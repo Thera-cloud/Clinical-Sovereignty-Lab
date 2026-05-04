@@ -2881,6 +2881,7 @@ coach_nexus_v2 = CoachNexusV2(VAULT_ROOT)
 #)
 
 from app.constants import tiers as tier_constants  # FEATURE-ENTITLEMENT: billing labels for tier_source
+from app.services.lived_wisdom import LivedWisdomService
 from .feature_entitlement import effective_feature_tier, resolve_feature_entitlement
 
 
@@ -7192,6 +7193,13 @@ async def _deep_memory_search_chat(
     return combined
 
 
+def _strip_reasoning_wire(text: str) -> str:
+    """QUANTUM-CRYSTAL-ARCH — strip fused reasoning markers before Nate chat WebSocket emit."""
+    if not text or "<think>" not in text:
+        return text
+    return re.sub(r"<think>[\s\S]*?</think>\s*", "", text).strip()
+
+
 # ------------------------------------------------------------------------------
 # PART 10: AZURE AI CORTEX
 # ------------------------------------------------------------------------------
@@ -8052,6 +8060,7 @@ class AzureCortex:
         # context (e.g. "dojo" iframe). Without this filter, both parent and
         # iframe sockets receive the response and the iframe shows duplicates.
         _ctx = client_context  # local alias used in every _send below
+        _turn_id = str(uuid.uuid4())  # QUANTUM-CRYSTAL-ARCH: merge stream + finalize into one client bubble per turn
         print(f">>> [AI] Cortex Active for {profile.get('name')} ctx={_ctx}")
         # QUANTUM-CRYSTAL-ARCH: resolve DOJO per-type model-tier override (skips ODPE)
         _dojo_tier = _DOJO_TYPE_MODEL_TIER.get((dojo_type or "").lower()) if dojo_type else None
@@ -8070,7 +8079,7 @@ class AzureCortex:
         _ip_deflection = check_ip_boundary(user_text, _role)
         if _ip_deflection:
             print(f">>> [IP BOUNDARY] Blocked restricted topic probe from {_role} user {profile.get('name')}")
-            await self._send(uid, _ip_deflection, client_context=_ctx)
+            await self._send(uid, _ip_deflection, client_context=_ctx, turn_id=_turn_id)
             return
 
         # Check if this is a Dojo simulation - skip token deduction for training
@@ -8089,7 +8098,7 @@ class AzureCortex:
                 # #region agent log
                 print(f">>> [DBG-H4] TOKEN FAIL - returning early for {uid}")
                 # #endregion
-                await self._send(uid, "Your token balance is low. Please upgrade your subscription to continue.", client_context=_ctx)
+                await self._send(uid, "Your token balance is low. Please upgrade your subscription to continue.", client_context=_ctx, turn_id=_turn_id)
                 return
                 
         # Record analytics (skip for Dojo to keep stats clean)
@@ -8193,7 +8202,7 @@ class AzureCortex:
                                     "Do NOT output any JSON, code, or search queries.")
                             else:
                                 print(f">>> [WEB SEARCH] Detected intent for {profile.get('name')}: '{_query[:80]}'")
-                                await self._send(uid, f"Searching online for {_query[:60]}...", client_context=_ctx)
+                                await self._send(uid, f"Searching online for {_query[:60]}...", client_context=_ctx, turn_id=_turn_id)
                                 import asyncio as _aio_search
                                 try:
                                     _search_result = await _aio_search.wait_for(
@@ -8956,7 +8965,7 @@ class AzureCortex:
                                 print(f">>> [SOVEREIGN] First token in {_ttft_ms}ms via {provider}")
                                 _first_token = False
                             if len(_chunk_buf) >= 25:
-                                await self._send(uid, full_response, client_context=_ctx)
+                                await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
                                 _chunk_buf = ""
 
                     if _garble_aborted:
@@ -8976,7 +8985,7 @@ class AzureCortex:
                             if _fb_resp:
                                 full_response = _fb_resp
                                 _provider_used = _fb_prov
-                                await self._send(uid, full_response, client_context=_ctx)
+                                await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
                                 _already_streamed = True
                                 print(f">>> [GARBLE] Fallback via {_fb_prov}: {len(full_response)} chars")
                         except Exception as _fb_err:
@@ -8991,7 +9000,7 @@ class AzureCortex:
                         elif not _think_resolved and _raw_accum:
                             full_response = _raw_accum
                         if _chunk_buf or (full_response and not _chunk_buf):
-                            await self._send(uid, full_response, client_context=_ctx)
+                            await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
                     if not _garble_aborted:
                         _already_streamed = True  # QUANTUM-CRYSTAL-ARCH: prevent duplicate send
                 except Exception as _sov_err:
@@ -9018,15 +9027,21 @@ class AzureCortex:
             elif _race_inference:  # SOVEREIGN-VOICE — fallback: race inference
                 print(f">>> [RACE] Starting Grok+Azure race for uid={uid}")
                 try:
+
+                    async def _race_send_ws(uu: str, tt: str):
+                        await self._send(uu, tt, client_context=_ctx, turn_id=_turn_id)
+
                     full_response, _provider_used = await _race_inference(
                         system_prompt, user_text, uid,
-                        send_fn=self._send, temperature=_user_temp, max_tokens=1500,
+                        send_fn=_race_send_ws, temperature=_user_temp, max_tokens=1500,
                     )
                 except Exception as _race_err:
                     print(f">>> [RACE] Primary inference failed: {_race_err}")
                     full_response = ""
                     _provider_used = "failed"
                 print(f">>> [RACE] Winner: {_provider_used} uid={uid} len={len(full_response)}")
+                if _provider_used == "azure" and full_response.strip():
+                    _already_streamed = True  # QUANTUM-CRYSTAL-ARCH: deltas already emitted via realtime WS
             else:  # SOVEREIGN-VOICE — emergency Azure-only fallback
                 import aiohttp
                 url = AZURE_ENDPOINT
@@ -9043,13 +9058,14 @@ class AzureCortex:
                                 event_type = event.get("type")
                                 if event_type == "response.text.delta":
                                     full_response += event.get("delta", "")
-                                    await self._send(uid, full_response, client_context=_ctx)
+                                    await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
                                 elif event_type in ("response.text.done", "response.done"):
                                     break
                                 elif event_type == "error":
                                     print(f">>> [AZURE ERROR] {event}")
                                     break
                 _provider_used = "azure"
+                _already_streamed = True  # QUANTUM-CRYSTAL-ARCH: deltas already emitted inline
 
             # SOVEREIGN-VOICE — AQ Refusal Bypass (runs regardless of provider)
             _is_refusal = not full_response.strip() or _provider_used == "failed"
@@ -9116,7 +9132,7 @@ class AzureCortex:
 
             # SOVEREIGN-VOICE — send response (sovereign/race paths need explicit send)
             if _provider_used != "azure" and not _already_streamed:
-                await self._send(uid, full_response, client_context=_ctx)
+                await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
 
             # SOVEREIGN-VOICE — zero-cost token refund
             if not is_dojo_simulation and _provider_used in _ZERO_COST_PROVIDERS:
@@ -9167,7 +9183,7 @@ class AzureCortex:
                     print(f">>> [SOVEREIGN] Post-process stripped <think> block ({_pre_len} → {len(full_response)} chars)")
             _final_response = full_response
             if not full_response.strip():
-                await self._send(uid, "I'm having trouble connecting right now. Please try again in a moment.", client_context=_ctx)
+                await self._send(uid, "I'm having trouble connecting right now. Please try again in a moment.", client_context=_ctx, turn_id=_turn_id)
                 print(f">>> [AI] Empty response for {uid} - sent fallback message")
             else:
                 _sanitized = sanitize_ai_response(full_response, _role)
@@ -9178,7 +9194,7 @@ class AzureCortex:
                     pass
                 if _sanitized != full_response:
                     print(f">>> [IP BOUNDARY] Sanitized AI response for {_role} user {profile.get('name')}")
-                    await self._send(uid, _sanitized, client_context=_ctx)
+                    await self._send(uid, _sanitized, client_context=_ctx, turn_id=_turn_id)
                     _final_response = _sanitized
 
             # QUANTUM-CRYSTAL-ARCH — Layer 8 factual grounding post-check
@@ -9192,7 +9208,7 @@ class AzureCortex:
                         user_id=uid,
                     )
                     if not _v8.get("safe"):
-                        await self._send(uid, _v8["redirect"], client_context=_ctx)
+                        await self._send(uid, _v8["redirect"], client_context=_ctx, turn_id=_turn_id)
                         _final_response = _v8["redirect"]
                         print(f">>> [LAYER 8] Factual grounding redirect for {uid}: {_v8.get('reason')}")
                 except Exception as _v8e:
@@ -9205,7 +9221,7 @@ class AzureCortex:
                     _qg_uid = _UUID(int=0)
                     _safe, _blocked = await _queens_guard.verify_output(_qg_uid, _final_response)
                     if _blocked:
-                        await self._send(uid, _safe, client_context=_ctx)
+                        await self._send(uid, _safe, client_context=_ctx, turn_id=_turn_id)
                         _final_response = _safe
                         print(f">>> [LAYER 9] Queens Guard L3 blocked output for {uid}")
                 except Exception as _qg_err:
@@ -9359,7 +9375,7 @@ class AzureCortex:
                 "the weight it deserves. Tell me more about what brought this up "
                 "right now — what's happening in your body as you say it?"
             )
-            await self._send(uid, _fallback, client_context=_ctx)
+            await self._send(uid, _fallback, client_context=_ctx, turn_id=_turn_id)
 
     async def process_sanctuary_message(
             self,
@@ -10320,7 +10336,7 @@ class AzureCortex:
                     }
 
 
-    async def _send(self, uid: str, text: str, client_context: Optional[str] = None):
+    async def _send(self, uid: str, text: str, client_context: Optional[str] = None, turn_id: Optional[str] = None):
         """Send message to connected sockets for user.
 
         QUANTUM-CRYSTAL-ARCH: When `client_context` is provided, only sockets
@@ -10329,9 +10345,11 @@ class AzureCortex:
         socket (which caused visible duplicate Nate messages because both
         sockets feed UI panels). When `None` (legacy callers), broadcasts to
         all sockets for backward compatibility.
+        Optional `turn_id` lets Flutter merge stream + finalize into one bubble.
         """
         # Admin Contact Shield: redact protected PII before transmission
         text = _admin_shield.redact(text)
+        text = _strip_reasoning_wire(text)
         if uid in self.sockets:
             # #region agent log
             _socket_count = len(self.sockets[uid])
@@ -10346,7 +10364,10 @@ class AzureCortex:
                         _skipped_ctx += 1
                         continue
                 try:
-                    await ws.send(json.dumps({"type": "nate_response", "text": text}))
+                    _payload: Dict[str, Any] = {"type": "nate_response", "text": text}
+                    if turn_id:
+                        _payload["turn_id"] = turn_id
+                    await ws.send(json.dumps(_payload))
                     # #region agent log
                     _sent_ok += 1
                     # #endregion
@@ -27144,6 +27165,19 @@ IMPORTANT:
                 
                 print(f">>> [SANCTUARY] Saved to history: {history_path}")
                 print(f">>> [SANCTUARY] Needs coach review: {needs_review} {review_reasons}")
+
+                # SANCTUARY-WISDOM-WIRE: lived wisdom extraction (failures never block completion)
+                _lw_log = logging.getLogger("bridge")
+                if db_pool and sanctuary_data.get("family_id"):
+                    try:
+                        _lw_sess = uuid.UUID(str(sanctuary_id))
+                        _lw_fam = uuid.UUID(str(sanctuary_data.get("family_id")))
+                        _lw_msgs = [{**m, "text": m.get("content", m.get("text", ""))} for m in messages]
+                        _lw_svc = LivedWisdomService(db_pool)
+                        _lw_n = len(await _lw_svc.extract_sanctuary_wisdom(_lw_sess, _lw_fam, _lw_msgs, member_ids=None))
+                        _lw_log.info("sanctuary_complete lived_wisdom stored=%s sanctuary=%s", _lw_n, sanctuary_id)
+                    except Exception as _lw_e:
+                        _lw_log.warning("sanctuary_complete lived_wisdom: %s", _lw_e)
                 
                 # ============================================
                 # SEND PERSONALIZED SUMMARY TO EACH MEMBER
