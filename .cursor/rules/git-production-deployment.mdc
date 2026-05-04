@@ -20,7 +20,7 @@ ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && git pull origin main
 3. **Commit and push locally before pulling on production.** The server pulls from GitHub, not from the local machine.
 4. **The remote uses HTTPS** (`https://github.com/Thera-cloud/Clinical-Sovereignty-Lab.git`), not SSH. No deploy key needed.
 5. **Never run `git reset --hard` on production** without explicit approval — it discards server-local files (`.env`, data dirs).
-6. **After every pull + rebuild, run the full post-deploy verification** per `build-deploy-ux-verification.mdc`: containers healthy, 112/112 services, bridge PG connected, ENVIRONMENT match.
+6. **After every pull + rebuild, run the full post-deploy verification** per `build-deploy-ux-verification.mdc`: containers healthy, 114/114 services, bridge PG connected, ENVIRONMENT match.
 
 ## Workflow
 

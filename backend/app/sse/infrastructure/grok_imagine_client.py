@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Optional
+from typing import Any, Optional
 
 import aiohttp
 
@@ -185,12 +185,18 @@ async def _video_with_key(key: str, payload: dict) -> str:
 
 
 async def generate_video(
-    prompt: str, source_image_url: Optional[str] = None
+    prompt: str,
+    source_image_url: Optional[str] = None,
+    *,
+    request_extras: Optional[dict[str, Any]] = None,
 ) -> str:
     """Start video generation via Grok Video API.
 
     Returns a request_id string for polling. Does NOT wait for completion.
     Tries primary key first, falls back to XAI_FALLBACK_KEY on 429.
+
+    ``request_extras`` merges into the JSON body (e.g. undocumented motion knobs).
+    Unknown keys may cause 400 — callers should treat failures as optional features.
     """
     key = _get_api_key()
     if not key:
@@ -198,9 +204,13 @@ async def generate_video(
 
     # Payload is model-dependent; preset output.resolution (e.g. 1920x1080) is not wired here —
     # xAI returns native dimensions (often ~848x480 observed) unless/until API documents width/height.
-    payload: dict = {"model": "grok-imagine-video", "prompt": prompt}
+    payload: dict[str, Any] = {"model": "grok-imagine-video", "prompt": prompt}
     if source_image_url:
         payload["image_url"] = source_image_url
+    if request_extras:
+        for ek, ev in request_extras.items():
+            if ev is not None:
+                payload[ek] = ev
 
     try:
         return await _video_with_key(key, payload)

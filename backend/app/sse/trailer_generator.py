@@ -427,6 +427,16 @@ _FS_GROK_VIDEO_STYLE_PREFIX = (
     "16:9 cinematic — "
 )
 
+# Grok Imagine Video prompt hard cap (API fails silently above ~4096 chars).
+_MAX_GROK_VIDEO_PROMPT_CHARS = 4096
+# Grok Imagine **image** prompt cap (undocumented; prod uses ~8k safe ceiling).
+_MAX_GROK_IMAGE_PROMPT_CHARS = 8000
+
+_FS_STEP5_OVERRIDE_MOTION_SUFFIX = (
+    "Minimal motion only: subtle breathing, slight fabric drift, micro head movement — preserve source still wardrobe "
+    "and hairstyles exactly; no walking cycles; no costume or hair changes; no new background people."
+)
+
 # Scene 1 only: Grok-video sometimes ignores generic NOT-anime fuse — prepend this full-strength anchor for Act1 open beat.
 _FS_GROK_VIDEO_SCENE1_PHOTOREAL_LEAD = (
     "SCENE1 PHOTOREAL ANCHOR: live-action cinematic fantasy film still LOOK — volumetric jewel light photoreal painterly DEPTH "
@@ -519,6 +529,24 @@ def _append_dragon_negative_if_applicable(prompt: str, scene_num: int, preset_id
     if SCENE_TONE.get(scene_num, "warm") == "dark":
         return prompt + " " + NEGATIVE_PROMPT_DARK
     return prompt
+
+
+def _family_sanctuary_step5_video_prompt(
+    scene_num: int,
+    *,
+    motion_map: dict[int, dict],
+    per_scene_prompt_overrides: dict[int, str] | None,
+) -> str:
+    """Assemble Grok Video prompt; optional per-scene override replaces preset motion + casting lock."""
+    ovr = per_scene_prompt_overrides or {}
+    if scene_num in ovr:
+        assembled = _FS_GROK_VIDEO_STYLE_PREFIX + (ovr[scene_num] or "").strip()
+    else:
+        motion = motion_map.get(scene_num, {"motion": "Smooth cinematic painterly motion"})
+        assembled = _build_video_prompt(scene_num, motion["motion"], preset_id=FAMILY_SANCTUARY_PRESET_ID)
+    if len(assembled) > _MAX_GROK_VIDEO_PROMPT_CHARS:
+        assembled = assembled[:_MAX_GROK_VIDEO_PROMPT_CHARS]
+    return assembled
 
 
 def _build_video_prompt(
@@ -2341,6 +2369,7 @@ async def regenerate_family_sanctuary_hero_scene_pngs(
     backup_name: str = "v2_backup",
     audit_identity_strict: bool = False,
     local_audit_review_dir: str | None = None,
+    png_prompt_overrides: dict[int, str] | None = None,
 ) -> list[dict]:
     """Step 3 — regenerate specific family_sanctuary scene hero PNGs; backs up prior keys to *_<backup_name>.png on R2.
 
@@ -2350,6 +2379,10 @@ async def regenerate_family_sanctuary_hero_scene_pngs(
     correct previous-frame chain, and quartet character list for cel composite.
     Optional ``local_audit_review_dir``: if set (e.g. ``/tmp/gate1b_scenes``), each successful regenerated PNG is also
     written as ``scene_NN_audit.png`` for SCP review gates.
+
+    ``png_prompt_overrides``: per-scene **full narrative** replacements (caller-vetted length). Each is prefixed with
+    the preset style lead and (for outdoor beats) continuity locks, then truncated to ``_MAX_GROK_IMAGE_PROMPT_CHARS``.
+    Use for surgical wardrobe/composition fixes without mutating preset JSON (e.g. scene 12 closing tableau).
     """
     want = sorted({int(n) for n in scene_nums if int(n) > 0})
     if not want:
@@ -2450,7 +2483,27 @@ async def regenerate_family_sanctuary_hero_scene_pngs(
             )
             composite_key = f"sse/studio/projects/{project_id}/step3/cel_scene_{num:02d}_regen.jpg"
 
-            if audit_identity_strict and num in _FAMILY_SANCTUARY_AUDIT_REGEN_SCENES:
+            ovr_map = png_prompt_overrides or {}
+            if num in ovr_map:
+                prefix = _get_style_prefix(num, FAMILY_SANCTUARY_PRESET_ID)
+                pieces: list[str] = [prefix, str(ovr_map[num]).strip()]
+                if num >= 11:
+                    pieces.append(_family_sanctuary_outdoor_throughline_sentence())
+                if num == 12:
+                    pieces.append(_father_age_lock_sentence())
+                    pieces.append(
+                        "SCENE12 TEXT BAN — render ZERO typography title logo subtitle watermark glyphs letters words "
+                        "flames shaped as text forbidden; vector title composites in FFmpeg later."
+                    )
+                hero_prompt = " ".join(p for p in pieces if p).strip()
+                if len(hero_prompt) > _MAX_GROK_IMAGE_PROMPT_CHARS:
+                    hero_prompt = hero_prompt[:_MAX_GROK_IMAGE_PROMPT_CHARS]
+                    logger.warning(
+                        "[FAMILY-HERO-REGEN] scene %d png_prompt_override truncated to %d chars",
+                        num,
+                        _MAX_GROK_IMAGE_PROMPT_CHARS,
+                    )
+            elif audit_identity_strict and num in _FAMILY_SANCTUARY_AUDIT_REGEN_SCENES:
                 narr = _FAMILY_SANCT_AUDIT_SCENE_NARRATIVES.get(num)
                 if narr:
                     scene["prompt"] = narr
@@ -2459,8 +2512,22 @@ async def regenerate_family_sanctuary_hero_scene_pngs(
                 hero_prompt = _family_sanctuary_cel_hero_prompt(
                     scene, doc, audit_compact=True
                 ) + " " + _family_sanctuary_audit_regen_prompt_suffix(compact=True)
+                if len(hero_prompt) > _MAX_GROK_IMAGE_PROMPT_CHARS:
+                    hero_prompt = hero_prompt[:_MAX_GROK_IMAGE_PROMPT_CHARS]
+                    logger.warning(
+                        "[FAMILY-HERO-REGEN] scene %d audit compact prompt truncated to %d chars",
+                        num,
+                        _MAX_GROK_IMAGE_PROMPT_CHARS,
+                    )
             else:
                 hero_prompt = _family_sanctuary_cel_hero_prompt(scene, doc)
+                if len(hero_prompt) > _MAX_GROK_IMAGE_PROMPT_CHARS:
+                    hero_prompt = hero_prompt[:_MAX_GROK_IMAGE_PROMPT_CHARS]
+                    logger.warning(
+                        "[FAMILY-HERO-REGEN] scene %d default cel prompt truncated to %d chars",
+                        num,
+                        _MAX_GROK_IMAGE_PROMPT_CHARS,
+                    )
 
             try:
                 composite_url = await store_bytes(composite_jpg, composite_key, "image/jpeg")
@@ -2980,6 +3047,7 @@ async def _azure_tts(
     instructions: str = "",
     *,
     response_format: str | None = None,
+    speed: float | None = None,
 ) -> Optional[bytes]:
     """Generate TTS audio via Azure gpt-4o-mini-tts.
 
@@ -3000,6 +3068,8 @@ async def _azure_tts(
         payload["instructions"] = instructions
     if response_format:
         payload["response_format"] = response_format
+    if speed is not None:
+        payload["speed"] = float(speed)
 
     async with aiohttp.ClientSession() as sess:
         async with sess.post(url, json=payload,
@@ -3299,6 +3369,8 @@ async def generate_family_sanctuary_step5_motion(
     preview_path: str | None = None,
     inter_scene_delay_seconds: float = 8.0,
     scenes_to_regenerate: list[int] | None = None,
+    per_scene_prompt_overrides: dict[int, str] | None = None,
+    grok_motion_strength: float = 0.6,
 ) -> dict:
     """Step 5: twelve motion clips from FS hero PNGs → local disk + ``sse/trailer/family_sanctuary/motion/``.
 
@@ -3314,6 +3386,13 @@ async def generate_family_sanctuary_step5_motion(
     If ``scenes_to_regenerate`` is set (e.g. ``[1, 11, 12]``), only those scenes (1–12) are processed; Grok Video is forced;
     preset Ken Burns fallback is suppressed for those runs (failures stay ``failed`` and existing files on disk are left untouched).
     Cost ceiling raised to at least ``FAMILY_SANCTUARY_STEP5_REGEN_CEILING_USD`` (default 15 USD) over the regenerated subset.
+
+    ``per_scene_prompt_overrides``: when a scene number is present, its string replaces the auto-built motion prompt
+    (style fuse is still prepended). Override scenes cap ``motion_strength`` sent to Grok Video at ``0.4`` (via
+    ``request_extras``); xAI may ignore unknown JSON fields — prompt suffix still tightens drift.
+
+    ``grok_motion_strength``: merged into Grok Video JSON as ``motion_strength`` for override scenes only
+    (effective value ``min(grok_motion_strength, 0.4)``). Non-override scenes keep legacy behavior (no extra JSON keys).
     """
     repo_root = Path(__file__).resolve().parents[3]
     doc = _load_preset_document(FAMILY_SANCTUARY_PRESET_ID)
@@ -3348,8 +3427,21 @@ async def generate_family_sanctuary_step5_motion(
             hero_key = _family_sanctuary_scene_png_key(scene_num)
             img_uri = presigned_url(hero_key, expires_in=7200)
 
-            motion = motion_map.get(scene_num, {"motion": "Smooth cinematic painterly motion"})
-            motion_prompt = _build_video_prompt(scene_num, motion["motion"], preset_id=FAMILY_SANCTUARY_PRESET_ID)
+            motion_prompt = _family_sanctuary_step5_video_prompt(
+                scene_num,
+                motion_map=motion_map,
+                per_scene_prompt_overrides=per_scene_prompt_overrides,
+            )
+            uses_prompt_override = bool(per_scene_prompt_overrides and scene_num in per_scene_prompt_overrides)
+            if uses_prompt_override:
+                motion_prompt = f"{motion_prompt} {_FS_STEP5_OVERRIDE_MOTION_SUFFIX}".strip()
+                if len(motion_prompt) > _MAX_GROK_VIDEO_PROMPT_CHARS:
+                    motion_prompt = motion_prompt[:_MAX_GROK_VIDEO_PROMPT_CHARS]
+
+            video_req_extras: dict | None = None
+            if uses_prompt_override:
+                ms_eff = min(float(grok_motion_strength), 0.4)
+                video_req_extras = {"motion_strength": ms_eff}
 
             raw_local = os.path.join(motion_dir, f"_raw_scene_{scene_num:02d}.mp4")
             final_mp4 = os.path.join(motion_dir, f"scene_{scene_num:02d}.mp4")
@@ -3385,7 +3477,26 @@ async def generate_family_sanctuary_step5_motion(
                     policy_eff["ceiling"],
                 )
                 try:
-                    video_id = await generate_video(motion_prompt, source_image_url=img_uri)
+                    try:
+                        video_id = await generate_video(
+                            motion_prompt,
+                            source_image_url=img_uri,
+                            request_extras=video_req_extras,
+                        )
+                    except RuntimeError as ge:
+                        if video_req_extras and any(x in str(ge) for x in ("400", "422")):
+                            logger.warning(
+                                "[FS-MOTION] Scene %d: Grok rejected request_extras; retry without motion_strength: %s",
+                                scene_num,
+                                ge,
+                            )
+                            video_id = await generate_video(
+                                motion_prompt,
+                                source_image_url=img_uri,
+                                request_extras=None,
+                            )
+                        else:
+                            raise
                     video_url_remote: str | None = None
                     for attempt in range(60):
                         await asyncio.sleep(5)
@@ -3509,6 +3620,8 @@ async def generate_family_sanctuary_step5_motion(
         "father_triptych_meets_min": bool(father_sum is not None and father_sum >= 2.99),
         "preview_output": preview_out,
         "preview_crossfade_seconds": xd,
+        "grok_motion_strength_requested": grok_motion_strength,
+        "per_scene_prompt_override_scenes": sorted((per_scene_prompt_overrides or {}).keys()),
     }
 
     ordered_clips = [os.path.join(motion_dir, f"scene_{i:02d}.mp4") for i in range(1, 13)]

@@ -99,9 +99,9 @@ docker exec nate_postgres psql -U nate_admin -d little_nate -c \
 
 **Why**: The corporate_command_auditor grew from 12 to 25 endpoints but the baseline stayed at 21. The Trust Enforcer flagged this as a DATA_PIPELINE mismatch.
 
-## Rule 6: 112/112 Service Health Is the Target
+## Rule 6: 114/114 Service Health Is the Target
 
-The backend reports `STARTUP COMPLETE: N/112 services healthy`. Any number below 112 is degraded. Common causes:
+The backend reports `STARTUP COMPLETE: N/114 services healthy`. Any number below 114 is degraded. Common causes:
 
 | Degraded Service | Root Cause | Fix |
 |---|---|---|

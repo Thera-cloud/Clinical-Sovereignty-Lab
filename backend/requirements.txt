@@ -98,6 +98,8 @@ structlog~=24.1.0
 
 # Date/Time
 python-dateutil~=2.8.2
+phonenumbers>=8.13.0
+geoip2>=4.7.0
 
 # Background Scheduler (drip campaigns + SkyEye sessions)
 apscheduler~=3.10.0

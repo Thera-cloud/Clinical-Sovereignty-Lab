@@ -1311,15 +1311,27 @@ async def handle_file_upload_request(ws, data, bridge, current_profile=None):
         await ws.send(json.dumps({"type": "error", "message": f"File rejected: {e}"}))
         return
 
+    try:
+        from app.constants.tiers import normalize_tier as _billing_normalize
+        from app.websocket.bridge_server import load_registry
+        from app.websocket.feature_entitlement import effective_feature_tier
+    except ImportError:
+        await ws.send(json.dumps({"type": "error", "message": "Server configuration error"}))
+        return
+
     member_id = current_profile.get("hardware_id") or current_profile.get("id") or ""
-    tier = (current_profile.get("subscription_plan") or current_profile.get("tier") or "TRIAL").upper()
+    billing_tier = _billing_normalize(
+        current_profile.get("subscription_plan") or current_profile.get("tier") or ""
+    )
+    feature_band = effective_feature_tier(current_profile, load_registry())
     result = await vault_bridge.handle_file_upload_in_chat(
         member_id=member_id,
         file_bytes=file_bytes,
         filename=data.get("filename", "upload"),
         message=data.get("message", ""),
-        tier=tier,
+        tier=billing_tier,
         session_id=data.get("session_id", ""),
+        feature_gate_band=feature_band,
     )
     await ws.send(json.dumps({"type": "file_upload_response", **result}))
 
@@ -1336,11 +1348,15 @@ async def handle_vault_preview_request(ws, data, bridge, current_profile=None):
     if not vault_bridge:
         await ws.send(json.dumps({"type": "error", "message": "Vault not initialized"}))
         return
+    from app.constants.tiers import normalize_tier as _billing_normalize
+
     member_id = current_profile.get("hardware_id") or current_profile.get("id") or ""
-    tier = (current_profile.get("subscription_plan") or current_profile.get("tier") or "TRIAL").upper()
+    billing_tier = _billing_normalize(
+        current_profile.get("subscription_plan") or current_profile.get("tier") or ""
+    )
     result = await vault_bridge.handle_vault_preview_request(
         member_id=member_id,
         item_id=data.get("item_id", ""),
-        tier=tier,
+        tier=billing_tier,
     )
     await ws.send(json.dumps({"type": "vault_preview_response", **result}))

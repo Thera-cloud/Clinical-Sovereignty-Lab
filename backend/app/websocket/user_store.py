@@ -274,6 +274,12 @@ class UserStore:
             # Store the full profile as JSONB for all the extra fields
             profile_data = json.dumps(profile, default=str)
 
+            phone_col = profile.get("phone")
+            if phone_col is not None:
+                phone_col = str(phone_col).strip() or None
+            tz_col = str(profile.get("timezone") or "UTC").strip() or "UTC"
+            tz_src_col = str(profile.get("timezone_source") or "default_utc").strip() or "default_utc"
+
             async with self.pool.acquire() as conn:
                 # Resolve family code (e.g. "FAM_1834DACF") to families.id UUID
                 family_uuid = None
@@ -290,10 +296,13 @@ class UserStore:
                         family_id, profile_data, token_balance,
                         subscription_token_balance, purchased_token_balance,
                         login_count,
+                        phone, timezone, timezone_source,
                         updated_at
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb,
                               COALESCE($12, 0), COALESCE($13, 0), COALESCE($14, 0),
-                              COALESCE($15, 0), NOW())
+                              COALESCE($15, 0),
+                              $16, $17, $18,
+                              NOW())
                     ON CONFLICT (username) DO UPDATE SET
                         -- SOVEREIGN-VOICE 2026-04-28: never let bridge cache overwrite a
                         -- DB-set password_hash with empty/null. Mitigates bridge-cache
@@ -345,10 +354,28 @@ class UserStore:
                             users.purchased_token_balance, EXCLUDED.purchased_token_balance, 0
                         ),
                         login_count = COALESCE(EXCLUDED.login_count, users.login_count),
+                        phone = COALESCE(NULLIF(EXCLUDED.phone, ''), users.phone),
+                        timezone = CASE
+                          WHEN EXCLUDED.timezone_source = 'user_explicit' THEN EXCLUDED.timezone
+                          WHEN users.timezone_source = 'user_explicit' THEN users.timezone
+                          ELSE COALESCE(NULLIF(EXCLUDED.timezone, ''), users.timezone, 'UTC')
+                        END,
+                        timezone_source = CASE
+                          WHEN EXCLUDED.timezone_source = 'user_explicit' THEN 'user_explicit'
+                          WHEN users.timezone_source = 'user_explicit' THEN 'user_explicit'
+                          ELSE COALESCE(NULLIF(EXCLUDED.timezone_source, ''), users.timezone_source, 'default_utc')
+                        END,
+                        timezone_updated_at = CASE
+                          WHEN EXCLUDED.timezone IS DISTINCT FROM users.timezone
+                            OR EXCLUDED.timezone_source IS DISTINCT FROM users.timezone_source
+                          THEN NOW()
+                          ELSE COALESCE(users.timezone_updated_at, NOW())
+                        END,
                         updated_at = NOW()
                 """, username, password_hash, role, tier, name, email or None,
                     hardware_id, consent_version, sub_status, family_uuid, profile_data,
-                    token_balance, sub_bal, purch_bal, login_count)
+                    token_balance, sub_bal, purch_bal, login_count,
+                    phone_col, tz_col, tz_src_col)
             return True
         except Exception as e:
             logger.warning(f"[UserStore] upsert_user failed for {registry_key}: {e}")
@@ -506,6 +533,12 @@ class UserStore:
             profile["tier"] = row["tier"]
         if row.get("phone"):
             profile["phone"] = row["phone"]
+        tz_r = row.get("timezone")
+        if tz_r:
+            profile["timezone"] = tz_r
+        tzs_r = row.get("timezone_source")
+        if tzs_r:
+            profile["timezone_source"] = tzs_r
         if row.get("dob"):
             profile["dob"] = str(row["dob"])
         if row.get("specialties"):

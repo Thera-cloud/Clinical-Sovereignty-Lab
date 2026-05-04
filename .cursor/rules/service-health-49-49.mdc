@@ -1,15 +1,15 @@
 ---
-description: All 113 services must remain healthy at startup. Never introduce changes that break the 113/113 health check.
+description: All 114 services must remain healthy at startup. Never introduce changes that break the 114/114 health check.
 alwaysApply: true
 ---
 
-# 112/112 Service Health Requirement
+# 114/114 Service Health Requirement
 
-The backend reports `STARTUP COMPLETE: N/112 services healthy` on boot. The target is **112/112 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
+The backend reports `STARTUP COMPLETE: N/114 services healthy` on boot. The target is **114/114 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
 
-## Service Registry (112 total)
+## Service Registry (114 total)
 
-### Core Services (85)
+### Core Services (87)
 
 | # | Service | Source |
 |---|---------|--------|
@@ -101,6 +101,8 @@ The backend reports `STARTUP COMPLETE: N/112 services healthy` on boot. The targ
 | 85 | sse_orchestrator | SSE delivery pipeline scheduler |
 | 86 | classroom_learning_auditor | ClassroomLearningAuditor — 15-check classroom / lived-wisdom DB scorecard (3x daily, stagger 283s) |
 
+*(Human-readable registry rows above may omit one-off entries; `_service_checks` in `main.py` is authoritative — currently **87** core rows + **27** `hive:*` rows.)*
+
 ### Hive Defense Services (27)
 
 webhook_fortress, guardian_fibre, sentinel_mesh, pipeline_drum, hepa_filter, billing_monitor, trial_guard, usage_meter, coach_financial_guard, anonymization_proxy, therapeutic_integrity, model_stability, transit_guardian, infiltrator_trap, family_data_guardian, mirror_prediction, coach_integrity_shield, legal_compulsion, sovereign_stripe_proxy, family_session_guardian, zero_knowledge_vault, sovereign_keys, succession_protocol, recovery_drill, heritage_vault, upstream_canary, deadman_switch
@@ -113,7 +115,7 @@ webhook_fortress, guardian_fibre, sentinel_mesh, pipeline_drum, hepa_filter, bil
 
 3. **Singletons require constructor args** — `SessionMemoryStore(storage_root)`, `NotificationSystem(data_dir, api_key)`, etc. Never instantiate these bare. Reuse the instance from `app.state` when available.
 
-4. **After any `main.py` change, verify health** — deploy, restart, and confirm the startup log shows `113/113 services healthy` and `ALL SYSTEMS NOMINAL`. If degraded, fix before considering the deploy complete.
+4. **After any `main.py` change, verify health** — deploy, restart, and confirm the startup log shows `114/114 services healthy` and `ALL SYSTEMS NOMINAL`. If degraded, fix before considering the deploy complete.
 
 5. **Agent Status Digest emails 3x daily** to `support@sovereignsanctuary.net`. If the digest reports any agent as FAILED or WARNING, investigate — it means a live process is not running as expected.
 

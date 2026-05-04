@@ -214,6 +214,10 @@ class Settings(BaseSettings):
     # Predictor). Activity still logs to skyeye_activity. Default True.
     SKYEYE_SOCIAL_TOKEN_ALERT_EMAILS_ENABLED: bool = True
 
+    # Comma-separated skyeye_platform_tokens.platform keys (e.g. x,linkedin).
+    # Pauses renewal SMS/email and audit-gap "missed notification" alerts only for those platforms.
+    SKYEYE_TOKEN_ALERT_PAUSED_PLATFORMS: str = ""
+
     # -------------------------------------------------------------------------
     # SkyEye — Social Media Platform Credentials (all optional)
     # -------------------------------------------------------------------------

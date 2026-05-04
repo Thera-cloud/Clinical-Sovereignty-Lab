@@ -81,7 +81,7 @@ class VaultBridge:
         return self._auto_filer_cache
 
     async def build_messages_with_file(
-        self, messages: List[dict], file_item: dict, tier: str
+        self, messages: List[dict], file_item: dict, tier: str, feature_gate_band: Optional[str] = None
     ) -> List[dict]:
         """
         Augment chat messages with file content for AI context.
@@ -95,8 +95,11 @@ class VaultBridge:
           - TOP_TIER: all
         - Apply FileContentSentinel scan on extracted text before injection
         - Truncate text: STANDARD 8000 chars, TOP_TIER 50000 chars
+
+        tier_norm resolves feature_gate_band when set (effective feature tier for gating injection
+        caps); tier alone is unchanged for callers that omit feature_gate_band.
         """
-        tier_norm = _normalize_tier(tier)
+        tier_norm = _normalize_tier(feature_gate_band if feature_gate_band is not None else tier)
         content_type = (file_item.get("content_type") or "").lower()
         display_name = file_item.get("display_name") or file_item.get("filename") or "upload"
 
@@ -187,14 +190,14 @@ class VaultBridge:
         return messages
 
     async def check_vault_suggestion(
-        self, member_id: str, user_message: str, tier: str
+        self, member_id: str, user_message: str, tier: str, feature_gate_band: Optional[str] = None
     ) -> Optional[dict]:
         """
         If tier is TOP_TIER: search vault for items relevant to user's message.
         Use PostgreSQL tsvector match against user_message keywords.
         Return top match if confidence > 0.7 (ts_rank).
         """
-        if _normalize_tier(tier) != "TOP_TIER":
+        if _normalize_tier(feature_gate_band if feature_gate_band is not None else tier) != "TOP_TIER":
             return None
 
         # Cap search query length (WS-M6)
@@ -267,18 +270,22 @@ class VaultBridge:
         message: str,
         tier: str,
         session_id: str,
+        feature_gate_band: Optional[str] = None,
     ) -> dict:
         """
         Process file through FileProcessor, store via VaultBlobManager,
         add to vault via VaultOperations, auto-file via AutoFiler.
-        Return processed item with extracted content for immediate chat injection.
-        For TTL items (Threshold/Trial tier): set 24hr TTL.
+
+        tier: canonical billing tier (DEPENDENT / STANDARD / …) for quotas and TTL — never spoofed UX tier.
+        feature_gate_band: effective feature tier (TOP_TIER / STANDARD / TRIAL) for future injection paths;
+           reserved for callers that reuse build_messages_with_file with inherited entitlements.
         """
-        tier_norm = _normalize_tier(tier)
         proc = self._file_processor()
         blob_mgr = self._get_blob_manager()
         vault_ops = self._vault_operations()
         auto_filer = self._auto_filer()
+        tier_norm_billing = _normalize_tier(tier)
+        _ = feature_gate_band  # passed from bridge_handlers for parity with entitlement resolver
 
         if not file_bytes:
             return {"error": "Empty file", "success": False}
@@ -318,7 +325,7 @@ class VaultBridge:
             except Exception:
                 pass
 
-        ttl_seconds = 24 * 60 * 60 if tier_norm == "TRIAL" else None
+        ttl_seconds = 24 * 60 * 60 if tier_norm_billing == "TRIAL" else None
 
         folders = await vault_ops.get_folder_tree(member_id)
         if not folders:
