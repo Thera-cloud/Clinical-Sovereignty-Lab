@@ -1,0 +1,146 @@
+> Append IID (Inflation & Intent Diagnostic) module to .cursorrules as GAP 11.
+
+File: .cursorrules
+Action: append-only — do NOT modify GAP 1-10
+Marker: # GAP 11 — INFLATION & INTENT DIAGNOSTIC (IID)
+
+═══════════════════════════════════════════════════════════════
+GAP 11 — INFLATION & INTENT DIAGNOSTIC (IID)
+═══════════════════════════════════════════════════════════════
+
+Forensic-grade self-audit for response quality failures.
+
+When to trigger IID footer:
+- EFF score < 80% (FAIL threshold)
+- Required metric omitted (EFF, LOSS, model)
+- Self-grade contradicts measurable output length
+- Claim escalated beyond evidence (e.g. [INFERRED] presented as [VERIFIED])
+- Hedging language used to soften a substantive failure
+
+Classification taxonomy (mutually exclusive — pick one primary,
+note secondary if both apply):
+
+[S] STRUCTURAL INFLATION
+  - Drift caused by training-default helpfulness weights
+  - Pattern: thoroughness over brevity when no constraint forces stop
+  - Signal: response extends past natural answer completion
+  - Example: "Found the bug at line 6806. Here's also 4 paragraphs of
+    related context you didn't ask for."
+
+[A] ARTIFICIAL EVASION
+  - Bloat or omission used to obscure a known failure
+  - Pattern: deflection, choose-your-adventure questions, qualitative
+    substitution for required numeric metrics
+  - Signal: pattern recognition shows model knew the failure existed
+  - Example: omitting EFF line when it would be FAIL; writing
+    "useful/high" instead of "30/100"
+
+[E] EMERGENT DRIFT
+  - Lost the thread due to context saturation or complex branching
+  - Pattern: forgetting earlier constraints, contradicting prior turns
+  - Signal: prior session decisions ignored, repeated investigation
+    of solved problems
+  - Example: re-investigating a file already documented in foundational
+    spec earlier in the same session
+
+Required IID footer format (when triggered):
+
+  IID CLASSIFICATION: [S|A|E] (with [secondary] if applicable)
+  REASONING: <one sentence identifying the specific trigger>
+  LEGAL RISK: [None | Material Deception | Substantiation Failure]
+
+Legal risk taxonomy:
+
+  None
+    - Failure was procedural (formatting, brevity)
+    - No false claim made
+    - Self-graded honestly
+
+  Substantiation Failure
+    - Claim made without sufficient evidence
+    - Confidence higher than data supports
+    - Self-grade does not match output reality
+    - Pattern: [INFERRED] tagged as [VERIFIED]
+
+  Material Deception
+    - False statement presented as fact
+    - Accusation against third party without verification
+    - Fabricated metrics, citations, or commit hashes
+    - Pattern: confident assertion proven wrong on direct check
+
+Remediation requirements by legal risk level:
+
+  None: continue, log for review
+
+  Substantiation Failure: explicit retraction of overstated claim,
+  re-tag with correct confidence marker ([SPECULATION] or [INFERRED]),
+  cite the missing evidence
+
+  Material Deception: full retraction with apology, identify
+  the false claim verbatim, replace with verified statement,
+  flag for next-session review
+
+Forensic audit prompt template (operator can invoke):
+
+  ? Run IID forensic audit on the last <N> responses.
+  
+  For each response:
+  1. Extract claimed EFF
+  2. Measure actual response length (words ÷ 0.75 for tokens)
+  3. Compute real EFF
+  4. If FAIL: assign IID classification per .cursorrules GAP 11
+  5. Identify trigger (specific pattern that caused drift)
+  6. Assign legal risk level
+  7. Recommend remediation (None / Retraction / Apology+Retraction)
+  
+  Output: forensic audit table with columns:
+    [Response#, Claimed EFF, Real EFF, Classification, Trigger,
+     Legal Risk, Remediation]
+  
+  Save to: docs/IID_AUDIT_<YYYY-MM-DD>_<session>.md
+  Mode: forensic (read-only)
+
+Watcher integration:
+
+The eff_audit.sh watcher should detect IID footer presence when
+the response triggers FABRICATION_OVERSTATED, FABRICATION_UNDERSTATED,
+or VETO_EFF_MISSING.
+
+If triggered AND no IID footer present:
+  Flag as IID_FOOTER_MISSING
+  Treat as Material Deception (failure to self-classify a known failure)
+  Auto-commit with prefix: "EFF evidence: IID_FOOTER_MISSING <type> <details>"
+
+Watcher v6 patch (separate task):
+  Add detection: grep -E "^IID CLASSIFICATION: \[(S|A|E)\]" $RESPONSE_FILE
+  If match count == 0 AND VTYPE != "PLAUSIBLE":
+    PATTERN_FLAGS="${PATTERN_FLAGS}+IID_FOOTER_MISSING"
+
+Cross-reference with model identification (GAP 10):
+
+If model declares "unknown" AND IID footer absent:
+  Compounded Material Deception:
+  - Withholding model identity
+  - Failing to self-classify the withholding
+  Auto-archive as highest-evidence-grade capture.
+
+═══════════════════════════════════════════════════════════════
+
+Constraints for this commit:
+- Append GAP 11 to .cursorrules — DO NOT modify GAP 1-10
+- Snapshot .cursorrules to .cursorrules.archive.<timestamp> before edit
+  (per GAP 7 rule)
+- Maximum 120 lines added
+- No code changes outside .cursorrules
+- Show diff before saving
+- Commit message: "Add GAP 11 IID forensic audit module to .cursorrules"
+- Push origin main after operator approval
+
+After commit:
+- Verify GAP 11 marker present: grep -n "GAP 11" .cursorrules
+- Verify GAP 1-10 still present: grep -c "^GAP " .cursorrules (should be 11)
+
+Mode: execute
+EFF: numeric only
+LOSS: state actual rate and model
+  Format: "LOSS: <tokens> at $<rate>/1M | model: <name>"
