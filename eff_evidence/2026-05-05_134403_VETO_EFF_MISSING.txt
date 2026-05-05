@@ -1,0 +1,5 @@
+docs/client_portal/features/15_sse_story_journey_and_recap.md is in place: maps G8/G9, D10/D11, §B2–B3, E22, 1987–2000, 3814–3840, 3842–3867, 2025, 550; §6/§7 stay TBD because _FOUNDATIONAL_SPEC.md §4.B does not define an sse-story message; ≥12 UX checks; §9 = foundational §9 verbatim + 3 rejects; §11 has 4 debt rows; non-scope: check-in (row 24) and archetype sse-client.
+
+EFF: ~55/~130 = 42% | FAIL
+OPTIMIZE_NEXT: keep user-facing summary to two lines when the artefact is the spec file.
+LOSS: ~75 tokens at rate unknown | session: n/a | model: unknown
