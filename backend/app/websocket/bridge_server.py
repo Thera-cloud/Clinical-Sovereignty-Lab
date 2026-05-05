@@ -12153,6 +12153,7 @@ async def handle_client(websocket, path=None):
                 if current_profile and current_profile.get("role") == "CLIENT":
                     coach_id = (current_profile.get("assigned_coach_id") or d.get("coach_id") or "").strip()
                     target_date = (d.get("date") or "").strip()
+                    print(f">>> [AVAILABILITY-DEBUG] client_get_coach_availability: client={uid} coach={coach_id} date={target_date}")  # AVAILABILITY-DEBUG
                     if not coach_id:
                         await websocket.send(json.dumps({"type": "error", "message": "No coach assigned"}))
                     elif not db_pool:
@@ -12179,6 +12180,7 @@ async def handle_client(websocket, path=None):
                                     {"day": r["day_of_week"], "day_name": _DAY_INT_TO_NAME.get(r["day_of_week"], ""), "start": str(r["start_time"]), "end": str(r["end_time"])}
                                     for r in _slots_rows
                                 ]
+                                print(f">>> [AVAILABILITY-DEBUG] found {len(_slots_rows)} availability rows for coach={coach_id} uuid={_coach_uuid}")  # AVAILABILITY-DEBUG
                                 avail_data = {"slots": avail_slots, "timezone": "America/New_York"}
 
                                 available_slots = []
@@ -12265,6 +12267,7 @@ async def handle_client(websocket, path=None):
                                                 if is_free and slot_start > datetime.datetime.now():
                                                     available_slots.append({"start": slot_start.isoformat(), "end": slot_end.isoformat()})
 
+                            print(f">>> [AVAILABILITY-DEBUG] returning {len(available_slots)} open slots after masking {len(booked_slots)} booked")  # AVAILABILITY-DEBUG
                             await websocket.send(json.dumps({
                                 "type": "coach_availability",
                                 "coach_id": coach_id,
@@ -12275,7 +12278,7 @@ async def handle_client(websocket, path=None):
                             }))
                         except Exception as e:
                             import traceback; traceback.print_exc()
-                            print(f">>> [ERROR] Failed to load availability: {e}")
+                            print(f">>> [AVAILABILITY-DEBUG] client_get_coach_availability FAILED: {e}")  # AVAILABILITY-DEBUG
                             await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
 
             # === CLIENT: GET COACH INFO ===
