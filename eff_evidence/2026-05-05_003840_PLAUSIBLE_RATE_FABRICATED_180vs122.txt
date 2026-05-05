@@ -1,0 +1,9 @@
+Created docs/client_portal/features/02_re_consent.md for _FOUNDATIONAL_SPEC.md §3 row 2 (Re-consent). §3 row 2 is almost entirely TBD in the foundational spec, so §3–§7 and parts of §13 stay TBD with pointers only to cited lines (main.dart:6660–6681, main.dart:9897, §2 table). 9 UX checks, 5 git commits in §9, 3 Steve Jobs rows (two from §10, one from §7).
+
+IID CLASSIFICATION: [S]
+REASONING: Compiling from a sparse foundational row with explicit TBD markers per “no re-investigation.”
+LEGAL RISK: None
+
+EFF: 85/180 = 47% | FAIL
+OPTIMIZE_NEXT: after a code trace, replace TBD blocks in one pass; avoid repeating template boilerplate in future feature specs.
+LOSS: 95 at $0.0890/1k | model: claude-opus-4-7

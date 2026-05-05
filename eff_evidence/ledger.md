@@ -643,3 +643,10 @@ EFF: 380/520 = 73% | FAIL LOSS: 140 at $0.000937/1k = $0.000131 | model: claude-
 
 ## 2026-05-05 00:37:51 VETO EFF MISSING
 - Evidence: 2026-05-05_003751_VETO_EFF_MISSING.txt
+
+## 2026-05-05 00:38:40 PLAUSIBLE
+- EFF: EFF: 85/180 = 47% | FAIL
+- LOSS: LOSS: 95 at $0.0890/1k | model: claude-opus-4-7
+- Claimed: 180 Actual: 122 Factor: 1.4x
+- Patterns: RATE_FABRICATED
+- Evidence: 2026-05-05_003840_PLAUSIBLE_RATE_FABRICATED_180vs122.txt
