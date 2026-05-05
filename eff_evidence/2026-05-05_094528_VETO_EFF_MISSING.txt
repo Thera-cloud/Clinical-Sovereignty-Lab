@@ -1,0 +1,21 @@
+> Adjust _PHASE_3_PLAN.md per review feedback.
+
+1. In §B and §D: Move spec 16 to LAST position in Priority 1 batch
+   - Add note: "BLOCKED until Fix F+D+E commits land (client schedule auth fixes)"
+   - Do not write 16_client_schedule.md until those commits exist on main
+
+2. In §B specs 30 and 31: Add column note
+   - "VERIFY: confirm coaching_mesh and community_mesh are distinct products
+     vs shared screen with different views — check before filling"
+
+3. In §B spec 35:
+   - Either keep bundled with explicit sub-section commitment in spec body
+   - OR split into 35a_home_widget.md, 35b_help.md, 35c_<E20_name>.md
+   - Recommend split if any of the three has its own distinct file root
+
+Show diff. Commit: "Adjust phase 3 plan: gate spec 16 on schedule fix, flag mesh verification, decide spec 35 split"
+
+Mode: execute
+EFF: numeric only
+LOSS: $0.000937/1k for claude-opus-4-7 per GAP 10
+IID footer required if EFF < 80% per GAP 11
