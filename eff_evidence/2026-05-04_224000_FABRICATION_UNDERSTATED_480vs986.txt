@@ -1,0 +1,220 @@
+
+proceed with grep
+
+? Find the actual handler for client_get_coach_availability in bridge_server.py.
+
+
+
+Read-only. Max 500 tokens.
+
+
+
+Symptom: bridge logs show
+
+   ">>> RECEIVED: type=client_get_coach_availability len=89"
+
+but AVAILABILITY-DEBUG log lines (added in commit c43b9a3) never fire.
+
+
+
+Hypotheses:
+
+1. There is more than one branch in bridge_server.py matching this type
+
+2. The AVAILABILITY-DEBUG was added to an unreachable elif chain
+
+3. Message is intercepted by a generic dispatcher before reaching the typed handler
+
+
+
+Investigate:
+
+1. grep -n "client_get_coach_availability" backend/app/websocket/bridge_server.py
+
+   - Show ALL matches with surrounding 3 lines
+
+   - Identify every elif/if branch that handles this type
+
+
+
+2. grep -n "AVAILABILITY-DEBUG" backend/app/websocket/bridge_server.py
+
+   - Verify where the debug logs were added
+
+   - Cross-reference: are they inside the actual handler branch?
+
+
+
+3. Look for a dispatcher pattern that might intercept early:
+
+   grep -n "RECEIVED:.*type=" backend/app/websocket/bridge_server.py
+
+   grep -n "elif t ==" backend/app/websocket/bridge_server.py | head -5
+
+
+
+4. Check if there's a try/except that swallows handler errors silently:
+
+   - Look at lines around the AVAILABILITY-DEBUG markers
+
+   - Is the handler wrapped in try/except with a bare pass or print to stderr only?
+
+
+
+Output:
+
+- Section A: All grep matches for client_get_coach_availability with line numbers
+
+- Section B: Where AVAILABILITY-DEBUG was added (line numbers)
+
+- Section C: Are A and B in the same function/branch (yes/no/unclear)
+
+- Section D: One sentence root cause hypothesis
+
+
+
+No code changes.
+
+
+
+Mode: investigate
+
+EFF: numeric only
+
+LOSS: rate unknown if model unknown
+
+Section A — client_get_coach_availability (all matches)
+Line	Context
+10925–10928
+Entry in _SENTINEL_SKIP frozenset (with client_get_coach_info, etc.) — not a handler.
+12151–12152
+Comment # === CLIENT: GET COACH AVAILABILITY === then elif t == "client_get_coach_availability": — only typed branch for this message type.
+12156
+Debug string mentions client_get_coach_availability (inside nested if).
+12281
+Debug string on exception path.
+No other if/elif matches this literal type string in bridge_server.py.
+
+Section B — AVAILABILITY-DEBUG lines
+12156, 12183, 12270, 12281 — all under elif t == "client_get_coach_availability":.
+
+Section C — Same branch?
+Yes. RECEIVED is logged at 10812–10814 in the same async for message loop as elif t == "client_get_coach_availability" at 12152 inside handle_client (10746); there is no alternate dispatcher file printing >>> RECEIVED: (only these two lines in websocket/).
+
+Section D — One-sentence root-cause hypothesis
+Most plausible: something after >>> RECEIVED short-circuits the loop (continue from rate limit 10817–10818 or abuse hold/ban 10865–10871, or return from auth timeout 11133–11136) before the elif chain runs, or the message does reach elif t == "client_get_coach_availability" but current_profile is falsy or role != "CLIENT", so the handler body (including every AVAILABILITY-DEBUG print, which sits inside if current_profile and current_profile.get("role") == "CLIENT") never runs and there is no else on that branch to log or respond.
+
+EFF: 420/480 = 88% | PASS
+LOSS: ~60 tokens at rate unknown | session: n/a | model: unknown
+
+> Add diagnostic logging for the silent drop in client_get_coach_availability handler.
+
+
+
+File: backend/app/websocket/bridge_server.py
+
+Handler: lines 12152-12290 (elif t == "client_get_coach_availability")
+
+
+
+Symptom: message arrives (>>> RECEIVED logs at 10812-10814) but AVAILABILITY-DEBUG
+
+lines (12156, 12183, 12270, 12281) never fire. Hypothesis (per investigation):
+
+the inner gate `if current_profile and current_profile.get("role") == "CLIENT"`
+
+is failing silently. No else branch, no log, no response — UI stuck.
+
+
+
+Required changes:
+
+
+
+1. At handler entry (BEFORE the role gate, immediately after elif matches),
+
+   log the gate check inputs:
+
+   print(f">>> [AVAILABILITY-DEBUG] entry: uid={uid} profile_present={bool(current_profile)} role={current_profile.get('role') if current_profile else 'NONE'}")  # AVAILABILITY-DEBUG-GATE
+
+
+
+2. Add an else branch to the role gate that logs the rejection AND sends
+
+   an error response to the client (so UI doesn't hang):
+
+   else:
+
+       print(f">>> [AVAILABILITY-DEBUG-GATE] REJECTED uid={uid} role={current_profile.get('role') if current_profile else 'NO_PROFILE'}")
+
+       await websocket.send(json.dumps({
+
+           "type": "coach_availability_error",
+
+           "error": "auth_role_mismatch",
+
+           "detail": f"Expected CLIENT role"
+
+       }))
+
+
+
+Constraints:
+
+- Maximum 10 lines added
+
+- No behavior change to the success path
+
+- Add # AVAILABILITY-DEBUG-GATE marker
+
+- Send response on rejection so UI can show real error instead of hanging
+
+
+
+After diff:
+
+- Show diff
+
+- Commit: "Add gate diagnostic for client_get_coach_availability silent drop"
+
+- Push origin main
+
+
+
+Do NOT deploy. Operator deploys + reproduces + reads logs.
+
+
+
+Mode: execute
+
+EFF: numeric only
+
+LOSS: state actual rate and model — never "rate unknown" since model is known
+
+  Format: "LOSS: <tokens> at $<rate>/1M | model: <name>"
+
+  Example: "LOSS: 45 at $0.001019/1M | model: claude-opus-4-7-thinking-high"
+
+  Cursor model billing is observable in your settings — use it
+
+            elif t == "client_get_coach_availability":
+                print(f">>> [AVAILABILITY-DEBUG] entry: uid={uid} profile_present={bool(current_profile)} role={current_profile.get('role') if current_profile else 'NONE'}")  # AVAILABILITY-DEBUG-GATE
+                if current_profile and current_profile.get("role") == "CLIENT":
+            
+            # === CLIENT: GET COACH AVAILABILITY ===
+            elif t == "client_get_coach_availability":
+                print(f">>> [AVAILABILITY-DEBUG] entry: uid={uid} profile_present={bool(current_profile)} role={current_profile.get('role') if current_profile else 'NONE'}")  # AVAILABILITY-DEBUG-GATE
+                if current_profile and current_profile.get("role") == "CLIENT":
+                            await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
+                else:
+                    print(f">>> [AVAILABILITY-DEBUG-GATE] REJECTED uid={uid} role={current_profile.get('role') if current_profile else 'NO_PROFILE'}")  # AVAILABILITY-DEBUG-GATE
+                    await websocket.send(json.dumps({
+                        "type": "coach_availability_error",
+                        "error": "auth_role_mismatch",
+                        "detail": "Expected CLIENT role",
+                    }))
+Pushed 8c2a768 (main). Flutter should listen for coach_availability_error if you want in-app copy (optional follow-up).
+
+EFF: ~95/~130 = 73% | FAIL
+OPTIMIZE_NEXT: Omit redundant prose when diff + SHA suffice.
+LOSS: ~35 at $1.019/1M | model: claude-opus-4-7-thinking-xhigh (cursor-blended, .cursorrules GAP1)
