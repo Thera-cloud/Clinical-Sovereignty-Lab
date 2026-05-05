@@ -1,0 +1,8 @@
+docs/client_portal/_PHASE_3_PLAN.md written (107 lines). §B fixes 05–40 (36 specs + 01–04 = 40); §C lists deferrals (E-numbers/G-numbers accounted in §B gap line); §D prioritized; §E contrasts client vs coach_portal/features (schedule, brief vs briefings, insights vs coherence, folder vs vault, mesh wording).
+
+IID CLASSIFICATION: [S] — REASONING: Plan artifact is terse; narration would add low-value tokens vs file body. LEGAL RISK: None
+
+EFF: 120/265 = 45% | FAIL
+OPTIMIZE_NEXT: User reads _PHASE_3_PLAN.md directly; omit table echo in reply.
+
+LOSS: 145 at $0.000148/1k | model: claude-opus-4-7-thinking-xhigh
