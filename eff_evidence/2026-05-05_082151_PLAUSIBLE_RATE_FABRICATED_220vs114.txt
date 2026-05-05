@@ -1,0 +1,10 @@
+Delivered: docs/client_portal/features/04_onboarding_paid.md — _PIPELINE_TEMPLATE.md shape; §3 row 4 + §2 Paid onboarding; 10 UX bullets (≥8); §9 commits with verbatim summaries from _FOUNDATIONAL_SPEC.md §9; §11 five Steve Jobs / §7 shell rows with applicability notes. §9 §11 patched so nothing is inferred beyond the foundational spec.
+
+IID CLASSIFICATION: [S]
+REASONING: Spec-only pass produced a longer completion note than strictly needed for “file written”; EFF penalized total reply vs small useful slice.
+LEGAL RISK: None
+
+EFF: 70/220 = 32% | FAIL
+OPTIMIZE_NEXT: One-line confirmation + pointer to path only unless user asks for section excerpts.
+
+LOSS: 150 at $0.000141/1k | model: claude-opus-4-7
