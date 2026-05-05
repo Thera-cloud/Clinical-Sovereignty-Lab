@@ -1,0 +1,9 @@
+> Fill docs/client_portal/features/01_chat_with_nate.md from _PIPELINE_TEMPLATE.md.
+Source of truth: docs/client_portal/_FOUNDATIONAL_SPEC.md (Feature 1 from §3 inventory)
+
+Use existing data from foundational spec — do NOT re-investigate code.
+Required: 8+ UX criteria, 3+ anti-patterns from git log, 3+ Steve Jobs UX debt items.
+Mode: investigate
+EFF: numeric only
+LOSS: $0.000937/1k for claude-opus-4-7 per GAP 10
+IID footer required if EFF < 80% per GAP 11
