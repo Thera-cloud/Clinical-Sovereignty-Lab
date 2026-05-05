@@ -735,3 +735,9 @@ EFF: 380/520 = 73% | FAIL LOSS: 140 at $0.000937/1k = $0.000131 | model: claude-
 
 ## 2026-05-05 13:20:44 VETO EFF MISSING
 - Evidence: 2026-05-05_132044_VETO_EFF_MISSING.txt
+
+## 2026-05-05 13:22:56 FABRICATION_OVERSTATED
+- EFF: EFF: 160/420 = 38% | FAIL
+- LOSS: LOSS: 260 at $0.001019/1k | model: claude-opus-4-7-thinking-xhigh
+- Claimed: 420 Actual: 105 Factor: 4.0x
+- Evidence: 2026-05-05_132256_FABRICATION_OVERSTATED_420vs105.txt

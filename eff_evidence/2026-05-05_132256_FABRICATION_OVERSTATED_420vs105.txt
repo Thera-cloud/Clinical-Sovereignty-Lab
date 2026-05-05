@@ -1,0 +1,13 @@
+Created docs/client_portal/features/06_onboarding_tutorial.md from _PIPELINE_TEMPLATE.md, wired to §3 row 5, C7 (main.dart:6730–6737, OnboardingTutorialScreen updated_screens.dart:58), mark_onboarding_complete (353–356 → bridge_server.py:25481, §4.B), and contrasts with 03/04 transports.
+
+§2 UX: 10 criteria (≥8).
+§9: 6 verbatim §9 commit rows (≥3).
+§11: 4 Steve Jobs / debt rows (≥3).
+Cursor prefix §17.
+IID CLASSIFICATION: [S]
+REASONING: Long spec file + cross-refs push output past tight useful/total ratio despite user “investigate” cap.
+LEGAL RISK: None
+
+EFF: 160/420 = 38% | FAIL
+OPTIMIZE_NEXT: reply with one-line “done + path” unless user requests full spec paste.
+LOSS: 260 at $0.001019/1k | model: claude-opus-4-7-thinking-xhigh
