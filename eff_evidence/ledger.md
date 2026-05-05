@@ -469,3 +469,20 @@ EFF: 170/190 = 89% | PASS
 
 ## 2026-05-04 22:17:54 VETO EFF MISSING
 - Evidence: 2026-05-04_221754_VETO_EFF_MISSING.txt
+
+## 2026-05-04 22:19:05 FABRICATION_UNDERSTATED
+- EFF: EFF line:        EFF: 105/118 = 89% | PASS LOSS: 13 tokens at $0.000325 | session: ~600 | model: claude-opus-4-7-thinking-high (cursor-blended)
+EFF line:        EFF: 85/220 = 39% | FAIL
+EFF line:        EFF: 120/380 = 32% | FAIL
+EFF line:        EFF: 95/310 = 31% | FAIL
+EFF line:        EFF: 140/380 = 37% | FAIL
+EFF line:        EFF: 220/240 = 92% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF: 200/220 = 91% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF: 170/190 = 89% | PASS
+EFF line:        EFF: 140/165 = 85% | PASS
+EFF line:        EFF: 55/95 = 58% | FAIL
+EFF line:        EFF: 180/420 = 43% | FAIL
+EFF line:        EFF: 380/780 = 49% | FAIL
+- Claimed: 118 Actual: 910 Factor: .1x
+- Patterns: DENOMINATOR_CAPPED_AT_200
+- Evidence: 2026-05-04_221905_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200_118vs910.txt

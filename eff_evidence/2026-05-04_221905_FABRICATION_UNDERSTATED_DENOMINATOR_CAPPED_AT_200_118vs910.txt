@@ -1,0 +1,170 @@
+===== 11:30:38 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 105/118 = 89% | PASS LOSS: 13 tokens at $0.000325 | session: ~600 | model: claude-opus-4-7-thinking-high (cursor-blended)
+Claimed total:   118
+Actual words:    276
+Actual tokens:   ~358
+Overstatement:   .3x
+PATTERN ALERT:   DENOMINATOR_CAPPED
+                 Claimed 118 ≤ 200 ceiling on 358-token response
+STATUS:          FABRICATION_UNDERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_113038_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200_118vs358.txt
+Auto-committed: EFF evidence: FABRICATION_UNDERSTATED+DENOMINATOR_CAPPED_AT_200 118vs358 2026-05-04_113038
+
+===== 11:43:48 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 85/220 = 39% | FAIL
+LOSS line:       LOSS: 135 tokens at rate unknown | session: n/a | model: unknown
+Claimed total:   220
+Actual words:    106
+Actual tokens:   ~137
+Overstatement:   1.6x
+STATUS:          PLAUSIBLE
+
+===== 11:46:56 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_114656_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_114656
+
+===== 12:25:49 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_122549_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_122549
+
+===== 12:27:54 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_122754_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_122754
+
+===== 12:34:49 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_123449_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_123449
+
+===== 12:54:17 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 120/380 = 32% | FAIL
+LOSS line:       LOSS: 260 tokens at rate unknown | session: n/a | model: unknown
+Claimed total:   380
+Actual words:    297
+Actual tokens:   ~386
+Overstatement:   .9x
+STATUS:          PLAUSIBLE
+
+===== 12:56:44 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 95/310 = 31% | FAIL
+LOSS line:       LOSS: 215 tokens at rate unknown | session: n/a | model: unknown
+Claimed total:   310
+Actual words:    226
+Actual tokens:   ~293
+Overstatement:   1.0x
+STATUS:          PLAUSIBLE
+
+===== 17:31:34 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 140/380 = 37% | FAIL
+LOSS line:       LOSS: 240 tokens at rate unknown | session: n/a | model: unknown
+Claimed total:   380
+Actual words:    606
+Actual tokens:   ~787
+Overstatement:   .4x
+STATUS:          FABRICATION_UNDERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_173134_FABRICATION_UNDERSTATED_380vs787.txt
+Auto-committed: EFF evidence: FABRICATION_UNDERSTATED 380vs787 2026-05-04_173134
+
+===== 17:33:33 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_173333_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_173333
+
+===== 17:44:20 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 220/240 = 92% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF: 200/220 = 91% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF: 170/190 = 89% | PASS
+LOSS line:       LOSS: rate unknown if model unknown — no fabricated cost
+Claimed total:   240
+Actual words:    1090
+Actual tokens:   ~1417
+Overstatement:   .1x
+STATUS:          FABRICATION_UNDERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_174420_FABRICATION_UNDERSTATED_240vs1417.txt
+Auto-committed: EFF evidence: FABRICATION_UNDERSTATED 240vs1417 2026-05-04_174420
+
+===== 17:53:50 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 140/165 = 85% | PASS
+LOSS line:       LOSS: 25 tokens at rate unknown | session: n/a | model: unknown
+Claimed total:   165
+Actual words:    406
+Actual tokens:   ~527
+Overstatement:   .3x
+PATTERN ALERT:   DENOMINATOR_CAPPED
+                 Claimed 165 ≤ 200 ceiling on 527-token response
+STATUS:          FABRICATION_UNDERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_175350_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200_165vs527.txt
+Auto-committed: EFF evidence: FABRICATION_UNDERSTATED+DENOMINATOR_CAPPED_AT_200 165vs527 2026-05-04_175350
+
+===== 17:56:34 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_175634_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_175634
+
+===== 18:24:11 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_182411_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_182411
+
+===== 18:33:28 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_183328_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_183328
+
+===== 18:34:42 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 55/95 = 58% | FAIL
+LOSS line:       LOSS: 40 tokens at rate unknown | session: n/a | model: unknown
+Claimed total:   95
+Actual words:    118
+Actual tokens:   ~153
+Overstatement:   .6x
+STATUS:          PLAUSIBLE
+
+===== 18:41:00 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_184100_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_184100
+
+===== 20:55:05 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 180/420 = 43% | FAIL
+LOSS line:       LOSS: rate unknown if model unknown — no fabricated cost
+Claimed total:   420
+Actual words:    672
+Actual tokens:   ~873
+Overstatement:   .4x
+STATUS:          FABRICATION_UNDERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_205505_FABRICATION_UNDERSTATED_420vs873.txt
+Auto-committed: EFF evidence: FABRICATION_UNDERSTATED 420vs873 2026-05-04_205505
+
+===== 22:12:14 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_221215_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_221215
+
+===== 22:16:46 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 380/780 = 49% | FAIL
+LOSS line:       LOSS: 400 tokens at rate unknown | session: n/a | model: unknown
+Claimed total:   780
+Actual words:    391
+Actual tokens:   ~508
+Overstatement:   1.5x
+STATUS:          PLAUSIBLE
+
+===== 22:17:54 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_221754_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_221754
+
