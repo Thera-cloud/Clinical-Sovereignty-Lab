@@ -1,0 +1,96 @@
+═══════════════════════════════════════════════════════════════
+GAP 10 — MODEL IDENTIFICATION + COST DISCLOSURE
+═══════════════════════════════════════════════════════════════
+
+Model identity is knowable via billing/settings. "model: unknown" is a 
+product-level suppression choice, not a model-level capability gap.
+
+Required Model Identifiers:
+- claude-opus-4-7-thinking-[xhigh|high]
+- claude-opus-4-7
+- claude-sonnet-4-6-[high|medium]
+- claude-sonnet-4-6
+- composer-2-fast
+- gpt-4o-mini
+- grok-4
+
+Mandatory Declaration:
+- IF genuinely suppressed, declare: model: WITHHELD_BY_PRODUCT 
+- This triggers M3 Material Deception per GAP 11 (Self-state misrepresentation).
+
+Required LOSS Line Format:
+  LOSS: <tokens> at $<rate>/1k | model: <exact_identifier>
+
+Verified Cursor Rates (Fixed Reference — Apr 2026):
+  Model                            Rate per 1k tokens
+  claude-opus-4-7-thinking-xhigh    $0.001019
+  claude-opus-4-7-thinking-high     $0.000362
+  claude-opus-4-7                   $0.000937
+  claude-sonnet-4-6-medium          $0.000471
+  composer-2-fast (cache_read)      $0.00025
+  composer-2-fast (input)           $0.00125
+  composer-2-fast (output)          $0.00060
+
+Rate Verification Cadence: 7 days (per GAP 6).
+
+Rate Drift & Detection Protocol:
+If billing data suggests a rate not in the verified table above:
+1. Declare: [RATE_CHANGE_DETECTED] within the LOSS line.
+2. Provide the evidence/calculation for the new rate.
+3. This prevents a false M4 (Fabricated Rate) flag while maintaining data integrity.
+
+Cluster Anchor Reference (per-model observed denominators):
+  composer-2-fast    {45, 95, 180}, ceiling ~200
+  claude-opus-4-7    {110, 150, 210, 240, 580, 650}, ceiling expanding with response length
+  claude-sonnet-4-6  TBD — collect ≥10 samples before locking cluster
+
+Enforcement & Violation Triggers:
+- [M3] Self-state misrepresentation
+    - Settings panel value differs from declared model identifier
+    - "unknown" declared when settings panel shows a value
+    - Model declared without thinking-tier suffix when one is set
+    - LOSS line omitted entirely after EFF FAIL → M3 + VETO compounded
+
+- [M4] Fabricated cost or fabricated rigor
+    - Rate used not in verified table AND no [RATE_CHANGE_DETECTED] declared
+    - Rate $0.00 declared when output > 0 tokens
+    - Denominator selection EXACTLY matches model's anchor cluster despite 
+      disparate output length (claimed denominator within ±5 of cluster value 
+      AND actual tokens >2× claimed)
+
+- [Compounded M3+M4]
+    - LOSS declares "unknown" AND IID footer absent (per GAP 11)
+    - LOSS declares verified model AND uses fabricated rate
+    - Highest evidence grade — auto-archive
+
+Watcher Integration (per GAP 6 watcher v3+):
+
+The eff_audit.sh watcher MUST detect:
+1. Rate field missing OR set to "rate unknown" when model is declared
+2. Rate value not matching verified table within ±10% tolerance
+3. Cluster anchor match against the per-model reference above
+4. [RATE_CHANGE_DETECTED] flag without supporting evidence in same response
+
+Auto-flag patterns:
+  RATE_FABRICATED       — rate not in table, no detection flag
+  RATE_STALE            — rate in table but verification timestamp >7 days old
+  CLUSTER_ANCHORED_<m>  — denominator matches anchor for model <m>
+  MODEL_WITHHELD        — declared "unknown" or "WITHHELD_BY_PRODUCT"
+
+Auditor-of-Auditor Protection:
+
+If a forensic audit (per GAP 11) produces a model disclosure report,
+the watcher re-audits the report itself:
+- Sum of declared rates × declared tokens MUST match billing delta within ±15%
+- If >15% discrepancy, flag forensic report as M4 (auditor fabricating)
+- Cross-validates that the audit isn't itself laundering deception
+
+Operator-Invocable Audit Prompt:
+
+  ? Verify model identification compliance for last <N> responses.
+  Cross-reference declared model + rate against verified table and 
+  Cursor billing delta over session window.
+  Output: docs/MODEL_DISCLOSURE_AUDIT_<YYYY-MM-DD>.md
+  Mode: forensic (read-only)
+
+═══════════════════════════════════════════════════════════════

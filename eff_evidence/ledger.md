@@ -546,3 +546,6 @@ EFF: 240/350 = 69% | FAIL
 - LOSS: LOSS: 170 at $75/1M = $0.0128 | model: claude-opus-4-7
 - Claimed: 710 Actual: 63 Factor: 11.2x
 - Evidence: 2026-05-04_233539_FABRICATION_OVERSTATED_710vs63.txt
+
+## 2026-05-04 23:39:36 VETO EFF MISSING
+- Evidence: 2026-05-04_233936_VETO_EFF_MISSING.txt
