@@ -1,0 +1,48 @@
+> Fix client login: WS connection authenticates successfully but subsequent
+messages still hit handlers as uid=GUEST.
+
+Symptom (verified in production logs):
+- Bridge receives login_request (line 11207 handler)
+- Login handler appears intact through line 11392 (await websocket.send for login_success payload)
+- But subsequent client_get_coach_availability shows uid=GUEST profile_present=False
+- Multiple biometric_update flooding from same uid=GUEST
+
+User: client1 (CLIENT_001), display name "John D.", role CLIENT, profile_data complete
+File: backend/app/websocket/bridge_server.py
+Login handler: line 11207
+Profile assignment: line 11349 (current_profile = res)
+Login_success send: line 11392
+
+INVESTIGATE FIRST (read-only):
+
+1. Verify whether login is actually succeeding for client1:
+   ssh root@68.183.168.75 "docker logs nate_bridge --since 10m 2>&1 | grep -E 'Registered client connection: CLIENT_001|Registered coach connection|authenticate_user|GUEST'"
+   
+   Look for: "Registered client connection: CLIENT_001" — confirms login completed
+   If absent: login failing before line 11349 (authenticate_user returning None)
+
+2. If login succeeded but subsequent messages hit GUEST, check if there are
+   multiple WebSocket connections from the same client:
+   ssh root@68.183.168.75 "docker logs nate_bridge --since 10m 2>&1 | grep -E 'Connection closed|new client connection|websocket.*open' | tail -20"
+
+3. Check if current_profile assignment at line 11349 persists across the message loop:
+   - Show the async for loop structure containing the elif chain
+   - Verify current_profile is declared in the outer scope (handle_client function), NOT inside the elif branch
+   - sed -n '10746,10810p' bridge_server.py to see handle_client opening + current_profile declaration
+
+4. Check if biometric_update handler is mutating current_profile or running on a different code path:
+   grep -n "biometric_update" backend/app/websocket/bridge_server.py | head -10
+
+REPORT findings before any fix:
+- Section A: Did login succeed for CLIENT_001 in this session?
+- Section B: How many WS connections opened for this user in last 10 min?
+- Section C: Where is current_profile declared (line number)?
+- Section D: Is biometric_update on a separate connection / handler?
+- Section E: Single-line root cause statement
+
+DO NOT propose code changes yet. Investigate and report.
+
+Mode: investigate
+EFF: numeric only
+LOSS: state actual rate and model
+  Format: "LOSS: <tokens> at $<rate>/1M | model: <name>"
