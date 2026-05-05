@@ -1,0 +1,9 @@
+Added docs/client_portal/features/03_onboarding_trial.md (§3 row 3, OnboardingThresholdScreen). Per foundational: HTTP + optional existingSocket (19–26), build 196, state 35–46, slide builders 554+, sends TBD. 10 UX checks, 5 commits in §9, 3 Steve Jobs rows from §10/§7 with an applicability column.
+
+IID CLASSIFICATION: [S]
+REASONING: Spec assembly from foundational table only; many TBDs left explicit.
+LEGAL RISK: None
+
+EFF: 95/210 = 45% | FAIL
+OPTIMIZE_NEXT: after routing trace, add one main.dart bullet for Threshold pushReplacement to drop duplicate “TBD” prose.
+LOSS: 115 at $0.1078/1k | model: claude-opus-4-7
