@@ -1,0 +1,47 @@
+? Find why Flutter client opens multiple WebSocket connections to /ws.
+
+Read-only investigate. Max 600 tokens.
+
+Symptom: bridge logs show login_request + Registered client connection on
+ONE socket, but client_get_coach_availability + biometric_update arrive
+on a DIFFERENT socket as uid=GUEST. Both from the same browser session.
+
+Hypothesis: The Flutter client opens 2+ WebSocketChannel instances and
+only one runs login.
+
+Investigate:
+
+1. Find every WebSocket connection point in mobile/lib/:
+   grep -rn "WebSocketChannel\|wss://\|/ws" mobile/lib/ | head -20
+
+2. For each connect call, identify:
+   - Which screen/widget initiates it
+   - Whether login_request is sent on that channel
+   - When the channel is closed
+   - Whether there's a singleton/shared channel pattern
+
+3. Specifically check the client schedule screen:
+   grep -rn "client_get_coach_availability\|coach_availability" mobile/lib/ | head -10
+   - Which file sends this message
+   - Does it use the existing app-wide socket or open its own
+
+4. Check biometric_update sender:
+   grep -rn "biometric_update" mobile/lib/ | head -10
+   - Is this on a separate socket (NEVEDAL service has its own?)
+
+5. Look for NEVEDAL service WS pattern (console showed >>> [NEVEDAL] Service initialized):
+   grep -rn "NEVEDAL\|nevedal" mobile/lib/ -i | head -10
+
+Output:
+- Section A: Every WebSocketChannel.connect call (file:line, target URL)
+- Section B: Which channels run login_request, which don't
+- Section C: Which channel sends client_get_coach_availability
+- Section D: Which channel sends biometric_update
+- Section E: Single-line root cause
+
+No code changes.
+
+Mode: investigate
+EFF: numeric only
+LOSS: state actual rate and model
+  Format: "LOSS: <tokens> at $<rate>/1M | model: <name>"
