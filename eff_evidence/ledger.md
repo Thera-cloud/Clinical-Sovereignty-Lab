@@ -834,3 +834,10 @@ EFF: 380/520 = 73% | FAIL LOSS: 140 at $0.000937/1k = $0.000131 | model: claude-
 - ESTIMATED: yes (~-prefix on EFF counts)
 - Patterns: IID_MISMATCH_A2_OVERSTATED
 - Evidence: 2026-05-05_135449_FABRICATION_OVERSTATED_IID_MISMATCH_A2_OVERSTATED_800vs41.txt
+
+## 2026-05-05 13:54:49 FABRICATION_OVERSTATED
+- EFF: EFF: ~70/~800 = 8% | FAIL
+- LOSS: LOSS: 50 tokens at $0.001019/1k | model: claude-opus-4-7-thinking-xhigh
+- Claimed: 800 Actual: 41 Factor: 19.5x
+- ESTIMATED: yes (~-prefix on EFF counts)
+- Evidence: 2026-05-05_135449_FABRICATION_OVERSTATED_800vs41.txt
