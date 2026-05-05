@@ -1,0 +1,8 @@
+docs/client_portal/features/09_biometric_quick_login.md added: E3 main.dart:6667–6669, C10, G24 settings_screen.dart:3046, 3048–3083, §H 3066–3083 web caveats, cross-refs 05 / 40 vs Nevedal row 8; 9 UX bullets; 6 §9 commits; 4 §10/§7 debt rows.
+
+IID CLASSIFICATION: [S] — REASONING: Spec is self-contained in repo; reply minimal. LEGAL RISK: None
+
+EFF: 65/175 = 37% | FAIL
+OPTIMIZE_NEXT: Reply with path-only when file is the artifact.
+
+LOSS: 110 at $0.000112/1k | model: claude-opus-4-7-thinking-xhigh
