@@ -1,0 +1,5 @@
+EFF: 540/710 = 76% | FAIL
+LOSS: 170 at $75/1M = $0.0128 | model: claude-opus-4-7
+IID CLASSIFICATION: [S] Structural Inflation
+REASONING: Verified rates table included rates I'm uncertain about (claude-sonnet-4-6-high marked "~verify" rather than confirmed) — should have either verified them or omitted that row entirely.
+LEGAL RISK: Substantiation Failure — included rate data with weak confidence in a document meant to be authoritative.
