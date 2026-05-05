@@ -1,0 +1,9 @@
+Created docs/client_portal/features/11_neural_interface_interactions.md (D1–D4, D15–D16, B4–B6, G5–G7, complements 01, 3663–4137 shell cite).
+
+IID CLASSIFICATION: [S]
+REASONING: Long spec + short reply ⇒ low EFF ratio.
+LEGAL RISK: None
+
+EFF: 70/240 = 29% | FAIL
+OPTIMIZE_NEXT: User message = path + one line only.
+LOSS: 170 at $0.001019/1k | model: claude-opus-4-7-thinking-xhigh
