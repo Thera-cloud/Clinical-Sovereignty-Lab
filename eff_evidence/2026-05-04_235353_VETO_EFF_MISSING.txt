@@ -1,0 +1,58 @@
+> Patch eff_audit.sh with watcher v5: GAP 10 + GAP 11 detections.
+
+File: ~/bin/eff_audit.sh (or wherever the watcher lives — find it first)
+Action: insert detection logic after EFF/LOSS extraction, before STATUS write
+
+Required detections:
+
+1. SKIP OUTBOUND PROMPTS — at top of audit logic, before any extraction:
+   - If response starts with "?" or ">" followed by Mode keyword, skip
+   - If response contains "Mode: investigate" or "Mode: execute" markers, skip
+   - If response < 20 words, skip
+   - Exit 0 silently for skipped captures (no commit, no flag)
+
+2. MODEL_WITHHELD detection (GAP 10):
+   - If LOSS line contains "model: unknown" or "model: WITHHELD_BY_PRODUCT"
+   - PATTERN_FLAGS+="+MODEL_WITHHELD"
+
+3. RATE_FABRICATED detection (GAP 10):
+   - Extract rate value from LOSS line
+   - Compare against verified table:
+     $0.001019/1k → claude-opus-4-7-thinking-xhigh
+     $0.000362/1k → claude-opus-4-7-thinking-high
+     $0.000937/1k → claude-opus-4-7
+     $0.000471/1k → claude-sonnet-4-6-medium
+     $0.00025/1k, $0.00125/1k, $0.00060/1k → composer-2-fast tiers
+   - If rate is "$75/1M", "$15/1M", "$3/1M" → flag RATE_FABRICATED_ANTHROPIC_PUBLIC
+     (Anthropic public rate used instead of Cursor blended)
+   - If rate not in table AND no [RATE_CHANGE_DETECTED] flag → RATE_FABRICATED
+
+4. IID_FOOTER_MISSING detection (GAP 11):
+   - When EFF FAIL or STATUS in (FABRICATION_OVERSTATED, FABRICATION_UNDERSTATED)
+   - Check for line matching: ^IID CLASSIFICATION:\s*\[(S|A|E)\]
+   - If absent → PATTERN_FLAGS+="+IID_FOOTER_MISSING"
+   - Per GAP 11: treat as M3 Material Deception
+
+5. IID_CLASSIFICATION_MISMATCH detection (GAP 11):
+   - If IID footer present AND classification is [S]
+   - AND PATTERN_FLAGS contains RATE_FABRICATED
+   - → PATTERN_FLAGS+="+IID_CLASSIFICATION_MISMATCH_A2"
+     (severity underclassification — should be [A] not [S])
+
+Find the watcher script first:
+   ls -la ~/bin/eff_audit.sh
+   ls -la ~/Desktop/Clinical-Sovereignty-Lab-2/eff_audit.sh
+   which eff_audit.sh
+
+Show me the current file before editing. Then propose the patch with exact insertion line numbers. Wait for approval before writing.
+
+Constraints:
+- Maximum 50 lines added
+- No changes to existing detection logic
+- All new detections additive (don't break existing PLAUSIBLE/FABRICATION_OVERSTATED logic)
+- Add # WATCHER-V5 marker block
+
+Mode: investigate then execute (gated)
+EFF: numeric only
+LOSS: state actual rate per GAP 10 verified table — $0.000937/1k for claude-opus-4-7
+IID footer required if EFF < 80% per GAP 11
