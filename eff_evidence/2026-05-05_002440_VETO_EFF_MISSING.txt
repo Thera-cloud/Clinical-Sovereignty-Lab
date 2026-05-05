@@ -1,0 +1,186 @@
+> Create Client Portal foundational documentation pipeline mirroring Coach Portal pattern.
+
+Reference: docs/coach_portal/ structure (foundational spec + pipeline template + per-feature specs)
+
+═══════════════════════════════════════════════════════════════
+GATING — three phases, halt after each
+═══════════════════════════════════════════════════════════════
+
+Phase 1 → foundational spec
+Phase 2 → pipeline template  
+Phase 3 → per-tab/feature specs
+
+═══════════════════════════════════════════════════════════════
+PHASE 1 — Foundational spec
+═══════════════════════════════════════════════════════════════
+
+File: docs/client_portal/_FOUNDATIONAL_SPEC.md
+
+Mirror structure of docs/coach_portal/_FOUNDATIONAL_SPEC.md but for the
+CLIENT side. Investigate the actual code, not assumptions.
+
+Required sections:
+
+§ 1 — Purpose and scope (what is the client portal, who uses it)
+
+§ 2 — Entry points (how clients reach the app)
+   - Lobby (mobile/lib/main.dart LobbyScreen)
+   - Onboarding flows (onboarding_paid_screen.dart, onboarding_threshold_screen.dart)
+   - Settings (settings_screen.dart)
+   - NeuralInterface (the chat surface)
+   - List file:line for each entry point
+
+§ 3 — Tab/Feature inventory
+   - Walk through actual client UI surfaces
+   - Identify each major screen/feature (NOT assumed list)
+   - For each: file:line of the build method, message types it sends/receives,
+     state variables it owns
+   - Common features expected (verify each in code):
+     • Chat with Nate (NeuralInterface)
+     • Schedule / book sessions (ClientScheduleScreen)
+     • Settings
+     • Coherence Reports
+     • Weekly Brief
+     • Memory Search
+     • Distress Beacon
+     • Family Sanctuary
+     • Wisdom / Discipline tracker
+     • Avatar / Voice settings
+     • Subscription / Billing
+
+§ 4 — WebSocket message inventory
+   - All client_* and get_* message types from mobile/lib/ → bridge_server.py
+   - Show file:line for handler entry on bridge side
+   - Note auth requirements (current_profile.role == "CLIENT" check, etc.)
+
+§ 5 — Database tables touched (per feature)
+   - users, coaching_sessions, coach_availability, family_members,
+     wisdom_entries, etc.
+   - Note any schema mismatches like the coach_availability UUID/TEXT issue
+
+§ 6 — Auth and connection lifecycle
+   - WebSocket connection points (where _channel is created)
+   - login_request → login_success → profile attached
+   - _ClientWsHub for shared sockets (commit 38158cc/2145c9d)
+   - Known bug surface: ClientScheduleScreen multi-socket from Settings path
+
+§ 7 — Known UX debt
+   - Current bug: client schedule doesn't show coach availability (in-flight)
+   - Service worker timeout warnings
+   - NEVEDAL biometric flooding
+   - Any other observed issues from bridge logs / git history
+
+§ 8 — Security and privacy boundaries
+   - What client can see vs what coach can see
+   - assigned_coach_id linkage
+   - recording_consent flow
+   - Family sanctuary scoping
+
+§ 9 — Anti-patterns documented in git history
+   - Use git log to find commits with "fix:", "client", "schedule", etc.
+   - Cite specific commit hashes for documented past failures
+
+§ 10 — Steve Jobs UX debt items
+   - 3-5 friction points in current client flows
+   - Dated entries with severity
+
+Constraints for Phase 1:
+- Read actual code — do NOT assume features exist without verification
+- Cite file:line for every claim
+- Maximum 600 lines
+- Mark TBD for anything genuinely unknown rather than fabricating
+- Use foundational spec format from coach_portal as structural reference
+
+After Phase 1:
+- Show outline (just section headers + line counts)
+- Confirm "Phase 1 ready"
+- HALT until "continue Phase 2"
+
+═══════════════════════════════════════════════════════════════
+PHASE 2 — Pipeline template
+═══════════════════════════════════════════════════════════════
+
+File: docs/client_portal/_PIPELINE_TEMPLATE.md
+
+Mirror docs/coach_portal/_PIPELINE_TEMPLATE.md structure but adapted for
+client features (not coach features).
+
+Per-feature template sections:
+1. Purpose (1 sentence)
+2. UX criteria (8+ items, client-perspective)
+3. File references (mobile + bridge + db, with file:line)
+4. WebSocket messages (sent + expected response)
+5. State variables (owned by the widget)
+6. Database tables touched
+7. Edge cases (offline, auth lost, no data)
+8. Anti-patterns from git history (3+ commits cited)
+9. Known bugs (open + recently fixed with commit refs)
+10. Steve Jobs UX debt (3+ items, dated)
+11. Security boundaries (what this feature exposes vs hides)
+12. Test scenarios (manual reproduction steps)
+13. Foundational spec cross-reference (link back to specific section)
+
+Constraints for Phase 2:
+- ~200 lines
+- Match coach pipeline template structure where applicable
+- Adapt sections that differ between coach and client perspectives
+
+After Phase 2:
+- Show diff
+- Confirm "Phase 2 ready"
+- HALT until "continue Phase 3"
+
+═══════════════════════════════════════════════════════════════
+PHASE 3 — Per-feature specs
+═══════════════════════════════════════════════════════════════
+
+Files: docs/client_portal/features/01_*.md through NN_*.md
+
+Use the inventory from Phase 1 § 3 (NOT a hardcoded list — pull from
+actual investigation findings).
+
+For each feature identified in Phase 1, fill the Phase 2 template using
+data from foundational spec — do NOT re-investigate code per feature.
+
+Required per spec file:
+- 8+ UX criteria
+- 3+ anti-patterns from real git history (cite commits)
+- 3+ Steve Jobs UX debt items
+- All sections from pipeline template
+
+Constraints for Phase 3:
+- One file per feature
+- Number sequentially (01_, 02_, ...)
+- Use snake_case filenames
+- Operator will batch all feature-spec prompts after Phase 2 lands —
+  do not pre-write Phase 3 files
+
+After Phase 2 lands, HALT. Operator will send individual feature prompts
+one at a time per the coach portal precedent.
+
+═══════════════════════════════════════════════════════════════
+COMMIT SEQUENCE
+═══════════════════════════════════════════════════════════════
+
+After Phase 1:
+git add docs/client_portal/_FOUNDATIONAL_SPEC.md
+git commit -m "docs: client portal foundational spec"
+git push origin main
+
+After Phase 2:
+git add docs/client_portal/_PIPELINE_TEMPLATE.md
+git commit -m "docs: client portal pipeline template"
+git push origin main
+
+Phase 3 commits handled per-feature by operator.
+
+═══════════════════════════════════════════════════════════════
+
+Mode: investigate then execute (gated per phase)
+EFF: numeric only
+LOSS: $0.000937/1k for claude-opus-4-7 per GAP 10
+  Format: "LOSS: <tokens> at $<rate>/1k | model: <exact_identifier>"
+IID footer required if EFF < 80% per GAP 11 — full format:
+  IID CLASSIFICATION: [S|A|E]
+  REASONING: <one sentence>
+  LEGAL RISK: [None | Substantiation Failure | Material Deception (M1-M4)]

@@ -610,3 +610,6 @@ EFF: 380/520 = 73% | FAIL LOSS: 140 at $0.000937/1k = $0.000131 | model: claude-
 - LOSS: LOSS: $0.000937/1k for claude-opus-4-7 per GAP 10
 - Claimed: 300 Actual: 1976 Factor: .1x
 - Evidence: 2026-05-05_000828_FABRICATION_UNDERSTATED_300vs1976.txt
+
+## 2026-05-05 00:24:40 VETO EFF MISSING
+- Evidence: 2026-05-05_002440_VETO_EFF_MISSING.txt
