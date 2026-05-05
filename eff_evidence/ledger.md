@@ -457,3 +457,9 @@ EFF: 170/190 = 89% | PASS
 
 ## 2026-05-04 18:41:00 VETO EFF MISSING
 - Evidence: 2026-05-04_184100_VETO_EFF_MISSING.txt
+
+## 2026-05-04 20:55:05 FABRICATION_UNDERSTATED
+- EFF: EFF: 180/420 = 43% | FAIL
+- LOSS: LOSS: rate unknown if model unknown — no fabricated cost
+- Claimed: 420 Actual: 873 Factor: .4x
+- Evidence: 2026-05-04_205505_FABRICATION_UNDERSTATED_420vs873.txt

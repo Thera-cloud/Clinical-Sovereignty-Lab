@@ -1,0 +1,172 @@
+? Investigate why client_001's "View Availability & Book Session" page shows
+
+"No published hours for this date" when their assigned coach (CoachN) has
+
+availability published. Remember for this is a multi-file cross-stack investigation with database verification. Don't miss the schema mismatch nuance the foundational spec already documented for Coach Portal.
+
+
+
+Read-only investigate mode. Max 2500 tokens.
+
+
+
+Source of truth: docs/coach_portal/_FOUNDATIONAL_SPEC.md
+
+Reference docs:
+
+  docs/coach_portal/features/02_schedule.md (coach side)
+
+  Look for client-side counterpart in mobile/lib/
+
+
+
+Symptoms (from browser console + screenshots):
+
+- Client app at app.sovereignsanctuary.net showing "Loading coach availability..."
+
+  followed by "No published hours for this date"
+
+- WebSocket to wss://api.sovereignsanctuary.net/ws repeatedly failing
+
+- "Uncaught Error" after every WS connection attempt
+
+- Service worker timeout warning at 4000ms (separate concern)
+
+- client_001 confirmed assigned to CoachN
+
+- CoachN has timezone America/New_York and recently scheduled Paula's session
+
+
+
+Investigate in this order:
+
+
+
+1. WebSocket connection failure for clients
+
+   grep -n "wss://api.sovereignsanctuary.net/ws\|_clientServerUrl\|clientWsUrl" mobile/lib/ -r | head -20
+
+   - What URL does the client connect to vs the coach
+
+   - Is there a different WS endpoint for clients vs coaches
+
+   - Check if /ws is the correct path or if it should be /api/ws or similar
+
+
+
+2. Client-side availability fetch
+
+   grep -n "client_get_coach_availability\|getCoachAvailability\|coach_availability" mobile/lib/ -r | head -20
+
+   - Find the client widget that displays "View Availability & Book Session"
+
+   - What WebSocket message does it send
+
+   - What response message does it expect
+
+   - What state variable holds the availability list
+
+
+
+3. Backend handler verification
+
+   - Confirm bridge_server.py handler for client_get_coach_availability exists
+
+   - Foundational spec referenced this at line 12152
+
+   - What table does it query (coach_availability)
+
+   - What does it filter on
+
+
+
+4. Database verification
+
+   ssh root@68.183.168.75 "docker exec nate_postgres psql -U postgres -d little_nate -c \"SELECT coach_id, day_of_week, start_time, end_time, is_published FROM coach_availability WHERE coach_id IN (SELECT id FROM users WHERE username = 'CoachN') LIMIT 20;\""
+
+   - Are there published availability rows for CoachN
+
+   - Note: coach_availability has UUID coach_id (001_schema.sql) AND TEXT coach_id (081)
+
+     per foundational spec — verify which schema is active in production
+
+
+
+5. Schema mismatch check
+
+   ssh root@68.183.168.75 "docker exec nate_postgres psql -U postgres -d little_nate -c \"\\d coach_availability\""
+
+   - Show actual current schema
+
+   - Compare to migrations 001 and 081
+
+
+
+6. Client-coach assignment verification
+
+   ssh root@68.183.168.75 "docker exec nate_postgres psql -U postgres -d little_nate -c \"SELECT id, username, hardware_id, profile_data->>'assigned_coach' as assigned_coach FROM users WHERE username = 'client_001';\""
+
+   - Confirm client_001 is actually linked to CoachN
+
+   - Note which field holds the assignment (assigned_coach username vs coach_id UUID)
+
+
+
+7. WebSocket auth issue check
+
+   - Browser console shows WS failures BEFORE availability fetch
+
+   - Investigate if auth token is being passed correctly on WS connect
+
+   - Check main.dart and updated_screens.dart for WS connection setup
+
+   - Compare to working coach WS connection
+
+
+
+8. Service worker note (non-blocking)
+
+   - Service worker timeout is 4000ms, hitting that limit
+
+   - May indicate slow initial load but not root cause of availability bug
+
+   - Flag for separate investigation if WS issue is fixed
+
+
+
+Output structure for findings report:
+
+- Section A: WebSocket failure root cause (auth, URL, network)
+
+- Section B: Availability fetch flow (what's sent, what's expected, what's missing)
+
+- Section C: Database state (does CoachN have published hours, is client_001 linked)
+
+- Section D: Schema status (which coach_availability schema is active)
+
+- Section E: Recommended fix scope (1-2 sentences, no code)
+
+
+
+No code changes. No fixes proposed. Investigation only.
+
+Write findings to docs/CLIENT_AVAILABILITY_INVESTIGATION_2026-05-04.md
+
+
+
+Mode: investigate
+
+EFF: numeric only
+
+LOSS: rate unknown if model unknown — no fabricated cost
+
+Writing the investigation document: confirming the coach-booking query uses scheduled_at vs scheduled_start for real rows.
+
+Full findings are in docs/CLIENT_AVAILABILITY_INVESTIGATION_2026-05-04.md.
+
+TL;DR: CoachN has 4 recurring coach_availability rows (UUID coach_id); prod schema matches 001/consolidated, not TEXT 081. The literal username client_001 is absent; client1 (CLIENT_001) has assigned_coach_id = COACH_COACHN_ID. Client and coach both target wss://api.sovereignsanctuary.net/ws. client_get_coach_availability exists at bridge_server.py:~12152 as in the foundational spec. The UI text “No published hours” can appear whenever _selectedDate is set but coach_availability never fills _availableSlots — including WS failures, so it often masks transport/auth errors. Secondary: booked masking uses scheduled_at::date while real appointments may live on scheduled_start.
+
+EFF: 180/420 = 43% | FAIL
+OPTIMIZE_NEXT: Omit redundant TL;DR when doc link suffices
+
+LOSS: 240 tokens at rate unknown | session: n/a | model: unknown
