@@ -1,0 +1,41 @@
+? Find the actual handler for client_get_coach_availability in bridge_server.py.
+
+Read-only. Max 500 tokens.
+
+Symptom: bridge logs show
+   ">>> RECEIVED: type=client_get_coach_availability len=89"
+but AVAILABILITY-DEBUG log lines (added in commit c43b9a3) never fire.
+
+Hypotheses:
+1. There is more than one branch in bridge_server.py matching this type
+2. The AVAILABILITY-DEBUG was added to an unreachable elif chain
+3. Message is intercepted by a generic dispatcher before reaching the typed handler
+
+Investigate:
+1. grep -n "client_get_coach_availability" backend/app/websocket/bridge_server.py
+   - Show ALL matches with surrounding 3 lines
+   - Identify every elif/if branch that handles this type
+
+2. grep -n "AVAILABILITY-DEBUG" backend/app/websocket/bridge_server.py
+   - Verify where the debug logs were added
+   - Cross-reference: are they inside the actual handler branch?
+
+3. Look for a dispatcher pattern that might intercept early:
+   grep -n "RECEIVED:.*type=" backend/app/websocket/bridge_server.py
+   grep -n "elif t ==" backend/app/websocket/bridge_server.py | head -5
+
+4. Check if there's a try/except that swallows handler errors silently:
+   - Look at lines around the AVAILABILITY-DEBUG markers
+   - Is the handler wrapped in try/except with a bare pass or print to stderr only?
+
+Output:
+- Section A: All grep matches for client_get_coach_availability with line numbers
+- Section B: Where AVAILABILITY-DEBUG was added (line numbers)
+- Section C: Are A and B in the same function/branch (yes/no/unclear)
+- Section D: One sentence root cause hypothesis
+
+No code changes.
+
+Mode: investigate
+EFF: numeric only
+LOSS: rate unknown if model unknown
