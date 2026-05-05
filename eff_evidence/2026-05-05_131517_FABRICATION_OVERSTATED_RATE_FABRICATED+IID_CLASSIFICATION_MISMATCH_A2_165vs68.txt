@@ -1,0 +1,10 @@
+docs/client_portal/features/08_critical_session_security_modals.md is in place: E1/E2, G22/G23, C9, main.dart:6430, 6797–6801, 6803–6830; 10 UX bullets; 6 §9 commits; 4 §10/§7 debt rows; notes no §3 row (WS overlays). Cross-refs 05 for E4 contrast.
+
+IID CLASSIFICATION: [S]
+REASONING: Deliverable is the file; reply stays minimal.
+LEGAL RISK: None
+
+EFF: 70/165 = 42% | FAIL
+OPTIMIZE_NEXT: Omit redundant clause when the path suffices.
+
+LOSS: 95 at $0.000097/1k | model: claude-opus-4-7-thinking-xhigh
