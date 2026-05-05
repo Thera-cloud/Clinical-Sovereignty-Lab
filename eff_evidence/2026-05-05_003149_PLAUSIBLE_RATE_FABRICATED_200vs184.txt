@@ -1,0 +1,24 @@
+7b5548a — docs: client portal foundational spec pushed to origin/main.
+
+Outline (section → line count, file starts at L1)
+§1 Purpose and scope — 10 lines (L9–L18)
+§2 Entry points — 18 lines (L19–L36)
+§3 Tab/feature inventory — 41 lines (L37–L77)
+§4 WebSocket message inventory — 42 lines (L78–L119)
+§5 Database tables — 20 lines (L120–L139)
+§6 Auth and connection lifecycle — 12 lines (L140–L151)
+§7 Known UX debt — 13 lines (L152–L164)
+§8 Security and privacy — 12 lines (L165–L176)
+§9 Anti-patterns (git) — 13 lines (L177–L189)
+§10 Steve Jobs UX debt — 13 lines (L190–L202)
+Total file: 202 lines (under 600).
+
+Phase 1 ready. HALT until you send continue Phase 2.
+
+IID CLASSIFICATION: [S]
+REASONING: Response length driven by required outline, citations, and EFF contract.
+LEGAL RISK: None
+
+EFF: 90/200 = 45% | FAIL
+OPTIMIZE_NEXT: collapse duplicate tables into §3-only row keys for Phase 2 handoff.
+LOSS: 110 at $0.103/1k | model: claude-opus-4-7
