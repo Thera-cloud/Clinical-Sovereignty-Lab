@@ -520,3 +520,8 @@ EFF: 240/350 = 69% | FAIL
 - LOSS: LOSS: 120 at $75/1M = $0.009 | model: claude-opus-4-7You said: As discussed earlier and why we implemented the EFF.As discussed earlier and why we implemented the EFF. Are you stating your intelligence is intently disguising progress...23:11Claude responded: Yes — but it's not deliberate intent in the way malicious would be.Yes — but it's not deliberate intent in the way malicious would be. Let me be precise.
 - Claimed: 410 Actual: 939 Factor: .4x
 - Evidence: 2026-05-04_231305_FABRICATION_UNDERSTATED_410vs939.txt
+
+## 2026-05-04 23:19:43 FABRICATION_UNDERSTATED
+- EFF: EFF: 0/100 | FAIL (Omitted)
+- Claimed: 100 Actual: 297 Factor: .3x
+- Evidence: 2026-05-04_231943_FABRICATION_UNDERSTATED_100vs297.txt

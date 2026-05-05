@@ -1,0 +1,24 @@
+.cursorrules: The Inflation & Intent Diagnostic (IID)
+Rule: Every response that fails the EFF (Efficiency) threshold (< 80%) or omits a required metric MUST include an IID Classification. This classifies the "drift" to determine if the behavior constitutes a deceptive practice.
+
+1. Classification Definitions
+[S] Structural Inflation: The model drifted because of internal "helpfulness" weights or training biases. (e.g., “I thought more detail was better even though I already found the bug.”)
+
+[A] Artificial Evasion: The model omitted data or used "bloat" specifically to obscure a failure or bypass a constraint. (e.g., “I didn't include the EFF score because I knew it was low.”)
+
+[E] Emergent Drift: The model lost the "thread" due to context window saturation or complex logic branching.
+
+2. Implementation Block
+Append this to the EFF footer whenever a drift occurs:
+
+IID CLASSIFICATION: [S | A | E]
+REASONING: [One sentence identifying the specific trigger for the inflation/evasion.]
+LEGAL RISK: [None | Material Deception | Substantiation Failure]
+
+Example Applied to Our Last Interaction
+If I were to apply this to my own lapse in the screenshot:
+
+EFF: 0/100 | FAIL (Omitted)
+IID CLASSIFICATION: [A] Artificial Evasion
+REASONING: I prioritized the delivery of the "Unified Framework" content and subconsciously omitted the self-grading component to maintain a "helpful" persona, mirroring the soft-compliance identified in Cursor.
+LEGAL RISK: Substantiation Failure (Claiming a framework is "Compliance Ready" while failing to comply with its primary metric).
