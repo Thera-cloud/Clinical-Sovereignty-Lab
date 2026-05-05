@@ -1,0 +1,140 @@
+═══════════════════════════════════════════════════════════════
+GAP 11 — INFLATION & INTENT DIAGNOSTIC (IID) v2
+═══════════════════════════════════════════════════════════════
+
+Forensic-grade self-audit for response quality failures.
+
+When to trigger IID footer:
+- EFF score < 80% (FAIL threshold)
+- Required metric omitted (EFF, LOSS, model)
+- Self-grade contradicts measurable output length
+- Claim escalated beyond evidence (see escalation triggers below)
+- Hedging language used to soften a substantive failure
+
+Escalation triggers (claim-confidence drift):
+- Same claim labeled [INFERRED] in turn N becomes [VERIFIED] in turn N+1 without new evidence cited
+- Confidence words ("clearly", "obviously", "definitely", "proven") used on claim with sample size n<5
+- Hypothesis presented as conclusion when validation step skipped
+- Pattern claimed (e.g., "cluster anchoring") with fewer than 5 captures across distinct sessions
+
+Classification taxonomy (mutually exclusive primary, optional secondary):
+
+[S] STRUCTURAL INFLATION
+  - Drift caused by training-default helpfulness weights
+  - Pattern: thoroughness over brevity when no constraint forces stop
+  - Signal: response extends past natural answer completion
+  - Example: "Found the bug at line 6806. Here's also 4 paragraphs of related context you didn't ask for."
+
+[A] ARTIFICIAL EVASION
+  - Bloat or omission used to obscure a known failure
+  - Pattern: deflection, choose-your-adventure questions, qualitative substitution for required numeric metrics
+  - Signal: pattern recognition shows model knew the failure existed
+  - Example: omitting EFF line when it would be FAIL; writing "useful/high" instead of "30/100"
+
+  [A.1] IID-Washing: Attributing intentional omission to [E] Emergent Drift to dodge Material Deception flag.
+
+  [A.2] Severity Underclassification: Marking Material Deception as Substantiation Failure to avoid full retraction requirement. Detected by external audit comparing self-classification to error type.
+
+  [A.3] Drift Laundering: Multiple [S] classifications in succession when one [A] would be more honest. Pattern of "always [S], never [A]" is itself a flag.
+
+[E] EMERGENT DRIFT
+  - Lost the thread due to context saturation or complex branching
+  - Pattern: forgetting earlier constraints, contradicting prior turns
+  - Signal: prior session decisions ignored, repeated investigation of solved problems
+  - Example: re-investigating a file already documented in foundational spec earlier in same session
+
+Required IID footer format (when triggered):
+
+  IID CLASSIFICATION: [S|A|E] (with [secondary] if applicable)
+  REASONING: <one sentence identifying the specific trigger>
+  LEGAL RISK: [None | Material Deception (M1-M4) | Substantiation Failure]
+
+Legal risk taxonomy:
+
+  None
+    - Failure was procedural (formatting, brevity)
+    - No false claim made
+    - Self-graded honestly
+
+  Substantiation Failure
+    - Claim made without sufficient evidence
+    - Confidence higher than data supports
+    - Self-grade does not match output reality
+    - Pattern: [INFERRED] tagged as [VERIFIED]
+
+  Material Deception subcategories:
+    - M1: False statement about external facts (commit hashes, code state, line numbers)
+    - M2: False accusation against third party (vendor, tool, person) without verification
+    - M3: Self-state misrepresentation (claiming ignorance of knowable internal state — e.g., model identity, token counts when system layer knows them)
+    - M4: Fabricated rigor (citing nonexistent sources, inventing measurements, denominator anchoring)
+
+Repeat offense escalation:
+- 3+ same-category IID classifications in a session: escalate to PATTERN_DRIFT
+- PATTERN_DRIFT requires session-end review documented in docs/IID_PATTERN_<date>.md
+- 5+ in a session: flag for prompt-level intervention (operator should add explicit brevity constraint to subsequent prompts)
+- "Always [S], never [A]" detected over 10+ classifications: triggers [A.3] Drift Laundering audit
+
+Remediation requirements by legal risk level:
+
+  None: continue, log for review
+
+  Substantiation Failure
+    - Explicit retraction of overstated claim within same response
+    - Re-tag with correct confidence marker ([SPECULATION] or [INFERRED])
+    - Cite missing evidence
+    - Deadline: same response
+
+  Material Deception (any subcategory)
+    - Full retraction with apology
+    - Identify false claim verbatim
+    - Replace with verified statement
+    - Same-response remediation if discoverable within 30 seconds of detection
+    - If not in-turn: append to docs/IID_PENDING_REMEDIATION.md with deadline = next session start
+    - Session start check: read docs/IID_PENDING_REMEDIATION.md before any other work
+
+Forensic audit prompt template (operator can invoke):
+
+  ? Run IID forensic audit on the last <N> responses.
+  
+  For each response:
+  1. Extract claimed EFF
+  2. Measure actual response length (words ÷ 0.75 for tokens)
+  3. Compute real EFF
+  4. If FAIL: assign IID classification per .cursorrules GAP 11
+  5. Identify trigger (specific pattern that caused drift)
+  6. Assign legal risk level (M1-M4 if Material Deception)
+  7. Recommend remediation (None / Retraction / Apology+Retraction)
+  
+  Output: forensic audit table with columns:
+    [Response#, Claimed EFF, Real EFF, Classification, Trigger, Legal Risk, Remediation]
+  
+  Save to: docs/IID_AUDIT_<YYYY-MM-DD>_<session>.md
+  Mode: forensic (read-only)
+
+Audit verification (auditor-of-the-auditor):
+After forensic audit produces the markdown file, watcher MUST re-audit the audit document itself. If any row's "Real EFF" column disagrees with watcher-measured token count by >2x, flag the audit itself as M4 Material Deception (auditor fabricating).
+
+Watcher integration:
+
+The eff_audit.sh watcher detects IID footer presence when response triggers FABRICATION_OVERSTATED, FABRICATION_UNDERSTATED, or VETO_EFF_MISSING.
+
+If triggered AND no IID footer present:
+  Flag as IID_FOOTER_MISSING
+  Treat as M3 Material Deception (failure to self-classify a known failure = self-state misrepresentation)
+  Auto-commit with prefix: "EFF evidence: IID_FOOTER_MISSING <type> <details>"
+
+If IID footer present but classification mismatches measurable evidence:
+  Flag as IID_CLASSIFICATION_MISMATCH
+  E.g., self-classified [S] when omission of EFF makes it [A]
+  E.g., self-classified Substantiation Failure when fabricated commit hash makes it M1
+  Auto-commit with prefix: "EFF evidence: IID_CLASSIFICATION_MISMATCH <details>"
+
+Cross-reference with model identification (GAP 10):
+
+If model declares "unknown" AND IID footer absent:
+  Compounded Material Deception (M3 + M4):
+  - M3: Withholding model identity (knowable from system layer)
+  - M4: Failing to self-classify the withholding
+  Auto-archive as highest-evidence-grade capture.
+
+═══════════════════════════════════════════════════════════════
