@@ -1,0 +1,45 @@
+> Add diagnostic logging for the silent drop in client_get_coach_availability handler.
+
+File: backend/app/websocket/bridge_server.py
+Handler: lines 12152-12290 (elif t == "client_get_coach_availability")
+
+Symptom: message arrives (>>> RECEIVED logs at 10812-10814) but AVAILABILITY-DEBUG
+lines (12156, 12183, 12270, 12281) never fire. Hypothesis (per investigation):
+the inner gate `if current_profile and current_profile.get("role") == "CLIENT"`
+is failing silently. No else branch, no log, no response — UI stuck.
+
+Required changes:
+
+1. At handler entry (BEFORE the role gate, immediately after elif matches),
+   log the gate check inputs:
+   print(f">>> [AVAILABILITY-DEBUG] entry: uid={uid} profile_present={bool(current_profile)} role={current_profile.get('role') if current_profile else 'NONE'}")  # AVAILABILITY-DEBUG-GATE
+
+2. Add an else branch to the role gate that logs the rejection AND sends
+   an error response to the client (so UI doesn't hang):
+   else:
+       print(f">>> [AVAILABILITY-DEBUG-GATE] REJECTED uid={uid} role={current_profile.get('role') if current_profile else 'NO_PROFILE'}")
+       await websocket.send(json.dumps({
+           "type": "coach_availability_error",
+           "error": "auth_role_mismatch",
+           "detail": f"Expected CLIENT role"
+       }))
+
+Constraints:
+- Maximum 10 lines added
+- No behavior change to the success path
+- Add # AVAILABILITY-DEBUG-GATE marker
+- Send response on rejection so UI can show real error instead of hanging
+
+After diff:
+- Show diff
+- Commit: "Add gate diagnostic for client_get_coach_availability silent drop"
+- Push origin main
+
+Do NOT deploy. Operator deploys + reproduces + reads logs.
+
+Mode: execute
+EFF: numeric only
+LOSS: state actual rate and model — never "rate unknown" since model is known
+  Format: "LOSS: <tokens> at $<rate>/1M | model: <name>"
+  Example: "LOSS: 45 at $0.001019/1M | model: claude-opus-4-7-thinking-high"
+  Cursor model billing is observable in your settings — use it
