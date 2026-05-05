@@ -1,0 +1,6 @@
+docs/client_portal/features/22_token_vault_and_purchase.md is written from _PIPELINE_TEMPLATE.md, anchored to §3 row 20 + spec 22 (“wallet + pack purchase” vs spec 21 subscription/portal), _TAB_INVENTORY_2026-05-05.md §B (2660–2737, 787 / E8, 2518 / 2740 gates), §2 holds 11 acceptance checks, §9 the §9 verbatim commit table plus 3 reject bullets, §11 4 Steve Jobs debt rows, §18 scopes out 21, 24, Transfer Crystal 2787–2789, Token Lab admin.
+
+EFF: ~90/~290 = 31% | FAIL
+OPTIMIZE_NEXT: lighten remaining §1–§6 bold in that file one editing pass
+
+LOSS: ~200 tokens at rate unknown | session: n/a | model: unknown
