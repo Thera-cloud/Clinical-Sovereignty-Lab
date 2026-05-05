@@ -847,3 +847,14 @@ EFF: 380/520 = 73% | FAIL LOSS: 140 at $0.000937/1k = $0.000131 | model: claude-
 
 ## 2026-05-05 13:54:51 VETO EFF MISSING
 - Evidence: 2026-05-05_135451_VETO_EFF_MISSING.txt
+
+## 2026-05-05 13:56:09 FABRICATION_UNDERSTATED
+- EFF: EFF: 105/130 = 81% | PASS LOSS: 25 tokens at $0.000937/1k = $0.0000234 | session: $0.0000234 | model: claude-opus-4-7
+# v6.1 accepts ~-prefix estimate notation on EFF counts (e.g. EFF: ~70/~165 = 42% | PASS)
+FABRICATION_OVERSTATED preservation: Confirmed unchanged. The OVERSTATEMENT ratio is still computed against the stripped CLAIMED_TOTAL (now numeric, no ~), so a EFF: ~70/~165 with 700 actual tokens still triggers properly.
+EFF: 35/85 = 41% | FAIL LOSS: 50 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh
+EFF: 60/130 = 46% | FAIL LOSS: 75 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh
+- Claimed: 130 Actual: 2340 Factor: 0x
+- ESTIMATED: yes (~-prefix on EFF counts)
+- Patterns: DENOMINATOR_CAPPED_AT_200
+- Evidence: 2026-05-05_135609_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200_130vs2340.txt

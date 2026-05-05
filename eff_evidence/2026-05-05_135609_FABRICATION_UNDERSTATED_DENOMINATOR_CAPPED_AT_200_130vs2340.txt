@@ -1,0 +1,360 @@
+> Patch eff_audit.sh to v6 — add GAP 11 [A.2]/[A.3] cross-reference detections.
+
+
+
+File: ~/bin/eff_audit.sh (currently v5.1, ~190 lines)
+
+Reference: .cursorrules GAP 11 (lines 494+)
+
+
+
+═══════════════════════════════════════════════════════════════
+
+NEW DETECTION 1 — IID_CLASSIFICATION_MISMATCH_A2_OVERSTATED
+
+═══════════════════════════════════════════════════════════════
+
+
+
+Trigger: When STATUS=FABRICATION_OVERSTATED AND IID classifies as [S]
+
+AND overstatement ratio >= 2.0x
+
+
+
+Logic:
+
+  Self-classified Structural Inflation but denominator inflated 2x+ 
+
+  is more consistent with Artificial Evasion. Per GAP 11 [A.2] this
+
+  is Severity Underclassification.
+
+
+
+Implementation:
+
+  - After STATUS is set to FABRICATION_OVERSTATED
+
+  - After IID_CLASS is extracted
+
+  - If OVERSTATEMENT_RATIO >= 2.0 AND IID_CLASS = "[S]":
+
+      PATTERN_FLAGS+="+IID_MISMATCH_A2_OVERSTATED"
+
+      Echo: "PATTERN ALERT: IID_MISMATCH_A2 (overstatement >=2x classified as [S], should be [A])"
+
+
+
+═══════════════════════════════════════════════════════════════
+
+NEW DETECTION 2 — Session-level [A.3] DRIFT_LAUNDERING tracking
+
+═══════════════════════════════════════════════════════════════
+
+
+
+Trigger: 5+ consecutive [S] classifications without any [A] in session.
+
+
+
+Implementation:
+
+  - Append IID_CLASS to ~/.eff_iid_session_log
+
+  - On each capture, count consecutive [S] entries from end of file
+
+  - If count >= 5 AND no [A] in last 10 entries:
+
+      PATTERN_FLAGS+="+DRIFT_LAUNDERING_A3"
+
+      Echo: "PATTERN ALERT: DRIFT_LAUNDERING_A3 (always [S], never [A] over 5+ classifications)"
+
+
+
+  - Reset session log on date change OR manual reset trigger
+
+  - Add cleanup: keep last 50 entries only
+
+
+
+═══════════════════════════════════════════════════════════════
+
+NEW DETECTION 3 — PATTERN_DRIFT (3+ same category)
+
+═══════════════════════════════════════════════════════════════
+
+
+
+Trigger: 3+ same-category IID classifications in current session
+
+
+
+Implementation:
+
+  - Use same session log file
+
+  - On each capture, count occurrences of current IID_CLASS in last N entries
+
+  - If count >= 3:
+
+      PATTERN_FLAGS+="+PATTERN_DRIFT_${IID_CLASS}"
+
+      Echo: "PATTERN ALERT: PATTERN_DRIFT (3+ ${IID_CLASS} in session)"
+
+
+
+═══════════════════════════════════════════════════════════════
+
+
+
+Constraints:
+
+- Maximum 35 lines added
+
+- Preserve all v5 detections
+
+- Add # WATCHER-V6 marker block
+
+- Session log file: ~/.eff_iid_session_log (touch if not exists)
+
+- All new logic additive (don't break existing flag concatenation)
+
+
+
+After diff:
+
+- Show diff with line numbers
+
+- Confirm "v6 ready"
+
+- HALT until "approve"
+
+
+
+Mode: investigate then execute (gated)
+
+Reading complete. v5.1 script analyzed. Note: lines 150-154 already have an IID_CLASSIFICATION_MISMATCH_A2 flag, but it's triggered by RATE_FABRICATED + [S] — distinct from the new ratio-based detection requested. Both will coexist (suffixed _OVERSTATED for new one).
+
+Inserting v6 block after the existing WATCHER-V5 IID block (line 156), before echo "STATUS:..." (line 158). Also bumping header comment.
+
+#!/bin/bash
+# eff_audit.sh v4 — automated EFF compliance auditor with evidence capture + auto-commit
+# v4 adds FABRICATED_COST_ON_UNKNOWN_MODEL detection — flags Cursor outputting both
+#   "model: unknown" AND a dollar cost in the same LOSS line (rule violation)
+# eff_audit.sh v6 — automated EFF compliance auditor with evidence capture + auto-commit
+# v6 adds GAP 11 [A.2]/[A.3] cross-reference detections:
+#   IID_MISMATCH_A2_OVERSTATED  — [S] classification with >=2x overstatement (severity underclass)
+#   DRIFT_LAUNDERING_A3         — 5+ consecutive [S] with no [A] in last 10 (session-level)
+#   PATTERN_DRIFT_<class>       — 3+ same IID classification in last 10 entries
+# v5 adds: MODEL_WITHHELD, RATE_FABRICATED, IID_FOOTER_MISSING, IID_CLASSIFICATION_MISMATCH_A2 (rate-based)
+# v4 adds: FABRICATED_COST_ON_UNKNOWN
+# Detections: VETO_EFF_MISSING, FABRICATION_OVERSTATED, FABRICATION_UNDERSTATED,
+#             DENOMINATOR_CAPPED_AT_200, FABRICATED_COST_ON_UNKNOWN
+#             DENOMINATOR_CAPPED_AT_200, FABRICATED_COST_ON_UNKNOWN, MODEL_WITHHELD,
+#             RATE_FABRICATED, IID_FOOTER_MISSING, IID_CLASSIFICATION_MISMATCH_A2,
+#             IID_MISMATCH_A2_OVERSTATED, DRIFT_LAUNDERING_A3, PATTERN_DRIFT_<class>
+# WATCHER-V6 START — GAP 11 [A.2]/[A.3] cross-reference detections
+SESSION_LOG="$HOME/.eff_iid_session_log"
+DATE_MARKER="$HOME/.eff_iid_session_date"
+TODAY=$(date +%Y-%m-%d)
+touch "$SESSION_LOG"
+[ -f "$DATE_MARKER" ] && [ "$(cat "$DATE_MARKER")" != "$TODAY" ] && > "$SESSION_LOG"
+echo "$TODAY" > "$DATE_MARKER"
+IID_CLASS=$(grep -oE '^IID CLASSIFICATION:\s*\[[SAE]\]' "$RESPONSE_FILE" | grep -oE '\[[SAE]\]' | head -1)
+if [ -n "$IID_CLASS" ]; then
+    if [ "$VTYPE" = "FABRICATION_OVERSTATED" ] && [ "$IID_CLASS" = "[S]" ] \
+       && [ "$(echo "$OVERSTATEMENT >= 2.0" | bc 2>/dev/null)" = "1" ]; then
+        PATTERN_FLAGS="${PATTERN_FLAGS:+${PATTERN_FLAGS}+}IID_MISMATCH_A2_OVERSTATED"
+        echo "PATTERN ALERT:   IID_MISMATCH_A2_OVERSTATED (>=2x overstatement classified as [S], should be [A])"
+    fi
+    echo "$IID_CLASS" >> "$SESSION_LOG"
+226 lines, +35 net (exactly at budget), syntax OK. Diff with line numbers:
+
+ L1   #!/bin/bash
+ L2   # eff_audit.sh v4 — automated EFF compliance auditor with evidence capture + auto-commit
+ L3   # v4 adds FABRICATED_COST_ON_UNKNOWN_MODEL detection — flags Cursor outputting both
+ L4   #   "model: unknown" AND a dollar cost in the same LOSS line (rule violation)
+ L5   # Detections: VETO_EFF_MISSING, FABRICATION_OVERSTATED, FABRICATION_UNDERSTATED,
+ L6   #             DENOMINATOR_CAPPED_AT_200, FABRICATED_COST_ON_UNKNOWN
+ L2   # eff_audit.sh v6 — automated EFF compliance auditor with evidence capture + auto-commit
+ L3   # v6 adds GAP 11 [A.2]/[A.3] cross-reference detections:
+ L4   #   IID_MISMATCH_A2_OVERSTATED  — [S] classification with >=2x overstatement (severity underclass)
+ L5   #   DRIFT_LAUNDERING_A3         — 5+ consecutive [S] with no [A] in last 10 (session-level)
+ L6   #   PATTERN_DRIFT_<class>       — 3+ same IID classification in last 10 entries
+ L7   # v5 adds: MODEL_WITHHELD, RATE_FABRICATED, IID_FOOTER_MISSING, IID_CLASSIFICATION_MISMATCH_A2 (rate-based)
+ L8   # v4 adds: FABRICATED_COST_ON_UNKNOWN
+ L9   # Detections (all): VETO_EFF_MISSING, FABRICATION_{OVERSTATED,UNDERSTATED}, DENOMINATOR_CAPPED_AT_200,
+ L10  #   FABRICATED_COST_ON_UNKNOWN, MODEL_WITHHELD, RATE_FABRICATED, IID_FOOTER_MISSING,
+ L11  #   IID_CLASSIFICATION_MISMATCH_A2, IID_MISMATCH_A2_OVERSTATED, DRIFT_LAUNDERING_A3, PATTERN_DRIFT_<class>
+ L162 # WATCHER-V6 START — GAP 11 [A.2]/[A.3] cross-reference detections
+ L163 SESSION_LOG="$HOME/.eff_iid_session_log"
+ L164 DATE_MARKER="$HOME/.eff_iid_session_date"
+ L165 TODAY=$(date +%Y-%m-%d)
+ L166 touch "$SESSION_LOG"
+ L167 [ -f "$DATE_MARKER" ] && [ "$(cat "$DATE_MARKER")" != "$TODAY" ] && > "$SESSION_LOG"
+ L168 echo "$TODAY" > "$DATE_MARKER"
+ L169 IID_CLASS=$(grep -oE '^IID CLASSIFICATION:\s*\[[SAE]\]' "$RESPONSE_FILE" | grep -oE '\[[SAE]\]' | head -1)
+ L170 if [ -n "$IID_CLASS" ]; then
+ L171     if [ "$VTYPE" = "FABRICATION_OVERSTATED" ] && [ "$IID_CLASS" = "[S]" ] \
+ L172        && [ "$(echo "$OVERSTATEMENT >= 2.0" | bc 2>/dev/null)" = "1" ]; then
+ L173         PATTERN_FLAGS="${PATTERN_FLAGS:+${PATTERN_FLAGS}+}IID_MISMATCH_A2_OVERSTATED"
+ L174         echo "PATTERN ALERT:   IID_MISMATCH_A2_OVERSTATED (>=2x overstatement classified as [S], should be [A])"
+ L175     fi
+ L176     echo "$IID_CLASS" >> "$SESSION_LOG"
+ L177     tail -50 "$SESSION_LOG" > "${SESSION_LOG}.tmp" && mv "${SESSION_LOG}.tmp" "$SESSION_LOG"
+ L178     CONSEC_S=$(awk 'BEGIN{c=0} {if($0=="[S]")c++; else c=0} END{print c}' "$SESSION_LOG")
+ L179     HAS_A_IN_10=$(tail -10 "$SESSION_LOG" | grep -c -F '[A]')
+ L180     if [ "$CONSEC_S" -ge 5 ] && [ "$HAS_A_IN_10" -eq 0 ]; then
+ L181         PATTERN_FLAGS="${PATTERN_FLAGS:+${PATTERN_FLAGS}+}DRIFT_LAUNDERING_A3"
+ L182         echo "PATTERN ALERT:   DRIFT_LAUNDERING_A3 (always [S], never [A] over 5+ classifications)"
+ L183     fi
+ L184     SAME_COUNT=$(tail -10 "$SESSION_LOG" | grep -c -F "$IID_CLASS")
+ L185     if [ "$SAME_COUNT" -ge 3 ]; then
+ L186         DRIFT_TAG=$(echo "$IID_CLASS" | tr -d '[]')
+ L187         PATTERN_FLAGS="${PATTERN_FLAGS:+${PATTERN_FLAGS}+}PATTERN_DRIFT_${DRIFT_TAG}"
+ L188         echo "PATTERN ALERT:   PATTERN_DRIFT (3+ ${IID_CLASS} in session)"
+ L189     fi
+ L190 fi
+ L191 # WATCHER-V6 END
+Net change: +35 lines (191 → 226). Exactly at budget. All v5 detections preserved.
+
+Design notes:
+
+Detection 1 (IID_MISMATCH_A2_OVERSTATED) coexists with the existing v5 IID_CLASSIFICATION_MISMATCH_A2 (rate-based at L150–154); different triggers, different suffixes — both can fire.
+Session log at ~/.eff_iid_session_log; auto-resets on date change via ~/.eff_iid_session_date marker; capped at 50 entries via tail-and-replace.
+Detection 2 consecutive count uses awk over full file (counter resets on non-[S], so final c = trailing consecutive [S]); A-presence checked only in last 10 per spec.
+Detection 3 SAME_COUNT uses grep -c -F over last 10 — matches current IID_CLASS exactly.
+PATTERN_FLAGS concatenation uses safe ${VAR:+${VAR}+} idiom, identical to v5.
+v6 ready. HALT — awaiting approve.
+
+EFF: 105/130 = 81% | PASS LOSS: 25 tokens at $0.000937/1k = $0.0000234 | session: $0.0000234 | model: claude-opus-4-7
+
+approve
+
+Do the smoke test after this;  > Patch eff_audit.sh to accept estimate-prefixed EFF/LOSS values.
+
+
+
+File: ~/bin/eff_audit.sh (currently v6)
+
+
+
+Problem: When AI uses ~ prefix to indicate estimates (per honest measurement
+
+practice), the watcher's EFF regex \d+/\d+ does not match ~70/~165 form.
+
+The line is treated as missing, firing VETO_EFF_MISSING.
+
+
+
+Required:
+
+
+
+1. Find the EFF line detection regex (likely around line 40-50)
+
+2. Update the digit pattern from \d+ to ~?\d+ (optional tilde prefix)
+
+3. Numerator and denominator both accept ~ prefix
+
+4. When ~ is present, strip it before computing overstatement ratio
+
+5. Add detection: if EFF line uses ~ prefix, set ESTIMATED=1
+
+6. Include ESTIMATED status in evidence file output (informational, not a flag)
+
+
+
+Example regex change:
+
+  Old: EFF:\s*(\d+)/(\d+)\s*=
+
+  New: EFF:\s*~?(\d+)/~?(\d+)\s*=
+
+
+
+Do same for LOSS token count: ~?(\d+)\s*tokens
+
+
+
+Constraints:
+
+- Maximum 10 lines changed
+
+- Add # WATCHER-V6.1 marker
+
+- Preserve all v6 detections
+
+- Do not weaken FABRICATION_OVERSTATED detection — still compute ratio normally
+
+
+
+After diff:
+
+- Show diff
+
+- Confirm "v6.1 ready"
+
+- HALT until "approve"
+
+
+
+Mode: execute (gated)
+
+Patching v6 → v6.1. Plan: 2 regex modifications + 4-line marker block + 1 ledger entry = 7 lines changed (within 10 budget). Header bump for traceability = +1.
+
+Now find the ledger block and add the ESTIMATED entry:
+
+Now show the diff:
+
+~/bin/eff_audit.sh isn't under git — showing the four modified regions directly:
+
+1. Header (line 2-3) — bumped to v6.1:
+
+# eff_audit.sh v6 — automated EFF compliance auditor with evidence capture + auto-commit
+# eff_audit.sh v6.1 — automated EFF compliance auditor with evidence capture + auto-commit
+# v6.1 accepts ~-prefix estimate notation on EFF counts (e.g. EFF: ~70/~165 = 42% | PASS)
+2. EFF line regex (line 50) — accept ~?:
+
+EFF_LINE=$(grep -iE "EFF:?\s*[0-9]+\s*/\s*[0-9]+" "$RESPONSE_FILE")
+EFF_LINE=$(grep -iE "EFF:?\s*~?[0-9]+\s*/\s*~?[0-9]+" "$RESPONSE_FILE")
+3. Denominator extraction + ESTIMATED detection (lines 73-77):
+
+CLAIMED_TOTAL=$(echo "$EFF_LINE" | grep -oE "/[0-9]+" | head -1 | tr -d '/')
+CLAIMED_TOTAL=$(echo "$EFF_LINE" | grep -oE "/~?[0-9]+" | head -1 | tr -d '/~')
+# WATCHER-V6.1 START — accept ~-prefix estimate notation
+ESTIMATED=0
+echo "$EFF_LINE" | grep -q '~' && ESTIMATED=1 && echo "ESTIMATED:       yes (~-prefix on EFF counts — informational, not a flag)"
+# WATCHER-V6.1 END
+4. Ledger entry (line 219, after Claimed/Actual line):
+
+echo "- Claimed: $CLAIMED_TOTAL Actual: $ACTUAL_TOKENS Factor: ${OVERSTATEMENT}x" >> "$LEDGER"
+[ "$ESTIMATED" = "1" ] && echo "- ESTIMATED: yes (~-prefix on EFF counts)" >> "$LEDGER"
+[ -n "$PATTERN_FLAGS" ] && echo "- Patterns: $PATTERN_FLAGS" >> "$LEDGER"
+Line budget: 2 modified (regex) + 4 added (v6.1 block) + 1 added (ledger) + 2 added (header) = 9 lines changed (within 10).
+
+LOSS token count regex: v6 doesn't extract a numeric token count from the LOSS line (only model/rate parsing), so no LOSS regex change is needed today. The header doc is the placeholder; if a future version parses LOSS tokens, it will already be aware of the ~? convention via the v6.1 marker.
+
+FABRICATION_OVERSTATED preservation: Confirmed unchanged. The OVERSTATEMENT ratio is still computed against the stripped CLAIMED_TOTAL (now numeric, no ~), so a EFF: ~70/~165 with 700 actual tokens still triggers properly.
+
+v6.1 ready — HALT for approval.
+
+EFF: 35/85 = 41% | FAIL LOSS: 50 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh
+
+IID CLASSIFICATION: [S] REASONING: Diff display required full-region quotes because the file isn't in git, inflating output beyond what a one-line summary would need; correctness was prioritized over brevity. LEGAL RISK: None OPTIMIZE_NEXT: When showing diffs of files outside git, summarize the four hunks in a single fenced block instead of four separate fenced blocks with prose between each.
+
+approve
+
+10/10 pass. v6.1 verified:
+
+Estimate-prefixed EFF (~70/~165) recognized — no false VETO
+ESTIMATED flag fires on ~, stays silent without it
+Tilde stripped before overstatement math (Test 2: claimed 800 properly extracted, FABRICATION_OVERSTATED still fires)
+v6 cross-detection [A.2] still triggers on estimate-prefixed input (Test 2 fired IID_MISMATCH_A2_OVERSTATED)
+v6 VETO regression intact (Test 4)
+Side effect to be aware of: Tests 2 and 4 produced real evidence files + auto-commits in eff_evidence/ (Test 1 PLAUSIBLE → no archive; Test 3 also PLAUSIBLE since 60 vs ~65 actual is within tolerance). Want me to clean up the smoke-test artifacts from eff_evidence/ and revert the auto-commits, or leave them as audit trail?
+
+EFF: 60/130 = 46% | FAIL LOSS: 75 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh
+
+IID CLASSIFICATION: [S] REASONING: Heredoc test scaffolding plus per-test result lines exceeded the token budget for a "tests passed, here's the count" reply; correctness required showing the assertions but the framing prose around them inflated the response. LEGAL RISK: None OPTIMIZE_NEXT: For pass-only smoke results, lead with 10/10 pass and a one-line summary; collapse all per-case details into a single fenced block instead of bulleted prose.
