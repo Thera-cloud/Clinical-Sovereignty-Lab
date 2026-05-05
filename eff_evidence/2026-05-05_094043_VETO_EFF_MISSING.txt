@@ -1,0 +1,94 @@
+> Consolidate Phase 3 client portal feature spec list before batch creation.
+
+Read the inventory and produce a final consolidated spec list.
+
+Reference: docs/client_portal/_TAB_INVENTORY_2026-05-05.md
+  - 24 foundational §3 rows (all matched in code)
+  - 31 gaps discovered (G1-G31)
+  - 7 AppBar actions + 6 body adornments (NeuralInterfaceV2)
+  - 20 settings sections (13 tier/role-gated)
+  - 11 lobby/onboarding entry points (C1-C11)
+  - 16 in-chat sub-features (D1-D16)
+  - 22 modal/overlay surfaces (E1-E22)
+  - Already created: 01_chat_with_nate, 02_re_consent,
+    03_onboarding_trial, 04_onboarding_paid
+
+Goal: Produce a final numbered spec list (~40 files) where each spec
+covers a logically distinct feature surface. Avoid overlap.
+
+Consolidation rules:
+
+1. Group items that share most fields (state, WS messages, UX criteria)
+   - Example: "Avatar Mode" + "AI Modes" might consolidate if they share
+     the same settings panel and message types
+   - Example: "Sovereign Vault browser/organizer/transfer" likely 3 specs
+     if each has distinct UX flow, OR 1 spec with sub-sections if they share
+     the same screen
+   
+2. Keep separate when:
+   - Different file root (different screen class)
+   - Different WS message vocabulary
+   - Different user mental model (clients think of these as separate things)
+   - Different tier/role gating
+
+3. Modal/overlay features (E1-E22):
+   - Group small modals into thematic specs (e.g., "Crisis modals" covering
+     Distress Beacon, Suicide Prevention, etc.)
+   - Major modals (force_password_reset, account_frozen) get standalone specs
+
+4. In-chat sub-features (D1-D16):
+   - Voice mode, file upload, slash commands typically share one
+     "Neural Interface interactions" spec
+   - Avatar selector, archetype selector get standalone specs
+
+OUTPUT: docs/client_portal/_PHASE_3_PLAN.md
+
+Required sections:
+
+§ A — Already created (4 specs)
+  Lines: filenames + brief summary of what each covers
+
+§ B — Final consolidated spec list (numbered 05-NN)
+  Table: spec_number | filename | covers_inventory_items | est_complexity
+  
+  Examples:
+    05 | 05_lobby_login.md       | row 1, C1, D-login | medium
+    06 | 06_neural_chat.md       | D1, D2, D3 (voice/upload/avatar) | high
+    07 | 07_sovereign_vault.md   | G14, G15, G16 (browser/org/transfer) | high
+    ...
+
+§ C — Specs deferred / not creating
+  Items deemed too small or too vestigial to warrant own spec
+  Justification per item
+
+§ D — Recommended creation order
+  Priority 1: Specs covering features with active bugs (schedule, login)
+  Priority 2: Specs covering tier-gated revenue features (paid onboarding,
+              billing, vault)
+  Priority 3: Specs covering quality-of-life features (avatar, archetype)
+  Priority 4: Specs covering edge cases (crisis modals, password reset)
+
+§ E — Cross-portal terminology check
+  Compare client spec names to coach spec names
+  Flag any concept named differently between portals
+  Example: "session" vs "consultation" vs "booking"
+
+Constraints:
+- Maximum 250 lines
+- Use snake_case filenames consistent with already-created files
+- Number sequentially starting from 05
+- Cite inventory item IDs (G-numbers, C-numbers, D-numbers, E-numbers)
+- Do NOT create the spec files yet — plan only
+
+Mode: investigate
+EFF: numeric only
+LOSS format per GAP 10: <tokens> at $<rate>/1k | model: <exact_identifier>
+  Verified: $0.001019/1k = claude-opus-4-7-thinking-xhigh
+            $0.000937/1k = claude-opus-4-7
+            $0.000471/1k = claude-sonnet-4-6-medium
+            $0.00025/$0.00125/$0.00060/1k = composer-2-fast tiers
+  Anthropic public rates ($75/$15/$3 per 1M) = M4 violation
+IID footer required if EFF < 80% per GAP 11 — full format:
+  IID CLASSIFICATION: [S|A|E]
+  REASONING: <one sentence>
+  LEGAL RISK: [None | Substantiation Failure | Material Deception (M1-M4)]
