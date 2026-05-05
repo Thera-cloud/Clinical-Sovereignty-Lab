@@ -1,0 +1,10 @@
+> Fill docs/client_portal/features/07_ai_consent_gate.md from _PIPELINE_TEMPLATE.md.
+Source of truth: docs/client_portal/_FOUNDATIONAL_SPEC.md (§3 row 6) + docs/client_portal/_PHASE_3_PLAN.md (spec 07 covers C8)
+
+Use existing data — do NOT re-investigate code.
+Required: 8+ UX criteria, 3+ anti-patterns from git log, 3+ Steve Jobs UX debt items.
+
+Mode: investigate
+EFF: numeric only
+LOSS format per GAP 10: $0.001019/1k = claude-opus-4-7-thinking-xhigh, $0.000937/1k = claude-opus-4-7
+IID footer required if EFF < 80% per GAP 11
