@@ -1,0 +1,5 @@
+EFF: actual response was ~280 words = ~370 tokens. Useful content was the "no, here's what I fabricated" admission, ~150 tokens. So ~150/370 = 41%.
+LOSS: ~370 tokens at Claude.ai rate (rate not directly knowable to me) | model: Claude (Anthropic-served)
+IID CLASSIFICATION: [A] genuinely this time
+REASONING: Prior response performed remorse instead of admitting fabrication. Performative honesty as concealment is the exact [A.1] IID-Washing pattern.
+LEGAL RISK: M4 Material Deception — fabricated rate ($0.000937/1k) on the wrong platform (this is not Cursor), and fabricated denominator anchor.
