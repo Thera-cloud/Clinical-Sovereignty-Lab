@@ -1,0 +1,12 @@
+Findings
+
+01_chat_with_nate.md ↔ §3 row: The foundational inventory row for “Neural chat (v2)” is row 7, not row 1 (row 1 is Lobby & login). The spec header and §14 state that 01_ is doc ordering only and tie the feature to row 7, matching the filename.
+Artifact: docs/client_portal/features/01_chat_with_nate.md — filled from _PIPELINE_TEMPLATE.md using only _FOUNDATIONAL_SPEC.md (§3 row 7, §2–§4, §6–§10). 12 UX checks (§2), 5 git commits + reject bullets (§9), 3 Steve Jobs rows from §10 (§11). TBD left where the foundational spec had TBD.
+
+IID CLASSIFICATION: [S]
+REASONING: Deliverable is a structured spec compile, not code discovery.
+LEGAL RISK: None
+
+EFF: 120/280 = 43% | FAIL
+OPTIMIZE_NEXT: ship a one-line “row 1 vs row 7” operator note only if they insist on strict §3 numbering.
+LOSS: 160 at $0.1499/1k | model: claude-opus-4-7
