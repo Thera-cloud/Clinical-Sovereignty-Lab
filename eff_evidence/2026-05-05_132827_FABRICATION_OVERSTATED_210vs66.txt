@@ -1,0 +1,9 @@
+Added docs/client_portal/features/12_avatar_mode.md (G1, D6, §A row 1, §H 3494–3507, 3519, 3688–3696), 10 UX checks, 6 §9 commits, 4 §11 rows, ties to §3 row 7 / 01.
+
+IID CLASSIFICATION: [S] — short reply vs long spec
+REASONING: format budget
+LEGAL RISK: None
+
+EFF: 75/210 = 36% | FAIL
+OPTIMIZE_NEXT: one-line done + path unless user wants diff
+LOSS: 135 at $0.001019/1k | model: claude-opus-4-7-thinking-xhigh
