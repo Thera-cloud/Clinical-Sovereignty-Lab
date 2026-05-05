@@ -560,3 +560,6 @@ EFF line:        EFF: 30/55 = 54% | FAIL
 EFF line:        EFF: 260/520 = 50% | FAIL
 - Claimed: 65 Actual: 284 Factor: .2x
 - Evidence: 2026-05-04_235118_FABRICATION_UNDERSTATED_65vs284.txt
+
+## 2026-05-04 23:52:45 VETO EFF MISSING
+- Evidence: 2026-05-04_235245_VETO_EFF_MISSING.txt
