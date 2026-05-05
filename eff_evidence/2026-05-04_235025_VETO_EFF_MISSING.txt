@@ -1,0 +1,74 @@
+> Fix client schedule socket to share authenticated app socket + handle error response.
+
+Two coordinated fixes per investigation findings.
+
+═══════════════════════════════════════════════════════════════
+FIX A — ClientScheduleScreen uses dedicated WS that doesn't authenticate
+═══════════════════════════════════════════════════════════════
+
+File: mobile/lib/main.dart
+Class: ClientScheduleScreen
+Constructor + _connect: lines 10391-10393 area
+
+Problem: schedule screen opens its own WebSocket via _connect() which never
+sends login_request. Bridge sees uid=GUEST. Handler at bridge_server.py:12152
+rejects with coach_availability_error/auth_role_mismatch.
+
+Required:
+1. Replace dedicated socket with shared authenticated app channel
+   - Use the existing app-wide WebSocket (the same one that completed login)
+   - Pass it via constructor parameter or read from a singleton/provider
+2. Remove _connect() opening a new channel
+3. Subscribe message listener to the shared channel for the duration of this screen
+4. Unsubscribe on dispose() — do NOT close the shared channel
+
+Constraints:
+- Maximum 30 lines changed
+- No new package imports
+- Add // SCHEDULE-SHARED-WS marker
+- Preserve existing message handling for coach_availability response
+
+After diff:
+- Show diff
+- Confirm "Fix A ready"
+- HALT until "continue Fix B"
+
+═══════════════════════════════════════════════════════════════
+FIX B — Handle coach_availability_error in UI
+═══════════════════════════════════════════════════════════════
+
+File: mobile/lib/main.dart
+Lines: 11141-11161 (the _availableSlots empty UI branch)
+
+Problem: bridge sends coach_availability_error on auth/role rejection,
+but UI has no listener for it. UI stays in "Loading..." or "No published
+hours" state forever.
+
+Required:
+1. Add listener for type == 'coach_availability_error' on shared channel
+2. Set state with error message from payload (error + detail fields)
+3. UI displays distinct error state, not the generic "no published hours"
+4. Add retry button when error type is 'auth_role_mismatch'
+
+Constraints:
+- Maximum 25 lines added
+- Use existing error display patterns from other screens
+- Add // COACH-AVAIL-ERROR-HANDLER marker
+
+After diff:
+- Show diff
+- Confirm "Fix B ready"
+- HALT until "commit both"
+
+═══════════════════════════════════════════════════════════════
+COMMIT SEQUENCE
+═══════════════════════════════════════════════════════════════
+
+git add mobile/lib/main.dart
+git commit -m "Fix client schedule: share authenticated app WS + handle availability errors"
+
+Mode: investigate then execute (gated per fix)
+EFF: numeric only
+LOSS: state actual rate and model per GAP 10
+  Format: "LOSS: <tokens> at $<rate>/1k | model: <exact_identifier>"
+IID footer required if EFF < 80% per GAP 11
