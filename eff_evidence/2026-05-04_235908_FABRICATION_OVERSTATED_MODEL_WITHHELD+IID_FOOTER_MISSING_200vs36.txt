@@ -1,0 +1,6 @@
+# Test 1: MODEL_WITHHELD detection
+echo "EFF: 100/200 = 50% | FAIL
+LOSS: 50 tokens at rate unknown | model: unknown" | pbcopy
+
+# Wait 2-3 seconds for watcher to fire, then check:
+ls -lt ~/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/ | head -3
