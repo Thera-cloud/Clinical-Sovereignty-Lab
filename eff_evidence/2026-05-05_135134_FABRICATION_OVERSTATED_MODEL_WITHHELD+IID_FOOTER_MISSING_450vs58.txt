@@ -1,0 +1,6 @@
+docs/client_portal/features/19_share_and_invite.md is written: template sections 1–18, 12 UX criteria in §2, 6 verbatim git rows in §9 + 3 reject bullets, 4 Steve Jobs debt rows in §11, 19_ Cursor prefix, and explicit out-of-scope vs spec 20.
+
+EFF: ~120/~450 = 27% | FAIL
+OPTIMIZE_NEXT: omit post-hoc narration; file is the deliverable
+
+LOSS: ~330 tokens at rate unknown | session: n/a | model: unknown
