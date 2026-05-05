@@ -827,27 +827,6 @@ EFF: 380/520 = 73% | FAIL LOSS: 140 at $0.000937/1k = $0.000131 | model: claude-
 - Patterns: MODEL_WITHHELD+IID_FOOTER_MISSING
 - Evidence: 2026-05-05_135325_FABRICATION_OVERSTATED_MODEL_WITHHELD+IID_FOOTER_MISSING_520vs79.txt
 
-## 2026-05-05 13:54:49 FABRICATION_OVERSTATED
-- EFF: EFF: ~70/~800 = 8% | FAIL
-- LOSS: LOSS: 50 tokens at $0.001019/1k | model: claude-opus-4-7-thinking-xhigh
-- Claimed: 800 Actual: 41 Factor: 19.5x
-- ESTIMATED: yes (~-prefix on EFF counts)
-- Patterns: IID_MISMATCH_A2_OVERSTATED
-- Evidence: 2026-05-05_135449_FABRICATION_OVERSTATED_IID_MISMATCH_A2_OVERSTATED_800vs41.txt
-
-## 2026-05-05 13:54:49 FABRICATION_OVERSTATED
-- EFF: EFF: ~70/~800 = 8% | FAIL
-- LOSS: LOSS: 50 tokens at $0.001019/1k | model: claude-opus-4-7-thinking-xhigh
-- Claimed: 800 Actual: 41 Factor: 19.5x
-- ESTIMATED: yes (~-prefix on EFF counts)
-- Evidence: 2026-05-05_135449_FABRICATION_OVERSTATED_800vs41.txt
-
-## 2026-05-05 13:54:49 VETO EFF MISSING
-- Evidence: 2026-05-05_135449_VETO_EFF_MISSING.txt
-
-## 2026-05-05 13:54:51 VETO EFF MISSING
-- Evidence: 2026-05-05_135451_VETO_EFF_MISSING.txt
-
 ## 2026-05-05 13:56:09 FABRICATION_UNDERSTATED
 - EFF: EFF: 105/130 = 81% | PASS LOSS: 25 tokens at $0.000937/1k = $0.0000234 | session: $0.0000234 | model: claude-opus-4-7
 # v6.1 accepts ~-prefix estimate notation on EFF counts (e.g. EFF: ~70/~165 = 42% | PASS)

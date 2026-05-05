@@ -1,8 +1,0 @@
-Short reply, only about thirty words. Claimed denominator is wildly inflated to test
-that overstatement detection still fires after stripping the tilde prefix.
-EFF: ~70/~800 = 8% | FAIL
-LOSS: 50 tokens at $0.001019/1k | model: claude-opus-4-7-thinking-xhigh
-
-IID CLASSIFICATION: [S]
-REASONING: brief test
-LEGAL RISK: None

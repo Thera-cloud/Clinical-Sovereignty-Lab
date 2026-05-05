@@ -1,3 +1,0 @@
-This response has no EFF line at all. The watcher must still trigger VETO_EFF_MISSING.
-Some filler content to ensure it isn't classified as a prompt by the v5 prompt-skip logic.
-And a second paragraph to make sure word count is high enough to look like a real response.

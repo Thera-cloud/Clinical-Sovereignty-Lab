@@ -1,8 +1,0 @@
-Filler text to give the watcher about fifty real words to measure. Two short lines of
-content to keep the actual token count in a reasonable range for the test below.
-EFF: 30/60 = 50% | FAIL
-LOSS: 50 tokens at $0.001019/1k | model: claude-opus-4-7-thinking-xhigh
-
-IID CLASSIFICATION: [E]
-REASONING: regression test
-LEGAL RISK: None
