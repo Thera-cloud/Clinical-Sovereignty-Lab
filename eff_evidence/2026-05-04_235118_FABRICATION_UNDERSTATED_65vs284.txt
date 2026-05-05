@@ -1,0 +1,54 @@
+EFF line:        EFF: 45/65 = 69% | FAIL
+LOSS line:       LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+Claimed total:   65
+Actual words:    82
+Actual tokens:   ~106
+Overstatement:   .6x
+STATUS:          PLAUSIBLE
+
+===== 23:34:00 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_233400_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_233400
+
+===== 23:35:39 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 540/710 = 76% | FAIL
+LOSS line:       LOSS: 170 at $75/1M = $0.0128 | model: claude-opus-4-7
+Claimed total:   710
+Actual words:    49
+Actual tokens:   ~63
+Overstatement:   11.2x
+STATUS:          FABRICATION_OVERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_233539_FABRICATION_OVERSTATED_710vs63.txt
+Auto-committed: EFF evidence: FABRICATION_OVERSTATED 710vs63 2026-05-04_233539
+
+===== 23:39:36 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_233936_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_233936
+
+===== 23:42:10 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 30/55 = 54% | FAIL
+LOSS line:       LOSS: 25 tokens at $0.000937/1k = $0.0000234 | model: claude-opus-4-7
+Claimed total:   55
+Actual words:    49
+Actual tokens:   ~63
+Overstatement:   .8x
+STATUS:          PLAUSIBLE
+
+===== 23:48:18 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 260/520 = 50% | FAIL
+LOSS line:       LOSS: 260 tokens at rate unknown | model: unknown
+Claimed total:   520
+Actual words:    663
+Actual tokens:   ~861
+Overstatement:   .6x
+STATUS:          PLAUSIBLE
+
+===== 23:50:25 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_235025_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_235025
