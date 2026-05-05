@@ -12150,6 +12150,7 @@ async def handle_client(websocket, path=None):
             
             # === CLIENT: GET COACH AVAILABILITY ===
             elif t == "client_get_coach_availability":
+                print(f">>> [AVAILABILITY-DEBUG] entry: uid={uid} profile_present={bool(current_profile)} role={current_profile.get('role') if current_profile else 'NONE'}")  # AVAILABILITY-DEBUG-GATE
                 if current_profile and current_profile.get("role") == "CLIENT":
                     coach_id = (current_profile.get("assigned_coach_id") or d.get("coach_id") or "").strip()
                     target_date = (d.get("date") or "").strip()
@@ -12280,6 +12281,13 @@ async def handle_client(websocket, path=None):
                             import traceback; traceback.print_exc()
                             print(f">>> [AVAILABILITY-DEBUG] client_get_coach_availability FAILED: {e}")  # AVAILABILITY-DEBUG
                             await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
+                else:
+                    print(f">>> [AVAILABILITY-DEBUG-GATE] REJECTED uid={uid} role={current_profile.get('role') if current_profile else 'NO_PROFILE'}")  # AVAILABILITY-DEBUG-GATE
+                    await websocket.send(json.dumps({
+                        "type": "coach_availability_error",
+                        "error": "auth_role_mismatch",
+                        "detail": "Expected CLIENT role",
+                    }))
 
             # === CLIENT: GET COACH INFO ===
             elif t == "client_get_coach_info":
