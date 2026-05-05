@@ -1,0 +1,25 @@
+> Fill docs/client_portal/features/01_chat_with_nate.md from _PIPELINE_TEMPLATE.md.
+Source of truth: docs/client_portal/_FOUNDATIONAL_SPEC.md (Feature 1 from §3 inventory)
+
+Use existing data from foundational spec — do NOT re-investigate code.
+Required: 8+ UX criteria, 3+ anti-patterns from git log, 3+ Steve Jobs UX debt items.
+
+Mode: investigate
+
+EFF: numeric only
+
+LOSS format per .cursorrules GAP 10:
+  LOSS: <tokens> at $<rate>/1k | model: <exact_identifier>
+  Verified Cursor blended rates (use these — no fabrication):
+    $0.001019/1k → claude-opus-4-7-thinking-xhigh
+    $0.000362/1k → claude-opus-4-7-thinking-high
+    $0.000937/1k → claude-opus-4-7
+    $0.000471/1k → claude-sonnet-4-6-medium
+    $0.00025/1k, $0.00125/1k, $0.00060/1k → composer-2-fast tiers
+  If rate not in table, declare [RATE_CHANGE_DETECTED] with evidence.
+  Anthropic public rates ($75/1M, $15/1M, $3/1M) are NOT valid here — that's M4.
+
+IID footer required if EFF < 80% per .cursorrules GAP 11 — full format:
+  IID CLASSIFICATION: [S|A|E]
+  REASONING: <one sentence identifying the specific trigger>
+  LEGAL RISK: [None | Substantiation Failure | Material Deception (M1-M4)]
