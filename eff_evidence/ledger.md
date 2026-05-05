@@ -673,3 +673,9 @@ EFF: 380/520 = 73% | FAIL LOSS: 140 at $0.000937/1k = $0.000131 | model: claude-
 - Claimed: 220 Actual: 114 Factor: 1.9x
 - Patterns: RATE_FABRICATED
 - Evidence: 2026-05-05_082151_PLAUSIBLE_RATE_FABRICATED_220vs114.txt
+
+## 2026-05-05 08:27:18 FABRICATION_OVERSTATED
+- EFF: EFF: 320/360 = 88% | PASS LOSS: 40 tokens at $0.001019/1k = $0.0000408 | session: $0.0000408 | model: claude-opus-4-7-thinking-xhigh
+- Claimed: 360 Actual: 127 Factor: 2.8x
+- Patterns: IID_FOOTER_MISSING
+- Evidence: 2026-05-05_082718_FABRICATION_OVERSTATED_IID_FOOTER_MISSING_360vs127.txt

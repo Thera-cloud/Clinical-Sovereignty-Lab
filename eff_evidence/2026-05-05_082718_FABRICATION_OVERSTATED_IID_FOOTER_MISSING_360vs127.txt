@@ -1,0 +1,11 @@
+Inventory written: docs/client_portal/_TAB_INVENTORY_2026-05-05.md (337/400 lines).
+
+Key findings:
+
+No TabController / BottomNavigationBar in the client portal — NeuralInterfaceV2 is single-Scaffold; "tabs" are 7 AppBar actions + 6 body adornments (updated_screens.dart:3663–4137)
+Settings hub has 20 sections, 13 of them tier/role-gated
+11 lobby/onboarding entry points (C1–C11)
+16 in-chat sub-features (D1–D16) and 22 modal/overlay surfaces (E1–E22)
+Foundational § 3 cross-check: all 24 rows match code; 31 gaps found (G1–G31) — biggest misses are Avatar Mode, AI Modes, Nudges, Sovereign Vault browser/organizer/transfer, Quests/Missions, SSE Story Journey, Calendar Sync, Become-a-Coach
+Recommended Phase 3 spec count: 55 raw → ~40 after consolidation (3 already created)
+EFF: 320/360 = 88% | PASS LOSS: 40 tokens at $0.001019/1k = $0.0000408 | session: $0.0000408 | model: claude-opus-4-7-thinking-xhigh
