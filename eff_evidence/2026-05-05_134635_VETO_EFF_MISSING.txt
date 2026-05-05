@@ -1,0 +1,5 @@
+Added docs/client_portal/features/17_client_settings_profile_and_preferences.md: §3 row 11 hub, G27 (2260–2290 + REST/WS), G28–G30 (2801–2868), D13 (3765–3786), foundational lines 204–214, 221–249, 327–331, 468, 476–481, 2846–2849, 1337+; 12 UX bullets; §9 = foundational §9 + 3 rejects; §11 = 4 debt rows; §18 lists out-of-scope settings sections (tools, billing, vault, etc.).
+
+EFF: ~85/~220 = 39% | FAIL
+OPTIMIZE_NEXT: omit long inline spec echo in the reply when the file is the artifact.
+LOSS: ~135 tokens at rate unknown | session: n/a | model: unknown
