@@ -1,0 +1,9 @@
+Added docs/client_portal/features/07_ai_consent_gate.md: §3 row 6, C8 (ai_consent_screen.dart:23, 6770–6780 predicate, 6770–6780 §H alignment), REST 58–65, state 42–43, main.dart:6748–6787 / 6751–6752 hub context, 10 UX checks, 6 §9 commits, 4 §11 debt rows, §8/recording_consent TBD pointer.
+
+IID CLASSIFICATION: [S]
+REASONING: Reply must stay short while file is long-form spec.
+LEGAL RISK: None
+
+EFF: 90/220 = 41% | FAIL
+OPTIMIZE_NEXT: Deliver path-only confirmation unless user asks for section paste.
+LOSS: 130 at $0.001019/1k | model: claude-opus-4-7-thinking-xhigh
