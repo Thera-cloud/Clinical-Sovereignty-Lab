@@ -1,0 +1,4 @@
+===== 13:47:55 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-05_134755_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-05_134755
