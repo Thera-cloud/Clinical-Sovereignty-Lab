@@ -1,0 +1,5 @@
+Added docs/client_portal/features/18_calendar_sync.md: G15 / **§B 2295–2298, google_external_busy §5 tie-in, 12 UX bullets, foundational §9 table + 3 rejects, §11 4 debt rows, 16 cross-link, GoogleCalendarSection impl marked TBD.
+
+EFF: ~70/~165 = 42% | FAIL
+OPTIMIZE_NEXT: shorter reply body.
+LOSS: ~95 tokens at rate unknown | session: n/a | model: unknown
