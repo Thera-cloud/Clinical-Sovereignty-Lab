@@ -1,0 +1,11 @@
+> Fill docs/client_portal/features/03_<row3_name>.md from _PIPELINE_TEMPLATE.md.
+Source of truth: docs/client_portal/_FOUNDATIONAL_SPEC.md (§3 row 3)
+
+Use existing data from foundational spec — do NOT re-investigate code.
+Required: 8+ UX criteria, 3+ anti-patterns from git log, 3+ Steve Jobs UX debt items.
+
+Mode: investigate
+EFF: numeric only
+LOSS format per GAP 10: <tokens> at $<rate>/1k | model: <exact_identifier>
+  Verified: $0.000937/1k = claude-opus-4-7
+IID footer required if EFF < 80% per GAP 11
