@@ -1660,6 +1660,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
             sessionId: sessionId,
             userId: widget.username ?? 'unknown',
           );
+          _ClientWsHub.attach(_socket!); // SCHEDULE-SHARED-WS-NEURAL
         }
       }
       else if (data['type'] == 'nate_response' || data['type'] == 'chat_reply') {
