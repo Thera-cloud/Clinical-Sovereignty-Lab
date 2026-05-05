@@ -1,0 +1,41 @@
+? Verify which bug is causing the empty availability for client1.
+
+Read-only. Max 800 tokens.
+
+Reference: docs/CLIENT_AVAILABILITY_INVESTIGATION_2026-05-04.md
+
+Three possibilities to rule in/out:
+
+POSSIBILITY 1 — WebSocket can't connect for client1
+Test: 
+ssh root@68.183.168.75 "docker logs nate_bridge --since 30m 2>&1 | grep -E 'client1|CLIENT_001|WS.*connect|auth.*fail' | tail -30"
+Expected: see WS auth attempts. If failing, root cause is WS.
+If WS connects fine, move to Possibility 2.
+
+POSSIBILITY 2 — client_get_coach_availability handler returns empty
+Test:
+ssh root@68.183.168.75 "docker logs nate_bridge --since 30m 2>&1 | grep -E 'client_get_coach_availability|coach_availability' | tail -20"
+Look for: handler invocation, query result count.
+If handler runs but returns 0 rows, schema query is wrong.
+
+POSSIBILITY 3 — Booked-mask query mismatch (scheduled_at vs scheduled_start)
+Test directly:
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U postgres -d little_nate -c \"SELECT column_name FROM information_schema.columns WHERE table_name = 'coaching_sessions' AND column_name LIKE 'scheduled%';\""
+If both columns exist, find which one bridge_server.py masking query uses.
+grep -n "scheduled_at\|scheduled_start" backend/app/websocket/bridge_server.py | head -20
+
+For each possibility, report:
+- Test command run
+- Output (verbatim)
+- Conclusion: confirmed / ruled out / inconclusive
+
+Single section after all 3:
+- Most likely root cause
+- Why
+- One-line recommended fix scope (no code)
+
+No code changes.
+
+Mode: investigate
+EFF: numeric only
+LOSS: rate unknown if model unknown
