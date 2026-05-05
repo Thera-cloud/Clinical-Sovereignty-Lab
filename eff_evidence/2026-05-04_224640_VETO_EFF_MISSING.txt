@@ -1,0 +1,42 @@
+? Find which container runs bridge_server.py and verify deploy state.
+
+Read-only investigate. Max 400 tokens.
+
+Symptom: deploy rebuilt nate_backend but AVAILABILITY-DEBUG logs (commit 8c2a768)
+don't fire when grepping nate_bridge logs. Need to identify the right container
+to restart.
+
+Run these on production (68.183.168.75) via ssh:
+
+1. List all running containers:
+   ssh root@68.183.168.75 "docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'"
+
+2. List compose services:
+   ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && docker compose -f docker-compose.prod.yml config --services"
+
+3. Check which container has the new AVAILABILITY-DEBUG-GATE code:
+   ssh root@68.183.168.75 "docker exec nate_bridge grep -c AVAILABILITY-DEBUG-GATE /app/app/websocket/bridge_server.py 2>/dev/null || echo 'nate_bridge: not found'"
+   ssh root@68.183.168.75 "docker exec nate_backend grep -c AVAILABILITY-DEBUG-GATE /app/app/websocket/bridge_server.py 2>/dev/null || echo 'nate_backend: not found'"
+
+4. Identify which container handles WebSocket /ws traffic by examining
+   the compose file for port 8000 or 8765 binding:
+   ssh root@68.183.168.75 "grep -A 20 'bridge\|backend' /opt/clinical-sovereignty-lab/docker-compose.prod.yml | head -60"
+
+5. Show entrypoint or command for each candidate container:
+   ssh root@68.183.168.75 "docker inspect nate_bridge --format '{{.Config.Cmd}} {{.Config.Entrypoint}}'"
+   ssh root@68.183.168.75 "docker inspect nate_backend --format '{{.Config.Cmd}} {{.Config.Entrypoint}}'"
+
+Output:
+- Section A: All running containers (verbatim)
+- Section B: All compose service names
+- Section C: Which container(s) have AVAILABILITY-DEBUG-GATE marker (counts)
+- Section D: Which container handles /ws WebSocket connections (port + entrypoint)
+- Section E: One-line recommended next deploy command (which service to rebuild)
+
+No code changes.
+
+Mode: investigate
+EFF: numeric only
+LOSS: state actual rate and model
+  Format: "LOSS: <tokens> at $<rate>/1M | model: <name>"
+  Cursor model billing observable in settings — use it

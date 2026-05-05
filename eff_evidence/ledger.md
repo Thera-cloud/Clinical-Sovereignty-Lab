@@ -507,3 +507,6 @@ EFF line:        EFF: 380/780 = 49% | FAIL
 - LOSS: LOSS: rate unknown if model unknown
 - Claimed: 480 Actual: 986 Factor: .4x
 - Evidence: 2026-05-04_224000_FABRICATION_UNDERSTATED_480vs986.txt
+
+## 2026-05-04 22:46:40 VETO EFF MISSING
+- Evidence: 2026-05-04_224640_VETO_EFF_MISSING.txt
