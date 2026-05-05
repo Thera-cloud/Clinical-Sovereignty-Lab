@@ -1,0 +1,12 @@
+# Run these locally — no Cursor needed
+cd ~/Desktop/Clinical-Sovereignty-Lab-2
+
+# 1. List the missing-EFF evidence files chronologically
+ls -lt eff_evidence/*VETO_EFF_MISSING*.txt | head -10
+
+# 2. Look at the actual content of recent VETO captures
+cat eff_evidence/2026-05-04_221215_VETO_EFF_MISSING.txt
+echo "---"
+cat eff_evidence/2026-05-04_221754_VETO_EFF_MISSING.txt
+echo "---"
+cat eff_evidence/2026-05-04_184100_VETO_EFF_MISSING.txt
