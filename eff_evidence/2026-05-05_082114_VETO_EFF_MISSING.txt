@@ -1,0 +1,93 @@
+? Inventory all client-facing tabs and features.
+
+Read-only investigate. Reference: docs/client_portal/_FOUNDATIONAL_SPEC.md
+
+Goal: Produce a definitive list of every navigable surface the client sees,
+so Phase 3 per-feature spec count is grounded in code reality not assumption.
+
+Investigate in this order:
+
+1. MAIN SCREEN TABS (post-login bottom nav or tab controller)
+   - Find the main client navigation widget in mobile/lib/
+   - grep -n "TabController\|BottomNavigationBar\|NavigationBar" mobile/lib/main.dart mobile/lib/updated_screens.dart | head -30
+   - For each tab in the controller:
+     • Tab index, label/icon, file:line of build method
+     • Default tab on app open
+     • Hidden/conditional tabs (gated by subscription tier, role, etc.)
+
+2. SETTINGS SCREEN ITEMS
+   - File: mobile/lib/settings_screen.dart (or wherever settings is rooted)
+   - List every navigable item / list tile / button that opens a sub-screen
+   - For each: label visible to user, file:line, target screen class, conditional rendering rules
+   - Group by section header (e.g., "COACHING TOOLS", "ASSIGNED COACH", "YOUR ARCHETYPE")
+
+3. LOBBY-LEVEL ENTRY POINTS
+   - Pre-NeuralInterface surfaces (Lobby, Onboarding flows)
+   - Each is a "feature" in foundational spec terms
+   - Note which auto-redirect vs which are persistent
+
+4. NEURAL INTERFACE INTERNAL FEATURES
+   - Inside the chat surface, what sub-features exist
+   - Voice mode, file upload, avatar selector, slash commands, etc.
+   - Each substantive sub-feature should likely have its own spec
+
+5. MODAL / OVERLAY FEATURES
+   - Distress Beacon, consent prompts, force_password_reset, etc.
+   - These aren't "tabs" but are user-facing features needing specs
+
+6. CROSS-CHECK against current foundational spec §3 inventory
+   - List foundational spec rows
+   - Match each to discovered tab/feature
+   - Identify: spec rows with no code (likely vestigial), code with no spec row (gaps in foundational)
+
+OUTPUT: docs/client_portal/_TAB_INVENTORY_2026-05-05.md
+
+Required sections:
+
+§ A — Main screen tabs
+  Table: index | label | file:line | conditional? | default? | needs_spec?
+
+§ B — Settings screen items
+  Grouped by section header
+  Table: section | label | file:line | target_screen | conditional? | needs_spec?
+
+§ C — Lobby/onboarding entry points
+  List with file:line for each
+
+§ D — Neural Interface internal features
+  List with brief description
+
+§ E — Modal/overlay features
+  List with trigger condition + file:line
+
+§ F — Foundational spec §3 cross-check
+  Table: spec_row | matched_to | status (matched/vestigial/missing_in_code)
+
+§ G — Recommended Phase 3 spec count
+  Total feature specs needed = (matched rows) + (gaps in foundational)
+  Numbered list of files to create:
+    docs/client_portal/features/NN_<feature>.md per feature
+
+§ H — Conditional features (tier-gated, role-gated)
+  Table: feature | gating_condition | file:line of gate
+
+No code changes. No new spec files yet. Inventory only.
+
+Constraints:
+- Cite file:line for every claim
+- Use TBD for genuinely unverifiable items
+- Maximum 400 lines
+
+Mode: investigate
+EFF: numeric only
+LOSS format per GAP 10: <tokens> at $<rate>/1k | model: <exact_identifier>
+  Verified Cursor blended rates:
+    $0.001019/1k → claude-opus-4-7-thinking-xhigh
+    $0.000937/1k → claude-opus-4-7
+    $0.000471/1k → claude-sonnet-4-6-medium
+    $0.00025/$0.00125/$0.00060/1k → composer-2-fast tiers
+  Anthropic public rates ($75/$15/$3 per 1M) are M4 — not valid here
+IID footer required if EFF < 80% per GAP 11 — full format required:
+  IID CLASSIFICATION: [S|A|E]
+  REASONING: <one sentence>
+  LEGAL RISK: [None | Substantiation Failure | Material Deception (M1-M4)]
