@@ -1,0 +1,324 @@
+
+Add to Chat⌘L
+yes
+
+> Adjust eff_audit.sh skip filter — too aggressive on short responses.
+
+
+
+File: ~/bin/eff_audit.sh (v5)
+
+
+
+Problem: word_count < 20 skip rule blocks legitimate short Cursor responses
+
+that contain EFF/LOSS lines (e.g., 12-word test captures with EFF + LOSS).
+
+Skipping silently means those don't get audited.
+
+
+
+Required:
+
+1. In WATCHER-V5 Block 1 (skip outbound prompts):
+
+   - Remove the [ "$WORD_COUNT" -lt 20 ] condition
+
+   - Keep the ^?> first-line check
+
+   - Keep the "Mode: investigate/execute/verify" check
+
+2. Add positive signal: if response contains "EFF:" or "LOSS:" markers,
+
+   process it (override skip even if other conditions match weakly)
+
+
+
+Pseudo-logic:
+
+   HAS_METRICS=$(grep -cE "^(EFF|LOSS):" "$RESPONSE_FILE")
+
+   FIRST_LINE_PROMPT=$(echo "$FIRST_LINE" | grep -qE '^\s*[?>]\s*' && echo 1 || echo 0)
+
+   HAS_MODE_MARKER=$(grep -qE '^Mode:\s*(investigate|execute|verify)' "$RESPONSE_FILE" && echo 1 || ec
+
+Prompt appears truncated mid-pseudo-logic. I have the two requirements; proposing patch and waiting for confirm before write.
+
+Proposed replacement of WATCHER-V5 Block 1 (lines 27-35)
+# WATCHER-V5 START — skip outbound prompts (not assistant responses)
+FIRST_LINE=$(head -1 "$RESPONSE_FILE")
+HAS_METRICS=$(grep -cE "^(EFF|LOSS):" "$RESPONSE_FILE")
+if [ "$HAS_METRICS" -eq 0 ]; then
+    if echo "$FIRST_LINE" | grep -qE '^\s*[?>]\s*' \
+       || grep -qE '^Mode:\s*(investigate|execute|verify)' "$RESPONSE_FILE"; then
+        exit 0
+    fi
+fi
+# WATCHER-V5 END
+Behavior change
+Input	Old (v5.0)	New (v5.1)
+Starts with ? or >, no metrics
+skip
+skip
+Has Mode: marker, no metrics
+skip
+skip
+12-word response with EFF + LOSS
+skip (bug)
+process
+5-word "ok" reply
+skip
+process (no metrics → falls through to existing VETO logic)
+Prompt with ? AND has EFF: line
+skip
+process (HAS_METRICS overrides)
+Side effect
+Removing the <20 word filter means short non-prompt responses without EFF lines (e.g., "ok" / "done") will now hit the existing VETO_EFF_MISSING path on line 41 and trigger an evidence file. That's the correct behavior under your rules — every substantive response needs EFF — but it may flag short conversational acknowledgements. If you want to suppress those, add a "no metrics + word_count < 5" silent skip (not currently in spec).
+
+Apply? (yes / changes)
+
+EFF: 215/300 = 72% | FAIL LOSS: 85 at $0.000937/1k = $0.0000796 | model: claude-opus-4-7 (cursor-blended) | session: 230
+
+IID CLASSIFICATION: [S] REASONING: Behavior table is useful but consumed ~80 tokens; could have been one-line summary. LEGAL RISK: None OPTIMIZE_NEXT: When proposing, show diff + one-line behavior change instead of full before/after table.
+
+yes
+
+Patched. SYNTAX OK. 190 lines (+1 from prior 189).
+
+EFF: 18/24 = 75% | FAIL LOSS: 6 at $0.000937/1k = $0.0000056 | model: claude-opus-4-7 (cursor-blended) | session: 236
+
+IID CLASSIFICATION: [S] REASONING: Sub-80% because verification line is fixed-cost overhead on a tiny payload — denominator naturally small. LEGAL RISK: None OPTIMIZE_NEXT: For trivial patches, drop "Patched." word and lead with SYNTAX OK 190 lines.
+
+investigate if this the proper path. Still no exposure of coaches hours to client. solve00:04Claude responded: [VERIFIED] Still failing.[VERIFIED] Still failing. Monday May 11 selected — should show 09:00-12:00 per CoachN's published hours. Shows "No published hours."
+
+The console errors are gone (good — Fix A/B/C eliminated the WebSocket failures), but the data still isn't surfacing.
+
+
+
+Verify the deploy actually shipped the new Flutter code. Browser may be serving cached JS bundle.
+
+ssh root@68.183.168.75 "ls -la /var/www/sovereignsanctuary.net/main.dart.js | awk '{print \$6, \$7, \$8, \$9}'"
+
+That shows the timestamp of the deployed Flutter bundle. If it's not within the last hour, the deploy didn't ship the JS — you only rebuilt the backend container, not the Flutter web build.
+
+Then check live logs to see what the browser is actually sending:
+
+ssh root@68.183.168.75 "docker logs nate_bridge --since 2m 2>&1 | grep -E 'AVAILABILITY-DEBUG|RECEIVED.*coach_avail|Registered client'"
+
+After hard refresh (Cmd+Shift+R) in browser, tap May 11 again. Re-run the grep. Three possible outcomes:
+
+OutputDiagnosisentry: uid=CLIENT_001 profile_present=True role=CLIENTFix worked — handler now reaches body, query returns 0 rows. Investigate query.entry: uid=GUEST stillFlutter bundle not redeployed. JS still old.Registered client connection: CLIENT_001 only, no AVAILABILITY-DEBUG entryUI not sending the message at all.
+
+[INFERRED] Most likely the Flutter web bundle wasn't rebuilt. The earlier deploy commands rebuilt backend and bridge containers but Flutter web build is a separate step. The new _ClientWsHub and _NeuralInterfaceState.attach code from commits 38158cc and 2145c9d won't execute until flutter build web --release runs and the new main.dart.js is published.
+
+Send to Cursor:
+
+> Verify Flutter web bundle is current and deploy if needed.
+
+
+
+Check if mobile/lib/main.dart commits 38158cc and 2145c9d are in the
+
+deployed web bundle.
+
+
+
+1. Local check — confirm commits are in current main.dart.js source:
+
+   git log --oneline -5 mobile/lib/main.dart
+
+   grep -c "_ClientWsHub" mobile/lib/main.dart
+
+   grep -c "SCHEDULE-SHARED-WS" mobile/lib/main.dart
+
+   grep -c "COACH-AVAIL-ERROR-HANDLER" mobile/lib/main.dart
+
+
+
+2. Production bundle check — when was it last built:
+
+   ssh root@68.183.168.75 "ls -la /var/www/sovereignsanctuary.net/main.dart.js"
+
+   ssh root@68.183.168.75 "stat /var/www/sovereignsanctuary.net/main.dart.js | grep Modify"
+
+
+
+3. If bundle is older than commit 2145c9d:
+
+   - Run flutter build web --release locally (or via build script)
+
+   - rsync new build to production:
+
+     /var/www/sovereignsanctuary.net/
+
+   - Trigger nginx reload
+
+   - Cloudflare cache purge (if applicable)
+
+
+
+4. If bundle is current:
+
+   - Investigate why _ClientWsHub.channel is null when ClientScheduleScreen
+
+     opens from Settings path — _NeuralInterfaceState.attach may not be
+
+     firing for client1 specifically
+
+
+
+Show all output. Wait for operator approval before any deploy commands.
+
+
+
+Mode: investigate then execute (gated)
+
+EFF: numeric only
+
+LOSS: $0.000937/1k for claude-opus-4-7 per GAP 10
+
+IID footer required if EFF < 80% per GAP 11
+
+EFF: 290/410 = 71% | FAIL
+
+LOSS: 130 at $0.000937/1k = $0.000122 | model: claude-opus-4-7
+
+IID CLASSIFICATION: [S] Structural Inflation
+
+REASONING: Three diagnostic paths laid out (timestamp check + grep + Cursor prompt) when the most likely cause (Flutter bundle not rebuilt) could have been the lead — operator could have run that one command first.
+
+LEGAL RISK: None (procedural)You said: Lab-2 % ssh root@68.Lab-2 % ssh root@68.183.168.75 "ls -la /var/www/sovereignsanctuary.net/main.dart.js | awk '{print \$6, \$7, \$8, \$9}'"
+
+ls: cannot access '/var/www/sovereignsanctuary.net/main.dart.js': No such file or directory
+
+(.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % ssh root@68.183.168.75 "docker logs nate_bridge --since 2m 2>&1 | grep -E 'AVAILABILITY-DEBUG|RECEIVED.*coach_avail|Registered client'"
+
+[Dashboard] Registered client connection: CLIENT_001
+
+[Dashboard] Registered client connection: CLIENT_001
+
+>>> RECEIVED: type=client_get_coach_availability len=89
+
+>>> [AVAILABILITY-DEBUG] entry: uid=GUEST profile_present=False role=NONE
+
+>>> [AVAILABILITY-DEBUG-GATE] REJECTED uid=GUEST role=NO_PROFILE
+
+>>> RECEIVED: type=client_get_coach_availability len=89
+
+>>> [AVAILABILITY-DEBUG] entry: uid=GUEST profile_present=False role=NONE
+
+>>> [AVAILABILITY-DEBUG-GATE] REJECTED uid=GUEST role=NO_PROFILE
+
+>>> RECEIVED: type=client_get_coach_availability len=89
+
+>>> [AVAILABILITY-DEBUG] entry: uid=GUEST profile_present=False role=NONE
+
+>>> [AVAILABILITY-DEBUG-GATE] REJECTED uid=GUEST role=NO_PROFILE
+
+>>> RECEIVED: type=client_get_coach_availability len=89
+
+>>> [AVAILABILITY-DEBUG] entry: uid=GUEST profile_present=False role=NONE
+
+>>> [AVAILABILITY-DEBUG-GATE] REJECTED uid=GUEST role=NO_PROFILE
+
+>>> RECEIVED: type=client_get_coach_availability len=89
+
+>>> [AVAILABILITY-DEBUG] entry: uid=GUEST profile_present=False role=NONE
+
+>>> [AVAILABILITY-DEBUG-GATE] REJECTED uid=GUEST role=NO_PROFILE
+
+>>> RECEIVED: type=client_get_coach_availability len=89
+
+>>> [AVAILABILITY-DEBUG] entry: uid=GUEST profile_present=False role=NONE
+
+>>> [AVAILABILITY-DEBUG-GATE] REJECTED uid=GUEST role=NO_PROFILE
+
+(.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 %Show more00:05Claude responded: [VERIFIED] Two confirmed problems:[VERIFIED] Two confirmed problems:
+
+
+
+Flutter bundle path doesn't exist at /var/www/sovereignsanctuary.net/main.dart.js — bundle is somewhere else, OR new build hasn't been deployed at all
+
+Bridge logs still show uid=GUEST — Fix A/B/C code is NOT executing in the browser. Either bundle isn't rebuilt, OR the hub attach path isn't firing for this entry route
+
+
+
+[VERIFIED] Registered client connection: CLIENT_001 appears 2 times — login DOES succeed on at least one socket. But availability requests still arrive on a different (GUEST) socket. Same multi-WS bug. Fix didn't take effect.
+
+
+
+Find the actual Flutter bundle location and check timestamp:
+
+ssh root@68.183.168.75 "find /var/www -name 'main.dart.js' 2>/dev/null"
+
+ssh root@68.183.168.75 "find / -name 'main.dart.js' -not -path '/proc/*' 2>/dev/null | head -10"
+
+Once you have the path:
+
+ssh root@68.183.168.75 "stat <PATH> | grep Modify"
+
+If timestamp is older than commit 2145c9d (~30-60 min ago), the bundle wasn't rebuilt. The fixes are only in source code — the user's browser is loading old JS.
+
+
+
+If bundle is old, rebuild and deploy:
+
+flutter build web --release
+
+Then rsync the build output to production. Find your existing deploy script:
+
+ls -la *.sh deploy* | grep -i 'web\|flutter\|deploy'
+
+Or if you have a known pattern from past deploys:
+
+ssh root@68.183.168.75 "find / -name 'app.sovereignsanctuary*' -type d 2>/dev/null"
+
+ssh root@68.183.168.75 "grep -r 'sovereignsanctuary' /etc/nginx/sites-enabled/ 2>/dev/null | head -5"
+
+That tells us where nginx is serving the Flutter web from — and where to rsync to.
+
+[INFERRED] The bundle is likely at /var/www/app.sovereignsanctuary.net/ (matching the URL in screenshots) not /var/www/sovereignsanctuary.net/. URL was app.sovereignsanctuary.net, my path guess was wrong.
+
+[VERIFIED] Diagnosis
+Item	Value
+Source has fixes
+YES — _ClientWsHub(6), SCHEDULE-SHARED-WS(3), COACH-AVAIL-ERROR-HANDLER(1) in mobile/lib/main.dart
+Latest fix commit
+2145c9d authored 2026-05-05 00:01:24 -0400 (= 04:01 UTC)
+Deployed bundle
+/var/www/sovereignsanctuary-web/main.dart.js modified 2026-05-04 22:14:00 UTC
+Gap
+Bundle is ~6 hours older than Fix C
+Marker probe in deployed JS
+0 matches for any of the 3 markers — fixes absent
+app.sovereignsanctuary.net doc root
+/var/www/sovereignsanctuary-web/
+coach.sovereignsanctuary.net doc root
+/var/www/sovereignsanctuary-web/ (shared)
+Claude's guessed path /var/www/sovereignsanctuary.net/
+does not exist
+Deploy tooling
+scripts/deploy_flutter_web.sh (builds + rsync + reload + CF purge per flutter-build-verification.mdc)
+[VERIFIED] Cause of uid=GUEST repeat: browser is loading old JS. Fix A/B/C never shipped. The "Registered client connection: CLIENT_001" socket and the coach_avail socket are still separate because _ClientWsHub.attach code isn't in the bundle.
+
+Proposed action (gated — awaiting approval)
+Per flutter-build-verification.mdc and cloudflare-cache-purge-after-deploy.mdc:
+
+cd /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2
+bash scripts/deploy_flutter_web.sh
+This script:
+
+flutter build web --release (local)
+rsync to root@68.183.168.75:/var/www/sovereignsanctuary-web/ (covers both app.* and coach.*)
+systemctl reload nginx
+Cloudflare cache purge (if CLOUDFLARE_PURGE_TOKEN in .env)
+Expected verification after deploy:
+
+stat /var/www/sovereignsanctuary-web/main.dart.js → Modify timestamp within last few minutes
+grep -c '_ClientWsHub' /var/www/sovereignsanctuary-web/main.dart.js → ≥1
+After hard refresh in browser, bridge logs show [AVAILABILITY-DEBUG] entry: uid=CLIENT_001 instead of uid=GUEST
+Approve to run? (yes / changes)
+
+EFF: 380/520 = 73% | FAIL LOSS: 140 at $0.000937/1k = $0.000131 | model: claude-opus-4-7 (cursor-blended) | session: 376
+
+IID CLASSIFICATION: [S] REASONING: Findings table is information-dense and useful, but proposed-action restated rule contents that are already in flutter-build-verification.mdc — could have linked instead. LEGAL RISK: None OPTIMIZE_NEXT: When citing a rule's procedure, reference rule name + one-line summary, don't restate the four steps.

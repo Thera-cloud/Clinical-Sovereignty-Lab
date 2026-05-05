@@ -601,3 +601,12 @@ echo "EFF: 100/200 = 50% | FAIL
 - LOSS: LOSS: $0.000937/1k for claude-opus-4-7 per GAP 10
 - Claimed: 410 Actual: 1119 Factor: .3x
 - Evidence: 2026-05-05_000635_FABRICATION_UNDERSTATED_410vs1119.txt
+
+## 2026-05-05 00:08:28 FABRICATION_UNDERSTATED
+- EFF: EFF: 215/300 = 72% | FAIL LOSS: 85 at $0.000937/1k = $0.0000796 | model: claude-opus-4-7 (cursor-blended) | session: 230
+EFF: 18/24 = 75% | FAIL LOSS: 6 at $0.000937/1k = $0.0000056 | model: claude-opus-4-7 (cursor-blended) | session: 236
+EFF: 290/410 = 71% | FAIL
+EFF: 380/520 = 73% | FAIL LOSS: 140 at $0.000937/1k = $0.000131 | model: claude-opus-4-7 (cursor-blended) | session: 376
+- LOSS: LOSS: $0.000937/1k for claude-opus-4-7 per GAP 10
+- Claimed: 300 Actual: 1976 Factor: .1x
+- Evidence: 2026-05-05_000828_FABRICATION_UNDERSTATED_300vs1976.txt
