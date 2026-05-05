@@ -1,0 +1,10 @@
+> Fill docs/client_portal/features/11_neural_interface_interactions.md from _PIPELINE_TEMPLATE.md.
+Source of truth: docs/client_portal/_FOUNDATIONAL_SPEC.md + docs/client_portal/_PHASE_3_PLAN.md (spec 11 covers D1, D2, D3, D4, D15, D16, §B B4-B6, G5, G6, G7 — mic, vault attach, TTS read-back, vocab, upload chrome; complements 01)
+
+Use existing data — do NOT re-investigate code.
+Required: 8+ UX criteria, 3+ anti-patterns from git log, 3+ Steve Jobs UX debt items.
+
+Mode: investigate
+EFF: numeric only
+LOSS format per GAP 10: $0.001019/1k = claude-opus-4-7-thinking-xhigh, $0.000937/1k = claude-opus-4-7
+IID footer required if EFF < 80% per GAP 11
