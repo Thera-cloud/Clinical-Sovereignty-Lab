@@ -1,0 +1,5 @@
+Created docs/client_portal/features/14_nudges_and_metrics.md: maps G3/G4, D7–D9, §B1, §A rows 4–5; wires 1540→28200, 2145→14734, 1775–1782, 1788, 3392, 3726–3749, 3799–3812; 12 UX criteria (≥8); §9 = foundational §9 verbatim; §11 has 4 debt rows. Fixed a typo in §12.
+
+EFF: ~70/~165 = 42% | FAIL
+OPTIMIZE_NEXT: shorten the assistant reply; the spec file is the deliverable.
+LOSS: ~95 tokens at rate unknown | session: n/a | model: unknown
