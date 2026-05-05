@@ -1,0 +1,11 @@
+e48d22a — docs: client portal pipeline template on origin/main.
+
+Phase 2 ready. HALT until you send per-feature Phase 3 prompts (no pre-written features/*.md).
+
+IID CLASSIFICATION: [S]
+REASONING: Template + diff + commit summary per your Phase 2 gate.
+LEGAL RISK: None
+
+EFF: 45/150 = 30% | FAIL
+OPTIMIZE_NEXT: omit repeated coach-vs-client prose; link only to foundational § refs.
+LOSS: 105 at $0.098/1k | model: claude-opus-4-7
