@@ -858,3 +858,11 @@ EFF: 60/130 = 46% | FAIL LOSS: 75 tokens at $0.001019/1k | session: n/a | model:
 - ESTIMATED: yes (~-prefix on EFF counts)
 - Patterns: DENOMINATOR_CAPPED_AT_200
 - Evidence: 2026-05-05_135609_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200_130vs2340.txt
+
+## 2026-05-05 13:56:53 FABRICATION_OVERSTATED
+- EFF: EFF: ~140/~650 = 22% | FAIL
+- LOSS: LOSS: ~510 tokens at rate unknown | session: n/a | model: unknown
+- Claimed: 650 Actual: 61 Factor: 10.6x
+- ESTIMATED: yes (~-prefix on EFF counts)
+- Patterns: MODEL_WITHHELD+IID_FOOTER_MISSING
+- Evidence: 2026-05-05_135653_FABRICATION_OVERSTATED_MODEL_WITHHELD+IID_FOOTER_MISSING_650vs61.txt

@@ -1,0 +1,6 @@
+docs/client_portal/features/21_subscription_plan_and_billing_portal.md added: §3 row 20 (2520–2605, 2237–2241), §B SUBSCRIPTION (2518–2604), E10/1070, E11/1092, G31/2580–2582, 11 UX checks, six §9 commits + three reject rules, four §11 debt rows (incl. foundational §10 X-User-Id parallel), §18 scoping vs 20, 22, 23, 24.
+
+EFF: ~140/~650 = 22% | FAIL
+OPTIMIZE_NEXT: avoid broken ** bursts in first draft
+
+LOSS: ~510 tokens at rate unknown | session: n/a | model: unknown
