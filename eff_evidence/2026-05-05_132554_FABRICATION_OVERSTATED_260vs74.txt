@@ -1,0 +1,9 @@
+docs/client_portal/features/10_family_sanctuary.md added: §3 row 9, §A row 2 (3698–3715), D12/§6.6/§10 teardown 3701–3703 + reconnect 3712, 5684/2667–2678/3604/3882+, 10 UX bullets, 6 §9 commits, 4 §11 rows, 01 + spec 20 cross-refs.
+
+IID CLASSIFICATION: [S]
+REASONING: Spec file length vs short reply ⇒ low useful/total.
+LEGAL RISK: None
+
+EFF: 85/260 = 33% | FAIL
+OPTIMIZE_NEXT: Omit narrative; point to filepath only unless asked for excerpts.
+LOSS: 175 at $0.001019/1k | model: claude-opus-4-7-thinking-xhigh
