@@ -1,0 +1,6 @@
+docs/client_portal/features/20_family_management.md is in place: _PIPELINE_TEMPLATE structure, §3 row 21 (billing_screens.dart:1149, 900, 857–859), §B FAMILY (2353–2513, 1522/2356, 2444, 2578–2602), 13 UX criteria, 6 §9 commits, 3 reject rules, 4 §11 debt rows (incl. foundational §10 Family Sanctuary socket + dual entry + tier gate), 20_ Cursor prefix, out-of-scope vs 02 / 19 / 22.
+
+EFF: ~100/~520 = 19% | FAIL
+OPTIMIZE_NEXT: deliver file only; skip echoing section list
+
+LOSS: ~420 tokens at rate unknown | session: n/a | model: unknown
