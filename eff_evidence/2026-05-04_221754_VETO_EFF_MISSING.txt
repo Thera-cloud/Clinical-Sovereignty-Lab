@@ -1,0 +1,38 @@
+> Add diagnostic logging to client_get_coach_availability handler.
+
+File: backend/app/websocket/bridge_server.py
+Handler location: ~line 12152 (per foundational spec)
+
+Required changes (all logging, no behavior change):
+
+1. At handler entry, log:
+   logger.info("client_get_coach_availability: client=%s coach=%s date=%s", 
+               client_hw_id, coach_id, requested_date)
+
+2. After coach_availability query, log row count:
+   logger.info("client_get_coach_availability: found %d availability rows for coach=%s", 
+               len(avail_rows), coach_id)
+
+3. After booked-mask subtraction, log:
+   logger.info("client_get_coach_availability: returning %d open slots after masking %d booked", 
+               len(open_slots), len(booked))
+
+4. On any exception in this handler, log:
+   logger.exception("client_get_coach_availability failed: %s", e)
+
+Constraints:
+- Maximum 8 lines added
+- No behavior changes
+- Use existing logger pattern (same as other handlers)
+- Add # AVAILABILITY-DEBUG marker
+
+After diff:
+- Show diff
+- Commit: "Add diagnostic logging to client_get_coach_availability"
+- Push origin main
+
+Do NOT deploy. Operator will deploy + reproduce + read logs.
+
+Mode: execute
+EFF: numeric only
+LOSS: rate unknown if model unknown
