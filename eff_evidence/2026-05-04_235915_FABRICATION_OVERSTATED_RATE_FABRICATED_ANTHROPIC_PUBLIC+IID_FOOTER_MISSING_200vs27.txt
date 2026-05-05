@@ -1,0 +1,5 @@
+# Test 2: RATE_FABRICATED_ANTHROPIC_PUBLIC detection
+echo "EFF: 100/200 = 50% | FAIL
+LOSS: 50 at \$75/1M | model: claude-opus-4-7" | pbcopy
+
+# Check for new evidence file with RATE_FABRICATED_ANTHROPIC_PUBLIC flag
