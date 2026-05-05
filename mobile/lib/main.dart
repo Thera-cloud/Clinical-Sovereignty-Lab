@@ -6748,6 +6748,10 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
               final subPlan = (profile['subscription_plan'] ?? '').toString().toUpperCase();
               final canAccessNate = profile['can_access_nate'] ?? true;
               if (subPlan == 'COACH_ONLY' || canAccessNate == false) {
+                if (_channel != null) {
+                  _ClientWsHub.attach(_channel!);
+                  _channel = null;
+                }
                 nextScreen = ClientScheduleScreen(currentUserProfile: profileWithToken, username: user, password: pass);
               } else {
                 // AI consent gate — required before chat access
@@ -10305,6 +10309,21 @@ class _Header extends StatelessWidget {
 }
 
 
+// SCHEDULE-SHARED-WS: lobby hands off authenticated `/ws`; broadcast inbound so ClientScheduleScreen never opens a second login socket.
+class _ClientWsHub {
+  static WebSocketChannel? channel;
+  static StreamSubscription<dynamic>? _hubPipe;
+  static final StreamController<dynamic> _hubIn = StreamController<dynamic>.broadcast();
+  static Stream<dynamic> get inbound => _hubIn.stream;
+  static void attach(WebSocketChannel ch) {
+    channel = ch;
+    _hubPipe?.cancel();
+    _hubPipe = ch.stream.listen((m) {
+      if (!_hubIn.isClosed) _hubIn.add(m);
+    }, onError: (_) {}, onDone: () {});
+  }
+}
+
 // =============================================================================
 // CLIENT SCHEDULE SCREEN (COACH_ONLY & TOP_TIER)
 // =============================================================================
@@ -10322,6 +10341,7 @@ class ClientScheduleScreen extends StatefulWidget {
 
 class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   WebSocketChannel? _socket;
+  StreamSubscription<dynamic>? _hubSub;
   final String _serverUrl = defaultWsUrl;
   List<Map<String, dynamic>> _upcomingSessions = [];
   List<Map<String, dynamic>> _availableSlots = [];
@@ -10383,6 +10403,8 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   Map<String, dynamic>? _pendingRequest;
   List<Map<String, dynamic>> _requestMessages = [];
   bool _submittingRequest = false;
+  String? _coachAvailErr;
+  String? _coachAvailDetail;
 
   bool get _hasCoach => _coachId.isNotEmpty;
 
@@ -10390,7 +10412,24 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   void initState() {
     super.initState();
     _coachId = (widget.currentUserProfile?['assigned_coach_id'] ?? '').toString();
-    _connect();
+    // SCHEDULE-SHARED-WS
+    if (_ClientWsHub.channel != null) {
+      _socket = _ClientWsHub.channel;
+      _hubSub = _ClientWsHub.inbound.listen(_handleMessage,
+          onError: (e) => debugLog('WS Error: $e'),
+          onDone: () {
+            if (mounted && _isLoading) setState(() => _isLoading = false);
+          });
+      if (_hasCoach) {
+        _requestUpcomingSessions();
+        _requestMonthOverview();
+      } else {
+        _fetchCoachDirectory();
+        _fetchRequestStatus();
+      }
+    } else {
+      _connect();
+    }
     _loadingTimeout = Timer(const Duration(seconds: 8), () {
       if (mounted && _isLoading) setState(() => _isLoading = false);
     });
@@ -10440,9 +10479,18 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
         });
       } else if (type == 'coach_availability') {
         setState(() {
+          _coachAvailErr = null;
+          _coachAvailDetail = null;
           _availableSlots = List<Map<String, dynamic>>.from(
             (data['available_slots'] ?? []).map((s) => Map<String, dynamic>.from(s))
           );
+        });
+      } else if (type == 'coach_availability_error') {
+        // COACH-AVAIL-ERROR-HANDLER
+        setState(() {
+          _coachAvailErr = data['error']?.toString() ?? 'unknown';
+          _coachAvailDetail = data['detail']?.toString();
+          _availableSlots = [];
         });
       } else if (type == 'coach_month_overview') {
         setState(() {
@@ -10532,7 +10580,11 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   }
   
   void _requestAvailability(String date) {
-    setState(() => _selectedDate = date);
+    setState(() {
+      _selectedDate = date;
+      _coachAvailErr = null;
+      _coachAvailDetail = null;
+    });
     _socket?.sink.add(jsonEncode({
       "type": "client_get_coach_availability",
       "coach_id": _coachId,
@@ -11004,7 +11056,8 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   @override
   void dispose() {
     _loadingTimeout?.cancel();
-    _socket?.sink.close();
+    _hubSub?.cancel();
+    if (_hubSub == null) _socket?.sink.close();
     super.dispose();
   }
   
@@ -11141,24 +11194,51 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
             ..._availableSlots.map((slot) => _buildSlotCard(slot)),
           ] else if (_selectedDate != null) ...[
             const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF111111),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF252525)),
+            if (_coachAvailErr != null)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF111111),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.35)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Availability request failed',
+                        style: TextStyle(color: Color(0xFFEF4444), fontSize: 14, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 6),
+                    Text(_coachAvailDetail ?? _coachAvailErr ?? 'Error',
+                        style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                    if (_coachAvailErr == 'auth_role_mismatch') ...[
+                      const SizedBox(height: 10),
+                      TextButton(
+                        onPressed: () => _requestAvailability(_selectedDate!),
+                        child: const Text('Retry', style: TextStyle(color: Color(0xFFC9A962))),
+                      ),
+                    ],
+                  ],
+                ),
+              )
+            else
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF111111),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF252525)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text('No published hours for this date',
+                        style: TextStyle(color: Color(0xFFC9A962), fontSize: 14, fontWeight: FontWeight.w600)),
+                    SizedBox(height: 6),
+                    Text('Your coach has not published available hours yet. Check back soon or contact them directly.',
+                        style: TextStyle(color: Colors.grey, fontSize: 13)),
+                  ],
+                ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text('No published hours for this date',
-                      style: TextStyle(color: Color(0xFFC9A962), fontSize: 14, fontWeight: FontWeight.w600)),
-                  SizedBox(height: 6),
-                  Text('Your coach has not published available hours yet. Check back soon or contact them directly.',
-                      style: TextStyle(color: Colors.grey, fontSize: 13)),
-                ],
-              ),
-            ),
           ],
         ],
       ),
