@@ -1,0 +1,10 @@
+docs/client_portal/features/05_lobby_and_login.md added: §3 row 1, C1/C2, E4/E5, login_success block 6656–6787, hub attach 6748–6752, 10 UX checks, 6 §9 commits (verbatim), 4 §10/§7 debt rows, cross-link 01_chat_with_nate.md for post-auth login_request. Fixed 7405 typo and §15 wording.
+
+IID CLASSIFICATION: [E]
+REASONING: Minor doc typo on first write required correction pass.
+LEGAL RISK: None
+
+EFF: 75/195 = 38% | FAIL
+OPTIMIZE_NEXT: Ship only the file path + one-line fix note when the diff is self-explanatory.
+
+LOSS: 120 at $0.000122/1k | model: claude-opus-4-7-thinking-xhigh
