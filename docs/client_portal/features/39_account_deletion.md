@@ -90,7 +90,7 @@
 
 | ID | Symptom |
 |----|---------|
-| AD-01 | **Duplicate **`_performAccountDeletion`** implementations** (**coach variant**) — divergence risk (**`4556+`**) |
+| AD-01 | Duplicate `_performAccountDeletion` implementations (**coach variant** at **`4556+`**) — divergence risk |
 
 ---
 
