@@ -1,0 +1,193 @@
+> Implement Fix F + D + E — client schedule socket sharing + auth fixes.
+
+Three coordinated fixes per investigation findings (gated F → D → E).
+Reference: prior investigation in this session showing 4th login_request
+silently fails with empty password from Settings entry path; ClientScheduleScreen
+opens unauthenticated socket → uid=GUEST → handler rejects with auth_role_mismatch.
+
+═══════════════════════════════════════════════════════════════
+FIX F — Hub attach unconditional in lobby (structural)
+═══════════════════════════════════════════════════════════════
+
+File: mobile/lib/main.dart
+Location: ~line 6753 (LobbyScreen login_success handler)
+
+Problem: _ClientWsHub.attach(_channel!) currently sits inside the
+  if (subPlan == 'COACH_ONLY' || canAccessNate == false) { ... }
+branch. Only COACH_ONLY clients populate the hub. Full-Nate clients
+who go through NeuralInterface populate via line 1663 attach, but if
+NeuralInterface is popped, hub becomes stale.
+
+Required:
+1. Move _ClientWsHub.attach(_channel!) call to BEFORE the
+   COACH_ONLY/canAccessNate branch
+2. Attach happens for ALL clients regardless of subscription tier
+3. _channel = null line follows attach (so dispose() doesn't close
+   the shared channel)
+
+Implementation pattern:
+   // SCHEDULE-SHARED-WS-LOBBY-FIX-F
+   _ClientWsHub.attach(_channel!);
+   _channel = null;  // hub now owns lifecycle
+   
+   if (subPlan == 'COACH_ONLY' || canAccessNate == false) {
+     // existing routing logic — no longer needs attach inside
+     ...
+   } else {
+     // full-Nate path: NeuralInterface line 1663 attach becomes
+     // belt-and-suspenders since lobby already attached
+     ...
+   }
+
+Constraints:
+- Maximum 8 lines moved/changed
+- No new logic — just relocate the attach call
+- Preserve existing dispose() behavior (still null-checks _channel)
+- Add # FIX-F marker comment
+
+After diff:
+- Show diff
+- Confirm "Fix F ready"
+- HALT until "continue Fix D"
+
+═══════════════════════════════════════════════════════════════
+FIX D — Settings password handoff (urgent)
+═══════════════════════════════════════════════════════════════
+
+File: mobile/lib/settings_screen.dart
+Location: ~line 2962 (handoff to ClientScheduleScreen)
+
+Problem: Settings passes _profile['password'] which is empty string
+(passwords are not stored in session state). ClientScheduleScreen._connect()
+fires login_request with empty password → bridge silently fails auth →
+socket stays GUEST.
+
+Required (pick whichever is feasible based on what's available in scope):
+
+OPTION D1 (preferred): Use _ClientWsHub if Fix F made it always available
+1. Before navigating to ClientScheduleScreen, check _ClientWsHub.channel
+2. If non-null: do not pass password; ClientScheduleScreen will detect
+   hub channel and skip _connect()
+3. If null: log warning and fall back to D2 or D3
+
+OPTION D2: Pass token instead of password
+1. Settings has access to _profile['token'] (the JWT/session token from login_success)
+2. Pass token to ClientScheduleScreen constructor as new parameter
+3. ClientScheduleScreen sends {type: 'token_auth', token: token} instead
+   of password-based login_request when token is present
+
+OPTION D3: Refuse navigation with empty password
+1. Before navigating, check if _profile['password'] is non-empty
+2. If empty AND _ClientWsHub.channel is null: show error dialog
+   "Session expired. Please log out and back in to access schedule."
+3. Do not navigate
+
+Implementation: prefer D1 (clean shared-socket pattern). Fall back to D2 if hub
+isn't reliably populated. D3 only as last resort.
+
+Constraints:
+- Maximum 25 lines added
+- No password storage anywhere
+- Add # FIX-D marker
+- Preserve existing navigation routing (don't break other Settings tiles)
+
+After diff:
+- Show diff and which Option (D1/D2/D3) was chosen
+- Confirm "Fix D ready"
+- HALT until "continue Fix E"
+
+═══════════════════════════════════════════════════════════════
+FIX E — Defensive: refuse to send login_request with empty password
+═══════════════════════════════════════════════════════════════
+
+File: mobile/lib/main.dart
+Location: ~line 10441 (ClientScheduleScreen._connect)
+
+Problem: _connect() sends login_request regardless of password validity.
+Empty password → silent server-side fail. Class of bug that should not
+exist — empty creds should never hit the wire.
+
+Required:
+1. Before sending login_request, validate widget.password is non-empty
+2. If empty: do not send login_request
+3. Set state to display error: "Cannot connect — session credentials missing.
+   Please log out and back in."
+4. Do not silently retry
+5. Log diagnostic: print(">>> [SCHEDULE-FIX-E] Empty password — refusing to send login_request");
+
+Constraints:
+- Maximum 12 lines added
+- Add # FIX-E marker
+- Defensive only — does not replace D1/D2/D3 fix; backstop for any path
+  that still ends up with empty password
+
+After diff:
+- Show diff
+- Confirm "Fix E ready"
+- HALT until "commit all three"
+
+═══════════════════════════════════════════════════════════════
+COMMIT SEQUENCE (after all three gates approved)
+═══════════════════════════════════════════════════════════════
+
+Three commits in order:
+
+git add mobile/lib/main.dart
+git commit -m "Fix F: move _ClientWsHub.attach above COACH_ONLY branch — hub populated for all clients"
+
+git add mobile/lib/settings_screen.dart mobile/lib/main.dart
+git commit -m "Fix D: replace empty-password handoff from Settings with hub-shared channel (Option D<X>)"
+
+git add mobile/lib/main.dart  
+git commit -m "Fix E: defensive — refuse to send login_request with empty password in ClientScheduleScreen"
+
+git push origin main
+
+═══════════════════════════════════════════════════════════════
+DEPLOYMENT (after commits — operator runs, not Cursor)
+═══════════════════════════════════════════════════════════════
+
+DO NOT deploy from this prompt. Operator will run:
+
+  ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && git pull origin main && docker compose -f docker-compose.prod.yml build backend bridge && docker compose -f docker-compose.prod.yml up -d --force-recreate backend bridge"
+
+  bash scripts/deploy_flutter_web.sh
+
+═══════════════════════════════════════════════════════════════
+VERIFICATION (after deploy — operator runs)
+═══════════════════════════════════════════════════════════════
+
+In browser as client1 (John D.):
+1. Hard refresh (Cmd+Shift+R) to flush cached JS
+2. Settings → View Availability & Book Session
+3. Tap a Tuesday or Wednesday
+4. Expected: schedule shows CoachN's hours (Tue/Wed 7:00 AM - 9:30 PM)
+
+Bridge log verification:
+  ssh root@68.183.168.75 "docker logs nate_bridge --since 3m 2>&1 | grep AVAILABILITY-DEBUG"
+  
+Expected:
+  >>> [AVAILABILITY-DEBUG] entry: uid=CLIENT_001 profile_present=True role=CLIENT
+  >>> [AVAILABILITY-DEBUG] found 4 availability rows for coach=COACH_COACHN_ID
+  >>> [AVAILABILITY-DEBUG] returning N open slots after masking 0 booked
+
+NOT expected (would indicate fix didn't take):
+  >>> [AVAILABILITY-DEBUG] entry: uid=GUEST profile_present=False
+
+═══════════════════════════════════════════════════════════════
+
+Constraints throughout:
+- Read-only investigation first per gate, then execute that gate
+- No --force, no --hard
+- No DB writes
+- Mark TBD if any code element doesn't exist as expected
+- If Fix F implementation shows hub is already always-attached (work
+  was done but not verified in past commits), report that and skip to Fix D
+
+Mode: investigate then execute (gated per fix)
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10 verified table
+  $0.001019/1k = claude-opus-4-7-thinking-xhigh
+  $0.000937/1k = claude-opus-4-7
+  Anthropic public rates ($75/1M etc) = M4 violation
+IID footer required if EFF < 80% per .cursorrules GAP 11
