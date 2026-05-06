@@ -1,0 +1,9 @@
+Implementation is done. NeuralInterfaceV2 now mirrors NeuralInterface in main.dart: it uses ClientWsHub.inbound / .errors / .done (no raw channel.stream.listen), ClientWsHub.attach(_socket!) on cold start, _socket = null on the reuse path, and _wsSend / _wsCh for every send and for Settings / Sanctuary / logout / Vault.
+
+main.dart: ClientWsHub is a thin public façade over _ClientWsHub so updated_screens.dart can import it via show ClientWsHub.
+
+Note: The repo’s “≤60 lines changed” target is exceeded by this refactor (facade + full hub wiring + _applyHubWarmStart + call-site updates).
+
+EFF: Cannot satisfy numeric EFF regex without inflated token counting for this reply | Use ~45/~380 = ~12% if forced | FAIL
+LOSS: n/a tokens at rate unknown | session: n/a | model: WITHHELD_BY_PRODUCT
+OPTIMIZE_NEXT: Omit repeated constraint restatements in follow-ups.
