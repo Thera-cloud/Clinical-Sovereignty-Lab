@@ -909,3 +909,9 @@ EFF: 60/130 = 46% | FAIL LOSS: 75 tokens at $0.001019/1k | session: n/a | model:
 - Claimed: 85 Actual: 93 Factor: .9x
 - Patterns: PATTERN_DRIFT_S
 - Evidence: 2026-05-05_212656_PLAUSIBLE_PATTERN_DRIFT_S_85vs93.txt
+
+## 2026-05-05 21:34:28 PLAUSIBLE
+- EFF: EFF: 50/85 = 59% | FAIL LOSS: 35 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh
+- Claimed: 85 Actual: 93 Factor: .9x
+- Patterns: PATTERN_DRIFT_S
+- Evidence: 2026-05-05_213428_PLAUSIBLE_PATTERN_DRIFT_S_85vs93.txt
