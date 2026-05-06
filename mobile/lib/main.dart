@@ -1496,11 +1496,15 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
 
   // Track socket subscription to prevent "Stream already listened to"
   StreamSubscription? _socketSub;
+  StreamSubscription? _socketErrSub; // FIX-G' broadcast errors from hub
+  StreamSubscription? _socketDoneSub; // FIX-G' broadcast done from hub
 
   @override
   void dispose() {
     _nevedal.dispose();
     _socketSub?.cancel();
+    _socketErrSub?.cancel(); // FIX-G'
+    _socketDoneSub?.cancel(); // FIX-G'
     _socket?.sink.close();
     _scrollController.dispose();
     _speech.stop();
@@ -1529,22 +1533,25 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
     // Clean up previous connection
     _socketSub?.cancel();
     _socketSub = null;
+    _socketErrSub?.cancel(); _socketErrSub = null; // FIX-G'
+    _socketDoneSub?.cancel(); _socketDoneSub = null; // FIX-G'
     try { _socket?.sink.close(); } catch (_) {}
     _socket = null;
 
     try {
       _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
-      
-      _socketSub = _socket!.stream.listen(
-        _handleSocketMessage,
-        onError: (e) {
-          if(mounted) setState(() => _connectionStatus = "ERROR: $e");
-          _addSystemMsg("Connection Died: $e");
-        },
-        onDone: () {
-          if(mounted) setState(() => _connectionStatus = "DISCONNECTED");
-        }
-      );
+
+      // FIX-G' (HUB-OWNS-RAW-STREAM): hub is sole owner of `_socket.stream`.
+      // NeuralInterface consumes via broadcast inbound/errors/done.
+      _ClientWsHub.attach(_socket!);
+      _socketSub = _ClientWsHub.inbound.listen(_handleSocketMessage);
+      _socketErrSub = _ClientWsHub.errors.listen((e) {
+        if(mounted) setState(() => _connectionStatus = "ERROR: $e");
+        _addSystemMsg("Connection Died: $e");
+      });
+      _socketDoneSub = _ClientWsHub.done.listen((_) {
+        if(mounted) setState(() => _connectionStatus = "DISCONNECTED");
+      });
 
       // 2. IMMEDIATE LOGIN
       debugLog(">>> NEURAL INTERFACE: Sending Login...");
@@ -1660,7 +1667,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
             sessionId: sessionId,
             userId: widget.username ?? 'unknown',
           );
-          _ClientWsHub.attach(_socket!); // SCHEDULE-SHARED-WS-NEURAL
+          // FIX-G': hub already owns _socket from _connectToCortex; no re-attach needed.
         }
       }
       else if (data['type'] == 'nate_response' || data['type'] == 'chat_reply') {
@@ -6215,6 +6222,8 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
   final HardwareIdentity _identity = HardwareIdentity();
   WebSocketChannel? _channel;
   StreamSubscription? _lobbySub;
+  StreamSubscription? _lobbyErrSub; // FIX-G' broadcast errors from hub
+  StreamSubscription? _lobbyDoneSub; // FIX-G' broadcast done from hub
   
   // Connection State
   bool _isConnected = false;
@@ -6296,6 +6305,8 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
   @override
   void dispose() {
     _lobbySub?.cancel();
+    _lobbyErrSub?.cancel(); // FIX-G'
+    _lobbyDoneSub?.cancel(); // FIX-G'
     _channel?.sink.close();
     super.dispose();
   }
@@ -6311,33 +6322,36 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
 
     try {
       _lobbySub?.cancel();
+      _lobbyErrSub?.cancel(); // FIX-G'
+      _lobbyDoneSub?.cancel(); // FIX-G'
       _channel?.sink.close();
       _channel = WebSocketChannel.connect(Uri.parse(_serverUrl));
 
-      _lobbySub = _channel!.stream.listen(
-        _handlePacket,
-        onError: (e) {
-          debugLog("Lobby Socket Error: $e");
-          if (mounted) {
-            setState(() {
-              _isConnected = false;
-              _statusMessage = "Connection Failed.\n$_serverUrl";
-            });
-            _scheduleReconnect();
-          }
-        },
-        onDone: () {
-          debugLog("Lobby Socket Closed");
-          if (mounted) {
-            setState(() {
-              _isConnected = false;
-              _statusMessage = "Disconnected.\n$_serverUrl";
-            });
-            _scheduleReconnect();
-          }
-        },
-        cancelOnError: true,
-      );
+      // FIX-G' (HUB-OWNS-RAW-STREAM): hub is sole owner of `_channel.stream`.
+      // Lobby consumes via broadcast inbound/errors/done — safe to subscribe
+      // alongside Schedule, Neural, etc.
+      _ClientWsHub.attach(_channel!);
+      _lobbySub = _ClientWsHub.inbound.listen(_handlePacket);
+      _lobbyErrSub = _ClientWsHub.errors.listen((e) {
+        debugLog("Lobby Socket Error: $e");
+        if (mounted) {
+          setState(() {
+            _isConnected = false;
+            _statusMessage = "Connection Failed.\n$_serverUrl";
+          });
+          _scheduleReconnect();
+        }
+      });
+      _lobbyDoneSub = _ClientWsHub.done.listen((_) {
+        debugLog("Lobby Socket Closed");
+        if (mounted) {
+          setState(() {
+            _isConnected = false;
+            _statusMessage = "Disconnected.\n$_serverUrl";
+          });
+          _scheduleReconnect();
+        }
+      });
 
       // Allow login attempts immediately — onError/onDone will flip state back.
       // Some browser/websocket timing edge-cases can miss the server's "connected" greeting.
@@ -6649,6 +6663,8 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
         // Cancel subscription FIRST to prevent Uncaught Error from onDone firing after navigation.
         _lobbySub?.cancel();
         _lobbySub = null;
+        _lobbyErrSub?.cancel(); _lobbyErrSub = null; // FIX-G'
+        _lobbyDoneSub?.cancel(); _lobbyDoneSub = null; // FIX-G'
         // Don't close inside the stream callback — let dispose() handle it.
         // On Flutter web, closing inside the callback causes an unhandled async error
         // that can block Navigator.pushReplacement from completing.
@@ -6745,13 +6761,10 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
             } else if (role == 'COACH') {
               nextScreen = CoachDashboardScreenV2(currentUserProfile: profileWithToken, username: user, password: pass);
             } else {
-              // Fix F (SCHEDULE-SHARED-WS): attach lobby's authenticated channel to
-              // _ClientWsHub for ALL CLIENT routes so Schedule (incl. via Settings)
-              // can reuse it instead of opening a new unauthenticated socket.
-              if (_channel != null) {
-                _ClientWsHub.attach(_channel!);
-                _channel = null;
-              }
+              // FIX-G' (HUB-OWNS-RAW-STREAM): hub already attached at connect
+              // (line ~6326). Just clear lobby's reference so dispose() can't
+              // re-close the channel that Schedule/NeuralInterface still need.
+              _channel = null;
               // Check if COACH_ONLY client
               final subPlan = (profile['subscription_plan'] ?? '').toString().toUpperCase();
               final canAccessNate = profile['can_access_nate'] ?? true;
@@ -6803,6 +6816,8 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
       } else if (data['type'] == 'security_disconnect') {
         _lobbySub?.cancel();
         _lobbySub = null;
+        _lobbyErrSub?.cancel(); _lobbyErrSub = null; // FIX-G'
+        _lobbyDoneSub?.cancel(); _lobbyDoneSub = null; // FIX-G'
         if (mounted) {
           setState(() => _isLoading = false);
           showDialog(
@@ -10314,17 +10329,27 @@ class _Header extends StatelessWidget {
 
 
 // SCHEDULE-SHARED-WS: lobby hands off authenticated `/ws`; broadcast inbound so ClientScheduleScreen never opens a second login socket.
+// FIX-G' (HUB-OWNS-RAW-STREAM): WebSocketChannel.stream is single-subscription
+// (web_socket_channel ^2.4.0 → StreamChannelController default ctor). Hub is the
+// SOLE owner of `ch.stream.listen`. All consumers (Lobby, NeuralInterface,
+// Schedule) must subscribe via `inbound`/`errors`/`done` (broadcast).
 class _ClientWsHub {
   static WebSocketChannel? channel;
   static StreamSubscription<dynamic>? _hubPipe;
   static final StreamController<dynamic> _hubIn = StreamController<dynamic>.broadcast();
+  static final StreamController<Object> _hubErr = StreamController<Object>.broadcast();
+  static final StreamController<void> _hubDone = StreamController<void>.broadcast();
   static Stream<dynamic> get inbound => _hubIn.stream;
+  static Stream<Object> get errors => _hubErr.stream;
+  static Stream<void> get done => _hubDone.stream;
   static void attach(WebSocketChannel ch) {
     channel = ch;
     _hubPipe?.cancel();
-    _hubPipe = ch.stream.listen((m) {
-      if (!_hubIn.isClosed) _hubIn.add(m);
-    }, onError: (_) {}, onDone: () {});
+    _hubPipe = ch.stream.listen(
+      (m) { if (!_hubIn.isClosed) _hubIn.add(m); },
+      onError: (e) { if (!_hubErr.isClosed) _hubErr.add(e is Object ? e : Object()); },
+      onDone: () { channel = null; if (!_hubDone.isClosed) _hubDone.add(null); },
+    );
   }
 }
 
