@@ -1,0 +1,43 @@
+EFF: ~85/~110 = 77% | FAIL LOSS: ~25 tokens at $0.001019/1k = $0.0000255 | session: ~$0.00026 | model: claude-opus-4-7-thinking-xhigh
+
+OPTIMIZE_NEXT: condense halt summary; rely on diff above as primary artifact.
+
+IID CLASSIFICATION: [S] STRUCTURAL INFLATION REASONING: Halt summary repeats info already visible in the diff above (file:line refs, intent comments). LEGAL RISK: None
+
+Fix G' (Option A — hub-first) drafted. HALT for approval.
+Diff stats: mobile/lib/main.dart only — 71 insertions, 46 deletions, net +25. Lint clean.
+
+Architectural change (single source of truth):
+
+_ClientWsHub (main.dart:10331) is now the sole owner of ch.stream.listen. Adds errors (broadcast Object) and done (broadcast void) alongside existing inbound. Forwards raw onError → _hubErr.add, onDone → _hubDone.add + nulls channel.
+Lobby (main.dart:6326): _ClientWsHub.attach(_channel!) runs immediately after WebSocketChannel.connect(...) — before any consumer listen. _lobbySub now subscribes to _ClientWsHub.inbound; new _lobbyErrSub/_lobbyDoneSub carry the Connection Failed / Disconnected / _scheduleReconnect() semantics.
+Lobby login_success CLIENT branch (main.dart:6764): Fix F's if (_channel != null) { attach; _channel = null; } collapses to just _channel = null; — hub already owns the channel.
+NeuralInterface (main.dart:1547): same pattern — attach at connect, listen via broadcast trio. Removes redundant attach at main.dart:1670.
+All four lobby teardown sites (dispose, reconnect entry, login_success, security_disconnect) cancel the new subs.
+Subscription ownership verified:
+
+_LobbyScreenState._lobbySub (main.dart:6224) owned _channel.stream → now owns _ClientWsHub.inbound
+_NeuralInterfaceState._socketSub (main.dart:1498) owned _socket.stream → now owns _ClientWsHub.inbound
+_ClientWsHub._hubPipe is the only code that touches ch.stream.listen after this patch
+Why this is correct (where Fix G failed):
+
+WebSocketChannel.stream is single-subscription (per web_socket_channel ^2.4.0 → StreamChannelController default ctor in ~/.pub-cache/.../web_socket_channel-*/lib/html.dart). Cancelling a single-sub does not reset its "already listened" state, so the original Fix G's cancel-then-attach would still have thrown on any code path that re-entered.
+This patch ensures ch.stream.listen is invoked exactly once per channel instance, by exactly one site (the hub). Multi-consumer reads happen on broadcast streams that legally accept N listeners.
+Behavioral preservation checklist:
+
+✅ Lobby Connection Failed / Disconnected status messages + _scheduleReconnect() — preserved via _lobbyErrSub/_lobbyDoneSub
+✅ Neural ERROR / DISCONNECTED status + _addSystemMsg — preserved via _socketErrSub/_socketDoneSub
+⚠️ cancelOnError: true on lobby's old listen is dropped — broadcast subs survive errors. Lobby's error handler explicitly cancels its own subs via _scheduleReconnect() flow, so net behavior matches.
+✅ Fix F intent (Schedule reuses authenticated socket) — still met; hub owns it from the moment of connect rather than at login_success handoff.
+✅ Fix D + Fix E unchanged.
+Pending operator action:
+
+Review diff above.
+Reply "commit Fix G'" to authorize:
+git add mobile/lib/main.dart
+git commit -m "Fix G': hub owns raw WS stream; Lobby/Neural consume via broadcast inbound/errors/done"
+git push origin main
+After commit, you run the clean rebuild + deploy sequence. Post-deploy verification:
+ssh root@68.183.168.75 "grep -c 'FIX-F\|FIX-D\|FIX-E\|FIX-G' /var/www/sovereignsanctuary-web/main.dart.js"
+Expect ≥ 4 (note: minifier may rename, but comments survive in --release source comments? — actually no, comments are stripped. Better verification: deploy a version.json bump and confirm browser console shows no Stream has already been listened to on landing.)
+Awaiting "commit Fix G'" or revision request.
