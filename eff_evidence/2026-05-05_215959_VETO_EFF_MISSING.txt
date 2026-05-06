@@ -1,0 +1,96 @@
+> Implement Fix G — cancel _lobbySub before _ClientWsHub.attach to prevent
+double-listen on single-subscription WebSocket stream.
+
+Per investigation findings: _channel.stream is single-subscription.
+_lobbySub at main.dart:6317 owns the listen. _ClientWsHub.attach() at line 10325
+listens AGAIN on the same stream → StateError "Stream has already been listened to."
+
+This crash exists pre-Fix-F (only on COACH_ONLY login) but Fix F expands the
+blast radius to every CLIENT login. Must ship Fix G in same build as F+D+E or
+the F+D+E deploy makes the crash worse.
+
+Two patch locations:
+
+═══════════════════════════════════════════════════════════════
+PATCH G1 — Lobby login_success attach
+═══════════════════════════════════════════════════════════════
+
+File: mobile/lib/main.dart
+Location: ~line 6748-6752 (the relocated Fix F attach)
+
+Required:
+Before _ClientWsHub.attach(_channel!), cancel _lobbySub:
+
+  // FIX-G: cancel single-sub listener before handing channel to hub
+  await _lobbySub?.cancel();
+  _lobbySub = null;
+  _ClientWsHub.attach(_channel!);
+  _channel = null;
+
+Constraints:
+- Maximum 6 lines added
+- Add # FIX-G marker
+- Preserve Fix F structural change (attach above COACH_ONLY branch)
+
+═══════════════════════════════════════════════════════════════
+PATCH G2 — NeuralInterface attach
+═══════════════════════════════════════════════════════════════
+
+File: mobile/lib/main.dart
+Location: ~line 1657-1664 (NeuralInterface _ClientWsHub.attach(_socket!))
+
+Required:
+Before _ClientWsHub.attach(_socket!), cancel the local socket subscription
+that owns _socket.stream. Identify which subscription holds it:
+- If _socketSub at line 1538 owns _socket.stream: cancel _socketSub first
+- Set the local sub to null after cancel
+- Then call attach
+
+Pattern:
+  // FIX-G: cancel local socket listener before hub takeover
+  await _socketSub?.cancel();
+  _socketSub = null;
+  _ClientWsHub.attach(_socket!);
+
+Constraints:
+- Maximum 6 lines added per location
+- Add # FIX-G marker
+- Verify which subscription variable owns _socket.stream before cancelling
+
+═══════════════════════════════════════════════════════════════
+COMMIT
+═══════════════════════════════════════════════════════════════
+
+git add mobile/lib/main.dart
+git commit -m "Fix G: cancel single-sub stream listener before _ClientWsHub.attach to prevent double-listen StateError"
+git push origin main
+
+═══════════════════════════════════════════════════════════════
+DEPLOY (operator runs, NOT Cursor)
+═══════════════════════════════════════════════════════════════
+
+Operator will run:
+  cd mobile && rm -rf build/ .dart_tool/
+  flutter pub get
+  flutter build web --release
+  cd .. && bash scripts/deploy_flutter_web.sh
+  bash scripts/cf_purge_flutter_web.sh
+
+Then verify F+D+E+G all present in deployed bundle:
+  ssh root@68.183.168.75 "grep -c 'FIX-F\|FIX-D\|FIX-E\|FIX-G' /var/www/sovereignsanctuary-web/main.dart.js"
+  Expected: count >= 4
+
+═══════════════════════════════════════════════════════════════
+GATING
+═══════════════════════════════════════════════════════════════
+
+Show diff for both G1 and G2 before committing.
+Verify which subscription variable owns _socket.stream in NeuralInterface.
+HALT until operator says "commit Fix G" before pushing.
+
+Mode: investigate (verify subscription ownership) then execute (gated)
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10
+  $0.001019/1k = claude-opus-4-7-thinking-xhigh
+  $0.000937/1k = claude-opus-4-7
+IID footer required if EFF < 80%

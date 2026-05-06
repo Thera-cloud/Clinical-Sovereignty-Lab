@@ -924,3 +924,6 @@ EFF: 60/130 = 46% | FAIL LOSS: 75 tokens at $0.001019/1k | session: n/a | model:
 - Claimed: 620 Actual: 656 Factor: .9x
 - Patterns: PATTERN_DRIFT_S
 - Evidence: 2026-05-05_215113_PLAUSIBLE_PATTERN_DRIFT_S_620vs656.txt
+
+## 2026-05-05 21:59:59 VETO EFF MISSING
+- Evidence: 2026-05-05_215959_VETO_EFF_MISSING.txt
