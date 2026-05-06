@@ -10353,6 +10353,16 @@ class _ClientWsHub {
   }
 }
 
+// Public façade for cross-library reuse (e.g. NeuralInterfaceV2). # FIX-H
+class ClientWsHub {
+  ClientWsHub._();
+  static WebSocketChannel? get channel => _ClientWsHub.channel;
+  static Stream<dynamic> get inbound => _ClientWsHub.inbound;
+  static Stream<Object> get errors => _ClientWsHub.errors;
+  static Stream<void> get done => _ClientWsHub.done;
+  static void attach(WebSocketChannel ch) => _ClientWsHub.attach(ch);
+}
+
 // =============================================================================
 // CLIENT SCHEDULE SCREEN (COACH_ONLY & TOP_TIER)
 // =============================================================================

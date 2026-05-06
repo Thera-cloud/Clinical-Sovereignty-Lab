@@ -24,7 +24,7 @@ import 'shared_widgets.dart';
 import 'widgets/calendar_views.dart';
 import 'services/nevedal_flutter.dart';
 import 'services/large_video_upload.dart';
-import 'main.dart' show defaultWsUrl, defaultApiBaseUrl, LobbyScreen, FamilySanctuaryScreen, ClientScheduleScreen, isNativeIOS;
+import 'main.dart' show defaultWsUrl, defaultApiBaseUrl, LobbyScreen, FamilySanctuaryScreen, ClientScheduleScreen, isNativeIOS, ClientWsHub;
 import 'debug_logger.dart';
 import 'avatar.dart' hide AnimatedBuilder;
 import 'screens/settings_screen.dart';
@@ -224,7 +224,8 @@ class _OnboardingTutorialScreenState extends State<OnboardingTutorialScreen> wit
       if (token != null) {
         _socket!.sink.add(json.encode({"type": "auth", "token": token, "hardware_id": widget.userData["hardware_id"] ?? ""}));
       }
-      // Listen for messages from bridge (audio deltas, tts_done, auth confirmation)
+      // FIX-H: NOT ClientWsHub — tour uses a dedicated short-lived WS + `auth` (not lobby
+      // login_request). Hub is client main-context only; double-listen on one channel N/A here.
       _socketSub = _socket!.stream.listen((message) {
         try {
           final data = json.decode(message);
@@ -1220,6 +1221,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
   final _dbg = getDebugLogger();
   
   WebSocketChannel? _socket;
+  StreamSubscription<dynamic>? _socketSub;
+  StreamSubscription<Object>? _socketErrSub;
+  StreamSubscription<void>? _socketDoneSub;
   String get _serverUrl => defaultWsUrl;
   StreamSubscription<String>? _audioSub;
   Timer? _talkingTimer;
@@ -1423,7 +1427,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      if (_socket != null) _socket!.sink.add(jsonEncode({"type": "get_profile"}));
+      if (_wsCh != null) _wsSend(jsonEncode({"type": "get_profile"})); // FIX-H
       if (PaymentConfirmationScreen.pendingCheckout && mounted) {
         PaymentConfirmationScreen.pendingCheckout = false;
         Navigator.push(context, MaterialPageRoute(builder: (_) => PaymentConfirmationScreen(
@@ -1464,37 +1468,72 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
     // #endregion
   }
 
+  WebSocketChannel? get _wsCh => ClientWsHub.channel ?? _socket; // FIX-H
+  void _wsSend(String payload) => _wsCh?.sink.add(payload); // FIX-H
+  void _cancelNeuralWsSubs() {
+    _socketSub?.cancel(); _socketSub = null;
+    _socketErrSub?.cancel(); _socketErrSub = null;
+    _socketDoneSub?.cancel(); _socketDoneSub = null;
+  }
+  void _applyHubWarmStart() { // FIX-H login_success side-effects without second login_request
+    _reconnectAttempts = 0;
+    if (mounted) setState(() => _connectionStatus = "ONLINE (SECURE)");
+    _addSystemMsg("Neural Link Established.");
+    _updateMetricsFromProfile(widget.currentUserProfile ?? {});
+    _requestMetrics();
+    _wsSend(jsonEncode({"type": "get_pending_nudges"}));
+    _checkSseIntake();
+    _nevedal.initialize(
+      socket: ClientWsHub.channel!,
+      sessionId: 'session_${DateTime.now().millisecondsSinceEpoch}',
+      userId: widget.username ?? 'unknown',
+    );
+  }
+
   void _connectToCortex() {
     setState(() => _connectionStatus = "Dialing Neural Core...");
-    
-    try {
-      _socket?.sink.close();
-      _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
-      
-      _socket!.stream.listen(
-        _handleSocketMessage,
-        onError: (e) {
+    _cancelNeuralWsSubs();
+    if (ClientWsHub.channel != null) { // FIX-H reuse lobby-authenticated hub
+      try { _socket?.sink.close(); } catch (_) {}
+      _socket = null;
+      _socketSub = ClientWsHub.inbound.listen(_handleSocketMessage);
+      _socketErrSub = ClientWsHub.errors.listen((e) {
+        _debugLog("Neural socket error: $e");
+        if (mounted) setState(() => _connectionStatus = "Connection interrupted. Reconnecting...");
+        _scheduleReconnect();
+      });
+      _socketDoneSub = ClientWsHub.done.listen((_) {
+        if (mounted) setState(() => _connectionStatus = "Reconnecting...");
+        _scheduleReconnect();
+      });
+      _applyHubWarmStart();
+    } else {
+      try { _socket?.sink.close(); } catch (_) {}
+      _socket = null;
+      try {
+        _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
+        ClientWsHub.attach(_socket!);
+        _socketSub = ClientWsHub.inbound.listen(_handleSocketMessage);
+        _socketErrSub = ClientWsHub.errors.listen((e) {
           _debugLog("Neural socket error: $e");
-          if(mounted) setState(() => _connectionStatus = "Connection interrupted. Reconnecting...");
+          if (mounted) setState(() => _connectionStatus = "Connection interrupted. Reconnecting...");
           _scheduleReconnect();
-        },
-        onDone: () {
-          if(mounted) setState(() => _connectionStatus = "Reconnecting...");
+        });
+        _socketDoneSub = ClientWsHub.done.listen((_) {
+          if (mounted) setState(() => _connectionStatus = "Reconnecting...");
           _scheduleReconnect();
-        }
-      );
-
-      if (kDebugMode) print(">>> NEURAL INTERFACE: Sending Login...");
-      _socket!.sink.add(jsonEncode({
-        "type": "login_request",
-        "username": widget.username,
-        "password": widget.password,
-        "expected_role": "CLIENT"
-      }));
-
-    } catch (e) {
-      _debugLog("Connection error: $e");
-      _scheduleReconnect();
+        });
+        if (kDebugMode) print(">>> NEURAL INTERFACE: Sending Login...");
+        _socket!.sink.add(jsonEncode({
+          "type": "login_request",
+          "username": widget.username,
+          "password": widget.password,
+          "expected_role": "CLIENT"
+        }));
+      } catch (e) {
+        _debugLog("Connection error: $e");
+        _scheduleReconnect();
+      }
     }
 
     _audioSub?.cancel();
@@ -1537,15 +1576,16 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
         _requestMetrics();
 
         // Request pending nudges from Nate
-        _socket?.sink.add(jsonEncode({"type": "get_pending_nudges"}));
+        _wsSend(jsonEncode({"type": "get_pending_nudges"})); // FIX-H
 
         _checkSseIntake();
 
-        if (_socket != null) {
+        final sk = ClientWsHub.channel ?? _socket; // FIX-H
+        if (sk != null) {
           final sessionId = data['session_id'] as String? ??
               'session_${DateTime.now().millisecondsSinceEpoch}';
           _nevedal.initialize(
-            socket: _socket!,
+            socket: sk,
             sessionId: sessionId,
             userId: widget.username ?? 'unknown',
           );
@@ -1612,7 +1652,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4ECDC4)),
                   onPressed: () {
                     Navigator.pop(ctx);
-                    _socket?.sink.add(jsonEncode({
+                    _wsSend(jsonEncode({ // FIX-H
                       'type': 'search_consent_approved',
                       'query': query,
                     }));
@@ -1761,7 +1801,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
             content: Text('Payment confirmed — $label'),
             backgroundColor: const Color(0xFF4ECDC4),
           ));
-          _socket?.sink.add(jsonEncode({"type": "get_profile"}));
+          _wsSend(jsonEncode({"type": "get_profile"})); // FIX-H
         }
       }
     } catch (e) {
@@ -1772,14 +1812,14 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
   // ── Nudge Actions ──
 
   void _markNudgeOpened(String nudgeId) {
-    _socket?.sink.add(jsonEncode({"type": "nudge_mark_opened", "nudge_id": nudgeId}));
+    _wsSend(jsonEncode({"type": "nudge_mark_opened", "nudge_id": nudgeId})); // FIX-H
     setState(() {
       _pendingNudges.removeWhere((n) => n['nudge_id'] == nudgeId);
     });
   }
 
   void _dismissNudge(String nudgeId) {
-    _socket?.sink.add(jsonEncode({"type": "nudge_dismiss", "nudge_id": nudgeId}));
+    _wsSend(jsonEncode({"type": "nudge_dismiss", "nudge_id": nudgeId})); // FIX-H
     setState(() {
       _pendingNudges.removeWhere((n) => n['nudge_id'] == nudgeId);
     });
@@ -1874,7 +1914,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
   // ── AI Mode Actions ──
 
   void _activateAiMode(String mode) {
-    _socket?.sink.add(jsonEncode({
+    _wsSend(jsonEncode({ // FIX-H
       "type": "ai_mode_activate",
       "mode": mode,
       "session_id": widget.currentUserProfile?['hardware_id'] ?? 'default',
@@ -1883,7 +1923,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
 
   void _deactivateAiMode() {
     if (_activeAiMode == null) return;
-    _socket?.sink.add(jsonEncode({
+    _wsSend(jsonEncode({ // FIX-H
       "type": "ai_mode_deactivate",
       "session_id": widget.currentUserProfile?['hardware_id'] ?? 'default',
     }));
@@ -2142,7 +2182,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
   }
 
   void _requestMetrics() {
-    _socket?.sink.add(jsonEncode({"type": "get_metrics"}));
+    _wsSend(jsonEncode({"type": "get_metrics"})); // FIX-H
   }
 
   // ===========================================================================
@@ -3195,14 +3235,14 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
       if (!_aiDataConsentGiven) return;
     }
     
-    if (_socket == null || _connectionStatus.contains("DISCONNECTED")) {
+    if (_wsCh == null || _connectionStatus.contains("DISCONNECTED")) { // FIX-H
       _addSystemMsg("Link is dead. Reconnecting...");
       _connectToCortex();
       return;
     }
 
     if (kDebugMode) print(">>> SENDING: $text");
-    _socket!.sink.add(jsonEncode({
+    _wsSend(jsonEncode({ // FIX-H
       "type": "nate_query", 
       "nate_query": text,
       "modality": "General" 
@@ -3285,8 +3325,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
     });
 
     // Notify backend that export was completed
-    if (_socket != null) {
-      _socket!.sink.add(jsonEncode({
+    if (_wsCh != null) { // FIX-H
+      _wsSend(jsonEncode({
         "type": "export_completed",
         "destination": destination,
         "success": success,
@@ -3481,8 +3521,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
 
   /// Speak a Nate message aloud via Mini-TTS
   void _speakNateMessage(String text) {
-    if (text.trim().isEmpty || _socket == null) return;
-    _socket!.sink.add(json.encode({
+    if (text.trim().isEmpty || _wsCh == null) return; // FIX-H
+    _wsSend(json.encode({ // FIX-H
       "type": "tts_speak",
       "text": text,
     }));
@@ -3655,7 +3695,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
     _scrollController.dispose();
     _tts.stop();
     _speech.stop();
-    _socket?.sink.close();
+    _cancelNeuralWsSubs(); // FIX-H hub: cancel only; cold: subs + socket
+    if (_socket != null) _socket!.sink.close(); // FIX-H shared hub: skip close
+    _socket = null;
     super.dispose();
   }
 
@@ -3700,7 +3742,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
             onPressed: () async {
               // Close parent socket -- iOS Safari struggles with concurrent
               // WebSocket connections to the same origin for the same user
-              _socket?.sink.close();
+              _wsCh?.sink.close(); // FIX-H shared or owned channel
               await Navigator.push(context, MaterialPageRoute(
                 builder: (_) => FamilySanctuaryScreen(
                   profile: widget.currentUserProfile ?? {},
@@ -3769,9 +3811,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
               Navigator.push<dynamic>(context, MaterialPageRoute(
                 builder: (_) => ClientSettingsScreen(
                   profile: widget.currentUserProfile ?? {},
-                  socket: _socket,
+                  socket: _wsCh,
                   onLogout: () {
-                    _socket?.sink.close();
+                    _wsCh?.sink.close(); // FIX-H
                   },
                 ),
               )).then((result) {
@@ -3787,7 +3829,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.red),
             onPressed: () {
-              _socket?.sink.close();
+              _wsCh?.sink.close(); // FIX-H
               Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LobbyScreen()));
             }
           )
@@ -4069,7 +4111,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
                   const SizedBox(width: 4),
                   VaultAttachmentButton(
                     profile: widget.currentUserProfile,
-                    socket: _socket,
+                    socket: _wsCh,
                     onVaultItemSelected: (itemId) {
                       if (itemId != null && itemId.isNotEmpty) {
                         _chatController.text = '${_chatController.text}[Vault:$itemId] '.trim();
@@ -4380,6 +4422,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       _socket?.sink.close();
       _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
       
+      // FIX-H: NOT ClientWsHub — static hub is client-lobby/Neural V2/Schedule handoff only.
+      // Coach `login_request` must stay its own socket or it would overwrite client channel on same isolate.
       // On Flutter web, websocket failures can surface as unhandled async errors unless
       // we provide an explicit onError handler.
       _socket!.stream.listen(
@@ -17754,6 +17798,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
     try {
       _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
       
+      // FIX-H: NOT ClientWsHub — admin MAIN_CONTEXT WS is separate from client `_ClientWsHub` singleton.
       _socket!.stream.listen(
         _handleSocketMessage,
         onError: (e) {
