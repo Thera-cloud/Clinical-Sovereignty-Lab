@@ -1,0 +1,6 @@
+docs/client_portal/features/24_sovereign_vault.md is in place per _PIPELINE_TEMPLATE.md: _PHASE_3_PLAN.md spec 24 (G10, G11, G12, E19); line truth from _TAB_INVENTORY_2026-05-05.md §B (2744, 2743, 2778–2795) and §H (499–502, 739–742); _FOUNDATIONAL_SPEC.md §3 row 11 (not row 24 — that row is check-in). §2 has 14 criteria across 2.A–2.E; §9 is the verbatim §9 table plus 3 rejects; §11 has 4 Steve Jobs / IA debt rows; §18 fences 22, 11, 09_folder.md, and foundational row 24 check-in.
+
+EFF: ~85/~270 = 31% | FAIL
+OPTIMIZE_NEXT: merge §2 sub-headings into a flat checklist if you want shorter maintainer scans
+
+LOSS: ~185 tokens at rate unknown | session: n/a | model: unknown
