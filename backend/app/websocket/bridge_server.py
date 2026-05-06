@@ -12187,8 +12187,16 @@ async def handle_client(websocket, path=None):
                                 available_slots = []
                                 booked_slots = []
                                 if target_date:
+                                    # SCHEDULE-AVAILABILITY-FIX: parse in coach TZ so "today" comparisons match coach local time
+                                    try:
+                                        from zoneinfo import ZoneInfo
+                                        _tz = ZoneInfo(avail_data.get("timezone") or "America/New_York")
+                                    except Exception:
+                                        _tz = None
                                     try:
                                         target_dt = datetime.datetime.fromisoformat(target_date)
+                                        if _tz is not None:
+                                            target_dt = target_dt.replace(tzinfo=_tz)
                                         day_name = target_dt.strftime("%A").lower()
                                     except Exception:
                                         target_dt = None
@@ -12250,8 +12258,15 @@ async def handle_client(websocket, path=None):
                                         for slot in day_slots:
                                             _st_str = slot.get("start", "09:00:00")
                                             _en_str = slot.get("end", "17:00:00")
-                                            start_h = int(_st_str.split(":")[0])
-                                            end_h = int(_en_str.split(":")[0])
+                                            # SCHEDULE-AVAILABILITY-FIX: respect minute precision — round start UP, end DOWN to whole hours
+                                            try:
+                                                _st_t = datetime.time.fromisoformat(_st_str)
+                                                _en_t = datetime.time.fromisoformat(_en_str)
+                                                start_h = _st_t.hour + (1 if _st_t.minute > 0 else 0)
+                                                end_h = _en_t.hour
+                                            except Exception:
+                                                start_h = int(_st_str.split(":")[0])
+                                                end_h = int(_en_str.split(":")[0])
                                             for hour in range(start_h, end_h):
                                                 slot_start = target_dt.replace(hour=hour, minute=0, second=0)
                                                 slot_end = slot_start + datetime.timedelta(hours=1)
@@ -12265,7 +12280,9 @@ async def handle_client(websocket, path=None):
                                                             break
                                                     except Exception:
                                                         pass
-                                                if is_free and slot_start > datetime.datetime.now():
+                                                # SCHEDULE-AVAILABILITY-FIX: compare against "now" in same TZ as slot
+                                                _now = datetime.datetime.now(_tz) if _tz is not None else datetime.datetime.now()
+                                                if is_free and slot_start > _now:
                                                     available_slots.append({"start": slot_start.isoformat(), "end": slot_end.isoformat()})
 
                             print(f">>> [AVAILABILITY-DEBUG] returning {len(available_slots)} open slots after masking {len(booked_slots)} booked")  # AVAILABILITY-DEBUG
