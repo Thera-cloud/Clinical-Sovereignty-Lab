@@ -885,3 +885,10 @@ EFF: 60/130 = 46% | FAIL LOSS: 75 tokens at $0.001019/1k | session: n/a | model:
 - ESTIMATED: yes (~-prefix on EFF counts)
 - Patterns: MODEL_WITHHELD+IID_FOOTER_MISSING
 - Evidence: 2026-05-05_210936_FABRICATION_OVERSTATED_MODEL_WITHHELD+IID_FOOTER_MISSING_240vs91.txt
+
+## 2026-05-05 21:11:16 FABRICATION_OVERSTATED
+- EFF: EFF: 90/275 = 33% | FAIL
+- LOSS: LOSS: 185 at $0.1110 | session: n/a | model: composer-2-fast (cursor output rate)
+- Claimed: 275 Actual: 58 Factor: 4.7x
+- Patterns: IID_FOOTER_MISSING
+- Evidence: 2026-05-05_211116_FABRICATION_OVERSTATED_IID_FOOTER_MISSING_275vs58.txt

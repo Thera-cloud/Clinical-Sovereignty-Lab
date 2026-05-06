@@ -1,0 +1,6 @@
+Added docs/client_portal/features/27_memory_search.md from the pipeline template: foundational §3 row 15 (secure_search_screen.dart 249 / 120–123 / 52–71), inventory YOUR TOOLS 2872 + 2889–2893, plan spec 27; §9 table verbatim + 3 rejects; §11 ≥4 debit rows.
+
+EFF: 90/275 = 33% | FAIL
+OPTIMIZE_NEXT: Compress duplicate “Foundational/plan/inventory” preface into one bullet next time
+
+LOSS: 185 at $0.1110 | session: n/a | model: composer-2-fast (cursor output rate)
