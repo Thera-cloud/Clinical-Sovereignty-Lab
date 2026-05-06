@@ -5556,6 +5556,30 @@ async def sse_ble_proximity(request: Request, _user: dict = Depends(_sse_auth)):
         raise HTTPException(422, "nearby_user_id required")
     return await process_proximity_event(uid, nearby, request.app.state.db_pool)
 
+def _refresh_presigned(url: str | None) -> str | None:
+    """Re-sign a stale presigned R2 URL. Extracts the object key from the URL
+    path and generates a fresh 24h signature. Returns the original URL unchanged
+    if R2 is not configured or the URL is not an R2 presigned URL."""
+    if not url:
+        return url
+    try:
+        from app.sse.infrastructure.r2_storage import presigned_url as _presign, _R2_BUCKET
+        from urllib.parse import urlparse
+        parsed = urlparse(url.split("?")[0])
+        path = parsed.path.lstrip("/")
+        bucket_prefix = f"{_R2_BUCKET}/"
+        if path.startswith(bucket_prefix):
+            key = path[len(bucket_prefix):]
+        else:
+            key = path
+        if not key:
+            return url
+        fresh = _presign(key)
+        return fresh or url
+    except Exception:
+        return url
+
+
 @sse_client_router.get("/journey/panels")
 async def sse_client_journey_panels(request: Request, _user: dict = Depends(_sse_auth)):
     hw_id = _user.get("hardware_id") or _user.get("user_id") or ""
@@ -5579,8 +5603,13 @@ async def sse_client_journey_panels(request: Request, _user: dict = Depends(_sse
         f = await conn.fetchrow("SELECT archetype_hint, archetype_image_url FROM sse_identity_forge WHERE user_id = ANY($1) LIMIT 1", ids)
     merged = sorted([dict(r) for r in rows_j] + [dict(r) for r in rows_w],
                      key=lambda x: x.get("generated_at") or "", reverse=True)[:50]
+    for panel in merged:
+        panel["r2_url"] = _refresh_presigned(panel.get("r2_url"))
+    archetype = dict(f) if f else {}
+    if archetype.get("archetype_image_url"):
+        archetype["archetype_image_url"] = _refresh_presigned(archetype["archetype_image_url"])
     return {
-        "archetype": dict(f) if f else {},
+        "archetype": archetype,
         "journey": dict(j) if j else {},
         "panels": merged
     }

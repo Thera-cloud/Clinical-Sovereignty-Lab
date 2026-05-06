@@ -489,6 +489,7 @@ class NevedalService {
   void handleServerUpdate(Map<String, dynamic> data) {
     try {
       _currentState = NevedalState.fromJson(data);
+      if (_stateController.isClosed) return;
       _stateController.add(_currentState);
       
       // Log CEE windows
@@ -514,6 +515,8 @@ class NevedalService {
     
     try {
       _socket!.sink.add(jsonEncode(payload));
+    } on StateError {
+      _socket = null;
     } catch (e) {
       print(">>> [NEVEDAL] Error sending biometrics: $e");
     }
@@ -522,7 +525,12 @@ class NevedalService {
   /// Dispose of resources
   void dispose() {
     _updateTimer?.cancel();
-    _stateController.close();
+    _updateTimer = null;
+    _socket = null;
+    _sessionId = null;
+    if (!_stateController.isClosed) {
+      _stateController.close();
+    }
     _collector.reset();
   }
 }
