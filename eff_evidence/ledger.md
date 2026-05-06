@@ -895,3 +895,11 @@ EFF: 60/130 = 46% | FAIL LOSS: 75 tokens at $0.001019/1k | session: n/a | model:
 
 ## 2026-05-05 21:17:44 VETO EFF MISSING
 - Evidence: 2026-05-05_211744_VETO_EFF_MISSING.txt
+
+## 2026-05-05 21:22:26 FABRICATION_OVERSTATED
+- EFF: EFF: ~35/~165 = ~21% | FAIL
+- LOSS: LOSS: ~130 tokens at rate unknown | session: n/a | model: unknown
+- Claimed: 165 Actual: 72 Factor: 2.2x
+- ESTIMATED: yes (~-prefix on EFF counts)
+- Patterns: MODEL_WITHHELD+IID_FOOTER_MISSING
+- Evidence: 2026-05-05_212226_FABRICATION_OVERSTATED_MODEL_WITHHELD+IID_FOOTER_MISSING_165vs72.txt

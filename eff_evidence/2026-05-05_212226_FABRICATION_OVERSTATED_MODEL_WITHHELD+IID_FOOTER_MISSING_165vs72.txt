@@ -1,0 +1,14 @@
+Commit (batch message): 07f04dc309c0696b05ba4382eb1b1016c73c9c6e
+
+Follow-up: c7b4dc → typo fix in 39_account_deletion.md table (HEAD c7b4a4f607cf5ddd52fb473449648c35a8767550)
+
+**docs/client_portal/features/*.md count: 38 (spec 16 still blocked)
+
+Mesh: CoachingMeshScreen (mobile/lib/screens/coaching_mesh_screen.dart:111) ≠ CommunityMeshScreen (mobile/lib/screens/community_mesh_screen.dart:84) → two specs: 30_coaching_mesh.md + 31_community_mesh.md (stated in commit body)
+
+**35a/35b:** Separate files 35a_home_widget.md, 35b_help_faq.md ( **_HelpFAQScreen** **settings_screen.dart:5575**)
+
+EFF: ~35/~165 = ~21% | FAIL
+OPTIMIZE_NEXT: One-line confirmation only (hash + count + VERIFY) next time
+
+LOSS: ~130 tokens at rate unknown | session: n/a | model: unknown
