@@ -1,0 +1,36 @@
+EFF: 480/620 = 77% | FAIL | EXEMPT: correctness LOSS: 140 tokens at $0.001019/1k = $0.0001 | session: n/a | model: claude-opus-4-7-thinking-xhigh
+
+IID CLASSIFICATION: [S] STRUCTURAL INFLATION REASONING: Investigation output exceeded compact budget due to 6 sections × evidence quoting; trims possible by inlining only diff-critical lines. LEGAL RISK: None.
+
+Section A — Commit audit (c7b4a4f..HEAD)
+Total commits: 7
+F/D/E intent: d0e905f (F), 6fbd33e (D), d95faf8 (E) — all touch only mobile/lib/main.dart + mobile/lib/screens/settings_screen.dart ✅ in scope
+Other 4 commits: e0eff31, 1155510, 93754c6, 54e39b3 — all eff_evidence/*.txt + ledger.md + violations.csv only. Author = Nathan Nevedal (auto-watcher). Cannot affect deployed bundle.
+Working tree: unrelated rule/script edits, no mobile/lib/ changes.
+No pubspec/web/ changes in 24h.
+Section B — Crash source identification
+Line 3849: n(a){return A.fX(a,new Error())} — generic Dart throw helper.
+Line 50478: Tb(a,b,c,d){...if((p.b&3)!==0)throw A.n(A.an("Stream has already been listened to."))} — single-subscription Stream listened twice.
+Line 32089: $.bDN=new A.bH(s,...).dD(new A.aLH(),new A.aLI(),new A.aLJ()) — top-level $.bDN initializer chaining .dD (Future.then) on a stream.
+Source map: not deployed (separate fix).
+Dart culprit: a StreamSubscription.listen() site invoked during boot on a controller already attached. Top-level $.bDN field strongly suggests a global/static stream subscriber initialized at app start.
+Section C — Fix F null-safety analysis
+_channel non-null at relocated attach point: YES (guarded by if (_channel != null) { _ClientWsHub.attach(_channel!); _channel = null; } at main.dart:6748-6751).
+_ClientWsHub.attach(WebSocketChannel ch) at main.dart:10322 — non-nullable param, safe.
+Fix F NOT a null-deref source. Also: this code is inside role == 'CLIENT' branch after successful login_request — does NOT execute at app boot.
+Section D — Fix D & E boot-time analysis
+Fix D: removes password: arg in Settings → Schedule navigation. ClientScheduleScreen.password is String? (main.dart:10338). No compile error. Runs only on Settings tap → not boot.
+Fix E: new guard inside _ClientScheduleScreenState._connect(). Runs only when Schedule mounted. Not boot.
+Neither F/D/E executes during lobby init. Stack trace fires before user reaches CLIENT/COACH/ADMIN button.
+Section E — Non-F/D/E candidates
+Smoking gun: Deployed main.dart.js mtime = 2026-05-05 04:23:56 UTC = local build May 5 00:23:56 ET. F/D/E committed May 5 21:25 ET = May 6 01:25 UTC. Bundle is ~21 h older than F/D/E.
+version.json says deployed_at: 2026-05-06T01:29:15Z but grep for Fix E's runtime string 'Schedule _connect skipped' in deployed bundle returns 0 hits. Same for SCHEDULE-SHARED-WS. Fix F/D/E are NOT in the deployed main.dart.js.
+The bash scripts/deploy_flutter_web.sh rsync ran but flutter build web --release was not re-run before deploy (or rsync -t preserved old mtime). The version.json stamp updated; the JS bundle did not.
+Section F — Root cause
+The deployed bundle predates F/D/E by ~21 hours; the "Stream has already been listened to" crash is a pre-existing boot issue in the stale build, not introduced by F/D/E.
+
+Recommended fix scope (in order):
+
+Re-run cd mobile && flutter clean && flutter build web --release then bash scripts/deploy_flutter_web.sh. Verify ssh root@68.183.168.75 "grep -c 'Schedule _connect skipped' /var/www/sovereignsanctuary-web/main.dart.js" returns ≥1 before declaring deployed.
+Also deploy main.dart.js.map (currently absent) to enable de-minified stack traces.
+If crash persists in fresh F/D/E bundle, the offender is a top-level $.bDN stream subscriber — audit the 8 .stream.listen sites in mobile/lib/main.dart (esp. any global late Stream initialized in main()), independent of tonight's fixes.
