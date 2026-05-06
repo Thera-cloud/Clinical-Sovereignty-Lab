@@ -1,0 +1,6 @@
+docs/client_portal/features/25_weekly_brief.md is added from _PIPELINE_TEMPLATE.md, tied to _FOUNDATIONAL_SPEC.md §3 row 13 (6345, 6305–6323, brief GET + X-User-Id), _PHASE_3_PLAN.md spec 25 / E15→25, and _TAB_INVENTORY_2026-05-05.md (2872, 2886–2888, 2125 E15). §2 lists 11 criteria; §9 uses the verbatim §9 commit table + 3 rejects; §11 has 4 Steve Jobs / auth / branding debt rows; §18 excludes row 14, coach 04_briefings.md, and chat recap/SSE.
+
+EFF: ~80/~250 = 32% | FAIL
+OPTIMIZE_NEXT: drop duplicate “foundational + inventory” overlap in §4 if you want a shorter file
+
+LOSS: ~170 tokens at rate unknown | session: n/a | model: unknown
