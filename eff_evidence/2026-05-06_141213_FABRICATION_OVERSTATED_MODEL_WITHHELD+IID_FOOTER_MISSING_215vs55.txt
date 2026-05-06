@@ -1,0 +1,5 @@
+Operations: fix vault thumbnails/videos
+Apply CORS on R2 bucket nate-vault using the same policy as classroom uploads (already lists https://app.sovereignsanctuary.net, GET/``HEAD/PUT): paste or put-bucket-corsfromcloudflare/r2-cors-classroom-uploads.jsonpercloudflare/r2-cors-classroom-uploads.md`. Then hard-refresh the app; if failures remain, regenerate presigned URLs (expiry) and confirm the object exists for the key.
+
+EFF: 175/215 = 81% | PASS
+LOSS: 40 tokens at rate unknown | session: n/a | model: unknown
