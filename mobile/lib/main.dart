@@ -10440,6 +10440,21 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   }
   
   void _connect() {
+    // Fix E (COACH-AVAIL-ERROR-HANDLER): never send login_request with empty creds.
+    // Empty password silently fails bridge auth → uid=GUEST on subsequent sends.
+    final u = (widget.username ?? '').trim();
+    final p = (widget.password ?? '');
+    if (u.isEmpty || p.isEmpty) {
+      debugLog('Schedule _connect skipped: missing credentials and no hub channel');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _coachAvailErr = 'Session expired';
+          _coachAvailDetail = 'Return to the home screen and reopen Schedule.';
+        });
+      }
+      return;
+    }
     try {
       _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
       _socket!.stream.listen(_handleMessage, onError: (e) => debugLog('WS Error: $e'), onDone: () {
@@ -10447,8 +10462,8 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
       });
       _socket!.sink.add(jsonEncode({
         "type": "login_request",
-        "username": widget.username ?? '',
-        "password": widget.password ?? '',
+        "username": u,
+        "password": p,
         "expected_role": "CLIENT",
       }));
     } catch (e) {
