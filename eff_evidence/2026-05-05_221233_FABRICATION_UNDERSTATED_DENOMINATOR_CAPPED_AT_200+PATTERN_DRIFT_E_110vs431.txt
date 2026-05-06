@@ -1,0 +1,27 @@
+0 is expected — Flutter --release minifier strips Dart comments (// FIX-G' markers don't survive into main.dart.js). The grep verifier was incorrect; I flagged this in the prior message but should have proposed the right one. Use these instead:
+
+# 1. Confirm new bundle deployed (mtime + size differ from yesterday)
+ssh root@68.183.168.75 "ls -la /var/www/sovereignsanctuary-web/main.dart.js"
+# 2. Confirm version.json matches commit 72af178
+ssh root@68.183.168.75 "cat /var/www/sovereignsanctuary-web/version.json"
+curl -sL https://app.sovereignsanctuary.net/version.json
+# 3. Confirm new code path present (search for hub broadcast getter signature
+#    that minifier preserves as a property name when used dynamically — but
+#    here it's static, so it WILL be renamed). Best signal: byte size delta.
+ssh root@68.183.168.75 "wc -c /var/www/sovereignsanctuary-web/main.dart.js"
+# Compare against last-known-good size.
+Authoritative verification: load https://app.sovereignsanctuary.net in a fresh incognito window. Open DevTools console BEFORE the page loads. Two outcomes:
+
+✅ Fix G' worked: No Uncaught Error at boot. WS connects, "Awaiting handshake..." resolves to lobby buttons usable.
+❌ Still broken: Console shows the same minified stack at main.dart.js:NNNNN. Capture line number — it will differ from prior 50478 if the new bundle is deployed (different minified offsets).
+If grep returned 0 AND the size matches yesterday's bundle: the rebuild/rsync didn't actually run. Re-execute:
+
+cd mobile && rm -rf build/ .dart_tool/ && flutter pub get && flutter build web --release
+cd .. && bash scripts/deploy_flutter_web.sh && bash scripts/cf_purge_flutter_web.sh
+Awaiting either: confirmation page boots clean, or new error capture if it doesn't.
+
+EFF: ~85/~110 = 77% | FAIL LOSS: ~25 tokens at $0.001019/1k = $0.0000255 | session: ~$0.00031 | model: claude-opus-4-7-thinking-xhigh
+
+OPTIMIZE_NEXT: should have proposed correct verifier (size delta + console check) the first time instead of repeating the operator's grep approach.
+
+IID CLASSIFICATION: [E] EMERGENT DRIFT REASONING: Original recommendation included the same flawed grep verifier I now have to retract; the parenthetical caveat acknowledged the issue but didn't replace the bad command, forcing this correction round. LEGAL RISK: Substantiation Failure — recommended a verification step I knew (per my own caveat) wouldn't work. Retraction: the grep -c 'FIX-F|...|FIX-G' command is invalid for --release builds. Use file size + version.json + browser console instead.
