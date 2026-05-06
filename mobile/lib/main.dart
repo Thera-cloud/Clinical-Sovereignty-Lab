@@ -6745,14 +6745,17 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
             } else if (role == 'COACH') {
               nextScreen = CoachDashboardScreenV2(currentUserProfile: profileWithToken, username: user, password: pass);
             } else {
+              // Fix F (SCHEDULE-SHARED-WS): attach lobby's authenticated channel to
+              // _ClientWsHub for ALL CLIENT routes so Schedule (incl. via Settings)
+              // can reuse it instead of opening a new unauthenticated socket.
+              if (_channel != null) {
+                _ClientWsHub.attach(_channel!);
+                _channel = null;
+              }
               // Check if COACH_ONLY client
               final subPlan = (profile['subscription_plan'] ?? '').toString().toUpperCase();
               final canAccessNate = profile['can_access_nate'] ?? true;
               if (subPlan == 'COACH_ONLY' || canAccessNate == false) {
-                if (_channel != null) {
-                  _ClientWsHub.attach(_channel!);
-                  _channel = null;
-                }
                 nextScreen = ClientScheduleScreen(currentUserProfile: profileWithToken, username: user, password: pass);
               } else {
                 // AI consent gate — required before chat access
