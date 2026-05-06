@@ -1,0 +1,6 @@
+docs/client_portal/features/26_coherence_reports.md is in place from _PIPELINE_TEMPLATE.md, tied to _FOUNDATIONAL_SPEC.md §3 row 14 (nevedal_reports_screen.dart:130, 37–43, 69–79), _PHASE_3_PLAN.md spec 26, and _TAB_INVENTORY YOUR TOOLS 2881–2885 under gate 2872. §2 has 10 criteria; §9 is the verbatim §9 table plus 3 rejects; §11 has 4 Steve Jobs / IA debt rows; §18 excludes 25, 27, 14 (cross-ref only), coach 03_insights.md.
+
+EFF: ~75/~240 = 31% | FAIL
+OPTIMIZE_NEXT: merge §3 table with §4 first bullet set to cut ~15 lines
+
+LOSS: ~165 tokens at rate unknown | session: n/a | model: unknown
