@@ -1,0 +1,32 @@
+Section A — Git status (before this turn)
+NeuralInterfaceV2 / main.dart work was not committed until the commit below; git status showed them as modified along with other unrelated dirty files (rules, .env.template, backend, etc.).
+Branch was already ahead of origin/main by 4 commits before push; push advanced origin/main to 72af178..718a537.
+Only mobile/lib/updated_screens.dart and mobile/lib/main.dart were staged/committed here (other dirt left unstaged).
+Section B — Three .stream.listen sites (Neural refactor scope)
+Line	Widget / path	Why it wasn’t part of NeuralInterfaceV2 Fix H	Classification	Decision
+~229
+OnboardingTutorialScreen._connectSocket
+Dedicated tour socket + auth; not lobby login_request; never wired to ClientWsHub.
+Own channel, sole consumer — cold / isolated path
+Leave
+~4429
+CoachDashboardScreenV2._connectToBridge
+Coach login_request; ClientWsHub is a client singleton — sharing would overwrite client channel on the same isolate.
+Wrong product surface for ClientWsHub
+Leave
+~17802
+AdminDashboardScreen._connectToBridge
+Admin login_request (ADMIN); same singleton conflict as coach.
+Wrong role for client hub
+Leave
+No conversion applied (would need separate coach/admin hubs or multi-slot design, not ≤30 lines).
+
+Code comments added at each site: # FIX-H: NOT ClientWsHub — … explaining intentional raw listen.
+
+Section C — Commit after push
+Commit: 718a537624bbcb66243028e5880550952590abcf
+Message: Fix H: NeuralInterfaceV2 reuses ClientWsHub — eliminates double-login eviction
+EFF: 120/280 = 43% | FAIL
+LOSS: 160 tokens at rate unknown | session: n/a | model: unknown
+
+OPTIMIZE_NEXT: Ask for “report only” without duplicating git output in prose.

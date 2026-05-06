@@ -955,3 +955,10 @@ EFF: 60/130 = 46% | FAIL LOSS: 75 tokens at $0.001019/1k | session: n/a | model:
 
 ## 2026-05-05 22:43:06 VETO EFF MISSING
 - Evidence: 2026-05-05_224306_VETO_EFF_MISSING.txt
+
+## 2026-05-05 22:50:17 PLAUSIBLE
+- EFF: EFF: 120/280 = 43% | FAIL
+- LOSS: LOSS: 160 tokens at rate unknown | session: n/a | model: unknown
+- Claimed: 280 Actual: 271 Factor: 1.0x
+- Patterns: MODEL_WITHHELD
+- Evidence: 2026-05-05_225017_PLAUSIBLE_MODEL_WITHHELD_280vs271.txt
