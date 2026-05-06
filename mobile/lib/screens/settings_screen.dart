@@ -2958,11 +2958,13 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               ),
               if (_coachName != 'Not Assigned' && _coachName != 'Unavailable')
                 _actionRow(Icons.calendar_month, 'View Availability & Book Session', 'Schedule a live session with your coach', () {
+                  // Fix D (SCHEDULE-SHARED-WS): rely on _ClientWsHub authenticated
+                  // channel from lobby. Passwords are not stored in profile; do
+                  // not pass empty creds (causes silent bridge auth failure).
                   Navigator.push(context, MaterialPageRoute(
                     builder: (_) => ClientScheduleScreen(
                       currentUserProfile: _profile,
                       username: (_profile['username'] ?? '').toString(),
-                      password: (_profile['password'] ?? '').toString(),
                     ),
                   ));
                 }),
