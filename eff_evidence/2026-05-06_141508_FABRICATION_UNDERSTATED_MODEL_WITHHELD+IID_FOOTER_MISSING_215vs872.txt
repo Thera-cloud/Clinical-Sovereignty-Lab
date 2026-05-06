@@ -1,0 +1,85 @@
+Tracing how vault/SSE journey assets load and whether we use XHR (CORS-sensitive) vs. plain image/video URLs.
+
+Confirming: Flutter web loads journey thumbs via Image.network on presigned r2.cloudflarestorage.com URLs — that uses a credentialed request path that requires R2 CORS. dispose() clears the timer but leaves _socket set, so after the WebSocket closes the periodic callback can still call sink.add. Hardening NevedalService: guard sends and null out socket on dispose.
+
+      _currentState = NevedalState.fromJson(data);
+      if (_stateController.isClosed) return;
+      _stateController.add(_currentState);
+      _socket!.sink.add(jsonEncode(payload));
+    } on StateError {
+      _socket = null;
+    } catch (e) {
+    _updateTimer?.cancel();
+    _stateController.close();
+    _updateTimer = null;
+    _socket = null;
+    _sessionId = null;
+    if (!_stateController.isClosed) {
+      _stateController.close();
+    }
+    _collector.reset();
+Browse vault → Sovereign Journey (SSE)
+Settings / vault UI uses vault_browser_screen.dart: virtual folder Sovereign Journey (__sse_journey__) loads panels with GET /api/sse-client/journey/panels, maps each panel’s r2_url to thumbnail_url, and renders with Image.network (grid + detail sheet). Thumbnails and full view are the presigned R2 URLs returned by the API.
+
+vault_browser_screen.dart
+Lines 193-228
+  Future<void> _loadSSEPanels() async {
+    try {
+      final uri = Uri.parse('$_baseUrl/api/sse-client/journey/panels');
+      final resp = await http.get(uri, headers: _authHeaders).timeout(const Duration(seconds: 10));
+      // ...
+        final mapped = panels.map<Map<String, dynamic>>((p) {
+          final m = Map<String, dynamic>.from(p as Map);
+          // ...
+          return {
+            'id': m['id'] ?? m['panel_id'] ?? '',
+            'display_name': '${realType.replaceAll('_', ' ')} — ${_fmtDate(m['generated_at'])}',
+            'content_type': 'sse_panel',
+            'created_at': m['generated_at'],
+            'thumbnail_url': m['r2_url'],
+            // ...
+          };
+        }).toList();
+SSE imagery is stored under keys like sse/journey/{user_id}/... via thera_world_engine.py and friends; URLs are presigned GETs from backend/app/sse/infrastructure/r2_storage.py.
+Console errors
+Symptom	Cause
+CORS + XMLHttpRequest on *.r2.cloudflarestorage.com
+On Flutter web, Image.network to another origin behaves like a credentialed fetch; R2 must return Access-Control-Allow-Origin for https://app.sovereignsanctuary.net (and coach if used).
+403 on presigned URL
+Often signature/expiry or permission; error bodies sometimes omit CORS headers, so the browser still reports a CORS failure.
+Service worker > 4000ms
+Slow/hung SW registration or network; app continues without SW.
+[NEVEDAL] Cannot add event after closing
+NevedalService.dispose() cancelled the timer but left _socket non-null after the WebSocket sink closed, so the 2s tick could still call sink.add.
+Code change (biometrics) — uncommitted
+nevedal_flutter.dart: guard handleServerUpdate with isClosed; on StateError from sink.add, clear _socket; dispose() now nulls _socket / _sessionId / _updateTimer and only closes _stateController if it is not already closed.
+Operations: fix vault thumbnails/videos
+Apply CORS on R2 bucket nate-vault using the same policy as classroom uploads (already lists https://app.sovereignsanctuary.net, GET/``HEAD/PUT): paste or put-bucket-corsfromcloudflare/r2-cors-classroom-uploads.jsonpercloudflare/r2-cors-classroom-uploads.md`. Then hard-refresh the app; if failures remain, regenerate presigned URLs (expiry) and confirm the object exists for the key.
+
+EFF: 175/215 = 81% | PASS
+LOSS: 40 tokens at rate unknown | session: n/a | model: unknown
+
+Are you guessing at what would fix it? Operations: fix vault thumbnails/videos
+
+Apply CORS on R2 bucket nate-vault using the same policy as classroom uploads (already lists https://app.sovereignsanctuary.net, GET/``HEAD/PUT): paste or put-bucket-corsfromcloudflare/r2-cors-classroom-uploads.jsonpercloudflare/r2-cors-classroom-uploads.md`. Then hard-refresh the app; if failures remain, regenerate presigned URLs (expiry) and confirm the object exists for the key.
+
+
+
+EFF: 175/215 = 81% | PASS
+
+LOSS: 40 tokens at rate unknown | session: n/a | model: unknown
+
+Not guessing the symptom: your console line is explicit—cross-origin request from https://app.sovereignsanctuary.net to *.r2.cloudflarestorage.com failed because the response had no Access-Control-Allow-Origin. That is a browser-reported fact, not an inference.
+
+Not guessing the usual fix for that message: for browser-originated reads of R2 URLs, the bucket’s CORS policy must allow that origin (and the method the client uses). Your repo already documents applying cloudflare/r2-cors-classroom-uploads.json to nate-vault in cloudflare/r2-cors-classroom-uploads.md (R2 → Settings → CORS). Recommending that file is following your own ops doc, not inventing a policy.
+
+What is conditional (not fully known without production checks):
+
+403 + CORS text: R2 (or Cloudflare) sometimes returns 403 (bad/expired signature, wrong key, WAF) with a body that still omits CORS headers, so DevTools shows both. CORS policy on the bucket does not fix a broken presign; it only fixes allowed-origin responses when the object is actually served.
+Proof sequence (no guesswork):
+curl -sI '<presigned-url>' — expect 200 and, for browser relevance, check OPTIONS/GET from an allowed origin or use the dashboard “CORS saved” + browser retest.
+Cloudflare dashboard → R2 → nate-vault → CORS — confirm the rule matches what you pasted.
+So: CORS on nate-vault is the direct response to the CORS error you pasted; presign/403 verification is the follow-up if thumbnails still fail after CORS is correct.
+
+EFF: 95/115 = 83% | PASS
+LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
