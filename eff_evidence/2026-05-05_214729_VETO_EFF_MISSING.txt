@@ -1,0 +1,153 @@
+? Investigate landing page Uncaught Error and identify all code changes since
+last known-working state. Determine if F+D+E commits or other unreviewed
+code introduced the crash.
+
+Read-only investigate. Max 1500 tokens.
+
+═══════════════════════════════════════════════════════════════
+SYMPTOM
+═══════════════════════════════════════════════════════════════
+
+Landing page renders BUT throws Uncaught Error at boot:
+  main.dart.js:3849:20 → Object.n
+  main.dart.js:50478:24 → E1.Tb
+  main.dart.js:50687:27 → bH.cl
+  main.dart.js:50689:23 → bH.dD
+  main.dart.js:32089:37 → Object.bDO
+  main.dart.js:120499:15
+  main.dart.js:5197:63 → bsq.a
+  main.dart.js:49773:14 → bsq.$2
+  main.dart.js:5183:10 → Object.A
+  main.dart.js:120537:10 → b7X.ahg
+
+WS connection shows "Awaiting handshake..." (does not complete).
+User can see lobby (I AM A CLIENT / COACH / ADMINISTRATION buttons)
+but error thrown before/during initialization.
+
+═══════════════════════════════════════════════════════════════
+KNOWN-CHANGED FILES (operator-tracked)
+═══════════════════════════════════════════════════════════════
+
+Operator tracked these as the only intended changes tonight:
+- Fix F (commit d0e905f): mobile/lib/main.dart — _ClientWsHub.attach relocation
+- Fix D (commit 6fbd33e): mobile/lib/settings_screen.dart + main.dart — handoff fix
+- Fix E (commit d95faf8): mobile/lib/main.dart — empty password defensive
+
+Bundle deployed: 2026.05.05.2129 commit 1155510 (rsync confirmed 86 files).
+
+═══════════════════════════════════════════════════════════════
+INVESTIGATION REQUIRED
+═══════════════════════════════════════════════════════════════
+
+PHASE 1 — Confirm what shipped vs what was tracked
+
+1. List ALL commits in main between known-working state and current HEAD:
+   git log --oneline c7b4a4f..HEAD
+   
+2. For each commit not in [d0e905f, 6fbd33e, d95faf8], identify:
+   - Author (was it Cursor or another agent or auto-merge?)
+   - Files changed (git show <hash> --stat)
+   - Reason for the commit (commit message)
+   - Whether it was approved by operator in chat history
+
+3. Check for unreviewed changes in working tree:
+   git status
+   git diff HEAD
+   git log --since="6 hours ago" --all --oneline
+
+4. Check if any commits modified files OUTSIDE the F/D/E scope:
+   - F/D/E should only touch mobile/lib/main.dart and mobile/lib/settings_screen.dart
+   - Any commit touching other files = unexpected scope
+
+PHASE 2 — Locate the crash source
+
+5. Examine the deployed main.dart.js for the failing call site:
+   ssh root@68.183.168.75 "sed -n '3848,3852p' /var/www/sovereignsanctuary-web/main.dart.js"
+   ssh root@68.183.168.75 "sed -n '50476,50480p' /var/www/sovereignsanctuary-web/main.dart.js"
+   - Even minified, function names sometimes hint at source (e.g., "throwAssertionError")
+   - Look for the literal error message being thrown
+
+6. Check the source map if present:
+   ssh root@68.183.168.75 "ls /var/www/sovereignsanctuary-web/main.dart.js.map 2>/dev/null"
+   - If present, attempt to map line 3849 back to source file:line
+   - If not present, note that source map deployment is missing (separate fix)
+
+PHASE 3 — Audit Fix F specifically (highest suspicion)
+
+7. Show Fix F diff in full:
+   git show d0e905f -- mobile/lib/main.dart
+   
+8. Examine whether _channel could be null at the new attach location:
+   - Original code attached INSIDE the COACH_ONLY branch — _channel guaranteed non-null at that point
+   - Relocated code attaches BEFORE the branch — is _channel still guaranteed non-null?
+   - Show 30 lines of context around the new attach location
+   - If _channel! force-unwrap is used and _channel could be null at app boot, that's the crash
+
+9. Check _ClientWsHub class:
+   grep -n "class _ClientWsHub\|static.*attach\|static.*channel" mobile/lib/main.dart
+   - Does attach() handle null gracefully?
+   - Does the class initialize with safe defaults?
+
+PHASE 4 — Audit Fix D and E for boot-time crashes
+
+10. Fix D path verification:
+    git show 6fbd33e -- mobile/lib/settings_screen.dart mobile/lib/main.dart
+    - Did it add a constructor parameter that breaks existing widget construction?
+    - Did it modify a class that's instantiated at app boot before user reaches Settings?
+
+11. Fix E timing:
+    git show d95faf8 -- mobile/lib/main.dart
+    - Empty-password check — does it run during widget build, or only on _connect()?
+    - If during build: the widget is constructed at app boot for some routes, would crash early
+
+PHASE 5 — Rule out non-F/D/E causes
+
+12. Check for unrelated late-night commits:
+    git log --since="12 hours ago" --all --oneline --author="*"
+    - Were there auto-bumps, dependency updates, or other commits operator didn't approve?
+    
+13. Check pubspec.yaml or dependency changes:
+    git log -p --since="12 hours ago" -- mobile/pubspec.yaml mobile/pubspec.lock
+    - Any package version changes that could break boot?
+
+14. Check service worker / index.html changes:
+    git log --since="12 hours ago" -- mobile/web/
+
+OUTPUT REQUIRED:
+
+Section A — Commit audit:
+  - Total commits between c7b4a4f and HEAD
+  - Commits matching F/D/E intent
+  - UNEXPECTED commits (if any) with author, files, justification status
+
+Section B — Crash source identification:
+  - Line 3849 minified content (raw)
+  - Source map availability
+  - Best guess at originating Dart source file:line
+
+Section C — Fix F null-safety analysis:
+  - Is _channel guaranteed non-null at relocated attach point: YES / NO / UNCLEAR
+  - If NO: confirmed root cause
+  - Specific source line responsible
+
+Section D — Fix D and Fix E boot-time analysis:
+  - Did either introduce code that runs at widget construction / app boot?
+  - Could either trigger the observed stack trace?
+
+Section E — Non-F/D/E candidates:
+  - Any unauthorized commits found
+  - Any dependency or web/ changes
+
+Section F — Root cause statement:
+  - One sentence identifying the likely culprit
+  - Recommended fix scope (rollback range / specific patch / source-map deploy needed)
+
+No code changes. No deployments. Investigation only.
+
+Mode: investigate
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10
+  $0.001019/1k = claude-opus-4-7-thinking-xhigh
+  $0.000937/1k = claude-opus-4-7
+  Anthropic public rates ($75/1M etc) = M4 violation
+IID footer required if EFF < 80% per .cursorrules GAP 11
