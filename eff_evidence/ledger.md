@@ -941,3 +941,11 @@ EFF: 60/130 = 46% | FAIL LOSS: 75 tokens at $0.001019/1k | session: n/a | model:
 - ESTIMATED: yes (~-prefix on EFF counts)
 - Patterns: DENOMINATOR_CAPPED_AT_200+PATTERN_DRIFT_E
 - Evidence: 2026-05-05_221233_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200+PATTERN_DRIFT_E_110vs431.txt
+
+## 2026-05-05 22:31:00 FABRICATION_UNDERSTATED
+- EFF: EFF: ~95/340 = 28% | FAIL
+- LOSS: LOSS: ~245 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended per GAP10)
+- Claimed: 340 Actual: 1177 Factor: .2x
+- ESTIMATED: yes (~-prefix on EFF counts)
+- Patterns: IID_FOOTER_MISSING
+- Evidence: 2026-05-05_223100_FABRICATION_UNDERSTATED_IID_FOOTER_MISSING_340vs1177.txt

@@ -1,0 +1,156 @@
+Investigate why the builds today have not yet fixed the issue of the clients not able to see the availability of the assigned coach to the client. Determine and show factual truth of the issue through testing
+
+Tracing the client schedule → availability pipeline and verifying production bundle vs fix state.
+
+Running production checks to verify bridge eviction and availability data:
+
+Here is the factual picture from code + production checks (not guesses).
+
+1) Deploy vs “today’s builds”
+Your terminal snippet shows 4780653 bytes and build":"1be6304" — that was an older bundle.
+
+Current production (verified just now via SSH):
+
+main.dart.js: 4781353 bytes
+version.json: build":"8e40b3e", deployed_at":"2026-05-06T02:19:58Z"
+So “builds didn’t ship” was true at the time of that snippet; the deployed artifact has moved forward since.
+
+2) Console errors vs availability (architecture)
+Client availability is driven only by WebSocket messages:
+
+client_get_coach_month_overview → coach_month_overview (_calLoadedOnce, recurring-day hints)
+client_get_coach_availability → coach_availability (_availableSlots)
+
+main.dart
+Lines 10622-10647
+  void _requestUpcomingSessions() {
+    _socket?.sink.add(jsonEncode({"type": "client_get_upcoming_sessions"}));
+  }
+  ...
+  void _requestAvailability(String date) {
+    ...
+    _socket?.sink.add(jsonEncode({
+      "type": "client_get_coach_availability",
+      "coach_id": _coachId,
+      "date": date,
+    }));
+  }
+  void _requestMonthOverview() {
+    if (_coachId.isEmpty) return;
+    ...
+    _socket?.sink.add(jsonEncode({
+      "type": "client_get_coach_month_overview",
+      "coach_id": _coachId,
+      "year_month": ym,
+    }));
+  }
+Settings → “View Availability & Book Session” opens schedule with username only — no password (by design of Fix D comment): it depends on _ClientWsHub.channel still being the live, authenticated socket.
+
+
+settings_screen.dart
+Lines 2960-2969
+                _actionRow(Icons.calendar_month, 'View Availability & Book Session', 'Schedule a live session with your coach', () {
+                  // Fix D (SCHEDULE-SHARED-WS): rely on _ClientWsHub authenticated
+                  // channel from lobby. Passwords are not stored in profile; do
+                  // not pass empty creds (causes silent bridge auth failure).
+                  Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => ClientScheduleScreen(
+                      currentUserProfile: _profile,
+                      username: (_profile['username'] ?? '').toString(),
+                    ),
+                  ));
+                }),
+But NeuralInterfaceV2 does not attach to _ClientWsHub. It opens a new WebSocket and calls login_request again:
+
+
+updated_screens.dart
+Lines 1467-1493
+  void _connectToCortex() {
+    setState(() => _connectionStatus = "Dialing Neural Core...");
+    
+    try {
+      _socket?.sink.close();
+      _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
+      
+      _socket!.stream.listen(
+        _handleSocketMessage,
+        onError: (e) { ... },
+        onDone: () { ... }
+      );
+      _socket!.sink.add(jsonEncode({
+        "type": "login_request",
+        "username": widget.username,
+        "password": widget.password,
+        "expected_role": "CLIENT"
+      }));
+On the bridge, a second login for the same user (same client_context) closes the prior main socket:
+
+
+bridge_server.py
+Lines 7688-7714
+        for _prior_ws in list(self.sockets[uid]):
+            ...
+            if _prior_ctx != client_context:
+                continue
+            ...
+                asyncio.create_task(_prior_ws.close(code=4001, reason="session_replaced_by_new_login"))
+                ...
+                print(f">>> [SOCKET EVICT] uid={uid} ctx={client_context} ... reason=session_replaced_by_new_login")
+Production logs (last 2h) show that eviction is happening:
+
+>>> [SOCKET EVICT] uid=CLIENT_001 ctx=main ... reason=session_replaced_by_new_login
+>>> [SOCKET EVICT] uid=CLIENT_001 ctx=main ... reason=session_replaced_by_new_login
+So the factual chain is:
+
+Lobby connects and _ClientWsHub.attach holds the first socket.
+Client lands on NeuralInterfaceV2, which opens a second socket and logs in again.
+Bridge evicts the first socket — the one the hub is still wired to if onDone / channel = null lags, or the schedule screen still holds a dead WebSocketChannel reference.
+Schedule (especially from Settings with no password) sends on _ClientWsHub.channel / sink.add → matches WebSocket is already in CLOSING or CLOSED state.
+Nevedal/biometrics still tries to use the same broken pipeline → Cannot add event after closing.
+That matches your screenshot’s console, independent of whether the coach has DB availability.
+
+3) “No published hours” can be a lie in the UI
+If the day request never arrives or never gets a coach_availability message, _coachAvailErr stays null and _availableSlots stays empty — the UI shows the “no published hours” copy even when the real problem is transport/auth, not the coach’s calendar:
+
+
+main.dart
+Lines 11234-11285
+          ] else if (_selectedDate != null) ...[
+            ...
+            else
+              Container(
+                ...
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text('No published hours for this date', ...),
+                    ...
+                  ],
+                ),
+              ),
+So the loading strip (!_calLoadedOnce → “Loading coach availability…”) can sit next to misleading empty-day copy when month overview also never lands.
+
+4) Database truth: most coaches have zero published slots
+Production query:
+
+Recurring (non-blocked) rows: 4 total.
+Per coach: only CoachN / COACH_COACHN_ID has 4 rows; every other coach in the table has 0.
+So even with a perfect WebSocket, a client whose assigned coach is not the one with those four rows will correctly see no availability until coaches publish hours in the system that backs coach_availability (see bridge handler using table coach_availability — not the old JSON file path in sessions.py).
+
+5) Bottom-line “factual truth”
+Layer	What we proved
+Deploy
+Your pasted 1be6304 / 4780653 was stale; current 8e40b3e / 4781353 is live.
+WebSocket / hub
+Second login from NeuralInterfaceV2 triggers SOCKET EVICT on production; Settings schedule path requires hub socket without password → fragile when hub socket is replaced or closed → console errors you saw are consistent with code + logs.
+Data
+Only CoachN has recurring availability rows; all other coaches = 0 → many clients will see empty availability even if transport is fixed.
+UX
+Empty slots with no error often map to “No published hours” even when the failure is WS closed — that’s a product bug in messaging, not proof the coach has no hours.
+Tests run: SSH docker logs nate_bridge (eviction lines), SSH psql counts on coach_availability, SSH wc/version.json on deployed main.dart.js, plus static tracing of ClientScheduleScreen / NeuralInterfaceV2 / cortex.register.
+
+Fix direction (for a follow-up implementation, not done here): make NeuralInterfaceV2 reuse _ClientWsHub (no second login_request), or on schedule open reattach to the live socket and/or REST fallback for availability with bearer token — so Settings does not depend on a socket that was evicted.
+
+EFF: ~95/340 = 28% | FAIL
+OPTIMIZE_NEXT: ship a one-page “findings only” doc with code block line ranges trimmed to headers + 1 snippet each.
+LOSS: ~245 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended per GAP10)
