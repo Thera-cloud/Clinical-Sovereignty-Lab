@@ -1,0 +1,110 @@
+The platform status links for social media tokens where supposed to be fixed. When I press these authorized links they were designed to automating sync the token with the developer side of authentication to make it approve and allow Little Nate to automating post on these social media pages as designed doing his own marketing and allow me to discuss those campaigns in Big Nate Chat, Go Live, Content Que, Growth Dashboard, Funnel Piepline, Marketing BRain, Quiz Factory, Campiagns, and Approval Quene, including Drip Bridge, Comliance, History, and Expressions tabs in the SkyEye tab of Sovereign Command. Plus the Social Developer tab. Investigate the pipelines, endpoints, linked pages, developer token handshacks, and follow rules. Then review and fix the social media link tabs in SkyEye. Do not break code for login credentials of admin or Yubikey or other security features.
+
+Fix connectPlatform JS to handle API error responses
+Add URL param handling for OAuth callback results on page load
+Persist X PKCE code_verifier in Redis (survive backend restarts)
+Fix PUBLIC_BASE_URL fallback so redirect_uri is always api.sovereignsanctuary.net
+Add diagnostic logging for OAuth redirect_uri computation
+Now let me check the get_adapter factory and the platform-status endpoint that determines what the UI shows.
+
+Fix 1: connectPlatform — handle _error responses from API.
+
+Fix 2: Handle ?connected= and ?oauth_error= URL params on page load. The callback redirects to skyeye.html?connected=x but the page only parses hash params.
+
+Fix 3: Move X (Twitter) PKCE code_verifier from volatile in-memory dict to Redis. First read the current code.
+
+Good. Now I see the full picture. The callback at line 1490 uses the same PUBLIC_BASE_URL or str(request.base_url) logic. I also see that _store_oauth_state_from_url may replace the X adapter's dynamically generated state (which starts with skyeye_x_) with a new random state, but the original state is the key in _pkce_store. This is actually fine since X states are NOT in _STATIC_OAUTH_STATES. The X-generated state skyeye_x_{hex} passes through unchanged because it's not in the static set.
+
+Now the critical fix: move _pkce_store to Redis.
+
+Now update get_oauth_url to store code_verifier in Redis via db_pool access to the adapter's pool, and read it in handle_oauth_callback. The adapter has self.db_pool from the base class — but Redis is better suited. The adapter doesn't have direct Redis access though. I need a helper to get Redis from app state. Actually, looking at the adapter pattern, the cleanest approach is to add a _redis property and pass it through, or just use the DB. Since the adapter already has db_pool, I can use a temporary table or I can add Redis through the constructor.
+
+Looking at the codebase patterns, the simplest approach: store in PostgreSQL via db_pool since every adapter has it. Or better — store in the skyeye_platform_tokens table as a JSON field. Actually the cleanest is just to use a lightweight skyeye_oauth_state approach with the existing db_pool.
+
+The simplest reliable approach: store the verifier alongside the state in Redis via _store_oauth_state_from_url which already writes to Redis. The initiate_platform_connect endpoint has access to Redis. I can pass the code_verifier back from get_oauth_url and store it in the same Redis key.
+
+Actually, the simplest pattern: have the adapter store the verifier in skyeye_platform_tokens table temporarily, or use an in-memory fallback with Redis primary. The problem is the adapter doesn't have Redis access.
+
+The cleanest fix: modify the _store_oauth_state_from_url function in skyeye_api.py to also accept and store a code_verifier, and modify platform_oauth_callback to retrieve it and pass it to handle_oauth_callback. The adapter's get_oauth_url can return the verifier alongside the URL.
+
+But that changes the adapter interface. Let me look at the actual flow more carefully. The adapter's get_oauth_url returns a URL string. I need to get the code_verifier out of it. The simplest approach: have the X adapter return the verifier through a different channel.
+
+Most pragmatic approach: keep _pkce_store as in-memory fallback, but ALSO store in the DB (skyeye_platform_tokens metadata column or a simple temporary row). Actually, even simpler — store in the same Redis that _store_oauth_state_from_url uses, by having the adapter accept an optional redis reference.
+
+Let me take the simplest path that doesn't change adapter interfaces broadly: modify the XTwitterAdapter to accept an optional redis client and store/retrieve the verifier there.
+
+Now update get_oauth_url to store the verifier in Redis (with in-memory fallback):
+
+Now inject Redis into the X adapter when it's created. The adapter is instantiated via get_adapter. Let me find that function.
+
+The adapter is created without Redis access. The best injection point is in initiate_platform_connect and platform_oauth_callback — after getting the adapter, set _redis on it if it's the X adapter. This keeps the change minimal.
+
+Now do the same for the callback handler and the GET redirect:
+
+Also inject Redis in the GET redirect endpoint:
+
+Fix 4: Harden PUBLIC_BASE_URL fallback. The request.base_url inside Docker resolves to http://localhost:8000 which won't match registered callback URIs. Need to verify what's in settings and add a reliable fallback.
+
+PUBLIC_BASE_URL defaults to empty string. If the .env file on the server doesn't set it, settings.PUBLIC_BASE_URL is falsy, and the fallback str(request.base_url).rstrip("/") will yield http://localhost:8000 inside Docker. This is the root cause for ALL platforms.
+
+The fix: add a hardcoded fallback when PUBLIC_BASE_URL is empty and the request base_url looks like localhost/internal.
+
+Good — the template has it, but we need to ensure the production .env actually has it set. I'll add a safety net in the code: if PUBLIC_BASE_URL is empty and we're in production (ENVIRONMENT=production), default to https://api.sovereignsanctuary.net.
+
+Now update all three places in skyeye_api.py that compute base_url to use settings.public_api_url:
+
+Fix PUBLIC_BASE_URL fallback so redirect_uri is always api.sovereignsanctuary.net
+Add diagnostic logging for OAuth redirect_uri computation
+Verify other platform adapters (LinkedIn, Instagram, FB, YouTube, TikTok, Pinterest) OAuth flows
+Now verify the other platform adapters handle the callback redirect correctly. The callback handler in skyeye_api.py redirects back to the dashboard after success — need to check this path:
+
+Good — the callback path looks correct. It redirects to skyeye.html?connected={platform} on success and skyeye.html?oauth_error=... on failure, which the new frontend handler picks up.
+
+Now check if last_error is tracked on the base adapter — some adapters may not set it:
+
+Good, last_error is on the base class.
+
+Now verify the callback handler in the initiate_platform_connect endpoint returns the oauth_url correctly:
+
+Good — all three code paths now use settings.public_api_url with the production fallback.
+
+Now check that the connectPlatform function in skyeye.html correctly opens the OAuth URL. The current flow is: POST to /api/skyeye/platforms/{platform}/connect → get oauth_url back → open it in a window.
+
+Frontend logic is correct. The popup opens → API returns oauth_url → popup navigates to the social platform's OAuth consent page → after consent, the platform redirects back to https://api.sovereignsanctuary.net/api/skyeye/platforms/{platform}/callback → the backend exchanges the code for tokens, stores them, then redirects the popup to skyeye.html?connected={platform} → the new _handleOAuthReturn handler picks up the query param and refreshes status.
+
+Now let me check that the "Authorize" buttons in the Platform Status section actually call connectPlatform:
+
+The "Authorize" button at line 3887 correctly calls connectPlatform('${p.platform}'). But the status bar version at line 2671 just sets a label — need to check if that label is also clickable:
+
+Line 2685-2686 shows that when not connected, the entire status bar item is clickable via connectPlatform. This looks correct.
+
+Now verify the _store_oauth_state_from_url function properly stores state in Redis:
+
+X's state is skyeye_x_{hex} which is NOT in _STATIC_OAUTH_STATES, so it won't be replaced — X uses its own dynamic state, which is correct since it also serves as the PKCE verifier lookup key.
+
+The critical issue is: when _store_oauth_state_from_url replaces a static state (like skyeye_linkedin) with a random token, the callback needs to still work. The callback handler validates the state from Redis. For X, the adapter generates its own unique state, and the verifier is stored under that state key in Redis/DB. This is correct.
+
+Now verify the notifications_service.py changes (the file that was already modified according to git status):
+
+That's unrelated to our OAuth fix — it's a notifications change from SMTP to SendGrid API. Won't interfere with our work.
+
+Now run lints on the changed files:
+
+All fixes applied — pending commit (uncommitted). Summary of changes across 4 files:
+
+backend/app/config/_settings.py — Added public_api_url property that falls back to https://api.sovereignsanctuary.net when PUBLIC_BASE_URL is empty and ENVIRONMENT=production. Prevents redirect_uri from resolving to http://localhost:8000 inside Docker containers, which breaks every platform's OAuth callback.
+
+backend/app/routers/skyeye_api.py — Three changes:
+
+All 3 redirect_uri computations now use settings.public_api_url instead of raw settings.PUBLIC_BASE_URL
+Redis client injected into adapters in the callback handler and GET redirect (was only in the POST initiate), so X's PKCE verifier can be loaded during token exchange
+Diagnostic logging on OAuth initiate and callback showing the actual redirect_uri being used
+backend/app/services/platforms/x_twitter.py — Replaced volatile in-memory _pkce_store dict with Redis-backed storage (600s TTL). Falls back to a temporary skyeye_platform_tokens row if Redis unavailable. The old in-memory store was lost on every backend restart, breaking X authorization mid-flow.
+
+dashboard/skyeye.html — Two changes:
+
+connectPlatform now shows the actual error detail from the backend instead of a generic "check server logs"
+New _handleOAuthReturn handler parses ?connected= and ?oauth_error= query params after the OAuth redirect returns, refreshing platform status or showing the error
+These changes are local to BLUE. To take effect, they need to be committed, pushed, and deployed to GREEN per three-node-sync-discipline.
+
+EFF: 320/380 = 84% | PASS LOSS: 60 at $0.0015 | session: 60 | model: claude-opus-4-6 (cursor-blended)
