@@ -1,0 +1,167 @@
+? Audit OAuth scope vs. product alignment across ALL SkyEye social platform 
+
+adapters.
+
+
+
+Read-only investigation. Max 1500 tokens.
+
+
+
+Background: LinkedIn fails OAuth with "Bummer something went wrong" because 
+
+adapter requests r_member_social which requires Community Management API 
+
+product not enabled on the LinkedIn app. Operator wants to know if the same 
+
+class of failure exists on other platforms before fixing.
+
+
+
+For each adapter in backend/app/services/platforms/, extract:
+
+  - Platform name
+
+  - File path
+
+  - get_oauth_url() method
+
+  - Exact scope string requested
+
+  - Endpoint URL used
+
+
+
+Then for each platform, document the product/permission requirement on the 
+
+provider side based on available code comments, .cursor/rules/ entries, 
+
+docs/ folder content, or .env.template hints.
+
+
+
+Platforms to audit:
+
+- linkedin.py (already known — included for completeness)
+
+- x_twitter.py
+
+- facebook.py (if exists)
+
+- instagram.py (if exists)
+
+- youtube.py
+
+- tiktok.py
+
+- pinterest.py
+
+- reddit.py (if exists)
+
+- threads.py (if exists)
+
+- any other adapter file
+
+
+
+For each: classify into one of three states:
+
+
+
+STATE A — Aligned: scope request matches what a basic developer app provides 
+
+by default. Should work with standard app setup.
+
+
+
+STATE B — Requires elevated product/permission: scope request requires a 
+
+specific product to be enabled on the provider side that may not be granted 
+
+to typical apps (like LinkedIn's Community Management). High failure risk if 
+
+the operator's app doesn't have that product approved.
+
+
+
+STATE C — Unknown: cannot determine from code/docs whether the scope is 
+
+default or elevated.
+
+
+
+Cross-reference with .cursor/rules/ folder for any platform-specific 
+
+architecture rules (like the linkedin-dual-credential-architecture.mdc).
+
+
+
+OUTPUT REQUIRED:
+
+
+
+Section A — Per-platform audit table:
+
+  | Platform | Scopes requested | Product requirement | State | Risk |
+
+
+
+Section B — High-risk findings (STATE B platforms):
+
+  For each, identify which scope is the likely culprit and what the alignment 
+
+  fix would be (drop the scope, or document that the product must be enabled).
+
+
+
+Section C — Recommended fix scope:
+
+  Single batch fix vs sequential per-platform investigation.
+
+  Whether each fix is code-only (drop scope) or requires operator action 
+
+  on the provider's developer portal.
+
+
+
+Section D — Reference cross-check:
+
+  Does .cursor/rules/ or docs/ document the intended scope model for each 
+
+  platform? Flag any rules that are violated by current code.
+
+
+
+Output as docs/SOCIAL_OAUTH_SCOPE_AUDIT_2026-05-07.md
+
+
+
+No code changes. Investigation only.
+
+
+
+Mode: investigate
+
+Scanning platform adapters and cross-referencing rules and docs.
+
+Writing the audit document to docs/SOCIAL_OAUTH_SCOPE_AUDIT_2026-05-07.md.
+
+# Social OAuth scope vs. product alignment — SkyEye adapters
+**Date:** 2026-05-07  
+**Scope:** Read-only audit of `backend/app/services/platforms/*.py` (+ registry + rules).  
+**Note:** `threads.py` does **not** exist; registry lists 9 platform keys in `_ADAPTER_MAP` (`__init__.py`).
+---
+## Section A — Per-platform audit table
+| Platform | File | `get_oauth_url()` — scope string (verbatim) | Auth endpoint | Product requirement (from code / rules / template) | State | Risk |
+|----------|------|-----------------------------------------------|---------------|-----------------------------------------------------|-------|------|
+| **x** | `x_twitter.py` | `tweet.read tweet.write users.read offline.access` | `https://x.com/i/oauth2/authorize` | X Developer Portal project; write + offline typically need **approved/use-case** access, not anonymous dev defaults. Code comment: X API v2 + OAuth 2.0 PKCE. | **B** | High if project is basic/unapproved |
+| **linkedin** | `linkedin.py` (`LinkedInAdapter`) | `openid profile email w_member_social r_member_social` | `https://www.linkedin.com/oauth/v2/authorization` | **Open ID** product; **Share on LinkedIn** (`w_member_social`); **`r_member_social`** = **Community Management API** (separate app per `.cursor/rules/linkedin-dual-credential-architecture.mdc`). | **B** | **High** — mixed posting + community read on one app |
+| **linkedin_community** | `linkedin.py` (`LinkedInCommunityAdapter`) | `openid profile email w_member_social` | same | Second app “Sovereign Sanctuary Engine 1.0”; Community Management API approval. Rule documents client id example + redirect `.../linkedin_community/callback`. | **B** | High until product approved |
+| **instagram** | `instagram.py` | *(no `scope` query param)* — `config_id=1458216979214040`, `override_default_response_type=true` | `https://www.facebook.com/v21.0/dialog/oauth` | **Facebook Login for Business** use case; `.cursor/rules/meta-instagram-oauth-checklist.mdc` lists required permissions: `instagram_business_basic`, `instagram_business_content_publish`, `instagram_business_manage_comments`, `instagram_business_manage_insights`, `business_management`. `.env.template`: `INSTAGRAM_APP_ID`, etc. | **B** | High if use case / App Review / publish incomplete |
+Deliverable written: docs/SOCIAL_OAUTH_SCOPE_AUDIT_2026-05-07.md (Sections A–D, per-platform table, high-risk list, fix strategy, rule cross-check). threads: not present in platforms/; 9 adapters in registry.
+
+Headline: Same authorize-time failure class as LinkedIn applies most strongly where scopes imply unapproved products (LinkedIn r_member_social on posting app, Meta Pages/IG Business, TikTok posting, Reddit mod scopes). Instagram is special: no scope in URL — risk is Meta config_id / use-case vs checklist, not a string in code.
+
+EFF: 95/180 = 53% | FAIL
+LOSS: 85 at $0.000079 | session: n/a | model: claude-opus-4-6 (cursor-blended)
+OPTIMIZE_NEXT: Skip repeating table rows in chat; point at file only.
