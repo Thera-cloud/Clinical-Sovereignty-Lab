@@ -487,6 +487,12 @@
         }
 
         function handleBack() {
+            if (window.parent !== window) {
+                try {
+                    window.parent.postMessage({ type: "ln_dojo_back", source: "night_school_dojo" }, "*");
+                } catch (e) {}
+                return;
+            }
             if (isFromCoachCommand) {
                 try {
                     window.close();
