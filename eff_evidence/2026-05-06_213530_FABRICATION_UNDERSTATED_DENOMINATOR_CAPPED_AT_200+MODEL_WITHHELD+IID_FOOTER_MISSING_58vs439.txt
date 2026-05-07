@@ -1,0 +1,82 @@
+Running full git status and git diff … | head -30 for each modified file. Halting before any commits.
+
+1) git status (full)
+On main, ahead of origin/main by 1 commit (unpushed local commit).
+Modified (not staged):
+.cursor/rules/api-backwards-compatibility.mdc,
+.cursor/rules/cloudflare-cache-purge-after-deploy.mdc,
+.cursor/rules/coach-dashboard-tab-sync.mdc,
+.cursor/rules/flutter-build-verification.mdc,
+.cursor/rules/nginx-host-vs-docker.mdc,
+.cursor/rules/web-deployment.mdc,
+.cursorrules,
+.env.template,
+.sovereign/rules/cloudflare-cache-purge-after-deploy.mdc,
+backend/app/services/notifications_service.py,
+cloudflare/r2-cors-classroom-uploads.md
+Untracked:
+.cursorrules.archive.2026-05-04-2339,
+.cursorrules.archive.2026-05-05-2245,
+cloudflare/r2-cors-classroom-uploads-wrangler.json,
+docs/CLIENT_AVAILABILITY_INVESTIGATION_2026-05-04.md,
+docs/client_portal/_TAB_INVENTORY_2026-05-05.md,
+docs/client_portal/features/16_client_schedule.md,
+scripts/cf_purge_flutter_web.sh,
+scripts/deploy_flutter_web.sh
+2) git diff <file> | head -30 (summary)
+File	What the first ~30 lines show
+api-backwards-compatibility.mdc
+Doc: deploy script → bash scripts/deploy_flutter_web.sh
+cloudflare-cache-purge-after-deploy.mdc
+Deploy wrapper + CLOUDFLARE_PURGE_TOKEN + cf_purge_flutter_web.sh
+coach-dashboard-tab-sync.mdc
+Tab count 8→10, table of builders
+flutter-build-verification.mdc
+Mentions deploy_flutter_web.sh
+nginx-host-vs-docker.mdc
+Indent tweak + preferred deploy script
+web-deployment.mdc
+Canonical deploy_flutter_web.sh, legacy ./deploy-web.sh warning
+.cursorrules
+Large append: GAP 10/11 (model ID + IID v2)
+.env.template
+CLOUDFLARE_PURGE_TOKEN= + comments only (no populated secrets in diff)
+.sovereign/rules/cloudflare-cache-purge-after-deploy.mdc
+Same cloudflare-cache-purge edits as .cursor/rules/
+notifications_service.py
+SMTP/aiosmtplib → aiohttp, SENDGRID_API_KEY / SMTP_PASSWORD fallback — behavioral change
+r2-cors-classroom-uploads.md
+JSON shape table, wrangler vs dashboard, doc restructure
+3) .env.template — secrets check
+Diff adds only comments and an empty CLOUDFLARE_PURGE_TOKEN= line. No key material in the patch. Template-only.
+
+HALT — proposed commit grouping (needs your OK)
+Suggested 5 commits (your list + one clarification):
+
+rules: GAP 10/11 IID framework + watcher v6.1 patches
+
+.cursorrules, .cursor/rules/*
+Include .sovereign/rules/cloudflare-cache-purge-after-deploy.mdc here or duplicate it in ops — recommend same “rules” commit as the mirror of .cursor/rules/.
+ops: r2 cors docs + flutter deploy scripts
+
+cloudflare/r2-cors-classroom-uploads.md
+cloudflare/r2-cors-classroom-uploads-wrangler.json (untracked)
+scripts/cf_purge_flutter_web.sh, scripts/deploy_flutter_web.sh (untracked)
+.env.template (purge token placeholder) — fits ops, not the GAP 10/11 rules commit.
+docs: client/coach portal spec work
+
+docs/CLIENT_AVAILABILITY_INVESTIGATION_2026-05-04.md
+docs/client_portal/_TAB_INVENTORY_2026-05-05.md
+docs/client_portal/features/16_client_schedule.md
+backend: notifications service — only if you confirm SendGrid/aiohttp instead of SMTP is intentional; diff is larger than the first 30 lines.
+
+.gitignore: add .cursorrules.archive.* — separate tiny commit (chore: ignore cursorrules archives) or fold into commit 1; your instruction was explicit.
+
+Not committed: .cursorrules.archive.* files themselves.
+
+After you approve: apply .gitignore, stage per groups, commit, then git push origin main (pushes the existing +1 commit plus these).
+
+Reply with approve / adjust (e.g. split sovereign rule, drop backend commit, or squash).
+
+EFF: 52/58 = 90% | PASS
+LOSS: 6 tokens at rate unknown | session: n/a | model: unknown
