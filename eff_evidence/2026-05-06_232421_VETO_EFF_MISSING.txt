@@ -1,0 +1,18 @@
+[VERIFIED] You're inside the backend/ directory. The path needs to drop the backend/ prefix.
+Re-run from where you are:
+git diff app/websocket/bridge_server.py | head -60
+grep -n "_select_max_tokens\|FIX-LEN\|LENGTH-CAP" app/websocket/bridge_server.py
+Or go up one level first:
+cd ..
+git diff backend/app/websocket/bridge_server.py | head -60
+grep -n "_select_max_tokens\|FIX-LEN\|LENGTH-CAP" backend/app/websocket/bridge_server.py
+
+What we already know from your output:
+
+bridge_server.py IS modified locally (Changes not staged for commit)
+HEAD is 3 commits ahead of origin/main — but those 3 commits are auto-watcher EFF evidence files, NOT the Phase 1 fix
+notifications_service.py is also still modified (the SendGrid change from earlier — still uncommitted)
+Three audit .md files are untracked
+
+So Phase 1 work IS in your working tree. Never committed, never pushed. Same pattern as before.
+The grep above will tell you whether the LENGTH-CAP markers are actually in the local edit, or if Cursor reported "ready" without making the edit at all.
