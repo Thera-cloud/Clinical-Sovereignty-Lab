@@ -1,0 +1,529 @@
+Investigate what is causing this consule issue. No code change. Deteremine if this is a pipeline or endpoint issue with the iframing of the DOJO causing it to reset due to iframe issues or something else
+
+Searching the codebase for DOJO iframe/embed patterns; no console message was attached—we'll map likely causes and flag what's missing.
+
+Need context: The exact console line(s) were not pasted (401, SecurityError, WebSocket, CORS, Blocked frame, etc.). Below maps architecture to likely causes; paste the message to narrow to one bucket.
+
+Findings
+
+mobile/web/night_school_dojo.html + REST — previewAssessment / confirmAndGeneratePdf / etc. call fetch(apiBase + "/api/dojo/…") with FormData only (see ~738–755, ~783+). tokenParam is never sent on HTTP. Router backend/app/routers/dojo_api.py:19 sets dependencies=[Depends(require_coach)] on the whole /api/dojo router, so those POSTs expect Authorization: Bearer …. Likely console: failed fetch, 401, or JSON parse errors. Class: endpoint/auth pipeline bug, not iframe framing.
+
+“Resets” when leaving DOJO tab — CoachDashboardScreenV2 uses a plain TabBarView (updated_screens.dart ~7555–7569) with _buildDojoTab() as a child. Off-screen tabs are not wrapped in AutomaticKeepAliveClientMixin. Switching tabs drops the DOJO subtree; on return, HtmlElementView + iframe are recreated (dojo_iframe_web.dart ~27–52, ValueKey(dojoUrl)). night_school_dojo.html state lives only in that iframe’s JS — new load ⇒ looks like a full reset. Class: Flutter tab lifecycle + embedded HTML, not X-Frame-Options blocking.
+
+“Resets” or wrong shell after Back — handleBack() (~487–500): window.close() usually fails inside an iframe, then window.location.href = "/" runs and can load the main app inside the iframe. Class: iframe + navigation behavior, not API.
+
+WebSocket — socket.onclose → setTimeout(connect, 3000) (~542). Drops/reconnects can re-run connect() and feel like a reset. ws query must match wss://…/ws so apiBase derivation (~738) still yields https://api… for fetch. Class: WS/network or bad ws param, only indirectly iframe-related.
+
+Framing / CSP — DOJO is same-origin as the Flutter host (/night_school_dojo.html on coach.* / app.*). Iframe uses sandbox with allow-scripts allow-same-origin … (dojo_iframe_web.dart ~43). Typical “refused to frame” / X-Frame-Options errors are unlikely here unless the HTML is served from a different host or headers are overridden.
+
+Verdict: Console errors on assessment/PDF actions → REST vs require_coach (missing Authorization) is the strongest code-backed hypothesis. Perceived “reset” → tab switch disposing the iframe or handleBack() navigation inside the iframe are stronger than “iframes blocked by policy.”
+
+If you paste the exact console text, it can be labeled 401/CORS, WS, navigation, or Flutter/platform view in one step.
+
+EFF: 42/52 = 81% | PASS
+LOSS: 10 tokens at rate unknown | session: n/a | model: unknown
+OPTIMIZE_NEXT: user to paste 1–3 verbatim console lines next turn.
+
+Also check these errors: An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+
+ Received: connected [object Object]
+
+ Received: auth_success [object Object]
+
+ >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+ Received: metrics_update [object Object]
+
+ Received: metrics_data [object Object]
+
+ Received: connected [object Object]
+
+ Received: auth_success [object Object]
+
+ >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+ Received: metrics_update [object Object]
+
+ Received: metrics_data [object Object]
+
+ Received: connected [object Object]
+
+ Received: auth_success [object Object]
+
+ >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+ Received: metrics_update [object Object]
+
+ Received: metrics_data [object Object]
+
+VM14 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM14 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM14 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM14 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM14 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+Service Worker was updated because "Update on reload" was checked in the DevTools Application panel.
+
+VM21 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM21 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM21 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM21 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM21 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM23 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM23 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM23 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM23 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM23 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM25 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM25 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM25 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM25 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM25 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM27 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM27 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM27 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM27 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM27 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM29 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM29 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM29 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM29 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM29 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM31 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM31 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM31 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM31 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM31 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM33 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM33 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM33 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM33 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM33 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM35 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM35 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM35 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM35 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM35 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM37 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM37 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM37 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM37 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM37 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM39 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM39 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM39 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM39 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM39 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM41 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM41 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM41 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM41 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM41 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM43 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM43 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM43 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM43 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM43 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM45 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM45 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM45 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM45 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM45 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM47 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM47 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM47 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM47 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM47 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM49 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM49 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM49 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM49 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM49 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM51 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM51 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM51 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM51 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM51 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM53 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM53 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM53 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM53 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM53 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM55 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM55 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM55 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM55 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM55 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM58 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM58 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM58 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM58 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM58 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM60 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+VM60 night_school_dojo.html:226 Received: auth_success {type: 'auth_success', profile: {…}}
+
+VM60 night_school_dojo.html:249 >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+VM60 night_school_dojo.html:226 Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+VM60 night_school_dojo.html:226 Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+VM62 night_school_dojo.html:226 Received: connected {type: 'connected', status: 'ready'}
+
+ Received: auth_success {type: 'auth_success', profile: {…}}
+
+ >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+ Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+ Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+ Received: connected {type: 'connected', status: 'ready'}
+
+ Received: auth_success {type: 'auth_success', profile: {…}}
+
+ >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+ Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+ Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+ Received: connected {type: 'connected', status: 'ready'}
+
+ Received: auth_success {type: 'auth_success', profile: {…}}
+
+ >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+ Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+ Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+ Received: connected {type: 'connected', status: 'ready'}
+
+ Received: auth_success {type: 'auth_success', profile: {…}}
+
+ >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+ Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+ Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+ Received: connected {type: 'connected', status: 'ready'}
+
+ Received: auth_success {type: 'auth_success', profile: {…}}
+
+ >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+ Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+ Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+ Received: connected {type: 'connected', status: 'ready'}
+
+ Received: auth_success {type: 'auth_success', profile: {…}}
+
+ >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+ Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+ Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+ Received: connected {type: 'connected', status: 'ready'}
+
+ Received: auth_success {type: 'auth_success', profile: {…}}
+
+ >>> Dojo authenticated as COACH (fromCoachCommand: true)
+
+ Received: metrics_update {type: 'metrics_update', metrics: {…}, mood_history: Array(11), token_balance: 0, token_usage: 0}
+
+ Received: metrics_data {type: 'metrics_data', metrics: {…}, mood_history: Array(11)}
+
+Sandbox warning
+
+Meaning: Chrome is stating a spec fact: sandbox with allow-scripts + allow-same-origin gives the framed document a normal same-origin, so scripts inside are not in a maximally locked-down sandbox (in principle they can lift restrictions). It is informational / security UX, not a runtime failure.
+Where it comes from: The DOJO iframe sets exactly that pair (plus other tokens) here:
+
+dojo_iframe_web.dart
+Lines 36-43
+        final iframe = html.IFrameElement()
+          ..src = dojoUrl
+          ..style.border = 'none'
+          ..style.width = '100%'
+          ..style.height = '100%'
+          ..allow = 'microphone; camera'
+          ..setAttribute('allowfullscreen', 'true')
+          ..setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads');
+Why so many lines: The browser logs per iframe instance. Many lines ⇒ many iframes created over time (e.g. each HtmlElementView rebuild, tab away/back, hot reload, or multiple embedded pages), not one iframe “spamming” by itself.
+Received: connected / auth_success / metrics_* with VM14, VM21, …
+
+VM## in DevTools = separate JS worlds (typically one per iframe or injected isolated context). The pattern VM numbers stepping up + repeated full connect → auth → metrics matches many DOJO iframes (or full reloads) each opening a WebSocket and authenticating again — aligned with TabBarView dropping/recreating the DOJO subtree or Flutter web rebuilding the platform view, not with a broken API per se.
+Service worker lines
+
+Cause: DevTools → Application → Service workers → “Update on reload” (message says this explicitly). Local debugging artifact, not production signaling.
+Bottom line
+
+Noise	Cause
+Sandbox “escape” text
+Expected Chrome warning for allow-scripts + allow-same-origin; intentional for same-origin DOJO (WS, forms, etc.).
+Many copies
+Many iframe lifetimes or reloads.
+Repeated auth / metrics
+Each new iframe runs night_school_dojo.html init + connect() again.
+SW “updated”
+DevTools “Update on reload” enabled.
+Not an “iframe blocked” / X-Frame-Options failure; not proof the DOJO page is wrongly iframed — it’s browser warning + repeated embed lifecycle + DevTools SW mode.
+
+EFF: 38/48 = 79% | FAIL
+LOSS: 10 tokens at rate unknown | session: n/a | model: unknown
+OPTIMIZE_NEXT: omit repeating the same log block when pasting; 5 lines are enough to classify.
+
+Show what you would do to fix all these issues
+
+Here’s a fix plan mapped to the issues we diagnosed (no edits applied in this message).
+
+1. REST /api/dojo/* returning 401 (missing auth)
+mobile/web/night_school_dojo.html: For every fetch(apiBase + "/api/dojo/…"), add headers:
+Authorization: Bearer <token> using tokenParam from the query string (same token as WS auth).
+Optional harden: If tokenParam is empty, skip fetch or show a clear in-page error.
+2. DOJO “resets” / duplicate connected + auth_success (many iframes / VMs)
+mobile/lib/updated_screens.dart: Keep the DOJO tab’s subtree alive when switching tabs:
+Wrap the DOJO tab body in a widget that uses AutomaticKeepAliveClientMixin and wantKeepAlive => true, or
+Use a PageStorageKey / cached child so HtmlElementView is not torn down on every tab change.
+Goal: One long-lived iframe per session unless token or explicit refresh changes.
+3. HtmlElementView / ValueKey(dojoUrl) churn
+mobile/lib/dojo_iframe_web.dart: Prefer a stable viewType for the platform view when URL is unchanged (e.g. register once per host session, not only when hashCode first seen); only change when token or real URL changes.
+Align ValueKey with that (stable key unless auth URL actually changes).
+4. Back button loads / inside iframe (handleBack)
+mobile/web/night_school_dojo.html: When isFromCoachCommand and embedded in iframe (window.parent !== window):
+postMessage to parent: e.g. { type: 'dojo_close' }, and let Flutter switch tab / show snackbar; or
+window.parent.focus() and do not set location.href = '/' on the iframe.
+Only use window.close() / / fallback for top-level window.
+5. Sandbox “can escape sandboxing” warnings
+Tradeoff: allow-scripts + allow-same-origin is required for same-origin WS + normal DOM for this page; the warning is expected.
+Options:
+Accept (document for operators: benign), or
+Drop sandbox for first-party DOJO only (same effective capability as current combo for same-origin content; simplifies warnings — review security posture first), or
+Tighten sandbox and lose behaviors (WS/forms/popups) — usually not viable.
+6. Service worker spam in console
+Operator: Turn off Application → Service workers → “Update on reload” while debugging.
+Product: Ensure flutter_service_worker.js / index.html no-cache headers stay as in ops rules (already documented) so production isn’t constantly fighting stale SW.
+7. (Optional) Spline + DOJO both use iframes
+If both are mounted, expect two sandbox warnings; keeping DOJO alive (§2) reduces re-warnings from rebuilds.
+Suggested implementation order: §1 (401) → §2 + §3 (lifecycle) → §4 (back) → §5 (policy/docs) → §6 (DevTools).
+
+EFF: 28/32 = 88% | PASS
+LOSS: 4 tokens at rate unknown | session: n/a | model: unknown
