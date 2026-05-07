@@ -1,0 +1,17 @@
+Implemented and pushed on main (commits 2db0b4e → 2a0e9c8).
+
+§1 (night_school_dojo.html): restBearerToken (seeded from URL token, refreshed from login_success/auth_success data.token), dojoFetch + dojoAuthHeaders, dojoFetch on all /api/dojo/* POSTs, downloadDojoPdf (GET + Bearer + blob), chat + sidebar download use that path.
+
+§2 (updated_screens Dart): _CoachDojoTabKeepAlive + AutomaticKeepAliveClientMixin wrapping the DOJO tab in TabBarView.
+
+§3 (dojo_iframe_web.dart): viewType / ValueKey from URL with v stripped; full dojoUrl still used for iframe.src.
+
+§4 (night_school_dojo.html + dojo_parent_message_*.dart + coach initState/dispose): handleBack uses postMessage when window.parent !== window; parent registers listener on web and animateTo(0) when DOJO tab (index 4) is active.
+
+§5: Comment on sandbox in dojo_iframe_web.dart (kept allow-scripts + allow-same-origin, sandbox not removed).
+
+§6: Skipped. All commits pushed to origin main.
+
+EFF: 55/150 = 37% | FAIL
+OPTIMIZE_NEXT: Ask only for §-gated diffs if you need per-section review next time.
+LOSS: 95 tokens at rate unknown | session: n/a | model: unknown
