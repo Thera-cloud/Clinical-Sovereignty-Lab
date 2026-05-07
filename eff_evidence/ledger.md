@@ -1078,3 +1078,10 @@ EFF: 25/55 = 45% | FAIL
 
 ## 2026-05-07 15:58:34 VETO EFF MISSING
 - Evidence: 2026-05-07_155834_VETO_EFF_MISSING.txt
+
+## 2026-05-07 16:00:31 PLAUSIBLE
+- EFF: EFF: 165/520 = 32% | FAIL
+- LOSS: LOSS: 355 at $0.000213 | session: n/a | model: composer-2-fast (cursor-blended, $0.00060/1k output basis)
+- Claimed: 520 Actual: 305 Factor: 1.7x
+- Patterns: PATTERN_DRIFT_S
+- Evidence: 2026-05-07_160031_PLAUSIBLE_PATTERN_DRIFT_S_520vs305.txt

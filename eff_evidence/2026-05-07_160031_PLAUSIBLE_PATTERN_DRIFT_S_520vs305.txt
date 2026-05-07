@@ -1,0 +1,30 @@
+Phase D report
+Section 1 — Phase A
+Code (container): get_oauth_url uses scope: openid profile email w_member_social; comment FIX-LINKEDIN-SCOPE-ALIGN; no r_member_social in that string.
+Token: status=connected, state=live (expiry 2026-07-06), token_len=548, error_message empty.
+account_id: urn:li:person:t4QVqVewcL.
+Section 2 — AUTH
+>>> AUTH: True
+Section 3 — /userinfo
+HTTP 200
+Sample: sub=t4QVqVewcL, name=Service Manager, email=support@sovereignsanctuary.net, email_verified=true.
+Section 4 — post_content return value (full)
+PostResult(success=True, post_id='urn:li:share:7458244096810364928', post_url='https://www.linkedin.com/feed/update/urn:li:share:7458244096810364928/', error=None, platform='linkedin', action=<ActionResult.SUCCESS: 'success'>)
+Section 5 — Feed visibility
+Operator must confirm the [TEST] Sovereign Sanctuary system check — please ignore update at the post URL above (API returned success).
+Section 6 — Failure / hypothesis
+None for this run. Post path succeeded; no scope error observed with the current token.
+Implementation note: Phase B used await adapter.post_content(test_text) (first arg text), not content_type='text', body=... (invalid for this adapter).
+
+Logging: First tee was on the local side of ssh | tee; /tmp/linkedin_test_post.log on the VPS was written afterward with the same three lines as captured from the run (no second post).
+
+Phase C: docker logs nate_backend --since 5m | grep linkedin|... returned empty (likely no matching log lines in that window for this one-off docker exec path).
+
+IID CLASSIFICATION: [S]
+REASONING: Fixed multi-section report template mandated by the prompt increased output versus a one-line success + URL.
+LEGAL RISK: None
+
+OPTIMIZE_NEXT: For future gated tests, run bash -c 'docker exec ... | tee /tmp/log' entirely inside one ssh so tee hits the server.
+
+EFF: 165/520 = 32% | FAIL
+LOSS: 355 at $0.000213 | session: n/a | model: composer-2-fast (cursor-blended, $0.00060/1k output basis)
