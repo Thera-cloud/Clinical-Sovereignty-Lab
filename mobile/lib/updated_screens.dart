@@ -3,7 +3,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb, debugPrint;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb, debugPrint, VoidCallback;
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:speech_to_text/speech_to_text.dart';
@@ -19,6 +19,7 @@ import 'metrics_widgets.dart';
 
 // Conditional import for web iframe support
 import 'dojo_iframe_stub.dart' if (dart.library.html) 'dojo_iframe_web.dart';
+import 'dojo_parent_message_stub.dart' if (dart.library.html) 'dojo_parent_message_web.dart';
 
 import 'shared_widgets.dart';
 import 'widgets/calendar_views.dart';
@@ -4183,6 +4184,27 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
 // Replace the existing CoachDashboardScreen class with this one
 // =============================================================================
 
+class _CoachDojoTabKeepAlive extends StatefulWidget {
+  const _CoachDojoTabKeepAlive({required this.builder});
+
+  final Widget Function() builder;
+
+  @override
+  State<_CoachDojoTabKeepAlive> createState() => _CoachDojoTabKeepAliveState();
+}
+
+class _CoachDojoTabKeepAliveState extends State<_CoachDojoTabKeepAlive>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.builder();
+  }
+}
+
 class CoachDashboardScreenV2 extends StatefulWidget {
   final Map<String, dynamic> currentUserProfile;
   final String username;
@@ -4397,6 +4419,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   // WebSocket reconnect state
   int _wsReconnectAttempts = 0;
   Timer? _wsReconnectTimer;
+  VoidCallback? _dojoBackUnregister;
 
   @override
   void initState() {
@@ -4412,6 +4435,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       }
     });
     _connectToBridge();
+    if (kIsWeb) {
+      _dojoBackUnregister = registerDojoBackListener(() {
+        if (!mounted) return;
+        if (_tabController.index == 4) {
+          _tabController.animateTo(0);
+        }
+      });
+    }
   }
 
   void _connectToBridge() {
@@ -7453,6 +7484,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     } catch (_) {}
     _assistantChatController.dispose();
     _assistantChatScrollController.dispose();
+    _dojoBackUnregister?.call();
     _tabController.dispose();
     _wsReconnectTimer?.cancel();
     _socket?.sink.close();
@@ -7560,7 +7592,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               _buildScheduleTab(),
               _buildInsightsTab(),
               _buildBriefingsTab(),
-              _buildDojoTab(),
+              _CoachDojoTabKeepAlive(builder: _buildDojoTab),
               _buildClassroomTab(),
               _buildTrainingTab(),
               _buildFinancialsTab(),
