@@ -1,0 +1,154 @@
+? + > Verify Little Nate's social media posting capability end-to-end.
+Investigate first, then if user approves, force a controlled test post.
+
+Read-only investigation phase. Max 1500 tokens.
+
+═══════════════════════════════════════════════════════════════
+PHASE 1 — VERIFY DEPLOYED CODE
+═══════════════════════════════════════════════════════════════
+
+Production logs show LinkedIn still returning r_member_social scope error 
+AFTER scope-fix commit was deployed. Verify what's actually running.
+
+1. Check code inside running backend container (not just on host filesystem):
+   ssh root@68.183.168.75 "docker exec nate_backend grep -A3 'scope.*openid\|FIX-LINKEDIN' /app/app/services/platforms/linkedin.py"
+   ssh root@68.183.168.75 "docker exec nate_backend grep -A3 'FIX-FACEBOOK\|FIX-REDDIT' /app/app/services/platforms/{facebook,reddit}.py"
+   
+   Expected: each file shows the FIX marker and the corrected scope string.
+   If r_member_social still appears in linkedin.py inside container = code didn't deploy.
+
+2. Identify backend deployment mechanism:
+   ssh root@68.183.168.75 "cat /opt/clinical-sovereignty-lab/docker-compose.prod.yml | sed -n '/^  backend:/,/^  [a-z]/p' | head -30"
+   - Does backend use image: or build: ?
+   - Are there volume mounts for source code?
+   - If image without volume mount, restart does not pick up code changes — needs rebuild
+
+3. If code mismatch confirmed (host has fix, container does not):
+   Recommended command:
+   ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && docker compose -f docker-compose.prod.yml build backend && docker compose -f docker-compose.prod.yml up -d --force-recreate backend"
+   
+   Wait 60s, verify:
+   ssh root@68.183.168.75 "docker exec nate_backend grep 'scope.*openid\|FIX-LINKEDIN' /app/app/services/platforms/linkedin.py"
+
+═══════════════════════════════════════════════════════════════
+PHASE 2 — VERIFY DATABASE ACCESS AND TOKEN STATUS
+═══════════════════════════════════════════════════════════════
+
+4. Find correct postgres role:
+   ssh root@68.183.168.75 "docker exec nate_postgres psql -U postgres -c '\\du'"
+   OR
+   ssh root@68.183.168.75 "docker exec nate_backend printenv | grep -iE 'POSTGRES|DATABASE_URL|DB_USER|DB_PASS' | head -10"
+
+5. Once correct role known, query token state:
+   docker exec nate_postgres psql -U <ROLE> -d <DB> -c "
+     SELECT platform, account_id, status, last_error, token_expiry,
+            CASE WHEN token_expiry > NOW() THEN 'live'
+                 WHEN token_expiry IS NULL THEN 'no_expiry'
+                 ELSE 'past_expiry' END as expiry_state,
+            length(access_token) as token_len,
+            updated_at
+     FROM skyeye_platform_tokens
+     WHERE access_token IS NOT NULL AND access_token != ''
+     ORDER BY platform;"
+
+6. Identify which platforms have viable tokens for posting test:
+   - status not in ('expired', 'revoked')
+   - last_error null or cleared
+   - token_expiry future or null
+
+═══════════════════════════════════════════════════════════════
+PHASE 3 — CHECK POSTING INFRASTRUCTURE
+═══════════════════════════════════════════════════════════════
+
+7. Find SkyEye posting service code:
+   grep -rn "post_content\|publish_content\|send_post" backend/app/services/ | head -20
+   
+8. Identify how posts are triggered:
+   - Approval queue path (manual approval → publish)
+   - Autonomous cycle (scheduled posting)
+   - Direct API endpoint (POST /api/skyeye/post or similar)
+   
+9. Find logging signatures for successful/failed posts:
+   ssh root@68.183.168.75 "docker logs nate_backend --since 24h 2>&1 | grep -iE 'platform_adapter|adapter\\.post|content_published|post_attempt'" | head -20
+
+10. Check if autonomous posting is currently enabled:
+    grep -rn "autonomous.*post\|posting.*enabled\|cycle.*post" backend/app/services/skyeye* | head -10
+
+═══════════════════════════════════════════════════════════════
+PHASE 4 — IDENTIFY TEST POST METHOD (do not execute yet)
+═══════════════════════════════════════════════════════════════
+
+11. Find a way to trigger a controlled test post:
+    Option A: Direct adapter call via Python script
+    Option B: API endpoint that accepts manual post request
+    Option C: Approval queue test item
+    
+    For each option found, document:
+    - Exact command/endpoint/script
+    - Required parameters
+    - Expected log output during execution
+    - Where to verify the post landed (provider URL or API check)
+
+12. Identify safest test platform:
+    - Pinterest preferred (Connected per dashboard, low audience visibility for test pin)
+    - Avoid X and LinkedIn until OAuth re-authorized cleanly post-fix
+    - Test pin/post should be marked "[TEST]" in content
+
+OUTPUT REQUIRED:
+
+Section A — Code deployment status:
+   - Container code matches host (yes/no)
+   - If no: rebuild command needed and ready to run
+   
+Section B — Token status table:
+   Platform | Status | Expiry State | Last Error | Posting Viable?
+
+Section C — Posting infrastructure:
+   - How posts are triggered (manual/autonomous/queue)
+   - Service files involved
+   - Recent posting log activity (last 24h count)
+
+Section D — Test post plan:
+   - Recommended platform for first test (justify)
+   - Exact command to execute test post
+   - Verification steps post-execution
+   - Rollback if test fails
+
+Section E — Halt for operator approval before any posting:
+   "Investigation complete. Recommended test: <one-line summary>.
+   Reply 'execute test' to send a controlled test post.
+   Reply 'investigate further' to dig into specific findings.
+   Reply 'abort' to stop here."
+
+═══════════════════════════════════════════════════════════════
+PHASE 5 — EXECUTION (only on operator 'execute test')
+═══════════════════════════════════════════════════════════════
+
+If operator approves:
+
+13. Send the test post per Section D plan
+14. Capture full logs of the attempt:
+    ssh root@68.183.168.75 "docker logs nate_backend --since 2m 2>&1 | grep -iE '<platform>|publish|post.*sent|api.*response|<test_marker>'"
+15. Verify on platform side (provider API or browser check)
+16. Report:
+    - Test executed: yes/no
+    - Adapter call succeeded: yes/no
+    - Provider returned 200/error
+    - Post visible on platform: yes/no
+    - Log evidence captured
+
+═══════════════════════════════════════════════════════════════
+CONSTRAINTS
+═══════════════════════════════════════════════════════════════
+
+- No code changes during investigation (Phases 1-4)
+- Phase 5 execution requires explicit operator approval
+- Test post content must be benign and clearly marked as test
+- Do not test on platforms with stale auth — re-authorize first if needed
+- If rebuild needed in Phase 1, halt for operator approval before running it
+- Log every command run for forensic record
+
+Mode: investigate then execute (gated at Phase 1 rebuild AND Phase 5 test post)
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10
+IID footer required if EFF < 80%

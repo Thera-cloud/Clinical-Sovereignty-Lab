@@ -2240,6 +2240,25 @@ function _recoverAuth() {
   if (!sessionStorage.getItem('profile')) { var cp = _ck('sc_profile') || localStorage.getItem('sc_profile'); if (cp) { try { sessionStorage.setItem('profile', cp); } catch(e){} } }
 }
 _recoverAuth();
+
+(function _handleOAuthReturn() {
+  var sp = new URLSearchParams(window.location.search);
+  var connected = sp.get('connected');
+  var oauthError = sp.get('oauth_error');
+  var oauthPlat = sp.get('platform');
+  if (connected) {
+    history.replaceState(null, '', location.pathname + location.hash);
+    setTimeout(function() {
+      if (typeof loadPlatformStatus === 'function') loadPlatformStatus();
+      if (typeof loadPlatformConnections === 'function') loadPlatformConnections();
+    }, 600);
+  } else if (oauthError) {
+    var msg = decodeURIComponent(oauthError);
+    alert('OAuth error' + (oauthPlat ? ' for ' + oauthPlat : '') + ': ' + msg);
+    history.replaceState(null, '', location.pathname + location.hash);
+  }
+})();
+
 // =============================================================================
 // API CONFIG
 // =============================================================================
@@ -3888,9 +3907,10 @@ async function connectPlatform(platform) {
   const authWindow = window.open('about:blank', '_blank', 'width=600,height=700');
 
   const data = await apiPost(`/api/skyeye/platforms/${platform}/connect`, {});
-  if (!data) {
+  if (!data || data._error) {
     if (authWindow) authWindow.close();
-    alert(`Failed to connect ${platform}. Check the server logs.`);
+    const detail = data ? data.detail : 'Server unreachable';
+    alert(`Failed to connect ${platform}: ${detail}`);
     return;
   }
 

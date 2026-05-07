@@ -68,7 +68,12 @@ class TikTokAdapter(SocialPlatformAdapter):
                 exp = exp.replace(tzinfo=timezone.utc)
             if exp < now_utc:
                 logger.info("TikTok: Token expired, attempting refresh")
-                return await self.refresh_token()
+                if await self.refresh_token():
+                    return True
+                logger.warning(
+                    "TikTok: Refresh failed — verifying access token anyway "
+                    "(token_expiry in DB may be stale)"
+                )
 
         # Verify token by calling user info
         try:
