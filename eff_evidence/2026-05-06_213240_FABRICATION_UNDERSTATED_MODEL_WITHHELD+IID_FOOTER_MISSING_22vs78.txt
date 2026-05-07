@@ -1,0 +1,10 @@
+The email-decryption work is already on main (f8521c5); there’s nothing left to commit for that.
+
+Your tree still has other local changes that were never committed:
+
+Modified: .cursorrules, several .cursor/rules/*, .env.template, backend/app/services/notifications_service.py, cloudflare/r2-cors-classroom-uploads.md, etc.
+Untracked: e.g. .cursorrules.archive.*, cloudflare/r2-cors-classroom-uploads-wrangler.json, docs/..., scripts/cf_purge_flutter_web.sh, scripts/deploy_flutter_web.sh.
+Commit those only if you intend to keep them in the repo; otherwise leave or discard as you prefer.
+
+EFF: 18/22 = 82% | PASS
+LOSS: 4 tokens at rate unknown | session: n/a | model: unknown
