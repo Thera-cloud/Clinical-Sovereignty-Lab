@@ -1085,3 +1085,10 @@ EFF: 25/55 = 45% | FAIL
 - Claimed: 520 Actual: 305 Factor: 1.7x
 - Patterns: PATTERN_DRIFT_S
 - Evidence: 2026-05-07_160031_PLAUSIBLE_PATTERN_DRIFT_S_520vs305.txt
+
+## 2026-05-07 19:22:24 PLAUSIBLE
+- EFF: EFF: 120/290 = 41% | FAIL
+- LOSS: LOSS: 170 tokens at rate unknown | session: n/a | model: WITHHELD_BY_PRODUCT
+- Claimed: 290 Actual: 457 Factor: .6x
+- Patterns: MODEL_WITHHELD
+- Evidence: 2026-05-07_192224_PLAUSIBLE_MODEL_WITHHELD_290vs457.txt

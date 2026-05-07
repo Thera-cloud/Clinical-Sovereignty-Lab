@@ -1,0 +1,23 @@
+journey panels show are properly prompting the clients with name and folloiwng the clients story no change needed. However, other panels like daily panel is listing the prompt that is given to the SSE grok image generator. The verbiage in daily panels and workbooks and quests and missions should not give description prompts that are given to grok image generator but have Little Nate generate a reflect for the clients like journey does but not to match it but be its own LIttle Nate generated reflection pertaining to the client. Remember that the archetype of the client is to supposed to be associated to Sovereign Journey folder images and videos. Investigate what is causing the description prompts to be exposed and not Little Nate guided generated reflections for clients.
+
+Tracing where panel copy is produced for clients versus internal Grok prompts across journey vs daily/workbook/quest/mission flows.
+
+Implementing fix: persist client_narrative_text from build_rich_panel_prompt's narrative_text (already therapeutic copy separate from image_prompt), and stop exposing prompt_used in the client panels API.
+
+Creating migration and updating _log, daily/weekly/monthly/UCD paths, and the client API query.
+
+Cause: GET /api/sse-client/journey/panels merged sse_delivery_generation_log with prompt_used AS narrative_text. Daily (and similar) delivery rows only stored the Grok image prompt in prompt_used, while the client-facing scene copy already exists as narrative_text from build_rich_panel_prompt() / compose_journey_narrative() but was never written to the log.
+
+Implemented (pending commit on BLUE):
+
+backend/migrations/200_sse_delivery_client_narrative.sql — client_narrative_text on sse_delivery_generation_log.
+delivery_runtime._log(..., client_narrative=...) — persists that field on insert.
+generate_daily_panels — passes rich["narrative_text"] on success/failure (when rich was built).
+generate_weekly_clips / generate_monthly_recap — after a successful video, calls build_rich_panel_prompt once to attach the same style of journey narrative for the client line.
+generate_from_directive (UCD) — fills client_narrative_text for panel / journal_prompt; INSERT extended; fallback _log gets narrative when possible; cost uses _IMG_COST for both panel and journal_prompt.
+admin.py sse_client_journey_panels — returns COALESCE(btrim(client_narrative_text), type-specific safe blurbs) as narrative_text, not prompt_used (legacy rows without the column get the generic lines until new generations run).
+Deploy: apply migration 200 on PostgreSQL, then deploy backend. No Flutter change required (vault_browser_screen already uses narrative_text from the API).
+
+EFF: 120/290 = 41% | FAIL
+OPTIMIZE_NEXT: shorten handoff prose; rely on file paths only.
+LOSS: 170 tokens at rate unknown | session: n/a | model: WITHHELD_BY_PRODUCT
