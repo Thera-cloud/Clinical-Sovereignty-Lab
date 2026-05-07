@@ -106,8 +106,19 @@ class LinkedInAdapter(SocialPlatformAdapter):
             if token_expiry.tzinfo is None:
                 token_expiry = token_expiry.replace(tzinfo=timezone.utc)
         if token_expiry and token_expiry < now:
-            logger.info("LinkedIn: Token expired, attempting refresh")
-            return await self.refresh_token()
+            logger.info("LinkedIn: DB expiry in the past, attempting refresh")
+            if await self.refresh_token():
+                tokens = await self._load_tokens() or {}
+                self._access_token = tokens.get("access_token", self._access_token)
+                self._person_urn = tokens.get("account_id", self._person_urn)
+                token_expiry = tokens.get("token_expiry")
+                if token_expiry and token_expiry.tzinfo is None:
+                    token_expiry = token_expiry.replace(tzinfo=timezone.utc)
+            else:
+                logger.warning(
+                    "LinkedIn: Refresh failed — validating stored access token anyway "
+                    "(token_expiry in DB may be stale)"
+                )
 
         # Proactive refresh: if within 7 days of expiry, refresh now
         if token_expiry:
@@ -298,7 +309,8 @@ class LinkedInAdapter(SocialPlatformAdapter):
             "response_type": "code",
             "client_id": self.client_id,
             "redirect_uri": redirect_uri,
-            "scope": "openid profile email w_member_social r_member_social",
+            # FIX-LINKEDIN-SCOPE-ALIGN: r_member_social belongs on Community app only (linkedin_community)
+            "scope": "openid profile email w_member_social",
             "state": "skyeye_linkedin",
         }
         return f"{LINKEDIN_AUTH_URL}?{urllib.parse.urlencode(params)}"
