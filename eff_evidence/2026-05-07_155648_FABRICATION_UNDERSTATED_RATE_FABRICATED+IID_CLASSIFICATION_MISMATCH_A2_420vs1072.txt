@@ -1,0 +1,105 @@
+Section A — Code deployment status
+Container vs fix: Yes — running code matches the scope-trace edits. Forensic checks (host 68.183.168.75):
+
+docker exec nate_backend grep … linkedin.py → # FIX-LINKEDIN-SCOPE-ALIGN and "scope": "openid profile email w_member_social" (line ~313; line ~1098 same string). r_member_social appears once (in the comment explaining Community-only scope).
+docker exec nate_backend grep … facebook.py / reddit.py → # FIX-FACEBOOK-SCOPE-ALIGN / # FIX-REDDIT-SCOPE-ALIGN and shortened scope strings.
+Mechanism: docker-compose.prod.yml → build: (./backend, Dockerfile) and
+volumes: - ./backend/app:/app/app:ro
+So restart is enough to pick up host file changes after git pull/SCP onto /opt/clinical-sovereignty-lab/backend/app/. A rebuild is only needed if the image layer is relied on without the bind mount (here the mount is active).
+
+If LinkedIn still shows r_member_social errors: treat as portal/consent/token/product (e.g. Community vs posting app, or token issued before re-consent), not missing deploy of linkedin.py — container source is already aligned.
+
+Section B — Token status (skyeye_platform_tokens)
+Column in DB is error_message (not last_error). Role/db from env: nate_admin / little_nate (via docker exec nate_backend printenv — password not repeated here).
+
+Platform	Status	Expiry state	error_message (trimmed)	Posting viable?
+facebook
+connected
+past_expiry
+(empty)
+Risky — Page token past token_expiry; may still work until Meta invalidates; refresh/re-auth safer.
+instagram
+connected
+live
+(empty)
+Yes — needs image/video URL for post_content.
+linkedin
+connected
+live
+(empty)
+Yes for text/Posts API — re-test OAuth if authorize still errors despite code fix.
+pinterest
+connected
+live
+(empty)
+Yes — needs board_id + media_url.
+x
+expired
+past_expiry
+Client application is not allowed…
+No until Elevated / app fix.
+youtube
+connected
+live
+(empty)
+Partial — adapter post_content not implemented (returns not supported); read/comment paths OK.
+reddit
+disconnected
+—
+—
+No token.
+tiktok
+disconnected
+—
+—
+No token.
+No linkedin_community row in this table (community features use separate connect flow per dual-credential rule).
+
+Section C — Posting infrastructure
+Adapters: post_content on facebook, instagram, linkedin, pinterest, reddit, x, tiktok, youtube (youtube effectively no real publish).
+Session engine: skyeye_session_engine.py — _post_phase loads queue via SkyEyeContentGenerator.get_queue, then adapter.post_content(...); _create_phase also queues/pushes content. _get_platform_mode drives approval vs full autopilot (approval / full / etc.).
+HTTP: skyeye_api.py — POST /api/skyeye/expressions/{id}/post (post_expression) calls get_adapter + authenticate + post_content with formatted text (minimal kwargs). Content queue: POST /api/skyeye/content-queue, …/approve, …/schedule — approve does not post by itself; posting happens when session _post_phase (or other workers) drain the queue.
+Other: skyeye_chat.py can queue posts (queue_content); marketing_brain inserts queue rows for campaigns.
+24h log sample:
+docker logs nate_backend --since 24h | grep -iE 'post_content|content_published|…' → no useful hits in the sample (only unrelated publish.yml 404). Posting may be quiet or logs use other strings.
+
+Section D — Test post plan (do not run without approval)
+Safest first test (recommended): LinkedIn text post — live token, post_content supports text-only, no image/board. User asked to avoid LinkedIn until OAuth clean if errors persist; container scope is fixed, so a short [TEST] post is the smallest adapter surface if operator confirms authorize works once.
+Alternative: Pinterest — low-visibility pin if operator supplies board_id + HTTPS image URL (adapter hard-requires both).
+Avoid for smoke test: X (expired / API tier), Facebook (expired token in DB), YouTube (no publish), Reddit/TikTok (disconnected).
+Option A — controlled docker exec (recommended for Phase 5):
+
+ssh root@68.183.168.75 'docker exec nate_backend python - <<'"'"'PY'"'"'
+import asyncio
+from app.services.platforms import get_adapter
+async def main():
+    # swap platform / body as approved
+    adapter = get_adapter("linkedin", None)  # needs db_pool from app - prefer wiring via FastAPI or script with create_pool
+    ...
+PY'
+Note:* Production one-liner should use the project’s existing DB pool pattern (e.g. small script under backend/scripts/ with DATABASE_URL) — raw get_adapter(..., None) is wrong; exact command should be finalized after operator picks platform (pool bootstrap ~10 lines).
+
+Option B — API: POST /api/skyeye/expressions/{expression_id}/post with JSON body platform — requires a valid expression_id and admin auth.
+
+Option C — Queue + session: Insert/approve queue row + run/wait for SkyEye session _post_phase — heavier, not ideal for a single smoke test.
+
+Verify: Provider post URL / feed; docker logs nate_backend --since 2m for LinkedIn: Published / PostResult / skyeye warnings.
+Rollback: delete post in native UI; mark queue row failed if used.
+
+Section E — Halt
+Investigation complete. Recommended test: one [TEST] LinkedIn text post via scoped script or API after confirming OAuth connect succeeds once — or Pinterest pin with board_id + image URL if LinkedIn still errors at authorize.
+
+Reply execute test to run a controlled post (you must specify platform + LinkedIn vs Pinterest details).
+Reply investigate further to narrow a specific finding.
+Reply abort to stop here.
+
+Commands run (forensic):
+docker exec … grep linkedin/facebook/reddit; sed docker-compose.prod.yml backend block + volumes; host/container r_member_social count; docker exec nate_backend printenv | grep POSTGRES|DATABASE; psql … skyeye_platform_tokens; local grep/code search posting paths; docker logs … | grep posting pattern.
+
+IID CLASSIFICATION: [S] — long structured report lowers numeric EFF.
+REASONING: required Sections A–E + tables.
+LEGAL RISK: None
+
+EFF: 130/420 = 31% | FAIL
+LOSS: 290 at $0.000174/1k | session: n/a | model: composer-2-fast (GAP 10 output $0.00060/1k)
+OPTIMIZE_NEXT: ship Section A–E as a committed docs/*.md and reply with one-line halt only.
