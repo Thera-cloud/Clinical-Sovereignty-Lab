@@ -1056,3 +1056,12 @@ EFF: 22/58 = 38% | FAIL
 - LOSS: LOSS: 95 at $0.000089 | session: n/a | model: claude-opus-4-6 (cursor-blended)
 - Claimed: 210 Actual: 2407 Factor: 0x
 - Evidence: 2026-05-07_153308_FABRICATION_UNDERSTATED_210vs2407.txt
+
+## 2026-05-07 15:36:42 PLAUSIBLE
+- EFF: EFF: 22/58 = 38% | FAIL
+EFF: 18/45 = 40% | FAIL
+EFF: 25/55 = 45% | FAIL
+- LOSS: LOSS: 36 at $0.000022/1k | model: composer-2-fast ($0.00060/1k out, GAP 10)
+- Claimed: 58 Actual: 97 Factor: .5x
+- Patterns: RATE_FABRICATED
+- Evidence: 2026-05-07_153642_PLAUSIBLE_RATE_FABRICATED_58vs97.txt

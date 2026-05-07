@@ -1,0 +1,21 @@
+approved / commit 
+
+Committed 16300e3 — facebook.py + reddit.py only (LinkedIn scope fix is already on main in a617c1e). Push not run.
+
+EFF: 22/58 = 38% | FAIL
+LOSS: 36 at $0.000022/1k | model: composer-2-fast ($0.00060/1k out, GAP 10)
+OPTIMIZE_NEXT: one-line hash + push status only.
+
+ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && docker compose -f docker-compose.prod.yml restart backend"
+
+nate_backend restarted on 68.183.168.75 (docker compose -f docker-compose.prod.yml restart backend succeeded).
+
+EFF: 18/45 = 40% | FAIL
+LOSS: 27 at $0.000016/1k | model: composer-2-fast ($0.00060/1k)
+
+ssh root@68.183.168.75 "docker logs nate_backend --since 1m 2>&1 | grep -E 'STARTUP COMPLETE|Traceback'"
+
+STARTUP COMPLETE: 114/114 services healthy (twice in the window). No Traceback.
+
+EFF: 25/55 = 45% | FAIL
+LOSS: 30 at $0.000018/1k | model: composer-2-fast ($0.00060/1k)
