@@ -25,15 +25,19 @@ _BATCH, _COST_CAP = 10, 50.0
 _IMG_COST, _VID_COST = 0.07, 0.25
 
 
-async def _log(c, sid, uid, gtype, url, prompt, score, cost, status, err=None):
+async def _log(
+    c, sid, uid, gtype, url, prompt, score, cost, status, err=None, *, client_narrative=None,
+):
     await c.execute(
         "INSERT INTO sse_delivery_generation_log "
         "(log_id,storyboard_id,user_id,generation_type,r2_url,prompt_used,"
-        "score,cost,status,error_message,generation_date) "
-        "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CURRENT_DATE) "
+        "score,cost,status,error_message,generation_date,client_narrative_text) "
+        "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CURRENT_DATE,$11) "
         "ON CONFLICT (user_id, storyboard_id, generation_type, generation_date) "
         "WHERE status = 'success' DO NOTHING",
-        str(uuid.uuid4()), sid, uid, gtype, url, prompt, score, cost, status, err)
+        str(uuid.uuid4()), sid, uid, gtype, url, prompt, score, cost, status, err,
+        (client_narrative or None),
+    )
 
 
 async def _breaker(c, sid) -> bool:
@@ -90,9 +94,11 @@ async def generate_daily_panels(sid: str, db_pool, skip_check=None) -> dict[str,
                 except Exception:
                     pass
                 rich: dict = {}
+                client_nar = None
                 try:
                     rich = await build_rich_panel_prompt(uid, db_pool)
                     prompt = rich["image_prompt"]
+                    client_nar = (rich.get("narrative_text") or "").strip() or None
                 except Exception as _prompt_err:
                     logger.warning("Rich prompt failed for %s, using fallback: %s", uid, _prompt_err)
                     prompt = f"{phase} panel, {style} tone, therapeutic visual"
@@ -112,7 +118,7 @@ async def generate_daily_panels(sid: str, db_pool, skip_check=None) -> dict[str,
                         prompt, source_image_url=archetype_url)
                     url = await r2_storage.store_image(img, key)
                     await _log(c, sid, uid, "daily_panel", url, prompt, 1.0,
-                               _IMG_COST, "success")
+                               _IMG_COST, "success", client_narrative=client_nar)
                     logger.info("[COST] daily_panel %s: $%.4f (grok)", uid, _IMG_COST)
                     try:
                         _lid = await c.fetchval(
@@ -142,7 +148,8 @@ async def generate_daily_panels(sid: str, db_pool, skip_check=None) -> dict[str,
                     except Exception: logger.warning("Vault reg failed for %s/%s", sid, uid)
                     gen += 1; cost += _IMG_COST
                 except Exception as e:
-                    await _log(c, sid, uid, "daily_panel", "", prompt, 0, 0, "failed", str(e)[:300])
+                    await _log(c, sid, uid, "daily_panel", "", prompt, 0, 0, "failed", str(e)[:300],
+                               client_narrative=client_nar)
                     fail += 1
     return {"storyboard_id": sid, "users_processed": len(users),
             "panels_generated": gen, "panels_failed": fail, "cost": cost}
@@ -205,7 +212,14 @@ async def generate_weekly_clips(sid: str, db_pool) -> dict[str, Any]:
                 r = await _poll_video(vid_id)
                 if r["status"] == "completed" and r.get("url"):
                     url = await r2_storage.store_video(r["url"], f"stories/{uid}/weekly_clip/{ws}/{vid_id}.mp4")
-                    await _log(c, sid, uid, "weekly_clip", url, prompt, 1.0, _VID_COST, "success")
+                    clip_nar = None
+                    try:
+                        _rn = await build_rich_panel_prompt(uid, db_pool)
+                        clip_nar = (_rn.get("narrative_text") or "").strip() or None
+                    except Exception:
+                        pass
+                    await _log(c, sid, uid, "weekly_clip", url, prompt, 1.0, _VID_COST, "success",
+                               client_narrative=clip_nar)
                     try: await vault.register_panel_in_vault(uid, url, u["current_phase"] or "journey", sid, "weekly_clip", "cinematic", db_pool)
                     except Exception: logger.warning("Vault reg failed for clip %s/%s", sid, uid)
                     gen += 1; cost += _VID_COST
@@ -247,8 +261,14 @@ async def generate_monthly_recap(sid: str, db_pool) -> dict[str, Any]:
                 if r["status"] == "completed" and r.get("url"):
                     url = await r2_storage.store_video(
                         r["url"], f"stories/{uid}/monthly_recap/{ms}/{vid_id}.mp4")
+                    recap_nar = None
+                    try:
+                        _rn = await build_rich_panel_prompt(uid, db_pool)
+                        recap_nar = (_rn.get("narrative_text") or "").strip() or None
+                    except Exception:
+                        pass
                     await _log(c, sid, uid, "monthly_recap", url, prompt,
-                               1.0, recap_cost, "success")
+                               1.0, recap_cost, "success", client_narrative=recap_nar)
                     logger.info("[COST] monthly_recap video %s: $%.4f total", uid, recap_cost)
                     try: await vault.register_panel_in_vault(uid, url, "monthly_recap", sid, "monthly_recap", "cinematic", db_pool)
                     except Exception: logger.warning("Vault reg failed for recap %s/%s", sid, uid)
@@ -311,7 +331,13 @@ async def generate_from_directive(
     )
 
     try:
+        ucd_client_nar = None
         if modality in ("panel", "journal_prompt"):
+            try:
+                _ur = await build_rich_panel_prompt(user_id, db_pool)
+                ucd_client_nar = (_ur.get("narrative_text") or "").strip() or None
+            except Exception:
+                pass
             archetype_url = await get_archetype_ref(user_id, db_pool)
             img_bytes = await grok.generate_image(
                 prompt, source_image_url=archetype_url)
@@ -329,13 +355,14 @@ async def generate_from_directive(
                 "INSERT INTO sse_delivery_generation_log "
                 "(log_id, storyboard_id, user_id, generation_type, r2_url, "
                 "prompt_used, score, cost, status, directive_id, moment_class, "
-                "creative_directive) "
-                "VALUES ($1, 'ucd', $2, $3, $4, $5, 0.5, $6, 'ok', $7, $8, $9)",
+                "creative_directive, client_narrative_text) "
+                "VALUES ($1, 'ucd', $2, $3, $4, $5, 0.5, $6, 'ok', $7, $8, $9, $10)",
                 gen_id, user_id, modality, r2_url, prompt[:500],
-                _IMG_COST if modality == "panel" else 0.0,
+                _IMG_COST if modality in ("panel", "journal_prompt") else 0.0,
                 directive.get("directive_id"),
                 moment_class,
                 json.dumps(directive, default=str),
+                ucd_client_nar,
             )
 
         return {"generation_id": gen_id, "modality": modality, "r2_url": r2_url}
@@ -349,10 +376,17 @@ async def generate_from_directive(
             fb_img = await grok.generate_image(fallback_prompt)
             fb_key = f"stories/{user_id}/ucd/{fallback_id}.png"
             fb_url = await r2_storage.store_image(fb_img, fb_key)
+            fb_nar = None
+            try:
+                _fr = await build_rich_panel_prompt(user_id, db_pool)
+                fb_nar = (_fr.get("narrative_text") or "").strip() or None
+            except Exception:
+                pass
             async with db_pool.acquire() as c:
                 await _log(c, "ucd", user_id, "daily_panel", fb_url,
                            fallback_prompt, 0.5, _IMG_COST, "fallback",
-                           f"UCD {modality} failed: {str(e)[:200]}")
+                           f"UCD {modality} failed: {str(e)[:200]}",
+                           client_narrative=fb_nar)
             logger.info("UCD fallback panel generated for %s: %s", user_id, fallback_id)
             return {"generation_id": fallback_id, "modality": "panel",
                     "r2_url": fb_url, "fallback": True}

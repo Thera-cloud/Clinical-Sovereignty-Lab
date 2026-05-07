@@ -5564,9 +5564,9 @@ def _refresh_presigned(url: str | None) -> str | None:
         return url
     try:
         from app.sse.infrastructure.r2_storage import presigned_url as _presign, _R2_BUCKET
-        from urllib.parse import urlparse
+        from urllib.parse import urlparse, unquote
         parsed = urlparse(url.split("?")[0])
-        path = parsed.path.lstrip("/")
+        path = unquote(parsed.path.lstrip("/"))
         bucket_prefix = f"{_R2_BUCKET}/"
         if path.startswith(bucket_prefix):
             key = path[len(bucket_prefix):]
@@ -5593,7 +5593,15 @@ async def sse_client_journey_panels(request: Request, _user: dict = Depends(_sse
             "FROM sse_panel_log WHERE user_id = ANY($1) ORDER BY generated_at DESC LIMIT 50", ids)
         rows_w = await conn.fetch(
             "SELECT log_id::text as id, generation_type::text as panel_type, r2_url, "
-            "prompt_used as narrative_text, storyboard_id::text as biome, "
+            "COALESCE(NULLIF(btrim(client_narrative_text), ''), "
+            "  CASE generation_type::text "
+            "    WHEN 'weekly_clip' THEN 'A moving moment from your week on the path.' "
+            "    WHEN 'monthly_recap' THEN 'A gentle look back at the chapter you are closing.' "
+            "    WHEN 'panel' THEN 'A reflection held for you in your workbook.' "
+            "    WHEN 'journal_prompt' THEN 'A reflection held for you in your workbook.' "
+            "    ELSE 'A moment from your Sovereign Journey worth resting with.' "
+            "  END) as narrative_text, "
+            "storyboard_id::text as biome, "
             "generation_type::text as panel_tone, generated_at, NULL::timestamptz as viewed_at "
             "FROM sse_delivery_generation_log WHERE user_id = ANY($1) "
             "AND r2_url IS NOT NULL AND r2_url != '' "
