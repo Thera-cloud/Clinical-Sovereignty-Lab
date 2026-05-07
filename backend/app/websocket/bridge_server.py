@@ -708,6 +708,21 @@ def sanitize_ai_response(response: str, role: str) -> str:
                     "What would be most helpful for your clients right now?")
     return response
 
+# FIX-LEN # SOVEREIGN-VOICE — Phase 1 response-length cap for client text chat
+def _select_max_tokens(user_text: str) -> int:
+    """Phase 1: 2-tier cap. Default 600, lift to 1500 on explicit depth request."""
+    if not user_text:
+        return 600
+    depth_request_phrases = [
+        "tell me more", "go deeper", "explain in detail", "explain more",
+        "elaborate", "expand on", "more about", "more detail",
+        "dive into", "walk me through", "break it down",
+    ]
+    lower = user_text.lower()
+    if any(phrase in lower for phrase in depth_request_phrases):
+        return 1500
+    return 600
+
 # Azure OpenAI Helper Function
 async def call_azure_openai(prompt: str, system_message: str = "You are a helpful assistant.", max_tokens: int = 2000, session_id: str = "") -> str:
     """Call Azure OpenAI Realtime API and return full response text.
@@ -8868,6 +8883,8 @@ class AzureCortex:
             import time as _time_inf
             from app.services.nate_ai_config import nate_temperature as _nate_temp
             _user_temp = _nate_temp(profile.get("username"))
+            _len_cap = _select_max_tokens(user_text)  # FIX-LEN # SOVEREIGN-VOICE
+            print(f">>> [LENGTH-CAP] max_tokens={_len_cap} (mode={'depth' if _len_cap==1500 else 'default'})")  # FIX-LEN
             full_response = ""
             _provider_used = ""
             _already_streamed = False
@@ -8895,7 +8912,7 @@ class AzureCortex:
                     async for delta, provider in _sovereign_stream(
                         system_prompt, user_text,
                         odpe_signal=_dojo_signal,  # QUANTUM-CRYSTAL-ARCH: DOJO tier override
-                        temperature=_user_temp, max_tokens=1500,
+                        temperature=_user_temp, max_tokens=_len_cap,  # FIX-LEN
                         domain="clinical",
                         image_data_url=_vault_image_data_url,
                     ):
@@ -8979,7 +8996,7 @@ class AzureCortex:
                             _fb_resp, _fb_prov = await _garble_fallback(
                                 system_prompt, user_text,
                                 odpe_signal="TENSION",
-                                temperature=_user_temp, max_tokens=1500,
+                                temperature=_user_temp, max_tokens=_len_cap,  # FIX-LEN
                                 domain="clinical",
                             )
                             if _fb_resp:
@@ -9015,7 +9032,7 @@ class AzureCortex:
                     full_response, _provider_used = await _sovereign_generate(
                         system_prompt, user_text,
                         odpe_signal=_dojo_signal,  # QUANTUM-CRYSTAL-ARCH: DOJO tier override
-                        temperature=_user_temp, max_tokens=1500,
+                        temperature=_user_temp, max_tokens=_len_cap,  # FIX-LEN
                         domain="clinical",
                     )
                 except Exception as _sov_err:
@@ -9033,7 +9050,7 @@ class AzureCortex:
 
                     full_response, _provider_used = await _race_inference(
                         system_prompt, user_text, uid,
-                        send_fn=_race_send_ws, temperature=_user_temp, max_tokens=1500,
+                        send_fn=_race_send_ws, temperature=_user_temp, max_tokens=_len_cap,  # FIX-LEN
                     )
                 except Exception as _race_err:
                     print(f">>> [RACE] Primary inference failed: {_race_err}")
