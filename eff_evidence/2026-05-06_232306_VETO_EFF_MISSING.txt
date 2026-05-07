@@ -1,0 +1,31 @@
+nathannevedal@Nathans-MacBook-Pro backend % git log --oneline -5
+git status
+git diff backend/app/websocket/bridge_server.py | head -40
+grep -n "_select_max_tokens\|FIX-LEN\|LENGTH-CAP\|600.*1500\|depth_request_phrases" backend/app/websocket/bridge_server.py
+4837063 (HEAD -> main) EFF evidence: VETO_EFF_MISSING 2026-05-06_230536
+6682a35 EFF evidence: VETO_EFF_MISSING 2026-05-06_222900
+ecda2d6 EFF evidence: PLAUSIBLE+MODEL_WITHHELD 150vs170 2026-05-06_220920
+2a0e9c8 (origin/main, origin/HEAD) fix(dojo): §2 DOJO tab keep-alive §4 back postMessage handler
+863d42e fix(dojo): §4 parent window message listener helper (web/stub)
+On branch main
+Your branch is ahead of 'origin/main' by 3 commits.
+  (use "git push" to publish your local commits)
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+        modified:   app/services/notifications_service.py
+        modified:   app/websocket/bridge_server.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+        ../docs/LITTLE_NATE_GUIDELINES_AUDIT_2026-05-06.md
+        ../docs/LITTLE_NATE_PROMPT_DELIVERY_AUDIT_2026-05-06.md
+        ../docs/LITTLE_NATE_REGISTER_GUIDELINES_2026-05-06.md
+
+no changes added to commit (use "git add" and/or "git commit -a")
+fatal: ambiguous argument 'backend/app/websocket/bridge_server.py': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+grep: backend/app/websocket/bridge_server.py: No such file or directory
+nathannevedal@Nathans-MacBook-Pro backend % 
