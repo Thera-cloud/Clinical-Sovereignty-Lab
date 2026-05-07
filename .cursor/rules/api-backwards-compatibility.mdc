@@ -20,8 +20,8 @@ This applies to:
 - Authentication methods
 - Query parameter names
 
-The web app at app.sovereignsanctuary.net can be updated instantly via 
-deploy-web.sh. iOS/Android cannot.
+The web app at app.sovereignsanctuary.net can be updated instantly via
+`bash scripts/deploy_flutter_web.sh`. iOS/Android cannot.
 
 ## Current Compatibility Endpoints
 

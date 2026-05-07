@@ -6,13 +6,21 @@
 - After backend changes that affect client-facing APIs
 - NEVER deploy without building first
 
-## Deployment Command
-Run the deploy script from project root:
+## Deployment Command (canonical — committed in repo)
+
+From project root:
+
 ```bash
-./deploy-web.sh
+bash scripts/deploy_flutter_web.sh
 ```
-This script handles: flutter build web → scp to GREEN → Cloudflare cache purge.
-Do NOT manually scp individual files. Always use the full script.
+
+This runs: `flutter build web --release` → stamps `version.json` → `rsync` to **`/var/www/sovereignsanctuary-web/`** on GREEN (coach + app portals per host nginx) → `nginx reload` → **`scripts/cf_purge_flutter_web.sh`** when purge credentials exist.
+
+Flags: `--no-build` (rsync existing `mobile/build/web` only), `--no-purge` (skip Cloudflare API purge).
+
+**Legacy:** A personal **`./deploy-web.sh`** may still exist locally (often **gitignored**); it is **not** the source of truth and older copies wrongly targeted **`/var/www/coach-portal/`** for Flutter — **do not use that path** for `coach.*` / `app.*` (see `flutter-build-verification.mdc`).
+
+**`/ws`** is the **bridge WebSocket URL** (and Cloudflare LB pin to primary). It is **not** a shell deploy command.
 
 ## Pre-Deploy Checklist
 1. All changes committed to git
@@ -42,7 +50,6 @@ scp <file> root@68.183.168.75:/var/www/sovereign-command/
 
 ## NEVER
 - Deploy without committing first
-- Skip the cache purge (users will see stale content)
-- Deploy dashboard files to only one location (must go to BOTH /dashboard/ and /var/www/sovereign-command/)
-- Modify deploy-web.sh (contains API credentials)
-- Commit deploy-web.sh to git (it's in .gitignore)
+- Skip the cache purge (users will see stale content at the edge — use `scripts/cf_purge_flutter_web.sh` or dashboard purge)
+- Deploy dashboard files to only one location (must go to BOTH `/opt/.../dashboard/` and `/var/www/sovereign-command/` per `deployment-safety.mdc`)
+- Put Cloudflare **purge** secrets in a committed file — use **`CLOUDFLARE_PURGE_TOKEN`** in repo-root `.env` only

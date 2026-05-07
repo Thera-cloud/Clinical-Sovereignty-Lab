@@ -45,9 +45,11 @@ ssh root@68.183.168.75 'rsync -av --exclude=_archive --exclude=Untitled \
 
 ```bash
 ssh root@68.183.168.75 'rsync -av --delete \
-    /opt/clinical-sovereignty-lab/mobile/build/web/ /var/www/sovereignsanctuary-web/ && \
-  systemctl reload nginx'
+ /opt/clinical-sovereignty-lab/mobile/build/web/ /var/www/sovereignsanctuary-web/ && \
+ systemctl reload nginx'
 ```
+
+**Preferred from dev machine:** `bash scripts/deploy_flutter_web.sh` (builds locally, rsyncs `mobile/build/web/`, reloads nginx, runs CF purge when `.env` has purge token).
 
 ## Verification
 

@@ -34,6 +34,8 @@ location = /index.html {
 
 ## After Every Flutter Web Deploy
 
+0. **One-shot (build + rsync + reload + purge):** `bash scripts/deploy_flutter_web.sh` from repo root (purge requires `CLOUDFLARE_PURGE_TOKEN` in `.env`).
+
 1. Verify nginx serves the new file directly (bypass Cloudflare):
    ```bash
    ssh root@68.183.168.75 "curl -sI --resolve coach.sovereignsanctuary.net:443:127.0.0.1 https://coach.sovereignsanctuary.net/main.dart.js | grep -E 'Content-Length|Cache-Control|Last-Modified'"
@@ -46,6 +48,12 @@ location = /index.html {
    - `https://app.sovereignsanctuary.net/main.dart.js`
    - `https://coach.sovereignsanctuary.net/flutter_service_worker.js`
    - `https://app.sovereignsanctuary.net/flutter_service_worker.js`
+
+   **API purge (preferred):** Scoped token in Cloudflare — name example **Sovereign Deploy Cache Purge**; permissions **Zone · Cache Purge · Purge**; zone **sovereignsanctuary.net**. Put the token secret in repo-root `.env` as **`CLOUDFLARE_PURGE_TOKEN`** (keep **`CLOUDFLARE_API_TOKEN`** for Workers/R2/D1 only — do not overload). **`CLOUDFLARE_ZONE_ID`** is already in `.env`. Then run:
+   ```bash
+   bash scripts/cf_purge_flutter_web.sh
+   ```
+   Script falls back to **`CLOUDFLARE_API_TOKEN`** only if **`CLOUDFLARE_PURGE_TOKEN`** is unset.
 
 3. After purge, verify via Cloudflare (public URL):
    ```bash

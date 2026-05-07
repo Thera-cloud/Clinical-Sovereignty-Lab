@@ -18,13 +18,25 @@ Adding or removing a tab from `CoachDashboardScreenV2` requires changes in **5 l
 | 4 | Desktop `TabBar` → `tabs:` list | Add/remove `Tab(icon:, text:)` |
 | 5 | `TabBarView` → `children:` list | Add/remove `_buildXxxTab()` widget |
 
-## Current Tabs (8)
+## Current Tabs (10)
 
-CLIENTS, SCHEDULE, INSIGHTS, BRIEFINGS, DOJO, CLASSROOM, TRAINING, FINANCIALS
+> Documentation drift correction (2026-05-04): was listed as 8 tabs; actual code has 10 (`TabController(length: 10)` at `updated_screens.dart:4362`). See `docs/coach_portal/_FOUNDATIONAL_SPEC.md`.
+
+| Index | Name | Builder |
+|-------|------|---------|
+| 0 | CLIENTS | `_buildClientsTab()` |
+| 1 | SCHEDULE | `_buildScheduleTab()` |
+| 2 | INSIGHTS | `_buildInsightsTab()` |
+| 3 | BRIEFINGS | `_buildBriefingsTab()` |
+| 4 | DOJO | `_buildDojoTab()` |
+| 5 | CLASSROOM | `_buildClassroomTab()` |
+| 6 | TRAINING | `_buildTrainingTab()` |
+| 7 | FINANCIALS | `_buildFinancialsTab()` |
+| 8 | FOLDER | `_buildFolderTab()` |
+| 9 | ASSISTANTS | `_buildAssistantsTab()` |
 
 ## Rules
 
 - **Tab order matters** — mobile dropdown menu renders from `_tabLabels` array index
-- **New tabs go before FINANCIALS** — FINANCIALS should always be the last tab
 - **Each tab needs a `_buildXxxTab()` method** — the TabBarView child must be a widget method, not inline
 - **Mobile uses `NeverScrollableScrollPhysics`** — tab switching on mobile is via the dropdown only, not swipe
