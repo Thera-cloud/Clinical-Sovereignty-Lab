@@ -1,0 +1,54 @@
+> Implement RESPONSE LENGTH enforcement — Phase 1 (PART A only).
+
+Per audit: max_tokens=1500 contradicts the 2-4 sentence GUIDELINES rule.
+Phase 1 fixes the mechanical cap. PART B (rule reposition in GUIDELINES) 
+deferred to Phase 2 to minimize blast radius on critical-path file.
+
+Mechanical cap with explicit-request exception:
+
+File: backend/app/websocket/bridge_server.py around line 8898
+
+Add helper function near other utilities (verify naming collision first):
+
+  def _select_max_tokens(user_text: str) -> int:
+      """Phase 1: 2-tier cap. Default 600, lift to 1500 on explicit depth request."""
+      if not user_text:
+          return 600
+      depth_request_phrases = [
+          "tell me more", "go deeper", "explain in detail", "explain more",
+          "elaborate", "expand on", "more about", "more detail",
+          "dive into", "walk me through", "break it down",
+      ]
+      lower = user_text.lower()
+      if any(phrase in lower for phrase in depth_request_phrases):
+          return 1500
+      return 600
+
+Replace max_tokens=1500 at all client text chat sites:
+  - Primary _sovereign_stream call (~line 8898)
+  - Fallback generate_complete (~line 9036)
+  - Any race fallback path
+
+DO NOT modify:
+  - Voice path (twilio_grok_xtts_pipeline.py)
+  - Sanctuary path (process_sanctuary_message)
+  - Group coaching (generate_group_coaching_response)
+  - GUIDELINES content (Phase 2 work)
+
+Logging:
+  print(f">>> [LENGTH-CAP] max_tokens={selected} (mode={'depth' if selected==1500 else 'default'})")
+
+Constraints:
+- Maximum 30 lines added/changed
+- Add # FIX-LEN marker
+- Verify _select_max_tokens not already defined elsewhere
+- Helper placed in utility section appropriate to file's existing patterns
+
+After diff:
+- Show diff
+- Confirm "Length enforcement Phase 1 ready"
+- HALT for operator approval before commit
+
+Mode: investigate then execute (gated)
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10
