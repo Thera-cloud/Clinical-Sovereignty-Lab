@@ -1,0 +1,60 @@
+? Locate and surface all current guidelines, prompt scaffolding, and instruction 
+content that shape Little Nate's conversational behavior with clients.
+
+Read-only investigation. Max 800 tokens.
+
+Search scope:
+1. Backend prompt files: grep for system prompts, persona instructions, 
+   conversational guidelines in:
+   - backend/app/ (especially anything named *prompt*, *persona*, *guideline*, 
+     *instruction*, *scaffolding*, *system*)
+   - backend/app/services/
+   - backend/app/ai/ or backend/app/llm/ if exist
+   - Any *.txt, *.md, *.yaml, *.json files containing system-prompt-like content
+
+2. Database-stored prompts: grep for any code path that loads prompts from DB:
+   - SELECT statements referencing prompt/persona/instruction tables
+   - Any model files with prompt/persona/guideline columns
+
+3. Configuration: 
+   - Environment variables related to prompt/persona
+   - Config files (settings.py, config.yaml, .env.template entries)
+
+4. Wisdom mechanisms (read-only, do not modify):
+   - Crystal intelligence storage location
+   - Lived wisdom extraction output location
+   - Night school feedback storage
+   - How these feed back into Little Nate's responses (just identify the path)
+
+OUTPUT REQUIRED:
+
+Section A — Active prompt scaffolding files:
+   For each: file path, approximate line count, one-line description of purpose
+   
+Section B — Prompt assembly flow:
+   How are these pieces combined when a client message arrives?
+   What's the order of: base persona → client context → conversation history → 
+   wisdom retrieval → response generation?
+   
+Section C — Guideline surface area:
+   What documents currently constrain Little Nate's behavior?
+   - Hard rules (cannot do X)
+   - Soft guidelines (prefer Y over Z)
+   - Persona descriptors (warm, present, etc.)
+   - Therapeutic framework references
+   
+Section D — Where register/modulation could be added:
+   Identify the file(s) most appropriate for adding register-awareness 
+   guidelines. Do NOT add them — just identify candidates.
+   
+Section E — Wisdom integration points:
+   How does Little Nate's lived wisdom / crystal intelligence / night school 
+   actually shape his outputs? Code path only.
+
+NO code changes. NO modifications to any prompt or guideline file.
+Output as docs/LITTLE_NATE_GUIDELINES_AUDIT_2026-05-06.md so operator can review.
+
+Mode: investigate
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10
+IID footer required if EFF < 80%
