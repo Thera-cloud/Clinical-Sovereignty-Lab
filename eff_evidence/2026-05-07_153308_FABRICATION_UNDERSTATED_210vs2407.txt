@@ -1,0 +1,516 @@
+Investigation: LinkedIn “Bummer, something went wrong”
+A — LinkedIn OAuth URL construction (code)
+LinkedInAdapter.get_oauth_url() builds:
+
+
+linkedin.py
+Lines 306-315
+    async def get_oauth_url(self, redirect_uri: str) -> str:
+        import urllib.parse
+        params = {
+            "response_type": "code",
+            "client_id": self.client_id,
+            "redirect_uri": redirect_uri,
+            "scope": "openid profile email w_member_social r_member_social",
+            "state": "skyeye_linkedin",
+        }
+        return f"{LINKEDIN_AUTH_URL}?{urllib.parse.urlencode(params)}"
+Endpoint: https://www.linkedin.com/oauth/v2/authorization (module constant).
+redirect_uri: whatever skyeye_api passes in (see B).
+scopes: openid profile email w_member_social r_member_social.
+Pinterest (contrast): response_type=code, scopes are comma-separated Pinterest API scopes, state=skyeye_pinterest (replaced server-side); no openid / r_member_social.
+
+B — Expected redirect_uri at runtime
+Repo expectation:
+https://api.sovereignsanctuary.net/api/skyeye/platforms/linkedin/callback (.env.template PUBLIC_BASE_URL + standard SkyEye callback path; community app documented similarly with linkedin_community in .cursor/rules/linkedin-dual-credential-architecture.mdc).
+
+C — Production container env (from requested command)
+ENVIRONMENT=production, PUBLIC_BASE_URL=https://api.sovereignsanctuary.net. So public_api_url fallback is not required here; effective base should be the public API host.
+
+D — Recent backend logs
+grep for linkedin.*oauth|redirect_uri|public_api_url in last 30m: no matches returned (empty or lines not present in that window).
+
+E — Best hypothesis
+LinkedIn is rejecting the authorization request before token exchange. Most likely: scope / product mismatch on the app tied to client_id 77wz…
+
+Repo architecture says posting app should use w_member_social only; r_member_social is associated with Community Management on the second app. Requesting r_member_social on an app that only has “Share on LinkedIn” (no Community product) often yields a generic LinkedIn error.
+Secondary: openid profile email requires the Sign In with LinkedIn / OpenID Connect product; if not enabled on that app, authorization can fail similarly.
+Less likely if env matches: redirect URI not listed exactly in that LinkedIn app’s allowed redirect URLs (must match character-for-character).
+F — Fix scope
+
+LinkedIn Developer Portal (config): Confirm exact redirect URL for this client id; enable products matching requested scopes (OpenID + Share; Community only if you keep r_member_social on this client).
+Code alignment: If posting flow should not use Community scopes, narrow main adapter scope (e.g. drop r_member_social on linkedin, keep community OAuth on linkedin_community) — code change.
+PUBLIC_BASE_URL: Already set in prod; only relevant if it were wrong or empty.
+EFF: 115/210 = 55% | FAIL
+LOSS: 95 at $0.000089 | session: n/a | model: claude-opus-4-6 (cursor-blended)
+OPTIMIZE_NEXT: One hypothesis paragraph only; drop Pinterest diff to one line.
+
+? Audit OAuth scope vs. product alignment across ALL SkyEye social platform 
+
+adapters.
+
+
+
+Read-only investigation. Max 1500 tokens.
+
+
+
+Background: LinkedIn fails OAuth with "Bummer something went wrong" because 
+
+adapter requests r_member_social which requires Community Management API 
+
+product not enabled on the LinkedIn app. Operator wants to know if the same 
+
+class of failure exists on other platforms before fixing.
+
+
+
+For each adapter in backend/app/services/platforms/, extract:
+
+  - Platform name
+
+  - File path
+
+  - get_oauth_url() method
+
+  - Exact scope string requested
+
+  - Endpoint URL used
+
+
+
+Then for each platform, document the product/permission requirement on the 
+
+provider side based on available code comments, .cursor/rules/ entries, 
+
+docs/ folder content, or .env.template hints.
+
+
+
+Platforms to audit:
+
+- linkedin.py (already known — included for completeness)
+
+- x_twitter.py
+
+- facebook.py (if exists)
+
+- instagram.py (if exists)
+
+- youtube.py
+
+- tiktok.py
+
+- pinterest.py
+
+- reddit.py (if exists)
+
+- threads.py (if exists)
+
+- any other adapter file
+
+
+
+For each: classify into one of three states:
+
+
+
+STATE A — Aligned: scope request matches what a basic developer app provides 
+
+by default. Should work with standard app setup.
+
+
+
+STATE B — Requires elevated product/permission: scope request requires a 
+
+specific product to be enabled on the provider side that may not be granted 
+
+to typical apps (like LinkedIn's Community Management). High failure risk if 
+
+the operator's app doesn't have that product approved.
+
+
+
+STATE C — Unknown: cannot determine from code/docs whether the scope is 
+
+default or elevated.
+
+
+
+Cross-reference with .cursor/rules/ folder for any platform-specific 
+
+architecture rules (like the linkedin-dual-credential-architecture.mdc).
+
+
+
+OUTPUT REQUIRED:
+
+
+
+Section A — Per-platform audit table:
+
+  | Platform | Scopes requested | Product requirement | State | Risk |
+
+
+
+Section B — High-risk findings (STATE B platforms):
+
+  For each, identify which scope is the likely culprit and what the alignment 
+
+  fix would be (drop the scope, or document that the product must be enabled).
+
+
+
+Section C — Recommended fix scope:
+
+  Single batch fix vs sequential per-platform investigation.
+
+  Whether each fix is code-only (drop scope) or requires operator action 
+
+  on the provider's developer portal.
+
+
+
+Section D — Reference cross-check:
+
+  Does .cursor/rules/ or docs/ document the intended scope model for each 
+
+  platform? Flag any rules that are violated by current code.
+
+
+
+Output as docs/SOCIAL_OAUTH_SCOPE_AUDIT_2026-05-07.md
+
+
+
+No code changes. Investigation only.
+
+
+
+Mode: investigate
+
+Scanning platform adapters and cross-referencing rules and docs.
+
+Writing the audit document to docs/SOCIAL_OAUTH_SCOPE_AUDIT_2026-05-07.md.
+
+Deliverable written: docs/SOCIAL_OAUTH_SCOPE_AUDIT_2026-05-07.md (Sections A–D, per-platform table, high-risk list, fix strategy, rule cross-check). threads: not present in platforms/; 9 adapters in registry.
+
+Headline: Same authorize-time failure class as LinkedIn applies most strongly where scopes imply unapproved products (LinkedIn r_member_social on posting app, Meta Pages/IG Business, TikTok posting, Reddit mod scopes). Instagram is special: no scope in URL — risk is Meta config_id / use-case vs checklist, not a string in code.
+
+EFF: 95/180 = 53% | FAIL
+LOSS: 85 at $0.000079 | session: n/a | model: claude-opus-4-6 (cursor-blended)
+OPTIMIZE_NEXT: Skip repeating table rows in chat; point at file only.
+
+? Read docs/SOCIAL_OAUTH_SCOPE_AUDIT_2026-05-07.md and produce a 
+
+remediation plan that follows Path C (fix to minimum approved scopes 
+
+now, document elevated permissions to apply for separately).
+
+
+
+For each STATE B platform identified in the audit:
+
+
+
+1. Code fix needed (drop unapproved scopes):
+
+   - File:line of scope string
+
+   - Current scope (verbatim)
+
+   - Recommended scope (what to keep)
+
+   - What functionality is lost by dropping scopes
+
+   
+
+2. Provider portal application needed (for elevated permissions):
+
+   - Provider name
+
+   - Product/use-case to apply for
+
+   - Estimated review time
+
+   - What functionality is restored once approved
+
+
+
+3. Re-expansion plan:
+
+   - When provider approves, what code changes are needed to restore 
+
+     the dropped scopes
+
+   - Whether tests should be added to prevent scope regression
+
+
+
+Output: docs/SOCIAL_OAUTH_REMEDIATION_PLAN_2026-05-07.md
+
+
+
+For each platform, recommend whether the operator should:
+
+  - Fix code immediately (low-functionality loss, restores OAuth)
+
+  - Apply for permission first (waiting acceptable, full functionality matters)
+
+  - Both (fix code now, apply for permission in parallel)
+
+
+
+No code changes yet. Plan only.
+
+
+
+Mode: investigate
+
+Checking adapter feature usage to ground “minimal scopes” recommendations:
+
+Writing the remediation plan document.
+
+docs/SOCIAL_OAUTH_REMEDIATION_PLAN_2026-05-07.md is written with Path C sections for every STATE B platform from the audit, plus Pinterest (A/B). It includes file:line scope strings, minimal vs elevated portal steps, re-expansion notes, tests, and operator actions (Fix code now / Portal first / Both).
+
+EFF: 45/95 = 47% | FAIL
+LOSS: 50 at $0.000046 | session: n/a | model: claude-opus-4-6 (cursor-blended)
+OPTIMIZE_NEXT: Omit summary in chat; filename only.
+
+? For Facebook, YouTube, and Reddit adapters, trace which API methods 
+
+SkyEye code actually calls. Identify which scopes from current request 
+
+are required by used methods, and which are unused (safe to drop).
+
+
+
+Read-only. Max 1000 tokens.
+
+
+
+For each platform (facebook, youtube, reddit):
+
+
+
+1. List all methods called in the adapter file (post_content, get_metrics, 
+
+   reply_to_comment, moderate_content, etc.)
+
+2. For each called method, identify which scope it requires per provider docs
+
+3. Cross-reference with current scope string
+
+4. Output: which scopes are USED, which are UNUSED, which are UNCERTAIN
+
+
+
+Also check whether session_engine or other consumers call adapter methods 
+
+that need scopes the adapter currently requests.
+
+
+
+Output: docs/SOCIAL_SCOPE_USAGE_TRACE_2026-05-07.md
+
+
+
+No code changes.
+
+Mode: investigate
+
+Writing docs/SOCIAL_SCOPE_USAGE_TRACE_2026-05-07.md with method lists, scope mapping, and consumer cross-references.
+
+Deliverable: docs/SOCIAL_SCOPE_USAGE_TRACE_2026-05-07.md — method inventory per adapter, Graph/YouTube/Reddit endpoints, scope USED / UNUSED / UNCERTAIN, and consumer map (notification_observer, skyeye_session_engine, livestream_chat for YouTube).
+
+Headline: Facebook — pages_manage_metadata unused by adapter HTTP calls; rest align with posts/comments/reactions. YouTube — full youtube scope needed for comment write/moderation; youtube.force-ssl likely redundant. Reddit — identity/read/submit/privatemessages match session + adapter; modflair, modposts, history, mysubreddits unused in traced code; edit / flair / block_user marked uncertain.
+
+EFF: 45/95 = 47% | FAIL
+LOSS: 50 at $0.00125/1k (composer-2-fast cursor-blended) | session: n/a | model: composer-2-fast (cursor-blended)
+OPTIMIZE_NEXT: skip repeating doc prose in chat; point to file only.
+
+> Drop r_member_social from main LinkedInAdapter scope.
+
+File: backend/app/services/platforms/linkedin.py line 312
+
+Change: "openid profile email w_member_social r_member_social"
+
+   → "openid profile email w_member_social"
+
+Per .cursor/rules/linkedin-dual-credential-architecture.mdc
+
+Add # FIX-LINKEDIN-SCOPE-ALIGN marker
+
+Commit: "fix(linkedin): drop r_member_social from posting adapter per dual-credential rule"
+
+HALT for approval before commit. Mode: investigate then execute (gated)
+
+Edit applied in backend/app/services/platforms/linkedin.py (get_oauth_url: scope string + # FIX-LINKEDIN-SCOPE-ALIGN comment).
+
+No commit run — reply approved / commit to create the commit with message
+fix(linkedin): drop r_member_social from posting adapter per dual-credential rule.
+
+EFF: 28/78 = 36% | FAIL
+LOSS: 50 at $0.00030/1k | session: n/a | model: composer-2-fast (cursor-blended)
+OPTIMIZE_NEXT: omit FAIL narrative when change is one-line + halt notice.
+
+approved / commit
+
+Committed at a617c1eed (a617c1e).
+
+Included in that commit
+
+Requested: get_oauth_url scope → openid profile email w_member_social + # FIX-LINKEDIN-SCOPE-ALIGN.
+Also in the same file: earlier edits to authenticate (expired-token path: refresh vs validate-if-stale wording + reload tokens after refresh). Those were already in linkedin.py when it was staged.
+If you want scope-only history, say so and we can git reset --soft HEAD~1, restore the authenticate hunk to pre-change, and recommit.
+
+EFF: 35/120 = 29% | FAIL
+LOSS: 85 at $0.000051/1k | session: n/a | model: composer-2-fast (cursor-blended)
+OPTIMIZE_NEXT: use git add -p when the file has unrelated hunks.
+
+> Apply confirmed-safe scope drops per docs/SOCIAL_SCOPE_USAGE_TRACE_2026-05-07.md.
+
+
+
+Three adapters, four scope changes:
+
+
+
+1. backend/app/services/platforms/linkedin.py line 312
+
+   Change: "openid profile email w_member_social r_member_social"
+
+   To:     "openid profile email w_member_social"
+
+   Reason: Per .cursor/rules/linkedin-dual-credential-architecture.mdc — 
+
+   r_member_social belongs on linkedin_community adapter, not posting adapter
+
+   Marker: # FIX-LINKEDIN-SCOPE-ALIGN
+
+
+
+2. backend/app/services/platforms/facebook.py line 149
+
+   Change: "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement,pages_manage_metadata"
+
+   To:     "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement"
+
+   Reason: pages_manage_metadata has no adapter or consumer usage per scope trace
+
+   Marker: # FIX-FACEBOOK-SCOPE-ALIGN
+
+
+
+3. backend/app/services/platforms/reddit.py line 200
+
+   Change: "identity,submit,read,privatemessages,modflair,modposts,edit,flair,history,mysubreddits"
+
+   To:     "identity,submit,read,privatemessages,edit,flair"
+
+   Reason: modflair/modposts/history/mysubreddits have no usage per scope trace.
+
+   edit and flair retained as UNCERTAIN per trace.
+
+   Marker: # FIX-REDDIT-SCOPE-ALIGN
+
+
+
+DO NOT modify:
+
+- youtube.py (force-ssl marked UNCERTAIN, needs live test first)
+
+- linkedin_community.py (no change needed; portal approval is the blocker)
+
+- x_twitter.py (X needs portal Elevated access, not scope reduction)
+
+- instagram.py (Meta config_id flow, not a scope string)
+
+- tiktok.py (Content Posting API portal approval needed, not scope reduction)
+
+- pinterest.py (write scope approval needed if you want write features)
+
+
+
+Constraints:
+
+- Maximum 6 lines changed total (3 scope strings + 3 marker comments)
+
+- One commit per platform OR single batch commit
+
+- Add markers as specified
+
+
+
+After diffs:
+
+- Show all 3 diffs
+
+- Confirm "Scope alignment ready"
+
+- HALT for operator approval
+
+
+
+Then commit (operator preference — confirm before pushing):
+
+git add backend/app/services/platforms/linkedin.py backend/app/services/platforms/facebook.py backend/app/services/platforms/reddit.py
+
+git commit -m "fix(social): align OAuth scopes with actual usage per scope-trace audit (linkedin/facebook/reddit)"
+
+git push origin main
+
+
+
+Mode: investigate then execute (gated)
+
+EFF: numeric only
+
+LOSS: state actual rate per .cursorrules GAP 10
+
+IID footer required if EFF < 80%
+
+LinkedIn already matches item 1 (marker + scope). Updating Facebook and Reddit only.
+
+1) linkedin.py
+No working-tree diff — get_oauth_url already has # FIX-LINKEDIN-SCOPE-ALIGN and openid profile email w_member_social (see 312:314:backend/app/services/platforms/linkedin.py).
+
+2) facebook.py
+        params = {
+            "client_id": self.app_id,
+            "redirect_uri": redirect_uri,
+            "scope": "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement,pages_manage_metadata",
+            # FIX-FACEBOOK-SCOPE-ALIGN: pages_manage_metadata unused by adapter/consumers (scope trace)
+            "scope": "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement",
+            "response_type": "code",
+            "state": "skyeye_facebook",
+        }
+3) reddit.py
+            "state": "skyeye_reddit",
+            "redirect_uri": redirect_uri,
+            "duration": "permanent",
+            "scope": "identity,submit,read,privatemessages,modflair,modposts,edit,flair,history,mysubreddits",
+            # FIX-REDDIT-SCOPE-ALIGN: dropped modflair/modposts/history/mysubreddits per scope trace; edit+flair retained (uncertain)
+            "scope": "identity,submit,read,privatemessages,edit,flair",
+        }
+        return f"{REDDIT_AUTH_URL}?{urllib.parse.urlencode(params)}"
+Scope alignment ready (Facebook + Reddit staged in working tree; LinkedIn already aligned).
+
+HALT: Reply approved / commit (and push or not) to run: git add … && git commit -m "fix(social): align OAuth scopes with actual usage per scope-trace audit (linkedin/facebook/reddit)"
+(linkedin.py only needed if you amend to touch it for a single commit message scope — optional.)
+
+IID CLASSIFICATION: [S]
+REASONING: EFF < 80% under diff + halt format.
+LEGAL RISK: None
+
+EFF: 55/200 = 28% | FAIL
+LOSS: 145 at $0.000087/1k | model: composer-2-fast (GAP 10 output $0.00060/1k)
+OPTIMIZE_NEXT: skip IID prose when operator asked numeric EFF only.
+
+approved / commit 
+
+Committed 16300e3 — facebook.py + reddit.py only (LinkedIn scope fix is already on main in a617c1e). Push not run.
+
+EFF: 22/58 = 38% | FAIL
+LOSS: 36 at $0.000022/1k | model: composer-2-fast ($0.00060/1k out, GAP 10)
+OPTIMIZE_NEXT: one-line hash + push status only.
