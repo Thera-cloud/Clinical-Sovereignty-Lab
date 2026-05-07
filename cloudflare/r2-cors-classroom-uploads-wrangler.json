@@ -1,0 +1,19 @@
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": [
+          "https://coach.sovereignsanctuary.net",
+          "https://app.sovereignsanctuary.net",
+          "https://command.sovereignsanctuary.net",
+          "https://pwa.sovereignsanctuary.net",
+          "http://localhost:3000"
+        ],
+        "methods": ["GET", "HEAD", "PUT"],
+        "headers": ["*"]
+      },
+      "exposeHeaders": ["ETag"],
+      "maxAgeSeconds": 86400
+    }
+  ]
+}

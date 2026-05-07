@@ -14,24 +14,37 @@ The two non-obvious requirements:
    `/upload-video/complete` call will fail with
    `ETag header missing from R2 response`.
 
-## Apply via Cloudflare dashboard (preferred)
+## JSON shapes (do not mix them up)
+
+| Tool | File | Shape |
+|------|------|--------|
+| Cloudflare dashboard (CORS editor) | [`r2-cors-classroom-uploads.json`](./r2-cors-classroom-uploads.json) | S3-style **array** of rules (`AllowedOrigins`, …) |
+| `wrangler r2 bucket cors set` | [`r2-cors-classroom-uploads-wrangler.json`](./r2-cors-classroom-uploads-wrangler.json) | Cloudflare API body: `{ "rules": [ { "allowed": { "origins", "methods", "headers" }, … } ] }` |
+
+Wrangler rejects the dashboard array file with: *must contain a 'rules' array*.
+
+## Apply via Cloudflare dashboard
 
 1. Cloudflare Dashboard → R2 → `nate-vault` → **Settings** tab.
 2. Scroll to **CORS Policy** → **Edit**.
 3. Paste the contents of [`r2-cors-classroom-uploads.json`](./r2-cors-classroom-uploads.json).
 4. Save.
 
-## Apply via wrangler / aws CLI
+## Apply via wrangler (account API token)
 
-If you have R2 admin-scoped S3 credentials (the production read/write key
-on the backend is bucket-scoped and cannot mutate CORS):
+From repo root (uses `CLOUDFLARE_API_TOKEN` and account from `wrangler` auth):
 
 ```bash
-aws s3api put-bucket-cors \
-  --bucket nate-vault \
-  --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-  --cors-configuration file://cloudflare/r2-cors-classroom-uploads.json
+npx wrangler r2 bucket cors set nate-vault \
+  --file cloudflare/r2-cors-classroom-uploads-wrangler.json -y
+npx wrangler r2 bucket cors list nate-vault
 ```
+
+## Apply via aws CLI (S3-compatible)
+
+Requires IAM-level R2 credentials (not the app bucket key). The CLI expects
+`{"CORSRules":[...]}` (`AllowedOrigins`, `AllowedMethods`, …). Prefer
+**wrangler** above unless you already maintain that document.
 
 ## Diff vs the previous CORS policy
 
