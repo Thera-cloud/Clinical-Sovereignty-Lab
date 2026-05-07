@@ -8,6 +8,13 @@ import 'package:flutter/widgets.dart';
 // Track registered view factories by URL
 final Map<String, bool> _registeredViewTypes = {};
 
+/// URL identity for iframe factory registration: token/ws/hw matter; cache-buster `v` does not.
+String _stableDojoIframeRegistrationUrl(String dojoUrl) {
+  final uri = Uri.parse(dojoUrl);
+  final q = Map<String, String>.from(uri.queryParameters)..remove('v');
+  return uri.replace(queryParameters: q.isEmpty ? null : q).toString();
+}
+
 /// Toggle pointer-events on all iframes to prevent platform view z-index conflicts.
 /// When disabled, iframes won't intercept taps meant for Flutter overlay widgets
 /// (like popup menus), while keeping the iframe alive and state intact.
@@ -25,9 +32,9 @@ void launchDojoUrl(String url) {
 
 /// Creates a widget that displays the Dojo page in an iframe (web only)
 Widget buildDojoIframe(String dojoUrl) {
-  // Create unique view type per URL to handle URL changes
-  final viewType = 'dojo-iframe-${dojoUrl.hashCode}';
-  
+  final stableUrl = _stableDojoIframeRegistrationUrl(dojoUrl);
+  final viewType = 'dojo-iframe-${stableUrl.hashCode}';
+
   // Register the view factory for this URL if not already done
   if (!_registeredViewTypes.containsKey(viewType)) {
     ui_web.platformViewRegistry.registerViewFactory(
@@ -40,15 +47,18 @@ Widget buildDojoIframe(String dojoUrl) {
           ..style.height = '100%'
           ..allow = 'microphone; camera'
           ..setAttribute('allowfullscreen', 'true')
+          // sandbox: allow-scripts + allow-same-origin is intentional for same-origin DOJO
+          // (WebSocket to bridge, form posts, normal DOM). Keep sandbox; do not drop it;
+          // other flags still restrict top navigation/popups to an explicit allow-list.
           ..setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads');
         return iframe;
       },
     );
     _registeredViewTypes[viewType] = true;
   }
-  
+
   return HtmlElementView(
     viewType: viewType,
-    key: ValueKey(dojoUrl),
+    key: ValueKey(stableUrl),
   );
 }
