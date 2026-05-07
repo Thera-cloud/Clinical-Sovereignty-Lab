@@ -1,0 +1,46 @@
+Investigation: LinkedIn “Bummer, something went wrong”
+A — LinkedIn OAuth URL construction (code)
+LinkedInAdapter.get_oauth_url() builds:
+
+
+linkedin.py
+Lines 306-315
+    async def get_oauth_url(self, redirect_uri: str) -> str:
+        import urllib.parse
+        params = {
+            "response_type": "code",
+            "client_id": self.client_id,
+            "redirect_uri": redirect_uri,
+            "scope": "openid profile email w_member_social r_member_social",
+            "state": "skyeye_linkedin",
+        }
+        return f"{LINKEDIN_AUTH_URL}?{urllib.parse.urlencode(params)}"
+Endpoint: https://www.linkedin.com/oauth/v2/authorization (module constant).
+redirect_uri: whatever skyeye_api passes in (see B).
+scopes: openid profile email w_member_social r_member_social.
+Pinterest (contrast): response_type=code, scopes are comma-separated Pinterest API scopes, state=skyeye_pinterest (replaced server-side); no openid / r_member_social.
+
+B — Expected redirect_uri at runtime
+Repo expectation:
+https://api.sovereignsanctuary.net/api/skyeye/platforms/linkedin/callback (.env.template PUBLIC_BASE_URL + standard SkyEye callback path; community app documented similarly with linkedin_community in .cursor/rules/linkedin-dual-credential-architecture.mdc).
+
+C — Production container env (from requested command)
+ENVIRONMENT=production, PUBLIC_BASE_URL=https://api.sovereignsanctuary.net. So public_api_url fallback is not required here; effective base should be the public API host.
+
+D — Recent backend logs
+grep for linkedin.*oauth|redirect_uri|public_api_url in last 30m: no matches returned (empty or lines not present in that window).
+
+E — Best hypothesis
+LinkedIn is rejecting the authorization request before token exchange. Most likely: scope / product mismatch on the app tied to client_id 77wz…
+
+Repo architecture says posting app should use w_member_social only; r_member_social is associated with Community Management on the second app. Requesting r_member_social on an app that only has “Share on LinkedIn” (no Community product) often yields a generic LinkedIn error.
+Secondary: openid profile email requires the Sign In with LinkedIn / OpenID Connect product; if not enabled on that app, authorization can fail similarly.
+Less likely if env matches: redirect URI not listed exactly in that LinkedIn app’s allowed redirect URLs (must match character-for-character).
+F — Fix scope
+
+LinkedIn Developer Portal (config): Confirm exact redirect URL for this client id; enable products matching requested scopes (OpenID + Share; Community only if you keep r_member_social on this client).
+Code alignment: If posting flow should not use Community scopes, narrow main adapter scope (e.g. drop r_member_social on linkedin, keep community OAuth on linkedin_community) — code change.
+PUBLIC_BASE_URL: Already set in prod; only relevant if it were wrong or empty.
+EFF: 115/210 = 55% | FAIL
+LOSS: 95 at $0.000089 | session: n/a | model: claude-opus-4-6 (cursor-blended)
+OPTIMIZE_NEXT: One hypothesis paragraph only; drop Pinterest diff to one line.
