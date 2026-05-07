@@ -1,0 +1,154 @@
+Deploy sequence (gated on checks above):
+
+git status
+
+git diff --stat
+
+git add backend/migrations/200_sse_delivery_client_narrative.sql \
+
+        backend/app/services/sse/delivery_runtime.py \
+
+        backend/app/services/sse/generate_daily_panels.py \
+
+        backend/app/services/sse/generate_weekly_clips.py \
+
+        backend/app/services/sse/generate_monthly_recap.py \
+
+        backend/app/services/sse/generate_from_directive.py \
+
+        backend/app/routers/admin.py
+
+git commit -m "fix(sse): expose client_narrative_text not prompt_used to clients across daily/weekly/monthly/UCD panels"
+
+git push origin main
+
+(Adjust file paths if Cursor's working tree shows different ones.)
+
+Then on production:
+
+# Step 1: Apply migration FIRST (before code that uses the column)
+
+ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && git pull origin main"
+
+ssh root@68.183.168.75 "docker exec -i nate_postgres psql -U nate_admin -d little_nate < /opt/clinical-sovereignty-lab/backend/migrations/200_sse_delivery_client_narrative.sql"
+
+
+
+# Step 2: Verify migration applied
+
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"\\d sse_delivery_generation_log\" | grep client_narrative"
+
+
+
+# Step 3: Restart backend
+
+ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && docker compose -f docker-compose.prod.yml restart backend"
+
+
+
+# Step 4: Verify boot
+
+ssh root@68.183.168.75 "docker logs nate_backend --since 1m 2>&1 | grep -E 'STARTUP COMPLETE|Traceback'"
+
+
+
+Post-deploy verification:
+
+
+
+Check that legacy rows still render with safe blurbs:
+
+
+
+Open Sovereign Vault → Sovereign Journey folder
+
+Look at panel descriptions — old daily panels should show generic safe text, not the raw Grok prompt
+
+
+
+
+
+Generate a fresh daily panel (wait for next scheduled run, or trigger manually):
+
+
+
+Verify the new panel's description is Little Nate's therapeutic narrative, not the image prompt
+
+Compare quality to journey panels (should be similar register)
+
+
+
+
+
+Spot-check the database:
+
+
+
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"
+
+  SELECT id, type, 
+
+         CASE WHEN client_narrative_text IS NOT NULL THEN 'YES' ELSE 'NO' END as has_narrative,
+
+         length(prompt_used) as prompt_len,
+
+         length(client_narrative_text) as narrative_len,
+
+         created_at
+
+  FROM sse_delivery_generation_log
+
+  WHERE created_at > NOW() - INTERVAL '1 hour'
+
+  ORDER BY created_at DESC LIMIT 10;\""
+
+Expected: new rows show has_narrative=YES. Older rows show has_narrative=NO (fall back to safe blurbs in API response).
+
+
+
+One thing to verify in Cursor's implementation:
+
+The fix uses build_rich_panel_prompt() and compose_journey_narrative() to generate the narrative text. Make sure these functions actually produce Little Nate's voice (warm, attuned, therapeutic) — not just trimmed versions of the image prompt.
+
+grep -A20 "def compose_journey_narrative\|def build_rich_panel_prompt" backend/app/services/sse/ | head -60
+
+If those functions internally generate via Little Nate's prompting infrastructure (system_prompt, register awareness, archetype context), the narrative will match journey panels. If they're just templated strings or formatted versions of the image prompt, output will feel generic.
+
+Verifying working-tree paths, compose_journey_narrative / build_rich_panel_prompt behavior, then committing with correct paths and running the deploy sequence.
+
+Staging only the SSE fix files (paths: backend/app/sse/foundation/delivery_runtime.py, not backend/app/services/sse/...). compose_journey_narrative uses chat_completion_with_fallback with a therapeutic system prompt and returns separate narrative_text vs image_prompt JSON — not a trimmed prompt. Committing, pushing, and running production steps.
+
+Discarding server-only uncommitted admin.py edits (presign unquote); they're included upstream in 91e31cc.
+
+Local repo: committed 91e31cc — only these paths exist in-tree (not backend/app/services/sse/delivery_runtime.py):
+
+backend/migrations/200_sse_delivery_client_narrative.sql
+backend/app/sse/foundation/delivery_runtime.py
+backend/app/routers/admin.py (includes _refresh_presigned unquote + delivery-log narrative_text COALESCE)
+Narrative vs image prompt: compose_journey_narrative calls chat_completion_with_fallback with a Sovereign Story Engine system prompt and requires JSON with narrative_text (scene the user reads) and image_prompt (Grok Imagine) as separate fields; on failure it uses a short template, not a slice of the image prompt.
+
+
+thera_world_engine.py
+Lines 404-444
+    sys_prompt = (
+        "You are a therapeutic narrative composer for the Sovereign Story Engine. "
+        "Generate a short scene description (2-3 sentences) and a Grok Imagine image prompt "
+        "for a user's daily story panel.\n\n"
+        ...
+        "Return JSON only, no markdown:\n"
+        f"{panel_tone_hold_hint}"
+        '{"narrative_text": "2-3 sentence scene description the user reads", '
+        '"image_prompt": "detailed Grok Imagine prompt, painterly style, muted warm palette", '
+        '"panel_tone": "one of: meditative, action_sequence, threshold_pathway, restoration_sands, revelation"}'
+    )
+    ...
+    raw = await _llm_fallback(_msgs, max_tokens=400, temperature=0.7)
+build_rich_panel_prompt then returns both from that result (image prompt gets archetype/NPC suffixes only).
+
+Production: git pull was blocked by uncommitted admin.py (unquote only). Ran git restore backend/app/routers/admin.py then fast-forward to 91e31cc. Migration 200 applied; client_narrative_text present. Backend restart OK; log shows STARTUP COMPLETE: 114/114 services healthy / ALL SYSTEMS NOMINAL.
+
+Spot-check SQL (your script used wrong columns): use log_id, generation_type, generated_at — last-hour query returned 0 rows (no generations in that window); after the next daily run, expect has_narrative = YES on new successes.
+
+EFF: 95/210 = 45% | FAIL
+OPTIMIZE_NEXT: single combined ssh for pull+migration+restart when operator repeats.
+LOSS: 115 tokens at rate unknown | session: n/a | model: WITHHELD_BY_PRODUCT
