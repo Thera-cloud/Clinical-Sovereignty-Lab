@@ -1,0 +1,115 @@
+execute test
+
+Platform: linkedin
+Content: "[TEST] Sovereign Sanctuary system check — please ignore"
+
+Pre-flight checks (Phase A):
+
+1. Verify the deployed code is what's running:
+   ssh root@68.183.168.75 "docker exec nate_backend grep -A2 'def get_oauth_url' /app/app/services/platforms/linkedin.py | head -10"
+   
+   Expected: scope = "openid profile email w_member_social"
+   If r_member_social still appears in container, halt and report.
+
+2. Verify LinkedIn token is live and account_id present:
+   ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"
+     SELECT account_id, status, token_expiry, error_message,
+            CASE WHEN token_expiry > NOW() THEN 'live' ELSE 'expired' END as state,
+            length(access_token) as token_len
+     FROM skyeye_platform_tokens 
+     WHERE platform='linkedin';\""
+   
+   Expected: status=connected, state=live, token_len > 100, error_message empty.
+   If state=expired, halt — operator must re-authorize via SkyEye Authorize button first.
+
+3. Identify operator may need to re-authorize one more time:
+   The token currently in DB was obtained BEFORE the scope fix landed.
+   It still carries r_member_social scope claim. LinkedIn may reject 
+   posting calls that the token doesn't actually have permission for, 
+   even though token itself is "live."
+   
+   If existing token works for /me endpoint but fails on posting:
+   operator needs to click Authorize one more time to get a fresh token 
+   with only the corrected scopes.
+
+Phase B — Test post execution (only if Phase A passes):
+
+Create a small script using the project's existing DB pool pattern:
+
+ssh root@68.183.168.75 "docker exec nate_backend python -c \"
+import asyncio, asyncpg, os
+async def main():
+    pool = await asyncpg.create_pool(os.environ['DATABASE_URL'])
+    from app.services.platforms import get_adapter
+    adapter = get_adapter('linkedin', pool)
+    
+    # Authenticate (loads token from DB)
+    auth_ok = await adapter.authenticate()
+    print(f'>>> AUTH: {auth_ok}')
+    if not auth_ok:
+        print('>>> ERROR: Authentication failed, aborting')
+        return
+    
+    # Verify identity via /me endpoint first (low-risk check)
+    import httpx
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        me = await client.get(
+            'https://api.linkedin.com/v2/userinfo',
+            headers={'Authorization': f'Bearer {adapter._access_token}'}
+        )
+        print(f'>>> USERINFO: {me.status_code} {me.text[:200]}')
+    
+    if me.status_code != 200:
+        print('>>> ERROR: userinfo failed, token may need refresh, aborting before post')
+        return
+    
+    # Execute the post
+    test_text = '[TEST] Sovereign Sanctuary system check — please ignore'
+    result = await adapter.post_content(content_type='text', body=test_text)
+    print(f'>>> POST RESULT: {result}')
+    
+    await pool.close()
+
+asyncio.run(main())
+\"" 2>&1 | tee /tmp/linkedin_test_post.log
+
+Phase C — Verify post landed:
+
+4. Check log output for:
+   - AUTH: True
+   - USERINFO: 200 with profile data
+   - POST RESULT: indicates success with post URN/ID
+
+5. Capture broader log context:
+   ssh root@68.183.168.75 "docker logs nate_backend --since 2m 2>&1 | grep -iE 'linkedin|publish|UGC|userGenerated' | tail -20"
+
+6. Verify post on LinkedIn:
+   - Open the linked LinkedIn account in browser
+   - Look for the [TEST] post in the feed
+   - Note timestamp matches Phase B execution time
+
+Phase D — Report:
+
+- Section 1: Phase A verification results (code, token, account_id)
+- Section 2: AUTH success/failure
+- Section 3: /userinfo HTTP status + response sample
+- Section 4: post_content return value (full)
+- Section 5: Did post appear on LinkedIn? (operator confirms)
+- Section 6: If failed: exact error message, hypothesis (scope mismatch on 
+  existing token, API tier issue, content format issue, etc.)
+
+If post fails specifically with scope error:
+   Operator clicks Authorize in SkyEye UI to re-do OAuth flow with corrected 
+   scopes, gets a fresh token, then re-runs Phase B.
+
+Constraints:
+- Do NOT execute Phase B if Phase A shows expired/missing token or wrong code
+- Use exact DATABASE_URL from container env, not hardcoded
+- Test text must contain "[TEST]" prefix
+- Capture all logs to /tmp/linkedin_test_post.log on server
+- Do not make multiple posts on retries — fix the issue first
+
+Mode: investigate (Phase A) then execute (Phase B-C, gated on A passing)
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10
+IID footer required if EFF < 80%
