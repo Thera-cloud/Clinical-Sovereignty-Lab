@@ -13837,7 +13837,13 @@ async def handle_client(websocket, path=None):
                                         _gp_profile.update(_gp_pdata)
                                     _gp_profile["username"] = _gp_row["username"]
                                     _gp_profile["role"] = _gp_row["role"]
-                                    _gp_profile["email"] = _gp_row["email"] or _gp_profile.get("email", "")
+                                    _gp_raw_email = _gp_row["email"] or _gp_profile.get("email", "")
+                                    if _gp_raw_email and is_encrypted(_gp_raw_email):
+                                        try:
+                                            _gp_raw_email = decrypt_pii(_gp_raw_email) or _gp_raw_email
+                                        except Exception:
+                                            pass
+                                    _gp_profile["email"] = _gp_raw_email
                                     _gp_profile["name"] = _gp_row["name"] or _gp_profile.get("name", "")
                                     _gp_profile["hardware_id"] = _gp_row["hardware_id"]
                                     _gp_profile["family_id"] = str(_gp_row["family_id"]) if _gp_row["family_id"] else None

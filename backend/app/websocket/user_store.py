@@ -523,7 +523,14 @@ class UserStore:
         profile["username"] = username
         profile["role"] = row["role"] or profile.get("role", "CLIENT")
         profile["name"] = row["name"] or profile.get("name", username)
-        profile["email"] = row["email"] or profile.get("email", "")
+        _raw_email = row["email"] or profile.get("email", "")
+        if _raw_email and isinstance(_raw_email, str) and _raw_email.startswith("gAAAAA"):
+            try:
+                from app.services.pii_cipher import decrypt_pii
+                _raw_email = decrypt_pii(_raw_email) or _raw_email
+            except Exception:
+                pass
+        profile["email"] = _raw_email
         profile["hardware_id"] = row["hardware_id"] or profile.get("hardware_id", "")
         profile["consent_version"] = row["consent_version"] or profile.get("consent_version", "")
         profile["subscription_status"] = row["subscription_status"] or profile.get("subscription_status", "ACTIVE")
