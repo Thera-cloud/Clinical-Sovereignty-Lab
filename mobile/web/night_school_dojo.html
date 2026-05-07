@@ -461,6 +461,8 @@
         var tokenParam = (urlParams.get("token") || "").trim();
         var hwParam = (urlParams.get("hw") || "").trim();
         var wsParam = (urlParams.get("ws") || "").trim();
+        // Bridge token for REST (/api/dojo/* uses require_coach → Bearer). URL token for coach iframe; password flow sets from login_success.
+        var restBearerToken = tokenParam;
         if (wsParam) {
             SERVER_URL = wsParam;
         }
@@ -486,22 +488,60 @@
 
         function handleBack() {
             if (isFromCoachCommand) {
-                // Coach: close this tab (opened via window.open from Coach Command)
-                // If window.close() is blocked, redirect to the main app
                 try {
                     window.close();
                 } catch (e) {
-                    // Fallback: go to main app
                     window.location.href = "/";
                 }
-                // If window.close() didn't work (some browsers block it), redirect after delay
                 setTimeout(function() {
                     window.location.href = "/";
                 }, 100);
             } else {
-                // Admin: navigate to Night School hub
                 window.location.href = "night_school.html";
             }
+        }
+
+        function dojoAuthHeaders() {
+            var t = (restBearerToken || tokenParam || "").trim();
+            if (!t) return {};
+            return { "Authorization": "Bearer " + t };
+        }
+
+        function dojoFetch(url, options) {
+            options = options || {};
+            var h = Object.assign({}, dojoAuthHeaders(), options.headers || {});
+            options.headers = h;
+            return fetch(url, options);
+        }
+
+        function downloadDojoPdf(testId) {
+            var apiBase = SERVER_URL.replace("wss://", "https://").replace("ws://", "http://").replace("/ws", "");
+            var t = (restBearerToken || tokenParam || "").trim();
+            if (!t) {
+                alert("Not authenticated for download.");
+                return;
+            }
+            fetch(apiBase + "/api/dojo/download-assessment/" + encodeURIComponent(testId), {
+                method: "GET",
+                headers: { "Authorization": "Bearer " + t }
+            })
+                .then(function(r) {
+                    if (!r.ok) throw new Error("HTTP " + r.status);
+                    return r.blob();
+                })
+                .then(function(blob) {
+                    var url = URL.createObjectURL(blob);
+                    var a = document.createElement("a");
+                    a.href = url;
+                    a.download = "dojo-assessment-" + testId + ".pdf";
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(function() { URL.revokeObjectURL(url); }, 2000);
+                })
+                .catch(function(e) {
+                    alert("Download failed: " + e);
+                });
         }
 
         function init() {
@@ -552,6 +592,7 @@
             
             // Accept both login flows (admin/dev + token auth)
             if (data.type === "auth_success" || data.type === "login_success") {
+                if (data.token) restBearerToken = String(data.token).trim();
                 // Allow COACH + ADMIN on this page
                 var role = ((data.profile || {}).role || "").toString().toUpperCase();
                 currentUserRole = role;
@@ -752,7 +793,7 @@
             formData.append("coach_name", coachName);
             if (currentPreviewId) formData.append("preview_id", currentPreviewId);
             
-            fetch(apiBase + "/api/dojo/generate-assessment", { method: "POST", body: formData })
+            dojoFetch(apiBase + "/api/dojo/generate-assessment", { method: "POST", body: formData })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.test_id) {
@@ -762,10 +803,10 @@
                         currentPreviewId = null;
                         
                         // Show download link in chat
-                        var downloadUrl = apiBase + "/api/dojo/download-assessment/" + data.test_id;
+                        var tid = String(data.test_id).replace(/[^\w-]/g, "");
                         var msg = "Your " + numQ + "-question " + currentMode.toUpperCase() + " assessment PDF is ready!" +
                             "<br><br><strong>Test ID:</strong> " + data.test_id +
-                            '<br><br><a href="' + downloadUrl + '" target="_blank" style="display:inline-block; padding:10px 20px; background:#C9A962; color:#000; border-radius:8px; text-decoration:none; font-weight:600; margin:8px 0;">⬇️ Download PDF Assessment</a>' +
+                            '<br><br><a href="#" onclick="downloadDojoPdf(\'' + tid + '\'); return false;" style="display:inline-block; padding:10px 20px; background:#C9A962; color:#000; border-radius:8px; text-decoration:none; font-weight:600; margin:8px 0;">⬇️ Download PDF Assessment</a>' +
                             "<br><br>Once completed, upload your answers using the <strong>Upload Completed Assessment</strong> button in the sidebar.";
                         addMessage("nate", msg, true);
                     } else {
@@ -800,7 +841,7 @@
             formData.append("difficulty", diff);
             formData.append("coach_name", coachName);
             
-            fetch(apiBase + "/api/dojo/preview-assessment", { method: "POST", body: formData })
+            dojoFetch(apiBase + "/api/dojo/preview-assessment", { method: "POST", body: formData })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     document.getElementById("previewBtn").textContent = "📋 Preview Questions";
@@ -857,7 +898,7 @@
             formData.append("coach_name", coachName);
             if (currentPreviewId) formData.append("preview_id", currentPreviewId);
             
-            fetch(apiBase + "/api/dojo/generate-assessment", { method: "POST", body: formData })
+            dojoFetch(apiBase + "/api/dojo/generate-assessment", { method: "POST", body: formData })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.test_id) {
@@ -879,8 +920,7 @@
 
         function downloadAssessment() {
             if (!currentTestId) { alert("Generate an assessment first."); return; }
-            var apiBase = SERVER_URL.replace("wss://", "https://").replace("ws://", "http://").replace("/ws", "");
-            window.open(apiBase + "/api/dojo/download-assessment/" + currentTestId, "_blank");
+            downloadDojoPdf(currentTestId);
         }
 
         function uploadAssessment(input) {
@@ -895,7 +935,7 @@
             formData.append("coach_id", hwId);
             formData.append("test_id", currentTestId);
             
-            fetch(apiBase + "/api/dojo/score-assessment", { method: "POST", body: formData })
+            dojoFetch(apiBase + "/api/dojo/score-assessment", { method: "POST", body: formData })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.overall_score !== undefined) {
