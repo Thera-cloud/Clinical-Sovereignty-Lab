@@ -1,0 +1,51 @@
+> Apply confirmed-safe scope drops per docs/SOCIAL_SCOPE_USAGE_TRACE_2026-05-07.md.
+
+Three adapters, four scope changes:
+
+1. backend/app/services/platforms/linkedin.py line 312
+   Change: "openid profile email w_member_social r_member_social"
+   To:     "openid profile email w_member_social"
+   Reason: Per .cursor/rules/linkedin-dual-credential-architecture.mdc — 
+   r_member_social belongs on linkedin_community adapter, not posting adapter
+   Marker: # FIX-LINKEDIN-SCOPE-ALIGN
+
+2. backend/app/services/platforms/facebook.py line 149
+   Change: "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement,pages_manage_metadata"
+   To:     "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement"
+   Reason: pages_manage_metadata has no adapter or consumer usage per scope trace
+   Marker: # FIX-FACEBOOK-SCOPE-ALIGN
+
+3. backend/app/services/platforms/reddit.py line 200
+   Change: "identity,submit,read,privatemessages,modflair,modposts,edit,flair,history,mysubreddits"
+   To:     "identity,submit,read,privatemessages,edit,flair"
+   Reason: modflair/modposts/history/mysubreddits have no usage per scope trace.
+   edit and flair retained as UNCERTAIN per trace.
+   Marker: # FIX-REDDIT-SCOPE-ALIGN
+
+DO NOT modify:
+- youtube.py (force-ssl marked UNCERTAIN, needs live test first)
+- linkedin_community.py (no change needed; portal approval is the blocker)
+- x_twitter.py (X needs portal Elevated access, not scope reduction)
+- instagram.py (Meta config_id flow, not a scope string)
+- tiktok.py (Content Posting API portal approval needed, not scope reduction)
+- pinterest.py (write scope approval needed if you want write features)
+
+Constraints:
+- Maximum 6 lines changed total (3 scope strings + 3 marker comments)
+- One commit per platform OR single batch commit
+- Add markers as specified
+
+After diffs:
+- Show all 3 diffs
+- Confirm "Scope alignment ready"
+- HALT for operator approval
+
+Then commit (operator preference — confirm before pushing):
+git add backend/app/services/platforms/linkedin.py backend/app/services/platforms/facebook.py backend/app/services/platforms/reddit.py
+git commit -m "fix(social): align OAuth scopes with actual usage per scope-trace audit (linkedin/facebook/reddit)"
+git push origin main
+
+Mode: investigate then execute (gated)
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10
+IID footer required if EFF < 80%
