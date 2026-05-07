@@ -146,7 +146,8 @@ class FacebookAdapter(SocialPlatformAdapter):
         params = {
             "client_id": self.app_id,
             "redirect_uri": redirect_uri,
-            "scope": "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement,pages_manage_metadata",
+            # FIX-FACEBOOK-SCOPE-ALIGN: pages_manage_metadata unused by adapter/consumers (scope trace)
+            "scope": "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement",
             "response_type": "code",
             "state": "skyeye_facebook",
         }

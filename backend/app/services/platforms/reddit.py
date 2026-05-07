@@ -197,7 +197,8 @@ class RedditAdapter(SocialPlatformAdapter):
             "state": "skyeye_reddit",
             "redirect_uri": redirect_uri,
             "duration": "permanent",
-            "scope": "identity,submit,read,privatemessages,modflair,modposts,edit,flair,history,mysubreddits",
+            # FIX-REDDIT-SCOPE-ALIGN: dropped modflair/modposts/history/mysubreddits per scope trace; edit+flair retained (uncertain)
+            "scope": "identity,submit,read,privatemessages,edit,flair",
         }
         return f"{REDDIT_AUTH_URL}?{urllib.parse.urlencode(params)}"
 
