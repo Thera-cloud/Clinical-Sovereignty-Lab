@@ -1,0 +1,13 @@
+Quest/mission LLM ready. Diff above — HALTING for operator approval.
+
+Findings:
+
+Both functions now query nate_intelligence_crystals (quest: by domain; mission: by clinical domain + ILIKE on relationship target)
+Both call chat_completion_with_fallback with structured system prompt in Little Nate's voice
+Return shape unchanged: {narrative_text, image_prompt, panel_tone}
+Soft fallback on LLM failure — warm template, never exposes raw image prompt
+# FIX-QUEST-MISSION-LLM markers on both docstrings
+Logging: >>> [QUEST-PANEL] / >>> [MISSION-PANEL] with user, id, narrative length
+Zero external callers found — functions are ready but inert until Phase 4 wiring
+119 insertions / 7 deletions (net +112, slightly over 100-line target due to two parallel implementations each needing crystal fetch + LLM + parse + fallback)
+EFF: 280/310 = 90% | PASS LOSS: 30 tokens at $0.001019 | session: 185 | model: claude-opus-4-7-thinking-xhigh (cursor-blended)

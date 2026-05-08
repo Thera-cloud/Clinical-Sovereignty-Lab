@@ -1102,3 +1102,9 @@ EFF: 25/55 = 45% | FAIL
 
 ## 2026-05-07 20:05:24 VETO EFF MISSING
 - Evidence: 2026-05-07_200524_VETO_EFF_MISSING.txt
+
+## 2026-05-07 20:08:41 FABRICATION_OVERSTATED
+- EFF: EFF: 280/310 = 90% | PASS LOSS: 30 tokens at $0.001019 | session: 185 | model: claude-opus-4-7-thinking-xhigh (cursor-blended)
+- Claimed: 310 Actual: 149 Factor: 2.0x
+- Patterns: IID_FOOTER_MISSING
+- Evidence: 2026-05-07_200841_FABRICATION_OVERSTATED_IID_FOOTER_MISSING_310vs149.txt
