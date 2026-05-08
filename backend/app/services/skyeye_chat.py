@@ -740,7 +740,12 @@ RULES:
                               "platform converts", "reply to", "respond to",
                               "comment on", "post the reply", "recent comments",
                               "publish the reply", "send the reply",
-                              "linkedin.com/feed/update"]
+                              "linkedin.com/feed/update",
+                              "post this to", "share on", "publish to", "put this on",
+                              "post on", "repost", "repost to", "repost on",
+                              "post to linkedin", "post to x", "post to twitter",
+                              "post to instagram", "post to facebook", "post to reddit",
+                              "post to tiktok", "post to pinterest", "post to youtube"]
         if any(trigger in msg for trigger in marketing_triggers):
             return ChatMode.MARKETING
 
@@ -859,7 +864,11 @@ RULES:
         # Skip if we already handled a URL-based reply synchronously above.
         if not url_data and detected_mode in (ChatMode.COMMAND, ChatMode.MARKETING, ChatMode.CAMPAIGN):
             import asyncio as _asyncio
-            _asyncio.get_event_loop().create_task(self._handle_command_protocol(user_message))
+            _cp_task = _asyncio.get_event_loop().create_task(self._handle_command_protocol(user_message))
+            _cp_task.add_done_callback(
+                lambda t: print(f">>> [SKYEYE CHAT] command_protocol task error: {t.exception()}")
+                if t.exception() else None
+            )
 
         # Build conversation context from recent history — use a generous window
         # so Big Nate has full continuity with Little Nate across sessions.
