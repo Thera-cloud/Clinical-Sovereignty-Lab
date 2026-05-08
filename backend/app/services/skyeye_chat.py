@@ -860,9 +860,10 @@ RULES:
 
         # Handle command execution (fire-and-forget so chat response isn't blocked
         # by long-running campaign design or content generation).
-        # Runs for COMMAND and MARKETING modes since campaign launches come from both.
-        # Skip if we already handled a URL-based reply synchronously above.
-        if not url_data and detected_mode in (ChatMode.COMMAND, ChatMode.MARKETING, ChatMode.CAMPAIGN):
+        # Run for ALL modes — the protocol has internal early-returns for non-matching
+        # messages. Mode-gating previously dropped direct-post commands when the
+        # dashboard sent mode_override='admin'. Skip only if URL-reply already handled.
+        if not url_data:
             import asyncio as _asyncio
             _cp_task = _asyncio.get_event_loop().create_task(self._handle_command_protocol(user_message))
             _cp_task.add_done_callback(
