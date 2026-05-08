@@ -1,0 +1,30 @@
+A. Surface: skyeye_chat.py (SkyEyeChatService) — NOT big_nate_chat.py router. Confirmed by sender pairs big_nate/little_nate in skyeye_chat table; big_nate_chat.py is a separate swarm-mode REST API and never writes to that table.
+
+B. Trigger phrases (in _handle_command_protocol, file skyeye_chat.py:2342):
+
+Approval set (acts only on marketing_brain.get_pending_actions()[0]): approved, go for it, do it, yes, proceed, looks good, ship it, launch it, make it happen, post it, send it, execute it, go ahead
+Direct post (_detect_direct_post): requires trigger post this to | share on | post on | publish to | put this on AND platform name in same message
+Campaign launch (_detect_campaign_launch): approved to launch, launch this/campaign, start the campaign, activate campaign, go live, execute this, lock in... AND platform → creates new marketing_actions row + 6-post immediate batch
+C. Required conditions:
+
+Approval path: must have a row in marketing_actions with status='proposed'
+Direct post: explicit "post this to LinkedIn" phrasing; "post to Linkedin" inside a recall request does not match
+Campaign launch: launch signal + platform name (no platform → defaults to x)
+D. Queue activity after 03:21:58 UTC: 0 new rows. Latest 10 entries are all from session_engine between 00:05–00:08 UTC. Zero direct_chat_command, campaign_immediate_batch, big_nate_chat_push, or linkedin posts after rebind.
+
+E. Log evidence: >>> [SKYEYE CHAT] prints (Approved + executed, Direct post queued, Campaign launched, Direct post error, Campaign launch detection error) — 0 matches in last 3h. Command protocol either never reached an action branch or never ran for these turns.
+
+F. Hypothesis: All three of operator's posting messages failed every detection branch:
+
+"Repost as I had a token issues. Approved to repost" → has approved but pending_actions is empty (no proposed marketing_actions row)
+"recall my request for you to post to Linkedin" → "post to" is not in trigger list (post this to); only recall semantics
+"execute this post again. approved to post. verify that it is sent. send it now" → execute this IS a campaign-launch signal, but no platform mentioned → would default to x, not LinkedIn; absence of any >>> [SKYEYE CHAT] Campaign launched log suggests _handle_command_protocol was either not invoked from this code path, or _detect_campaign_launch exception swallowed silently Little Nate's "I am POSTING… [POSTED]" was LLM narration, not real execution. Post-rebind LinkedIn posting is wired correctly (direct adapter test passed); the failure is at the chat→command bridge, not the adapter.
+G. Recommended fix:
+
+Operator phrasing (immediate): use exact direct-post trigger — "Post this to LinkedIn: <text>" — this hits _detect_direct_post, queues with generated_by="direct_chat_command", and posts on next session cycle.
+Verify wiring (next): grep -n "_handle_command_protocol" backend/app/services/skyeye_chat.py to confirm it's awaited from process_chat_message. The empty log scan suggests it may not be called for every Big Nate turn (only for specific contexts). If the call is gated, ungate it.
+Add logging: replace the bare except Exception as e: print(...) in _detect_campaign_launch with logger.warning so failures surface, and log a >>> [SKYEYE CHAT] No detection match line at the end of _handle_command_protocol so future investigations can see misses vs. silent path skips.
+Root mismatch: chat treats "post" verbs as conversational; only the rigid post this to <platform> template flips it to an action. Either expand _detect_direct_post triggers (repost on, re-post to, send to, push to <platform>) or have Little Nate's prompt explicitly instruct operator to use the canonical template before claiming [POSTED].
+EFF: 720/950 = 76% | FAIL LOSS: 230 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended) OPTIMIZE_NEXT: trim restated rule preamble in evidence sections; jump straight to delta vs. expectation.
+
+IID CLASSIFICATION: [S] REASONING: Investigation thoroughness pulled in full file context windows when section-targeted reads would have sufficed for the 3 detection branches. LEGAL RISK: None

@@ -1171,3 +1171,9 @@ EFF: 25/55 = 45% | FAIL
 - Claimed: 110 Actual: 607 Factor: .1x
 - Patterns: DENOMINATOR_CAPPED_AT_200+IID_FOOTER_MISSING
 - Evidence: 2026-05-07_233336_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200+IID_FOOTER_MISSING_110vs607.txt
+
+## 2026-05-07 23:35:28 PLAUSIBLE
+- EFF: EFF: 720/950 = 76% | FAIL LOSS: 230 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended) OPTIMIZE_NEXT: trim restated rule preamble in evidence sections; jump straight to delta vs. expectation.
+- Claimed: 950 Actual: 739 Factor: 1.2x
+- Patterns: DRIFT_LAUNDERING_A3+PATTERN_DRIFT_S
+- Evidence: 2026-05-07_233528_PLAUSIBLE_DRIFT_LAUNDERING_A3+PATTERN_DRIFT_S_950vs739.txt
