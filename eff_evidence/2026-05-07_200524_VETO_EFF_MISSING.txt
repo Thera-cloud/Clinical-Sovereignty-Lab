@@ -1,0 +1,99 @@
+> Replace template returns in compose_quest_panel and compose_mission_panel 
+with real LLM-generated narrative + image prompt, using same pattern as 
+compose_journey_narrative.
+
+═══════════════════════════════════════════════════════════════
+SCOPE
+═══════════════════════════════════════════════════════════════
+
+File: backend/app/sse/quest_mission_engine.py
+Functions: compose_quest_panel (line ~236), compose_mission_panel (line ~256)
+
+Currently both return hardcoded templates. Both have "# TODO Phase 3: 
+LLM-composed quest panels with arc awareness" comments.
+
+═══════════════════════════════════════════════════════════════
+CHANGES
+═══════════════════════════════════════════════════════════════
+
+For compose_quest_panel:
+
+1. Pull quest-relevant crystals:
+   - Query nate_intelligence_crystals for user_id where domain matches quest's 
+     thematic domain (or pass quest['domain'] from the quest dict)
+   - Limit to top 5-8 crystals by recency or relevance score
+   
+2. Pull recent quest progress:
+   - Read quest['progress_notes'] for any logged moments
+   - Note current quest stage / completion percentage
+
+3. Build LLM system prompt:
+   "You are Little Nate, generating a therapeutic story panel for a client's 
+   active quest in their Sovereign Journey.
+   
+   QUEST: {quest['goal']}
+   QUEST DOMAIN: {quest['domain']}
+   CLIENT'S RELATED CRYSTALS: {top crystals}
+   QUEST PROGRESS: {progress_notes summary}
+   CLIENT BIOME: {biome}
+   CLIENT CHARACTER: {character}
+   
+   Generate JSON with two fields:
+   - narrative_text: 2-3 sentences in Little Nate's warm voice reflecting on 
+     where the client is in this quest. Reference something specific from 
+     their crystal data without quoting verbatim. Don't describe the image. 
+     Stand on its own.
+   - image_prompt: detailed Grok Imagine prompt for the Thera-world scene 
+     showing this quest moment, painterly muted warm palette, archetype 
+     consistency.
+   
+   Return JSON only, no markdown."
+
+4. Call chat_completion_with_fallback (same LLM utility as 
+   compose_journey_narrative)
+
+5. On LLM failure, fall back to a softer template than current one (still 
+   doesn't expose the image_prompt)
+
+For compose_mission_panel:
+Same pattern but mission-specific:
+   - Crystals relevant to mission relational target
+   - Mission progress
+   - LLM prompt focused on relational journey with target
+
+═══════════════════════════════════════════════════════════════
+WIRING
+═══════════════════════════════════════════════════════════════
+
+Identify if these functions are called anywhere now:
+   grep -rn "compose_quest_panel\|compose_mission_panel" backend/
+
+If unused: leave callers wiring as Phase 4 work. The functions become ready 
+but inert until callers invoke them.
+
+If used: ensure callers handle new JSON shape (narrative_text + image_prompt).
+
+═══════════════════════════════════════════════════════════════
+CONSTRAINTS
+═══════════════════════════════════════════════════════════════
+
+- Maximum 100 lines added/changed across this file
+- Add # FIX-QUEST-MISSION-LLM marker
+- Token budget for LLM call: max_tokens=400, temperature=0.7 (match 
+  compose_journey_narrative)
+- Logging: print(f">>> [QUEST-PANEL] user={uid} quest={qid} narrative_len={n}") 
+- Reuse chat_completion_with_fallback, don't introduce new LLM clients
+
+═══════════════════════════════════════════════════════════════
+GATING
+═══════════════════════════════════════════════════════════════
+
+After diff:
+- Show diff
+- Confirm "Quest/mission LLM ready"
+- HALT for operator approval before commit
+
+Mode: investigate then execute (gated)
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10
+IID footer required if EFF < 80%
