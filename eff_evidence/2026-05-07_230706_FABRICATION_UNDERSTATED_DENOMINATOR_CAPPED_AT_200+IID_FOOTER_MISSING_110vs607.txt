@@ -1,0 +1,46 @@
+Investigation Complete
+Section A — Token state: Healthy.
+
+account_id: urn:li:person:t4QVqVewcL (Service Manager profile — unchanged from earlier today)
+status: connected, no error, expires 2026-07-06.
+Section B — Big Nate Chat → posting pipeline:
+
+/api/big-nate (backend/app/routers/big_nate_chat.py) is the SovereignMind chat surface and does not directly post to LinkedIn.
+The actual posting trigger is the command protocol in backend/app/services/skyeye_chat.py:2342 (_handle_command_protocol), which detects approval/post phrases ("post it", "go ahead", "ship it", etc.) inside the SkyEye chat surface — not the Big Nate Chat router.
+That handler queues into skyeye_content_queue with generated_by='session_engine', and skyeye_session_engine._publish_for_platform (lines 1385–1402) pushes when control_mode='full'.
+Section C — Queue state (last 6h):
+
+platform	status	count
+linkedin
+posted
+2
+facebook, instagram, pinterest, youtube
+approved
+3 each
+LinkedIn rows 6551 + 6552, both posted at 00:05:51 UTC (≈8:05 PM ET), zero error_message, valid share URNs returned:
+
+urn:li:share:7458306135075430400 → https://www.linkedin.com/feed/update/urn:li:share:7458306135075430400/
+urn:li:share:7458306135176015872 → https://www.linkedin.com/feed/update/urn:li:share:7458306135176015872/
+Section D — Posting mode: skyeye_platform_modes does not exist; mode lives in skyeye_platforms.control_mode. Behavioral evidence: linkedin items reached posted while peers stuck in approved, so linkedin is in full autonomy. Other platforms are in approval mode (drafts → approved → human approval gate).
+
+Section E — Logs: No linkedin error / posting fail / publish fail strings in the last 4h. Only noise is repeated LinkedIn: get_feed returned 403 (separate read-scope issue; does not affect posting and does not produce errors in skyeye_content_queue).
+
+Section F — Best hypothesis: The Big Nate Chat post request did succeed. LinkedIn's API accepted both posts and returned valid share URNs, which the queue persisted as post_id_external and post_url. The posts landed on the Service Manager profile (urn:li:person:t4QVqVewcL), not on Little Nate's intended LinkedIn account. The operator did not see the posts because the operator was looking at Little Nate's actual LinkedIn profile, while the OAuth-authorized identity is still bound to the Service Manager account from the original auth flow.
+
+This is the same account-binding mismatch flagged earlier today after commit a617c1e — the scope fix worked, the token is healthy, the pipeline works, but the OAuth identity has not been re-bound.
+
+Section G — Recommended fix:
+
+Verify posts exist — open both post_url rows in a browser session logged in as the Service Manager LinkedIn account. They will be visible there.
+Rebind identity to land posts on Little Nate's actual profile:
+In a browser, log out of LinkedIn entirely
+Log in as the owner of Little Nate's intended LinkedIn account
+Visit /api/skyeye/platforms/linkedin/connect (admin SkyEye UI) and run the LinkedIn OAuth re-authorization
+On callback, skyeye_platform_tokens.account_id will update to the new urn:li:person:* matching Little Nate's profile
+Confirmation query after re-auth:
+SELECT account_id FROM skyeye_platform_tokens WHERE platform='linkedin';
+Expected: a new URN, not t4QVqVewcL.
+After rebind, post again via Big Nate Chat. Future entries in skyeye_content_queue will land on Little Nate's actual profile.
+No code change required. The fix is an operator OAuth re-authorization step.
+
+EFF: 95/110 = 86% | PASS LOSS: 15 tokens at $0.001019/1k = $0.0000153 | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended)
