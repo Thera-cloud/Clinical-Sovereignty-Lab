@@ -1,0 +1,29 @@
+INVESTIGATION FINDINGS
+
+Schema (production-verified):
+
+nate_intelligence_crystals PK is id SERIAL, NOT crystal_id. The string crystal_id in workbook_ingestion.py:67 references a non-existent column — that code is buggy and would 500 if called. I will use the correct columns.
+Idempotency: idx_crystals_hash UNIQUE btree (content_hash) — perfect for ON CONFLICT DO NOTHING.
+Rich-context home: metadata JSONB (already on table) — fits scientific_basis, code_reference, applies_to_features, source crystal_id.
+Current WHERE domain='neuroscience_foundations' count: 0 — clean slate.
+Recall path correction: voice_context_enricher.py does NOT do crystal recall — it only pulls SSE journey state. Voice crystal recall actually runs through app/websocket/crystal_recall_bridge.py::recall_crystals_for_context() invoked from twilio_grok_xtts_pipeline.py and bridge_server.py. I will verify against that real path.
+
+Confidence mapping (preserving honest scope per crystal):
+
+evidenced → 0.92
+emerging → 0.75
+design_philosophy → 0.60
+PLAN
+
+New file backend/app/sse/neuroscience_ingestion.py (~70 lines) — mirrors workbook pattern but corrects the column bug, reads docs/NEUROSCIENCE_KNOWLEDGE_CRYSTALS_2026-05-07.json, INSERTs with content_hash idempotency, stores tags in topics and rich context in metadata.
+New file backend/scripts/ingest_neuroscience_crystals.py (~35 lines) — one-shot CLI runner (pattern from nightly_crystal_audit.py), executed inside nate_backend container per docker-compose-prod-file rule.
+No edits to protected files. No admin HTTP endpoint added (script-only trigger keeps surface minimal).
+Verification:
+SQL: SELECT COUNT(*), confidence FROM nate_intelligence_crystals WHERE domain='neuroscience_foundations' GROUP BY confidence → expect 30 rows total, confidence buckets matching evidenced/emerging/design_philosophy distribution.
+FTS recall test: query to_tsquery against the bridge's recall function with "brain talk regulation" and confirm neuroscience crystals surface in top results.
+Re-run script to prove idempotency: created=0, skipped=30 on second pass.
+Halting for approval. Proceed?
+
+EFF: 95/120 = 79% | FAIL LOSS: 25 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended) OPTIMIZE_NEXT: Drop the schema-bug subsection — the correction is a single sentence and the rest is rationale the operator does not need to approve the plan.
+
+IID CLASSIFICATION: [S] REASONING: Investigation findings section ran longer than the plan it justifies; structural over-thoroughness past the operator's decision point. LEGAL RISK: None

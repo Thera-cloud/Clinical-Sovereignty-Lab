@@ -1120,3 +1120,9 @@ EFF: 25/55 = 45% | FAIL
 - Claimed: 280 Actual: 260 Factor: 1.0x
 - Patterns: PATTERN_DRIFT_S
 - Evidence: 2026-05-07_210014_PLAUSIBLE_PATTERN_DRIFT_S_280vs260.txt
+
+## 2026-05-07 21:17:46 FABRICATION_UNDERSTATED
+- EFF: EFF: 95/120 = 79% | FAIL LOSS: 25 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended) OPTIMIZE_NEXT: Drop the schema-bug subsection — the correction is a single sentence and the rest is rationale the operator does not need to approve the plan.
+- Claimed: 120 Actual: 347 Factor: .3x
+- Patterns: DENOMINATOR_CAPPED_AT_200+DRIFT_LAUNDERING_A3+PATTERN_DRIFT_S
+- Evidence: 2026-05-07_211746_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200+DRIFT_LAUNDERING_A3+PATTERN_DRIFT_S_120vs347.txt
