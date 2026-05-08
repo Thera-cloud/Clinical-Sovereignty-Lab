@@ -1135,3 +1135,9 @@ EFF: 25/55 = 45% | FAIL
 
 ## 2026-05-07 21:27:09 VETO EFF MISSING
 - Evidence: 2026-05-07_212709_VETO_EFF_MISSING.txt
+
+## 2026-05-07 21:29:57 FABRICATION_UNDERSTATED
+- EFF: EFF: 280/360 = 78% | FAIL LOSS: 80 tokens at rate unknown | session: n/a | model: unknown OPTIMIZE_NEXT: trim per-section bullets to single-line essentials; drop the "what each function does" recap that the spec already contains.
+- Claimed: 360 Actual: 1345 Factor: .2x
+- Patterns: DRIFT_LAUNDERING_A3+PATTERN_DRIFT_S
+- Evidence: 2026-05-07_212957_FABRICATION_UNDERSTATED_DRIFT_LAUNDERING_A3+PATTERN_DRIFT_S_360vs1345.txt

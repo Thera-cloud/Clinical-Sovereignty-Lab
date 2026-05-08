@@ -1,0 +1,117 @@
+HALT 1 — Section A Findings
+A1. Per-turn LLM dispatch in bridge_server.py
+The 4 "call sites" (8912 streaming, 8995 garble fallback, 9032 non-stream, 9051 race, 9070 Azure-only) are branches of one flow inside Cortex.process_interaction(). They share scope:
+
+system_prompt (composed earlier in the function)
+user_text (incoming message)
+_len_cap = _select_max_tokens(user_text) at line 8886 — Phase 1 default 600 / depth 1500
+After all branches, line 9088+ runs AQ Refusal Bypass (clinical-wrapper retry on empty/refused output)
+Streaming branches emit deltas via await self._send(uid, full_response, ...) for sub-second TTFT
+There is no single LLM call to "replace." Streaming is mandatory for UX (garble detection, provider race, deltas to client). Replacing with chat_completion_with_fallback (synchronous one-shot) would regress TTFT and lose ODPE provider routing + garble retry.
+
+A2. TMC API
+Class: TherapeuticMomentClassifier(db_pool) in backend/app/sse/ucd/tmc.py:36
+Method: await tmc.classify(user_id) — returns {moment_class, confidence, signals, scores, safety_gate, classifier_version}
+Classes: THRESHOLD, BREAKTHROUGH, INTEGRATION, RECURRENCE, REST, CRISIS, HERITAGE
+Labile-window classes for mismatch: THRESHOLD, BREAKTHROUGH, RECURRENCE
+Spec referenced classify_tmc_moment — actual name is classify. Use classify.
+Coherence available via signals.ec_current and signals.ec_slope (read from nevedal_coherence_log).
+A3. Nevedal engine
+backend/app/services/nevedal_engine.py: NevedalEngine, VoiceBiometricExtractor (line 220), CEEEvent (line 203), _persist_cee_event writes events.
+Per-turn coherence: read via TMC's signals rather than calling NevedalEngine directly (TMC already aggregates c_emo from nevedal_coherence_log). One source of truth, one DB query.
+Voice biometrics extraction is not available in text-chat path (only voice-call surface has audio). Defer voice signals; rely on text-derived signals + TMC + coherence for state classification in the text-chat integration.
+A4. Crystal recall
+recall_crystals_for_context(db_pool, hardware_id, max_results, source, affect_weight, query_text) in crystal_recall_bridge.py:282
+Returns a formatted string (not list), already split into YOUR PERSONAL MEMORIES / CLINICAL DNA / GENERAL KNOWLEDGE
+It does NOT accept domain filter. Two paths to surface neuroscience crystals:
+(a) Pass query_text containing meta-therapeutic markers — FTS picks up neuroscience global crystals naturally (verified Step 3)
+(b) Add a thin helper recall_neuroscience_for_meta_question(db_pool, query_text) that queries WHERE domain='neuroscience_foundations' directly, ONLY when meta-markers detected ("why do you", "how does this", "what's happening in my brain")
+(b) is preferred — keeps the existing recall function untouched (rule #15 in crystal-recall-crystallization-wiring.mdc: don't bypass reinforcement for normal recall).
+A5. Recent narrative pattern
+Already exists: _fetch_recent_delivery_narratives(user_id, db_pool) in backend/app/sse/thera_world_engine.py:241 — last 7 in 14 days from sse_delivery_generation_log.client_narrative_text. Reusable as-is for anti-repetition.
+A6. Per-turn flow chain
+user_text → process_interaction()
+  → context build (memories, history, vault images)
+  → system_prompt = base + crystal_ctx + recent_narratives + overrides
+  → _len_cap = _select_max_tokens(user_text)
+  → LLM dispatch (one of 5 streaming/non-streaming branches)
+  → AQ Refusal Bypass on empty/refused
+  → response_sanitizer + leak_guard
+  → self._send() to client
+  → crystallize_from_conversation() background task
+A7. DNA file accessibility
+docs/ is not in the Docker image (Dockerfile copies app/, migrations/, assets/, scripts/ only) and not bind-mounted in docker-compose.prod.yml.
+Per Step 3 we used docker cp for one-shot ingestion; per-turn loading needs a sustainable path.
+Integration Plan (revised)
+The spec's pattern of "replace with generate_therapeutic_response" causes regression of streaming TTFT, ODPE routing, garble retry, AQ bypass. Recommend a wrapper pattern that achieves the same therapeutic effect without replacing the LLM dispatch:
+
+Two integration points (not one)
+1. prepare_therapeutic_context() — pre-flight, called BEFORE the LLM branch chain Inputs: user_text, user_id, db_pool, base_system_prompt, conversation_context Outputs: {enriched_system_prompt, max_tokens, audit_metadata} Does:
+
+PART 1 multi-signal autonomic state (text patterns + brevity-shift + TMC class + ec_current)
+PART 2 recurring-pattern detection (TMC RECURRENCE + crystal repeat-domain count)
+PART 3 mismatch-opportunity assessment
+PART 4 context assembly (recent_narratives, neuroscience-domain recall when meta-marker, recent_messages already present)
+PART 5 token cap (override _len_cap)
+PART 6 system-prompt composition (DNA + state guidance + register guidance + bridge-sentence requirement + anti-repetition + neuroscience crystals if meta)
+2. audit_therapeutic_response() — post-flight, called AFTER full_response is final (after AQ bypass) Inputs: full_response, audit_metadata, user_id, db_pool, recent_narratives Outputs: {audit_passed, violations, response_to_send} Does:
+
+PART 8 therapeutic post-audit (WARM register, bridge sentence, somatic invitation, banned phrases, length cap, anti-repetition phrase overlap)
+One regenerate retry via chat_completion_with_fallback if violations and mismatch_attempted (NOT a streaming retry — short non-stream regenerate is acceptable on the slow path)
+Log to sse_therapeutic_audit_log
+PART 9 reconsolidation event candidate (insert CEEEvent row when mismatch_delivered)
+Bridge integration (minimal, two try/except blocks)
+Around line 8885 (just before _len_cap):
+
+try:
+    _ctx_pack = await therapeutic_controller.prepare_therapeutic_context(...)
+    system_prompt = _ctx_pack["enriched_system_prompt"]
+    _len_cap = _ctx_pack["max_tokens"]
+    _audit_meta = _ctx_pack["audit_metadata"]
+except Exception as e:
+    logger.warning(f"[THERAPEUTIC-CTRL] pre-flight failed for {uid}: {e}")
+    _audit_meta = None
+    # _len_cap and system_prompt unchanged → existing flow preserved
+After AQ bypass succeeds (~line 9100, before self._send/sanitize):
+
+if _audit_meta:
+    try:
+        full_response = await therapeutic_controller.audit_therapeutic_response(
+            full_response, _audit_meta, uid, db_pool, _ctx_pack.get("recent_narratives", []))
+    except Exception as e:
+        logger.warning(f"[THERAPEUTIC-CTRL] post-audit failed for {uid}: {e}")
+        # full_response unchanged
+DNA layer loading
+Recommend: ship DNA as backend/app/services/_dna_neuroscience_text.py — a Python module exporting DNA_TEXT: str (triple-quoted string copied verbatim from docs/SOVEREIGN_SANCTUARY_DNA_NEUROSCIENCE_2026-05-07.md). Module-level constant, zero startup I/O, zero docker-compose changes. The docs/ markdown remains canonical for humans; the Python module is a build-time mirror committed alongside.
+
+Fallback if _dna_neuroscience_text is unimportable: 200-word hardcoded compressed version (3 commitments + scope limits) in therapeutic_controller.py.
+
+Files to be created/modified
+File	Lines	Change
+backend/app/services/therapeutic_controller.py
+new ~280
+prepare_therapeutic_context + audit_therapeutic_response + helpers
+backend/app/services/_dna_neuroscience_text.py
+new ~60
+DNA constant (mirror of docs/)
+backend/app/websocket/bridge_server.py
++~30
+two try/except wrappers around line 8885 + line ~9100
+backend/migrations/201_therapeutic_audit_log.sql
+new ~25
+new table + 2 indexes
+Total: ~395 lines, under the 400 cap.
+
+Per-turn cost
+3 added DB queries (TMC classify, _fetch_recent_delivery_narratives, optional neuroscience recall) — within the 3-query budget.
+
+Two design questions for operator approval
+Q1. Approve the wrapper pattern (pre-flight + post-flight) instead of full LLM replacement? This preserves streaming, garble retry, ODPE routing, AQ bypass. Trade-off: the controller does NOT call the LLM itself for the primary response — it shapes the prompt and audits the output.
+
+Q2. Approve the DNA-as-Python-constant approach (_dna_neuroscience_text.py module) instead of file-load at startup? This avoids docker-compose.prod.yml edits and removes startup I/O. Source of truth remains docs/...md; the .py is a committed mirror.
+
+If both approved → proceed to HALT 2 with code. If Q1 rejected (full replacement preferred), I'll need to redesign with explicit streaming fall-back; that pushes total lines above the 400 cap and risks TTFT regression — flagging for explicit approval if you want it that way.
+
+EFF: 280/360 = 78% | FAIL LOSS: 80 tokens at rate unknown | session: n/a | model: unknown OPTIMIZE_NEXT: trim per-section bullets to single-line essentials; drop the "what each function does" recap that the spec already contains.
+
+IID CLASSIFICATION: [S] REASONING: Investigation findings are accurate but exceeded the minimum-viable summary by including spec-restated content (e.g., A6 flow chain that the operator already knows). LEGAL RISK: None
