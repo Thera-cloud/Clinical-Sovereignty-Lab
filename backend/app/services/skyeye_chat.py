@@ -895,6 +895,8 @@ RULES:
                 "review this link", "review this url", "review this:",
                 "check this link", "check this url",
                 "what's at ", "what is at ",
+                "review ", "summarize ", "tell me about ", "look at ",
+                "what's on ", "what is on ", "go to ",
             ]
             _search_query = None
             for prefix in _search_triggers:
@@ -906,6 +908,15 @@ RULES:
                 _url_match = re.search(r'https?://[^\s)\]\}>"\']+', user_message)
                 if _url_match:
                     _search_query = _url_match.group(0)
+            if not _search_query:
+                # Bare domain (e.g. "sovereignsanctuary.net") — require common TLD
+                # to avoid false positives on filenames or version strings.
+                _dom_match = re.search(
+                    r'\b([a-zA-Z0-9-]+\.(?:com|net|org|io|ai|gov|edu|co|us|app|tech|dev|me|tv|xyz))\b',
+                    user_message,
+                )
+                if _dom_match:
+                    _search_query = _dom_match.group(1)
             if _search_query:
                 try:
                     _injections = self._search_proxy.sanitizer.detect_injection(user_message)
