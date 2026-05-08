@@ -1,0 +1,143 @@
+> Batch 2: Add daily panel continuity writeback + anti-repetition to delivery_runtime.
+
+═══════════════════════════════════════════════════════════════
+PROBLEM
+═══════════════════════════════════════════════════════════════
+
+Per docs/IMAGE_VIDEO_GENERATION_AUDIT_2026-05-07.md two gaps remain:
+
+GAP 1 — Daily panel continuity stale:
+generate_daily_panels uses build_rich_panel_prompt which reads 
+sse_user_journeys.last_panel_summary / panel_sequence for continuity.
+But it never WRITES BACK after success. Only generate_journey_panel does.
+Result: each daily panel reads the same stale summary as the previous one,
+so continuity block in LLM prompt becomes meaningless after day 1.
+
+GAP 2 — Anti-repetition only checks last 1 panel:
+compose_journey_narrative receives last_panel_summary (singular) but doesn't 
+see narratives from the prior 3-7 days. So Little Nate may repeat themes, 
+phrases, or insights across consecutive days even when the immediate-prior 
+panel was different.
+
+═══════════════════════════════════════════════════════════════
+CHANGES
+═══════════════════════════════════════════════════════════════
+
+PART A — Continuity writeback in generate_daily_panels:
+
+File: backend/app/sse/foundation/delivery_runtime.py
+Function: generate_daily_panels
+
+After successful daily panel generation (after _log INSERT succeeds), 
+add an UPDATE to sse_user_journeys for that user:
+
+UPDATE sse_user_journeys 
+SET last_panel_summary = $1,    -- first sentence of new narrative_text
+    last_panel_npcs = $2,        -- NPC list from the rich panel result
+    panel_sequence = panel_sequence + 1,
+    updated_at = NOW()
+WHERE user_id = $3
+
+This mirrors what generate_journey_panel does.
+
+Extract first sentence from narrative_text:
+  first_sentence = narrative_text.split('.')[0].strip() + '.' if narrative_text else ''
+
+PART B — Anti-repetition context in build_rich_panel_prompt:
+
+File: backend/app/sse/thera_world_engine.py  
+Function: build_rich_panel_prompt (and/or compose_journey_narrative)
+
+Before calling compose_journey_narrative, fetch recent narratives:
+
+SELECT client_narrative_text 
+FROM sse_delivery_generation_log
+WHERE user_id = $1 
+  AND client_narrative_text IS NOT NULL 
+  AND btrim(client_narrative_text) <> ''
+  AND generated_at > NOW() - INTERVAL '14 days'
+ORDER BY generated_at DESC LIMIT 7
+
+Pass into compose_journey_narrative as new parameter recent_narratives.
+
+In compose_journey_narrative system prompt, add a section:
+
+"RECENT NARRATIVES (last 7 panels — do NOT repeat themes or phrases):
+{enumerated list of recent narratives}
+
+Your new narrative MUST:
+- NOT repeat metaphors, imagery, or phrases from above
+- NOT restate the same insight or theme
+- Approach the moment from a different angle
+- If the client is in a similar emotional space as recent days, find a 
+  different lens, sensation, or detail to reflect on"
+
+If recent_narratives is empty (new user, first panel), skip this section.
+
+PART C — Token budget management:
+
+Each recent narrative is 2-3 sentences. 7 narratives = ~600 tokens of context.
+Truncate each narrative to first 200 chars to stay within budget:
+  recent_summary = "\n".join(f"- {n[:200]}..." for n in recent_narratives)
+
+═══════════════════════════════════════════════════════════════
+APPLIES TO
+═══════════════════════════════════════════════════════════════
+
+Anti-repetition (Part B) applies to ALL paths that call 
+compose_journey_narrative or build_rich_panel_prompt:
+- generate_daily_panels
+- generate_journey_panel  
+- generate_weekly_clips (calls build_rich_panel_prompt for narrative)
+- generate_monthly_recap (calls build_rich_panel_prompt for narrative)
+- generate_from_directive (UCD)
+
+Continuity writeback (Part A) is specifically for generate_daily_panels.
+generate_journey_panel already has writeback. Other paths don't need it 
+because they're not daily-frequency.
+
+═══════════════════════════════════════════════════════════════
+CONSTRAINTS
+═══════════════════════════════════════════════════════════════
+
+- Maximum 60 lines added/changed across both files
+- Add # FIX-NARRATIVE-DIVERSITY marker on new code blocks  
+- Logging: 
+  print(f">>> [DAILY-CONTINUITY] user={uid} seq={n} summary_len={m}")
+  print(f">>> [ANTI-REPEAT] user={uid} recent_count={n} chars_in_context={m}")
+- If recent narratives query fails, gracefully proceed without anti-repetition 
+  context (log warning, don't block panel generation)
+- Reuse existing db_pool; no new connections
+
+═══════════════════════════════════════════════════════════════
+TESTING
+═══════════════════════════════════════════════════════════════
+
+After deploy:
+1. Generate 3 consecutive daily panels for a test user
+2. Compare narrative_text across the 3 — should feel like distinct reflections
+3. SQL check after Day 3 generation:
+   SELECT panel_sequence, last_panel_summary 
+   FROM sse_user_journeys WHERE user_id = '<test>';
+   Expected: panel_sequence incremented by 3, last_panel_summary 
+   matches first sentence of Day 3's narrative
+
+═══════════════════════════════════════════════════════════════
+GATING
+═══════════════════════════════════════════════════════════════
+
+After diff:
+- Show diff
+- Confirm "Daily continuity + anti-repetition ready"  
+- HALT for operator approval before commit
+
+Then:
+git add backend/app/sse/foundation/delivery_runtime.py \
+        backend/app/sse/thera_world_engine.py
+git commit -m "fix(sse): daily continuity writeback + anti-repetition across narrative generation paths"
+git push origin main
+
+Mode: investigate then execute (gated)
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10
+IID footer required if EFF < 80%
