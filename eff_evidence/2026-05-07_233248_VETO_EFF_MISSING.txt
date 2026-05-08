@@ -1,0 +1,57 @@
+? Investigate why Big Nate Chat post commands fail to trigger actual 
+LinkedIn posting after re-auth.
+
+Read-only. Max 1000 tokens.
+
+EVIDENCE:
+- Re-auth completed 03:21:58 UTC, account_id rebound to 
+  urn:li:person:PDdADbiRBt (Little Nate's profile)
+- Direct adapter test post succeeded post-rebind
+- Big Nate Chat surface working — Little Nate responds, generates content
+- Operator typed posting requests in Big Nate ↔ Little Nate Chat — 
+  Little Nate narrates posting ("I am POSTING... Status: [POSTED]") but 
+  no database action follows
+- Query for skyeye_content_queue rows after 03:21:58 returns 0 rows OR 
+  scheduled/non-posted rows
+
+INVESTIGATE:
+
+1. Read backend/app/services/skyeye_chat.py:2342 _handle_command_protocol
+   - What exact phrases trigger posting?
+   - What conditions must be met (platform mentioned, prior context, etc.)?
+   - How does it insert into skyeye_content_queue?
+
+2. Verify which chat surface "Big Nate ↔ Little Nate Chat" actually routes to
+   - Is it big_nate_chat.py router or skyeye_chat.py?
+   - grep -rn "Big Nate.*Little Nate Chat\|big_nate.*little_nate" backend/
+
+3. Check if Big Nate Chat has its own command handler separate from skyeye_chat
+   grep -A20 "command\|post\|publish" backend/app/routers/big_nate_chat.py | head -40
+
+4. Run query to see queue activity after rebind:
+   ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"
+     SELECT id, status, generated_by, post_id_external, created_at,
+            LEFT(content_text, 60) as preview
+     FROM skyeye_content_queue 
+     WHERE created_at > '2026-05-08 03:21:58'
+     ORDER BY created_at DESC LIMIT 15;\""
+
+5. Check backend logs for command protocol activity:
+   ssh root@68.183.168.75 "docker logs nate_backend --since 2h 2>&1 | 
+     grep -iE 'command_protocol|publish_for_platform|big_nate.*post|post.*queue' | tail -30"
+
+OUTPUT:
+
+A. Which chat surface "Big Nate ↔ Little Nate Chat" is wired to
+B. Exact trigger phrases for command protocol
+C. Required conditions (must mention platform? must be approval response?)
+D. Queue activity after rebind (rows or empty)
+E. Log evidence of command_protocol firing or not firing
+F. Best hypothesis for the failure
+G. Recommended fix (operator phrasing change OR code wiring fix)
+
+No code changes.
+Mode: investigate
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10
+IID footer required if EFF < 80%
