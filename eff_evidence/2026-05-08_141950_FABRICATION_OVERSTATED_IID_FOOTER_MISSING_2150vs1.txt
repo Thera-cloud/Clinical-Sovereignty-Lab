@@ -1,0 +1,1 @@
+EFF: 1820/2150 = 85% | PASS LOSS: 330 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended)
