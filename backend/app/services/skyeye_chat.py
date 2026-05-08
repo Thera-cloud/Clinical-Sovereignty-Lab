@@ -597,6 +597,16 @@ class SkyEyeChatService:
         # QUANTUM-CRYSTAL-ARCH — Layer 9 adversarial resistance
         self._queens_guard = _QGClass(db_pool=db_pool) if _QGClass and db_pool else None
 
+        # Web search proxy (DuckDuckGo) — same SecureSearchProxy used by bridge_server
+        # for client/coach Little Nate chat. Lazy init; tolerates import/key failure.
+        self._search_proxy = None
+        try:
+            from app.services.search_proxy import SecureSearchProxy as _SSP
+            _data_dir = os.getenv("DATA_DIR", "/app/data")
+            self._search_proxy = _SSP(_data_dir, os.getenv("BING_SEARCH_API_KEY", ""))
+        except Exception as _ssp_e:
+            print(f">>> [SKYEYE CHAT] SecureSearchProxy init skipped: {_ssp_e}")
+
     _COACH_IP_RESTRICTED = {
         "sovereign command", "admin dashboard", "admin portal", "admin console",
         "corporate command", "corporate dashboard", "corporate portal",
@@ -871,6 +881,50 @@ RULES:
                 if t.exception() else None
             )
 
+        # Web search injection (DuckDuckGo via SecureSearchProxy).
+        # Mirrors bridge_server.py:8156 pattern. Triggers on explicit search verbs,
+        # "review this link" phrasing, or a bare URL in the message (URL is used
+        # as the search query — search_proxy intentionally does not fetch arbitrary
+        # URLs, so DDG returns metadata/snippets about the page).
+        web_search_context = ""
+        if not url_data and self._search_proxy and self._search_proxy.is_available:
+            _msg_lower = user_message.lower().strip()
+            _search_triggers = [
+                "search for ", "search up ", "look up ", "search the web",
+                "google ", "find online ", "what does the internet say",
+                "review this link", "review this url", "review this:",
+                "check this link", "check this url",
+                "what's at ", "what is at ",
+            ]
+            _search_query = None
+            for prefix in _search_triggers:
+                if prefix in _msg_lower:
+                    idx = _msg_lower.find(prefix) + len(prefix)
+                    _search_query = user_message[idx:].strip().rstrip("?.!,")
+                    break
+            if not _search_query:
+                _url_match = re.search(r'https?://[^\s)\]\}>"\']+', user_message)
+                if _url_match:
+                    _search_query = _url_match.group(0)
+            if _search_query:
+                try:
+                    _injections = self._search_proxy.sanitizer.detect_injection(user_message)
+                    if _injections:
+                        print(f">>> [BIG NATE WEB SEARCH BLOCKED] injection: {_injections[:3]}")
+                    else:
+                        import asyncio as _aio_search
+                        _result = await _aio_search.wait_for(
+                            self._search_proxy.execute_search(_search_query, "big_nate_chat"),
+                            timeout=15.0,
+                        )
+                        if _result.get("success") and _result.get("results"):
+                            web_search_context = "\n\n" + self._search_proxy.format_for_nate(_result["results"])
+                            print(f">>> [BIG NATE WEB SEARCH] {len(_result['results'])} results for '{_search_query[:80]}'")
+                        else:
+                            print(f">>> [BIG NATE WEB SEARCH] no results for '{_search_query[:80]}'")
+                except Exception as _se:
+                    print(f">>> [BIG NATE WEB SEARCH] error: {_se}")
+
         # Build conversation context from recent history — use a generous window
         # so Big Nate has full continuity with Little Nate across sessions.
         history = await self.get_chat_history(limit=50)
@@ -890,7 +944,7 @@ RULES:
         activity_timeline = await self._get_activity_timeline_context()
         liminal_presence = await self._get_liminal_presence_context()
         recent_comments = await self._get_recent_comments_context()
-        conversation_text = conversation_text + marketing_context + mode_context + archived_wisdom + unified_insights + posting_history + activity_timeline + liminal_presence + recent_comments + url_reply_context
+        conversation_text = conversation_text + marketing_context + mode_context + archived_wisdom + unified_insights + posting_history + activity_timeline + liminal_presence + recent_comments + url_reply_context + web_search_context
 
         # QUANTUM-CRYSTAL-ARCH — Layer 9: sanitize admin input before LLM
         if self._queens_guard:
