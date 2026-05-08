@@ -235,8 +235,10 @@ async def create_mission(user_id: str, relationship_target: str, relationship_ty
 
 async def compose_quest_panel(user_id: str, quest: dict, profile: dict,
                               journey: dict, db_pool) -> dict:
-    """Generate a quest-specific panel that weaves NPCs into the biome."""
+    """Generate a quest-specific panel via LLM — Little Nate voice."""  # FIX-QUEST-MISSION-LLM
     from app.sse.thera_world_engine import BIOME_THRESHOLDS, determine_character
+    from app.sse.llm_fallback import chat_completion_with_fallback
+
     biome_name = journey.get("current_biome", "dark_forest")
     biome = next((b for b in BIOME_THRESHOLDS if b["biome"] == biome_name), BIOME_THRESHOLDS[0])
     character = await determine_character(profile)
@@ -245,27 +247,137 @@ async def compose_quest_panel(user_id: str, quest: dict, profile: dict,
         progress = json.loads(progress)
     npcs = progress[0].get("npcs", []) if progress else []
     npc_frags = ", ".join(n.get("visual_prompt_fragment", "") for n in npcs[:3] if n.get("visual_prompt_fragment"))
+    goal = quest.get("goal", "growth")
+    domain = quest.get("goal_domain", "")
+    qid = quest.get("quest_id", "?")
+
+    crystal_snippets = ""
+    try:
+        async with db_pool.acquire() as conn:
+            uid = await conn.fetchval("SELECT id FROM users WHERE username = $1", user_id)
+            if uid and domain:
+                rows = await conn.fetch(
+                    "SELECT crystal_text FROM nate_intelligence_crystals "
+                    "WHERE user_id = $1 AND superseded_by IS NULL AND domain = $2 "
+                    "ORDER BY created_at DESC LIMIT 5", uid, domain)
+                crystal_snippets = "\n".join(r["crystal_text"][:120] for r in rows if r["crystal_text"])
+    except Exception as e:
+        logger.warning("compose_quest_panel crystal fetch: %s", e)
+
+    progress_summary = ""
+    for p in progress[-3:]:
+        ev = p.get("event", "")
+        if ev == "crystals_added":
+            progress_summary += f"- New insights added ({len(p.get('crystals', []))} crystals)\n"
+        elif ev == "quest_created":
+            progress_summary += "- Quest began\n"
+        if p.get("climax_ready"):
+            progress_summary += "- Approaching a turning point\n"
+
     fallback = {
-        "narrative_text": f"In the {biome_name.replace('_', ' ')}, the quest for {quest.get('goal', 'growth')} continues.",
+        "narrative_text": f"In the {biome_name.replace('_', ' ')}, the quest for {goal} continues.",
         "image_prompt": f"{biome['description']}, a solitary figure, {character[1]}, {npc_frags}, painterly style, muted warm palette, no text",
         "panel_tone": "action_sequence",
     }
-    return fallback  # TODO Phase 3: LLM-composed quest panels with arc awareness
+    sys = (
+        "You are Little Nate, generating a therapeutic story panel for a client's active quest.\n"
+        f"QUEST: {goal}\nQUEST DOMAIN: {domain}\nBIOME: {biome_name.replace('_', ' ')}\n"
+        f"CHARACTER: {character[0]} — {character[1]}\n"
+        f"CLIENT CRYSTALS:\n{crystal_snippets or '(none yet)'}\n"
+        f"QUEST PROGRESS:\n{progress_summary or '(just started)'}\n\n"
+        "Return JSON only (no markdown). Two fields:\n"
+        "- narrative_text: 2-3 warm sentences reflecting where the client is in this quest. "
+        "Reference their crystal themes without quoting verbatim. Don't describe the image.\n"
+        "- image_prompt: detailed Grok Imagine prompt for this Thera-world quest scene, "
+        f"painterly muted warm palette, incorporating NPCs: {npc_frags or 'none yet'}. "
+        "End with: no text, no words, no lettering."
+    )
+    try:
+        raw = await chat_completion_with_fallback(
+            [{"role": "system", "content": sys},
+             {"role": "user", "content": "Generate the quest panel."}],
+            max_tokens=400, temperature=0.7)
+        if raw:
+            m = re.search(r"\{.*\}", raw, re.DOTALL)
+            if m:
+                parsed = json.loads(m.group())
+                if parsed.get("narrative_text") and parsed.get("image_prompt"):
+                    parsed.setdefault("panel_tone", "action_sequence")
+                    print(f">>> [QUEST-PANEL] user={user_id} quest={qid} narrative_len={len(parsed['narrative_text'])}")
+                    return parsed
+    except Exception as e:
+        logger.warning("compose_quest_panel LLM failed for %s: %s", user_id, e)
+    print(f">>> [QUEST-PANEL] user={user_id} quest={qid} fallback")
+    return fallback
 
 
 async def compose_mission_panel(user_id: str, mission: dict, profile: dict,
                                 journey: dict, db_pool) -> dict:
-    """Generate a mission-specific panel for relational work."""
+    """Generate a mission-specific panel via LLM — relational work."""  # FIX-QUEST-MISSION-LLM
     from app.sse.thera_world_engine import BIOME_THRESHOLDS, determine_character
+    from app.sse.llm_fallback import chat_completion_with_fallback
+
     biome_name = journey.get("current_biome", "dark_forest")
     biome = next((b for b in BIOME_THRESHOLDS if b["biome"] == biome_name), BIOME_THRESHOLDS[0])
     character = await determine_character(profile)
+    target = mission.get("relationship_target", "a loved one")
+    rel_type = mission.get("relationship_type", "family")
+    mid = mission.get("mission_id", "?")
+
+    progress = mission.get("progress_notes", [])
+    if isinstance(progress, str):
+        progress = json.loads(progress)
+    npcs = progress[0].get("npcs", []) if progress else []
+    npc_frags = ", ".join(n.get("visual_prompt_fragment", "") for n in npcs[:3] if n.get("visual_prompt_fragment"))
+
+    crystal_snippets = ""
+    try:
+        async with db_pool.acquire() as conn:
+            uid = await conn.fetchval("SELECT id FROM users WHERE username = $1", user_id)
+            if uid:
+                rows = await conn.fetch(
+                    "SELECT crystal_text FROM nate_intelligence_crystals "
+                    "WHERE user_id = $1 AND superseded_by IS NULL "
+                    "AND (domain = 'clinical' OR crystal_text ILIKE $2) "
+                    "ORDER BY created_at DESC LIMIT 5", uid, f"%{target[:20]}%")
+                crystal_snippets = "\n".join(r["crystal_text"][:120] for r in rows if r["crystal_text"])
+    except Exception as e:
+        logger.warning("compose_mission_panel crystal fetch: %s", e)
+
     fallback = {
-        "narrative_text": f"In the {biome_name.replace('_', ' ')}, the relational journey with {mission.get('relationship_target', 'a loved one')} deepens.",
-        "image_prompt": f"{biome['description']}, two distant figures in the landscape, {character[1]}, painterly style, muted warm palette, no text",
+        "narrative_text": f"In the {biome_name.replace('_', ' ')}, the relational journey with {target} deepens.",
+        "image_prompt": f"{biome['description']}, two figures in the landscape, {character[1]}, {npc_frags}, painterly style, muted warm palette, no text",
         "panel_tone": "meditative",
     }
-    return fallback  # TODO Phase 3: LLM-composed mission panels
+    sys = (
+        "You are Little Nate, generating a therapeutic story panel for a client's relational mission.\n"
+        f"MISSION: Journey with {target} ({rel_type})\nBIOME: {biome_name.replace('_', ' ')}\n"
+        f"CHARACTER: {character[0]} — {character[1]}\n"
+        f"CLIENT CRYSTALS (relational):\n{crystal_snippets or '(none yet)'}\n\n"
+        "Return JSON only (no markdown). Two fields:\n"
+        "- narrative_text: 2-3 warm sentences reflecting the relational journey. "
+        "Reference crystal themes without quoting verbatim. Don't describe the image.\n"
+        "- image_prompt: detailed Grok Imagine prompt for a Thera-world scene with two figures, "
+        f"painterly muted warm palette, incorporating NPCs: {npc_frags or 'none yet'}. "
+        "End with: no text, no words, no lettering."
+    )
+    try:
+        raw = await chat_completion_with_fallback(
+            [{"role": "system", "content": sys},
+             {"role": "user", "content": "Generate the mission panel."}],
+            max_tokens=400, temperature=0.7)
+        if raw:
+            m = re.search(r"\{.*\}", raw, re.DOTALL)
+            if m:
+                parsed = json.loads(m.group())
+                if parsed.get("narrative_text") and parsed.get("image_prompt"):
+                    parsed.setdefault("panel_tone", "meditative")
+                    print(f">>> [MISSION-PANEL] user={user_id} mission={mid} narrative_len={len(parsed['narrative_text'])}")
+                    return parsed
+    except Exception as e:
+        logger.warning("compose_mission_panel LLM failed for %s: %s", user_id, e)
+    print(f">>> [MISSION-PANEL] user={user_id} mission={mid} fallback")
+    return fallback
 
 
 async def update_quest_progress(quest_id: str, new_crystal_summaries: list, db_pool) -> dict:
