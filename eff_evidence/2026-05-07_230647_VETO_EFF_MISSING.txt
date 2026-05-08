@@ -1,0 +1,222 @@
+? Comprehensive audit of all existing infrastructure that would support 
+a future phase_coherence_inference.py module.
+
+Read-only investigation. Max 2000 tokens.
+
+GOAL: Determine what's already built that could feed a phase coherence 
+inference module, what's partial, and what's genuinely missing. This 
+prevents rebuilding existing infrastructure and identifies real gaps.
+
+INVESTIGATION DOMAINS:
+
+═══════════════════════════════════════════════════════════════
+DOMAIN 1 — Predictability and forecasting
+═══════════════════════════════════════════════════════════════
+
+Search for:
+- Predictive models, n-gram analysis, sequence prediction
+- Pattern forecasting based on prior data
+- State prediction from history
+- Anomaly detection against expected patterns
+- Predictive_intelligence domain implementation
+
+Commands:
+grep -rn "predictability\|predict.*pattern\|forecast\|baseline.*deviation\|n_gram\|markov\|sequence.*predict\|anomaly.*detect" backend/app/ --include="*.py" | head -40
+
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"
+  SELECT COUNT(*), AVG(confidence) FROM nate_intelligence_crystals 
+  WHERE domain='predictive_intelligence' AND scope='global';\""
+
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"
+  SELECT crystal_text, confidence FROM nate_intelligence_crystals 
+  WHERE domain='predictive_intelligence' AND scope='global'
+  ORDER BY confidence DESC LIMIT 8;\""
+
+═══════════════════════════════════════════════════════════════
+DOMAIN 2 — Cycle / periodicity detection
+═══════════════════════════════════════════════════════════════
+
+Search for:
+- FFT, Fourier analysis, spectral analysis
+- Oscillation detection, rhythm detection
+- Periodic pattern recognition
+- Wave-based analysis of state over time
+
+Commands:
+grep -rn "cycle.*detect\|periodicity\|cyclical\|fft\|fourier\|spectral\|oscillat\|rhythm.*detect\|wave.*analysis\|periodogram" backend/app/ --include="*.py" | head -30
+
+═══════════════════════════════════════════════════════════════
+DOMAIN 3 — Time-series state analysis
+═══════════════════════════════════════════════════════════════
+
+Search for:
+- Coherence trend tracking
+- ec_slope (exists per Section A1 of Step 4 investigation)
+- State trajectory over sessions
+- Trend analysis on autonomic/coherence signals
+
+Commands:
+grep -rn "time.series\|temporal.*pattern\|coherence.*history\|coherence.*trend\|ec_slope\|ec_history\|state.*trajectory\|trend.*analysis" backend/app/ --include="*.py" | head -25
+
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"
+  SELECT table_name FROM information_schema.tables 
+  WHERE table_schema='public' 
+  AND (table_name LIKE '%coherence%' OR table_name LIKE '%nevedal%' OR 
+       table_name LIKE '%history%')
+  ORDER BY table_name;\""
+
+═══════════════════════════════════════════════════════════════
+DOMAIN 4 — Per-user baseline modeling
+═══════════════════════════════════════════════════════════════
+
+Search for:
+- User-specific baseline calculation
+- Individual norm tracking
+- Personalized deviation detection
+- Rolling window per-user statistics
+
+Commands:
+grep -rn "user.*baseline\|baseline.*user\|personal.*baseline\|individual.*norm\|rolling.*user\|user.*rolling\|per.user.*stat" backend/app/ --include="*.py" | head -25
+
+═══════════════════════════════════════════════════════════════
+DOMAIN 5 — Linguistic feature extraction
+═══════════════════════════════════════════════════════════════
+
+Search for:
+- Connectives analysis (Corona-Hernández method)
+- Word2vec or BERT embeddings on user text
+- Semantic similarity windowing
+- Syntactic complexity tracking
+- Lexical diversity measures
+
+Commands:
+grep -rn "connective\|contingency.*marker\|expansion.*marker\|temporality.*marker\|word2vec\|embedding\|sentence.*similarity\|lexical.*diversity\|syntactic.*complex" backend/app/ --include="*.py" | head -30
+
+═══════════════════════════════════════════════════════════════
+DOMAIN 6 — Voice biometric signals
+═══════════════════════════════════════════════════════════════
+
+Search for:
+- Voice biometric extraction beyond what's in nevedal_engine
+- Pitch, energy, pause analysis
+- Prosody-based state inference
+
+Commands:
+grep -rn "VoiceBiometric\|pitch.*variance\|pitch.*mean\|energy.*speech\|pause.*ratio\|prosody.*state" backend/app/ --include="*.py" | head -20
+
+═══════════════════════════════════════════════════════════════
+DOMAIN 7 — Crystal recurrence pattern detection
+═══════════════════════════════════════════════════════════════
+
+Search for:
+- Recurring crystal pattern detection
+- Theme repetition tracking
+- Domain-clustering over time
+
+Commands:
+grep -rn "crystal.*recur\|recur.*crystal\|theme.*repeat\|domain.*cluster\|crystal.*pattern\|crystal.*frequency" backend/app/ --include="*.py" | head -25
+
+═══════════════════════════════════════════════════════════════
+DOMAIN 8 — TMC labile-window detection
+═══════════════════════════════════════════════════════════════
+
+Search for:
+- THRESHOLD/BREAKTHROUGH/RECURRENCE class implementations
+- Labile window timing logic
+- State-dependent intervention timing
+
+Commands:
+grep -A10 "THRESHOLD\|BREAKTHROUGH\|RECURRENCE\|labile" backend/app/sse/ucd/tmc.py | head -50
+
+═══════════════════════════════════════════════════════════════
+DOMAIN 9 — Foundry-Lattice / template engine
+═══════════════════════════════════════════════════════════════
+
+Operator referenced Foundry-Lattice in prior sessions. Check if it exists 
+and what it does:
+
+Commands:
+find backend/ -name "*foundry*" -o -name "*lattice*" 2>/dev/null | head -10
+grep -rn "foundry_lattice\|FoundryLattice\|template.*engine" backend/app/ --include="*.py" | head -15
+
+═══════════════════════════════════════════════════════════════
+DOMAIN 10 — Existing inference / classification modules
+═══════════════════════════════════════════════════════════════
+
+Search for any module already doing state inference from text:
+
+Commands:
+grep -rn "def.*classify\|def.*infer.*state\|def.*detect.*state" backend/app/ --include="*.py" | head -30
+
+═══════════════════════════════════════════════════════════════
+DOMAIN 11 — Database schema for state tracking
+═══════════════════════════════════════════════════════════════
+
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"
+  SELECT table_name FROM information_schema.tables 
+  WHERE table_schema='public' 
+  AND (table_name LIKE '%state%' OR table_name LIKE '%phase%' OR 
+       table_name LIKE '%predict%' OR table_name LIKE '%pattern%' OR
+       table_name LIKE '%baseline%')
+  ORDER BY table_name;\""
+
+═══════════════════════════════════════════════════════════════
+DOMAIN 12 — Therapeutic controller integration points
+═══════════════════════════════════════════════════════════════
+
+The new therapeutic_controller.py from today's deploy. Identify what 
+hooks already exist that phase_coherence_inference could plug into:
+
+Commands:
+grep -A3 "_classify\|_detect\|_analyze\|_extract" backend/app/services/therapeutic_controller.py | head -40
+
+═══════════════════════════════════════════════════════════════
+OUTPUT REQUIRED
+═══════════════════════════════════════════════════════════════
+
+For each of the 12 domains above:
+
+Section A — What EXISTS (with file:line references):
+   - Function/module name
+   - What it actually does
+   - How it's invoked
+   - Quality assessment (production-grade / partial / stub)
+
+Section B — What's PARTIAL:
+   - The stubs and incomplete implementations
+   - What would need to be finished
+
+Section C — What's MISSING:
+   - Genuinely absent infrastructure that phase_coherence_inference 
+     would need to build
+
+Section D — Integration map:
+   For each existing piece, identify if/how phase_coherence_inference.py 
+   would consume it.
+
+Section E — Gap-to-720-score analysis:
+   Given what exists, what's the actual remaining work to reach the 
+   720/1000 score? List as concrete deliverables.
+
+Section F — Honest verdict per domain:
+   "Domain X: production-ready / partial / absent"
+   With confidence rating per domain.
+
+═══════════════════════════════════════════════════════════════
+HONESTY REQUIREMENTS
+═══════════════════════════════════════════════════════════════
+
+- If something doesn't exist, say so plainly. Don't extrapolate from 
+  similar code.
+- If something exists but only as TODO comment or stub, classify it 
+  as missing not partial.
+- If something exists in 1 place but isn't wired into the runtime 
+  flow, flag it as "exists but unwired."
+- Distinguish "works in production today" from "exists in codebase."
+
+No code changes. Investigation only.
+
+Mode: investigate
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10
+IID footer required if EFF < 80%
