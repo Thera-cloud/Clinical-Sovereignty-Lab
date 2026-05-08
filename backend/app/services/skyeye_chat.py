@@ -2521,6 +2521,36 @@ RULES:
                     generated_by="direct_chat_command",
                 )
                 print(f">>> [SKYEYE CHAT] Direct post queued for {detected_platform}: #{queue_id}")
+
+                # Direct chat command = POST NOW (operator intent). Bypass approval gate
+                # and publish inline via platform adapter, mirroring session engine path.
+                try:
+                    from app.services.platforms import get_adapter
+                    from app.services.skyeye_platform_base import ContentType
+                    adapter = get_adapter(detected_platform, self.db_pool)
+                    if adapter and await adapter.authenticate():
+                        ct = result.get("content_type", "post")
+                        post_ct = ContentType.ARTICLE if ct == "article" else ContentType.POST
+                        publish = await adapter.post_content(
+                            text=result["content"],
+                            content_type=post_ct,
+                        )
+                        if publish and publish.success:
+                            await gen.update_queue_status(
+                                queue_id, "posted",
+                                approved_by="direct_chat_command",
+                                post_id_external=publish.post_id,
+                                post_url=publish.post_url,
+                            )
+                            print(f">>> [SKYEYE CHAT] Direct post PUBLISHED to {detected_platform}: {publish.post_url}")
+                        else:
+                            err = (publish.error if publish else "adapter returned None")
+                            await gen.update_queue_status(queue_id, "failed", error_message=err)
+                            print(f">>> [SKYEYE CHAT] Direct post publish FAILED for {detected_platform}: {err}")
+                    else:
+                        print(f">>> [SKYEYE CHAT] Direct post: no adapter or auth failed for {detected_platform} — left as draft")
+                except Exception as pe:
+                    print(f">>> [SKYEYE CHAT] Direct post inline-publish error: {pe}")
                 return True
         except Exception as e:
             print(f">>> [SKYEYE CHAT] Direct post error: {e}")
