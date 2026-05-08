@@ -1,0 +1,89 @@
+? Investigate why Big Nate Chat request to post on LinkedIn did not 
+result in actual LinkedIn post.
+
+Read-only investigation. Max 1500 tokens.
+
+CONTEXT:
+- LinkedIn scope fix deployed earlier today (a617c1e)
+- LinkedIn token is live but bound to "Service Manager" account 
+  (urn:li:person:t4QVqVewcL) NOT Little Nate's actual account
+- Operator requested LinkedIn post via Big Nate Chat — no post appeared 
+  on LinkedIn
+- Earlier test post via direct script DID succeed (urn:li:share:7458244096810364928) 
+  but landed on Service Manager profile
+
+INVESTIGATION:
+
+PHASE A — Verify token state hasn't degraded:
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"
+  SELECT platform, account_id, status, error_message, token_expiry, updated_at
+  FROM skyeye_platform_tokens 
+  WHERE platform='linkedin';\""
+
+Confirm: still connected, still bound to t4QVqVewcL, no new errors.
+
+PHASE B — Trace Big Nate Chat → posting pipeline:
+1. Find Big Nate Chat handler:
+   grep -rn "big_nate.*chat\|process.*big_nate\|big_nate.*request" backend/app/ --include="*.py" | head -20
+
+2. Find where Big Nate Chat creates/queues social posts:
+   grep -rn "queue_content\|insert.*content_queue\|skyeye.*queue\|big_nate.*post" backend/app/ --include="*.py" | head -20
+
+3. Trace whether the queue is being drained:
+   ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"
+     SELECT COUNT(*), status, platform 
+     FROM skyeye_content_queue 
+     WHERE created_at > NOW() - INTERVAL '4 hours' 
+     GROUP BY status, platform;\""
+   
+   If items are 'pending' → queue not draining
+   If items are 'failed' → posting failed (check error)
+   If items are 'posted' → posted somewhere (which account?)
+   If no items → Big Nate Chat didn't queue at all
+
+PHASE C — Check posting mode:
+4. Find _get_platform_mode in skyeye_session_engine.py:
+   grep -A20 "_get_platform_mode\|platform_mode\|posting.*mode" backend/app/services/skyeye_session_engine.py | head -40
+   
+5. Check current mode for linkedin:
+   ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"
+     SELECT platform, mode, updated_at FROM skyeye_platform_modes;\""
+   
+   If 'approval' mode → posts queue but require manual approve
+   If 'full' or autopilot → posts go directly
+
+PHASE D — Look for recent posting attempts in logs:
+6. ssh root@68.183.168.75 "docker logs nate_backend --since 4h 2>&1 | grep -iE 'big_nate.*post|big_nate.*chat|skyeye.*queue|linkedin.*publish|linkedin.*post' | head -40"
+
+7. Look for errors specifically:
+   ssh root@68.183.168.75 "docker logs nate_backend --since 4h 2>&1 | grep -iE 'linkedin.*error|posting.*fail|publish.*fail' | head -20"
+
+PHASE E — Check approval queue:
+8. ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"
+     SELECT queue_id, platform, content_text, status, created_at 
+     FROM skyeye_content_queue 
+     WHERE platform='linkedin' AND created_at > NOW() - INTERVAL '6 hours'
+     ORDER BY created_at DESC LIMIT 5;\""
+
+PHASE F — Account mismatch reminder:
+9. Even if posting infrastructure works perfectly, posts will land on 
+   Service Manager profile (urn:li:person:t4QVqVewcL), NOT Little Nate's 
+   profile, until operator re-authorizes LinkedIn while logged into 
+   Little Nate's actual account.
+
+OUTPUT REQUIRED:
+
+Section A — Token state (still healthy?)
+Section B — Big Nate Chat pipeline trace (where does post request go?)
+Section C — Queue state (anything queued? any errors?)
+Section D — Posting mode (approval vs full)
+Section E — Recent log activity (any posting attempts logged?)
+Section F — Best hypothesis for the failure
+Section G — Recommended fix
+
+No code changes. Investigation only.
+
+Mode: investigate
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10
+IID footer required if EFF < 80%
