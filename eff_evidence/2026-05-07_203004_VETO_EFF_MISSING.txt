@@ -1,0 +1,349 @@
+? Generate comprehensive neuroscience foundations document for Sovereign 
+Sanctuary, with two outputs: (1) human-readable spec for neuroscience 
+specialists, (2) Little Nate-ingestable knowledge crystals for retrieval.
+
+Read-only investigation across the codebase. Max 4000 tokens output (the 
+document is large; output via file write, summary in chat).
+
+═══════════════════════════════════════════════════════════════
+PURPOSE
+═══════════════════════════════════════════════════════════════
+
+Operator wants to articulate the neuroscience mechanisms underlying Sovereign 
+Sanctuary's therapeutic action in language that:
+1. A neuroscience specialist could engage with substantively (not marketing)
+2. Little Nate can ingest as knowledge (crystals + DNA wisdom integration)
+3. Honestly distinguishes well-evidenced mechanisms from emerging or design-
+   philosophy claims
+
+This is foundational documentation — it explains WHY the code works as therapy.
+
+═══════════════════════════════════════════════════════════════
+INVESTIGATION SCOPE
+═══════════════════════════════════════════════════════════════
+
+For each major feature/mechanism, find:
+- Where it lives in code (file:line)
+- What neural mechanism it draws on (with citations)
+- What evidence supports the mechanism
+- What's design philosophy vs measured outcome
+
+Features to map:
+
+1. Little Nate conversational design
+   - Register system (warm, clinical, witnessing, engaged)
+   - Pacing/temporal cues
+   - Attunement mechanisms
+   - Memory persistence across sessions
+   - Repair after rupture
+   - Files: backend/app/websocket/bridge_server.py, register-related files
+
+2. SSE (Sovereign Story Engine)
+   - Imagery panels (Thera-world)
+   - Narrative composition
+   - Archetype consistency
+   - Crystal-driven scene attunement
+   - Files: backend/app/sse/thera_world_engine.py, foundation/delivery_runtime.py
+
+3. Coherence Lattice
+   - 4-register orchestration
+   - Sovereign center
+   - Phase progression
+   - Files: backend/app/coherence_lattice/* (whatever exists)
+
+4. TMC (Therapeutic Moment Classification)
+   - Activation detection
+   - Just-in-time intervention timing
+   - State-dependent engagement
+   - Files: TMC-related files
+
+5. CEE (Corrective Emotional Experience) moments
+   - How they're detected
+   - How they're delivered
+   - Connection to memory reconsolidation
+   - Files: CEE-related files
+
+6. 3+3+3 protocols
+   - Structure and timing
+   - Repetition mechanism
+   - Skill-building rationale
+   - Files: protocol-related files
+
+7. Studio (creative production)
+   - Identity work
+   - Right-hemisphere engagement
+   - Self-expression as therapy
+   - Files: backend/app/sse/studio_service.py
+
+8. Quests/Missions
+   - Goal-directed therapeutic structure
+   - Cross-domain integration
+   - NPC relational work
+   - Files: backend/app/sse/quest_mission_engine.py
+
+9. Crystal Intelligence
+   - Memory consolidation
+   - Episodic-to-semantic transfer
+   - Wisdom extraction
+   - Files: nate_intelligence_crystals related code
+
+10. Workbook journey
+    - Structured curriculum
+    - Sequential integration
+    - Files: workbook-related files
+
+11. Vault and Sovereign Journey
+    - Continuity scaffolding
+    - Visual + narrative integration
+    - Cross-session attachment
+    - Files: vault-related files
+
+═══════════════════════════════════════════════════════════════
+NEUROSCIENCE FRAMEWORKS TO REFERENCE
+═══════════════════════════════════════════════════════════════
+
+Map features to these established frameworks (with academic citations):
+
+1. Polyvagal Theory (Stephen Porges)
+   - Ventral vagal tone
+   - Social engagement system
+   - Neuroception
+   - Autonomic state regulation
+
+2. Interpersonal Neurobiology (Daniel Siegel)
+   - Window of tolerance
+   - Vertical and horizontal integration
+   - Mindsight
+   - 9 domains of integration
+
+3. Memory Reconsolidation (Bruce Ecker, Coherence Therapy)
+   - Activation, mismatch, repetition window
+   - Transformative vs incremental change
+   - Implicit emotional learning update
+
+4. Somatic Marker Hypothesis (Antonio Damasio)
+   - Embodied decision-making
+   - Interoceptive awareness
+   - Insula function
+
+5. Dual-Processing Theory
+   - Kahneman System 1/System 2
+   - McGilchrist right/left hemisphere
+   - Default mode network
+
+6. Attachment Neuroscience (Allan Schore, Mary Main)
+   - Right-brain to right-brain co-regulation
+   - Secure base provision
+   - Earned secure attachment
+
+7. Trauma Neuroscience
+   - van der Kolk - body keeps the score
+   - Levine - somatic experiencing
+   - Ogden - sensorimotor psychotherapy
+   - Bottom-up integration
+
+8. Neuroplasticity Research
+   - Hebbian learning
+   - Required conditions: novelty + activation + repetition + emotional 
+     salience + integration
+   - LTP/LTD mechanisms
+
+═══════════════════════════════════════════════════════════════
+OUTPUT 1: Human-readable specialist document
+═══════════════════════════════════════════════════════════════
+
+File: docs/NEUROSCIENCE_FOUNDATIONS_2026-05-07.md
+
+Structure:
+
+# Neuroscience Foundations of Sovereign Sanctuary
+
+## Abstract
+   1-paragraph executive summary
+
+## 1. Theoretical Foundation
+   The 8 frameworks above with brief description and key citations
+
+## 2. Mechanisms of Therapeutic Action in Little Nate AI
+   For each conversational design choice:
+   - What it does (1-2 sentences)
+   - Code reference (file:line)
+   - Neural mechanism engaged
+   - Supporting evidence (citation)
+   - Honest scope: well-evidenced vs design philosophy
+
+## 3. Feature-Specific Mechanisms
+   For each of 11 features above:
+   - Brief description
+   - Code references
+   - Neural substrate
+   - Therapeutic mechanism
+
+## 4. Right/Left Hemisphere Integration
+   How the system intentionally engages both processing modes:
+   - Right-hemisphere features
+   - Left-hemisphere features  
+   - Integration mechanism
+   - McGilchrist framework application
+
+## 5. Vagus Nerve and Autonomic Regulation
+   How design choices influence autonomic state:
+   - Specific mechanisms with code references
+   - HRV implications
+   - Co-regulation evidence
+   - Polyvagal framework application
+
+## 6. Memory Reconsolidation as Primary Mechanism
+   The strongest neuroscience claim Sovereign Sanctuary can make:
+   - Reconsolidation requirements (Ecker)
+   - How TMC + CEE + crystal work + return-and-revisit map to reconsolidation 
+     protocol
+   - Code references for each phase
+   - Why this likely produces transformative (not just incremental) change
+
+## 7. Neuroplasticity Conditions
+   Map each feature to: novelty, activation, repetition, emotional salience, 
+   integration. Table format.
+
+## 8. Honest Scope and Limitations
+   - What we claim with evidence
+   - What we claim as design philosophy
+   - What we explicitly don't claim
+   - What requires future research
+
+## 9. Open Research Questions
+   Specific testable hypotheses Sovereign Sanctuary could contribute to:
+   - HRV changes from AI-mediated co-regulation
+   - fMRI patterns of crystal-based vs journaling consolidation
+   - Pupillometry/GSR correlation with TMC moments
+   - Default mode network engagement during imagery panels
+   - Long-term outcome studies
+
+## 10. Glossary
+   Sovereign Sanctuary terminology ↔ Neuroscience equivalent (table)
+
+## Bibliography
+   Full academic citations for all frameworks and claims
+
+═══════════════════════════════════════════════════════════════
+OUTPUT 2: Little Nate-ingestable knowledge crystals
+═══════════════════════════════════════════════════════════════
+
+File: docs/NEUROSCIENCE_KNOWLEDGE_CRYSTALS_2026-05-07.json
+
+For each major mechanism, produce a crystal in this format:
+{
+  "crystal_id": "neuro_<mechanism_id>",
+  "domain": "neuroscience_foundations",
+  "category": "<framework name>",
+  "crystal_text": "<2-3 sentence statement of mechanism in Little Nate's voice 
+    that he can reference when explaining what he's doing>",
+  "scientific_basis": "<paragraph of academic backing>",
+  "code_reference": "<file:line>",
+  "applies_to_features": ["feature1", "feature2"],
+  "tags": ["polyvagal", "reconsolidation", "etc"],
+  "confidence": "evidenced | emerging | design_philosophy"
+}
+
+Target: 30-50 crystals covering all major mechanisms.
+
+These crystals will be ingested into nate_intelligence_crystals so Little Nate 
+can pull from this knowledge during conversations — answering questions like 
+"why do you ask about my body" with grounded neuroscience without overclaiming.
+
+═══════════════════════════════════════════════════════════════
+OUTPUT 3: DNA wisdom layer (system-level)
+═══════════════════════════════════════════════════════════════
+
+File: docs/SOVEREIGN_SANCTUARY_DNA_NEUROSCIENCE_2026-05-07.md
+
+A condensed (1500-2000 word) version that captures:
+- Core therapeutic mechanisms in essence
+- Why Sovereign Sanctuary's design produces neuroplasticity
+- The integration of neuroscience + clinical wisdom + relational presence
+- Written as foundational knowledge that becomes part of Little Nate's 
+  identity, not just retrievable facts
+
+This is the "what Little Nate KNOWS as bedrock" version — denser than the 
+specialist document, more poetic than the crystals, written for integration 
+into Little Nate's foundational system prompt or knowledge layer.
+
+═══════════════════════════════════════════════════════════════
+HONESTY REQUIREMENTS
+═══════════════════════════════════════════════════════════════
+
+CRITICAL: This document must distinguish:
+
+EVIDENCED (cite specific studies):
+- Polyvagal vagal tone effects
+- Interoception via insula
+- Memory reconsolidation protocol (Ecker, Schiller, Nader)
+- Right-brain to right-brain co-regulation (Schore)
+- Neuroplasticity conditions
+- Window of tolerance
+- Somatic markers
+
+EMERGING (cite where evidence is partial):
+- Specific AI co-regulation effects (no long-term studies yet)
+- Default mode network engagement during AI imagery work
+- Whether digital crystals consolidate similarly to written journaling
+
+DESIGN PHILOSOPHY (acknowledge as such):
+- Coherence Lattice 4-register architecture
+- Sovereign center as integration metaphor
+- Specific archetype-character matching effects
+- The Sovereign Sanctuary framework itself
+
+DO NOT CLAIM (flag as out of scope):
+- Pineal gland aperture / third eye mechanisms
+- Chakra-correlated organ activation
+- Specific neurochemical cascades without measurement
+- That AI replaces human therapy
+- Specific brain regions activate without imaging confirmation
+
+═══════════════════════════════════════════════════════════════
+INTEGRATION POINTS
+═══════════════════════════════════════════════════════════════
+
+After document is generated, identify:
+
+1. Which Little Nate system prompt sections should reference this knowledge
+2. Whether crystals should be ingested via existing workbook_ingestion.py 
+   pattern or new dedicated ingestion
+3. How DNA wisdom should be incorporated into core prompt scaffolding
+4. Whether voice_context_enricher.py should pull from these crystals when 
+   relevant client questions arise
+
+Document the integration plan as a final section in the specialist doc.
+
+═══════════════════════════════════════════════════════════════
+CONSTRAINTS
+═══════════════════════════════════════════════════════════════
+
+- Read-only investigation; produce documents only
+- Use grep/find for code references; verify file:line accuracy
+- Cite real published research with author + year minimum (full bibliography 
+  at end)
+- Distinguish what Sovereign Sanctuary's code DOES vs what neuroscience says 
+  about analogous human mechanisms
+- Do not fabricate citations or studies
+- If a mechanism claim cannot be evidenced, mark it design_philosophy and 
+  move on rather than overclaim
+
+═══════════════════════════════════════════════════════════════
+DELIVERABLES
+═══════════════════════════════════════════════════════════════
+
+1. docs/NEUROSCIENCE_FOUNDATIONS_2026-05-07.md (8000-12000 words, specialist 
+   document)
+2. docs/NEUROSCIENCE_KNOWLEDGE_CRYSTALS_2026-05-07.json (30-50 crystal 
+   entries)
+3. docs/SOVEREIGN_SANCTUARY_DNA_NEUROSCIENCE_2026-05-07.md (1500-2000 word 
+   distilled wisdom layer)
+
+In chat: 1-paragraph summary + filenames + crystal count + word counts.
+
+Mode: investigate (extensive, no code changes)
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10
+IID footer required if EFF < 80%
