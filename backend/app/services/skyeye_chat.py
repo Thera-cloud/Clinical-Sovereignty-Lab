@@ -899,24 +899,29 @@ RULES:
                 "what's on ", "what is on ", "go to ",
             ]
             _search_query = None
-            for prefix in _search_triggers:
-                if prefix in _msg_lower:
-                    idx = _msg_lower.find(prefix) + len(prefix)
-                    _search_query = user_message[idx:].strip().rstrip("?.!,")
-                    break
+            # Priority 1: full URL anywhere in message — DDG searches the URL
+            # itself, not the prose around it. Deep paths get reduced to bare
+            # domain (DDG indexes domains better than path fragments).
+            _url_match = re.search(r'https?://[^\s)\]\}>"\']+', user_message)
+            if _url_match:
+                _full_url = _url_match.group(0).rstrip(".,;:!?")
+                _bare = re.sub(r'^https?://(?:www\.)?', '', _full_url).split('/')[0]
+                _search_query = _bare if _bare else _full_url
+            # Priority 2: bare domain (no protocol)
             if not _search_query:
-                _url_match = re.search(r'https?://[^\s)\]\}>"\']+', user_message)
-                if _url_match:
-                    _search_query = _url_match.group(0)
-            if not _search_query:
-                # Bare domain (e.g. "sovereignsanctuary.net") — require common TLD
-                # to avoid false positives on filenames or version strings.
                 _dom_match = re.search(
                     r'\b([a-zA-Z0-9-]+\.(?:com|net|org|io|ai|gov|edu|co|us|app|tech|dev|me|tv|xyz))\b',
                     user_message,
                 )
                 if _dom_match:
                     _search_query = _dom_match.group(1)
+            # Priority 3: explicit search verb → tail of message
+            if not _search_query:
+                for prefix in _search_triggers:
+                    if prefix in _msg_lower:
+                        idx = _msg_lower.find(prefix) + len(prefix)
+                        _search_query = user_message[idx:].strip().rstrip("?.!,")
+                        break
             if _search_query:
                 try:
                     _injections = self._search_proxy.sanitizer.detect_injection(user_message)
