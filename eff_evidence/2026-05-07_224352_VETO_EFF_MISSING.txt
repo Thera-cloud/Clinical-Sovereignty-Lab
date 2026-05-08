@@ -1,0 +1,43 @@
+approved / commit and deploy
+
+Line overage accepted (610 lines total). Trimming would compromise 
+readability for hot-path code. The surface area reflects real Step 4 
+complexity — not padding.
+
+All four files reviewed:
+- Migration 201: idempotent, additive, safe
+- _dna_neuroscience_text.py: clean two-export pattern, token budget acceptable
+- therapeutic_controller.py: comprehensive but justified
+- bridge_server.py wrappers: production-safe fall-back pattern verified
+
+Proceed with deploy sequence:
+
+git add backend/app/services/therapeutic_controller.py \
+        backend/app/services/_dna_neuroscience_text.py \
+        backend/app/websocket/bridge_server.py \
+        backend/migrations/201_therapeutic_audit_log.sql
+git commit -m "feat(therapy): state-dependent therapeutic controller integrating DNA + TMC + nevedal + crystals (FIX-THERAPEUTIC-CONTROLLER)"
+git push origin main
+
+ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && git pull origin main"
+ssh root@68.183.168.75 "docker exec -i nate_postgres psql -U nate_admin -d little_nate < /opt/clinical-sovereignty-lab/backend/migrations/201_therapeutic_audit_log.sql"
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c '\\d sse_therapeutic_audit_log' | grep audit_id"
+ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && docker compose -f docker-compose.prod.yml restart backend"
+ssh root@68.183.168.75 "docker logs nate_backend --since 1m 2>&1 | grep -E 'STARTUP COMPLETE|Traceback'"
+
+After STARTUP COMPLETE confirmed:
+1. Send a regulated test message in Little Nate chat
+2. Check audit log:
+   docker exec nate_postgres psql -U nate_admin -d little_nate -c "
+     SELECT autonomic_state, tmc_class, register_used, audit_passed, 
+            response_token_count
+     FROM sse_therapeutic_audit_log 
+     ORDER BY timestamp DESC LIMIT 5;"
+3. Confirm log line: >>> [THERAPEUTIC-CTRL] user=... state=in_window...
+
+Report results.
+
+Mode: execute deploy
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10
+IID footer required if EFF < 80%
