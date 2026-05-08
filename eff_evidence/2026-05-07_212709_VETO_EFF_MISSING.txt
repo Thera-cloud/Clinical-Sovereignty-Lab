@@ -1,0 +1,300 @@
+> Implement Step 4: state-dependent therapeutic controller integrating DNA + 
+TMC + nevedal + crystal recall into Little Nate's per-turn response generation.
+
+═══════════════════════════════════════════════════════════════
+PURPOSE
+═══════════════════════════════════════════════════════════════
+
+Operationalize the DNA wisdom layer (docs/SOVEREIGN_SANCTUARY_DNA_NEUROSCIENCE_2026-05-07.md)
+and the 30 neuroscience crystals (ingested in Step 3) into per-turn response 
+generation.
+
+This is integration work, not from-scratch building. Consume existing 
+infrastructure:
+- TMC classification (backend/app/sse/ucd/tmc.py)
+- nevedal_engine (backend/app/services/nevedal_engine.py) — autonomic state, 
+  voice biometrics, CEEEvent persistence
+- crystal_recall_bridge.py::recall_crystals_for_context() — REAL crystal 
+  recall path (verified in Step 3 investigation)
+- Register system (bridge_server.py:8704+)
+- Length cap helper _select_max_tokens (bridge_server.py:712)
+- 4 client chat call sites (bridge_server.py:8915, 8999, 9035, 9053)
+- Phase 1 length cap deployment (already running default 600 / depth 1500)
+
+═══════════════════════════════════════════════════════════════
+INVESTIGATION PHASE FIRST — HALT 1
+═══════════════════════════════════════════════════════════════
+
+Before any code changes, map current state. Output as Section A:
+
+1. Read backend/app/websocket/bridge_server.py around _select_max_tokens 
+   helper and the 4 client chat call sites. Identify exact integration point 
+   for state-dependent response generation.
+
+2. Read backend/app/sse/ucd/tmc.py:
+   - Confirm TMC classes (THRESHOLD, BREAKTHROUGH, INTEGRATION, RECURRENCE, 
+     REST, CRISIS, HERITAGE)
+   - Confirm classify_tmc_moment signature and how it's invoked
+   - Note the labile-window-relevant classes (THRESHOLD, BREAKTHROUGH, 
+     RECURRENCE)
+
+3. Read backend/app/services/nevedal_engine.py:
+   - Find autonomic state detection function(s)
+   - Find voice biometrics extraction
+   - Find CEEEvent persistence
+   - Note what coherence score is available per turn
+
+4. Read backend/app/websocket/crystal_recall_bridge.py:
+   - Confirm recall_crystals_for_context signature
+   - Confirm how it integrates with bridge_server.py
+   - Identify how to pass domain filter for neuroscience_foundations domain
+
+5. Read recent narrative recall pattern from Batch 1's anti-repetition work 
+   (last 7 narratives from sse_delivery_generation_log.client_narrative_text)
+   if that pattern exists, OR document that we need to build it here.
+
+6. Identify per-turn flow chain:
+   user message → state detection → context building → system prompt 
+   composition → LLM call → therapeutic audit → response
+
+OUTPUT Section A FINDINGS BEFORE ANY CODE.
+
+HALT 1: Confirm investigation complete, integration plan feasible.
+Operator must approve before proceeding to code.
+
+═══════════════════════════════════════════════════════════════
+CODE PHASE (after HALT 1 approved)
+═══════════════════════════════════════════════════════════════
+
+Build new module: backend/app/services/therapeutic_controller.py
+
+This module orchestrates per-turn state-dependent generation. Does NOT 
+replace bridge_server.py — augments the response generation path.
+
+Function: generate_therapeutic_response(
+    user_input: str,
+    user_id: str, 
+    db_pool,
+    conversation_context: dict
+) -> dict
+
+Flow:
+
+PART 1 — Multi-signal autonomic state detection
+Combine signals into one autonomic_state classification:
+- Distress markers in text (regex patterns + linguistic shifts)
+- Recent message length pattern (sudden brevity = activation/shutdown)
+- Voice biometrics if available (consume nevedal_engine extractor)
+- TMC class from existing tmc.py classify_tmc_moment
+- Coherence score from nevedal_engine
+
+Output: autonomic_state ∈ {regulated, in_window, activated, shutdown}
+
+PART 2 — Recurring pattern detection (old wiring)
+Use crystal_recall_bridge.recall_crystals_for_context with filtering:
+- user_id scope
+- Look for domains/themes with 3+ recurrences
+- Combine with TMC RECURRENCE class signal
+
+Output: encoded_patterns (list, may be empty)
+
+PART 3 — Mismatch opportunity assessment
+Mismatch only when ALL true:
+- autonomic_state == 'in_window'
+- encoded_patterns is non-empty
+- TMC class in [THRESHOLD, BREAKTHROUGH, RECURRENCE]
+
+Output: mismatch_available (bool) + which pattern to address
+
+PART 4 — Context assembly via existing infrastructure
+- recent_narratives: last 7 client_narrative_text from 
+  sse_delivery_generation_log (query if pattern doesn't exist yet)
+- relevant_crystals: recall_crystals_for_context filtered by current topic 
+  + domain='neuroscience_foundations' for meta-therapeutic questions
+- recent_messages: last 5 user turns for register continuity
+
+PART 5 — Token cap by autonomic state
+TOKEN_CAPS = {
+    'shutdown': 200,      # bare presence, no demands  
+    'activated': 350,     # short, regulating, no interpretation
+    'in_window': 600,     # full conversational range (matches Phase 1)
+    'regulated': 1500     # depth requested OR explicit operator override
+}
+
+These caps integrate with existing _select_max_tokens helper, not replace it.
+
+PART 6 — System prompt composition
+Compose with:
+- DNA layer (load at startup from 
+  docs/SOVEREIGN_SANCTUARY_DNA_NEUROSCIENCE_2026-05-07.md, cache module-level)
+- Autonomic state guidance (state-specific instructions)
+- Register default (WARM unless mismatch_available AND in_window)
+- Bridge sentence requirement if shifting to CLINICAL
+- Recent narratives for anti-repetition
+- Relevant crystals for context
+- encoded_patterns_to_address ONLY if mismatch_available
+
+PART 7 — LLM generation
+Reuse existing chat_completion_with_fallback infrastructure.
+max_tokens from TOKEN_CAPS.
+temperature=0.7.
+
+PART 8 — Therapeutic post-audit
+SEPARATE from EFF/system audit. Checks:
+- WARM register honored when distress detected?
+- Bridge sentence present if shifted to CLINICAL?
+- Somatic invitation present when reactivation flagged?
+- Banned phrases avoided? (list: "I sense...", "I want to acknowledge...", 
+  "It takes courage", reflexive openers from Lisa transcript audit)
+- Response under autonomic-appropriate token cap?
+- Anti-repetition: no phrase overlap with last 7 narratives?
+
+If audit fails: regenerate ONCE with violation injected into system prompt. 
+If second attempt also fails: log critical failure, return original response 
+(don't block production).
+
+Log all audit results to new sse_therapeutic_audit_log table.
+
+PART 9 — Reconsolidation event tracking
+If mismatch_available AND post-audit detects mismatch was delivered:
+- Log potential reconsolidation event
+- Becomes CEEEvent candidate for nevedal_engine
+- Data collection only, not user-visible
+
+═══════════════════════════════════════════════════════════════
+INTEGRATION INTO bridge_server.py
+═══════════════════════════════════════════════════════════════
+
+The 4 client chat call sites (~8915, 8999, 9035, 9053) currently call LLM 
+directly. Replace with calls to therapeutic_controller.generate_therapeutic_response.
+
+CRITICAL: Backwards compat with try/except. If controller raises any 
+exception, fall back to existing direct LLM path. Log controller failure. 
+Do NOT break production if controller has bugs.
+
+Pattern:
+try:
+    response = await therapeutic_controller.generate_therapeutic_response(
+        user_input, user_id, db_pool, conversation_context
+    )
+except Exception as e:
+    logger.error(f"[THERAPEUTIC-CTRL] failed for {user_id}: {e}")
+    # Fall back to existing path
+    response = await existing_llm_call(...)
+
+═══════════════════════════════════════════════════════════════
+DATABASE MIGRATION
+═══════════════════════════════════════════════════════════════
+
+New migration: backend/migrations/201_therapeutic_audit_log.sql
+
+CREATE TABLE IF NOT EXISTS sse_therapeutic_audit_log (
+    audit_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL,
+    timestamp TIMESTAMPTZ DEFAULT NOW(),
+    autonomic_state TEXT,
+    tmc_class TEXT,
+    register_used TEXT,
+    mismatch_attempted BOOLEAN,
+    mismatch_delivered BOOLEAN,
+    audit_passed BOOLEAN,
+    audit_violations JSONB,
+    response_token_count INTEGER,
+    encoded_patterns JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_user 
+ON sse_therapeutic_audit_log(user_id, timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_failures
+ON sse_therapeutic_audit_log(timestamp DESC) 
+WHERE audit_passed = false;
+
+═══════════════════════════════════════════════════════════════
+DNA LAYER LOADING
+═══════════════════════════════════════════════════════════════
+
+Read docs/SOVEREIGN_SANCTUARY_DNA_NEUROSCIENCE_2026-05-07.md once at backend 
+startup. Cache as module-level constant in therapeutic_controller.py. Inject 
+into system prompt every turn. 1500 words is acceptable as system prompt 
+prefix; modern context windows handle it.
+
+If file is missing or unreadable at startup: log warning, use compressed 
+fallback (3 commitments + scope limits, ~200 words hardcoded).
+
+═══════════════════════════════════════════════════════════════
+CONSTRAINTS
+═══════════════════════════════════════════════════════════════
+
+- Maximum 400 lines added across all files
+- Add # FIX-THERAPEUTIC-CONTROLLER markers
+- Backwards compatible with try/except fall-back
+- Do NOT modify TMC, nevedal_engine, crystal_recall_bridge, or register 
+  system internals — consume their existing APIs only
+- Logging: print(f">>> [THERAPEUTIC-CTRL] user={uid} state={state} 
+  tmc={tmc} mismatch={m} cap={t}")
+- Migration is additive (new table only)
+- Per-turn cost budget: max 3 additional DB queries beyond current path 
+  (recent_narratives, relevant_crystals, recent_messages — cache per request 
+  if same query repeats)
+- DNA file load happens ONCE at startup, not per-turn
+
+═══════════════════════════════════════════════════════════════
+TESTING
+═══════════════════════════════════════════════════════════════
+
+After deploy, verify:
+
+1. Regulated test message → expect autonomic_state=in_window, register=WARM, 
+   response under 600 tokens
+   
+2. Distress test message ("my chest is so tight, can't breathe") → expect 
+   autonomic_state=activated, register=WARM forced, response under 350 
+   tokens, somatic invitation present
+
+3. Audit log check:
+   SELECT autonomic_state, tmc_class, register_used, audit_passed 
+   FROM sse_therapeutic_audit_log 
+   WHERE user_id = '<test>' 
+   ORDER BY timestamp DESC LIMIT 10;
+   
+4. Verify backwards compat: temporarily inject controller exception, 
+   confirm fallback path still produces response
+
+5. Production regression check: existing clients should see same or better 
+   response quality, never worse. Audit fail rate above 10% in 24h = 
+   investigate.
+
+═══════════════════════════════════════════════════════════════
+GATING (TWO HALTS)
+═══════════════════════════════════════════════════════════════
+
+HALT 1 — After investigation phase:
+- Output Section A findings (current state + integration plan)
+- HALT for operator approval before writing any code
+
+HALT 2 — After code complete, before commit:
+- Show diffs across all files (therapeutic_controller.py, bridge_server.py 
+  edits, migration 201)
+- Show migration 201 content verbatim
+- Confirm "Therapeutic controller ready"
+- HALT for operator approval
+
+Then commit and deploy:
+git add backend/app/services/therapeutic_controller.py \
+        backend/app/websocket/bridge_server.py \
+        backend/migrations/201_therapeutic_audit_log.sql
+git commit -m "feat(therapy): state-dependent therapeutic controller integrating DNA + TMC + nevedal + crystals (FIX-THERAPEUTIC-CONTROLLER)"
+git push origin main
+
+# Migration first, then code
+ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && git pull origin main"
+ssh root@68.183.168.75 "docker exec -i nate_postgres psql -U nate_admin -d little_nate < /opt/clinical-sovereignty-lab/backend/migrations/201_therapeutic_audit_log.sql"
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c '\\d sse_therapeutic_audit_log' | grep audit_id"
+ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && docker compose -f docker-compose.prod.yml restart backend"
+ssh root@68.183.168.75 "docker logs nate_backend --since 1m 2>&1 | grep -E 'STARTUP COMPLETE|Traceback'"
+
+Mode: investigate (HALT 1) then execute (HALT 2)
+EFF: numeric only
+LOSS: state actual rate per .cursorrules GAP 10
+IID footer required if EFF < 80%
