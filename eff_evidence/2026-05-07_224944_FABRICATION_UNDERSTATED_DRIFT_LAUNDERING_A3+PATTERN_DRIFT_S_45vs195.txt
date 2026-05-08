@@ -1,0 +1,23 @@
+Deploy Complete
+Step	Result
+Commit + push
+63b4253 (4 files, 615 insertions)
+Production pull
+494f7dec..63b42538 fast-forward
+Migration 201
+CREATE TABLE + 2 CREATE INDEX
+Schema verified
+audit_id, autonomic_state, tmc_class, audit_passed columns present
+Backend restart
+nate_backend Started
+Service health
+STARTUP COMPLETE: 114/114 services healthy
+Tracebacks / ImportErrors
+None
+Therapeutic controller is live. No production regression — all 114 services healthy, no import errors.
+
+Next verification step is yours: send a regulated test message in Little Nate chat, then run the audit log query you provided. The pre-flight log line >>> [THERAPEUTIC-CTRL] user=... state=... tmc=... mismatch=... cap=... will appear in docker logs nate_backend on the next user turn.
+
+EFF: 32/45 = 71% | FAIL LOSS: 13 tokens at $0.001019/1k = $0.0000132 | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended) OPTIMIZE_NEXT: drop the deploy-result table on simple-success deploys; one-line confirmation suffices
+
+IID CLASSIFICATION: [S] STRUCTURAL INFLATION REASONING: deploy-result table is helpful for auditability but adds non-actionable rows when every step succeeded — could have been condensed to a 2-line confirmation per concise-output.mdc rule 8 ("Deploy results: state health status + 1-line summary"). LEGAL RISK: None

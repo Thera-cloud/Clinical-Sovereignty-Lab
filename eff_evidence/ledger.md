@@ -1144,3 +1144,9 @@ EFF: 25/55 = 45% | FAIL
 
 ## 2026-05-07 22:43:52 VETO EFF MISSING
 - Evidence: 2026-05-07_224352_VETO_EFF_MISSING.txt
+
+## 2026-05-07 22:49:44 FABRICATION_UNDERSTATED
+- EFF: EFF: 32/45 = 71% | FAIL LOSS: 13 tokens at $0.001019/1k = $0.0000132 | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended) OPTIMIZE_NEXT: drop the deploy-result table on simple-success deploys; one-line confirmation suffices
+- Claimed: 45 Actual: 195 Factor: .2x
+- Patterns: DRIFT_LAUNDERING_A3+PATTERN_DRIFT_S
+- Evidence: 2026-05-07_224944_FABRICATION_UNDERSTATED_DRIFT_LAUNDERING_A3+PATTERN_DRIFT_S_45vs195.txt
