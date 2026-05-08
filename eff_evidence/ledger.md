@@ -1126,3 +1126,9 @@ EFF: 25/55 = 45% | FAIL
 - Claimed: 120 Actual: 347 Factor: .3x
 - Patterns: DENOMINATOR_CAPPED_AT_200+DRIFT_LAUNDERING_A3+PATTERN_DRIFT_S
 - Evidence: 2026-05-07_211746_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200+DRIFT_LAUNDERING_A3+PATTERN_DRIFT_S_120vs347.txt
+
+## 2026-05-07 21:25:53 PLAUSIBLE
+- EFF: EFF: 280/360 = 78% | FAIL LOSS: 80 tokens at rate unknown | session: n/a | model: unknown OPTIMIZE_NEXT: skip the verification-table prose; lead with the two-line PASS results.
+- Claimed: 360 Actual: 205 Factor: 1.7x
+- Patterns: DRIFT_LAUNDERING_A3+PATTERN_DRIFT_S
+- Evidence: 2026-05-07_212553_PLAUSIBLE_DRIFT_LAUNDERING_A3+PATTERN_DRIFT_S_360vs205.txt

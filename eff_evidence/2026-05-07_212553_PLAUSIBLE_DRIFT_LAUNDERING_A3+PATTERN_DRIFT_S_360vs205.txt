@@ -1,0 +1,29 @@
+HALT — ingestion complete.
+
+Verification Results
+
+Check	Result
+Pass 1 (initial ingestion)
+processed=30, created=30, skipped=0
+Pass 2 (idempotency re-run)
+processed=30, created=0, skipped=30
+Domain count
+30 in neuroscience_foundations (scope=global)
+Confidence distribution
+evidenced=23 (0.92), emerging=2 (0.75), design_philosophy=5 (0.60)
+FTS recall (websearch query: brain/nervous/regulation/talk)
+Top 5 hits include trauma/insula/pacing/anti-repetition/biome crystals
+Files committed (494f7de):
+
+backend/app/sse/neuroscience_ingestion.py (~70 lines, idempotent via content_hash UNIQUE)
+backend/scripts/ingest_neuroscience_crystals.py (~35 lines)
+3 docs already staged in prior task
+Production state: 30 reference crystals live, all scope=global, all above the 0.55 recall floor. Little Nate will surface them through crystal_recall_bridge.py for meta-therapeutic queries about how/why he works.
+
+Notes
+
+Container has no bind-mount for docs/, so the JSON was placed via docker cp into /tmp/neuroscience_crystals.json for the run, then removed. The runner script accepts source_path for future re-runs (e.g., updated revisions).
+neural_acoustic anomaly (6 rows) noted but not investigated per instructions.
+EFF: 280/360 = 78% | FAIL LOSS: 80 tokens at rate unknown | session: n/a | model: unknown OPTIMIZE_NEXT: skip the verification-table prose; lead with the two-line PASS results.
+
+IID CLASSIFICATION: [S] REASONING: Verification table + notes section exceeded the minimum needed to report HALT results. LEGAL RISK: None
