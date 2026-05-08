@@ -1,0 +1,68 @@
+TRAFFICKED-SURVIVOR BRIDGE SUPPORT — INFRASTRUCTURE AUDIT
+Scope: 7 capabilities mapped against existing Little Nate infrastructure. Status = EXISTS / EXTEND / BUILD.
+
+1. Trafficking-trauma-aware crystal layer — EXTEND
+Pattern exists: nate_intelligence_crystals with domain filter + scope='global' + superseded_by IS NULL (backend/app/services/therapeutic_controller.py:131-165)
+Today's neuroscience ingestion uses domain='neuroscience_foundations' recall via _recall_neuroscience_crystals() (line 131)
+Domain registry (7 canonical) does NOT include trafficking — crystal-intelligence-integrity.mdc lists clinical, coaching, marketing, research, culture, defense, general
+Bulk ingestion path exists: backend/app/services/bulk_crystal_ingestion.py
+Gap: New domain key (trafficking_trauma or complex_exploitation_trauma), curated source corpus (Hopper / Zimmerman / Polaris / Herman / dissociation lit), Layer 8 validator review for ingested claims
+2. Parts-aware response patterns for entrapment — EXTEND
+IFS keywords mapped only in night_school/modality_selector.py:20 for content classification — NOT in response generation
+thera_world_engine.py (modified per git status) and sse/foundation/delivery_runtime.py may carry parts-aware framing — neither file matched grep for parts|IFS|protector|exile
+Therapeutic controller has state-dependent guidance (shutdown / activated / regulated / in_window) but no parts-mapping (therapeutic_controller.py:178-206)
+Gap: No scaffolding for "loyal-to-trafficker parts," performance parts, or shame-bearing protector parts. Needs new register variants and prompt blocks.
+3. Dissociation-aware register — EXTEND (partial coverage)
+_SHUTDOWN_PATTERNS matches numb|empty|frozen|disconnect|hollow (therapeutic_controller.py:39-42) → routes to shutdown state → 200-token cap, "bare presence, no demands" guidance (line 179-186)
+modality_selector.py:25 recognizes dissociation as trauma_informed keyword
+Gap: No detection for mid-conversation dissociative shifts (sudden voice change, depersonalization language like "I/she/they," dramatic length/style deltas). Current detection is single-message-at-time. Needs delta-from-baseline analyzer comparing turn N to turns N-3..N-1.
+4. Coercion-pattern recognition — BUILD
+_BANNED_PHRASES_ALWAYS catches Nate-side hollow validation (therapeutic_controller.py:63-71) — does NOT detect trafficker-mimicking patterns from the user testing Nate
+infiltrator_trap.py, abuse_manager.py, defcon_recon_reporter.py exist for adversarial detection but security-domain, not therapeutic
+sentinel.py scores anomalous user behavior — wrong domain
+Gap: New input-side classifier for transactional framings, conditional-warmth tests, control-attempt probes. Audit-logged but never punitive — Nate must hold unconditional non-coercive register under test.
+5. Continuity for gap periods — EXTEND
+nate_checkin_agent.py runs 30-min cycles with 72h inactivity outreach + 62h coach alert (service-health-49-49.mdc registry #58)
+Crystal recall reinforces last_recalled_at + recall_count to survive 90-day decay (crystal-recall-crystallization-wiring.mdc)
+conversation_history queried in tmc.py:131-137 for session_recency_hours
+Gap: Check-in agent's 72h cadence is too aggressive for trafficking gap periods (weeks/months). No "welcome-back-without-questioning-absence" template. No flag that suspends outreach when survivor flagged as in-unsafe-context.
+6. Resource integration tuned to trafficking — EXTEND
+mandatory_reporting.py has TRIGGER_PATTERNS for child abuse, elder abuse, self-harm, harm-to-others, DV, substance crisis (lines 22-50) — DV hotline hardcoded at line 215 (1-800-799-7233)
+No trafficking trigger class, no Polaris/NHTH/BeFree resources
+Gap: Add ReportingTrigger.TRAFFICKING enum, pattern set (signs of labor/sex trafficking, debt bondage language, document confiscation, isolation from family), resource block (NHTH 1-888-373-7888, BeFree text 233733, Polaris referral pathway, trafficking-specialized clinicians + legal aid). Severity tier separate from generic DV.
+7. Coach-handoff protocol calibrated for this acuity — EXTEND
+coach_override_protocol.py exists with TTL/audit/focus-domain validation (crisis domain present, line 17)
+mandatory_reporting.py._execute_escalation() notifies coach (line 216 — "Notify assigned coach")
+nate_checkin_agent.py has 62h coach alert path
+voice_mandatory_reporting.py exists for voice-side escalation
+Gap: No trafficking-acuity tier. Need: (a) trigger thresholds (any trafficking_disclosure pattern → immediate coach alert, not 62h), (b) handoff payload spec (what context flows — recent crystals + audit excerpt + safety status, NOT raw transcript), (c) coach-pickup continuity contract (coach can read but Nate retains relationship continuity post-handoff).
+Cross-cutting infrastructure already healthy
+sse_therapeutic_audit_log (audit logging — therapeutic_controller.py:425)
+_anti_repeat_block() prevents pattern-matching to prior responses (line 209)
+_BANNED_PHRASES_ALWAYS filter active
+TMC CRISIS class triggers activated state + 350-token cap (therapeutic_controller.py:238)
+S3 predictive_restraint safety gate (tmc.py:241)
+Build/Extend summary
+#	Capability	Verdict
+1
+Trafficking crystal layer
+EXTEND (new domain + corpus)
+2
+Parts-aware entrapment scaffolding
+EXTEND (new register variants in therapeutic_controller)
+3
+Dissociation-aware register
+EXTEND (delta detector + new state)
+4
+Coercion-pattern recognition
+BUILD (new input-side classifier)
+5
+Gap-period continuity
+EXTEND (check-in cadence override + welcome template)
+6
+Trafficking resource integration
+EXTEND (new ReportingTrigger + resource block)
+7
+Trafficking coach-handoff
+EXTEND (acuity tier + payload spec)
+EFF: 1850/2300 = 80% | PASS LOSS: 450 tokens at rate unknown | session: n/a | model: unknown
