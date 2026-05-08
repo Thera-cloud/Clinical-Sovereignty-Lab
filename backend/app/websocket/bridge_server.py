@@ -8885,6 +8885,28 @@ class AzureCortex:
             _user_temp = _nate_temp(profile.get("username"))
             _len_cap = _select_max_tokens(user_text)  # FIX-LEN # SOVEREIGN-VOICE
             print(f">>> [LENGTH-CAP] max_tokens={_len_cap} (mode={'depth' if _len_cap==1500 else 'default'})")  # FIX-LEN
+            # FIX-THERAPEUTIC-CONTROLLER — pre-flight: state-dependent prompt + cap
+            _ttc_audit_meta = None
+            _ttc_recent_narrs: list = []
+            try:
+                from app.services.therapeutic_controller import prepare_therapeutic_context as _ttc_pre
+                _ttc_pack = await _ttc_pre(
+                    user_text=user_text, user_id=uid, db_pool=db_pool,
+                    base_system_prompt=system_prompt, default_max_tokens=_len_cap,
+                )
+                if _ttc_pack:
+                    system_prompt = _ttc_pack.get("enriched_system_prompt", system_prompt)
+                    _len_cap = _ttc_pack.get("max_tokens", _len_cap)
+                    _ttc_audit_meta = _ttc_pack.get("audit_metadata")
+                    _ttc_recent_narrs = _ttc_pack.get("recent_narratives") or []
+                    if _ttc_audit_meta:
+                        print(
+                            f">>> [THERAPEUTIC-CTRL] user={uid} state={_ttc_audit_meta.get('autonomic_state')} "
+                            f"tmc={_ttc_audit_meta.get('tmc_class')} mismatch={_ttc_audit_meta.get('mismatch_available')} "
+                            f"cap={_len_cap}"
+                        )
+            except Exception as _ttc_pre_err:
+                print(f">>> [THERAPEUTIC-CTRL] pre-flight failed for {uid}: {_ttc_pre_err}")
             full_response = ""
             _provider_used = ""
             _already_streamed = False
@@ -9146,6 +9168,19 @@ class AzureCortex:
                     )
                 _provider_used = "witnessing_fallback"
                 print(f">>> [AQ-BYPASS] Witnessing fallback generated ({len(full_response)} chars)")
+
+            # FIX-THERAPEUTIC-CONTROLLER — post-flight: audit + optional regenerate
+            if _ttc_audit_meta and full_response.strip():
+                try:
+                    from app.services.therapeutic_controller import audit_therapeutic_response as _ttc_post
+                    _ttc_audited = await _ttc_post(
+                        response_text=full_response, audit_metadata=_ttc_audit_meta,
+                        user_id=uid, db_pool=db_pool, recent_narratives=_ttc_recent_narrs,
+                    )
+                    if _ttc_audited and _ttc_audited.get("response_text"):
+                        full_response = _ttc_audited["response_text"]
+                except Exception as _ttc_post_err:
+                    print(f">>> [THERAPEUTIC-CTRL] post-audit failed for {uid}: {_ttc_post_err}")
 
             # SOVEREIGN-VOICE — send response (sovereign/race paths need explicit send)
             if _provider_used != "azure" and not _already_streamed:
