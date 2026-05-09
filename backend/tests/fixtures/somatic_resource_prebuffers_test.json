@@ -1,0 +1,15 @@
+{
+  "_meta": {
+    "version": "test-fixture-1.0.0",
+    "locale": "en-US",
+    "last_review_date": "2026-05-08",
+    "clinician_authored_by": "synthetic_test_only",
+    "reviewed_by": "synthetic_test_only",
+    "status": "test_fixture_do_not_ship"
+  },
+  "buffers": [
+    {"domain": "fixture_domain_a", "register": "default", "text": "FIXTURE_PREBUFFER_DOMAIN_A_DEFAULT"},
+    {"domain": "fixture_domain_a", "register": "predictability_continuity", "text": "FIXTURE_PREBUFFER_DOMAIN_A_PREDICTABILITY"},
+    {"domain": "fixture_domain_b", "register": "default", "text": "FIXTURE_PREBUFFER_DOMAIN_B_DEFAULT"}
+  ]
+}

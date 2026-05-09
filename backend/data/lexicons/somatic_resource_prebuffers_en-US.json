@@ -1,0 +1,11 @@
+{
+  "_meta": {
+    "version": "0.0.0-empty-pre-clinician-authoring",
+    "locale": "en-US",
+    "last_review_date": null,
+    "clinician_authored_by": null,
+    "reviewed_by": null,
+    "status": "awaiting_clinician_authoring"
+  },
+  "buffers": []
+}

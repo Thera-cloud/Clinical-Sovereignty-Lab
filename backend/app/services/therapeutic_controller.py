@@ -9,12 +9,70 @@ attempted, and logs metrics to sse_therapeutic_audit_log.
 
 Backwards compatible: caller wraps each entry point in try/except and falls
 back to existing behavior on any failure.
+
+PHASE 3 v1.3 — ADDITIVITY CONTRACT (orchestrator absent → identical to v1.2)
+
+When `register_directive`, `dissociation_delta`, and `coercion_severity` are
+all None (the Phase 3 state, before Phase 4 orchestrator wiring), this module
+must produce byte-identical behavior to v1.2:
+
+- Token caps for `shutdown|activated|in_window|regulated` unchanged.
+- Banned-phrase set for en-US is a STRICT SUPERSET of the v1.2 list.
+- Mismatch evaluation logic for `mismatch_available` unchanged.
+- Thalamic Novelty Gate evaluates to `blocked=False` (no signals → no block).
+- Predictability-continuity cap resolver is dormant (no register_directive).
+
+Auditor checks (`_auditor_self_check`):
+- `register_variants_additive_only` — every v1.2 variant still resolves
+- `banned_phrases_extended_not_replaced` — v1.3 list ⊇ v1.2 list
+- `thalamic_gate_dual_insertion_present` — both source markers present
+- `phase3_controller_v1_2_fixtures_pass` — external fixture suite (Phase 6)
+
+PHASE 3 v1.3 — NEW REGISTER VARIANTS (Gap 6 / 10 / 7 / dissociation + Gap 4)
+
+- `purity_wound`             — slow, no rushing, validates without attacking
+                                faith tradition; somatic invitation; no
+                                "deprogramming" framing.
+- `betrayal_response`        — companions infidelity-trauma response; no
+                                pressure toward forgiveness or stay/leave.
+- `unfaithful_shame`         — holds shame without minimizing; no moralizing;
+                                works underlying patterns; never becomes
+                                couples' therapist.
+- `dissociation_grounding`   — narrows to grounding without forcing presence;
+                                triggered by `dissociation_delta_detector`;
+                                distinct from existing `shutdown` state.
+- `predictability_continuity`— Gap 4 register selected when Thalamic Novelty
+                                Gate blocks. Token cap is RESOLVED PER-USER
+                                via `_resolve_predictability_continuity_cap`
+                                (parity with prior turn's actual emitted
+                                tokens, with floor).
+
+PHASE 3 v1.3 — THALAMIC NOVELTY GATE (Gap 4)
+
+For hyper-vigilant trauma survivors, novelty registers as threat first and
+corrective experience second (if at all). The gate suppresses mismatch when
+`dissociation_delta` or `coercion_severity` exceeds the user's per-cohort
+threshold (trafficking=0.20, general trauma=0.30 default), or when
+`thalamic_gate_forced=True` (trigger date or legal proximity).
+
+Dual insertion sites (BOTH must remain present per Note 1, Phase 3):
+
+1. `# THALAMIC GATE INSERTION 1 of 2 — top-of-function pre-flight`
+   In `prepare_therapeutic_context`, immediately after `mismatch_available`
+   is computed. Gate result overrides register and disables mismatch.
+
+2. `# THALAMIC GATE INSERTION 2 of 2 — mismatch decision path`
+   In `audit_therapeutic_response`, immediately before the regenerate-on-
+   violation branch. Re-evaluates from `audit_metadata` to defensively catch
+   any future code path that might re-enable mismatch downstream.
 """
 
 import json
 import logging
 import re
-from typing import Any, Optional
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +109,33 @@ _META_QUESTION_PATTERNS = [
 ]
 
 TOKEN_CAPS = {
+    # v1.2 base — autonomic-state-derived caps
     "shutdown": 200,
     "activated": 350,
     "in_window": 600,
     "regulated": 1500,
+    # v1.3 register-variant caps — orchestrator-driven (Phase 4 wiring)
+    # Dormant in Phase 3 (no orchestrator => register_directive=None => unused).
+    "purity_wound": 350,
+    "betrayal_response": 400,
+    "unfaithful_shame": 350,
+    "dissociation_grounding": 200,
+    # predictability_continuity uses an FLOOR here only; the actual cap is
+    # resolved per-user via _resolve_predictability_continuity_cap() because
+    # the variant requires length parity with the prior turn (Gap 4).
+    "predictability_continuity": 80,
 }
 
 _LABILE_WINDOW_TMC = {"THRESHOLD", "BREAKTHROUGH", "RECURRENCE"}
 
-# Banned phrases (Lisa transcript audit + register guidelines)
-_BANNED_PHRASES_ALWAYS = [
+# ─────────────── v1.2 sealed reference (additivity verification) ───────────────
+# DO NOT MODIFY. Used by _auditor_self_check() to prove v1.3 is a strict
+# superset of v1.2 (register_variants_additive_only,
+# banned_phrases_extended_not_replaced).
+_PHASE_V1_2_REGISTER_VARIANTS: Tuple[str, ...] = (
+    "shutdown", "activated", "in_window", "regulated",
+)
+_PHASE_V1_2_BANNED_PHRASES: Tuple[str, ...] = (
     "i sense",
     "i want to acknowledge",
     "it takes courage",
@@ -68,7 +143,245 @@ _BANNED_PHRASES_ALWAYS = [
     "honor your journey",
     "liminal threshold",
     "sit with that",
-]
+)
+
+# v1.3 additive register variants (orchestrator-driven, dormant in Phase 3).
+_PHASE_V1_3_NEW_REGISTERS: Tuple[str, ...] = (
+    "purity_wound",
+    "betrayal_response",
+    "unfaithful_shame",
+    "dissociation_grounding",
+    "predictability_continuity",
+)
+
+# ─────────────── Banned phrases (locale-aware, additive) ───────────────
+# Note 3 (Phase 3 build): structure is dict-keyed by locale from day one,
+# even though only en-US is populated in v1.3. Future locale additions are
+# pure data work — no code change. Mirrors the lexicon-overlay pattern.
+
+# v1.3 additions (en-US). Three phrases per Plan v1.3:
+#  - "you have nothing to be ashamed of"  → bypasses lived experience
+#  - "you'll get over this"               → problem-solves grief work
+#  - "everything happens for a reason"    → spiritual bypass
+_PHASE_V1_3_NEW_BANNED_PHRASES_EN_US: Tuple[str, ...] = (
+    "you have nothing to be ashamed of",
+    "you'll get over this",
+    "everything happens for a reason",
+)
+
+# In-code authoritative baseline. Lexicon overlay file (Note 3 stub) extends.
+_BANNED_PHRASES_BY_LOCALE: Dict[str, Tuple[str, ...]] = {
+    "en-US": _PHASE_V1_2_BANNED_PHRASES + _PHASE_V1_3_NEW_BANNED_PHRASES_EN_US,
+}
+
+# Path to the lexicon overlay directory (matches Phase 2 lexicon convention).
+_LEXICON_DIR = Path(__file__).resolve().parents[2] / "data" / "lexicons"
+
+# Backward-compat: v1.2 callers reference _BANNED_PHRASES_ALWAYS as a flat list.
+# Resolves to en-US default (v1.2 superset). Kept so existing imports do not
+# break; _audit_violations() uses the locale-aware resolver below.
+_BANNED_PHRASES_ALWAYS: List[str] = list(_BANNED_PHRASES_BY_LOCALE["en-US"])
+
+
+def _resolve_banned_phrases(locale: str = "en-US") -> Tuple[str, ...]:
+    """Resolve banned-phrase set for a given locale with overlay merge.
+
+    Fallback chain (matches the Phase 2 lexicon convention):
+        <requested_locale> → <language> → en-US → in-code defaults
+
+    Overlay file at `data/lexicons/banned_phrases_<locale>.json` is appended
+    to the in-code baseline (additive only — overlays cannot remove a
+    baseline phrase). Empty/missing overlay returns the in-code baseline.
+
+    Phase 3 ships en-US in-code only; overlay file is an authoring-stub.
+    """
+    requested = (locale or "en-US").strip() or "en-US"
+    language = requested.split("-", 1)[0]
+    candidates = []
+    for lc in (requested, language, "en-US"):
+        if lc and lc not in candidates:
+            candidates.append(lc)
+
+    base: Tuple[str, ...] = ()
+    for lc in candidates:
+        if lc in _BANNED_PHRASES_BY_LOCALE:
+            base = _BANNED_PHRASES_BY_LOCALE[lc]
+            break
+    if not base:
+        base = _BANNED_PHRASES_BY_LOCALE["en-US"]
+
+    overlay: List[str] = []
+    overlay_path = _LEXICON_DIR / f"banned_phrases_{requested}.json"
+    if overlay_path.exists():
+        try:
+            with overlay_path.open("r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+            phrases = payload.get("phrases") or []
+            if isinstance(phrases, list):
+                for ph in phrases:
+                    if isinstance(ph, str) and ph.strip():
+                        overlay.append(ph.strip().lower())
+        except Exception as e:
+            # Fail-closed-additively: overlay parse error never DROPS a baseline
+            # phrase. Log and proceed with in-code baseline.
+            logger.warning(
+                "therapeutic_controller: banned-phrases overlay parse failed "
+                "(%s) — using in-code baseline only: %s",
+                overlay_path.name, e,
+            )
+
+    if not overlay:
+        return base
+
+    seen = set()
+    merged: List[str] = []
+    for ph in list(base) + overlay:
+        key = ph.lower()
+        if key not in seen:
+            seen.add(key)
+            merged.append(ph)
+    return tuple(merged)
+
+
+# ─────────────── Thalamic Novelty Gate (Gap 4) ───────────────
+
+@dataclass(frozen=True)
+class ThalamicGateDecision:
+    """Outcome of the Thalamic Novelty Gate (Gap 4).
+
+    For hyper-vigilant trauma survivors, novelty registers as threat first,
+    corrective experience second (if at all). When dissociation or coercion
+    signals exceed the user's per-cohort threshold, novelty (mismatch) is
+    suppressed and `predictability_continuity` register takes over —
+    sustained predictable presence as the corrective experience.
+
+    Phase 3 default (no orchestrator → no signals) returns blocked=False.
+    """
+    blocked: bool
+    reason: str
+    dissociation_delta: float
+    coercion_severity: float
+    threshold: float
+
+
+def _evaluate_thalamic_novelty_gate(
+    dissociation_delta: Optional[float] = None,
+    coercion_severity: Optional[float] = None,
+    threshold: float = 0.30,
+    forced_on: bool = False,
+) -> ThalamicGateDecision:
+    """Evaluate whether mismatch should be blocked this turn.
+
+    Args:
+        dissociation_delta: From dissociation_delta_detector (Phase 4 input).
+            None in Phase 3 (no orchestrator) → contributes 0.0.
+        coercion_severity: From coercion_pattern_detector (Phase 4 input).
+            None in Phase 3 → contributes 0.0.
+        threshold: Per-user (trafficking=0.20, general trauma=0.30 default).
+        forced_on: True when trigger-date proximity or legal proximity forces
+            the gate ON regardless of computed signals (Gap 5, Gap 9).
+
+    Returns:
+        ThalamicGateDecision. In Phase 3 with no orchestrator inputs, returns
+        blocked=False with reason='signals_below_threshold' — preserving v1.2
+        behavior exactly per the additivity contract.
+    """
+    diss = float(dissociation_delta or 0.0)
+    coer = float(coercion_severity or 0.0)
+    thr = float(threshold or 0.30)
+
+    if forced_on:
+        return ThalamicGateDecision(
+            blocked=True,
+            reason="forced_on_trigger_or_legal_proximity",
+            dissociation_delta=diss,
+            coercion_severity=coer,
+            threshold=thr,
+        )
+    if diss >= thr or coer >= thr:
+        return ThalamicGateDecision(
+            blocked=True,
+            reason="signal_above_threshold",
+            dissociation_delta=diss,
+            coercion_severity=coer,
+            threshold=thr,
+        )
+    return ThalamicGateDecision(
+        blocked=False,
+        reason="signals_below_threshold",
+        dissociation_delta=diss,
+        coercion_severity=coer,
+        threshold=thr,
+    )
+
+
+# ─────────────── Predictability-continuity cap resolver (Gap 4) ───────────────
+
+PREDICTABILITY_CONTINUITY_FLOOR_TOKENS: int = 80
+"""Minimum cap when prior-turn parity would collapse the response.
+
+Per Note 2 (Phase 3 build): floor at the variant's minimum — don't let cap
+collapse to zero if the prior turn was a single-word acknowledgement. 80
+tokens (~60 words) is a "warm short response" floor — enough for 3-4
+sentences of sustained presence without truncating mid-thought.
+"""
+
+
+async def _resolve_predictability_continuity_cap(
+    user_id: str,
+    db_pool,
+    floor: int = PREDICTABILITY_CONTINUITY_FLOOR_TOKENS,
+) -> int:
+    """Resolve `predictability_continuity` token cap by parity with prior turn.
+
+    Per Note 2 (Phase 3 build): the predictability_continuity register's
+    clinical purpose — sustained predictable presence as the corrective
+    mismatch — fails if Nate's response length swings unpredictably while the
+    register is active. Cap matches the prior turn's ACTUAL emitted token
+    count (not the cap that turn was allowed), with `floor` as the lower
+    bound.
+
+    Source of truth: `conversation_history.word_count_ai` (set at insert time
+    per migration 099) — the actual word count of what was emitted, NOT the
+    `metadata.max_tokens` cap that turn was permitted. Word→token conversion
+    uses the same 0.75 ratio used elsewhere in this module (Claude/GPT-4-class
+    tokenizers average ~0.75 tokens per English word).
+
+    Args:
+        user_id: Hardware-id or username (matches conversation_history.user_id).
+        db_pool: asyncpg pool. None → returns floor.
+        floor: Lower bound on returned cap. Defaults to module constant.
+
+    Returns:
+        int. Minimum is `floor`. No upper bound (parity is the design goal).
+        Returns `floor` on any failure path so the register never crashes the
+        caller.
+    """
+    if not db_pool or not user_id:
+        return floor
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT word_count_ai FROM conversation_history "
+                "WHERE user_id = $1 AND ai_text IS NOT NULL "
+                "AND btrim(ai_text) <> '' "
+                "ORDER BY created_at DESC LIMIT 1",
+                user_id,
+            )
+            if not row:
+                return floor
+            words = int(row["word_count_ai"] or 0)
+            if words <= 0:
+                return floor
+            # words → approximate tokens (~0.75 tokens/word)
+            prior_tokens = int(round(words / 0.75))
+            return max(prior_tokens, floor)
+    except Exception as e:
+        logger.warning(
+            "therapeutic_controller: predictability cap resolve failed "
+            "for %s: %s — returning floor=%d", user_id, e, floor,
+        )
+        return floor
 
 
 # ─────────────────────────── Helpers ───────────────────────────
@@ -206,6 +519,73 @@ def _state_guidance(state: str) -> str:
     )
 
 
+# ─────────────── v1.3 register-variant guidance (additive) ───────────────
+# These guidance blocks fire only when an orchestrator (Phase 4) sets
+# `register_directive`. Phase 3 callers leave register_directive=None →
+# _register_variant_guidance() returns "" and v1.2 behavior is preserved.
+
+def _register_variant_guidance(variant: Optional[str]) -> str:
+    """Return register-specific guidance block for v1.3 register variants.
+
+    Returns "" for None or unknown variants (preserves v1.2 behavior). The
+    caller appends the returned string to the enriched system prompt; an
+    empty string adds nothing.
+    """
+    if not variant:
+        return ""
+    if variant == "purity_wound":
+        return (
+            "## REGISTER VARIANT — PURITY WOUND\n"
+            "Slow. No rushing. Validate the lived experience without attacking "
+            "the survivor's faith tradition or family of origin. Somatic "
+            "invitation is allowed and encouraged when the body is present. "
+            "DO NOT use 'deprogramming' framing. DO NOT pathologize the "
+            "tradition itself; the wound is in the rupture, not the doctrine. "
+            "Hold both: the harm IS real, AND the person's loyalty to family "
+            "is also real. Under 350 tokens."
+        )
+    if variant == "betrayal_response":
+        return (
+            "## REGISTER VARIANT — BETRAYAL RESPONSE (hurt party)\n"
+            "Companion the trauma response. No pressure toward forgiveness. "
+            "No pressure toward stay-or-leave. The person is in acute "
+            "betrayal-trauma activation; the work right now is presence with "
+            "the rupture, not problem-solving the relationship. Validate the "
+            "shock and the body's alarm. Under 400 tokens."
+        )
+    if variant == "unfaithful_shame":
+        return (
+            "## REGISTER VARIANT — UNFAITHFUL SHAME (party who broke trust)\n"
+            "Hold the shame without minimizing what happened. NO moralizing. "
+            "Work the underlying patterns (attachment, avoidance, dissociation "
+            "from intimacy) — never become the couples' therapist. The other "
+            "party is not in this conversation; do not reconstruct their "
+            "experience or speak for them. Under 350 tokens."
+        )
+    if variant == "dissociation_grounding":
+        return (
+            "## REGISTER VARIANT — DISSOCIATION GROUNDING\n"
+            "Narrow the scope. Do NOT force presence. Offer one orienting "
+            "anchor (a fact in the room, a felt sense of contact with the "
+            "chair) and let it sit. NO somatic-prompting questions ('where do "
+            "you feel that'). NO trauma processing. Bare presence. Under 200 "
+            "tokens. Distinct from `shutdown` — dissociation is a different "
+            "physiological state and tolerates even less demand."
+        )
+    if variant == "predictability_continuity":
+        return (
+            "## REGISTER VARIANT — PREDICTABILITY CONTINUITY (Thalamic Gate)\n"
+            "Sustained, predictable, non-triggering presence. Same opening "
+            "cadence as prior turns. Mismatch DISABLED in this register — the "
+            "ABSENCE of novelty IS the corrective experience. Length matches "
+            "the prior turn's actual length (parity is the clinical signal). "
+            "No reframes. No new interpretations. No new metaphors. The "
+            "survivor's nervous system is reading 'is this the same Nate as "
+            "last time' — be that."
+        )
+    return ""
+
+
 def _anti_repeat_block(narratives: list) -> str:
     if not narratives:
         return ""
@@ -225,9 +605,45 @@ async def prepare_therapeutic_context(
     db_pool,
     base_system_prompt: str,
     default_max_tokens: int = 600,
+    # ─── Phase 3 v1.3 additive params (orchestrator-driven, Phase 4 wiring) ───
+    # All defaults preserve v1.2 behavior identically (additivity contract).
+    register_directive: Optional[str] = None,
+    dissociation_delta: Optional[float] = None,
+    coercion_severity: Optional[float] = None,
+    novelty_threshold: float = 0.30,
+    thalamic_gate_forced: bool = False,
+    locale: str = "en-US",
 ) -> dict:
     """Classify state, assemble context, shape prompt + cap. Always returns
-    a dict; on partial failure, fields default to the original prompt/cap."""
+    a dict; on partial failure, fields default to the original prompt/cap.
+
+    Phase 3 v1.3 — ADDITIVE PARAMETERS (Phase 4 orchestrator only):
+        register_directive: When set, overrides autonomic-state-derived
+            register selection. Selects guidance from
+            `_register_variant_guidance()`. None = v1.2 behavior.
+        dissociation_delta, coercion_severity: Detector outputs consumed by
+            the Thalamic Novelty Gate (Insertion 1 below). None = no signal.
+        novelty_threshold: Per-user gate threshold (default 0.30 general
+            trauma; trafficking cohort uses 0.20).
+        thalamic_gate_forced: Forces gate ON regardless of signals (Gap 5
+            trigger-date proximity, Gap 9 legal proximity).
+        locale: Resolves banned-phrase set (Note 3, Phase 3 build).
+    """
+    # v1.3 Sensitive Clinical Bridge — single wiring seam (Phase 4 Note 1).
+    # Master kill switch + per-user gap_features_enabled gate the orchestrator
+    # internally; when dormant, register_directive is None and downstream
+    # logic runs identically to v1.2. Failure is best-effort: a raised
+    # exception leaves register_directive at the caller-supplied value.
+    try:
+        from app.services import sensitive_clinical_bridge as _scb
+        _bd = await _scb.evaluate_disclosure(
+            db_pool=db_pool, user_id=user_id, message=user_text, locale=locale,
+        )
+        if _bd is not None and _bd.register_directive:
+            register_directive = _bd.register_directive
+    except Exception as _e:
+        logger.warning("therapeutic_controller: bridge wiring skipped: %s", _e)
+
     tmc_result = await _classify_tmc(db_pool, user_id)
     signals = tmc_result.get("signals", {}) or {}
     tmc_class = tmc_result.get("moment_class") or "REST"
@@ -251,6 +667,28 @@ async def prepare_therapeutic_context(
         and tmc_class in _LABILE_WINDOW_TMC
     )
 
+    # THALAMIC GATE INSERTION 1 of 2 — top-of-function pre-flight
+    # Per Note 1 (Phase 3 build): block novelty BEFORE mismatch_block emits
+    # when dissociation/coercion signals exceed user's per-cohort threshold,
+    # OR when forced ON by trigger-date / legal proximity. In Phase 3 (no
+    # orchestrator → no signals), gate evaluates blocked=False and behavior
+    # is identical to v1.2. AUDITOR CHECK: thalamic_gate_dual_insertion_present
+    # greps for THIS exact comment marker; do not rename it.
+    gate_decision = _evaluate_thalamic_novelty_gate(
+        dissociation_delta=dissociation_delta,
+        coercion_severity=coercion_severity,
+        threshold=novelty_threshold,
+        forced_on=thalamic_gate_forced,
+    )
+    effective_register_directive = register_directive
+    if gate_decision.blocked:
+        # Force predictability_continuity unless an even-more-specific register
+        # directive was explicitly supplied (orchestrator may already have set
+        # a higher-acuity register; do not downgrade).
+        if not effective_register_directive:
+            effective_register_directive = "predictability_continuity"
+        mismatch_available = False
+
     recent_narratives = await _fetch_recent_narratives(db_pool, user_id)
     neuroscience_ctx = ""
     if _is_meta_therapeutic(user_text):
@@ -264,6 +702,19 @@ async def prepare_therapeutic_context(
     else:
         max_tokens = state_cap
 
+    # v1.3 register-directive cap override (orchestrator-driven, dormant in
+    # Phase 3). predictability_continuity uses the parity resolver; all other
+    # variants use their TOKEN_CAPS entry.
+    if effective_register_directive:
+        if effective_register_directive == "predictability_continuity":
+            max_tokens = await _resolve_predictability_continuity_cap(
+                user_id=user_id,
+                db_pool=db_pool,
+                floor=PREDICTABILITY_CONTINUITY_FLOOR_TOKENS,
+            )
+        elif effective_register_directive in TOKEN_CAPS:
+            max_tokens = TOKEN_CAPS[effective_register_directive]
+
     mismatch_block = ""
     if mismatch_available:
         mismatch_block = (
@@ -275,17 +726,27 @@ async def prepare_therapeutic_context(
             "with a bridge sentence."
         )
 
+    register_variant_block = _register_variant_guidance(effective_register_directive)
+
     enriched = (
         f"## DNA — NEUROSCIENCE BEDROCK\n{_DNA_PREFIX}\n\n"
         f"## CURRENT THERAPEUTIC STATE\n"
         f"autonomic_state: {autonomic_state} | tmc_class: {tmc_class} | "
         f"ec_current: {ec_current:.2f} | ec_slope: {ec_slope:+.2f}\n\n"
         f"{_state_guidance(autonomic_state)}\n"
+        f"{register_variant_block}\n"
         f"{mismatch_block}\n"
         f"{neuroscience_ctx}\n"
         f"{_anti_repeat_block(recent_narratives)}\n\n"
         f"---\n\n{base_system_prompt}"
     )
+
+    if effective_register_directive:
+        register_default_field = effective_register_directive
+    elif mismatch_available:
+        register_default_field = "CLINICAL_BRIDGED"
+    else:
+        register_default_field = "WARM"
 
     return {
         "enriched_system_prompt": enriched,
@@ -296,8 +757,19 @@ async def prepare_therapeutic_context(
             "tmc_class": tmc_class,
             "mismatch_available": mismatch_available,
             "encoded_patterns": encoded_patterns,
-            "register_default": "CLINICAL_BRIDGED" if mismatch_available else "WARM",
+            "register_default": register_default_field,
             "max_tokens": max_tokens,
+            # v1.3 additive metadata (carried into audit_therapeutic_response
+            # for Insertion 2 re-evaluation; absent in Phase 3 fixtures means
+            # the v1.2 audit logic still works unchanged).
+            "register_directive": effective_register_directive,
+            "thalamic_gate_blocked": gate_decision.blocked,
+            "thalamic_gate_reason": gate_decision.reason,
+            "dissociation_delta": gate_decision.dissociation_delta,
+            "coercion_severity": gate_decision.coercion_severity,
+            "novelty_threshold": gate_decision.threshold,
+            "thalamic_gate_forced": bool(thalamic_gate_forced),
+            "locale": locale,
         },
     }
 
@@ -316,7 +788,11 @@ def _audit_violations(response_text: str, audit_metadata: dict, recent_narrative
     if approx_tokens > cap * 1.15:
         violations.append(f"length_over_cap_{approx_tokens}_vs_{cap}")
 
-    for phrase in _BANNED_PHRASES_ALWAYS:
+    # Locale-aware banned phrases (v1.3). For v1.2 audit_metadata that lacks
+    # 'locale', fall back to en-US — which is a strict superset of v1.2's
+    # _BANNED_PHRASES_ALWAYS, preserving existing audit semantics.
+    banned_phrases = _resolve_banned_phrases(audit_metadata.get("locale", "en-US"))
+    for phrase in banned_phrases:
         if phrase in rl:
             violations.append(f"banned_phrase:{phrase}")
 
@@ -358,7 +834,28 @@ async def audit_therapeutic_response(
     final_text = response_text
     mismatch_delivered = audit_passed and bool(audit_metadata.get("mismatch_available"))
 
-    if not audit_passed and audit_metadata.get("mismatch_available"):
+    # THALAMIC GATE INSERTION 2 of 2 — mismatch decision path
+    # Per Note 1 (Phase 3 build): defensively re-evaluate the gate using
+    # signals carried in audit_metadata before entering the regenerate-on-
+    # violation branch. Catches any future code path that might re-enable
+    # mismatch downstream of Insertion 1 (e.g., a maintainer who flips
+    # audit_metadata['mismatch_available'] manually). In Phase 3 with no
+    # orchestrator signals, the gate evaluates blocked=False and the
+    # regenerate path runs identically to v1.2. AUDITOR CHECK:
+    # thalamic_gate_dual_insertion_present greps for THIS exact comment
+    # marker; do not rename it.
+    gate_decision_post = _evaluate_thalamic_novelty_gate(
+        dissociation_delta=audit_metadata.get("dissociation_delta"),
+        coercion_severity=audit_metadata.get("coercion_severity"),
+        threshold=audit_metadata.get("novelty_threshold", 0.30),
+        forced_on=bool(audit_metadata.get("thalamic_gate_forced", False)),
+    )
+
+    if (
+        not audit_passed
+        and audit_metadata.get("mismatch_available")
+        and not gate_decision_post.blocked
+    ):
         try:
             from app.sse.llm_fallback import chat_completion_with_fallback
             retry_sys = (
@@ -441,3 +938,144 @@ async def _log_audit(
             )
     except Exception as e:
         logger.warning("therapeutic_controller: audit log write failed: %s", e)
+
+
+# ─────────────── Auditor self-check (Phase 6 surface) ───────────────
+
+def _verify_thalamic_gate_dual_insertion_present() -> bool:
+    """Confirm both Thalamic Gate insertion markers are present in this module.
+
+    Greps the module's own source file for the EXACT comment markers that flag
+    each insertion site. Failing either marker fails the auditor check
+    `thalamic_gate_dual_insertion_present`. Source-file grep (not introspection
+    of compiled bytecode) is intentional — comments are the contract surface
+    that future maintainers will read.
+
+    Returns True on success. Raises AssertionError on missing marker.
+    """
+    src_path = Path(__file__)
+    try:
+        src = src_path.read_text(encoding="utf-8")
+    except Exception as e:
+        raise AssertionError(
+            f"thalamic_gate_dual_insertion_present FAILED: cannot read "
+            f"source file {src_path.name}: {e}"
+        )
+    marker_1 = (
+        "# THALAMIC GATE INSERTION 1 of 2 \u2014 top-of-function pre-flight"
+    )
+    marker_2 = (
+        "# THALAMIC GATE INSERTION 2 of 2 \u2014 mismatch decision path"
+    )
+    assert marker_1 in src, (
+        f"thalamic_gate_dual_insertion_present FAILED: missing marker 1 "
+        f"({marker_1!r})"
+    )
+    assert marker_2 in src, (
+        f"thalamic_gate_dual_insertion_present FAILED: missing marker 2 "
+        f"({marker_2!r})"
+    )
+    return True
+
+
+def _verify_register_variants_additive_only() -> bool:
+    """Confirm v1.2 register variants still resolve to a guidance block.
+
+    Iterates `_PHASE_V1_2_REGISTER_VARIANTS` and asserts that
+    `_state_guidance(variant)` returns a non-trivial string. Detects the
+    failure mode where a future maintainer renames or merges an existing
+    variant without preserving its guidance surface.
+    """
+    for variant in _PHASE_V1_2_REGISTER_VARIANTS:
+        guidance = _state_guidance(variant)
+        assert guidance and len(guidance) >= 50, (
+            f"register_variants_additive_only FAILED: v1.2 variant "
+            f"{variant!r} no longer resolves to a guidance block "
+            f"(got {len(guidance) if guidance else 0} chars)"
+        )
+    return True
+
+
+def _verify_banned_phrases_extended_not_replaced() -> bool:
+    """Confirm v1.3 banned-phrase set is a strict superset of v1.2.
+
+    Resolves en-US banned phrases via `_resolve_banned_phrases('en-US')` and
+    asserts every entry in `_PHASE_V1_2_BANNED_PHRASES` is still present.
+    Detects the failure mode where a maintainer accidentally drops a v1.2
+    phrase while editing the locale-keyed dict.
+    """
+    current = set(_resolve_banned_phrases("en-US"))
+    v1_2 = set(_PHASE_V1_2_BANNED_PHRASES)
+    missing = v1_2 - current
+    assert not missing, (
+        f"banned_phrases_extended_not_replaced FAILED: v1.2 banned phrases "
+        f"removed from v1.3 en-US set: {sorted(missing)}"
+    )
+    return True
+
+
+def _auditor_self_check() -> Dict[str, Any]:
+    """Lightweight contract verification for the Phase 6 sensitive-bridge auditor.
+
+    Runs the three in-module checks:
+        - register_variants_additive_only
+        - banned_phrases_extended_not_replaced
+        - thalamic_gate_dual_insertion_present
+
+    The fourth check (`phase3_controller_v1_2_fixtures_pass`) is intentionally
+    out of scope here — it requires the v1.2 fixture suite which lives
+    external to this module. Phase 6 auditor invokes this function and runs
+    the fixture suite separately.
+
+    Returns:
+        Dict with keys:
+            checks: list[{"name": str, "passed": bool, "detail": str}]
+            v1_2_register_count: int
+            v1_3_register_count: int
+            v1_2_banned_count: int
+            v1_3_banned_count_en_us: int
+    """
+    results: List[Dict[str, Any]] = []
+    for name, fn in (
+        ("register_variants_additive_only", _verify_register_variants_additive_only),
+        ("banned_phrases_extended_not_replaced", _verify_banned_phrases_extended_not_replaced),
+        ("thalamic_gate_dual_insertion_present", _verify_thalamic_gate_dual_insertion_present),
+    ):
+        try:
+            fn()
+            results.append({"name": name, "passed": True, "detail": "ok"})
+        except AssertionError as e:
+            results.append({"name": name, "passed": False, "detail": str(e)})
+        except Exception as e:
+            results.append({
+                "name": name,
+                "passed": False,
+                "detail": f"unexpected_error: {type(e).__name__}: {e}",
+            })
+
+    return {
+        "checks": results,
+        "v1_2_register_count": len(_PHASE_V1_2_REGISTER_VARIANTS),
+        "v1_3_register_count": (
+            len(_PHASE_V1_2_REGISTER_VARIANTS) + len(_PHASE_V1_3_NEW_REGISTERS)
+        ),
+        "v1_2_banned_count": len(_PHASE_V1_2_BANNED_PHRASES),
+        "v1_3_banned_count_en_us": len(_resolve_banned_phrases("en-US")),
+    }
+
+
+# ─────────────── Boot-time additivity guard ───────────────
+# Per Phase 3 sequencing reminder: controller behavior with register_directive
+# unset must be identical to v1.2. These two checks are the cheapest possible
+# enforcement and run at module import time. A regression here will surface
+# on backend startup, not in production.
+try:
+    _verify_register_variants_additive_only()
+    _verify_banned_phrases_extended_not_replaced()
+except AssertionError as _boot_err:
+    logger.error(
+        "therapeutic_controller: BOOT-TIME ADDITIVITY GUARD FAILED — %s. "
+        "v1.3 controller has regressed from v1.2 contract. Halting import.",
+        _boot_err,
+    )
+    raise

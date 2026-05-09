@@ -63,6 +63,18 @@ class ReportingTrigger(str, Enum):
     HARM_TO_OTHERS = "harm_to_others"
     DOMESTIC_VIOLENCE = "domestic_violence"
     SUBSTANCE_CRISIS = "substance_crisis"
+    # ─────────────── Phase 3 v1.3 (Sensitive Clinical Bridge) ───────────────
+    # NEW VALUE — adding to this enum has blast radius across every consumer
+    # that exhaustively matches on ReportingTrigger. Verified Phase 3 build:
+    #   - mandatory_reporting.py: new dict entry in TRIGGER_PATTERNS,
+    #     immediate-actions, escalation-chain (this file's primary consumer)
+    #   - me2me/ingestion_safety.py: uses dict.get() with `if trigger:`
+    #     fallback — adding TRAFFICKING here means trafficking categories
+    #     are NOT routed via me2me ingestion (correct: dedicated path is
+    #     mandatory_reporting.py.screen_message)
+    #   - audit-log serialization uses .value (string), not hardcoded mapping
+    # Auditor check: reporting_trigger_consumers_handle_trafficking
+    TRAFFICKING = "trafficking"
 
 
 class MandatoryReportingProtocol(BaseModel):

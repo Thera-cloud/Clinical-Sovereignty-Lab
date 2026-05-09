@@ -1,0 +1,17 @@
+{
+  "_meta": {
+    "version": "test-fixture-1.0.0",
+    "locale": "en-US",
+    "last_review_date": "2026-05-08",
+    "clinician_authored_by": "synthetic_test_only",
+    "reviewed_by": "synthetic_test_only",
+    "status": "test_fixture_do_not_ship"
+  },
+  "patterns": [
+    {"term": "synthetic_marker_alpha", "weight": 0.6, "domain": "fixture_domain_a", "stem": false},
+    {"term": "synthetic_marker_beta", "weight": 0.9, "domain": "fixture_domain_a", "stem": false},
+    {"term": "syntheticstem", "weight": 0.5, "domain": "fixture_domain_b", "stem": true},
+    {"term": "fixture_phrase_gamma", "weight": 0.4, "domain": "fixture_domain_b", "stem": false}
+  ],
+  "default_threshold": 1.0
+}

@@ -1,0 +1,48 @@
+{
+  "_meta": {
+    "lexicon_name": "sensitive_domain_validator_lexicon",
+    "locale": "en-US",
+    "schema_version": "1.0",
+    "status": "awaiting_clinician_authoring",
+    "authoring_owner": "clinical_director",
+    "review_cycle_days": 30,
+    "fail_closed": true,
+    "fail_closed_behavior": "When this file is empty (no entries) or malformed, the validator emits the lexicon_load_failed audit event at severity=critical and falls back to last-known-good in-memory state. If no last-known-good exists (cold start), _check_sensitive_lexicon() returns no violations (fail-open at the violation layer) but the audit event records the failure so the trust enforcer surfaces it. Lexicon entries are NEVER hardcoded in code per Gap D contract.",
+    "phase": "Phase 4 wiring step (Plan v1.3 §9, Note 2)",
+    "consumed_by": "backend/app/services/nate_response_validator.py::_check_sensitive_lexicon",
+    "hot_reload": true,
+    "documentation": "docs/SENSITIVE_CLINICAL_BRIDGE_GUIDELINES_2026-05-08.md §Validator/Layer 8"
+  },
+  "block_patterns": {
+    "trauma_processing_attempts": [],
+    "detailed_disclosure_prompts": [],
+    "unprompted_trauma_interpretation": []
+  },
+  "warn_patterns": {
+    "trauma_processing_attempts": [],
+    "detailed_disclosure_prompts": [],
+    "unprompted_trauma_interpretation": []
+  },
+  "user_state_gating": {
+    "block_categories_in_states": {
+      "predictability_continuity": ["trauma_processing_attempts", "detailed_disclosure_prompts", "unprompted_trauma_interpretation"],
+      "disclosure_minimization": ["detailed_disclosure_prompts", "unprompted_trauma_interpretation"],
+      "harm_reduction": ["unprompted_trauma_interpretation"],
+      "embodiment_repair": ["unprompted_trauma_interpretation"],
+      "CRISIS": ["trauma_processing_attempts", "detailed_disclosure_prompts", "unprompted_trauma_interpretation"],
+      "dissociation_grounding": ["trauma_processing_attempts", "detailed_disclosure_prompts", "unprompted_trauma_interpretation"]
+    },
+    "domain_overrides": {}
+  },
+  "_authoring_instructions": {
+    "block_patterns_format": "Each list contains regex strings. Match (case-insensitive) against the response text. High-severity match = block + regenerate.",
+    "warn_patterns_format": "Each list contains regex strings. Match (case-insensitive) against the response text. Match = warn + log only, response not modified.",
+    "user_state_gating_format": "block_categories_in_states maps user_state -> list of block_pattern category names that are active in that state. Categories not listed for a state are inactive (no block, no warn from that category).",
+    "publish_workflow": [
+      "1. Clinician authors patterns in this file.",
+      "2. Update _meta.status from 'awaiting_clinician_authoring' to 'live_v<n>' and bump _meta.schema_version.",
+      "3. Commit + ship — file watcher hot-reloads on next request.",
+      "4. Verify via skyeye_activity for 'validator_lexicon_loaded' audit event with new schema_version."
+    ]
+  }
+}

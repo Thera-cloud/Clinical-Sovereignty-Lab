@@ -1,0 +1,19 @@
+{
+  "_meta": {
+    "version": "0.0.0-empty-pre-clinician-authoring",
+    "locale": "en-US",
+    "clinician_authored_by": null,
+    "reviewed_by": [],
+    "last_review_date": null,
+    "status": "awaiting_clinician_authoring",
+    "loader": "backend.app.services.nate_checkin_agent._load_welcome_back_template",
+    "notes": [
+      "Plan §7 contract: holds prior context, does NOT question absence, no pressure to resume.",
+      "Triggered when safe_silence_mode_state auto-reverts at day 30 (or earlier clinician revert).",
+      "Audience: survivor returning from a clinically-sanctioned silence window.",
+      "DO NOT add engineer-default body text. Loader fails closed (returns None, logs welcome_back_template_unavailable) when body is empty/missing or status != clinician_authored.",
+      "Two-clinician review required before status flips (see backend/data/templates/README.md)."
+    ]
+  },
+  "body": ""
+}

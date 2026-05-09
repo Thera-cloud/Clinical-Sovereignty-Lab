@@ -4,14 +4,275 @@ Nate Response Validator — Post-generation hallucination scanner.
 Runs after Azure/sovereign inference returns a response, BEFORE the response
 is stored or delivered. Initial deployment is log-only mode: warnings are
 logged to skyeye_activity but responses are never blocked or modified.
+
+v1.3 additive extension (Phase 4 / Note 2): adds Layer 8 sensitive-lexicon
+checks driven by clinician-authored
+`data/lexicons/sensitive_domain_validator_lexicon_<locale>.json`. Existing
+v1.2 behavior is unchanged when no `user_state` flows in context.
 """
 
+import os
 import re
 import json
 import logging
-from typing import List, Tuple, Optional, Set
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Tuple, Optional, Set
 
 logger = logging.getLogger(__name__)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# v1.3 SENSITIVE LEXICON LOADER (Phase 4 / Note 2)
+# ═════════════════════════════════════════════════════════════════════════
+#
+# Lexicon files live at backend/data/lexicons/
+# sensitive_domain_validator_lexicon_<locale>.json. Loaded with mtime-based
+# hot-reload. Fail-closed: malformed JSON triggers an audit event at
+# severity=critical and falls back to last-known-good in-memory state. If no
+# last-known-good exists (cold start), the loader returns None and the
+# validator emits zero violations (fail-open at the violation layer; the
+# audit event surfaces the failure to the trust enforcer).
+#
+# Lexicon entries are NEVER hardcoded in this module per Gap D contract.
+
+_LEXICON_CACHE: Dict[str, Dict[str, Any]] = {}
+_LEXICON_MTIME: Dict[str, float] = {}
+_LEXICON_LOAD_FAILED_AT: Dict[str, float] = {}
+
+# Audit-event hook (set by the host application at startup). Signature:
+#     async def hook(event_type: str, severity: str, payload: dict) -> None
+# When None, the loader logs locally only. The Phase 6 sensitive_bridge
+# wiring sets this to a function that writes to skyeye_activity.
+_LEXICON_AUDIT_HOOK: Optional[Any] = None
+
+
+def set_lexicon_audit_hook(hook) -> None:
+    """Register an async audit-event hook. Called by main.py at startup so
+    the validator can emit `validator_lexicon_load_failed` and
+    `validator_lexicon_loaded` events into skyeye_activity."""
+    global _LEXICON_AUDIT_HOOK
+    _LEXICON_AUDIT_HOOK = hook
+
+
+def _lexicon_dir() -> Path:
+    """Resolve the lexicon directory in a way that works for both the
+    in-tree dev path and the deployed container layout."""
+    here = Path(__file__).resolve()
+    # backend/app/services/<file> -> backend/data/lexicons
+    candidate = here.parent.parent.parent / "data" / "lexicons"
+    if candidate.is_dir():
+        return candidate
+    # Container layout (/app/data/lexicons)
+    alt = Path("/app/data/lexicons")
+    if alt.is_dir():
+        return alt
+    return candidate  # return even if missing; loader will handle
+
+
+def _resolve_lexicon_path(locale: str) -> Optional[Path]:
+    """Locale fallback chain: en-US -> en -> en-US (default).
+
+    Mirrors the clinical_arousal_lexicon resolver pattern (Phase 2 Gap 3).
+    Returns None only when no file exists at any rung.
+    """
+    base = _lexicon_dir()
+    candidates: List[str] = []
+    locale = (locale or "en-US").strip()
+    candidates.append(f"sensitive_domain_validator_lexicon_{locale}.json")
+    if "-" in locale:
+        candidates.append(f"sensitive_domain_validator_lexicon_{locale.split('-')[0]}.json")
+    if locale != "en-US":
+        candidates.append("sensitive_domain_validator_lexicon_en-US.json")
+    for name in candidates:
+        path = base / name
+        if path.is_file():
+            return path
+    return None
+
+
+def _emit_lexicon_audit(event_type: str, severity: str, payload: Dict[str, Any]) -> None:
+    """Best-effort audit emission. Sync — schedules the async hook on the
+    running loop if one exists; otherwise logs locally."""
+    logger.warning(
+        "NateResponseValidator: lexicon audit event=%s severity=%s payload=%s",
+        event_type, severity, payload,
+    )
+    if _LEXICON_AUDIT_HOOK is None:
+        return
+    try:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        loop.create_task(_LEXICON_AUDIT_HOOK(event_type, severity, payload))
+    except RuntimeError:
+        # No running loop — fall back to logger only.
+        pass
+    except Exception as e:
+        logger.warning("NateResponseValidator: failed to dispatch audit hook: %s", e)
+
+
+def _load_sensitive_lexicon(locale: str = "en-US") -> Optional[Dict[str, Any]]:
+    """Hot-reload lexicon by mtime. Returns parsed dict or None.
+
+    Cold-start failure (no file, no last-known-good) returns None; the
+    audit event is emitted so the trust enforcer surfaces the gap.
+    Mid-stream failure (malformed JSON after a successful prior load)
+    falls back to the cached last-known-good and emits audit event.
+    """
+    path = _resolve_lexicon_path(locale)
+    if path is None:
+        # No file at any rung. Emit once per minute to avoid log flooding.
+        last = _LEXICON_LOAD_FAILED_AT.get(locale, 0.0)
+        if time.time() - last > 60:
+            _LEXICON_LOAD_FAILED_AT[locale] = time.time()
+            _emit_lexicon_audit(
+                "validator_lexicon_load_failed",
+                "critical",
+                {"locale": locale, "reason": "no_lexicon_file_at_any_locale_rung"},
+            )
+        return _LEXICON_CACHE.get(locale)  # return last-known-good if any
+
+    try:
+        mtime = path.stat().st_mtime
+        cached_mtime = _LEXICON_MTIME.get(locale, 0.0)
+        if mtime == cached_mtime and locale in _LEXICON_CACHE:
+            return _LEXICON_CACHE[locale]
+        # Reload.
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("lexicon root is not a dict")
+        # Stamp on first successful load OR on hot-reload.
+        had_prior = locale in _LEXICON_CACHE
+        _LEXICON_CACHE[locale] = data
+        _LEXICON_MTIME[locale] = mtime
+        meta = data.get("_meta", {}) if isinstance(data.get("_meta"), dict) else {}
+        _emit_lexicon_audit(
+            "validator_lexicon_loaded",
+            "info",
+            {
+                "locale": locale,
+                "lexicon_path": str(path),
+                "schema_version": meta.get("schema_version"),
+                "status": meta.get("status"),
+                "hot_reload": had_prior,
+            },
+        )
+        return data
+    except Exception as e:
+        # Fail-closed to last-known-good.
+        last = _LEXICON_LOAD_FAILED_AT.get(locale, 0.0)
+        if time.time() - last > 60:
+            _LEXICON_LOAD_FAILED_AT[locale] = time.time()
+            _emit_lexicon_audit(
+                "validator_lexicon_load_failed",
+                "critical",
+                {"locale": locale, "reason": str(e), "lexicon_path": str(path)},
+            )
+        return _LEXICON_CACHE.get(locale)
+
+
+# Crystal arousal-loaded markers (Gap 6 embodiment phase logic; Phase 1
+# crystal ingestion already tags crystals with these markers in the
+# `tags` JSONB or `markers` array). When user state is dissociation_grounding
+# or CRISIS, these crystals must be excluded from recall.
+AROUSAL_LOADED_MARKER_NAMES: Tuple[str, ...] = (
+    "arousal_loaded",
+    "trauma_processing",
+    "disclosure_prompt",
+    "embodiment_repair_advanced",
+    "trauma_meaning_interpretation",
+)
+
+# User states that activate sensitive-recall filtering.
+SENSITIVE_RECALL_STATES: frozenset = frozenset({
+    "dissociation_grounding",
+    "CRISIS",
+})
+
+
+def is_sensitive_recall_state(user_state: Optional[str]) -> bool:
+    """Public predicate for v1.3 sensitive-recall gating.
+
+    Returns True iff `user_state` is one of the states under which arousal-
+    loaded crystals must be excluded from recall (see Note 2, Plan v1.3 §9).
+    """
+    return user_state in SENSITIVE_RECALL_STATES if user_state else False
+
+
+def crystal_is_arousal_loaded(crystal: Any) -> bool:
+    """Public predicate: True iff crystal carries any arousal-loaded marker.
+
+    Inspects (in order):
+      - `crystal["markers"]` — list of marker strings
+      - `crystal["tags"]`    — list of tag strings or dict whose keys/values
+                                 contain marker names
+      - `crystal["metadata"]["markers"]` — nested location used by Phase 1
+                                            ingestion
+
+    Returns False on any malformed input — fail-open on the predicate side
+    is intentional. The orchestrator caller is responsible for fail-closed
+    behavior (e.g., dropping the crystal entirely if the call raises).
+    """
+    if not isinstance(crystal, dict):
+        return False
+    candidates: List[Any] = []
+    candidates.append(crystal.get("markers"))
+    candidates.append(crystal.get("tags"))
+    md = crystal.get("metadata")
+    if isinstance(md, dict):
+        candidates.append(md.get("markers"))
+        candidates.append(md.get("tags"))
+    for c in candidates:
+        if not c:
+            continue
+        if isinstance(c, str):
+            if c in AROUSAL_LOADED_MARKER_NAMES:
+                return True
+            continue
+        if isinstance(c, (list, tuple, set, frozenset)):
+            for item in c:
+                if isinstance(item, str) and item in AROUSAL_LOADED_MARKER_NAMES:
+                    return True
+            continue
+        if isinstance(c, dict):
+            for k, v in c.items():
+                if isinstance(k, str) and k in AROUSAL_LOADED_MARKER_NAMES:
+                    return True
+                if isinstance(v, str) and v in AROUSAL_LOADED_MARKER_NAMES:
+                    return True
+    return False
+
+
+def filter_sensitive_recalled_crystals(
+    crystals: List[Any],
+    user_state: Optional[str],
+) -> Tuple[List[Any], int]:
+    """v1.3 Gap 6 sensitive-recall filter (Note 2).
+
+    Removes any crystal carrying an arousal-loaded marker when
+    `user_state` is in `SENSITIVE_RECALL_STATES`. No-op otherwise.
+
+    Returns `(filtered_crystals, dropped_count)` so the caller can include
+    the count in audit telemetry without re-walking the list.
+    """
+    if not crystals or not is_sensitive_recall_state(user_state):
+        return list(crystals or []), 0
+    kept: List[Any] = []
+    dropped = 0
+    for crystal in crystals:
+        try:
+            if crystal_is_arousal_loaded(crystal):
+                dropped += 1
+                continue
+        except Exception:
+            # Fail-closed on the filter: if marker inspection raises, drop
+            # the crystal — better to lose recall context than to surface
+            # a potentially arousal-loaded crystal during dissociation/CRISIS.
+            dropped += 1
+            continue
+        kept.append(crystal)
+    return kept, dropped
 
 
 class NateResponseValidator:
@@ -225,7 +486,113 @@ class NateResponseValidator:
                 warnings.append("therapeutic_boundary_violation")
                 break
 
+        # ─────────────────────────────────────────────────────────────
+        # v1.3 Sensitive Lexicon — additive Layer 8 extension (Note 2).
+        # Single additive call. Only fires when context carries a
+        # `user_state` key — v1.2 callers see no behavioral change.
+        # ─────────────────────────────────────────────────────────────
+        user_state = context.get("user_state") if isinstance(context, dict) else None
+        if user_state:
+            domain = context.get("domain") if isinstance(context, dict) else None
+            locale = (context.get("locale") if isinstance(context, dict) else None) or "en-US"
+            for violation in self._check_sensitive_lexicon(
+                response=response,
+                user_state=user_state,
+                domain=domain,
+                locale=locale,
+            ):
+                warnings.append(
+                    f"lexicon_violation_{violation['severity']}:{violation['category']}"
+                )
+
         return response, warnings
+
+    def _check_sensitive_lexicon(
+        self,
+        *,
+        response: str,
+        user_state: str,
+        domain: Optional[str] = None,
+        locale: str = "en-US",
+    ) -> List[Dict[str, str]]:
+        """v1.3 Layer 8 sensitive-lexicon check (Phase 4 / Note 2).
+
+        Returns list of LexiconViolation dicts:
+            {"severity": "high"|"moderate", "category": str, "matched": str}
+
+        High-severity violations should block + regenerate. Moderate
+        violations should warn + log only.
+
+        Lexicon driven entirely by `data/lexicons/
+        sensitive_domain_validator_lexicon_<locale>.json` (clinician-authored
+        per Gap D contract). When the lexicon is empty, missing, or
+        currently fails to load, this method returns an empty list (the
+        load failure is independently audited via `_emit_lexicon_audit`).
+        """
+        try:
+            lex = _load_sensitive_lexicon(locale=locale)
+        except Exception as e:
+            logger.warning("NateResponseValidator: lexicon load raised: %s", e)
+            return []
+        if not lex:
+            return []
+
+        gating = lex.get("user_state_gating") or {}
+        block_categories_in_states = gating.get("block_categories_in_states") or {}
+        active_block_cats: List[str] = list(
+            block_categories_in_states.get(user_state, []) or []
+        )
+        # Domain-specific overrides (additive, non-subtractive).
+        if domain:
+            domain_overrides = (gating.get("domain_overrides") or {}).get(domain) or {}
+            extra = domain_overrides.get("block_categories", []) or []
+            for cat in extra:
+                if cat not in active_block_cats:
+                    active_block_cats.append(cat)
+
+        violations: List[Dict[str, str]] = []
+        block_patterns = lex.get("block_patterns") or {}
+        warn_patterns = lex.get("warn_patterns") or {}
+
+        # High-severity: any pattern in active_block_cats that matches.
+        for cat in active_block_cats:
+            patterns = block_patterns.get(cat) or []
+            for pattern_str in patterns:
+                try:
+                    if re.search(pattern_str, response, re.IGNORECASE):
+                        violations.append({
+                            "severity": "high",
+                            "category": cat,
+                            "matched": pattern_str,
+                        })
+                        break  # one high-severity hit per category is enough
+                except re.error as e:
+                    logger.warning(
+                        "NateResponseValidator: malformed block pattern in "
+                        "category=%s: %s (%s)", cat, pattern_str, e,
+                    )
+                    continue
+
+        # Moderate-severity: any warn_patterns category. These fire regardless
+        # of user_state because they are advisory.
+        for cat, patterns in warn_patterns.items():
+            for pattern_str in (patterns or []):
+                try:
+                    if re.search(pattern_str, response, re.IGNORECASE):
+                        violations.append({
+                            "severity": "moderate",
+                            "category": cat,
+                            "matched": pattern_str,
+                        })
+                        break
+                except re.error as e:
+                    logger.warning(
+                        "NateResponseValidator: malformed warn pattern in "
+                        "category=%s: %s (%s)", cat, pattern_str, e,
+                    )
+                    continue
+
+        return violations
 
     @staticmethod
     def is_high_severity(warnings: List[str]) -> bool:

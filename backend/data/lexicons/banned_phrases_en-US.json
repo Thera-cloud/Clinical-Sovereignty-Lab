@@ -1,0 +1,20 @@
+{
+  "_meta": {
+    "version": "0.0.0-empty-pre-clinician-authoring",
+    "locale": "en-US",
+    "last_review_date": null,
+    "clinician_authored_by": null,
+    "reviewed_by": null,
+    "status": "awaiting_clinician_authoring",
+    "scope": "therapeutic_controller_banned_phrases_overlay",
+    "loader": "backend/app/services/therapeutic_controller.py::_resolve_banned_phrases",
+    "fallback_chain": "<requested_locale> -> <language> -> en-US -> in-code defaults",
+    "notes": [
+      "This file is an OVERLAY appended to in-code _BANNED_PHRASES_BY_LOCALE['en-US'].",
+      "In-code defaults (Phase 3 v1.3) are the authoritative baseline; this file extends, never replaces.",
+      "Empty 'phrases' array is the expected pre-clinician-authoring state.",
+      "Two-clinician review required per data/lexicons/README.md before merging non-empty content."
+    ]
+  },
+  "phrases": []
+}
