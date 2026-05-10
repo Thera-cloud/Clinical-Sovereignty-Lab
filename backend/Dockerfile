@@ -35,10 +35,26 @@ COPY migrations/ ./migrations/
 COPY assets/ ./assets/
 COPY scripts/ ./scripts/
 
+# Sensitive Clinical Bridge v1.3 (Phases 1–6) — clinician-authored lexicons,
+# templates, crystal seeds, and v1.2 parity fixtures. Two destinations because
+# linguistic_arousal_load.py resolves to /backend/data/lexicons (parents[3])
+# while therapeutic_controller.py + nate_response_validator.py resolve to
+# /app/data/lexicons (parents[2]). Keeping both in-image avoids touching
+# either resolver (both are sealed behind REGISTRY_CONTENT_HASH).
+COPY data/lexicons/ /backend/data/lexicons/
+COPY data/lexicons/ /app/data/lexicons/
+COPY data/templates/ /backend/data/templates/
+COPY data/templates/ /app/data/templates/
+COPY data/sensitive_crystal_seeds/ /backend/data/sensitive_crystal_seeds/
+COPY data/sensitive_crystal_seeds/ /app/data/sensitive_crystal_seeds/
+# v1.2 parity fixtures consumed by sensitive_bridge_v1_2_parity.py at audit time
+# (parents[2]/tests/fixtures -> /app/tests/fixtures).
+COPY tests/fixtures/ /app/tests/fixtures/
+
 # Create logs + data dirs and the non-root runtime user.
 RUN mkdir -p /app/logs /app/data \
     && useradd -m -u 1000 nate \
-    && chown -R nate:nate /app
+    && chown -R nate:nate /app /backend
 
 # gosu lets the entrypoint fix volume ownership as root, then drop to the
 # nate user before exec'ing uvicorn. This prevents PermissionError on
