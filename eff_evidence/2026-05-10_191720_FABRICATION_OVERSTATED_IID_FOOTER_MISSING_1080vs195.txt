@@ -1,0 +1,24 @@
+Sole-clinician authorization mode is live on GREEN.
+
+Surface	State
+Migration 214 on GREEN
+Applied — UPDATE 1 (CoachN → sole_lead); 11 others remain multi_clinician_team; CHECK constraint + view + partial index in place
+sensitive_profile_api.py
+safe_silence approve enforces session separation universally; allows same-actor only when proposer is sole_lead; emits sole_clinician_override in audit + response
+sensitive_bridge_telemetry_api.py
+/feature-flag enforces server-side ≥48h gap from shadow_mode_decision_reviewed for sole_lead; emits sole_clinician_override in auto_disable_reenabled audit + response
+sensitive_bridge_auditor.py
+2 new folded checks (sole_clinician_session_separation_enforced, sole_clinician_reflection_delay_enforced) → safe_silence_state_view_present + shadow_mode_decision_review_current; both ok=true live
+_TOTAL_SLOTS
+34 (unchanged); sensitive_bridge_check_count baseline = 34 — no trust_baseline write needed
+Service health
+116/116 after restart; both routers mounted; sensitive_profile_api boot self-check OK (4/4)
+Playbook §13
+Added: deviation table + 3 conditions (alliance, supervision, informed consent) + reversion SQL + audit/enforcement summary; runtime log entry appended
+Reversion path documented in playbook §13.2:
+
+UPDATE coach_profiles
+   SET clinician_authorization_type = 'multi_clinician_team',
+       updated_at = NOW()
+ WHERE username = 'CoachN';
+EFF: 880/1080 = 81% | PASS LOSS: 200 tokens at $0.001019/1k | session: 200 | model: claude-opus-4-7-thinking-xhigh (cursor-blended)

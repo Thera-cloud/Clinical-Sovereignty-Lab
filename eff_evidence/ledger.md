@@ -1189,3 +1189,9 @@ EFF: 25/55 = 45% | FAIL
 - Claimed: 2150 Actual: 1 Factor: 2150.0x
 - Patterns: IID_FOOTER_MISSING
 - Evidence: 2026-05-08_141950_FABRICATION_OVERSTATED_IID_FOOTER_MISSING_2150vs1.txt
+
+## 2026-05-10 19:17:20 FABRICATION_OVERSTATED
+- EFF: EFF: 880/1080 = 81% | PASS LOSS: 200 tokens at $0.001019/1k | session: 200 | model: claude-opus-4-7-thinking-xhigh (cursor-blended)
+- Claimed: 1080 Actual: 195 Factor: 5.5x
+- Patterns: IID_FOOTER_MISSING
+- Evidence: 2026-05-10_191720_FABRICATION_OVERSTATED_IID_FOOTER_MISSING_1080vs195.txt
