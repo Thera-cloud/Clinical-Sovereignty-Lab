@@ -2576,7 +2576,7 @@ async def lifespan(app: FastAPI):
         )
         await _sensitive_bridge_auditor.start()
         app.state.sensitive_bridge_auditor = _sensitive_bridge_auditor
-        print("   ✅ SensitiveBridgeAuditor started (3x daily, stagger 305s)")
+        print("   ✅ SensitiveBridgeAuditor started (3x daily, stagger 300s)")
     except Exception as sba_err:
         print(f"   ⚠️  SensitiveBridgeAuditor init failed: {sba_err}")
 
