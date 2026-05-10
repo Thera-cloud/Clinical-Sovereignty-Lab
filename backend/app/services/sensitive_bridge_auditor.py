@@ -76,7 +76,7 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger("nate.sensitive_bridge_auditor")
 
 AUDIT_HOURS = {5, 17, 23}
-STAGGER_SECONDS = 305  # next slot after Nate Check-In (300s)
+STAGGER_SECONDS = 300  # firm 300s ceiling per service-health-49-49.mdc + trust-enforcer-architecture.mdc (must complete before Trust Enforcer fires at HH:10 / 600s)
 
 # ---------------------------------------------------------------------------
 # Declared check ordering (cheap → expensive). The META check verifies the

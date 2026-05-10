@@ -24,6 +24,11 @@ IMMUTABLE_TYPES = (
     "audit_log",
     "factual_grounding_redirect",
     "nate_accuracy_warning",
+    # Sensitive Clinical Bridge v1.3 Phase 6 — clinician-authored sensitive
+    # disclosures retained 7 years per migration 202 (sensitive_bridge_log
+    # retained_until default). Protect mirrored skyeye_activity rows so the
+    # daily prune cannot evict the audit trail before its retention window.
+    "sensitive_bridge_log_event",
 )
 
 
