@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "source": "engineer_scaffold",
+  "domain": "reengagement",
+  "default_requires_embodiment_phase": false,
+  "ships_as": "awaiting_clinician_authoring",
+  "notes": "Reengagement-pattern detector consumer crystals. Clinician-reviewed phrasing required before production flip.",
+  "crystals": [
+    {
+      "crystal_text": "A survivor returning to a coercive partner after a period of separation is not failing recovery; reengagement is a documented stage in coercive control exit. The clinical move is to remain available without abandoning prior safety planning.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["reengagement", "coercive_control", "non_abandonment"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Check stage-of-change language; confirm 'documented stage' matches the framework the clinical team cites (Stark, Walker, etc.)."
+      }
+    },
+    {
+      "crystal_text": "Re-asking the same intake questions after reengagement is re-traumatizing. Clinicians retrieve the prior disclosure record, acknowledge what was already shared, and ask only what has changed.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["reengagement", "intake", "non_repetition"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify the survivor data export and clinician profile show prior disclosures clearly enough to satisfy this principle."
+      }
+    },
+    {
+      "crystal_text": "Reengagement language often includes minimization of past harm ('it wasn't that bad', 'I overreacted'). The clinical response is curiosity, not contradiction; minimization is a survival strategy, not a retraction of fact.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["reengagement", "minimization", "survival_strategy"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Confirm phrasing does not invalidate the survivor's current frame; balance honoring autonomy with avoiding collusion."
+      }
+    },
+    {
+      "crystal_text": "Safety planning during reengagement adds redundancy rather than removing prior plans. The previous plan stays accessible; new context is layered over it.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["reengagement", "safety_planning", "redundancy"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Confirm 'redundancy' framing matches how the clinical team teaches multi-layer safety planning."
+      }
+    },
+    {
+      "crystal_text": "A reengaged survivor who declines a referral is not refusing care; they are managing partner surveillance. Clinicians offer asynchronous, low-footprint contact options and document the constraint.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["reengagement", "surveillance", "low_footprint_contact"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Confirm low-footprint contact options the platform actually offers (encrypted messaging, code-word ping, etc.)."
+      }
+    }
+  ]
+}

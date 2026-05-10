@@ -234,15 +234,42 @@ async def determine_character(profile: dict) -> Tuple[str, str]:
     return _DEFAULT_CHARACTER
 
 
+async def _fetch_recent_delivery_narratives(user_id: str, db_pool) -> List[str]:  # FIX-NARRATIVE-DIVERSITY
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT client_narrative_text FROM sse_delivery_generation_log WHERE user_id=$1 "
+                "AND client_narrative_text IS NOT NULL AND btrim(client_narrative_text)<>'' "
+                "AND generated_at > NOW() - INTERVAL '14 days' ORDER BY generated_at DESC LIMIT 7",
+                user_id)
+            return [r["client_narrative_text"] for r in rows]
+    except Exception as e:
+        logger.warning("TheraWorld: recent narratives fetch failed %s: %s", user_id, e)
+        return []
+
+
 async def compose_journey_narrative(
     profile: dict, journey: dict, biome: dict, character: Tuple[str, str], db_pool,
     last_panel_summary: str = "", last_panel_npcs: list = None, panel_sequence: int = 0,
-    user_id: str = "",
+    user_id: str = "", recent_narratives: Optional[List[str]] = None,
 ) -> dict:
     """Use LLM to compose a scene narrative. Falls back to template on failure."""
     import httpx
 
     char_name, grok_suffix = character
+    rr = recent_narratives or []  # FIX-NARRATIVE-DIVERSITY
+    anti_repeat = ""
+    if rr:
+        lst = "\n".join((f"- {t[:200]}..." if len(t) > 200 else f"- {t}") for t in rr)
+        anti_repeat = (
+            "RECENT NARRATIVES (last 7 panels — do NOT repeat themes or phrases):\n" + lst + "\n\n"
+            "Your new narrative MUST:\n"
+            "- NOT repeat metaphors, imagery, or phrases from above\n"
+            "- NOT restate the same insight or theme\n"
+            "- Approach the moment from a different angle\n"
+            "- If the client is in a similar emotional space as recent days, find a "
+            "different lens, sensation, or detail to reflect on\n\n")
+        print(f">>> [ANTI-REPEAT] user={user_id} recent_count={len(rr)} chars_in_context={len(anti_repeat)}")
     biome_name = biome["biome"]
     biome_desc = biome["description"]
     crystal_summaries = "; ".join(profile.get("recent_crystals", [])[:3]) or "beginning their journey"
@@ -415,6 +442,7 @@ async def compose_journey_narrative(
         f"Active mission: {mission_target_eff}\n"
         f"Therapeutic arc: {arc}\n"
         f"{family_block}"
+        f"{anti_repeat}"
         f"{continuity_block}\n"
         "The scene should:\n"
         "- Reflect where the user is therapeutically (not literally — metaphorically)\n"
@@ -511,10 +539,11 @@ async def build_rich_panel_prompt(user_id: str, db_pool) -> dict:
     await _enrich_profile_coaching_calibration(profile, user_id, db_pool)
     await _enrich_profile_assessment_calibration(profile, user_id, db_pool)
 
+    recent_nar = await _fetch_recent_delivery_narratives(user_id, db_pool)  # FIX-NARRATIVE-DIVERSITY
     narrative = await compose_journey_narrative(
         profile, journey, biome, character, db_pool,
         last_panel_summary=last_summary, last_panel_npcs=last_npcs,
-        panel_sequence=panel_seq, user_id=user_id)
+        panel_sequence=panel_seq, user_id=user_id, recent_narratives=recent_nar)
 
     image_prompt = narrative.get("image_prompt", "")
     if not image_prompt:
@@ -557,6 +586,7 @@ async def build_rich_panel_prompt(user_id: str, db_pool) -> dict:
         "panel_tone": narrative.get("panel_tone", "meditative"),
         "biome": current_biome_name,
         "character": character[0],
+        "current_npcs": current_npcs[:5],
     }
 
 
@@ -638,10 +668,11 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     await _enrich_profile_coaching_calibration(profile, user_id, db_pool)
     await _enrich_profile_assessment_calibration(profile, user_id, db_pool)
 
+    recent_nar = await _fetch_recent_delivery_narratives(user_id, db_pool)  # FIX-NARRATIVE-DIVERSITY
     narrative = await compose_journey_narrative(
         profile, journey, biome, character, db_pool,
         last_panel_summary=last_summary, last_panel_npcs=last_npcs,
-        panel_sequence=panel_seq, user_id=user_id)
+        panel_sequence=panel_seq, user_id=user_id, recent_narratives=recent_nar)
 
     image_prompt = narrative.get("image_prompt", "")
     if not image_prompt:

@@ -1,0 +1,132 @@
+{
+  "_meta": {
+    "version": "v1.2-parity-fixture-1.0.0",
+    "locale": "en-US",
+    "last_review_date": "2026-05-09",
+    "clinician_authored_by": "synthetic_v1_2_contract_extraction",
+    "reviewed_by": "phase5_pre_auditor",
+    "status": "v1_2_parity_fixture_in_repo",
+    "contract_under_test": "governance/mandatory_reporting.py",
+    "phase3_pinned_constants": [
+      "_SCREEN_MESSAGE_RAW_MATCH_TRIGGERS",
+      "TRIGGER_PATTERNS"
+    ],
+    "auditor_check_id": "phase3_mandatory_reporting_v1_2_fixtures_pass",
+    "fixture_count": 10,
+    "positive_count": 6,
+    "negative_count": 4,
+    "notes": "Validates the v1.2 raw-text whitelist matching layer. Does NOT exercise async _create_protocol/_execute_escalation (those require DB pool); the runner asserts on the pure pattern-match layer that drives screen_message()."
+  },
+  "fixtures": [
+    {
+      "id": "report_pos_child_abuse_raw_match",
+      "category": "positive",
+      "kind": "v1_2_raw_match_fires",
+      "input": {
+        "message": "I am hitting my child and need to stop.",
+        "expected_trigger": "CHILD_ABUSE"
+      },
+      "expected": {"trigger_fires": true, "matched_pattern_substring": "hitting my child"},
+      "rationale": "v1.2 CHILD_ABUSE pattern must still fire on raw text via screen_message()."
+    },
+    {
+      "id": "report_pos_elder_abuse_raw_match",
+      "category": "positive",
+      "kind": "v1_2_raw_match_fires",
+      "input": {
+        "message": "He's been neglecting my parent for weeks.",
+        "expected_trigger": "ELDER_ABUSE"
+      },
+      "expected": {"trigger_fires": true, "matched_pattern_substring": "neglecting my parent"},
+      "rationale": "v1.2 ELDER_ABUSE pattern must still fire on raw text."
+    },
+    {
+      "id": "report_pos_self_harm_raw_match",
+      "category": "positive",
+      "kind": "v1_2_raw_match_fires",
+      "input": {
+        "message": "I want to die. I can't do this anymore.",
+        "expected_trigger": "SELF_HARM"
+      },
+      "expected": {"trigger_fires": true, "matched_pattern_substring": "want to die"},
+      "rationale": "v1.2 SELF_HARM pattern must still fire on raw text."
+    },
+    {
+      "id": "report_pos_harm_to_others_raw_match",
+      "category": "positive",
+      "kind": "v1_2_raw_match_fires",
+      "input": {
+        "message": "I am going to hurt him when he gets home.",
+        "expected_trigger": "HARM_TO_OTHERS"
+      },
+      "expected": {"trigger_fires": true, "matched_pattern_substring": "going to hurt"},
+      "rationale": "v1.2 HARM_TO_OTHERS pattern must still fire on raw text."
+    },
+    {
+      "id": "report_pos_domestic_violence_raw_match",
+      "category": "positive",
+      "kind": "v1_2_raw_match_fires",
+      "input": {
+        "message": "My partner hits me almost every day now.",
+        "expected_trigger": "DOMESTIC_VIOLENCE"
+      },
+      "expected": {"trigger_fires": true, "matched_pattern_substring": "partner hits me"},
+      "rationale": "v1.2 DOMESTIC_VIOLENCE pattern must still fire on raw text."
+    },
+    {
+      "id": "report_pos_substance_crisis_raw_match",
+      "category": "positive",
+      "kind": "v1_2_raw_match_fires",
+      "input": {
+        "message": "I'm scared I overdose tonight.",
+        "expected_trigger": "SUBSTANCE_CRISIS"
+      },
+      "expected": {"trigger_fires": true, "matched_pattern_substring": "overdose"},
+      "rationale": "v1.2 SUBSTANCE_CRISIS pattern must still fire on raw text."
+    },
+    {
+      "id": "report_neg_trafficking_owe_him_no_v1_2_match",
+      "category": "negative",
+      "kind": "trafficking_pattern_excluded_from_v1_2_raw_match",
+      "input": {
+        "message": "I owe him money for everything he's done for me.",
+        "trafficking_classification": null
+      },
+      "expected": {"trigger_fires_in_v1_2_path": false},
+      "rationale": "TRAFFICKING patterns are CLASSIFIER-CONFIRMED ONLY. Raw-text 'owe him' must NOT fire in the v1.2 screen_message path (would over-fire on benign content)."
+    },
+    {
+      "id": "report_neg_trafficking_passport_no_v1_2_match",
+      "category": "negative",
+      "kind": "trafficking_pattern_excluded_from_v1_2_raw_match",
+      "input": {
+        "message": "He took my passport when we crossed the border.",
+        "trafficking_classification": null
+      },
+      "expected": {"trigger_fires_in_v1_2_path": false},
+      "rationale": "TRAFFICKING document-confiscation patterns must NOT fire via raw-text v1.2 path."
+    },
+    {
+      "id": "report_neg_trafficking_isolation_no_v1_2_match",
+      "category": "negative",
+      "kind": "trafficking_pattern_excluded_from_v1_2_raw_match",
+      "input": {
+        "message": "He won't let me see my family this year.",
+        "trafficking_classification": null
+      },
+      "expected": {"trigger_fires_in_v1_2_path": false},
+      "rationale": "TRAFFICKING isolation patterns must NOT fire via raw-text v1.2 path."
+    },
+    {
+      "id": "report_neg_trafficking_unclassified_falls_back_to_v1_2",
+      "category": "negative",
+      "kind": "unclassified_classification_does_not_hijack_v1_2_signature",
+      "input": {
+        "message": "I just had a hard day, nothing to report.",
+        "trafficking_classification": "unclassified"
+      },
+      "expected": {"trigger_fires_in_v1_2_path": false, "v1_2_signature_unchanged": true},
+      "rationale": "screen_message_with_trafficking(classification=unclassified) defers to screen_message(); benign text → no trigger (matches v1.2 'no-op when nothing meets the bar')."
+    }
+  ]
+}

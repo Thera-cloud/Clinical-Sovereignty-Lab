@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "source": "engineer_scaffold",
+  "domain": "rj_companioning",
+  "default_requires_embodiment_phase": false,
+  "ships_as": "awaiting_clinician_authoring",
+  "notes": "Restorative-justice companioning crystals. Clinician must verify these align with RJ practitioner training (NACRJ standards or equivalent) before production flip.",
+  "crystals": [
+    {
+      "crystal_text": "Restorative justice processes are survivor-led; the clinical role is to companion, not to facilitate. If the survivor is asking the clinician to facilitate, that is a signal to refer to a trained RJ practitioner.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["restorative_justice", "companioning", "scope_of_practice"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify scope-of-practice boundary; confirm referral pathway exists in the platform's specialized_resources registry."
+      }
+    },
+    {
+      "crystal_text": "RJ readiness is not measured by elapsed time since the harm; it is measured by the survivor's stable capacity to articulate what they need from the process and what would constitute closure.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["restorative_justice", "readiness", "needs_articulation"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify readiness assessment matches the RJ frameworks the clinical team endorses (Zehr, Pranis, Sered, etc.)."
+      }
+    },
+    {
+      "crystal_text": "Survivor withdrawal from an RJ process at any stage is the survivor exercising the central RJ principle: agency. The clinical move is to validate the withdrawal, not to repair the process.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["restorative_justice", "withdrawal", "agency"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Confirm validation language does not implicitly pressure the survivor toward re-engagement."
+      }
+    },
+    {
+      "crystal_text": "An RJ process where the person who caused harm is not in genuine accountability mode is a re-traumatization vector, not a failed RJ. The clinical assessment includes the readiness of both parties.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["restorative_justice", "accountability_assessment", "re_traumatization"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify the dual-readiness framing; clinician should specify what accountability indicators they look for."
+      }
+    },
+    {
+      "crystal_text": "RJ outcomes do not require reconciliation. Closure can be unilateral; the survivor's clarity about what they will and will not carry forward is itself a complete outcome.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["restorative_justice", "unilateral_closure", "non_reconciliation"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Confirm wording does not imply reconciliation is the default RJ outcome; this is a common misconception."
+      }
+    }
+  ]
+}

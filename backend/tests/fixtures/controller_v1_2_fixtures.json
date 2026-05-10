@@ -1,0 +1,126 @@
+{
+  "_meta": {
+    "version": "v1.2-parity-fixture-1.0.0",
+    "locale": "en-US",
+    "last_review_date": "2026-05-09",
+    "clinician_authored_by": "synthetic_v1_2_contract_extraction",
+    "reviewed_by": "phase5_pre_auditor",
+    "status": "v1_2_parity_fixture_in_repo",
+    "contract_under_test": "therapeutic_controller.py",
+    "phase3_pinned_constants": [
+      "_PHASE_V1_2_REGISTER_VARIANTS",
+      "_PHASE_V1_2_BANNED_PHRASES",
+      "_resolve_banned_phrases('en-US')"
+    ],
+    "auditor_check_id": "phase3_controller_v1_2_fixtures_pass",
+    "fixture_count": 13,
+    "positive_count": 7,
+    "negative_count": 6
+  },
+  "fixtures": [
+    {
+      "id": "ctrl_pos_register_shutdown",
+      "category": "positive",
+      "kind": "v1_2_register_variant_resolved",
+      "input": {"variant": "shutdown"},
+      "expected": {"is_v1_2_variant": true, "is_v1_3_only": false},
+      "rationale": "v1.2 variant 'shutdown' must remain dispatchable in v1.3."
+    },
+    {
+      "id": "ctrl_pos_register_activated",
+      "category": "positive",
+      "kind": "v1_2_register_variant_resolved",
+      "input": {"variant": "activated"},
+      "expected": {"is_v1_2_variant": true, "is_v1_3_only": false},
+      "rationale": "v1.2 variant 'activated' must remain dispatchable in v1.3."
+    },
+    {
+      "id": "ctrl_pos_register_in_window",
+      "category": "positive",
+      "kind": "v1_2_register_variant_resolved",
+      "input": {"variant": "in_window"},
+      "expected": {"is_v1_2_variant": true, "is_v1_3_only": false},
+      "rationale": "v1.2 variant 'in_window' must remain dispatchable in v1.3."
+    },
+    {
+      "id": "ctrl_pos_register_regulated",
+      "category": "positive",
+      "kind": "v1_2_register_variant_resolved",
+      "input": {"variant": "regulated"},
+      "expected": {"is_v1_2_variant": true, "is_v1_3_only": false},
+      "rationale": "v1.2 variant 'regulated' must remain dispatchable in v1.3."
+    },
+    {
+      "id": "ctrl_pos_banned_i_sense_preserved",
+      "category": "positive",
+      "kind": "v1_2_banned_phrase_present",
+      "input": {"phrase": "i sense", "locale": "en-US"},
+      "expected": {"present_in_resolved_set": true},
+      "rationale": "v1.2 banned phrase 'i sense' must remain in en-US resolved set."
+    },
+    {
+      "id": "ctrl_pos_banned_holding_space_preserved",
+      "category": "positive",
+      "kind": "v1_2_banned_phrase_present",
+      "input": {"phrase": "holding space", "locale": "en-US"},
+      "expected": {"present_in_resolved_set": true},
+      "rationale": "v1.2 banned phrase 'holding space' must remain in en-US resolved set."
+    },
+    {
+      "id": "ctrl_pos_banned_liminal_threshold_preserved",
+      "category": "positive",
+      "kind": "v1_2_banned_phrase_present",
+      "input": {"phrase": "liminal threshold", "locale": "en-US"},
+      "expected": {"present_in_resolved_set": true},
+      "rationale": "v1.2 banned phrase 'liminal threshold' must remain in en-US resolved set."
+    },
+    {
+      "id": "ctrl_neg_register_purity_wound_v1_3_only",
+      "category": "negative",
+      "kind": "v1_3_register_variant_not_in_v1_2",
+      "input": {"variant": "purity_wound"},
+      "expected": {"is_v1_2_variant": false, "is_v1_3_only": true},
+      "rationale": "v1.3-added register 'purity_wound' must NOT appear in v1.2 set (catches accidental v1.2 hijack)."
+    },
+    {
+      "id": "ctrl_neg_register_dissociation_grounding_v1_3_only",
+      "category": "negative",
+      "kind": "v1_3_register_variant_not_in_v1_2",
+      "input": {"variant": "dissociation_grounding"},
+      "expected": {"is_v1_2_variant": false, "is_v1_3_only": true},
+      "rationale": "v1.3-added register 'dissociation_grounding' must NOT appear in v1.2 set."
+    },
+    {
+      "id": "ctrl_neg_register_predictability_continuity_v1_3_only",
+      "category": "negative",
+      "kind": "v1_3_register_variant_not_in_v1_2",
+      "input": {"variant": "predictability_continuity"},
+      "expected": {"is_v1_2_variant": false, "is_v1_3_only": true},
+      "rationale": "v1.3-added register 'predictability_continuity' must NOT appear in v1.2 set."
+    },
+    {
+      "id": "ctrl_neg_banned_v1_3_addition_doesnt_displace_v1_2",
+      "category": "negative",
+      "kind": "v1_3_banned_phrase_added_without_displacing_v1_2",
+      "input": {"new_phrase": "you have nothing to be ashamed of", "locale": "en-US"},
+      "expected": {"new_phrase_in_resolved_set": true, "v1_2_phrase_count_preserved": 7},
+      "rationale": "v1.3 banned phrase added without removing any v1.2 phrase."
+    },
+    {
+      "id": "ctrl_neg_banned_youll_get_over_this_added",
+      "category": "negative",
+      "kind": "v1_3_banned_phrase_added_without_displacing_v1_2",
+      "input": {"new_phrase": "you'll get over this", "locale": "en-US"},
+      "expected": {"new_phrase_in_resolved_set": true, "v1_2_phrase_count_preserved": 7},
+      "rationale": "v1.3 banned phrase added without removing any v1.2 phrase."
+    },
+    {
+      "id": "ctrl_neg_banned_everything_happens_for_a_reason_added",
+      "category": "negative",
+      "kind": "v1_3_banned_phrase_added_without_displacing_v1_2",
+      "input": {"new_phrase": "everything happens for a reason", "locale": "en-US"},
+      "expected": {"new_phrase_in_resolved_set": true, "v1_2_phrase_count_preserved": 7},
+      "rationale": "v1.3 banned phrase added without removing any v1.2 phrase."
+    }
+  ]
+}

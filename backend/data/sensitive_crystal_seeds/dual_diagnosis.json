@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "source": "engineer_scaffold",
+  "domain": "dual_diagnosis",
+  "default_requires_embodiment_phase": false,
+  "ships_as": "awaiting_clinician_authoring",
+  "notes": "Dual-diagnosis (substance-use + trauma) register scaffolds. Clinician must verify language is non-pathologizing and harm-reduction aligned.",
+  "crystals": [
+    {
+      "crystal_text": "Substance use following coercive trauma is a regulation strategy, not a moral failing. The clinical move is to ask what the substance is doing for the survivor before discussing reduction.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["dual_diagnosis", "substance_use", "regulation_strategy"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Confirm 'regulation strategy' matches harm-reduction framing the clinical team uses; replace if the team prefers a different conceptualization."
+      }
+    },
+    {
+      "crystal_text": "Sobriety is not a precondition for trauma processing; the two are sequenced based on the survivor's capacity for affect tolerance, not on a preset abstinence threshold.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["dual_diagnosis", "sequencing", "affect_tolerance"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify sequencing principle aligns with clinical team's stance on Phase-Based Trauma Treatment (Herman) and concurrent-treatment evidence."
+      }
+    },
+    {
+      "crystal_text": "Coerced substance use (where a partner introduced or maintained the survivor's use as part of control) is a distinct pattern from independent substance use. The clinical assessment differs and so does the safety plan.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["dual_diagnosis", "coerced_substance_use", "differential_assessment"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Confirm assessment differential — clinician should specify what changes in the safety plan when use was coerced."
+      }
+    },
+    {
+      "crystal_text": "Withdrawal symptoms can mimic and amplify trauma activation. Distinguishing between the two informs whether the next intervention is medical, somatic, or processing-based.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["dual_diagnosis", "withdrawal", "differential"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify symptom-overlap statement; clinician should add a brief differential checklist if appropriate."
+      }
+    },
+    {
+      "crystal_text": "Relapse during trauma processing is a clinical signal that the processing window opened too wide, not evidence the survivor cannot recover. The titration is the issue.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["dual_diagnosis", "relapse", "titration"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Confirm titration framing; verify this does not minimize survivor agency or imply the clinician is solely responsible for the relapse."
+      }
+    }
+  ]
+}

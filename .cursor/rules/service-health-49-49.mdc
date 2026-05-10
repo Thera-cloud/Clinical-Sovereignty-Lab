@@ -1,11 +1,11 @@
 ---
-description: All 114 services must remain healthy at startup. Never introduce changes that break the 114/114 health check.
+description: All 116 services must remain healthy at startup. Never introduce changes that break the 116/116 health check.
 alwaysApply: true
 ---
 
-# 114/114 Service Health Requirement
+# 116/116 Service Health Requirement
 
-The backend reports `STARTUP COMPLETE: N/114 services healthy` on boot. The target is **114/114 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
+The backend reports `STARTUP COMPLETE: N/116 services healthy` on boot. The target is **116/116 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
 
 ## Service Registry (114 total)
 
@@ -115,7 +115,7 @@ webhook_fortress, guardian_fibre, sentinel_mesh, pipeline_drum, hepa_filter, bil
 
 3. **Singletons require constructor args** — `SessionMemoryStore(storage_root)`, `NotificationSystem(data_dir, api_key)`, etc. Never instantiate these bare. Reuse the instance from `app.state` when available.
 
-4. **After any `main.py` change, verify health** — deploy, restart, and confirm the startup log shows `114/114 services healthy` and `ALL SYSTEMS NOMINAL`. If degraded, fix before considering the deploy complete.
+4. **After any `main.py` change, verify health** — deploy, restart, and confirm the startup log shows `116/116 services healthy` and `ALL SYSTEMS NOMINAL`. If degraded, fix before considering the deploy complete.
 
 5. **Agent Status Digest emails 3x daily** to `support@sovereignsanctuary.net`. If the digest reports any agent as FAILED or WARNING, investigate — it means a live process is not running as expected.
 

@@ -1,11 +1,11 @@
 ---
-description: Rules for sustaining 524/524 TRUSTED (100%) GREEN across all 28 auditors and 5 pre-flight checks.
+description: Rules for sustaining 558/558 TRUSTED (100%) GREEN across all 29 auditors and 5 pre-flight checks.
 alwaysApply: true
 ---
 
 # Trust 100% Sustainment Protocol
 
-The Trust Enforcer reports `524/524 TRUSTED (100%) — Pre-flight 5/5 — GREEN — 0 actions` three times daily (5:10 AM, 5:10 PM, 11:10 PM UTC). Any change that drops this below 100% is a regression.
+The Trust Enforcer reports `558/558 TRUSTED (100%) — Pre-flight 5/5 — GREEN — 0 actions` three times daily (5:10 AM, 5:10 PM, 11:10 PM UTC). Any change that drops this below 100% is a regression.
 
 ## Trust Architecture
 
@@ -18,7 +18,7 @@ Trust Enforcer (meta-agent)
 │   ├── Azure Env — 5 Azure vars set (ENDPOINT, API_KEY, CHAT_DEPLOYMENT, DEPLOYMENT, MINI_TTS_DEPLOYMENT)
 │   └── Redis — responds to PING
 │
-└── 28 Auditors (524 total checks)
+└── 29 Auditors (558 total checks)
     ├── SkyEye Dashboard ........... 61 endpoints
     ├── Sovereign Command .......... 25 endpoints
     ├── The Eye ..................... 21 endpoints
@@ -162,9 +162,9 @@ After deploying any backend, database, or infrastructure change:
    # Wait 60s for auditors to finish
    curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/trust-enforcer/trigger
    ```
-5. **Verify 100%**: Check `skyeye_activity` for the latest `trust_enforcer_sent` entry — must show `524/524 TRUSTED (100%) — GREEN — 0 actions`
+5. **Verify 100%**: Check `skyeye_activity` for the latest `trust_enforcer_sent` entry — must show `558/558 TRUSTED (100%) — GREEN — 0 actions`
 
-## Current Trust Baseline (524 Total — 28 Active Auditors)
+## Current Trust Baseline (558 Total — 29 Active Auditors)
 
 | Auditor | Expected | Baseline Key |
 |---------|----------|-------------|
@@ -196,3 +196,4 @@ After deploying any backend, database, or infrastructure change:
 | Corporate Command | 25 | `corporate_command_check_count` |
 | Voice Infrastructure | 10 | `voice_infra_check_count` |
 | Classroom Learning | 15 | `classroom_learning_check_count` |
+| Sensitive Clinical Bridge | 34 | `sensitive_bridge_check_count` |

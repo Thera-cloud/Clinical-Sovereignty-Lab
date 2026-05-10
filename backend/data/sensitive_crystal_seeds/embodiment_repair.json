@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "source": "engineer_scaffold",
+  "domain": "embodiment_repair",
+  "default_requires_embodiment_phase": true,
+  "ships_as": "awaiting_clinician_authoring",
+  "notes": "Phase 5 Note 2 scaffold. Engineer-authored placeholder text. Every crystal must be reviewed by a clinician before crystal_status is flipped to 'production'. Until then, crystal_recall_bridge filters these out via _PRODUCTION_STATUS_FILTER.",
+  "crystals": [
+    {
+      "crystal_text": "Embodiment repair work proceeds at the survivor's nervous-system pace. Rushing the timeline is a re-enactment of the original violation, not a sign of progress.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["embodiment", "pacing", "polyvagal", "consent"],
+      "requires_embodiment_phase": true,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Confirm phrasing matches Levine and van der Kolk pacing guidance; replace if a more accurate clinical framing exists."
+      }
+    },
+    {
+      "crystal_text": "Felt-sense check-ins precede content questions. The question 'what do you notice in your body right now?' is a grounding move; it is not a request for disclosure.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["embodiment", "felt_sense", "grounding"],
+      "requires_embodiment_phase": true,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify against Gendlin focusing protocol and confirm this matches the body-first sequencing the clinical team teaches."
+      }
+    },
+    {
+      "crystal_text": "Re-introducing pleasurable physical sensation after sexual trauma is a clinical phase, not a homework assignment. Survivors choose the entry point, the duration, and the witness.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["embodiment", "sexual_trauma", "agency", "phase_work"],
+      "requires_embodiment_phase": true,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Sensitive phrasing; clinician must confirm wording does not impose a normative timeline. Consider replacing 'pleasurable' with 'neutral or pleasurable' depending on phase."
+      }
+    },
+    {
+      "crystal_text": "Dissociation during embodiment exercises is data, not failure. The clinical move is to slow down, lower the intensity, and return to a known-safe anchor before continuing.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["embodiment", "dissociation", "titration"],
+      "requires_embodiment_phase": true,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Confirm 'known-safe anchor' language aligns with the resourcing protocol the clinical team uses."
+      }
+    },
+    {
+      "crystal_text": "Bilateral co-regulation (matched breath, matched posture) is appropriate before embodiment work; it is not appropriate as a substitute for an explicit consent check.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["embodiment", "co_regulation", "consent"],
+      "requires_embodiment_phase": true,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify the boundary between co-regulation and consent — clinician should confirm this is not collapsing two distinct moves."
+      }
+    }
+  ]
+}

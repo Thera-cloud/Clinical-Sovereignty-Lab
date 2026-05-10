@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from enum import Enum
 import asyncio
 from jinja2 import Environment, BaseLoader
-import aiosmtplib
+import aiohttp
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -32,10 +32,7 @@ from email.mime.multipart import MIMEMultipart
 
 logger = logging.getLogger(__name__)
 
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.sendgrid.net")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "apikey")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")  # SendGrid API key
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "") or os.getenv("SMTP_PASSWORD", "")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "sanctuary@littlenate.ai")
 FROM_NAME = os.getenv("FROM_NAME", "Sovereign Sanctuary")
 
@@ -519,24 +516,32 @@ class EmailService:
             except Exception as _tg_err:
                 logger.debug("Transit Guardian email inspection non-blocking: %s", _tg_err)
         
-        message = MIMEMultipart("alternative")
-        message["Subject"] = subject
-        message["From"] = f"{from_name} <{from_email}>"
-        message["To"] = to_email
-        
-        html_part = MIMEText(html_content, "html")
-        message.attach(html_part)
-        
+        if not SENDGRID_API_KEY:
+            print("Email send failed: SENDGRID_API_KEY not set")
+            return False
+
+        payload = {
+            "personalizations": [{"to": [{"email": to_email}]}],
+            "from": {"email": from_email, "name": from_name},
+            "subject": subject,
+            "content": [{"type": "text/html", "value": html_content}],
+        }
         try:
-            await aiosmtplib.send(
-                message,
-                hostname=SMTP_HOST,
-                port=SMTP_PORT,
-                username=SMTP_USER,
-                password=SMTP_PASSWORD,
-                use_tls=True
-            )
-            return True
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.sendgrid.com/v3/mail/send",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {SENDGRID_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if resp.status in (200, 202):
+                        return True
+                    body = await resp.text()
+                    print(f"Email send failed: SendGrid {resp.status}: {body[:200]}")
+                    return False
         except Exception as e:
             print(f"Email send failed: {e}")
             return False

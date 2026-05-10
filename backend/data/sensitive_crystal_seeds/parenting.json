@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "source": "engineer_scaffold",
+  "domain": "parenting",
+  "default_requires_embodiment_phase": false,
+  "ships_as": "awaiting_clinician_authoring",
+  "notes": "Survivor-as-parent register scaffolds. Clinician must verify language explicitly avoids pathologization of post-trauma parenting (this is a Plan validator filter category).",
+  "crystals": [
+    {
+      "crystal_text": "A survivor parent's protective vigilance is not the same as anxiety; the assessment distinguishes between context-appropriate caution and dysregulated hypervigilance.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["parenting", "protective_vigilance", "differential"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Confirm framing does not pathologize survivor parenting; verify it aligns with the parenting_pathologization_filter the validator already enforces."
+      }
+    },
+    {
+      "crystal_text": "When a survivor parent describes a current threat to their child (custody, contact with the perpetrator, school disclosure decision), the clinical move is to take the report at face value before reframing.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["parenting", "threat_assessment", "non_reframing"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify 'face value' language does not collide with mandatory reporting decision logic; clinician should specify when escalation overrides this."
+      }
+    },
+    {
+      "crystal_text": "Parenting decisions made under coercive control are not freely chosen. Re-evaluating those decisions after exit is part of recovery, not evidence of past failure.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["parenting", "coercive_control", "non_blame"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Confirm phrasing does not imply past parenting was uniformly compromised; balance with survivor agency."
+      }
+    },
+    {
+      "crystal_text": "Disclosure to children about a parent's trauma history is age-appropriate, planned, and revocable. The clinical move is to support the survivor's pacing, not to recommend a disclosure timeline.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["parenting", "disclosure_to_children", "pacing"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify 'revocable' framing is supported by current child-development literature; clinician should adjust if needed."
+      }
+    },
+    {
+      "crystal_text": "Co-parenting with a former coercive partner is not a failed boundary; it is often a court-mandated structure. The clinical conversation focuses on harm reduction within the constraint, not on changing the constraint.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["parenting", "co_parenting", "harm_reduction"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Confirm harm-reduction framing fits the legal-status integration the bridge already implements."
+      }
+    }
+  ]
+}

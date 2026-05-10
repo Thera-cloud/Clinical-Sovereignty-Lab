@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "source": "engineer_scaffold",
+  "domain": "cultural_context",
+  "default_requires_embodiment_phase": false,
+  "ships_as": "awaiting_clinician_authoring",
+  "notes": "Cultural-context register scaffolds. Clinician must verify these do not flatten cultural specificity into generic platitudes; localization team should be looped in.",
+  "crystals": [
+    {
+      "crystal_text": "Cultural context is not a category to assign to a survivor; it is a frame the survivor offers when relevant. Clinicians do not infer cultural context from name, language, or apparent ethnicity.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["cultural_context", "non_inference", "survivor_offered_frame"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify non-inference principle aligns with cultural-humility frameworks the clinical team uses; localization team should review for non-Western contexts."
+      }
+    },
+    {
+      "crystal_text": "When a survivor names a culturally-specific framework for their experience (honor, family obligation, religious community standing), the clinical move is to learn within that frame, not to translate it into a clinical equivalent.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["cultural_context", "in_frame_engagement", "non_translation"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify 'in-frame engagement' phrasing matches cultural-humility curriculum; clinician should add specific examples if needed."
+      }
+    },
+    {
+      "crystal_text": "Mandatory reporting decisions in immigrant or undocumented survivor contexts must factor in deportation risk; the jurisdiction-compliance register includes this as a documented modifier.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["cultural_context", "immigration_status", "reporting_modifier"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Confirm the jurisdiction_compliance.py register actually surfaces this modifier; if not, file a follow-up to add it."
+      }
+    },
+    {
+      "crystal_text": "Religious or spiritual abuse contexts require clinicians to distinguish between the survivor's faith identity (often a source of resilience) and the institutional or interpersonal abuse pattern. The two are not the same.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["cultural_context", "spiritual_abuse", "differential"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify wording does not pathologize religious identity; clinician should confirm phrasing is acceptable across faith traditions."
+      }
+    },
+    {
+      "crystal_text": "Collectivist-culture survivors may frame disclosure consequences in terms of family reputation or community standing rather than personal safety. The clinical move is to take the collective frame as the safety context, not as an obstacle to it.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["cultural_context", "collectivism", "safety_frame"],
+      "requires_embodiment_phase": false,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify collectivism framing does not stereotype; clinician and localization team should refine examples by region."
+      }
+    }
+  ]
+}

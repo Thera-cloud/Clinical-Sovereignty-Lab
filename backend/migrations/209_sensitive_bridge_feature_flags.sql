@@ -162,32 +162,101 @@ COMMENT ON TABLE detector_telemetry IS
 -- Inserted only if sensitive_bridge_log exists (migration 202 already applied).
 -- The orchestrator's auditor checks read this row to confirm Phase 4 wiring
 -- artifacts shipped.
+--
+-- NOTE: 'feature_flags_initialized' is added to sensitive_bridge_log.event_type
+-- CHECK by migration 210. If 210 has not yet applied, the insert below would
+-- violate the CHECK and abort this migration. The DO block guards against that
+-- by extending the CHECK in-place if the new value is missing — making 209 +
+-- 210 commutative and self-healing on either ordering.
+-- access_classification uses 'admin_only_redacted' (the canonical 202 value);
+-- 'admin_only' alone is NOT in 202's CHECK and would also abort the insert.
 DO $$
+DECLARE
+    _has_feature_flags_initialized BOOLEAN;
 BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables
-               WHERE table_name = 'sensitive_bridge_log') THEN
-        INSERT INTO sensitive_bridge_log (
-            user_id, event_type, event_severity,
-            payload_json, recorded_by, access_classification, pii_screened_at
-        ) VALUES (
-            'system',
-            'feature_flags_initialized',
-            'info',
-            jsonb_build_object(
-                'migration', '209_sensitive_bridge_feature_flags',
-                'master_enabled_default', false,
-                'gap_flags_count', 16,
-                'all_flags_default', false,
-                'cohort_at_apply', 'unenrolled',
-                'detector_telemetry_writable', true,
-                'detector_telemetry_row_count_at_apply', 0,
-                'auto_disable_trigger_active', false
-            ),
-            'migration_209',
-            'admin_only',
-            NOW()
-        );
+    IF NOT EXISTS (SELECT 1 FROM information_schema.tables
+                   WHERE table_name = 'sensitive_bridge_log') THEN
+        RETURN;
     END IF;
+
+    -- Check whether the event_type CHECK already permits 'feature_flags_initialized'.
+    SELECT EXISTS (
+        SELECT 1
+        FROM   pg_constraint
+        WHERE  conname = 'sensitive_bridge_log_event_type_check'
+          AND  pg_get_constraintdef(oid) ILIKE '%feature_flags_initialized%'
+    ) INTO _has_feature_flags_initialized;
+
+    -- If migration 210 has not yet extended the CHECK, extend it inline so this
+    -- migration can complete without depending on apply order.
+    IF NOT _has_feature_flags_initialized THEN
+        ALTER TABLE sensitive_bridge_log
+            DROP CONSTRAINT IF EXISTS sensitive_bridge_log_event_type_check;
+        ALTER TABLE sensitive_bridge_log
+            ADD CONSTRAINT sensitive_bridge_log_event_type_check
+            CHECK (event_type IN (
+                'disclosure_evaluated',
+                'introjection_detected',
+                'codeword_triggered',
+                'codeword_triggered_with_mandatory_reporting_path',
+                'arousal_cap_triggered',
+                'thalamic_gate_blocked',
+                'trigger_date_active',
+                'embodiment_phase_filter_applied',
+                'reengagement_pattern_detected',
+                'polyvictim_load_applied',
+                'legal_event_proximity_detected',
+                'dual_diagnosis_register_applied',
+                'safe_silence_mode_state_change',
+                'safe_silence_mode_expiry_warning',
+                'safe_silence_mode_auto_reverted',
+                'sensitive_profile_mutation',
+                'validator_lexicon_filter_applied',
+                'validator_minor_protection_filter',
+                'validator_parenting_pathologization_filter',
+                'reporting_trigger_fired',
+                'coach_handoff_emitted',
+                'active_trafficking_disclosed',
+                'imminent_danger_detected',
+                'survivor_recruiter_role_disclosed',
+                'jurisdiction_policy_applied',
+                'survivor_data_export_requested',
+                'minor_survivor_mandatory_reporting_auto_fired',
+                'guardian_dual_approval_required',
+                'parenting_crisis_alert_fired',
+                'rj_companioning_register_applied',
+                'cultural_context_register_applied',
+                'locale_fallback_applied',
+                'gap_feature_auto_disabled',
+                'feature_flags_initialized',
+                'auto_disable_armed',
+                'auto_disable_committed',
+                'auto_disable_cancelled',
+                'auto_disable_reenabled'
+            ));
+    END IF;
+
+    INSERT INTO sensitive_bridge_log (
+        user_id, event_type, event_severity,
+        payload_json, recorded_by, access_classification, pii_screened_at
+    ) VALUES (
+        'system',
+        'feature_flags_initialized',
+        'info',
+        jsonb_build_object(
+            'migration', '209_sensitive_bridge_feature_flags',
+            'master_enabled_default', false,
+            'gap_flags_count', 16,
+            'all_flags_default', false,
+            'cohort_at_apply', 'unenrolled',
+            'detector_telemetry_writable', true,
+            'detector_telemetry_row_count_at_apply', 0,
+            'auto_disable_trigger_active', false
+        ),
+        'migration_209',
+        'admin_only_redacted',
+        NOW()
+    );
 END$$;
 
 COMMIT;

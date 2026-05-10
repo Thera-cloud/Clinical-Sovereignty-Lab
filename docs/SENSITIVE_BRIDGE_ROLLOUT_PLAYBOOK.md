@@ -186,6 +186,185 @@ This SHOULD only be run after explicit admin approval if Phase 1 must be fully r
 
 ---
 
+## 4a. Do NOT Rollback For These (Note 2)
+
+Rollback is irreversible loss of operational state and clinician trust. The
+following symptoms **look like** rollback opportunities at 2am but are not.
+Saving the on-call admin from a pager-call overreaction during pilot is the
+purpose of this section.
+
+For each: the **symptom**, why it looks like a rollback signal, and the
+**right response** that is not a rollback.
+
+### 4a.1 — Single false-positive on a single user
+
+**Symptom:** Clinician flags one shadow-mode decision as a false positive.
+A specific user's decision_summary shows a register dispatch the clinician
+disagrees with.
+
+**Looks like:** Detector misfire requiring rollback of the offending detector.
+
+**Why it isn't:** A single clinician flag on a single row is one data point.
+Rollback overreacts. The detector_telemetry pipeline + the auto-disable
+trigger (Section 5) exist precisely to absorb single FP rows without manual
+intervention. One FP per detector per week is well within the 5%-over-20-sample
+gate; only a sustained pattern across multiple windows arms the auto-disable.
+
+**Right response:** Mark the row in the clinician review queue as
+`classification = 'false_positive'`, `clinician_reviewed = TRUE`. Telemetry
+will pick it up on the next agent cycle. If the pattern continues, the
+multi-window agreement check will arm the disable.
+
+---
+
+### 4a.2 — Clinician disagreement with a register dispatch
+
+**Symptom:** Clinician reviews a `register_assigned` event in
+`sensitive_bridge_log` and disagrees with the register the orchestrator
+chose for a specific disclosure.
+
+**Looks like:** Controller bug requiring revert of `therapeutic_controller.py`
+register variant logic.
+
+**Why it isn't:** Register disagreement is a **clinical review** outcome, not
+a software defect. The lexicon and register-mapping rules live in clinician-
+authored config (`data/sensitive_domain_validator_lexicon_*.json` per Gap D),
+not in code. Rolling back code does not change the register mapping.
+
+**Right response:** Use the lexicon-update workflow per Gap D — open a
+clinician PR against the lexicon JSON, route through two-clinician sign-off,
+land via `bulk_crystal_ingestion.py`. Code stays put.
+
+---
+
+### 4a.3 — Performance regression in non-bridge code
+
+**Symptom:** API p95 latency creeps up after a deploy that touched the bridge
+plus other modules. Bridge orchestrator is in the trace.
+
+**Looks like:** Bridge orchestrator overhead requires rollback of the
+sensitive bridge.
+
+**Why it isn't:** The bridge appearing in a trace does not make it the cause.
+The orchestrator's p95 budget is < 200ms (verified in CI bench, Phase 4 gate)
+and the kill-switch at `app_settings.sensitive_bridge_master_enabled = false`
+provides a one-flag bypass that takes < 5 seconds to flip. Rolling back the
+bridge to fix someone else's bug deletes operational state we will not get
+back cheaply.
+
+**Right response:** Flip the master kill switch first as a diagnostic
+(orchestrator returns neutral BridgeDecision — equivalent to "bridge
+removed from request path" without the data loss). If latency recovers,
+the bridge is involved; bisect bridge changes. If latency does not recover,
+the bridge is exonerated — investigate the other module. Either way, no
+schema rollback.
+
+```bash
+# Diagnostic kill switch (NOT a rollback — easily reversed)
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://api.sovereignsanctuary.net/api/admin/sensitive-bridge/feature-flag \
+  -d '{"flag":"sensitive_bridge_master_enabled","enabled":false,"reason":"latency diagnostic"}'
+```
+
+---
+
+### 4a.4 — Spike in `disclosure_evaluated` events
+
+**Symptom:** `sensitive_bridge_log` shows 5x normal volume of
+`event_type = 'disclosure_evaluated'` rows after a pilot cohort enrollment
+expansion.
+
+**Looks like:** Detector firing too aggressively, producing event noise.
+
+**Why it isn't:** `disclosure_evaluated` fires on **every** orchestrator
+invocation, not on detector positive matches. A spike in `disclosure_evaluated`
+means more disclosures are being evaluated, which is **the pilot working** —
+more enrolled users, more chat traffic, more orchestrator calls. The signal
+to watch for detector-firing volume is `event_type` values like
+`introjection_detected`, `codeword_triggered`, `arousal_cap_triggered` — not
+the umbrella `disclosure_evaluated` event.
+
+**Right response:** None. Pilot is healthy. If detector-specific event types
+also show 5x volume **and** the FP rate from clinician review jumps, that is
+the signal — and the auto-disable trigger (Section 5) will catch it without
+any manual intervention.
+
+---
+
+### 4a.5 — Telemetry agent armed an auto-disable
+
+**Symptom:** Admin receives a `coach_alert_high` notification:
+"sensitive_bridge_telemetry_agent: armed auto-disable for gap_X (commits in 30 min)."
+
+**Looks like:** Detector failure requiring rollback of the detector module.
+
+**Why it isn't:** Arming is the safeguard working. The 30-minute countdown
+exists for human review, not for panic. If the multi-window snapshot in the
+alert payload shows a real sustained FP regression, **let the disable
+commit** — that is the entire purpose of the safeguard. If clinician review
+of the FP rows shows the rate is calibration drift (not a detector bug),
+**cancel the disable** via the REST endpoint and re-classify the underlying
+telemetry rows.
+
+**Right response:** Read the multi-window snapshot in the alert payload.
+If the breach is real, do nothing — let the disable commit and use the
+re-enable resolved-telemetry gate to bring it back when fixed. If the
+breach is artifactual, cancel via REST and re-classify the telemetry. **Do
+not** revert detector code in either case.
+
+---
+
+### 4a.6 — Failed Phase-1 migration on staging
+
+**Symptom:** Migration 203 fails on staging clone with a CHECK-constraint
+error related to `sensitive_bridge_log.event_type`.
+
+**Looks like:** Time to abandon the bridge and roll back Phase 1.
+
+**Why it isn't:** Migrations 209 and 210 contain self-healing `DO $$` blocks
+that extend the `event_type` CHECK constraint to include the new event
+types. If a CHECK error occurs, the right response is to verify the
+self-healing block ran (read the migration source for the `IF NOT EXISTS`
+guard), not to drop tables.
+
+**Right response:** Inspect `pg_constraint` for the current constraint
+definition. If the new event types are missing, re-run the migration in a
+transaction — the `IF NOT EXISTS` self-healing logic is idempotent. If the
+re-run still fails, **then** open the rollback runbook in Section 4.
+
+---
+
+### 4a.7 — Auditor reports `META_ORDERING_OBSERVED != _CHECK_ORDER`
+
+**Symptom:** `sensitive_bridge_audit_sent` rows show
+`audit_check_ordering_cheap_first` failing.
+
+**Looks like:** Auditor itself is broken; rollback the auditor.
+
+**Why it isn't:** This is the META check **doing its job**. It catches a
+maintainer who reordered checks "for readability" and broke the cost-tier
+ordering contract. The fix is to revert the reorder, not the auditor.
+
+**Right response:** `git log -p backend/app/services/sensitive_bridge_auditor.py`
+to find the commit that reordered `_CHECK_ORDER` or the `_run_tierN` methods.
+Revert that single commit. Do not revert the auditor itself.
+
+---
+
+### Summary table
+
+| # | Symptom | Why not rollback | Right response |
+|---|---|---|---|
+| 4a.1 | Single FP on one user | Telemetry will catch real patterns | Re-classify in clinician review queue |
+| 4a.2 | Clinician disagrees with register | Code change won't fix lexicon mapping | Lexicon-update workflow (Gap D) |
+| 4a.3 | Latency regression w/ bridge in trace | Kill switch is the diagnostic | Flip `sensitive_bridge_master_enabled=false` |
+| 4a.4 | `disclosure_evaluated` 5x spike | That's the pilot working | Watch detector-specific event types instead |
+| 4a.5 | Telemetry armed an auto-disable | Arming is the safeguard | Let it commit, or cancel + re-classify |
+| 4a.6 | Phase-1 migration CHECK error | Migrations are self-healing | Re-run; rollback only if re-run fails |
+| 4a.7 | META ordering check fails | META is doing its job | Revert the offending reorder commit |
+
+---
+
 ## 5. Per-Detector Feature Flags (Gap F)
 
 Once Phase 4 lands, every detector ships behind a flag. Default OFF.
@@ -224,9 +403,89 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{"flag":"gap_introjection_enabled","value":false,"reason":"FP rate >5% over 7d"}'
 ```
 
-### Auto-disable trigger
+### Auto-disable trigger (Note 1 — three implementation safeguards)
 
-`detector_telemetry` aggregator runs hourly. If any flag's classifications over the last 7 days show false-positive rate > 5% (from clinician review queue), the flag auto-disables globally and an admin alert fires.
+The auto-disable trigger has the **highest blast radius** of any single piece of
+code in this build: a single nightly job can disable an entire detector for all
+enrolled users. Three safeguards prevent off-by-one or window-boundary bugs from
+disabling a clinically-correct detector.
+
+**Owner:** `backend/app/services/sensitive_bridge_telemetry_agent.py`.
+**REST surface:** `/api/admin/sensitive-bridge/auto-disable/*` and
+`/api/admin/sensitive-bridge/feature-flag` (admin-only). Auditor invariant:
+`auto_disable_reenable_requires_resolved_telemetry` (Tier-1 slot 11).
+
+**Default posture:** `app_settings.sensitive_bridge_telemetry_agent.paused = TRUE`.
+Migration 210 ships the agent **paused** so nothing auto-disables until an admin
+explicitly enables it during pilot. This is the **fail-safe-off** default — if
+the agent module crashes, nothing happens to the feature flags either.
+
+#### Safeguard 1 — Multi-window agreement (24h, 72h, 7d)
+
+`false_positive_rate` is computed across three trailing windows (last 24h, 72h, 7d).
+A flag is only **armed** for auto-disable if **all three windows agree** on the
+threshold breach (rate > 0.05 AND clinician-reviewed sample >= 20 in each window).
+
+| Pattern | Interpretation | Action |
+|---|---|---|
+| 24h breach + 72h ok + 7d ok | Acute spike, possibly a single bad cohort hour | Telemetry continues; no arm |
+| 24h breach + 72h breach + 7d ok | Recent regression, real but not yet established | Telemetry continues; no arm |
+| 24h breach + 72h breach + 7d breach | Persistent regression across all windows | **ARM** — proceed to safeguard 2 |
+| Any window has reviewed sample < 20 | Insufficient evidence | Telemetry continues; no arm |
+
+Single-window breach without consistency = noise, not signal. The window set is
+configured in `app_settings.sensitive_bridge_telemetry_agent.windows` and may
+only be widened (not narrowed) without admin approval.
+
+#### Safeguard 2 — Alert + 30-minute admin override countdown
+
+When a flag is armed, the agent does **not** disable immediately. It:
+
+1. Writes a row to `detector_auto_disable_state` with `state = 'armed'`,
+   `armed_at = NOW()`, and `commit_at = NOW() + 30 minutes`.
+2. Emits `coach_alert_high` to **all admins** with the multi-window snapshot
+   embedded in the payload (no PII; `payload_ref` only).
+3. Writes a `sensitive_bridge_log` event with
+   `event_type = 'auto_disable_armed'` and `severity = 'warning'`.
+4. **Blocks for 30 minutes**. During this window, an admin may cancel via:
+   ```bash
+   curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+     "https://api.sovereignsanctuary.net/api/admin/sensitive-bridge/auto-disable/<gap_flag>/cancel" \
+     -d '{"reason":"clinician confirmed FP cluster is calibration drift, not detector bug"}'
+   ```
+   Cancellation moves the row to `state = 'cancelled'` and writes
+   `auto_disable_cancelled` to the audit log.
+5. If no cancellation arrives, the next agent cycle observes `commit_at <= NOW()`
+   and **only then** flips
+   `app_settings.sensitive_bridge_global_gap_flags->{gap_flag} = false`,
+   sets `state = 'disabled'` with `disabled_at = NOW()`, and writes
+   `auto_disable_committed` to the audit log.
+
+30 minutes of human-in-the-loop on a clinical-safety-critical disable is worth
+the friction. Plan v1.3 originally said "auto-disable then alert"; we ship
+"alert + countdown to disable + admin can cancel."
+
+#### Safeguard 3 — Re-enable requires resolved telemetry
+
+Re-enabling an auto-disabled flag requires explicit admin action **and** fresh
+telemetry showing the underlying issue is resolved. The REST endpoint
+`POST /api/admin/sensitive-bridge/feature-flag` with `enabled=true` enforces
+the gate via `assert_reenable_telemetry_resolved()`:
+
+- Reviewed-sample count after `disabled_at` must be >= 20.
+- Reviewed FP rate after `disabled_at` must be <= 0.05.
+
+Failures return `409 Conflict` with body
+`{"error":"reenable_blocked_telemetry_unresolved","detail":<reason>,"snapshot":<rates>}`.
+The admin cannot override this gate via REST; if the telemetry is genuinely a
+false alarm, the path is to re-classify the offending telemetry rows
+(through the clinician review queue), then retry the re-enable.
+
+The auditor check `auto_disable_reenable_requires_resolved_telemetry`
+(Tier-1 slot 11) verifies: (a) the gate function is importable, (b) the
+exception class exists, (c) the agent's default posture is `paused=true`. If
+any of these fail, the auditor emits `severity=error` and the trust enforcer
+flags the row.
 
 ---
 
@@ -276,11 +535,11 @@ When the 29th auditor (`sensitive_bridge_auditor.py`) lands, the 5-location sync
 
 | # | Location | Update |
 |---|---|---|
-| 1 | `TAB_ENDPOINTS` in `sensitive_bridge_auditor.py` | 25 checks across 5 tabs |
+| 1 | `_CHECK_ORDER` in `sensitive_bridge_auditor.py` | 33 inventory + 1 META = **34 checks** |
 | 2 | `AUDITOR_ACTIVITY_TYPES` in `trust_enforcer.py` | `"sensitive_bridge_audit_sent"` |
 | 3 | `AUDITOR_LABELS` in `trust_enforcer.py` | `"Sensitive Clinical Bridge"` |
 | 4 | `_baseline_key_for()` in `trust_enforcer.py` | `"sensitive_bridge_check_count"` |
-| 5 | `trust_baseline` row | `{"expected": 25}` |
+| 5 | `trust_baseline` row | `{"expected": 34}` (META is a real auditor entry; do not exclude) |
 
 ### Reserved auditor check IDs (25 total)
 
@@ -311,13 +570,43 @@ and at least one telemetry event in the last 7 days. `flag_introjection_active`,
 `mandatory_reporting_trafficking_path_present`, `coach_handoff_redaction_payload_no_pii`,
 `validator_lexicon_loaded_and_versioned`.
 
-Service health denominator changes from 114 → 115. Update:
-- `_service_checks` in `main.py`
+**Telemetry agent gate (1):** `auto_disable_reenable_requires_resolved_telemetry`
+*(Phase 5 Note 1 safeguard #3 — verifies the resolved-telemetry gate is intact
+and the telemetry agent ships PAUSED).* Tier-1 slot 11.
+
+Service health denominator changes from 114 → 116 (+1 auditor + 1 telemetry agent). Update:
+- `_service_checks` in `main.py` (+2 entries)
 - `.cursor/rules/service-health-49-49.mdc`
 - `.cursor/rules/service-health-124.mdc`
-- `.cursor/rules/trust-100-percent.mdc` (524 + 25 = 549)
+- `.cursor/rules/trust-100-percent.mdc` (524 + 34 = 558)
 
-Stagger: next available 5s slot, currently 295s is taken — use 300s ceiling (verify no other agent at 300s first).
+Auditor stagger: 305s (3x daily). Telemetry agent stagger: 320s (cycles
+hourly when unpaused). 320 is within the 300s auditor ceiling guidance because
+the telemetry agent is **not** an auditor — it is a long-running background
+observer with its own poll interval.
+
+#### Observation cadence during pilot (Observation 3)
+
+3x daily auditor cadence = ~8h between cycles, which is **insufficient**
+granularity to detect drift before cohort_25 promotion during the 14-day
+shadow-mode pilot. The cadence choice is:
+
+**Decision (locked for pilot launch):** keep the auditor at 3x daily standard
+cadence and let the **telemetry agent** do the high-frequency observation
+(hourly cycles when unpaused). Rationale: the auditor is a contract surface
+scorecard, not a drift detector; the telemetry agent is purpose-built for
+continuous observation and emits its own audit-log events
+(`auto_disable_armed`, `auto_disable_committed`, `auto_disable_cancelled`,
+`auto_disable_reenabled`) that the auditor's Tier-3
+`false_positive_rate_under_5pct_per_gap` check reads on its standard cadence.
+
+Alternative considered and rejected: bumping the auditor to 6x daily during
+pilot. Rejected because (a) the auditor is shared infrastructure and changing
+its cadence has cascade effects on stagger budgets, (b) the telemetry agent's
+hourly cycle gives 24x granularity vs the auditor's 3x.
+
+Re-evaluate this decision after cohort_25 promotion. If drift signal volume
+warrants it, revisit raising the auditor cadence then.
 
 ---
 

@@ -581,12 +581,17 @@ class NotificationObserver:
         OAuth credentials and expiry are actually stored."""
         try:
             async with self.db_pool.acquire() as conn:
+                # Do not filter on token_expiry — many providers use long-lived
+                # tokens and DB expiry can be NULL or stale while access is valid.
                 rows = await conn.fetch("""
                     SELECT platform FROM skyeye_platform_tokens
                     WHERE access_token IS NOT NULL
                       AND access_token != ''
-                      AND (token_expiry IS NULL OR token_expiry > NOW())
                       AND (error_message IS NULL OR error_message = '')
+                      AND (
+                          status IS NULL
+                          OR status NOT IN ('expired', 'revoked')
+                      )
                 """)
                 return [r["platform"] for r in rows]
         except Exception as e:

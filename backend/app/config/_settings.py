@@ -24,6 +24,17 @@ class Settings(BaseSettings):
     WS_URL: str = "ws://localhost:8765"
     DOMAIN: Optional[str] = None
     PUBLIC_BASE_URL: str = ""  # Public-facing API URL (e.g. https://api.sovereignsanctuary.net) for OAuth redirects
+
+    @property
+    def public_api_url(self) -> str:
+        """Resolved public API base URL. Falls back to the canonical production URL
+        when PUBLIC_BASE_URL is empty and ENVIRONMENT is production — prevents
+        OAuth redirect_uri from resolving to http://localhost:8000 inside Docker."""
+        if self.PUBLIC_BASE_URL:
+            return self.PUBLIC_BASE_URL.rstrip("/")
+        if self.ENVIRONMENT == "production":
+            return "https://api.sovereignsanctuary.net"
+        return ""
     
     # -------------------------------------------------------------------------
     # Azure OpenAI

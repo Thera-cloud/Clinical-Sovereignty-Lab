@@ -1385,8 +1385,13 @@ async def initiate_platform_connect(platform: str, request: Request):
     if not adapter:
         raise HTTPException(status_code=500, detail=f"Failed to load adapter for {platform}")
 
-    base_url = settings.PUBLIC_BASE_URL or str(request.base_url).rstrip("/")
+    _r = getattr(request.app.state, "auth_redis", None) or getattr(request.app.state, "redis_pool", None)
+    if _r and hasattr(adapter, "_redis"):
+        adapter._redis = _r
+
+    base_url = settings.public_api_url or str(request.base_url).rstrip("/")
     redirect_uri = f"{base_url}/api/skyeye/platforms/{platform}/callback"
+    logger.info("OAuth connect %s: redirect_uri=%s (PUBLIC_BASE_URL=%r)", platform, redirect_uri, settings.PUBLIC_BASE_URL)
 
     try:
         oauth_url = await adapter.get_oauth_url(redirect_uri)
@@ -1420,7 +1425,11 @@ async def platform_connect_redirect(platform: str, request: Request):
     if not adapter:
         raise HTTPException(status_code=404, detail=f"Unknown platform: {platform}")
 
-    base_url = _settings.PUBLIC_BASE_URL or str(request.base_url).rstrip("/")
+    _r = getattr(request.app.state, "auth_redis", None) or getattr(request.app.state, "redis_pool", None)
+    if _r and hasattr(adapter, "_redis"):
+        adapter._redis = _r
+
+    base_url = _settings.public_api_url or str(request.base_url).rstrip("/")
     redirect_uri = f"{base_url}/api/skyeye/platforms/{platform}/callback"
 
     try:
@@ -1487,10 +1496,14 @@ async def platform_oauth_callback(
     if not adapter:
         raise HTTPException(status_code=404, detail=f"Unknown platform: {platform}")
 
-    base_url = _settings.PUBLIC_BASE_URL or str(request.base_url).rstrip("/")
+    _r = getattr(request.app.state, "auth_redis", None) or getattr(request.app.state, "redis_pool", None)
+    if _r and hasattr(adapter, "_redis"):
+        adapter._redis = _r
+
+    base_url = _settings.public_api_url or str(request.base_url).rstrip("/")
     redirect_uri = f"{base_url}/api/skyeye/platforms/{platform}/callback"
 
-    _log.info("OAuth callback for %s: code_len=%d, state_present=%s", platform, len(code), bool(state))
+    _log.info("OAuth callback for %s: code_len=%d, state_present=%s, redirect_uri=%s", platform, len(code), bool(state), redirect_uri)
 
     try:
         success = await adapter.handle_oauth_callback(code, redirect_uri, state=state)

@@ -54,6 +54,16 @@ _MIN_SCORE_VOICE = 2
 _MIN_USER_LEN = 40
 _MIN_USER_LEN_VOICE = 15
 
+# Plan v1.3 Phase 5 Note 2c — engineer-authored sensitive seed crystals are
+# inserted with crystal_status='awaiting_clinician_authoring'. They MUST NOT
+# surface in production recall until a clinician reviews and flips the row to
+# 'production'. The OR NULL clause preserves backward compat for legacy rows
+# (added in migration 211 with default 'production'); pre-migration rows have
+# NULL crystal_status and remain recallable. New seed inserts are explicit.
+_PRODUCTION_STATUS_FILTER = (
+    "AND (crystal_status IS NULL OR crystal_status = 'production')"
+)
+
 # Global crystal cache (5-min TTL) — avoids repeated 21K+ row scans
 _global_crystal_cache: dict = {"rows": [], "expires": 0.0}
 _GLOBAL_CACHE_TTL = 300.0  # seconds
@@ -83,6 +93,7 @@ async def _fast_recall_crystals(conn, user_uuid, query_text: str, max_user: int 
                       AND confidence >= 0.30
                       AND scope NOT IN ('archived')
                       AND superseded_by IS NULL
+                      AND (crystal_status IS NULL OR crystal_status = 'production')
                       AND to_tsvector('english', crystal_text) @@ plainto_tsquery('english', $2)
                     ORDER BY ts_rank(to_tsvector('english', crystal_text),
                                      plainto_tsquery('english', $2)) DESC
@@ -95,6 +106,7 @@ async def _fast_recall_crystals(conn, user_uuid, query_text: str, max_user: int 
                       AND confidence >= 0.30
                       AND scope NOT IN ('archived')
                       AND superseded_by IS NULL
+                      AND (crystal_status IS NULL OR crystal_status = 'production')
                       AND id NOT IN (SELECT id FROM topic_matched)
                     ORDER BY created_at DESC, confidence DESC
                     LIMIT 2
@@ -114,6 +126,7 @@ async def _fast_recall_crystals(conn, user_uuid, query_text: str, max_user: int 
                   AND confidence >= 0.30
                   AND scope NOT IN ('archived')
                   AND superseded_by IS NULL
+                  AND (crystal_status IS NULL OR crystal_status = 'production')
                 ORDER BY created_at DESC, confidence DESC
                 LIMIT $2
                 """,
@@ -132,6 +145,7 @@ async def _fast_recall_crystals(conn, user_uuid, query_text: str, max_user: int 
             "FROM nate_intelligence_crystals "
             "WHERE user_id IS NULL AND confidence >= 0.55 "
             "AND scope NOT IN ('archived') AND superseded_by IS NULL "
+            "AND (crystal_status IS NULL OR crystal_status = 'production') "
             "ORDER BY confidence DESC, last_recalled_at DESC NULLS LAST LIMIT 50",
         )
         _global_crystal_cache["rows"] = [dict(r) for r in _g_top_all]
@@ -165,6 +179,7 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
                     "SELECT count(*) FROM nate_intelligence_crystals "
                     "WHERE user_id = $1 AND confidence >= 0.30 AND scope NOT IN ('archived') "
                     "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
+                    "AND (crystal_status IS NULL OR crystal_status = 'production') "
                     "AND created_at > NOW() - INTERVAL '180 days'",
                     user_uuid,
                 )
@@ -174,6 +189,7 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
                         "FROM nate_intelligence_crystals "
                         "WHERE user_id = $1 AND confidence >= 0.30 AND scope NOT IN ('archived') "
                         "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
+                        "AND (crystal_status IS NULL OR crystal_status = 'production') "
                         "AND created_at > NOW() - INTERVAL '180 days' "
                         "ORDER BY id OFFSET $2 LIMIT 1",
                         user_uuid, _rnd.randrange(max(_u_cold_cnt, 1)),
@@ -187,7 +203,8 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
                 _g_cold_cnt = await conn.fetchval(
                     "SELECT count(*) FROM nate_intelligence_crystals "
                     "WHERE user_id IS NULL AND confidence >= 0.55 AND scope NOT IN ('archived') "
-                    "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0)",
+                    "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
+                    "AND (crystal_status IS NULL OR crystal_status = 'production')",
                 )
                 if _g_cold_cnt > 0:
                     _g_cold = await conn.fetch(
@@ -195,6 +212,7 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
                         "FROM nate_intelligence_crystals "
                         "WHERE user_id IS NULL AND confidence >= 0.55 AND scope NOT IN ('archived') "
                         "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
+                        "AND (crystal_status IS NULL OR crystal_status = 'production') "
                         "ORDER BY id OFFSET $1 LIMIT 1",
                         _rnd.randrange(max(_g_cold_cnt, 1)),
                     )
@@ -210,6 +228,7 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
                       AND confidence >= 0.55
                       AND scope NOT IN ('archived')
                       AND superseded_by IS NULL
+                      AND (crystal_status IS NULL OR crystal_status = 'production')
                       AND to_tsvector('english', crystal_text) @@ plainto_tsquery('english', $1)
                     ORDER BY ts_rank(to_tsvector('english', crystal_text),
                                      plainto_tsquery('english', $1)) DESC
@@ -225,7 +244,8 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
             _dna_cnt = await conn.fetchval(
                 "SELECT count(*) FROM nate_intelligence_crystals "
                 "WHERE user_id IS NULL AND confidence >= 0.85 AND scope NOT IN ('archived') "
-                "AND superseded_by IS NULL AND origin_surface IN ('growth_engine', 'clinical_edge_seed')",
+                "AND superseded_by IS NULL AND origin_surface IN ('growth_engine', 'clinical_edge_seed') "
+                "AND (crystal_status IS NULL OR crystal_status = 'production')",
             )
             if _dna_cnt > 0:
                 _dna_rows = await conn.fetch(
@@ -233,6 +253,7 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
                     "FROM nate_intelligence_crystals "
                     "WHERE user_id IS NULL AND confidence >= 0.85 AND scope NOT IN ('archived') "
                     "AND superseded_by IS NULL AND origin_surface IN ('growth_engine', 'clinical_edge_seed') "
+                    "AND (crystal_status IS NULL OR crystal_status = 'production') "
                     "ORDER BY id OFFSET $1 LIMIT 2",
                     _rnd.randrange(max(_dna_cnt, 1)),
                 )
@@ -442,11 +463,17 @@ async def _record_co_activation(db_pool, crystal_ids: list, source: str) -> None
     """
     try:
         async with db_pool.acquire() as conn:
+            # Note 2c defense-in-depth: even though upstream recall paths
+            # already filter awaiting_clinician_authoring crystals, this query
+            # accepts raw crystal_ids from any caller. Reapply the filter so
+            # engineer-authored placeholders can never enter the co-activation
+            # graph (which would taint similarity edges in production).
             rows = await conn.fetch(
                 """SELECT id, LEFT(content_hash, 16) as hash_prefix
                    FROM nate_intelligence_crystals
                    WHERE id = ANY($1::int[])
-                     AND content_hash IS NOT NULL AND content_hash != ''""",
+                     AND content_hash IS NOT NULL AND content_hash != ''
+                     AND (crystal_status IS NULL OR crystal_status = 'production')""",
                 crystal_ids,
             )
             hashes = sorted(set(r["hash_prefix"] for r in rows if r["hash_prefix"]))
@@ -502,6 +529,7 @@ async def retrieve_anticipatory_crystals(
                      AND metadata->>'target_user_id' = $1
                      AND created_at > NOW() - INTERVAL '14 days'
                      AND scope NOT IN ('archived')
+                     AND (crystal_status IS NULL OR crystal_status = 'production')
                    ORDER BY created_at DESC
                    LIMIT 5""",
                 user_id,

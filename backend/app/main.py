@@ -2565,6 +2565,47 @@ async def lifespan(app: FastAPI):
     except Exception as nca_err:
         print(f"   ⚠️  NateCheckInAuditor init failed: {nca_err}")
 
+    # ── Sensitive Bridge Auditor — 3x daily v1.3 contract surface scorecard ──
+    _sensitive_bridge_auditor = None
+    try:
+        from app.services.sensitive_bridge_auditor import SensitiveBridgeAuditor
+        _sensitive_bridge_auditor = SensitiveBridgeAuditor(
+            db_pool=db_pool,
+            notification_system=None,
+            app_state=app.state,
+        )
+        await _sensitive_bridge_auditor.start()
+        app.state.sensitive_bridge_auditor = _sensitive_bridge_auditor
+        print("   ✅ SensitiveBridgeAuditor started (3x daily, stagger 305s)")
+    except Exception as sba_err:
+        print(f"   ⚠️  SensitiveBridgeAuditor init failed: {sba_err}")
+
+    # ── Sensitive Bridge Telemetry Agent — auto-disable trigger w/ Note 1 safeguards
+    # Plan v1.3 Phase 5 Note 1: ships PAUSED (app_settings.paused=true). The
+    # 30-minute admin-override countdown + multi-window agreement (24h/72h/7d)
+    # + resolved-telemetry re-enable gate live in the agent + REST router.
+    _sensitive_bridge_telemetry_agent = None
+    try:
+        from app.services.sensitive_bridge_telemetry_agent import (
+            SensitiveBridgeTelemetryAgent,
+        )
+        _telem_notify = getattr(app.state, "notification_system", None)
+        _sensitive_bridge_telemetry_agent = SensitiveBridgeTelemetryAgent(
+            db_pool=db_pool,
+            notification_system=_telem_notify,
+            app_state=app.state,
+        )
+        await _sensitive_bridge_telemetry_agent.start()
+        app.state.sensitive_bridge_telemetry_agent = (
+            _sensitive_bridge_telemetry_agent
+        )
+        print(
+            "   ✅ SensitiveBridgeTelemetryAgent started "
+            "(PAUSED by default; admin must unpause via app_settings)"
+        )
+    except Exception as sbt_err:
+        print(f"   ⚠️  SensitiveBridgeTelemetryAgent init failed: {sbt_err}")
+
     # ── Token Usage Agent — daily/monthly reset, per-source snapshots ──
     _token_usage_agent = None
     try:
@@ -3003,6 +3044,9 @@ async def lifespan(app: FastAPI):
         ("token_usage_agent", _token_usage_agent is not None),
         ("nate_checkin_agent", _nate_checkin_agent is not None),
         ("nate_checkin_auditor", _nate_checkin_auditor is not None),
+        ("sensitive_bridge_auditor", _sensitive_bridge_auditor is not None),
+        ("sensitive_bridge_telemetry_agent",
+         _sensitive_bridge_telemetry_agent is not None),
         ("fcode_engine", _fcode_engine is not None),
         ("session_payment_agent", _session_payment_agent is not None),
         ("signup_sharing_agent", _signup_sharing_agent is not None),
@@ -3287,6 +3331,8 @@ async def lifespan(app: FastAPI):
         ("token_usage_agent", "TokenUsageAgent"),
         ("nate_checkin_agent", "NateCheckInAgent"),
         ("nate_checkin_auditor", "NateCheckInAuditor"),
+        ("sensitive_bridge_auditor", "SensitiveBridgeAuditor"),
+        ("sensitive_bridge_telemetry_agent", "SensitiveBridgeTelemetryAgent"),
     ]:
         _agent = getattr(app.state, _attr, None)
         if _agent:
@@ -3816,6 +3862,75 @@ try:
     app.include_router(voice_edge_router)
 except Exception as _ve_err:
     print(f"   ⚠️  Voice edge router failed: {_ve_err}")
+
+# QUANTUM-CRYSTAL-ARCH: Sensitive Clinical Bridge clinician portal (Phase 4b)
+# Two routers: coach_router (require_clinician_for_user gate) + admin_router (require_admin + WebAuthn).
+# Fail-soft: if import fails, dependent screens show empty state but rest of API stays up.
+try:
+    from app.routers.sensitive_profile_api import (
+        coach_router as sensitive_profile_coach_router,
+        admin_router as sensitive_profile_admin_router,
+        AUDITOR_SELF_CHECK_RESULTS as _sensitive_profile_self_check,
+    )
+    app.include_router(sensitive_profile_coach_router)
+    app.include_router(sensitive_profile_admin_router)
+    if not all(_sensitive_profile_self_check.values()):
+        _failed = [k for k, v in _sensitive_profile_self_check.items() if not v]
+        print(f"   ⚠️  sensitive_profile_api boot self-check FAILED: {_failed}")
+    else:
+        print(f"   ✅ sensitive_profile_api boot self-check OK ({len(_sensitive_profile_self_check)}/{len(_sensitive_profile_self_check)})")
+except Exception as _sp_err:
+    print(f"   ⚠️  sensitive_profile_api router failed: {_sp_err}")
+
+
+# QUANTUM-CRYSTAL-ARCH: Sensitive Bridge Telemetry — admin auto-disable controls
+# (Phase 5 Note 1). Endpoints:
+#   POST /api/admin/sensitive-bridge/auto-disable/{gap_flag}/cancel
+#   POST /api/admin/sensitive-bridge/feature-flag    (re-enable gate enforced)
+#   GET  /api/admin/sensitive-bridge/auto-disable
+# Fail-soft: import failure leaves bridge auto-disable controls dormant; the
+# agent itself ships PAUSED so nothing auto-disables anyway.
+try:
+    from app.routers.sensitive_bridge_telemetry_api import (
+        router as sensitive_bridge_telemetry_router,
+    )
+    app.include_router(sensitive_bridge_telemetry_router)
+    print("   ✅ sensitive_bridge_telemetry_api router mounted")
+except Exception as _sbt_err:
+    print(f"   ⚠️  sensitive_bridge_telemetry_api router failed: {_sbt_err}")
+
+
+# QUANTUM-CRYSTAL-ARCH: Client Data Export (HIPAA 45 CFR 164.524 Right of Access)
+# Phase 5 Gap N — survivor-facing sensitive-bridge data export with three
+# redaction layers (SQL-filter access_classification + canonical PII screen +
+# atomic single-download). Two routers:
+#   - router       → /api/client/sensitive-data-export/{request,/{id}/status,/download/{token}}
+#   - admin_router → /api/admin/sensitive-data-export/_synthetic_test
+# Fail-soft: if import fails, survivors see an empty state but the rest of
+# the API stays up. Auditor's twin-download self-test goes through the admin
+# router and folds into an existing slot in sensitive_bridge_auditor.py.
+try:
+    from app.routers.client_data_export import (
+        router as client_data_export_router,
+        admin_router as client_data_export_admin_router,
+        _auditor_self_check as _client_data_export_self_check,
+    )
+    app.include_router(client_data_export_router)
+    app.include_router(client_data_export_admin_router)
+    _cde_check = _client_data_export_self_check()
+    if not _cde_check.get("uses_canonical_pii_screen"):
+        print(
+            f"   ⚠️  client_data_export PII screen check FAILED: "
+            f"module={_cde_check.get('pii_screen_module')}"
+        )
+    else:
+        print(
+            f"   ✅ client_data_export router mounted "
+            f"(contract={_cde_check.get('contract_version')}, "
+            f"ttl_days={_cde_check.get('default_ttl_days')})"
+        )
+except Exception as _cde_err:
+    print(f"   ⚠️  client_data_export router failed: {_cde_err}")
 
 
 # QUANTUM-CRYSTAL-ARCH: conditional routers — mount if dependencies are satisfied

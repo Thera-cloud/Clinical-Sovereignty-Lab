@@ -78,7 +78,12 @@ class YouTubeAdapter(SocialPlatformAdapter):
             if token_expiry.tzinfo is None:
                 token_expiry = token_expiry.replace(tzinfo=timezone.utc)
             if token_expiry < now_utc + timedelta(minutes=5):
-                return await self.refresh_token()
+                if await self.refresh_token():
+                    return True
+                logger.warning(
+                    "YouTube: Proactive refresh failed — verifying access token anyway "
+                    "(token_expiry in DB may be stale)"
+                )
 
         # Verify token
         try:

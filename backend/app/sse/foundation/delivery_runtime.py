@@ -119,6 +119,18 @@ async def generate_daily_panels(sid: str, db_pool, skip_check=None) -> dict[str,
                     url = await r2_storage.store_image(img, key)
                     await _log(c, sid, uid, "daily_panel", url, prompt, 1.0,
                                _IMG_COST, "success", client_narrative=client_nar)
+                    if client_nar:  # FIX-NARRATIVE-DIVERSITY — journey continuity for next daily
+                        try:
+                            fs = (client_nar.split(".")[0].strip() + ".") if client_nar else ""
+                            npc_wb = rich.get("current_npcs") or []
+                            new_seq = await c.fetchval(
+                                "UPDATE sse_user_journeys SET last_panel_summary=$1, last_panel_npcs=$2::jsonb, "
+                                "panel_sequence=panel_sequence+1, last_panel_at=NOW() WHERE user_id=$3 "
+                                "RETURNING panel_sequence",
+                                fs, json.dumps(npc_wb), uid)
+                            print(f">>> [DAILY-CONTINUITY] user={uid} seq={new_seq} summary_len={len(fs)}")
+                        except Exception as _dc:
+                            logger.warning("daily continuity writeback failed %s: %s", uid, _dc)
                     logger.info("[COST] daily_panel %s: $%.4f (grok)", uid, _IMG_COST)
                     try:
                         _lid = await c.fetchval(

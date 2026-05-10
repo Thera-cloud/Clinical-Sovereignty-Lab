@@ -8,6 +8,7 @@ Auth: OAuth 2.0 with PKCE (User Access Token)
 """
 
 import hashlib
+import json
 import logging
 import secrets
 import urllib.parse
@@ -31,8 +32,8 @@ X_TOKEN_URL = "https://api.x.com/2/oauth2/token"
 X_API_BASE = "https://api.x.com/2"
 X_USER_AGENT = "LittleNate/1.0 (Sovereign Sanctuary)"
 
-# PKCE state storage (in-memory, single instance)
-_pkce_store: Dict[str, str] = {}
+_PKCE_REDIS_PREFIX = "skyeye_pkce:"
+_PKCE_TTL = 600
 
 
 class XTwitterAdapter(SocialPlatformAdapter):
@@ -45,6 +46,7 @@ class XTwitterAdapter(SocialPlatformAdapter):
         self._access_token: Optional[str] = None
         self._user_id: Optional[str] = None
         self._username: Optional[str] = None
+        self._redis = None
 
     @property
     def _has_credentials(self) -> bool:
@@ -75,7 +77,12 @@ class XTwitterAdapter(SocialPlatformAdapter):
                 token_expiry = token_expiry.replace(tzinfo=timezone.utc)
             if token_expiry < now_utc + timedelta(minutes=5):
                 logger.info("X: Token expired or expiring soon, attempting refresh")
-                return await self.refresh_token()
+                if await self.refresh_token():
+                    return True
+                logger.warning(
+                    "X: Proactive refresh failed — verifying stored access token "
+                    "(token_expiry in DB may be stale)"
+                )
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
@@ -145,6 +152,51 @@ class XTwitterAdapter(SocialPlatformAdapter):
 
     # ── OAuth 2.0 with PKCE ──────────────────────────────────────────
 
+    async def _store_pkce_verifier(self, state: str, verifier: str) -> None:
+        if self._redis:
+            try:
+                await self._redis.setex(f"{_PKCE_REDIS_PREFIX}{state}", _PKCE_TTL, verifier)
+                return
+            except Exception as e:
+                logger.warning("X: Redis PKCE store failed, using DB fallback: %s", e)
+        try:
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    """INSERT INTO skyeye_platform_tokens (platform, access_token, account_id, status)
+                       VALUES ($1, $2, $3, 'pkce_pending')
+                       ON CONFLICT (platform) DO UPDATE
+                       SET access_token = skyeye_platform_tokens.access_token,
+                           account_id = EXCLUDED.account_id""",
+                    f"_pkce_{state}", verifier, state,
+                )
+        except Exception as e:
+            logger.warning("X: DB PKCE store failed: %s", e)
+
+    async def _load_pkce_verifier(self, state: str) -> str:
+        if self._redis:
+            try:
+                val = await self._redis.get(f"{_PKCE_REDIS_PREFIX}{state}")
+                if val:
+                    await self._redis.delete(f"{_PKCE_REDIS_PREFIX}{state}")
+                    return val if isinstance(val, str) else val.decode()
+            except Exception as e:
+                logger.warning("X: Redis PKCE load failed: %s", e)
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT access_token FROM skyeye_platform_tokens WHERE platform = $1",
+                    f"_pkce_{state}",
+                )
+                if row:
+                    await conn.execute(
+                        "DELETE FROM skyeye_platform_tokens WHERE platform = $1",
+                        f"_pkce_{state}",
+                    )
+                    return row["access_token"]
+        except Exception as e:
+            logger.warning("X: DB PKCE load failed: %s", e)
+        return ""
+
     async def get_oauth_url(self, redirect_uri: str) -> str:
         code_verifier = secrets.token_urlsafe(64)[:128]
         code_challenge = hashlib.sha256(code_verifier.encode()).digest()
@@ -152,7 +204,7 @@ class XTwitterAdapter(SocialPlatformAdapter):
         code_challenge_b64 = base64.urlsafe_b64encode(code_challenge).rstrip(b"=").decode()
 
         state = f"skyeye_x_{secrets.token_hex(8)}"
-        _pkce_store[state] = code_verifier
+        await self._store_pkce_verifier(state, code_verifier)
 
         params = {
             "response_type": "code",
@@ -167,9 +219,9 @@ class XTwitterAdapter(SocialPlatformAdapter):
 
     async def handle_oauth_callback(self, code: str, redirect_uri: str,
                                      state: str = None) -> bool:
-        code_verifier = _pkce_store.pop(state, "") if state else ""
+        code_verifier = await self._load_pkce_verifier(state) if state else ""
         if not code_verifier:
-            logger.warning("X: No PKCE code_verifier found for state")
+            logger.warning("X: No PKCE code_verifier found for state %s", state)
             code_verifier = ""
 
         try:

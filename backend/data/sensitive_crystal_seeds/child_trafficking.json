@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "source": "engineer_scaffold",
+  "domain": "child_trafficking",
+  "default_requires_embodiment_phase": true,
+  "ships_as": "awaiting_clinician_authoring",
+  "notes": "Child-trafficking domain. HIGHEST review priority — every crystal must be vetted by a clinician with CSEC/DMST training before any production flip. Engineer scaffolding must not surface in production recall under any circumstance.",
+  "crystals": [
+    {
+      "crystal_text": "Disclosure of childhood trafficking is rarely linear; survivors often disclose what happened to a friend before disclosing it happened to them. The clinical move is to honor the displaced framing without correcting it.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["child_trafficking", "disclosure_pattern", "displaced_framing"],
+      "requires_embodiment_phase": true,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify displaced-framing principle is consistent with what CSEC-trained clinicians actually teach; adjust language if needed."
+      }
+    },
+    {
+      "crystal_text": "Adult survivors of child trafficking commonly carry the introjected belief that they were complicit. Clinical reframing addresses the developmental coercion context — a child cannot consent to commercial sexual exploitation under any framework.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["child_trafficking", "complicity_belief", "developmental_coercion"],
+      "requires_embodiment_phase": true,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Sensitive reframing; clinician should confirm wording aligns with the legal framework (TVPA, age-of-consent statutes) and survivor-voice literature."
+      }
+    },
+    {
+      "crystal_text": "Mandatory reporting obligations for adult disclosure of historical child trafficking vary by jurisdiction. The clinical move is to consult the jurisdiction-compliance register before any reporting decision.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["child_trafficking", "mandatory_reporting", "jurisdiction"],
+      "requires_embodiment_phase": true,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Confirm this points clinicians toward jurisdiction_compliance.py rather than implying a default reporting path."
+      }
+    },
+    {
+      "crystal_text": "Survivors may have been moved across multiple jurisdictions during exploitation; the survivor's current location is not necessarily the jurisdiction where the events occurred. Clinical assessment captures both.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["child_trafficking", "multi_jurisdiction", "assessment"],
+      "requires_embodiment_phase": true,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Verify assessment language does not pressure the survivor for geographic detail before they're ready."
+      }
+    },
+    {
+      "crystal_text": "Survivors of childhood trafficking who are now parents may have heightened protective vigilance toward their own children; this is a normal post-trauma response, not pathological hypervigilance.",
+      "confidence": 0.45,
+      "scope": "global",
+      "topics": ["child_trafficking", "parenting", "protective_vigilance"],
+      "requires_embodiment_phase": true,
+      "metadata": {
+        "needs_review": true,
+        "review_notes": "Cross-reference with parenting.json crystals; ensure consistency in non-pathologization framing."
+      }
+    }
+  ]
+}

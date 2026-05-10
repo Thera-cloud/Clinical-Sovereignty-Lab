@@ -1,6 +1,6 @@
 # Autonomous Trust Verification Agents
 
-These agents can be invoked by Cursor background agents to maintain 100% trust (524/524 checks, 28 auditors, 5 pre-flight).
+These agents can be invoked by Cursor background agents to maintain 100% trust (558/558 checks, 29 auditors, 5 pre-flight).
 
 ---
 
@@ -49,7 +49,7 @@ These agents can be invoked by Cursor background agents to maintain 100% trust (
    ssh root@68.183.168.75 "docker ps --format '{{.Names}}\t{{.Status}}'"
    ```
 
-2. **Service Health** — 114/114 healthy:
+2. **Service Health** — 116/116 healthy:
    ```bash
    ssh root@68.183.168.75 "docker logs nate_backend --since 2m 2>&1 | grep 'STARTUP COMPLETE'"
    ```
@@ -75,7 +75,7 @@ These agents can be invoked by Cursor background agents to maintain 100% trust (
    ssh root@68.183.168.75 'TOKEN=$(grep SKYEYE_AUDIT_TOKEN /opt/clinical-sovereignty-lab/.env | cut -d= -f2); curl -s -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/admin/skyeye-audit/send'
    ```
 
-7. **Wait 5 minutes**, then verify 524/524:
+7. **Wait 5 minutes**, then verify 558/558:
    ```bash
    ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"SELECT content FROM skyeye_activity WHERE type = 'trust_enforcer_sent' ORDER BY created_at DESC LIMIT 1\""
    ```

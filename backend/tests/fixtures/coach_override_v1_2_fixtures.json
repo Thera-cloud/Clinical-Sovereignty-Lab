@@ -1,0 +1,96 @@
+{
+  "_meta": {
+    "version": "v1.2-parity-fixture-1.0.0",
+    "locale": "en-US",
+    "last_review_date": "2026-05-09",
+    "clinician_authored_by": "synthetic_v1_2_contract_extraction",
+    "reviewed_by": "phase5_pre_auditor",
+    "status": "v1_2_parity_fixture_in_repo",
+    "contract_under_test": "coach_override_protocol.py",
+    "phase3_pinned_constants": [
+      "_ALLOWED_FOCUS_DOMAINS_V1_2",
+      "ALLOWED_FOCUS_DOMAINS",
+      "ACUITY_TIERS",
+      "_ACUITY_TIERS_V1_2"
+    ],
+    "auditor_check_id": "phase3_coach_override_v1_2_fixtures_pass",
+    "fixture_count": 8,
+    "positive_count": 5,
+    "negative_count": 3,
+    "notes": "v1.2 had no formal acuity-tier registry (all alerts flowed through coach_override_audit rows implicitly); _ACUITY_TIERS_V1_2 is intentionally empty. Positive cases therefore exercise focus_domain dispatch via merge_override_payload(). Negative cases verify v1.3 additions (tiers + new focus_domains) do not collide with v1.2 dispatch."
+  },
+  "fixtures": [
+    {
+      "id": "override_pos_focus_domain_clinical",
+      "category": "positive",
+      "kind": "v1_2_focus_domain_dispatches",
+      "input": {"focus_domain": "clinical"},
+      "expected": {"merged_focus_domain": "clinical", "is_v1_2_domain": true},
+      "rationale": "v1.2 focus_domain 'clinical' must merge unchanged."
+    },
+    {
+      "id": "override_pos_focus_domain_family_systems",
+      "category": "positive",
+      "kind": "v1_2_focus_domain_dispatches",
+      "input": {"focus_domain": "family_systems"},
+      "expected": {"merged_focus_domain": "family_systems", "is_v1_2_domain": true},
+      "rationale": "v1.2 focus_domain 'family_systems' must merge unchanged."
+    },
+    {
+      "id": "override_pos_focus_domain_crisis",
+      "category": "positive",
+      "kind": "v1_2_focus_domain_dispatches",
+      "input": {"focus_domain": "crisis"},
+      "expected": {"merged_focus_domain": "crisis", "is_v1_2_domain": true},
+      "rationale": "v1.2 focus_domain 'crisis' must merge unchanged."
+    },
+    {
+      "id": "override_pos_focus_domain_trauma_informed",
+      "category": "positive",
+      "kind": "v1_2_focus_domain_dispatches",
+      "input": {"focus_domain": "trauma_informed"},
+      "expected": {"merged_focus_domain": "trauma_informed", "is_v1_2_domain": true},
+      "rationale": "v1.2 focus_domain 'trauma_informed' must merge unchanged."
+    },
+    {
+      "id": "override_pos_focus_domain_attachment",
+      "category": "positive",
+      "kind": "v1_2_focus_domain_dispatches",
+      "input": {"focus_domain": "attachment"},
+      "expected": {"merged_focus_domain": "attachment", "is_v1_2_domain": true},
+      "rationale": "v1.2 focus_domain 'attachment' must merge unchanged."
+    },
+    {
+      "id": "override_neg_v1_3_intimacy_clinical_does_not_displace_v1_2",
+      "category": "negative",
+      "kind": "v1_3_focus_domain_added_without_displacing_v1_2",
+      "input": {"focus_domain": "intimacy_clinical"},
+      "expected": {
+        "is_v1_2_domain": false,
+        "in_current_allowed_domains": true,
+        "v1_2_domain_count_preserved": 11
+      },
+      "rationale": "v1.3-added 'intimacy_clinical' is allowed but is NOT a v1.2 domain (catches accidental v1.2 hijack)."
+    },
+    {
+      "id": "override_neg_v1_3_trafficking_does_not_displace_v1_2",
+      "category": "negative",
+      "kind": "v1_3_focus_domain_added_without_displacing_v1_2",
+      "input": {"focus_domain": "trafficking"},
+      "expected": {
+        "is_v1_2_domain": false,
+        "in_current_allowed_domains": true,
+        "v1_2_domain_count_preserved": 11
+      },
+      "rationale": "v1.3-added 'trafficking' is allowed but is NOT a v1.2 domain."
+    },
+    {
+      "id": "override_neg_v1_3_acuity_tier_name_collision_check",
+      "category": "negative",
+      "kind": "v1_3_acuity_tier_name_does_not_collide_with_v1_2",
+      "input": {"tier_name": "trafficking_disclosure"},
+      "expected": {"in_v1_2_acuity_tiers": false, "in_current_acuity_tiers": true},
+      "rationale": "v1.3-added 'trafficking_disclosure' tier dispatches via current ACUITY_TIERS but is NOT a member of the empty v1.2 tier set. Catches any future code path that mis-routes through a v1.2 dispatch."
+    }
+  ]
+}

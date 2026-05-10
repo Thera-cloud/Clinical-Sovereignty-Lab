@@ -67,7 +67,12 @@ class PinterestAdapter(SocialPlatformAdapter):
             if getattr(exp, "tzinfo", None) is None:
                 exp = exp.replace(tzinfo=timezone.utc)
             if exp < now_utc:
-                return await self.refresh_token()
+                if await self.refresh_token():
+                    return True
+                logger.warning(
+                    "Pinterest: Refresh failed — verifying access token anyway "
+                    "(token_expiry in DB may be stale)"
+                )
 
         try:
             async with httpx.AsyncClient() as client:

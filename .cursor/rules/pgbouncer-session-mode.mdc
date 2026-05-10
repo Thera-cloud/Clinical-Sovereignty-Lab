@@ -9,7 +9,7 @@ PgBouncer was deployed on **2026-04-26** in front of PostgreSQL on the productio
 | `nate_pgbouncer` container | Up and healthy (listens on `0.0.0.0:6432` via explicit `LISTEN_PORT: 6432`) |
 | `nate_backend` container | Up and healthy (force-recreated to pick up `pgbouncer:6432` routing) |
 | `nate_bridge` container | Up and healthy — **NOT recreated** (protected-file constraint, see Blocker 4) |
-| Backend startup | `STARTUP COMPLETE: 114/114 services healthy — ALL SYSTEMS NOMINAL` |
+| Backend startup | `STARTUP COMPLETE: 116/116 services healthy — ALL SYSTEMS NOMINAL` |
 | `pg_stat_activity` distribution | `nate_pgbouncer @ 172.20.0.7` = 60 conns (pooled) · `nate_bridge @ 172.20.0.5` = 2 conns (direct) |
 | pgcrypto round-trip | `SELECT count(*) FROM users WHERE password_hash IS NOT NULL` = 42 ✅ encrypted reads work through pooled session |
 | Authenticated REST | `GET /api/trust-enforcer/status` = 200 · `GET /api/skyeye/pulse` = 200 |
@@ -127,7 +127,7 @@ ssh root@68.183.168.75 'docker exec nate_postgres psql -U nate_admin -d little_n
 
 # Health invariants from service-health-49-49.mdc
 ssh root@68.183.168.75 "docker logs nate_backend --since 30s 2>&1 | grep 'STARTUP COMPLETE'"
-# Expected: 114/114 services healthy — ALL SYSTEMS NOMINAL
+# Expected: 116/116 services healthy — ALL SYSTEMS NOMINAL
 ```
 
 ## Never Do (Until Migration Is Complete)

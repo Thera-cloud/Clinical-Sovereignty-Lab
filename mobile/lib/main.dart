@@ -2747,6 +2747,23 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
   // WebSocket subscription
   StreamSubscription? _wsSubscription;
 
+  // Reconnect backoff state (per endpoint-websocket-sustainability.mdc Pattern #2)
+  int _reconnectAttempts = 0;
+  static const int _maxReconnectAttempts = 10;
+  Timer? _reconnectTimer;
+  bool _isManuallyDisconnected = false;
+
+  // ARCH-FIX (FAMILY-SANCTUARY-HUB-SHARE): when the chat screen's _ClientWsHub
+  // already holds an authenticated socket for this user, Family Sanctuary
+  // borrows it instead of opening a duplicate WS that the bridge would kick.
+  // See voice-call-pipeline & endpoint-websocket-sustainability rules.
+  bool _borrowedFromHub = false;
+  StreamSubscription<Object>? _hubErrSub;
+  StreamSubscription<void>? _hubDoneSub;
+  Timer? _hubRejoinTimer;
+  int _hubRejoinAttempts = 0;
+  static const int _maxHubRejoinAttempts = 30;
+
   @override
   void initState() {
     super.initState();
@@ -2762,9 +2779,48 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
   }
 
   void _connectToServer() {
-    // Cancel previous subscription and close old channel before reconnecting
-    _wsSubscription?.cancel();
-    _wsSubscription = null;
+    // Defensive: a fresh connection cycle clears any stale manual-disconnect
+    // state so onDone/onError can schedule reconnects normally.
+    _isManuallyDisconnected = false;
+    // Cancel previous subscriptions before re-attaching.
+    _wsSubscription?.cancel(); _wsSubscription = null;
+    _hubErrSub?.cancel(); _hubErrSub = null;
+    _hubDoneSub?.cancel(); _hubDoneSub = null;
+    _hubRejoinTimer?.cancel(); _hubRejoinTimer = null;
+
+    // ARCH-FIX (FAMILY-SANCTUARY-HUB-SHARE): if the shared client hub already
+    // owns an authenticated WS for this user (Lobby/NeuralInterface attached
+    // it on login_success), reuse it. This eliminates the duplicate-session
+    // kick storm that produced the reconnect loop. The hub is the SOLE owner
+    // of the underlying stream; we subscribe via the broadcast inbound stream.
+    if (_ClientWsHub.channel != null) {
+      debugLog('>>> SANCTUARY: Borrowing _ClientWsHub channel (already authed)');
+      _borrowedFromHub = true;
+      _channel = _ClientWsHub.channel;
+      _wsSubscription = _ClientWsHub.inbound.listen(
+        (message) {
+          try {
+            _handleWebSocketMessage(json.decode(message as String));
+          } catch (e) {
+            debugLog('Error parsing hub message: $e');
+          }
+        },
+      );
+      _hubErrSub = _ClientWsHub.errors.listen((e) {
+        debugLog('>>> SANCTUARY: Hub error: $e');
+      });
+      _hubDoneSub = _ClientWsHub.done.listen((_) {
+        debugLog('>>> SANCTUARY: Hub channel closed; awaiting hub revival');
+        if (!_isManuallyDisconnected && mounted) _scheduleHubRejoin();
+      });
+      // Hub is already authed -> jump straight to sanctuary join/create.
+      _initiateSanctuaryFlow();
+      return;
+    }
+
+    // Standalone fallback: hub not initialized yet (rare; defensive).
+    debugLog('>>> SANCTUARY: Hub unavailable, opening standalone WS');
+    _borrowedFromHub = false;
     try { _channel?.sink.close(); } catch (_) {}
     _channel = null;
 
@@ -2776,7 +2832,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
         widget.profile['email']?.split('@')[0] ??
         'client1';
 
-    debugLog('>>> SANCTUARY: Authenticating...');
+    debugLog('>>> SANCTUARY: Authenticating (standalone)...');
     _channel?.sink.add(json.encode({
       "type": "login_request",
       "username": username,
@@ -2804,13 +2860,24 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
 
   @override
   void dispose() {
+    _isManuallyDisconnected = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _hubRejoinTimer?.cancel();
+    _hubRejoinTimer = null;
     WidgetsBinding.instance.removeObserver(this);
     _messageController.dispose();
     _suggestedController.dispose();
     _groupCoachingTimer?.cancel();
     _scrollController.dispose();
     _wsSubscription?.cancel();
-    _channel?.sink.close();
+    _hubErrSub?.cancel();
+    _hubDoneSub?.cancel();
+    // CRITICAL: when borrowing _ClientWsHub.channel the chat screen owns the
+    // socket lifetime. Closing it here would kill the chat screen's WS too.
+    if (!_borrowedFromHub) {
+      try { _channel?.sink.close(); } catch (_) {}
+    }
     super.dispose();
   }
 
@@ -3004,6 +3071,8 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
     
     if (state == AppLifecycleState.resumed) {
       debugLog('>>> SANCTUARY: App resumed, syncing state...');
+      // Verify socket health on resume (handles iOS/Android background WS kills).
+      _reconnectIfNeeded();
       // Auto-sync state when returning from background (handles missed broadcasts)
       if (_sanctuaryId != null) {
         Future.delayed(const Duration(milliseconds: 500), () {
@@ -3015,12 +3084,22 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
   }
 
   void _reconnectIfNeeded() {
-    // Check if WebSocket is still connected
+    // Hub-borrow mode: the chat screen owns reconnects. We just verify the hub
+    // socket is still alive and resync if needed.
+    if (_borrowedFromHub) {
+      if (_ClientWsHub.channel == null) {
+        debugLog('>>> SANCTUARY: Resume; hub down, scheduling rejoin');
+        _scheduleHubRejoin();
+      } else {
+        debugLog('>>> SANCTUARY: Resume; hub alive');
+      }
+      return;
+    }
+    // Standalone mode: check if WebSocket is still connected.
     if (_channel == null) {
-      debugLog('>>> SANCTUARY: Reconnecting...');
+      debugLog('>>> SANCTUARY: Reconnecting (standalone)...');
       _connectToServer();
     } else {
-      // Send a ping to check connection, if it fails reconnect
       try {
         _channel?.sink.add(json.encode({"type": "ping"}));
         debugLog('>>> SANCTUARY: Connection still alive');
@@ -3309,18 +3388,104 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
       onError: (error) {
         debugLog('>>> SANCTUARY: WebSocket error: $error');
         if (mounted) _showError('Connection interrupted. Reconnecting...');
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) _connectToServer();
-        });
+        _scheduleReconnect();
       },
       onDone: () {
         debugLog('>>> SANCTUARY: WebSocket closed');
-        if (mounted) _showError('Reconnecting...');
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) _connectToServer();
-        });
+        if (!_isManuallyDisconnected && mounted) {
+          _showError('Reconnecting...');
+          _scheduleReconnect();
+        }
       },
     );
+  }
+
+  /// Schedule a reconnect with exponential backoff + 20% jitter.
+  /// Per endpoint-websocket-sustainability.mdc Pattern #2 and the lobby pattern at
+  /// _LobbyScreenState._connectToBridge. Caps at ~30s, gives up after _maxReconnectAttempts.
+  void _scheduleReconnect() {
+    if (_isManuallyDisconnected || !mounted) return;
+
+    // Hub-borrow mode: chat screen owns reconnect. Don't open a duplicate WS;
+    // poll for hub channel revival and resend sanctuary_join when it returns.
+    if (_borrowedFromHub) {
+      _scheduleHubRejoin();
+      return;
+    }
+
+    _reconnectTimer?.cancel();
+
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      debugLog('>>> SANCTUARY: Reconnect ceiling reached ($_reconnectAttempts attempts)');
+      if (mounted) _showError('Unable to reach Family Sanctuary. Pull down to retry.');
+      return;
+    }
+
+    final attempt = _reconnectAttempts.clamp(0, 10);
+    final baseMs = (1000 * (1 << attempt)).clamp(1000, 30000);
+    final jitterMs = (baseMs * 0.2 *
+            (DateTime.now().millisecondsSinceEpoch % 100) /
+            100)
+        .toInt();
+    final delayMs = baseMs + jitterMs;
+    _reconnectAttempts++;
+
+    debugLog('>>> SANCTUARY: Reconnect attempt $_reconnectAttempts in ${delayMs}ms');
+    _reconnectTimer = Timer(Duration(milliseconds: delayMs), () {
+      if (!mounted || _isManuallyDisconnected) return;
+      _connectToServer();
+    });
+  }
+
+  /// Hub-borrow rejoin path: chat screen reconnects the hub socket on its own
+  /// schedule. We poll once per second for `_ClientWsHub.channel` revival, then
+  /// re-attach + resend sanctuary_join. Caps at _maxHubRejoinAttempts (~30s).
+  void _scheduleHubRejoin() {
+    if (_isManuallyDisconnected || !mounted) return;
+    _hubRejoinTimer?.cancel();
+
+    if (_hubRejoinAttempts >= _maxHubRejoinAttempts) {
+      debugLog('>>> SANCTUARY: Hub rejoin ceiling reached ($_hubRejoinAttempts)');
+      if (mounted) _showError('Connection lost. Pull down to retry.');
+      return;
+    }
+    _hubRejoinAttempts++;
+
+    _hubRejoinTimer = Timer(const Duration(milliseconds: 1000), () {
+      if (!mounted || _isManuallyDisconnected) return;
+      if (_ClientWsHub.channel != null) {
+        debugLog('>>> SANCTUARY: Hub channel revived; re-attaching');
+        _hubRejoinAttempts = 0;
+        _connectToServer();
+      } else {
+        _scheduleHubRejoin();
+      }
+    });
+  }
+
+  /// Send sanctuary_join (rejoin) or sanctuary_get_or_create (fresh) on the
+  /// already-authed hub socket. Mirrors the `case 'login_success'` handler so
+  /// hub-borrow and standalone paths produce identical sanctuary state.
+  void _initiateSanctuaryFlow() {
+    if (!mounted || _channel == null) return;
+    _reconnectAttempts = 0;
+    if (_sanctuaryId != null) {
+      debugLog('>>> SANCTUARY: hub mode rejoin -> sanctuary_join $_sanctuaryId');
+      _channel?.sink.add(json.encode({
+        "type": "sanctuary_join",
+        "sanctuary_id": _sanctuaryId,
+      }));
+    } else {
+      final familyId = widget.profile['family_id'];
+      final hardwareId = widget.profile['hardware_id'] ?? 'GUEST';
+      debugLog('>>> SANCTUARY: hub mode -> sanctuary_get_or_create family=$familyId');
+      _channel?.sink.add(json.encode({
+        "type": "sanctuary_get_or_create",
+        "family_id": familyId,
+        "member_id": hardwareId,
+        "member_name": widget.profile['name'] ?? 'Family Member',
+      }));
+    }
   }
 
   void _postAssistedResponse() {
@@ -3603,16 +3768,31 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
       // LOGIN
       case 'login_success':
         debugLog('>>> SANCTUARY: Authenticated successfully');
-        // Now request or create the sanctuary (event-driven, not timer-based)
-        final familyId = widget.profile['family_id'];
-        final hardwareId = widget.profile['hardware_id'] ?? 'GUEST';
-        debugLog('>>> SANCTUARY: Checking for existing sanctuary for family $familyId');
-        _channel?.sink.add(json.encode({
-          "type": "sanctuary_get_or_create",
-          "family_id": familyId,
-          "member_id": hardwareId,
-          "member_name": widget.profile['name'] ?? 'Family Member',
-        }));
+        // Successful auth -> reset reconnect backoff so future drops start fast,
+        // and clear manual-disconnect state in case it was set by a prior path.
+        _reconnectAttempts = 0;
+        _isManuallyDisconnected = false;
+        // If we already had an active sanctuary in this state (i.e. this is a
+        // reconnect, not a fresh entry), rejoin via sanctuary_join so the
+        // backend's add_or_reconnect_member() emits `sanctuary_reconnected`
+        // with the last-50 message history. Otherwise, fresh entry path.
+        if (_sanctuaryId != null) {
+          debugLog('>>> SANCTUARY: Reconnect path -> sanctuary_join $_sanctuaryId');
+          _channel?.sink.add(json.encode({
+            "type": "sanctuary_join",
+            "sanctuary_id": _sanctuaryId,
+          }));
+        } else {
+          final familyId = widget.profile['family_id'];
+          final hardwareId = widget.profile['hardware_id'] ?? 'GUEST';
+          debugLog('>>> SANCTUARY: Checking for existing sanctuary for family $familyId');
+          _channel?.sink.add(json.encode({
+            "type": "sanctuary_get_or_create",
+            "family_id": familyId,
+            "member_id": hardwareId,
+            "member_name": widget.profile['name'] ?? 'Family Member',
+          }));
+        }
         break;
         
       case 'metrics_update':
@@ -8512,7 +8692,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
         const SizedBox(height: 28),
         _buildRoleCard(
           "I'm a Client",
-          "AI companion, therapy, coaching, family wellness",
+          "Between session AI companion - 24/7, wellness coaching, family deep",
           Icons.self_improvement,
           Colors.blueAccent,
           "CLIENT",
@@ -8520,7 +8700,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
         const SizedBox(height: 16),
         _buildRoleCard(
           "I'm a Coach",
-          "Coach Command, DOJO training, mentoring — requires approval",
+          "AI assisted coaching platform all-in-one suite, scheduling, DOJO training, financials, records",
           Icons.psychology,
           const Color(0xFFFFD700),
           "COACH",
