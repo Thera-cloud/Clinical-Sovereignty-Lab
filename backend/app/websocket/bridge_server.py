@@ -26101,7 +26101,7 @@ Coach Reflection on Session {session_id}:
                         onboarding_message = f"""Welcome to Family Sanctuary, {current_profile['name']}. I'm Little Nate, and I'll be facilitating this conversation to help your family find connection and understanding.
 
                     Currently in the sanctuary:
-                    {chr(10).join(['• ' + name for name in members_list])}
+                    {chr(10).join(['• ' + (m.get('name') or 'Member') for m in members_list])}  # QUANTUM-CRYSTAL-ARCH: members_list is List[dict]; was raising TypeError and tearing the WS down on every sanctuary_join
 
                     Before we begin, please share:
                     1. What brought you to this Family Sanctuary today?
