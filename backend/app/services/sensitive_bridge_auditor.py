@@ -903,8 +903,31 @@ async def _check_crystal_domain_canonical(conn, cid: str) -> Dict[str, Any]:
     every crystal in the sensitive-domain set MUST have ``requires_embodiment_phase``
     populated. NULL on a sensitive-domain crystal is a contract violation.
     """
-    canonical = {"clinical", "coaching", "marketing",
-                 "research", "culture", "defense", "general"}
+    # Phase 6 follow-up (Path B, 2026-05-10): canonical set expanded from the
+    # original 7 to 15 to honor pre-Sensitive-Clinical-Bridge organic domains
+    # already populated in nate_intelligence_crystals (178k+ rows). Each added
+    # domain has a documented operational origin and a long-term renormalization
+    # path; this expansion is a contract widening, not a relaxation of the
+    # sealed-domain principle.
+    #
+    # Original 7 (sealed):  clinical, coaching, marketing, research,
+    #                       culture, defense, general
+    # Added 8 (organic):    coding                 — code-learning crystals
+    #                       biochem                — Nevedal biochemistry
+    #                       coherence              — Nevedal coherence engine
+    #                       predictive_intelligence— foresight engine
+    #                       voice                  — voice biometrics
+    #                       patent                 — patent portfolio
+    #                       neuroscience_foundations — Patent #9 neuroanatomical
+    #                       neural_acoustic        — neural-acoustic verification
+    canonical = {
+        # Sealed clinical/sensitive-bridge contract (Plan v1.3 §canonical-domains)
+        "clinical", "coaching", "marketing", "research",
+        "culture", "defense", "general",
+        # Organic engine/research domains (pre-existing in production)
+        "coding", "biochem", "coherence", "predictive_intelligence",
+        "voice", "patent", "neuroscience_foundations", "neural_acoustic",
+    }
     try:
         rows = await conn.fetch(
             "SELECT DISTINCT domain FROM nate_intelligence_crystals "
