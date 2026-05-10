@@ -7234,14 +7234,26 @@ class AzureCortex:
         self._client_messages = {}  # QUANTUM-CRYSTAL-ARCH — uid -> list of recent client messages
 
         # EFT marker patterns (parsed from Little Nate output ONLY)
-        self._eft_longing_re = re.compile(r'\[LONGING_DETECTED:\s*([^|]+)\|([^|]+)\|"([^"]+)"\|([^|]+)\|([^\]]+)\]')
-        self._eft_tender_re = re.compile(r'\[TENDER_MOMENT:\s*"([^"]+)"\|([^|]+)\|([^\]]+)\]')
-        self._eft_corrective_re = re.compile(r'\[CORRECTIVE_MOMENT:\s*"([^"]+)"\|([^\]]+)\]')
-        self._eft_cycle_re = re.compile(r'\[NEGATIVE_CYCLE:\s*([^|]+)\|"([^"]+)"\|([^\]]+)\]')
+        # QUANTUM-CRYSTAL-ARCH: quote class accepts straight ("), curly (\u201c\u201d) and
+        # mismatched typography so models that auto-convert to smart quotes still parse +
+        # strip cleanly. Previously curly quotes broke extraction and leaked the raw marker.
+        _Q = r'["\u201c\u201d]'
+        self._eft_longing_re = re.compile(rf'\[LONGING_DETECTED:\s*([^|]+)\|([^|]+)\|{_Q}([^"\u201c\u201d]+){_Q}\|([^|]+)\|([^\]]+)\]')
+        self._eft_tender_re = re.compile(rf'\[TENDER_MOMENT:\s*{_Q}([^"\u201c\u201d]+){_Q}\|([^|]+)\|([^\]]+)\]')
+        self._eft_corrective_re = re.compile(rf'\[CORRECTIVE_MOMENT:\s*{_Q}([^"\u201c\u201d]+){_Q}\|([^\]]+)\]')
+        self._eft_cycle_re = re.compile(rf'\[NEGATIVE_CYCLE:\s*([^|]+)\|{_Q}([^"\u201c\u201d]+){_Q}\|([^\]]+)\]')
         self._eft_liminal_re = re.compile(r'\[LIMINAL_THRESHOLD:\s*[^\]]+\]')
 
-        # Catch-all for any internal clinical/debug tags that should never reach clients
-        self._internal_tag_re = re.compile(r'\[(?:LIMINAL_THRESHOLD|CLINICAL|INTERNAL|DEBUG|THRESHOLD|RISSC|ODPE|EFT_STAGE|CYCLE_PATTERN|ATTACHMENT_STYLE):[^\]]*\]')
+        # QUANTUM-CRYSTAL-ARCH: catch-all stripper for every internal marker type. This is
+        # the defense-in-depth net so a malformed/curly-quoted marker can never reach the
+        # client, even if the precise extraction regex above misses it.
+        self._internal_tag_re = re.compile(
+            r'\[(?:LONGING_DETECTED|TENDER_MOMENT|CORRECTIVE_MOMENT|NEGATIVE_CYCLE|'
+            r'LIMINAL_THRESHOLD|IMAGERY_USED|SCHEMA_ACTIVATED|ACTIVATION_DEEPENED|'
+            r'MISMATCH_CREATED|CONSOLIDATION|RECONSOLIDATION_VERIFIED|'
+            r'CLINICAL|INTERNAL|DEBUG|THRESHOLD|RISSC|ODPE|EFT_STAGE|CYCLE_PATTERN|ATTACHMENT_STYLE)'
+            r':[^\]]*\]'
+        )
 
         # Reconsolidation / imagery markers (parsed from Little Nate output ONLY)
         self._recon_imagery_re = re.compile(r'\[IMAGERY_USED:\s*([^|]+)\|"([^"]+)"\|([^\]]+)\]')
@@ -9684,6 +9696,10 @@ class AzureCortex:
           [TENDER_MOMENT: "description"|PARTICIPANTS|QUALITY]
         - If you notice a negative cycle, append:
           [NEGATIVE_CYCLE: PATTERN|"description"|ROLES]
+          ROLES MUST list ONLY authenticated family members (use [AUTH:<name>] tags as truth).
+          NEVER include yourself ("Nate", "Little Nate", "the AI") as a participant or role.
+          The cycle exists BETWEEN family members; you observe it, you are not in it.
+          If only one member has spoken so far, do NOT emit this marker — wait for an interaction.
         - If a corrective moment happens, append:
           [CORRECTIVE_MOMENT: "description"|LONGING_MET]
         - If you detect a liminal threshold moment, append:
