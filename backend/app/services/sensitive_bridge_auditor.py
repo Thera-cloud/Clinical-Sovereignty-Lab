@@ -1147,7 +1147,7 @@ async def _check_handoff_redaction_no_pii(conn, cid: str) -> Dict[str, Any]:
             SELECT payload_json
             FROM sensitive_bridge_log
             WHERE event_type LIKE 'coach_alert%'
-            ORDER BY created_at DESC
+            ORDER BY occurred_at DESC
             LIMIT 50
             """,
         )
