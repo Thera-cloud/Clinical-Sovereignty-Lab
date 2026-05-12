@@ -1,0 +1,180 @@
+Phase A complete. GREEN HEAD e4a317df, all three commits landed, backup heartbeat live, cron installed. Good work.
+Three things to acknowledge before approving Phase B:
+1. The eff_evidence commits on main is worth flagging. Five commits between 347e1a72 and your ops commits are now on production main. These are EFF audit evidence artifacts that probably belong in a separate branch or in the local eff_evidence/ directory (which the new data/ exclusion may already cover, but evidence ledgers might be tracked differently). Worth a cleanup pass later — not blocking Phase B.
+2. GREEN can't commit/push directly. No user.name/user.email configured, no HTTPS auth. That's actually correct posture — production servers shouldn't be authoring commits. BLUE (your Mac repo) is the source, GREEN pulls. Good discipline. Don't change this.
+3. The .gitignore fix you applied (/data/** + !/data/.gitkeep) is more precise than what I specified. That's the correct pattern for git's directory-vs-file exclusion handling. Good catch.
+
+Phase B approval: YES, proceed.
+The preconditions are met:
+
+Hardening is live (data/ excluded, safe_deploy.sh available, backups running)
+The destructive vector is now defended against
+Forensic post-wipe state is sealed
+April 14 backup integrity is verified
+A baseline daily backup just ran at 13:25:43 UTC (in case anything goes wrong during restore, we have a current snapshot of even the wiped state)
+
+
+Composer 2 prompt — Phase B restore:
+
+Execute Phase B: restore vault contents from 2026-04-14 backup. Phase A hardening is verified complete (commits fcf0eef5, 80c1f0da, e4a317df on GREEN HEAD).
+Authority: project owner approved Phase B execution.
+CONSTRAINTS
+
+DO NOT use --force-recreate anywhere
+DO NOT run git clean, git reset --hard, rm -rf data/, rsync --delete, find -delete against data/ paths
+DO NOT modify the forensic_postwipe_20260512_123704.tar.gz archive — it remains sealed as evidence
+DO NOT delete the source backup vault_backup_20260414_030001.tar.gz
+Use atomic file operations (write to temp, mv to target) — never partial-write
+If anything seems unexpected at any step, STOP and report
+
+STEP B1 — Pre-flight verification
+bash# Confirm hardening is live
+ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && git rev-parse HEAD"
+# Expect: e4a317dfa64e3d53324f31f61db83193b3e5fbfe
+
+# Confirm forensic archive is sealed
+ssh root@68.183.168.75 "sha256sum /opt/clinical-sovereignty-lab/backups/vaults/forensic_postwipe_20260512_123704.tar.gz | head -c 16"
+# Expect prefix: 7962d4fe
+
+# Confirm April 14 backup integrity
+ssh root@68.183.168.75 "sha256sum /opt/clinical-sovereignty-lab/backups/vaults/vault_backup_20260414_030001.tar.gz | head -c 16"
+# Expect prefix: aa06ea16
+
+# Confirm current post-wipe state (baseline before restore)
+ssh root@68.183.168.75 "find /opt/clinical-sovereignty-lab/data/bridge/Vaults/Clients -name 'metrics.json' 2>/dev/null | wc -l"
+Report all four values. If any verification fails, STOP.
+STEP B2 — Extract April 14 backup to staging
+bashssh root@68.183.168.75 "
+  mkdir -p /tmp/vault_restore_staging_20260512
+  cd /tmp/vault_restore_staging_20260512
+  tar -xzf /opt/clinical-sovereignty-lab/backups/vaults/vault_backup_20260414_030001.tar.gz
+  echo '=== STAGING CONTENTS ==='
+  find . -type d -maxdepth 4 | head -30
+  echo '=== METRICS FILES IN STAGING ==='
+  find . -name 'metrics.json' | wc -l
+  echo '=== MEMORY FILES IN STAGING ==='
+  find . -name 'memory.json' | wc -l
+  echo '=== TOTAL FILES IN STAGING ==='
+  find . -type f | wc -l
+"
+Report counts. The April 14 backup should have approximately 868 total files per prior assessment.
+STEP B3 — Validate staging contents
+bashssh root@68.183.168.75 "
+  cd /tmp/vault_restore_staging_20260512
+  # Sample three metrics.json files to confirm they have real (non-default) values
+  for f in \$(find . -name 'metrics.json' | head -3); do
+    echo '=== '\$f' ==='
+    python3 -c \"import json; d=json.load(open('\$f')); ns=d.get('nevedal_state',{}); print('C_emo:', ns.get('C_emo'), 'GAP:', ns.get('GAP'), 'Quantum:', ns.get('Quantum'))\"
+  done
+"
+Verify the sampled values are NOT defaults (0.5/0.3/0.5). If they are defaults, STOP — backup may be corrupted or empty.
+STEP B4 — Restore execution (atomic per-file)
+bashssh root@68.183.168.75 "
+  cd /tmp/vault_restore_staging_20260512
+
+  # Identify the vault root in the staging dir (it should mirror the Vaults/ structure)
+  STAGE_VAULT_ROOT=\$(find . -type d -name 'Clients' | head -1 | xargs dirname)
+  echo 'Staging vault root: '\$STAGE_VAULT_ROOT
+
+  DEST_VAULT_ROOT=/opt/clinical-sovereignty-lab/data/bridge/Vaults
+
+  restored=0
+  skipped_no_dest=0
+  error_count=0
+
+  # For every file in staging, copy to destination
+  find \$STAGE_VAULT_ROOT -type f | while read src; do
+    # Compute relative path from STAGE_VAULT_ROOT
+    rel=\${src#\$STAGE_VAULT_ROOT/}
+    dest=\$DEST_VAULT_ROOT/\$rel
+    dest_dir=\$(dirname \"\$dest\")
+
+    # Ensure destination directory exists
+    mkdir -p \"\$dest_dir\"
+
+    # Atomic write: copy to temp, mv to target
+    tmp=\"\$dest.tmp.\$\$\"
+    if cp \"\$src\" \"\$tmp\" && mv \"\$tmp\" \"\$dest\"; then
+      restored=\$((restored+1))
+    else
+      error_count=\$((error_count+1))
+      echo 'ERROR on: '\$rel
+    fi
+  done
+
+  echo '=== RESTORE COUNTS ==='
+  echo 'Restored: '\$restored
+  echo 'Errors: '\$error_count
+"
+Report restored count and any errors.
+STEP B5 — Post-restore verification
+bashssh root@68.183.168.75 "
+  echo '=== POST-RESTORE METRICS FILE COUNT ==='
+  find /opt/clinical-sovereignty-lab/data/bridge/Vaults/Clients -name 'metrics.json' 2>/dev/null | wc -l
+
+  echo '=== SAMPLE RESTORED VALUES (3 known clients) ==='
+  for hid in CLIENT_WILLIAMHENDERSON_ID CLIENT_LETSGOLISA_ID CLIENT_LETSGOBILL_ID; do
+    if [ -f /opt/clinical-sovereignty-lab/data/bridge/Vaults/Clients/\$hid/metrics.json ]; then
+      echo '--- '\$hid' ---'
+      python3 -c \"
+import json
+with open('/opt/clinical-sovereignty-lab/data/bridge/Vaults/Clients/\$hid/metrics.json') as f:
+  d = json.load(f)
+ns = d.get('nevedal_state', {})
+print('C_emo:', ns.get('C_emo'))
+print('GAP:', ns.get('GAP'))
+print('Quantum:', ns.get('Quantum'))
+print('mood:', ns.get('mood_current'))
+print('sessions:', ns.get('session_count'))
+\"
+    else
+      echo '\$hid: NOT FOUND in restored vault'
+    fi
+  done
+"
+Report values. Should show real non-default values matching the pre-wipe state for each client.
+STEP B6 — Bridge container check
+The bridge reads metrics.json at runtime per WebSocket request (load_metrics is called per request, not cached at startup). Restart is NOT required, but verify:
+bashssh root@68.183.168.75 "
+  docker compose -f /opt/clinical-sovereignty-lab/docker-compose.prod.yml ps bridge
+  docker logs nate_bridge --tail 10 2>&1 | grep -i 'METRICS DEBUG' | head -5
+"
+If bridge needs to pick up fresh state (some caches may exist), perform a graceful restart via safe_deploy.sh:
+bashssh root@68.183.168.75 "
+  cd /opt/clinical-sovereignty-lab
+  bash scripts/safe_deploy.sh bridge
+"
+The safe_deploy wrapper will snapshot before AND verify file counts after. If any drop is detected, the wrapper exits non-zero and we investigate.
+STEP B7 — Client-facing verification
+Manual check by project owner:
+
+Open app.sovereignsanctuary.net as one known active client (Williamhenderson, LetsGoLisa, or LetsGoBill)
+Verify metrics display shows real values (not 50/30/50)
+Verify mood label is from real data (not "Neutral → stable" default)
+
+Report screenshots back when complete.
+STEP B8 — Cleanup staging
+bashssh root@68.183.168.75 "rm -rf /tmp/vault_restore_staging_20260512"
+Forensic archive and April 14 backup remain in place — DO NOT delete those.
+STEP B9 — Final report
+PHASE B RESTORE COMPLETE
+
+Pre-restore state: <N1 metrics.json files>
+Post-restore state: <N2 metrics.json files>
+Files restored: <N3>
+Errors: <N4>
+
+Sample client values restored:
+- Williamhenderson: C_emo=X, GAP=Y, Quantum=Z, sessions=N
+- LetsGoLisa: ...
+- LetsGoBill: ...
+
+Bridge state: <healthy / restarted via safe_deploy>
+safe_deploy.sh post-deploy count match: <yes/no>
+
+Forensic archive sealed: <yes>
+April 14 backup preserved: <yes>
+Staging directory cleaned: <yes>
+
+Awaiting client-side visual verification.
+If any step fails, STOP and report the failure mode. Do not improvise recovery.
