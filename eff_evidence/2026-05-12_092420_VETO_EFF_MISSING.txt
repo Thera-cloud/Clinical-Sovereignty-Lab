@@ -1,0 +1,28 @@
+Audit the existing .cursorrules file (or equivalent rules file) at /opt/clinical-sovereignty-lab repo root. Identify any rules currently MISSING that would have prevented the recent failures (2026-05-12 vault wipe, View Brief button uncommitted, conversation review JSONL not rendering, identity mismatch, View Brief pill disabled-state click bug, etc.).
+Step 1 — Inventory existing rules:
+Read the current .cursorrules (or .cursor/rules/*.mdc, or whatever the project's authoritative rules location is). List every active rule by category.
+Step 2 — Cross-reference against recent failure modes:
+For each failure pattern below, check whether an active rule prevents it. If yes, quote the rule. If no, note as a gap.
+
+Production deploy used --force-recreate which caused vault wipe
+Inline ssh root@... "<command>" deploy pattern bypassed safety wrappers
+Manual deploys without pre/post vault file count guard
+Files reached GREEN via scp instead of git pull (e.g., redis_resolve_bridge_tokens.py drift)
+Untracked files on GREEN blocked git pulls (server-side discipline)
+Cursor reported "complete" without commit hash, without deploy match verification, without E2E test
+Cursor reported "complete" when work was uncommitted in local working tree (View Brief pill)
+Identity mismatch between bridge boundary and downstream consumers (hardware_id vs username)
+Sensitive Bridge feature wired with cohort-specific gating where universal was intended
+Notes adding scope rather than approving and stopping
+Token count fabrication in EFF footer (DENOMINATOR_CAPPED_AT_200, FABRICATION_OVERSTATED patterns)
+Vault backup cron stopped silently (no heartbeat monitoring)
+
+Step 3 — Report gaps:
+Format:
+EXISTING RULES INVENTORY
+[list each active rule by name + brief summary]
+
+GAPS IDENTIFIED
+1. <failure mode>: <missing rule needed>
+2. ...
+Step 4 — Do NOT modify .cursorrules yet. Report findings only. Project owner will decide which gaps to fill before any changes are committed.
