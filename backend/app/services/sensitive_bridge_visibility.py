@@ -13,14 +13,16 @@ duplicating SQL or risking drift.
 The combined ``compute_visibility`` returns the dict the bridge attaches to
 ``presession_brief.sensitive_bridge_visibility``; the Flutter View Brief modal
 uses it to decide whether to render the "Sensitive Profile" button and which
-of the three states (``hidden | disabled | active``) to render it in.
+of the three states (``hidden | enroll_available | active``) to render it in.
 
 Naming contract — ``button_state``:
-  • ``"hidden"``   — coach is not authorized; button must NOT render at all.
-  • ``"disabled"`` — coach authorized, client NOT enrolled; render disabled
-                     pill with the not-enrolled tooltip.
-  • ``"active"``   — coach authorized AND client enrolled; render the
-                     active cyan pill.
+  • ``"hidden"``           — coach is not authorized; pill must NOT render.
+  • ``"enroll_available"`` — coach authorized, client NOT enrolled; pill
+                             renders muted and **is tappable** — navigates to
+                             ``SensitiveClinicalProfileScreen`` where Path-C
+                             enrollment UI lives.
+  • ``"active"``           — coach authorized AND client enrolled; pill
+                             renders emphasized and opens the profile screen.
 """
 
 from __future__ import annotations
@@ -92,7 +94,7 @@ def derive_button_state(coach_authorized: bool, client_enrolled: bool) -> str:
     if not coach_authorized:
         return "hidden"
     if not client_enrolled:
-        return "disabled"
+        return "enroll_available"
     return "active"
 
 
@@ -108,7 +110,7 @@ async def compute_visibility(
         {
           "coach_authorized": bool,
           "client_enrolled":  bool,
-          "button_state":     "hidden" | "disabled" | "active",
+          "button_state":     "hidden" | "enroll_available" | "active",
           "client_username":  str | null,
         }
     """

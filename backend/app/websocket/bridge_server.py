@@ -17784,7 +17784,7 @@ async def handle_client(websocket, path=None):
                         # Profile" pill button. coach_authorized comes from
                         # coach_profiles.coach_sensitive_bridge_authorized;
                         # client_enrolled comes from sensitive_bridge_enrollment.
-                        # button_state collapses both into hidden|disabled|active
+                        # button_state: hidden|enroll_available|active
                         # so the Flutter widget has a single field to switch on.
                         try:
                             from app.services.sensitive_bridge_visibility import (

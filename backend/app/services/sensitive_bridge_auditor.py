@@ -1291,6 +1291,36 @@ def _check_sensitive_profile_screen_single_entry_point() -> Dict[str, Any]:
     extra_callers = sorted(observed_paths - expected_paths)
     missing_callers = sorted(expected_paths - observed_paths)
 
+    # Path-C three-state pill: enroll_available must navigate (not be ElevatedButton-null).
+    pill_contract_ok = True
+    pill_contract_notes: List[str] = []
+    us_rel = "updated_screens.dart"
+    us_full = os.path.join(flutter_root, us_rel)
+    try:
+        with open(us_full, "r", encoding="utf-8") as fh:
+            us_src = fh.read()
+        _pill_i = us_src.find("Widget _buildSensitiveProfilePill")
+        _pill_j = us_src.find("Future<void> _openSensitiveProfile", _pill_i + 1)
+        pill_blob = us_src[_pill_i:_pill_j] if _pill_i != -1 and _pill_j != -1 else ""
+        if not pill_blob:
+            pill_contract_ok = False
+            pill_contract_notes.append("pill_blob_missing")
+        else:
+            if "enroll_available" not in pill_blob:
+                pill_contract_ok = False
+                pill_contract_notes.append("missing_enroll_available_state")
+            if "_openSensitiveProfile" not in pill_blob or "onPressed:" not in pill_blob:
+                pill_contract_ok = False
+                pill_contract_notes.append("missing_onPressed_open_navigation")
+            if "onPressed: isActive" in pill_blob:
+                pill_contract_ok = False
+                pill_contract_notes.append(
+                    "regression_guard:onPressed_must_not_be_isActive_only"
+                )
+    except Exception as _pill_exc:
+        pill_contract_ok = False
+        pill_contract_notes.append(repr(_pill_exc)[:120])
+
     # Verify the harness path is gated by kDebugMode in main.dart.
     has_debug_gate = False
     main_dart_scan_error: Optional[str] = None
@@ -1312,6 +1342,7 @@ def _check_sensitive_profile_screen_single_entry_point() -> Dict[str, Any]:
         and not missing_callers
         and has_debug_gate
         and main_dart_scan_error is None
+        and pill_contract_ok
     )
     return {
         "id": cid, "ok": ok,
@@ -1325,6 +1356,8 @@ def _check_sensitive_profile_screen_single_entry_point() -> Dict[str, Any]:
             "missing_callers": missing_callers,
             "harness_kdebugmode_gate_present": has_debug_gate,
             "main_dart_scan_error": main_dart_scan_error,
+            "pill_three_state_contract_ok": pill_contract_ok,
+            "pill_three_state_contract_notes": pill_contract_notes,
         },
     }
 

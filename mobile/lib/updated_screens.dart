@@ -7367,12 +7367,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
 
           // PATH-C SENSITIVE PROFILE ENTRY POINT (M215+M216)
           // Layout: MoodIndicator (Happy emoji box, left) + "Sensitive Profile"
-          // pill (right). The pill is sourced from
-          // brief['sensitive_bridge_visibility'].button_state which collapses
-          // (coach_authorized, client_enrolled) into hidden|disabled|active.
-          //   hidden   → coach lacks coach_sensitive_bridge_authorized → no UI
-          //   disabled → coach OK but no sensitive_bridge_enrollment row
-          //   active   → both OK → push SensitiveClinicalProfileScreen
+          // pill (right). brief['sensitive_bridge_visibility'].button_state:
+          //   hidden           → coach not authorized → no pill
+          //   enroll_available → coach OK, client not enrolled → muted pill (tap → enroll UI)
+          //   active           → enrolled → emphasized pill (tap → profile)
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -7446,50 +7444,68 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   // ---------------------------------------------------------------------------
   // PATH-C: SENSITIVE PROFILE PILL (M215+M216)
   //
-  // Renders nothing for unauthorized coaches (button_state='hidden'), a
-  // disabled pill with tooltip for not-enrolled clients (button_state='disabled'),
-  // and an active cyan pill that pushes SensitiveClinicalProfileScreen for
-  // enrolled clients (button_state='active'). Every active push emits a
-  // sensitive_profile_screen_opened audit event over the bridge so the
-  // sensitive_bridge_log table records every coach entry into the screen.
+  // Three states from brief['sensitive_bridge_visibility'].button_state:
+  //   hidden           → no pill (coach not authorized)
+  //   enroll_available → muted pill, onPressed navigates (Path-C enrollment UI)
+  //   active           → emphasized pill, onPressed navigates
+  // Legacy 'disabled' from older bridges is treated as shrink (fail-closed UI).
   // ---------------------------------------------------------------------------
   Widget _buildSensitiveProfilePill(Map<String, dynamic> brief) {
     final vis = brief['sensitive_bridge_visibility'];
     if (vis is! Map) return const SizedBox.shrink();
-    final state = (vis['button_state'] ?? 'hidden').toString();
-    if (state == 'hidden') return const SizedBox.shrink();
 
-    final clientUsername = (vis['client_username'] ?? '').toString();
-    if (clientUsername.isEmpty) return const SizedBox.shrink();
+    final state = vis['button_state']?.toString() ?? 'hidden';
+    final rawClient = vis['client_username'];
+    final clientUsername = rawClient == null
+        ? ''
+        : rawClient.toString().trim();
 
+    if (state == 'hidden' || clientUsername.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final isEnrollAvailable = state == 'enroll_available';
     final isActive = state == 'active';
-    final pill = ElevatedButton.icon(
-      onPressed: isActive
-          ? () => _openSensitiveProfile(clientUsername)
-          : null,
-      icon: const Icon(Icons.shield_outlined, color: Colors.black, size: 16),
-      label: const Text(
-        'Sensitive Profile',
-        style: TextStyle(
-          color: Colors.black,
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFF4ECDC4),
-        disabledBackgroundColor: const Color(0xFF4ECDC4).withValues(alpha: 0.35),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      ),
-    );
+    if (!isEnrollAvailable && !isActive) {
+      return const SizedBox.shrink();
+    }
 
-    if (isActive) return pill;
+    const Color activeFg = Color(0xFF050505);
+    const Color activeBg = Color(0xFF4ECDC4);
+    final Color mutedFg = const Color(0xFF4ECDC4).withValues(alpha: 0.85);
+    final Color mutedBg = const Color(0xFF4ECDC4).withValues(alpha: 0.14);
+
     return Tooltip(
-      message: 'This client is not enrolled in the Sensitive Clinical Bridge.',
-      child: pill,
+      message: isEnrollAvailable
+          ? 'Client not enrolled — tap to begin enrollment'
+          : 'Open Sensitive Clinical Profile',
+      child: TextButton.icon(
+        onPressed: () => _openSensitiveProfile(clientUsername),
+        icon: Icon(
+          Icons.shield_outlined,
+          size: 18,
+          color: isActive ? activeFg : mutedFg,
+        ),
+        label: Text(
+          isEnrollAvailable ? 'Sensitive Profile · Enroll' : 'Sensitive Profile',
+          style: TextStyle(
+            color: isActive ? activeFg : mutedFg,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        style: ButtonStyle(
+          backgroundColor: WidgetStateProperty.all(
+            isActive ? activeBg : mutedBg,
+          ),
+          padding: WidgetStateProperty.all(
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          ),
+          shape: WidgetStateProperty.all(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          ),
+        ),
+      ),
     );
   }
 
