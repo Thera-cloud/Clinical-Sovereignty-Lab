@@ -1101,10 +1101,12 @@ class NateCheckInAgent:
     # =======================================================================
 
     async def scan_safe_silence_expiry(self) -> Dict[str, int]:
-        """Note 2 contract: TWO independent passes, NOT one.
+        """Note 2 contract: THREE independent passes, NOT one.
 
           * Pass A — day-25 expiry warning
           * Pass B — day-30 auto-revert
+          * Pass C — manual admin revoke → welcome-back follow-up within 24h
+             (Priority 2a; fail-closed template — Gap M wiring extension).
 
         Each pass has its own idempotency:
           * Pass A reserves `expiry_warning_sent_at` atomically.
@@ -1122,6 +1124,7 @@ class NateCheckInAgent:
         counters = {
             "warnings_emitted": 0,
             "reverts_emitted": 0,
+            "manual_revoke_welcome_attempts": 0,
             "errors": 0,
         }
 
@@ -1204,6 +1207,93 @@ class NateCheckInAgent:
         except Exception as e:
             logger.warning(
                 "nate_checkin_agent: revert pass query failed: %s", e
+            )
+            counters["errors"] += 1
+
+        # ===== Pass C: Manual admin revoke → welcome-back (24h window; Priority 2a)
+        try:
+            async with self.db_pool.acquire() as conn:
+                revoke_rows = await conn.fetch(
+                    """
+                    SELECT id, user_id, occurred_at, payload_json
+                    FROM sensitive_bridge_log
+                    WHERE event_type = 'safe_silence_mode_state_change'
+                      AND payload_json->>'mutation_kind' = $1
+                      AND occurred_at >= NOW() - INTERVAL '24 hours'
+                    ORDER BY occurred_at ASC
+                    """,
+                    "safe_silence_active_revoked",
+                )
+
+            for row in revoke_rows:
+                try:
+                    uid = row["user_id"]
+                    occurred_at = row["occurred_at"]
+                    raw_pl = row["payload_json"]
+                    pl: Dict[str, Any] = {}
+                    if isinstance(raw_pl, dict):
+                        pl = raw_pl
+                    elif isinstance(raw_pl, str):
+                        try:
+                            parsed = json.loads(raw_pl)
+                            if isinstance(parsed, dict):
+                                pl = parsed
+                        except Exception:
+                            pl = {}
+                    af = pl.get("additional_fields_redacted") or {}
+                    if not isinstance(af, dict):
+                        af = {}
+                    trigger_ok = af.get("revoke_trigger") == (
+                        "manual_admin_revocation"
+                    )
+                    if not trigger_ok:
+                        continue
+
+                    sole_ov = af.get("sole_clinician_override")
+
+                    async with self.db_pool.acquire() as conn:
+                        dup = await conn.fetchval(
+                            """
+                            SELECT 1 FROM sensitive_bridge_log
+                            WHERE user_id = $1
+                              AND event_type = $2
+                              AND occurred_at >= $3
+                              AND COALESCE(
+                                  payload_json->>'welcome_back_source',
+                                  ''
+                              ) = $4
+                            LIMIT 1
+                            """,
+                            uid,
+                            AUDIT_EVT_SAFE_SILENCE_REVERTED,
+                            occurred_at,
+                            "manual_admin_revocation",
+                        )
+                    if dup:
+                        continue
+
+                    await self._dispatch_welcome_back(
+                        uid,
+                        locale_hint=None,
+                        welcome_back_source="manual_admin_revocation",
+                        sole_clinician_override=(
+                            bool(sole_ov) if sole_ov is not None else None
+                        ),
+                    )
+                    counters["manual_revoke_welcome_attempts"] += 1
+                except Exception as e:
+                    logger.warning(
+                        "nate_checkin_agent: manual-revoke welcome-back "
+                        "row failed for %s: %s",
+                        row.get("user_id"),
+                        e,
+                    )
+                    counters["errors"] += 1
+        except Exception as e:
+            logger.warning(
+                "nate_checkin_agent: manual-revoke welcome-back query "
+                "failed: %s",
+                e,
             )
             counters["errors"] += 1
 
@@ -1456,7 +1546,11 @@ class NateCheckInAgent:
 
         # Welcome-back dispatch outside the transaction. Fail-closed.
         try:
-            await self._dispatch_welcome_back(username, locale_hint=None)
+            await self._dispatch_welcome_back(
+                username,
+                locale_hint=None,
+                welcome_back_source="approval_window_elapsed",
+            )
         except Exception as e:
             logger.error(
                 "nate_checkin_agent: welcome-back dispatch failed for %s "
@@ -1543,8 +1637,11 @@ class NateCheckInAgent:
         username: str,
         *,
         locale_hint: Optional[str] = None,
+        welcome_back_source: str = "approval_window_elapsed",
+        sole_clinician_override: Optional[bool] = None,
     ) -> bool:
-        """Dispatch the welcome-back message after auto-revert.
+        """Dispatch the welcome-back message after auto-revert or manual
+        admin revoke (Priority 2a Pass C).
 
         Fail-closed: if the loader returns None, no message is sent. An
         audit row is appended noting the gap so the portal can surface
@@ -1557,6 +1654,12 @@ class NateCheckInAgent:
         """
         locale = locale_hint or "en-US"
         doc = self._load_welcome_back_template(locale)
+
+        def _wb_payload(base: Dict[str, Any]) -> Dict[str, Any]:
+            out = {**base, "welcome_back_source": welcome_back_source}
+            if sole_clinician_override is not None:
+                out["sole_clinician_override"] = bool(sole_clinician_override)
+            return out
 
         if doc is None:
             try:
@@ -1574,11 +1677,13 @@ class NateCheckInAgent:
                         username,
                         AUDIT_EVT_SAFE_SILENCE_REVERTED,
                         json.dumps(
-                            {
-                                "welcome_back_dispatched": False,
-                                "reason": DIAG_WELCOME_BACK_UNAVAILABLE,
-                                "requested_locale": locale,
-                            }
+                            _wb_payload(
+                                {
+                                    "welcome_back_dispatched": False,
+                                    "reason": DIAG_WELCOME_BACK_UNAVAILABLE,
+                                    "requested_locale": locale,
+                                }
+                            )
                         ),
                     )
             except Exception as e:
@@ -1618,15 +1723,17 @@ class NateCheckInAgent:
                     username,
                     AUDIT_EVT_SAFE_SILENCE_REVERTED,
                     json.dumps(
-                        {
-                            "welcome_back_dispatched": True,
-                            "template_version": meta.get("version"),
-                            "template_locale": meta.get("locale"),
-                            "clinician_authored_by": meta.get(
-                                "clinician_authored_by"
-                            ),
-                            "body_length": len(body),
-                        }
+                        _wb_payload(
+                            {
+                                "welcome_back_dispatched": True,
+                                "template_version": meta.get("version"),
+                                "template_locale": meta.get("locale"),
+                                "clinician_authored_by": meta.get(
+                                    "clinician_authored_by"
+                                ),
+                                "body_length": len(body),
+                            }
+                        )
                     ),
                 )
         except Exception as e:

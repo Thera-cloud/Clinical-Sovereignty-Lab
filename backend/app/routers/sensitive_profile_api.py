@@ -250,6 +250,45 @@ VALID_LEGAL_CASE_STATUSES = frozenset(
 NOVELTY_THRESHOLD_RANGE = (0.0, 1.0)
 AROUSAL_THRESHOLD_RANGE = (0.0, 3.0)
 
+#: Path C (M216) — coach-initiated enrollment cohort labels. Subset of the
+#: full M209+M216 CHECK constraint that a coach is allowed to set from the
+#: SensitiveClinicalProfileScreen banner. Admin retains the full set
+#: (unenrolled, shadow_only, cohort_5, cohort_ga, etc.) via the existing
+#: telemetry-agent surface.
+VALID_COACH_ENROLLMENT_COHORTS = frozenset(
+    {
+        "inspection_test",
+        "pilot_5",
+        "cohort_25",
+        "cohort_100",
+        "general_availability",
+    }
+)
+
+#: Path C — population type labels written to users.profile_data on
+#: enrollment. The minor + transitioning_youth values trigger the
+#: guardian-consent precondition; adult_survivor does not.
+VALID_POPULATION_TYPES = frozenset(
+    {
+        "adult_survivor",
+        "minor_survivor",
+        "transitioning_youth_16_to_21",
+    }
+)
+
+#: Population types that require ``users.profile_data->>'guardian_dual_approval_on_file' = 'true'``
+#: before the enrollment endpoint will write the row. Path C explicitly
+#: refuses to auto-enroll minors via this surface — admin must run the
+#: existing guardian-consent flow first.
+POPULATION_TYPES_REQUIRING_GUARDIAN_CONSENT = frozenset(
+    {"minor_survivor", "transitioning_youth_16_to_21"}
+)
+
+#: Path C — audit event_type. Mirrors the M216 CHECK constraint addition
+#: on ``sensitive_bridge_log.event_type``. If you add another enrollment-
+#: adjacent event, also extend the migration's CHECK list.
+EVT_ENROLLMENT_CREATED = "enrollment_created"
+
 #: Activity log default window (Note 3 — Flutter UX expectation).
 ACTIVITY_LOG_DEFAULT_DAYS = 7
 ACTIVITY_LOG_MAX_DAYS = 365
@@ -299,6 +338,47 @@ def _token_session_hash(credentials: Optional[HTTPAuthorizationCredentials]) -> 
     if credentials is None or not credentials.credentials:
         return ""
     return hashlib.sha256(credentials.credentials.encode("utf-8")).hexdigest()
+
+
+# =============================================================================
+# Sole-clinician authorization lookup (migration 214)
+# =============================================================================
+
+CLIN_AUTH_SOLE_LEAD = "sole_lead"
+CLIN_AUTH_MULTI = "multi_clinician_team"
+
+
+async def _lookup_clinician_authorization_type(conn, actor_username: str) -> str:
+    """Return the actor's ``clinician_authorization_type`` per migration 214.
+
+    Falls back to ``'multi_clinician_team'`` if the row, the column, or the
+    table is missing (pre-migration boot, fresh staging clone). The default
+    is the SAFE answer because it forces the strict two-clinician gate; a
+    missing row must never accidentally widen the sole-lead exemption.
+    """
+    if not actor_username:
+        return CLIN_AUTH_MULTI
+    try:
+        val = await conn.fetchval(
+            """
+            SELECT clinician_authorization_type
+              FROM coach_profiles
+             WHERE username = $1
+             LIMIT 1
+            """,
+            actor_username,
+        )
+    except Exception as e:  # pragma: no cover - defense in depth
+        logger.warning(
+            "sensitive_profile_api: clinician_authorization_type lookup failed "
+            "for actor=%s: %s — defaulting to multi_clinician_team",
+            actor_username,
+            e,
+        )
+        return CLIN_AUTH_MULTI
+    if val == CLIN_AUTH_SOLE_LEAD:
+        return CLIN_AUTH_SOLE_LEAD
+    return CLIN_AUTH_MULTI
 
 
 # =============================================================================
@@ -771,17 +851,77 @@ class SafeSilenceApprove(BaseModel):
     approver_note_redacted: Optional[str] = Field(default=None, max_length=500)
 
 
+class CoachInitiatedEnrollment(BaseModel):
+    """Path C — coach-initiated self-enrollment from the
+    SensitiveClinicalProfileScreen banner. Field names are sealed (the
+    Flutter dialog parses them verbatim).
+
+    ``informed_consent_confirmed`` is gated server-side: the endpoint
+    refuses to write the row unless this is True. The dialog's submit
+    button is disabled until the checkbox is checked, but never trust the
+    client — the server is the contract.
+
+    ``cohort_label`` and ``population_type`` are validated against the
+    M216-extended enums; mismatches surface as 422 invalid_enum_value.
+    """
+
+    cohort_label: str = Field(
+        ...,
+        description="One of: inspection_test, pilot_5, cohort_25, cohort_100, general_availability",
+    )
+    population_type: str = Field(
+        ...,
+        description="One of: adult_survivor, minor_survivor, transitioning_youth_16_to_21",
+    )
+    informed_consent_confirmed: bool = Field(
+        ...,
+        description="Coach confirms the client has provided HIPAA-grade informed "
+        "consent. Server refuses enrollment if False.",
+    )
+
+    @validator("cohort_label")
+    def _v_cohort(cls, v):
+        if v not in VALID_COACH_ENROLLMENT_COHORTS:
+            raise ValueError(
+                "cohort_label must be one of "
+                + "|".join(sorted(VALID_COACH_ENROLLMENT_COHORTS))
+            )
+        return v
+
+    @validator("population_type")
+    def _v_pop(cls, v):
+        if v not in VALID_POPULATION_TYPES:
+            raise ValueError(
+                "population_type must be one of "
+                + "|".join(sorted(VALID_POPULATION_TYPES))
+            )
+        return v
+
+
 # =============================================================================
 # Profile read helpers — used by both GET endpoints
 # =============================================================================
 
 
-async def _load_profile_data(db_pool, user_id: str) -> Dict[str, Any]:
+async def _load_profile_data(
+    db_pool,
+    user_id: str,
+    *,
+    coach_username: Optional[str] = None,
+) -> Dict[str, Any]:
     """Pull the JSONB profile fields the portal cares about.
 
     Returns an empty dict if the user has no rows in any sub-table; the
     Flutter screen treats missing keys as "not configured yet" — never as
     an error.
+
+    Path C (M215+M216) attaches three additional keys consumed by the new
+    _NotEnrolledBanner widget on SensitiveClinicalProfileScreen:
+      • ``is_enrolled``                          — bool, from sensitive_bridge_enrollment
+      • ``coach_sensitive_bridge_authorized``    — bool, from coach_profiles
+      • ``population_type``                      — str|None, mirrored from
+        users.profile_data so the post-enrollment refresh shows the value
+        the coach just set in the dialog without a second round-trip.
     """
     out: Dict[str, Any] = {
         "user_id": user_id,
@@ -789,11 +929,16 @@ async def _load_profile_data(db_pool, user_id: str) -> Dict[str, Any]:
         "novelty_threshold": None,
         "arousal_threshold": None,
         "substance_status": None,
+        "population_type": None,
         "safe_silence_mode_state": {},
         "codewords": [],
         "trigger_dates": [],
         "polyvictim_layers": [],
         "legal_status": [],
+        # Path C visibility flags (M215+M216). Defaults are the closed
+        # state: not enrolled, coach not authorized.
+        "is_enrolled": False,
+        "coach_sensitive_bridge_authorized": False,
     }
 
     async with db_pool.acquire() as conn:
@@ -816,11 +961,47 @@ async def _load_profile_data(db_pool, user_id: str) -> Dict[str, Any]:
             out["novelty_threshold"] = pd.get("novelty_threshold")
             out["arousal_threshold"] = pd.get("arousal_threshold")
             out["substance_status"] = pd.get("substance_status")
+            out["population_type"] = pd.get("population_type")
             sss = pd.get("safe_silence_mode_state") or {}
             # NEVER surface the proposer_token_hash to clients — it's a
             # session secret used only by the approve endpoint.
             sss_safe = {k: v for k, v in sss.items() if k != "proposer_token_hash"}
             out["safe_silence_mode_state"] = sss_safe
+
+        # Path C: attach enrollment + coach authorization flags. Both are
+        # tiny SELECTs on indexed columns; the cost is negligible compared
+        # to the four sub-table fetches below.
+        try:
+            enroll_row = await conn.fetchrow(
+                "SELECT 1 FROM sensitive_bridge_enrollment WHERE user_id = $1",
+                user_id,
+            )
+            out["is_enrolled"] = enroll_row is not None
+        except Exception as e:
+            logger.warning(
+                "sensitive_profile_api: enrollment lookup failed for %s: %s",
+                user_id, e,
+            )
+
+        if coach_username:
+            try:
+                cp_row = await conn.fetchrow(
+                    """
+                    SELECT coach_sensitive_bridge_authorized
+                      FROM coach_profiles
+                     WHERE username = $1
+                    """,
+                    coach_username,
+                )
+                if cp_row is not None:
+                    out["coach_sensitive_bridge_authorized"] = bool(
+                        cp_row["coach_sensitive_bridge_authorized"]
+                    )
+            except Exception as e:
+                logger.warning(
+                    "sensitive_profile_api: coach auth lookup failed for %s: %s",
+                    coach_username, e,
+                )
 
         cw_rows = await conn.fetch(
             """
@@ -990,7 +1171,10 @@ async def get_full_profile(
     db_pool = request.app.state.db_pool
     if db_pool is None:
         raise HTTPException(503, detail={"reason": "database_unavailable"})
-    return await _load_profile_data(db_pool, user_id)
+    coach_username = principal.get("username") or principal.get("user_id") or ""
+    return await _load_profile_data(
+        db_pool, user_id, coach_username=coach_username
+    )
 
 
 # ------- COACH: scalar setters ------------------------------------------------
@@ -1630,14 +1814,21 @@ async def safe_silence_cancel(
     request: Request,
     principal: Dict = Depends(require_clinician_for_user),
 ):
-    """Coach-side cancellation of a pending proposal. Cannot cancel an
-    active state — that requires the admin or the auto-revert path.
+    """Cancel a pending proposal (any assigned clinician) or revoke an active
+    silence mode (ADMIN only; sole_lead requires revoke session ≠ propose and
+    ≠ approve token sessions via persisted gate hashes — Priority 2a).
+
+    Welcome-back follow-up is dispatched by ``nate_checkin_agent`` Pass C
+    (fail-closed template), not inline here.
     """
     db_pool = request.app.state.db_pool
     if db_pool is None:
         raise HTTPException(503, detail={"reason": "database_unavailable"})
 
     actor_id = principal.get("username", "") or principal.get("user_id", "")
+    role = (principal.get("role") or "COACH").upper()
+    revoker_hash = principal.get("_token_session_hash") or ""
+
     async with db_pool.acquire() as conn:
         urow = await conn.fetchrow(
             "SELECT profile_data FROM users WHERE username = $1",
@@ -1652,48 +1843,164 @@ async def safe_silence_cancel(
             except Exception:
                 pd = {}
         sss = pd.get("safe_silence_mode_state") or {}
-        if sss.get("state") != SAFE_SILENCE_PENDING:
-            raise HTTPException(409, detail={"reason": "no_pending_proposal"})
+        cur_state = sss.get("state") or SAFE_SILENCE_INACTIVE
 
-        new_state = {
-            "state": SAFE_SILENCE_INACTIVE,
-            "proposer_id": None,
-            "approver_id": None,
-            "proposed_at": None,
-            "approved_at": None,
-            "expires_at": None,
-            "expiry_warning_sent_at": None,
-            "auto_revert_eligible_at": None,
-            "codeword_precondition_met": False,
-            "reason_redacted": None,
-        }
-        await conn.execute(
-            """
-            UPDATE users
-               SET profile_data = jsonb_set(
-                       COALESCE(profile_data, '{}'::jsonb),
-                       '{safe_silence_mode_state}',
-                       $2::jsonb,
-                       true
-                   ),
-                   updated_at = NOW()
-             WHERE username = $1
-            """,
-            user_id,
-            json.dumps(new_state),
+        if cur_state == SAFE_SILENCE_PENDING:
+            new_state = {
+                "state": SAFE_SILENCE_INACTIVE,
+                "proposer_id": None,
+                "approver_id": None,
+                "proposed_at": None,
+                "approved_at": None,
+                "expires_at": None,
+                "expiry_warning_sent_at": None,
+                "auto_revert_eligible_at": None,
+                "codeword_precondition_met": False,
+                "reason_redacted": None,
+                "proposal_id": None,
+                "approver_note_redacted": None,
+                "proposer_token_hash": None,
+                "gate_proposer_token_hash": None,
+                "gate_approver_token_hash": None,
+            }
+            await conn.execute(
+                """
+                UPDATE users
+                   SET profile_data = jsonb_set(
+                           COALESCE(profile_data, '{}'::jsonb),
+                           '{safe_silence_mode_state}',
+                           $2::jsonb,
+                           true
+                       ),
+                       updated_at = NOW()
+                 WHERE username = $1
+                """,
+                user_id,
+                json.dumps(new_state),
+            )
+
+            await _emit_profile_mutation_audit(
+                db_pool,
+                target_user_id=user_id,
+                actor_id=actor_id,
+                actor_role=principal.get("role", "COACH"),
+                mutation_kind="safe_silence_cancelled",
+                additional_fields_redacted={},
+                severity="moderate",
+                event_type=EVT_SAFE_SILENCE_STATE_CHANGE,
+            )
+            return {"ok": True, "state": SAFE_SILENCE_INACTIVE}
+
+        if cur_state == SAFE_SILENCE_ACTIVE:
+            if role != "ADMIN":
+                raise HTTPException(
+                    403,
+                    detail={"reason": "admin_required_for_active_revocation"},
+                )
+
+            revoker_auth = await _lookup_clinician_authorization_type(
+                conn, actor_id,
+            )
+            gate_p = (sss.get("gate_proposer_token_hash") or "").strip()
+            gate_a = (sss.get("gate_approver_token_hash") or "").strip()
+            if revoker_auth == CLIN_AUTH_SOLE_LEAD:
+                if gate_p or gate_a:
+                    if revoker_hash and (
+                        (gate_p and hmac.compare_digest(revoker_hash, gate_p))
+                        or (
+                            gate_a
+                            and hmac.compare_digest(revoker_hash, gate_a)
+                        )
+                    ):
+                        raise HTTPException(
+                            409,
+                            detail={
+                                "reason": "same_session_violation",
+                                "message": (
+                                    "Revoke must occur in a session "
+                                    "different from propose or approve"
+                                ),
+                            },
+                        )
+                else:
+                    logger.warning(
+                        "sensitive_profile_api: sole_lead active revoke for "
+                        "%s without gate hashes — session separation skipped "
+                        "(legacy row)",
+                        user_id,
+                    )
+
+            prior_proposer = (sss.get("proposer_id") or "").strip()
+            prior_proposer_auth = await _lookup_clinician_authorization_type(
+                conn, prior_proposer,
+            )
+            sole_flag = prior_proposer_auth == CLIN_AUTH_SOLE_LEAD
+
+            revoked_at = datetime.now(timezone.utc).isoformat()
+            new_state = {
+                "state": SAFE_SILENCE_INACTIVE,
+                "revoked_at": revoked_at,
+                "revoked_by": actor_id,
+                "revoke_reason": "manual_admin_revocation",
+                "prior_proposer_id": sss.get("proposer_id"),
+                "prior_approver_id": sss.get("approver_id"),
+                "proposer_id": None,
+                "approver_id": None,
+                "proposed_at": None,
+                "approved_at": None,
+                "expires_at": None,
+                "expiry_warning_sent_at": None,
+                "auto_revert_eligible_at": None,
+                "codeword_precondition_met": False,
+                "reason_redacted": None,
+                "proposal_id": None,
+                "approver_note_redacted": None,
+                "proposer_token_hash": None,
+                "gate_proposer_token_hash": None,
+                "gate_approver_token_hash": None,
+            }
+            await conn.execute(
+                """
+                UPDATE users
+                   SET profile_data = jsonb_set(
+                           COALESCE(profile_data, '{}'::jsonb),
+                           '{safe_silence_mode_state}',
+                           $2::jsonb,
+                           true
+                       ),
+                       updated_at = NOW()
+                 WHERE username = $1
+                """,
+                user_id,
+                json.dumps(new_state),
+            )
+
+            await _emit_profile_mutation_audit(
+                db_pool,
+                target_user_id=user_id,
+                actor_id=actor_id,
+                actor_role="ADMIN",
+                mutation_kind="safe_silence_active_revoked",
+                additional_fields_redacted={
+                    "transition": "active_to_inactive",
+                    "revoke_trigger": "manual_admin_revocation",
+                    "sole_clinician_override": sole_flag,
+                    "revoker_authorization_type": revoker_auth,
+                },
+                severity="high",
+                event_type=EVT_SAFE_SILENCE_STATE_CHANGE,
+            )
+            return {
+                "ok": True,
+                "state": SAFE_SILENCE_INACTIVE,
+                "revoked_at": revoked_at,
+                "revoked_by": actor_id,
+            }
+
+        raise HTTPException(
+            409,
+            detail={"reason": "no_active_or_pending_state"},
         )
-
-    await _emit_profile_mutation_audit(
-        db_pool,
-        target_user_id=user_id,
-        actor_id=actor_id,
-        actor_role=principal.get("role", "COACH"),
-        mutation_kind="safe_silence_cancelled",
-        additional_fields_redacted={},
-        severity="moderate",
-        event_type=EVT_SAFE_SILENCE_STATE_CHANGE,
-    )
-    return {"ok": True, "state": SAFE_SILENCE_INACTIVE}
 
 
 # ------- COACH: activity log read --------------------------------------------
@@ -1827,6 +2134,243 @@ async def get_activity_log(
     }
 
 
+# ------- COACH: Path-C self-enrollment (M215+M216) ---------------------------
+
+
+@coach_router.post("/{user_id}/enroll")
+async def coach_initiated_enroll(
+    user_id: str,
+    body: CoachInitiatedEnrollment,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    """Path C — coach-initiated self-enrollment surface.
+
+    Authorization layering (defense in depth — all four must hold):
+
+      1. ``require_clinician_for_user`` already verified COACH/ADMIN role
+         AND that this coach is on the client's clinician chain.
+      2. ``coach_sensitive_bridge_authorized = TRUE`` on
+         ``coach_profiles``. If FALSE, return **404 not_found**, NOT 403.
+         The 404 deliberately mimics a missing endpoint so an unauthorized
+         coach cannot infer that Path C exists. (The Flutter dialog only
+         renders the "Enroll this client" button when the GET response
+         has ``coach_sensitive_bridge_authorized=true``, so the 404 is a
+         tamper-only path.)
+      3. ``informed_consent_confirmed = true`` in the body. Server refuses
+         on False with 422 ``consent_required``.
+      4. For minor_survivor / transitioning_youth_16_to_21:
+         ``users.profile_data->>'guardian_dual_approval_on_file' = 'true'``.
+         Otherwise 409 ``requires_guardian_consent`` — the existing
+         guardian-consent flow runs separately under admin.
+
+    Idempotency:
+
+      • Refuses if a ``sensitive_bridge_enrollment`` row already exists
+        for ``user_id`` (409 ``already_enrolled``). The Flutter dialog
+        surfaces a Refresh modal on this code; the user re-loads the
+        profile and proceeds.
+
+    Side effects on success:
+
+      a. INSERT row into ``sensitive_bridge_enrollment`` with
+         ``cohort_label = body.cohort_label``,
+         ``gap_features_enabled = '{}'::jsonb``,
+         ``enrolled_by = current_coach_username``,
+         ``enrolled_at = NOW()``.
+         Note that ``gap_features_enabled`` is FORCED to empty — Path C
+         can NEVER set per-user gap flags. That stays admin-only via the
+         telemetry-agent surface.
+
+      b. UPDATE ``users.profile_data`` to set ``population_type``. Uses
+         ``jsonb_set`` to preserve other keys (per
+         ``bridge-cache-db-sovereignty.mdc``).
+
+      c. EMIT ``enrollment_created`` audit event to
+         ``sensitive_bridge_log`` with severity ``moderate``,
+         classification ``clinician_and_admin``, payload
+         ``{cohort_label, population_type, enrolled_by,
+         informed_consent_timestamp}``. Payload runs through the
+         standard ``_emit_profile_mutation_audit`` PII screen.
+
+    Explicit non-actions:
+
+      • Does NOT flip ``app_settings.sensitive_bridge_master_enabled``.
+      • Does NOT set any clinical fields (embodiment_phase, thresholds,
+        codewords). The coach configures those via the existing scalar
+        setters after enrollment.
+      • Does NOT modify any admin-side enrollment surface.
+    """
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+
+    coach_username = principal.get("username") or principal.get("user_id") or ""
+
+    # ---- Gate 2: coach_sensitive_bridge_authorized -------------------------
+    # Auditor probes can bypass this without leaking that the feature
+    # exists. The require_clinician_for_user dep returned an is_audit
+    # principal already if the bearer matched the audit token. We honor
+    # that by treating it as authorized so the auditor can exercise the
+    # full happy/failure paths.
+    is_audit = bool(principal.get("is_audit"))
+    role = (principal.get("role") or "").upper()
+    coach_authorized = is_audit or role == "ADMIN"
+
+    if not coach_authorized:
+        try:
+            async with db_pool.acquire() as conn:
+                cp_row = await conn.fetchrow(
+                    """
+                    SELECT coach_sensitive_bridge_authorized
+                      FROM coach_profiles
+                     WHERE username = $1
+                    """,
+                    coach_username,
+                )
+            coach_authorized = bool(
+                cp_row is not None
+                and cp_row["coach_sensitive_bridge_authorized"]
+            )
+        except Exception as e:
+            logger.warning(
+                "sensitive_profile_api: coach auth lookup failed for %s: %s",
+                coach_username, e,
+            )
+            coach_authorized = False
+
+    if not coach_authorized:
+        # Mimic missing route — do NOT 403. The auditor check
+        # `enrollment_endpoint_requires_coach_authorization` asserts this
+        # exact response shape.
+        raise HTTPException(
+            404,
+            detail={"reason": "not_found"},
+        )
+
+    # ---- Gate 3: informed_consent_confirmed --------------------------------
+    if not body.informed_consent_confirmed:
+        raise HTTPException(
+            422,
+            detail={"reason": "consent_required"},
+        )
+
+    # ---- Gate 4: guardian consent for minors -------------------------------
+    requires_guardian = body.population_type in POPULATION_TYPES_REQUIRING_GUARDIAN_CONSENT
+
+    async with db_pool.acquire() as conn:
+        urow = await conn.fetchrow(
+            "SELECT profile_data FROM users WHERE username = $1",
+            user_id,
+        )
+        if urow is None:
+            # require_clinician_for_user already 404'd on missing user,
+            # but defensive in case of a TOCTOU race.
+            raise HTTPException(404, detail={"reason": "user_not_found"})
+        pd = urow["profile_data"] or {}
+        if isinstance(pd, str):
+            try:
+                pd = json.loads(pd)
+            except Exception:
+                pd = {}
+
+        if requires_guardian:
+            guardian_ok = pd.get("guardian_dual_approval_on_file")
+            # Accept bool True or string "true" — profile_data is JSONB
+            # but legacy paths sometimes write strings.
+            if not (
+                guardian_ok is True
+                or (isinstance(guardian_ok, str) and guardian_ok.lower() == "true")
+            ):
+                raise HTTPException(
+                    409,
+                    detail={
+                        "reason": "requires_guardian_consent",
+                        "message": (
+                            "Minor enrollment requires guardian consent flow. "
+                            "Contact admin."
+                        ),
+                    },
+                )
+
+        # ---- Idempotency: 409 if already enrolled --------------------------
+        existing = await conn.fetchrow(
+            "SELECT cohort_label FROM sensitive_bridge_enrollment WHERE user_id = $1",
+            user_id,
+        )
+        if existing is not None:
+            raise HTTPException(
+                409,
+                detail={
+                    "reason": "already_enrolled",
+                    "cohort_label": existing["cohort_label"],
+                },
+            )
+
+        # ---- Side effect (a): INSERT enrollment row ------------------------
+        consent_ts = datetime.now(timezone.utc)
+        await conn.execute(
+            """
+            INSERT INTO sensitive_bridge_enrollment (
+                user_id, cohort_label, gap_features_enabled,
+                enrolled_at, enrolled_by, last_modified_at, last_modified_by
+            ) VALUES (
+                $1, $2, '{}'::jsonb, NOW(), $3, NOW(), $3
+            )
+            """,
+            user_id,
+            body.cohort_label,
+            coach_username,
+        )
+
+        # ---- Side effect (b): mirror population_type into profile_data -----
+        # jsonb_set is required to preserve other keys (see
+        # bridge-cache-db-sovereignty.mdc — the bridge will overwrite a
+        # full-profile_data replacement on its next save cycle).
+        await conn.execute(
+            """
+            UPDATE users
+               SET profile_data = jsonb_set(
+                   COALESCE(profile_data, '{}'::jsonb),
+                   '{population_type}',
+                   to_jsonb($2::text),
+                   true
+               )
+             WHERE username = $1
+            """,
+            user_id,
+            body.population_type,
+        )
+
+    # ---- Side effect (c): emit enrollment_created audit event --------------
+    await _emit_profile_mutation_audit(
+        db_pool,
+        target_user_id=user_id,
+        actor_id=coach_username,
+        actor_role=role or "COACH",
+        mutation_kind="enrollment_created",
+        additional_fields_redacted={
+            "cohort_label": body.cohort_label,
+            "population_type": body.population_type,
+            "enrolled_by_hash": _hash_actor_id(coach_username),
+            "informed_consent_timestamp": consent_ts.isoformat(),
+        },
+        severity="moderate",
+        event_type=EVT_ENROLLMENT_CREATED,
+        access_classification=ACCESS_CLINICIAN_AND_ADMIN,
+    )
+
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "cohort_label": body.cohort_label,
+        "population_type": body.population_type,
+        "enrolled_by": coach_username,
+        "enrolled_at": consent_ts.isoformat(),
+        "informed_consent_timestamp": consent_ts.isoformat(),
+    }
+
+
 # ------- ADMIN: safe_silence_mode approve ------------------------------------
 
 
@@ -1896,7 +2440,11 @@ async def safe_silence_approve(
 
         # Precondition (a): same-session violation (Risk #19). Compare
         # token hashes BEFORE the codeword check so a same-session attempt
-        # never even sees whether codewords are configured.
+        # never even sees whether codewords are configured. This rule applies
+        # universally — sole_lead clinicians get NO relief here. The
+        # session-separation enforcement is the load-bearing safeguard for
+        # the sole-clinician exemption (audited as
+        # ``sole_clinician_session_separation_enforced``).
         proposer_token_hash = sss.get("proposer_token_hash") or ""
         if (
             proposer_token_hash
@@ -1907,6 +2455,36 @@ async def safe_silence_approve(
                 409,
                 detail={"reason": "same_session_violation"},
             )
+
+        # Precondition (a-bis): in the default (multi_clinician_team) mode,
+        # also require a *different actor* — same-person, two-session
+        # self-approval defeats the multi-clinician intent. Look up the
+        # PROPOSER's authorization type, NOT the approver's: the exemption
+        # is a property of the practice the proposal originated in, not of
+        # the admin who happens to push the button.
+        proposer_id = (sss.get("proposer_id") or "").strip()
+        proposer_auth_type = await _lookup_clinician_authorization_type(
+            conn, proposer_id,
+        )
+        sole_clinician_override = False
+        if proposer_auth_type == CLIN_AUTH_SOLE_LEAD:
+            # sole_lead: same-actor approval is permitted because the
+            # session-separation check above already requires a fresh login
+            # session. The 30-day auto-revert (Plan Gap M) and codeword
+            # precondition (b) below remain in force — those are not relaxed
+            # by this exemption. We flag the audit row so a reviewer sees
+            # the deviation explicitly.
+            sole_clinician_override = (proposer_id == approver_id)
+        else:
+            # multi_clinician_team: enforce different actor (username).
+            if proposer_id and approver_id and proposer_id == approver_id:
+                raise HTTPException(
+                    409,
+                    detail={
+                        "reason": "multi_clinician_required",
+                        "proposer_authorization_type": proposer_auth_type,
+                    },
+                )
 
         # Precondition (b): codeword precondition. MUST run BEFORE the flip
         # so a zero-codeword user is never silenced without a safety net.
@@ -1928,6 +2506,10 @@ async def safe_silence_approve(
         new_state = {
             "state": SAFE_SILENCE_ACTIVE,
             "proposer_id": sss.get("proposer_id"),
+            # Persist gate hashes for sole_lead admin revoke session separation
+            # after proposer_token_hash is cleared (Priority 2a).
+            "gate_proposer_token_hash": proposer_token_hash or None,
+            "gate_approver_token_hash": approver_token_hash or None,
             "proposer_token_hash": None,
             "approver_id": approver_id,
             "proposed_at": sss.get("proposed_at"),
@@ -1967,6 +2549,8 @@ async def safe_silence_approve(
             "expires_at": expires_at.isoformat(),
             "approval_ttl_days": SAFE_SILENCE_APPROVAL_TTL_DAYS,
             "active_codeword_count": int(cw_count),
+            "proposer_authorization_type": proposer_auth_type,
+            "sole_clinician_override": bool(sole_clinician_override),
         },
         severity="high",
         event_type=EVT_SAFE_SILENCE_STATE_CHANGE,
@@ -1977,6 +2561,8 @@ async def safe_silence_approve(
         "approved_at": now.isoformat(),
         "expires_at": expires_at.isoformat(),
         "approval_ttl_days": SAFE_SILENCE_APPROVAL_TTL_DAYS,
+        "proposer_authorization_type": proposer_auth_type,
+        "sole_clinician_override": bool(sole_clinician_override),
     }
 
 

@@ -645,6 +645,15 @@ class SensitiveBridgeAuditor:
             if not sc_sep["ok"]:
                 silence_view_entry["ok"] = False
                 silence_view_entry["severity"] = "error"
+            revoke_c = _check_safe_silence_active_revoke_contracts()
+            silence_view_entry["details"]["safe_silence_active_revoke_contracts"] = {
+                "check_id": revoke_c["id"],
+                "ok": bool(revoke_c["ok"]),
+                "findings": revoke_c["details"],
+            }
+            if not revoke_c["ok"]:
+                silence_view_entry["ok"] = False
+                silence_view_entry["severity"] = "error"
             results.append(silence_view_entry)
             observed.append("safe_silence_state_view_present")
 
@@ -992,6 +1001,10 @@ _SOLE_LEAD_TELEMETRY_PATH = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "..", "routers", "sensitive_bridge_telemetry_api.py",
 ))
+_CHECKIN_AGENT_PATH = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "nate_checkin_agent.py",
+))
 
 # Path-C enrollment endpoint shares a router file with the rest of the
 # sensitive_profile contract. Reuse the same anchored path used by the
@@ -1077,6 +1090,67 @@ def _check_sole_clinician_session_separation_enforced() -> Dict[str, Any]:
         "id": cid, "ok": ok,
         "severity": "info" if ok else "error",
         "details": findings,
+    }
+
+
+def _check_safe_silence_active_revoke_contracts() -> Dict[str, Any]:
+    """Priority 2a static contracts folded into ``safe_silence_state_view_present``.
+
+    Three named sub-checks (runtime exercised by fixtures / ops drills):
+      • ``safe_silence_active_revoke_admin_only``
+      • ``safe_silence_active_revoke_sole_lead_session_separation``
+      • ``safe_silence_revoke_emits_welcome_back_trigger``
+    """
+    cid = "safe_silence_active_revoke_contracts"
+    details: Dict[str, Any] = {"api_path": _SOLE_LEAD_API_PATH}
+    try:
+        with open(_SOLE_LEAD_API_PATH, "r", encoding="utf-8") as fh:
+            api = fh.read()
+        with open(_CHECKIN_AGENT_PATH, "r", encoding="utf-8") as fh:
+            agent = fh.read()
+    except Exception as e:
+        return {
+            "id": cid,
+            "ok": False,
+            "severity": "warning",
+            "details": {**details, "error": repr(e)[:160]},
+        }
+
+    admin_only = (
+        "admin_required_for_active_revocation" in api
+        and "no_active_or_pending_state" in api
+        and "safe_silence_active_revoked" in api
+    )
+    sole_lead_sep = (
+        "gate_proposer_token_hash" in api
+        and "gate_approver_token_hash" in api
+        and "revoker_hash" in api
+        and "manual_admin_revocation" in api
+        and _re.search(
+            r"hmac\.compare_digest\(\s*revoker_hash\s*,",
+            api,
+        )
+        is not None
+    )
+    welcome_trigger = (
+        "manual_admin_revocation" in agent
+        and "safe_silence_active_revoked" in agent
+        and "welcome_back_source" in agent
+        and "manual_revoke_welcome_attempts" in agent
+    )
+
+    details.update({
+        "safe_silence_active_revoke_admin_only": admin_only,
+        "safe_silence_active_revoke_sole_lead_session_separation": sole_lead_sep,
+        "safe_silence_revoke_emits_welcome_back_trigger": welcome_trigger,
+        "checkin_path": _CHECKIN_AGENT_PATH,
+    })
+    ok = admin_only and sole_lead_sep and welcome_trigger
+    return {
+        "id": cid,
+        "ok": ok,
+        "severity": "info" if ok else "error",
+        "details": details,
     }
 
 
