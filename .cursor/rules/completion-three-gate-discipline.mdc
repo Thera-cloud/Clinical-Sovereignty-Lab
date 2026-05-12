@@ -1,0 +1,28 @@
+---
+alwaysApply: true
+---
+# Completion Three-Gate Discipline
+
+## "Complete" requires three independent confirmations in the same report
+
+1. **Commit hash on main**
+   - Format: `<hash> on main` (or document explicit uncommitted state per GAP 12)
+   - Push verified: `git ls-remote origin main` matches local
+
+2. **Deploy confirmation**
+   - GREEN server `git rev-parse HEAD` matches commit hash exactly
+   - Container rebuild/restart confirmed if backend/bridge touched
+   - `cat /var/www/sovereignsanctuary-web/version.json` shows new hash if Flutter touched
+
+3. **End-to-end production test**
+   - Real user (or audit test user) interacts through real UI surface
+   - Expected outcome verified via screenshot, log entry, OR audit row in PG
+   - "Linter passed" and "build succeeded" are NOT E2E tests
+
+## Forbidden patterns
+- "Complete" reported with code written but not committed
+- "Complete" reported with commit on main but no GREEN verification
+- "Complete" reported with deploy verified but no production-UI smoke test
+
+## Why
+2026-05-11 View Brief pill: reported complete; was uncommitted in local working tree across multiple Cursor sessions. CoachN couldn't reach Sensitive Profile screen from production Coach Command for ~24 hours after "completion" was reported.

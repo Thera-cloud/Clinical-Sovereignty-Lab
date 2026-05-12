@@ -1,0 +1,22 @@
+---
+alwaysApply: true
+---
+# Renderer & Data Contract Synchronization
+
+## Rule
+Any dashboard, modal, or display surface that renders structured data (JSONL, JSON payloads, audit logs) must have a matching renderer that:
+
+1. Parses the structured format
+2. Renders for human readability (not raw)
+3. Is updated in the same commit when the data contract changes
+
+## Examples
+- Coach Command Client Briefing Recent Memory → must render as threaded conversation log (speaker labels, human timestamps, session dividers), NOT raw JSONL
+- Sovereign Command Crisis Watchlist Review → same threaded format
+- Sensitive Profile Activity Log → typed event renderer per event_type, not raw payload_json dump
+
+## Forbidden
+Shipping a feature that writes structured data without confirming all consumer surfaces have a working renderer for it.
+
+## Why
+Coach Command Client Briefing displayed conversations as raw `{"timestamp":"...","session_id":"...","user":"...","ai":"..."}` JSONL strings instead of readable format. Reported as fixed in Priority 2 but Flutter rendering shipped without backend renderer wiring; visual review confirmed raw JSONL still displayed.

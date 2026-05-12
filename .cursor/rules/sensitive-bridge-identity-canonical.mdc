@@ -1,0 +1,22 @@
+---
+alwaysApply: true
+---
+# Sensitive Clinical Bridge — Canonical User Identity
+
+## Rule
+All Sensitive Clinical Bridge persistence, audit, and orchestrator code MUST use `users.username` as the canonical user_id.
+
+## Boundary resolution
+The chat path passes hardware_id. At the bridge boundary (therapeutic_controller.prepare_therapeutic_context), call:
+  from app.services._identity_resolver import resolve_username
+  canonical_user_id = await resolve_username(db_pool, user_id)
+
+Then pass canonical_user_id (NOT the original user_id) to evaluate_disclosure and all downstream consumers.
+
+## Forbidden patterns
+- Querying sensitive_bridge_enrollment, user_safety_codewords, user_trigger_dates, user_polyvictimization_layers, user_legal_status, sensitive_bridge_log by hardware_id
+- Adding new tables with FK to users(hardware_id) for Sensitive Bridge surfaces
+- Special-casing identity per cohort, user, or session
+
+## Why
+Schema FKs (migrations 202-207) reference users(username). Pre-resolution chat path passed hardware_id, causing orchestrator to return empty data even when enrollment existed. Fixed in commit a7c03b7 (Priority 1).

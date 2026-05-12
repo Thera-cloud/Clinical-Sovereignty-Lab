@@ -1,0 +1,20 @@
+---
+alwaysApply: true
+---
+# Vault Backup Cron & Heartbeat Monitoring
+
+## Required cron entry
+/etc/cron.d/sovereign-vault-backup runs daily at 03:00 UTC:
+  /opt/clinical-sovereignty-lab/scripts/daily_vault_backup.sh
+
+## Required heartbeat
+Script writes /opt/clinical-sovereignty-lab/backups/vaults/.last_backup_heartbeat with ISO timestamp on each successful run.
+
+## Required monitoring
+Trust enforcer or scheduled audit check: if heartbeat file mtime is older than 48 hours, raise alert.
+
+## Required retention
+30 days of vault_backup_YYYYMMDD_HHMMSS.tar.gz rotated; older files auto-deleted by script.
+
+## Why
+2026-04-14 to 2026-05-12: vault backup cron stopped silently. No heartbeat monitoring meant 28 days passed without detection. When 2026-05-12 wipe occurred, restore floor was 2026-04-14, losing 28 days of unrecoverable client metrics.

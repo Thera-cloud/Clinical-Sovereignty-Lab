@@ -1,0 +1,22 @@
+---
+alwaysApply: true
+---
+# Safe Deploy Script Mandatory for GREEN
+
+## Rule
+All production deploys to GREEN (68.183.168.75) MUST use:
+  /opt/clinical-sovereignty-lab/scripts/safe_deploy.sh <service>
+
+## Forbidden patterns
+- Inline `ssh root@68.183.168.75 "docker compose ..."` from Mac terminal
+- Direct `docker compose -f docker-compose.prod.yml ...` on GREEN console
+- Any deploy that skips the pre/post vault count guard
+- Hand-copying files to GREEN via scp; use git pull on GREEN instead
+
+## Required pattern
+ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && git pull origin main && bash scripts/safe_deploy.sh <service>"
+
+Single command, single SSH invocation, single repository state, single guarded deploy step.
+
+## Why
+2026-05-12 vault wipe traced to manual deploy bypassing safety wrapper. Inline SSH with --force-recreate caused 28-day data loss for 26 clients.

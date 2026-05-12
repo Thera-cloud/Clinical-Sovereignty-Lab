@@ -1,0 +1,19 @@
+---
+alwaysApply: true
+---
+# Flutter Disabled-State Control QA
+
+## Rule
+Flutter widgets that visually appear disabled (muted color, opacity reduced, "disabled" badge) must explicitly distinguish between:
+
+1. **Hidden** — widget not rendered at all (SizedBox.shrink, etc.)
+2. **Display-only blocked** — visible, NOT tappable (onPressed: null)
+3. **Display-only available action** — visible, IS tappable, opens secondary flow (e.g. enrollment dialog, info modal)
+
+Three-state visibility is REQUIRED any time a disabled-looking control has a meaningful secondary action behind it.
+
+## Forbidden
+Visually disabled control with `onPressed: null` when authorized users need to reach a secondary flow (e.g. "tap to begin enrollment", "tap to view details", "tap to request access").
+
+## Why
+2026-05-12 View Brief Sensitive Profile pill: rendered disabled for not-enrolled clients with onPressed: null. Blocked Path-C self-enrollment workflow. Coach could not reach the SensitiveClinicalProfileScreen's "Enroll this client" button because the entry pill rejected clicks. Fixed by adding `enroll_available` as distinct state.

@@ -1,0 +1,27 @@
+---
+alwaysApply: true
+---
+# Vault & Bind-Mount Data Protection
+
+## Hard ban (production GREEN: 68.183.168.75)
+NEVER execute against /opt/clinical-sovereignty-lab/data/ or any bind-mounted volume:
+- docker compose ... --force-recreate (specifically forbidden)
+- docker compose down -v (anonymous volume removal)
+- rm -rf data/, rm -rf Vaults/
+- rsync --delete with data/ as target
+- find data/ -delete
+- git clean -fd (will wipe untracked data/ even with .gitignore)
+
+## Required wrapper
+All production docker compose actions go through:
+  /opt/clinical-sovereignty-lab/scripts/safe_deploy.sh <service>
+
+The wrapper:
+1. Tar-snapshots data/bridge/Vaults and data/backend/Vaults before deploy
+2. Counts metrics.json files pre-deploy
+3. Runs docker compose up -d <service> (no --force-recreate, no --build flags unless caller explicitly passes)
+4. Counts metrics.json files post-deploy
+5. Exit code 2 + ALERT if count drops more than 10%
+
+## Why
+2026-05-12 02:56:22 UTC incident: --force-recreate during deploy wiped /data/bridge/Vaults/Clients/ (28 days of accumulated metrics for 26 clients, ~826 files). Root cause: bind mount detached during 2-second container kill-restart gap; new bridge container lazy-initialized empty files via initialize_metrics() default stub.
