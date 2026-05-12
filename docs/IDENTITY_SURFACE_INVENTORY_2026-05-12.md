@@ -134,6 +134,8 @@ ORDER BY table_name, column_name;
 
 **Row count:** **229** (tabular rows below).
 
+> **Coverage gap:** this filter uses `%corporate_id%` but not `%company_id%`. Tables such as **`users.company_id`** require a separate column grep when auditing corporate FK surfaces.
+
 | table_name | column_name | data_type |
 |------------|-------------|-----------|
 | active_tokens | user_id | uuid |
