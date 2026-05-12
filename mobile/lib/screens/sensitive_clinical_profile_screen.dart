@@ -19,6 +19,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart' as cfg;
@@ -70,6 +71,68 @@ double _noveltyPreset(String? populationType) =>
 double _arousalPreset(String? populationType) =>
     _AROUSAL_PRESETS[populationType ?? ''] ?? _AROUSAL_PRESETS['general_trauma']!;
 
+/// Calendar date as YYYY-MM-DD for trigger/legal endpoints.
+String _dateOnlyIso(DateTime d) {
+  final local = DateTime(d.year, d.month, d.day);
+  final y = local.year.toString().padLeft(4, '0');
+  final m = local.month.toString().padLeft(2, '0');
+  final day = local.day.toString().padLeft(2, '0');
+  return '$y-$m-$day';
+}
+
+// -----------------------------------------------------------------------------
+// Interactive controls — enum mirrors backend sensitive_profile_api.py (Phase 4b).
+// -----------------------------------------------------------------------------
+const List<String> _kEmbodimentPhases = ['repair', 'transitioning', 'ready'];
+const List<String> _kSubstanceStatuses = [
+  'none',
+  'recovery',
+  'active_use',
+  'crisis',
+];
+/// Server CHECK constraint (migration 204): explicit_word | innocuous_phrase.
+const List<String> _kCodewordTypesApi = ['explicit_word', 'innocuous_phrase'];
+const List<String> _kTriggerDateTypes = [
+  'escape_anniversary',
+  'first_exploitation',
+  'legal_outcome',
+  'related_death',
+  'custody_outcome',
+  'court_appearance',
+  'medical_anniversary',
+  'other',
+];
+const List<String> _kSeverities = ['low', 'moderate', 'high', 'critical'];
+const List<String> _kPolyvictimLayerTypes = [
+  'childhood_abuse',
+  'family_dysfunction',
+  'prior_partner_violence',
+  'trafficking',
+  'post_trafficking_exploitation',
+  'legal_system_trauma',
+  'medical_trauma',
+  'religious_trauma',
+  'community_violence',
+];
+const List<String> _kLegalCaseTypes = [
+  'criminal_against_trafficker',
+  't_visa',
+  'u_visa',
+  'civil',
+  'custody',
+  'expungement',
+  'protective_order',
+  'other',
+];
+const List<String> _kLegalCaseStatuses = [
+  'pending',
+  'active_hearing_scheduled',
+  'testifying_imminent',
+  'deposition_imminent',
+  'outcome_pending',
+  'closed',
+];
+
 // -----------------------------------------------------------------------------
 // SAFE SILENCE EXPIRY THRESHOLDS (Gap M)
 // red ≤5 days remaining → expiring soon
@@ -103,6 +166,15 @@ class SensitiveProfile {
   /// response surface yet; default to general_trauma per Note 3 banner rule.
   final String? populationType;
 
+  // -------------------------------------------------------------------------
+  // PATH-C ENROLLMENT VISIBILITY (M215 + M216)
+  // Backend `_load_profile_data` attaches these two flags so the screen
+  // can render the not-enrolled banner + coach-initiated enroll button
+  // without a second REST round-trip.
+  // -------------------------------------------------------------------------
+  final bool isEnrolled;
+  final bool coachAuthorized;
+
   SensitiveProfile({
     required this.userId,
     required this.embodimentPhase,
@@ -115,6 +187,8 @@ class SensitiveProfile {
     required this.polyvictimLayers,
     required this.legalStatus,
     required this.populationType,
+    this.isEnrolled = true,
+    this.coachAuthorized = false,
   });
 
   factory SensitiveProfile.fromJson(Map<String, dynamic> j) {
@@ -142,6 +216,8 @@ class SensitiveProfile {
           .map((e) => LegalCase.fromJson((e as Map).cast<String, dynamic>()))
           .toList(),
       populationType: j['population_type'] as String?,
+      isEnrolled: j['is_enrolled'] == true,
+      coachAuthorized: j['coach_sensitive_bridge_authorized'] == true,
     );
   }
 
@@ -444,7 +520,7 @@ class _SensitiveProfileApi {
         .get(uri, headers: _headers)
         .timeout(const Duration(seconds: 15));
     if (resp.statusCode != 200) {
-      throw _ApiError(resp.statusCode, _decodeReason(resp.body));
+      throw _ApiError.fromResponse(resp);
     }
     final data = jsonDecode(resp.body) as Map<String, dynamic>;
     return SensitiveProfile.fromJson(data);
@@ -467,7 +543,7 @@ class _SensitiveProfileApi {
         .get(uri, headers: _headers)
         .timeout(const Duration(seconds: 15));
     if (resp.statusCode != 200) {
-      throw _ApiError(resp.statusCode, _decodeReason(resp.body));
+      throw _ApiError.fromResponse(resp);
     }
     final data = jsonDecode(resp.body) as Map<String, dynamic>;
     final rows = (data['rows'] as List?) ?? [];
@@ -479,18 +555,243 @@ class _SensitiveProfileApi {
   Future<void> putThreshold(
     String userId,
     String which,
-    double value,
-  ) async {
+    double value, {
+    String? populationPreset,
+  }) async {
     final path = which == 'novelty'
         ? 'novelty-threshold'
         : 'arousal-threshold';
     final uri = Uri.parse('$_base/api/coach/sensitive-profile/$userId/$path');
-    final body = jsonEncode({which: value});
+    final Map<String, dynamic> payload = which == 'novelty'
+        ? {'novelty_threshold': value}
+        : {'arousal_threshold': value};
+    if (populationPreset != null && populationPreset.isNotEmpty) {
+      payload['population_preset'] = populationPreset;
+    }
+    final body = jsonEncode(payload);
     final resp = await http
         .put(uri, headers: _headers, body: body)
         .timeout(const Duration(seconds: 10));
     if (resp.statusCode != 200) {
-      throw _ApiError(resp.statusCode, _decodeReason(resp.body));
+      throw _ApiError.fromResponse(resp);
+    }
+  }
+
+  Future<void> putEmbodimentPhase(String userId, String phase) async {
+    final uri = Uri.parse(
+      '$_base/api/coach/sensitive-profile/$userId/embodiment-phase',
+    );
+    final resp = await http
+        .put(
+          uri,
+          headers: _headers,
+          body: jsonEncode({'embodiment_phase': phase}),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw _ApiError.fromResponse(resp);
+    }
+  }
+
+  Future<void> putSubstanceStatus(String userId, String status) async {
+    final uri = Uri.parse(
+      '$_base/api/coach/sensitive-profile/$userId/substance-status',
+    );
+    final resp = await http
+        .put(
+          uri,
+          headers: _headers,
+          body: jsonEncode({'substance_status': status}),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw _ApiError.fromResponse(resp);
+    }
+  }
+
+  Future<void> postCodeword(
+    String userId, {
+    required String plaintextCodeword,
+    required String codewordType,
+    required bool triggersMandatoryReporting,
+    String? codewordLabel,
+  }) async {
+    final uri = Uri.parse('$_base/api/coach/sensitive-profile/$userId/codeword');
+    final resp = await http
+        .post(
+          uri,
+          headers: _headers,
+          body: jsonEncode({
+            'plaintext_codeword': plaintextCodeword,
+            'codeword_type': codewordType,
+            'triggers_mandatory_reporting': triggersMandatoryReporting,
+            if (codewordLabel != null && codewordLabel.isNotEmpty)
+              'codeword_label': codewordLabel,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw _ApiError.fromResponse(resp);
+    }
+  }
+
+  Future<void> deleteCodeword(String userId, String hashPrefix) async {
+    final uri = Uri.parse(
+      '$_base/api/coach/sensitive-profile/$userId/codeword/$hashPrefix',
+    );
+    final resp = await http
+        .delete(uri, headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw _ApiError.fromResponse(resp);
+    }
+  }
+
+  Future<void> postTriggerDate(
+    String userId, {
+    required String triggerDateIso,
+    required String dateType,
+    required String severity,
+    required bool recurringAnnually,
+    String? notesRedacted,
+  }) async {
+    final uri =
+        Uri.parse('$_base/api/coach/sensitive-profile/$userId/trigger-date');
+    final resp = await http
+        .post(
+          uri,
+          headers: _headers,
+          body: jsonEncode({
+            'trigger_date': triggerDateIso,
+            'date_type': dateType,
+            'severity': severity,
+            'recurring_annually': recurringAnnually,
+            if (notesRedacted != null && notesRedacted.isNotEmpty)
+              'notes_redacted': notesRedacted,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw _ApiError.fromResponse(resp);
+    }
+  }
+
+  Future<void> deleteTriggerDate(String userId, int id) async {
+    final uri = Uri.parse(
+      '$_base/api/coach/sensitive-profile/$userId/trigger-date/$id',
+    );
+    final resp = await http
+        .delete(uri, headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw _ApiError.fromResponse(resp);
+    }
+  }
+
+  Future<void> postPolyvictimLayer(
+    String userId, {
+    required String layerType,
+    required String severity,
+    String? notesRedacted,
+  }) async {
+    final uri =
+        Uri.parse('$_base/api/coach/sensitive-profile/$userId/polyvictim-layer');
+    final resp = await http
+        .post(
+          uri,
+          headers: _headers,
+          body: jsonEncode({
+            'layer_type': layerType,
+            'severity': severity,
+            if (notesRedacted != null && notesRedacted.isNotEmpty)
+              'notes_redacted': notesRedacted,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw _ApiError.fromResponse(resp);
+    }
+  }
+
+  Future<void> deletePolyvictimLayer(String userId, int layerId) async {
+    final uri = Uri.parse(
+      '$_base/api/coach/sensitive-profile/$userId/polyvictim-layer/$layerId',
+    );
+    final resp = await http
+        .delete(uri, headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw _ApiError.fromResponse(resp);
+    }
+  }
+
+  Future<void> postLegalStatus(
+    String userId, {
+    required String caseType,
+    required String caseStatus,
+    String? nextEventDateIso,
+    String? attorneyContactRedacted,
+  }) async {
+    final uri =
+        Uri.parse('$_base/api/coach/sensitive-profile/$userId/legal-status');
+    final Map<String, dynamic> body = {
+      'case_type': caseType,
+      'case_status': caseStatus,
+      if (nextEventDateIso != null && nextEventDateIso.isNotEmpty)
+        'next_event_date': nextEventDateIso,
+      if (attorneyContactRedacted != null &&
+          attorneyContactRedacted.isNotEmpty)
+        'attorney_contact_redacted': attorneyContactRedacted,
+    };
+    final resp = await http
+        .post(
+          uri,
+          headers: _headers,
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw _ApiError.fromResponse(resp);
+    }
+  }
+
+  Future<void> patchLegalStatus(
+    String userId,
+    int legalId, {
+    String? caseStatus,
+    String? nextEventDateIso,
+    String? attorneyContactRedacted,
+  }) async {
+    final uri = Uri.parse(
+      '$_base/api/coach/sensitive-profile/$userId/legal-status/$legalId',
+    );
+    final Map<String, dynamic> patch = {};
+    if (caseStatus != null) patch['case_status'] = caseStatus;
+    if (nextEventDateIso != null && nextEventDateIso.isNotEmpty) {
+      patch['next_event_date'] = nextEventDateIso;
+    }
+    if (attorneyContactRedacted != null) {
+      patch['attorney_contact_redacted'] = attorneyContactRedacted;
+    }
+    if (patch.isEmpty) {
+      throw _ApiError(422, 'no_fields_to_patch');
+    }
+    final resp = await http
+        .patch(uri, headers: _headers, body: jsonEncode(patch))
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw _ApiError.fromResponse(resp);
+    }
+  }
+
+  Future<void> deleteSafeSilence(String userId) async {
+    final uri =
+        Uri.parse('$_base/api/coach/sensitive-profile/$userId/safe-silence');
+    final resp = await http
+        .delete(uri, headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw _ApiError.fromResponse(resp);
     }
   }
 
@@ -509,7 +810,7 @@ class _SensitiveProfileApi {
         )
         .timeout(const Duration(seconds: 15));
     if (resp.statusCode != 200) {
-      throw _ApiError(resp.statusCode, _decodeReason(resp.body));
+      throw _ApiError.fromResponse(resp);
     }
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
@@ -534,29 +835,81 @@ class _SensitiveProfileApi {
         )
         .timeout(const Duration(seconds: 15));
     if (resp.statusCode != 200) {
-      throw _ApiError(resp.statusCode, _decodeReason(resp.body));
+      throw _ApiError.fromResponse(resp);
     }
   }
 
-  String _decodeReason(String body) {
-    try {
-      final j = jsonDecode(body);
-      if (j is Map && j['detail'] is Map) {
-        final reason = (j['detail'] as Map)['reason'];
-        if (reason != null) return reason.toString();
-      }
-      if (j is Map && j['detail'] != null) return j['detail'].toString();
-    } catch (_) {}
-    return body.length > 240 ? '${body.substring(0, 240)}…' : body;
+  /// Path-C: coach-initiated self-enrollment.
+  /// Returns the parsed body on 200; throws _ApiError carrying the
+  /// server-side `reason` (`consent_required`, `requires_guardian_consent`,
+  /// `already_enrolled`, `not_found`, …) so the caller can render
+  /// reason-specific UX.
+  Future<Map<String, dynamic>> enrollClient(
+    String userId, {
+    required String cohortLabel,
+    required String populationType,
+    required bool informedConsentConfirmed,
+  }) async {
+    final uri = Uri.parse('$_base/api/coach/sensitive-profile/$userId/enroll');
+    final resp = await http
+        .post(
+          uri,
+          headers: _headers,
+          body: jsonEncode({
+            'cohort_label': cohortLabel,
+            'population_type': populationType,
+            'informed_consent_confirmed': informedConsentConfirmed,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw _ApiError.fromResponse(resp);
+    }
+    final j = jsonDecode(resp.body);
+    if (j is Map<String, dynamic>) return j;
+    return <String, dynamic>{};
   }
 }
 
 class _ApiError implements Exception {
   final int status;
-  final String reason;
-  _ApiError(this.status, this.reason);
+  final String message;
+  final Map<String, dynamic>? detail;
+
+  _ApiError(this.status, this.message, {this.detail});
+
+  factory _ApiError.fromResponse(http.Response resp) {
+    final raw = resp.body;
+    try {
+      final j = jsonDecode(raw);
+      if (j is Map<String, dynamic>) {
+        final d = j['detail'];
+        if (d is Map<String, dynamic>) {
+          final reason = d['reason']?.toString() ?? 'request_failed';
+          final buf = StringBuffer(reason);
+          if (d['pattern_matched'] != null) {
+            buf.write(
+              ' · pattern "${d['pattern_matched']}" at position ${d['field_position']}',
+            );
+          }
+          if (d['field'] != null) buf.write(' · field: ${d['field']}');
+          return _ApiError(resp.statusCode, buf.toString(), detail: d);
+        }
+        if (d != null) {
+          return _ApiError(resp.statusCode, d.toString());
+        }
+      }
+    } catch (_) {}
+    final truncated =
+        raw.length > 480 ? '${raw.substring(0, 480)}…' : raw;
+    return _ApiError(resp.statusCode, truncated.isEmpty ? 'HTTP ${resp.statusCode}' : truncated);
+  }
+
+  /// Enrollment / snackbar paths still read `.reason`.
+  String get reason => message;
+
   @override
-  String toString() => 'API $status: $reason';
+  String toString() => 'API $status: $message';
 }
 
 // =============================================================================
@@ -572,10 +925,36 @@ class SensitiveClinicalProfileScreen extends StatefulWidget {
   /// Routes resolve this string against `users.username`.
   final String targetUserId;
 
+  // ---------------------------------------------------------------------------
+  // INSPECTION-HARNESS OVERRIDES (additive, null in production)
+  //
+  // These three parameters exist solely so the local Flutter dev preview at
+  // `mobile/lib/screens/inspection/sensitive_profile_inspection_harness.dart`
+  // can render this screen against in-memory fixtures without touching the
+  // real `_loadProfile()` / `_loadActivityLog()` REST calls. When all three
+  // are null (the only production code path), the screen behaves byte-for-byte
+  // as before: `initState` triggers `_loadProfile()` which hits the API,
+  // which then triggers `_loadActivityLog(reset: true)`.
+  //
+  // Contract:
+  //   - profileOverride non-null   → skip GET /api/coach/sensitive-profile/{id}
+  //   - logEventsOverride non-null → skip GET /api/coach/sensitive-profile/{id}/log
+  //   - loadErrorOverride non-null → render the error UI as if the GET 4xx'd
+  //
+  // The harness MUST only be reachable behind a `kDebugMode` URL gate; release
+  // builds never expose a code path that supplies these overrides.
+  // ---------------------------------------------------------------------------
+  final SensitiveProfile? profileOverride;
+  final List<ActivityEvent>? logEventsOverride;
+  final String? loadErrorOverride;
+
   const SensitiveClinicalProfileScreen({
     super.key,
     required this.currentUserProfile,
     required this.targetUserId,
+    this.profileOverride,
+    this.logEventsOverride,
+    this.loadErrorOverride,
   });
 
   @override
@@ -601,6 +980,15 @@ class _SensitiveClinicalProfileScreenState
   int? _logCursor; // before_id for next page
   bool _logExhausted = false;
 
+  // PATH-C enrollment state. Drives the disabled state of the
+  // "Enroll this client" button so we don't fire two POSTs back-to-back.
+  bool _enrollInFlight = false;
+
+  bool _savingEmbodiment = false;
+  String? _embodimentInlineError;
+  bool _savingSubstance = false;
+  String? _substanceInlineError;
+
   @override
   void initState() {
     super.initState();
@@ -613,11 +1001,49 @@ class _SensitiveClinicalProfileScreenState
       (widget.currentUserProfile['role'] ?? '').toString().toUpperCase();
   bool get _isAdmin => _role == 'ADMIN';
 
+  /// Debug harness loads fixture via profileOverride — never hit prod APIs.
+  bool get _inspectionHarness => widget.profileOverride != null;
+
+  bool _canEditSensitiveFields(SensitiveProfile p) =>
+      p.coachAuthorized && p.isEnrolled;
+
+  bool get _blockHarnessNetwork => _inspectionHarness;
+
+  String get _currentPrincipalUsername =>
+      (widget.currentUserProfile['username'] ?? '').toString();
+
+  Future<void> _profileRefresh() => _loadProfile();
+
   Future<void> _loadProfile() async {
     setState(() {
       _loading = true;
       _loadError = null;
     });
+
+    // ---- Inspection-harness short-circuit (additive, null in production) ----
+    // When the harness injects overrides we never touch the network. The
+    // override branches are only reachable when the screen was constructed
+    // from `sensitive_profile_inspection_harness.dart`, which itself is only
+    // pushable from a `kDebugMode` URL gate — release builds cannot reach
+    // this branch.
+    if (widget.loadErrorOverride != null) {
+      if (!mounted) return;
+      setState(() {
+        _loadError = widget.loadErrorOverride;
+        _loading = false;
+      });
+      return;
+    }
+    if (widget.profileOverride != null) {
+      if (!mounted) return;
+      setState(() {
+        _profile = widget.profileOverride;
+        _loading = false;
+      });
+      _loadActivityLog(reset: true);
+      return;
+    }
+
     try {
       final p = await _api.getProfile(widget.targetUserId);
       if (!mounted) return;
@@ -648,6 +1074,26 @@ class _SensitiveClinicalProfileScreenState
         _logExhausted = false;
       }
     });
+
+    // ---- Inspection-harness short-circuit (additive, null in production) ----
+    // The harness ships a pre-baked event list; treat it as a single,
+    // exhausted page so the "load older" affordance correctly hides.
+    if (widget.logEventsOverride != null) {
+      if (!mounted) return;
+      setState(() {
+        if (reset) {
+          _logEvents
+            ..clear()
+            ..addAll(widget.logEventsOverride!);
+        }
+        _logCursor =
+            _logEvents.isNotEmpty ? _logEvents.last.id : null;
+        _logExhausted = true;
+        _logLoading = false;
+      });
+      return;
+    }
+
     try {
       final events = await _api.getLog(
         widget.targetUserId,
@@ -734,6 +1180,16 @@ class _SensitiveClinicalProfileScreenState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // PATH-C: not-enrolled banner. Renders ONLY when the server
+          // says is_enrolled=false. The "Enroll this client" button
+          // inside the banner only shows for coaches whose
+          // coach_sensitive_bridge_authorized flag is true.
+          if (!p.isEnrolled)
+            _NotEnrolledBanner(
+              coachAuthorized: p.coachAuthorized,
+              enrollInFlight: _enrollInFlight,
+              onEnrollPressed: _openEnrollmentDialog,
+            ),
           if (p.populationType == null)
             const _PopulationTypeBanner(),
           _SectionCard(
@@ -860,18 +1316,169 @@ class _SensitiveClinicalProfileScreenState
   // BODIES
   // ---------------------------------------------------------------------------
 
-  Widget _embodimentBody(SensitiveProfile p) {
-    return _ReadOnlyKv(rows: [
-      _Kv('Current phase', p.embodimentPhase ?? '—'),
-      const _Kv(
-        'Allowed values',
-        'repair · transitioning · ready',
+  String _apiErrorMessage(Object e) {
+    if (e is _ApiError) return e.message;
+    return e.toString();
+  }
+
+  Future<bool> _confirmDialog({
+    required String title,
+    required String message,
+    String confirmLabel = 'Confirm',
+  }) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(LogicalKeyboardKey.escape): () {
+            Navigator.of(ctx).pop(false);
+          },
+        },
+        child: Focus(
+          autofocus: true,
+          child: AlertDialog(
+            backgroundColor: _D.bgCard,
+            title: Text(title, style: const TextStyle(color: _D.gold)),
+            content: Text(message, style: const TextStyle(color: _D.text)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: Text(confirmLabel),
+              ),
+            ],
+          ),
+        ),
       ),
-    ]);
+    );
+    return ok == true;
+  }
+
+  bool _harnessMutationBarrier() {
+    if (!_blockHarnessNetwork) return false;
+    if (!mounted) return true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        backgroundColor: _D.bgElev,
+        content: Text(
+          'Inspection harness: network mutation skipped.',
+          style: TextStyle(color: _D.gold),
+        ),
+      ),
+    );
+    return true;
+  }
+
+  Widget _embodimentBody(SensitiveProfile p) {
+    final rows = <_Kv>[
+      const _Kv('Allowed values', 'repair · transitioning · ready'),
+    ];
+    if (!_canEditSensitiveFields(p)) {
+      rows.insert(0, _Kv('Current phase', p.embodimentPhase ?? '—'));
+      return _ReadOnlyKv(rows: rows);
+    }
+
+    final opts = List<String>.from(_kEmbodimentPhases);
+    final cur = p.embodimentPhase;
+    if (cur != null && cur.isNotEmpty && !opts.contains(cur)) {
+      opts.insert(0, cur);
+    }
+    final effective =
+        (cur != null && opts.contains(cur)) ? cur : opts.first;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ReadOnlyKv(rows: rows),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: effective,
+                dropdownColor: _D.bgElev,
+                style: const TextStyle(color: _D.text, fontSize: 13),
+                decoration: const InputDecoration(
+                  filled: true,
+                  fillColor: _D.bgElev,
+                  border: OutlineInputBorder(),
+                  labelText: 'Embodiment phase',
+                  labelStyle: TextStyle(color: _D.textDim, fontSize: 12),
+                ),
+                items: opts
+                    .map(
+                      (e) => DropdownMenuItem(
+                        value: e,
+                        child: Text(e, style: const TextStyle(color: _D.text)),
+                      ),
+                    )
+                    .toList(),
+                onChanged: _savingEmbodiment
+                    ? null
+                    : (v) {
+                        if (v == null || v == cur) return;
+                        _applyEmbodimentPhase(v);
+                      },
+              ),
+            ),
+            if (_savingEmbodiment)
+              const Padding(
+                padding: EdgeInsets.only(left: 10),
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+          ],
+        ),
+        if (_embodimentInlineError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              _embodimentInlineError!,
+              style: const TextStyle(color: _D.red, fontSize: 11),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _applyEmbodimentPhase(String phase) async {
+    if (_harnessMutationBarrier()) return;
+    setState(() {
+      _savingEmbodiment = true;
+      _embodimentInlineError = null;
+    });
+    try {
+      await _api.putEmbodimentPhase(widget.targetUserId, phase);
+      if (!mounted) return;
+      await _loadProfile();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _embodimentInlineError = _apiErrorMessage(e));
+      }
+    } finally {
+      if (mounted) setState(() => _savingEmbodiment = false);
+    }
   }
 
   Widget _thresholdsBody(SensitiveProfile p) {
     final pop = p.populationType;
+    if (!_canEditSensitiveFields(p)) {
+      final n = p.noveltyThreshold ?? _noveltyPreset(pop);
+      final a = p.arousalThreshold ?? _arousalPreset(pop);
+      return _ReadOnlyKv(rows: [
+        _Kv('Novelty threshold', n.toStringAsFixed(2)),
+        _Kv('Arousal threshold', a.toStringAsFixed(2)),
+        _Kv('Population preset', pop ?? 'general_trauma'),
+      ]);
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -882,6 +1489,7 @@ class _SensitiveClinicalProfileScreenState
           min: 0.0,
           max: 1.0,
           population: pop,
+          interactive: true,
           onCommit: (v) => _commitThreshold('novelty', v),
         ),
         const SizedBox(height: 12),
@@ -892,6 +1500,7 @@ class _SensitiveClinicalProfileScreenState
           min: 0.0,
           max: 3.0,
           population: pop,
+          interactive: true,
           onCommit: (v) => _commitThreshold('arousal', v),
         ),
       ],
@@ -899,8 +1508,27 @@ class _SensitiveClinicalProfileScreenState
   }
 
   Future<void> _commitThreshold(String which, double value) async {
+    if (_blockHarnessNetwork) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: _D.bgElev,
+          content: Text(
+            'Inspection harness: $which threshold commit skipped (no network).',
+            style: const TextStyle(color: _D.gold),
+          ),
+        ),
+      );
+      return;
+    }
+    final pop = _profile?.populationType;
     try {
-      await _api.putThreshold(widget.targetUserId, which, value);
+      await _api.putThreshold(
+        widget.targetUserId,
+        which,
+        value,
+        populationPreset: pop,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -917,83 +1545,1270 @@ class _SensitiveClinicalProfileScreenState
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: _D.red,
-          content: Text('Update failed: $e',
-              style: const TextStyle(color: Colors.white)),
+          content: Text(
+            _apiErrorMessage(e),
+            style: const TextStyle(color: Colors.white),
+          ),
         ),
       );
     }
   }
 
   Widget _substanceBody(SensitiveProfile p) {
-    return _ReadOnlyKv(rows: [
-      _Kv('Current status', p.substanceStatus ?? 'none'),
+    final rows = <_Kv>[
       const _Kv('Allowed values', 'none · recovery · active_use · crisis'),
-    ]);
+    ];
+    if (!_canEditSensitiveFields(p)) {
+      rows.insert(0, _Kv('Current status', p.substanceStatus ?? 'none'));
+      return _ReadOnlyKv(rows: rows);
+    }
+
+    final opts = List<String>.from(_kSubstanceStatuses);
+    final cur = p.substanceStatus ?? 'none';
+    if (!opts.contains(cur)) {
+      opts.insert(0, cur);
+    }
+    final effective = opts.contains(cur) ? cur : opts.first;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ReadOnlyKv(rows: rows),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: effective,
+                dropdownColor: _D.bgElev,
+                style: const TextStyle(color: _D.text, fontSize: 13),
+                decoration: const InputDecoration(
+                  filled: true,
+                  fillColor: _D.bgElev,
+                  border: OutlineInputBorder(),
+                  labelText: 'Substance status',
+                  labelStyle: TextStyle(color: _D.textDim, fontSize: 12),
+                ),
+                items: opts
+                    .map(
+                      (e) => DropdownMenuItem(
+                        value: e,
+                        child: Text(e, style: const TextStyle(color: _D.text)),
+                      ),
+                    )
+                    .toList(),
+                onChanged: _savingSubstance
+                    ? null
+                    : (v) {
+                        if (v == null || v == cur) return;
+                        _applySubstanceStatus(v);
+                      },
+              ),
+            ),
+            if (_savingSubstance)
+              const Padding(
+                padding: EdgeInsets.only(left: 10),
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+          ],
+        ),
+        if (_substanceInlineError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              _substanceInlineError!,
+              style: const TextStyle(color: _D.red, fontSize: 11),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _applySubstanceStatus(String status) async {
+    if (_harnessMutationBarrier()) return;
+    setState(() {
+      _savingSubstance = true;
+      _substanceInlineError = null;
+    });
+    try {
+      await _api.putSubstanceStatus(widget.targetUserId, status);
+      if (!mounted) return;
+      await _loadProfile();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _substanceInlineError = _apiErrorMessage(e));
+      }
+    } finally {
+      if (mounted) setState(() => _savingSubstance = false);
+    }
   }
 
   Widget _codewordBody(SensitiveProfile p) {
+    final can = _canEditSensitiveFields(p);
+    final rows = <Widget>[];
+
     if (p.codewords.isEmpty) {
-      return const _Empty('No codewords set.');
+      rows.add(const _Empty('No codewords set.'));
+    } else {
+      for (final c in p.codewords) {
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        c.codewordLabel ?? c.hashPrefix,
+                        style: const TextStyle(color: _D.text, fontSize: 13),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${c.codewordType ?? '—'} · '
+                        '${c.active ? 'active' : 'inactive'}'
+                        '${c.triggersMandatoryReporting ? ' · mandatory-report' : ''}'
+                        '${c.triggerCount > 0 ? ' · ×${c.triggerCount}' : ''}',
+                        style: const TextStyle(color: _D.textDim, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+                if (can)
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline,
+                        color: _D.red, size: 20),
+                    tooltip: 'Delete codeword',
+                    onPressed: () => _confirmDeleteCodeword(c),
+                  ),
+              ],
+            ),
+          ),
+        );
+      }
     }
+
+    if (can) {
+      rows.add(
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _showAddCodewordDialog,
+            icon: const Icon(Icons.add, color: _D.gold, size: 18),
+            label:
+                const Text('Add Codeword', style: TextStyle(color: _D.gold)),
+          ),
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: p.codewords
-          .map((c) => _ListTile(
-                title: c.codewordLabel ?? c.hashPrefix,
-                subtitle:
-                    '${c.codewordType ?? '—'} · ${c.active ? 'active' : 'inactive'}'
-                    '${c.triggersMandatoryReporting ? ' · mandatory-report' : ''}',
-                trailing: c.triggerCount > 0 ? '×${c.triggerCount}' : null,
-              ))
-          .toList(),
+      children: rows,
     );
+  }
+
+  Future<void> _showAddCodewordDialog() async {
+    final prof = _profile;
+    if (prof == null || !_canEditSensitiveFields(prof)) return;
+
+    final ctrl = TextEditingController();
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          String cwType = _kCodewordTypesApi.first;
+          bool mandatory = false;
+          bool submitting = false;
+          String? inlineErr;
+
+          return StatefulBuilder(
+            builder: (ctx, setDlg) {
+              return CallbackShortcuts(
+                bindings: <ShortcutActivator, VoidCallback>{
+                  const SingleActivator(LogicalKeyboardKey.escape): () {
+                    if (!submitting) Navigator.of(ctx).pop();
+                  },
+                },
+                child: Focus(
+                  autofocus: true,
+                  child: AlertDialog(
+                    backgroundColor: _D.bgCard,
+                    title: const Text(
+                      'Add Codeword',
+                      style: TextStyle(color: _D.gold),
+                    ),
+                    content: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          TextField(
+                            controller: ctrl,
+                            enabled: !submitting,
+                            style: const TextStyle(color: _D.text),
+                            decoration: const InputDecoration(
+                              labelText: 'Codeword',
+                              hintText:
+                                  'Enter codeword — will be hashed before storage',
+                              hintStyle: TextStyle(color: _D.textDim),
+                              filled: true,
+                              fillColor: _D.bgElev,
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          DropdownButtonFormField<String>(
+                            value: cwType,
+                            dropdownColor: _D.bgElev,
+                            style: const TextStyle(color: _D.text),
+                            decoration: const InputDecoration(
+                              labelText: 'Codeword type',
+                              filled: true,
+                              fillColor: _D.bgElev,
+                              border: OutlineInputBorder(),
+                              labelStyle: TextStyle(color: _D.textDim),
+                            ),
+                            items: _kCodewordTypesApi
+                                .map(
+                                  (e) => DropdownMenuItem(
+                                    value: e,
+                                    child: Text(e),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: submitting
+                                ? null
+                                : (v) => setDlg(() {
+                                      cwType = v ?? cwType;
+                                      if (cwType == 'innocuous_phrase') {
+                                        mandatory = false;
+                                      }
+                                    }),
+                          ),
+                          const SizedBox(height: 4),
+                          CheckboxListTile(
+                            value: mandatory,
+                            onChanged: (submitting ||
+                                    cwType == 'innocuous_phrase')
+                                ? null
+                                : (v) =>
+                                    setDlg(() => mandatory = v ?? false),
+                            title: const Text(
+                              'Triggers mandatory reporting',
+                              style:
+                                  TextStyle(color: _D.text, fontSize: 12),
+                            ),
+                            fillColor:
+                                WidgetStateProperty.resolveWith((states) {
+                              if (states.contains(WidgetState.selected)) {
+                                return _D.gold;
+                              }
+                              return null;
+                            }),
+                            checkColor: _D.bgVoid,
+                          ),
+                          if (inlineErr != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                inlineErr!,
+                                style: const TextStyle(
+                                    color: _D.red, fontSize: 11),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed:
+                            submitting ? null : () => Navigator.of(ctx).pop(),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: submitting
+                            ? null
+                            : () async {
+                                final raw = ctrl.text.trim();
+                                if (raw.isEmpty) return;
+                                if (_blockHarnessNetwork) {
+                                  if (ctx.mounted) Navigator.of(ctx).pop();
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(
+                                      const SnackBar(
+                                        backgroundColor: _D.bgElev,
+                                        content: Text(
+                                          'Inspection harness: mutation skipped.',
+                                          style:
+                                              TextStyle(color: _D.gold),
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                  return;
+                                }
+                                setDlg(() {
+                                  submitting = true;
+                                  inlineErr = null;
+                                });
+                                try {
+                                  await _api.postCodeword(
+                                    widget.targetUserId,
+                                    plaintextCodeword: raw,
+                                    codewordType: cwType,
+                                    triggersMandatoryReporting:
+                                        cwType == 'explicit_word' &&
+                                            mandatory,
+                                  );
+                                  if (ctx.mounted) Navigator.of(ctx).pop();
+                                  await _loadProfile();
+                                } catch (e) {
+                                  setDlg(() {
+                                    submitting = false;
+                                    inlineErr = _apiErrorMessage(e);
+                                  });
+                                }
+                              },
+                        child: const Text('Add Codeword'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      ctrl.dispose();
+    }
+  }
+
+  Future<void> _confirmDeleteCodeword(Codeword c) async {
+    final prof = _profile;
+    if (prof == null || !_canEditSensitiveFields(prof)) return;
+    final ok = await _confirmDialog(
+      title: 'Delete codeword?',
+      message: 'Delete codeword? This cannot be undone.',
+      confirmLabel: 'Delete',
+    );
+    if (!ok) return;
+    if (_harnessMutationBarrier()) return;
+    try {
+      await _api.deleteCodeword(widget.targetUserId, c.hashPrefix);
+      await _loadProfile();
+    } catch (e) {
+      _showError(e);
+    }
   }
 
   Widget _triggerDateBody(SensitiveProfile p) {
-    if (p.triggerDates.isEmpty) return const _Empty('No trigger dates set.');
+    final can = _canEditSensitiveFields(p);
+    final rows = <Widget>[];
+
+    if (p.triggerDates.isEmpty) {
+      rows.add(const _Empty('No trigger dates set.'));
+    } else {
+      for (final t in p.triggerDates) {
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        t.triggerDate,
+                        style: const TextStyle(color: _D.text, fontSize: 13),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${t.dateType ?? '—'} · severity ${t.severity ?? '—'}'
+                        '${t.recurringAnnually ? ' · annual' : ''}'
+                        '${t.active ? '' : ' · inactive'}',
+                        style: const TextStyle(color: _D.textDim, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+                if (can) ...[
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined,
+                        color: _D.cyan, size: 20),
+                    tooltip: 'Edit trigger date',
+                    onPressed: () => _showTriggerDateDialog(existing: t),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline,
+                        color: _D.red, size: 20),
+                    tooltip: 'Delete trigger date',
+                    onPressed: () => _confirmDeleteTriggerDate(t),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      }
+    }
+
+    if (can) {
+      rows.add(
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => _showTriggerDateDialog(),
+            icon: const Icon(Icons.add, color: _D.gold, size: 18),
+            label: const Text(
+              'Add Trigger Date',
+              style: TextStyle(color: _D.gold),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: p.triggerDates
-          .map((t) => _ListTile(
-                title: t.triggerDate,
-                subtitle:
-                    '${t.dateType ?? '—'} · severity ${t.severity ?? '—'}'
-                    '${t.recurringAnnually ? ' · annual' : ''}'
-                    '${t.active ? '' : ' · inactive'}',
-              ))
-          .toList(),
+      children: rows,
     );
   }
 
-  Widget _polyvictimBody(SensitiveProfile p) {
-    if (p.polyvictimLayers.isEmpty) {
-      return const _Empty('No polyvictim layers recorded.');
+  Future<void> _confirmDeleteTriggerDate(TriggerDate t) async {
+    final prof = _profile;
+    if (prof == null || !_canEditSensitiveFields(prof)) return;
+    final ok = await _confirmDialog(
+      title: 'Delete trigger date?',
+      message:
+          'Remove this trigger date entry? This cannot be undone.',
+      confirmLabel: 'Delete',
+    );
+    if (!ok) return;
+    if (_harnessMutationBarrier()) return;
+    try {
+      await _api.deleteTriggerDate(widget.targetUserId, t.id);
+      await _loadProfile();
+    } catch (e) {
+      _showError(e);
     }
+  }
+
+  Future<void> _showTriggerDateDialog({TriggerDate? existing}) async {
+    final prof = _profile;
+    if (prof == null || !_canEditSensitiveFields(prof)) return;
+
+    final notesCtrl = TextEditingController(
+      text: existing?.notesRedacted ?? '',
+    );
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          final now = DateTime.now();
+          final firstCal =
+              DateTime(now.year - 50, now.month, now.day);
+          final lastCal = DateTime(now.year + 10, now.month, now.day);
+          DateTime selectedDay = existing != null
+              ? (DateTime.tryParse(existing.triggerDate) != null
+                  ? DateTime(
+                      DateTime.parse(existing.triggerDate).year,
+                      DateTime.parse(existing.triggerDate).month,
+                      DateTime.parse(existing.triggerDate).day,
+                    )
+                  : firstCal)
+              : now;
+          if (selectedDay.isBefore(firstCal)) selectedDay = firstCal;
+          if (selectedDay.isAfter(lastCal)) selectedDay = lastCal;
+
+          String dateType = existing?.dateType ?? _kTriggerDateTypes.first;
+          if (!_kTriggerDateTypes.contains(dateType)) {
+            dateType = _kTriggerDateTypes.first;
+          }
+          String severity = existing?.severity ?? 'high';
+          if (!_kSeverities.contains(severity)) severity = 'high';
+          bool recurring = existing?.recurringAnnually ?? true;
+          bool submitting = false;
+          String? inlineErr;
+
+          Future<void> pickDate(StateSetter setDlg) async {
+            final picked = await showDatePicker(
+              context: ctx,
+              initialDate: selectedDay,
+              firstDate: firstCal,
+              lastDate: lastCal,
+              builder: (c, child) => Theme(
+                data: Theme.of(c).copyWith(
+                  colorScheme: const ColorScheme.dark(
+                    primary: _D.gold,
+                    surface: _D.bgElev,
+                  ),
+                ),
+                child: child ?? const SizedBox.shrink(),
+              ),
+            );
+            if (picked != null) {
+              setDlg(() => selectedDay = picked);
+            }
+          }
+
+          return StatefulBuilder(
+            builder: (ctx, setDlg) {
+              return CallbackShortcuts(
+                bindings: <ShortcutActivator, VoidCallback>{
+                  const SingleActivator(LogicalKeyboardKey.escape): () {
+                    if (!submitting) Navigator.of(ctx).pop();
+                  },
+                },
+                child: Focus(
+                  autofocus: true,
+                  child: AlertDialog(
+                    backgroundColor: _D.bgCard,
+                    title: Text(
+                      existing == null
+                          ? 'Add Trigger Date'
+                          : 'Edit Trigger Date',
+                      style: const TextStyle(color: _D.gold),
+                    ),
+                    content: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          ListTile(
+                            title: const Text(
+                              'Trigger date',
+                              style: TextStyle(color: _D.textDim, fontSize: 12),
+                            ),
+                            subtitle: Text(
+                              _dateOnlyIso(selectedDay),
+                              style: const TextStyle(color: _D.gold),
+                            ),
+                            trailing: TextButton(
+                              onPressed: submitting
+                                  ? null
+                                  : () => pickDate(setDlg),
+                              child: const Text('Pick'),
+                            ),
+                          ),
+                          DropdownButtonFormField<String>(
+                            value: dateType,
+                            dropdownColor: _D.bgElev,
+                            style: const TextStyle(color: _D.text),
+                            decoration: const InputDecoration(
+                              labelText: 'Date type',
+                              filled: true,
+                              fillColor: _D.bgElev,
+                              border: OutlineInputBorder(),
+                            ),
+                            items: _kTriggerDateTypes
+                                .map((e) => DropdownMenuItem(
+                                      value: e,
+                                      child: Text(e),
+                                    ))
+                                .toList(),
+                            onChanged: submitting
+                                ? null
+                                : (v) => setDlg(
+                                    () => dateType = v ?? dateType),
+                          ),
+                          const SizedBox(height: 10),
+                          DropdownButtonFormField<String>(
+                            value: severity,
+                            dropdownColor: _D.bgElev,
+                            style: const TextStyle(color: _D.text),
+                            decoration: const InputDecoration(
+                              labelText: 'Severity',
+                              filled: true,
+                              fillColor: _D.bgElev,
+                              border: OutlineInputBorder(),
+                            ),
+                            items: _kSeverities
+                                .map((e) => DropdownMenuItem(
+                                      value: e,
+                                      child: Text(e),
+                                    ))
+                                .toList(),
+                            onChanged: submitting
+                                ? null
+                                : (v) =>
+                                    setDlg(() => severity = v ?? severity),
+                          ),
+                          const SizedBox(height: 8),
+                          CheckboxListTile(
+                            value: recurring,
+                            onChanged: submitting
+                                ? null
+                                : (v) => setDlg(
+                                    () => recurring = v ?? false),
+                            title: const Text(
+                              'Recurring annually',
+                              style: TextStyle(color: _D.text, fontSize: 12),
+                            ),
+                            fillColor:
+                                WidgetStateProperty.resolveWith((states) {
+                              if (states.contains(WidgetState.selected)) {
+                                return _D.gold;
+                              }
+                              return null;
+                            }),
+                            checkColor: _D.bgVoid,
+                          ),
+                          TextField(
+                            controller: notesCtrl,
+                            enabled: !submitting,
+                            maxLength: 500,
+                            maxLines: 3,
+                            style: const TextStyle(color: _D.text),
+                            decoration: const InputDecoration(
+                              labelText: 'Notes (redacted)',
+                              helperText:
+                                  'No PII — server screens this field; '
+                                  'do not include names, dates of birth, addresses',
+                              helperMaxLines: 3,
+                              filled: true,
+                              fillColor: _D.bgElev,
+                              border: OutlineInputBorder(),
+                              labelStyle: TextStyle(color: _D.textDim),
+                            ),
+                          ),
+                          if (inlineErr != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                inlineErr!,
+                                style: const TextStyle(
+                                    color: _D.red, fontSize: 11),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed:
+                            submitting ? null : () => Navigator.of(ctx).pop(),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: submitting
+                            ? null
+                            : () async {
+                                if (_blockHarnessNetwork) {
+                                  if (ctx.mounted) Navigator.of(ctx).pop();
+                                  _harnessMutationBarrier();
+                                  return;
+                                }
+                                setDlg(() {
+                                  submitting = true;
+                                  inlineErr = null;
+                                });
+                                final iso = _dateOnlyIso(selectedDay);
+                                final notesTrim =
+                                    notesCtrl.text.trim();
+                                final oldId = existing?.id;
+                                try {
+                                  await _api.postTriggerDate(
+                                    widget.targetUserId,
+                                    triggerDateIso: iso,
+                                    dateType: dateType,
+                                    severity: severity,
+                                    recurringAnnually: recurring,
+                                    notesRedacted: notesTrim.isEmpty
+                                        ? null
+                                        : notesTrim,
+                                  );
+                                  if (oldId != null) {
+                                    await _api.deleteTriggerDate(
+                                      widget.targetUserId,
+                                      oldId,
+                                    );
+                                  }
+                                  if (ctx.mounted) Navigator.of(ctx).pop();
+                                  await _loadProfile();
+                                } catch (e) {
+                                  setDlg(() {
+                                    submitting = false;
+                                    inlineErr = _apiErrorMessage(e);
+                                  });
+                                }
+                              },
+                        child: Text(
+                            existing == null ? 'Add' : 'Save'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      notesCtrl.dispose();
+    }
+  }
+
+  Widget _polyvictimBody(SensitiveProfile p) {
+    final can = _canEditSensitiveFields(p);
+    final rows = <Widget>[];
+
+    if (p.polyvictimLayers.isEmpty) {
+      rows.add(const _Empty('No polyvictim layers recorded.'));
+    } else {
+      for (final l in p.polyvictimLayers) {
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        l.layerType,
+                        style: const TextStyle(color: _D.text, fontSize: 13),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'severity ${l.severity}'
+                        '${l.active ? '' : ' · inactive'}',
+                        style: const TextStyle(color: _D.textDim, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+                if (can)
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline,
+                        color: _D.red, size: 20),
+                    tooltip: 'Remove layer',
+                    onPressed: () => _confirmDeletePolyLayer(l),
+                  ),
+              ],
+            ),
+          ),
+        );
+      }
+    }
+
+    if (can) {
+      rows.add(
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _showAddPolyLayerDialog,
+            icon: const Icon(Icons.add, color: _D.gold, size: 18),
+            label: const Text(
+              'Add Layer',
+              style: TextStyle(color: _D.gold),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: p.polyvictimLayers
-          .map((l) => _ListTile(
-                title: l.layerType,
-                subtitle:
-                    'severity ${l.severity}${l.active ? '' : ' · inactive'}',
-              ))
-          .toList(),
+      children: rows,
+    );
+  }
+
+  Future<void> _confirmDeletePolyLayer(PolyvictimLayer l) async {
+    final prof = _profile;
+    if (prof == null || !_canEditSensitiveFields(prof)) return;
+    final ok = await _confirmDialog(
+      title: 'Delete polyvictim layer?',
+      message:
+          'Remove this layer record? This cannot be undone.',
+      confirmLabel: 'Delete',
+    );
+    if (!ok) return;
+    if (_harnessMutationBarrier()) return;
+    try {
+      await _api.deletePolyvictimLayer(widget.targetUserId, l.id);
+      await _loadProfile();
+    } catch (e) {
+      _showError(e);
+    }
+  }
+
+  Future<void> _showAddPolyLayerDialog() async {
+    final prof = _profile;
+    if (prof == null || !_canEditSensitiveFields(prof)) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        String layerType = _kPolyvictimLayerTypes.first;
+        String severity = 'high';
+        bool submitting = false;
+        String? inlineErr;
+
+        return StatefulBuilder(
+          builder: (ctx, setDlg) {
+            return CallbackShortcuts(
+              bindings: <ShortcutActivator, VoidCallback>{
+                const SingleActivator(LogicalKeyboardKey.escape): () {
+                  if (!submitting) Navigator.of(ctx).pop();
+                },
+              },
+              child: Focus(
+                autofocus: true,
+                child: AlertDialog(
+                  backgroundColor: _D.bgCard,
+                  title: const Text(
+                    'Add Polyvictim Layer',
+                    style: TextStyle(color: _D.gold),
+                  ),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      DropdownButtonFormField<String>(
+                        value: layerType,
+                        dropdownColor: _D.bgElev,
+                        style: const TextStyle(color: _D.text),
+                        decoration: const InputDecoration(
+                          labelText: 'Layer type',
+                          filled: true,
+                          fillColor: _D.bgElev,
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _kPolyvictimLayerTypes
+                            .map((e) => DropdownMenuItem(
+                                  value: e,
+                                  child: Text(e),
+                                ))
+                            .toList(),
+                        onChanged: submitting
+                            ? null
+                            : (v) =>
+                                setDlg(() => layerType = v ?? layerType),
+                      ),
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        value: severity,
+                        dropdownColor: _D.bgElev,
+                        style: const TextStyle(color: _D.text),
+                        decoration: const InputDecoration(
+                          labelText: 'Severity',
+                          filled: true,
+                          fillColor: _D.bgElev,
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _kSeverities
+                            .map((e) => DropdownMenuItem(
+                                  value: e,
+                                  child: Text(e),
+                                ))
+                            .toList(),
+                        onChanged: submitting
+                            ? null
+                            : (v) =>
+                                setDlg(() => severity = v ?? severity),
+                      ),
+                      if (inlineErr != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            inlineErr!,
+                            style: const TextStyle(
+                                color: _D.red, fontSize: 11),
+                          ),
+                        ),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed:
+                          submitting ? null : () => Navigator.of(ctx).pop(),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: submitting
+                          ? null
+                          : () async {
+                              if (_blockHarnessNetwork) {
+                                Navigator.of(ctx).pop();
+                                _harnessMutationBarrier();
+                                return;
+                              }
+                              setDlg(() {
+                                submitting = true;
+                                inlineErr = null;
+                              });
+                              try {
+                                await _api.postPolyvictimLayer(
+                                  widget.targetUserId,
+                                  layerType: layerType,
+                                  severity: severity,
+                                );
+                                if (ctx.mounted) Navigator.of(ctx).pop();
+                                await _loadProfile();
+                              } catch (e) {
+                                setDlg(() {
+                                  submitting = false;
+                                  inlineErr = _apiErrorMessage(e);
+                                });
+                              }
+                            },
+                      child: const Text('Add'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
   Widget _legalBody(SensitiveProfile p) {
-    if (p.legalStatus.isEmpty) return const _Empty('No legal cases on file.');
+    final can = _canEditSensitiveFields(p);
+    final rows = <Widget>[];
+
+    if (p.legalStatus.isEmpty) {
+      rows.add(const _Empty('No legal cases on file.'));
+    } else {
+      for (final c in p.legalStatus) {
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${c.caseType} · ${c.caseStatus}',
+                        style: const TextStyle(color: _D.text, fontSize: 13),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        c.nextEventDate != null
+                            ? 'next event: ${c.nextEventDate}'
+                            : 'no scheduled event',
+                        style: const TextStyle(color: _D.textDim, fontSize: 11),
+                      ),
+                      if (c.attorneyContactRedacted != null &&
+                          c.attorneyContactRedacted!.isNotEmpty)
+                        Text(
+                          'counsel: ${c.attorneyContactRedacted}',
+                          style:
+                              const TextStyle(color: _D.textDim, fontSize: 11),
+                        ),
+                    ],
+                  ),
+                ),
+                if (can)
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined,
+                        color: _D.cyan, size: 20),
+                    tooltip: 'Edit case',
+                    onPressed: () => _showLegalCaseDialog(existing: c),
+                  ),
+              ],
+            ),
+          ),
+        );
+      }
+    }
+
+    if (can) {
+      rows.add(
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => _showLegalCaseDialog(),
+            icon: const Icon(Icons.add, color: _D.gold, size: 18),
+            label: const Text(
+              'Add Case',
+              style: TextStyle(color: _D.gold),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: p.legalStatus
-          .map((c) => _ListTile(
-                title: '${c.caseType} · ${c.caseStatus}',
-                subtitle: c.nextEventDate != null
-                    ? 'next event: ${c.nextEventDate}'
-                    : 'no scheduled event',
-              ))
-          .toList(),
+      children: rows,
     );
+  }
+
+  Future<void> _showLegalCaseDialog({LegalCase? existing}) async {
+    final prof = _profile;
+    if (prof == null || !_canEditSensitiveFields(prof)) return;
+
+    final attorneyCtrl = TextEditingController(
+      text: existing?.attorneyContactRedacted ?? '',
+    );
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          final now = DateTime.now();
+          final firstFuture = DateTime(now.year, now.month, now.day);
+          final lastFuture =
+              DateTime(now.year + 15, now.month, now.day);
+
+          String caseType =
+              existing?.caseType ?? _kLegalCaseTypes.first;
+          if (!_kLegalCaseTypes.contains(caseType)) {
+            caseType = _kLegalCaseTypes.first;
+          }
+          String caseStatus =
+              existing?.caseStatus ?? _kLegalCaseStatuses.first;
+          if (!_kLegalCaseStatuses.contains(caseStatus)) {
+            caseStatus = _kLegalCaseStatuses.first;
+          }
+
+          DateTime? nextEvt;
+          if (existing?.nextEventDate != null) {
+            nextEvt = DateTime.tryParse(existing!.nextEventDate!);
+            if (nextEvt != null) {
+              nextEvt = DateTime(nextEvt.year, nextEvt.month, nextEvt.day);
+            }
+          }
+
+          bool submitting = false;
+          String? inlineErr;
+
+          Future<void> pickLegalDate(StateSetter setDlg) async {
+            final picked = await showDatePicker(
+              context: ctx,
+              initialDate: nextEvt ?? firstFuture,
+              firstDate: firstFuture,
+              lastDate: lastFuture,
+              builder: (c, child) => Theme(
+                data: Theme.of(c).copyWith(
+                  colorScheme: const ColorScheme.dark(
+                    primary: _D.gold,
+                    surface: _D.bgElev,
+                  ),
+                ),
+                child: child ?? const SizedBox.shrink(),
+              ),
+            );
+            if (picked != null) {
+              setDlg(() => nextEvt = picked);
+            }
+          }
+
+          return StatefulBuilder(
+            builder: (ctx, setDlg) {
+              return CallbackShortcuts(
+                bindings: <ShortcutActivator, VoidCallback>{
+                  const SingleActivator(LogicalKeyboardKey.escape): () {
+                    if (!submitting) Navigator.of(ctx).pop();
+                  },
+                },
+                child: Focus(
+                  autofocus: true,
+                  child: AlertDialog(
+                    backgroundColor: _D.bgCard,
+                    title: Text(
+                      existing == null ? 'Add Case' : 'Edit Case',
+                      style: const TextStyle(color: _D.gold),
+                    ),
+                    content: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (existing != null)
+                            Text(
+                              'Case type (read-only): ${existing.caseType}',
+                              style: const TextStyle(
+                                  color: _D.textDim, fontSize: 12),
+                            ),
+                          if (existing == null) ...[
+                            DropdownButtonFormField<String>(
+                              value: caseType,
+                              dropdownColor: _D.bgElev,
+                              style: const TextStyle(color: _D.text),
+                              decoration: const InputDecoration(
+                                labelText: 'Case type',
+                                filled: true,
+                                fillColor: _D.bgElev,
+                                border: OutlineInputBorder(),
+                              ),
+                              items: _kLegalCaseTypes
+                                  .map((e) => DropdownMenuItem(
+                                        value: e,
+                                        child: Text(e),
+                                      ))
+                                  .toList(),
+                              onChanged: submitting
+                                  ? null
+                                  : (v) => setDlg(
+                                      () => caseType = v ?? caseType),
+                            ),
+                          ],
+                          const SizedBox(height: 10),
+                          DropdownButtonFormField<String>(
+                            value: caseStatus,
+                            dropdownColor: _D.bgElev,
+                            style: const TextStyle(color: _D.text),
+                            decoration: const InputDecoration(
+                              labelText: 'Case status',
+                              filled: true,
+                              fillColor: _D.bgElev,
+                              border: OutlineInputBorder(),
+                            ),
+                            items: _kLegalCaseStatuses
+                                .map((e) => DropdownMenuItem(
+                                      value: e,
+                                      child: Text(e),
+                                    ))
+                                .toList(),
+                            onChanged: submitting
+                                ? null
+                                : (v) => setDlg(
+                                    () => caseStatus = v ?? caseStatus),
+                          ),
+                          const SizedBox(height: 8),
+                          ListTile(
+                            title: const Text(
+                              'Next event date (optional)',
+                              style: TextStyle(color: _D.textDim, fontSize: 12),
+                            ),
+                            subtitle: Text(
+                              nextEvt != null
+                                  ? _dateOnlyIso(nextEvt!)
+                                  : 'none',
+                              style: const TextStyle(color: _D.gold),
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (nextEvt != null)
+                                  TextButton(
+                                    onPressed: submitting
+                                        ? null
+                                        : () => setDlg(() => nextEvt = null),
+                                    child: const Text('Clear'),
+                                  ),
+                                TextButton(
+                                  onPressed: submitting
+                                      ? null
+                                      : () => pickLegalDate(setDlg),
+                                  child: const Text('Pick'),
+                                ),
+                              ],
+                            ),
+                          ),
+                          TextField(
+                            controller: attorneyCtrl,
+                            enabled: !submitting,
+                            maxLength: 200,
+                            style: const TextStyle(color: _D.text),
+                            decoration: const InputDecoration(
+                              labelText: 'Attorney / org (redacted)',
+                              helperText:
+                                  'Name or organization only — no PII per Gap C',
+                              filled: true,
+                              fillColor: _D.bgElev,
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          if (inlineErr != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                inlineErr!,
+                                style: const TextStyle(
+                                    color: _D.red, fontSize: 11),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed:
+                            submitting ? null : () => Navigator.of(ctx).pop(),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: submitting
+                            ? null
+                            : () async {
+                                if (_blockHarnessNetwork) {
+                                  Navigator.of(ctx).pop();
+                                  _harnessMutationBarrier();
+                                  return;
+                                }
+                                setDlg(() {
+                                  submitting = true;
+                                  inlineErr = null;
+                                });
+                                final nextIso = nextEvt != null
+                                    ? _dateOnlyIso(nextEvt!)
+                                    : null;
+                                final att = attorneyCtrl.text.trim();
+                                try {
+                                  if (existing == null) {
+                                    await _api.postLegalStatus(
+                                      widget.targetUserId,
+                                      caseType: caseType,
+                                      caseStatus: caseStatus,
+                                      nextEventDateIso: nextIso,
+                                      attorneyContactRedacted:
+                                          att.isEmpty ? null : att,
+                                    );
+                                  } else {
+                                    await _api.patchLegalStatus(
+                                      widget.targetUserId,
+                                      existing.id,
+                                      caseStatus: caseStatus,
+                                      nextEventDateIso: nextIso,
+                                      attorneyContactRedacted: att,
+                                    );
+                                  }
+                                  if (ctx.mounted) Navigator.of(ctx).pop();
+                                  await _loadProfile();
+                                } catch (e) {
+                                  setDlg(() {
+                                    submitting = false;
+                                    inlineErr = _apiErrorMessage(e);
+                                  });
+                                }
+                              },
+                        child: Text(existing == null ? 'Add' : 'Save'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      attorneyCtrl.dispose();
+    }
   }
 
   Widget _safeSilenceBody(SensitiveProfile p) {
@@ -1001,13 +2816,67 @@ class _SensitiveClinicalProfileScreenState
     return _SafeSilencePanel(
       state: s,
       isAdmin: _isAdmin,
+      principalUsername: _currentPrincipalUsername,
       hasActiveCodeword: p.activeCodewordCount > 0,
       onPropose: _onProposeSafeSilence,
       onApprove: _onApproveSafeSilence,
+      onCancelPending: _onCoachCancelSafeSilenceProposal,
+      onRejectPending: _onAdminRejectSafeSilenceProposal,
+      onRevokeActive: _onAdminRevokeSafeSilenceActive,
     );
   }
 
+  Future<void> _deleteSafeSilenceMutation(String successMsg) async {
+    if (_harnessMutationBarrier()) return;
+    try {
+      await _api.deleteSafeSilence(widget.targetUserId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: _D.bgElev,
+          content: Text(successMsg, style: const TextStyle(color: _D.gold)),
+        ),
+      );
+      _loadProfile();
+    } catch (e) {
+      _showError(e);
+    }
+  }
+
+  Future<void> _onCoachCancelSafeSilenceProposal() async {
+    final ok = await _confirmDialog(
+      title: 'Cancel proposal?',
+      message: 'Withdraw this Safe Silence proposal?',
+      confirmLabel: 'Cancel proposal',
+    );
+    if (!ok) return;
+    await _deleteSafeSilenceMutation('Safe Silence proposal cancelled.');
+  }
+
+  Future<void> _onAdminRejectSafeSilenceProposal() async {
+    final ok = await _confirmDialog(
+      title: 'Reject proposal?',
+      message: 'Reject this Safe Silence proposal?',
+      confirmLabel: 'Reject',
+    );
+    if (!ok) return;
+    await _deleteSafeSilenceMutation('Safe Silence proposal rejected.');
+  }
+
+  Future<void> _onAdminRevokeSafeSilenceActive() async {
+    final ok = await _confirmDialog(
+      title: 'Revoke Silence Mode?',
+      message:
+          'Revoking will resume 72-hour check-in cadence immediately. '
+          'Confirm only if survivor\'s safety net should be restored now.',
+      confirmLabel: 'Revoke',
+    );
+    if (!ok) return;
+    await _deleteSafeSilenceMutation('Safe Silence revoked.');
+  }
+
   Future<void> _onProposeSafeSilence(String reason) async {
+    if (_harnessMutationBarrier()) return;
     try {
       final out = await _api.proposeSafeSilence(
         widget.targetUserId,
@@ -1031,6 +2900,7 @@ class _SensitiveClinicalProfileScreenState
   }
 
   Future<void> _onApproveSafeSilence(String proposalId, String? note) async {
+    if (_harnessMutationBarrier()) return;
     try {
       await _api.approveSafeSilence(
         widget.targetUserId,
@@ -1055,16 +2925,17 @@ class _SensitiveClinicalProfileScreenState
 
   void _showError(Object e) {
     if (!mounted) return;
-    final msg = e.toString();
-    String hint = msg;
+    final base = _apiErrorMessage(e);
+    String hint = base;
     // Surface the structured 409s as inline-friendly text.
-    if (msg.contains('same_session_violation')) {
+    if (hint.contains('same_session_violation')) {
       hint =
           'Same-session block: a different user must approve in a separate session.';
-    } else if (msg.contains('requires_codeword')) {
+    } else if (hint.contains('requires_codeword')) {
       hint =
           'At least one active codeword must be set before approval can succeed.';
-    } else if (msg.contains('stale_proposal') || msg.contains('proposal_id')) {
+    } else if (hint.contains('stale_proposal') ||
+        hint.contains('proposal_id')) {
       hint =
           'Proposal is stale or rotated. Ask the coach to re-propose, then approve the new id.';
     }
@@ -1089,6 +2960,169 @@ class _SensitiveClinicalProfileScreenState
         _loadActivityLog(reset: true);
       },
       onLoadOlder: () => _loadActivityLog(reset: false),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // PATH-C: COACH-INITIATED SELF-ENROLLMENT
+  //
+  // Opens the enrollment dialog. The dialog is a self-contained modal that
+  // collects (cohort_label, population_type, informed_consent_confirmed) and
+  // POSTs to /api/coach/sensitive-profile/{id}/enroll. On success we close
+  // the dialog, clear the not-enrolled banner via _loadProfile(), and show
+  // a snackbar. On failure we map the server `reason` codes to the four
+  // UX outcomes the spec calls out (consent_required snackbar,
+  // requires_guardian_consent modal, already_enrolled refresh modal, generic
+  // failure snackbar).
+  // ---------------------------------------------------------------------------
+  Future<void> _openEnrollmentDialog() async {
+    if (_enrollInFlight) return;
+    final result = await showDialog<_EnrollmentDialogResult>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _EnrollmentDialog(targetUserId: widget.targetUserId),
+    );
+    if (result == null || !mounted) return;
+    await _submitEnrollment(result);
+  }
+
+  Future<void> _submitEnrollment(_EnrollmentDialogResult r) async {
+    setState(() => _enrollInFlight = true);
+    try {
+      await _api.enrollClient(
+        widget.targetUserId,
+        cohortLabel: r.cohortLabel,
+        populationType: r.populationType,
+        informedConsentConfirmed: r.informedConsentConfirmed,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: _D.bgElev,
+          content: Text(
+            'Client enrolled in cohort: ${r.cohortLabel}',
+            style: const TextStyle(color: _D.cyan),
+          ),
+        ),
+      );
+      await _loadProfile();
+    } on _ApiError catch (err) {
+      if (!mounted) return;
+      await _handleEnrollmentFailure(err);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: _D.red,
+          content: Text(
+            'Enrollment failed. Please try again or contact admin.',
+            style: TextStyle(color: Colors.white),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _enrollInFlight = false);
+    }
+  }
+
+  Future<void> _handleEnrollmentFailure(_ApiError err) async {
+    final reason = err.reason.toLowerCase();
+    if (reason.contains('consent_required')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: _D.yellow,
+          content: Text(
+            'Please confirm informed consent to enroll.',
+            style: TextStyle(color: Colors.black),
+          ),
+        ),
+      );
+      // Re-open dialog with checkbox unchecked (default state).
+      final retry = await showDialog<_EnrollmentDialogResult>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) =>
+            _EnrollmentDialog(targetUserId: widget.targetUserId),
+      );
+      if (retry != null && mounted) {
+        await _submitEnrollment(retry);
+      }
+      return;
+    }
+    if (reason.contains('requires_guardian_consent')) {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: _D.bgCard,
+          title: const Text(
+            'Guardian Consent Required',
+            style: TextStyle(color: _D.gold),
+          ),
+          content: const Text(
+            'Minor enrollment requires guardian dual-approval. This client '
+            'has not completed the guardian consent flow. Contact admin to '
+            'initiate guardian consent.',
+            style: TextStyle(color: _D.text),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('OK', style: TextStyle(color: _D.gold)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    if (reason.contains('already_enrolled')) {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: _D.bgCard,
+          title: const Text(
+            'Already Enrolled',
+            style: TextStyle(color: _D.gold),
+          ),
+          content: const Text(
+            'This client is already enrolled. Refresh the screen to load '
+            'their profile.',
+            style: TextStyle(color: _D.text),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _loadProfile();
+              },
+              child: const Text('Refresh', style: TextStyle(color: _D.cyan)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    if (reason.contains('not_found')) {
+      // Coach not authorized — server hides the feature behind a 404. We
+      // surface a neutral message and refuse to show the dialog again.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: _D.red,
+          content: Text(
+            'Enrollment is not available for this account.',
+            style: TextStyle(color: Colors.white),
+          ),
+        ),
+      );
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: _D.red,
+        content: Text(
+          'Enrollment failed: ${err.reason}',
+          style: const TextStyle(color: Colors.white),
+        ),
+      ),
     );
   }
 }
@@ -1123,6 +3157,279 @@ class _PopulationTypeBanner extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// =============================================================================
+// PATH-C: NOT-ENROLLED BANNER + ENROLLMENT DIALOG (M215 + M216)
+//
+// _NotEnrolledBanner shows the "client not enrolled" message and, when the
+// current coach has coach_sensitive_bridge_authorized=TRUE, also surfaces an
+// "Enroll this client" pill button. Unauthorized coaches see only the
+// message — there is no way to discover the enrollment surface from the UI.
+//
+// _EnrollmentDialog gathers (cohort_label, population_type,
+// informed_consent_confirmed) and pops a _EnrollmentDialogResult. The
+// "Enroll Client" submit button is disabled until informed_consent is
+// checked AND a population_type is selected.
+// =============================================================================
+class _NotEnrolledBanner extends StatelessWidget {
+  final bool coachAuthorized;
+  final bool enrollInFlight;
+  final VoidCallback onEnrollPressed;
+
+  const _NotEnrolledBanner({
+    required this.coachAuthorized,
+    required this.enrollInFlight,
+    required this.onEnrollPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: _D.bgCard,
+        border: Border.all(color: _D.cyan.withValues(alpha: 0.5)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.shield_outlined, color: _D.cyan, size: 18),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'This client is not enrolled in the Sensitive Clinical '
+                  'Bridge. Contact admin to enroll.',
+                  style: TextStyle(color: _D.text, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          if (coachAuthorized) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: ElevatedButton.icon(
+                onPressed: enrollInFlight ? null : onEnrollPressed,
+                icon: const Icon(Icons.add_moderator_outlined,
+                    color: Colors.black, size: 16),
+                label: Text(
+                  enrollInFlight ? 'Enrolling…' : 'Enroll this client',
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _D.cyan,
+                  disabledBackgroundColor:
+                      _D.cyan.withValues(alpha: 0.4),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _EnrollmentDialogResult {
+  final String cohortLabel;
+  final String populationType;
+  final bool informedConsentConfirmed;
+  const _EnrollmentDialogResult({
+    required this.cohortLabel,
+    required this.populationType,
+    required this.informedConsentConfirmed,
+  });
+}
+
+class _EnrollmentDialog extends StatefulWidget {
+  final String targetUserId;
+  const _EnrollmentDialog({required this.targetUserId});
+
+  @override
+  State<_EnrollmentDialog> createState() => _EnrollmentDialogState();
+}
+
+class _EnrollmentDialogState extends State<_EnrollmentDialog> {
+  // Cohort enum mirrors VALID_COACH_ENROLLMENT_COHORTS in
+  // sensitive_profile_api.py. Keep in sync if the backend list changes.
+  static const _cohortOptions = [
+    'inspection_test',
+    'pilot_5',
+    'cohort_25',
+    'cohort_100',
+    'general_availability',
+  ];
+  static const _populationOptions = [
+    'adult_survivor',
+    'minor_survivor',
+    'transitioning_youth_16_to_21',
+  ];
+
+  String _cohort = 'inspection_test';
+  String? _population; // intentionally null — coach must choose
+  bool _consent = false;
+
+  bool get _canSubmit => _consent && _population != null;
+
+  String _cohortTooltip(String cohort) {
+    if (cohort == 'inspection_test') {
+      return 'Initial screen evaluation. Does not engage shadow-mode telemetry.';
+    }
+    return 'Requires informed consent on file. inspection_test is appropriate '
+        'for initial screen evaluation without engaging shadow-mode telemetry.';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: _D.bgCard,
+      title: Text(
+        'Enroll ${widget.targetUserId}',
+        style: const TextStyle(color: _D.gold),
+      ),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Cohort label',
+              style: TextStyle(color: _D.textDim, fontSize: 11),
+            ),
+            const SizedBox(height: 4),
+            DropdownButtonFormField<String>(
+              initialValue: _cohort,
+              dropdownColor: _D.bgElev,
+              style: const TextStyle(color: _D.text, fontSize: 13),
+              decoration: const InputDecoration(
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+              items: _cohortOptions
+                  .map((c) => DropdownMenuItem<String>(
+                        value: c,
+                        child: Tooltip(
+                          message: _cohortTooltip(c),
+                          child: Text(c),
+                        ),
+                      ))
+                  .toList(),
+              onChanged: (v) => setState(() => _cohort = v ?? _cohort),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Population type',
+              style: TextStyle(color: _D.textDim, fontSize: 11),
+            ),
+            const SizedBox(height: 4),
+            DropdownButtonFormField<String>(
+              initialValue: _population,
+              dropdownColor: _D.bgElev,
+              style: const TextStyle(color: _D.text, fontSize: 13),
+              hint: const Text(
+                'Select population…',
+                style: TextStyle(color: _D.textDim, fontSize: 12),
+              ),
+              decoration: const InputDecoration(
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+              items: _populationOptions
+                  .map((p) => DropdownMenuItem<String>(
+                        value: p,
+                        child: Tooltip(
+                          message: p == 'adult_survivor'
+                              ? 'Adults aged 18+ with informed consent.'
+                              : 'Minor selections require guardian consent '
+                                  'per Gap O.',
+                          child: Text(p),
+                        ),
+                      ))
+                  .toList(),
+              onChanged: (v) => setState(() => _population = v),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Checkbox(
+                  value: _consent,
+                  fillColor: WidgetStateProperty.resolveWith((states) {
+                    if (states.contains(WidgetState.selected)) {
+                      return _D.cyan;
+                    }
+                    return null;
+                  }),
+                  checkColor: _D.bgVoid,
+                  onChanged: (v) => setState(() => _consent = v ?? false),
+                ),
+                const Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(top: 12),
+                    child: Text(
+                      'I confirm this client has provided informed consent '
+                      'for Sensitive Clinical Bridge enrollment, including '
+                      'data collection, clinician review of detector outputs, '
+                      'and HIPAA Right of Access per Gap N.',
+                      style: TextStyle(color: _D.text, fontSize: 11),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel', style: TextStyle(color: _D.textDim)),
+        ),
+        ElevatedButton(
+          onPressed: _canSubmit
+              ? () {
+                  Navigator.of(context).pop(_EnrollmentDialogResult(
+                    cohortLabel: _cohort,
+                    populationType: _population!,
+                    informedConsentConfirmed: _consent,
+                  ));
+                }
+              : null,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _D.cyan,
+            disabledBackgroundColor: _D.cyan.withValues(alpha: 0.3),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+          ),
+          child: const Text(
+            'Enroll Client',
+            style: TextStyle(
+              color: Colors.black,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1344,6 +3651,7 @@ class _PresetSlider extends StatefulWidget {
   final double min;
   final double max;
   final String? population;
+  final bool interactive;
   final ValueChanged<double> onCommit;
 
   const _PresetSlider({
@@ -1353,6 +3661,7 @@ class _PresetSlider extends StatefulWidget {
     required this.min,
     required this.max,
     required this.population,
+    this.interactive = true,
     required this.onCommit,
   });
 
@@ -1413,10 +3722,14 @@ class _PresetSliderState extends State<_PresetSlider> {
                 min: widget.min,
                 max: widget.max,
                 value: _draft.clamp(widget.min, widget.max),
-                onChanged: (v) => setState(() => _draft = v),
-                onChangeEnd: (v) {
-                  widget.onCommit(v);
-                },
+                onChanged: widget.interactive
+                    ? (v) => setState(() => _draft = v)
+                    : null,
+                onChangeEnd: widget.interactive
+                    ? (v) {
+                        widget.onCommit(v);
+                      }
+                    : null,
               ),
             ),
             // Preset marker — vertical pill aligned to the preset position.
@@ -1457,7 +3770,7 @@ class _PresetSliderState extends State<_PresetSlider> {
               style: const TextStyle(color: _D.textDim, fontSize: 11),
             ),
             const Spacer(),
-            if (isOverridden)
+            if (isOverridden && widget.interactive)
               TextButton(
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1488,16 +3801,24 @@ class _PresetSliderState extends State<_PresetSlider> {
 class _SafeSilencePanel extends StatefulWidget {
   final SafeSilenceState state;
   final bool isAdmin;
+  final String principalUsername;
   final bool hasActiveCodeword;
   final Future<void> Function(String reason) onPropose;
   final Future<void> Function(String proposalId, String? note) onApprove;
+  final Future<void> Function() onCancelPending;
+  final Future<void> Function() onRejectPending;
+  final Future<void> Function() onRevokeActive;
 
   const _SafeSilencePanel({
     required this.state,
     required this.isAdmin,
+    required this.principalUsername,
     required this.hasActiveCodeword,
     required this.onPropose,
     required this.onApprove,
+    required this.onCancelPending,
+    required this.onRejectPending,
+    required this.onRevokeActive,
   });
 
   @override
@@ -1514,6 +3835,12 @@ class _SafeSilencePanelState extends State<_SafeSilencePanel> {
     _reasonCtrl.dispose();
     _approveNoteCtrl.dispose();
     super.dispose();
+  }
+
+  bool get _isProposer {
+    final pid = widget.state.proposerId ?? '';
+    final me = widget.principalUsername;
+    return pid.isNotEmpty && me.isNotEmpty && pid == me;
   }
 
   @override
@@ -1553,16 +3880,104 @@ class _SafeSilencePanelState extends State<_SafeSilencePanel> {
             child: _proposeForm(),
           ),
         if (s.isPending)
-          widget.isAdmin
-              ? _approveForm(s.proposalId ?? '')
-              : const _Empty(
-                  'Awaiting admin approval in a separate session.',
-                ),
-        if (s.isActive)
-          const _Empty(
-            'Safe Silence is active. The agent will not initiate outreach. '
-            'Codeword listener remains armed.',
+          widget.isAdmin ? _adminPendingPanel(s) : _coachPendingPanel(),
+        if (s.isActive) _activePanel(),
+      ],
+    );
+  }
+
+  Widget _coachPendingPanel() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _Empty(
+          'Awaiting admin approval in a separate session.',
+        ),
+        if (_isProposer) ...[
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: _busy
+                  ? null
+                  : () async {
+                      setState(() => _busy = true);
+                      try {
+                        await widget.onCancelPending();
+                      } finally {
+                        if (mounted) setState(() => _busy = false);
+                      }
+                    },
+              child: const Text(
+                'Cancel Proposal',
+                style: TextStyle(color: _D.red),
+              ),
+            ),
           ),
+        ],
+      ],
+    );
+  }
+
+  Widget _adminPendingPanel(SafeSilenceState s) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _approveForm(s.proposalId ?? ''),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: _busy
+                ? null
+                : () async {
+                    setState(() => _busy = true);
+                    try {
+                      await widget.onRejectPending();
+                    } finally {
+                      if (mounted) setState(() => _busy = false);
+                    }
+                  },
+            child: const Text(
+              'Reject Proposal',
+              style: TextStyle(color: _D.red),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _activePanel() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _Empty(
+          'Safe Silence is active. The agent will not initiate outreach. '
+          'Codeword listener remains armed.',
+        ),
+        if (widget.isAdmin) ...[
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: _busy
+                  ? null
+                  : () async {
+                      setState(() => _busy = true);
+                      try {
+                        await widget.onRevokeActive();
+                      } finally {
+                        if (mounted) setState(() => _busy = false);
+                      }
+                    },
+              child: const Text(
+                'Revoke Silence Mode',
+                style: TextStyle(color: _D.red),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
