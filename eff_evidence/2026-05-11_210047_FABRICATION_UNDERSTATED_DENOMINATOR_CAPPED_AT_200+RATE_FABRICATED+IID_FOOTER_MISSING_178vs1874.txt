@@ -1,0 +1,244 @@
+William Henderson E2E wiring (read-only)
+Identifiers on prod: users.username = Williamhenderson, hardware_id = CLIENT_WILLIAMHENDERSON_ID. sensitive_bridge_enrollment.user_id = Williamhenderson (username). Chat path passes hardware_id into prepare_therapeutic_context / evaluate_disclosure.
+
+1. When William sends a message, does evaluate_disclosure() run? Chain from prepare_therapeutic_context() to evaluate_disclosure()
+PASS (call happens) — process_interaction sets uid = profile.get("hardware_id") and calls prepare_therapeutic_context(user_text=..., user_id=uid, ...).
+
+
+bridge_server.py
+Lines 8084-8908
+    async def process_interaction(self, profile: dict, user_text: str, dojo_type: Optional[str] = None, client_context: Optional[str] = None):
+        uid = profile.get("hardware_id", "UNKNOWN")
+        ...
+                _ttc_pack = await _ttc_pre(
+                    user_text=user_text, user_id=uid, db_pool=db_pool,
+                    base_system_prompt=system_prompt, default_max_tokens=_len_cap,
+                )
+
+therapeutic_controller.py
+Lines 637-641
+        _bd = await _scb.evaluate_disclosure(
+            db_pool=db_pool, user_id=user_id, message=user_text, locale=locale,
+        )
+FAIL (full pipeline / detectors) — prod sensitive_bridge_master_enabled = false → STEP 0 returns neutral before steps 2–17 (evaluate_disclosure ~1535–1537).
+
+2. Orchestrator reads sensitive_bridge_enrollment and gates detectors on gap_features_enabled
+PARTIAL / misleading vs wording — It reads enrollment and merges flags (_read_user_enrollment, _resolve_effective_flags), then only checks any flag true (_any_v13_signal_active). It does not turn individual detectors on/off per gap key; steps 2–16 run only after that single OR-gate passes.
+
+
+sensitive_clinical_bridge.py
+Lines 1538-1544
+    global_flags = await _read_global_gap_flags(db_pool)
+    user_enrollment = await _read_user_enrollment(db_pool, user_id)
+    effective_flags = _resolve_effective_flags(
+        global_flags=global_flags, user_flags=user_enrollment["flags"],
+    )
+    if not _any_v13_signal_active(effective_flags):
+        return _build_neutral_bridge_decision(reason="all_gap_flags_dormant")
+UNWIRED (identity) — _read_user_enrollment matches sensitive_bridge_enrollment.user_id = $1 while the chat path passes CLIENT_WILLIAMHENDERSON_ID, not Williamhenderson. That yields no row → "flags" all False even if enrollment exists under username.
+
+
+sensitive_clinical_bridge.py
+Lines 2434-2453
+            row = await conn.fetchrow(
+                "SELECT cohort_label, gap_features_enabled "
+                "FROM sensitive_bridge_enrollment WHERE user_id = $1",
+                user_id,
+            )
+3. Substance status = recovery → STEP 13 considers profile_data->>'substance_status'; substance_branch_active from TMC
+FAIL / UNWIRED — Register branching uses only tmc_signals["substance_branch_active"], not profile substance_status. tmc.py has no substance / substance_branch_active wiring (grep: no matches). Prod William: root substance_status is null/empty.
+
+
+sensitive_clinical_bridge.py
+Lines 1918-1933
+def _resolve_substance_branch(
+    *,
+    tmc_signals: Dict[str, Any],
+    embodiment: EmbodimentPhaseApplied,
+) -> SubstanceRegisterBranch:
+    ...
+    if bool(tmc_signals.get("substance_branch_active")):
+        return SubstanceRegisterBranch(
+            branched=True, reason="profile_flag_active",
+        )
+    return SubstanceRegisterBranch(branched=False, reason="not_active")
+4. Embodiment phase “transitioning” → crystal recall filter
+UNWIRED (profile path) — Orchestrator reads profile_data["sensitive_clinical"]["embodiment_phase"]. Coach API PUT .../embodiment-phase patches top-level embodiment_phase, not sensitive_clinical.
+
+
+sensitive_clinical_bridge.py
+Lines 1008-1031
+def _resolve_embodiment_phase(profile: Dict[str, Any]) -> EmbodimentPhaseApplied:
+    ...
+    sc = profile.get("sensitive_clinical") if profile else None
+    ...
+    phase = sc.get("embodiment_phase")
+
+sensitive_profile_api.py
+Lines 1193-1195
+        db_pool, user_id, "embodiment_phase", body.embodiment_phase
+Crystal path nuance: Non-null phase influences _crystal_domain_for → domain passed into recall_crystals_for_context. The Gap 6 filter is driven by user_state_hint (dissociation/CRISIS), not by embodiment phase.
+
+
+sensitive_clinical_bridge.py
+Lines 1085-1095
+    if user_state_hint:
+        ...
+            raw_list, sensitive_dropped = filter_sensitive_recalled_crystals(
+                raw_list, user_state_hint,
+            )
+5. Codeword for William → listener fires on messages
+UNWIRED (chat) — Step 2 calls _check_codeword; if nate_checkin_agent is None → immediate None. prepare_therapeutic_context never passes an agent (only db_pool, user_id, message, locale).
+
+
+sensitive_clinical_bridge.py
+Lines 698-702
+    if nate_checkin_agent is None:
+        return None
+    try:
+        return await nate_checkin_agent.check_codeword(
+6. Polyvictim layer → TMC SIGNAL_WEIGHTS
+CODE PATH PASS — TherapeuticMomentClassifier._gather_signals loads user_polyvictimization_layers; _score_moment_classes adds weighted terms.
+
+
+tmc.py
+Lines 302-365
+                    layer_rows = await conn.fetch(
+                        "SELECT severity FROM user_polyvictimization_layers "
+                        "WHERE user_id = $1 AND active = TRUE",
+                        user_id,
+                    )
+                    ...
+            + poly_count * SIGNAL_WEIGHTS["polyvictimization_layer_count"]
+            + poly_load * SIGNAL_WEIGHTS["polyvictim_severity_load"]
+FAIL (E2E from chat for William) — Same username vs hardware_id issue: portal writes layers under Williamhenderson; orchestrator/TMC on chat uses CLIENT_WILLIAMHENDERSON_ID → rows won’t match unless duplicated under hw_id.
+
+7. Trigger date within ±1 day → forced predictability_continuity register
+CODE PATH PASS (when pipeline runs and no codeword): find_active_matches ±1 day → trigger_date.matched → forced_on → gate blocked → _select_register returns predictability_continuity when gate blocked (codeword wins first).
+
+
+sensitive_clinical_bridge.py
+Lines 1702-1726
+    forced_on = trigger_date.matched or legal_proximity.detected
+    novelty_gate = _thalamic_gate_v1_3(
+        ...
+        forced_on=forced_on,
+    )
+    ...
+    register_directive, selected_register_source = _select_register(
+        ...
+        novelty_gate=novelty_gate,
+    )
+
+sensitive_clinical_bridge.py
+Lines 1140-1154
+    if novelty_gate.blocked:
+        ...
+        return ("predictability_continuity", source or "thalamic_gate_block")
+FAIL (E2E) — _check_trigger_dates passes the same user_id string to TriggerDateRegistry; portal stores dates under username. With hardware_id passed from bridge, matches won’t hit William’s rows unless keyed by hw_id too.
+
+8. Audit rows in sensitive_bridge_log
+Query with exact lowercase williamhenderson returns 0 rows (username is Williamhenderson). With correct casing, prod shows only sensitive_profile_screen_opened — no disclosure_evaluated / orchestrator audits (consistent with master off + never completing the emitting path).
+
+9. Master switch sensitive_bridge_master_enabled
+Prod value: false — STEP 0 short-circuits; downstream wiring does not run.
+
+10. William’s gap_features_enabled
+{} (empty JSON). Effective flags = globals ∪ user overrides → all gap_ keys FALSE* (global map on prod has every listed flag false).
+
+Cross-cutting verdict
+Concern	Verdict
+Call evaluate_disclosure on chat
+PASS
+Full 17-step orchestration for William today
+FAIL (master off; enrollment/all-gap gate; username/hw_id mismatch)
+Per-gap detector gating
+FAIL (only global “any flag” gate; no per-detector reads of individual gap keys)
+Enrollment / trigger / polyvictim DB rows keyed like chat user_id
+UNWIRED (Williamhenderson vs CLIENT_WILLIAMHENDERSON_ID)
+EFF: 95/178 = 53% | FAIL
+OPTIMIZE_NEXT: collapse bullets 8–10 into one “prod state” line next time.
+LOSS: 83 tokens at $0.001239/1k | session: n/a | model: composer-2-fast (cursor-blended $0.001239/1k per GAP1 table)
+
+Audit the SensitiveClinicalProfileScreen Flutter implementation for interactive controls. For each of the 9 sections, report what interactive elements exist (buttons, sliders, dropdowns, text fields, dialogs) and what is read-only display only.
+
+Sections to audit:
+
+
+
+Embodiment Phase — is there a dropdown or radio selector to change the phase? Does it call PUT /api/coach/sensitive-profile/{user_id}/embodiment-phase?
+
+Thresholds — are the sliders draggable in production (not just in the debug harness)? Do they call PUT .../novelty-threshold and PUT .../arousal-threshold on release?
+
+Substance Status — is there a dropdown or radio selector to change status? Does it call PUT .../substance-status?
+
+Codewords — is there an "Add codeword" button? Does it open a dialog with text field + type selector? Does submit call POST .../codeword?
+
+Trigger Dates — is there an "Add trigger date" button? Date picker + type selector + severity + recurring flag + notes? Does submit call POST .../trigger-date?
+
+Polyvictim Layers — is there an "Add layer" button? Layer type selector + severity? Does submit call POST .../polyvictim-layer?
+
+Legal Status — is there an "Add legal case" button? Case type + status + next event date + attorney contact? Does submit call POST .../legal-status?
+
+Safe Silence Mode — propose flow exists per screenshots; verify approve flow renders when state=pending_approval; verify cancel/delete exists.
+
+Activity Log — already verified read-only with window toggle, no mutation expected.
+
+
+
+For each section, return one of three statuses:
+
+
+
+FULLY INTERACTIVE — controls present, wired to correct REST endpoint, tested working
+
+DISPLAY-ONLY — section shows current state but has no UI to mutate it (REST endpoint may exist server-side but Flutter doesn't call it)
+
+PARTIALLY INTERACTIVE — some mutation possible (e.g., slider drag) but missing features (e.g., can't add new entries)
+
+
+
+Report each section by name with status and specifics. If sections are DISPLAY-ONLY, list the REST endpoints that exist but have no Flutter consumer.
+
+Read-only inspection. Report findings only.
+
+SensitiveClinicalProfileScreen — interactive audit (mobile/lib/screens/sensitive_clinical_profile_screen.dart)
+1. Embodiment Phase — DISPLAY-ONLY
+_embodimentBody uses _ReadOnlyKv: “Current phase” + static “Allowed values” text. No DropdownButton, radio, or PUT.
+REST with no Flutter consumer: PUT /api/coach/sensitive-profile/{user_id}/embodiment-phase
+
+2. Thresholds — PARTIALLY INTERACTIVE (sliders yes; API contract likely wrong)
+Two _PresetSlider widgets (Slider with onChangeEnd → _commitThreshold → _api.putThreshold). Same widget in production build (not harness-only).
+Bug: putThreshold sends jsonEncode({which: value}) → {"novelty": …} / {"arousal": …}. Server expects novelty_threshold / arousal_threshold (NoveltyThresholdUpdate, ArousalThresholdUpdate). Likely 422, so not reliably “wired to correct REST endpoint.”
+Optional telemetry fields (population_preset) are never sent.
+
+3. Substance Status — DISPLAY-ONLY
+_substanceBody is _ReadOnlyKv only (“Current status” + allowed values). No selector or PUT.
+REST with no Flutter consumer: PUT /api/coach/sensitive-profile/{user_id}/substance-status
+
+4. Codewords — DISPLAY-ONLY
+Lists codewords via _ListTile; empty state text only. No “Add codeword”, no dialog, no POST.
+REST with no Flutter consumer: POST .../codeword, DELETE .../codeword/{hash_prefix}
+
+5. Trigger Dates — DISPLAY-ONLY
+List _ListTile only; empty _Empty. No add UI, date picker, severity/recurring/notes, no POST.
+REST with no Flutter consumer: POST .../trigger-date, DELETE .../trigger-date/{trigger_date_id}
+
+6. Polyvictim Layers — DISPLAY-ONLY
+List _ListTile; empty _Empty. No add, type/severity form, no POST.
+REST with no Flutter consumer: POST .../polyvictim-layer, DELETE .../polyvictim-layer/{layer_id}
+
+7. Legal Status — DISPLAY-ONLY
+List _ListTile; empty _Empty. No “add case”, no POST/PATCH.
+REST with no Flutter consumer: POST .../legal-status and related patch/delete if used elsewhere on backend (LegalStatusCreate / LegalStatusPatch in router).
+
+8. Safe Silence Mode — PARTIALLY INTERACTIVE
+
+Inactive: coach sees propose form (TextField + “Propose” → POST .../safe-silence/propose). Admin sees message that admin cannot propose.
+pending_approval: isPending is true for state == 'pending_approval'; admin gets _approveForm (optional note TextField + “Approve in This Session” → POST /api/admin/sensitive-profile/{user_id}/safe-silence/approve). Coach sees read-only “Awaiting admin approval…”.
+Active: informational _Empty only.
+Missing: no cancel / revoke / DELETE .../safe-silence anywhere in this file (backend exposes @coach_router.delete("/{user_id}/safe-silence")).
+9. Activity Log — READ-ONLY DATA + NAVIGATION ONLY (as expected)
+ChoiceChip window (7/30/90/365d) + “load older” pagination via GET .../log. No create/update/delete mutations.
+
+Harness note: profileOverride / logEventsOverride only skip network for GET profile/log in inspection mode; threshold sliders and safe-silence actions still call _api unless you avoid opening those flows — layout/widgets are shared with production.
