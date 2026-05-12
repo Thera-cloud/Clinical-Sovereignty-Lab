@@ -347,6 +347,40 @@ class SensitiveBridgeAuditor:
             )
             return {}
 
+    async def _identity_resolution_bridge_boundary_check(self) -> Dict[str, Any]:
+        """DB probe: ``audit_client.hardware_id`` must resolve to ``username``."""
+        detail: Dict[str, Any] = {"check_id": "identity_resolution_at_bridge_boundary"}
+        if not self.db_pool:
+            detail["skipped"] = True
+            detail["reason"] = "db_pool_unavailable"
+            return {"ok": True, "detail": detail}
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT username, hardware_id FROM users "
+                    "WHERE username = 'audit_client' LIMIT 1",
+                )
+            if not row or not row.get("hardware_id"):
+                detail["skipped"] = True
+                detail["reason"] = "audit_client_row_missing"
+                return {"ok": True, "detail": detail}
+            from app.services._identity_resolver import resolve_username as _resolve_uname
+
+            resolved = await _resolve_uname(self.db_pool, str(row["hardware_id"]))
+            expected = str(row["username"])
+            ok = resolved == expected
+            detail.update(
+                {
+                    "hardware_id_probe": row["hardware_id"],
+                    "expected_username": expected,
+                    "resolved_username": resolved,
+                }
+            )
+            return {"ok": ok, "detail": detail}
+        except Exception as e:
+            detail["error"] = repr(e)
+            return {"ok": False, "detail": detail}
+
     # -- tier 1: static module self-checks (sub-ms) -------------------------
 
     async def _run_tier1(
@@ -362,6 +396,8 @@ class SensitiveBridgeAuditor:
         # Pull mandatory_reporting + linguistic_arousal_load.
         mand = _safe_call(_import_mandatory_reporting_self_check, default={})
         ling = _safe_call(_import_linguistic_arousal_self_check, default={})
+
+        ir_boundary = await self._identity_resolution_bridge_boundary_check()
 
         controller_v1_2 = v1_2_verdicts.get("controller") or {}
         reporting_v1_2 = v1_2_verdicts.get("mandatory_reporting") or {}
@@ -394,10 +430,16 @@ class SensitiveBridgeAuditor:
         # Slot 1: pipeline_order_matches_plan_v1_3 ← folds controller v1.2
         _emit(
             "pipeline_order_matches_plan_v1_3",
-            parent_ok=bool(orch.get("pipeline_order_matches_plan_v1_3", False)),
+            parent_ok=(
+                bool(orch.get("pipeline_order_matches_plan_v1_3", False))
+                and bool(ir_boundary.get("ok", False))
+            ),
             parent_severity_when_ok="info",
             fold=controller_v1_2,
             source="sensitive_clinical_bridge._auditor_self_check",
+        )
+        results[-1]["details"]["identity_resolution_at_bridge_boundary"] = ir_boundary.get(
+            "detail", {}
         )
 
         # Slot 2: bridge_decision_schema_hash_stable
@@ -415,16 +457,41 @@ class SensitiveBridgeAuditor:
             observed.append(cid)
 
         # Slot 4: phase4_no_modifications_to_phase3_modules
+        # Fold M215 sensitive_profile_screen_single_entry_point Flutter-source
+        # static check into details. The fold pattern matches the v1.2 parity
+        # / sole-clinician folds: parent ok flips False if the folded check
+        # regresses. In production containers the mobile/ tree is absent and
+        # the folded check returns severity="skipped" with ok=True, so it
+        # never red-flags production trust — local dev / pre-deploy CI is
+        # the authoritative gate for the entry-point invariant.
         phase4_invariant_ok = bool(
             orch.get("phase4_no_modifications_to_phase3_modules",
                      orch.get("no_phase3_module_mutations", False))
         )
+        screen_entry = _check_sensitive_profile_screen_single_entry_point()
+        phase4_details = {
+            "source": "sensitive_clinical_bridge._auditor_self_check",
+            "alias": "no_phase3_module_mutations",
+            "sensitive_profile_screen_single_entry_point": {
+                "check_id": screen_entry["id"],
+                "ok": bool(screen_entry["ok"]),
+                "severity": screen_entry["severity"],
+                "findings": screen_entry["details"],
+            },
+        }
+        # Skipped fold (production container, mobile/ absent) does not flip
+        # the parent verdict — only an explicit ok=False with severity=error
+        # counts as regression.
+        screen_fold_regressed = (
+            not screen_entry["ok"]
+            and screen_entry["severity"] != "skipped"
+        )
+        slot4_ok = phase4_invariant_ok and not screen_fold_regressed
         results.append(_entry(
             "phase4_no_modifications_to_phase3_modules",
-            ok=phase4_invariant_ok,
-            details={"source": "sensitive_clinical_bridge._auditor_self_check",
-                     "alias": "no_phase3_module_mutations"},
-            severity="info" if phase4_invariant_ok else "error",
+            ok=slot4_ok,
+            details=phase4_details,
+            severity="info" if slot4_ok else "error",
         ))
         observed.append("phase4_no_modifications_to_phase3_modules")
 
@@ -562,10 +629,23 @@ class SensitiveBridgeAuditor:
             ))
             observed.append("user_safety_codewords_no_plaintext_leak")
 
-            results.append(await _check_view_present(
+            silence_view_entry = await _check_view_present(
                 conn, "safe_silence_state_view_present",
                 view_candidates=("safe_silence_state_v", "v_safe_silence_state"),
-            ))
+            )
+            # Fold migration-214 sole-clinician session-separation static
+            # check into the parent slot. No new top-level entry is added —
+            # parent ``ok`` flips False if the static contract regresses.
+            sc_sep = _check_sole_clinician_session_separation_enforced()
+            silence_view_entry["details"]["sole_clinician_session_separation"] = {
+                "check_id": sc_sep["id"],
+                "ok": bool(sc_sep["ok"]),
+                "findings": sc_sep["details"],
+            }
+            if not sc_sep["ok"]:
+                silence_view_entry["ok"] = False
+                silence_view_entry["severity"] = "error"
+            results.append(silence_view_entry)
             observed.append("safe_silence_state_view_present")
 
             results.append(await _check_crystal_domain_canonical(
@@ -626,10 +706,39 @@ class SensitiveBridgeAuditor:
             )
 
         async with self.db_pool.acquire() as conn:
-            results.append(await _check_table_present(
+            enroll_table_entry = await _check_table_present(
                 conn, "sensitive_bridge_enrollment_table_present",
                 table_candidates=("sensitive_bridge_enrollment",),
-            ))
+            )
+            # Fold M215+M216 Path-C coach-initiated enrollment static
+            # contracts into details. Same pattern as the v1.2 parity /
+            # sole-clinician folds above: parent ok flips False if any
+            # folded check regresses. All four are static source scans of
+            # backend/app/routers/sensitive_profile_api.py (shipped in the
+            # backend image) and migrations/216_coach_initiated_enrollment.sql.
+            enroll_folds = {
+                "consent_required": _check_enrollment_endpoint_requires_consent_confirmed(),
+                "minor_guardian_consent": _check_enrollment_endpoint_blocks_minor_without_guardian_consent(),
+                "audit_row_emitted": _check_enrollment_creates_audit_row(),
+                "coach_authorization": _check_enrollment_endpoint_requires_coach_authorization(),
+            }
+            enroll_table_entry["details"]["coach_initiated_enrollment"] = {
+                fold_key: {
+                    "check_id": entry["id"],
+                    "ok": bool(entry["ok"]),
+                    "severity": entry["severity"],
+                    "findings": entry["details"],
+                }
+                for fold_key, entry in enroll_folds.items()
+            }
+            enroll_fold_regressed = any(
+                not entry["ok"] and entry["severity"] != "skipped"
+                for entry in enroll_folds.values()
+            )
+            if enroll_fold_regressed:
+                enroll_table_entry["ok"] = False
+                enroll_table_entry["severity"] = "error"
+            results.append(enroll_table_entry)
             observed.append("sensitive_bridge_enrollment_table_present")
 
             results.append(await _check_table_present(
@@ -643,9 +752,21 @@ class SensitiveBridgeAuditor:
             ))
             observed.append("false_positive_rate_under_5pct_per_gap")
 
-            results.append(await _check_shadow_mode_review_current(
+            shadow_review_entry = await _check_shadow_mode_review_current(
                 conn, "shadow_mode_decision_review_current",
-            ))
+            )
+            # Fold migration-214 sole-clinician 48h reflection-delay static
+            # check into the parent slot. Same pattern as Tier-2 fold above.
+            sc_delay = _check_sole_clinician_reflection_delay_enforced()
+            shadow_review_entry["details"]["sole_clinician_reflection_delay"] = {
+                "check_id": sc_delay["id"],
+                "ok": bool(sc_delay["ok"]),
+                "findings": sc_delay["details"],
+            }
+            if not sc_delay["ok"]:
+                shadow_review_entry["ok"] = False
+                shadow_review_entry["severity"] = "error"
+            results.append(shadow_review_entry)
             observed.append("shadow_mode_decision_review_current")
 
             results.append(await _check_safe_silence_warning_cadence(
@@ -844,6 +965,536 @@ async def _check_view_present(
         details={"checked": list(view_candidates), "found": found},
         severity="info" if ok else "warning",
     )
+
+
+# ---------------------------------------------------------------------------
+# Sole-clinician (migration 214) folded checks — static source scans
+# ---------------------------------------------------------------------------
+# Both checks run as regex scans over the relevant router source. They are
+# folded into the verdicts of two existing _CHECK_ORDER slots (no new top-
+# level entries), keeping _TOTAL_SLOTS at 34. The framework uses the
+# `details.sole_clinician_*` substructure for visibility, and the parent's
+# `ok` flips to False if the fold fails — same pattern the v1.2 parity
+# fixtures already use.
+
+import re as _re
+
+# Anchor the static-source scan paths to THIS module's location so the check
+# works regardless of CWD. ``__file__`` here is .../app/services/<this>.py;
+# the routers live at .../app/routers/. Inside the production container that
+# resolves to /app/app/routers/...; on a developer checkout it resolves to
+# .../backend/app/routers/...
+_SOLE_LEAD_API_PATH = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..", "routers", "sensitive_profile_api.py",
+))
+_SOLE_LEAD_TELEMETRY_PATH = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..", "routers", "sensitive_bridge_telemetry_api.py",
+))
+
+# Path-C enrollment endpoint shares a router file with the rest of the
+# sensitive_profile contract. Reuse the same anchored path used by the
+# session-separation check above.
+_ENROLLMENT_API_PATH = _SOLE_LEAD_API_PATH
+
+# Flutter source tree — used by sensitive_profile_screen_single_entry_point.
+# In a developer checkout this resolves to .../mobile/lib; in the production
+# Docker image the mobile/ tree is NOT bind-mounted into nate_backend, so the
+# check returns ok=True with severity="skipped" and a flutter_source_tree
+# diagnostic when the directory is absent. The local dev run is the
+# authoritative gate; production is a soft no-op so we never red-flag a
+# missing harness on a host that cannot see the Flutter code.
+_FLUTTER_LIB_CANDIDATES: Tuple[str, ...] = (
+    os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "..", "..", "mobile", "lib",
+    )),
+    os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "..", "mobile", "lib",
+    )),
+    "/opt/clinical-sovereignty-lab/mobile/lib",
+)
+
+
+def _resolve_flutter_lib_root() -> Optional[str]:
+    for candidate in _FLUTTER_LIB_CANDIDATES:
+        if os.path.isdir(candidate):
+            return candidate
+    return None
+
+
+def _check_sole_clinician_session_separation_enforced() -> Dict[str, Any]:
+    """Verify the safe_silence approve flow still enforces session separation
+    when the proposer is ``sole_lead``.
+
+    Folds into ``safe_silence_state_view_present`` (Tier 2). The check is
+    deliberately a static source scan — runtime exercise would require
+    standing up two admin sessions per audit cycle, which is too expensive
+    for the cheap-first ordering. The runtime contract is enforced by the
+    endpoint code; this check guards against regression.
+
+    Pass criteria (all required):
+      • module-level constant ``CLIN_AUTH_SOLE_LEAD = "sole_lead"`` present
+      • ``_lookup_clinician_authorization_type`` symbol present
+      • ``hmac.compare_digest(proposer_token_hash, approver_token_hash)``
+        present (the universal session-separation check)
+      • the comment ``sole_clinician_session_separation_enforced`` referenced
+        in the source so future maintainers see this rule exists
+    """
+    cid = "sole_clinician_session_separation_enforced"
+    try:
+        with open(_SOLE_LEAD_API_PATH, "r", encoding="utf-8") as fh:
+            src = fh.read()
+    except Exception as e:
+        return {
+            "id": cid, "ok": False, "severity": "warning",
+            "details": {"error": repr(e)[:120],
+                        "path": _SOLE_LEAD_API_PATH},
+        }
+    has_const = 'CLIN_AUTH_SOLE_LEAD = "sole_lead"' in src
+    has_lookup = "_lookup_clinician_authorization_type" in src
+    has_hmac = bool(_re.search(
+        r"hmac\.compare_digest\(\s*proposer_token_hash\s*,\s*approver_token_hash\s*\)",
+        src,
+    ))
+    has_audit_marker = "sole_clinician_session_separation_enforced" in src
+    findings = {
+        "has_sole_lead_constant": has_const,
+        "has_authorization_lookup": has_lookup,
+        "has_session_hash_compare": has_hmac,
+        "has_audit_marker_comment": has_audit_marker,
+        "scanned_path": _SOLE_LEAD_API_PATH,
+    }
+    ok = all(findings[k] for k in (
+        "has_sole_lead_constant",
+        "has_authorization_lookup",
+        "has_session_hash_compare",
+        "has_audit_marker_comment",
+    ))
+    return {
+        "id": cid, "ok": ok,
+        "severity": "info" if ok else "error",
+        "details": findings,
+    }
+
+
+def _check_sole_clinician_reflection_delay_enforced() -> Dict[str, Any]:
+    """Verify the detector-promotion endpoint enforces a 48h reflection delay
+    when the actor is ``sole_lead``.
+
+    Folds into ``shadow_mode_decision_review_current`` (Tier 3). Static
+    source scan: runtime exercise would require seeding telemetry rows
+    across a 48h window every audit cycle.
+
+    Pass criteria (all required):
+      • ``SOLE_CLINICIAN_REFLECTION_DELAY_HOURS = 48`` constant present
+      • ``_lookup_authorization_type`` helper present
+      • ``timedelta(hours=SOLE_CLINICIAN_REFLECTION_DELAY_HOURS)`` literal
+        present (the actual server-side delta)
+      • 409 with reason ``sole_clinician_reflection_delay_unmet`` present
+    """
+    cid = "sole_clinician_reflection_delay_enforced"
+    try:
+        with open(_SOLE_LEAD_TELEMETRY_PATH, "r", encoding="utf-8") as fh:
+            src = fh.read()
+    except Exception as e:
+        return {
+            "id": cid, "ok": False, "severity": "warning",
+            "details": {"error": repr(e)[:120],
+                        "path": _SOLE_LEAD_TELEMETRY_PATH},
+        }
+    has_const = "SOLE_CLINICIAN_REFLECTION_DELAY_HOURS = 48" in src
+    has_lookup = "_lookup_authorization_type" in src
+    has_delta = "timedelta(hours=SOLE_CLINICIAN_REFLECTION_DELAY_HOURS)" in src
+    has_reason = "sole_clinician_reflection_delay_unmet" in src
+    findings = {
+        "has_delay_constant_48h": has_const,
+        "has_authorization_lookup": has_lookup,
+        "has_server_side_timedelta": has_delta,
+        "has_409_reason_string": has_reason,
+        "scanned_path": _SOLE_LEAD_TELEMETRY_PATH,
+    }
+    ok = all(findings.values()) and findings["scanned_path"] is not None
+    # `scanned_path` is always truthy; recompute purely on contract bools:
+    ok = all(findings[k] for k in (
+        "has_delay_constant_48h",
+        "has_authorization_lookup",
+        "has_server_side_timedelta",
+        "has_409_reason_string",
+    ))
+    return {
+        "id": cid, "ok": ok,
+        "severity": "info" if ok else "error",
+        "details": findings,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Path-C (M215+M216) coach-initiated enrollment static contracts.
+#
+# These five checks fold into existing slots — no new top-level inventory
+# entries, no trust_baseline expected_count change. The fold pattern matches
+# the v1.2 parity / sole-clinician folds above:
+#
+#   • sensitive_profile_screen_single_entry_point
+#       → folds into Tier-1 phase4_no_modifications_to_phase3_modules
+#   • enrollment_endpoint_requires_consent_confirmed
+#   • enrollment_endpoint_blocks_minor_without_guardian_consent
+#   • enrollment_creates_audit_row
+#   • enrollment_endpoint_requires_coach_authorization
+#       → all four fold into Tier-3 sensitive_bridge_enrollment_table_present
+#
+# All checks are STATIC source scans — runtime exercise would require seeding
+# enrollment rows + spinning real Flutter clients per audit cycle, which is
+# too expensive for the cheap-first ordering. Runtime contracts are enforced
+# by the endpoint code itself; these checks guard against silent regression.
+# ---------------------------------------------------------------------------
+
+
+def _check_sensitive_profile_screen_single_entry_point() -> Dict[str, Any]:
+    """Static Flutter source scan: there must be exactly two production
+    entry points to ``SensitiveClinicalProfileScreen``:
+
+      1. ``mobile/lib/screens/inspection/sensitive_profile_inspection_harness.dart``
+         — debug-only, kDebugMode-gated in ``main.dart``.
+      2. ``mobile/lib/updated_screens.dart`` — Coach Command Briefings tab,
+         "View Brief" modal "Sensitive Profile" pill (Path-C entry point).
+
+    Any third caller is a contract violation and must be removed before
+    merge. The harness must remain reachable only when ``kDebugMode == true``
+    so release bundles dead-strip the harness widget tree entirely.
+
+    In the production Docker image the ``mobile/`` tree is not bind-mounted
+    into ``nate_backend``, so the check returns ``ok=True`` with severity
+    ``"skipped"`` and ``details.flutter_source_tree="missing"``. The local
+    dev run / pre-deploy CI pass is the authoritative gate.
+    """
+    cid = "sensitive_profile_screen_single_entry_point"
+    flutter_root = _resolve_flutter_lib_root()
+    if not flutter_root:
+        return {
+            "id": cid, "ok": True, "severity": "skipped",
+            "details": {
+                "flutter_source_tree": "missing",
+                "candidates": list(_FLUTTER_LIB_CANDIDATES),
+                "note": "production container does not bind-mount mobile/ — local dev / CI is the gate",
+            },
+        }
+
+    # Walk mobile/lib for SensitiveClinicalProfileScreen( call sites.
+    callsites: List[str] = []
+    main_dart_path: Optional[str] = None
+    for dirpath, _dirs, files in os.walk(flutter_root):
+        for fname in files:
+            if not fname.endswith(".dart"):
+                continue
+            full = os.path.join(dirpath, fname)
+            try:
+                with open(full, "r", encoding="utf-8") as fh:
+                    contents = fh.read()
+            except Exception:
+                continue
+            rel = os.path.relpath(full, flutter_root)
+            if rel == "main.dart":
+                main_dart_path = full
+            # Skip the file that DECLARES the class — that's where the
+            # constructor lives, not where it's invoked. The class is
+            # defined in exactly one place; if more than one file declares
+            # it, that's a separate (worse) regression we'll still fail on.
+            if "class SensitiveClinicalProfileScreen" in contents:
+                continue
+            # Match constructor invocations.
+            for _m in _re.finditer(r"SensitiveClinicalProfileScreen\(", contents):
+                callsites.append(rel)
+
+    expected_paths = {
+        "screens/inspection/sensitive_profile_inspection_harness.dart",
+        "updated_screens.dart",
+    }
+    observed_paths = set(callsites)
+    extra_callers = sorted(observed_paths - expected_paths)
+    missing_callers = sorted(expected_paths - observed_paths)
+
+    # Verify the harness path is gated by kDebugMode in main.dart.
+    has_debug_gate = False
+    main_dart_scan_error: Optional[str] = None
+    if main_dart_path:
+        try:
+            with open(main_dart_path, "r", encoding="utf-8") as fh:
+                main_src = fh.read()
+            # Both pieces required: kDebugMode guard AND harness import.
+            has_debug_gate = (
+                "if (kDebugMode)" in main_src
+                and "sensitive_profile_inspection_harness.dart" in main_src
+                and "SensitiveProfileInspectionHarness" in main_src
+            )
+        except Exception as e:
+            main_dart_scan_error = repr(e)[:120]
+
+    ok = (
+        not extra_callers
+        and not missing_callers
+        and has_debug_gate
+        and main_dart_scan_error is None
+    )
+    return {
+        "id": cid, "ok": ok,
+        "severity": "info" if ok else "error",
+        "details": {
+            "flutter_root": flutter_root,
+            "callsite_count": len(callsites),
+            "callsites": sorted(set(callsites)),
+            "expected_paths": sorted(expected_paths),
+            "extra_callers": extra_callers,
+            "missing_callers": missing_callers,
+            "harness_kdebugmode_gate_present": has_debug_gate,
+            "main_dart_scan_error": main_dart_scan_error,
+        },
+    }
+
+
+def _check_enrollment_endpoint_requires_consent_confirmed() -> Dict[str, Any]:
+    """Static scan of ``sensitive_profile_api.py``: the coach-initiated
+    enrollment endpoint must raise 422 ``consent_required`` when
+    ``informed_consent_confirmed`` is False.
+
+    Pass criteria (all required):
+      • ``CoachInitiatedEnrollment`` request model present
+      • ``informed_consent_confirmed`` field referenced in validation flow
+      • ``consent_required`` reason string raised in HTTPException detail
+    """
+    cid = "enrollment_endpoint_requires_consent_confirmed"
+    try:
+        with open(_ENROLLMENT_API_PATH, "r", encoding="utf-8") as fh:
+            src = fh.read()
+    except Exception as e:
+        return {
+            "id": cid, "ok": False, "severity": "warning",
+            "details": {"error": repr(e)[:120], "path": _ENROLLMENT_API_PATH},
+        }
+    has_model = "class CoachInitiatedEnrollment" in src
+    has_field = "informed_consent_confirmed" in src
+    # Look for the 422 reason string in proximity to a not-true check on the
+    # informed_consent_confirmed field.
+    has_reason = bool(_re.search(
+        r'"consent_required"',
+        src,
+    ))
+    has_reason_paired = bool(_re.search(
+        r"informed_consent_confirmed[\s\S]{0,200}consent_required",
+        src,
+    )) or bool(_re.search(
+        r"consent_required[\s\S]{0,200}informed_consent_confirmed",
+        src,
+    ))
+    findings = {
+        "has_request_model": has_model,
+        "has_consent_field": has_field,
+        "has_consent_required_reason": has_reason,
+        "consent_field_paired_with_reason": has_reason_paired,
+        "scanned_path": _ENROLLMENT_API_PATH,
+    }
+    ok = all(findings[k] for k in (
+        "has_request_model",
+        "has_consent_field",
+        "has_consent_required_reason",
+        "consent_field_paired_with_reason",
+    ))
+    return {
+        "id": cid, "ok": ok,
+        "severity": "info" if ok else "error",
+        "details": findings,
+    }
+
+
+def _check_enrollment_endpoint_blocks_minor_without_guardian_consent() -> Dict[str, Any]:
+    """Static scan: minor / transitioning-youth enrollment must require
+    guardian dual-approval and return 409 ``requires_guardian_consent``
+    when the consent row is missing.
+
+    Pass criteria (all required):
+      • ``POPULATION_TYPES_REQUIRING_GUARDIAN_CONSENT`` constant present
+      • ``minor_survivor`` and ``transitioning_youth_16_to_21`` listed
+      • ``guardian_dual_approval_on_file`` lookup present
+      • 409 with reason ``requires_guardian_consent`` raised
+    """
+    cid = "enrollment_endpoint_blocks_minor_without_guardian_consent"
+    try:
+        with open(_ENROLLMENT_API_PATH, "r", encoding="utf-8") as fh:
+            src = fh.read()
+    except Exception as e:
+        return {
+            "id": cid, "ok": False, "severity": "warning",
+            "details": {"error": repr(e)[:120], "path": _ENROLLMENT_API_PATH},
+        }
+    has_constant = "POPULATION_TYPES_REQUIRING_GUARDIAN_CONSENT" in src
+    has_minor = '"minor_survivor"' in src
+    has_youth = '"transitioning_youth_16_to_21"' in src
+    has_guardian_lookup = "guardian_dual_approval_on_file" in src
+    has_reason = '"requires_guardian_consent"' in src
+    findings = {
+        "has_population_constant": has_constant,
+        "lists_minor_survivor": has_minor,
+        "lists_transitioning_youth": has_youth,
+        "has_guardian_consent_lookup": has_guardian_lookup,
+        "has_409_reason_string": has_reason,
+        "scanned_path": _ENROLLMENT_API_PATH,
+    }
+    ok = all(findings[k] for k in (
+        "has_population_constant",
+        "lists_minor_survivor",
+        "lists_transitioning_youth",
+        "has_guardian_consent_lookup",
+        "has_409_reason_string",
+    ))
+    return {
+        "id": cid, "ok": ok,
+        "severity": "info" if ok else "error",
+        "details": findings,
+    }
+
+
+def _check_enrollment_creates_audit_row() -> Dict[str, Any]:
+    """Static scan: a successful enrollment must emit an ``enrollment_created``
+    audit row to ``sensitive_bridge_log`` with ``enrolled_by`` and
+    ``cohort_label`` recorded in the payload.
+
+    Pass criteria (all required):
+      • ``EVT_ENROLLMENT_CREATED = "enrollment_created"`` constant present
+      • ``EVT_ENROLLMENT_CREATED`` referenced inside the enrollment endpoint
+      • ``enrolled_by`` / ``cohort_label`` keys named in the audit payload
+      • Migration 216 ``CHECK`` constraint widened to allow the new event
+        (verified by grep against the migration file shipped in this image)
+    """
+    cid = "enrollment_creates_audit_row"
+    try:
+        with open(_ENROLLMENT_API_PATH, "r", encoding="utf-8") as fh:
+            src = fh.read()
+    except Exception as e:
+        return {
+            "id": cid, "ok": False, "severity": "warning",
+            "details": {"error": repr(e)[:120], "path": _ENROLLMENT_API_PATH},
+        }
+    has_const = 'EVT_ENROLLMENT_CREATED = "enrollment_created"' in src
+    has_const_used = src.count("EVT_ENROLLMENT_CREATED") >= 2
+    has_payload_keys = (
+        '"enrolled_by"' in src
+        and '"cohort_label"' in src
+    )
+
+    # Migration 216 CHECK widening — co-located in backend/migrations.
+    migration_path = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "..", "migrations", "216_coach_initiated_enrollment.sql",
+    ))
+    migration_ok = False
+    migration_error: Optional[str] = None
+    try:
+        with open(migration_path, "r", encoding="utf-8") as fh:
+            mig = fh.read()
+        migration_ok = (
+            "enrollment_created" in mig
+            and "sensitive_bridge_log" in mig
+            and "event_type" in mig
+        )
+    except Exception as e:
+        migration_error = repr(e)[:120]
+
+    findings = {
+        "has_event_type_constant": has_const,
+        "constant_referenced_in_endpoint": has_const_used,
+        "audit_payload_includes_enrolled_by_and_cohort": has_payload_keys,
+        "m216_widens_event_type_check": migration_ok,
+        "m216_path": migration_path,
+        "m216_scan_error": migration_error,
+        "scanned_path": _ENROLLMENT_API_PATH,
+    }
+    ok = all(findings[k] for k in (
+        "has_event_type_constant",
+        "constant_referenced_in_endpoint",
+        "audit_payload_includes_enrolled_by_and_cohort",
+        "m216_widens_event_type_check",
+    )) and migration_error is None
+    return {
+        "id": cid, "ok": ok,
+        "severity": "info" if ok else "error",
+        "details": findings,
+    }
+
+
+def _check_enrollment_endpoint_requires_coach_authorization() -> Dict[str, Any]:
+    """Static scan: the enrollment endpoint must check
+    ``coach_sensitive_bridge_authorized`` and return 404 (NOT 403) when the
+    coach lacks authorization, so unauthorized coaches cannot even infer
+    the feature exists.
+
+    Pass criteria (all required):
+      • ``coach_sensitive_bridge_authorized`` referenced in the endpoint
+      • ``coach_profiles`` table queried for that flag
+      • A 404 ``HTTPException`` is raised in the unauthorized branch
+      • No 403 raised in the same branch (silent feature hiding)
+    """
+    cid = "enrollment_endpoint_requires_coach_authorization"
+    try:
+        with open(_ENROLLMENT_API_PATH, "r", encoding="utf-8") as fh:
+            src = fh.read()
+    except Exception as e:
+        return {
+            "id": cid, "ok": False, "severity": "warning",
+            "details": {"error": repr(e)[:120], "path": _ENROLLMENT_API_PATH},
+        }
+    has_flag = "coach_sensitive_bridge_authorized" in src
+    has_table = "coach_profiles" in src
+    # Locate the enroll handler body specifically. The flag also appears in
+    # other endpoints (visibility/load), so anchoring on the first match
+    # would scan the wrong function. We isolate from the @router.post(...)
+    # for /enroll through the next top-level def/decorator.
+    # Decorator is `@coach_router.post(...)`. The handler body starts at the
+    # `async def coach_initiated_enroll(` and ends at the next top-level
+    # decorator OR a non-handler top-level def, OR end-of-file. We must
+    # consume the handler's OWN `async def` line first so the lookahead
+    # doesn't terminate immediately on it.
+    enroll_handler = _re.search(
+        r"@\w*router\.post\(\s*[\"'][^\"']*/enroll[\"'][\s\S]*?\nasync def \w[\s\S]*?(?=\n@\w*router\.|\nasync def \w|\ndef \w|\Z)",
+        src,
+    )
+    gate_window = enroll_handler
+    has_404_in_window = False
+    has_403_in_window = False
+    if gate_window:
+        window = gate_window.group(0)
+        # Match all common ways the unauthorized branch could raise 404:
+        #   raise HTTPException(404, detail=...)         positional
+        #   raise HTTPException(status_code=404, ...)    keyword
+        #   raise HTTPException(status.HTTP_404_NOT_FOUND, ...)
+        has_404_in_window = bool(_re.search(
+            r"HTTPException\(\s*(?:status_code\s*=\s*)?404\b",
+            window,
+        )) or "HTTP_404_NOT_FOUND" in window
+        has_403_in_window = bool(_re.search(
+            r"HTTPException\(\s*(?:status_code\s*=\s*)?403\b",
+            window,
+        )) or "HTTP_403_FORBIDDEN" in window
+    findings = {
+        "has_authorization_flag_lookup": has_flag,
+        "queries_coach_profiles_table": has_table,
+        "raises_404_when_unauthorized": has_404_in_window,
+        "does_not_raise_403_in_gate": not has_403_in_window,
+        "scanned_path": _ENROLLMENT_API_PATH,
+    }
+    ok = all(findings[k] for k in (
+        "has_authorization_flag_lookup",
+        "queries_coach_profiles_table",
+        "raises_404_when_unauthorized",
+        "does_not_raise_403_in_gate",
+    ))
+    return {
+        "id": cid, "ok": ok,
+        "severity": "info" if ok else "error",
+        "details": findings,
+    }
 
 
 async def _check_immutable_trigger(conn, cid: str, *, table: str) -> Dict[str, Any]:

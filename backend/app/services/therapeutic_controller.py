@@ -629,6 +629,30 @@ async def prepare_therapeutic_context(
             trigger-date proximity, Gap 9 legal proximity).
         locale: Resolves banned-phrase set (Note 3, Phase 3 build).
     """
+    # Canonical username for DB-backed paths (portal + FK tables use username;
+    # bridge chat passes hardware_id). Unresolved → keep raw id (fail-soft).
+    canonical_user_id = user_id
+    if db_pool and user_id:
+        try:
+            from app.services._identity_resolver import resolve_username as _resolve_username
+
+            _resolved = await _resolve_username(db_pool, user_id)
+            if _resolved is None:
+                logger.warning(
+                    "therapeutic_controller: sensitive bridge identity unresolved "
+                    "(provided_identifier=%r source=bridge_boundary)",
+                    user_id,
+                )
+                canonical_user_id = user_id
+            else:
+                canonical_user_id = _resolved
+        except Exception as _rid_exc:
+            logger.warning(
+                "therapeutic_controller: identity resolution failed: %s — using raw id",
+                _rid_exc,
+            )
+            canonical_user_id = user_id
+
     # v1.3 Sensitive Clinical Bridge — single wiring seam (Phase 4 Note 1).
     # Master kill switch + per-user gap_features_enabled gate the orchestrator
     # internally; when dormant, register_directive is None and downstream
@@ -637,14 +661,17 @@ async def prepare_therapeutic_context(
     try:
         from app.services import sensitive_clinical_bridge as _scb
         _bd = await _scb.evaluate_disclosure(
-            db_pool=db_pool, user_id=user_id, message=user_text, locale=locale,
+            db_pool=db_pool,
+            user_id=canonical_user_id,
+            message=user_text,
+            locale=locale,
         )
         if _bd is not None and _bd.register_directive:
             register_directive = _bd.register_directive
     except Exception as _e:
         logger.warning("therapeutic_controller: bridge wiring skipped: %s", _e)
 
-    tmc_result = await _classify_tmc(db_pool, user_id)
+    tmc_result = await _classify_tmc(db_pool, canonical_user_id)
     signals = tmc_result.get("signals", {}) or {}
     tmc_class = tmc_result.get("moment_class") or "REST"
     ec_current = float(signals.get("ec_current") or 0.0)
@@ -689,7 +716,7 @@ async def prepare_therapeutic_context(
             effective_register_directive = "predictability_continuity"
         mismatch_available = False
 
-    recent_narratives = await _fetch_recent_narratives(db_pool, user_id)
+    recent_narratives = await _fetch_recent_narratives(db_pool, canonical_user_id)
     neuroscience_ctx = ""
     if _is_meta_therapeutic(user_text):
         neuroscience_ctx = await _recall_neuroscience_crystals(db_pool, user_text, limit=3)
@@ -708,7 +735,7 @@ async def prepare_therapeutic_context(
     if effective_register_directive:
         if effective_register_directive == "predictability_continuity":
             max_tokens = await _resolve_predictability_continuity_cap(
-                user_id=user_id,
+                user_id=canonical_user_id,
                 db_pool=db_pool,
                 floor=PREDICTABILITY_CONTINUITY_FLOOR_TOKENS,
             )
