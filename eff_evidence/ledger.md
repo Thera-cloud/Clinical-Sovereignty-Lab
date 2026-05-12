@@ -1213,3 +1213,21 @@ EFF: 25/55 = 45% | FAIL
 - ESTIMATED: yes (~-prefix on EFF counts)
 - Patterns: DENOMINATOR_CAPPED_AT_200+IID_FOOTER_MISSING
 - Evidence: 2026-05-12_091807_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200+IID_FOOTER_MISSING_150vs640.txt
+
+## 2026-05-12 09:18:18 FABRICATION_UNDERSTATED
+- EFF: EFF line:        EFF: 95/110 = 86% | PASS LOSS: 15 tokens at $0.001019/1k = $0.0000153 | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended)
+EFF line:        EFF: 1820/2150 = 85% | PASS LOSS: 330 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended)
+EFF line:        EFF: 720/950 = 76% | FAIL LOSS: 230 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended) OPTIMIZE_NEXT: trim restated rule preamble in evidence sections; jump straight to delta vs. expectation.
+EFF line:        EFF: 1850/2300 = 80% | PASS LOSS: 450 tokens at rate unknown | session: n/a | model: unknown
+EFF line:        EFF: 1820/2150 = 85% | PASS LOSS: 330 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended)
+EFF line:        EFF: ~280/~310 = 90% | PASS LOSS: ~30 tokens at $0.000937/1k | session: n/a | model: claude-opus-4-7 (cursor-blended)
+EFF line:        EFF: 380/520 = 73% | PASS
+EFF line:        EFF: 35/52 = 67% | FAIL LOSS: 17 tokens at rate unknown | session: n/a | model: unknown OPTIMIZE_NEXT: drop the journey/trust-enforcer footer paragraphs; result + commit is sufficient.
+EFF line:        EFF: 880/1080 = 81% | PASS LOSS: 200 tokens at $0.001019/1k | session: 200 | model: claude-opus-4-7-thinking-xhigh (cursor-blended)
+EFF line:        EFF: ~270/~500 = 54% | FAIL OPTIMIZE_NEXT: request bullet-only verdicts next pass to raise ratio
+EFF line:        EFF: 95/178 = 53% | FAIL
+EFF line:        EFF: ~120/~150 = 80% | PASS
+- Claimed: 110 Actual: 1006 Factor: .1x
+- ESTIMATED: yes (~-prefix on EFF counts)
+- Patterns: DENOMINATOR_CAPPED_AT_200+IID_FOOTER_MISSING
+- Evidence: 2026-05-12_091818_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200+IID_FOOTER_MISSING_110vs1006.txt

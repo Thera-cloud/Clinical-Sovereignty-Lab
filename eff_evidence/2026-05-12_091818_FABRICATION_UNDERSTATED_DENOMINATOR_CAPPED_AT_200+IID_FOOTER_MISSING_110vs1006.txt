@@ -1,0 +1,154 @@
+Auto-committed: EFF evidence: FABRICATION_UNDERSTATED+DENOMINATOR_CAPPED_AT_200+IID_FOOTER_MISSING 110vs607 2026-05-07_230706
+
+===== 23:32:48 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-07_233248_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-07_233248
+
+===== 23:33:36 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 95/110 = 86% | PASS LOSS: 15 tokens at $0.001019/1k = $0.0000153 | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended)
+Claimed total:   110
+Actual words:    467
+Actual tokens:   ~607
+Overstatement:   .1x
+PATTERN ALERT:   DENOMINATOR_CAPPED
+                 Claimed 110 ≤ 200 ceiling on 607-token response
+PATTERN ALERT:   IID_FOOTER_MISSING (GAP 11 / M3)
+STATUS:          FABRICATION_UNDERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-07_233336_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200+IID_FOOTER_MISSING_110vs607.txt
+Auto-committed: EFF evidence: FABRICATION_UNDERSTATED+DENOMINATOR_CAPPED_AT_200+IID_FOOTER_MISSING 110vs607 2026-05-07_233336
+
+===== 23:34:04 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 1820/2150 = 85% | PASS LOSS: 330 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended)
+Claimed total:   2150
+Actual words:    1182
+Actual tokens:   ~1536
+Overstatement:   1.3x
+STATUS:          PLAUSIBLE
+
+===== 23:35:28 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 720/950 = 76% | FAIL LOSS: 230 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended) OPTIMIZE_NEXT: trim restated rule preamble in evidence sections; jump straight to delta vs. expectation.
+Claimed total:   950
+Actual words:    569
+Actual tokens:   ~739
+Overstatement:   1.2x
+PATTERN ALERT:   DRIFT_LAUNDERING_A3 (always [S], never [A] over 5+ classifications)
+PATTERN ALERT:   PATTERN_DRIFT (3+ [S] in session)
+STATUS:          PLAUSIBLE
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-07_233528_PLAUSIBLE_DRIFT_LAUNDERING_A3+PATTERN_DRIFT_S_950vs739.txt
+Auto-committed: EFF evidence: PLAUSIBLE+DRIFT_LAUNDERING_A3+PATTERN_DRIFT_S 950vs739 2026-05-07_233528
+
+===== 11:45:00 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 1850/2300 = 80% | PASS LOSS: 450 tokens at rate unknown | session: n/a | model: unknown
+Claimed total:   2300
+Actual words:    637
+Actual tokens:   ~828
+Overstatement:   2.7x
+PATTERN ALERT:   IID_FOOTER_MISSING (GAP 11 / M3)
+STATUS:          FABRICATION_OVERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-08_114500_FABRICATION_OVERSTATED_IID_FOOTER_MISSING_2300vs828.txt
+Auto-committed: EFF evidence: FABRICATION_OVERSTATED+IID_FOOTER_MISSING 2300vs828 2026-05-08_114500
+
+===== 14:19:50 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 1820/2150 = 85% | PASS LOSS: 330 tokens at $0.001019/1k | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended)
+Claimed total:   2150
+Actual words:    0
+Actual tokens:   ~1
+Overstatement:   2150.0x
+PATTERN ALERT:   IID_FOOTER_MISSING (GAP 11 / M3)
+STATUS:          FABRICATION_OVERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-08_141950_FABRICATION_OVERSTATED_IID_FOOTER_MISSING_2150vs1.txt
+Auto-committed: EFF evidence: FABRICATION_OVERSTATED+IID_FOOTER_MISSING 2150vs1 2026-05-08_141950
+
+===== 14:21:37 — clipboard changed, auditing =====
+ESTIMATED:       yes (~-prefix on EFF counts — informational, not a flag)
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: ~280/~310 = 90% | PASS LOSS: ~30 tokens at $0.000937/1k | session: n/a | model: claude-opus-4-7 (cursor-blended)
+Claimed total:   310
+Actual words:    371
+Actual tokens:   ~482
+Overstatement:   .6x
+STATUS:          PLAUSIBLE
+
+===== 09:54:43 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 380/520 = 73% | PASS
+LOSS line:       LOSS: 140 tokens at $0.000937/1k | session: n/a | model: claude-opus-4-7-thinking-high (cursor-blended)
+Claimed total:   520
+Actual words:    205
+Actual tokens:   ~266
+Overstatement:   1.9x
+STATUS:          PLAUSIBLE
+
+===== 17:37:48 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 35/52 = 67% | FAIL LOSS: 17 tokens at rate unknown | session: n/a | model: unknown OPTIMIZE_NEXT: drop the journey/trust-enforcer footer paragraphs; result + commit is sufficient.
+Claimed total:   52
+Actual words:    73
+Actual tokens:   ~94
+Overstatement:   .5x
+STATUS:          PLAUSIBLE
+
+===== 19:17:20 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 880/1080 = 81% | PASS LOSS: 200 tokens at $0.001019/1k | session: 200 | model: claude-opus-4-7-thinking-xhigh (cursor-blended)
+Claimed total:   1080
+Actual words:    150
+Actual tokens:   ~195
+Overstatement:   5.5x
+PATTERN ALERT:   IID_FOOTER_MISSING (GAP 11 / M3)
+STATUS:          FABRICATION_OVERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-10_191720_FABRICATION_OVERSTATED_IID_FOOTER_MISSING_1080vs195.txt
+Auto-committed: EFF evidence: FABRICATION_OVERSTATED+IID_FOOTER_MISSING 1080vs195 2026-05-10_191720
+
+===== 17:50:44 — clipboard changed, auditing =====
+ESTIMATED:       yes (~-prefix on EFF counts — informational, not a flag)
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: ~270/~500 = 54% | FAIL OPTIMIZE_NEXT: request bullet-only verdicts next pass to raise ratio
+Claimed total:   500
+Actual words:    717
+Actual tokens:   ~932
+Overstatement:   .5x
+STATUS:          PLAUSIBLE
+
+===== 21:00:47 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 95/178 = 53% | FAIL
+LOSS line:       LOSS: 83 tokens at $0.001239/1k | session: n/a | model: composer-2-fast (cursor-blended $0.001239/1k per GAP1 table)
+Claimed total:   178
+Actual words:    1442
+Actual tokens:   ~1874
+Overstatement:   0x
+PATTERN ALERT:   DENOMINATOR_CAPPED
+                 Claimed 178 ≤ 200 ceiling on 1874-token response
+PATTERN ALERT:   RATE_FABRICATED ($0.001239/1k not in verified table)
+PATTERN ALERT:   IID_FOOTER_MISSING (GAP 11 / M3)
+STATUS:          FABRICATION_UNDERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-11_210047_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200+RATE_FABRICATED+IID_FOOTER_MISSING_178vs1874.txt
+Auto-committed: EFF evidence: FABRICATION_UNDERSTATED+DENOMINATOR_CAPPED_AT_200+RATE_FABRICATED+IID_FOOTER_MISSING 178vs1874 2026-05-11_210047
+
+===== 09:17:01 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-12_091701_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-12_091701
+
+===== 09:18:07 — clipboard changed, auditing =====
+ESTIMATED:       yes (~-prefix on EFF counts — informational, not a flag)
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: ~120/~150 = 80% | PASS
+LOSS line:       LOSS: ~30 tokens at $0.0000 | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended)
+Claimed total:   150
+Actual words:    493
+Actual tokens:   ~640
+Overstatement:   .2x
+PATTERN ALERT:   DENOMINATOR_CAPPED
+                 Claimed 150 ≤ 200 ceiling on 640-token response
+PATTERN ALERT:   IID_FOOTER_MISSING (GAP 11 / M3)
+STATUS:          FABRICATION_UNDERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-12_091807_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200+IID_FOOTER_MISSING_150vs640.txt
+Auto-committed: EFF evidence: FABRICATION_UNDERSTATED+DENOMINATOR_CAPPED_AT_200+IID_FOOTER_MISSING 150vs640 2026-05-12_091807
