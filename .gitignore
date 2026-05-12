@@ -191,3 +191,7 @@ mobile/**/test_*.html
 mobile/**/ws_test*
 mobile/**/Untitled
 .cursorrules.archive.*
+
+# Defensive: never let git clean track vault dirs — stub file stays tracked for emptiable dirs
+/data/**
+!/data/.gitkeep
