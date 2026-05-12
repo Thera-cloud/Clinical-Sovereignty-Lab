@@ -1,0 +1,83 @@
+.75 "docker logs nate_bridge --tail 30"
+>>> [METRICS DEBUG] Loading from: /app/data/Vaults/Clients/CLIENT_ZACKS99_ID/metrics.json
+>>> [METRICS DEBUG] C_emo=0.5, last_updated=2026-04-28 16:03:32.066043
+>>> [METRICS DEBUG] Loading from: /app/data/Vaults/Clients/CLIENT_ERICBANDO_ID/metrics.json
+>>> [METRICS DEBUG] C_emo=0.5, last_updated=2026-05-07 01:55:42.002891
+>>> [METRICS DEBUG] Loading from: /app/data/Vaults/Clients/CLIENT_SELENABANDO_ID/metrics.json
+>>> [METRICS DEBUG] C_emo=0.5, last_updated=2026-05-07 01:55:42.003727
+>>> [METRICS DEBUG] Loading from: /app/data/Vaults/Clients/CLIENT_001/metrics.json
+>>> [METRICS DEBUG] C_emo=0.5, last_updated=2026-05-07 01:29:55.457352
+>>> [METRICS DEBUG] Loading from: /app/data/Vaults/Clients/CLIENT_001/metrics.json
+>>> [METRICS DEBUG] C_emo=0.5, last_updated=2026-05-07 01:29:55.457352
+>>> RECEIVED: type=get_metrics len=22
+>>> [METRICS DEBUG] Loading from: /app/data/Vaults/Clients/CLIENT_001/metrics.json
+>>> [METRICS DEBUG] C_emo=0.5, last_updated=2026-05-07 01:29:55.457352
+>>> [METRICS DEBUG] Loading from: /app/data/Vaults/Clients/CLIENT_001/metrics.json
+>>> [METRICS DEBUG] C_emo=0.5, last_updated=2026-05-07 01:29:55.457352
+>>> RECEIVED: type=get_pending_nudges len=29
+>>> RECEIVED: type=biometric_update len=182
+>>> RECEIVED: type=biometric_update len=182
+>>> RECEIVED: type=biometric_update len=182
+>>> RECEIVED: type=biometric_update len=182
+>>> RECEIVED: type=biometric_update len=182
+>>> RECEIVED: type=biometric_update len=182
+>>> RECEIVED: type=biometric_update len=182
+>>> RECEIVED: type=biometric_update len=182
+>>> [AUTONOMOUS] Learn cycle: +0 new, buffer=1009, total=0 (GREEN), 123.7s
+>>> RECEIVED: type=biometric_update len=182
+>>> [AUTONOMOUS] Cycle 2: Health: 10/10 | LEARN
+>>> [INTERNET RESEARCH] 1 queries, +3 fragments (2.2s)
+>>> RECEIVED: type=biometric_update len=182
+>>> RECEIVED: type=biometric_update len=182
+nathannevedal@Nathans-MacBook-Pro backend % ssh root@68.183.168.75 "docker logs nate_bridge --since 2m 2>&1 | grep -E 'LENGTH-CAP|interaction'"
+nathannevedal@Nathans-MacBook-Pro backend % >....              
+Logs: docker logs nate_bridge … | grep LENGTH-CAP → no lines (full log buffer scanned).
+Code on GREEN: grep -c 'LENGTH-CAP' /opt/clinical-sovereignty-lab/backend/app/websocket/bridge_server.py → 0 (Phase 1 change is not on the server yet).
+Recent bridge traffic only shows the existing [SOVEREIGN] lines (inference still running).
+
+To see >>> [LENGTH-CAP] max_tokens=... in logs:
+
+Push/commit + pull on 68.183.168.75 (or scp bridge_server.py).
+Recreate/restart bridge so the container picks up the file:
+docker compose -f docker-compose.prod.yml up -d bridge
+Send any client AI chat turn (or load test) — the print runs once per turn at inference start.
+EFF: ~120/~150 = 80% | PASS
+LOSS: ~30 tokens at $0.0000 | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended)
+zsh: parse error near `>'
+nathannevedal@Nathans-MacBook-Pro backend % ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && git pull origin main"
+ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && grep -c 'LENGTH-CAP' backend/app/websocket/bridge_server.py"
+From https://github.com/Thera-cloud/Clinical-Sovereignty-Lab
+ * branch              main       -> FETCH_HEAD
+Already up to date.
+0
+nathannevedal@Nathans-MacBook-Pro backend % git log --oneline -5
+git status
+git diff backend/app/websocket/bridge_server.py | head -40
+grep -n "_select_max_tokens\|FIX-LEN\|LENGTH-CAP\|600.*1500\|depth_request_phrases" backend/app/websocket/bridge_server.py
+4837063 (HEAD -> main) EFF evidence: VETO_EFF_MISSING 2026-05-06_230536
+6682a35 EFF evidence: VETO_EFF_MISSING 2026-05-06_222900
+ecda2d6 EFF evidence: PLAUSIBLE+MODEL_WITHHELD 150vs170 2026-05-06_220920
+2a0e9c8 (origin/main, origin/HEAD) fix(dojo): §2 DOJO tab keep-alive §4 back postMessage handler
+863d42e fix(dojo): §4 parent window message listener helper (web/stub)
+On branch main
+Your branch is ahead of 'origin/main' by 3 commits.
+  (use "git push" to publish your local commits)
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+        modified:   app/services/notifications_service.py
+        modified:   app/websocket/bridge_server.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+        ../docs/LITTLE_NATE_GUIDELINES_AUDIT_2026-05-06.md
+        ../docs/LITTLE_NATE_PROMPT_DELIVERY_AUDIT_2026-05-06.md
+        ../docs/LITTLE_NATE_REGISTER_GUIDELINES_2026-05-06.md
+
+no changes added to commit (use "git add" and/or "git commit -a")
+fatal: ambiguous argument 'backend/app/websocket/bridge_server.py': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+grep: backend/app/websocket/bridge_server.py: No such file or directory
+nathannevedal@Nathans-MacBook-Pro backend % 

@@ -1205,3 +1205,11 @@ EFF: 25/55 = 45% | FAIL
 
 ## 2026-05-12 09:17:01 VETO EFF MISSING
 - Evidence: 2026-05-12_091701_VETO_EFF_MISSING.txt
+
+## 2026-05-12 09:18:07 FABRICATION_UNDERSTATED
+- EFF: EFF: ~120/~150 = 80% | PASS
+- LOSS: LOSS: ~30 tokens at $0.0000 | session: n/a | model: claude-opus-4-7-thinking-xhigh (cursor-blended)
+- Claimed: 150 Actual: 640 Factor: .2x
+- ESTIMATED: yes (~-prefix on EFF counts)
+- Patterns: DENOMINATOR_CAPPED_AT_200+IID_FOOTER_MISSING
+- Evidence: 2026-05-12_091807_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200+IID_FOOTER_MISSING_150vs640.txt
