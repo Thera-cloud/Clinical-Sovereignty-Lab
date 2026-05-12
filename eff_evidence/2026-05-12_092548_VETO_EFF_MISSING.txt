@@ -1,0 +1,119 @@
+Step 1 — EXISTING RULES INVENTORY
+A. .cursorrules (root — authoritative for agent behavior)
+
+Mode dispatch & budgets: execute / verify / investigate, token budgets, correctness override.
+Performance & token loss: mandatory EFF/LOSS lines, rate table pointers, fail thresholds.
+Forbidden phrases & hard overrides: destructive ops (incl. --force), ambiguity halt, mode mismatch, dependency check.
+Agentic / investigation discipline: no padding, no fix proposals inside investigate output, efficiency circuit breaker.
+Self-check: EFF honesty, LOSS table / unknown model.
+CSL project block: overview, stack, Nevedal/voice/PII pointers, network ports, naming, protected files + 50-line policy, voice pipeline lock.
+GAP addenda (May 2026): blended Cursor rates (GAP 1), EFF regex (2), cache ROI (3), token spike halt (4), substantiation audit (5), rate cadence (6), .cursorrules archive before edit (7), ROI tracker (8), EFF veto (9), model ID + LOSS (10), IID / M1–M4 (11), completion claims + hash/blame (GAP 12).
+B. .cursor/rules/*.mdc — 158 files (each file ≈ one focused rule; many alwaysApply: true).
+Condensed by theme (filenames = that theme’s concrete rules):
+
+Theme	Role (brief)	Examples (not exhaustive)
+Deploy / compose / node sync
+SAFE deploy paths, compose file, rsync/scp, three-node
+deployment-safety.mdc, git-production-deployment.mdc, docker-compose-prod-file.mdc, docker-volume-awareness.mdc, three-node-sync-discipline.mdc, nginx-host-vs-docker.mdc, web-deployment.mdc, container-registry-deploy.mdc, clone-vps-operations.mdc, cloudflare-cache-purge-after-deploy.mdc, build-deploy-ux-verification.mdc, deploy-trust-checklist.mdc, csl-cursor-desktop-sync.mdc
+Trust / auditors / health
+100% trust, enforcer, service counts, auditor sync
+trust-100-percent.mdc, trust-enforcer-architecture.mdc, deployment-trust-100-percent.mdc, trust-regression-prevention.mdc, auditor-endpoint-sync.mdc, auditor-status-code-consistency.mdc, service-health-124.mdc, service-health-49-49.mdc, deploy-trust-checklist.mdc, skyeye-trust-audit.mdc
+Postgres / registry / bridge
+PG SoT, RLS, bridge DB, cache merge
+postgresql-source-of-truth.mdc, bridge-postgres-connectivity.mdc, bridge-cache-db-sovereignty.mdc, userstore-rls-context.mdc, learned-integration-patterns.mdc, account-lookup-protocol.mdc, coach-client-assignment-fields.mdc, asyncpg-type-casting.mdc, sql-schema-verification.mdc
+Auth / portals / endpoints
+Login order, coach/admin gates, fetch auth
+login-security-protocol.mdc, endpoint-websocket-sustainability.mdc, client-screens-rest-not-ws.mdc, webauthn-yubikey-security.mdc, coach-login-diagnostics.mdc
+Conversation / memory / device
+PG history, sync, search
+conversation-history-postgresql.mdc, device-history-sync-on-login.mdc, memory-search-conversation-history.mdc, always-on-memory.mdc
+Voice / realtime
+Pipelines, Grok, therapy, load-test baselines
+voice-call-pipeline.mdc, voice-therapy-pipeline.mdc, grok-rex-native-voice.mdc, voice-web-search-safety.mdc, … (+ ~15 more voice-*, tiered-voice-pipeline.mdc, load-test-performance-baseline.mdc)
+Nevedal / ODPE / crystals
+Formulas, recall, crystallization, lab
+odpe-architecture.mdc, crystal-recall-crystallization-wiring.mdc, crystal-intelligence-integrity.mdc, counterfactual-engine.mdc, pmb-predictability-model.mdc, six-quotient-*.mdc, noetic-helix-architecture.mdc, quantum-presence-sustainability.mdc
+SkyEye / marketing / social
+Data integrity, engagement, Big Nate
+skyeye-data-integrity.mdc, social-engagement-architecture.mdc, bignate-chat-social-push.mdc, notification-observer-data-pipeline.mdc
+Defense / Hive / edge
+Layers, workers, CF fleet
+distributed-defense-layers.mdc, castle-defense-layers.mdc, hive-defense-*.mdc, edge-worker-fleet.mdc, cloudflare-load-balancer.mdc, …
+Billing / tokens / GKM / QB
+Stripe, token lab, GKM, QuickBooks
+stripe-payment-billing-architecture.mdc, token-economics-architecture.mdc, token-lab-data-integrity.mdc, gkm-ministry-*.mdc, quickbooks-multi-tenant.mdc, ble-token-sharing-protocol.mdc
+Flutter / web UX
+Build, cache, index protection
+flutter-build-verification.mdc, flutter-index-protection.mdc, safari-flutter-web-caching.mdc
+Agents / maintenance
+Lifecycle, errors, DB discipline
+agent-lifecycle-rules.mdc, background-agent-error-visibility.mdc, silent-exception-prevention.mdc, self-learning-agent-governance.mdc, agent-database-discipline.mdc, token-usage-agent-lifecycle.mdc, agent-digest-coverage.mdc, agent-notification-protocol.mdc
+Other domains
+Coaching mesh, classroom, sandbox, patents, IP, Azure, R2, etc.
+coaching-mesh-architecture.mdc, dojo-mentor-rules.mdc, sandbox-vps-infrastructure.mdc, patent-portfolio-integrity.mdc, ip-protection-protocol.mdc, r2-cloudflare-storage.mdc, …
+Note: Two service-health rule files exist (service-health-124.mdc vs service-health-49-49.mdc) — same topic; counts in prose may drift between them.
+
+Step 2 — Cross-reference (failure mode → active rule?)
+docker compose … --force-recreate → vault wipe
+
+Partial: Hard override #1 (.cursorrules) classifies --force as destructive and requiring explicit confirmation — does not name docker compose / volume recreation / Vault paths.
+Partial: deployment-safety.mdc — “Check for --delete, rm -rf, --force” before deploy — not compose-specific or vault-specific.
+Does not mandate backup or “never force-recreate production data containers” in docker-compose-prod-file.mdc.
+Inline ssh root@… "curl|docker|…" bypassing safety wrappers
+
+Partial: git-production-deployment.mdc gives a canonical ssh … git pull && docker compose -f docker-compose.prod.yml up -d --build flow.
+No rule that forbids ad-hoc one-liners or requires a single audited deploy script.
+Manual deploys without pre/post Vault (or data dir) file-count guard
+
+Not covered. docker-volume-awareness.mdc says where bind mounts live, not counting objects before/after deploy.
+GREEN updated via scp vs git pull (e.g. script drift)
+
+Acknowledged risk, weak prevention: three-node-sync-discipline.mdc — local edits don’t exist on GREEN until push/scp; warns stale builds.
+No rule requiring GREEN HEAD == origin/main or checksum match after hotfix.
+Untracked server files blocking git pull
+
+Not covered in workspace rules (no “git status on GREEN before pull” / stash policy).
+“Complete” without commit hash / without deploy verification / without E2E
+
+Hash / uncommitted: GAP 12 (.cursorrules) — completion verbs require commit hash OR explicit uncommitted + blame.
+Deploy match / E2E: build-deploy-ux-verification.mdc + git-production-deployment.mdc require post-deploy health (containers, API, bridge PG, ENVIRONMENT) — not git hash parity on server and not app-level E2E (e.g. View Brief / JSONL UI).
+“Complete” while work still uncommitted locally (View Brief pill)
+
+Covered if GAP 12 followed: same block — blame showing “Not Committed Yet” → must say uncommitted, not “done”.
+Identity mismatch (hardware_id vs username) across bridge vs consumers
+
+Partial / fragmented: account-lookup-protocol.mdc, learned-integration-patterns.mdc (e.g. §19–22 users columns), conversation-history-postgresql.mdc (user_id = hardware_id), coach-client-assignment-fields.mdc, device-history-sync-on-login.mdc.
+No single rule: “feature X must document and test identifier at every boundary.”
+Sensitive Bridge: cohort-style gating vs universal intent
+
+Operational mention only: trust-100-percent.mdc lists Sensitive Clinical Bridge check count — no product rule on universal vs cohort rollout or feature-flag governance in .cursor/rules.
+Notes / agent adding scope instead of approve-and-stop
+
+Weak: Agentic loop (.cursorrules) — “no while I’m at it” — not a hard “owner approval gate before extra files.”
+Token-count fabrication in EFF (DENOMINATOR_CAPPED_AT_200, FABRICATION_*)
+
+Partial (normative, not mechanically enforced): GAP 2 (EFF regex, integer slash values), GAP 10 (cluster anchors + CLUSTER_ANCHORED_* / watcher text), token-loss-measurement.mdc, IID / M4 (“fabricated measurements”).
+Evidence of past flags lives in repo eff_evidence/ledger.md, not as a Cursor-enforced guard.
+Vault backup cron stopped silently (no heartbeat)
+
+Not covered for Vault/cron (unlike some plan docs mentioning heartbeats — not in .cursorrules / core .mdc corpus).
+Additional items you listed (“etc.”):
+
+Conversation review JSONL not rendering — no dedicated rule tying dashboard/JS renderer contracts to telemetry formats.
+View Brief pill disabled-state click bug — no UI rule for IgnorePointer / disabled semantics / QA of coach command surfaces.
+Step 3 — GAPS IDENTIFIED
+--force-recreate / compose volume churn: explicit prohibition + pre/post data inventory (Vault paths, bind-mount roots) before any recreate.
+Ad-hoc SSH deploys: require wrapper script or checklist step; ban “mystery one-liner” deploys not in repo docs.
+Vault / critical data guards: mandatory object count or size checksum before/after deploy touching containers with persistent mounts.
+GREEN revision discipline: after scp or pull, verify git rev-parse HEAD vs origin/main (or tagged release) for code paths that must match git.
+Server working tree: rule for untracked/merge-blocking state on GREEN before git pull.
+Completion claims: extend GAP 12 (or sibling rule) to deploy artifact (e.g. server confirms digest) and smoke/E2E for features touched — not only git hash.
+Identifier contract: single cross-surface rule: which ID (hardware_id, username, UUID) at bridge, REST, Redis, PG, Flutter for Sensitive Bridge and similar features.
+Sensitive Bridge product gating: explicit rollout semantics (universal vs cohort); link to playbook + enforce in code review checklist.
+Scope control: approval gate when proposed diff exceeds agreed file/scope list.
+EFF fabrication: automated eff_audit / watcher as required (today largely aspirational in prose).
+Vault backup cron: heartbeat + alert pattern (stale timestamp = page-on-call), analogous to other agent heartbeat rules.
+Dashboard/renderer contracts: JSONL/path schema + renderer sync for conversation review (SkyEye/command surfaces).
+Disabled UI still clickable: Flutter/Web accessibility/gesture QA note for “disabled” controls.
+Step 4
+No edits were made to .cursorrules or any rule files.
