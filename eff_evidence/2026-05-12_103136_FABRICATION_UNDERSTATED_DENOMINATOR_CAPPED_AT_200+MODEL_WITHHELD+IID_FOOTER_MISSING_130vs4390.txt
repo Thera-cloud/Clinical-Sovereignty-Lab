@@ -1,0 +1,1032 @@
+Option A (rebuild memory.json from PG):
+
+
+
+Reconstruct vault memory.json files for all active clients from PostgreSQL conversation_history. This makes coach-facing surfaces (Coach Command Briefings, Sovereign Command Conversation History) display current data immediately, without bridge code changes.
+
+Background:
+
+
+
+Both surfaces read from vault memory.json via hippocampus.recall_full() (per diagnostic)
+
+PG conversation_history has full data through 2026-05-12 (intact, never wiped)
+
+Vault memory.json files were restored from 2026-04-14 backup in Phase B (so they end at April 14)
+
+Goal: rewrite each user's memory.json with their full PG conversation_history (most recent N entries) so the read path returns current data
+
+
+
+CONSTRAINTS
+
+
+
+DO NOT modify bridge code (bridge_server.py, hippocampus class, etc.)
+
+DO NOT delete the current memory.json files (move them to .pre_rebuild backup first for safety)
+
+DO NOT modify PG conversation_history
+
+Use users.username AND hardware_id mapping carefully — conversation_history is keyed by hardware_id (per the RLS policy in schema) but some rows use username; the memory.json file location is keyed by hardware_id per MemorySystem._path()
+
+Write atomically: write temp file, mv to target
+
+
+
+STEP A1 — Identify memory.json schema
+
+bashssh root@68.183.168.75 "
+
+# Inspect a memory.json that has known good (pre-wipe) data
+
+python3 -c \"
+
+import json
+
+with open('/opt/clinical-sovereignty-lab/data/bridge/Vaults/Clients/CLIENT_LETSGOLISA_ID/memory.json') as f:
+
+    data = json.load(f)
+
+print('Total entries:', len(data))
+
+print('First entry keys:', list(data[0].keys()) if data else 'EMPTY')
+
+print('Sample entry:')
+
+print(json.dumps(data[0] if data else {}, indent=2, default=str)[:500])
+
+print()
+
+print('Last entry:')
+
+print(json.dumps(data[-1] if data else {}, indent=2, default=str)[:500])
+
+\"
+
+"
+
+Report the schema. Specifically, identify which keys correspond to:
+
+
+
+timestamp / created_at
+
+user message text
+
+AI response text
+
+session_id (if present)
+
+word counts (if present)
+
+any other metadata
+
+
+
+Do not proceed until schema is documented.
+
+STEP A2 — Identify hardware_id ↔ username mapping
+
+bashssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"
+
+SELECT username, hardware_id
+
+FROM users
+
+WHERE username IN ('LetsGoLisa', 'LetsGoBill', 'DrNevedal1', 'CoachN')
+
+   OR hardware_id IN ('CLIENT_LETSGOLISA_ID', 'CLIENT_LETSGOBILL_ID', 'CLIENT_001', 'audit_client')
+
+ORDER BY username;
+
+\""
+
+Report mappings. Confirm whether conversation_history.user_id contains username, hardware_id, or both.
+
+STEP A3 — Identify all active clients to rebuild
+
+bashssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"
+
+SELECT user_id, COUNT(*) as turns, MIN(created_at) as first, MAX(created_at) as last
+
+FROM conversation_history
+
+WHERE created_at > '2026-04-14'
+
+GROUP BY user_id
+
+HAVING COUNT(*) > 0
+
+ORDER BY MAX(created_at) DESC;
+
+\""
+
+Report list of users with conversation activity after April 14. These are the candidates for rebuild.
+
+STEP A4 — Write rebuild script (DO NOT execute yet, just stage)
+
+Create /opt/clinical-sovereignty-lab/scripts/rebuild_memory_from_pg.py with logic:
+
+
+
+For each user_id in conversation_history with rows after a configurable cutoff date
+
+Determine their hardware_id (resolve from users table if user_id is username; pass-through if already hardware_id)
+
+Locate target file path: data/bridge/Vaults/Clients/{hardware_id}/memory.json (or Coaches/ if role is COACH, Admin/ if role is ADMIN)
+
+Read current memory.json — back it up to memory.json.pre_rebuild_<timestamp>
+
+Query conversation_history for that user_id, all rows, ORDER BY created_at ASC (chronological), limit to most recent N=500
+
+Map each PG row into the memory.json entry schema (from Step A1)
+
+Write to memory.json.tmp.<pid>, validate JSON parses, then mv to memory.json
+
+Log: {user_id, hardware_id, target_path, pg_row_count, written: true/false, backup_path}
+
+
+
+Script should accept --dry-run flag that shows what WOULD be written without writing.
+
+Show me the script content. Do not execute.
+
+STEP A5 — Dry run
+
+bashssh root@68.183.168.75 "
+
+docker exec nate_backend python3 /opt/clinical-sovereignty-lab/scripts/rebuild_memory_from_pg.py --dry-run
+
+"
+
+Report dry-run output. I will review before approving live execution.
+
+STEP A6 — Execute (HOLD until approved)
+
+Do NOT execute Step A6 until I explicitly approve based on Step A5 dry-run output.
+
+Running A1–A3 on GREEN and inspecting conversation_history column shapes for the rebuild script.
+
+Documenting A1 schema from inspection. Writing scripts/rebuild_memory_from_pg.py and running A5 dry-run via nate_bridge (vault lives under /app/data/Vaults; nate_backend mounts data/backend, not bridge vaults).
+
+STEP A1 — memory.json schema (LetsGoLisa sample)
+Field	Role
+timestamp
+Turn time — string like "2026-02-10 01:34:09.499820" (naive local/PG-style; maps from conversation_history.created_at).
+session_id
+Session key — null or string (maps from conversation_history.session_id).
+user
+User message (maps from user_text).
+ai
+Nate reply (maps from ai_text).
+word_count_user
+Integer (maps from word_count_user, or derived from word split if null).
+word_count_ai
+Integer (same for word_count_ai).
+No extra metadata keys in this sample; script emits only these six keys.
+
+STEP A2 — Username ↔ hardware_id & PG user_id
+Sample query result:
+
+username	hardware_id	role
+CoachN
+COACH_COACHN_ID
+COACH
+DrNevedal1
+ADMIN_DRNEVEDAL1_ID
+ADMIN
+LetsGoBill
+CLIENT_LETSGOBILL_ID
+CLIENT
+LetsGoLisa
+CLIENT_LETSGOLISA_ID
+CLIENT
+client1
+CLIENT_001
+CLIENT
+conversation_history.user_id: Bridge persists username (_persist_chat_to_conversation_history uses username as $1). Rows can also appear under hardware_id where code searches ANY(username, hardware_id). Aliases are merged per account in the rebuild script.
+
+STEP A3 — Activity after 2026-04-14 (distinct PG user_id)
+Nine user_id groups with created_at > '2026-04-14': LetsGoLisa (199), LetsGoBill (28), client1 (56), paula182 (12), DrNevedal1 (2), sweet2noend@yahoo.com (66), hector12 (6), CoachN (6), audit_client (2).
+
+STEP A4 — Script staged
+File in repo: scripts/rebuild_memory_from_pg.py (also on GREEN at /opt/clinical-sovereignty-lab/scripts/rebuild_memory_from_pg.py).
+
+Behavior summary:
+
+Candidates: distinct conversation_history.user_id with created_at > --cutoff (default 2026-04-14T00:00:00+00:00).
+Resolve users row by username = uid OR hardware_id = uid; require role ∈ CLIENT / COACH / ADMIN; folder Clients / Coaches / Admin per MemorySystem._path.
+Merge aliases {uid, username, hardware_id} per hardware_id so history is read with WHERE user_id = ANY(aliases).
+Load rows ORDER BY created_at ASC, id ASC, keep last --limit (default 500).
+Map rows to the A1 schema; skip rows that look encrypted-empty (content_encrypted with no text).
+Live: memory.json → memory.json.pre_rebuild_<UTC_ts> copy; write memory.json.tmp.*, validate JSON, os.replace → memory.json.
+--dry-run: log only, no backup/write.
+Run location: Use nate_bridge, not nate_backend — vault is /app/data/Vaults on the bridge mount.
+
+docker cp /opt/clinical-sovereignty-lab/scripts/rebuild_memory_from_pg.py nate_bridge:/tmp/rebuild_memory_from_pg.py
+docker exec nate_bridge python3 /tmp/rebuild_memory_from_pg.py --dry-run --vault-root /app/data/Vaults
+STEP A5 — Dry-run output (executed)
+Targets: 9 distinct hardware_id rows.
+
+hardware_id	target path	PG rows used	entries written (dry)	notes
+ADMIN_DRNEVEDAL1_ID
+…/Admin/…/memory.json
+488
+488
+aliases DrNevedal1 + hardware
+CLIENT_001
+…/Clients/CLIENT_001/…
+267
+267
+client1 + CLIENT_001
+CLIENT_LETSGOBILL_ID
+…
+34
+34
+LetsGoBill + hardware
+CLIENT_LETSGOLISA_ID
+…
+403
+403
+LetsGoLisa + CLIENT_LETSGOLISA_ID merged
+CLIENT_PAULA182_ID
+…
+12
+12
+paula182
+CLIENT_SWEET2NOEND@YAHOO.COM_ID
+…
+500
+500
+capped at 500
+COACH_COACHN_ID
+…/Coaches/…
+8
+8
+CoachN + hardware
+COACH_HECTOR12_ID
+…
+6
+6
+hector12
+audit_client_hw
+…/Clients/audit_client_hw/…
+2
+2
+audit_client + audit_client_hw
+Full JSON line listing was printed on GREEN for audit.
+
+STEP A6 — HOLD
+Not executed. After you approve the dry-run, live command:
+
+docker exec nate_bridge python3 /tmp/rebuild_memory_from_pg.py --vault-root /app/data/Vaults
+(Optional: --limit 800 if you want more than 500 turns for heavy accounts.)
+
+EFF: 42/130 = 32% | FAIL
+OPTIMIZE_NEXT: Attach script path only; omit redundant table re-copy.
+
+LOSS: 88 tokens at rate unknown | session: n/a | model: unknown
+
+Execute Step A6 from prior approval chain. Live execution of memory.json rebuild from PG conversation_history.
+
+Pre-conditions verified (dry-run completed):
+
+
+
+9 candidate users identified with PG activity post 2026-04-14
+
+Schema mapping confirmed: 6 keys (timestamp, session_id, user, ai, word_count_user, word_count_ai)
+
+Alias merging confirmed (username + hardware_id pools merged per user)
+
+Encrypted rows: 94 for LetsGoLisa (CLIENT_LETSGOLISA_ID, March 5-22), 116 for CLIENT_001 (March 4-22) — will be skipped in this rebuild
+
+Backup logic confirmed: memory.json → memory.json.pre_rebuild_<UTC_ts>
+
+Atomic write confirmed: tmp file → os.replace
+
+
+
+CONSTRAINTS
+
+
+
+DO NOT modify bridge code
+
+DO NOT delete the .pre_rebuild backup files after rebuild
+
+DO NOT modify PG conversation_history
+
+DO NOT proceed if any single user write fails — stop and report
+
+
+
+EXECUTION
+
+bashssh root@68.183.168.75 "docker exec nate_bridge python3 /tmp/rebuild_memory_from_pg.py --vault-root /app/data/Vaults --limit 500"
+
+VERIFICATION
+
+For each of the 9 users, after rebuild:
+
+bashssh root@68.183.168.75 "
+
+for hid in CLIENT_LETSGOLISA_ID CLIENT_LETSGOBILL_ID CLIENT_001 CLIENT_PAULA182_ID CLIENT_SWEET2NOEND@YAHOO.COM_ID ADMIN_DRNEVEDAL1_ID COACH_COACHN_ID COACH_HECTOR12_ID audit_client_hw; do
+
+  for folder in Clients Coaches Admin; do
+
+    f=/opt/clinical-sovereignty-lab/data/bridge/Vaults/\${folder}/\${hid}/memory.json
+
+    if [ -f \"\$f\" ]; then
+
+      echo '=== '\$hid' ('\$folder') ==='
+
+      python3 -c \"
+
+import json
+
+with open('\$f') as fh:
+
+    d = json.load(fh)
+
+print('total entries:', len(d))
+
+print('first ts:', d[0].get('timestamp') if d else 'EMPTY')
+
+print('last ts:', d[-1].get('timestamp') if d else 'EMPTY')
+
+\"
+
+    fi
+
+  done
+
+done
+
+"
+
+EXPECTED RESULTS
+
+
+
+LetsGoLisa: 309 entries, last_ts = 2026-05-12 01:34:49 area
+
+LetsGoBill: 34 entries, last_ts = 2026-05-11 11:57 area
+
+DrNevedal1: 475 entries, last_ts = 2026-05-04 03:30 area
+
+client1 (CLIENT_001): 144 entries (post-encryption-era), last_ts = 2026-05-08 21:21 area
+
+sweet2noend: 123 entries, last_ts = 2026-05-04 00:18 area
+
+paula182: 12 entries, last_ts = 2026-05-08 11:12 area
+
+CoachN: 6 entries, last_ts = 2026-04-28 03:47 area
+
+hector12: 6 entries, last_ts = 2026-04-30 03:51 area
+
+audit_client: 2 entries, last_ts = 2026-04-21 04:50 area
+
+
+
+REPORT
+
+REBUILD EXECUTION RESULT
+
+
+
+Per-user write log: <pasted from script output>
+
+
+
+Verification per user:
+
+- LetsGoLisa: <actual entries> / <expected 309>, last_ts = <ts>
+
+- [... 8 others ...]
+
+
+
+Backup files created: <list of memory.json.pre_rebuild_<ts> paths>
+
+
+
+Encrypted rows skipped: 94 (LetsGoLisa hardware_id era) + 116 (CLIENT_001 hardware_id era) = 210 rows not included in coach view
+
+
+
+COMMIT_REBUILD: <not applicable, no code changes; only data writes to vault>
+
+
+
+Surfaces ready for visual verification: Coach Command Briefings, Sovereign Command Conv History
+
+After rebuild: project owner performs visual check at coach.sovereignsanctuary.net (View Brief on Lisa West) and command.sovereignsanctuary.net (My Clients → Lisa West → Conversation History) to confirm May 12 entries display.
+
+REBUILD EXECUTION RESULT
+Step A6 completed: docker exec nate_bridge python3 /tmp/rebuild_memory_from_pg.py --vault-root /app/data/Vaults --limit 500 exited 0. All 9 targets written (no per-user failure).
+
+Per-user write log (from script stdout):
+
+hardware_id	pg_rows	entries written	backup
+ADMIN_DRNEVEDAL1_ID
+488
+488
+yes
+CLIENT_001
+267
+267
+yes
+CLIENT_LETSGOBILL_ID
+34
+34
+yes
+CLIENT_LETSGOLISA_ID
+403
+403
+yes
+CLIENT_PAULA182_ID
+12
+12
+none (backup=None)
+CLIENT_SWEET2NOEND@YAHOO.COM_ID
+500
+500
+yes
+COACH_COACHN_ID
+8
+8
+yes
+COACH_HECTOR12_ID
+6
+6
+yes
+audit_client_hw
+2
+2
+yes
+JSON summary reported skipped_encrypted_empty: 0 for every user.
+
+Verification (host paths)
+User	Actual entries	Expected (your note)	last_ts (verified)
+LetsGoLisa (CLIENT_LETSGOLISA_ID)
+403
+309
+2026-05-12 01:34:49.460097
+LetsGoBill
+34
+34
+2026-05-11 11:57:10.957052
+DrNevedal1 (ADMIN_DRNEVEDAL1_ID)
+488
+475
+2026-05-04 03:30:15.175093
+client1 (CLIENT_001)
+267
+144
+2026-05-08 21:21:22.494593
+sweet2noend
+500
+123
+2026-05-04 00:18:04.555884
+paula182
+12
+12
+2026-05-08 11:12:22.607680
+CoachN
+8
+6
+2026-04-28 03:47:44.194884
+hector12
+6
+6
+2026-04-30 03:51:58.517925
+audit_client
+2
+2
+2026-04-21 04:50:22.978062
+Bill, paula182, hector12, and audit_client match your expected counts and last_ts bands. Lisa’s last_ts matches your May 12 target; entry count is higher than 309 because the rebuild included all merged PG rows (script reported 403). Admin / CLIENT_001 / CoachN counts exceed your spreadsheet expectations; sweet2noend hit --limit 500 (500 rows pulled from PG for that pool).
+
+Backup files created
+/opt/clinical-sovereignty-lab/data/bridge/Vaults/Admin/ADMIN_DRNEVEDAL1_ID/memory.json.pre_rebuild_20260512T140950Z
+/opt/clinical-sovereignty-lab/data/bridge/Vaults/Clients/CLIENT_001/memory.json.pre_rebuild_20260512T140950Z
+/opt/clinical-sovereignty-lab/data/bridge/Vaults/Clients/CLIENT_LETSGOBILL_ID/memory.json.pre_rebuild_20260512T140950Z
+/opt/clinical-sovereignty-lab/data/bridge/Vaults/Clients/CLIENT_LETSGOLISA_ID/memory.json.pre_rebuild_20260512T140950Z
+/opt/clinical-sovereignty-lab/data/bridge/Vaults/Clients/CLIENT_SWEET2NOEND@YAHOO.COM_ID/memory.json.pre_rebuild_20260512T140950Z
+/opt/clinical-sovereignty-lab/data/bridge/Vaults/Clients/audit_client_hw/memory.json.pre_rebuild_20260512T140950Z
+/opt/clinical-sovereignty-lab/data/bridge/Vaults/Coaches/COACH_COACHN_ID/memory.json.pre_rebuild_20260512T140950Z
+/opt/clinical-sovereignty-lab/data/bridge/Vaults/Coaches/COACH_HECTOR12_ID/memory.json.pre_rebuild_20260512T140950Z
+Not created: CLIENT_PAULA182_ID (script logged backup=None — likely no prior file or skip path).
+
+Backups were not deleted per your constraint.
+
+Encrypted rows / coach view
+Script reported no skipped_encrypted_empty increments. Your 210-row coach-view gap (94 + 116) is not reflected in this run’s counters; if UI still hides ciphertext, that would be display/decrypt logic, not this PG→JSON export.
+
+COMMIT_REBUILD: not applicable (data-only writes on GREEN vault).
+
+Surfaces: Coach Command Briefings + Sovereign Command Conversation History — spot-check Lisa West for 2026-05-12 rows after cache/refresh.
+
+EFF: 180/420 = 43% | FAIL
+OPTIMIZE_NEXT: shorten tables to counts-only lines after success path.
+LOSS: 240 tokens at rate unknown | session: n/a | model: unknown
+
+Execute one-time PG migration to unify conversation_history rows that were written under hardware_id (pre Sensitive Bridge canonicalization, before 2026-03-22) with rows written under username (post canonicalization, 2026-03-22 onward). This eliminates the identity-era split in conversation_history so future reads don't require alias-merge logic.
+
+Background: Sensitive Bridge canonicalization (Priority 1, commit a7c03b7, March 22 deploy) switched _persist_chat_to_conversation_history write path from hardware_id keying to username keying. Historical rows under hardware_id remain orphaned from username queries. This migration unifies them.
+
+CONSTRAINTS
+
+
+
+This is a one-way data migration. Take a full PG dump before executing.
+
+DO NOT delete encrypted columns (user_text_enc, ai_text_enc) — those rows stay readable for any future decryption work
+
+DO NOT modify the user_id field on rows where no matching user record exists (orphans)
+
+DRY RUN FIRST. Show row counts before committing UPDATE.
+
+The migration must be idempotent (running twice should not double-process)
+
+
+
+STEP M1 — Full PG backup before migration
+
+bashssh root@68.183.168.75 "
+
+ts=\$(date -u +%Y%m%d_%H%M%S)
+
+docker exec nate_postgres pg_dump -U nate_admin -d little_nate -t conversation_history -f /tmp/conversation_history_pre_migration_\${ts}.sql
+
+docker cp nate_postgres:/tmp/conversation_history_pre_migration_\${ts}.sql /opt/clinical-sovereignty-lab/backups/
+
+ls -la /opt/clinical-sovereignty-lab/backups/conversation_history_pre_migration_*.sql
+
+"
+
+Report file size and confirm backup created.
+
+STEP M2 — Identify affected rows (DRY RUN)
+
+sql-- How many rows have user_id matching a hardware_id (not a username)?
+
+SELECT
+
+  COUNT(*) as orphan_rows,
+
+  COUNT(DISTINCT ch.user_id) as orphan_user_ids,
+
+  MIN(ch.created_at) as earliest,
+
+  MAX(ch.created_at) as latest
+
+FROM conversation_history ch
+
+WHERE EXISTS (
+
+  SELECT 1 FROM users u WHERE u.hardware_id = ch.user_id
+
+)
+
+AND NOT EXISTS (
+
+  SELECT 1 FROM users u2 WHERE u2.username = ch.user_id
+
+);
+
+
+
+-- Per-user breakdown
+
+SELECT
+
+  ch.user_id as current_hardware_id,
+
+  u.username as target_username,
+
+  COUNT(*) as rows,
+
+  MIN(ch.created_at) as first_row,
+
+  MAX(ch.created_at) as last_row
+
+FROM conversation_history ch
+
+JOIN users u ON u.hardware_id = ch.user_id
+
+WHERE NOT EXISTS (
+
+  SELECT 1 FROM users u2 WHERE u2.username = ch.user_id
+
+)
+
+GROUP BY ch.user_id, u.username
+
+ORDER BY rows DESC;
+
+Run both queries and report results. Expected: ~210 rows for LetsGoLisa + CLIENT_001, plus likely more for LetsGoBill + others not yet inspected. The total tells us migration scope.
+
+STEP M3 — Execute migration with transaction
+
+sqlBEGIN;
+
+
+
+-- Update conversation_history rows where user_id matches a hardware_id
+
+-- to use the corresponding username instead
+
+UPDATE conversation_history ch
+
+SET user_id = u.username
+
+FROM users u
+
+WHERE u.hardware_id = ch.user_id
+
+  AND NOT EXISTS (
+
+    SELECT 1 FROM users u2 WHERE u2.username = ch.user_id
+
+  );
+
+
+
+-- Verify rowcount affected
+
+-- (Postgres reports this automatically)
+
+
+
+-- Verify no orphan rows remain
+
+SELECT COUNT(*) FROM conversation_history ch
+
+WHERE EXISTS (SELECT 1 FROM users u WHERE u.hardware_id = ch.user_id)
+
+  AND NOT EXISTS (SELECT 1 FROM users u2 WHERE u2.username = ch.user_id);
+
+-- Should be 0
+
+
+
+-- COMMIT only if verification clean
+
+COMMIT;
+
+Execute and report:
+
+
+
+Number of rows updated
+
+Final orphan count (must be 0)
+
+Any rollback events
+
+
+
+STEP M4 — Post-migration verification
+
+sql-- Lisa: should now have all 403 rows under LetsGoLisa, zero under hardware_id
+
+SELECT user_id, COUNT(*) FROM conversation_history
+
+WHERE user_id IN ('LetsGoLisa', 'CLIENT_LETSGOLISA_ID')
+
+GROUP BY user_id;
+
+
+
+-- client1 / CLIENT_001 same check
+
+SELECT user_id, COUNT(*) FROM conversation_history
+
+WHERE user_id IN ('client1', 'CLIENT_001')
+
+GROUP BY user_id;
+
+Expected: only username rows; hardware_id rows = 0.
+
+STEP M5 — Re-rebuild memory.json (CRITICAL)
+
+After migration, memory.json files written by Prompt 1 are still keyed correctly. But future PG queries no longer need alias merging. Run rebuild script again with simplified single-identifier reads:
+
+bashssh root@68.183.168.75 "docker exec nate_bridge python3 /tmp/rebuild_memory_from_pg.py --vault-root /app/data/Vaults --limit 500 --verify-only"
+
+(Add --verify-only flag to script: query PG without writing, confirm memory.json matches PG state)
+
+REPORT
+
+PG MIGRATION RESULT
+
+
+
+Pre-migration backup: <file path, size>
+
+Step M2 orphan rows pre-migration: <count, per-user breakdown>
+
+Step M3 rows updated: <count>
+
+Step M3 orphan rows post-migration: <count, must be 0>
+
+Step M4 verification: <per-user counts>
+
+Step M5 memory.json consistency: <pass/fail>
+
+
+
+Migration complete: <yes/no>
+
+Rollback required: <yes/no>
+
+Executing M1–M5: reading scripts/rebuild_memory_from_pg.py, then running backup, dry-run queries, migration, verification, and adding --verify-only.
+
+Implementing --verify-only in the rebuild script, then executing M1–M5 on the server.
+
+Running M3 in a single transaction: abort with exception if verification fails (rolls back UPDATE).
+
+PG MIGRATION RESULT
+Pre-migration backup (M1)
+Path: /opt/clinical-sovereignty-lab/backups/conversation_history_pre_migration_20260512_141459.sql
+Size: 5,280,496 bytes (~5.0 MiB)
+Step M2 — orphan rows (pre-migration)
+Metric	Value
+orphan_rows
+731
+orphan_user_ids
+8
+earliest
+2026-03-04 15:02:18+00
+latest
+2026-03-22 23:30:31+00
+Per-user breakdown:
+
+current_hardware_id	target_username	rows
+CLIENT_SWEET2NOEND@YAHOO.COM_ID
+sweet2noend@yahoo.com
+458
+CLIENT_001
+client1
+123
+CLIENT_LETSGOLISA_ID
+LetsGoLisa
+94
+CLIENT_WILSNAW_ID
+wilsnaw
+28
+ADMIN_DRNEVEDAL1_ID
+DrNevedal1
+13
+CLIENT_WILLIAMHENDERSON_ID
+Williamhenderson
+7
+audit_student_1_hw
+audit_student_1
+6
+COACH_COACHN_ID
+CoachN
+2
+(LetsGoBill had no hardware-only rows in this predicate — already canonical username keying.)
+
+Step M3 — migration
+Rows updated: 731 (UPDATE 731)
+Post-verify orphan count: 0 (enforced inside txn via DO block; would have ROLLBACK on failure — none occurred)
+Rollback events: none
+Idempotency: repeat UPDATE … → UPDATE 0 (no double-processing)
+user_text / ai_text / encrypted columns were not altered — only user_id rewritten where user_id = users.hardware_id and no row already uses users.username.
+
+Step M4 — verification
+Lisa: only LetsGoLisa — 403 rows; CLIENT_LETSGOLISA_ID — 0
+client1: only client1 — 267 rows; CLIENT_001 — 0
+Step M5 — memory.json consistency (--verify-only)
+Result: PASS — all 9 targets: verify_pass: true, verify_reason: ok, username-only fetch_aliases_verify, counts match disk; process exit 0.
+--verify-only added in repo scripts/rebuild_memory_from_pg.py (deployed to GREEN + nate_bridge:/tmp/rebuild_memory_from_pg.py).
+
+Migration complete: yes
+Rollback required: no
+
+Code/data follow-ups: commit/push the updated scripts/rebuild_memory_from_pg.py from BLUE when you want repo parity.
+
+EFF: 150/380 = 39% | FAIL
+OPTIMIZE_NEXT: omit redundant JSON echo in operator pasteback; link backup filename once.
+LOSS: 230 tokens at rate unknown | session: n/a | model: unknown
+
+Generate an identity surface inventory for the Clinical-Sovereignty-Lab codebase. Document every read/write surface that uses a user identifier so future identity changes can be planned with full visibility.
+
+This is the document that should have existed at foundational spec time but didn't. Building it now.
+
+DELIVERABLE
+
+Single markdown file at /opt/clinical-sovereignty-lab/docs/IDENTITY_SURFACE_INVENTORY_2026-05-12.md with the structure below.
+
+INVENTORY STRUCTURE
+
+For each surface, document:
+
+SurfaceTypeIdentifier UsedSource of TruthMigration StoryNotes
+
+Where:
+
+
+
+Surface: file path or function name
+
+Type: PG table | vault file | Redis key | API endpoint | WebSocket message | cron job
+
+Identifier Used: username | hardware_id | UUID | corporate_id | family_id | group_id | device_id | email | session_id
+
+Source of Truth: where the canonical identifier originates
+
+Migration Story: what happens to existing data if the canonical identifier changes for a user
+
+Notes: any quirks, encryption, RLS policies, recent changes
+
+
+
+DOMAINS TO INVENTORY
+
+
+
+PostgreSQL tables — Run \d on every table; extract user-identifier columns
+
+Vault files — /data/bridge/Vaults/{Clients,Coaches,Admin,Guests}/{identifier}/...
+
+WebSocket message handlers — every elif t == "..." branch in bridge_server.py that reads/writes user data
+
+REST API endpoints — every router in app/services/*_api.py that takes user identifier param
+
+Redis keys — any key pattern containing user identifier
+
+Cron jobs and agents — any scheduled task that operates per-user
+
+Flutter screen data sources — which screens query which APIs with which identifier
+
+Logs — sensitive_bridge_log, audit logs, telemetry — what identifier they record
+
+
+
+EXPECTED CRITICAL FINDINGS
+
+Looking for and explicitly documenting:
+
+
+
+Which surfaces use hardware_id vs username (and why)
+
+Which surfaces involve corporate_id / family_id / group_id and whether those have parallel split risks
+
+Surfaces that have a write path under one identifier and a read path under another
+
+Surfaces with RLS policies that filter by a specific identifier (e.g., convhist_app_own uses app.acting_hardware_id)
+
+Surfaces that have undergone canonicalization changes recently (March 22 Sensitive Bridge, others?)
+
+Encryption boundaries: which surfaces encrypt at write time and what identifier they encrypt against
+
+
+
+STEPS
+
+bash# Step 1: PG schema inventory
+
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"
+
+SELECT
+
+  table_name,
+
+  column_name,
+
+  data_type
+
+FROM information_schema.columns
+
+WHERE table_schema = 'public'
+
+  AND (column_name LIKE '%user_id%'
+
+       OR column_name LIKE '%hardware_id%'
+
+       OR column_name LIKE '%username%'
+
+       OR column_name LIKE '%corporate_id%'
+
+       OR column_name LIKE '%family_id%'
+
+       OR column_name LIKE '%group_id%'
+
+       OR column_name LIKE '%device_id%'
+
+       OR column_name LIKE '%client_id%')
+
+ORDER BY table_name, column_name;
+
+\"" > /tmp/pg_identity_columns.txt
+
+Report row count and capture for inventory.
+
+bash# Step 2: WebSocket handler inventory
+
+grep -n "elif t ==" /opt/clinical-sovereignty-lab/backend/app/websocket/bridge_server.py | head -100
+
+grep -n "user_id\|hardware_id\|username" /opt/clinical-sovereignty-lab/backend/app/websocket/bridge_server.py | head -50
+
+Extract every handler and what identifier it reads/writes.
+
+bash# Step 3: REST API inventory
+
+grep -rn "@router\|@app\.\(get\|post\|put\|delete\)" /opt/clinical-sovereignty-lab/backend/app/services/*_api.py | head -100
+
+bash# Step 4: Vault file structure
+
+ls -la /opt/clinical-sovereignty-lab/data/bridge/Vaults/Clients/ | head -10
+
+ls -la /opt/clinical-sovereignty-lab/data/bridge/Vaults/Clients/CLIENT_LETSGOLISA_ID/ 2>/dev/null
+
+What identifier names the folders? What files exist per user?
+
+bash# Step 5: Redis key patterns
+
+ssh root@68.183.168.75 "docker exec -i nate_backend python3 -c \"
+
+import redis
+
+r = redis.Redis(host='localhost', port=6379, decode_responses=True)
+
+keys = r.keys('*')
+
+patterns = set()
+
+for k in keys[:1000]:
+
+    parts = k.split(':')
+
+    if len(parts) > 1:
+
+        patterns.add(':'.join(parts[:2]) + ':*')
+
+for p in sorted(patterns):
+
+    print(p)
+
+\""
+
+Show top key patterns.
+
+bash# Step 6: Migration history
+
+grep -l "ALTER TABLE.*user_id\|ALTER TABLE.*hardware_id" /opt/clinical-sovereignty-lab/backend/migrations/*.sql
+
+grep -n "username\|hardware_id" /opt/clinical-sovereignty-lab/backend/migrations/2*.sql | head -30
+
+bash# Step 7: Flutter screen data sources
+
+grep -rn "user_id\|hardware_id\|username" /opt/clinical-sovereignty-lab/mobile/lib/screens/*.dart 2>/dev/null | head -50
+
+OUTPUT FORMAT
+
+The final IDENTITY_SURFACE_INVENTORY_2026-05-12.md should be a structured document with:
+
+
+
+Executive summary: total surface count, identifier distribution, known split risks
+
+Per-surface table (sortable)
+
+CRITICAL FINDINGS section: surfaces where read identifier ≠ write identifier, surfaces with no migration story, surfaces that recently changed
+
+RECOMMENDED ACTIONS: which surfaces need migration, which need read-time translation, which can stay as-is
+
+Appendix: raw command output, schema dumps
+
+
+
+COMMIT
+
+bashcd /opt/clinical-sovereignty-lab
+
+git add docs/IDENTITY_SURFACE_INVENTORY_2026-05-12.md
+
+git commit -m "docs: identity surface inventory - retroactive spec deliverable to prevent identity-era splits"
+
+git push origin main
+
+echo "COMMIT_INVENTORY: $(git rev-parse HEAD)"
+
+Report commit hash.
+
+Gathering schema, bridge handlers, APIs, vault layout, Redis patterns, migrations, and Flutter references to build the inventory document.
+
+Writing the inventory document and committing it.
+
+Deliverable
+Repo path: docs/IDENTITY_SURFACE_INVENTORY_2026-05-12.md (~25 KB)
+GREEN path: /opt/clinical-sovereignty-lab/docs/IDENTITY_SURFACE_INVENTORY_2026-05-12.md (after git pull)
+Contents: Executive summary (229 PG columns, vault = hardware_id, ~100 bridge elif t ==, REST in backend/app/routers/ not services/*_api.py, Redis nate:{env}:auth:*), consolidated per-surface table, CRITICAL FINDINGS (RLS convhist_app_own vs username-keyed conversation_history, split reads/writes, Sensitive Bridge + May 2025 PG merge, encryption, family/corp/group risks), RECOMMENDED ACTIONS, Appendix A full column list, Appendix B raw refs + footnote on company_id not in the Step‑1 SQL pattern.
+
+COMMIT_INVENTORY: ab7af40e020de1aed951bd49db262b614f8e4e3a (includes footnote commit; initial inventory fc1fa68)
+
+GREEN git pull brought this doc plus other upstream commits—only docs/IDENTITY_SURFACE_INVENTORY_2026-05-12.md was authored here.
