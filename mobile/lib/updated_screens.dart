@@ -23,6 +23,7 @@ import 'dojo_parent_message_stub.dart' if (dart.library.html) 'dojo_parent_messa
 
 import 'shared_widgets.dart';
 import 'widgets/calendar_views.dart';
+import 'widgets/conversation_log_view.dart';
 import 'services/nevedal_flutter.dart';
 import 'services/large_video_upload.dart';
 import 'main.dart' show defaultWsUrl, defaultApiBaseUrl, LobbyScreen, FamilySanctuaryScreen, ClientScheduleScreen, isNativeIOS, ClientWsHub;
@@ -35,6 +36,7 @@ import 'services/export_service.dart';
 import 'screens/coaching_mesh_screen.dart';
 import 'screens/onboarding_paid_screen.dart';
 import 'screens/community_mesh_screen.dart';
+import 'screens/sensitive_clinical_profile_screen.dart';
 import 'config/app_config.dart';
 import 'widgets/vault_attachment_button.dart';
 import 'widgets/upload_progress_indicator.dart';
@@ -7362,14 +7364,30 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           ),
           
           const SizedBox(height: 24),
-          
-          // Current mood
-          MoodIndicator(
-            mood: metrics['mood_current'] ?? 'neutral',
-            trend: metrics['mood_trend'],
-            large: true,
+
+          // PATH-C SENSITIVE PROFILE ENTRY POINT (M215+M216)
+          // Layout: MoodIndicator (Happy emoji box, left) + "Sensitive Profile"
+          // pill (right). The pill is sourced from
+          // brief['sensitive_bridge_visibility'].button_state which collapses
+          // (coach_authorized, client_enrolled) into hidden|disabled|active.
+          //   hidden   → coach lacks coach_sensitive_bridge_authorized → no UI
+          //   disabled → coach OK but no sensitive_bridge_enrollment row
+          //   active   → both OK → push SensitiveClinicalProfileScreen
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: MoodIndicator(
+                  mood: metrics['mood_current'] ?? 'neutral',
+                  trend: metrics['mood_trend'],
+                  large: true,
+                ),
+              ),
+              const SizedBox(width: 12),
+              _buildSensitiveProfilePill(brief),
+            ],
           ),
-          
+
           const SizedBox(height: 24),
           
           // Nevedal metrics
@@ -7405,67 +7423,93 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
             const SizedBox(height: 24),
           ],
           
-          // Recent conversations
+          // Recent conversations (shared threaded log)
           if (recentConversations.isNotEmpty) ...[
             const Text(
               "RECENT CONVERSATIONS",
               style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 1.5, fontSize: 12),
             ),
             const SizedBox(height: 12),
-            ...recentConversations.take(5).map((conv) => Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.person, color: Colors.grey, size: 14),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          conv['user'] ?? '',
-                          style: const TextStyle(color: Colors.white70, fontSize: 13),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(Icons.smart_toy, color: Color(0xFF00FFFF), size: 14),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          conv['ai'] ?? '',
-                          style: TextStyle(color: Colors.grey[400], fontSize: 12),
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    conv['timestamp']?.toString().substring(0, 16) ?? '',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 10),
-                  ),
-                ],
-              ),
-            )).toList(),
+            ConversationLogView(
+              entries: ConversationLogView.parseEntries(recentConversations),
+              clientFirstName: ((client['name'] ?? 'Client').toString().trim().split(RegExp(r'\s+')).first),
+              emptyText: 'No recent conversation captured.',
+            ),
           ],
           
           const SizedBox(height: 40),
         ],
       ),
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // PATH-C: SENSITIVE PROFILE PILL (M215+M216)
+  //
+  // Renders nothing for unauthorized coaches (button_state='hidden'), a
+  // disabled pill with tooltip for not-enrolled clients (button_state='disabled'),
+  // and an active cyan pill that pushes SensitiveClinicalProfileScreen for
+  // enrolled clients (button_state='active'). Every active push emits a
+  // sensitive_profile_screen_opened audit event over the bridge so the
+  // sensitive_bridge_log table records every coach entry into the screen.
+  // ---------------------------------------------------------------------------
+  Widget _buildSensitiveProfilePill(Map<String, dynamic> brief) {
+    final vis = brief['sensitive_bridge_visibility'];
+    if (vis is! Map) return const SizedBox.shrink();
+    final state = (vis['button_state'] ?? 'hidden').toString();
+    if (state == 'hidden') return const SizedBox.shrink();
+
+    final clientUsername = (vis['client_username'] ?? '').toString();
+    if (clientUsername.isEmpty) return const SizedBox.shrink();
+
+    final isActive = state == 'active';
+    final pill = ElevatedButton.icon(
+      onPressed: isActive
+          ? () => _openSensitiveProfile(clientUsername)
+          : null,
+      icon: const Icon(Icons.shield_outlined, color: Colors.black, size: 16),
+      label: const Text(
+        'Sensitive Profile',
+        style: TextStyle(
+          color: Colors.black,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF4ECDC4),
+        disabledBackgroundColor: const Color(0xFF4ECDC4).withValues(alpha: 0.35),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      ),
+    );
+
+    if (isActive) return pill;
+    return Tooltip(
+      message: 'This client is not enrolled in the Sensitive Clinical Bridge.',
+      child: pill,
+    );
+  }
+
+  Future<void> _openSensitiveProfile(String clientUsername) async {
+    // Emit audit event BEFORE navigating so the row is durable even if the
+    // coach immediately backs out. payload mirrors bridge handler contract.
+    try {
+      _socket?.sink.add(jsonEncode({
+        "type": "sensitive_profile_screen_opened",
+        "client_id": clientUsername,
+        "entry_point": "coach_command_briefings_view_brief",
+      }));
+    } catch (_) {}
+    if (!mounted) return;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => SensitiveClinicalProfileScreen(
+        currentUserProfile: widget.currentUserProfile,
+        targetUserId: clientUsername,
+      ),
+    ));
   }
 
   @override

@@ -17777,7 +17777,99 @@ async def handle_client(websocket, path=None):
                         except NameError:
                             pass
 
+                        # QUANTUM-CRYSTAL-ARCH — Sensitive Bridge Path-C visibility (presession_brief).
+                        # SENSITIVE-BRIDGE-VISIBILITY (M215+M216 Path C):
+                        # Attach the three booleans the View Brief modal
+                        # uses to decide whether to render the "Sensitive
+                        # Profile" pill button. coach_authorized comes from
+                        # coach_profiles.coach_sensitive_bridge_authorized;
+                        # client_enrolled comes from sensitive_bridge_enrollment.
+                        # button_state collapses both into hidden|disabled|active
+                        # so the Flutter widget has a single field to switch on.
+                        try:
+                            from app.services.sensitive_bridge_visibility import (
+                                compute_visibility as _sb_compute_visibility,
+                            )
+                            _sb_coach = (current_profile.get("username") or "").strip()
+                            _sb_client = (client_profile.get("username") or "").strip()
+                            brief["sensitive_bridge_visibility"] = await _sb_compute_visibility(
+                                db_pool,
+                                coach_username=_sb_coach,
+                                client_username=_sb_client,
+                            )
+                        except Exception as _sb_err:
+                            logger.warning(
+                                "get_presession_brief: sensitive_bridge_visibility failed: %s",
+                                _sb_err,
+                            )
+                            brief["sensitive_bridge_visibility"] = {
+                                "coach_authorized": False,
+                                "client_enrolled": False,
+                                "button_state": "hidden",
+                                "client_username": (client_profile.get("username") or None),
+                            }
+
                         await websocket.send(json.dumps({"type": "presession_brief", "brief": brief}))
+
+            # QUANTUM-CRYSTAL-ARCH — Sensitive Profile screen-open audit (bridge WS).
+            # === COACH: SENSITIVE PROFILE SCREEN OPEN AUDIT (M215) ===
+            # Path-C entry-point telemetry. The Flutter "Sensitive Profile"
+            # button in the View Brief modal sends this WS message right
+            # before navigating to SensitiveClinicalProfileScreen, so the
+            # audit row exists even if the screen itself fails to render.
+            # The auditor check `sensitive_profile_screen_single_entry_point`
+            # uses these rows to confirm the production entry point fired
+            # exactly once per coach navigation.
+            elif t == "sensitive_profile_screen_opened":
+                if not current_profile or current_profile.get("role") not in ("COACH", "ADMIN"):
+                    await websocket.send(json.dumps({"type": "error", "message": "COACH_ONLY"}))
+                    continue
+                if not db_pool:
+                    await websocket.send(json.dumps({"type": "error", "message": "DATABASE_UNAVAILABLE"}))
+                    continue
+                try:
+                    _spo_client_id = (d.get("client_id") or d.get("client_user_id") or "").strip()
+                    _spo_coach_id = (current_profile.get("username") or "").strip()
+                    _spo_entry = (d.get("entry_point") or "coach_command_briefings_view_brief").strip()
+                    if not _spo_client_id or not _spo_coach_id:
+                        await websocket.send(json.dumps({"type": "error", "message": "missing_client_or_coach"}))
+                        continue
+                    _spo_payload = {
+                        "entry_point": _spo_entry[:128],
+                        "coach_id": _spo_coach_id,
+                        "client_id": _spo_client_id,
+                        "opened_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    }
+                    async with db_pool.acquire() as _spo_conn:
+                        await _spo_conn.execute(
+                            """
+                            INSERT INTO sensitive_bridge_log (
+                                user_id, event_type, event_severity,
+                                payload_json, decision_summary,
+                                occurred_at, recorded_by, access_classification,
+                                pii_screened_at, redaction_pass_count
+                            ) VALUES (
+                                $1, 'sensitive_profile_screen_opened', 'info',
+                                $2::jsonb, $3::jsonb,
+                                NOW(), 'bridge_server', 'clinician_and_admin',
+                                NOW(), 1
+                            )
+                            """,
+                            _spo_client_id,
+                            json.dumps(_spo_payload),
+                            json.dumps({"entry_point": _spo_payload["entry_point"]}),
+                        )
+                    await websocket.send(json.dumps({
+                        "type": "sensitive_profile_screen_opened_ack",
+                        "ok": True,
+                        "client_id": _spo_client_id,
+                    }))
+                except Exception as _spo_err:
+                    logger.warning("sensitive_profile_screen_opened: audit insert failed: %s", _spo_err)
+                    await websocket.send(json.dumps({
+                        "type": "sensitive_profile_screen_opened_ack",
+                        "ok": False,
+                    }))
 
             elif t == "coach_get_client_panel_insights":
                 if not current_profile or current_profile.get("role") not in ("COACH", "ADMIN"):
