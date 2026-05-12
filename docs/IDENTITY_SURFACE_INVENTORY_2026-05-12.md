@@ -370,6 +370,35 @@ ORDER BY table_name, column_name;
 
 ---
 
+## Amendment 1 — Corporate, Tenant, and Group Identity Scopes
+
+**Effective:** 2026-05-11 — extends identity survey with scopes omitted from Appendix A’s narrower column filter (`%company_id%` was noted as a gap; **`tenant_id`** / **`group_entity_id`** were not enumerated).
+
+### AMENDMENT 1 — consolidated inventory rows
+
+| Surface | Type | Identifier used | Source of truth | Migration story | Notes |
+|---------|------|-----------------|-----------------|-----------------|-------|
+| **`tenant_id` — multi-table scope** | PG `text` column | **`tenant_id`** (logical tenant slug / institutional partition) | **`institutional_tenants.tenant_id`** (unique catalog row per tenant) | Additive migrations introducing institutional / consent / identity telemetry partitions | **9 tables** carry **`tenant_id`** (verified `information_schema`, production 2026-05-11): **`institutional_tenants`**, **`consent_records`**, **`consent_requests`**, **`data_deletion_queue`**, **`identity_inference_log`**, **`linguistic_fingerprints`**, **`narrative_identity_profiles`**, **`usage_events`**, **`voice_enrollment_profiles`**. Represents **org / deployment / consent boundary** for institutional rollouts (Twilio number, consent version, config JSON on catalog row). **Writes:** institutional onboarding / consent / identity pipelines (REST + agents vary by feature flag). **Reads:** compliance deletion queue, inference logs, enrollment. **Production status:** schema **active**; end-to-end multi-tenant routing is **partially exercised** — treat unpopulated **`tenant_id`** as **default single-tenant** behavior until institutional enrollment paths are consistently set at insert time. |
+| **`company_id` — corporate billing / roster** | PG `uuid` (+ JSON mirror risk) | **`company_id`** | **`corporate_sponsors.id`** (FK on **`users`**, **`users_secure`** view) | Corporate enrollment links users ↔ sponsor row | **5 tables** with **`company_id`** column (production 2026-05-11): **`users`**, **`users_secure`** (view), **`qb_corp_account_mapping`**, **`qb_corp_connection`**, **`qb_corp_sync_log`**. **Flow:** corporate enrollment / admin roster assigns sponsor UUID; Coach/Corp portals gate billing. **QuickBooks:** corp tenant OAuth + sync logs keyed by **`company_id`**. **RBAC:** corp admins modeled in **`corporate_sponsors`** / enrollment flows with **`corp_admin_permissions`** JSON (see **`access_control_api`** / corp routers) — not duplicated here row-by-row. |
+| **`group_entity_id` — hierarchical church / community / family graph** | PG `uuid` | **`group_entity_id`** | **`group_entities.id`** (adjacency list via **`parent_entity_id`** on **`group_entities`**) | Additive group-video / mesh features | **Hierarchy:** **`group_entities`** (parent **`parent_entity_id`**), **`families`**, **`corporate_sponsors`**, **`group_entity_members`**, **`group_videos`** — each exposes **`group_entity_id`** tying cohort/church/family/corp nodes into one graph. **Reads/writes:** community / classroom / group media surfaces; corporate sponsor rows may double as entities. Distinct from loose **`group_id`** TEXT profile field used in coach client filters — reconcile when merging cohort models. |
+| **`users_secure` mirror** | PG **VIEW** | Same identity columns as **`users`** + decrypted PII columns | Underlying **`users`** row | View recreated in **`105_pgcrypto_sql_encryption.sql`** | **`users_secure`** selects **`users.*`** plus **`decrypt_pii`** on **`email_enc`**, **`name_enc`**, **`dob_enc`**. **`company_id`** and **`family_id`** are **base-table columns** — there is **no separate sync job**; **mirror** means “decrypted read surface,” not a second writable store. **`family_id` / `company_id` mirroring with `profile_data`** follows existing workspace merge rules (`jsonb_set` / bridge upsert protections). |
+
+### Post-amendment schema introspection (`information_schema`)
+
+**Query:**
+
+```sql
+SELECT DISTINCT data_type, column_name
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND (column_name LIKE '%_id' OR column_name LIKE '%user%' OR column_name LIKE '%owner%')
+ORDER BY column_name;
+```
+
+**Identity-scope gap check:** After adding **`tenant_id`**, **`company_id`**, and **`group_entity_id`**, remaining high-volume `*_id` names are predominantly **operational foreign keys** (**`campaign_id`**, **`deployment_id`**, **`session_id`**, **`crystal_id`**, **`call_sid`**, etc.) — **not** primary human identity scopes. Re-run this DISTINCT query after migrations; promote any new **`*_id`** that binds **long-lived clinical or roster identity** into the next amendment.
+
+---
+
 ## Appendix B — Raw command fragments (reference)
 
 **Vault sample (GREEN host):**
