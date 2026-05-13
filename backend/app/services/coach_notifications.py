@@ -33,11 +33,12 @@ async def notify_coach(
     if pool:
         try:
             async with pool.acquire() as conn:
-                await conn.execute(
+                row = await conn.fetchrow(
                     """
                     INSERT INTO coach_escalation_notifications
                         (coach_username, urgency, subject, message, channels, payload)
                     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb)
+                    RETURNING id
                     """,
                     coach_username,
                     urgency,
@@ -46,6 +47,7 @@ async def notify_coach(
                     json.dumps(channels),
                     json.dumps(payload),
                 )
+                sent["notification_id"] = int(row["id"]) if row else 0
             sent["in_app"] = True
         except Exception as e:
             logger.warning("coach in-app notification failed: %s", e)

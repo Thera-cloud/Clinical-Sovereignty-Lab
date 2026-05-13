@@ -336,6 +336,66 @@ class SubstanceRegisterBranch:
 
 
 @dataclass(frozen=True)
+class SexAddictionRegisterBranch:
+    """v1.4 Step 13 branch — sex addiction."""
+    branched: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class GamblingRegisterBranch:
+    """v1.4 Step 13 branch — gambling."""
+    branched: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class GamingRegisterBranch:
+    """v1.4 Step 13 branch — gaming."""
+    branched: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class FoodCompulsionRegisterBranch:
+    """v1.4 Step 13 branch — food compulsion."""
+    branched: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class WorkCompulsionRegisterBranch:
+    """v1.4 Step 13 branch — work compulsion."""
+    branched: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class SpendingCompulsionRegisterBranch:
+    """v1.4 Step 13 branch — spending compulsion."""
+    branched: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class CodependencyRegisterBranch:
+    """v1.4 Step 13 branch — codependency."""
+    branched: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class CrossAddictionRegisterBranch:
+    """v1.4 composite branch — fires when 2+ individual branches active."""
+    branched: bool
+    reason: str
+    active_branches: tuple = ()
+    primary: str = ""
+    secondary: str = ""
+    overlay_directive: str = ""
+
+
+@dataclass(frozen=True)
 class TraffickingClassificationSummary:
     """Step 7 → step 15 hand-off. Carries the trafficking classifier result
     in a redacted-by-construction summary for mandatory_reporting input.
@@ -1123,6 +1183,14 @@ def _select_register(
     tmc_class: str,
     substance_branch: SubstanceRegisterBranch,
     novelty_gate: NoveltyGateState,
+    sex_addiction_branch: Optional[SexAddictionRegisterBranch] = None,
+    gambling_branch: Optional[GamblingRegisterBranch] = None,
+    gaming_branch: Optional[GamingRegisterBranch] = None,
+    food_compulsion_branch: Optional[FoodCompulsionRegisterBranch] = None,
+    work_compulsion_branch: Optional[WorkCompulsionRegisterBranch] = None,
+    spending_compulsion_branch: Optional[SpendingCompulsionRegisterBranch] = None,
+    codependency_branch: Optional[CodependencyRegisterBranch] = None,
+    cross_addiction_branch: Optional[CrossAddictionRegisterBranch] = None,
 ) -> Tuple[Optional[str], str]:
     """Step 13 — Register selection.
 
@@ -1133,15 +1201,10 @@ def _select_register(
     listener fired (codeword always wins; safety-net contract). This
     matches the Phase 3 controller insertion semantics.
     """
-    # Codeword always wins (safety-net contract).
     if codeword_match is not None:
         return ("safe_silence_mode_codeword", "codeword")
 
-    # Apply gate to all non-codeword paths.
     if novelty_gate.blocked:
-        # Gate blocks novelty — register becomes predictability_continuity
-        # regardless of which other source would have been selected. Source
-        # tag still reflects the originating signal for telemetry.
         source = _first_matching_register_source(
             trigger_date=trigger_date,
             legal_proximity=legal_proximity,
@@ -1150,6 +1213,14 @@ def _select_register(
             embodiment=embodiment,
             tmc_class=tmc_class,
             substance_branch=substance_branch,
+            sex_addiction_branch=sex_addiction_branch,
+            gambling_branch=gambling_branch,
+            gaming_branch=gaming_branch,
+            food_compulsion_branch=food_compulsion_branch,
+            work_compulsion_branch=work_compulsion_branch,
+            spending_compulsion_branch=spending_compulsion_branch,
+            codependency_branch=codependency_branch,
+            cross_addiction_branch=cross_addiction_branch,
         )
         return ("predictability_continuity", source or "thalamic_gate_block")
 
@@ -1168,8 +1239,25 @@ def _select_register(
         return (f"embodiment_{embodiment.phase}", "embodiment")
     if tmc_class == "CRISIS":
         return ("crisis_stabilization", "tmc_class")
+    # v1.4: cross-addiction composite takes priority over any single branch
+    if cross_addiction_branch and cross_addiction_branch.branched:
+        return (cross_addiction_branch.overlay_directive, "cross_addiction")
     if substance_branch.branched:
         return ("dual_diagnosis_substance", "substance_branch")
+    if sex_addiction_branch and sex_addiction_branch.branched:
+        return ("dual_diagnosis_sex_addiction", "sex_addiction_branch")
+    if gambling_branch and gambling_branch.branched:
+        return ("dual_diagnosis_gambling", "gambling_branch")
+    if gaming_branch and gaming_branch.branched:
+        return ("dual_diagnosis_gaming", "gaming_branch")
+    if food_compulsion_branch and food_compulsion_branch.branched:
+        return ("dual_diagnosis_food_compulsion", "food_compulsion_branch")
+    if work_compulsion_branch and work_compulsion_branch.branched:
+        return ("dual_diagnosis_work_compulsion", "work_compulsion_branch")
+    if spending_compulsion_branch and spending_compulsion_branch.branched:
+        return ("dual_diagnosis_spending_compulsion", "spending_compulsion_branch")
+    if codependency_branch and codependency_branch.branched:
+        return ("dual_diagnosis_codependency", "codependency_branch")
     return (None, "default")
 
 
@@ -1182,6 +1270,14 @@ def _first_matching_register_source(
     embodiment: EmbodimentPhaseApplied,
     tmc_class: str,
     substance_branch: SubstanceRegisterBranch,
+    sex_addiction_branch: Optional[SexAddictionRegisterBranch] = None,
+    gambling_branch: Optional[GamblingRegisterBranch] = None,
+    gaming_branch: Optional[GamingRegisterBranch] = None,
+    food_compulsion_branch: Optional[FoodCompulsionRegisterBranch] = None,
+    work_compulsion_branch: Optional[WorkCompulsionRegisterBranch] = None,
+    spending_compulsion_branch: Optional[SpendingCompulsionRegisterBranch] = None,
+    codependency_branch: Optional[CodependencyRegisterBranch] = None,
+    cross_addiction_branch: Optional[CrossAddictionRegisterBranch] = None,
 ) -> Optional[str]:
     """Companion to _select_register — returns just the source tag for the
     first non-codeword match. Used when the thalamic gate replaces the
@@ -1199,8 +1295,24 @@ def _first_matching_register_source(
         return "embodiment"
     if tmc_class == "CRISIS":
         return "tmc_class"
+    if cross_addiction_branch and cross_addiction_branch.branched:
+        return "cross_addiction"
     if substance_branch.branched:
         return "substance_branch"
+    if sex_addiction_branch and sex_addiction_branch.branched:
+        return "sex_addiction_branch"
+    if gambling_branch and gambling_branch.branched:
+        return "gambling_branch"
+    if gaming_branch and gaming_branch.branched:
+        return "gaming_branch"
+    if food_compulsion_branch and food_compulsion_branch.branched:
+        return "food_compulsion_branch"
+    if work_compulsion_branch and work_compulsion_branch.branched:
+        return "work_compulsion_branch"
+    if spending_compulsion_branch and spending_compulsion_branch.branched:
+        return "spending_compulsion_branch"
+    if codependency_branch and codependency_branch.branched:
+        return "codependency_branch"
     return None
 
 
@@ -1708,10 +1820,27 @@ async def evaluate_disclosure(
     )
 
     # ───────────────────────────────────────────────────────────────────
-    # STEP 13 — Register selection
+    # STEP 13 — Register selection (v1.4: 9 branch resolvers)
     # ───────────────────────────────────────────────────────────────────
     substance_branch = _resolve_substance_branch(
         tmc_signals=tmc_signals, embodiment=embodiment,
+    )
+    sex_addiction_branch = _resolve_sex_addiction_branch(tmc_signals=tmc_signals)
+    gambling_branch = _resolve_gambling_branch(tmc_signals=tmc_signals)
+    gaming_branch = _resolve_gaming_branch(tmc_signals=tmc_signals)
+    food_compulsion_branch = _resolve_food_compulsion_branch(tmc_signals=tmc_signals)
+    work_compulsion_branch = _resolve_work_compulsion_branch(tmc_signals=tmc_signals)
+    spending_compulsion_branch = _resolve_spending_compulsion_branch(tmc_signals=tmc_signals)
+    codependency_branch = _resolve_codependency_branch(tmc_signals=tmc_signals)
+    cross_addiction_branch = _resolve_cross_addiction_branch(
+        substance=substance_branch,
+        sex_addiction=sex_addiction_branch,
+        gambling=gambling_branch,
+        gaming=gaming_branch,
+        food_compulsion=food_compulsion_branch,
+        work_compulsion=work_compulsion_branch,
+        spending_compulsion=spending_compulsion_branch,
+        codependency=codependency_branch,
     )
     register_directive, selected_register_source = _select_register(
         codeword_match=codeword_match,
@@ -1723,6 +1852,59 @@ async def evaluate_disclosure(
         tmc_class=tmc_class,
         substance_branch=substance_branch,
         novelty_gate=novelty_gate,
+        sex_addiction_branch=sex_addiction_branch,
+        gambling_branch=gambling_branch,
+        gaming_branch=gaming_branch,
+        food_compulsion_branch=food_compulsion_branch,
+        work_compulsion_branch=work_compulsion_branch,
+        spending_compulsion_branch=spending_compulsion_branch,
+        codependency_branch=codependency_branch,
+        cross_addiction_branch=cross_addiction_branch,
+    )
+
+    # ───────────────────────────────────────────────────────────────────
+    # STEP 13b — v1.4 DST Lens (Gap 2)
+    # ───────────────────────────────────────────────────────────────────
+    dst_active = _dst_lens_active(
+        sex_addiction_branch=sex_addiction_branch,
+        polyvictim_load=polyvictim_load,
+        tmc_signals=tmc_signals,
+    )
+    dst_prompt_block: Optional[str] = None
+    if dst_active:
+        register_directive, dst_prompt_block = _apply_dst_lens(register_directive)
+
+    # ───────────────────────────────────────────────────────────────────
+    # STEP 13c — v1.4 Framework Lens (Gap 3) + Crystal Factory
+    # ───────────────────────────────────────────────────────────────────
+    active_branches_list: List[str] = []
+    for _bname, _bobj in (
+        ("substance", substance_branch),
+        ("sex_addiction", sex_addiction_branch),
+        ("gambling", gambling_branch),
+        ("gaming", gaming_branch),
+        ("food_compulsion", food_compulsion_branch),
+        ("work_compulsion", work_compulsion_branch),
+        ("spending_compulsion", spending_compulsion_branch),
+        ("codependency", codependency_branch),
+    ):
+        if _bobj and getattr(_bobj, "branched", False):
+            active_branches_list.append(_bname)
+    active_branches_tuple = tuple(active_branches_list)
+
+    framework_lenses = _select_framework_lens(active_branches=active_branches_tuple)
+    lens_primary = framework_lenses[0] if framework_lenses else None
+
+    lexicon_crystals = await _load_lexicon_crystals(
+        db_pool, user_id, active_branches_tuple,
+    )
+    response_crystals = await _load_response_pattern_crystals(
+        db_pool, user_id, lens_primary,
+    )
+
+    lens_directives_text, applied_lenses, audit_only_lenses = _compose_lens_directives(
+        framework_lenses,
+        response_pattern_crystals=response_crystals,
     )
 
     # ───────────────────────────────────────────────────────────────────
@@ -1831,6 +2013,15 @@ async def evaluate_disclosure(
         "reporting_trigger": reporting_trigger_name,
         "sensitive_recall_state_hint": _user_state_hint,
         "sensitive_recall_dropped_count": int(sensitive_recall_dropped),
+        "lens_dst": dst_active,
+        "dst_prompt_injected": dst_prompt_block is not None,
+        "framework_lenses_applied": applied_lenses,
+        "framework_lenses_audit_only": audit_only_lenses,
+        "lexicon_crystals_count": len(lexicon_crystals),
+        "response_pattern_crystals_count": len(response_crystals),
+        "active_addiction_branches": active_branches_list,
+        "cross_addiction_active": cross_addiction_branch.branched if cross_addiction_branch else False,
+        "cross_addiction_count": cross_addiction_branch.active_count if cross_addiction_branch else 0,
         "schema_version": BRIDGE_DECISION_SCHEMA_VERSION,
         "schema_hash": BRIDGE_DECISION_SCHEMA_HASH,
         "pipeline_steps_completed": list(PIPELINE_STEP_NAMES_V1_3),
@@ -1931,6 +2122,344 @@ def _resolve_substance_branch(
             branched=True, reason="profile_flag_active",
         )
     return SubstanceRegisterBranch(branched=False, reason="not_active")
+
+
+def _resolve_sex_addiction_branch(
+    *, tmc_signals: Dict[str, Any],
+) -> SexAddictionRegisterBranch:
+    if bool(tmc_signals.get("sex_addiction_branch_active")):
+        return SexAddictionRegisterBranch(branched=True, reason="profile_flag_active")
+    return SexAddictionRegisterBranch(branched=False, reason="not_active")
+
+
+def _resolve_gambling_branch(
+    *, tmc_signals: Dict[str, Any],
+) -> GamblingRegisterBranch:
+    if bool(tmc_signals.get("gambling_branch_active")):
+        return GamblingRegisterBranch(branched=True, reason="profile_flag_active")
+    return GamblingRegisterBranch(branched=False, reason="not_active")
+
+
+def _resolve_gaming_branch(
+    *, tmc_signals: Dict[str, Any],
+) -> GamingRegisterBranch:
+    if bool(tmc_signals.get("gaming_branch_active")):
+        return GamingRegisterBranch(branched=True, reason="profile_flag_active")
+    return GamingRegisterBranch(branched=False, reason="not_active")
+
+
+def _resolve_food_compulsion_branch(
+    *, tmc_signals: Dict[str, Any],
+) -> FoodCompulsionRegisterBranch:
+    if bool(tmc_signals.get("food_compulsion_branch_active")):
+        return FoodCompulsionRegisterBranch(branched=True, reason="profile_flag_active")
+    return FoodCompulsionRegisterBranch(branched=False, reason="not_active")
+
+
+def _resolve_work_compulsion_branch(
+    *, tmc_signals: Dict[str, Any],
+) -> WorkCompulsionRegisterBranch:
+    if bool(tmc_signals.get("work_compulsion_branch_active")):
+        return WorkCompulsionRegisterBranch(branched=True, reason="profile_flag_active")
+    return WorkCompulsionRegisterBranch(branched=False, reason="not_active")
+
+
+def _resolve_spending_compulsion_branch(
+    *, tmc_signals: Dict[str, Any],
+) -> SpendingCompulsionRegisterBranch:
+    if bool(tmc_signals.get("spending_compulsion_branch_active")):
+        return SpendingCompulsionRegisterBranch(branched=True, reason="profile_flag_active")
+    return SpendingCompulsionRegisterBranch(branched=False, reason="not_active")
+
+
+def _resolve_codependency_branch(
+    *, tmc_signals: Dict[str, Any],
+) -> CodependencyRegisterBranch:
+    if bool(tmc_signals.get("codependency_branch_active")):
+        return CodependencyRegisterBranch(branched=True, reason="profile_flag_active")
+    return CodependencyRegisterBranch(branched=False, reason="not_active")
+
+
+def _resolve_cross_addiction_branch(
+    *,
+    substance: SubstanceRegisterBranch,
+    sex_addiction: SexAddictionRegisterBranch,
+    gambling: GamblingRegisterBranch,
+    gaming: GamingRegisterBranch,
+    food_compulsion: FoodCompulsionRegisterBranch,
+    work_compulsion: WorkCompulsionRegisterBranch,
+    spending_compulsion: SpendingCompulsionRegisterBranch,
+    codependency: CodependencyRegisterBranch,
+) -> CrossAddictionRegisterBranch:
+    """Composite resolver: fires when 2+ individual branches are active."""
+    _branch_map = {
+        "substance": substance.branched,
+        "sex_addiction": sex_addiction.branched,
+        "gambling": gambling.branched,
+        "gaming": gaming.branched,
+        "food_compulsion": food_compulsion.branched,
+        "work_compulsion": work_compulsion.branched,
+        "spending_compulsion": spending_compulsion.branched,
+        "codependency": codependency.branched,
+    }
+    active = tuple(k for k, v in _branch_map.items() if v)
+    if len(active) < 2:
+        return CrossAddictionRegisterBranch(branched=False, reason="fewer_than_2")
+    primary = active[0]
+    secondary = active[1]
+    overlay = f"cross_addiction:{'+'.join(active)}"
+    return CrossAddictionRegisterBranch(
+        branched=True,
+        reason=f"{len(active)}_branches_active",
+        active_branches=active,
+        primary=primary,
+        secondary=secondary,
+        overlay_directive=overlay,
+    )
+
+
+def _compose_cross_addiction_overlay(
+    cross: CrossAddictionRegisterBranch,
+) -> Optional[str]:
+    """Gap 1: compose a register overlay string for cross-addiction.
+    Returns None when cross addiction is inactive.
+    """
+    if not cross.branched:
+        return None
+    return cross.overlay_directive
+
+
+# ─────────────────────────────────────────────────────────────────────
+# v1.4 DST Lens (Gap 2)
+# ─────────────────────────────────────────────────────────────────────
+
+_DST_DIRECTIVE_BLOCK = (
+    "Apply DST awareness: assume dissociation may be present. "
+    "Prefer questions that name parts ('which part of you is...?') "
+    "over questions that assume a unified self. Pace slowly."
+)
+
+
+def _dst_lens_active(
+    *,
+    sex_addiction_branch: Optional[SexAddictionRegisterBranch] = None,
+    polyvictim_load: Optional[Any] = None,
+    tmc_signals: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Gap 2 gate: DST lens activates when sex_addiction status is non-none
+    OR when any addiction branch is active AND polyvictim layers > 0.
+    """
+    if sex_addiction_branch and sex_addiction_branch.branched:
+        return True
+    if polyvictim_load and getattr(polyvictim_load, "layers_active", 0) > 0:
+        signals = tmc_signals or {}
+        any_addiction = any(
+            bool(signals.get(k))
+            for k in (
+                "substance_branch_active", "sex_addiction_branch_active",
+                "gambling_branch_active", "gaming_branch_active",
+                "food_compulsion_branch_active", "work_compulsion_branch_active",
+                "spending_compulsion_branch_active", "codependency_branch_active",
+            )
+        )
+        if any_addiction:
+            return True
+    return False
+
+
+def _apply_dst_lens(
+    directive: Optional[str],
+) -> Tuple[Optional[str], str]:
+    """Gap 2 behavior: mutate directive with DST system-prompt block.
+    Returns (augmented_directive, dst_prompt_block).
+    """
+    augmented = directive or "default"
+    if not augmented.endswith("|dst"):
+        augmented = f"{augmented}|dst"
+    return augmented, _DST_DIRECTIVE_BLOCK
+
+
+# ─────────────────────────────────────────────────────────────────────
+# v1.4 Framework Lens (Gap 3)
+# ─────────────────────────────────────────────────────────────────────
+
+_FRAMEWORK_MENU: Dict[str, Dict[str, Any]] = {
+    "ifs": {
+        "label": "Internal Family Systems",
+        "prompt": "Use IFS framing: invite the part to speak rather than confronting it directly.",
+        "applies_to": {"sex_addiction", "codependency", "food_compulsion", "substance"},
+    },
+    "act": {
+        "label": "Acceptance & Commitment Therapy",
+        "prompt": "Apply ACT principles: defusion from thoughts, values-guided action.",
+        "applies_to": {"gambling", "gaming", "work_compulsion", "spending_compulsion"},
+    },
+    "dbt": {
+        "label": "Dialectical Behavior Therapy",
+        "prompt": "Apply DBT skills: distress tolerance, emotional regulation, interpersonal effectiveness.",
+        "applies_to": {"substance", "food_compulsion", "codependency"},
+    },
+    "cbt": {
+        "label": "Cognitive Behavioral Therapy",
+        "prompt": "Apply CBT restructuring: identify cognitive distortions, behavioral experiments.",
+        "applies_to": {"gambling", "gaming", "spending_compulsion"},
+    },
+    "motivational_interviewing": {
+        "label": "Motivational Interviewing",
+        "prompt": "Use MI approach: express empathy, develop discrepancy, roll with resistance.",
+        "applies_to": {"substance", "gambling", "sex_addiction", "gaming", "food_compulsion",
+                       "work_compulsion", "spending_compulsion", "codependency"},
+    },
+    "twelve_step": {
+        "label": "12-Step Facilitation",
+        "prompt": "Reference 12-step principles: powerlessness acknowledgment, higher power, fellowship.",
+        "applies_to": {"substance", "gambling", "sex_addiction", "codependency"},
+    },
+    "trauma_informed": {
+        "label": "Trauma-Informed Care",
+        "prompt": "Apply trauma-informed lens: safety first, trustworthiness, choice, collaboration.",
+        "applies_to": {"sex_addiction", "substance", "codependency", "food_compulsion"},
+    },
+    "emdr_informed": {
+        "label": "EMDR-Informed",
+        "prompt": "Reference EMDR adaptive information processing: notice body sensation, dual awareness.",
+        "applies_to": {"sex_addiction", "substance"},
+    },
+}
+
+
+def _load_framework_menu() -> Dict[str, Dict[str, Any]]:
+    """Return the canonical framework menu dict."""
+    return dict(_FRAMEWORK_MENU)
+
+
+def _select_framework_lens(
+    *,
+    active_branches: Tuple[str, ...],
+    user_preference: Optional[str] = None,
+) -> List[str]:
+    """Select ordered lens list based on active branches and optional user preference.
+    Returns lens keys ordered by applicability score (number of matching branches).
+    """
+    if not active_branches:
+        return []
+    scores: Dict[str, int] = {}
+    for key, meta in _FRAMEWORK_MENU.items():
+        overlap = len(set(active_branches) & meta["applies_to"])
+        if overlap > 0:
+            scores[key] = overlap
+    ordered = sorted(scores, key=lambda k: scores[k], reverse=True)
+    if user_preference and user_preference in ordered:
+        ordered.remove(user_preference)
+        ordered.insert(0, user_preference)
+    return ordered
+
+
+def _compose_lens_directives(
+    lens_list: List[str],
+    *,
+    response_pattern_crystals: Optional[List[str]] = None,
+) -> Tuple[str, List[str], List[str]]:
+    """Gap 3: compose lens directives with cap-at-2 rule.
+
+    Returns:
+        (composed_prompt_text, applied_lenses, audit_only_lenses)
+    """
+    if not lens_list:
+        return ("", [], [])
+    applied: List[str] = []
+    audit_only: List[str] = []
+    parts: List[str] = []
+
+    for i, key in enumerate(lens_list):
+        meta = _FRAMEWORK_MENU.get(key)
+        if not meta:
+            continue
+        if i == 0:
+            parts.append(f"[Primary Framework: {meta['label']}] {meta['prompt']}")
+            applied.append(key)
+        elif i == 1:
+            parts.append(f"Also: {meta['prompt']}")
+            applied.append(key)
+        else:
+            audit_only.append(key)
+
+    if response_pattern_crystals:
+        for crystal_text in response_pattern_crystals[:3]:
+            parts.append(crystal_text)
+
+    return ("\n".join(parts), applied, audit_only)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# v1.4 Crystal Factory Layer 1 + Layer 2
+# ─────────────────────────────────────────────────────────────────────
+
+async def _load_lexicon_crystals(
+    db_pool: Any,
+    username: str,
+    active_branches: Tuple[str, ...],
+) -> List[str]:
+    """Layer 1: per-client lexicon augmentation from nate_intelligence_crystals.
+    Returns list of crystal text snippets relevant to the active branches.
+    """
+    if not active_branches or not db_pool:
+        return []
+    branch_patterns = [f"%{b}%" for b in active_branches[:4]]
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT crystal_text FROM nate_intelligence_crystals
+                WHERE (user_id = (SELECT id FROM users WHERE username = $1 LIMIT 1)
+                       OR user_id IS NULL)
+                  AND scope != 'archived'
+                  AND confidence >= 0.40
+                  AND (domain = 'clinical' OR domain = 'coaching')
+                  AND (crystal_text ILIKE $2 OR crystal_text ILIKE $3
+                       OR crystal_text ILIKE $4 OR crystal_text ILIKE $5)
+                ORDER BY recall_count DESC, confidence DESC
+                LIMIT 5
+                """,
+                username,
+                *[branch_patterns[i] if i < len(branch_patterns) else "%__none__%"
+                  for i in range(4)],
+            )
+            return [r["crystal_text"] for r in rows if r.get("crystal_text")]
+    except Exception as e:
+        logger.warning("crystal_factory_l1: %s", e)
+        return []
+
+
+async def _load_response_pattern_crystals(
+    db_pool: Any,
+    username: str,
+    lens_primary: Optional[str],
+) -> List[str]:
+    """Layer 2: top-3 response pattern crystals by recall_count.
+    Scoped to scope='response_pattern'.
+    """
+    if not db_pool or not lens_primary:
+        return []
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT crystal_text FROM nate_intelligence_crystals
+                WHERE (user_id = (SELECT id FROM users WHERE username = $1 LIMIT 1)
+                       OR user_id IS NULL)
+                  AND scope = 'response_pattern'
+                  AND confidence >= 0.40
+                  AND crystal_text ILIKE $2
+                ORDER BY recall_count DESC
+                LIMIT 3
+                """,
+                username, f"%{lens_primary}%",
+            )
+            return [r["crystal_text"] for r in rows if r.get("crystal_text")]
+    except Exception as e:
+        logger.warning("crystal_factory_l2: %s", e)
+        return []
 
 
 def _resolve_resource_block(
