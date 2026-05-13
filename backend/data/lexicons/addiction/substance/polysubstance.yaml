@@ -1,0 +1,13 @@
+status: scaffolded_unreviewed
+source:
+  citation: "American Society of Addiction Medicine. (2023). Definition of addiction (public statement)."
+  link: "https://www.asam.org"
+last_review: null
+reviewed_by: null
+detector_patterns:
+  - pattern: "PLACEHOLDER_SCAFFOLD — replace after clinical review"
+    weight: 0.1
+    notes: "Phase A scaffold; clinical review required before activation."
+    verbatim: false
+response_seeds: []
+crystal_seeds: []

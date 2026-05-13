@@ -1,0 +1,13 @@
+status: scaffolded_unreviewed
+source:
+  citation: "Weiss, R. (2015). Sex addiction 101. HCI Books."
+  link: "https://www.robertweissmsw.com"
+last_review: null
+reviewed_by: null
+detector_patterns:
+  - pattern: "PLACEHOLDER_SCAFFOLD — replace after clinical review"
+    weight: 0.1
+    notes: "Phase A scaffold; clinical review required before activation."
+    verbatim: false
+response_seeds: []
+crystal_seeds: []

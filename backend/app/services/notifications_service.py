@@ -458,6 +458,23 @@ TEMPLATES = {
 </html>
 """
     },
+
+    # -------------------------------------------------------------------------
+    # INTERNAL CRISIS / ESCALATION (Sanctuary coach request, Sensitive Bridge)
+    # -------------------------------------------------------------------------
+    "crisis_alert": {
+        "subject": "[{{ alert_type }}] {{ client_name }}",
+        "html": """
+<!DOCTYPE html>
+<html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
+<div style="max-width:640px;margin:auto;background:#111;border:1px solid #333;border-radius:8px;padding:24px;">
+  <h2 style="color:#ef4444;margin-top:0;">Escalation: {{ alert_type }}</h2>
+  <p><strong>Client:</strong> {{ client_name }}</p>
+  <pre style="white-space:pre-wrap;background:#0a0a0a;padding:12px;border-radius:6px;color:#cbd5e1;">{{ details }}</pre>
+  <p style="color:#64748b;font-size:12px;">Sent by Sovereign Sanctuary notifications pipeline.</p>
+</div></body></html>
+""",
+    },
 }
 
 
@@ -580,6 +597,38 @@ class EmailService:
             "amount": amount,
             "date": date
         })
+
+    async def send_crisis_alert(
+        self,
+        to_email: Optional[str],
+        client_name: str,
+        alert_type: str,
+        details: str,
+    ) -> bool:
+        """Email ops / admin for sanctuary escalation paths (bridge + sanctuary_handlers)."""
+        dest = (
+            (to_email or "").strip()
+            or os.getenv("ADMIN_ALERT_EMAIL", "").strip()
+            or os.getenv("SUPPORT_EMAIL", "").strip()
+            or "support@sovereignsanctuary.net"
+        )
+        ok = await self.send_email(
+            dest,
+            "crisis_alert",
+            {
+                "client_name": client_name or "Unknown",
+                "alert_type": alert_type or "ALERT",
+                "details": details or "",
+            },
+        )
+        if not ok:
+            logger.warning(
+                "send_crisis_alert failed alert_type=%s client=%s dest=%s",
+                alert_type,
+                (client_name or "")[:32],
+                dest[:32],
+            )
+        return ok
     
     async def send_family_invitation(
         self, to_email: str, inviter_name: str, accept_url: str

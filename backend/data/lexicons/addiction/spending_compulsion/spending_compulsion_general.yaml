@@ -1,0 +1,13 @@
+status: scaffolded_unreviewed
+source:
+  citation: "Debtors Anonymous. (1999). A Currency of Hope."
+  link: "https://debtorsanonymous.org"
+last_review: null
+reviewed_by: null
+detector_patterns:
+  - pattern: "PLACEHOLDER_SCAFFOLD — replace after clinical review"
+    weight: 0.1
+    notes: "Phase A scaffold; clinical review required before activation."
+    verbatim: false
+response_seeds: []
+crystal_seeds: []

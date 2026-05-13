@@ -1,0 +1,35 @@
+# Verbatim from docs/V1_4_ADDICTION_ARCHITECTURE_SPEC_v0.2.md §11.2 (Q6)
+hotlines:
+  general_addiction_substance_and_behavioral:
+    name: SAMHSA National Helpline
+    phone: 1-800-662-4357
+    hours: 24/7
+    languages: [english, spanish]
+    addiction_scope: [substance, behavioral_general]
+  suicide_crisis_universal:
+    name: National Suicide and Crisis Lifeline
+    phone: '988'
+    text: '988'
+    hours: 24/7
+    addiction_scope: [any_acute_crisis]
+  sex_addiction_specific:
+    name: SAA International Office
+    phone: 1-800-477-8191
+    hours: 24/7
+    addiction_scope: [sex_addiction]
+  gambling_specific:
+    name: GA National Hotline
+    phone: 1-855-222-5542
+    hours: 24/7
+    addiction_scope: [gambling]
+  text_crisis:
+    name: Crisis Text Line
+    text: HOME to 741741
+    hours: 24/7
+    addiction_scope: [any_crisis_text_preferred]
+  human_trafficking:
+    name: National Human Trafficking Hotline
+    phone: 1-888-373-7888
+    text: '233733'
+    hours: 24/7
+    addiction_scope: [trafficking_victim_survivor]

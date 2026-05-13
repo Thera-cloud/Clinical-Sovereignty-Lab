@@ -187,6 +187,11 @@ VALID_SUBSTANCE_STATUSES = frozenset(
     {"none", "recovery", "active_use", "crisis"}
 )
 
+#: Behavioral / process addiction branches (v1.4) — coach-set scalar statuses.
+VALID_ADDICTION_BRANCH_STATUSES = frozenset(
+    {"none", "recovery", "active", "crisis"}
+)
+
 #: Codeword type values must match migration 204 CHECK constraint.
 VALID_CODEWORD_TYPES = frozenset({"explicit_word", "innocuous_phrase"})
 
@@ -732,6 +737,25 @@ class SubstanceStatusUpdate(BaseModel):
         return v
 
 
+class AddictionBranchStatusUpdate(BaseModel):
+    """v1.4 coach-set status for sex/gambling/gaming/food/work/spending/codependency."""
+
+    status: str
+    subtype: Optional[str] = Field(default=None, max_length=64)
+
+    @validator("status")
+    def _v_status(cls, v):
+        if v not in VALID_ADDICTION_BRANCH_STATUSES:
+            raise ValueError(
+                "status must be one of none|recovery|active|crisis"
+            )
+        return v
+
+
+class CrossAddictionProfileUpdate(BaseModel):
+    cross_addiction_profile: Dict[str, Any] = Field(default_factory=dict)
+
+
 class CodewordCreate(BaseModel):
     plaintext_codeword: str = Field(
         ...,
@@ -929,6 +953,14 @@ async def _load_profile_data(
         "novelty_threshold": None,
         "arousal_threshold": None,
         "substance_status": None,
+        "sex_addiction_status": None,
+        "gambling_status": None,
+        "gaming_status": None,
+        "food_compulsion_status": None,
+        "work_compulsion_status": None,
+        "spending_compulsion_status": None,
+        "codependency_status": None,
+        "cross_addiction_profile": {},
         "population_type": None,
         "safe_silence_mode_state": {},
         "codewords": [],
@@ -961,6 +993,17 @@ async def _load_profile_data(
             out["novelty_threshold"] = pd.get("novelty_threshold")
             out["arousal_threshold"] = pd.get("arousal_threshold")
             out["substance_status"] = pd.get("substance_status")
+            out["sex_addiction_status"] = pd.get("sex_addiction_status")
+            out["gambling_status"] = pd.get("gambling_status")
+            out["gaming_status"] = pd.get("gaming_status")
+            out["food_compulsion_status"] = pd.get("food_compulsion_status")
+            out["work_compulsion_status"] = pd.get("work_compulsion_status")
+            out["spending_compulsion_status"] = pd.get("spending_compulsion_status")
+            out["codependency_status"] = pd.get("codependency_status")
+            cap = pd.get("cross_addiction_profile")
+            out["cross_addiction_profile"] = (
+                cap if isinstance(cap, dict) else {}
+            )
             out["population_type"] = pd.get("population_type")
             sss = pd.get("safe_silence_mode_state") or {}
             # NEVER surface the proposer_token_hash to clients — it's a
@@ -1007,7 +1050,8 @@ async def _load_profile_data(
             """
             SELECT codeword_hash, codeword_type, codeword_label,
                    triggers_mandatory_reporting, set_by_clinician_id, set_at,
-                   active, last_triggered_at, trigger_count
+                   active, last_triggered_at, trigger_count,
+                   disclosure_type, part_name, part_number, part_category, addiction_link
               FROM user_safety_codewords
              WHERE user_id = $1
              ORDER BY set_at DESC
@@ -1029,6 +1073,11 @@ async def _load_profile_data(
                     else None
                 ),
                 "trigger_count": r["trigger_count"],
+                "disclosure_type": r.get("disclosure_type"),
+                "part_name": r.get("part_name"),
+                "part_number": r.get("part_number"),
+                "part_category": r.get("part_category"),
+                "addiction_link": r.get("addiction_link"),
             }
             for r in cw_rows
         ]
@@ -1136,6 +1185,105 @@ async def _patch_user_profile_data(
             key,
             json.dumps(value) if not isinstance(value, str) else value,
         )
+
+
+async def _patch_profile_jsonb_object(
+    db_pool, user_id: str, key: str, value: Dict[str, Any]
+) -> None:
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE users
+               SET profile_data = jsonb_set(
+                       COALESCE(profile_data, '{}'::jsonb),
+                       $2::text[],
+                       $3::jsonb,
+                       true
+                   ),
+                   updated_at = NOW()
+             WHERE username = $1
+            """,
+            user_id,
+            [key],
+            json.dumps(value),
+        )
+
+
+async def _fetch_profile_text_field(
+    db_pool, user_id: str, field_key: str
+) -> Optional[str]:
+    async with db_pool.acquire() as conn:
+        return await conn.fetchval(
+            "SELECT profile_data->>$2 FROM users WHERE username = $1",
+            user_id,
+            field_key,
+        )
+
+
+async def _append_addiction_status_history(
+    db_pool,
+    user_id: str,
+    addiction_type: str,
+    previous_status: Optional[str],
+    new_status: str,
+    set_by: str,
+    *,
+    subtype: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> None:
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO addiction_status_history (
+                user_id, addiction_type, previous_status, new_status,
+                subtype, set_by, notes
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            """,
+            user_id,
+            addiction_type,
+            previous_status,
+            new_status,
+            subtype,
+            set_by,
+            notes,
+        )
+
+
+async def _coach_put_addiction_branch_status(
+    *,
+    db_pool,
+    user_id: str,
+    profile_key: str,
+    addiction_type: str,
+    body: AddictionBranchStatusUpdate,
+    principal: Dict[str, Any],
+) -> Dict[str, Any]:
+    prev = await _fetch_profile_text_field(db_pool, user_id, profile_key)
+    await _patch_user_profile_data(db_pool, user_id, profile_key, body.status)
+    actor = principal.get("username", "") or principal.get("user_id", "") or ""
+    await _append_addiction_status_history(
+        db_pool,
+        user_id,
+        addiction_type,
+        previous_status=str(prev) if prev is not None else None,
+        new_status=body.status,
+        set_by=actor,
+        subtype=body.subtype,
+        notes=None,
+    )
+    await _emit_profile_mutation_audit(
+        db_pool,
+        target_user_id=user_id,
+        actor_id=actor,
+        actor_role=principal.get("role", "COACH"),
+        mutation_kind=f"{profile_key}_set",
+        additional_fields_redacted={
+            "new_value": body.status,
+            "subtype": body.subtype,
+        },
+    )
+    return {"ok": True, profile_key: body.status}
 
 
 # =============================================================================
@@ -1268,18 +1416,205 @@ async def set_substance_status(
     db_pool = request.app.state.db_pool
     if db_pool is None:
         raise HTTPException(503, detail={"reason": "database_unavailable"})
+    prev = await _fetch_profile_text_field(db_pool, user_id, "substance_status")
     await _patch_user_profile_data(
         db_pool, user_id, "substance_status", body.substance_status
+    )
+    actor = principal.get("username", "") or principal.get("user_id", "") or ""
+    await _append_addiction_status_history(
+        db_pool,
+        user_id,
+        "substance",
+        previous_status=str(prev) if prev is not None else None,
+        new_status=body.substance_status,
+        set_by=actor,
+        subtype=None,
+        notes=None,
     )
     await _emit_profile_mutation_audit(
         db_pool,
         target_user_id=user_id,
-        actor_id=principal.get("username", ""),
+        actor_id=actor,
         actor_role=principal.get("role", "COACH"),
         mutation_kind="substance_status_set",
         additional_fields_redacted={"new_value": body.substance_status},
     )
     return {"ok": True, "substance_status": body.substance_status}
+
+
+@coach_router.put("/{user_id}/sex-addiction-status")
+async def set_sex_addiction_status(
+    user_id: str,
+    body: AddictionBranchStatusUpdate,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+    return await _coach_put_addiction_branch_status(
+        db_pool=db_pool,
+        user_id=user_id,
+        profile_key="sex_addiction_status",
+        addiction_type="sex_addiction",
+        body=body,
+        principal=principal,
+    )
+
+
+@coach_router.put("/{user_id}/gambling-status")
+async def set_gambling_status(
+    user_id: str,
+    body: AddictionBranchStatusUpdate,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+    return await _coach_put_addiction_branch_status(
+        db_pool=db_pool,
+        user_id=user_id,
+        profile_key="gambling_status",
+        addiction_type="gambling",
+        body=body,
+        principal=principal,
+    )
+
+
+@coach_router.put("/{user_id}/gaming-status")
+async def set_gaming_status(
+    user_id: str,
+    body: AddictionBranchStatusUpdate,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+    return await _coach_put_addiction_branch_status(
+        db_pool=db_pool,
+        user_id=user_id,
+        profile_key="gaming_status",
+        addiction_type="gaming",
+        body=body,
+        principal=principal,
+    )
+
+
+@coach_router.put("/{user_id}/food-compulsion-status")
+async def set_food_compulsion_status(
+    user_id: str,
+    body: AddictionBranchStatusUpdate,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+    return await _coach_put_addiction_branch_status(
+        db_pool=db_pool,
+        user_id=user_id,
+        profile_key="food_compulsion_status",
+        addiction_type="food_compulsion",
+        body=body,
+        principal=principal,
+    )
+
+
+@coach_router.put("/{user_id}/work-compulsion-status")
+async def set_work_compulsion_status(
+    user_id: str,
+    body: AddictionBranchStatusUpdate,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+    return await _coach_put_addiction_branch_status(
+        db_pool=db_pool,
+        user_id=user_id,
+        profile_key="work_compulsion_status",
+        addiction_type="work_compulsion",
+        body=body,
+        principal=principal,
+    )
+
+
+@coach_router.put("/{user_id}/spending-compulsion-status")
+async def set_spending_compulsion_status(
+    user_id: str,
+    body: AddictionBranchStatusUpdate,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+    return await _coach_put_addiction_branch_status(
+        db_pool=db_pool,
+        user_id=user_id,
+        profile_key="spending_compulsion_status",
+        addiction_type="spending_compulsion",
+        body=body,
+        principal=principal,
+    )
+
+
+@coach_router.put("/{user_id}/codependency-status")
+async def set_codependency_status(
+    user_id: str,
+    body: AddictionBranchStatusUpdate,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+    return await _coach_put_addiction_branch_status(
+        db_pool=db_pool,
+        user_id=user_id,
+        profile_key="codependency_status",
+        addiction_type="codependency",
+        body=body,
+        principal=principal,
+    )
+
+
+@coach_router.put("/{user_id}/cross-addiction-profile")
+async def set_cross_addiction_profile(
+    user_id: str,
+    body: CrossAddictionProfileUpdate,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+    await _patch_profile_jsonb_object(
+        db_pool, user_id, "cross_addiction_profile", body.cross_addiction_profile
+    )
+    actor = principal.get("username", "") or principal.get("user_id", "") or ""
+    await _append_addiction_status_history(
+        db_pool,
+        user_id,
+        "cross_addiction_profile",
+        previous_status=None,
+        new_status="profile_updated",
+        set_by=actor,
+        subtype=None,
+        notes=None,
+    )
+    await _emit_profile_mutation_audit(
+        db_pool,
+        target_user_id=user_id,
+        actor_id=actor,
+        actor_role=principal.get("role", "COACH"),
+        mutation_kind="cross_addiction_profile_set",
+        additional_fields_redacted={"keys": list(body.cross_addiction_profile.keys())},
+    )
+    return {"ok": True, "cross_addiction_profile": body.cross_addiction_profile}
 
 
 # ------- COACH: codewords -----------------------------------------------------
@@ -1336,8 +1671,8 @@ async def add_codeword(
             INSERT INTO user_safety_codewords (
                 user_id, codeword_hash, codeword_salt, codeword_type,
                 codeword_label, triggers_mandatory_reporting,
-                set_by_clinician_id, active
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
+                set_by_clinician_id, active, disclosure_type
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, $8)
             """,
             user_id,
             cw_hash,
@@ -1346,6 +1681,7 @@ async def add_codeword(
             body.codeword_label,
             body.triggers_mandatory_reporting,
             actor_id,
+            body.codeword_type,
         )
 
     await _emit_profile_mutation_audit(

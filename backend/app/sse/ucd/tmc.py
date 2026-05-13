@@ -32,6 +32,7 @@ v1.3 Gap 8 — Polyvictimization Awareness (additive, dormant when no layers):
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 from datetime import datetime, timezone, timedelta
@@ -114,6 +115,14 @@ _STACKING_ELIGIBLE_CLASSES = frozenset({"THRESHOLD", "RECURRENCE"})
 # 'polyvictim_stacking' for tuning."
 _ESCALATION_PATH_BASELINE = "baseline"
 _ESCALATION_PATH_STACKING = "polyvictim_stacking"
+
+
+def _v14_addiction_branch_active(raw: Any) -> bool:
+    if raw is None:
+        return False
+    if isinstance(raw, str) and raw.strip().lower() == "none":
+        return False
+    return True
 
 
 class TherapeuticMomentClassifier:
@@ -231,6 +240,17 @@ class TherapeuticMomentClassifier:
             "polyvictimization_layer_count": 0.0,
             "polyvictim_severity_load": 0.0,
             "polyvictim_layers_active": 0,
+            # v1.4 addiction architecture — dormant until profile flags set.
+            "substance_branch_active": False,
+            "sex_addiction_branch_active": False,
+            "gambling_branch_active": False,
+            "gaming_branch_active": False,
+            "food_compulsion_branch_active": False,
+            "work_compulsion_branch_active": False,
+            "spending_compulsion_branch_active": False,
+            "codependency_branch_active": False,
+            "cross_addiction_active": False,
+            "cross_addiction_count": 0,
         }
         if not self.db_pool:
             return signals
@@ -326,6 +346,46 @@ class TherapeuticMomentClassifier:
                         "(signals dormant, v1.2 behavior preserved)",
                         user_id,
                         pv_err,
+                    )
+
+                # v1.4 — addiction branch signals from users.profile_data (username FK).
+                try:
+                    prow = await conn.fetchrow(
+                        "SELECT profile_data FROM users "
+                        "WHERE username = $1 OR id::text = $1 LIMIT 1",
+                        user_id,
+                    )
+                    pd = prow["profile_data"] if prow else None
+                    if isinstance(pd, str):
+                        try:
+                            pd = json.loads(pd)
+                        except Exception:
+                            pd = {}
+                    if not isinstance(pd, dict):
+                        pd = {}
+                    branch_keys = (
+                        ("substance_branch_active", "substance_status"),
+                        ("sex_addiction_branch_active", "sex_addiction_status"),
+                        ("gambling_branch_active", "gambling_status"),
+                        ("gaming_branch_active", "gaming_status"),
+                        ("food_compulsion_branch_active", "food_compulsion_status"),
+                        ("work_compulsion_branch_active", "work_compulsion_status"),
+                        ("spending_compulsion_branch_active", "spending_compulsion_status"),
+                        ("codependency_branch_active", "codependency_status"),
+                    )
+                    active_ct = 0
+                    for sig_key, prof_key in branch_keys:
+                        active = _v14_addiction_branch_active(pd.get(prof_key))
+                        signals[sig_key] = active
+                        if active:
+                            active_ct += 1
+                    signals["cross_addiction_count"] = active_ct
+                    signals["cross_addiction_active"] = active_ct >= 2
+                except Exception as ad_err:
+                    logger.warning(
+                        "TMC v1.4 addiction signal fetch failed for %s: %s",
+                        user_id,
+                        ad_err,
                     )
 
         except Exception as e:
