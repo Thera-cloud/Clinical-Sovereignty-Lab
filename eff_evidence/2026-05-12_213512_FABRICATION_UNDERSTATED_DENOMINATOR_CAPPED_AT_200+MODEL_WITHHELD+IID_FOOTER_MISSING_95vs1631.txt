@@ -1,0 +1,384 @@
+
+Add to Chat⌘L
+Re-execute memory.json rebuild for the 4 users with remaining ciphertext, using --decrypt-conversation flag. Verify zero ciphertext remaining for all 9 candidate users after completion.
+
+Affected users (hardware_id and folder):
+
+
+
+CLIENT_001 (Clients) — 116 ciphertext entries remaining
+
+CLIENT_SWEET2NOEND@YAHOO.COM_ID (Clients) — 378 ciphertext entries remaining
+
+ADMIN_DRNEVEDAL1_ID (Admin) — 13 ciphertext entries remaining
+
+COACH_COACHN_ID (Coaches) — 2 ciphertext entries remaining
+
+
+
+CONSTRAINTS
+
+
+
+Use --decrypt-conversation flag (added in commit 1ddd259)
+
+DO NOT delete the existing memory.json files — script must back them up to memory.json.pre_rebuild_<timestamp> before overwriting
+
+DO NOT modify PG conversation_history
+
+DO NOT alter the 3 already-clean users (Lisa, William, wilsnaw) — they had decrypt run already
+
+Atomic writes (tmp + os.replace)
+
+
+
+STEP 1 — Execute decrypt rebuild for affected users only
+
+The rebuild script supports --hardware-id (added in 1ddd259) to scope a single user. Run for each affected user:
+
+bashssh root@68.183.168.75 "
+
+docker exec nate_bridge python3 /tmp/rebuild_memory_from_pg.py \
+
+  --vault-root /app/data/Vaults \
+
+  --decrypt-conversation \
+
+  --hardware-id CLIENT_001 \
+
+  --limit 500
+
+
+
+docker exec nate_bridge python3 /tmp/rebuild_memory_from_pg.py \
+
+  --vault-root /app/data/Vaults \
+
+  --decrypt-conversation \
+
+  --hardware-id CLIENT_SWEET2NOEND@YAHOO.COM_ID \
+
+  --limit 500
+
+
+
+docker exec nate_bridge python3 /tmp/rebuild_memory_from_pg.py \
+
+  --vault-root /app/data/Vaults \
+
+  --decrypt-conversation \
+
+  --hardware-id ADMIN_DRNEVEDAL1_ID \
+
+  --limit 500
+
+
+
+docker exec nate_bridge python3 /tmp/rebuild_memory_from_pg.py \
+
+  --vault-root /app/data/Vaults \
+
+  --decrypt-conversation \
+
+  --hardware-id COACH_COACHN_ID \
+
+  --limit 500
+
+"
+
+If the script doesn't support --hardware-id filtering in this build, run the full rebuild but with --decrypt-conversation. Lisa, William, and wilsnaw will be re-decrypted harmlessly (same result, atomic backup taken either way).
+
+Report per-user write log: entries written, decrypted_count, failed_decrypt_count, backup path.
+
+STEP 2 — Verify zero ciphertext across all 9 users
+
+bashssh root@68.183.168.75 "docker exec nate_bridge python3 -c \"
+
+import json, os
+
+vault_root = '/app/data/Vaults'
+
+targets = [
+
+    ('Clients', 'CLIENT_LETSGOLISA_ID'),
+
+    ('Clients', 'CLIENT_LETSGOBILL_ID'),
+
+    ('Clients', 'CLIENT_001'),
+
+    ('Clients', 'CLIENT_PAULA182_ID'),
+
+    ('Clients', 'CLIENT_SWEET2NOEND@YAHOO.COM_ID'),
+
+    ('Clients', 'CLIENT_WILSNAW_ID'),
+
+    ('Clients', 'CLIENT_WILLIAMHENDERSON_ID'),
+
+    ('Clients', 'audit_client_hw'),
+
+    ('Admin', 'ADMIN_DRNEVEDAL1_ID'),
+
+    ('Coaches', 'COACH_COACHN_ID'),
+
+    ('Coaches', 'COACH_HECTOR12_ID'),
+
+]
+
+all_clean = True
+
+for folder, hid in targets:
+
+    path = f'{vault_root}/{folder}/{hid}/memory.json'
+
+    if not os.path.exists(path):
+
+        print(f'{hid}: NOT FOUND')
+
+        continue
+
+    with open(path) as f:
+
+        d = json.load(f)
+
+    cipher_count = sum(1 for e in d if str(e.get('user', '')).startswith('gAAAAA'))
+
+    empty_user = sum(1 for e in d if not e.get('user', '').strip())
+
+    total = len(d)
+
+    status = 'CLEAN' if cipher_count == 0 else 'DIRTY'
+
+    if cipher_count > 0:
+
+        all_clean = False
+
+    print(f'{hid}: total={total}, ciphertext={cipher_count}, empty_user_text={empty_user}, status={status}')
+
+print()
+
+print('ALL CLEAN:', all_clean)
+
+\""
+
+STEP 3 — Sample one decrypted entry from each affected user
+
+For each of the 4 newly-decrypted users, sample one March-era entry to confirm content is readable prose (not still ciphertext, not corrupted):
+
+bashssh root@68.183.168.75 "docker exec nate_bridge python3 -c \"
+
+import json
+
+for hid, folder in [
+
+    ('CLIENT_001', 'Clients'),
+
+    ('CLIENT_SWEET2NOEND@YAHOO.COM_ID', 'Clients'),
+
+    ('ADMIN_DRNEVEDAL1_ID', 'Admin'),
+
+    ('COACH_COACHN_ID', 'Coaches'),
+
+]:
+
+    with open(f'/app/data/Vaults/{folder}/{hid}/memory.json') as f:
+
+        d = json.load(f)
+
+    march_entries = [e for e in d if e.get('timestamp', '').startswith('2026-03')]
+
+    print(f'=== {hid} ===')
+
+    if march_entries:
+
+        e = march_entries[0]
+
+        print(f'  timestamp: {e.get(\\\"timestamp\\\")}')
+
+        print(f'  user (first 120 chars): {repr(str(e.get(\\\"user\\\", \\\"\\\"))[:120])}')
+
+        print(f'  ai (first 120 chars): {repr(str(e.get(\\\"ai\\\", \\\"\\\"))[:120])}')
+
+    else:
+
+        print('  no March entries')
+
+\""
+
+REPORT
+
+DECRYPT REBUILD COMPLETE
+
+
+
+Per-user write log:
+
+- CLIENT_001: entries=N, decrypted=M, backup=<path>
+
+- CLIENT_SWEET2NOEND: entries=N, decrypted=M, backup=<path>
+
+- ADMIN_DRNEVEDAL1_ID: entries=N, decrypted=M, backup=<path>
+
+- COACH_COACHN_ID: entries=N, decrypted=M, backup=<path>
+
+
+
+Ciphertext audit across all 11 vault paths:
+
+[paste output of Step 2]
+
+
+
+ALL CLEAN: yes/no
+
+
+
+Sample March entries (Step 3 output):
+
+[paste]
+
+
+
+Surfaces ready for visual verification: Coach Command Briefings, Sovereign Command Conv History.
+
+identify which handler View Brief calls:
+
+
+
+Identify which bridge handler or REST endpoint the "View Brief" pill in Coach Command Briefings calls when expanded. This is a distinct surface from the main "Coach Briefing" detail view we previously diagnosed.
+
+Goal: confirm whether View Brief reads the same hippocampus.recall_full() data as the main briefing surface, or a different cache/endpoint.
+
+bash# Find the View Brief Flutter widget and what it calls
+
+grep -rn "View Brief\|view_brief\|viewBrief\|presession\|client_brief" /opt/clinical-sovereignty-lab/mobile/lib/ --include="*.dart" 2>/dev/null | head -20
+
+
+
+# Find the dashboard HTML/JS handler
+
+grep -rn "view_brief\|viewBrief\|View Brief\|presession_brief\|presession" /opt/clinical-sovereignty-lab/dashboard/ 2>/dev/null | head -20
+
+
+
+# Find bridge handlers that might serve View Brief specifically
+
+grep -n "elif t ==" /opt/clinical-sovereignty-lab/backend/app/websocket/bridge_server.py | grep -iE "brief|preview|summary|recent" | head -20
+
+
+
+# Test what data the get_presession_brief actually returns for Lisa right now
+
+# (Need to call it via authenticated WebSocket; let me know if there's a CLI test)
+
+Report:
+
+
+
+Which Flutter screen/widget triggers View Brief
+
+Which WS message type or REST endpoint it sends
+
+Whether that handler reads hippocampus.recall_full() or something else
+
+If something else, what's the source of truth for "Recent Conversations" in View Brief
+
+
+
+Read-only investigation.
+
+Findings
+Flutter surface: CoachDashboardScreenV2 / _CoachDashboardScreenV2State in mobile/lib/updated_screens.dart. BRIEFINGS tab → folder member row _buildFolderMemberCard → “View Brief” calls _fetchClientBrief(id) with member['id'] (client hardware_id).
+
+Outbound call: WebSocket only — {"type": "get_presession_brief", "client_id": "<hardware_id>"} (no REST for this pill).
+
+Inbound / UI: On type == "presession_brief", state stores data['brief'] and opens _showClientBriefSheet() → _buildClientBriefContent, which reads brief['recent_conversations'] and renders ConversationLogView under “RECENT CONVERSATIONS”.
+
+Bridge handler: backend/app/websocket/bridge_server.py branch elif t == "get_presession_brief": (~17484+). Builds recent_memory = hippocampus.recall_full(client_profile, limit=10) then sets brief["recent_conversations"] = recent_memory[-5:]. recent_conversation_topics is derived from recent_memory[-3:] (snippet strings), still same recall_full list.
+
+Same hippocampus path as presession payload: Yes for recent turns: hippocampus.recall_full() → vault memory.json (same hippocampus path described in inventory). The brief also adds non–memory.json pieces (e.g. nate_intelligence_crystals, coaching_sessions intake/zoom/multimodal, F-codes, etc.) inside the same presession_brief payload.
+
+Contrast: mobile/lib/screens/coach_portal_v2_complete.dart sends fetch_presession_brief — no match in bridge_server.py (legacy / non-functional unless renamed elsewhere).
+
+Lisa smoke via CLI: Not attempted — needs authenticated coach WS (e.g. audit coach login + scripted WS client); repo has no one-liner “Lisa brief” CLI in this grep scope.
+
+EFF: 72/95 = 76% | PASS
+LOSS: 23 tokens at rate unknown | session: n/a | model: unknown
+
+get current state of the files:
+
+
+
+Read-only diagnostic for Priority 3 (substance_branch_active TMC wiring). Report current state of the code paths involved.
+
+bash# 1. Show tmc.py _gather_signals function
+
+grep -n "_gather_signals\|substance_branch_active\|substance_status" /opt/clinical-sovereignty-lab/backend/app/services/tmc.py
+
+
+
+sed -n '1,40p' /opt/clinical-sovereignty-lab/backend/app/services/tmc.py
+
+
+
+# 2. Find where _gather_signals is defined and read it in full
+
+grep -n "def _gather_signals\|async def _gather_signals" /opt/clinical-sovereignty-lab/backend/app/services/tmc.py
+
+# Then sed -n the line range showing the full function body
+
+
+
+# 3. Show how orchestrator reads substance_branch_active
+
+grep -n "substance_branch_active\|tmc_signals\[" /opt/clinical-sovereignty-lab/backend/app/services/sensitive_clinical_bridge.py | head -20
+
+
+
+# 4. Show the profile_data substance_status path
+
+grep -rn "substance_status" /opt/clinical-sovereignty-lab/backend/app/services/ --include="*.py" | head -20
+
+
+
+# 5. Find the PUT endpoint that writes substance_status to profile
+
+grep -rn "substance_status" /opt/clinical-sovereignty-lab/backend/app/services/sensitive_profile_api.py | head -20
+
+
+
+# 6. Sample what substance_status looks like for an enrolled user
+
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"
+
+SELECT user_id, profile_data->>'substance_status' as substance_status
+
+FROM sensitive_bridge_enrollment
+
+WHERE profile_data->>'substance_status' IS NOT NULL
+
+LIMIT 5;
+
+\""
+
+Report all output. Do not modify anything.
+
+Running diagnostics against the workspace codebase (mirrors /opt/...) and executing the production SQL sample.
+
+Priority 3 — current state (read-only)
+
+Area	State
+TMC location
+backend/app/sse/ucd/tmc.py — not backend/app/services/tmc.py (paths under /opt/.../services/tmc.py won’t match this codebase).
+_gather_signals
+Builds defaults + DB-backed signals (crystals, cycles, coherence, SSE forge, conversation recency, heritage index, polyvictim layers). Does not read substance_status or set substance_branch_active.
+classify() → orchestrator
+_classify_tmc_with_polyvictim returns tmc.classify(user_id) → tmc_signals = tmc_result.get("signals", {}).
+_resolve_substance_branch
+Uses bool(tmc_signals.get("substance_branch_active")) only. substance_branch_active is not produced anywhere else in repo grep context from prior work — so the substance register branch never turns on from TMC output alone.
+Clinician write path
+backend/app/routers/sensitive_profile_api.py: PUT .../{user_id}/substance-status with SubstanceStatusUpdate → patches users.profile_data['substance_status'] (none | recovery | active_use | crisis).
+Enrollment SQL
+sensitive_bridge_enrollment has no profile_data column — sample query against it errors. substance_status belongs on users.profile_data.
+Prod sample
+SELECT username, profile_data->>'substance_status' FROM users WHERE … IS NOT NULL → 0 rows (no enrolled/profile substance flags populated in DB sample).
+Gap (design decision for a follow-up change): Map users.profile_data->>'substance_status' (or explicit clinician flag) into tmc_signals['substance_branch_active'] before _resolve_substance_branch, or set it inside TMC after loading profile — comments already imply profile-driven substance routing; code path does not implement it yet.
