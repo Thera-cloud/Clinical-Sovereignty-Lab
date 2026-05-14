@@ -276,10 +276,12 @@ class TherapeuticMomentClassifier:
                 if cycle:
                     signals["first_time_pattern_break"] = bool(cycle.get("is_first_break", False))
 
+                # Domain-level observability: nevedal_coherence_log rows are keyed by
+                # `domain`, not per-user. Clinical chat/TMC uses the latest clinical
+                # coherence samples as a system signal (ec_current / ec_slope).
                 ec_rows = await conn.fetch(
-                    "SELECT c_emo, recorded_at FROM nevedal_coherence_log "
-                    "WHERE user_id = $1 ORDER BY recorded_at DESC LIMIT 5",
-                    user_id,
+                    "SELECT c_emo, created_at FROM nevedal_coherence_log "
+                    "WHERE domain = 'clinical' ORDER BY created_at DESC LIMIT 5",
                 )
                 if ec_rows:
                     signals["ec_current"] = float(ec_rows[0]["c_emo"] or 0)
