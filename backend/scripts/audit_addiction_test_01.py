@@ -36,7 +36,8 @@ PASSWORD_HASH = (
         100000,
     ).hex()
 )
-SESSION_ID = "audit_addiction_test_01_session"
+RUN_ID = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+SESSION_ID = f"audit_addiction_test_01_session_{RUN_ID}"
 
 V14_FLAGS = {
     "v1_4_codeword_listener_enabled": True,
@@ -416,7 +417,8 @@ async def _insert_telemetry(pool) -> List[Dict[str, Any]]:
 
 async def _cleanup(pool) -> None:
     async with pool.acquire() as conn:
-        await conn.execute("DELETE FROM sensitive_bridge_log WHERE user_id = $1", CLIENT)
+        # sensitive_bridge_log is immutable for 7-year clinical retention.
+        # Do not delete synthetic rows; SESSION_ID makes each run distinct.
         await conn.execute("DELETE FROM crisis_events WHERE user_name = $1", CLIENT)
         await conn.execute("DELETE FROM coach_escalation_notifications WHERE coach_username = $1", COACH)
         await conn.execute("DELETE FROM user_safety_codewords WHERE user_id = $1", CLIENT)
