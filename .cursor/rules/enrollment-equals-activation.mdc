@@ -1,0 +1,20 @@
+# Enrollment Equals Full v1.3 + v1.4 Activation
+
+## Rule
+
+- **`sensitive_bridge_enrollment.gap_features_enabled`** must be populated at **INSERT** with **`FULL_ACTIVATION_GAP_FEATURES`** from `backend/app/services/sensitive_clinical_bridge.py` (all 16 `gap_*` + 7 `v1_4_*` keys set to `true`).
+- **Never** default new enrollment rows to `'{}'::jsonb` or NULL for `gap_features_enabled`. Empty JSONB enrollment is a regression — enrollment is activation for v1.4 client engagement.
+- **Backfills** (migration or one-off) that repair `{}`/NULL must emit **`enrollment_backfilled_to_full_activation`** in `sensitive_bridge_log` per user touched.
+
+## Single Source of Truth
+
+- Python: `FULL_ACTIVATION_GAP_FEATURES` adjacent to `_FEATURE_FLAG_NAMES` / `_V1_4_FEATURE_FLAG_NAMES` in `sensitive_clinical_bridge.py`.
+- SQL migrations that embed the same JSON must stay byte-for-byte aligned when flag lists change.
+
+## Coach Enrollment Endpoint
+
+- `POST` coach-initiated enrollment in `sensitive_profile_api.py` must pass `json.dumps(FULL_ACTIVATION_GAP_FEATURES)` into the INSERT, not `'{}'::jsonb`.
+
+## Client-Initiated Codeword / Part
+
+- Persistence requires an enrollment row with `cohort_label IS DISTINCT FROM 'unenrolled'` (`client_initiated_sensitive_registration.py`). Feature flags on that JSONB gate orchestrator behavior separately.

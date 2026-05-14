@@ -3266,6 +3266,12 @@ _V1_4_FEATURE_FLAG_NAMES: Tuple[str, ...] = (
     "v1_4_alert_dispatch_enabled",
 )
 
+# Single source of truth: all gap_* + v1_4_* flags TRUE at enrollment INSERT/backfill.
+FULL_ACTIVATION_GAP_FEATURES: Dict[str, bool] = {
+    **{name: True for name in _FEATURE_FLAG_NAMES},
+    **{name: True for name in _V1_4_FEATURE_FLAG_NAMES},
+}
+
 
 async def _read_master_enabled(db_pool) -> bool:
     """Read app_settings.sensitive_bridge_master_enabled. Default False on any

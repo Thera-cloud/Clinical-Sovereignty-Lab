@@ -23,6 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.services.sensitive_clinical_bridge import FULL_ACTIVATION_GAP_FEATURES
+
 CLIENT = "audit_addiction_test_01"
 COACH = "audit_addiction_coach_01"
 _PASSWORD_SALT = "0123456789abcdef0123456789abcdef"
@@ -38,16 +40,6 @@ PASSWORD_HASH = (
 )
 RUN_ID = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 SESSION_ID = f"audit_addiction_test_01_session_{RUN_ID}"
-
-V14_FLAGS = {
-    "v1_4_codeword_listener_enabled": True,
-    "v1_4_addiction_branches_enabled": True,
-    "v1_4_cross_addiction_overlay_enabled": True,
-    "v1_4_dst_lens_enabled": True,
-    "v1_4_framework_lens_enabled": True,
-    "v1_4_crystal_factory_enabled": True,
-    "v1_4_alert_dispatch_enabled": True,
-}
 
 TELEMETRY_TYPES = (
     "addiction_status_update",
@@ -199,7 +191,7 @@ async def _setup(pool) -> None:
                 notes = EXCLUDED.notes
             """,
             CLIENT,
-            json.dumps(V14_FLAGS),
+            json.dumps(FULL_ACTIVATION_GAP_FEATURES),
         )
 
 

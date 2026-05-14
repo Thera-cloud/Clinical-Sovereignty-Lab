@@ -615,7 +615,14 @@ def _register_variant_guidance(variant: Optional[str]) -> str:
             "chair) and let it sit. NO somatic-prompting questions ('where do "
             "you feel that'). NO trauma processing. Bare presence. Under 200 "
             "tokens. Distinct from `shutdown` — dissociation is a different "
-            "physiological state and tolerates even less demand."
+            "physiological state and tolerates even less demand.\n"
+            "When the client directly requests a therapeutic tool (mantra, "
+            "grounding technique, breathing exercise, coping strategy, "
+            "affirmation, truth statement, anchor phrase, or similar), "
+            "deliver it cleanly: state the tool, give one brief instruction for "
+            "how to use it, then stop. Do not wrap the tool in a question "
+            "asking them to evaluate it, choose alternatives, or describe "
+            "whether it resonates."
         )
     if variant == "predictability_continuity":
         return (
@@ -626,7 +633,14 @@ def _register_variant_guidance(variant: Optional[str]) -> str:
             "the prior turn's actual length (parity is the clinical signal). "
             "No reframes. No new interpretations. No new metaphors. The "
             "survivor's nervous system is reading 'is this the same Nate as "
-            "last time' — be that."
+            "last time' — be that.\n"
+            "When the client directly requests a therapeutic tool (mantra, "
+            "grounding technique, breathing exercise, coping strategy, "
+            "affirmation, truth statement, anchor phrase, or similar), "
+            "deliver it cleanly: state the tool, give one brief instruction for "
+            "how to use it, then stop. Do not wrap the tool in a question "
+            "asking them to evaluate it, choose alternatives, or describe "
+            "whether it resonates."
         )
     return ""
 

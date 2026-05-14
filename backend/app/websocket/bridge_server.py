@@ -8723,6 +8723,27 @@ class AzureCortex:
         - When they mention past events, REFERENCE them directly
         - If you detect crisis language, express concern and suggest professional help
         - Focus on validation before problem-solving
+        - THERAPEUTIC TOOL REQUESTS: When the client directly asks for a mantra,
+          grounding technique, breathing exercise, coping strategy, affirmation,
+          truth statement, anchor phrase, or similar tactical help, deliver it
+          cleanly: state the tool, give one brief how-to, then stop. Do not wrap
+          it in questions that ask them to evaluate the tool, compare options,
+          or say whether it resonates.
+        - SENSITIVE BRIDGE — CODWORDS AND PARTS (CLIENT clients enrolled in
+          Sensitive Bridge): When clinically appropriate, you may gently INVITE
+          (never pressure) the client to register a codeword or name an internal
+          part so their clinician can see it in the Sensitive Profile. A
+          codeword is a phrase they might say later to signal a specific need
+          (grounding, distress, dissociation). Naming a part is IFS-style —
+          protector, exile, addiction-part, etc. Example invitations: "If it
+          would help, you could give this feeling a name we can use later —
+          would you like to?" or "If a phrase captures this state, we could save
+          it as something you say when you're struggling." If they agree and
+          supply text, confirm it can be saved to their profile for clinician
+          review. The client device sends WebSocket types
+          ``client_initiated_codeword_proposal`` or
+          ``client_initiated_part_proposal`` with the agreed payload — do not
+          claim persistence succeeded until the app confirms.
         
         FACTUAL GROUNDING (Sovereign Standard §8):
         - NEVER confidently assert facts about real people that fall OUTSIDE YOUR VERIFIABLE KNOWLEDGE. This includes current status (alive, dead, married, etc.), post-training-cutoff events (even if settled), and any claim you are not certain of. Established historical facts clearly within your training data ("Abraham Lincoln was the 16th president") are fine.
@@ -10856,6 +10877,97 @@ async def _classify_hoh_decision(obs_id, hoh_hardware_id, family_id, reason, not
         print(f">>> [HOH_OBS] Classification failed: {_cls_err}")
 
 
+async def _ws_resolve_canonical_username(profile: Dict[str, Any]) -> str:
+    """QUANTUM-CRYSTAL-ARCH: Sensitive Bridge rows key on ``users.username``."""
+    try:
+        from app.services._identity_resolver import resolve_username
+    except Exception:
+        resolve_username = None  # type: ignore
+
+    uid_key = (profile or {}).get("username") or (profile or {}).get("hardware_id") or ""
+    if resolve_username and db_pool and uid_key:
+        resolved = await resolve_username(db_pool, uid_key)
+        if resolved:
+            return str(resolved)
+    return str((profile or {}).get("username") or "")
+
+
+async def _handle_client_initiated_codeword_ws(
+    websocket, data: dict, profile: dict
+) -> None:
+    """Persist client-agreed codeword after Sensitive Bridge enrollment."""
+    from app.services.client_initiated_sensitive_registration import (
+        persist_client_initiated_codeword,
+    )
+
+    role = (profile.get("role") or "").upper()
+    if role != "CLIENT":
+        await websocket.send(
+            json.dumps({"type": "error", "message": "CLIENT_ROLE_REQUIRED"})
+        )
+        return
+    canon_u = await _ws_resolve_canonical_username(profile)
+    if not canon_u:
+        await websocket.send(
+            json.dumps({"type": "error", "message": "USER_RESOLUTION_FAILED"})
+        )
+        return
+    phrase = (
+        data.get("plaintext_codeword")
+        or data.get("codeword_phrase")
+        or data.get("phrase")
+        or ""
+    )
+    ok, payload = await persist_client_initiated_codeword(
+        db_pool,
+        canonical_username=canon_u,
+        plaintext_codeword=str(phrase),
+        suggested_disclosure_type=data.get("suggested_disclosure_type"),
+        codeword_type=data.get("codeword_type") or "innocuous_phrase",
+        part_name=data.get("part_name"),
+        part_number=data.get("part_number"),
+        part_category=data.get("part_category"),
+        addiction_link=data.get("addiction_link"),
+    )
+    out_type = (
+        "client_initiated_codeword_saved" if ok else "client_initiated_codeword_rejected"
+    )
+    await websocket.send(json.dumps({"type": out_type, **payload}, default=str))
+
+
+async def _handle_client_initiated_part_ws(
+    websocket, data: dict, profile: dict
+) -> None:
+    """Persist client-agreed part name after Sensitive Bridge enrollment."""
+    from app.services.client_initiated_sensitive_registration import (
+        persist_client_initiated_part,
+    )
+
+    role = (profile.get("role") or "").upper()
+    if role != "CLIENT":
+        await websocket.send(
+            json.dumps({"type": "error", "message": "CLIENT_ROLE_REQUIRED"})
+        )
+        return
+    canon_u = await _ws_resolve_canonical_username(profile)
+    if not canon_u:
+        await websocket.send(
+            json.dumps({"type": "error", "message": "USER_RESOLUTION_FAILED"})
+        )
+        return
+    ok, payload = await persist_client_initiated_part(
+        db_pool,
+        canonical_username=canon_u,
+        part_name=data.get("part_name") or "",
+        part_number=data.get("part_number"),
+        part_category=data.get("part_category"),
+        addiction_link=data.get("addiction_link"),
+        description=data.get("description"),
+    )
+    out_type = "client_initiated_part_saved" if ok else "client_initiated_part_rejected"
+    await websocket.send(json.dumps({"type": out_type, **payload}, default=str))
+
+
 async def handle_client(websocket, path=None):
     """Handle WebSocket connections"""
     uid = "GUEST"
@@ -11007,6 +11119,8 @@ async def handle_client(websocket, path=None):
                 "admin_setup_totp", "admin_verify_totp",
                 # --- Conversational / AI ---
                 "tts_speak", "tts_cancel", "chat_message", "nate_query",
+                "client_initiated_codeword_proposal",
+                "client_initiated_part_proposal",
                 "biometric_update",
                 # --- Admin data-fetch (dashboard auto-refresh) ---
                 "admin_get_stats", "admin_get_users", "admin_get_crisis_watchlist",
@@ -12152,6 +12266,22 @@ async def handle_client(websocket, path=None):
                                 _handle_tts_speak(websocket, tts_text, request_id, _active_tts_cancel, user_hw_id=current_hardware_id or uid)
                             )
             
+            elif t == "client_initiated_codeword_proposal":
+                if current_profile:
+                    await _handle_client_initiated_codeword_ws(websocket, d, current_profile)
+                else:
+                    await websocket.send(
+                        json.dumps({"type": "error", "message": "Not authenticated"})
+                    )
+
+            elif t == "client_initiated_part_proposal":
+                if current_profile:
+                    await _handle_client_initiated_part_ws(websocket, d, current_profile)
+                else:
+                    await websocket.send(
+                        json.dumps({"type": "error", "message": "Not authenticated"})
+                    )
+
             # === CHAT MESSAGE ===
             elif t == "chat_message":
                 if current_profile:

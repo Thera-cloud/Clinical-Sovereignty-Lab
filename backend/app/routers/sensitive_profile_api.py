@@ -145,6 +145,7 @@ from app.services.api_server import (
     require_coach,
     security as _bearer_security,
 )
+from app.services.sensitive_clinical_bridge import FULL_ACTIVATION_GAP_FEATURES
 
 logger = logging.getLogger(__name__)
 
@@ -2972,12 +2973,11 @@ async def coach_initiated_enroll(
 
       a. INSERT row into ``sensitive_bridge_enrollment`` with
          ``cohort_label = body.cohort_label``,
-         ``gap_features_enabled = '{}'::jsonb``,
+         ``gap_features_enabled = FULL_ACTIVATION_GAP_FEATURES`` (all 16
+         ``gap_*`` + 7 ``v1_4_*`` keys TRUE — enrollment activates full
+         v1.3+v1.4 bridge surface per ``enrollment-equals-activation`` rule),
          ``enrolled_by = current_coach_username``,
          ``enrolled_at = NOW()``.
-         Note that ``gap_features_enabled`` is FORCED to empty — Path C
-         can NEVER set per-user gap flags. That stays admin-only via the
-         telemetry-agent surface.
 
       b. UPDATE ``users.profile_data`` to set ``population_type``. Uses
          ``jsonb_set`` to preserve other keys (per
@@ -3112,11 +3112,12 @@ async def coach_initiated_enroll(
                 user_id, cohort_label, gap_features_enabled,
                 enrolled_at, enrolled_by, last_modified_at, last_modified_by
             ) VALUES (
-                $1, $2, '{}'::jsonb, NOW(), $3, NOW(), $3
+                $1, $2, $3::jsonb, NOW(), $4, NOW(), $4
             )
             """,
             user_id,
             body.cohort_label,
+            json.dumps(FULL_ACTIVATION_GAP_FEATURES),
             coach_username,
         )
 
