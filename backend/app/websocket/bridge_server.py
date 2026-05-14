@@ -27471,34 +27471,72 @@ IMPORTANT:
                 print(f">>> [SANCTUARY] ✓ Session {sanctuary_id} completed successfully")
 
             elif t == "sanctuary_entry_responses":
+                # E1: same completion contract as sanctuary_onboarding_complete — persist consent,
+                # then optionally start_session when all_members_joined (Track 1).
+                if not current_profile:
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": "Not authenticated",
+                    }))
+                    continue
+                _er_uid = current_profile["hardware_id"]
+                _er_name = current_profile.get("name", "Member")
                 sanctuary_id = d.get("sanctuary_id")
-                responses = d.get("responses", {})
+                responses = d.get("responses") or {}
+                if not isinstance(responses, dict):
+                    responses = {}
                 sanctuary_data = sanctuary_engine.data["active_sanctuaries"].get(sanctuary_id, {})
                 if sanctuary_data:
+
+                    def _entry_val(rdict, *keys, default=""):
+                        for _k in keys:
+                            _v = rdict.get(_k)
+                            if _v is None:
+                                continue
+                            if isinstance(_v, (dict, list)):
+                                return json.dumps(_v, default=str)[:10000]
+                            return str(_v)
+                        return default
+
+                    _reason = _entry_val(
+                        responses, "reason", "initial_reason", "what_brought_you", "brought_you_today"
+                    )
+                    _goal = _entry_val(responses, "goal", "personal_goal")
+                    _concerns = _entry_val(responses, "concerns", "family_concerns", "issues")
+                    await sanctuary_engine.store_member_input(
+                        sanctuary_id=sanctuary_id,
+                        user_id=_er_uid,
+                        initial_reason=_reason,
+                        personal_goal=_goal,
+                        family_concerns=_concerns,
+                    )
                     if "entry_responses" not in sanctuary_data:
                         sanctuary_data["entry_responses"] = {}
-                    sanctuary_data["entry_responses"][member_id] = {
+                    sanctuary_data["entry_responses"][_er_uid] = {
                         **responses,
-                        "member_name": member_name,
-                        "timestamp": datetime.datetime.now().isoformat()
+                        "member_name": _er_name,
+                        "timestamp": datetime.datetime.now().isoformat(),
                     }
                     sanctuary_engine.data["active_sanctuaries"][sanctuary_id] = sanctuary_data
                     sanctuary_engine._save()
-                    print(f">>> [SANCTUARY] Entry responses saved for {member_name}")
+                    print(f">>> [SANCTUARY] Entry responses saved for {_er_name}")
                     await websocket.send(json.dumps({
                         "type": "sanctuary_entry_complete",
                         "sanctuary_id": sanctuary_id,
                         "message": "Thank you for sharing."
                     }))
-                    members = [{"user_id": m.get("user_id"), "name": m.get("name")} for m in sanctuary_data.get("members", [])]
+                    sanctuary_data = sanctuary_engine.get_session(sanctuary_id)
+                    members = sanctuary_engine.get_member_list(sanctuary_id)
                     await websocket.send(json.dumps({
                         "type": "sanctuary_entry_ready",
                         "sanctuary_id": sanctuary_id,
-                        "status": sanctuary_data.get("status", "ACTIVE"),
+                        "status": (sanctuary_data or {}).get("status", "ACTIVE"),
                         "total_charges": sanctuary_engine.get_total_charges(sanctuary_id),
                         "members": members,
-                        "messages": (sanctuary_data.get("messages", []) or [])[-50:]
+                        "messages": ((sanctuary_data or {}).get("messages", []) or [])[-50:],
                     }))
+                    if sanctuary_engine.all_members_joined(sanctuary_id):
+                        await sanctuary_engine.start_session(sanctuary_id)
 
             elif t == "sanctuary_sync_state":
                 """

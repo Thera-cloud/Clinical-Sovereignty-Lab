@@ -531,14 +531,28 @@ class FamilySanctuaryEngine:
             self._save()
     
     def all_members_joined(self, sanctuary_id: str) -> bool:
-        """Check if all invited members have joined"""
-        sanctuary = self.data["active_sanctuaries"][sanctuary_id]
-        
-        joined_ids = {m["user_id"] for m in sanctuary["members"] if m["member_consent_agreed"]}
-        invited_ids = set(sanctuary["invited_member_ids"])
-        
-        # All invited members have completed onboarding
-        return joined_ids == invited_ids
+        """Check if all invited members have completed onboarding and HoH has consented."""
+        try:
+            sanctuary = self.data["active_sanctuaries"][sanctuary_id]
+        except KeyError:
+            return False
+        members = sanctuary.get("members") or []
+        if not members:
+            return False
+
+        joined_ids = {m["user_id"] for m in members if m.get("member_consent_agreed")}
+        invited_ids = set(sanctuary.get("invited_member_ids") or [])
+
+        # Invited list excludes the creator; they still appear in `members` once added.
+        # Subset check: every invited hardware_id must have consented (creator implicitly
+        # must also consent — listed in `members` but not in invited_member_ids).
+        if not invited_ids.issubset(joined_ids):
+            return False
+
+        hoh = sanctuary.get("head_of_household_id") or sanctuary.get("created_by") or ""
+        if hoh and hoh not in joined_ids:
+            return False
+        return True
     
     async def start_session(self, sanctuary_id: str):
         """Start the sanctuary session (all members ready)"""
