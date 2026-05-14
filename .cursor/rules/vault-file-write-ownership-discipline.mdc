@@ -1,0 +1,44 @@
+# Vault file write ownership discipline
+
+## Symptom
+
+`PermissionError [Errno 13]` in bridge logs when writing vault files (e.g. `metrics.json`).
+
+## Root cause
+
+Host-side operations (`cp`, `mv`, `tar` extract, `sed` in-place, manual edit, vault restore) create files as `root:root` with mode often `600` or root-default.
+
+## Container reality
+
+The bridge runs as **uid 1000** (`nate`). Reads can succeed with mode `644`, but writes require **uid 1000** ownership on bind-mounted vault paths.
+
+## Required discipline
+
+After **any** host-side write under `data/bridge/Vaults/Clients/**`:
+
+```bash
+chown 1000:1000 <path>
+chmod 644 <path>
+```
+
+For `docker exec` writes into mounted vault paths, **verify ownership after write**.
+
+## Historical incidents
+
+- 2026-04-14 → 2026-05-12 vault restore (root-extracted tar)
+- 2026-05-12 Swain metric replay (Paula + Zach)
+- 2026-05-12 `memory.json` rebuild from PG (initial pass surfaced permission skew)
+- Any vault tarball restore without ownership normalization
+
+## Pre-deploy / post-restore check (paste-ready)
+
+```bash
+find /opt/clinical-sovereignty-lab/data/bridge/Vaults/Clients -type f \( ! -user 1000 -o ! -perm -644 \) -ls
+```
+
+**Expected:** no output (empty). Non-empty output requires remediation (`chown` / `chmod` on listed files).
+
+## Rules
+
+1. Never leave `root:root` vault files on paths the bridge must write.
+2. After bulk fixes, re-run the `find` above until the result is empty.
