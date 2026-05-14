@@ -427,7 +427,7 @@ async def _cleanup(pool) -> None:
         await conn.execute("DELETE FROM cross_addiction_transfer_events WHERE user_id = $1", CLIENT)
         await conn.execute("DELETE FROM sensitive_bridge_enrollment WHERE user_id = $1", CLIENT)
         await conn.execute("DELETE FROM coach_client_overrides WHERE coach_user_id = $1 OR client_user_id = $2", COACH, CLIENT)
-        await conn.execute("DELETE FROM users WHERE username IN ($1, $2)", CLIENT, COACH)
+        # Keep synthetic users: retained sensitive_bridge_log rows FK to users(username).
 
 
 async def main() -> int:
