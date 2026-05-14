@@ -24,8 +24,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -775,6 +779,74 @@ class PGSDEngine:
         self.trace = QuantumTraceComputer()
         self.spatial = SpatioTemporalComputer()
 
+    @staticmethod
+    def _looks_like_uuid(value: str) -> bool:
+        try:
+            uuid.UUID(str(value).strip())
+            return True
+        except (ValueError, TypeError, AttributeError):
+            return False
+
+    async def resolve_pgsd_subject(self, subject: str) -> Optional[Dict[str, str]]:
+        """
+        Resolve a caller-supplied subject (users.id UUID, hardware_id, or
+        username) to internal row keys used by PGSD loaders.
+
+        Returns dict: id (uuid text), hardware_id, username; or None if
+        unresolved (audit via pgsd_subject_unresolved).
+        """
+        if not self.db or not subject or not str(subject).strip():
+            return None
+        sub = str(subject).strip()
+        try:
+            async with self.db.acquire() as conn:
+                row = None
+                if self._looks_like_uuid(sub):
+                    try:
+                        row = await conn.fetchrow(
+                            """
+                            SELECT id::text AS id, hardware_id, username
+                            FROM users
+                            WHERE id = $1::uuid
+                            """,
+                            sub,
+                        )
+                    except Exception:
+                        row = None
+                if not row:
+                    row = await conn.fetchrow(
+                        """
+                        SELECT id::text AS id, hardware_id, username
+                        FROM users
+                        WHERE hardware_id = $1
+                        """,
+                        sub,
+                    )
+                if not row:
+                    row = await conn.fetchrow(
+                        """
+                        SELECT id::text AS id, hardware_id, username
+                        FROM users
+                        WHERE username = $1
+                        """,
+                        sub,
+                    )
+                if row and row.get("id") and row.get("hardware_id"):
+                    return {
+                        "id": row["id"],
+                        "hardware_id": row["hardware_id"],
+                        "username": row["username"] or "",
+                    }
+        except Exception as e:
+            logger.warning(
+                "pgsd_subject_resolve_error subject=%r err=%s",
+                sub,
+                e,
+                extra={"identity_resolution_failed": True},
+            )
+            return None
+        return None
+
     async def compute_full_pgsd(self, user_id: str) -> Dict:
         """
         Compute the complete PGSD state for a user.
@@ -782,11 +854,27 @@ class PGSDEngine:
         Pulls from all available data sources. Gracefully degrades when
         any data source (or the db pool itself) is unavailable.
         """
-        crystals = await self._load_crystal_data(user_id)
-        metrics = await self._load_metrics(user_id)
-        sessions = await self._load_session_data(user_id)
-        family = await self._load_family_data(user_id)
-        multimodal = await self._load_multimodal(user_id)
+        resolved = await self.resolve_pgsd_subject(user_id)
+        if not resolved:
+            logger.warning(
+                "pgsd_subject_unresolved subject=%r",
+                user_id,
+                extra={"identity_resolution_failed": True},
+            )
+        uid_uuid = (resolved or {}).get("id") or ""
+        client_key = (resolved or {}).get("hardware_id") or user_id
+
+        crystals = await self._load_crystal_data(uid_uuid)
+        metrics = await self._load_metrics(uid_uuid)
+        sessions = await self._load_session_data(client_key)
+        family = await self._load_family_data(uid_uuid)
+        multimodal = await self._load_multimodal(client_key)
+
+        if resolved and not crystals.get("domains") and not crystals.get("total_crystals"):
+            logger.debug(
+                "pgsd_loader_empty kind=crystals user_uuid=%s — ok identity, no user crystals",
+                uid_uuid,
+            )
 
         # ─── TDUFT ───────────────────────────────────────────────────
         active_dims = len(crystals.get("domains", {}))
@@ -816,8 +904,8 @@ class PGSDEngine:
 
         # ─── Timescape ───────────────────────────────────────────────
         total_domains = active_dims
-        resolved = int(crystals.get("resolved_domains", 0) or 0)
-        void_fraction = self.timescape.compute_void_fraction(total_domains, resolved)
+        resolved_domains = int(crystals.get("resolved_domains", 0) or 0)
+        void_fraction = self.timescape.compute_void_fraction(total_domains, resolved_domains)
         time_dilation = self.timescape.compute_time_dilation(void_fraction)
         session_region = self.timescape.classify_session_region(
             time_density, session_engagement, crystal_yield
@@ -872,7 +960,7 @@ class PGSDEngine:
                 "void_fraction": void_fraction,
                 "time_dilation": time_dilation,
                 "session_region": session_region,
-                "resolved_domains": resolved,
+                "resolved_domains": resolved_domains,
                 "total_domains": total_domains,
             },
 
@@ -909,9 +997,9 @@ class PGSDEngine:
     # is missing or any query fails. The PGSD engine never raises on a
     # data-loading failure — it simply degrades to neutral inputs.
 
-    async def _load_crystal_data(self, user_id: str) -> Dict:
-        """Load crystal statistics for PGSD computation."""
-        if not self.db:
+    async def _load_crystal_data(self, user_uuid: str) -> Dict:
+        """Load crystal statistics for PGSD computation (users.id UUID text)."""
+        if not self.db or not user_uuid:
             return {"domains": {}, "total_crystals": 0}
 
         try:
@@ -923,16 +1011,12 @@ class PGSDEngine:
                        MIN(created_at) AS oldest,
                        MAX(created_at) AS newest
                 FROM nate_intelligence_crystals
-                WHERE user_id = (
-                    SELECT id FROM users
-                    WHERE hardware_id = $1
-                    LIMIT 1
-                )
+                WHERE user_id = $1::uuid
                   AND scope = 'user'
                   AND superseded_by IS NULL
                 GROUP BY domain
                 """,
-                user_id,
+                user_uuid,
             )
 
             domains: Dict[str, float] = {}
@@ -955,13 +1039,10 @@ class PGSDEngine:
             recent = await self.db.fetchval(
                 """
                 SELECT COUNT(*) FROM nate_intelligence_crystals
-                WHERE user_id = (
-                    SELECT id FROM users
-                    WHERE hardware_id = $1 LIMIT 1
-                )
+                WHERE user_id = $1::uuid
                   AND created_at > NOW() - INTERVAL '30 days'
                 """,
-                user_id,
+                user_uuid,
             ) or 0
 
             return {
@@ -976,7 +1057,7 @@ class PGSDEngine:
         except Exception:
             return {"domains": {}, "total_crystals": 0}
 
-    async def _load_metrics(self, user_id: str) -> Dict:
+    async def _load_metrics(self, user_uuid: str) -> Dict:
         """Load Nevedal metrics + emotional state indicators for this user.
 
         IMPORTANT: client_metrics column is `quantum`, NOT `quantum_score`
@@ -990,7 +1071,7 @@ class PGSDEngine:
             "anxiety": 0.0, "stress": 0.0, "depression": 0.0,
             "shame_profile": {},
         }
-        if not self.db:
+        if not self.db or not user_uuid:
             return defaults
         try:
             row = await self.db.fetchrow(
@@ -1000,11 +1081,9 @@ class PGSDEngine:
                        anxiety_level, stress_level, depression_indicators,
                        shame_profile
                 FROM client_metrics
-                WHERE user_id = (
-                    SELECT id FROM users WHERE hardware_id = $1 LIMIT 1
-                )
+                WHERE user_id = $1::uuid
                 """,
-                user_id,
+                user_uuid,
             )
             if row:
                 shame_raw = row["shame_profile"]
@@ -1024,6 +1103,10 @@ class PGSDEngine:
                     "depression": float(row["depression_indicators"] or 0.0),
                     "shame_profile": shame_raw if isinstance(shame_raw, dict) else {},
                 }
+            logger.debug(
+                "pgsd_loader_empty kind=metrics user_uuid=%s (no client_metrics row)",
+                user_uuid,
+            )
             return defaults
         except Exception:
             return defaults
@@ -1052,17 +1135,20 @@ class PGSDEngine:
         except Exception:
             return {}
 
-    async def _load_family_data(self, user_id: str) -> Dict:
+    async def _load_family_data(self, user_uuid: str) -> Dict:
         """Load family coherence data if applicable."""
-        if not self.db:
+        if not self.db or not user_uuid:
             return {"has_family": False}
         try:
             family_id = await self.db.fetchval(
                 """
-                SELECT profile_data->>'family_id'
-                FROM users WHERE hardware_id = $1
+                SELECT COALESCE(
+                    NULLIF(TRIM(profile_data->>'family_id'), ''),
+                    NULLIF(family_id::text, '')
+                )
+                FROM users WHERE id = $1::uuid
                 """,
-                user_id,
+                user_uuid,
             )
             if not family_id:
                 return {"has_family": False}

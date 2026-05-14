@@ -357,10 +357,12 @@ class PGSDWebSocketRouter:
 
     async def _bg_compute(self, user_id: str, source: str) -> None:
         try:
+            resolved = await self.engine.resolve_pgsd_subject(user_id)
+            save_key = (resolved or {}).get("hardware_id") or user_id
             pgsd = await self.engine.compute_full_pgsd(user_id)
             pgsd["computed_at"] = _utc_now_iso()
             pgsd["_trigger_source"] = source
-            await self._save_snapshot(user_id, pgsd, evolution=None)
+            await self._save_snapshot(save_key, pgsd, evolution=None)
         except Exception:
             # Auto-triggers must NEVER surface errors.
             return
