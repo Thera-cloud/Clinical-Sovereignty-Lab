@@ -98,6 +98,82 @@ def derive_button_state(coach_authorized: bool, client_enrolled: bool) -> str:
     return "active"
 
 
+_ADDICTION_BRANCH_KEYS = (
+    "substance_status",
+    "sex_addiction_status",
+    "gambling_status",
+    "gaming_status",
+    "spending_compulsion_status",
+    "food_compulsion_status",
+    "work_compulsion_status",
+    "codependency_status",
+)
+
+
+async def _addiction_summary(
+    db_pool, client_username: Optional[str],
+) -> Dict[str, Any]:
+    """Return lightweight addiction overlay for the View Brief pill.
+
+    {
+      "active_count":  int,   — branches at 'active' or 'crisis'
+      "crisis_count":  int,   — branches at 'crisis' only
+      "active_branches": ["substance", "gambling", ...],
+    }
+    """
+    empty: Dict[str, Any] = {
+        "active_count": 0,
+        "crisis_count": 0,
+        "active_branches": [],
+        "cross_addiction_active": False,
+        "cross_addiction_overlay_saved": False,
+    }
+    if db_pool is None or not client_username:
+        return empty
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT profile_data FROM users WHERE username = $1",
+                client_username,
+            )
+    except Exception as e:
+        logger.warning("sensitive_bridge_visibility: addiction summary failed for %s: %s", client_username, e)
+        return empty
+    if row is None:
+        return empty
+    pd = row["profile_data"]
+    if pd is None:
+        return empty
+    if isinstance(pd, str):
+        import json as _json
+        try:
+            pd = _json.loads(pd)
+        except Exception:
+            return empty
+    active_branches = []
+    crisis_count = 0
+    cross_active = False
+    cross_overlay_saved = False
+    cap = pd.get("cross_addiction_profile")
+    if isinstance(cap, dict):
+        cross_active = bool(cap.get("cross_addiction_active"))
+        cross_overlay_saved = bool(cap.get("overlay_applied"))
+    for key in _ADDICTION_BRANCH_KEYS:
+        val = (pd.get(key) or "none").lower()
+        if val in ("active", "crisis"):
+            branch_label = key.replace("_status", "").replace("_", " ")
+            active_branches.append(branch_label)
+            if val == "crisis":
+                crisis_count += 1
+    return {
+        "active_count": len(active_branches),
+        "crisis_count": crisis_count,
+        "active_branches": active_branches,
+        "cross_addiction_active": cross_active,
+        "cross_addiction_overlay_saved": cross_overlay_saved,
+    }
+
+
 async def compute_visibility(
     db_pool,
     *,
@@ -112,13 +188,17 @@ async def compute_visibility(
           "client_enrolled":  bool,
           "button_state":     "hidden" | "enroll_available" | "active",
           "client_username":  str | null,
+          "addiction_summary": { active_count, crisis_count, active_branches,
+            cross_addiction_active, cross_addiction_overlay_saved },
         }
     """
     coach_ok = await is_coach_authorized(db_pool, coach_username)
     enrolled = await is_client_enrolled(db_pool, client_username)
+    addiction = await _addiction_summary(db_pool, client_username)
     return {
         "coach_authorized": coach_ok,
         "client_enrolled": enrolled,
         "button_state": derive_button_state(coach_ok, enrolled),
         "client_username": client_username,
+        "addiction_summary": addiction,
     }

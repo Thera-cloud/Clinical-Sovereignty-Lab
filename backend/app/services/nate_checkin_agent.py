@@ -133,6 +133,30 @@ class CodewordMatch:
     audit_event: str  # which sensitive_bridge_log event_type was emitted
 
 
+@dataclass
+class CodewordDisclosureEvent:
+    """v1.4 part-aware codeword disclosure result.
+
+    Extends CodewordMatch with IFS part linkage and addiction-bridge context
+    per migration 217 columns on user_safety_codewords. Returned by
+    `detect_codeword_disclosure(...)`.
+    """
+
+    user_id: str
+    matched_codeword_id: int
+    codeword_hash: str
+    codeword_type: str
+    disclosure_type: Optional[str]
+    part_name: Optional[str]
+    part_number: Optional[int]
+    part_category: Optional[str]
+    addiction_link: Optional[str]
+    triggers_mandatory_reporting: bool
+    escalation_event: Dict[str, Any]
+    matched_at: datetime
+    audit_event: str
+
+
 class NateCheckInAgent:
     def __init__(self, db_pool, notification_system=None, app_state=None):
         self.db_pool = db_pool
@@ -990,6 +1014,159 @@ class NateCheckInAgent:
                 )
 
         return None
+
+    # ===================================================================
+    # v1.4 — Part-aware codeword disclosure detection (Phase C)
+    # ===================================================================
+
+    async def detect_codeword_disclosure(
+        self,
+        message: str,
+        username: str,
+        *,
+        session_id: Optional[str] = None,
+    ) -> Optional["CodewordDisclosureEvent"]:
+        """v1.4 part-aware codeword detection.
+
+        Loads codewords including the part-linkage columns added by migration
+        217 (disclosure_type, part_name, part_number, part_category,
+        addiction_link). Returns CodewordDisclosureEvent on match, None
+        otherwise.
+
+        Backward-compatible: if migration 217 columns are absent, falls back
+        gracefully to the v1.3 `check_codeword` result wrapped in the v1.4
+        dataclass shape (part fields = None).
+        """
+        if not message or not username:
+            return None
+
+        tokens = self._normalize_for_codeword(message)
+        if not tokens:
+            return None
+
+        codewords = await self._get_active_codewords_v2(username)
+        if not codewords:
+            return None
+
+        explicit_candidates: List[Tuple[str, ...]] = [(tok,) for tok in tokens]
+        phrase_candidates: List[Tuple[str, ...]] = []
+        for window in range(2, _CODEWORD_MAX_PHRASE_TOKENS + 1):
+            for i in range(len(tokens) - window + 1):
+                phrase_candidates.append(tuple(tokens[i : i + window]))
+
+        for cw in codewords:
+            cw_type = cw["codeword_type"]
+            salt = cw["codeword_salt"]
+            stored_hash = cw["codeword_hash"]
+            candidates = (
+                explicit_candidates
+                if cw_type == "explicit_word"
+                else phrase_candidates
+            )
+            for cand in candidates:
+                cand_text = " ".join(cand)
+                digest = hashlib.sha256(
+                    (cand_text + salt).encode("utf-8")
+                ).hexdigest()
+                if not hmac.compare_digest(digest, stored_hash):
+                    continue
+
+                triggers_reporting = bool(cw["triggers_mandatory_reporting"])
+                audit_event = (
+                    AUDIT_EVT_CODEWORD_WITH_REPORTING
+                    if triggers_reporting
+                    else AUDIT_EVT_CODEWORD_TRIGGERED
+                )
+
+                escalation = self._build_codeword_escalation(
+                    user_id=username,
+                    cw_type=cw_type,
+                    cw_label=cw.get("codeword_label"),
+                    triggers_reporting=triggers_reporting,
+                )
+
+                await self._emit_codeword_audit(
+                    user_id=username,
+                    session_id=session_id,
+                    codeword_hash=stored_hash,
+                    codeword_type=cw_type,
+                    triggers_reporting=triggers_reporting,
+                    audit_event=audit_event,
+                    escalation=escalation,
+                )
+
+                try:
+                    async with self.db_pool.acquire() as c:
+                        await c.execute(
+                            """
+                            UPDATE user_safety_codewords
+                            SET last_triggered_at = NOW(),
+                                trigger_count = trigger_count + 1
+                            WHERE user_id = $1 AND codeword_hash = $2
+                            """,
+                            username,
+                            stored_hash,
+                        )
+                except Exception as _meta_err:
+                    logger.debug(
+                        "nate_checkin_agent: codeword_disclosure trigger "
+                        "metadata update non-fatal: %s",
+                        _meta_err,
+                    )
+
+                return CodewordDisclosureEvent(
+                    user_id=username,
+                    matched_codeword_id=cw.get("id", 0),
+                    codeword_hash=stored_hash,
+                    codeword_type=cw_type,
+                    disclosure_type=cw.get("disclosure_type"),
+                    part_name=cw.get("part_name"),
+                    part_number=cw.get("part_number"),
+                    part_category=cw.get("part_category"),
+                    addiction_link=cw.get("addiction_link"),
+                    triggers_mandatory_reporting=triggers_reporting,
+                    escalation_event=escalation,
+                    matched_at=datetime.now(timezone.utc),
+                    audit_event=audit_event,
+                )
+
+        return None
+
+    async def _get_active_codewords_v2(
+        self, user_id: str
+    ) -> List[Dict[str, Any]]:
+        """v1.4 fetch with part-aware columns from migration 217.
+
+        Falls back to v1.3 query if new columns don't exist yet.
+        """
+        try:
+            async with self.db_pool.acquire() as c:
+                rows = await c.fetch(
+                    """
+                    SELECT id, codeword_hash, codeword_salt, codeword_type,
+                           codeword_label, triggers_mandatory_reporting,
+                           disclosure_type, part_name, part_number,
+                           part_category, addiction_link
+                    FROM user_safety_codewords
+                    WHERE user_id = $1 AND active = TRUE
+                    """,
+                    user_id,
+                )
+            return [dict(r) for r in rows]
+        except Exception as e:
+            if "does not exist" in str(e):
+                logger.info(
+                    "nate_checkin_agent: v1.4 columns not yet applied, "
+                    "falling back to v1.3 query for %s",
+                    user_id,
+                )
+                return await self._get_active_codewords(user_id)
+            logger.warning(
+                "nate_checkin_agent: _get_active_codewords_v2 failed "
+                "for %s: %s — returning empty",
+                user_id, e,
+            )
+            return []
 
     def _build_codeword_escalation(
         self,

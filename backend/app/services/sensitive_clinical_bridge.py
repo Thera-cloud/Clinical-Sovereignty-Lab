@@ -769,6 +769,43 @@ async def _check_codeword(
         return None
 
 
+async def _check_codeword_disclosure_v2(
+    *,
+    nate_checkin_agent: Any,
+    user_id: str,
+    message: str,
+    session_id: Optional[str],
+) -> Optional[Any]:
+    """Step 2 v1.4 — Part-aware codeword disclosure detection.
+
+    Tries `detect_codeword_disclosure` (v1.4 method with part linkage) first.
+    Falls back to v1.3 `check_codeword` if the v1.4 method is unavailable
+    (graceful degradation for rolling deploys).
+
+    Returns CodewordDisclosureEvent, CodewordMatch, or None. Never raises.
+    """
+    if nate_checkin_agent is None:
+        return None
+    try:
+        if hasattr(nate_checkin_agent, "detect_codeword_disclosure"):
+            result = await nate_checkin_agent.detect_codeword_disclosure(
+                message, user_id, session_id=session_id,
+            )
+            if result is not None:
+                return result
+            return None
+        return await nate_checkin_agent.check_codeword(
+            user_id=user_id, message=message, session_id=session_id,
+        )
+    except Exception as e:
+        logger.error(
+            "sensitive_clinical_bridge: codeword disclosure v2 failed "
+            "for %s: %s",
+            user_id, e,
+        )
+        return None
+
+
 async def _classify_tmc_with_polyvictim(
     *,
     db_pool,
@@ -1563,6 +1600,59 @@ def _build_handoff_if_needed(
         return None, None, None
 
 
+async def _resolve_assigned_coach_username(
+    db_pool,
+    client_username: str,
+    coach_id_hint: Optional[str],
+) -> Optional[str]:
+    """Best-effort coach username for alerts (prefers explicit hint, then profile)."""
+    if coach_id_hint and str(coach_id_hint).strip():
+        return str(coach_id_hint).strip()
+    if not db_pool or not client_username:
+        return None
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT profile_data FROM users WHERE username = $1",
+                client_username,
+            )
+    except Exception:
+        return None
+    if row is None:
+        return None
+    pd = row["profile_data"] or {}
+    if isinstance(pd, str):
+        import json as _json
+
+        try:
+            pd = _json.loads(pd)
+        except Exception:
+            pd = {}
+    for key in ("assigned_coach", "coach_username"):
+        v = pd.get(key)
+        if v and str(v).strip():
+            return str(v).strip()
+    cid = pd.get("coach_id") or pd.get("assigned_coach_id")
+    if not cid or not str(cid).strip():
+        return None
+    hw = str(cid).strip()
+    try:
+        async with db_pool.acquire() as conn:
+            r2 = await conn.fetchrow(
+                """
+                SELECT username FROM users
+                 WHERE hardware_id = $1 AND role = 'COACH'
+                 LIMIT 1
+                """,
+                hw,
+            )
+        if r2 and r2["username"]:
+            return str(r2["username"]).strip()
+    except Exception:
+        pass
+    return None
+
+
 async def _emit_escalation(
     *,
     user_id: str,
@@ -1686,7 +1776,7 @@ async def evaluate_disclosure(
     # signal extraction with TMC for performance, the answer is no:
     # safety-net independence is the contract.
     # ───────────────────────────────────────────────────────────────────
-    codeword_match = await _check_codeword(
+    codeword_match = await _check_codeword_disclosure_v2(
         nate_checkin_agent=nate_checkin_agent,
         user_id=user_id,
         message=message,
@@ -1907,6 +1997,16 @@ async def evaluate_disclosure(
         response_pattern_crystals=response_crystals,
     )
 
+    cross_overlay_para = _compose_cross_addiction_overlay(cross_addiction_branch)
+    _lens_block_parts: List[str] = []
+    if lens_directives_text:
+        _lens_block_parts.append(lens_directives_text)
+    if dst_prompt_block:
+        _lens_block_parts.append(dst_prompt_block)
+    if cross_overlay_para:
+        _lens_block_parts.append(cross_overlay_para)
+    lens_directives_block = "\n\n".join(_lens_block_parts)
+
     # ───────────────────────────────────────────────────────────────────
     # STEP 14 — Arousal load measurement
     # ───────────────────────────────────────────────────────────────────
@@ -1976,6 +2076,32 @@ async def evaluate_disclosure(
             handoff_schema_hash=handoff_hash,
             payload_emitted_at=datetime.now(timezone.utc).isoformat(),
         )
+        coach_for_alert = await _resolve_assigned_coach_username(
+            db_pool, user_id, coach_id,
+        )
+        if coach_for_alert:
+            try:
+                from app.services.sensitive_alert_dispatcher import (
+                    dispatch_sensitive_alert,
+                )
+
+                await dispatch_sensitive_alert(
+                    db_pool=db_pool,
+                    client_username=user_id,
+                    coach_username=coach_for_alert,
+                    risk_level=handoff_severity or "high",
+                    reason=f"Coach handoff triggered ({handoff_tier})",
+                    keywords=[handoff_tier, selected_register_source],
+                    session_id=session_id,
+                    family_id=None,
+                    raw_context=None,
+                    alert_type="coach_handoff",
+                )
+            except Exception as _disp_e:
+                logger.warning(
+                    "sensitive_clinical_bridge: dispatch_sensitive_alert failed: %s",
+                    _disp_e,
+                )
 
     # Resolve resource block (specialized_resources) for the active register.
     resource_block = _resolve_resource_block(
@@ -2020,8 +2146,21 @@ async def evaluate_disclosure(
         "lexicon_crystals_count": len(lexicon_crystals),
         "response_pattern_crystals_count": len(response_crystals),
         "active_addiction_branches": active_branches_list,
-        "cross_addiction_active": cross_addiction_branch.branched if cross_addiction_branch else False,
-        "cross_addiction_count": cross_addiction_branch.active_count if cross_addiction_branch else 0,
+        "cross_addiction_active": bool(
+            cross_addiction_branch and cross_addiction_branch.branched
+        ),
+        "cross_addiction_count": (
+            len(cross_addiction_branch.active_branches)
+            if cross_addiction_branch and cross_addiction_branch.branched
+            else 0
+        ),
+        "cross_addiction_overlay_applied": bool(cross_overlay_para),
+        "cross_addiction_branch_labels": list(
+            cross_addiction_branch.active_branches,
+        )
+        if cross_addiction_branch and cross_addiction_branch.branched
+        else [],
+        "lens_directives_block": lens_directives_block,
         "schema_version": BRIDGE_DECISION_SCHEMA_VERSION,
         "schema_hash": BRIDGE_DECISION_SCHEMA_HASH,
         "pipeline_steps_completed": list(PIPELINE_STEP_NAMES_V1_3),
@@ -2218,15 +2357,23 @@ def _resolve_cross_addiction_branch(
     )
 
 
+_CROSS_ADD_OVERLAY_TEMPLATE = (
+    "## CROSS-ADDICTION OVERLAY (v1.4)\n"
+    "Multiple behavioral-health registers are simultaneously active "
+    "({branches}). Pace slowly; avoid treating one channel as the sole "
+    "\"problem.\" Hold shame lightly; invite curiosity about what each "
+    "pattern regulates. Prefer short, somatically grounded prompts.\n"
+)
+
+
 def _compose_cross_addiction_overlay(
-    cross: CrossAddictionRegisterBranch,
+    cross: Optional[CrossAddictionRegisterBranch],
 ) -> Optional[str]:
-    """Gap 1: compose a register overlay string for cross-addiction.
-    Returns None when cross addiction is inactive.
-    """
-    if not cross.branched:
+    """Clinical overlay paragraph when 2+ addiction branches are active."""
+    if cross is None or not cross.branched or not cross.active_branches:
         return None
-    return cross.overlay_directive
+    branches = ", ".join(b.replace("_", " ") for b in cross.active_branches)
+    return _CROSS_ADD_OVERLAY_TEMPLATE.format(branches=branches)
 
 
 # ─────────────────────────────────────────────────────────────────────

@@ -43,18 +43,23 @@ async def dispatch_sensitive_alert(
         "coach_notified": False,
         "redacted": False,
         "alert_type": alert_type,
+        "notification_id": 0,
+        "email_sent": False,
     }
 
     redacted_context: Optional[str] = None
     if raw_context:
         try:
-            from app.services.pii_redaction import redact_conversation_turns
-            redacted = redact_conversation_turns(
-                turns=[{"role": "system", "content": raw_context}],
+            from app.services.pii_redaction import redact_pii
+
+            redacted = redact_pii(
+                [{"role": "system", "content": raw_context}],
                 coach_username=coach_username or "",
                 client_username=client_username,
             )
-            redacted_context = redacted[0].get("content", raw_context) if redacted else raw_context
+            redacted_context = (
+                redacted[0].get("content", raw_context) if redacted else raw_context
+            )
             receipt["redacted"] = True
         except Exception as e:
             logger.warning("sensitive_alert_dispatcher: PII redaction failed: %s", e)
@@ -77,18 +82,85 @@ async def dispatch_sensitive_alert(
     except Exception as e:
         logger.error("sensitive_alert_dispatcher: crisis event write failed: %s", e)
 
+    coach_email: Optional[str] = None
+    if db_pool and coach_username:
+        try:
+            async with db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT profile_data->>'email' AS email
+                      FROM users
+                     WHERE username = $1 AND role IN ('COACH', 'ADMIN')
+                    """,
+                    coach_username,
+                )
+            if row and row["email"]:
+                coach_email = str(row["email"]).strip() or None
+        except Exception as e:
+            logger.warning("sensitive_alert_dispatcher: coach email lookup failed: %s", e)
+
+    details_body = reason
+    if redacted_context:
+        details_body = f"{reason}\n\n{redacted_context}"
+
     if coach_username and receipt["event_id"]:
         try:
-            from app.services.notifications_service import EmailService
-            email_svc = EmailService()
-            await email_svc.send_crisis_alert(
-                coach_username=coach_username,
-                client_username=client_username,
-                risk_level=risk_level,
-                reason=reason,
+            from app.services.coach_notifications import notify_coach
+
+            urg = (
+                "critical" if risk_level in ("emergency", "critical") else "high"
             )
-            receipt["coach_notified"] = True
+            msg = f"[{alert_type}] client={client_username}\n{reason}"
+            if redacted_context:
+                msg += f"\n\nContext:\n{redacted_context}"
+            notif = await notify_coach(
+                db_pool,
+                coach_username,
+                {
+                    "urgency": urg,
+                    "subject": f"Sovereign Sanctuary · {alert_type}",
+                    "message": msg[:4000],
+                    "payload": {
+                        "alert_type": alert_type,
+                        "event_id": receipt["event_id"],
+                        "risk_level": risk_level,
+                        "session_id": session_id,
+                    },
+                },
+            )
+            nid = int(notif.get("notification_id") or notif.get("id") or 0)
+            receipt["notification_id"] = nid
+            receipt["coach_notified"] = nid > 0 or bool(
+                (notif.get("sent") or {}).get("in_app")
+            )
         except Exception as e:
-            logger.warning("sensitive_alert_dispatcher: coach notification failed: %s", e)
+            logger.warning("sensitive_alert_dispatcher: coach notify_coach failed: %s", e)
+
+        if coach_email:
+            try:
+                from app.services.notifications_service import EmailService
+
+                email_svc = EmailService()
+                ok = await email_svc.send_crisis_alert(
+                    coach_email,
+                    client_username,
+                    alert_type,
+                    details_body[:7500],
+                )
+                receipt["email_sent"] = bool(ok)
+            except Exception as e:
+                logger.warning("sensitive_alert_dispatcher: send_crisis_alert failed: %s", e)
 
     return receipt
+
+
+async def emit_addiction_alert(**kwargs: Any) -> Dict[str, Any]:
+    return await dispatch_sensitive_alert(alert_type="addiction_escalation", **kwargs)
+
+
+async def emit_trafficking_alert(**kwargs: Any) -> Dict[str, Any]:
+    return await dispatch_sensitive_alert(alert_type="trafficking_escalation", **kwargs)
+
+
+async def emit_codeword_disclosure_alert(**kwargs: Any) -> Dict[str, Any]:
+    return await dispatch_sensitive_alert(alert_type="codeword_disclosure", **kwargs)

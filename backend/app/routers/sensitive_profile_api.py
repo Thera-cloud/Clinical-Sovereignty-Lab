@@ -2048,6 +2048,297 @@ async def patch_legal_status(
     return {"ok": True, "id": legal_id}
 
 
+# ------- COACH: parts registry ------------------------------------------------
+
+
+class PartRegistryCreate(BaseModel):
+    part_name: str = Field(..., min_length=1, max_length=64)
+    part_number: Optional[int] = Field(default=None, ge=1, le=999)
+    part_category: str = Field(..., min_length=1, max_length=32)
+    addiction_link: Optional[str] = Field(default=None, max_length=32)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    protected_exile_part_id: Optional[int] = Field(default=None)
+
+    @validator("part_category")
+    def _v_category(cls, v):
+        allowed = {
+            "protector", "exile", "firefighter", "manager",
+            "self_energy", "addict_part", "inner_critic",
+            "caretaker", "dissociative_part", "other",
+        }
+        if v not in allowed:
+            raise ValueError(
+                "part_category must be one of " + "|".join(sorted(allowed))
+            )
+        return v
+
+
+@coach_router.post("/{user_id}/parts-registry")
+async def add_part(
+    user_id: str,
+    body: PartRegistryCreate,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+    _raise_if_pii("description", body.description)
+
+    actor_id = principal.get("username", "") or principal.get("user_id", "")
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO user_parts_registry (
+                user_id, part_name, part_number, part_category,
+                addiction_link, description, protected_exile_part_id,
+                is_active, created_by
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, $8)
+            ON CONFLICT (user_id, part_name) DO UPDATE
+               SET is_active = TRUE,
+                   part_number = EXCLUDED.part_number,
+                   part_category = EXCLUDED.part_category,
+                   addiction_link = EXCLUDED.addiction_link,
+                   description = EXCLUDED.description,
+                   protected_exile_part_id = EXCLUDED.protected_exile_part_id,
+                   retired_at = NULL
+            RETURNING id
+            """,
+            user_id,
+            body.part_name,
+            body.part_number,
+            body.part_category,
+            body.addiction_link,
+            body.description,
+            body.protected_exile_part_id,
+            actor_id,
+        )
+    new_id = int(row["id"])
+    await _emit_profile_mutation_audit(
+        db_pool,
+        target_user_id=user_id,
+        actor_id=actor_id,
+        actor_role=principal.get("role", "COACH"),
+        mutation_kind="part_registered",
+        additional_fields_redacted={
+            "id": new_id,
+            "part_name": body.part_name,
+            "part_category": body.part_category,
+            "addiction_link": body.addiction_link,
+        },
+    )
+    return {"ok": True, "id": new_id, "part_name": body.part_name}
+
+
+@coach_router.get("/{user_id}/parts-registry")
+async def list_parts(
+    user_id: str,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+    active_only: bool = True,
+):
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+    condition = " AND is_active = TRUE" if active_only else ""
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT id, part_name, part_number, part_category,
+                   addiction_link, description,
+                   protected_exile_part_id, is_active,
+                   created_at, created_by, retired_at
+              FROM user_parts_registry
+             WHERE user_id = $1{condition}
+             ORDER BY part_number ASC NULLS LAST, part_name ASC
+            """,
+            user_id,
+        )
+    return {
+        "ok": True,
+        "parts": [dict(r) for r in rows],
+    }
+
+
+@coach_router.delete("/{user_id}/parts-registry/{part_id}")
+async def retire_part(
+    user_id: str,
+    part_id: int,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+    async with db_pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE user_parts_registry
+               SET is_active = FALSE, retired_at = NOW()
+             WHERE id = $1 AND user_id = $2 AND is_active = TRUE
+            """,
+            part_id,
+            user_id,
+        )
+    changed = 0
+    try:
+        changed = int(result.split()[-1])
+    except (ValueError, IndexError):
+        changed = 0
+    if not changed:
+        raise HTTPException(404, detail={"reason": "part_not_found_or_already_retired"})
+    await _emit_profile_mutation_audit(
+        db_pool,
+        target_user_id=user_id,
+        actor_id=principal.get("username", ""),
+        actor_role=principal.get("role", "COACH"),
+        mutation_kind="part_retired",
+        additional_fields_redacted={"id": part_id},
+    )
+    return {"ok": True, "id": part_id}
+
+
+# ------- COACH: framework menu -----------------------------------------------
+
+
+@coach_router.get("/{user_id}/framework-menu")
+async def get_framework_menu(
+    user_id: str,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    """Return the canonical framework list with per-client enabled/disabled state."""
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+
+    from app.services.sensitive_clinical_bridge import _load_framework_menu
+
+    canonical = _load_framework_menu()
+
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT profile_data->'sensitive_bridge'->'framework_preferences' AS prefs
+              FROM users WHERE username = $1
+            """,
+            user_id,
+        )
+    stored_prefs: Dict[str, Any] = {}
+    if row and row["prefs"]:
+        import json as _json
+        raw = row["prefs"]
+        if isinstance(raw, str):
+            try:
+                stored_prefs = _json.loads(raw)
+            except Exception:
+                stored_prefs = {}
+        elif isinstance(raw, dict):
+            stored_prefs = raw
+
+    menu = []
+    for key, meta in canonical.items():
+        menu.append({
+            "key": key,
+            "label": meta["label"],
+            "applies_to": sorted(meta.get("applies_to", set())),
+            "enabled": stored_prefs.get(key, True),
+        })
+    return {
+        "ok": True,
+        "menu": menu,
+        "default_lens": stored_prefs.get("default_lens_for_today"),
+        "crystal_knowledge_graph_opt_in": stored_prefs.get(
+            "crystal_knowledge_graph_opt_in", False
+        ),
+    }
+
+
+class FrameworkPreferencesUpdate(BaseModel):
+    enabled_frameworks: Optional[Dict[str, bool]] = Field(
+        default=None,
+        description="Map of framework_key → enabled boolean.",
+    )
+    default_lens_for_today: Optional[str] = Field(
+        default=None, max_length=64,
+        description="Override: force this lens for all turns today.",
+    )
+    crystal_knowledge_graph_opt_in: Optional[bool] = Field(
+        default=None,
+        description="Opt-in to Crystal Knowledge Graph augmentation (default OFF).",
+    )
+
+
+@coach_router.put("/{user_id}/framework-menu")
+async def update_framework_preferences(
+    user_id: str,
+    body: FrameworkPreferencesUpdate,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+
+    from app.services.sensitive_clinical_bridge import _load_framework_menu
+
+    canonical_keys = set(_load_framework_menu().keys())
+
+    prefs: Dict[str, Any] = {}
+    if body.enabled_frameworks:
+        for k, v in body.enabled_frameworks.items():
+            if k not in canonical_keys:
+                raise HTTPException(
+                    422,
+                    detail={"reason": f"unknown_framework_key: {k}"},
+                )
+            prefs[k] = bool(v)
+    if body.default_lens_for_today is not None:
+        if body.default_lens_for_today and body.default_lens_for_today not in canonical_keys:
+            raise HTTPException(
+                422,
+                detail={"reason": f"unknown_framework_key: {body.default_lens_for_today}"},
+            )
+        prefs["default_lens_for_today"] = body.default_lens_for_today or None
+    if body.crystal_knowledge_graph_opt_in is not None:
+        prefs["crystal_knowledge_graph_opt_in"] = body.crystal_knowledge_graph_opt_in
+
+    if not prefs:
+        raise HTTPException(422, detail={"reason": "no_fields_to_update"})
+
+    import json as _json
+
+    actor_id = principal.get("username", "") or principal.get("user_id", "")
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE users
+               SET profile_data = jsonb_set(
+                   COALESCE(profile_data, '{}'::jsonb),
+                   '{sensitive_bridge,framework_preferences}',
+                   COALESCE(
+                       profile_data->'sensitive_bridge'->'framework_preferences', '{}'::jsonb
+                   ) || $2::jsonb,
+                   true
+               )
+             WHERE username = $1
+            """,
+            user_id,
+            _json.dumps(prefs),
+        )
+    await _emit_profile_mutation_audit(
+        db_pool,
+        target_user_id=user_id,
+        actor_id=actor_id,
+        actor_role=principal.get("role", "COACH"),
+        mutation_kind="framework_preferences_updated",
+        additional_fields_redacted={
+            "keys_updated": list(prefs.keys()),
+        },
+    )
+    return {"ok": True, "updated_keys": list(prefs.keys())}
+
+
 # ------- COACH: safe_silence_mode propose / cancel ---------------------------
 
 

@@ -40,6 +40,11 @@ import 'widgets/nate_home_widget.dart';
 import 'package:home_widget/home_widget.dart';
 import 'screens/checkin_screen.dart';
 import 'services/checkout_launcher.dart';
+// Debug-only: inspection harness for sensitive_clinical_profile_screen.
+// Reachable only via the kDebugMode-gated URL handler in _InitialRouteWidget;
+// release builds short-circuit the gate, leaving this import unreferenced
+// outside debug. Tree-shaking removes the harness from release bundles.
+import 'screens/inspection/sensitive_profile_inspection_harness.dart';
 
 /// Debug-only print: suppressed in production builds.
 // ignore: avoid_print
@@ -314,6 +319,39 @@ class _InitialRouteWidget extends StatelessWidget {
           return const LobbyScreen(registrationSuccess: true);
         }
       } catch (_) {}
+
+      // --- Debug-only: Sensitive Profile Inspection Harness ---
+      // Reachable in `flutter run --debug` via either:
+      //   http://localhost:PORT/?dev=sensitive-profile-inspection
+      //   http://localhost:PORT/#/dev/sensitive-profile-inspection
+      // The `kDebugMode` constant is `false` in release/profile builds, so this
+      // entire branch is dead-stripped from production bundles along with the
+      // harness widget tree it points at.
+      if (kDebugMode) {
+        try {
+          bool wantsInspection = false;
+          final dev = Uri.base.queryParameters['dev'];
+          if (dev == 'sensitive-profile-inspection') {
+            wantsInspection = true;
+          }
+          if (!wantsInspection) {
+            final path = Uri.base.path.toLowerCase();
+            if (path.contains('/dev/sensitive-profile-inspection')) {
+              wantsInspection = true;
+            }
+          }
+          if (!wantsInspection) {
+            final frag = Uri.base.fragment.toLowerCase();
+            if (frag.contains('dev/sensitive-profile-inspection') ||
+                frag.contains('dev=sensitive-profile-inspection')) {
+              wantsInspection = true;
+            }
+          }
+          if (wantsInspection) {
+            return const SensitiveProfileInspectionHarness();
+          }
+        } catch (_) {}
+      }
     }
     return const LobbyScreen();
   }
@@ -10624,8 +10662,27 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   bool _submittingRequest = false;
   String? _coachAvailErr;
   String? _coachAvailDetail;
+  /// IANA zone from bridge `coach_availability.availability.timezone` (coach’s published calendar).
+  String? _coachAvailabilityIana;
 
   bool get _hasCoach => _coachId.isNotEmpty;
+
+  String _friendlyCoachTzSubtitle(String? iana) {
+    if (iana == null || iana.isEmpty) return 'Coach’s published time zone';
+    if (iana == 'America/New_York') return 'Eastern Time (US & Canada)';
+    return iana;
+  }
+
+  String _formatClientSlotRangeLocal(String startIso, String endIso) {
+    try {
+      final a = DateTime.parse(startIso).toLocal();
+      final b = DateTime.parse(endIso).toLocal();
+      final jm = DateFormat.jm();
+      return '${jm.format(a)} – ${jm.format(b)}';
+    } catch (_) {
+      return startIso;
+    }
+  }
 
   @override
   void initState() {
@@ -10712,9 +10769,12 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
           _isLoading = false;
         });
       } else if (type == 'coach_availability') {
+        final av = data['availability'];
+        final tz = av is Map ? av['timezone']?.toString() : null;
         setState(() {
           _coachAvailErr = null;
           _coachAvailDetail = null;
+          _coachAvailabilityIana = (tz != null && tz.isNotEmpty) ? tz : _coachAvailabilityIana;
           _availableSlots = List<Map<String, dynamic>>.from(
             (data['available_slots'] ?? []).map((s) => Map<String, dynamic>.from(s))
           );
@@ -10725,6 +10785,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
           _coachAvailErr = data['error']?.toString() ?? 'unknown';
           _coachAvailDetail = data['detail']?.toString();
           _availableSlots = [];
+          _coachAvailabilityIana = null;
         });
       } else if (type == 'coach_month_overview') {
         setState(() {
@@ -11424,6 +11485,11 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
           if (_availableSlots.isNotEmpty) ...[
             const SizedBox(height: 16),
             const Text('Available Time Slots', style: TextStyle(color: Color(0xFFC9A962), fontSize: 14, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 4),
+            Text(
+              'Shown in your device’s local time · ${_friendlyCoachTzSubtitle(_coachAvailabilityIana)}${_coachAvailabilityIana != null && _coachAvailabilityIana!.isNotEmpty ? ' (${_coachAvailabilityIana})' : ''}',
+              style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11, height: 1.3),
+            ),
             const SizedBox(height: 8),
             ..._availableSlots.map((slot) => _buildSlotCard(slot)),
           ] else if (_selectedDate != null) ...[
@@ -11983,13 +12049,9 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   Widget _buildSlotCard(Map<String, dynamic> slot) {
     final start = slot['start'] ?? '';
     final end = slot['end'] ?? '';
-    
-    String label = start;
-    try {
-      final dtStart = DateTime.parse(start);
-      final dtEnd = DateTime.parse(end);
-      label = '${dtStart.hour}:${dtStart.minute.toString().padLeft(2, '0')} - ${dtEnd.hour}:${dtEnd.minute.toString().padLeft(2, '0')}';
-    } catch (_) {}
+    final label = (start.toString().isNotEmpty && end.toString().isNotEmpty)
+        ? _formatClientSlotRangeLocal(start.toString(), end.toString())
+        : start.toString();
     
     return Container(
       margin: const EdgeInsets.only(bottom: 6),

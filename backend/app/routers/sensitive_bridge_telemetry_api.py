@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -48,6 +49,17 @@ from app.services.sensitive_bridge_telemetry_agent import (
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Sole-clinician promotion gate (migration 214)
+# ---------------------------------------------------------------------------
+# Reflection delay between the actor's most recent
+# `shadow_mode_decision_reviewed` event and the promotion attempt. Enforced
+# server-side so a clinician cannot collapse the wait by spoofing client time.
+# Required only when the actor's clinician_authorization_type is 'sole_lead'.
+# Multi-clinician deployments don't need this delay because the second
+# clinician's review acts as the natural reflection gap.
+SOLE_CLINICIAN_REFLECTION_DELAY_HOURS = 48
+
 router = APIRouter(
     prefix="/api/admin/sensitive-bridge",
     tags=["sensitive-bridge-admin"],
@@ -57,6 +69,38 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+async def _lookup_authorization_type(conn, actor_username: str) -> str:
+    """Return the actor's ``coach_profiles.clinician_authorization_type``.
+
+    Defaults to ``'multi_clinician_team'`` if the row, the column, or the
+    table is missing — the safe default forces the strict gate. Migration
+    214 owns the schema.
+    """
+    if not actor_username:
+        return "multi_clinician_team"
+    try:
+        val = await conn.fetchval(
+            """
+            SELECT clinician_authorization_type
+              FROM coach_profiles
+             WHERE username = $1
+             LIMIT 1
+            """,
+            actor_username,
+        )
+    except Exception as e:  # pragma: no cover - defense in depth
+        logger.warning(
+            "sensitive_bridge_telemetry_api: clinician_authorization_type "
+            "lookup failed for actor=%s: %s — defaulting to multi_clinician_team",
+            actor_username,
+            e,
+        )
+        return "multi_clinician_team"
+    if val == "sole_lead":
+        return "sole_lead"
+    return "multi_clinician_team"
 
 
 def _validate_flag(gap_flag: str) -> None:
@@ -217,6 +261,9 @@ async def set_feature_flag(
 
     actor = (principal or {}).get("username") or "unknown_admin"
     snapshot: Optional[Dict[str, Any]] = None
+    sole_clinician_override = False
+    actor_authorization_type = "multi_clinician_team"
+    last_review_iso: Optional[str] = None
 
     if body.enabled:
         try:
@@ -233,6 +280,73 @@ async def set_feature_flag(
                     "snapshot": exc.snapshot,
                 },
             )
+
+        # Sole-clinician 48h reflection delay (migration 214). The check
+        # runs AFTER the telemetry-resolved gate so a sole_lead actor still
+        # has to clear the same FP-rate floor as everyone else. The single-
+        # clinician sign-off is implicit: ``require_admin`` already gates
+        # this endpoint to one actor; we just require their review→promote
+        # window be at least 48h. Audited as
+        # ``sole_clinician_reflection_delay_enforced``.
+        async with db_pool.acquire() as conn_auth:
+            actor_authorization_type = await _lookup_authorization_type(
+                conn_auth, actor,
+            )
+            if actor_authorization_type == "sole_lead":
+                last_review_dt = await conn_auth.fetchval(
+                    """
+                    SELECT MAX(created_at)
+                      FROM skyeye_activity
+                     WHERE type = 'shadow_mode_decision_reviewed'
+                       AND (
+                            content::jsonb->>'reviewed_by' = $1
+                            OR content::jsonb->>'gap_flag' = $2
+                       )
+                    """,
+                    actor, body.gap_flag,
+                )
+                if last_review_dt is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "reason": "sole_clinician_no_review_found",
+                            "gap_flag": body.gap_flag,
+                            "actor": actor,
+                            "explanation": (
+                                "sole_lead promotion requires a prior "
+                                "shadow_mode_decision_reviewed event for "
+                                "this gap before the 48h reflection delay "
+                                "can begin"
+                            ),
+                        },
+                    )
+                # Server-side delta — never trust client clocks.
+                now_dt = datetime.now(timezone.utc)
+                if last_review_dt.tzinfo is None:
+                    last_review_dt = last_review_dt.replace(tzinfo=timezone.utc)
+                elapsed = now_dt - last_review_dt
+                last_review_iso = last_review_dt.isoformat()
+                if elapsed < timedelta(hours=SOLE_CLINICIAN_REFLECTION_DELAY_HOURS):
+                    remaining = (
+                        timedelta(hours=SOLE_CLINICIAN_REFLECTION_DELAY_HOURS) - elapsed
+                    )
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "reason": "sole_clinician_reflection_delay_unmet",
+                            "gap_flag": body.gap_flag,
+                            "actor": actor,
+                            "reviewed_at": last_review_iso,
+                            "required_delay_hours": SOLE_CLINICIAN_REFLECTION_DELAY_HOURS,
+                            "elapsed_hours": round(
+                                elapsed.total_seconds() / 3600.0, 2,
+                            ),
+                            "remaining_hours": round(
+                                remaining.total_seconds() / 3600.0, 2,
+                            ),
+                        },
+                    )
+                sole_clinician_override = True
 
     async with db_pool.acquire() as conn:
         # Patch app_settings.sensitive_bridge_global_gap_flags.{flag} = enabled.
@@ -278,6 +392,13 @@ async def set_feature_flag(
                     "actor": actor,
                     "reason": body.reason,
                     "telemetry_snapshot_satisfying_gate": snapshot or {},
+                    "actor_authorization_type": actor_authorization_type,
+                    "sole_clinician_override": bool(sole_clinician_override),
+                    "reflection_delay_hours_required": (
+                        SOLE_CLINICIAN_REFLECTION_DELAY_HOURS
+                        if sole_clinician_override else None
+                    ),
+                    "reviewed_at": last_review_iso if sole_clinician_override else None,
                 },
                 actor=actor,
             )
@@ -316,6 +437,13 @@ async def set_feature_flag(
         "enabled": body.enabled,
         "actor": actor,
         "reenable_snapshot": snapshot if body.enabled else None,
+        "actor_authorization_type": actor_authorization_type,
+        "sole_clinician_override": bool(sole_clinician_override),
+        "reviewed_at": last_review_iso if sole_clinician_override else None,
+        "reflection_delay_hours_required": (
+            SOLE_CLINICIAN_REFLECTION_DELAY_HOURS
+            if sole_clinician_override else None
+        ),
     }
 
 

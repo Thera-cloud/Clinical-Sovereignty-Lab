@@ -660,7 +660,108 @@ A phase is **NOT done** if:
 
 ---
 
-## 13. Runtime Log
+## 13. Sole-Clinician Deployment Mode
+
+**Added:** Migration 214 (2026-05-10).
+**Owner:** Lead clinician (Dr. Nevedal; account `CoachN` / `DrNevedal1`).
+**Status column:** `coach_profiles.clinician_authorization_type IN
+('sole_lead', 'multi_clinician_team')`. Default is
+`'multi_clinician_team'` — the strict gate. Only the lead clinician's
+row is backfilled to `'sole_lead'`.
+
+### 13.1 What this mode changes
+
+The Sensitive Clinical Bridge's two-step gate (Plan v1.3 §Gap A) was
+written for clinics with **two or more clinicians on duty**. A single-
+clinician practice cannot satisfy "different actor on approve" without
+inventing a fictitious second account. `'sole_lead'` is a deliberately
+narrow exemption that:
+
+| Surface                                    | `multi_clinician_team` (default)                                                  | `sole_lead`                                                                                                                                                                  |
+| ------------------------------------------ | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `safe_silence_mode` approve, same actor    | **REJECTED** with `multi_clinician_required`                                      | **ALLOWED** *iff* the approve session is a different login session (different bearer-token hash) than the proposal session.                                                  |
+| `safe_silence_mode` approve, same session  | **REJECTED** with `same_session_violation`                                        | **REJECTED** with `same_session_violation` — *not relaxed*.                                                                                                                  |
+| Codeword precondition (b)                  | Required: ≥1 active codeword                                                      | Required: ≥1 active codeword — *not relaxed*.                                                                                                                                |
+| 30-day auto-revert                         | Active                                                                            | Active — *not relaxed*.                                                                                                                                                      |
+| Detector promotion (shadow → live)         | One clinician proposes the review, second clinician promotes via feature-flag set | Single clinician sign-off **plus** server-enforced ≥48h gap between the most recent `shadow_mode_decision_reviewed` event for that gap and the `gap_*_enabled = true` flip. |
+| Audit row                                  | `sole_clinician_override` field absent or `false`                                 | `sole_clinician_override: true` MUST appear in the `sensitive_bridge_log` event payload AND the auto-disable re-enable event payload.                                        |
+
+### 13.2 Three conditions for assigning a clinician to `'sole_lead'`
+
+The exemption is reserved for clinicians who satisfy **all three** of:
+
+1. **Established therapeutic alliance.** The clinician has direct
+   sustained therapeutic relationships with the survivors who would be
+   affected by `safe_silence_mode` approvals on their account. The
+   sole-clinician path skips the "second pair of eyes" safeguard, so the
+   first pair must be well-calibrated to the population.
+
+2. **External supervision exists.** A formal supervision relationship
+   (peer-consultation group, external clinical supervisor, IRB
+   oversight, or equivalent) is in place and is reviewing
+   `sole_clinician_override` audit rows on at least a monthly cadence.
+   The supervisor does not need IDP credentials in the sanctuary stack;
+   their role is to read the audit trail out-of-band.
+
+3. **Survivor informed consent.** Each affected survivor has received
+   and acknowledged a written disclosure that this clinician operates
+   in sole-lead mode, that approvals will be made by the same clinician
+   who proposes them (in a separate session), and that the survivor may
+   request transfer to a multi-clinician deployment at any time without
+   penalty. Acknowledgement is captured in the survivor's record before
+   the first `safe_silence_mode` proposal targeting them.
+
+If any of (1)-(3) lapses, the lead clinician's row MUST be reverted to
+`'multi_clinician_team'` via:
+
+```sql
+UPDATE coach_profiles
+   SET clinician_authorization_type = 'multi_clinician_team',
+       updated_at = NOW()
+ WHERE username = 'CoachN';
+```
+
+Reversion takes effect on the next request — the lookup happens
+per-request, no cache invalidation needed.
+
+### 13.3 Audit & enforcement
+
+* Migration 214 publishes the read-only view
+  `v_clinician_authorization_mode` consumed by both the
+  `sensitive_profile_api` two-step gate and the
+  `sensitive_bridge_telemetry_api` feature-flag promotion endpoint.
+* `SensitiveBridgeAuditor` runs two **folded** static-source checks
+  (no new top-level slots; `_TOTAL_SLOTS` stays at 34):
+  * `sole_clinician_session_separation_enforced` — folded into
+    `safe_silence_state_view_present` (Tier 2).
+  * `sole_clinician_reflection_delay_enforced` — folded into
+    `shadow_mode_decision_review_current` (Tier 3).
+  Either fold failing flips the parent slot to `ok=false`.
+* Every sole-clinician approval emits `sole_clinician_override: true`
+  inside the `additional_fields_redacted` payload of
+  `sensitive_bridge_log` (event type `safe_silence_state_change`)
+  and inside the `auto_disable_reenabled` payload for detector
+  promotions. The supervisor in §13.2 (2) reviews these.
+* The 48-hour reflection delay is calculated **server-side** from
+  `MAX(skyeye_activity.created_at)` filtered by
+  `type = 'shadow_mode_decision_reviewed'` and the actor or gap. Client
+  clocks never enter the comparison.
+
+### 13.4 Failure modes the exemption does NOT cover
+
+* It does NOT permit single-session approval. Two distinct login
+  sessions are still required.
+* It does NOT remove the codeword precondition. A `sole_lead` clinician
+  with zero active codewords on the target user receives the same
+  `precondition_unmet` rejection.
+* It does NOT remove the 30-day auto-revert.
+* It does NOT extend to other admin operations (cohort exports, RBAC
+  edits, retention-tier overrides). Those continue to follow whatever
+  approval policy their respective subsystems define.
+
+---
+
+## 14. Runtime Log
 
 This section is appended to during execution. Format: `<ISO timestamp> [<phase>] <event>`.
 
@@ -683,5 +784,29 @@ This section is appended to during execution. Format: `<ISO timestamp> [<phase>]
   Confirmed CLEAN: Sug 1 (codeword_type present line 24); Sug 5 hash policy
   (no server-side default on codeword_salt was ever present).
 ```
+
+2026-05-10T23:00:00Z [Migration 214] Sole-clinician deployment mode added.
+  - Migration 214 created: clinician_authorization_type column on
+    coach_profiles, default 'multi_clinician_team', CHECK constraint,
+    partial index, v_clinician_authorization_mode view, CoachN backfill
+    to 'sole_lead'.
+  - sensitive_profile_api.py: safe_silence approve flow now reads the
+    proposer's authorization type. sole_lead allows same-actor approval
+    iff session hashes differ; multi_clinician_team enforces different
+    actors. Audit row carries proposer_authorization_type and
+    sole_clinician_override.
+  - sensitive_bridge_telemetry_api.py: feature-flag promotion enforces
+    server-side ≥48h reflection delay between shadow_mode_decision_reviewed
+    and gap_*_enabled flip when actor is sole_lead. Audit row carries
+    actor_authorization_type, sole_clinician_override, reviewed_at,
+    reflection_delay_hours_required.
+  - sensitive_bridge_auditor.py: two new static-source checks
+    (sole_clinician_session_separation_enforced,
+    sole_clinician_reflection_delay_enforced) folded into existing
+    Tier-2 and Tier-3 slot details. _TOTAL_SLOTS unchanged at 34;
+    no trust_baseline write required.
+  - Playbook §13 (Sole-Clinician Deployment Mode) added documenting
+    the deviation, the three conditions for assignment, and the
+    audit/enforcement surface.
 
 Future entries appended chronologically by the executing engineer.

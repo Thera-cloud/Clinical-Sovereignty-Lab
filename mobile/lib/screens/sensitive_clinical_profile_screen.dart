@@ -24,6 +24,10 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart' as cfg;
 
+import 'client_cross_addiction_profile_screen.dart';
+import 'client_framework_menu_screen.dart';
+import 'client_parts_registry_screen.dart';
+
 // -----------------------------------------------------------------------------
 // DESIGN TOKENS — mirror settings_screen.dart so visual language is consistent
 // across the coach portal.
@@ -67,9 +71,11 @@ const Map<String, double> _AROUSAL_PRESETS = {
 };
 
 double _noveltyPreset(String? populationType) =>
-    _NOVELTY_PRESETS[populationType ?? ''] ?? _NOVELTY_PRESETS['general_trauma']!;
+    _NOVELTY_PRESETS[populationType ?? ''] ??
+    _NOVELTY_PRESETS['general_trauma']!;
 double _arousalPreset(String? populationType) =>
-    _AROUSAL_PRESETS[populationType ?? ''] ?? _AROUSAL_PRESETS['general_trauma']!;
+    _AROUSAL_PRESETS[populationType ?? ''] ??
+    _AROUSAL_PRESETS['general_trauma']!;
 
 /// Calendar date as YYYY-MM-DD for trigger/legal endpoints.
 String _dateOnlyIso(DateTime d) {
@@ -90,6 +96,7 @@ const List<String> _kSubstanceStatuses = [
   'active_use',
   'crisis',
 ];
+
 /// Server CHECK constraint (migration 204): explicit_word | innocuous_phrase.
 const List<String> _kCodewordTypesApi = ['explicit_word', 'innocuous_phrase'];
 const List<String> _kTriggerDateTypes = [
@@ -156,6 +163,16 @@ class SensitiveProfile {
   final double? noveltyThreshold;
   final double? arousalThreshold;
   final String? substanceStatus;
+  final String? sexAddictionStatus;
+  final String? gamblingStatus;
+  final String? gamingStatus;
+  final String? spendingCompulsionStatus;
+  final String? foodCompulsionStatus;
+  final String? workCompulsionStatus;
+  final String? codependencyStatus;
+
+  /// Clinician-maintained cross-addiction capsule (v1.4).
+  final Map<String, dynamic> crossAddictionProfile;
   final SafeSilenceState safeSilence;
   final List<Codeword> codewords;
   final List<TriggerDate> triggerDates;
@@ -181,6 +198,14 @@ class SensitiveProfile {
     required this.noveltyThreshold,
     required this.arousalThreshold,
     required this.substanceStatus,
+    required this.sexAddictionStatus,
+    required this.gamblingStatus,
+    required this.gamingStatus,
+    required this.spendingCompulsionStatus,
+    required this.foodCompulsionStatus,
+    required this.workCompulsionStatus,
+    required this.codependencyStatus,
+    required this.crossAddictionProfile,
     required this.safeSilence,
     required this.codewords,
     required this.triggerDates,
@@ -198,6 +223,18 @@ class SensitiveProfile {
       noveltyThreshold: _d(j['novelty_threshold']),
       arousalThreshold: _d(j['arousal_threshold']),
       substanceStatus: j['substance_status'] as String?,
+      sexAddictionStatus: j['sex_addiction_status'] as String?,
+      gamblingStatus: j['gambling_status'] as String?,
+      gamingStatus: j['gaming_status'] as String?,
+      spendingCompulsionStatus: j['spending_compulsion_status'] as String?,
+      foodCompulsionStatus: j['food_compulsion_status'] as String?,
+      workCompulsionStatus: j['work_compulsion_status'] as String?,
+      codependencyStatus: j['codependency_status'] as String?,
+      crossAddictionProfile: j['cross_addiction_profile'] is Map
+          ? Map<String, dynamic>.from(
+              (j['cross_addiction_profile'] as Map).cast<String, dynamic>(),
+            )
+          : {},
       safeSilence: SafeSilenceState.fromJson(
         (j['safe_silence_mode_state'] as Map?)?.cast<String, dynamic>() ?? {},
       ),
@@ -228,7 +265,8 @@ class SensitiveProfile {
   String? get highestPolyvictimSeverity {
     const order = ['critical', 'high', 'moderate', 'low'];
     for (final lvl in order) {
-      if (polyvictimLayers.any((p) => p.active && p.severity == lvl)) return lvl;
+      if (polyvictimLayers.any((p) => p.active && p.severity == lvl))
+        return lvl;
     }
     return null;
   }
@@ -558,9 +596,7 @@ class _SensitiveProfileApi {
     double value, {
     String? populationPreset,
   }) async {
-    final path = which == 'novelty'
-        ? 'novelty-threshold'
-        : 'arousal-threshold';
+    final path = which == 'novelty' ? 'novelty-threshold' : 'arousal-threshold';
     final uri = Uri.parse('$_base/api/coach/sensitive-profile/$userId/$path');
     final Map<String, dynamic> payload = which == 'novelty'
         ? {'novelty_threshold': value}
@@ -609,6 +645,41 @@ class _SensitiveProfileApi {
     }
   }
 
+  Future<void> _putAddictionStatus(
+    String userId,
+    String endpointSlug,
+    String bodyKey,
+    String status,
+  ) async {
+    final uri = Uri.parse(
+      '$_base/api/coach/sensitive-profile/$userId/$endpointSlug',
+    );
+    final resp = await http
+        .put(uri, headers: _headers, body: jsonEncode({bodyKey: status}))
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) throw _ApiError.fromResponse(resp);
+  }
+
+  Future<void> putSexAddictionStatus(String userId, String s) =>
+      _putAddictionStatus(
+          userId, 'sex-addiction-status', 'sex_addiction_status', s);
+  Future<void> putGamblingStatus(String userId, String s) =>
+      _putAddictionStatus(userId, 'gambling-status', 'gambling_status', s);
+  Future<void> putGamingStatus(String userId, String s) =>
+      _putAddictionStatus(userId, 'gaming-status', 'gaming_status', s);
+  Future<void> putSpendingCompulsionStatus(String userId, String s) =>
+      _putAddictionStatus(userId, 'spending-compulsion-status',
+          'spending_compulsion_status', s);
+  Future<void> putFoodCompulsionStatus(String userId, String s) =>
+      _putAddictionStatus(
+          userId, 'food-compulsion-status', 'food_compulsion_status', s);
+  Future<void> putWorkCompulsionStatus(String userId, String s) =>
+      _putAddictionStatus(
+          userId, 'work-compulsion-status', 'work_compulsion_status', s);
+  Future<void> putCodependencyStatus(String userId, String s) =>
+      _putAddictionStatus(
+          userId, 'codependency-status', 'codependency_status', s);
+
   Future<void> postCodeword(
     String userId, {
     required String plaintextCodeword,
@@ -616,7 +687,8 @@ class _SensitiveProfileApi {
     required bool triggersMandatoryReporting,
     String? codewordLabel,
   }) async {
-    final uri = Uri.parse('$_base/api/coach/sensitive-profile/$userId/codeword');
+    final uri =
+        Uri.parse('$_base/api/coach/sensitive-profile/$userId/codeword');
     final resp = await http
         .post(
           uri,
@@ -694,8 +766,8 @@ class _SensitiveProfileApi {
     required String severity,
     String? notesRedacted,
   }) async {
-    final uri =
-        Uri.parse('$_base/api/coach/sensitive-profile/$userId/polyvictim-layer');
+    final uri = Uri.parse(
+        '$_base/api/coach/sensitive-profile/$userId/polyvictim-layer');
     final resp = await http
         .post(
           uri,
@@ -739,8 +811,7 @@ class _SensitiveProfileApi {
       'case_status': caseStatus,
       if (nextEventDateIso != null && nextEventDateIso.isNotEmpty)
         'next_event_date': nextEventDateIso,
-      if (attorneyContactRedacted != null &&
-          attorneyContactRedacted.isNotEmpty)
+      if (attorneyContactRedacted != null && attorneyContactRedacted.isNotEmpty)
         'attorney_contact_redacted': attorneyContactRedacted,
     };
     final resp = await http
@@ -900,9 +971,9 @@ class _ApiError implements Exception {
         }
       }
     } catch (_) {}
-    final truncated =
-        raw.length > 480 ? '${raw.substring(0, 480)}…' : raw;
-    return _ApiError(resp.statusCode, truncated.isEmpty ? 'HTTP ${resp.statusCode}' : truncated);
+    final truncated = raw.length > 480 ? '${raw.substring(0, 480)}…' : raw;
+    return _ApiError(resp.statusCode,
+        truncated.isEmpty ? 'HTTP ${resp.statusCode}' : truncated);
   }
 
   /// Enrollment / snackbar paths still read `.reason`.
@@ -988,6 +1059,20 @@ class _SensitiveClinicalProfileScreenState
   String? _embodimentInlineError;
   bool _savingSubstance = false;
   String? _substanceInlineError;
+  bool _savingSexAddiction = false;
+  String? _sexAddictionInlineError;
+  bool _savingGambling = false;
+  String? _gamblingInlineError;
+  bool _savingGaming = false;
+  String? _gamingInlineError;
+  bool _savingSpendingCompulsion = false;
+  String? _spendingCompulsionInlineError;
+  bool _savingFoodCompulsion = false;
+  String? _foodCompulsionInlineError;
+  bool _savingWorkCompulsion = false;
+  String? _workCompulsionInlineError;
+  bool _savingCodependency = false;
+  String? _codependencyInlineError;
 
   @override
   void initState() {
@@ -1086,8 +1171,7 @@ class _SensitiveClinicalProfileScreenState
             ..clear()
             ..addAll(widget.logEventsOverride!);
         }
-        _logCursor =
-            _logEvents.isNotEmpty ? _logEvents.last.id : null;
+        _logCursor = _logEvents.isNotEmpty ? _logEvents.last.id : null;
         _logExhausted = true;
         _logLoading = false;
       });
@@ -1133,6 +1217,47 @@ class _SensitiveClinicalProfileScreenState
           style: const TextStyle(color: _D.gold, fontSize: 16),
         ),
         actions: [
+          PopupMenuButton<String>(
+            tooltip: 'More',
+            icon: const Icon(Icons.more_vert, color: _D.gold),
+            onSelected: (v) {
+              if (!mounted) return;
+              if (v == 'parts') {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ClientPartsRegistryScreen(
+                      currentUserProfile: widget.currentUserProfile,
+                      targetUserId: widget.targetUserId,
+                    ),
+                  ),
+                );
+              } else if (v == 'framework') {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ClientFrameworkMenuScreen(
+                      currentUserProfile: widget.currentUserProfile,
+                      targetUserId: widget.targetUserId,
+                    ),
+                  ),
+                );
+              } else if (v == 'cross') {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ClientCrossAddictionProfileScreen(
+                      currentUserProfile: widget.currentUserProfile,
+                      targetUserId: widget.targetUserId,
+                    ),
+                  ),
+                );
+              }
+            },
+            itemBuilder: (ctx) => const [
+              PopupMenuItem(value: 'parts', child: Text('Parts registry')),
+              PopupMenuItem(value: 'framework', child: Text('Framework menu')),
+              PopupMenuItem(
+                  value: 'cross', child: Text('Cross-addiction profile')),
+            ],
+          ),
           IconButton(
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh, color: _D.gold),
@@ -1166,8 +1291,7 @@ class _SensitiveClinicalProfileScreenState
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: _D.bgElev),
                 onPressed: _loadProfile,
-                child:
-                    const Text('Retry', style: TextStyle(color: _D.gold)),
+                child: const Text('Retry', style: TextStyle(color: _D.gold)),
               ),
             ],
           ),
@@ -1190,8 +1314,7 @@ class _SensitiveClinicalProfileScreenState
               enrollInFlight: _enrollInFlight,
               onEnrollPressed: _openEnrollmentDialog,
             ),
-          if (p.populationType == null)
-            const _PopulationTypeBanner(),
+          if (p.populationType == null) const _PopulationTypeBanner(),
           _SectionCard(
             title: 'Embodiment Phase',
             badge: _embodimentBadge(p.embodimentPhase),
@@ -1206,6 +1329,125 @@ class _SensitiveClinicalProfileScreenState
             title: 'Substance Status',
             badge: _substanceBadge(p.substanceStatus),
             child: _substanceBody(p),
+          ),
+          _SectionCard(
+            title: 'Sex Addiction',
+            badge: _substanceBadge(p.sexAddictionStatus),
+            child: _addictionBody(
+              p,
+              p.sexAddictionStatus,
+              'Sex addiction status',
+              _savingSexAddiction,
+              _sexAddictionInlineError,
+              (v) => _applyAddictionStatus(
+                v,
+                _api.putSexAddictionStatus,
+                (b) => setState(() => _savingSexAddiction = b),
+                (e) => setState(() => _sexAddictionInlineError = e),
+              ),
+            ),
+          ),
+          _SectionCard(
+            title: 'Gambling',
+            badge: _substanceBadge(p.gamblingStatus),
+            child: _addictionBody(
+              p,
+              p.gamblingStatus,
+              'Gambling status',
+              _savingGambling,
+              _gamblingInlineError,
+              (v) => _applyAddictionStatus(
+                v,
+                _api.putGamblingStatus,
+                (b) => setState(() => _savingGambling = b),
+                (e) => setState(() => _gamblingInlineError = e),
+              ),
+            ),
+          ),
+          _SectionCard(
+            title: 'Gaming',
+            badge: _substanceBadge(p.gamingStatus),
+            child: _addictionBody(
+              p,
+              p.gamingStatus,
+              'Gaming status',
+              _savingGaming,
+              _gamingInlineError,
+              (v) => _applyAddictionStatus(
+                v,
+                _api.putGamingStatus,
+                (b) => setState(() => _savingGaming = b),
+                (e) => setState(() => _gamingInlineError = e),
+              ),
+            ),
+          ),
+          _SectionCard(
+            title: 'Spending Compulsion',
+            badge: _substanceBadge(p.spendingCompulsionStatus),
+            child: _addictionBody(
+              p,
+              p.spendingCompulsionStatus,
+              'Spending compulsion status',
+              _savingSpendingCompulsion,
+              _spendingCompulsionInlineError,
+              (v) => _applyAddictionStatus(
+                v,
+                _api.putSpendingCompulsionStatus,
+                (b) => setState(() => _savingSpendingCompulsion = b),
+                (e) => setState(() => _spendingCompulsionInlineError = e),
+              ),
+            ),
+          ),
+          _SectionCard(
+            title: 'Food Compulsion',
+            badge: _substanceBadge(p.foodCompulsionStatus),
+            child: _addictionBody(
+              p,
+              p.foodCompulsionStatus,
+              'Food compulsion status',
+              _savingFoodCompulsion,
+              _foodCompulsionInlineError,
+              (v) => _applyAddictionStatus(
+                v,
+                _api.putFoodCompulsionStatus,
+                (b) => setState(() => _savingFoodCompulsion = b),
+                (e) => setState(() => _foodCompulsionInlineError = e),
+              ),
+            ),
+          ),
+          _SectionCard(
+            title: 'Work Compulsion',
+            badge: _substanceBadge(p.workCompulsionStatus),
+            child: _addictionBody(
+              p,
+              p.workCompulsionStatus,
+              'Work compulsion status',
+              _savingWorkCompulsion,
+              _workCompulsionInlineError,
+              (v) => _applyAddictionStatus(
+                v,
+                _api.putWorkCompulsionStatus,
+                (b) => setState(() => _savingWorkCompulsion = b),
+                (e) => setState(() => _workCompulsionInlineError = e),
+              ),
+            ),
+          ),
+          _SectionCard(
+            title: 'Codependency',
+            badge: _substanceBadge(p.codependencyStatus),
+            child: _addictionBody(
+              p,
+              p.codependencyStatus,
+              'Codependency status',
+              _savingCodependency,
+              _codependencyInlineError,
+              (v) => _applyAddictionStatus(
+                v,
+                _api.putCodependencyStatus,
+                (b) => setState(() => _savingCodependency = b),
+                (e) => setState(() => _codependencyInlineError = e),
+              ),
+            ),
           ),
           _SectionCard(
             title: 'Codewords',
@@ -1261,9 +1503,8 @@ class _SensitiveClinicalProfileScreenState
 
   Widget? _substanceBadge(String? status) {
     if (status == null || status == 'none') return null;
-    final color = (status == 'crisis' || status == 'active_use')
-        ? _D.red
-        : _D.cyan;
+    final color =
+        (status == 'crisis' || status == 'active_use') ? _D.red : _D.cyan;
     return _Badge(label: status, color: color);
   }
 
@@ -1299,8 +1540,7 @@ class _SensitiveClinicalProfileScreenState
     if (s.isActive) {
       final d = s.daysUntilExpiry;
       final c = _expiryColor(d);
-      final label =
-          d == null ? 'active' : 'active · ${d}d';
+      final label = d == null ? 'active' : 'active · ${d}d';
       return _Badge(label: label, color: c);
     }
     return _Badge(label: s.state, color: _D.yellow);
@@ -1387,8 +1627,7 @@ class _SensitiveClinicalProfileScreenState
     if (cur != null && cur.isNotEmpty && !opts.contains(cur)) {
       opts.insert(0, cur);
     }
-    final effective =
-        (cur != null && opts.contains(cur)) ? cur : opts.first;
+    final effective = (cur != null && opts.contains(cur)) ? cur : opts.first;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1648,6 +1887,106 @@ class _SensitiveClinicalProfileScreenState
     }
   }
 
+  Widget _addictionBody(
+    SensitiveProfile p,
+    String? currentStatus,
+    String label,
+    bool saving,
+    String? inlineError,
+    ValueChanged<String> onChanged,
+  ) {
+    final rows = <_Kv>[
+      const _Kv('Allowed values', 'none · recovery · active_use · crisis'),
+    ];
+    if (!_canEditSensitiveFields(p)) {
+      rows.insert(0, _Kv('Current status', currentStatus ?? 'none'));
+      return _ReadOnlyKv(rows: rows);
+    }
+
+    final opts = List<String>.from(_kSubstanceStatuses);
+    final cur = currentStatus ?? 'none';
+    if (!opts.contains(cur)) opts.insert(0, cur);
+    final effective = opts.contains(cur) ? cur : opts.first;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ReadOnlyKv(rows: rows),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: effective,
+                dropdownColor: _D.bgElev,
+                style: const TextStyle(color: _D.text, fontSize: 13),
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: _D.bgElev,
+                  border: const OutlineInputBorder(),
+                  labelText: label,
+                  labelStyle: const TextStyle(color: _D.textDim, fontSize: 12),
+                ),
+                items: opts
+                    .map(
+                      (e) => DropdownMenuItem(
+                        value: e,
+                        child: Text(e, style: const TextStyle(color: _D.text)),
+                      ),
+                    )
+                    .toList(),
+                onChanged: saving
+                    ? null
+                    : (v) {
+                        if (v == null || v == cur) return;
+                        onChanged(v);
+                      },
+              ),
+            ),
+            if (saving)
+              const Padding(
+                padding: EdgeInsets.only(left: 10),
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+          ],
+        ),
+        if (inlineError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              inlineError,
+              style: const TextStyle(color: _D.red, fontSize: 11),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _applyAddictionStatus(
+    String status,
+    Future<void> Function(String userId, String s) apiCall,
+    ValueChanged<bool> setSaving,
+    ValueChanged<String?> setError,
+  ) async {
+    if (_harnessMutationBarrier()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await apiCall(widget.targetUserId, status);
+      if (!mounted) return;
+      await _loadProfile();
+    } catch (e) {
+      if (mounted) setError(_apiErrorMessage(e));
+    } finally {
+      if (mounted) setSaving(false);
+    }
+  }
+
   Widget _codewordBody(SensitiveProfile p) {
     final can = _canEditSensitiveFields(p);
     final rows = <Widget>[];
@@ -1702,8 +2041,7 @@ class _SensitiveClinicalProfileScreenState
           child: TextButton.icon(
             onPressed: _showAddCodewordDialog,
             icon: const Icon(Icons.add, color: _D.gold, size: 18),
-            label:
-                const Text('Add Codeword', style: TextStyle(color: _D.gold)),
+            label: const Text('Add Codeword', style: TextStyle(color: _D.gold)),
           ),
         ),
       );
@@ -1800,12 +2138,10 @@ class _SensitiveClinicalProfileScreenState
                             onChanged: (submitting ||
                                     cwType == 'innocuous_phrase')
                                 ? null
-                                : (v) =>
-                                    setDlg(() => mandatory = v ?? false),
+                                : (v) => setDlg(() => mandatory = v ?? false),
                             title: const Text(
                               'Triggers mandatory reporting',
-                              style:
-                                  TextStyle(color: _D.text, fontSize: 12),
+                              style: TextStyle(color: _D.text, fontSize: 12),
                             ),
                             fillColor:
                                 WidgetStateProperty.resolveWith((states) {
@@ -1843,14 +2179,12 @@ class _SensitiveClinicalProfileScreenState
                                 if (_blockHarnessNetwork) {
                                   if (ctx.mounted) Navigator.of(ctx).pop();
                                   if (mounted) {
-                                    ScaffoldMessenger.of(context)
-                                        .showSnackBar(
+                                    ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
                                         backgroundColor: _D.bgElev,
                                         content: Text(
                                           'Inspection harness: mutation skipped.',
-                                          style:
-                                              TextStyle(color: _D.gold),
+                                          style: TextStyle(color: _D.gold),
                                         ),
                                       ),
                                     );
@@ -1867,8 +2201,7 @@ class _SensitiveClinicalProfileScreenState
                                     plaintextCodeword: raw,
                                     codewordType: cwType,
                                     triggersMandatoryReporting:
-                                        cwType == 'explicit_word' &&
-                                            mandatory,
+                                        cwType == 'explicit_word' && mandatory,
                                   );
                                   if (ctx.mounted) Navigator.of(ctx).pop();
                                   await _loadProfile();
@@ -1992,8 +2325,7 @@ class _SensitiveClinicalProfileScreenState
     if (prof == null || !_canEditSensitiveFields(prof)) return;
     final ok = await _confirmDialog(
       title: 'Delete trigger date?',
-      message:
-          'Remove this trigger date entry? This cannot be undone.',
+      message: 'Remove this trigger date entry? This cannot be undone.',
       confirmLabel: 'Delete',
     );
     if (!ok) return;
@@ -2019,8 +2351,7 @@ class _SensitiveClinicalProfileScreenState
         barrierDismissible: false,
         builder: (ctx) {
           final now = DateTime.now();
-          final firstCal =
-              DateTime(now.year - 50, now.month, now.day);
+          final firstCal = DateTime(now.year - 50, now.month, now.day);
           final lastCal = DateTime(now.year + 10, now.month, now.day);
           DateTime selectedDay = existing != null
               ? (DateTime.tryParse(existing.triggerDate) != null
@@ -2098,9 +2429,8 @@ class _SensitiveClinicalProfileScreenState
                               style: const TextStyle(color: _D.gold),
                             ),
                             trailing: TextButton(
-                              onPressed: submitting
-                                  ? null
-                                  : () => pickDate(setDlg),
+                              onPressed:
+                                  submitting ? null : () => pickDate(setDlg),
                               child: const Text('Pick'),
                             ),
                           ),
@@ -2122,8 +2452,7 @@ class _SensitiveClinicalProfileScreenState
                                 .toList(),
                             onChanged: submitting
                                 ? null
-                                : (v) => setDlg(
-                                    () => dateType = v ?? dateType),
+                                : (v) => setDlg(() => dateType = v ?? dateType),
                           ),
                           const SizedBox(height: 10),
                           DropdownButtonFormField<String>(
@@ -2144,16 +2473,14 @@ class _SensitiveClinicalProfileScreenState
                                 .toList(),
                             onChanged: submitting
                                 ? null
-                                : (v) =>
-                                    setDlg(() => severity = v ?? severity),
+                                : (v) => setDlg(() => severity = v ?? severity),
                           ),
                           const SizedBox(height: 8),
                           CheckboxListTile(
                             value: recurring,
                             onChanged: submitting
                                 ? null
-                                : (v) => setDlg(
-                                    () => recurring = v ?? false),
+                                : (v) => setDlg(() => recurring = v ?? false),
                             title: const Text(
                               'Recurring annually',
                               style: TextStyle(color: _D.text, fontSize: 12),
@@ -2175,8 +2502,7 @@ class _SensitiveClinicalProfileScreenState
                             style: const TextStyle(color: _D.text),
                             decoration: const InputDecoration(
                               labelText: 'Notes (redacted)',
-                              helperText:
-                                  'No PII — server screens this field; '
+                              helperText: 'No PII — server screens this field; '
                                   'do not include names, dates of birth, addresses',
                               helperMaxLines: 3,
                               filled: true,
@@ -2217,8 +2543,7 @@ class _SensitiveClinicalProfileScreenState
                                   inlineErr = null;
                                 });
                                 final iso = _dateOnlyIso(selectedDay);
-                                final notesTrim =
-                                    notesCtrl.text.trim();
+                                final notesTrim = notesCtrl.text.trim();
                                 final oldId = existing?.id;
                                 try {
                                   await _api.postTriggerDate(
@@ -2227,9 +2552,8 @@ class _SensitiveClinicalProfileScreenState
                                     dateType: dateType,
                                     severity: severity,
                                     recurringAnnually: recurring,
-                                    notesRedacted: notesTrim.isEmpty
-                                        ? null
-                                        : notesTrim,
+                                    notesRedacted:
+                                        notesTrim.isEmpty ? null : notesTrim,
                                   );
                                   if (oldId != null) {
                                     await _api.deleteTriggerDate(
@@ -2246,8 +2570,7 @@ class _SensitiveClinicalProfileScreenState
                                   });
                                 }
                               },
-                        child: Text(
-                            existing == null ? 'Add' : 'Save'),
+                        child: Text(existing == null ? 'Add' : 'Save'),
                       ),
                     ],
                   ),
@@ -2334,8 +2657,7 @@ class _SensitiveClinicalProfileScreenState
     if (prof == null || !_canEditSensitiveFields(prof)) return;
     final ok = await _confirmDialog(
       title: 'Delete polyvictim layer?',
-      message:
-          'Remove this layer record? This cannot be undone.',
+      message: 'Remove this layer record? This cannot be undone.',
       confirmLabel: 'Delete',
     );
     if (!ok) return;
@@ -2399,8 +2721,7 @@ class _SensitiveClinicalProfileScreenState
                             .toList(),
                         onChanged: submitting
                             ? null
-                            : (v) =>
-                                setDlg(() => layerType = v ?? layerType),
+                            : (v) => setDlg(() => layerType = v ?? layerType),
                       ),
                       const SizedBox(height: 10),
                       DropdownButtonFormField<String>(
@@ -2421,16 +2742,14 @@ class _SensitiveClinicalProfileScreenState
                             .toList(),
                         onChanged: submitting
                             ? null
-                            : (v) =>
-                                setDlg(() => severity = v ?? severity),
+                            : (v) => setDlg(() => severity = v ?? severity),
                       ),
                       if (inlineErr != null)
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(
                             inlineErr!,
-                            style: const TextStyle(
-                                color: _D.red, fontSize: 11),
+                            style: const TextStyle(color: _D.red, fontSize: 11),
                           ),
                         ),
                     ],
@@ -2570,16 +2889,13 @@ class _SensitiveClinicalProfileScreenState
         builder: (ctx) {
           final now = DateTime.now();
           final firstFuture = DateTime(now.year, now.month, now.day);
-          final lastFuture =
-              DateTime(now.year + 15, now.month, now.day);
+          final lastFuture = DateTime(now.year + 15, now.month, now.day);
 
-          String caseType =
-              existing?.caseType ?? _kLegalCaseTypes.first;
+          String caseType = existing?.caseType ?? _kLegalCaseTypes.first;
           if (!_kLegalCaseTypes.contains(caseType)) {
             caseType = _kLegalCaseTypes.first;
           }
-          String caseStatus =
-              existing?.caseStatus ?? _kLegalCaseStatuses.first;
+          String caseStatus = existing?.caseStatus ?? _kLegalCaseStatuses.first;
           if (!_kLegalCaseStatuses.contains(caseStatus)) {
             caseStatus = _kLegalCaseStatuses.first;
           }
@@ -2662,8 +2978,8 @@ class _SensitiveClinicalProfileScreenState
                                   .toList(),
                               onChanged: submitting
                                   ? null
-                                  : (v) => setDlg(
-                                      () => caseType = v ?? caseType),
+                                  : (v) =>
+                                      setDlg(() => caseType = v ?? caseType),
                             ),
                           ],
                           const SizedBox(height: 10),
@@ -2685,8 +3001,8 @@ class _SensitiveClinicalProfileScreenState
                                 .toList(),
                             onChanged: submitting
                                 ? null
-                                : (v) => setDlg(
-                                    () => caseStatus = v ?? caseStatus),
+                                : (v) =>
+                                    setDlg(() => caseStatus = v ?? caseStatus),
                           ),
                           const SizedBox(height: 8),
                           ListTile(
@@ -2695,9 +3011,7 @@ class _SensitiveClinicalProfileScreenState
                               style: TextStyle(color: _D.textDim, fontSize: 12),
                             ),
                             subtitle: Text(
-                              nextEvt != null
-                                  ? _dateOnlyIso(nextEvt!)
-                                  : 'none',
+                              nextEvt != null ? _dateOnlyIso(nextEvt!) : 'none',
                               style: const TextStyle(color: _D.gold),
                             ),
                             trailing: Row(
@@ -2866,8 +3180,7 @@ class _SensitiveClinicalProfileScreenState
   Future<void> _onAdminRevokeSafeSilenceActive() async {
     final ok = await _confirmDialog(
       title: 'Revoke Silence Mode?',
-      message:
-          'Revoking will resume 72-hour check-in cadence immediately. '
+      message: 'Revoking will resume 72-hour check-in cadence immediately. '
           'Confirm only if survivor\'s safety net should be restored now.',
       confirmLabel: 'Revoke',
     );
@@ -3041,8 +3354,7 @@ class _SensitiveClinicalProfileScreenState
       final retry = await showDialog<_EnrollmentDialogResult>(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) =>
-            _EnrollmentDialog(targetUserId: widget.targetUserId),
+        builder: (ctx) => _EnrollmentDialog(targetUserId: widget.targetUserId),
       );
       if (retry != null && mounted) {
         await _submitEnrollment(retry);
@@ -3229,8 +3541,7 @@ class _NotEnrolledBanner extends StatelessWidget {
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _D.cyan,
-                  disabledBackgroundColor:
-                      _D.cyan.withValues(alpha: 0.4),
+                  disabledBackgroundColor: _D.cyan.withValues(alpha: 0.4),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(20),
                   ),
@@ -3736,9 +4047,9 @@ class _PresetSliderState extends State<_PresetSlider> {
             // Computed in pixels at layout time.
             LayoutBuilder(
               builder: (ctx, c) {
-                final t = ((widget.preset - widget.min) /
-                        (widget.max - widget.min))
-                    .clamp(0.0, 1.0);
+                final t =
+                    ((widget.preset - widget.min) / (widget.max - widget.min))
+                        .clamp(0.0, 1.0);
                 // Slider has standard 24-px thumb padding; subtract to align.
                 const thumbPadding = 24.0;
                 final usable = c.maxWidth - thumbPadding * 2;
@@ -4232,9 +4543,7 @@ class _ActivityRow extends StatelessWidget {
                     child: Text(
                       subtitle,
                       style: TextStyle(
-                        color: event.isAdminRedacted
-                            ? _D.textDim
-                            : _D.textDim,
+                        color: event.isAdminRedacted ? _D.textDim : _D.textDim,
                         fontStyle: event.isAdminRedacted
                             ? FontStyle.italic
                             : FontStyle.normal,

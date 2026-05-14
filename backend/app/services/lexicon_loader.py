@@ -82,8 +82,11 @@ def load_active_lexicons(
             if categories and stem not in categories:
                 continue
             data = _load_yaml_file(str(yaml_file))
-            if data:
-                merged[f"{key}/{stem}"] = data
+            if not data:
+                continue
+            if (data.get("status") or "").strip() == "scaffolded_unreviewed":
+                continue
+            merged[f"{key}/{stem}"] = data
     return merged
 
 

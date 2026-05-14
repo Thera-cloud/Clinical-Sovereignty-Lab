@@ -61,6 +61,17 @@ class SensitiveProfileInspectionFixture {
       noveltyThreshold: 0.25,
       arousalThreshold: 1.5,
       substanceStatus: 'recovery',
+      sexAddictionStatus: null,
+      gamblingStatus: 'recovery',
+      gamingStatus: null,
+      spendingCompulsionStatus: null,
+      foodCompulsionStatus: null,
+      workCompulsionStatus: null,
+      codependencyStatus: null,
+      crossAddictionProfile: <String, dynamic>{
+        'active_branches': <String>['substance', 'gambling'],
+        'notes_redacted': '[redacted: inspection cross-addiction capsule]',
+      },
       populationType: 'trafficking_survivor',
       isEnrolled: true,
       coachAuthorized: true,
@@ -114,7 +125,8 @@ class SensitiveProfileInspectionFixture {
           dateType: 'court_appearance',
           severity: 'high',
           recurringAnnually: false,
-          notesRedacted: '[redacted: court date – Polyvictim layer 2 cross-reference]',
+          notesRedacted:
+              '[redacted: court date – Polyvictim layer 2 cross-reference]',
           setByClinicianId: 'CoachN',
           setAt: iso(now.subtract(const Duration(days: 14))),
           active: true,
@@ -140,7 +152,8 @@ class SensitiveProfileInspectionFixture {
           active: true,
           setByClinicianId: 'CoachN',
           setAt: iso(now.subtract(const Duration(days: 28))),
-          notesRedacted: '[redacted: 3 distinct perpetrator clusters identified]',
+          notesRedacted:
+              '[redacted: 3 distinct perpetrator clusters identified]',
         ),
         PolyvictimLayer(
           id: 7002,

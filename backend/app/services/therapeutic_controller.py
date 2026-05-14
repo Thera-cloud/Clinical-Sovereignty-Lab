@@ -658,16 +658,32 @@ async def prepare_therapeutic_context(
     # internally; when dormant, register_directive is None and downstream
     # logic runs identically to v1.2. Failure is best-effort: a raised
     # exception leaves register_directive at the caller-supplied value.
+    lens_bridge_block = ""
     try:
         from app.services import sensitive_clinical_bridge as _scb
+        # v1.4 — lightweight NateCheckInAgent for part-aware codeword detection.
+        # The bridge container has no app.state.nate_checkin_agent; we create a
+        # thin instance backed by the same db_pool. Only check_codeword /
+        # detect_codeword_disclosure methods are used (no background loop).
+        _nca_inst = None
+        try:
+            from app.services.nate_checkin_agent import NateCheckInAgent as _NCA
+            _nca_inst = _NCA(db_pool=db_pool)
+        except Exception:
+            pass  # graceful: step 2 runs with nate_checkin_agent=None
         _bd = await _scb.evaluate_disclosure(
             db_pool=db_pool,
             user_id=canonical_user_id,
             message=user_text,
             locale=locale,
+            nate_checkin_agent=_nca_inst,
         )
-        if _bd is not None and _bd.register_directive:
-            register_directive = _bd.register_directive
+        if _bd is not None:
+            if _bd.register_directive:
+                register_directive = _bd.register_directive
+            lens_bridge_block = (
+                (_bd.audit_event or {}).get("lens_directives_block") or ""
+            )
     except Exception as _e:
         logger.warning("therapeutic_controller: bridge wiring skipped: %s", _e)
 
@@ -762,6 +778,7 @@ async def prepare_therapeutic_context(
         f"ec_current: {ec_current:.2f} | ec_slope: {ec_slope:+.2f}\n\n"
         f"{_state_guidance(autonomic_state)}\n"
         f"{register_variant_block}\n"
+        f"{lens_bridge_block}\n"
         f"{mismatch_block}\n"
         f"{neuroscience_ctx}\n"
         f"{_anti_repeat_block(recent_narratives)}\n\n"

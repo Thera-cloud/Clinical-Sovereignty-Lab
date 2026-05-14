@@ -29,6 +29,7 @@ async def notify_coach(
 
     channels: List[str] = ["in_app"]
     sent: Dict[str, bool] = {"in_app": False, "sms": False, "email": False, "push": False}
+    notification_id = 0
 
     if pool:
         try:
@@ -47,7 +48,7 @@ async def notify_coach(
                     json.dumps(channels),
                     json.dumps(payload),
                 )
-                sent["notification_id"] = int(row["id"]) if row else 0
+                notification_id = int(row["id"]) if row else 0
             sent["in_app"] = True
         except Exception as e:
             logger.warning("coach in-app notification failed: %s", e)
@@ -78,7 +79,13 @@ async def notify_coach(
         if fcm_token:
             sent["push"] = False  # integrate firebase_admin when available
 
-    return {"status": "ok", "channels": channels, "sent": sent}
+    return {
+        "status": "ok",
+        "channels": channels,
+        "sent": sent,
+        "notification_id": notification_id,
+        "id": notification_id,
+    }
 
 
 async def _send_sendgrid_simple(to_email: str, subject: str, text: str) -> bool:
