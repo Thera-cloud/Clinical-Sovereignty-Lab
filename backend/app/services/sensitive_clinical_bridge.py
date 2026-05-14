@@ -205,6 +205,10 @@ _REDACTION_FIELD_ALLOWLIST: frozenset[str] = frozenset({
     # Empty set — no field is allowed to leak raw user text in v1.1.
 })
 
+# Populated on audit_event under this key (relative keys = audit_event field names).
+_AUDIT_FIELD_SOURCES_KEY: str = "audit_field_sources"
+_SOURCE_KIND_FRAMEWORK_DIRECTIVE: str = "framework_directive"
+
 
 class BridgeDecisionRedactionError(RuntimeError):
     """Raised when the pre-return validator detects raw user text in a
@@ -584,6 +588,32 @@ def _normalize_for_overlap(s: str) -> str:
     return " ".join(s.lower().split())
 
 
+def _audit_field_redaction_source_kind(
+    decision: BridgeDecision,
+    field_path: str,
+) -> Optional[str]:
+    """Return structured-origin tag for strings stored under audit_event.
+
+    v1.4 R1: template-built lens directive blocks may share token spans with
+    the user's message (e.g. clinical \"parts\" language vs client wording)
+    without embedding transcript text — overlap checks must skip those paths.
+    """
+    if not field_path.startswith("audit_event."):
+        return None
+    relative = field_path[len("audit_event."):]
+    # Nested audit_event.foo.bar — only top-level keys are tagged for now.
+    if "." in relative:
+        return None
+    ae = getattr(decision, "audit_event", None)
+    if not isinstance(ae, Mapping):
+        return None
+    sources = ae.get(_AUDIT_FIELD_SOURCES_KEY)
+    if not isinstance(sources, Mapping):
+        return None
+    sk = sources.get(relative)
+    return str(sk) if sk else None
+
+
 def _validate_no_raw_transcript_leak(
     decision: BridgeDecision,
     original_message: Optional[str],
@@ -603,8 +633,16 @@ def _validate_no_raw_transcript_leak(
     if len(msg_n) < _REDACTION_MIN_OVERLAP_CHARS:
         return  # Too short to detect contiguous leakage reliably.
 
+    sources_prefix = f"audit_event.{_AUDIT_FIELD_SOURCES_KEY}"
     for field_path, value in _iter_string_fields(decision):
         if field_path in _REDACTION_FIELD_ALLOWLIST:
+            continue
+        if field_path.startswith(sources_prefix):
+            continue
+        if (
+            _audit_field_redaction_source_kind(decision, field_path)
+            == _SOURCE_KIND_FRAMEWORK_DIRECTIVE
+        ):
             continue
         if not value:
             continue
@@ -2243,6 +2281,10 @@ async def evaluate_disclosure(
         if cross_addiction_branch and cross_addiction_branch.branched
         else [],
         "lens_directives_block": lens_directives_block,
+        # R1 — template/crystal-composed block; not verbatim transcript.
+        _AUDIT_FIELD_SOURCES_KEY: {
+            "lens_directives_block": _SOURCE_KIND_FRAMEWORK_DIRECTIVE,
+        },
         "schema_version": BRIDGE_DECISION_SCHEMA_VERSION,
         "schema_hash": BRIDGE_DECISION_SCHEMA_HASH,
         "pipeline_steps_completed": list(PIPELINE_STEP_NAMES_V1_3),
