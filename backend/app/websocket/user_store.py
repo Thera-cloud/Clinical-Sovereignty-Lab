@@ -34,6 +34,13 @@ from typing import Any, Dict, List, Optional, Tuple
 EMAIL_RE = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 logger = logging.getLogger(__name__)
 
+# Resolve families.family_code onto registry profiles when users.family_id is set (FK wins).
+_USER_FROM_ROW = """
+SELECT u.*, f.family_code AS resolved_family_code
+FROM users u
+LEFT JOIN families f ON f.id = u.family_id
+"""
+
 
 class UserStore:
     """Async PostgreSQL-backed user store that maintains registry dict compatibility."""
@@ -108,10 +115,9 @@ class UserStore:
     async def _load_all_from_pg(self) -> Dict[str, Any]:
         """Load all users from PostgreSQL and return in registry dict format."""
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("""
-                SELECT * FROM users
-                WHERE deleted_at IS NULL
-                ORDER BY created_at
+            rows = await conn.fetch(_USER_FROM_ROW + """
+                WHERE u.deleted_at IS NULL
+                ORDER BY u.created_at
             """)
 
         registry = {}
@@ -126,10 +132,10 @@ class UserStore:
         if not self.is_ready:
             return None
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
-                SELECT * FROM users
-                WHERE username = $1 AND deleted_at IS NULL
-            """, username)
+            row = await conn.fetchrow(
+                _USER_FROM_ROW + " WHERE u.username = $1 AND u.deleted_at IS NULL",
+                username,
+            )
         if not row:
             return None
         _, entry = self._row_to_entry(row)
@@ -140,10 +146,10 @@ class UserStore:
         if not self.is_ready:
             return None
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
-                SELECT * FROM users
-                WHERE hardware_id = $1 AND deleted_at IS NULL
-            """, hw_id)
+            row = await conn.fetchrow(
+                _USER_FROM_ROW + " WHERE u.hardware_id = $1 AND u.deleted_at IS NULL",
+                hw_id,
+            )
         if not row:
             return None
         _, entry = self._row_to_entry(row)
@@ -154,10 +160,10 @@ class UserStore:
         if not self.is_ready:
             return {}
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("""
-                SELECT * FROM users
-                WHERE role = $1 AND deleted_at IS NULL
-            """, role)
+            rows = await conn.fetch(
+                _USER_FROM_ROW + " WHERE u.role = $1 AND u.deleted_at IS NULL",
+                role,
+            )
         result = {}
         for row in rows:
             key, entry = self._row_to_entry(row)
@@ -475,7 +481,7 @@ class UserStore:
         try:
             async with self.pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    "SELECT * FROM users WHERE username = $1 AND deleted_at IS NULL",
+                    _USER_FROM_ROW + " WHERE u.username = $1 AND u.deleted_at IS NULL",
                     username,
                 )
             if row:
@@ -534,6 +540,11 @@ class UserStore:
         profile["hardware_id"] = row["hardware_id"] or profile.get("hardware_id", "")
         profile["consent_version"] = row["consent_version"] or profile.get("consent_version", "")
         profile["subscription_status"] = row["subscription_status"] or profile.get("subscription_status", "ACTIVE")
+
+        # Family Sanctuary / registry: honor FK → canonical family_code for websocket handlers.
+        rfam = row.get("resolved_family_code")
+        if rfam:
+            profile["family_id"] = rfam
 
         # Overlay additional indexed columns when present in the row
         if row.get("tier"):
