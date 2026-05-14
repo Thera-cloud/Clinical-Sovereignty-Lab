@@ -11,12 +11,26 @@ from __future__ import annotations
 def split_balances_from_profile(profile: dict) -> tuple[int, int]:
     """Return (subscription_part, purchased_part) from cache profile."""
     purch = int(profile.get("purchased_token_balance") or 0)
-    sub = profile.get("subscription_token_balance")
-    if sub is None:
-        total = int(profile.get("token_balance") or 0)
-        sub = max(0, total - purch)
+    sub_raw = profile.get("subscription_token_balance")
+    canonical_total = int(profile.get("token_balance") or 0)
+
+    if sub_raw is None:
+        sub = max(0, canonical_total - purch)
     else:
-        sub = int(sub or 0)
+        sub = int(sub_raw or 0)
+
+    bucket_total = sub + purch
+    # token_balance is authoritative when buckets drift (Token Lab / SQL grants often
+    # bump token_balance without rewriting subscription_/purchased_ columns).
+    if canonical_total > bucket_total:
+        sub += canonical_total - bucket_total
+    elif canonical_total < bucket_total:
+        rem = max(0, canonical_total)
+        new_purch = min(purch, rem)
+        rem -= new_purch
+        sub = rem
+        purch = new_purch
+
     return sub, purch
 
 

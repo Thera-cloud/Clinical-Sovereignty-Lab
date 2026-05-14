@@ -6035,6 +6035,8 @@ class BillingSystem:
     async def _atomic_deduct(self, username: str, amount: int):
         """Atomic deduction: purchased bucket first, then subscription; token_balance = sum."""
         # SOVEREIGN-VOICE: bucket-aware atomic deduction (Phase 2, migration 194).
+        # SOVEREIGN-VOICE: reconcile token_balance − (sub+purch) into subscription before deduct
+        # when bucket columns are stale zero (Token Lab / grants bump token_balance only).
         try:
             async with self.db_pool.acquire() as conn:
                 await conn.execute(
@@ -6047,7 +6049,15 @@ class BillingSystem:
                       ),
                       subscription_token_balance = GREATEST(
                           0,
-                          COALESCE(subscription_token_balance, 0)
+                          (
+                              COALESCE(subscription_token_balance, 0)
+                              + GREATEST(
+                                  0,
+                                  COALESCE(token_balance, 0)
+                                  - COALESCE(subscription_token_balance, 0)
+                                  - COALESCE(purchased_token_balance, 0)
+                              )
+                          )
                           - GREATEST(
                               0,
                               $1 - LEAST(COALESCE(purchased_token_balance, 0), $1)
@@ -6056,7 +6066,15 @@ class BillingSystem:
                       token_balance =
                           GREATEST(
                               0,
-                              COALESCE(subscription_token_balance, 0)
+                              (
+                                  COALESCE(subscription_token_balance, 0)
+                                  + GREATEST(
+                                      0,
+                                      COALESCE(token_balance, 0)
+                                      - COALESCE(subscription_token_balance, 0)
+                                      - COALESCE(purchased_token_balance, 0)
+                                  )
+                              )
                               - GREATEST(
                                   0,
                                   $1 - LEAST(COALESCE(purchased_token_balance, 0), $1)
