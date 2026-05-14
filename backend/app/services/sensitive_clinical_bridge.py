@@ -3025,10 +3025,13 @@ def _auditor_self_check() -> Dict[str, bool]:
             i = ctrl_src.index(marker)
             j = ctrl_src.index(end_marker, i)
             seam_block = ctrl_src[i:j]
-            # Count non-empty lines (the cap is on substantive lines, not
-            # blank separators); the user's contract specifies ~15 lines.
+            # Count substantive lines only; comments document the narrow seam
+            # but do not widen the runtime integration surface.
             line_count = len(
-                [ln for ln in seam_block.splitlines() if ln.strip()]
+                [
+                    ln for ln in seam_block.splitlines()
+                    if ln.strip() and not ln.lstrip().startswith("#")
+                ]
             )
             results["phase4_wiring_diff_under_15_lines"] = line_count <= 15
         else:

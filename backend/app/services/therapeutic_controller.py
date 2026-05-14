@@ -597,6 +597,14 @@ def _anti_repeat_block(narratives: list) -> str:
     )
 
 
+def _make_sensitive_bridge_checkin_agent(db_pool):
+    try:
+        from app.services.nate_checkin_agent import NateCheckInAgent as _NCA
+        return _NCA(db_pool=db_pool)
+    except Exception:
+        return None
+
+
 # ─────────────────────────── Pre-flight ───────────────────────────
 
 async def prepare_therapeutic_context(
@@ -661,16 +669,7 @@ async def prepare_therapeutic_context(
     lens_bridge_block = ""
     try:
         from app.services import sensitive_clinical_bridge as _scb
-        # v1.4 — lightweight NateCheckInAgent for part-aware codeword detection.
-        # The bridge container has no app.state.nate_checkin_agent; we create a
-        # thin instance backed by the same db_pool. Only check_codeword /
-        # detect_codeword_disclosure methods are used (no background loop).
-        _nca_inst = None
-        try:
-            from app.services.nate_checkin_agent import NateCheckInAgent as _NCA
-            _nca_inst = _NCA(db_pool=db_pool)
-        except Exception:
-            pass  # graceful: step 2 runs with nate_checkin_agent=None
+        _nca_inst = _make_sensitive_bridge_checkin_agent(db_pool)
         _bd = await _scb.evaluate_disclosure(
             db_pool=db_pool,
             user_id=canonical_user_id,

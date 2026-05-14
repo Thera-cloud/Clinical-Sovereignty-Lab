@@ -76,7 +76,6 @@ def _resolve_lexicon_path(locale: str) -> Optional[Path]:
     Mirrors the clinical_arousal_lexicon resolver pattern (Phase 2 Gap 3).
     Returns None only when no file exists at any rung.
     """
-    base = _lexicon_dir()
     candidates: List[str] = []
     locale = (locale or "en-US").strip()
     candidates.append(f"sensitive_domain_validator_lexicon_{locale}.json")
@@ -84,10 +83,19 @@ def _resolve_lexicon_path(locale: str) -> Optional[Path]:
         candidates.append(f"sensitive_domain_validator_lexicon_{locale.split('-')[0]}.json")
     if locale != "en-US":
         candidates.append("sensitive_domain_validator_lexicon_en-US.json")
-    for name in candidates:
-        path = base / name
-        if path.is_file():
-            return path
+    base_dirs = []
+    for base in (
+        _lexicon_dir(),
+        Path("/backend/data/lexicons"),
+        Path("/app/data/lexicons"),
+    ):
+        if base not in base_dirs:
+            base_dirs.append(base)
+    for base in base_dirs:
+        for name in candidates:
+            path = base / name
+            if path.is_file():
+                return path
     return None
 
 
