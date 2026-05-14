@@ -25,7 +25,17 @@ if str(ROOT) not in sys.path:
 
 CLIENT = "audit_addiction_test_01"
 COACH = "audit_addiction_coach_01"
-PASSWORD_HASH = hashlib.sha256(b"audit_addiction_test_01").hexdigest()
+_PASSWORD_SALT = "0123456789abcdef0123456789abcdef"
+PASSWORD_HASH = (
+    _PASSWORD_SALT
+    + ":"
+    + hashlib.pbkdf2_hmac(
+        "sha256",
+        b"AuditAddictionTest01!",
+        _PASSWORD_SALT.encode("utf-8"),
+        100000,
+    ).hex()
+)
 SESSION_ID = "audit_addiction_test_01_session"
 
 V14_FLAGS = {
