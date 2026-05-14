@@ -605,6 +605,19 @@ def _make_sensitive_bridge_checkin_agent(db_pool):
         return None
 
 
+def _apply_sensitive_bridge_decision(bridge_decision, fallback_register: Optional[str]):
+    register = fallback_register
+    lens_block = ""
+    if bridge_decision is not None:
+        if bridge_decision.register_directive:
+            register = bridge_decision.register_directive
+        lens_block = (
+            (bridge_decision.audit_event or {}).get("lens_directives_block")
+            or ""
+        )
+    return register, lens_block
+
+
 # ─────────────────────────── Pre-flight ───────────────────────────
 
 async def prepare_therapeutic_context(
@@ -661,12 +674,12 @@ async def prepare_therapeutic_context(
             )
             canonical_user_id = user_id
 
+    lens_bridge_block = ""
     # v1.3 Sensitive Clinical Bridge — single wiring seam (Phase 4 Note 1).
     # Master kill switch + per-user gap_features_enabled gate the orchestrator
     # internally; when dormant, register_directive is None and downstream
     # logic runs identically to v1.2. Failure is best-effort: a raised
     # exception leaves register_directive at the caller-supplied value.
-    lens_bridge_block = ""
     try:
         from app.services import sensitive_clinical_bridge as _scb
         _nca_inst = _make_sensitive_bridge_checkin_agent(db_pool)
@@ -677,12 +690,9 @@ async def prepare_therapeutic_context(
             locale=locale,
             nate_checkin_agent=_nca_inst,
         )
-        if _bd is not None:
-            if _bd.register_directive:
-                register_directive = _bd.register_directive
-            lens_bridge_block = (
-                (_bd.audit_event or {}).get("lens_directives_block") or ""
-            )
+        register_directive, lens_bridge_block = _apply_sensitive_bridge_decision(
+            _bd, register_directive,
+        )
     except Exception as _e:
         logger.warning("therapeutic_controller: bridge wiring skipped: %s", _e)
 
