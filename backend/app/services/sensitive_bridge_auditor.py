@@ -11,7 +11,7 @@ verdicts.
 
 CHECK ORDERING — cheap → expensive (Phase 5 Note 2)
 =====================================================
-32 inventory slots + 1 META = 33 entries. They run in this exact order so
+55 inventory slots + 1 META = 56 entries. They run in this exact order so
 a failed cheap contract short-circuits the expensive DB work:
 
   Tier 1 (sub-ms, in-process)         — 10 slots : static module self-checks
@@ -101,6 +101,24 @@ _CHECK_ORDER: Tuple[Tuple[str, int], ...] = (
     ("immutable_types_includes_sensitive_log", 1),
     # Plan v1.3 Phase 5 Note 1 safeguard #3 — telemetry agent re-enable gate.
     ("auto_disable_reenable_requires_resolved_telemetry", 1),
+    ("v1_4_put_substance_status_endpoint", 1),
+    ("v1_4_put_sex_addiction_status_endpoint", 1),
+    ("v1_4_put_gambling_status_endpoint", 1),
+    ("v1_4_put_gaming_status_endpoint", 1),
+    ("v1_4_put_food_compulsion_status_endpoint", 1),
+    ("v1_4_put_work_compulsion_status_endpoint", 1),
+    ("v1_4_put_spending_compulsion_status_endpoint", 1),
+    ("v1_4_put_codependency_status_endpoint", 1),
+    ("v1_4_put_cross_addiction_profile_endpoint", 1),
+    ("v1_4_parts_registry_create_endpoint", 1),
+    ("v1_4_parts_registry_list_endpoint", 1),
+    ("v1_4_parts_registry_patch_endpoint", 1),
+    ("v1_4_parts_registry_retire_endpoint", 1),
+    ("v1_4_framework_menu_get_endpoint", 1),
+    ("v1_4_framework_menu_put_endpoint", 1),
+    ("v1_4_crisis_events_writer_smoke", 1),
+    ("v1_4_pii_redaction_smoke", 1),
+    ("v1_4_part_aware_codeword_listener_smoke", 1),
 
     # Tier 2 — DB schema integrity (10–50 ms each)
     # Note: coach_handoff_redaction_payload_no_pii folds the coach_override
@@ -114,6 +132,10 @@ _CHECK_ORDER: Tuple[Tuple[str, int], ...] = (
     ("sensitive_log_jurisdiction_trigger_present", 2),
     ("sensitive_log_access_classification_enforced", 2),
     ("coach_handoff_redaction_payload_no_pii", 2),
+    ("v1_4_m217_codewords_part_columns", 2),
+    ("v1_4_m217_user_parts_registry_schema", 2),
+    ("v1_4_m217_addiction_status_history_schema", 2),
+    ("v1_4_m217_cross_addiction_transfer_events_schema", 2),
 
     # Tier 3 — DB cohort + telemetry (50–100 ms)
     ("sensitive_bridge_enrollment_table_present", 3),
@@ -247,13 +269,13 @@ class SensitiveBridgeAuditor:
     # -- core audit() -------------------------------------------------------
 
     async def audit(self) -> Dict[str, Any]:
-        """Run all 34 checks in the declared cost-tier order.
+        """Run all 56 checks in the declared cost-tier order.
 
         Returns:
           {
             "ok": bool,                      # aggregate health verdict
             "trusted": int,                  # count of ok=True checks
-            "total": int,                    # always 34 (33 inventory + 1 meta)
+            "total": int,                    # always 56 (55 inventory + 1 meta)
             "checks": List[CheckEntry],      # in execution order
             "ordering_observed": List[str],  # check ids in observed order
             "elapsed_ms": int,               # end-to-end wall time
@@ -285,7 +307,11 @@ class SensitiveBridgeAuditor:
                  "sensitive_log_retention_default_7yr",
                  "sensitive_log_jurisdiction_trigger_present",
                  "sensitive_log_access_classification_enforced",
-                 "coach_handoff_redaction_payload_no_pii"],
+                 "coach_handoff_redaction_payload_no_pii",
+                 "v1_4_m217_codewords_part_columns",
+                 "v1_4_m217_user_parts_registry_schema",
+                 "v1_4_m217_addiction_status_history_schema",
+                 "v1_4_m217_cross_addiction_transfer_events_schema"],
                 observed_order,
             ))
         else:
@@ -588,6 +614,10 @@ class SensitiveBridgeAuditor:
         ))
         observed.append("auto_disable_reenable_requires_resolved_telemetry")
 
+        for entry in _run_v1_4_static_contract_checks():
+            results.append(entry)
+            observed.append(entry["id"])
+
         return results
 
     # -- tier 2: DB schema integrity ----------------------------------------
@@ -606,7 +636,11 @@ class SensitiveBridgeAuditor:
                  "sensitive_log_retention_default_7yr",
                  "sensitive_log_jurisdiction_trigger_present",
                  "sensitive_log_access_classification_enforced",
-                 "coach_handoff_redaction_payload_no_pii"],
+                 "coach_handoff_redaction_payload_no_pii",
+                 "v1_4_m217_codewords_part_columns",
+                 "v1_4_m217_user_parts_registry_schema",
+                 "v1_4_m217_addiction_status_history_schema",
+                 "v1_4_m217_cross_addiction_transfer_events_schema"],
                 observed,
                 reason="db_pool_unavailable",
             )
@@ -697,6 +731,47 @@ class SensitiveBridgeAuditor:
                     handoff_entry["severity"] = "error"
             results.append(handoff_entry)
             observed.append("coach_handoff_redaction_payload_no_pii")
+
+            for cid, table, required_columns in (
+                (
+                    "v1_4_m217_codewords_part_columns",
+                    "user_safety_codewords",
+                    (
+                        "disclosure_type",
+                        "part_name",
+                        "part_number",
+                        "part_category",
+                        "addiction_link",
+                    ),
+                ),
+                (
+                    "v1_4_m217_user_parts_registry_schema",
+                    "user_parts_registry",
+                    (
+                        "user_id",
+                        "part_name",
+                        "part_number",
+                        "part_category",
+                        "addiction_link",
+                        "protected_exile_part_id",
+                        "is_active",
+                    ),
+                ),
+                (
+                    "v1_4_m217_addiction_status_history_schema",
+                    "addiction_status_history",
+                    ("user_id", "addiction_type", "previous_status", "new_status", "set_by"),
+                ),
+                (
+                    "v1_4_m217_cross_addiction_transfer_events_schema",
+                    "cross_addiction_transfer_events",
+                    ("user_id", "from_addiction", "to_addiction", "noted_by", "clinical_notes"),
+                ),
+            ):
+                results.append(await _check_required_columns(
+                    conn, cid, table=table, required_columns=required_columns,
+                ))
+                observed.append(cid)
 
         return results
 
@@ -958,6 +1033,37 @@ async def _check_table_present(
     )
 
 
+async def _check_required_columns(
+    conn,
+    cid: str,
+    *,
+    table: str,
+    required_columns: Tuple[str, ...],
+) -> Dict[str, Any]:
+    rows = await conn.fetch(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = $1
+        """,
+        table,
+    )
+    observed = {str(r["column_name"]) for r in rows}
+    missing = [c for c in required_columns if c not in observed]
+    ok = not missing
+    return _entry(
+        cid,
+        ok=ok,
+        details={
+            "table": table,
+            "required_columns": list(required_columns),
+            "missing_columns": missing,
+            "observed_count": len(observed),
+        },
+        severity="info" if ok else "error",
+    )
+
+
 async def _check_view_present(
     conn, cid: str, *, view_candidates: Tuple[str, ...],
 ) -> Dict[str, Any]:
@@ -981,7 +1087,7 @@ async def _check_view_present(
 # ---------------------------------------------------------------------------
 # Both checks run as regex scans over the relevant router source. They are
 # folded into the verdicts of two existing _CHECK_ORDER slots (no new top-
-# level entries), keeping _TOTAL_SLOTS at 34. The framework uses the
+# level entries). The framework uses the
 # `details.sole_clinician_*` substructure for visibility, and the parent's
 # `ok` flips to False if the fold fails — same pattern the v1.2 parity
 # fixtures already use.
@@ -1005,11 +1111,141 @@ _CHECKIN_AGENT_PATH = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "nate_checkin_agent.py",
 ))
+_PII_REDACTION_PATH = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "pii_redaction.py",
+))
+_CRISIS_EVENTS_WRITER_PATH = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "crisis_events_writer.py",
+))
+_SENSITIVE_ALERT_DISPATCHER_PATH = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "sensitive_alert_dispatcher.py",
+))
+_SENSITIVE_CLINICAL_BRIDGE_PATH = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "sensitive_clinical_bridge.py",
+))
 
 # Path-C enrollment endpoint shares a router file with the rest of the
 # sensitive_profile contract. Reuse the same anchored path used by the
 # session-separation check above.
 _ENROLLMENT_API_PATH = _SOLE_LEAD_API_PATH
+
+
+def _read_source(path: str) -> Tuple[str, Optional[str]]:
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return fh.read(), None
+    except Exception as exc:
+        return "", repr(exc)[:160]
+
+
+def _static_source_entry(
+    cid: str,
+    *,
+    source_path: str,
+    required: Dict[str, bool],
+) -> Dict[str, Any]:
+    ok = all(required.values())
+    return {
+        "id": cid,
+        "ok": ok,
+        "severity": "info" if ok else "error",
+        "details": {"source_path": source_path, **required},
+    }
+
+
+def _run_v1_4_static_contract_checks() -> List[Dict[str, Any]]:
+    """Static v1.4 contract checks added for the 56-slot Sensitive Bridge audit."""
+    api_src, api_err = _read_source(_SOLE_LEAD_API_PATH)
+    checkin_src, checkin_err = _read_source(_CHECKIN_AGENT_PATH)
+    bridge_src, bridge_err = _read_source(_SENSITIVE_CLINICAL_BRIDGE_PATH)
+    pii_src, pii_err = _read_source(_PII_REDACTION_PATH)
+    crisis_src, crisis_err = _read_source(_CRISIS_EVENTS_WRITER_PATH)
+    dispatcher_src, dispatcher_err = _read_source(_SENSITIVE_ALERT_DISPATCHER_PATH)
+
+    entries: List[Dict[str, Any]] = []
+    endpoint_specs = (
+        ("v1_4_put_substance_status_endpoint", '@coach_router.put("/{user_id}/substance-status")', "set_substance_status", "substance"),
+        ("v1_4_put_sex_addiction_status_endpoint", '@coach_router.put("/{user_id}/sex-addiction-status")', "set_sex_addiction_status", "sex_addiction"),
+        ("v1_4_put_gambling_status_endpoint", '@coach_router.put("/{user_id}/gambling-status")', "set_gambling_status", "gambling"),
+        ("v1_4_put_gaming_status_endpoint", '@coach_router.put("/{user_id}/gaming-status")', "set_gaming_status", "gaming"),
+        ("v1_4_put_food_compulsion_status_endpoint", '@coach_router.put("/{user_id}/food-compulsion-status")', "set_food_compulsion_status", "food_compulsion"),
+        ("v1_4_put_work_compulsion_status_endpoint", '@coach_router.put("/{user_id}/work-compulsion-status")', "set_work_compulsion_status", "work_compulsion"),
+        ("v1_4_put_spending_compulsion_status_endpoint", '@coach_router.put("/{user_id}/spending-compulsion-status")', "set_spending_compulsion_status", "spending_compulsion"),
+        ("v1_4_put_codependency_status_endpoint", '@coach_router.put("/{user_id}/codependency-status")', "set_codependency_status", "codependency"),
+        ("v1_4_put_cross_addiction_profile_endpoint", '@coach_router.put("/{user_id}/cross-addiction-profile")', "set_cross_addiction_profile", "cross_addiction_profile"),
+    )
+    for cid, decorator, handler, key in endpoint_specs:
+        entries.append(_static_source_entry(
+            cid,
+            source_path=_SOLE_LEAD_API_PATH,
+            required={
+                "source_readable": api_err is None,
+                "decorator_present": decorator in api_src,
+                "handler_present": f"async def {handler}" in api_src,
+                "writes_expected_key": key in api_src,
+                "uses_clinician_dependency": "require_clinician_for_user" in api_src,
+            },
+        ))
+
+    for cid, decorator, handler, extra in (
+        ("v1_4_parts_registry_create_endpoint", '@coach_router.post("/{user_id}/parts-registry")', "add_part", "INSERT INTO user_parts_registry"),
+        ("v1_4_parts_registry_list_endpoint", '@coach_router.get("/{user_id}/parts-registry")', "list_parts", "FROM user_parts_registry"),
+        ("v1_4_parts_registry_patch_endpoint", '@coach_router.patch("/{user_id}/parts-registry/{part_id}")', "update_part", "UPDATE user_parts_registry"),
+        ("v1_4_parts_registry_retire_endpoint", '@coach_router.delete("/{user_id}/parts-registry/{part_id}")', "retire_part", "retired_at"),
+        ("v1_4_framework_menu_get_endpoint", '@coach_router.get("/{user_id}/framework-menu")', "get_framework_menu", "framework_preferences"),
+        ("v1_4_framework_menu_put_endpoint", '@coach_router.put("/{user_id}/framework-menu")', "update_framework_preferences", "FrameworkPreferencesUpdate"),
+    ):
+        entries.append(_static_source_entry(
+            cid,
+            source_path=_SOLE_LEAD_API_PATH,
+            required={
+                "source_readable": api_err is None,
+                "decorator_present": decorator in api_src,
+                "handler_present": f"async def {handler}" in api_src,
+                "contract_marker_present": extra in api_src,
+                "uses_clinician_dependency": "require_clinician_for_user" in api_src,
+            },
+        ))
+
+    entries.append(_static_source_entry(
+        "v1_4_crisis_events_writer_smoke",
+        source_path=_CRISIS_EVENTS_WRITER_PATH,
+        required={
+            "source_readable": crisis_err is None,
+            "write_crisis_event_present": "async def write_crisis_event" in crisis_src,
+            "targets_crisis_events": "INSERT INTO crisis_events" in crisis_src,
+            "uses_canonical_username": "client_username" in crisis_src,
+            "dispatcher_calls_writer": "write_crisis_event" in dispatcher_src,
+        },
+    ))
+    entries.append(_static_source_entry(
+        "v1_4_pii_redaction_smoke",
+        source_path=_PII_REDACTION_PATH,
+        required={
+            "source_readable": pii_err is None,
+            "redact_pii_present": "def redact_pii" in pii_src,
+            "preserves_hotlines": "hotline" in pii_src.lower(),
+            "redacts_phone_email_address": all(s in pii_src.lower() for s in ("phone", "email", "address")),
+            "dispatcher_uses_redaction": "redact_pii" in dispatcher_src,
+        },
+    ))
+    entries.append(_static_source_entry(
+        "v1_4_part_aware_codeword_listener_smoke",
+        source_path=_CHECKIN_AGENT_PATH,
+        required={
+            "source_readable": checkin_err is None,
+            "event_class_present": "class CodewordDisclosureEvent" in checkin_src,
+            "listener_present": "async def detect_codeword_disclosure" in checkin_src,
+            "part_fields_present": all(s in checkin_src for s in ("part_name", "part_number", "part_category", "addiction_link")),
+            "orchestrator_source_readable": bridge_err is None,
+            "orchestrator_uses_listener": "_check_codeword_disclosure_v2" in bridge_src and "detect_codeword_disclosure" in bridge_src,
+        },
+    ))
+    return entries
 
 # Flutter source tree — used by sensitive_profile_screen_single_entry_point.
 # In a developer checkout this resolves to .../mobile/lib; in the production

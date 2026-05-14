@@ -2073,6 +2073,21 @@ class PartRegistryCreate(BaseModel):
         return v
 
 
+class PartRegistryPatch(BaseModel):
+    part_name: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    part_number: Optional[int] = Field(default=None, ge=1, le=999)
+    part_category: Optional[str] = Field(default=None, min_length=1, max_length=32)
+    addiction_link: Optional[str] = Field(default=None, max_length=32)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    protected_exile_part_id: Optional[int] = Field(default=None)
+
+    @validator("part_category")
+    def _v_category(cls, v):
+        if v is None:
+            return v
+        return PartRegistryCreate._v_category(v)
+
+
 @coach_router.post("/{user_id}/parts-registry")
 async def add_part(
     user_id: str,
@@ -2160,6 +2175,64 @@ async def list_parts(
     }
 
 
+@coach_router.patch("/{user_id}/parts-registry/{part_id}")
+async def update_part(
+    user_id: str,
+    part_id: int,
+    body: PartRegistryPatch,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+    _raise_if_pii("description", body.description)
+
+    updates = body.dict(exclude_unset=True)
+    if not updates:
+        raise HTTPException(422, detail={"reason": "no_fields_to_update"})
+
+    allowed = {
+        "part_name", "part_number", "part_category", "addiction_link",
+        "description", "protected_exile_part_id",
+    }
+    sets = []
+    values: List[Any] = [part_id, user_id]
+    for key, value in updates.items():
+        if key not in allowed:
+            continue
+        values.append(value)
+        sets.append(f"{key} = ${len(values)}")
+    if not sets:
+        raise HTTPException(422, detail={"reason": "no_valid_fields_to_update"})
+
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""
+            UPDATE user_parts_registry
+               SET {", ".join(sets)}
+             WHERE id = $1 AND user_id = $2 AND is_active = TRUE
+             RETURNING id
+            """,
+            *values,
+        )
+    if row is None:
+        raise HTTPException(404, detail={"reason": "part_not_found"})
+
+    await _emit_profile_mutation_audit(
+        db_pool,
+        target_user_id=user_id,
+        actor_id=principal.get("username", ""),
+        actor_role=principal.get("role", "COACH"),
+        mutation_kind="part_updated",
+        additional_fields_redacted={
+            "id": part_id,
+            "fields_patched": sorted(updates.keys()),
+        },
+    )
+    return {"ok": True, "id": part_id}
+
+
 @coach_router.delete("/{user_id}/parts-registry/{part_id}")
 async def retire_part(
     user_id: str,
@@ -2214,7 +2287,7 @@ async def get_framework_menu(
 
     from app.services.sensitive_clinical_bridge import _load_framework_menu
 
-    canonical = _load_framework_menu()
+    canonical = _load_framework_menu().get("definitions", {})
 
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -2282,7 +2355,7 @@ async def update_framework_preferences(
 
     from app.services.sensitive_clinical_bridge import _load_framework_menu
 
-    canonical_keys = set(_load_framework_menu().keys())
+    canonical_keys = set(_load_framework_menu().get("definitions", {}).keys())
 
     prefs: Dict[str, Any] = {}
     if body.enabled_frameworks:

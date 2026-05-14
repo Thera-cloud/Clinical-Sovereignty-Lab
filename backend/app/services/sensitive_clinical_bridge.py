@@ -1276,9 +1276,9 @@ def _select_register(
         return (f"embodiment_{embodiment.phase}", "embodiment")
     if tmc_class == "CRISIS":
         return ("crisis_stabilization", "tmc_class")
-    # v1.4: cross-addiction composite takes priority over any single branch
-    if cross_addiction_branch and cross_addiction_branch.branched:
-        return (cross_addiction_branch.overlay_directive, "cross_addiction")
+    # v1.4: cross-addiction is an overlay, not a replacing register.
+    # Individual branches keep driving the directive; the overlay is appended
+    # later through `_compose_cross_addiction_overlay`.
     if substance_branch.branched:
         return ("dual_diagnosis_substance", "substance_branch")
     if sex_addiction_branch and sex_addiction_branch.branched:
@@ -1295,6 +1295,8 @@ def _select_register(
         return ("dual_diagnosis_spending_compulsion", "spending_compulsion_branch")
     if codependency_branch and codependency_branch.branched:
         return ("dual_diagnosis_codependency", "codependency_branch")
+    if cross_addiction_branch and cross_addiction_branch.branched:
+        return (None, "cross_addiction")
     return (None, "default")
 
 
@@ -1332,8 +1334,6 @@ def _first_matching_register_source(
         return "embodiment"
     if tmc_class == "CRISIS":
         return "tmc_class"
-    if cross_addiction_branch and cross_addiction_branch.branched:
-        return "cross_addiction"
     if substance_branch.branched:
         return "substance_branch"
     if sex_addiction_branch and sex_addiction_branch.branched:
@@ -1350,6 +1350,8 @@ def _first_matching_register_source(
         return "spending_compulsion_branch"
     if codependency_branch and codependency_branch.branched:
         return "codependency_branch"
+    if cross_addiction_branch and cross_addiction_branch.branched:
+        return "cross_addiction"
     return None
 
 
@@ -1742,8 +1744,30 @@ async def evaluate_disclosure(
     effective_flags = _resolve_effective_flags(
         global_flags=global_flags, user_flags=user_enrollment["flags"],
     )
-    if not _any_v13_signal_active(effective_flags):
+    if not _any_sensitive_feature_active(effective_flags, user_enrollment):
         return _build_neutral_bridge_decision(reason="all_gap_flags_dormant")
+
+    v1_4_codeword_enabled = _v1_4_feature_enabled(
+        user_enrollment, "v1_4_codeword_listener_enabled",
+    )
+    v1_4_addiction_branches_enabled = _v1_4_feature_enabled(
+        user_enrollment, "v1_4_addiction_branches_enabled",
+    )
+    v1_4_cross_addiction_overlay_enabled = _v1_4_feature_enabled(
+        user_enrollment, "v1_4_cross_addiction_overlay_enabled",
+    )
+    v1_4_dst_lens_enabled = _v1_4_feature_enabled(
+        user_enrollment, "v1_4_dst_lens_enabled",
+    )
+    v1_4_framework_lens_enabled = _v1_4_feature_enabled(
+        user_enrollment, "v1_4_framework_lens_enabled",
+    )
+    v1_4_crystal_factory_enabled = _v1_4_feature_enabled(
+        user_enrollment, "v1_4_crystal_factory_enabled",
+    )
+    v1_4_alert_dispatch_enabled = _v1_4_feature_enabled(
+        user_enrollment, "v1_4_alert_dispatch_enabled",
+    )
 
     # ───────────────────────────────────────────────────────────────────
     # STEP 1 — Profile fetch
@@ -1776,12 +1800,14 @@ async def evaluate_disclosure(
     # signal extraction with TMC for performance, the answer is no:
     # safety-net independence is the contract.
     # ───────────────────────────────────────────────────────────────────
-    codeword_match = await _check_codeword_disclosure_v2(
-        nate_checkin_agent=nate_checkin_agent,
-        user_id=user_id,
-        message=message,
-        session_id=session_id,
-    )
+    codeword_match = None
+    if v1_4_codeword_enabled or bool(effective_flags.get("gap_codeword_enabled")):
+        codeword_match = await _check_codeword_disclosure_v2(
+            nate_checkin_agent=nate_checkin_agent,
+            user_id=user_id,
+            message=message,
+            session_id=session_id,
+        )
 
     # ───────────────────────────────────────────────────────────────────
     # STEP 3 — TMC classify + polyvictim weighting
@@ -1915,13 +1941,22 @@ async def evaluate_disclosure(
     substance_branch = _resolve_substance_branch(
         tmc_signals=tmc_signals, embodiment=embodiment,
     )
-    sex_addiction_branch = _resolve_sex_addiction_branch(tmc_signals=tmc_signals)
-    gambling_branch = _resolve_gambling_branch(tmc_signals=tmc_signals)
-    gaming_branch = _resolve_gaming_branch(tmc_signals=tmc_signals)
-    food_compulsion_branch = _resolve_food_compulsion_branch(tmc_signals=tmc_signals)
-    work_compulsion_branch = _resolve_work_compulsion_branch(tmc_signals=tmc_signals)
-    spending_compulsion_branch = _resolve_spending_compulsion_branch(tmc_signals=tmc_signals)
-    codependency_branch = _resolve_codependency_branch(tmc_signals=tmc_signals)
+    if v1_4_addiction_branches_enabled:
+        sex_addiction_branch = _resolve_sex_addiction_branch(tmc_signals=tmc_signals)
+        gambling_branch = _resolve_gambling_branch(tmc_signals=tmc_signals)
+        gaming_branch = _resolve_gaming_branch(tmc_signals=tmc_signals)
+        food_compulsion_branch = _resolve_food_compulsion_branch(tmc_signals=tmc_signals)
+        work_compulsion_branch = _resolve_work_compulsion_branch(tmc_signals=tmc_signals)
+        spending_compulsion_branch = _resolve_spending_compulsion_branch(tmc_signals=tmc_signals)
+        codependency_branch = _resolve_codependency_branch(tmc_signals=tmc_signals)
+    else:
+        sex_addiction_branch = SexAddictionRegisterBranch(False, reason="feature_flag_off")
+        gambling_branch = GamblingRegisterBranch(False, reason="feature_flag_off")
+        gaming_branch = GamingRegisterBranch(False, reason="feature_flag_off")
+        food_compulsion_branch = FoodCompulsionRegisterBranch(False, reason="feature_flag_off")
+        work_compulsion_branch = WorkCompulsionRegisterBranch(False, reason="feature_flag_off")
+        spending_compulsion_branch = SpendingCompulsionRegisterBranch(False, reason="feature_flag_off")
+        codependency_branch = CodependencyRegisterBranch(False, reason="feature_flag_off")
     cross_addiction_branch = _resolve_cross_addiction_branch(
         substance=substance_branch,
         sex_addiction=sex_addiction_branch,
@@ -1931,6 +1966,8 @@ async def evaluate_disclosure(
         work_compulsion=work_compulsion_branch,
         spending_compulsion=spending_compulsion_branch,
         codependency=codependency_branch,
+    ) if v1_4_cross_addiction_overlay_enabled else CrossAddictionRegisterBranch(
+        False, reason="feature_flag_off",
     )
     register_directive, selected_register_source = _select_register(
         codeword_match=codeword_match,
@@ -1961,8 +1998,11 @@ async def evaluate_disclosure(
         tmc_signals=tmc_signals,
     )
     dst_prompt_block: Optional[str] = None
-    if dst_active:
-        register_directive, dst_prompt_block = _apply_dst_lens(register_directive)
+    dst_adjustments: Dict[str, Any] = {}
+    if dst_active and v1_4_dst_lens_enabled:
+        register_directive, dst_prompt_block, dst_adjustments = _apply_dst_lens(
+            register_directive,
+        )
 
     # ───────────────────────────────────────────────────────────────────
     # STEP 13c — v1.4 Framework Lens (Gap 3) + Crystal Factory
@@ -1982,15 +2022,26 @@ async def evaluate_disclosure(
             active_branches_list.append(_bname)
     active_branches_tuple = tuple(active_branches_list)
 
-    framework_lenses = _select_framework_lens(active_branches=active_branches_tuple)
+    framework_menu = _load_framework_menu(profile)
+    framework_lenses = (
+        _select_framework_lens(
+            active_branches=active_branches_tuple,
+            framework_menu=framework_menu,
+        )
+        if v1_4_framework_lens_enabled
+        else []
+    )
     lens_primary = framework_lenses[0] if framework_lenses else None
 
-    lexicon_crystals = await _load_lexicon_crystals(
-        db_pool, user_id, active_branches_tuple,
-    )
-    response_crystals = await _load_response_pattern_crystals(
-        db_pool, user_id, lens_primary,
-    )
+    lexicon_crystals = []
+    response_crystals = []
+    if v1_4_crystal_factory_enabled:
+        lexicon_crystals = await _load_lexicon_crystals(
+            db_pool, user_id, active_branches_tuple,
+        )
+        response_crystals = await _load_response_pattern_crystals(
+            db_pool, user_id, lens_primary,
+        )
 
     lens_directives_text, applied_lenses, audit_only_lenses = _compose_lens_directives(
         framework_lenses,
@@ -2001,6 +2052,11 @@ async def evaluate_disclosure(
     _lens_block_parts: List[str] = []
     if lens_directives_text:
         _lens_block_parts.append(lens_directives_text)
+    if lexicon_crystals:
+        _lens_block_parts.append(
+            "Client-specific clinical lexicon cues:\n"
+            + "\n".join(f"- {text}" for text in lexicon_crystals[:5])
+        )
     if dst_prompt_block:
         _lens_block_parts.append(dst_prompt_block)
     if cross_overlay_para:
@@ -2079,7 +2135,7 @@ async def evaluate_disclosure(
         coach_for_alert = await _resolve_assigned_coach_username(
             db_pool, user_id, coach_id,
         )
-        if coach_for_alert:
+        if coach_for_alert and v1_4_alert_dispatch_enabled:
             try:
                 from app.services.sensitive_alert_dispatcher import (
                     dispatch_sensitive_alert,
@@ -2141,10 +2197,22 @@ async def evaluate_disclosure(
         "sensitive_recall_dropped_count": int(sensitive_recall_dropped),
         "lens_dst": dst_active,
         "dst_prompt_injected": dst_prompt_block is not None,
+        "dst_grounding_offer_threshold_delta": dst_adjustments.get(
+            "grounding_offer_threshold_delta",
+        ),
+        "dst_escalation_step_size_multiplier": dst_adjustments.get(
+            "escalation_step_size_multiplier",
+        ),
         "framework_lenses_applied": applied_lenses,
         "framework_lenses_audit_only": audit_only_lenses,
         "lexicon_crystals_count": len(lexicon_crystals),
         "response_pattern_crystals_count": len(response_crystals),
+        "response_pattern_crystal_applied": bool(response_crystals),
+        "response_pattern_crystal_ids": [
+            str(item.get("id"))
+            for item in response_crystals
+            if isinstance(item, dict) and item.get("id")
+        ],
         "active_addiction_branches": active_branches_list,
         "cross_addiction_active": bool(
             cross_addiction_branch and cross_addiction_branch.branched
@@ -2383,7 +2451,8 @@ def _compose_cross_addiction_overlay(
 _DST_DIRECTIVE_BLOCK = (
     "Apply DST awareness: assume dissociation may be present. "
     "Prefer questions that name parts ('which part of you is...?') "
-    "over questions that assume a unified self. Pace slowly."
+    "over questions that assume a unified self. Pace slowly. Raise the "
+    "grounding-offer threshold by 0.15 and reduce escalation step size by 25%."
 )
 
 
@@ -2416,14 +2485,17 @@ def _dst_lens_active(
 
 def _apply_dst_lens(
     directive: Optional[str],
-) -> Tuple[Optional[str], str]:
+) -> Tuple[Optional[str], str, Dict[str, Any]]:
     """Gap 2 behavior: mutate directive with DST system-prompt block.
-    Returns (augmented_directive, dst_prompt_block).
+    Returns (augmented_directive, dst_prompt_block, pacing_adjustments).
     """
     augmented = directive or "default"
     if not augmented.endswith("|dst"):
         augmented = f"{augmented}|dst"
-    return augmented, _DST_DIRECTIVE_BLOCK
+    return augmented, _DST_DIRECTIVE_BLOCK, {
+        "grounding_offer_threshold_delta": 0.15,
+        "escalation_step_size_multiplier": 0.75,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -2475,14 +2547,66 @@ _FRAMEWORK_MENU: Dict[str, Dict[str, Any]] = {
 }
 
 
-def _load_framework_menu() -> Dict[str, Dict[str, Any]]:
-    """Return the canonical framework menu dict."""
-    return dict(_FRAMEWORK_MENU)
+def _load_framework_menu(profile_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Return canonical framework metadata plus clinician-set client choices."""
+    source = profile_data or {}
+    raw_menu = source.get("framework_menu")
+    if not isinstance(raw_menu, dict):
+        sc = source.get("sensitive_clinical")
+        raw_menu = sc.get("framework_menu") if isinstance(sc, dict) else {}
+    if not isinstance(raw_menu, dict):
+        sb = source.get("sensitive_bridge")
+        raw_menu = sb.get("framework_preferences") if isinstance(sb, dict) else {}
+    if not isinstance(raw_menu, dict):
+        raw_menu = {}
+
+    enabled = raw_menu.get("enabled_frameworks")
+    if enabled is None:
+        enabled = raw_menu.get("enabled_lenses")
+    if isinstance(enabled, dict):
+        enabled_set = {
+            str(k) for k, v in enabled.items()
+            if bool(v) and str(k) in _FRAMEWORK_MENU
+        }
+    elif isinstance(enabled, list):
+        enabled_set = {str(item) for item in enabled if str(item) in _FRAMEWORK_MENU}
+    else:
+        enabled_set = {
+            str(k) for k, v in raw_menu.items()
+            if k in _FRAMEWORK_MENU and bool(v)
+        }
+
+    default_lens = raw_menu.get("default_lens_for_today")
+    if default_lens not in _FRAMEWORK_MENU:
+        default_lens = None
+    expires_at = raw_menu.get("default_lens_expires_at")
+    if default_lens and expires_at:
+        try:
+            expiry = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            if expiry < datetime.now(timezone.utc):
+                default_lens = None
+        except Exception:
+            default_lens = None
+
+    return {
+        "definitions": dict(_FRAMEWORK_MENU),
+        "enabled_frameworks": enabled_set,
+        "default_lens_for_today": default_lens,
+        "crystal_knowledge_graph_enabled": bool(
+            raw_menu.get(
+                "crystal_knowledge_graph_enabled",
+                raw_menu.get("crystal_knowledge_graph_opt_in", False),
+            ),
+        ),
+    }
 
 
 def _select_framework_lens(
     *,
     active_branches: Tuple[str, ...],
+    framework_menu: Optional[Dict[str, Any]] = None,
     user_preference: Optional[str] = None,
 ) -> List[str]:
     """Select ordered lens list based on active branches and optional user preference.
@@ -2490,22 +2614,29 @@ def _select_framework_lens(
     """
     if not active_branches:
         return []
+    menu = framework_menu or _load_framework_menu()
+    definitions = menu.get("definitions") or _FRAMEWORK_MENU
+    enabled = menu.get("enabled_frameworks")
+    enabled_set = enabled if isinstance(enabled, set) else set()
+    preferred_lens = user_preference or menu.get("default_lens_for_today")
     scores: Dict[str, int] = {}
-    for key, meta in _FRAMEWORK_MENU.items():
+    for key, meta in definitions.items():
+        if enabled_set and key not in enabled_set:
+            continue
         overlap = len(set(active_branches) & meta["applies_to"])
         if overlap > 0:
             scores[key] = overlap
     ordered = sorted(scores, key=lambda k: scores[k], reverse=True)
-    if user_preference and user_preference in ordered:
-        ordered.remove(user_preference)
-        ordered.insert(0, user_preference)
+    if preferred_lens and preferred_lens in ordered:
+        ordered.remove(preferred_lens)
+        ordered.insert(0, preferred_lens)
     return ordered
 
 
 def _compose_lens_directives(
     lens_list: List[str],
     *,
-    response_pattern_crystals: Optional[List[str]] = None,
+    response_pattern_crystals: Optional[List[Any]] = None,
 ) -> Tuple[str, List[str], List[str]]:
     """Gap 3: compose lens directives with cap-at-2 rule.
 
@@ -2532,7 +2663,14 @@ def _compose_lens_directives(
             audit_only.append(key)
 
     if response_pattern_crystals:
-        for crystal_text in response_pattern_crystals[:3]:
+        for crystal in response_pattern_crystals[:3]:
+            crystal_text = (
+                crystal.get("crystal_text")
+                if isinstance(crystal, dict)
+                else str(crystal)
+            )
+            if not crystal_text:
+                continue
             parts.append(crystal_text)
 
     return ("\n".join(parts), applied, audit_only)
@@ -2582,7 +2720,7 @@ async def _load_response_pattern_crystals(
     db_pool: Any,
     username: str,
     lens_primary: Optional[str],
-) -> List[str]:
+) -> List[Dict[str, str]]:
     """Layer 2: top-3 response pattern crystals by recall_count.
     Scoped to scope='response_pattern'.
     """
@@ -2592,7 +2730,7 @@ async def _load_response_pattern_crystals(
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT crystal_text FROM nate_intelligence_crystals
+                SELECT id::text AS id, crystal_text FROM nate_intelligence_crystals
                 WHERE (user_id = (SELECT id FROM users WHERE username = $1 LIMIT 1)
                        OR user_id IS NULL)
                   AND scope = 'response_pattern'
@@ -2603,7 +2741,11 @@ async def _load_response_pattern_crystals(
                 """,
                 username, f"%{lens_primary}%",
             )
-            return [r["crystal_text"] for r in rows if r.get("crystal_text")]
+            return [
+                {"id": str(r["id"]), "crystal_text": r["crystal_text"]}
+                for r in rows
+                if r.get("crystal_text")
+            ]
     except Exception as e:
         logger.warning("crystal_factory_l2: %s", e)
         return []
@@ -3046,6 +3188,16 @@ _FEATURE_FLAG_NAMES: Tuple[str, ...] = (
     "gap_cultural_context_enabled",
 )
 
+_V1_4_FEATURE_FLAG_NAMES: Tuple[str, ...] = (
+    "v1_4_codeword_listener_enabled",
+    "v1_4_addiction_branches_enabled",
+    "v1_4_cross_addiction_overlay_enabled",
+    "v1_4_dst_lens_enabled",
+    "v1_4_framework_lens_enabled",
+    "v1_4_crystal_factory_enabled",
+    "v1_4_alert_dispatch_enabled",
+)
+
 
 async def _read_master_enabled(db_pool) -> bool:
     """Read app_settings.sensitive_bridge_master_enabled. Default False on any
@@ -3118,6 +3270,7 @@ async def _read_user_enrollment(
         "enrolled": False,
         "cohort": "unenrolled",
         "flags": {name: False for name in _FEATURE_FLAG_NAMES},
+        "raw_flags": {},
     }
     if not db_pool or not user_id:
         return default
@@ -3145,6 +3298,7 @@ async def _read_user_enrollment(
             "enrolled": cohort != "unenrolled",
             "cohort": cohort,
             "flags": flags,
+            "raw_flags": dict(raw_flags),
         }
     except Exception as e:
         logger.warning(
@@ -3171,6 +3325,28 @@ def _resolve_effective_flags(
 def _any_v13_signal_active(effective_flags: Dict[str, bool]) -> bool:
     """At least one gap flag must be TRUE for v1.3 behavior to engage."""
     return any(bool(v) for v in effective_flags.values())
+
+
+def _v1_4_feature_enabled(
+    user_enrollment: Dict[str, Any],
+    flag_name: str,
+) -> bool:
+    raw_flags = user_enrollment.get("raw_flags")
+    if not isinstance(raw_flags, dict):
+        raw_flags = {}
+    return bool(raw_flags.get(flag_name, False))
+
+
+def _any_sensitive_feature_active(
+    effective_flags: Dict[str, bool],
+    user_enrollment: Dict[str, Any],
+) -> bool:
+    if _any_v13_signal_active(effective_flags):
+        return True
+    return any(
+        _v1_4_feature_enabled(user_enrollment, flag)
+        for flag in _V1_4_FEATURE_FLAG_NAMES
+    )
 
 
 def _build_neutral_bridge_decision(*, reason: str) -> BridgeDecision:

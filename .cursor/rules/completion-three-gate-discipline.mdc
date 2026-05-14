@@ -23,6 +23,7 @@ alwaysApply: true
 - "Complete" reported with code written but not committed
 - "Complete" reported with commit on main but no GREEN verification
 - "Complete" reported with deploy verified but no production-UI smoke test
+- "Complete" reported for Sensitive Bridge v1.4 without a `sensitive_bridge_audit_sent` row showing 56/56 TRUSTED or explicit uncommitted/non-deployed qualifier
 
 ## Why
 2026-05-11 View Brief pill: reported complete; was uncommitted in local working tree across multiple Cursor sessions. CoachN couldn't reach Sensitive Profile screen from production Coach Command for ~24 hours after "completion" was reported.

@@ -73,6 +73,10 @@ except Exception:
 | `webhook_api.py` | 2 | Low (webhooks are fire-and-forget) |
 | `twilio_voice.py` | 3 | High (uses wrong column names) |
 
+## Sensitive Bridge v1.4 Hot Path
+
+PII redaction, crisis event writes, addiction alerts, trafficking alerts, and codeword disclosure alerts must never fail silently. If redaction fails, log `WARNING` and continue only with a safe fallback payload. If crisis/audit persistence fails, log `ERROR` with the event type and canonical username.
+
 ## After Fixing a Silent Handler
 
 1. Deploy the fixed file

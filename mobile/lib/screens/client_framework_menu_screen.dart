@@ -140,9 +140,42 @@ class _ClientFrameworkMenuScreenState extends State<ClientFrameworkMenuScreen> {
                     SwitchListTile(
                       title: const Text('Crystal knowledge graph opt-in',
                           style: TextStyle(color: Colors.white70)),
+                      subtitle: const Text(
+                        'Default OFF. Phase G graph traversal stays disabled unless explicitly opted in.',
+                        style: TextStyle(color: Colors.white38, fontSize: 11),
+                      ),
                       value: _knowledgeGraph,
                       activeThumbColor: const Color(0xFFC9A962),
                       onChanged: (v) => setState(() => _knowledgeGraph = v),
+                    ),
+                    DropdownButtonFormField<String?>(
+                      value: _defaultLens,
+                      dropdownColor: const Color(0xFF111111),
+                      style: const TextStyle(color: Colors.white70),
+                      decoration: const InputDecoration(
+                        labelText: 'Default lens for today',
+                        labelStyle:
+                            TextStyle(color: Colors.white54, fontSize: 12),
+                      ),
+                      items: <DropdownMenuItem<String?>>[
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('No override',
+                              style: TextStyle(color: Colors.white70)),
+                        ),
+                        ..._menu.map(
+                          (row) => DropdownMenuItem<String?>(
+                            value: row['key']?.toString(),
+                            child: Text(
+                              row['label']?.toString() ??
+                                  row['key']?.toString() ??
+                                  '',
+                              style: const TextStyle(color: Colors.white70),
+                            ),
+                          ),
+                        ),
+                      ],
+                      onChanged: (v) => setState(() => _defaultLens = v),
                     ),
                     const Divider(color: Colors.white24),
                     ..._menu.map((row) {

@@ -1,0 +1,23 @@
+---
+description: Sensitive Bridge v1.4 alert PII redaction contract
+globs: backend/app/services/sensitive_alert_dispatcher.py,backend/app/services/pii_redaction.py,backend/app/services/coach_notifications.py
+alwaysApply: false
+---
+
+# Sensitive Bridge v1.4 PII Redaction
+
+## Rule
+
+Every Sensitive Bridge alert payload passed to `coach_notifications.notify_coach()` must first pass through `pii_redaction.redact_pii()`.
+
+## Preserve
+
+Hotline numbers and resource URLs must not be redacted. Examples include `1-888-373-7888` and crisis/resource links.
+
+## Storage Boundary
+
+Redacted content goes to coach-facing notifications. Unredacted clinical/audit context may only remain in `sensitive_bridge_log` under clinician-only access controls.
+
+## Failure
+
+PII redaction hard failures must be visible in logs and must not silently drop the alert. Use a redaction-failed placeholder for the coach payload if needed.

@@ -1,0 +1,29 @@
+---
+description: Sensitive Bridge v1.4 addiction taxonomy surfaces
+globs: backend/app/services/sensitive_clinical_bridge.py,backend/app/routers/sensitive_profile_api.py,backend/app/sse/ucd/tmc.py,backend/data/lexicons/**
+alwaysApply: false
+---
+
+# Sensitive Bridge v1.4 Addiction Taxonomy
+
+## Addiction Types
+
+The 8 addiction branches are `substance`, `sex_addiction`, `gambling`, `gaming`, `food_compulsion`, `work_compulsion`, `spending_compulsion`, and `codependency`. Cross-addiction is a composite overlay, not a standalone addiction type.
+
+## Required Surfaces
+
+Every new addiction type requires all 5 surfaces in the same change:
+
+1. `users.profile_data` status field.
+2. Clinician PUT endpoint in `sensitive_profile_api.py`.
+3. TMC `*_branch_active` signal.
+4. `_resolve_*_branch` resolver.
+5. Lexicon directory under `backend/data/lexicons/addiction/`.
+
+## Trafficking Boundary
+
+Trafficking is polyvictimization, detected through codeword/trafficking disclosure flow only. Never add `_resolve_trafficking_branch` and never put trafficking lexicons under `addiction/`.
+
+## Event Types
+
+v1.4 audit events include addiction status update, branch activation, lexicon match, response generated, coach alert dispatch/ack, referral suggest/ack, crisis warm handoff, cross-addiction transfer, part codeword match, framework lens selection, trafficking disclosure, and PII redaction.

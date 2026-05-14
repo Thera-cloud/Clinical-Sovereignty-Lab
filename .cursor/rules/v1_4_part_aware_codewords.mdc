@@ -1,0 +1,23 @@
+---
+description: Sensitive Bridge v1.4 part-aware codeword rules
+globs: backend/app/services/nate_checkin_agent.py,backend/app/services/sensitive_clinical_bridge.py,backend/app/routers/sensitive_profile_api.py
+alwaysApply: false
+---
+
+# Sensitive Bridge v1.4 Part-Aware Codewords
+
+## Identity
+
+All codeword and part registry reads use canonical `users.username`. Do not query part-aware v1.4 tables by hardware ID.
+
+## Parts
+
+Part numbers are per-client, not global. `part_category` carries the clinical role (`protector`, `exile`, `firefighter`, `manager`, `addict_part`, etc.) and must be preserved in disclosure events.
+
+## Entry Point
+
+After Phase C, `NateCheckInAgent.detect_codeword_disclosure(message, username)` is the canonical listener. It returns matched codeword ID, disclosure type, part name/number/category, and addiction link. Existing `check_codeword` is fallback only.
+
+## Clinical Boundary
+
+Codeword matching may elevate acuity silently, but it must not expose the codeword, part name, or addiction link to the client response.

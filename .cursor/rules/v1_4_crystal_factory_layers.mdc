@@ -1,0 +1,23 @@
+---
+description: Sensitive Bridge v1.4 crystal factory layer boundaries
+globs: backend/app/services/sensitive_clinical_bridge.py,mobile/lib/screens/client_framework_menu_screen.dart
+alwaysApply: false
+---
+
+# Sensitive Bridge v1.4 Crystal Factory Layers
+
+## Layers
+
+1. **Layer 1: per-client lexicon augmentation** reads `nate_intelligence_crystals` for the canonical username and active addiction branches, then adds bounded clinical cue text to the response directive.
+2. **Layer 2: response-pattern crystals** reads up to 3 `scope='response_pattern'` clinical crystals ordered by `recall_count`, appends them to framework lens directives, and records `response_pattern_crystal_applied` plus crystal IDs in audit.
+3. **Layer 3: per-client clinical knowledge graph** is deferred to Phase G. Do not build graph schema, traversal APIs, or part/trigger/codeword/addiction graph loading in v1.4 GA.
+
+## Opt-In Boundary
+
+`crystal_knowledge_graph_enabled` defaults to `false` in the framework menu. Layer 3 may only run when that per-client opt-in is true after a separate Phase G plan is approved.
+
+## Forbidden
+
+- Do not load Layer 3 graph data from Layer 1 or Layer 2 helpers.
+- Do not widen user-scoped crystals to global scope.
+- Do not inject archived crystals into response directives.

@@ -1,0 +1,26 @@
+---
+description: Sensitive Bridge v1.4 crisis warm referral contract
+globs: backend/app/services/sensitive_clinical_bridge.py,backend/app/services/sensitive_alert_dispatcher.py,backend/app/services/crisis_events_writer.py
+alwaysApply: false
+---
+
+# Sensitive Bridge v1.4 Crisis Warm Referral
+
+## Flow
+
+Crisis-tier warm referral follows a 6-step pause: stabilize, name immediate safety, offer resource, preserve agency, notify clinician/coach when authorized, and write audit.
+
+## Records
+
+Crisis paths write both:
+
+- `sensitive_bridge_log` as the canonical Sensitive Bridge audit record.
+- `crisis_events` for admin parity and crisis dashboards.
+
+## No Auto Follow-Up
+
+Do not create new automatic follow-up loops for crisis referral. Reengagement uses existing `NateCheckInAgent` 62h/72h behavior.
+
+## Trafficking
+
+Trafficking imminent-danger referrals must preserve and present `1-888-373-7888` when appropriate.

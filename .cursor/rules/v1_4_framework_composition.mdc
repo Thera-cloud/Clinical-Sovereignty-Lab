@@ -1,0 +1,27 @@
+---
+description: Sensitive Bridge v1.4 framework lens composition
+globs: backend/app/services/sensitive_clinical_bridge.py,mobile/lib/screens/client_framework_menu_screen.dart
+alwaysApply: false
+---
+
+# Sensitive Bridge v1.4 Framework Composition
+
+## Ownership
+
+The framework menu is clinician-set per client. The AI selects a per-turn lens from the enabled set and records the selected lenses in audit only.
+
+## Composition
+
+Prompt composition is capped at 2 lenses:
+
+1. Primary lens supplies the full framework directive.
+2. Secondary lens supplies one supplementary sentence.
+3. Lenses 3+ are audit-only and excluded from the prompt.
+
+## Client Surface
+
+Do not surface lens labels to clients. Use them for response shaping and `sensitive_bridge_log.framework_lens_selected`.
+
+## Crystal Graph
+
+`crystal_knowledge_graph_enabled` defaults to false. Layer 3 graph traversal is Phase G only.

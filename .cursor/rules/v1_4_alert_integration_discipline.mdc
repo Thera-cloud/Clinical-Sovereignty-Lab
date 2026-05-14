@@ -1,0 +1,25 @@
+---
+description: Sensitive Bridge v1.4 alert dispatch integration discipline
+globs: backend/app/services/sensitive_clinical_bridge.py,backend/app/services/sensitive_alert_dispatcher.py
+alwaysApply: false
+---
+
+# Sensitive Bridge v1.4 Alert Integration Discipline
+
+## Canonical Dispatcher
+
+Sensitive Bridge addiction, trafficking, and codeword alerts use `backend/app/services/sensitive_alert_dispatcher.py` as the single entry point.
+
+## Forbidden
+
+In `sensitive_clinical_bridge.py`, do not import or call:
+
+- `coach_notifications.notify_coach`
+- `crisis_events_writer.write_crisis_event`
+- `pii_redaction.redact_pii`
+
+Those belong behind the dispatcher.
+
+## Notification Path
+
+Use existing `notify_coach()`. Do not add new direct writers to `coach_escalation_notifications`, duplicate EmailService crisis paths, or broadcast sensitive content to all coaches.

@@ -15,6 +15,8 @@ Then pass canonical_user_id (NOT the original user_id) to evaluate_disclosure an
 
 ## Forbidden patterns
 - Querying sensitive_bridge_enrollment, user_safety_codewords, user_trigger_dates, user_polyvictimization_layers, user_legal_status, sensitive_bridge_log by hardware_id
+- Querying user_parts_registry, addiction_status_history, or cross_addiction_transfer_events by hardware_id
+- Querying v1.4 JSONB subkeys by hardware_id: sex_addiction_status, gambling_status, gaming_status, food_compulsion_status, work_compulsion_status, spending_compulsion_status, codependency_status, cross_addiction_profile, sensitive_clinical
 - Adding new tables with FK to users(hardware_id) for Sensitive Bridge surfaces
 - Special-casing identity per cohort, user, or session
 

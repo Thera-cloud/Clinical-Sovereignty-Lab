@@ -79,6 +79,21 @@ async def notify_coach(
         if fcm_token:
             sent["push"] = False  # integrate firebase_admin when available
 
+    if pool and notification_id:
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE coach_escalation_notifications
+                       SET channels = $2::jsonb
+                     WHERE id = $1
+                    """,
+                    notification_id,
+                    json.dumps(channels),
+                )
+        except Exception as e:
+            logger.warning("coach notification channel update failed: %s", e)
+
     return {
         "status": "ok",
         "channels": channels,

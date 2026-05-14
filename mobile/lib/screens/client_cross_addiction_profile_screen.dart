@@ -29,6 +29,10 @@ class _ClientCrossAddictionProfileScreenState
   String? _error;
   bool _crossActive = false;
   bool _overlayApplied = false;
+  List<String> _activeBranches = [];
+  List<String> _recoveryBranches = [];
+  List<Map<String, dynamic>> _transferHistory = [];
+  String? _polyvictimLink;
   final TextEditingController _notes = TextEditingController();
 
   String get _token => (widget.currentUserProfile['token'] ?? '').toString();
@@ -75,6 +79,19 @@ class _ClientCrossAddictionProfileScreenState
       _crossActive = m['cross_addiction_active'] == true;
       _overlayApplied = m['overlay_applied'] == true;
       _notes.text = (m['coach_notes'] ?? '').toString();
+      _activeBranches = _deriveBranches(data, active: true);
+      _recoveryBranches = _deriveBranches(data, active: false);
+      final transfers = m['transfer_history'];
+      _transferHistory = transfers is List
+          ? transfers
+              .whereType<Map>()
+              .map((e) => e.map((k, v) => MapEntry(k.toString(), v)))
+              .toList()
+          : <Map<String, dynamic>>[];
+      _polyvictimLink = (m['polyvictimization_link'] ??
+              m['polyvictim_link'] ??
+              data['polyvictimization_link'])
+          ?.toString();
     } catch (e) {
       _error = e.toString();
     }
@@ -112,6 +129,58 @@ class _ClientCrossAddictionProfileScreenState
     }
   }
 
+  List<String> _deriveBranches(Map<String, dynamic> data, {required bool active}) {
+    const fields = <String, String>{
+      'substance_status': 'Substance',
+      'sex_addiction_status': 'Sex addiction',
+      'gambling_status': 'Gambling',
+      'gaming_status': 'Gaming',
+      'food_compulsion_status': 'Food',
+      'work_compulsion_status': 'Work',
+      'spending_compulsion_status': 'Spending',
+      'codependency_status': 'Codependency',
+    };
+    final out = <String>[];
+    fields.forEach((key, label) {
+      final status = data[key]?.toString();
+      if (active && (status == 'active_use' || status == 'crisis')) {
+        out.add('$label · $status');
+      } else if (!active && status == 'recovery') {
+        out.add(label);
+      }
+    });
+    return out;
+  }
+
+  Widget _summaryCard(String title, List<String> values, String empty) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: const TextStyle(color: Color(0xFFC9A962))),
+          const SizedBox(height: 8),
+          if (values.isEmpty)
+            Text(empty, style: const TextStyle(color: Colors.white54))
+          else
+            ...values.map(
+              (v) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text('• $v',
+                    style: const TextStyle(color: Colors.white70)),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -146,6 +215,31 @@ class _ClientCrossAddictionProfileScreenState
               : ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
+                    _summaryCard(
+                      'Derived active branches',
+                      _activeBranches,
+                      'No active or crisis branches in the current profile.',
+                    ),
+                    _summaryCard(
+                      'Recovery branches',
+                      _recoveryBranches,
+                      'No recovery branches recorded.',
+                    ),
+                    _summaryCard(
+                      'Transfer history',
+                      _transferHistory
+                          .map((e) =>
+                              '${e['from'] ?? e['from_branch'] ?? 'unknown'} → '
+                              '${e['to'] ?? e['to_branch'] ?? 'unknown'}'
+                              '${e['recorded_at'] == null ? '' : ' · ${e['recorded_at']}'}')
+                          .toList(),
+                      'No transfer events recorded.',
+                    ),
+                    _summaryCard(
+                      'Polyvictimization link',
+                      [_polyvictimLink ?? 'No linked layer recorded.'],
+                      'No linked layer recorded.',
+                    ),
                     SwitchListTile(
                       title: const Text('Cross-addiction active',
                           style: TextStyle(color: Colors.white70)),

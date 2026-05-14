@@ -1,0 +1,28 @@
+---
+description: Sensitive Bridge v1.4 lexicon citation and review rules
+globs: backend/data/lexicons/**/*.yaml,backend/app/services/lexicon_loader.py
+alwaysApply: false
+---
+
+# Sensitive Bridge v1.4 Lexicon Citation
+
+## Required YAML Fields
+
+Every lexicon YAML file must include:
+
+- `status`
+- `source.citation`
+- `source.link`
+- `detector_patterns`
+
+## Review Status
+
+`status: scaffolded_unreviewed` files must never load in production. `lexicon_loader.py` must filter them out.
+
+## Verbatim Patterns
+
+If any pattern has `verbatim: true`, that pattern must include its own citation and link. APA-style citation belongs in `source.citation`.
+
+## Placement
+
+Addiction lexicons live under `backend/data/lexicons/addiction/`. Trafficking lexicons live under `backend/data/lexicons/polyvictimization/trafficking/`.
