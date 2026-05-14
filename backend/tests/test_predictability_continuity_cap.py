@@ -129,12 +129,21 @@ def test_db_error_falls_back_to_floor_fail_closed() -> None:
     assert cap == 80, f"expected floor=80 on db error, got {cap}"
 
 
-def test_none_db_pool_falls_back_to_floor() -> None:
-    """db_pool is None (orchestrator passed nothing) → floor applies."""
+def test_none_db_pool_uses_scaled_floor_for_heavy_long_input() -> None:
+    lisa_like = "x" * 2000 + " sexual assault grand jury "
     cap = asyncio.run(_resolve_predictability_continuity_cap(
-        user_id="alice", db_pool=None, floor=80,
+        user_id="alice", db_pool=None, floor=80, user_text=lisa_like,
     ))
-    assert cap == 80, f"expected floor=80 on None pool, got {cap}"
+    assert cap >= 400
+
+
+def test_no_prior_row_uses_scaled_floor_when_input_heavy() -> None:
+    lisa_like = "y" * 2100 + " trauma testimony "
+    pool = _FakePool(_FakeConn(return_value=None))
+    cap = asyncio.run(_resolve_predictability_continuity_cap(
+        user_id="alice", db_pool=pool, floor=80, user_text=lisa_like,
+    ))
+    assert cap >= 400
 
 
 def test_default_floor_constant_is_80() -> None:
@@ -182,6 +191,10 @@ if __name__ == "__main__":
          test_custom_floor_is_respected),
         ("test_high_word_count_above_floor_passes_through",
          test_high_word_count_above_floor_passes_through),
+        ("test_none_db_pool_uses_scaled_floor_for_heavy_long_input",
+         test_none_db_pool_uses_scaled_floor_for_heavy_long_input),
+        ("test_no_prior_row_uses_scaled_floor_when_input_heavy",
+         test_no_prior_row_uses_scaled_floor_when_input_heavy),
     ]
     passed = 0
     failed = 0

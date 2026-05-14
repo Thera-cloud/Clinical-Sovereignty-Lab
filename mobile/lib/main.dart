@@ -1708,6 +1708,18 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
           // FIX-G': hub already owns _socket from _connectToCortex; no re-attach needed.
         }
       }
+      else if (data['type'] == 'nate_thinking') {
+        final thinking = data['text'] ?? 'Little Nate is thinking...';
+        setState(() {
+          if (_chatHistory.isNotEmpty &&
+              _chatHistory.last.startsWith("Little Nate:")) {
+            _chatHistory[_chatHistory.length - 1] = "Little Nate: $thinking";
+          } else {
+            _chatHistory.add("Little Nate: $thinking");
+          }
+          _scrollToBottom();
+        });
+      }
       else if (data['type'] == 'nate_response' || data['type'] == 'chat_reply') {
         String reply = data['text'] ?? "";
         setState(() {

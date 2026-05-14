@@ -1929,6 +1929,34 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
             userId: widget.username ?? 'unknown',
           );
         }
+      } else if (data['type'] == 'nate_thinking') {
+        final thinking = data['text'] ?? 'Little Nate is thinking...';
+        final turnId = data['turn_id'] as String?;
+        setState(() {
+          final prefix = "Little Nate: ";
+          final line = "$prefix$thinking";
+          if (turnId != null && turnId.trim().isNotEmpty) {
+            final tid = turnId.trim();
+            final existing = _turnIdToChatIndex[tid];
+            if (existing != null &&
+                existing >= 0 &&
+                existing < _chatHistory.length) {
+              _chatHistory[existing] = line;
+            } else {
+              _chatHistory.add(line);
+              _turnIdToChatIndex[tid] = _chatHistory.length - 1;
+              _pruneTurnBubbleMapIfNeeded();
+            }
+          } else {
+            if (_chatHistory.isNotEmpty &&
+                _chatHistory.last.startsWith("Little Nate:")) {
+              _chatHistory[_chatHistory.length - 1] = line;
+            } else {
+              _chatHistory.add(line);
+            }
+          }
+          _scrollToBottom();
+        });
       } else if (data['type'] == 'nate_response' ||
           data['type'] == 'chat_reply') {
         String reply = data['text'] ?? "";

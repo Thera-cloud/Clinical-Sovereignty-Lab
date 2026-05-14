@@ -8919,6 +8919,10 @@ class AzureCortex:
                         )
             except Exception as _ttc_pre_err:
                 print(f">>> [THERAPEUTIC-CTRL] pre-flight failed for {uid}: {_ttc_pre_err}")
+            # QUANTUM-CRYSTAL-ARCH: buffer provider output until post-flight audit when TMC audit is active (C1).
+            _buffer_for_therapeutic_audit = bool(_ttc_audit_meta)
+            if _buffer_for_therapeutic_audit:
+                await self._send_nate_thinking(uid, client_context=_ctx, turn_id=_turn_id)
             full_response = ""
             _provider_used = ""
             _already_streamed = False
@@ -9016,7 +9020,8 @@ class AzureCortex:
                                 print(f">>> [SOVEREIGN] First token in {_ttft_ms}ms via {provider}")
                                 _first_token = False
                             if len(_chunk_buf) >= 25:
-                                await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
+                                if not _buffer_for_therapeutic_audit:
+                                    await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
                                 _chunk_buf = ""
 
                     if _garble_aborted:
@@ -9036,8 +9041,9 @@ class AzureCortex:
                             if _fb_resp:
                                 full_response = _fb_resp
                                 _provider_used = _fb_prov
-                                await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
-                                _already_streamed = True
+                                if not _buffer_for_therapeutic_audit:
+                                    await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
+                                    _already_streamed = True
                                 print(f">>> [GARBLE] Fallback via {_fb_prov}: {len(full_response)} chars")
                         except Exception as _fb_err:
                             print(f">>> [GARBLE] Fallback also failed: {_fb_err}")
@@ -9050,9 +9056,9 @@ class AzureCortex:
                             print(f">>> [SOVEREIGN] Stripped unclosed <think> block, kept {len(full_response)} chars")
                         elif not _think_resolved and _raw_accum:
                             full_response = _raw_accum
-                        if _chunk_buf or (full_response and not _chunk_buf):
+                        if not _buffer_for_therapeutic_audit and (_chunk_buf or (full_response and not _chunk_buf)):
                             await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
-                    if not _garble_aborted:
+                    if not _garble_aborted and not _buffer_for_therapeutic_audit:
                         _already_streamed = True  # QUANTUM-CRYSTAL-ARCH: prevent duplicate send
                 except Exception as _sov_err:
                     print(f">>> [SOVEREIGN] Streaming inference failed: {_sov_err}")
@@ -9082,16 +9088,17 @@ class AzureCortex:
                     async def _race_send_ws(uu: str, tt: str):
                         await self._send(uu, tt, client_context=_ctx, turn_id=_turn_id)
 
+                    _race_fn = None if _buffer_for_therapeutic_audit else _race_send_ws
                     full_response, _provider_used = await _race_inference(
                         system_prompt, user_text, uid,
-                        send_fn=_race_send_ws, temperature=_user_temp, max_tokens=_len_cap,  # FIX-LEN
+                        send_fn=_race_fn, temperature=_user_temp, max_tokens=_len_cap,  # FIX-LEN
                     )
                 except Exception as _race_err:
                     print(f">>> [RACE] Primary inference failed: {_race_err}")
                     full_response = ""
                     _provider_used = "failed"
                 print(f">>> [RACE] Winner: {_provider_used} uid={uid} len={len(full_response)}")
-                if _provider_used == "azure" and full_response.strip():
+                if _provider_used == "azure" and full_response.strip() and not _buffer_for_therapeutic_audit:
                     _already_streamed = True  # QUANTUM-CRYSTAL-ARCH: deltas already emitted via realtime WS
             else:  # SOVEREIGN-VOICE — emergency Azure-only fallback
                 import aiohttp
@@ -9109,14 +9116,16 @@ class AzureCortex:
                                 event_type = event.get("type")
                                 if event_type == "response.text.delta":
                                     full_response += event.get("delta", "")
-                                    await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
+                                    if not _buffer_for_therapeutic_audit:
+                                        await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
                                 elif event_type in ("response.text.done", "response.done"):
                                     break
                                 elif event_type == "error":
                                     print(f">>> [AZURE ERROR] {event}")
                                     break
                 _provider_used = "azure"
-                _already_streamed = True  # QUANTUM-CRYSTAL-ARCH: deltas already emitted inline
+                if not _buffer_for_therapeutic_audit:
+                    _already_streamed = True  # QUANTUM-CRYSTAL-ARCH: deltas already emitted inline
 
             # SOVEREIGN-VOICE — AQ Refusal Bypass (runs regardless of provider)
             _is_refusal = not full_response.strip() or _provider_used == "failed"
@@ -9194,8 +9203,9 @@ class AzureCortex:
                 except Exception as _ttc_post_err:
                     print(f">>> [THERAPEUTIC-CTRL] post-audit failed for {uid}: {_ttc_post_err}")
 
-            # SOVEREIGN-VOICE — send response (sovereign/race paths need explicit send)
-            if _provider_used != "azure" and not _already_streamed:
+            # SOVEREIGN-VOICE — emit completed provider text; C1 defers until after audit when buffering (any provider).
+            _emit_after_inference = (not _already_streamed) or _buffer_for_therapeutic_audit
+            if _emit_after_inference and (_provider_used != "azure" or _buffer_for_therapeutic_audit):
                 await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
 
             # SOVEREIGN-VOICE — zero-cost token refund
@@ -10403,6 +10413,23 @@ class AzureCortex:
                         "should_offer_assisted": False
                     }
 
+
+    async def _send_nate_thinking(self, uid: str, client_context: Optional[str] = None, turn_id: Optional[str] = None):
+        """QUANTUM-CRYSTAL-ARCH: placeholder bubble while provider output is buffered for therapeutic audit (C1)."""
+        text = "Little Nate is thinking..."
+        if uid in self.sockets:
+            for ws in list(self.sockets[uid]):
+                if client_context is not None:
+                    _ws_ctx = getattr(ws, "_eviction_context", "main")
+                    if _ws_ctx != client_context:
+                        continue
+                try:
+                    _payload: Dict[str, Any] = {"type": "nate_thinking", "text": text}
+                    if turn_id:
+                        _payload["turn_id"] = turn_id
+                    await ws.send(json.dumps(_payload))
+                except Exception:
+                    self.sockets[uid].discard(ws)
 
     async def _send(self, uid: str, text: str, client_context: Optional[str] = None, turn_id: Optional[str] = None):
         """Send message to connected sockets for user.

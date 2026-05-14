@@ -326,11 +326,55 @@ tokens (~60 words) is a "warm short response" floor — enough for 3-4
 sentences of sustained presence without truncating mid-thought.
 """
 
+TRANSPARENT_AUDIT_FALLBACK_MESSAGE: str = (
+    "I want to think about that more carefully — can you tell me which "
+    "part of what you shared feels most important to you right now?"
+)
+
+
+def _heuristic_input_affect_intensity(user_text: str) -> float:
+    """Rough 0..1 affect load from lexical cues (no LLM). Used for cap scaling."""
+    if not user_text:
+        return 0.0
+    lower = user_text.lower()
+    score = 0.0
+    for token in (
+        "rape", "assault", "abuse", "trauma", "suicide", "kill myself",
+        "hurt me", "panic", "terrified", "nightmare", "grand jury",
+        "sexual", "molest", "violence", "dying", "worthless", "helpless",
+    ):
+        if token in lower:
+            score += 0.12
+    if len(user_text) > 800:
+        score += 0.08
+    return min(1.0, score)
+
+
+def scaled_predictability_continuity_floor(
+    user_text: str,
+    base_floor: int = PREDICTABILITY_CONTINUITY_FLOOR_TOKENS,
+) -> int:
+    """C3: raise floor for long, emotionally weighted turns (predictability_continuity)."""
+    n = len(user_text or "")
+    if n > 500:
+        length_bonus = min(400, (n - 500) // 5)
+    else:
+        length_bonus = 0
+    aff = _heuristic_input_affect_intensity(user_text or "")
+    if aff > 0.6:
+        affect_bonus = 200
+    elif aff > 0.3:
+        affect_bonus = 100
+    else:
+        affect_bonus = 0
+    return base_floor + length_bonus + affect_bonus
+
 
 async def _resolve_predictability_continuity_cap(
     user_id: str,
     db_pool,
     floor: int = PREDICTABILITY_CONTINUITY_FLOOR_TOKENS,
+    user_text: str = "",
 ) -> int:
     """Resolve `predictability_continuity` token cap by parity with prior turn.
 
@@ -357,8 +401,9 @@ async def _resolve_predictability_continuity_cap(
         Returns `floor` on any failure path so the register never crashes the
         caller.
     """
+    scaled_floor = scaled_predictability_continuity_floor(user_text or "", floor)
     if not db_pool or not user_id:
-        return floor
+        return scaled_floor
     try:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -369,19 +414,19 @@ async def _resolve_predictability_continuity_cap(
                 user_id,
             )
             if not row:
-                return floor
+                return scaled_floor
             words = int(row["word_count_ai"] or 0)
             if words <= 0:
-                return floor
+                return scaled_floor
             # words → approximate tokens (~0.75 tokens/word)
             prior_tokens = int(round(words / 0.75))
-            return max(prior_tokens, floor)
+            return max(prior_tokens, scaled_floor)
     except Exception as e:
         logger.warning(
             "therapeutic_controller: predictability cap resolve failed "
-            "for %s: %s — returning floor=%d", user_id, e, floor,
+            "for %s: %s — returning scaled_floor=%d", user_id, e, scaled_floor,
         )
-        return floor
+        return scaled_floor
 
 
 # ─────────────────────────── Helpers ───────────────────────────
@@ -763,6 +808,7 @@ async def prepare_therapeutic_context(
                 user_id=canonical_user_id,
                 db_pool=db_pool,
                 floor=PREDICTABILITY_CONTINUITY_FLOOR_TOKENS,
+                user_text=user_text or "",
             )
         elif effective_register_directive in TOKEN_CAPS:
             max_tokens = TOKEN_CAPS[effective_register_directive]
@@ -936,6 +982,13 @@ async def audit_therapeutic_response(
                     mismatch_delivered = audit_passed
         except Exception as e:
             logger.warning("therapeutic_controller: regenerate failed: %s", e)
+
+    if not audit_passed:
+        final_text = TRANSPARENT_AUDIT_FALLBACK_MESSAGE
+        print(
+            f">>> [THERAPEUTIC-CTRL] audit_failed_transparent_fallback user={user_id} "
+            f"violations={len(violations)}"
+        )
 
     await _log_audit(
         db_pool=db_pool, user_id=user_id, audit_metadata=audit_metadata,
