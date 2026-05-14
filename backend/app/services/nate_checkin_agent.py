@@ -1143,7 +1143,7 @@ class NateCheckInAgent:
             async with self.db_pool.acquire() as c:
                 rows = await c.fetch(
                     """
-                    SELECT id, codeword_hash, codeword_salt, codeword_type,
+                    SELECT codeword_hash, codeword_salt, codeword_type,
                            codeword_label, triggers_mandatory_reporting,
                            disclosure_type, part_name, part_number,
                            part_category, addiction_link

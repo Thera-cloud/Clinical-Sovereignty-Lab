@@ -1938,6 +1938,20 @@ async def evaluate_disclosure(
     # ───────────────────────────────────────────────────────────────────
     # STEP 13 — Register selection (v1.4: 9 branch resolvers)
     # ───────────────────────────────────────────────────────────────────
+    if _profile_status_active(profile, "substance_status", ("active_use", "crisis")):
+        tmc_signals["substance_branch_active"] = True
+    for _profile_key, _signal_key in (
+        ("sex_addiction_status", "sex_addiction_branch_active"),
+        ("gambling_status", "gambling_branch_active"),
+        ("gaming_status", "gaming_branch_active"),
+        ("food_compulsion_status", "food_compulsion_branch_active"),
+        ("work_compulsion_status", "work_compulsion_branch_active"),
+        ("spending_compulsion_status", "spending_compulsion_branch_active"),
+        ("codependency_status", "codependency_branch_active"),
+    ):
+        if _profile_status_active(profile, _profile_key):
+            tmc_signals[_signal_key] = True
+
     substance_branch = _resolve_substance_branch(
         tmc_signals=tmc_signals, embodiment=embodiment,
     )
@@ -2329,6 +2343,15 @@ def _resolve_substance_branch(
             branched=True, reason="profile_flag_active",
         )
     return SubstanceRegisterBranch(branched=False, reason="not_active")
+
+
+def _profile_status_active(
+    profile: Dict[str, Any],
+    key: str,
+    active_values: Tuple[str, ...] = ("active", "crisis"),
+) -> bool:
+    value = profile.get(key) if isinstance(profile, dict) else None
+    return str(value or "").lower() in active_values
 
 
 def _resolve_sex_addiction_branch(
