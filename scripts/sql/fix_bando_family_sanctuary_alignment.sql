@@ -1,5 +1,5 @@
 -- =============================================================================
--- One-off: align Bando household for Family Sanctuary (same family_id + HoH role).
+-- Accounts: EricBando (HEAD), client_SelenaBando (SPOUSE).
 -- Preconditions: verify usernames with:
 --   SELECT username, hardware_id, role,
 --          profile_data->>'family_id', profile_data->>'family_role', family_id
@@ -28,13 +28,13 @@ UPDATE users AS u SET
         '{family_role}',
         CASE
             WHEN lower(u.username) = 'ericbando' THEN '"HEAD"'::jsonb
-            WHEN lower(u.username) = 'selenabando' THEN '"SPOUSE"'::jsonb
+            WHEN lower(u.username) = 'client_selenaando' THEN '"SPOUSE"'::jsonb
             ELSE COALESCE(u.profile_data->'family_role', '"MEMBER"'::jsonb)
         END,
         true
     ),
     updated_at = NOW()
-WHERE lower(u.username) IN ('ericbando', 'selenabando')
+WHERE lower(u.username) IN ('ericbando', 'client_selenaando')
   AND u.role = 'CLIENT'
   AND u.deleted_at IS NULL;
 
