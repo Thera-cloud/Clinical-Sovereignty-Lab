@@ -195,6 +195,59 @@ VALID_ADDICTION_BRANCH_STATUSES = frozenset(
 #: Codeword type values must match migration 204 CHECK constraint.
 VALID_CODEWORD_TYPES = frozenset({"explicit_word", "innocuous_phrase"})
 
+#: v1.4 part-aware codeword values (migration 217).
+VALID_CODEWORD_DISCLOSURE_TYPES = frozenset(
+    {
+        "explicit_word",
+        "innocuous_phrase",
+        "soft_pause",
+        "grounding_request",
+        "covert_observation",
+        "reengagement_risk",
+        "active_harm",
+        "imminent_danger",
+        "addict_part_speaking",
+        "dissociation_indicator",
+        "part_conflict",
+        "trafficking_history_disclosure",
+        "trafficking_active_risk",
+        "trafficking_imminent_danger",
+    }
+)
+VALID_PART_CATEGORIES = frozenset(
+    {
+        "protector",
+        "exile",
+        "firefighter",
+        "manager",
+        "self_energy",
+        "addict_part",
+        "inner_critic",
+        "caretaker",
+        "dissociative_part",
+        "inner_child",
+        "other",
+    }
+)
+VALID_CODEWORD_ADDICTION_LINKS = frozenset(
+    {
+        "substance",
+        "sex",
+        "sex_addiction",
+        "gambling",
+        "gaming",
+        "food",
+        "food_compulsion",
+        "work",
+        "work_compulsion",
+        "spending",
+        "spending_compulsion",
+        "codependency",
+        "trafficking",
+        "none",
+    }
+)
+
 #: Date type values must match migration 205 CHECK constraint.
 VALID_TRIGGER_DATE_TYPES = frozenset(
     {
@@ -766,11 +819,42 @@ class CodewordCreate(BaseModel):
     codeword_type: str = Field(...)
     codeword_label: Optional[str] = Field(default=None, max_length=64)
     triggers_mandatory_reporting: bool = Field(default=False)
+    disclosure_type: Optional[str] = Field(default=None)
+    part_name: Optional[str] = Field(default=None, max_length=80)
+    part_number: Optional[int] = Field(default=None, ge=1, le=999)
+    part_category: Optional[str] = Field(default=None)
+    addiction_link: Optional[str] = Field(default=None)
 
     @validator("codeword_type")
     def _v_type(cls, v):
         if v not in VALID_CODEWORD_TYPES:
             raise ValueError("codeword_type must be one of explicit_word|innocuous_phrase")
+        return v
+
+    @validator("disclosure_type")
+    def _v_disclosure_type(cls, v):
+        if v is not None and v not in VALID_CODEWORD_DISCLOSURE_TYPES:
+            raise ValueError(
+                "disclosure_type must be one of "
+                + "|".join(sorted(VALID_CODEWORD_DISCLOSURE_TYPES))
+            )
+        return v
+
+    @validator("part_category")
+    def _v_part_category(cls, v):
+        if v is not None and v not in VALID_PART_CATEGORIES:
+            raise ValueError(
+                "part_category must be one of " + "|".join(sorted(VALID_PART_CATEGORIES))
+            )
+        return v
+
+    @validator("addiction_link")
+    def _v_addiction_link(cls, v):
+        if v is not None and v not in VALID_CODEWORD_ADDICTION_LINKS:
+            raise ValueError(
+                "addiction_link must be one of "
+                + "|".join(sorted(VALID_CODEWORD_ADDICTION_LINKS))
+            )
         return v
 
 
@@ -1671,8 +1755,9 @@ async def add_codeword(
             INSERT INTO user_safety_codewords (
                 user_id, codeword_hash, codeword_salt, codeword_type,
                 codeword_label, triggers_mandatory_reporting,
-                set_by_clinician_id, active, disclosure_type
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, $8)
+                set_by_clinician_id, active, disclosure_type, part_name,
+                part_number, part_category, addiction_link
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, $8, $9, $10, $11, $12)
             """,
             user_id,
             cw_hash,
@@ -1681,7 +1766,11 @@ async def add_codeword(
             body.codeword_label,
             body.triggers_mandatory_reporting,
             actor_id,
-            body.codeword_type,
+            body.disclosure_type or body.codeword_type,
+            body.part_name,
+            body.part_number,
+            body.part_category,
+            body.addiction_link,
         )
 
     await _emit_profile_mutation_audit(
@@ -1694,6 +1783,11 @@ async def add_codeword(
             "hash_prefix": cw_hash[:12],
             "codeword_type": body.codeword_type,
             "triggers_mandatory_reporting": body.triggers_mandatory_reporting,
+            "disclosure_type": body.disclosure_type or body.codeword_type,
+            "part_name": body.part_name,
+            "part_number": body.part_number,
+            "part_category": body.part_category,
+            "addiction_link": body.addiction_link,
         },
         access_classification=ACCESS_CLINICIAN_ONLY,
     )
@@ -1706,6 +1800,9 @@ async def add_codeword(
         "ok": True,
         "hash_prefix": cw_hash[:12],
         "codeword_type": body.codeword_type,
+        "part_linked": bool(
+            body.part_name or body.part_number or body.part_category or body.addiction_link
+        ),
     }
 
 

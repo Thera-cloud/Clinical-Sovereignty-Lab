@@ -21,12 +21,23 @@ _DATE_US_RE = re.compile(
     r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b",
 )
 
+DEFAULT_HOTLINE_NUMBERS = (
+    "988",
+    "911",
+    "1-888-373-7888",
+    "233733",
+    "1-800-662-4357",
+    "1-800-656-4673",
+    "1-800-799-7233",
+)
+
 
 def _normalize_hotlines(hotline_numbers: Optional[Iterable[str]]) -> Set[str]:
     out: Set[str] = set()
-    if not hotline_numbers:
-        return out
-    for raw in hotline_numbers:
+    values = list(DEFAULT_HOTLINE_NUMBERS)
+    if hotline_numbers:
+        values.extend(str(raw) for raw in hotline_numbers if raw)
+    for raw in values:
         if not raw:
             continue
         digits = re.sub(r"\D+", "", str(raw))

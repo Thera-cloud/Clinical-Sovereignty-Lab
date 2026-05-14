@@ -23,5 +23,20 @@ The wrapper:
 4. Counts metrics.json files post-deploy
 5. Exit code 2 + ALERT if count drops more than 10%
 
+## Vault file ownership after writes
+
+**Rule:** Any vault file write from **host** or **container** (one-off/root) must end with **`chown 1000:1000`** + **`chmod 644`** on the files touched.
+
+Typical commands after the write:
+
+```bash
+chown 1000:1000 <path>
+chmod 644 <path>
+```
+
+(Apply to the concrete file or directory tree you just wrote, as appropriate.) The bridge container runs as **UID/GID 1000** (`nate`). Default root-owned or mode `600` files cause `[Errno 13] Permission denied` for `MetricsEngine` / `parietal` on `/app/data/Vaults/...`.
+
+**Reference:** 2026-05-12 — host-side metrics.json fixes created `root:root` `600`; replay via `docker exec nate_bridge` failed until ownership/mode were corrected.
+
 ## Why
 2026-05-12 02:56:22 UTC incident: --force-recreate during deploy wiped /data/bridge/Vaults/Clients/ (28 days of accumulated metrics for 26 clients, ~826 files). Root cause: bind mount detached during 2-second container kill-restart gap; new bridge container lazy-initialized empty files via initialize_metrics() default stub.

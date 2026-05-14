@@ -1563,6 +1563,7 @@
         </div>
     </div>
 
+    <script src="conversation_log_renderer.js"></script>
     <script>
         // =============================================================================
         // YUBIKEY VERIFICATION GATE
@@ -2596,7 +2597,15 @@
                 document.getElementById('briefingTitle').textContent = 'Client Briefing';
                 document.getElementById('briefingSubtitle').textContent = subtitle;
 
-                const memory = Array.isArray(b.recent_memory) ? b.recent_memory : [];
+                const memoryEntries = (window.NateConversationLog
+                    ? window.NateConversationLog.parseEntries(b.recent_memory)
+                    : (Array.isArray(b.recent_memory) ? b.recent_memory : []));
+                const clientFirstName = (function () {
+                    var src = b.client_name || payload.client_id || '';
+                    var first = String(src).trim().split(/\s+/)[0] || 'Client';
+                    return first;
+                })();
+                const memoryHostId = 'nclHost_' + Math.random().toString(36).slice(2, 8);
                 document.getElementById('briefingBody').innerHTML = `
                     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
                         ${pillForRisk(b.risk_level || ns.risk_level || 'LOW')}
@@ -2619,12 +2628,21 @@
                         </div>
                     </div>
                     <div class="brief-section">
-                        <details>
-                            <summary>Recent memory (last ${memory.length})</summary>
-                            <div class="mono">${escapeHtml(memory.map(m => JSON.stringify(m)).join('\n')) || '—'}</div>
+                        <details open>
+                            <summary>Recent conversation (last ${memoryEntries.length})</summary>
+                            <div id="${memoryHostId}" style="margin-top:8px;"></div>
                         </details>
                     </div>
                 `;
+                if (window.NateConversationLog) {
+                    var host = document.getElementById(memoryHostId);
+                    if (host) {
+                        window.NateConversationLog.render(host, memoryEntries, {
+                            clientFirstName: clientFirstName,
+                            emptyText: 'No recent conversation captured.'
+                        });
+                    }
+                }
                 return;
             }
 
@@ -2644,11 +2662,32 @@
             // Individual profiles (object keyed by member_id)
             const profiles = b.individual_profiles || {};
             const profileKeys = Object.keys(profiles || {});
+            const memberMemoryHosts = []; // [{hostId, entries, firstName}]
             const profilesHtml = profileKeys.length === 0 ? '<div class="empty-state"><div class="icon">👤</div><p>No member profiles available.</p></div>' : profileKeys.map(mid => {
                 const p = profiles[mid] || {};
                 const longings = Array.isArray(p.longings) ? p.longings : [];
                 const bio = p.biometrics || {};
                 const m = p.metrics || {};
+                const memberFirst = (function () {
+                    var src = p.name || mid || '';
+                    return String(src).trim().split(/\s+/)[0] || 'Member';
+                })();
+                const memEntries = (window.NateConversationLog
+                    ? window.NateConversationLog.parseEntries(p.recent_memory)
+                    : []);
+                let memHtml = '';
+                if (memEntries.length > 0) {
+                    const hostId = 'nclMember_' + mid.replace(/[^A-Za-z0-9_]/g, '_') + '_' + Math.random().toString(36).slice(2, 6);
+                    memberMemoryHosts.push({ hostId: hostId, entries: memEntries, firstName: memberFirst });
+                    memHtml = `
+                        <div class="brief-section">
+                            <details>
+                                <summary>Recent conversation (last ${memEntries.length})</summary>
+                                <div id="${hostId}" style="margin-top:8px;"></div>
+                            </details>
+                        </div>
+                    `;
+                }
                 return `
                     <div class="brief-card">
                         <h4>${escapeHtml(p.name || mid)} • ${escapeHtml(p.role || 'MEMBER')}</h4>
@@ -2666,14 +2705,7 @@
                                 <div class="mono">${escapeHtml(longings.map(l => JSON.stringify(l)).join('\n')) || '—'}</div>
                             </details>
                         </div>
-                        ${p.recent_memory ? `
-                            <div class="brief-section">
-                                <details>
-                                    <summary>Recent memory snapshot</summary>
-                                    <div class="mono">${escapeHtml(p.recent_memory)}</div>
-                                </details>
-                            </div>
-                        ` : ''}
+                        ${memHtml}
                     </div>
                 `;
             }).join('');
@@ -2741,6 +2773,19 @@
                     </details>
                 </div>
             `;
+
+            if (window.NateConversationLog && memberMemoryHosts.length > 0) {
+                for (var mh = 0; mh < memberMemoryHosts.length; mh++) {
+                    var entry = memberMemoryHosts[mh];
+                    var hostEl = document.getElementById(entry.hostId);
+                    if (hostEl) {
+                        window.NateConversationLog.render(hostEl, entry.entries, {
+                            clientFirstName: entry.firstName,
+                            emptyText: 'No recent conversation captured.'
+                        });
+                    }
+                }
+            }
         }
 
         // =====================================================================
