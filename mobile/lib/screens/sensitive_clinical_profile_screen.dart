@@ -1020,6 +1020,10 @@ class SensitiveClinicalProfileScreen extends StatefulWidget {
   final List<ActivityEvent>? logEventsOverride;
   final String? loadErrorOverride;
 
+  /// Coach Command briefings open this screen over [showModalBottomSheet]; pop
+  /// twice on exit so back returns to the tab, not the sheet only.
+  final bool closeBriefSheetOnExit;
+
   const SensitiveClinicalProfileScreen({
     super.key,
     required this.currentUserProfile,
@@ -1027,6 +1031,7 @@ class SensitiveClinicalProfileScreen extends StatefulWidget {
     this.profileOverride,
     this.logEventsOverride,
     this.loadErrorOverride,
+    this.closeBriefSheetOnExit = false,
   });
 
   @override
@@ -1206,67 +1211,86 @@ class _SensitiveClinicalProfileScreenState
   // BUILD
   // ---------------------------------------------------------------------------
 
+  void _exitSensitiveRoute() {
+    final nav = Navigator.of(context);
+    nav.pop();
+    if (widget.closeBriefSheetOnExit && nav.canPop()) nav.pop();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _D.bgVoid,
-      appBar: AppBar(
-        backgroundColor: _D.bgCard,
-        elevation: 0,
-        title: Text(
-          'Sensitive Profile · ${widget.targetUserId}',
-          style: const TextStyle(color: _D.gold, fontSize: 16),
+    return PopScope(
+      canPop: !widget.closeBriefSheetOnExit,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop || !widget.closeBriefSheetOnExit) return;
+        _exitSensitiveRoute();
+      },
+      child: Scaffold(
+        backgroundColor: _D.bgVoid,
+        appBar: AppBar(
+          backgroundColor: _D.bgCard,
+          elevation: 0,
+          leading: IconButton(
+            tooltip: 'Back',
+            icon: const Icon(Icons.arrow_back, color: _D.gold),
+            onPressed: _exitSensitiveRoute,
+          ),
+          title: Text(
+            'Sensitive Profile · ${widget.targetUserId}',
+            style: const TextStyle(color: _D.gold, fontSize: 16),
+          ),
+          actions: [
+            PopupMenuButton<String>(
+              tooltip: 'More',
+              icon: const Icon(Icons.more_vert, color: _D.gold),
+              onSelected: (v) {
+                if (!mounted) return;
+                if (v == 'parts') {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ClientPartsRegistryScreen(
+                        currentUserProfile: widget.currentUserProfile,
+                        targetUserId: widget.targetUserId,
+                      ),
+                    ),
+                  );
+                } else if (v == 'framework') {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ClientFrameworkMenuScreen(
+                        currentUserProfile: widget.currentUserProfile,
+                        targetUserId: widget.targetUserId,
+                      ),
+                    ),
+                  );
+                } else if (v == 'cross') {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ClientCrossAddictionProfileScreen(
+                        currentUserProfile: widget.currentUserProfile,
+                        targetUserId: widget.targetUserId,
+                      ),
+                    ),
+                  );
+                }
+              },
+              itemBuilder: (ctx) => const [
+                PopupMenuItem(value: 'parts', child: Text('Parts registry')),
+                PopupMenuItem(
+                    value: 'framework', child: Text('Framework menu')),
+                PopupMenuItem(
+                    value: 'cross', child: Text('Cross-addiction profile')),
+              ],
+            ),
+            IconButton(
+              tooltip: 'Refresh',
+              icon: const Icon(Icons.refresh, color: _D.gold),
+              onPressed: _loading ? null : _loadProfile,
+            ),
+          ],
         ),
-        actions: [
-          PopupMenuButton<String>(
-            tooltip: 'More',
-            icon: const Icon(Icons.more_vert, color: _D.gold),
-            onSelected: (v) {
-              if (!mounted) return;
-              if (v == 'parts') {
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => ClientPartsRegistryScreen(
-                      currentUserProfile: widget.currentUserProfile,
-                      targetUserId: widget.targetUserId,
-                    ),
-                  ),
-                );
-              } else if (v == 'framework') {
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => ClientFrameworkMenuScreen(
-                      currentUserProfile: widget.currentUserProfile,
-                      targetUserId: widget.targetUserId,
-                    ),
-                  ),
-                );
-              } else if (v == 'cross') {
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => ClientCrossAddictionProfileScreen(
-                      currentUserProfile: widget.currentUserProfile,
-                      targetUserId: widget.targetUserId,
-                    ),
-                  ),
-                );
-              }
-            },
-            itemBuilder: (ctx) => const [
-              PopupMenuItem(value: 'parts', child: Text('Parts registry')),
-              PopupMenuItem(value: 'framework', child: Text('Framework menu')),
-              PopupMenuItem(
-                  value: 'cross', child: Text('Cross-addiction profile')),
-            ],
-          ),
-          IconButton(
-            tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh, color: _D.gold),
-            onPressed: _loading ? null : _loadProfile,
-          ),
-        ],
+        body: _buildBody(),
       ),
-      body: _buildBody(),
     );
   }
 

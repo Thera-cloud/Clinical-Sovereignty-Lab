@@ -8890,6 +8890,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       builder: (_) => SensitiveClinicalProfileScreen(
         currentUserProfile: widget.currentUserProfile,
         targetUserId: clientUsername,
+        closeBriefSheetOnExit: true,
       ),
     ));
   }
