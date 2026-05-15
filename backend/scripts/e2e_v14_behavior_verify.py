@@ -204,10 +204,10 @@ async def _setup_user(pool: asyncpg.Pool) -> None:
 async def _cleanup(pool: asyncpg.Pool) -> None:
     try:
         async with pool.acquire() as conn:
+            # FK: sensitive_bridge_log.user_id → users(username); delete all test-user rows.
             await conn.execute(
-                "DELETE FROM sensitive_bridge_log WHERE user_id = $1 AND event_type = ANY($2::text[])",
+                "DELETE FROM sensitive_bridge_log WHERE user_id = $1",
                 TEST_USER,
-                [EVT_CODEWORD_CLIENT_INITIATED, EVT_PART_CLIENT_INITIATED],
             )
             await conn.execute(
                 "DELETE FROM user_parts_registry WHERE user_id = $1", TEST_USER
