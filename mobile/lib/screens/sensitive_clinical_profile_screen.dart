@@ -645,40 +645,41 @@ class _SensitiveProfileApi {
     }
   }
 
+  /// Backend [AddictionBranchStatusUpdate] expects `{"status": "..."}` only.
+  /// Allowed server enum: none | recovery | active | crisis (not `active_use`).
   Future<void> _putAddictionStatus(
     String userId,
     String endpointSlug,
-    String bodyKey,
     String status,
   ) async {
+    final apiStatus = status == 'active_use' ? 'active' : status;
     final uri = Uri.parse(
       '$_base/api/coach/sensitive-profile/$userId/$endpointSlug',
     );
     final resp = await http
-        .put(uri, headers: _headers, body: jsonEncode({bodyKey: status}))
+        .put(
+          uri,
+          headers: _headers,
+          body: jsonEncode({'status': apiStatus}),
+        )
         .timeout(const Duration(seconds: 15));
     if (resp.statusCode != 200) throw _ApiError.fromResponse(resp);
   }
 
   Future<void> putSexAddictionStatus(String userId, String s) =>
-      _putAddictionStatus(
-          userId, 'sex-addiction-status', 'sex_addiction_status', s);
+      _putAddictionStatus(userId, 'sex-addiction-status', s);
   Future<void> putGamblingStatus(String userId, String s) =>
-      _putAddictionStatus(userId, 'gambling-status', 'gambling_status', s);
+      _putAddictionStatus(userId, 'gambling-status', s);
   Future<void> putGamingStatus(String userId, String s) =>
-      _putAddictionStatus(userId, 'gaming-status', 'gaming_status', s);
+      _putAddictionStatus(userId, 'gaming-status', s);
   Future<void> putSpendingCompulsionStatus(String userId, String s) =>
-      _putAddictionStatus(userId, 'spending-compulsion-status',
-          'spending_compulsion_status', s);
+      _putAddictionStatus(userId, 'spending-compulsion-status', s);
   Future<void> putFoodCompulsionStatus(String userId, String s) =>
-      _putAddictionStatus(
-          userId, 'food-compulsion-status', 'food_compulsion_status', s);
+      _putAddictionStatus(userId, 'food-compulsion-status', s);
   Future<void> putWorkCompulsionStatus(String userId, String s) =>
-      _putAddictionStatus(
-          userId, 'work-compulsion-status', 'work_compulsion_status', s);
+      _putAddictionStatus(userId, 'work-compulsion-status', s);
   Future<void> putCodependencyStatus(String userId, String s) =>
-      _putAddictionStatus(
-          userId, 'codependency-status', 'codependency_status', s);
+      _putAddictionStatus(userId, 'codependency-status', s);
 
   Future<void> postCodeword(
     String userId, {
@@ -1503,8 +1504,11 @@ class _SensitiveClinicalProfileScreenState
 
   Widget? _substanceBadge(String? status) {
     if (status == null || status == 'none') return null;
-    final color =
-        (status == 'crisis' || status == 'active_use') ? _D.red : _D.cyan;
+    final color = (status == 'crisis' ||
+            status == 'active_use' ||
+            status == 'active')
+        ? _D.red
+        : _D.cyan;
     return _Badge(label: status, color: color);
   }
 
