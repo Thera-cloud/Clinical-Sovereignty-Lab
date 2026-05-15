@@ -324,34 +324,57 @@ class UserStore:
                         consent_version = COALESCE(EXCLUDED.consent_version, users.consent_version),
                         subscription_status = COALESCE(users.subscription_status, EXCLUDED.subscription_status),
                         family_id = COALESCE(EXCLUDED.family_id, users.family_id),
-                        profile_data = COALESCE(EXCLUDED.profile_data::jsonb, '{}'::jsonb)
-                            || COALESCE(
-                                (SELECT jsonb_object_agg(key, value)
-                                 FROM jsonb_each(COALESCE(users.profile_data, '{}'::jsonb))
-                                 WHERE key = ANY(ARRAY[
-                                     'token_balance',
-                                     'totp_enabled', 'totp_secret',
-                                     'sms_verified', 'sms_phone', 'admin_verify_phone',
-                                     'webauthn_enabled', 'webauthn_credentials',
-                                     'webauthn_challenge', 'webauthn_challenge_issued_at',
-                                     'webauthn_auth_challenge', 'webauthn_auth_challenge_issued_at',
-                                     'sentinel_frozen',
-                                     'checkin_snooze_until',
-                                     'import_batch_id', 'import_source',
-                                     'subscription_plan', 'subscription_status',
-                                     'account_status', 'force_password_reset',
-                                     'deletion_requested_at',
-                                     'certification_status', 'coach_verified',
-                                     'coaching_fee', 'w9_submitted', 'w9_data',
-                                     'stripe_customer_id',
-                                     'free_month_start', 'free_month_end',
-                                     'token_usage_today', 'token_usage_month',
-                                     'last_token_reset',
-                                     'qb_connected', 'qb_realm_id',
-                                     'subscription_token_balance', 'purchased_token_balance'
-                                 ])),
-                                '{}'::jsonb
-                            ),
+                        -- QUANTUM-CRYSTAL-ARCH: merge sensitive_bridge so existing PG wins on
+                        -- overlapping keys (coach REST e.g. framework_preferences / crystal graph
+                        -- opt-in); bridge-only keys under sensitive_bridge are preserved.
+                        profile_data = (
+                            SELECT jsonb_set(
+                                b.m,
+                                '{sensitive_bridge}',
+                                COALESCE(b.m->'sensitive_bridge', '{}'::jsonb)
+                                || COALESCE(users.profile_data->'sensitive_bridge', '{}'::jsonb),
+                                true
+                            )
+                            FROM (
+                                SELECT COALESCE(EXCLUDED.profile_data::jsonb, '{}'::jsonb)
+                                    || COALESCE(
+                                        (
+                                            SELECT jsonb_object_agg(key, value)
+                                            FROM jsonb_each(
+                                                COALESCE(users.profile_data, '{}'::jsonb)
+                                            )
+                                            WHERE key = ANY(ARRAY[
+                                                'token_balance',
+                                                'totp_enabled', 'totp_secret',
+                                                'sms_verified', 'sms_phone',
+                                                'admin_verify_phone',
+                                                'webauthn_enabled',
+                                                'webauthn_credentials',
+                                                'webauthn_challenge',
+                                                'webauthn_challenge_issued_at',
+                                                'webauthn_auth_challenge',
+                                                'webauthn_auth_challenge_issued_at',
+                                                'sentinel_frozen',
+                                                'checkin_snooze_until',
+                                                'import_batch_id', 'import_source',
+                                                'subscription_plan', 'subscription_status',
+                                                'account_status', 'force_password_reset',
+                                                'deletion_requested_at',
+                                                'certification_status', 'coach_verified',
+                                                'coaching_fee', 'w9_submitted', 'w9_data',
+                                                'stripe_customer_id',
+                                                'free_month_start', 'free_month_end',
+                                                'token_usage_today', 'token_usage_month',
+                                                'last_token_reset',
+                                                'qb_connected', 'qb_realm_id',
+                                                'subscription_token_balance',
+                                                'purchased_token_balance'
+                                            ])
+                                        ),
+                                        '{}'::jsonb
+                                    ) AS m
+                            ) AS b
+                        ),
                         token_balance = COALESCE(users.token_balance, EXCLUDED.token_balance, 0),
                         subscription_token_balance = COALESCE(
                             users.subscription_token_balance, EXCLUDED.subscription_token_balance, 0
