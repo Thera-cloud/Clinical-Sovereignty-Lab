@@ -202,13 +202,14 @@ async def _setup_user(pool: asyncpg.Pool) -> None:
 
 
 async def _cleanup(pool: asyncpg.Pool) -> None:
+    """Reset mutable SS rows only.
+
+    sensitive_bridge_log is append-only until retained_until (migration 213); DELETE
+    is blocked for live rows. We keep user + audit history and only wipe codewords,
+    parts, and enrollment so reruns can INSERT fresh test rows.
+    """
     try:
         async with pool.acquire() as conn:
-            # FK: sensitive_bridge_log.user_id → users(username); delete all test-user rows.
-            await conn.execute(
-                "DELETE FROM sensitive_bridge_log WHERE user_id = $1",
-                TEST_USER,
-            )
             await conn.execute(
                 "DELETE FROM user_parts_registry WHERE user_id = $1", TEST_USER
             )
@@ -218,7 +219,6 @@ async def _cleanup(pool: asyncpg.Pool) -> None:
             await conn.execute(
                 "DELETE FROM sensitive_bridge_enrollment WHERE user_id = $1", TEST_USER
             )
-            await conn.execute("DELETE FROM users WHERE username = $1", TEST_USER)
     except asyncpg.UndefinedTableError:
         pass
 
