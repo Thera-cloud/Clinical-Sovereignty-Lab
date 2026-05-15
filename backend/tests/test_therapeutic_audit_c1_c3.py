@@ -35,7 +35,7 @@ def base_audit_meta() -> dict:
 @pytest.mark.asyncio
 async def test_audit_failure_emits_transparent_message(base_audit_meta: dict) -> None:
     out = await audit_therapeutic_response(
-        response_text="Thanks for holding space with me here.",
+        response_text="You'll get over this — many people feel that way.",
         audit_metadata=base_audit_meta,
         user_id="test_hw",
         db_pool=None,
@@ -57,7 +57,7 @@ async def test_audit_repair_via_llm_fallback(base_audit_meta: dict) -> None:
         return_value=clean,
     ):
         out = await audit_therapeutic_response(
-            response_text="holding space for your journey today.",
+            response_text="Everything happens for a reason, Lisa.",
             audit_metadata=meta,
             user_id="test_hw",
             db_pool=None,

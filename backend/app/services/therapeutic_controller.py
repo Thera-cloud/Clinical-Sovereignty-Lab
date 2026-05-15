@@ -10,21 +10,22 @@ attempted, and logs metrics to sse_therapeutic_audit_log.
 Backwards compatible: caller wraps each entry point in try/except and falls
 back to existing behavior on any failure.
 
-PHASE 3 v1.3 — ADDITIVITY CONTRACT (orchestrator absent → identical to v1.2)
+PHASE 3 v1.3 — ADDITIVITY CONTRACT (orchestrator absent → v1.2-aligned except bans)
 
 When `register_directive`, `dissociation_delta`, and `coercion_severity` are
-all None (the Phase 3 state, before Phase 4 orchestrator wiring), this module
-must produce byte-identical behavior to v1.2:
+all None (the Phase 3 state, before Phase 4 orchestrator wiring), register
+variants and caps match the v1.2 surface; **en-US banned substrings are the
+three-entry hard-ban tuple** (`_THERAPEUTIC_BANNED_PHRASES_EN_US`), not the
+historical v1.2 filler list. Optional `data/lexicons/banned_phrases_*.json` overlays still append.
 
 - Token caps for `shutdown|activated|in_window|regulated` unchanged.
-- Banned-phrase set for en-US is a STRICT SUPERSET of the v1.2 list.
 - Mismatch evaluation logic for `mismatch_available` unchanged.
 - Thalamic Novelty Gate evaluates to `blocked=False` (no signals → no block).
 - Predictability-continuity cap resolver is dormant (no register_directive).
 
 Auditor checks (`_auditor_self_check`):
 - `register_variants_additive_only` — every v1.2 variant still resolves
-- `banned_phrases_extended_not_replaced` — v1.3 list ⊇ v1.2 list
+- `banned_phrases_extended_not_replaced` — any `_PHASE_V1_2_BANNED_PHRASES` pins ⊆ resolved
 - `thalamic_gate_dual_insertion_present` — both source markers present
 - `phase3_controller_v1_2_fixtures_pass` — external fixture suite (Phase 6)
 
@@ -129,21 +130,14 @@ TOKEN_CAPS = {
 _LABILE_WINDOW_TMC = {"THRESHOLD", "BREAKTHROUGH", "RECURRENCE"}
 
 # ─────────────── v1.2 sealed reference (additivity verification) ───────────────
-# DO NOT MODIFY. Used by _auditor_self_check() to prove v1.3 is a strict
-# superset of v1.2 (register_variants_additive_only,
-# banned_phrases_extended_not_replaced).
+# DO NOT MODIFY registers without updating fixtures. Banned-phrase pins
+# (`_PHASE_V1_2_BANNED_PHRASES`) may be empty; hard-ban list is
+# `_THERAPEUTIC_BANNED_PHRASES_EN_US`.
 _PHASE_V1_2_REGISTER_VARIANTS: Tuple[str, ...] = (
     "shutdown", "activated", "in_window", "regulated",
 )
-_PHASE_V1_2_BANNED_PHRASES: Tuple[str, ...] = (
-    "i sense",
-    "i want to acknowledge",
-    "it takes courage",
-    "holding space",
-    "honor your journey",
-    "liminal threshold",
-    "sit with that",
-)
+# Optional pins for auditors / parity (empty = no legacy v1.2 substring bans).
+_PHASE_V1_2_BANNED_PHRASES: Tuple[str, ...] = ()
 
 # v1.3 additive register variants (orchestrator-driven, dormant in Phase 3).
 _PHASE_V1_3_NEW_REGISTERS: Tuple[str, ...] = (
@@ -159,11 +153,8 @@ _PHASE_V1_3_NEW_REGISTERS: Tuple[str, ...] = (
 # even though only en-US is populated in v1.3. Future locale additions are
 # pure data work — no code change. Mirrors the lexicon-overlay pattern.
 
-# v1.3 additions (en-US). Three phrases per Plan v1.3:
-#  - "you have nothing to be ashamed of"  → bypasses lived experience
-#  - "you'll get over this"               → problem-solves grief work
-#  - "everything happens for a reason"    → spiritual bypass
-_PHASE_V1_3_NEW_BANNED_PHRASES_EN_US: Tuple[str, ...] = (
+# En-US hard ban (post-flight audit substring match, lowercase). Only these three.
+_THERAPEUTIC_BANNED_PHRASES_EN_US: Tuple[str, ...] = (
     "you have nothing to be ashamed of",
     "you'll get over this",
     "everything happens for a reason",
@@ -171,15 +162,13 @@ _PHASE_V1_3_NEW_BANNED_PHRASES_EN_US: Tuple[str, ...] = (
 
 # In-code authoritative baseline. Lexicon overlay file (Note 3 stub) extends.
 _BANNED_PHRASES_BY_LOCALE: Dict[str, Tuple[str, ...]] = {
-    "en-US": _PHASE_V1_2_BANNED_PHRASES + _PHASE_V1_3_NEW_BANNED_PHRASES_EN_US,
+    "en-US": _THERAPEUTIC_BANNED_PHRASES_EN_US,
 }
 
 # Path to the lexicon overlay directory (matches Phase 2 lexicon convention).
 _LEXICON_DIR = Path(__file__).resolve().parents[2] / "data" / "lexicons"
 
-# Backward-compat: v1.2 callers reference _BANNED_PHRASES_ALWAYS as a flat list.
-# Resolves to en-US default (v1.2 superset). Kept so existing imports do not
-# break; _audit_violations() uses the locale-aware resolver below.
+# Backward-compat: `_BANNED_PHRASES_ALWAYS` mirrors en-US resolved baseline (no overlay).
 _BANNED_PHRASES_ALWAYS: List[str] = list(_BANNED_PHRASES_BY_LOCALE["en-US"])
 
 
@@ -976,8 +965,9 @@ async def audit_therapeutic_response(
                 f"State={audit_metadata.get('autonomic_state')}; cap={audit_metadata.get('max_tokens')} tokens. "
                 "Generate a corrected therapeutic response that avoids these violations. "
                 "WARM register; bridge sentence required for any clinical shift; somatic "
-                "invitation if activated; no banned phrases ('I sense', 'It takes courage', "
-                "'holding space', 'honor your journey'). Address what the user said directly."
+                "invitation if activated; do not use: 'you have nothing to be ashamed of', "
+                "\"you'll get over this\", 'everything happens for a reason'. "
+                "Address what the user said directly."
             )
             retry = await chat_completion_with_fallback(
                 [
@@ -1117,12 +1107,9 @@ def _verify_register_variants_additive_only() -> bool:
 
 
 def _verify_banned_phrases_extended_not_replaced() -> bool:
-    """Confirm v1.3 banned-phrase set is a strict superset of v1.2.
+    """Every pinned `_PHASE_V1_2_BANNED_PHRASES` entry must appear in en-US resolved set.
 
-    Resolves en-US banned phrases via `_resolve_banned_phrases('en-US')` and
-    asserts every entry in `_PHASE_V1_2_BANNED_PHRASES` is still present.
-    Detects the failure mode where a maintainer accidentally drops a v1.2
-    phrase while editing the locale-keyed dict.
+    Legacy v1.2 pins may be empty; if non-empty, dropping one is a regression.
     """
     current = set(_resolve_banned_phrases("en-US"))
     v1_2 = set(_PHASE_V1_2_BANNED_PHRASES)

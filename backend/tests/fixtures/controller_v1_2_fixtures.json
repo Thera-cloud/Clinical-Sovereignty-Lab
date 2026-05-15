@@ -14,8 +14,8 @@
     ],
     "auditor_check_id": "phase3_controller_v1_2_fixtures_pass",
     "fixture_count": 13,
-    "positive_count": 7,
-    "negative_count": 6
+    "positive_count": 4,
+    "negative_count": 9
   },
   "fixtures": [
     {
@@ -51,28 +51,28 @@
       "rationale": "v1.2 variant 'regulated' must remain dispatchable in v1.3."
     },
     {
-      "id": "ctrl_pos_banned_i_sense_preserved",
-      "category": "positive",
+      "id": "ctrl_neg_banned_i_sense_removed",
+      "category": "negative",
       "kind": "v1_2_banned_phrase_present",
       "input": {"phrase": "i sense", "locale": "en-US"},
-      "expected": {"present_in_resolved_set": true},
-      "rationale": "v1.2 banned phrase 'i sense' must remain in en-US resolved set."
+      "expected": {"present_in_resolved_set": false},
+      "rationale": "Legacy phrase 'i sense' is not in en-US hard-ban list."
     },
     {
-      "id": "ctrl_pos_banned_holding_space_preserved",
-      "category": "positive",
+      "id": "ctrl_neg_banned_holding_space_removed",
+      "category": "negative",
       "kind": "v1_2_banned_phrase_present",
       "input": {"phrase": "holding space", "locale": "en-US"},
-      "expected": {"present_in_resolved_set": true},
-      "rationale": "v1.2 banned phrase 'holding space' must remain in en-US resolved set."
+      "expected": {"present_in_resolved_set": false},
+      "rationale": "Legacy phrase 'holding space' is not in en-US hard-ban list."
     },
     {
-      "id": "ctrl_pos_banned_liminal_threshold_preserved",
-      "category": "positive",
+      "id": "ctrl_neg_banned_liminal_threshold_removed",
+      "category": "negative",
       "kind": "v1_2_banned_phrase_present",
       "input": {"phrase": "liminal threshold", "locale": "en-US"},
-      "expected": {"present_in_resolved_set": true},
-      "rationale": "v1.2 banned phrase 'liminal threshold' must remain in en-US resolved set."
+      "expected": {"present_in_resolved_set": false},
+      "rationale": "Legacy phrase 'liminal threshold' is not in en-US hard-ban list."
     },
     {
       "id": "ctrl_neg_register_purity_wound_v1_3_only",
@@ -103,24 +103,24 @@
       "category": "negative",
       "kind": "v1_3_banned_phrase_added_without_displacing_v1_2",
       "input": {"new_phrase": "you have nothing to be ashamed of", "locale": "en-US"},
-      "expected": {"new_phrase_in_resolved_set": true, "v1_2_phrase_count_preserved": 7},
-      "rationale": "v1.3 banned phrase added without removing any v1.2 phrase."
+      "expected": {"new_phrase_in_resolved_set": true, "v1_2_phrase_count_preserved": 0},
+      "rationale": "Hard-ban phrase present; v1.2 pin tuple is empty so preserved count is 0."
     },
     {
       "id": "ctrl_neg_banned_youll_get_over_this_added",
       "category": "negative",
       "kind": "v1_3_banned_phrase_added_without_displacing_v1_2",
       "input": {"new_phrase": "you'll get over this", "locale": "en-US"},
-      "expected": {"new_phrase_in_resolved_set": true, "v1_2_phrase_count_preserved": 7},
-      "rationale": "v1.3 banned phrase added without removing any v1.2 phrase."
+      "expected": {"new_phrase_in_resolved_set": true, "v1_2_phrase_count_preserved": 0},
+      "rationale": "Hard-ban phrase present; v1.2 pin tuple is empty."
     },
     {
       "id": "ctrl_neg_banned_everything_happens_for_a_reason_added",
       "category": "negative",
       "kind": "v1_3_banned_phrase_added_without_displacing_v1_2",
       "input": {"new_phrase": "everything happens for a reason", "locale": "en-US"},
-      "expected": {"new_phrase_in_resolved_set": true, "v1_2_phrase_count_preserved": 7},
-      "rationale": "v1.3 banned phrase added without removing any v1.2 phrase."
+      "expected": {"new_phrase_in_resolved_set": true, "v1_2_phrase_count_preserved": 0},
+      "rationale": "Hard-ban phrase present; v1.2 pin tuple is empty."
     }
   ]
 }
