@@ -2085,11 +2085,12 @@ async def evaluate_disclosure(
     )
     lens_primary = framework_lenses[0] if framework_lenses else None
 
-    lexicon_crystals = []
+    lexicon_crystals: List[str] = []
+    did_lexicon_detector_matches: List[str] = []
     response_crystals = []
     if v1_4_crystal_factory_enabled:
-        lexicon_crystals = await _load_lexicon_crystals(
-            db_pool, user_id, active_branches_tuple,
+        lexicon_crystals, did_lexicon_detector_matches = await _load_lexicon_crystals(
+            db_pool, user_id, active_branches_tuple, client_message=message,
         )
         response_crystals = await _load_response_pattern_crystals(
             db_pool, user_id, lens_primary,
@@ -2258,6 +2259,7 @@ async def evaluate_disclosure(
         "framework_lenses_applied": applied_lenses,
         "framework_lenses_audit_only": audit_only_lenses,
         "lexicon_crystals_count": len(lexicon_crystals),
+        "did_lexicon_detector_matches": did_lexicon_detector_matches,
         "response_pattern_crystals_count": len(response_crystals),
         "response_pattern_crystal_applied": bool(response_crystals),
         "response_pattern_crystal_ids": [
@@ -2749,21 +2751,27 @@ async def _load_lexicon_crystals(
     db_pool: Any,
     username: str,
     active_branches: Tuple[str, ...],
-) -> List[str]:
-    """Layer 1: per-client lexicon augmentation from nate_intelligence_crystals.
-    Returns list of crystal text snippets relevant to the active branches.
-    """
-    # QUANTUM-CRYSTAL-ARCH — universal D.I.D. YAML cues prepend when clinically_active.
-    did_cues: List[str] = []
-    try:
-        from app.services.lexicon_loader import load_did_systems_layer1_text_cues
+    *,
+    client_message: Optional[str] = None,
+) -> Tuple[List[str], List[str]]:
+    """Layer 1: per-client crystals + D.I.D. YAML cues when detectors match text.
 
-        did_cues = load_did_systems_layer1_text_cues(max_items=5)
+    Returns ``(merged_snippets, did_pattern_hits)``.
+    """
+    # QUANTUM-CRYSTAL-ARCH — D.I.D. YAML cues only when detector_patterns match text.
+    did_cues: List[str] = []
+    did_hits: List[str] = []
+    try:
+        from app.services.lexicon_loader import collect_did_lexicon_layer1_cues
+
+        did_cues, did_hits = collect_did_lexicon_layer1_cues(
+            client_message, max_items=5,
+        )
     except Exception as _did_lex_exc:
         logger.debug("crystal_factory_l1: did_systems YAML cues skipped: %s", _did_lex_exc)
 
     if not active_branches or not db_pool:
-        return did_cues[:5]
+        return did_cues[:5], did_hits
     branch_patterns = [f"%{b}%" for b in active_branches[:4]]
     try:
         async with db_pool.acquire() as conn:
@@ -2793,10 +2801,10 @@ async def _load_lexicon_crystals(
                     merged.append(text)
                 if len(merged) >= 5:
                     break
-            return merged
+            return merged, did_hits
     except Exception as e:
         logger.warning("crystal_factory_l1: %s", e)
-        return did_cues[:5]
+        return did_cues[:5], did_hits
 
 
 async def _load_response_pattern_crystals(

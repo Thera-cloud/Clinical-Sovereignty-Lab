@@ -7,15 +7,18 @@ request cycle do not re-read disk.
 
 `did_systems` subdir is directory-discovered via `_BRANCH_TO_SUBDIR`; entries with
 `status: scaffolded_unreviewed` are skipped — zero patterns load until
-`status: clinically_active`.
+`status: clinically_active`. When active, Layer 1 YAML cues are injected only
+after ``detector_patterns`` match normalized client text (see
+``collect_did_lexicon_layer1_cues``).
 """
 
 from __future__ import annotations
 
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import logging
 
@@ -95,40 +98,98 @@ def load_active_lexicons(
     return merged
 
 
-def load_did_systems_layer1_text_cues(*, max_items: int = 5) -> List[str]:
-    """Crystal Factory Layer 1 — universal D.I.D. lexicon text snippets.
+def _did_pattern_matches(norm_msg: str, pattern: str) -> bool:
+    """Match client text to a YAML `detector_patterns[].pattern` entry."""
+    p = (pattern or "").strip()
+    if not p:
+        return False
+    pl = p.lower()
+    # Multi-token / punctuation phrases: substring (normalized lower).
+    if " " in pl or "'" in pl or "-" in pl:
+        return pl in norm_msg
+    esc = re.escape(pl)
+    if re.search(r"\b" + esc + r"\b", norm_msg):
+        return True
+    # Common plural: "alter" ↔ "alters" without listing both in YAML.
+    if not pl.endswith("s"):
+        return bool(re.search(r"\b" + esc + r"s\b", norm_msg))
+    return False
 
-    Returns empty list while YAML files remain `scaffolded_unreviewed`.
-    When clinically reviewed and marked `clinically_active`, merges
-    `response_seeds` framings (preferred) then brief detector notes into
-    inference-time cues alongside per-client `nate_intelligence_crystals`.
+
+def collect_did_lexicon_layer1_cues(
+    client_message: Optional[str],
+    *,
+    max_items: int = 5,
+) -> Tuple[List[str], List[str]]:
+    """Layer 1 D.I.D. YAML cues only when `detector_patterns` match client text.
+
+    Returns ``(cue_lines, matched_pattern_strings)``. Empty when lexicons are
+    scaffolded, inactive, or ``client_message`` is blank / non-matching.
     """
     merged = load_active_lexicons(["did_systems"])
-    if not merged:
-        return []
+    norm = (client_message or "").strip().lower()
     out: List[str] = []
+    matched_patterns: List[str] = []
+    seen_pat: Set[str] = set()
+    seen_line: Set[str] = set()
+
+    def add(line: str) -> None:
+        if line and line not in seen_line and len(out) < max_items:
+            seen_line.add(line)
+            out.append(line)
+
+    if not merged or not norm:
+        return [], []
+
     for path_key in sorted(merged.keys()):
         data = merged[path_key]
-        for rs in data.get("response_seeds") or []:
-            if not isinstance(rs, dict):
-                continue
-            ctx = str(rs.get("context") or "").strip()
-            framing = str(rs.get("framing") or "").strip()
-            if framing:
-                line = f"{ctx}: {framing}" if ctx else framing
-                out.append(line)
-            if len(out) >= max_items:
-                return out[:max_items]
+        scored: List[Tuple[float, str]] = []
+        file_hit = False
         for dp in data.get("detector_patterns") or []:
             if not isinstance(dp, dict):
                 continue
+            pat = str(dp.get("pattern") or "").strip()
+            if not pat or not _did_pattern_matches(norm, pat):
+                continue
+            file_hit = True
+            if pat not in seen_pat:
+                seen_pat.add(pat)
+                matched_patterns.append(pat)
+            weight = float(dp.get("weight") or 0.5)
             notes = str(dp.get("notes") or "").strip()
-            pattern = str(dp.get("pattern") or "").strip()
-            if notes and pattern:
-                out.append(f"D.I.D. lexicon ({pattern}): {notes}")
+            cue = (
+                f"D.I.D. lexicon ({pat}, w={weight:.2f}): {notes}"
+                if notes
+                else f"D.I.D. lexicon ({pat}, w={weight:.2f})"
+            )
+            scored.append((weight, cue))
+        scored.sort(key=lambda x: -x[0])
+        for _w, cue in scored:
+            add(cue)
             if len(out) >= max_items:
-                return out[:max_items]
-    return out[:max_items]
+                return out[:max_items], matched_patterns
+        if file_hit:
+            for rs in data.get("response_seeds") or []:
+                if not isinstance(rs, dict):
+                    continue
+                ctx = str(rs.get("context") or "").strip()
+                framing = str(rs.get("framing") or "").strip()
+                if framing:
+                    line = f"{ctx}: {framing}" if ctx else framing
+                    add(line)
+                if len(out) >= max_items:
+                    return out[:max_items], matched_patterns
+    return out[:max_items], matched_patterns
+
+
+def load_did_systems_layer1_text_cues(
+    *,
+    client_message: Optional[str] = None,
+    max_items: int = 5,
+) -> List[str]:
+    """Backward-compatible wrapper: cues only (pattern-gated)."""
+    cues, _hits = collect_did_lexicon_layer1_cues(client_message, max_items=max_items)
+    return cues
 
 
 def invalidate_cache() -> None:
