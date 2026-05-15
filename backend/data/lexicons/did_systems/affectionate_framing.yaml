@@ -1,0 +1,41 @@
+status: scaffolded_unreviewed
+source:
+  citation: "Multiplied By One. (n.d.). Dissociative identity disorder terminology."
+  link: "https://multipliedbyone.org/dissociative-identity-disorder-terminology/"
+  cross_references:
+    - "https://did-research.org/did/alters/"
+last_review: null
+reviewed_by: null
+scaffold_notes: |
+  Universally affectionate framings. Client-specific names (e.g. 'the Council')
+  are captured per-client via crystal_seed.yaml + Crystal Factory Layer 1 crystals.
+detector_patterns:
+  - pattern: "collective"
+    weight: 0.55
+    notes: "Affectionate plural framing; verify multiplicity context before weighting"
+    verbatim: false
+  - pattern: "internal family"
+    weight: 0.72
+    notes: "IFS-resonant affectionate framing (distinct clinical model — respect client usage)"
+    verbatim: false
+  - pattern: "clan"
+    weight: 0.58
+    notes: "Affectionate system nickname — ambiguous alone"
+    verbatim: false
+  - pattern: "crew"
+    weight: 0.58
+    notes: "Affectionate system nickname — ambiguous alone"
+    verbatim: false
+  - pattern: "the council"
+    weight: 0.62
+    notes: "Example affectionate system label (also verify client-specific crystal overlay)"
+    verbatim: false
+  - pattern: "the committee"
+    weight: 0.62
+    notes: "Example affectionate system label"
+    verbatim: false
+response_seeds:
+  - context: "Client uses affectionate naming for their system"
+    framing: "I'll mirror the language you use for everyone inside — tell me what name fits best from your side."
+    source: "Trauma-informed clinical synthesis"
+crystal_seeds: []

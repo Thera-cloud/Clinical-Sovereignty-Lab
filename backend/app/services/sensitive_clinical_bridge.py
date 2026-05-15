@@ -125,7 +125,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -2753,8 +2753,17 @@ async def _load_lexicon_crystals(
     """Layer 1: per-client lexicon augmentation from nate_intelligence_crystals.
     Returns list of crystal text snippets relevant to the active branches.
     """
+    # QUANTUM-CRYSTAL-ARCH — universal D.I.D. YAML cues prepend when clinically_active.
+    did_cues: List[str] = []
+    try:
+        from app.services.lexicon_loader import load_did_systems_layer1_text_cues
+
+        did_cues = load_did_systems_layer1_text_cues(max_items=5)
+    except Exception as _did_lex_exc:
+        logger.debug("crystal_factory_l1: did_systems YAML cues skipped: %s", _did_lex_exc)
+
     if not active_branches or not db_pool:
-        return []
+        return did_cues[:5]
     branch_patterns = [f"%{b}%" for b in active_branches[:4]]
     try:
         async with db_pool.acquire() as conn:
@@ -2775,10 +2784,19 @@ async def _load_lexicon_crystals(
                 *[branch_patterns[i] if i < len(branch_patterns) else "%__none__%"
                   for i in range(4)],
             )
-            return [r["crystal_text"] for r in rows if r.get("crystal_text")]
+            crystal_texts = [r["crystal_text"] for r in rows if r.get("crystal_text")]
+            merged: List[str] = []
+            seen: Set[str] = set()
+            for text in did_cues + crystal_texts:
+                if text and text not in seen:
+                    seen.add(text)
+                    merged.append(text)
+                if len(merged) >= 5:
+                    break
+            return merged
     except Exception as e:
         logger.warning("crystal_factory_l1: %s", e)
-        return []
+        return did_cues[:5]
 
 
 async def _load_response_pattern_crystals(

@@ -1,9 +1,13 @@
-"""Load addiction / polyvictimization lexicon YAML with caching. Phase B.
+"""Load addiction / polyvictimization / D.I.D. systems lexicon YAML with caching.
 
 Exposes `load_active_lexicons(branch_keys, *, categories=None)` which
 returns a merged dict of all matching lexicon entries. The loader caches
 parsed YAML in-process (LRU) so that repeated calls within the same
 request cycle do not re-read disk.
+
+`did_systems` subdir is directory-discovered via `_BRANCH_TO_SUBDIR`; entries with
+`status: scaffolded_unreviewed` are skipped — zero patterns load until
+`status: clinically_active`.
 """
 
 from __future__ import annotations
@@ -34,6 +38,7 @@ _BRANCH_TO_SUBDIR: Dict[str, str] = {
     "spending_compulsion": "addiction/spending_compulsion",
     "codependency": "addiction/codependency",
     "trafficking": "polyvictimization/trafficking",
+    "did_systems": "did_systems",
 }
 
 
@@ -88,6 +93,42 @@ def load_active_lexicons(
                 continue
             merged[f"{key}/{stem}"] = data
     return merged
+
+
+def load_did_systems_layer1_text_cues(*, max_items: int = 5) -> List[str]:
+    """Crystal Factory Layer 1 — universal D.I.D. lexicon text snippets.
+
+    Returns empty list while YAML files remain `scaffolded_unreviewed`.
+    When clinically reviewed and marked `clinically_active`, merges
+    `response_seeds` framings (preferred) then brief detector notes into
+    inference-time cues alongside per-client `nate_intelligence_crystals`.
+    """
+    merged = load_active_lexicons(["did_systems"])
+    if not merged:
+        return []
+    out: List[str] = []
+    for path_key in sorted(merged.keys()):
+        data = merged[path_key]
+        for rs in data.get("response_seeds") or []:
+            if not isinstance(rs, dict):
+                continue
+            ctx = str(rs.get("context") or "").strip()
+            framing = str(rs.get("framing") or "").strip()
+            if framing:
+                line = f"{ctx}: {framing}" if ctx else framing
+                out.append(line)
+            if len(out) >= max_items:
+                return out[:max_items]
+        for dp in data.get("detector_patterns") or []:
+            if not isinstance(dp, dict):
+                continue
+            notes = str(dp.get("notes") or "").strip()
+            pattern = str(dp.get("pattern") or "").strip()
+            if notes and pattern:
+                out.append(f"D.I.D. lexicon ({pattern}): {notes}")
+            if len(out) >= max_items:
+                return out[:max_items]
+    return out[:max_items]
 
 
 def invalidate_cache() -> None:

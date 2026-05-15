@@ -1,0 +1,17 @@
+status: scaffolded_unreviewed
+source:
+  citation: "Crystal Factory Layer 1 per-client augmentation — populated from nate_intelligence_crystals for each client"
+  link: null
+last_review: null
+reviewed_by: null
+detector_patterns: []
+response_seeds: []
+crystal_seeds: []
+notes: |
+  This file holds per-client D.I.D. terminology that emerges during conversation.
+  When a client uses a specific name for their system (e.g. "the Council"),
+  a specific alter name (e.g. "Little Mia"), or a specific framing pattern,
+  Crystal Factory Layer 1 captures it via nate_intelligence_crystals and
+  makes it available at inference time for that client's future sessions.
+  Base lexicon files (system_terminology, subsystem_terminology, affectionate_framing)
+  provide universal D.I.D. vocabulary; crystal_seed provides per-client overlay.

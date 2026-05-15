@@ -1,0 +1,105 @@
+status: scaffolded_unreviewed
+source:
+  citation: "Multiplied By One. (n.d.). Dissociative identity disorder terminology."
+  link: "https://multipliedbyone.org/dissociative-identity-disorder-terminology/"
+  cross_references:
+    - "https://did-research.org/did/alters/"
+    - "https://did-research.org/did/basics/dsm-5/"
+    - "https://did-research.org/did/identity_alteration/switching"
+    - "https://did-research.org/did/identity_alteration/time_loss"
+last_review: null
+reviewed_by: null
+detector_patterns:
+  - pattern: "my system"
+    weight: 0.8
+    notes: "Client referring to their D.I.D. system collectively"
+    verbatim: false
+  - pattern: "our system"
+    weight: 0.75
+    notes: "Collective framing of identity multiplicity within one body"
+    verbatim: false
+  - pattern: "the others"
+    weight: 0.6
+    notes: "Generic reference to other alters; lower weight due to ambiguity"
+    verbatim: false
+  - pattern: "alter"
+    weight: 0.65
+    notes: "Distinct identity-state terminology (context-dependent; not diagnostic)"
+    verbatim: false
+  - pattern: "who's front"
+    weight: 0.75
+    notes: "Shorthand for which alter holds executive control"
+    verbatim: false
+  - pattern: "on front"
+    weight: 0.72
+    notes: "Colloquial for executive/fronting state"
+    verbatim: false
+  - pattern: "fronting"
+    weight: 0.9
+    notes: "Direct D.I.D. terminology — alter currently in executive control"
+    verbatim: true
+    citation: "Multiplied By One terminology page"
+    citation_link: "https://multipliedbyone.org/dissociative-identity-disorder-terminology/"
+  - pattern: "co-consciousness"
+    weight: 0.9
+    notes: "Multiple alters aware simultaneously; may share executive function"
+    verbatim: true
+    citation: "Multiplied By One terminology page"
+    citation_link: "https://multipliedbyone.org/dissociative-identity-disorder-terminology/"
+  - pattern: "co-conscious"
+    weight: 0.88
+    notes: "Common shorthand for co-consciousness"
+    verbatim: false
+  - pattern: "time loss"
+    weight: 0.85
+    notes: "Losing awareness during another alter's fronting period; overlaps general dissociation"
+    verbatim: true
+    citation: "Multiplied By One terminology page"
+    citation_link: "https://multipliedbyone.org/dissociative-identity-disorder-terminology/"
+  - pattern: "lost time"
+    weight: 0.82
+    notes: "Lay phrase aligned with time-loss phenomenon"
+    verbatim: false
+  - pattern: "switching"
+    weight: 0.88
+    notes: "Transition between alters fronting"
+    verbatim: true
+    citation: "Multiplied By One terminology page"
+    citation_link: "https://did-research.org/did/identity_alteration/switching"
+  - pattern: "switched"
+    weight: 0.7
+    notes: "May indicate alter switching; context-dependent"
+    verbatim: true
+    citation: "Multiplied By One terminology page"
+    citation_link: "https://multipliedbyone.org/dissociative-identity-disorder-terminology/"
+  - pattern: "internal world"
+    weight: 0.85
+    notes: "Internal landscape where alters may reside between fronting"
+    verbatim: false
+  - pattern: "inner world"
+    weight: 0.82
+    notes: "Synonymous lay framing for internal landscape"
+    verbatim: false
+  - pattern: "headspace"
+    weight: 0.55
+    notes: "Community term for internal space; ambiguous outside D.I.D. discourse"
+    verbatim: false
+  - pattern: "average number of alters"
+    weight: 0.35
+    notes: "Population statistic framing (clinical interpretation required)"
+    verbatim: false
+  - pattern: "triggered and switched"
+    weight: 0.72
+    notes: "Trigger-activated fronting — alter becomes active when needed or triggered"
+    verbatim: false
+response_seeds:
+  - context: "Client mentions 'my system' or names a system collectively"
+    framing: "Honoring the system framing. When you say 'my system,' I want to understand who's present right now if you're able to share."
+    source: "IFS-aware framework synthesis; not direct quotation"
+  - context: "Client describes a switch happening or recent time loss"
+    framing: "Slowing down. If a part has come forward or someone different is here now, I want to take that seriously."
+    source: "Trauma-informed clinical synthesis"
+  - context: "Client uses fronting or co-conscious language"
+    framing: "Thank you for naming how executive awareness is organized for you right now. What feels most important to hold with whoever is here?"
+    source: "Trauma-informed clinical synthesis"
+crystal_seeds: []

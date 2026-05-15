@@ -1,0 +1,58 @@
+status: scaffolded_unreviewed
+source:
+  citation: "Multiplied By One. (n.d.). Dissociative identity disorder terminology."
+  link: "https://multipliedbyone.org/dissociative-identity-disorder-terminology/"
+  cross_references:
+    - "https://did-research.org/did/alters/"
+    - "https://did-research.org/did/basics/dsm-5/"
+last_review: null
+reviewed_by: null
+detector_patterns:
+  - pattern: "subsystem"
+    weight: 0.85
+    notes: "Systems within systems — nested organizational structure"
+    verbatim: false
+  - pattern: "sub-system"
+    weight: 0.8
+    notes: "Hyphenated variant of subsystem"
+    verbatim: false
+  - pattern: "type 1 subsystem"
+    weight: 0.75
+    notes: "Separate internal groups within one larger system; may have own internal worlds"
+    verbatim: false
+  - pattern: "type 2 subsystem"
+    weight: 0.75
+    notes: "Alterception pattern — alters who experience nested identities"
+    verbatim: false
+  - pattern: "alterception"
+    weight: 0.82
+    notes: "Informative term for type-2 subsystem pattern"
+    verbatim: false
+  - pattern: "trauma-locked"
+    weight: 0.84
+    notes: "Subsystem still organizing around abusive past; may question bodily safety"
+    verbatim: false
+  - pattern: "trauma locked"
+    weight: 0.8
+    notes: "Variant spelling without hyphen"
+    verbatim: false
+  - pattern: "inter-subsystem communication"
+    weight: 0.78
+    notes: "Communication pathways when subsystems lack full co-consciousness"
+    verbatim: false
+  - pattern: "between subsystems"
+    weight: 0.65
+    notes: "Lay reference to inter-subsystem boundaries"
+    verbatim: false
+  - pattern: "subsystem internal world"
+    weight: 0.76
+    notes: "Distinct or overlapping internal landscapes per subsystem"
+    verbatim: false
+response_seeds:
+  - context: "Client describes nested subsystems or alterception"
+    framing: "Nested structure inside your system can make coordination complex. I'm curious what communication pathways already exist, without assuming how they're organized."
+    source: "Trauma-informed clinical synthesis"
+  - context: "Client references trauma-locked subsystem material"
+    framing: "If some inside feel stuck in an unsafe past while your body is safer now, we can pace to honor both timelines."
+    source: "Trauma-informed clinical synthesis"
+crystal_seeds: []
