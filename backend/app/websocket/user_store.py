@@ -375,10 +375,25 @@ class UserStore:
                                     ) AS m
                             ) AS b
                         ),
-                        token_balance = COALESCE(users.token_balance, EXCLUDED.token_balance, 0),
-                        subscription_token_balance = COALESCE(
-                            users.subscription_token_balance, EXCLUDED.subscription_token_balance, 0
-                        ),
+                        -- QUANTUM-CRYSTAL-ARCH: COALESCE(users, excluded) treated 0 as authoritative,
+                        -- so PG could stay at 0 while bridge profile still carried the trial grant.
+                        -- When DB total is stuck at 0 and incoming row has tokens, adopt EXCLUDED;
+                        -- otherwise preserve prior COALESCE(users, excluded) semantics (preserves DB
+                        -- non-null/non-zero over stale bridge clears). See Mbryce 2026-05 stale-zero.
+                        token_balance = CASE
+                            WHEN COALESCE(users.token_balance, 0) = 0
+                                 AND COALESCE(EXCLUDED.token_balance, 0) > 0
+                            THEN EXCLUDED.token_balance
+                            ELSE COALESCE(users.token_balance, EXCLUDED.token_balance, 0)
+                        END,
+                        subscription_token_balance = CASE
+                            WHEN COALESCE(users.subscription_token_balance, 0) = 0
+                                 AND COALESCE(EXCLUDED.subscription_token_balance, 0) > 0
+                            THEN EXCLUDED.subscription_token_balance
+                            ELSE COALESCE(
+                                users.subscription_token_balance, EXCLUDED.subscription_token_balance, 0
+                            )
+                        END,
                         purchased_token_balance = COALESCE(
                             users.purchased_token_balance, EXCLUDED.purchased_token_balance, 0
                         ),
