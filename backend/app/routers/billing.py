@@ -188,6 +188,7 @@ class UpgradeDowngradeRequest(BaseModel):
     user_id: str
     new_plan: str
     proration: bool = True
+    comped: bool = False  # F-A: set True only for authorized comped accounts; requires no Stripe subscription
 
 class UsageRequest(BaseModel):
     user_id: str
@@ -502,6 +503,25 @@ async def upgrade_subscription(
     await _check_plan_change_cooldown(pool, req.user_id)
 
     registry, rk, profile = await _find_user_profile(req.user_id, db_pool=pool)
+
+    # ── F-A guard: CLIENT upgrades require Stripe backing or an explicit comped flag ──
+    target_role = (profile.get("role") or "").upper()
+    if target_role == "CLIENT" and not req.comped:
+        _has_stripe = bool(
+            (profile.get("stripe_customer_id") or "").strip() or
+            profile.get("comped")  # True = already authorised as comped in DB
+        )
+        if not _has_stripe:
+            raise HTTPException(
+                403,
+                detail=(
+                    "CLIENT tier upgrades require a Stripe subscription. "
+                    "Use /api/billing/checkout to collect payment, or pass "
+                    "comped=true if this account is authorised as a comped account."
+                ),
+            )
+    # ── end F-A guard ──
+
     current_plan = _normalize_tier(profile.get("subscription_plan") or profile.get("tier") or "TRIAL")
     new_idx = TIER_ORDER.index(req.new_plan) if req.new_plan in TIER_ORDER else -1
     cur_idx = TIER_ORDER.index(current_plan) if current_plan in TIER_ORDER else -1

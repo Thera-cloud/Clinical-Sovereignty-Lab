@@ -965,7 +965,7 @@ class DripScheduler:
 
             # --- Trial expired → Coach-only (stored payment method enables one-click upgrade) ---
             elif days_remaining <= 0 and status in ("TRIAL_ACTIVE", "ACTIVE", ""):
-                profile["subscription_status"] = "ACTIVE"
+                profile["subscription_status"] = "GRACE_PERIOD"  # F-C fix: was "ACTIVE", invalid terminal state
                 profile["subscription_plan"] = "COACH_ONLY"
                 profile["can_access_nate"] = False
                 profile["token_balance"] = 0

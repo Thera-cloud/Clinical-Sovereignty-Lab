@@ -994,17 +994,20 @@
         }
 
         // Enter key to submit (login form, passphrase, or SMS code)
-        document.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                const smsOv = document.getElementById('smsOverlay');
-                const ppOv = document.getElementById('passphraseOverlay');
-                if (smsOv && smsOv.style.display !== 'none') {
-                    submitSmsCode();
-                } else if (ppOv && ppOv.style.display !== 'none') {
-                    verifyPassphrase();
-                } else {
-                    attemptLogin();
-                }
+        // keydown — keypress often does not fire for Enter (passphrase felt "dead")
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' || e.repeat) return;
+            const smsOv = document.getElementById('smsOverlay');
+            const ppOv = document.getElementById('passphraseOverlay');
+            if (smsOv && smsOv.style.display !== 'none') {
+                e.preventDefault();
+                submitSmsCode();
+            } else if (ppOv && ppOv.style.display !== 'none') {
+                e.preventDefault();
+                verifyPassphrase();
+            } else {
+                e.preventDefault();
+                attemptLogin();
             }
         });
 

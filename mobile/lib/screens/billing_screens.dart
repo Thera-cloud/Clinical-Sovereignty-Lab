@@ -2880,24 +2880,27 @@ class _TrialBannerWidgetState extends State<TrialBannerWidget> {
       return const SizedBox.shrink();
     }
 
-    final trialEndStr = widget.userProfile['trial_end_date'] ??
-        widget.userProfile['trial_start_date'] ??
-        widget.userProfile['created_at'] ??
+    // trial_end_date is the authoritative field (set at registration: created_at + 7d).
+    // trial_start_date and created_at are start dates — add 7 days before comparing.
+    final trialEndRaw = widget.userProfile['trial_end_date']?.toString() ?? '';
+    final trialStartRaw = widget.userProfile['trial_start_date']?.toString() ??
+        widget.userProfile['created_at']?.toString() ??
         '';
     int daysRemaining = 7;
-    if (trialEndStr.toString().isNotEmpty) {
+    if (trialEndRaw.isNotEmpty) {
       try {
-        final end = DateTime.parse(trialEndStr.toString());
+        final end = DateTime.parse(trialEndRaw);
         daysRemaining = end.difference(DateTime.now()).inDays;
         if (daysRemaining < 0) daysRemaining = 0;
-      } catch (_) {
-        try {
-          final start = DateTime.parse(trialEndStr.toString());
-          final end = start.add(const Duration(days: 7));
-          daysRemaining = end.difference(DateTime.now()).inDays;
-          if (daysRemaining < 0) daysRemaining = 0;
-        } catch (_) {}
-      }
+      } catch (_) {}
+    } else if (trialStartRaw.isNotEmpty) {
+      // Fallback: treat as a start date and add the 7-day trial window.
+      try {
+        final start = DateTime.parse(trialStartRaw);
+        final end = start.add(const Duration(days: 7));
+        daysRemaining = end.difference(DateTime.now()).inDays;
+        if (daysRemaining < 0) daysRemaining = 0;
+      } catch (_) {}
     }
 
     final isExpired =

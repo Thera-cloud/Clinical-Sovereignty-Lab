@@ -3706,6 +3706,7 @@ async def create_dependent_account(guardian_id: str, data: dict) -> Tuple[bool, 
     _dep_name = str(data.get("name") or "").strip() or username
     _dep_email = str(data.get("email") or "").strip()
     _dep_phone = str(data.get("phone") or "").strip()
+    _dep_grant = tier_constants.initial_grant_tokens(tier_constants.TIER_DEPENDENT)
     new_profile = {
         "role": "CLIENT",
         "name": _dep_name,
@@ -3722,7 +3723,9 @@ async def create_dependent_account(guardian_id: str, data: dict) -> Tuple[bool, 
         "subscription_status": "FAMILY_PLAN_ACTIVE",
         "subscription_plan": "FAMILY_DEPENDENT",
         "total_sessions_count": 0,
-        "token_balance": 5000,
+        "token_balance": _dep_grant,
+        "subscription_token_balance": _dep_grant,
+        "purchased_token_balance": 0,
         "token_usage_today": 0,
         "token_usage_month": 0,
         "last_token_reset": str(datetime.datetime.now().date()),
@@ -17004,7 +17007,7 @@ async def handle_client(websocket, path=None):
                     tp["family_role"] = "HEAD"
                     tp["subscription_plan"] = "TRIAL"
                     tp["subscription_status"] = "TRIAL_ACTIVE"
-                    tp["trial_end"] = trial_end
+                    tp["trial_end_date"] = trial_end  # SOVEREIGN-VOICE
                     tp["updated_at"] = str(datetime.datetime.now())
 
                     # Optional name change

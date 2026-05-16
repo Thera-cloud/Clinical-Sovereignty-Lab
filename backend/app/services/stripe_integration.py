@@ -1489,6 +1489,7 @@ class StripeWebhookHandler:
     def __init__(self, db_pool: asyncpg.Pool):
         self.db = db_pool
         self._fortress = None  # Lazy-loaded from app.state
+        self._app_state = None  # Set per-request for Redis access
 
     def _get_fortress(self):
         """Get WebhookFortress instance (lazy-loaded)."""
@@ -1763,6 +1764,11 @@ class StripeWebhookHandler:
         # --- Client-to-Coach upgrade flow --- # QUANTUM-CRYSTAL-ARCH
         if metadata.get("type") == "coach_upgrade":
             await self._handle_coach_upgrade(session, metadata)
+            return
+
+        # --- Trial registration setup webhook fallback --- # QUANTUM-CRYSTAL-ARCH
+        if metadata.get("type") == "trial_registration_setup":
+            await self._handle_trial_setup_webhook(session, event_id)
             return
 
         user_id = metadata.get('user_id')
@@ -2972,6 +2978,89 @@ class StripeWebhookHandler:
         except Exception as e:
             print(f">>> [STRIPE] Coach upgrade processing failed for {username}: {e}")
 
+    def _get_trial_redis(self):
+        """Get Redis client for trial signup keys (via wisdom_mesh)."""
+        if not self._app_state:
+            return None
+        wm = getattr(self._app_state, "wisdom_mesh", None)
+        return getattr(wm, "_redis", None) if wm else None
+
+    async def _handle_trial_setup_webhook(self, session: Dict, event_id: str = ""):
+        """Webhook fallback for trial registration setup — writes verified state to Redis
+        so the mobile app's billing-status poll succeeds even if the browser redirect failed."""
+        from app.services.trial_signup_redis_keys import (
+            trial_contact_key,
+            trial_signup_session_key,
+        )
+        import re as _re
+
+        _TRIAL_TTL = 1800
+        session_id = session.get("id", "")
+        if not session_id:
+            _logger.warning("trial_setup_webhook: no session id")
+            return
+
+        setup_intent = session.get("setup_intent")
+        if isinstance(setup_intent, str):
+            try:
+                setup_intent = stripe.SetupIntent.retrieve(setup_intent)
+            except Exception as e:
+                _logger.warning("trial_setup_webhook SetupIntent retrieve: %s", e)
+                return
+        si_status = getattr(setup_intent, "status", None) if setup_intent else None
+        if si_status != "succeeded":
+            _logger.warning("trial_setup_webhook: setup_intent status=%s, skipping", si_status)
+            return
+
+        customer_id = session.get("customer", "")
+        if not customer_id:
+            _logger.warning("trial_setup_webhook: no customer_id")
+            return
+
+        r = self._get_trial_redis()
+        if not r:
+            _logger.warning("trial_setup_webhook: Redis unavailable, cannot write verified state")
+            return
+
+        email_norm = ""
+        phone_digits = ""
+        name = ""
+        try:
+            raw = await r.get(trial_signup_session_key(session_id))
+            if raw:
+                prev = json.loads(raw)
+                email_norm = prev.get("email_normalized") or ""
+                phone_digits = prev.get("phone_digits") or ""
+                name = prev.get("name") or ""
+        except Exception as e:
+            _logger.warning("trial_setup_webhook redis read: %s", e)
+
+        try:
+            cust = stripe.Customer.retrieve(customer_id)
+            if not email_norm and getattr(cust, "email", None):
+                email_norm = (cust.email or "").lower()
+            if (not phone_digits or len(phone_digits) < 10) and getattr(cust, "phone", None):
+                phone_digits = _re.sub(r"\D", "", cust.phone or "")
+        except Exception as e:
+            _logger.warning("trial_setup_webhook customer retrieve: %s", e)
+
+        payload = {
+            "verified": True,
+            "stripe_customer_id": customer_id,
+            "email_normalized": email_norm,
+            "phone_digits": phone_digits if len(phone_digits) >= 10 else "",
+            "name": name,
+        }
+        try:
+            await r.setex(trial_signup_session_key(session_id), _TRIAL_TTL, json.dumps(payload))
+            if email_norm:
+                await r.setex(trial_contact_key("email", email_norm), _TRIAL_TTL, session_id)
+            if phone_digits and len(phone_digits) >= 10:
+                await r.setex(trial_contact_key("phone", phone_digits), _TRIAL_TTL, session_id)
+            _logger.info("trial_setup_webhook: verified session %s via webhook", session_id)
+        except Exception as e:
+            _logger.warning("trial_setup_webhook redis write: %s", e)
+
     async def _handle_subscription_updated(self, subscription: Dict, event_id: str = ""):
         """Handle subscription changes — tier sync + upgrade token floor."""
 
@@ -3154,6 +3243,7 @@ def create_billing_router(db_pool: asyncpg.Pool) -> APIRouter:
     
     @router.post("/webhook")
     async def stripe_webhook(request: Request, stripe_signature: str = Header(None)):
+        webhook_handler._app_state = request.app.state
         payload = await request.body()
         return await webhook_handler.handle_webhook(payload, stripe_signature)
     
