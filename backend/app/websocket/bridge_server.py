@@ -251,6 +251,14 @@ db_pool = None
 chat_db_pool = None  # SOVEREIGN-VOICE: dedicated pool for chat context (fast, small)
 _pgsd_router = None  # QUANTUM-CRYSTAL-ARCH — set in init_database when PGSD_ENABLED
 
+# QUANTUM-CRYSTAL-ARCH — account creation audit hook (feature-flagged, fire-and-forget).
+# See migration 221, account_creation_hook.py, account_event_reconciler.py.
+try:
+    from app.services.account_creation_hook import mark_account_created as _mark_account_created
+except Exception:
+    def _mark_account_created(*_a, **_kw):  # type: ignore[no-redef]
+        return None
+
 # Bridge context — holds vault_bridge for B5 chat-integrated file interactions
 class _BridgeContext:
     vault_bridge = None
@@ -3656,6 +3664,15 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
         except Exception as e:
             print(f">>> [REG] Social memory match setup note: {e}")
 
+    # QUANTUM-CRYSTAL-ARCH — mark user_creation_events row (feature-flagged).
+    _mark_account_created(
+        db_pool, username,
+        created_via="ws_register",
+        role=role, tier=new_profile.get("tier"),
+        hardware_id=new_profile.get("hardware_id"),
+        metadata={"registration_type": new_profile.get("registration_type")},
+    )
+
     return True, "REGISTRATION_SUCCESS"
 
 MAX_FAMILY_MEMBERS = {"TOP_TIER": 5, "STANDARD": 0, "TRIAL": 0, "COACH_ONLY": 0}
@@ -3753,6 +3770,15 @@ async def create_dependent_account(guardian_id: str, data: dict) -> Tuple[bool, 
 
     metrics_engine = MetricsEngine(VAULT_ROOT)
     metrics_engine.initialize_metrics(new_profile)
+
+    # QUANTUM-CRYSTAL-ARCH — mark user_creation_events row (feature-flagged).
+    _mark_account_created(
+        db_pool, username,
+        created_via="ws_dependent",
+        role="CLIENT", tier="DEPENDENT",
+        hardware_id=new_profile.get("hardware_id"),
+        metadata={"guardian_id": guardian_id, "family_id": fam_id},
+    )
 
     return True, "DEPENDENT_CREATED"
 

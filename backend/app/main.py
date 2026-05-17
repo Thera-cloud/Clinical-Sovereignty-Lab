@@ -2619,6 +2619,23 @@ async def lifespan(app: FastAPI):
     except Exception as tua_err:
         print(f"   ⚠️  TokenUsageAgent init failed: {tua_err}")
 
+    # ── Account Event Reconciler — flags orphaned user INSERTs (no email path) ──
+    # Feature-flagged via ENABLE_USER_CREATION_HOOK (default OFF). Even when
+    # the flag is off the agent loop runs but is a no-op, so the service-health
+    # registration is stable across the rollout.
+    _account_event_reconciler = None
+    try:
+        from app.services.account_event_reconciler import AccountEventReconciler
+        _account_event_reconciler = AccountEventReconciler(
+            db_pool=db_pool,
+            notification_system=getattr(app.state, "notification_system", None),
+        )
+        await _account_event_reconciler.start()
+        app.state.account_event_reconciler = _account_event_reconciler
+        print("   ✅ AccountEventReconciler started (60s cycle, support@ orphan alerts)")
+    except Exception as aer_err:
+        print(f"   ⚠️  AccountEventReconciler init failed: {aer_err}")
+
     # ── Nate Check-In Agent — 72h inactivity outreach for clients + coaches ──
     _nate_checkin_agent = None
     try:
@@ -3042,6 +3059,7 @@ async def lifespan(app: FastAPI):
         ("token_lab_auditor", _token_lab_auditor is not None),
         ("gkm_auditor", _gkm_auditor is not None),
         ("token_usage_agent", _token_usage_agent is not None),
+        ("account_event_reconciler", _account_event_reconciler is not None),
         ("nate_checkin_agent", _nate_checkin_agent is not None),
         ("nate_checkin_auditor", _nate_checkin_auditor is not None),
         ("sensitive_bridge_auditor", _sensitive_bridge_auditor is not None),
@@ -3128,6 +3146,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ ClassroomLearningAuditor stopped")
         except Exception as _cla_stop:
             print(f"   ⚠️  ClassroomLearningAuditor shutdown: {_cla_stop}")
+    _account_event_reconciler_h = getattr(app.state, "account_event_reconciler", None)
+    if _account_event_reconciler_h:
+        try:
+            await _account_event_reconciler_h.stop()
+            print("   ✅ AccountEventReconciler stopped")
+        except Exception as _aer_stop:
+            print(f"   ⚠️  AccountEventReconciler shutdown: {_aer_stop}")
     if _sse_orchestrator:
         try:
             await _sse_orchestrator.stop()

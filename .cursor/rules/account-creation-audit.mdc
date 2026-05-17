@@ -1,0 +1,124 @@
+# Account Creation Audit Hook
+
+Every `users` INSERT must produce a `user_creation_events` row so support@ has a
+complete record of every signup, regardless of which code path created it.
+
+## Architecture
+
+```
+Any code path inserts into users
+  │
+  ▼
+TRIGGER on_user_created (migration 221) — ALWAYS RUNS
+  │  Writes row to user_creation_events (processed_at = NULL).
+  │  Exception-safe: failure NEVER blocks the parent INSERT.
+  ▼
+Known signup path calls account_creation_hook.mark_account_created()
+  │  Fire-and-forget. Marks the row processed_at = NOW(),
+  │  stamps created_via, merges metadata.
+  │  Feature-flagged via ENABLE_USER_CREATION_HOOK (default OFF).
+  ▼
+account_event_reconciler (60s cycle)
+  │  Polls for processed_at IS NULL older than 60s.
+  │  Marks them processed and emails support@ as "orphan signup".
+  │  Suppresses test/audit/loadtest/stevejobs accounts.
+```
+
+## Files
+
+| File | Role |
+|---|---|
+| `backend/migrations/221_user_creation_events.sql` | Table + trigger + backfill |
+| `backend/app/services/account_creation_hook.py` | Shared `mark_account_created()` helper |
+| `backend/app/services/account_event_reconciler.py` | 60s background poller |
+| `backend/app/services/registration_finalize.py` | Hook calls in 3 finalize functions |
+| `backend/app/websocket/bridge_server.py` | Hook calls in `register_new_user` + `create_dependent_account` (QUANTUM-CRYSTAL-ARCH, 22 lines) |
+| `backend/app/main.py` | Reconciler lifespan + `_service_checks` entry |
+
+## Provenance Labels (`created_via`)
+
+| Label | Source path |
+|---|---|
+| `ws_register` | `bridge_server.register_new_user` |
+| `ws_dependent` | `bridge_server.create_dependent_account` |
+| `stripe_finalize` | `registration_finalize.finalize_signup` |
+| `stripe_finalize_dependent` | `registration_finalize.finalize_dependent_signup` (FREE) |
+| `stripe_finalize_paid_dependent` | `registration_finalize.finalize_paid_dependent_signup` |
+| `backfill_migration_221` | Pre-existing users at migration time |
+| `unknown` | Trigger fired but no path called the hook — **orphan** |
+
+## Rules
+
+1. **Every NEW code path that creates a user MUST call `mark_account_created()`** with a unique `created_via` label. Otherwise the reconciler will fire an orphan alert to support@.
+
+2. **The trigger MUST stay wrapped in `EXCEPTION WHEN OTHERS`.** A bug in audit logic must never block a real signup, especially during the WJR campaign.
+
+3. **Never make the hook synchronous.** All callers use fire-and-forget. The signup hot path must not await audit side effects.
+
+4. **Never remove the suppression patterns from the reconciler.** Test/audit/loadtest/stevejobs accounts MUST NOT spam support@.
+
+5. **Service-health denominator includes the reconciler.** Current target: 117/117. See `service-health-49-49.mdc`.
+
+6. **`ENABLE_USER_CREATION_HOOK` defaults to OFF.** The table and trigger are always installed; the flag only gates the hook marker + reconciler email path. This lets us deploy the schema first and flip the flag separately after smoke-testing.
+
+## Rollback Procedure
+
+If the audit hook causes any production issue, roll back in this order (least → most invasive):
+
+### 1. Flag flip (zero downtime, undoes side effects)
+
+```bash
+ssh root@68.183.168.75 \
+  "cd /opt/clinical-sovereignty-lab && \
+   sed -i 's/^ENABLE_USER_CREATION_HOOK=.*/ENABLE_USER_CREATION_HOOK=false/' .env && \
+   docker compose -f docker-compose.prod.yml up -d backend bridge"
+```
+
+This stops the reconciler from emailing and the hook from marking rows. The trigger keeps writing `user_creation_events` rows but they pile up harmlessly with `processed_at = NULL`. Re-enabling later is a single sed + recreate.
+
+### 2. Disable the trigger (keeps the table)
+
+If the trigger itself is suspected:
+
+```bash
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate \
+  -c 'ALTER TABLE users DISABLE TRIGGER on_user_created;'"
+```
+
+Existing rows in `user_creation_events` are preserved. Re-enable with `ENABLE TRIGGER`.
+
+### 3. Full revert (drop trigger + table)
+
+Only if the table or trigger is causing data loss:
+
+```bash
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c '
+  DROP TRIGGER IF EXISTS on_user_created ON users;
+  DROP FUNCTION IF EXISTS notify_new_user_created();
+  DROP TABLE IF EXISTS user_creation_events;
+'"
+```
+
+Then revert the `main.py` / `bridge_server.py` / `registration_finalize.py` edits via `git revert <sha>` and redeploy.
+
+## Verification
+
+```bash
+# 1. Trigger installed
+docker exec nate_postgres psql -U nate_admin -d little_nate \
+  -c "SELECT tgname FROM pg_trigger WHERE tgname = 'on_user_created'"
+
+# 2. Backfill complete (no historical orphans)
+docker exec nate_postgres psql -U nate_admin -d little_nate \
+  -c "SELECT count(*) FROM user_creation_events WHERE processed_at IS NULL"
+# Expected immediately after migration: 0
+
+# 3. Reconciler healthy
+docker logs nate_backend --since 5m 2>&1 | grep AccountEventReconciler
+# Expected: "AccountEventReconciler started (60s cycle...)"
+
+# 4. After a real signup, the row was marked
+docker exec nate_postgres psql -U nate_admin -d little_nate -c \
+  "SELECT username, created_via, processed_at IS NOT NULL AS marked \
+   FROM user_creation_events ORDER BY id DESC LIMIT 5"
+```

@@ -232,6 +232,11 @@ class AgentStatusDigest:
         qb_sync = getattr(self.app, "quickbooks_sync_agent", None)
         status, detail = self._check_agent(qb_sync, "QuickBooks Sync Agent")
         rows.append((status, "QuickBooks Sync Agent", detail))
+
+        account_recon = getattr(self.app, "account_event_reconciler", None)
+        status, detail = self._check_agent(account_recon, "Account Event Reconciler")
+        rows.append((status, "Account Event Reconciler", detail))
+
         return {"title": "Billing / Accounts", "rows": rows}
 
     async def _section_trust_auditors(self) -> dict:

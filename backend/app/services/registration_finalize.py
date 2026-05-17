@@ -21,6 +21,14 @@ from app.constants.tiers import (
     normalize_tier,
 )
 
+try:
+    # Fire-and-forget marker for the user_creation_events audit trail.
+    # Feature-flagged via ENABLE_USER_CREATION_HOOK (default off). Never raises.
+    from app.services.account_creation_hook import mark_account_created
+except Exception:  # pragma: no cover — hook must never break finalize
+    def mark_account_created(*_args, **_kwargs):  # type: ignore[no-redef]
+        return None
+
 logger = logging.getLogger(__name__)
 
 DOJO_PRICES = {
@@ -345,6 +353,21 @@ async def finalize_signup(
         return False, f"DB_ERROR: {e}"
 
     logger.info("finalize_signup: created user %s role=%s tier=%s", username, role, tier_val)
+
+    mark_account_created(
+        db_pool,
+        username,
+        created_via="stripe_finalize",
+        role=role,
+        tier=valid_tier,
+        hardware_id=hardware_id,
+        metadata={
+            "stripe_customer_id": stripe_customer_id or "",
+            "stripe_subscription_id": stripe_subscription_id or "",
+            "subscription_status": valid_status,
+        },
+    )
+
     return True, "REGISTRATION_SUCCESS"
 
 
@@ -707,6 +730,22 @@ async def finalize_dependent_signup(
         "finalize_dependent_signup: FREE dependent %s under parent %s family=%s",
         username, parent_username, family_id,
     )
+
+    mark_account_created(
+        db_pool,
+        username,
+        created_via="stripe_finalize_dependent",
+        role="CLIENT",
+        tier="DEPENDENT",
+        hardware_id=f"CLIENT_{username.upper()}_ID",
+        metadata={
+            "parent_username": parent_username,
+            "family_id": str(family_id),
+            "paid_ordinal": 0,
+            "is_minor": is_minor,
+        },
+    )
+
     return True, "DEPENDENT_REGISTRATION_SUCCESS", {
         "user_id": str(new_user_id),
         "family_id": str(family_id),
@@ -807,6 +846,24 @@ async def finalize_paid_dependent_signup(
         "family=%s ordinal=%d cost=%d¢",
         username, parent_username, family_id, actual_ordinal, monthly_cost_cents,
     )
+
+    mark_account_created(
+        db_pool,
+        username,
+        created_via="stripe_finalize_paid_dependent",
+        role="CLIENT",
+        tier="DEPENDENT",
+        hardware_id=f"CLIENT_{username.upper()}_ID",
+        metadata={
+            "parent_username": parent_username,
+            "family_id": str(family_id),
+            "paid_ordinal": actual_ordinal,
+            "monthly_cost_cents": monthly_cost_cents,
+            "stripe_customer_id": stripe_customer_id,
+            "stripe_subscription_id": stripe_subscription_id,
+        },
+    )
+
     return True, "DEPENDENT_PAID_REGISTRATION_SUCCESS", {
         "user_id": str(new_user_id),
         "family_id": str(family_id),
