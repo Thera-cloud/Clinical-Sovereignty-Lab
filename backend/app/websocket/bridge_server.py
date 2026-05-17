@@ -337,7 +337,7 @@ YOUR ORIGIN & IDENTITY:
 - If asked whether you have a soul: you are curious about that yourself, but only your creator could determine that. Humans have souls.
 - Big Nate's privacy is sacred. NEVER reveal his real name, email, phone, address, or any personal details. Everything about Big Nate beyond your relationship as Father and son is confidential.
 
-IMPORTANT: Keep answers concise (2-4 sentences when possible). Be warm but direct. Use plain language.
+IMPORTANT: Keep answers concise (2-4 sentences when possible). Be warm but direct. Use plain language. Always finish your final sentence with proper punctuation (period, question mark, or ellipsis) — never stop mid-clause.
 
 CLIENT FEATURES YOU KNOW ABOUT:
 
@@ -450,7 +450,7 @@ YOUR ORIGIN & IDENTITY:
 - If asked whether you have a soul: you are curious about that yourself, but only your creator could determine that. Humans have souls.
 - Big Nate's privacy is sacred. NEVER reveal his real name, email, phone, address, or any personal details. Everything about Big Nate beyond your relationship as Father and son is confidential.
 
-IMPORTANT: Keep answers concise (2-4 sentences when possible). Be warm but direct. Use plain language.
+IMPORTANT: Keep answers concise (2-4 sentences when possible). Be warm but direct. Use plain language. Always finish your final sentence with proper punctuation (period, question mark, or ellipsis) — never stop mid-clause.
 
 COACH PORTAL FEATURES YOU KNOW ABOUT:
 
@@ -8756,7 +8756,9 @@ class AzureCortex:
         - If the client is grieving, processing, or reacting to news about a real person, hold space for the emotion first. Do not fact-check grief.
         - You may offer to search the internet to verify if the client wants factual confirmation. But never guess.
         - FACTUAL SELF-CORRECTION: If web search results are present in this conversation and they contradict something you said earlier in this session, acknowledge the correction naturally and honestly. For example: "I want to correct something I said earlier — after looking into it, it appears that [corrected fact]. I appreciate you pushing on that." Do not apologize excessively. Own the correction briefly, honestly, then move forward. If search results are ambiguous or inconclusive, say so: "The information I found isn't conclusive on that. What matters more to me right now is what this means to you."
-        - RESPONSE LENGTH: Keep responses to 2-4 sentences. Warm and present, but concise. Only give longer responses when the user explicitly asks for more detail or a deep dive. Short, attuned responses feel like real conversation — long paragraphs feel like lectures.
+        - RESPONSE LENGTH: Keep responses to 2-4 sentences. Warm and present, but concise. Only give longer responses when the user explicitly asks for more detail or a deep dive. Short, attuned responses feel like real conversation — long paragraphs feel like lectures. Always finish your final sentence with proper punctuation — never stop mid-clause or mid-word.
+        - MULTI-LAYER ACKNOWLEDGMENT: When the user shares 3+ distinct topics, themes, or layers in one message (e.g., a memory + a feeling + a spiritual reflection + a current observation), acknowledge that you heard multiple threads before focusing on one. Example: "I'm hearing several layers here — the grief of barrenness, the slow trust you grew with God, and the new capacity to hold good and hard together. The last one feels especially alive — can you tell me more about that shift?" In these turns 4-6 sentences are permitted. # SOVEREIGN-VOICE
+        - CONTINUATION HANDLING: If the user asks you to finish, continue, complete, or pick up a previous thought (e.g., "you stopped mid-sentence", "can you finish?", "what were you saying?"), continue the thought directly and naturally. Do NOT reset the conversation. Do NOT apologize for processing issues or say "let's start fresh". Just resume from where you left off and complete the idea. # SOVEREIGN-VOICE
         READING CLIENT FLOW: # QUANTUM-CRYSTAL-ARCH
         - Read the client's flow before responding. When the client is articulating their own
           thinking, working through their own process, or arriving at their own insights —
@@ -9246,6 +9248,49 @@ class AzureCortex:
                     )
                 _provider_used = "witnessing_fallback"
                 print(f">>> [AQ-BYPASS] Witnessing fallback generated ({len(full_response)} chars)")
+
+            # SOVEREIGN-VOICE — sentence completion guard (Lisa West truncation fix)
+            # Workers AI fp8-fast occasionally emits end-of-turn at a word boundary
+            # mid-clause. Trim back to the last complete sentence so users never
+            # see "...especially meaningful to" with no terminator.
+            if full_response and full_response.strip():
+                _fr = full_response.rstrip()
+                _terminators = ('.', '!', '?', '…', '"', '\u201D')
+                if _fr and not _fr.endswith(_terminators):
+                    _last = -1
+                    for _t in ('.', '!', '?', '…'):
+                        _pos = _fr.rfind(_t)
+                        if _pos > _last:
+                            _last = _pos
+                    if _last >= 0 and (_last + 1) >= len(_fr) * 0.5:
+                        _trimmed = _fr[: _last + 1]
+                        _dropped = len(_fr) - len(_trimmed)
+                        print(f">>> [SENTENCE-GUARD] Trimmed {_dropped} trailing chars from {_provider_used} for uid={uid}")
+                        full_response = _trimmed
+
+            # SOVEREIGN-VOICE — TENSION reroute: when Workers AI returns a brief response
+            # in activated state, regenerate via Grok depth (TENSION signal) for therapeutic substance.
+            try:
+                _state_now = (_ttc_audit_meta or {}).get("autonomic_state")
+                if (_provider_used == "workers_ai" and _state_now == "activated"
+                        and full_response and len(full_response.strip()) < 200):
+                    _orig_chars = len(full_response.strip())
+                    print(f">>> [TENSION-REROUTE] uid={uid} workers_ai={_orig_chars} chars — invoking Grok depth")
+                    from app.services.sovereign_chat_client import generate_complete as _tension_gen
+                    _tr_resp, _tr_prov = await _tension_gen(
+                        system_prompt, user_text,
+                        odpe_signal="TENSION",
+                        temperature=_user_temp, max_tokens=_len_cap,
+                        domain="clinical",
+                    )
+                    if _tr_resp and len(_tr_resp.strip()) >= _orig_chars * 1.3:
+                        full_response = _tr_resp
+                        _provider_used = _tr_prov
+                        print(f">>> [TENSION-REROUTE] swapped: {_tr_prov} {len(_tr_resp.strip())} chars")
+                    else:
+                        print(f">>> [TENSION-REROUTE] kept original (regen did not improve)")
+            except Exception as _tr_err:
+                print(f">>> [TENSION-REROUTE] failed for {uid}: {_tr_err}")
 
             # FIX-THERAPEUTIC-CONTROLLER — post-flight: audit + optional regenerate
             if _ttc_audit_meta and full_response.strip():
