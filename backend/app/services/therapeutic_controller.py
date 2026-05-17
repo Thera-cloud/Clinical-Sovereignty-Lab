@@ -899,7 +899,22 @@ def _audit_violations(response_text: str, audit_metadata: dict, recent_narrative
             violations.append(f"banned_phrase:{phrase}")
 
     if state == "activated":
-        somatic_markers = ["body", "breath", "chest", "shoulder", "feel in your", "notice", "sensation"]
+        # Workers AI / common models often use heart, grounding, "sit with", "I sense" without
+        # the original minimal list — expand markers to reduce transparent_fallback on good prose.
+        somatic_markers = [
+            "body",
+            "breath",
+            "chest",
+            "shoulder",
+            "feel in your",
+            "notice",
+            "sensation",
+            "heart",
+            "sit with",
+            "grounded",
+            "grounding",
+            "i sense",
+        ]
         if not any(m in rl for m in somatic_markers):
             violations.append("missing_somatic_invitation")
 
