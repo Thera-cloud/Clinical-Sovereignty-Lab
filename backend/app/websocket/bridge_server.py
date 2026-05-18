@@ -8665,48 +8665,11 @@ class AzureCortex:
         vault_context = ""
         _vault_image_data_url = None  # SOVEREIGN-VOICE: vision block for image vault items
         try:
-            import re as _vre
-            _vault_match = _vre.search(r'\[Vault:([a-fA-F0-9\-]+)\]', user_text)
-            if _vault_match and db_pool:
-                _vid = _vault_match.group(1)
-                _vrow = await db_pool.fetchrow(
-                    "SELECT display_name, content_type, extracted_text_preview, "
-                    "blob_path, thumbnail_path, mime_type "
-                    "FROM vault_items WHERE id = $1::uuid", _vid)
-                if _vrow:
-                    _vname = _vrow["display_name"] or "file"
-                    _vctype = (_vrow["content_type"] or "").lower()
-                    user_text = user_text.replace(
-                        _vault_match.group(0),
-                        f"(referring to my vault item: {_vname})").strip()
-
-                    if "image" in _vctype or _vctype == "upload_image":
-                        # SOVEREIGN-VOICE: load image blob for vision analysis
-                        _blob_path = _vrow.get("thumbnail_path") or _vrow.get("blob_path")
-                        if _blob_path:
-                            try:
-                                from app.services.blob_storage import BlobManager
-                                _bmgr = BlobManager()
-                                _img_bytes = _bmgr.read_blob(_blob_path)
-                                if _img_bytes:
-                                    import base64 as _b64v
-                                    _img_b64 = _b64v.b64encode(_img_bytes).decode("ascii")
-                                    _mime = _vrow.get("mime_type") or "image/jpeg"
-                                    _vault_image_data_url = f"data:{_mime};base64,{_img_b64}"
-                                    vault_context = (
-                                        f"\n[VAULT IMAGE — the user uploaded '{_vname}'. "
-                                        f"The image is attached as a vision block. "
-                                        f"Describe what you see in detail.]\n")
-                                    print(f">>> [VAULT] Image vision block ready for {_vid[:8]} "
-                                          f"({len(_img_bytes)} bytes)")
-                            except Exception as _img_err:
-                                print(f">>> [VAULT] Image load failed (non-fatal): {_img_err}")
-                    else:
-                        _vtext = _vrow["extracted_text_preview"] or ""
-                        vault_context = (
-                            f"\n[VAULT ITEM CONTEXT — the user is asking about '{_vname}']\n"
-                            f"{_vtext[:4000]}\n[END VAULT ITEM]")
-                    print(f">>> [VAULT] Injected context for {_vid[:8]}")
+            # QUANTUM-CRYSTAL-ARCH: global upload/vault chat retrieval
+            from app.services.vault_chat_context import build_vault_chat_context
+            user_text, vault_context, _vault_image_data_url = await build_vault_chat_context(
+                db_pool, profile, user_text
+            )
         except Exception as _ve:
             print(f">>> [VAULT] Injection error (non-fatal): {_ve}")
 
