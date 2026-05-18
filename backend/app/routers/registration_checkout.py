@@ -118,6 +118,7 @@ class TrialSetupBillingRequest(BaseModel):
     name: str
     email: Optional[str] = None
     phone_digits: Optional[str] = None
+    discount_code: Optional[str] = None
 
 
 @public_router.post("/trial/setup-billing")
@@ -174,12 +175,15 @@ async def trial_setup_billing(body: TrialSetupBillingRequest, request: Request):
         logger.error("trial_setup_billing session: %s", e)
         raise HTTPException(502, "Payment service unavailable")
 
-    pending = {
+    pending: Dict[str, Any] = {
         "phase": "pending",
         "name": name,
         "email_normalized": email,
         "phone_digits": phone_digits if len(phone_digits) >= 10 else "",
     }
+    discount_code = (body.discount_code or "").strip().upper()
+    if discount_code:
+        pending["discount_code"] = discount_code
     try:
         await r.setex(trial_signup_session_key(session.id), _TRIAL_SIGNUP_TTL, json.dumps(pending))
     except Exception as e:
@@ -234,6 +238,7 @@ async def trial_setup_callback(session_id: str, request: Request):
     email_norm = ""
     phone_digits = ""
     name = ""
+    discount_code_stored = ""
     if r:
         try:
             raw = await r.get(trial_signup_session_key(session_id))
@@ -242,6 +247,7 @@ async def trial_setup_callback(session_id: str, request: Request):
                 email_norm = prev.get("email_normalized") or ""
                 phone_digits = prev.get("phone_digits") or ""
                 name = prev.get("name") or ""
+                discount_code_stored = prev.get("discount_code") or ""
         except Exception as e:
             logger.warning("trial_setup_callback redis read: %s", e)
 
@@ -254,13 +260,15 @@ async def trial_setup_callback(session_id: str, request: Request):
     except Exception as e:
         logger.warning("trial_setup_callback customer retrieve: %s", e)
 
-    payload = {
+    payload: Dict[str, Any] = {
         "verified": True,
         "stripe_customer_id": customer_id,
         "email_normalized": email_norm,
         "phone_digits": phone_digits if len(phone_digits) >= 10 else "",
         "name": name,
     }
+    if discount_code_stored:
+        payload["discount_code"] = discount_code_stored
     if r:
         try:
             await r.setex(trial_signup_session_key(session_id), _TRIAL_SIGNUP_TTL, json.dumps(payload))
@@ -720,7 +728,7 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
             async with db_pool.acquire() as conn:
                 disc = await conn.fetchrow(
                     "SELECT discount_type, discount_value, stripe_coupon_id "
-                    "FROM promotional_specials WHERE code = $1 AND active = true "
+                    "FROM promotional_specials WHERE promo_code = $1 AND active = true "
                     "AND (expires_at IS NULL OR expires_at > NOW())",
                     body.discount_code.strip().upper(),
                 )

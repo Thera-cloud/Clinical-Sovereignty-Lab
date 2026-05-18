@@ -77,6 +77,34 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
   String? _verifiedPromo;
 
   @override
+  void initState() {
+    super.initState();
+    // Auto-fill discount code stored at signup, then silently verify it
+    final stored = (widget.currentUserProfile['discount_code'] ?? '').toString().trim();
+    if (stored.isNotEmpty && _verifiedPromo == null) {
+      _promoCtrl.text = stored.toUpperCase();
+      WidgetsBinding.instance.addPostFrameCallback((_) => _autoVerifyStoredPromo());
+    }
+  }
+
+  Future<void> _autoVerifyStoredPromo() async {
+    final code = _promoCtrl.text.trim();
+    if (code.isEmpty || !mounted) return;
+    final uid = widget.currentUserProfile['hardware_id'] ??
+        widget.currentUserProfile['username'] ?? '';
+    try {
+      final plan = Uri.encodeComponent(_currentPlan);
+      final resp = await http.get(
+        Uri.parse('$defaultApiBaseUrl/api/billing/verify-promo/${Uri.encodeComponent(code)}?tier=$plan'),
+        headers: _authHeaders(uid),
+      );
+      if (resp.statusCode == 200 && mounted) {
+        setState(() => _verifiedPromo = code);
+      }
+    } catch (_) {}
+  }
+
+  @override
   void dispose() {
     _promoCtrl.dispose();
     super.dispose();

@@ -8214,6 +8214,9 @@ class _SignUpWizardState extends State<SignUpWizard> {
           final uri = Uri.parse('$base/api/registration/trial/setup-billing');
           final emailT = _emailCtrl.text.trim();
           final phoneDigits = _phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+          final discountForSetup = _discountValidated && _discountCodeCtrl.text.trim().isNotEmpty
+              ? _discountCodeCtrl.text.trim()
+              : (_inviteCodeCtrl.text.trim().isNotEmpty ? _inviteCodeCtrl.text.trim() : null);
           final resp = await http
               .post(
                 uri,
@@ -8222,6 +8225,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
                   'name': _nameCtrl.text.trim(),
                   if (emailT.isNotEmpty) 'email': emailT,
                   if (phoneDigits.length >= 10) 'phone_digits': phoneDigits,
+                  if (discountForSetup != null) 'discount_code': discountForSetup,
                 }),
               )
               .timeout(const Duration(seconds: 20));
