@@ -1162,12 +1162,15 @@ class TransferCrystalBuilder:
             # Truncate for display
             display_name = display_name[:250]
 
-            # Extract preview from first user messages
-            preview_parts = []
-            for m in conv.get("messages", [])[:10]:
-                if m.get("role") == "user":
-                    preview_parts.append(m.get("text", "")[:200])
-            preview = " | ".join(preview_parts)[:500]
+            # Build full conversation text for chat context + FTS  # QUANTUM-CRYSTAL-ARCH
+            _conv_parts = []
+            for m in conv.get("messages", []):
+                _role = m.get("role", "unknown")
+                _txt = (m.get("text") or "").strip()
+                if _txt:
+                    _label = "User" if _role == "user" else "AI"
+                    _conv_parts.append(f"{_label}: {_txt}")
+            preview = "\n\n".join(_conv_parts)[:50000]
 
             # Themes
             themes = ["imported", "chatgpt"]
@@ -1186,7 +1189,7 @@ class TransferCrystalBuilder:
                     folder_id=target_folder,
                     content_type="transfer_conversation",
                     display_name=display_name,
-                    blob_path=None,  # Stored inline via extracted_text_preview + themes
+                    blob_path=None,  # QUANTUM-CRYSTAL-ARCH: full text in extracted_text_preview
                     size_bytes=len(conv_json.encode()),
                     mime_type="application/json",
                     extracted_text_preview=preview,
