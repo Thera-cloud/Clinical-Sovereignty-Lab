@@ -138,42 +138,51 @@ class _NateOrganizerScreenState extends State<NateOrganizerScreen> {
   static const int _maxReconnectAttempts = 10;
 
   void _connect() {
+    try {
+      _channel?.sink.close();
+    } catch (_) {}
+    _authConfirmed = false;
     final wsUrl = AppConfig.wsUrl;
     _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
     _channel!.stream.listen(
       _onMessage,
-      onError: (_) {
-        if (mounted) setState(() => _error = 'Connection lost');
-      },
-      onDone: () {
-        if (!mounted) return;
-        // Don't reconnect if auth permanently failed or we've hit max retries
-        if (_authFailed || _reconnectAttempts >= _maxReconnectAttempts) {
-          if (mounted) {
-            setState(() {
-              _error = _authFailed
-                  ? 'Authentication failed. Please log in again.'
-                  : 'Unable to reconnect. Please go back and try again.';
-            });
-          }
-          return;
-        }
-        if (_sessionActive || !_authConfirmed) {
-          final delay = Duration(
-            milliseconds: (3000 * (1 << _reconnectAttempts).clamp(1, 10)).clamp(3000, 30000),
-          );
-          _reconnectAttempts++;
-          Future.delayed(delay, _connect);
-        }
-      },
+      onError: (_) => _handleSocketLost('Connection lost'),
+      onDone: () => _handleSocketLost('Connection lost'),
     );
+  }
 
-    // Auth handshake
-    _channel!.sink.add(jsonEncode({
+  void _sendAuth() {
+    _channel?.sink.add(jsonEncode({
       'type': 'auth',
       'token': _resolvedToken ?? '',
       'hardware_id': _userId,
+      // Separate bridge context so main app login does not evict this socket.
+      'client_context': 'organizer',
     }));
+  }
+
+  void _handleSocketLost(String message) {
+    if (!mounted) return;
+    _authConfirmed = false;
+    _startWatchdog?.cancel();
+    if (_authFailed || _reconnectAttempts >= _maxReconnectAttempts) {
+      setState(() {
+        if (_loading && !_sessionActive) _loading = false;
+        _error = _authFailed
+            ? 'Authentication failed. Please log in again.'
+            : 'Unable to reconnect. Please go back and try again.';
+      });
+      return;
+    }
+    setState(() {
+      if (_loading && !_sessionActive) _loading = false;
+      _error = '$message Reconnecting…';
+    });
+    final delay = Duration(
+      milliseconds: (3000 * (1 << _reconnectAttempts).clamp(1, 10)).clamp(3000, 30000),
+    );
+    _reconnectAttempts++;
+    Future.delayed(delay, _connect);
   }
 
   void _onMessage(dynamic raw) {
@@ -185,13 +194,14 @@ class _NateOrganizerScreenState extends State<NateOrganizerScreen> {
       switch (type) {
         // Auth handshake responses
         case 'connected':
-          // Bridge ready, waiting for auth_success
+          if (!_authFailed) _sendAuth();
           break;
 
         case 'auth_success':
           _authConfirmed = true;
           _authFailed = false;
           _reconnectAttempts = 0;
+          _error = null;
           // If reconnecting with an active session, try to resume it
           if (_sessionId != null && _sessionActive) {
             _channel?.sink.add(jsonEncode({
@@ -298,11 +308,14 @@ class _NateOrganizerScreenState extends State<NateOrganizerScreen> {
         });
       }
     });
-    _send({
+    if (!_send({
       'type': 'organize_start',
       'content': content,
       'vault_item_id': widget.vaultItemId,
-    });
+    })) {
+      _startWatchdog?.cancel();
+      setState(() => _loading = false);
+    }
   }
 
   void _sendChat() {
@@ -370,8 +383,26 @@ class _NateOrganizerScreenState extends State<NateOrganizerScreen> {
     } catch (_) {}
   }
 
-  void _send(Map<String, dynamic> msg) {
-    _channel?.sink.add(jsonEncode(msg));
+  bool _send(Map<String, dynamic> msg) {
+    if (!_authConfirmed) {
+      setState(() => _error = 'Still connecting — try again in a moment.');
+      return false;
+    }
+    final ch = _channel;
+    if (ch == null) {
+      setState(() => _error = 'Not connected. Reconnecting…');
+      _connect();
+      return false;
+    }
+    try {
+      ch.sink.add(jsonEncode(msg));
+      return true;
+    } catch (_) {
+      _authConfirmed = false;
+      setState(() => _error = 'Send failed. Reconnecting…');
+      _connect();
+      return false;
+    }
   }
 
   // ─── Build ─────────────────────────────────────────────────────────────────
