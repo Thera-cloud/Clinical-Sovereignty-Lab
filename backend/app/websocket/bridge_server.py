@@ -15044,6 +15044,8 @@ async def handle_client(websocket, path=None):
             # === NATE ORGANIZER (Sovereign Circle — Accessibility) ===
             # Voice-first AI-guided document organization for users with disabilities
             elif t == "organize_start":  # QUANTUM-CRYSTAL-ARCH
+                # QUANTUM-CRYSTAL-ARCH: entry-trace for forensic visibility
+                print(f">>> [ORGANIZER] organize_start received uid={uid or '?'} content_len={len(d.get('content','') or '')} vault_item_id={d.get('vault_item_id')}")
                 if not current_profile:
                     await websocket.send(json.dumps({"type": "error", "message": "Login required"}))
                 elif effective_feature_tier(current_profile, load_registry()) != "TOP_TIER":

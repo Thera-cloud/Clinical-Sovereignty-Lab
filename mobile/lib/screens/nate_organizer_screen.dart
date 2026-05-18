@@ -13,6 +13,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../config/app_config.dart';
+import 'vault_browser_screen.dart';
 
 // ─── Design Tokens ───────────────────────────────────────────────────────────
 
@@ -76,6 +77,7 @@ class _NateOrganizerScreenState extends State<NateOrganizerScreen> {
   bool _loading = false;
   bool _sessionActive = false;
   String? _error;
+  Timer? _startWatchdog;
 
   // ── Controllers ──
   final _chatController = TextEditingController();
@@ -119,6 +121,7 @@ class _NateOrganizerScreenState extends State<NateOrganizerScreen> {
 
   @override
   void dispose() {
+    _startWatchdog?.cancel();
     _channel?.sink.close();
     _chatController.dispose();
     _contentController.dispose();
@@ -208,6 +211,7 @@ class _NateOrganizerScreenState extends State<NateOrganizerScreen> {
 
         case 'organize_started':
         case 'organize_resumed':
+          _startWatchdog?.cancel();
           _sessionId = data['session_id'] as String?;
           _sections = List<Map<String, dynamic>>.from(data['sections'] ?? []);
           _progress = data['progress'] as Map<String, dynamic>?;
@@ -245,6 +249,7 @@ class _NateOrganizerScreenState extends State<NateOrganizerScreen> {
           break;
 
         case 'error':
+          _startWatchdog?.cancel();
           _loading = false;
           _error = data['message'] as String?;
           _messages.add(_ChatMessage.system('Error: ${data['message']}'));
@@ -271,8 +276,28 @@ class _NateOrganizerScreenState extends State<NateOrganizerScreen> {
 
   void _startOrganizing() {
     final content = _contentController.text.trim();
-    if (content.isEmpty) return;
-    setState(() => _loading = true);
+    if (content.isEmpty) {
+      setState(() => _error = 'Add some content first, then tap Start.');
+      return;
+    }
+    if (!_authConfirmed) {
+      setState(() => _error = 'Still connecting — try again in a moment.');
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    _startWatchdog?.cancel();
+    _startWatchdog = Timer(const Duration(seconds: 60), () {
+      if (!mounted) return;
+      if (_loading) {
+        setState(() {
+          _loading = false;
+          _error = 'Start timed out. Tap Start Organizing to retry.';
+        });
+      }
+    });
     _send({
       'type': 'organize_start',
       'content': content,
@@ -328,12 +353,18 @@ class _NateOrganizerScreenState extends State<NateOrganizerScreen> {
       final result = await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => _VaultPickerScreen(profile: widget.profile),
+          builder: (_) => VaultBrowserScreen(
+            profile: widget.profile,
+            selectMode: true,
+          ),
         ),
       );
       if (result != null && result is String && result.isNotEmpty && mounted) {
+        final existing = _contentController.text.trim();
         setState(() {
-          _contentController.text = result;
+          _contentController.text = existing.isEmpty
+              ? result
+              : '$existing\n\n$result';
         });
       }
     } catch (_) {}
@@ -900,98 +931,3 @@ class _ChatMessage {
       _ChatMessage(type: _ChatType.system, text: text);
 }
 
-
-// ─── Vault Picker (Minimal) ─────────────────────────────────────────────────
-
-class _VaultPickerScreen extends StatefulWidget {
-  final Map<String, dynamic> profile;
-  const _VaultPickerScreen({required this.profile});
-
-  @override
-  State<_VaultPickerScreen> createState() => _VaultPickerScreenState();
-}
-
-class _VaultPickerScreenState extends State<_VaultPickerScreen> {
-  List<Map<String, dynamic>> _items = [];
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadItems();
-  }
-
-  Future<void> _loadItems() async {
-    try {
-      final storage = const FlutterSecureStorage(
-        aOptions: AndroidOptions(encryptedSharedPreferences: true),
-      );
-      final token = await storage.read(key: 'session_token');
-      if (token == null) return;
-
-      final url = '${AppConfig.apiBaseUrl}/api/v1/vault/folders/root/items?limit=50';
-      final resp = await http.get(
-        Uri.parse(url),
-        headers: {'Authorization': 'Bearer $token'},
-      ).timeout(const Duration(seconds: 10));
-
-      if (resp.statusCode == 200 && mounted) {
-        final data = jsonDecode(resp.body);
-        final items = (data['items'] as List?)
-            ?.map((e) => Map<String, dynamic>.from(e as Map))
-            .where((i) {
-              final mime = (i['mime_type'] ?? '').toString();
-              return mime.startsWith('text/') ||
-                     mime.contains('pdf') ||
-                     mime.contains('document');
-            })
-            .toList() ?? [];
-        setState(() { _items = items; _loading = false; });
-      } else {
-        if (mounted) setState(() => _loading = false);
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _OD.bgVoid,
-      appBar: AppBar(
-        backgroundColor: _OD.bgChamber,
-        title: const Text('Select Vault Item',
-          style: TextStyle(color: _OD.textPrimary, fontSize: 18)),
-        iconTheme: const IconThemeData(color: _OD.gold),
-      ),
-      body: _loading
-        ? const Center(child: CircularProgressIndicator(color: _OD.gold))
-        : _items.isEmpty
-          ? const Center(child: Text('No text documents in vault',
-              style: TextStyle(color: _OD.textSecondary)))
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _items.length,
-              itemBuilder: (ctx, i) {
-                final item = _items[i];
-                return ListTile(
-                  leading: const Icon(Icons.description, color: _OD.goldDim),
-                  title: Text(
-                    item['display_name']?.toString() ?? 'Untitled',
-                    style: const TextStyle(color: _OD.textPrimary, fontSize: 14),
-                  ),
-                  subtitle: Text(
-                    item['mime_type']?.toString() ?? '',
-                    style: const TextStyle(color: _OD.textMuted, fontSize: 11),
-                  ),
-                  onTap: () {
-                    final preview = item['extracted_text_preview']?.toString() ?? '';
-                    Navigator.pop(context, preview);
-                  },
-                );
-              },
-            ),
-    );
-  }
-}

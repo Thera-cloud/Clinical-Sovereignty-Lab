@@ -62,8 +62,12 @@ bool _vaultThumbnailIsVideo(String? thumbUrl, Map<String, dynamic> item) {
 
 class VaultBrowserScreen extends StatefulWidget {
   final Map<String, dynamic> profile;
+  /// When true, tapping an item returns its text content to the caller via
+  /// Navigator.pop(context, String) instead of opening the preview modal.
+  /// Used by Nate Organizer's "Load from Vault" entry point.
+  final bool selectMode;
 
-  const VaultBrowserScreen({super.key, required this.profile});
+  const VaultBrowserScreen({super.key, required this.profile, this.selectMode = false});
 
   @override
   State<VaultBrowserScreen> createState() => _VaultBrowserScreenState();
@@ -778,6 +782,10 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
 
   void _openItem(Map<String, dynamic> item) {
     final isSSE = item['content_type'] == 'sse_panel' || item['content_type'] == 'sse_archetype';
+    if (widget.selectMode) {
+      _returnItemForSelection(item);
+      return;
+    }
     if (isSSE) {
       _openSSEPanel(item);
       return;
@@ -815,6 +823,47 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
         ] : null,
       ),
     );
+  }
+
+  Future<void> _returnItemForSelection(Map<String, dynamic> item) async {
+    final isSSE = item['content_type'] == 'sse_panel' || item['content_type'] == 'sse_archetype';
+    if (isSSE) {
+      final sse = item['_sse'] as Map<String, dynamic>? ?? {};
+      final narrative = sse['narrative_text']?.toString() ?? '';
+      final biome = sse['biome']?.toString() ?? '';
+      final tone = sse['panel_tone']?.toString() ?? '';
+      final pType = sse['panel_type']?.toString() ?? 'journey';
+      final fmtBiome = biome.replaceAll('_', ' ');
+      final msg = '[Story Panel: $pType] Biome: $fmtBiome. Tone: $tone.\n\n$narrative';
+      if (mounted) Navigator.pop(context, msg.trim());
+      return;
+    }
+    var preview = item['extracted_text_preview']?.toString() ?? '';
+    final itemId = item['id']?.toString() ?? '';
+    if (itemId.isNotEmpty) {
+      try {
+        final resp = await http.get(
+          Uri.parse('$_baseUrl/api/v1/vault/items/$itemId'),
+          headers: _authHeaders,
+        ).timeout(const Duration(seconds: 8));
+        if (resp.statusCode >= 200 && resp.statusCode < 300) {
+          final data = jsonDecode(resp.body) as Map<String, dynamic>;
+          final fullText = data['extracted_text']?.toString()
+              ?? data['extracted_text_preview']?.toString()
+              ?? '';
+          if (fullText.trim().isNotEmpty) preview = fullText;
+        }
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    if (preview.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('No text content available for this item.'),
+        backgroundColor: _VaultDesign.red,
+      ));
+      return;
+    }
+    Navigator.pop(context, preview);
   }
 
   void _openSSEPanel(Map<String, dynamic> item) {
