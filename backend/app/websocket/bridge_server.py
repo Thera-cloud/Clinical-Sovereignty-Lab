@@ -226,6 +226,59 @@ _DOJO_TIER_TO_SIGNAL = {"tension": "TENSION", "workers_ai": "LOCKED", "auto": No
 _chat_session_turns: dict = {}  # uid -> list of {"user_text": ..., "ai_text": ...}
 _CHAT_SESSION_CRYSTAL_INTERVAL = 5  # create session crystal every N turns
 
+# QUANTUM-CRYSTAL-ARCH — adaptive mode detection (reflective/exploratory/strategic/handoff/accommodating)
+try:
+    from app.services import little_nate_adaptive as _adaptive_mod
+except Exception as _adaptive_imp_err:
+    print(f">>> [ADAPTIVE] Import failed (non-fatal): {_adaptive_imp_err}")
+    _adaptive_mod = None
+_adaptive_states: dict = {}  # uid -> SessionState
+_adaptive_locks: dict = {}   # uid -> asyncio.Lock
+_ADAPTIVE_IDLE_TTL_S = 7200  # 2 hours
+_ADAPTIVE_SWEEP_INTERVAL = 50  # sweep every N interactions
+_adaptive_sweep_counter = 0
+_ADDENDUM_RESERVE = 2000  # chars reserved at end of system prompt for mode addendum
+
+
+def _adaptive_sweep() -> None:
+    """Drop stale per-uid adaptive state + locks. Called every N interactions."""
+    if not _adaptive_states:
+        return
+    import time as _t
+    cutoff = _t.time() - _ADAPTIVE_IDLE_TTL_S
+    stale = [uid for uid, st in _adaptive_states.items()
+             if getattr(st, "last_touched_ts", 0) < cutoff]
+    for uid in stale:
+        _adaptive_states.pop(uid, None)
+        _adaptive_locks.pop(uid, None)
+    if stale:
+        print(f">>> [ADAPTIVE] swept {len(stale)} stale state(s)")
+
+
+def _adaptive_get_state(uid: str):
+    """Lazy-create SessionState for uid. Returns None if adaptive module unavailable."""
+    if _adaptive_mod is None or not uid:
+        return None
+    st = _adaptive_states.get(uid)
+    if st is None:
+        st = _adaptive_mod.SessionState()
+        _adaptive_states[uid] = st
+    return st
+
+
+def _adaptive_get_lock(uid: str):
+    import asyncio as _asyncio
+    lk = _adaptive_locks.get(uid)
+    if lk is None:
+        lk = _asyncio.Lock()
+        _adaptive_locks[uid] = lk
+    return lk
+
+
+def _adaptive_clear(uid: str) -> None:
+    _adaptive_states.pop(uid, None)
+    _adaptive_locks.pop(uid, None)
+
 # QUANTUM-CRYSTAL-ARCH — Six-Quotient Growth Engine (per-interaction self-assessment)
 _six_quotient_growth = None
 try:
@@ -7816,6 +7869,12 @@ class AzureCortex:
             self.sessions.end_session(session_id, topics=topics)
             del self.active_sessions[uid]
 
+        # QUANTUM-CRYSTAL-ARCH — drop adaptive mode state on unregister
+        try:
+            _adaptive_clear(uid)
+        except Exception:
+            pass
+
     def _get_family(self, p: dict) -> str:
         fid = p.get("family_id")
         if not fid:
@@ -8959,6 +9018,35 @@ class AzureCortex:
         {lr_context}"""
         # SOVEREIGN-VOICE — cap system prompt; workers_ai/grok handle 128K+ context  # QUANTUM-CRYSTAL-ARCH
         _SP_CAP = 32000
+
+        # QUANTUM-CRYSTAL-ARCH — adaptive mode addendum (reflective/exploratory/strategic/handoff/accommodating)
+        # G3: reserve headroom FIRST so the cap can never silently eat the mode instruction.
+        _adaptive_payload = None
+        if _adaptive_mod is not None and _role == "CLIENT" and not dojo_type:
+            try:
+                global _adaptive_sweep_counter
+                _adaptive_sweep_counter += 1
+                if _adaptive_sweep_counter >= _ADAPTIVE_SWEEP_INTERVAL:
+                    _adaptive_sweep_counter = 0
+                    _adaptive_sweep()
+                _ad_state = _adaptive_get_state(uid)
+                _ad_lock = _adaptive_get_lock(uid)
+                if _ad_state is not None and _ad_lock is not None:
+                    async with _ad_lock:
+                        _adaptive_payload = _adaptive_mod.prepare_response(_ad_state, user_text, profile)
+                    _addendum = _adaptive_payload.get("system_addendum", "") if _adaptive_payload else ""
+                    if _addendum:
+                        # Reserve headroom for the addendum so trim can never drop it.
+                        _max_base = _SP_CAP - _ADDENDUM_RESERVE
+                        if len(system_prompt) > _max_base:
+                            print(f">>> [ADAPTIVE] base prompt {len(system_prompt)} > {_max_base}, trimming to reserve addendum headroom")
+                            system_prompt = system_prompt[:_max_base] + "\n\n[Context truncated to preserve mode instruction.]"
+                        system_prompt = system_prompt + "\n\n---\n" + _addendum
+                        _signals_fired = [k for k, v in _adaptive_payload.get("signals", {}).items() if v]
+                        print(f">>> [ADAPTIVE] uid={uid} mode={_adaptive_payload.get('mode')} signals={_signals_fired} locked={getattr(_ad_state, 'accommodating_locked', False)}")
+            except Exception as _ad_err:
+                print(f">>> [ADAPTIVE] error (non-fatal): {type(_ad_err).__name__}: {_ad_err}")
+
         if len(system_prompt) > _SP_CAP:
             print(f">>> [PROMPT CAP] Trimming system prompt from {len(system_prompt)} to {_SP_CAP} chars")
             system_prompt = system_prompt[:_SP_CAP] + "\n\n[Context truncated for performance. Focus on the user's current message.]"
@@ -9449,6 +9537,31 @@ class AzureCortex:
                     print(f">>> [MEMORY SKIP] Empty/garbled response not persisted for uid={uid}")
             except Exception as mem_err:
                 print(f">>> [MEMORY SAVE ERROR] uid={uid} {type(mem_err).__name__}: {mem_err}")
+
+            # QUANTUM-CRYSTAL-ARCH — adaptive mode: record assistant turn under same per-uid lock
+            if _adaptive_payload is not None and _adaptive_mod is not None and _final_response.strip():
+                try:
+                    _ad_state2 = _adaptive_states.get(uid)
+                    _ad_lock2 = _adaptive_locks.get(uid)
+                    if _ad_state2 is not None and _ad_lock2 is not None:
+                        async with _ad_lock2:
+                            _adaptive_mod.record_assistant_turn(_ad_state2, _final_response)
+                    # Surface handoff offer to client UI
+                    if _adaptive_payload.get("should_offer_coach_ui") and uid in self.sockets:
+                        _meta_payload = {
+                            "type": "offer_coach_handoff",
+                            "coach_name": _adaptive_payload.get("coach_name", "your coach"),
+                            "turn_id": _turn_id,
+                        }
+                        for _ws in list(self.sockets[uid]):
+                            if _ctx is not None and getattr(_ws, "_eviction_context", "main") != _ctx:
+                                continue
+                            try:
+                                await _ws.send(json.dumps(_meta_payload))
+                            except Exception:
+                                self.sockets[uid].discard(_ws)
+                except Exception as _ad_post_err:
+                    print(f">>> [ADAPTIVE] post-turn error (non-fatal): {_ad_post_err}")
 
             if not _is_search_synthesis:  # QUANTUM-CRYSTAL-ARCH — skip crystallizing search dumps
                 try:

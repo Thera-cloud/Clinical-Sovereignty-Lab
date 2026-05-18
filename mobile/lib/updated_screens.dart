@@ -2003,6 +2003,30 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
               data['sentiment'] ?? data['mood'] ?? _metrics['mood_current'];
           _updateAvatarFromSentiment(sentiment, reply);
         }
+      } else if (data['type'] == 'offer_coach_handoff') {
+        final coachName = (data['coach_name'] as String?)?.trim().isNotEmpty == true
+            ? data['coach_name'] as String
+            : 'your coach';
+        if (mounted) {
+          setState(() {
+            _chatHistory.add('System: [Reach out to $coachName]');
+            _scrollToBottom();
+          });
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Want to bring $coachName into this?',
+                style: const TextStyle(color: Colors.white)),
+            backgroundColor: const Color(0xFF1A1A2E),
+            duration: const Duration(seconds: 8),
+            action: SnackBarAction(
+              label: 'Reach out',
+              textColor: const Color(0xFFC9A962),
+              onPressed: () {
+                // Navigate to coach contact / sessions tab if available.
+                // Minimal handler: leave it to the user to act on the prompt.
+              },
+            ),
+          ));
+        }
       } else if (data['type'] == 'search_consent_request') {
         final query = data['query'] ?? '';
         if (query.isNotEmpty && mounted) {
