@@ -2848,7 +2848,17 @@ async def process_refund(req: RefundRequest, request: Request):
                     json.dumps(refund_record, default=str),
                 )
         except Exception as e:
-            logger.warning("process_refund: PG write failed: %s", e)
+            logger.error("process_refund: payment_history INSERT failed (user=%s amount=%s): %s",
+                         req.user_id, req.amount, e)
+            try:
+                async with pool.acquire() as _audit_conn:
+                    await _audit_conn.execute(
+                        "INSERT INTO skyeye_activity (type, content, severity, created_at) "
+                        "VALUES ('sql_failure_payment_history', $1, 'error', NOW())",
+                        f"process_refund INSERT failed user={req.user_id} amount={req.amount}: {e}",
+                    )
+            except Exception:
+                pass
 
     # JSON backup
     billing.setdefault("transactions", []).append(refund_record)
@@ -2968,7 +2978,17 @@ async def create_coupon_legacy(req: CouponRequest, request: Request):
                     json.dumps(coupon_record, default=str),
                 )
         except Exception as e:
-            logger.warning("create_coupon_legacy: PG write failed: %s", e)
+            logger.error("create_coupon_legacy: payment_history INSERT failed (code=%s): %s",
+                         req.code, e)
+            try:
+                async with pool.acquire() as _audit_conn:
+                    await _audit_conn.execute(
+                        "INSERT INTO skyeye_activity (type, content, severity, created_at) "
+                        "VALUES ('sql_failure_payment_history', $1, 'error', NOW())",
+                        f"create_coupon_legacy INSERT failed code={req.code}: {e}",
+                    )
+            except Exception:
+                pass
 
     # JSON backup
     billing.setdefault("coupons", []).append(coupon_record)
