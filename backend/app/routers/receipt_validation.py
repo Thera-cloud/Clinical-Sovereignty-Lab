@@ -286,11 +286,21 @@ async def _credit_consumable(request: Request, user_id: str,
 
     elif consumable["type"] == "sanctuary_charge":
         async with pool.acquire() as conn:
+            user_uuid = await conn.fetchval(
+                "SELECT id FROM users WHERE username = $1", user_id
+            )
+            if not user_uuid:
+                raise RuntimeError(
+                    f"IAP sanctuary_charge: no user matched username '{user_id}'"
+                )
+            # Schema: (user_id UUID NOT NULL FK, amount_cents INT NOT NULL, currency NOT NULL,
+            #         status NOT NULL, event_type VARCHAR(64) NOT NULL, metadata JSONB)
             await conn.execute("""
-                INSERT INTO payment_history (user_id, amount_cents, payment_type, product_id, source, status, created_at)
-                SELECT id, $2, 'sanctuary_charge', $3, $4, 'completed', NOW()
-                FROM users WHERE username = $1
-            """, user_id, consumable["amount_cents"], product_id, source)
+                INSERT INTO payment_history
+                    (user_id, amount_cents, currency, status, event_type, metadata, created_at)
+                VALUES ($1, $2, 'usd', 'succeeded', 'iap.sanctuary_charge', $3::jsonb, NOW())
+            """, user_uuid, consumable["amount_cents"],
+                _json_mod.dumps({"product_id": product_id, "source": source}))
 
             await conn.execute("""
                 INSERT INTO skyeye_activity (type, platform, content, created_at)

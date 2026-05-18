@@ -2835,14 +2835,27 @@ async def process_refund(req: RefundRequest, request: Request):
             refund_record["stripe_error"] = str(e)
 
     # PG-first: write refund to payment_history
+    # Schema: (user_id UUID NOT NULL FK, amount_cents INT NOT NULL, currency NOT NULL,
+    #         status NOT NULL, event_type VARCHAR(64) NOT NULL, failure_reason TEXT,
+    #         metadata JSONB, created_at TIMESTAMPTZ NOT NULL)
     if pool:
         try:
             async with pool.acquire() as conn:
+                user_uuid = await conn.fetchval(
+                    "SELECT id FROM users WHERE username = $1 OR hardware_id = $1 LIMIT 1",
+                    req.user_id,
+                )
+                if not user_uuid:
+                    raise RuntimeError(
+                        f"refund audit: no user matched identifier '{req.user_id}'"
+                    )
                 await conn.execute(
                     """INSERT INTO payment_history
-                       (username, amount, currency, status, description, metadata, created_at)
-                       VALUES ($1, $2, 'usd', 'refunded', $3, $4::jsonb, NOW())""",
-                    req.user_id,
+                       (user_id, amount_cents, currency, status, event_type,
+                        failure_reason, metadata, created_at)
+                       VALUES ($1, $2, 'usd', 'refunded', 'admin_refund',
+                               $3, $4::jsonb, NOW())""",
+                    user_uuid,
                     int(req.amount * 100),
                     f"Admin refund: {req.reason}",
                     json.dumps(refund_record, default=str),
@@ -2964,31 +2977,23 @@ async def create_coupon_legacy(req: CouponRequest, request: Request):
             coupon_record["stripe_coupon"] = True
         except Exception as e:
             coupon_record["stripe_error"] = str(e)
-    # PG-first: log coupon creation to payment_history
+    # Log coupon creation to skyeye_activity (correct audit table for non-payment events).
+    # Previously wrote to payment_history with non-existent columns (username, description) —
+    # coupons aren't payments and don't belong in payment_history.
     pool = getattr(request.app.state, "db_pool", None)
     if pool:
         try:
             async with pool.acquire() as conn:
                 await conn.execute(
-                    """INSERT INTO payment_history
-                       (username, amount, currency, status, description, metadata, created_at)
-                       VALUES ($1, $2, 'usd', 'coupon_created', $3, $4::jsonb, NOW())""",
-                    "system", 0,
-                    f"Coupon {req.code}: {req.discount} {req.type}",
+                    "INSERT INTO skyeye_activity (type, content, severity, metadata, created_at) "
+                    "VALUES ('coupon_created', $1, 'info', $2::jsonb, NOW())",
+                    f"Coupon {req.code}: {req.discount} {req.type} "
+                    f"(stripe={coupon_record.get('stripe_coupon')})",
                     json.dumps(coupon_record, default=str),
                 )
         except Exception as e:
-            logger.error("create_coupon_legacy: payment_history INSERT failed (code=%s): %s",
+            logger.error("create_coupon_legacy: skyeye_activity audit write failed (code=%s): %s",
                          req.code, e)
-            try:
-                async with pool.acquire() as _audit_conn:
-                    await _audit_conn.execute(
-                        "INSERT INTO skyeye_activity (type, content, severity, created_at) "
-                        "VALUES ('sql_failure_payment_history', $1, 'error', NOW())",
-                        f"create_coupon_legacy INSERT failed code={req.code}: {e}",
-                    )
-            except Exception:
-                pass
 
     # JSON backup
     billing.setdefault("coupons", []).append(coupon_record)

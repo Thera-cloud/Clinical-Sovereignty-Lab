@@ -1455,7 +1455,7 @@ class StripeService:
                     )
                 else:
                     await self.db.execute(
-                        "UPDATE subscriptions SET status = 'CANCELLED', cancelled_at = NOW() WHERE user_id = $1",
+                        "UPDATE subscriptions SET status = 'CANCELLED', canceled_at = NOW() WHERE user_id = $1",
                         db_uid
                     )
                 return True
@@ -1474,7 +1474,7 @@ class StripeService:
         else:
             stripe.Subscription.delete(sub['stripe_subscription_id'])
             await self.db.execute(
-                "UPDATE subscriptions SET status = 'CANCELLED', cancelled_at = NOW() WHERE user_id = $1",
+                "UPDATE subscriptions SET status = 'CANCELLED', canceled_at = NOW() WHERE user_id = $1",
                 db_uid
             )
         
@@ -3150,7 +3150,7 @@ class StripeWebhookHandler:
         
         if user_id:
             await self.db.execute(
-                "UPDATE subscriptions SET status = 'CANCELLED', cancelled_at = NOW() WHERE stripe_subscription_id = $1",
+                "UPDATE subscriptions SET status = 'CANCELLED', canceled_at = NOW() WHERE stripe_subscription_id = $1",
                 subscription_id
             )
             
