@@ -4,7 +4,10 @@ import re
 _SENTENCE_SPLIT = re.compile(r'(?<=[.!?])\s+')
 _NON_ASCII = re.compile(r'[^\x00-\x7F]')
 _MIXED_SCRIPTS = re.compile(
-    r'[\u0400-\u04FF].*[\u4E00-\u9FFF]|[\u4E00-\u9FFF].*[\u0400-\u04FF]'
+    r'[\u0400-\u04FF\uAC00-\uD7A3].*[\u4E00-\u9FFF]'
+    r'|[\u4E00-\u9FFF].*[\u0400-\u04FF\uAC00-\uD7A3]'
+    r'|[\u0400-\u04FF].*[\uAC00-\uD7A3]'
+    r'|[\uAC00-\uD7A3].*[\u0400-\u04FF]'
 )
 _CAMEL_CASE = re.compile(r'[a-z][A-Z][a-z]')
 _PASCAL_CODE = re.compile(r'^[A-Z][a-z]+[A-Z]')
@@ -14,6 +17,9 @@ _GARBLE_TOKENS = frozenset({
     'BootApplication', 'FetchType', 'Snapdragon', 'Cylinder',
     'diferentecek', 'scroll(func', 'jsonb_set', 'asyncio',
     'RETURN/disc', 'panLab', 'ysRETURN', 'poss ridAff',
+    'methodName', 'namedtuple', 'hmac_tracks', 'offsetHeight',
+    'removeFromSuperview', 'WEBPACK', 'getOutputStream',
+    'ExecutionContext', 'ExpandedRenderer', 'ContentView',
 })
 
 
@@ -63,6 +69,8 @@ def is_chunk_garbled(chunk: str) -> bool:
     )
     if code_tokens >= 2:
         score += 2
+    elif code_tokens == 1:
+        score += 1
 
     non_ascii = sum(1 for c in chunk if ord(c) > 127)
     if non_ascii / max(len(chunk), 1) > 0.15:
@@ -83,6 +91,10 @@ def is_chunk_garbled(chunk: str) -> bool:
             scripts.add('dev')
         elif 0x4E00 <= cp <= 0x9FFF:
             scripts.add('cjk')
+        elif 0xAC00 <= cp <= 0xD7A3:
+            scripts.add('kor')
+        elif 0x0600 <= cp <= 0x06FF:
+            scripts.add('ara')
         elif 0x0041 <= cp <= 0x007A:
             scripts.add('lat')
     if len(scripts) >= 3:
@@ -119,5 +131,5 @@ def sanitize_response(text: str) -> str:
     if clean_after:
         parts.extend(clean_after)
     if not parts:
-        return text
+        return ""
     return '  '.join(parts)

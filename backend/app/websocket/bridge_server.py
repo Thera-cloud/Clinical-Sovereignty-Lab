@@ -9080,14 +9080,14 @@ class AzureCortex:
                                 _chunk_buf += delta
 
                             # QUANTUM-CRYSTAL-ARCH: garble detection before sending to client
-                            if provider == "workers_ai" and len(_chunk_buf) >= 25:
+                            if len(_chunk_buf) >= 25:
                                 if _is_garbled_chunk(_chunk_buf):
                                     _garble_streak += 1
-                                    print(f">>> [GARBLE] Garbled chunk #{_garble_streak} from workers_ai ({len(_chunk_buf)} chars): {_chunk_buf[:80]}...")
+                                    print(f">>> [GARBLE] Garbled chunk #{_garble_streak} from {provider} ({len(_chunk_buf)} chars): {_chunk_buf[:80]}...")
                                     _chunk_buf = ""
                                     full_response = _clean_prefix
                                     if _garble_streak >= _GARBLE_STREAK_LIMIT:
-                                        print(f">>> [GARBLE] {_garble_streak} consecutive garbled chunks — aborting workers_ai")
+                                        print(f">>> [GARBLE] {_garble_streak} consecutive garbled chunks — aborting {provider}")
                                         _garble_aborted = True
                                         break
                                     continue
@@ -9097,7 +9097,7 @@ class AzureCortex:
 
                                 _total_chars_sent += len(_chunk_buf)
                                 if _total_chars_sent > _MAX_CHARS_WORKERS:
-                                    print(f">>> [GARBLE] Workers AI exceeded {_MAX_CHARS_WORKERS} char safety cap")
+                                    print(f">>> [GARBLE] {provider} exceeded {_MAX_CHARS_WORKERS} char safety cap")
                                     break
 
                             if _first_token:
@@ -9443,7 +9443,10 @@ class AzureCortex:
                 _mem_meta = {}
                 if hasattr(self.metrics, '_last_mismatch') and self.metrics._last_mismatch:
                     _mem_meta["cee_mismatch"] = self.metrics._last_mismatch
-                self.mem.memorize(profile, user_text, _final_response, session_id, metadata=_mem_meta if _mem_meta else None)
+                if _final_response.strip():
+                    self.mem.memorize(profile, user_text, _final_response, session_id, metadata=_mem_meta if _mem_meta else None)
+                else:
+                    print(f">>> [MEMORY SKIP] Empty/garbled response not persisted for uid={uid}")
             except Exception as mem_err:
                 print(f">>> [MEMORY SAVE ERROR] uid={uid} {type(mem_err).__name__}: {mem_err}")
 
