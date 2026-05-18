@@ -729,7 +729,7 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
                 disc = await conn.fetchrow(
                     "SELECT discount_type, discount_value, stripe_coupon_id "
                     "FROM promotional_specials WHERE promo_code = $1 AND active = true "
-                    "AND (expires_at IS NULL OR expires_at > NOW())",
+                    "AND ends_at > NOW()",
                     body.discount_code.strip().upper(),
                 )
                 if disc and disc["stripe_coupon_id"]:
