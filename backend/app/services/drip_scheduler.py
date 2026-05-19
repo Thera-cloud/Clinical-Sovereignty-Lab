@@ -8,7 +8,8 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Dict, Optional
+from uuid import UUID
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -807,6 +808,45 @@ class DripScheduler:
         except Exception as e:
             logger.warning("Balance sync failed for %s during trial sweep: %s", username, e)
 
+    async def _resolve_user_uuid(self, profile: Dict[str, Any], registry_key: str) -> Optional[UUID]:
+        """Resolve users.id (UUID) for nate_nudges — never hardware_id strings."""
+        raw = profile.get("user_uuid") or profile.get("pg_user_id")
+        if raw:
+            try:
+                return UUID(str(raw))
+            except (ValueError, TypeError):
+                pass
+        if not self.db_pool:
+            return None
+        hw_id = profile.get("hardware_id")
+        username = profile.get("username")
+        if not username and "_" in registry_key:
+            username = registry_key.split("_", 1)[-1]
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT id FROM users
+                    WHERE deleted_at IS NULL
+                      AND (
+                        ($1::text IS NOT NULL AND hardware_id = $1)
+                        OR ($2::text IS NOT NULL AND username = $2)
+                      )
+                    LIMIT 1
+                    """,
+                    hw_id,
+                    username,
+                )
+            if row and row.get("id"):
+                uid = UUID(str(row["id"]))
+                profile["user_uuid"] = str(uid)
+                return uid
+        except Exception as e:
+            logger.warning(
+                "Trial sweep: UUID lookup failed for %s: %s", registry_key, e
+            )
+        return None
+
     async def sweep_trial_expirations(self):
         """
         Hourly sweep for trial management:
@@ -825,7 +865,7 @@ class DripScheduler:
             try:
                 async with self.db_pool.acquire() as conn:
                     rows = await conn.fetch(
-                        """SELECT username, role, hardware_id, name, email,
+                        """SELECT id, username, role, hardware_id, name, email,
                                   tier, subscription_status, token_balance,
                                   profile_data, created_at
                            FROM users WHERE deleted_at IS NULL"""
@@ -842,6 +882,8 @@ class DripScheduler:
                         key = f"{(row.get('role') or 'CLIENT').lower()}_{row['username']}"
                         profile = {**pd}
                         profile.setdefault("hardware_id", row.get("hardware_id", ""))
+                        if row.get("id"):
+                            profile.setdefault("user_uuid", str(row["id"]))
                         profile.setdefault("name", row.get("name", ""))
                         profile.setdefault("email", row.get("email", ""))
                         profile.setdefault("username", row["username"])
@@ -907,61 +949,80 @@ class DripScheduler:
 
             trial_days = 7  # Default from PLAN_DETAILS
             trial_end = trial_start + timedelta(days=trial_days)
+            trial_end_str = profile.get("trial_end_date")
+            if trial_end_str:
+                try:
+                    te = datetime.fromisoformat(str(trial_end_str).replace("Z", "+00:00"))
+                    if te.tzinfo is None:
+                        te = te.replace(tzinfo=timezone.utc)
+                    else:
+                        te = te.astimezone(timezone.utc)
+                    trial_end = te
+                except (ValueError, TypeError):
+                    pass
             days_remaining = (trial_end - now).total_seconds() / 86400
 
             # --- Pre-expiry nudges (3 days and 1 day) ---
             if 0.5 < days_remaining <= 3.5 and status in ("TRIAL_ACTIVE", "ACTIVE", ""):
                 nudge_key = f"_trial_nudge_{'3d' if days_remaining > 1.5 else '1d'}"
                 if not profile.get(nudge_key):
-                    # Send Nate Nudge
-                    try:
-                        from app.services.nate_nudge import NateNudgeService
-                        nudge_svc = NateNudgeService(self.db_pool)
+                    user_uuid = await self._resolve_user_uuid(profile, key)
+                    if not user_uuid:
+                        logger.warning(
+                            "Trial nudge skipped for %s: could not resolve user UUID",
+                            key,
+                        )
+                    else:
                         days_label = "3 days" if days_remaining > 1.5 else "1 day"
                         user_name = profile.get("name") or profile.get("display_name") or "there"
+                        title = (
+                            "Last day of your trial"
+                            if days_remaining <= 1.5
+                            else f"Your trial ends in {days_label}"
+                        )
+                        content = (
+                            f"Hey {user_name}, last day of your trial. Upgrade now to keep access to Little Nate."
+                            if days_remaining <= 1.5
+                            else f"Hey {user_name}, your trial ends in {days_label}. Choose your plan to continue."
+                        )
+                        try:
+                            async with self.db_pool.acquire() as conn:
+                                await conn.execute(
+                                    """
+                                    INSERT INTO nate_nudges
+                                        (user_id, nudge_type, title, content, metadata, scheduled_at)
+                                    VALUES ($1, 'trial_expiry', $2, $3, $4, NOW())
+                                    """,
+                                    user_uuid,
+                                    title,
+                                    content,
+                                    json.dumps({
+                                        "days_remaining": round(days_remaining, 1),
+                                        "nudge_type": nudge_key,
+                                    }),
+                                )
+                            profile[nudge_key] = str(now)
+                            modified = True
+                            nudges_sent += 1
 
-                        async with self.db_pool.acquire() as conn:
-                            await conn.execute(
-                                """
-                                INSERT INTO nate_nudges
-                                    (user_id, nudge_type, title, content, metadata, scheduled_at)
-                                VALUES ($1, 'trial_expiry', $2, $3, $4, NOW())
-                                ON CONFLICT DO NOTHING
-                                """,
-                                profile.get("hardware_id", key),
-                                (
-                                    "Last day of your trial"
-                                    if days_remaining <= 1.5
-                                    else f"Your trial ends in {days_label}"
-                                ),
-                                (
-                                    f"Hey {user_name}, last day of your trial. Upgrade now to keep access to Little Nate."
-                                    if days_remaining <= 1.5
-                                    else f"Hey {user_name}, your trial ends in {days_label}. Choose your plan to continue."
-                                ),
-                                json.dumps({"days_remaining": round(days_remaining, 1), "nudge_type": nudge_key}),
-                            )
-                        profile[nudge_key] = str(now)
-                        modified = True
-                        nudges_sent += 1
-                    except Exception as e:
-                        logger.warning("Trial nudge failed for %s: %s", key, e)
-
-                    # Also send email notification
-                    try:
-                        from app.services.notifications_service import EmailService
-                        email_svc = EmailService()
-                        user_email = profile.get("email")
-                        user_name = profile.get("name") or "Friend"
-                        if user_email:
-                            await email_svc.send_trial_expiring(
-                                user_email, user_name,
-                                sessions=profile.get("session_count", 0),
-                                coherence_change=profile.get("coherence_delta", "+0%"),
-                                insights=profile.get("session_count", 0) * 3,
-                            )
-                    except Exception as e:
-                        logger.warning("Trial expiry email failed for %s: %s", key, e)
+                            user_email = profile.get("email")
+                            if user_email:
+                                try:
+                                    from app.services.notifications_service import EmailService
+                                    email_svc = EmailService()
+                                    await email_svc.send_trial_expiring(
+                                        user_email,
+                                        user_name or "Friend",
+                                        sessions=profile.get("session_count", 0),
+                                        coherence_change=profile.get("coherence_delta", "+0%"),
+                                        insights=profile.get("session_count", 0) * 3,
+                                    )
+                                except Exception as e:
+                                    logger.warning(
+                                        "Trial expiry email failed for %s: %s", key, e
+                                    )
+                        except Exception as e:
+                            logger.warning("Trial nudge failed for %s: %s", key, e)
 
             # --- Trial expired → Coach-only (stored payment method enables one-click upgrade) ---
             elif days_remaining <= 0 and status in ("TRIAL_ACTIVE", "ACTIVE", ""):

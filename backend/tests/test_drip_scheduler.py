@@ -3,7 +3,8 @@ Tests for DripScheduler — background job scheduler.
 """
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
 
 from app.services.drip_scheduler import DripScheduler
 
@@ -60,3 +61,28 @@ class TestDripSchedulerStart:
             "run_coherence_pulse",
         }
         assert registered_ids == expected_ids
+
+
+class TestTrialUserUuidResolution:
+    @pytest.mark.asyncio
+    async def test_resolve_from_profile_cache(self, fake_pool):
+        uid = UUID("faacaf2e-4ef0-4750-926c-3dc65ccfbf62")
+        scheduler = DripScheduler(db_pool=fake_pool)
+        profile = {"user_uuid": str(uid), "hardware_id": "CLIENT_MBRYCE_ID"}
+        got = await scheduler._resolve_user_uuid(profile, "client_Mbryce")
+        assert got == uid
+        fake_pool.acquire.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_resolve_from_db_by_hardware_id(self, fake_pool):
+        uid = UUID("faacaf2e-4ef0-4750-926c-3dc65ccfbf62")
+        conn = AsyncMock()
+        conn.fetchrow = AsyncMock(return_value={"id": uid})
+        fake_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
+        fake_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        scheduler = DripScheduler(db_pool=fake_pool)
+        profile = {"hardware_id": "CLIENT_MBRYCE_ID", "username": "Mbryce"}
+        got = await scheduler._resolve_user_uuid(profile, "client_Mbryce")
+        assert got == uid
+        assert profile["user_uuid"] == str(uid)
