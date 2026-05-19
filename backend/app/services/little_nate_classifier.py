@@ -99,7 +99,16 @@ sexuality_intimacy, faith_spirituality]
   weight: 0.0-1.0
     (how heavy is this message relative to ordinary conversation)
 
-Respond with JSON only, no preamble.\
+Return ONLY one valid JSON object.
+No markdown fences.
+No prose before or after JSON.\
+"""
+
+_CLASSIFIER_PROMPT_V1_STRICT = """\
+Return ONLY a valid JSON object for the requested schema.
+No markdown.
+No code fences.
+No extra text.
 """
 
 # ============================================================
@@ -170,6 +179,21 @@ def _parse_classifier_json(raw: str) -> ClassifierResult:
     raw = raw.strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+    if "{" in raw:
+        start = raw.find("{")
+        depth = 0
+        end = -1
+        for i, ch in enumerate(raw[start:], start=start):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end != -1:
+            raw = raw[start : end + 1]
 
     data = json.loads(raw)
 
@@ -245,29 +269,35 @@ async def _call_classifier_llm(user_msg: str) -> ClassifierResult:
         return ClassifierResult(error="azure_not_configured")
 
     headers = {"Content-Type": "application/json", "api-key": api_key}
-    messages = [
-        {"role": "system", "content": _CLASSIFIER_PROMPT_V1},
-        {"role": "user", "content": user_msg},
-    ]
-    if foundry:
-        payload = {
-            "model": _classifier_model(),
+    def _payload(system_prompt: str) -> Dict[str, object]:
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_msg},
+        ]
+        if foundry:
+            return {
+                "model": _classifier_model(),
+                "messages": messages,
+                "max_completion_tokens": 200,
+                "temperature": 0.0,
+                "response_format": {"type": "json_object"},
+            }
+        return {
             "messages": messages,
             "max_completion_tokens": 200,
-            "temperature": 0.1,
+            "temperature": 0.0,
+            "response_format": {"type": "json_object"},
         }
-    else:
-        payload = {
-            "messages": messages,
-            "max_completion_tokens": 200,
-            "temperature": 0.1,
-        }
+
+    async def _post_once(system_prompt: str):
+        import httpx
+
+        async with httpx.AsyncClient(timeout=_timeout_s()) as client:
+            return await client.post(url, json=_payload(system_prompt), headers=headers)
 
     t0 = time.monotonic()
     try:
-        import httpx
-        async with httpx.AsyncClient(timeout=_timeout_s()) as client:
-            resp = await client.post(url, json=payload, headers=headers)
+        resp = await _post_once(_CLASSIFIER_PROMPT_V1)
         latency = (time.monotonic() - t0) * 1000
 
         if resp.status_code != 200:
@@ -286,7 +316,21 @@ async def _call_classifier_llm(user_msg: str) -> ClassifierResult:
             _consecutive_failures += 1
             return ClassifierResult(error="empty_response", latency_ms=latency)
 
-        result = _parse_classifier_json(content)
+        try:
+            result = _parse_classifier_json(content)
+        except json.JSONDecodeError:
+            retry = await _post_once(f"{_CLASSIFIER_PROMPT_V1}\n\n{_CLASSIFIER_PROMPT_V1_STRICT}")
+            latency = (time.monotonic() - t0) * 1000
+            if retry.status_code != 200:
+                _consecutive_failures += 1
+                return ClassifierResult(error=f"http_{retry.status_code}", latency_ms=latency)
+            rj = retry.json()
+            rcontent = (rj.get("choices") or [{}])[0].get("message", {}).get("content", "")
+            if not rcontent:
+                _consecutive_failures += 1
+                return ClassifierResult(error="empty_response", latency_ms=latency)
+            result = _parse_classifier_json(rcontent)
+
         result = ClassifierResult(
             distress_intensity=result.distress_intensity,
             indirect_self_blame=result.indirect_self_blame,
@@ -300,6 +344,22 @@ async def _call_classifier_llm(user_msg: str) -> ClassifierResult:
         _consecutive_failures = 0
         return result
 
+    except json.JSONDecodeError:
+        latency = (time.monotonic() - t0) * 1000
+        # Parsing issues are content-shape problems, not transport outages.
+        # Do not open the circuit for these; fall back to regex for this turn.
+        return ClassifierResult(error="json_parse_failed", latency_ms=latency)
+    except ValueError as exc:
+        latency = (time.monotonic() - t0) * 1000
+        if "Expecting value" in str(exc) or "JSON" in str(exc):
+            return ClassifierResult(error="json_parse_failed", latency_ms=latency)
+        exc_name = type(exc).__name__
+        _consecutive_failures += 1
+        if _consecutive_failures >= _CIRCUIT_BREAK_FAILURES:
+            _circuit_open_until = time.monotonic() + _CIRCUIT_BREAK_COOLDOWN_S
+            logger.warning("[CLASSIFIER] circuit OPEN for %.0fs (%s)",
+                           _CIRCUIT_BREAK_COOLDOWN_S, exc_name)
+        return ClassifierResult(error=exc_name, latency_ms=latency)
     except Exception as exc:
         latency = (time.monotonic() - t0) * 1000
         exc_name = type(exc).__name__

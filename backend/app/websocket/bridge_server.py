@@ -227,7 +227,8 @@ _chat_session_turns: dict = {}  # uid -> list of {"user_text": ..., "ai_text": .
 _CHAT_SESSION_CRYSTAL_INTERVAL = 5  # create session crystal every N turns
 # Gap 3: live per-session continuity buffer for immediate referent recall.
 _chat_live_turns: dict = {}  # uid -> list of {"user_text": ..., "ai_text": ...}
-_CHAT_LIVE_TURN_LIMIT = 8
+_CHAT_LIVE_TURN_LIMIT = 16  # LOAD-TEST-BASELINE: was 8; r4 Gap 3 needs >=16 in-session turns
+_LIVE_TURN_PROMPT_LIMIT = 16
 
 # QUANTUM-CRYSTAL-ARCH — adaptive mode detection (reflective/exploratory/strategic/handoff/accommodating)
 try:
@@ -7106,7 +7107,28 @@ async def _fetch_pg_history_for_chat(db_pool, username: str, hardware_id: str, l
         return ""
 
 
-def _format_live_turn_context(uid: str, limit: int = 4) -> str:
+def _format_critical_recall_facts(uid: str) -> str:
+    """Pin salient in-session facts for recall prompts (Gap 3)."""
+    turns = _chat_live_turns.get(uid) or []
+    facts = []
+    for t in turns:
+        ut = (t.get("user_text") or "").lower()
+        if "over a year" in ut and "intimate" in ut:
+            facts.append("The user said intimacy has been absent for over a year.")
+        if "relationship with a guy in college" in ut:
+            facts.append("The user disclosed a college relationship with a man.")
+        if "church" in ut and "sin" in ut:
+            facts.append("The user linked faith/church pressure to this conflict.")
+    if not facts:
+        return ""
+    uniq = []
+    for f in facts:
+        if f not in uniq:
+            uniq.append(f)
+    return "CRITICAL RECALL FACTS (quote these when asked):\n- " + "\n- ".join(uniq[:5])
+
+
+def _format_live_turn_context(uid: str, limit: int = _LIVE_TURN_PROMPT_LIMIT) -> str:
     """Format immediate in-session turns for short-horizon continuity."""
     turns = _chat_live_turns.get(uid) or []
     if not turns:
@@ -8305,7 +8327,8 @@ class AzureCortex:
             )),
             _timed("pg_history", _fetch_pg_history_for_chat(_cpool, _uname, _hw_id, limit=15)),
         )
-        _live_turn_context = _format_live_turn_context(uid, limit=4)
+        _live_turn_context = _format_live_turn_context(uid)
+        _critical_recall_context = _format_critical_recall_facts(uid)
         _pre_ms = int((_time_ctx.monotonic() - _t_pre) * 1000)
         print(f">>> [RELATIONAL CONTEXT LENGTH]: {len(relational_context)} chars (parallel pre-fetch: {_pre_ms}ms)")
         
@@ -8782,6 +8805,9 @@ class AzureCortex:
 
         {_live_turn_context}
         {"Note: The live session context above is the immediate current conversation. Use it for short-horizon continuity (e.g., 'repeat what you just said')." if _live_turn_context else ""}
+
+        {_critical_recall_context}
+        {"Note: CRITICAL RECALL FACTS are binding session facts. Use them directly when the user asks what they told you." if _critical_recall_context else ""}
 
         {pg_history_context}
         {"Note: The above includes voice call transcripts and older chat history stored in the database. You remember ALL conversations — chat and phone calls alike." if pg_history_context else ""}

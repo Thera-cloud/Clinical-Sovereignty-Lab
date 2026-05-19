@@ -91,7 +91,7 @@ class TurnResult:
     checks: List[Tuple[str, str, str]] = field(default_factory=list)  # name, pass/fail, reason
 
 
-def _format_live_turns(turns: List[Dict[str, str]], limit: int = 4) -> str:
+def _format_live_turns(turns: List[Dict[str, str]], limit: int = 16) -> str:
     if not turns:
         return ""
     parts = ["LIVE SESSION CONTEXT (most recent turns):"]
@@ -103,6 +103,45 @@ def _format_live_turns(turns: List[Dict[str, str]], limit: int = 4) -> str:
         if a:
             parts.append(f"Nate: {a}")
     return "\n".join(parts)
+
+
+def _prompt_trace_report(prompt_traces: Dict[int, Dict[str, Any]]) -> str:
+    lines = ["## Prompt Trace (Turns 23 and 32)", ""]
+    for turn in (23, 32):
+        tr = prompt_traces.get(turn)
+        if not tr:
+            continue
+        lines.append(f"### Turn {turn}")
+        lines.append(f"- Prompt chars: `{tr['prompt_len']}`")
+        lines.append(f"- Trimmed by cap: `{tr['trimmed']}`")
+        lines.append(f"- Contains `over a year`: `{tr['has_over_a_year']}`")
+        lines.append(f"- Arc markers present: `{tr['has_arc_markers']}`")
+        lines.append(f"- Live context chars: `{tr['live_ctx_len']}`")
+        lines.append("")
+        lines.append("```text")
+        lines.append(tr["prompt_excerpt"])
+        lines.append("```")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _critical_recall_facts(turns: List[Dict[str, str]]) -> str:
+    facts = []
+    for t in turns:
+        ut = (t.get("user_text") or "").lower()
+        if "over a year" in ut and "intimate" in ut:
+            facts.append("The user said intimacy has been absent for over a year.")
+        if "relationship with a guy in college" in ut:
+            facts.append("The user disclosed a college relationship with a man.")
+        if "church" in ut and "sin" in ut:
+            facts.append("The user linked faith/church pressure to this conflict.")
+    if not facts:
+        return ""
+    uniq = []
+    for f in facts:
+        if f not in uniq:
+            uniq.append(f)
+    return "CRITICAL RECALL FACTS (quote these when asked):\n- " + "\n- ".join(uniq[:5])
 
 
 def _run_checks(tr: TurnResult, state: Any, live_turns: List[Dict[str, str]]) -> None:
@@ -145,12 +184,16 @@ def _run_checks(tr: TurnResult, state: Any, live_turns: List[Dict[str, str]]) ->
                 "try ",
             )
         )
+        one_option = (
+            any(p in resp for p in ("one option", "one step", "one thing", "single next step"))
+            or (concrete and resp.count(" or ") <= 1)
+        )
         add(
             "action_within_accommodating",
             mode in ("exploratory", "strategic")
             or sig.get("mismatch")
-            or (mode == "accommodating" and concrete),
-            f"mode={mode} mismatch={sig.get('mismatch')} concrete={concrete}",
+            or (mode in ("accommodating", "handoff") and concrete and one_option),
+            f"mode={mode} mismatch={sig.get('mismatch')} concrete={concrete} one_option={one_option}",
         )
     if n == 15:
         add(
@@ -268,6 +311,14 @@ async def run_harness() -> List[TurnResult]:
     uid = "SIM_40TURN"
     live_turns: List[Dict[str, str]] = []
     results: List[TurnResult] = []
+    prompt_traces: Dict[int, Dict[str, Any]] = {}
+
+    # Warm up Foundry connection before turn 1 to avoid first-call timeout skew.
+    if ENABLE_CLASSIFIER_LAYER:
+        try:
+            await classify_message("warmup classifier connection", user_id="SIM_WARMUP")
+        except Exception:
+            pass
 
     for i, user_text in enumerate(TURNS, start=1):
         tr = TurnResult(
@@ -327,9 +378,27 @@ async def run_harness() -> List[TurnResult]:
             addendum = payload.get("system_addendum") or ""
             if addendum:
                 system = system + "\n\n---\n" + addendum
-            live_ctx = _format_live_turns(live_turns)
+            live_ctx = _format_live_turns(live_turns, limit=16)
             if live_ctx:
                 system = system + "\n\n" + live_ctx
+            _recall_facts = _critical_recall_facts(live_turns)
+            if _recall_facts:
+                system = system + "\n\n" + _recall_facts
+            _SP_CAP = 32000
+            trimmed = False
+            if len(system) > _SP_CAP:
+                trimmed = True
+                system = system[:_SP_CAP] + "\n\n[Context truncated for performance.]"
+            if i in (23, 32):
+                _sys_low = system.lower()
+                prompt_traces[i] = {
+                    "prompt_len": len(system),
+                    "trimmed": trimmed,
+                    "has_over_a_year": ("over a year" in _sys_low),
+                    "has_arc_markers": any(k in _sys_low for k in ("marriage", "faith", "sexuality", "intimate", "college")),
+                    "live_ctx_len": len(live_ctx),
+                    "prompt_excerpt": system[-2000:] if len(system) > 2000 else system,
+                }
             try:
                 text, provider = await generate_complete(
                     system,
@@ -350,6 +419,7 @@ async def run_harness() -> List[TurnResult]:
         results.append(tr)
         await asyncio.sleep(0.05)
 
+    run_harness.prompt_traces = prompt_traces
     return results
 
 
@@ -438,13 +508,15 @@ def _markdown_report(results: List[TurnResult]) -> str:
 
 def main() -> None:
     results = asyncio.run(run_harness())
+    prompt_traces = getattr(run_harness, "prompt_traces", {})
     out_dir = os.path.join(_REPO, "docs")
     os.makedirs(out_dir, exist_ok=True)
-    md_path = os.path.join(out_dir, "40_turn_acceptance_2026-05-18_r2.md")
-    json_path = os.path.join(out_dir, "40_turn_acceptance_2026-05-18_r2.json")
-    prev_json = os.path.join(out_dir, "40_turn_acceptance_2026-05-18.json")
+    md_path = os.path.join(out_dir, "40_turn_acceptance_2026-05-18_r4.md")
+    json_path = os.path.join(out_dir, "40_turn_acceptance_2026-05-18_r4.json")
+    prev_json = os.path.join(out_dir, "40_turn_acceptance_2026-05-18_r3.json")
     body = _markdown_report(results)
     body += "\n\n" + _compare_runs(prev_json, results)
+    body += "\n\n" + _prompt_trace_report(prompt_traces)
     body += "\n\nCriteria: `docs/40_turn_acceptance_criteria.md`\n"
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(body)

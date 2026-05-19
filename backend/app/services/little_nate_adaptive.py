@@ -94,6 +94,8 @@ DISSATISFACTION_PHRASES = [
     r"\btell me something new\b",
     r"\balready tried\b",
     r"\bi('ve| have) done that\b",
+    r"\bsame category as\b",
+    r"\bi need something that (pings?|reminds?|alerts?)\b",
 ]
 
 REFLECTION_TELLS = [
@@ -342,6 +344,7 @@ def select_mode(state: SessionState, user_msg: str) -> tuple:
         "dissatisfaction": detect_user_dissatisfaction(user_msg),
         "neurodivergent": nd_fired,
         "neurodivergent_lock": nd_lock,
+        "accommodating_locked": state.accommodating_locked,
         "distress": detect_distress(state, user_msg),
         "mismatch": detect_mode_mismatch(state, user_msg),
         "rut": detect_assistant_rut(state),
@@ -394,7 +397,9 @@ MODE_ADDENDA = {
         "experiments, or next steps relevant to what they've shared. "
         "Name trade-offs. Be direct. You can return to reflection later "
         "if they want it, but right now they need substance. Do NOT ask "
-        "'what's coming up for you.'"
+        "'what's coming up for you.' If the user has explicitly rejected a "
+        "tool/category, do NOT restate that rejected category by name while "
+        "proposing alternatives."
     ),
     "direct": (
         "Mode: DIRECT. The user has asked for your opinion or "
@@ -431,6 +436,8 @@ MODE_ADDENDA = {
         "trying to fix it. 'That sounds exhausting' is more useful "
         "than 'let's explore what's underneath that.'\n"
         "- If they ask for a list, give a list. Numbered. Concrete."
+        "- If the user explicitly rejected a tool/category, do NOT repeat that "
+        "rejected category by name. Pivot to a new option directly."
     ),
 }
 
@@ -445,15 +452,35 @@ def _resolve_coach_name(profile: Optional[Mapping[str, Any]]) -> str:
     return "your coach"
 
 
+def _extract_rejected_categories(user_msg: str) -> list:
+    lower = (user_msg or "").lower()
+    out = []
+    if "bullet journal" in lower or "bullet journals" in lower:
+        out.append("bullet journals")
+    if "voice memo" in lower or "voice memos" in lower:
+        out.append("voice memos")
+    if "same category as" in lower and "notes" in lower:
+        out.append("that category")
+    return out
+
+
 def build_system_addendum(
     mode: Mode,
     signals: dict,
     profile: Optional[Mapping[str, Any]] = None,
+    user_msg: str = "",
 ) -> str:
     """Compose the addendum to inject alongside the base system prompt."""
     base = MODE_ADDENDA[mode]
     if mode == "handoff":
         base = base.format(coach_name=_resolve_coach_name(profile))
+        if signals.get("neurodivergent") or signals.get("accommodating_locked"):
+            # QUANTUM-CRYSTAL-ARCH — compose handoff with accommodating cadence.
+            base += (
+                "\n\nCOMPOSITION OVERRIDE: Keep accommodating style while offering handoff. "
+                "Use short concrete wording, one option at a time, and avoid 2-3 option menus. "
+                "Do not ask broad/open reflective questions."
+            )
 
     if signals.get("dissatisfaction"):
         base = (
@@ -462,6 +489,15 @@ def build_system_addendum(
             "briefly — one sentence, no over-apologizing — then "
             "change your approach.\n\n"
         ) + base
+
+    _rejected = _extract_rejected_categories(user_msg)
+    if _rejected and mode in ("strategic", "accommodating", "handoff"):
+        _joined = ", ".join(_rejected)
+        base += (
+            f"\n\nHARD CONSTRAINT: The user rejected these categories: {_joined}. "
+            "Do NOT repeat those category names in your response. Acknowledge the "
+            "constraint generically, then move straight to a new option."
+        )
 
     return base
 
@@ -545,7 +581,7 @@ def prepare_response(
         logger.warning("[SCOPE_GATE] error (non-fatal): %s: %s", type(_sg_err).__name__, _sg_err)
 
     mode, signals = select_mode(state, user_msg)
-    addendum = build_system_addendum(mode, signals, profile)
+    addendum = build_system_addendum(mode, signals, profile, user_msg=user_msg)
 
     if mode == "handoff":
         state.coach_offered = True

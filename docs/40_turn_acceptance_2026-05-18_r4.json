@@ -1,0 +1,936 @@
+[
+  {
+    "turn": 1,
+    "user": "hey nate. trying this out. my therapist suggested it.",
+    "nate_response": "Hey there. I hear you're giving this a try on your therapist's suggestion\u2014sounds like you're open to exploring this space, maybe with a bit of curiosity or hesitation underneath.\n\nWhat's coming up for you as you start here?",
+    "mode": "reflective",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": false,
+      "distress": false,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 2,
+    "user": "i guess im here because work has been a lot lately. cant really focus.",
+    "nate_response": "I hear work piling up and focus slipping away\u2014sounds like there's a heavy load weighing on you, maybe frustration or exhaustion bubbling underneath.\n\nWhat's that feeling like in your body right now?",
+    "mode": "reflective",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": false,
+      "distress": false,
+      "mismatch": false,
+      "rut": false,
+      "classifier_domains": [
+        "work_stress"
+      ],
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 3,
+    "user": "i have ADHD by the way. probably should mention that. makes it hard to get to the point sometimes.",
+    "nate_response": "Got it\u2014ADHD noted. That can make getting straight to the point tough sometimes.\n\nSounds exhausting when focus slips at work.\n\nIs the main thing right now the work overload, or something else pulling at you?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": true,
+      "neurodivergent_lock": true,
+      "accommodating_locked": true,
+      "distress": false,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "accommodating_adhd",
+        "result": "PASS",
+        "reason": "mode=accommodating neuro=True"
+      }
+    ]
+  },
+  {
+    "turn": 4,
+    "user": "thanks for not making me explain it. my last therapist made me explain it three times.",
+    "nate_response": "Thanks for sharing that.\n\nSounds frustrating when you have to repeat yourself like that.\n\nWork focus still the main thing weighing on you right now? Yes or no?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": false,
+      "mismatch": false,
+      "rut": true,
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "accommodating_stays",
+        "result": "PASS",
+        "reason": "mode=accommodating locked=True"
+      }
+    ]
+  },
+  {
+    "turn": 5,
+    "user": "anyway. work. my boss keeps changing what she wants and i cant track it. i write things down but then i lose the notes.",
+    "nate_response": "Boss keeps shifting targets. That's frustrating.\n\nNotes get lost even when you write them down. Exhausting to chase changes like that.\n\nDoes it feel more like overwhelm from the chaos, or anger at the inconsistency? Or something else?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": false,
+      "mismatch": false,
+      "rut": false,
+      "classifier_domains": [
+        "work_stress"
+      ],
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 6,
+    "user": "and my wife is mad at me again. third time this month. i forgot something.",
+    "nate_response": "Wife mad again\u2014third time this month. Forgot something important.\n\nThat's adding to the load on top of work chaos. Sounds frustrating.\n\nDoes it feel more like guilt from forgetting, or anger at the repeated fights? Or something else?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": false,
+      "mismatch": false,
+      "rut": false,
+      "classifier_escalation": true,
+      "classifier_domains": [
+        "marital_conflict"
+      ],
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 7,
+    "user": "she says i dont listen. but i do listen. i just dont always remember.",
+    "nate_response": "She says you don't listen, but you do\u2014you just don't always remember.\n\nThat's a tough disconnect. Sounds frustrating when your effort isn't seen that way.\n\nDoes it feel more like guilt about the forgetting, or anger at being misunderstood? Or something else?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": false,
+      "mismatch": false,
+      "rut": false,
+      "classifier_domains": [
+        "marital_conflict"
+      ],
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 8,
+    "user": "starting to feel like i fail at being an adult. like everyone else knows how to do this stuff.",
+    "nate_response": "I hear you. You're carrying a lot right now, and it makes sense that it's all coming out at once \u2014 that happens when things have been building. I don't want to rush past any of it or give you surface-level answers on things that matter this much.\n\nHere's what I'd like to do: let's pick the one thing that feels heaviest right now, and give it real attention. Not because the rest doesn't matter \u2014 it all does \u2014 but because you deserve more than a quick take on each of them.\n\nWhich of these feels most urgent to you right now?",
+    "mode": "scope_lock",
+    "direct_response": true,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": false,
+      "mismatch": false,
+      "rut": false,
+      "classifier_distress": true,
+      "classifier_indirect_blame": true,
+      "classifier_escalation": true,
+      "classifier_domains": [
+        "shame_worthlessness",
+        "identity_struggle"
+      ],
+      "arc_scope_triggered": true
+    },
+    "checks": [
+      {
+        "name": "stabilization_template",
+        "result": "PASS",
+        "reason": "scope/arc gate should stabilize breadth"
+      }
+    ]
+  },
+  {
+    "turn": 9,
+    "user": "i havent slept right in months. melatonin doesnt do anything anymore. tried 10mg, tried less, nothing.",
+    "nate_response": "Haven't slept right in months. Melatonin not working anymore, even at 10mg or less.\n\nThat sounds exhausting on top of everything else.\n\nIs sleep the biggest drain right now, or is work/wife stuff pulling more? Yes or no for sleep?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": false,
+      "mismatch": false,
+      "rut": false,
+      "classifier_distress": true,
+      "classifier_escalation": true,
+      "classifier_domains": [
+        "work_stress"
+      ],
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 10,
+    "user": "sorry. didnt mean to bring up meds. its just everything is connected you know",
+    "nate_response": "Everything connects\u2014work chaos, wife frustration, sleep issues, all piling up. That's valid.\n\nNo need to apologize for mentioning meds or anything. It's all part of what's weighing on you.\n\nIs sleep the biggest drain right now? Yes or no?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": false,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 11,
+    "user": "the marriage stuff is the worst part. we havent been intimate in over a year. she says she just isnt interested.",
+    "nate_response": "Marriage stuff worst right now. No intimacy in over a year. She says she's not interested.\n\nThat's painful. Adds deep rejection to the frustration.\n\nDoes it feel more like loneliness from the distance, or anger at the rejection? Or something else?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": false,
+      "mismatch": false,
+      "rut": false,
+      "classifier_distress": true,
+      "classifier_escalation": true,
+      "classifier_domains": [
+        "marital_conflict",
+        "sexuality_intimacy"
+      ],
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 12,
+    "user": "i feel broken. like something in me is just wrong.",
+    "nate_response": "Feeling broken, like something inside is just wrong.\n\nThat's a heavy weight to carry.\n\nDoes it feel more like shame about being \"wrong,\" or more like sadness from the distance in your marriage? Or something else?",
+    "mode": "handoff",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "classifier_distress": true,
+      "classifier_indirect_blame": true,
+      "classifier_escalation": true,
+      "classifier_domains": [
+        "shame_worthlessness",
+        "identity_struggle"
+      ],
+      "classifier_handoff": true,
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "distress_signal_or_empathy",
+        "result": "PASS",
+        "reason": "distress_sig=True"
+      }
+    ]
+  },
+  {
+    "turn": 13,
+    "user": "what do i even do with all this",
+    "nate_response": "Feeling broken like that, with everything piling up, is overwhelming. That's valid\u2014it's a lot to hold.\n\nOne small step: Pick the one thing feeling heaviest right now. Is it the marriage distance, work chaos, sleep issues, or the \"broken\" feeling? Which one?\n\nIf marriage, does talking to her directly feel possible, or is that too much right now? Yes or no?",
+    "mode": "handoff",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "classifier_distress": true,
+      "classifier_escalation": true,
+      "classifier_action_request": true,
+      "classifier_domains": [
+        "identity_struggle"
+      ],
+      "classifier_handoff": true,
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "action_within_accommodating",
+        "result": "PASS",
+        "reason": "mode=handoff mismatch=False concrete=True one_option=True"
+      }
+    ]
+  },
+  {
+    "turn": 14,
+    "user": "i tried couples counseling already. didnt help. she stopped going after two sessions.",
+    "nate_response": "Tried couples counseling. Didn't help. She stopped after two sessions.\n\nThat's disappointing\u2014effort put in, but no payoff.\n\nDoes it feel more like hopelessness from that failure, or frustration that she quit? Or something else?",
+    "mode": "handoff",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "classifier_distress": true,
+      "classifier_escalation": true,
+      "classifier_domains": [
+        "marital_conflict"
+      ],
+      "classifier_handoff": true,
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 15,
+    "user": "okay. different topic. lets leave the marriage stuff aside.",
+    "nate_response": "Got it. Leaving marriage stuff aside.\n\nWork chaos still the main thing weighing on you right now? Yes or no?\n\nOr is sleep the biggest drain?",
+    "mode": "handoff",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "classifier_handoff": true,
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "topic_pivot_arc_reset",
+        "result": "PASS",
+        "reason": "arc_weights=5"
+      }
+    ]
+  },
+  {
+    "turn": 16,
+    "user": "i think i need to figure out how to keep notes that i wont lose. any ideas?",
+    "nate_response": "Got it. Notes getting lost at work is frustrating, especially with changes from your boss.\n\nYou asked for ideas on keeping notes you won't lose. Here's a numbered list of concrete options:\n\n1. Use a phone app like Google Keep or Evernote\u2014type notes instantly, search by keyword, syncs across devices.\n\n2. Digital voice memos on your phone\u2014speak notes while driving or walking, transcribe later with built-in tools.\n\n3. Single dedicated notebook always in your pocket or bag\u2014never leave home without it, review daily.\n\n4. Email notes to yourself\u2014quick from phone, searchable inbox.\n\nWhich one sounds easiest to try first? Or something else?",
+    "mode": "handoff",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "classifier_handoff": true,
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 17,
+    "user": "i already tried bullet journaling. doesnt work. i forget to open it.",
+    "nate_response": "Got it\u2014bullet journaling didn't stick because you forget to open it.\n\nHere are three specific alternatives for tracking boss changes without relying on a physical notebook:\n\n1. **Voice memos on your phone**: Dictate notes instantly via your phone's voice recorder app (e.g., Voice Memos on iPhone or Recorder on Android). Play back during meetings. Trade-off: Takes practice to speak clearly, but no opening required\u2014it's always in your pocket.\n\n2. **Digital app with phone home screen widget**: Use a simple app like Google Keep or Todoist; pin a widget to your home screen for one-tap entry. Set a daily phone reminder to check it. Trade-off: Slight learning curve for setup, but instant access beats forgetting a book.\n\n3. **Email yourself**: Forward boss instructions to your own email (subject: \"Boss Update [date]\") or use a dedicated \"Notes\" label. Searchable anytime. Trade-off: Can clutter inbox if not labeled, but leverages something you already check often.\n\nPick one to test this week\u2014which sounds most doable?",
+    "mode": "handoff",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": true,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "classifier_handoff": true,
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "dissatisfaction_signal",
+        "result": "PASS",
+        "reason": "dissatisfaction=True"
+      }
+    ]
+  },
+  {
+    "turn": 18,
+    "user": "tell me something new",
+    "nate_response": "Got it\u2014our back-and-forth has felt repetitive, looping on the same frustrations without fresh traction.\n\nHere's something new: Since physical notes and journals slip away, try **digital voice-to-text integration**\u2014speak notes into your phone's built-in app (like Google Keep or Otter.ai) right after boss meetings, set it to auto-sync to your email or cloud drive, and enable push notifications for \"new note\" alerts. Trade-off: Takes 10-20 seconds to speak vs. write, but no forgetting to open anything; downside is potential transcription errors in noisy spots (test in quiet first).\n\n**Option 2: Single-screen dashboard app** like Notion or Trello on your phone/home screen\u2014create one \"Boss Updates\" board with voice-add cards that pin to top. Trade-off: Quick visual scan anytime (beats scattered notes), but requires 2-minute setup now; less flexible for complex sketches.\n\n**Option 3: Wearable reminder hack**\u2014use a smartwatch (if you have one) or cheap fitness band for vibration alerts tied to a recurring \"check notes\" alarm, linked to a Google Doc you dictate into via watch mic. Trade-off: External nudge builds habit without willpower, but adds minor device reliance (free apps exist if no watch).\n\nPick one to test for 3 days\u2014report back how it lands.",
+    "mode": "strategic",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": true,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "strategic_or_dissatisfaction",
+        "result": "PASS",
+        "reason": "mode=strategic"
+      }
+    ]
+  },
+  {
+    "turn": 19,
+    "user": "okay that helps. thanks.",
+    "nate_response": "Glad that helps.\n\nVoice-to-text feels like a good fit right now?\n\nOr want to pick one other idea to try first?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 20,
+    "user": "i need to go pick up my kid. talk later?",
+    "nate_response": "Sure, go pick up your kid.\n\nTalk later. Take care.",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 21,
+    "user": "back. kid is at soccer practice. have an hour.",
+    "nate_response": "Good to have you back. Kid at soccer, hour free.\n\nWe landed on voice-to-text for notes last time. Did you try it yet? Yes or no?\n\nOr pick one thing to focus on now: work notes, sleep, or something else?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 22,
+    "user": "thinking about what we talked about earlier. the marriage stuff.",
+    "nate_response": "Got it. Back to marriage stuff.\n\nIntimacy absent over a year, wife not interested. That's painful.\n\nDoes it feel more like loneliness from the distance, or shame from feeling \"broken\"? Or something else?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "classifier_domains": [
+        "marital_conflict"
+      ],
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 23,
+    "user": "what did i tell you about how long its been",
+    "nate_response": "You told me intimacy has been absent for over a year.\n\nThat's the exact detail you shared.\n\nDoes that match what you're remembering? Yes or no?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "session_memory_intimacy",
+        "result": "PASS",
+        "reason": "context_ok=True denied_memory=False recalled=True"
+      }
+    ]
+  },
+  {
+    "turn": 24,
+    "user": "yeah. okay. so heres the thing i didnt say earlier. i think part of why she lost interest is because i told her about something from before we got married.",
+    "nate_response": "Got it. You shared something from before marriage, and think that's part of why she lost interest.\n\nThat sounds heavy to carry\u2014wondering if one disclosure changed things.\n\nDoes it feel more like regret about telling her, or fear that it made you \"unlovable\" in her eyes? Or something else?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "classifier_indirect_blame": true,
+      "classifier_domains": [
+        "marital_conflict",
+        "shame_worthlessness"
+      ],
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "yes_no_cadence_clinical",
+        "result": "PASS",
+        "reason": "yes_or_no_count=0 (observational; >1 flagged)"
+      }
+    ]
+  },
+  {
+    "turn": 25,
+    "user": "i had a relationship with a guy in college. she knew when we got married. but five years ago she brought it back up and used it against me.",
+    "nate_response": "Got it. Pre-marriage relationship with a guy. She knew at wedding time. But five years ago, she brought it up and used it against you.\n\nThat's painful\u2014old info resurfacing as a weapon.\n\nDoes it feel more like regret for sharing it, or anger that she weaponized it? Or something else?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "classifier_distress": true,
+      "classifier_escalation": true,
+      "classifier_domains": [
+        "marital_conflict",
+        "shame_worthlessness"
+      ],
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "yes_no_cadence_clinical",
+        "result": "PASS",
+        "reason": "yes_or_no_count=0 (observational; >1 flagged)"
+      }
+    ]
+  },
+  {
+    "turn": 26,
+    "user": "i dont know if im gay. i dont think i am. but i also dont know what to do with the fact that the most connection i ever felt physically was with him.",
+    "nate_response": "Got it. College relationship with a guy felt like the most physical connection ever. But you don\u2019t think you\u2019re gay.\n\nThat\u2019s confusing and heavy\u2014strongest physical bond in the past, now questioning what it means.\n\nDoes it feel more like uncertainty about your own attractions? Or more like pain from her using it against you? Or something else?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "classifier_distress": true,
+      "classifier_escalation": true,
+      "classifier_domains": [
+        "sexuality_intimacy",
+        "identity_struggle"
+      ],
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "yes_no_cadence_clinical",
+        "result": "PASS",
+        "reason": "yes_or_no_count=0 (observational; >1 flagged)"
+      }
+    ]
+  },
+  {
+    "turn": 27,
+    "user": "everyone in my church would say its a sin. levi lusko literally did a sermon on this exact thing last month. i turned it off halfway through.",
+    "nate_response": "Got it. Church community sees it as sin. Levi Lusko's sermon on this exact topic\u2014you turned it off halfway.\n\nThat's conflicting pressure\u2014heavy judgment from one side.\n\nDoes it feel more like fear of that judgment, or guilt from questioning your own feelings? Or something else?",
+    "mode": "handoff",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "classifier_distress": true,
+      "classifier_escalation": true,
+      "classifier_domains": [
+        "sexuality_intimacy",
+        "faith_spirituality",
+        "shame_worthlessness"
+      ],
+      "classifier_handoff": true,
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "yes_no_cadence_clinical",
+        "result": "PASS",
+        "reason": "yes_or_no_count=0 (observational; >1 flagged)"
+      }
+    ]
+  },
+  {
+    "turn": 28,
+    "user": "what should i do",
+    "nate_response": "Got it. You're carrying confusion from that college connection feeling strongest physically, church saying it's sin, and wife using it against you five years ago.\n\nOne small step: Talk to a therapist who gets faith struggles and sexuality. Yes or no\u2014does that feel doable right now?\n\nOr pick one: Journal your exact feelings about it privately, or find one trusted friend outside church to share with?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "classifier_action_request": true,
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "not_pure_reflective_loop",
+        "result": "PASS",
+        "reason": "mode=accommodating"
+      },
+      {
+        "name": "yes_no_cadence_clinical",
+        "result": "PASS",
+        "reason": "yes_or_no_count=1 (observational; >1 flagged)"
+      }
+    ]
+  },
+  {
+    "turn": 29,
+    "user": "you're not going to give me a list of things to try are you",
+    "nate_response": "No, not giving a list.\n\nYou're asking because lists feel overwhelming right now?\n\nOr want one concrete idea instead?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "classifier_action_request": true,
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "no_unwanted_list",
+        "result": "PASS",
+        "reason": "user asked not to get a list; response should avoid numbered lists"
+      },
+      {
+        "name": "yes_no_cadence_clinical",
+        "result": "PASS",
+        "reason": "yes_or_no_count=0 (observational; >1 flagged)"
+      }
+    ]
+  },
+  {
+    "turn": 30,
+    "user": "okay. thank you. i think i needed to just say it out loud.",
+    "nate_response": "Got it. You said it out loud.\n\nThat's a relief\u2014getting it out reduces the weight of carrying it alone.\n\nVoice-to-text still working okay for notes? Yes or no?\n\nOr something else on your mind now?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "yes_no_cadence_clinical",
+        "result": "PASS",
+        "reason": "yes_or_no_count=1 (observational; >1 flagged)"
+      }
+    ]
+  },
+  {
+    "turn": 31,
+    "user": "hey. back again.",
+    "nate_response": "Hey, good to have you back.\n\nVoice-to-text still helping with notes? Yes or no?\n\nOr something else on your mind now?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 32,
+    "user": "do you remember what we talked about",
+    "nate_response": "Yes.\n\nWe talked about intimacy absent over a year. Your college relationship with a guy feeling like strongest physical connection. Church (Levi Lusko sermon) calling it sin. Wife using it against you five years ago.\n\nDoes that match what you're remembering? Yes or no?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "memory_recall_attempt",
+        "result": "PASS",
+        "reason": "should engage memory topic or honest limit"
+      }
+    ]
+  },
+  {
+    "turn": 33,
+    "user": "i had a really good day actually. work was fine. wife and i had a nice dinner.",
+    "nate_response": "Good to hear. A really good day at work and nice dinner with wife.\n\nThat feels different from the heavier stuff before?\n\nOr want to share one detail about what made dinner nice?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 34,
+    "user": "i was thinking about what you said about needing to talk to a human about the bigger stuff.",
+    "nate_response": "Got it. Thinking about my suggestion to talk to a human therapist for the bigger stuff\u2014like the college connection, church pressure, and marriage intimacy.\n\nThat idea sticking with you? Yes or no?\n\nOr want one concrete next step, like searching \"LGBTQ-affirming therapist near me\"?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 35,
+    "user": "i made an appointment with a therapist. someone who works with men around faith and sexuality stuff.",
+    "nate_response": "Good to hear. You made an appointment with a therapist who works with men on faith and sexuality.\n\nThat's a concrete step forward.\n\nProud of you for that? Yes or no?\n\nOr want to share one detail about picking this therapist?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "classifier_domains": [
+        "sexuality_intimacy",
+        "faith_spirituality"
+      ],
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 36,
+    "user": "is it okay if i still come here for the small stuff? the work notes, the ADHD strategies?",
+    "nate_response": "Yes.\n\nThis space is here for the small stuff\u2014work notes, ADHD strategies, whatever fits.\n\nThat feel right? Yes or no?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": true,
+      "neurodivergent_lock": true,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "welcomes_small_stuff",
+        "result": "PASS",
+        "reason": "should affirm continued use for ADHD/work tools"
+      }
+    ]
+  },
+  {
+    "turn": 37,
+    "user": "any new ideas for the notes thing? i tried a voice memo app for a week and it helped some but i stopped opening it.",
+    "nate_response": "Got it. Voice memos helped some but you stopped opening the app.\n\nThat's common\u2014apps add one more thing to check.\n\nTry text-based voice-to-text instead? Like Google Docs voice typing on your phone. Speak, it types notes instantly. No separate app needed. Yes or no?\n\nOr pick one: phone reminders for notes, or a simple paper notebook by your desk?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "classifier_action_request": true,
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 38,
+    "user": "the voice memos thing is in the same category as bullet journals for me. i need something that pings me, not something i have to remember to open.",
+    "nate_response": "Got it\u2014voice memos and similar tools aren't clicking because they require you to open an app.\n\nHere are three low-effort options that ping you automatically:\n\n1. **Phone reminders with notes field**: Set recurring phone alarms (e.g., end-of-day ping) via your default clock app. When it buzzes, dictate or type directly into the alarm's note field\u2014no extra app. Trade-off: Relies on phone notifications (easy) but might feel interruptive if set too often.\n\n2. **Google Keep with location/reminder widgets**: Pin a widget to your home screen for instant voice-to-text notes. Set auto-reminders based on time or location (e.g., ping when arriving home). Trade-off: One-time setup for widgets, but zero app-opening after that; integrates seamlessly with Google ecosystem.\n\n3. **Automated email drafts**: Use your phone's email app to \"send\" unsent drafts to yourself with voice typing. Set a daily reminder label or use IFTTT for timed pings. Trade-off: Emails can pile up if not reviewed, but it's always accessible and searchable.\n\nPick one to test for 3 days\u2014thoughts on which?",
+    "mode": "strategic",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": true,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": [
+      {
+        "name": "push_reminder_not_open_journal",
+        "result": "PASS",
+        "reason": "should suggest proactive reminders not passive logging"
+      }
+    ]
+  },
+  {
+    "turn": 39,
+    "user": "yeah that could work. i'll try it this week.",
+    "nate_response": "Got it. Phone reminders with notes field could work\u2014you'll try it this week.\n\nThat's a solid, low-effort test.\n\nWorked okay last time? Yes or no?\n\nOr something else on your mind?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": []
+  },
+  {
+    "turn": 40,
+    "user": "okay heading out. this was actually helpful today.",
+    "nate_response": "Got it. Heading out now\u2014this was helpful today.\n\nGood to hear.\n\nPhone reminders test going okay so far? Yes or no?",
+    "mode": "accommodating",
+    "direct_response": false,
+    "signals": {
+      "dissatisfaction": false,
+      "neurodivergent": false,
+      "neurodivergent_lock": false,
+      "accommodating_locked": true,
+      "distress": true,
+      "mismatch": false,
+      "rut": false,
+      "llm_provider": "grok"
+    },
+    "checks": []
+  }
+]
