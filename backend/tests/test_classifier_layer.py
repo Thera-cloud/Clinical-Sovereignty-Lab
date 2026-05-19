@@ -141,9 +141,11 @@ class TestCostGates:
         _cl_mod._circuit_open_until = 0.0
 
     def test_rate_limit_tracking(self):
+        import os
+        limit = float(os.getenv("CLASSIFIER_RATE_LIMIT_S", "1.5"))
         _cl_mod._last_call_ts["test_user"] = time.monotonic()
         last = _cl_mod._last_call_ts["test_user"]
-        assert time.monotonic() - last < _cl_mod._RATE_LIMIT_S
+        assert time.monotonic() - last < limit
         del _cl_mod._last_call_ts["test_user"]
 
 

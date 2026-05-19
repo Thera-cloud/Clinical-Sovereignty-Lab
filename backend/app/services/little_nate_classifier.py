@@ -42,9 +42,16 @@ ENABLE_CLASSIFIER_LAYER: bool = os.getenv(
 # TUNABLE CONSTANTS
 # ============================================================
 
-_TIMEOUT_S: float = 0.3
+def _timeout_s() -> float:
+    """Foundry chat p50 ~1.5s from BLUE; 300ms only viable on co-located mini deploy."""
+    return float(os.getenv("CLASSIFIER_TIMEOUT_S", "2.5"))
+
+
+def _rate_limit_s() -> float:
+    return float(os.getenv("CLASSIFIER_RATE_LIMIT_S", "1.5"))
+
+
 _MIN_MSG_LEN: int = 12
-_RATE_LIMIT_S: float = 1.5
 _CACHE_SIZE: int = 16
 _CIRCUIT_BREAK_FAILURES: int = 3
 _CIRCUIT_BREAK_COOLDOWN_S: float = 60.0
@@ -52,6 +59,14 @@ _CIRCUIT_BREAK_COOLDOWN_S: float = 60.0
 _CLASSIFIER_DEPLOYMENT = os.getenv(
     "CLASSIFIER_LLM_DEPLOYMENT", "gpt-4o-mini"
 )
+
+
+def reset_classifier_circuit() -> None:
+    """Test harness: clear circuit breaker and rate-limit state."""
+    global _consecutive_failures, _circuit_open_until
+    _consecutive_failures = 0
+    _circuit_open_until = 0.0
+    _last_call_ts.clear()
 
 # ============================================================
 # PROMPT (versioned — bump suffix on semantic changes)
@@ -189,38 +204,69 @@ def _parse_classifier_json(raw: str) -> ClassifierResult:
 # ASYNC LLM CALL
 # ============================================================
 
-async def _call_classifier_llm(user_msg: str) -> ClassifierResult:
-    """Call Azure OpenAI with the classifier prompt. Returns parsed result."""
-    global _consecutive_failures, _circuit_open_until
+def _classifier_model() -> str:
+    return (
+        os.getenv("CLASSIFIER_LLM_MODEL", "").strip()
+        or os.getenv("CLASSIFIER_LLM_DEPLOYMENT", "").strip()
+        or os.getenv("NATE_CHAT_MODEL", "").strip()
+        or "grok-4-1-fast-non-reasoning"
+    )
+
+
+def _classifier_request_config() -> tuple:
+    """Return (url, api_key, use_foundry_body). Prefer Foundry URL over legacy deploy path."""
+    custom_url = os.getenv("CLASSIFIER_LLM_URL", "").strip()
+    if custom_url:
+        key = os.getenv("CLASSIFIER_LLM_KEY", "").strip() or os.getenv("NATE_CHAT_KEY", "")
+        return custom_url, key, True
+
+    nate_url = os.getenv("NATE_CHAT_URL", "").strip()
+    if nate_url:
+        key = os.getenv("NATE_CHAT_KEY", "")
+        return nate_url, key, True
 
     endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").rstrip("/")
     api_key = os.getenv("AZURE_API_KEY", "")
-
-    if not all([endpoint, api_key, _CLASSIFIER_DEPLOYMENT]):
-        return ClassifierResult(error="azure_not_configured")
-
     if not endpoint.startswith("http"):
         endpoint = f"https://{endpoint}"
-
     url = (
         f"{endpoint}/openai/deployments/{_CLASSIFIER_DEPLOYMENT}"
         f"/chat/completions?api-version=2024-06-01"
     )
+    return url, api_key, False
+
+
+async def _call_classifier_llm(user_msg: str) -> ClassifierResult:
+    """Call classifier LLM (Foundry chat URL preferred). Returns parsed result."""
+    global _consecutive_failures, _circuit_open_until
+
+    url, api_key, foundry = _classifier_request_config()
+    if not url or not api_key:
+        return ClassifierResult(error="azure_not_configured")
 
     headers = {"Content-Type": "application/json", "api-key": api_key}
-    payload = {
-        "messages": [
-            {"role": "system", "content": _CLASSIFIER_PROMPT_V1},
-            {"role": "user", "content": user_msg},
-        ],
-        "max_completion_tokens": 200,
-        "temperature": 0.1,
-    }
+    messages = [
+        {"role": "system", "content": _CLASSIFIER_PROMPT_V1},
+        {"role": "user", "content": user_msg},
+    ]
+    if foundry:
+        payload = {
+            "model": _classifier_model(),
+            "messages": messages,
+            "max_completion_tokens": 200,
+            "temperature": 0.1,
+        }
+    else:
+        payload = {
+            "messages": messages,
+            "max_completion_tokens": 200,
+            "temperature": 0.1,
+        }
 
     t0 = time.monotonic()
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
+        async with httpx.AsyncClient(timeout=_timeout_s()) as client:
             resp = await client.post(url, json=payload, headers=headers)
         latency = (time.monotonic() - t0) * 1000
 
@@ -295,7 +341,7 @@ async def classify_message(
         return ClassifierResult(error="circuit_open")
 
     last = _last_call_ts.get(user_id, 0.0)
-    if now - last < _RATE_LIMIT_S:
+    if _rate_limit_s() > 0 and now - last < _rate_limit_s():
         return ClassifierResult(error="rate_limited")
     _last_call_ts[user_id] = now
 
