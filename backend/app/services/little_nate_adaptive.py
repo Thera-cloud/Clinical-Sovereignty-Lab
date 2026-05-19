@@ -420,10 +420,13 @@ MODE_ADDENDA = {
     "exploratory": (
         "Mode: EXPLORATORY. The user needs more than mirroring right now. "
         "Do NOT use the phrases 'what's coming up for you,' 'behind your "
-        "words,' or 'I sense.' Instead, offer 2-3 specific hypotheses or "
-        "framings of what might be going on in the situation they've "
-        "described. Be concrete. End by asking which framing fits, not "
-        "by asking how they feel."
+        "words,' or 'I sense.' Instead, offer 2-3 concrete framings in "
+        "plain behavioral language (capacity, sleep, boundaries, pacing, "
+        "overcommit) — NOT clinical labels they did not use. Do not "
+        "introduce attachment, psychodynamic, diagnostic, trauma-reframe, "
+        "Enneagram/MBTI, or unprompted theology unless they used that "
+        "vocabulary. Never diagnose or mention medications. End by asking "
+        "which framing fits, not by asking how they feel."
     ),
     "strategic": (
         "Mode: STRATEGIC. The user has asked for concrete help and/or "
@@ -532,6 +535,14 @@ def build_system_addendum(
             "Respond in one brief warm paragraph. Do NOT offer 2-3 hypotheses, "
             "clinical framings, or diagnostic labels. Wish them well."
         )
+
+    try:
+        from app.services.little_nate_clinical_output_policy import (
+            clinical_output_addendum_fragment,
+        )
+        base += clinical_output_addendum_fragment()
+    except ImportError:
+        pass
 
     _rejected = _extract_rejected_categories(user_msg)
     if _rejected and mode in ("strategic", "accommodating", "handoff"):

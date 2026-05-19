@@ -494,6 +494,25 @@ class NateResponseValidator:
                 warnings.append("therapeutic_boundary_violation")
                 break
 
+        # Layer 9b — Unsolicited clinical framing (Ticket 2, 2026-05-19)
+        try:
+            from app.services.little_nate_clinical_output_policy import (
+                check_unsolicited_clinical_framing,
+            )
+
+            _recent = context.get("recent_user_messages") or ()
+            _user_msg = (
+                context.get("client_message")
+                or context.get("user_message")
+                or ""
+            )
+            for label in check_unsolicited_clinical_framing(
+                response, _user_msg, _recent
+            ):
+                warnings.append(f"clinical_output:{label}")
+        except ImportError:
+            pass
+
         # ─────────────────────────────────────────────────────────────
         # v1.3 Sensitive Lexicon — additive Layer 8 extension (Note 2).
         # Single additive call. Only fires when context carries a

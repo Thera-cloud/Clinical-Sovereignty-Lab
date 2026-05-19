@@ -50,6 +50,9 @@ _ELEVATED_LOW = 1.1
 _ELEVATED_HIGH = 2.0
 _ELEVATED_HOME = 1.56
 
+# Client therapeutic chat cap (Lisa policy 2026-05-19)
+_CLINICAL_TEMP_CAP = float(os.getenv("NATE_CLINICAL_TEMPERATURE", "1.2"))
+
 _mood_seed = time.time()
 
 
@@ -58,11 +61,12 @@ def _is_elevated(user_id: str | None) -> bool:
     return bool(user_id and user_id in _ELEVATED_USERS)
 
 
-def nate_temperature(user_id: str | None = None) -> float:
+def nate_temperature(user_id: str | None = None, *, clinical: bool = False) -> float:
     """Return a mood-adjusted temperature.
 
     Standard users: drifts around 1.37 within [1.1, 1.52].
     Elevated test cohort: drifts around 1.56 within [1.1, 2.0].
+    When ``clinical=True``, result is capped at ``NATE_CLINICAL_TEMPERATURE`` (default 1.2).
     """
     global _mood_seed
     _mood_seed += random.random()
@@ -71,12 +75,16 @@ def nate_temperature(user_id: str | None = None) -> float:
         drift = random.gauss(0, 0.12)
         temp = _ELEVATED_HOME + drift
         temp = _TEMP_DRIFT_WEIGHT * temp + (1 - _TEMP_DRIFT_WEIGHT) * _ELEVATED_HOME
-        return round(max(_ELEVATED_LOW, min(_ELEVATED_HIGH, temp)), 3)
+        temp = max(_ELEVATED_LOW, min(_ELEVATED_HIGH, temp))
+    else:
+        drift = random.gauss(0, 0.08)
+        temp = _TEMP_HOME + drift
+        temp = _TEMP_DRIFT_WEIGHT * temp + (1 - _TEMP_DRIFT_WEIGHT) * _TEMP_HOME
+        temp = max(_TEMP_LOW, min(_TEMP_HIGH, temp))
 
-    drift = random.gauss(0, 0.08)
-    temp = _TEMP_HOME + drift
-    temp = _TEMP_DRIFT_WEIGHT * temp + (1 - _TEMP_DRIFT_WEIGHT) * _TEMP_HOME
-    return round(max(_TEMP_LOW, min(_TEMP_HIGH, temp)), 3)
+    if clinical:
+        temp = min(temp, _CLINICAL_TEMP_CAP)
+    return round(temp, 3)
 
 
 def nate_chat_headers() -> dict:

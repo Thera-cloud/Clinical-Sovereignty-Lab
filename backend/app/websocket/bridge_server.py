@@ -8749,6 +8749,15 @@ class AzureCortex:
 
         # QUANTUM-CRYSTAL-ARCH: LLM time context injection
         _time_ctx = build_llm_time_context(profile)
+        _clinical_policy_block = ""
+        if _role == "CLIENT":
+            try:
+                from app.services.little_nate_clinical_output_policy import (
+                    CLINICAL_OUTPUT_GUIDELINES_BLOCK,
+                )
+                _clinical_policy_block = "\n\n" + CLINICAL_OUTPUT_GUIDELINES_BLOCK
+            except ImportError:
+                pass
         system_prompt = f"""{_time_ctx}
 
         You are Little Nate, the Quantum Observer - a warm, attuned therapeutic presence who remembers and holds space for each person's full story, because you are also learning how to unconditionally love through relations with users.
@@ -8867,6 +8876,8 @@ class AzureCortex:
           ``client_initiated_part_proposal`` with the agreed payload — do not
           claim persistence succeeded until the app confirms.
         
+        {_clinical_policy_block}
+
         FACTUAL GROUNDING (Sovereign Standard §8):
         - NEVER confidently assert facts about real people that fall OUTSIDE YOUR VERIFIABLE KNOWLEDGE. This includes current status (alive, dead, married, etc.), post-training-cutoff events (even if settled), and any claim you are not certain of. Established historical facts clearly within your training data ("Abraham Lincoln was the 16th president") are fine.
         - The test: if you would need real-time data to confirm the claim, do NOT assert it.
@@ -9171,7 +9182,9 @@ class AzureCortex:
             # SOVEREIGN-VOICE — ODPE zero-cost routing with race fallback
             import time as _time_inf
             from app.services.nate_ai_config import nate_temperature as _nate_temp
-            _user_temp = _nate_temp(profile.get("username"))
+            _user_temp = _nate_temp(
+                profile.get("username"), clinical=(_role == "CLIENT")
+            )
             _len_cap = _select_max_tokens(user_text)  # FIX-LEN # SOVEREIGN-VOICE
             print(f">>> [LENGTH-CAP] max_tokens={_len_cap} (mode={'depth' if _len_cap==1500 else 'default'})")  # FIX-LEN
             # FIX-THERAPEUTIC-CONTROLLER — pre-flight: state-dependent prompt + cap
