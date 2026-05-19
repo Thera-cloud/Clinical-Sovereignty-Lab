@@ -58,6 +58,7 @@ async def build_vault_chat_context(db_pool, profile: dict[str, Any], user_text: 
         return user_text, "", None
 
     match = _VAULT_REF_RE.search(user_text)
+    upload_ref = bool(_UPLOAD_REF_RE.search(user_text))
     rows = []
     try:
         if match:
@@ -71,7 +72,7 @@ async def build_vault_chat_context(db_pool, profile: dict[str, Any], user_text: 
             if row:
                 rows = [row]
                 user_text = user_text.replace(match.group(0), f"(referring to my vault item: {row['display_name'] or 'file'})").strip()
-        elif _UPLOAD_REF_RE.search(user_text):
+        elif upload_ref:
             rows = await db_pool.fetch(
                 """SELECT id, display_name, content_type, extracted_text_preview,
                           blob_path, thumbnail_path, mime_type
@@ -87,6 +88,17 @@ async def build_vault_chat_context(db_pool, profile: dict[str, Any], user_text: 
         return user_text, "", None
 
     if not rows:
+        if upload_ref:
+            # Gap 2 hardening: if the user references uploads but no vault rows
+            # resolve, inject explicit context so Nate asks for a re-reference
+            # instead of claiming no access.
+            return (
+                user_text,
+                "[VAULT CONTEXT NOTE] The user referenced uploaded files, but no vault "
+                "items were resolved for this turn. Do not claim you can never access "
+                "uploads. Ask them to specify the file name or re-attach/share the item.",
+                None,
+            )
         return user_text, "", None
 
     parts = []

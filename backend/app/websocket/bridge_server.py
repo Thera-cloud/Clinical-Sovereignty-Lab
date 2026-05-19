@@ -225,6 +225,9 @@ _DOJO_TIER_TO_SIGNAL = {"tension": "TENSION", "workers_ai": "LOCKED", "auto": No
 # QUANTUM-CRYSTAL-ARCH: per-user turn accumulator for session-level crystals
 _chat_session_turns: dict = {}  # uid -> list of {"user_text": ..., "ai_text": ...}
 _CHAT_SESSION_CRYSTAL_INTERVAL = 5  # create session crystal every N turns
+# Gap 3: live per-session continuity buffer for immediate referent recall.
+_chat_live_turns: dict = {}  # uid -> list of {"user_text": ..., "ai_text": ...}
+_CHAT_LIVE_TURN_LIMIT = 8
 
 # QUANTUM-CRYSTAL-ARCH — adaptive mode detection (reflective/exploratory/strategic/handoff/accommodating)
 try:
@@ -255,14 +258,33 @@ def _adaptive_sweep() -> None:
         print(f">>> [ADAPTIVE] swept {len(stale)} stale state(s)")
 
 
-def _adaptive_get_state(uid: str):
-    """Lazy-create SessionState for uid. Returns None if adaptive module unavailable."""
+def _adaptive_get_state(uid: str, profile: dict = None):
+    """Lazy-create SessionState for uid. Returns None if adaptive module unavailable.
+    On first create, loads cross-session arc from profile_data if available."""
     if _adaptive_mod is None or not uid:
         return None
     st = _adaptive_states.get(uid)
     if st is None:
         st = _adaptive_mod.SessionState()
         _adaptive_states[uid] = st
+        # QUANTUM-CRYSTAL-ARCH — Phase 2: load cross-session arc
+        if profile:
+            try:
+                _pd = profile.get("profile_data", profile) if isinstance(profile, dict) else {}
+                if isinstance(_pd, str):
+                    import json as _json
+                    try:
+                        _pd = _json.loads(_pd)
+                    except Exception:
+                        _pd = {}
+                _arc_data = _pd.get("ln_conversation_arc") if isinstance(_pd, dict) else None
+                if _arc_data:
+                    from app.services.little_nate_arc_memory import load_arc_into_state
+                    load_arc_into_state(st, _arc_data)
+            except ImportError:
+                pass
+            except Exception as _arc_load_err:
+                print(f">>> [ARC] load error (non-fatal): {type(_arc_load_err).__name__}: {_arc_load_err}")
     return st
 
 
@@ -7084,6 +7106,22 @@ async def _fetch_pg_history_for_chat(db_pool, username: str, hardware_id: str, l
         return ""
 
 
+def _format_live_turn_context(uid: str, limit: int = 4) -> str:
+    """Format immediate in-session turns for short-horizon continuity."""
+    turns = _chat_live_turns.get(uid) or []
+    if not turns:
+        return ""
+    parts = ["LIVE SESSION CONTEXT (most recent turns):"]
+    for t in turns[-limit:]:
+        _u = (t.get("user_text") or "")[:200]
+        _a = (t.get("ai_text") or "")[:200]
+        if _u:
+            parts.append(f"Client: {_u}")
+        if _a:
+            parts.append(f"Nate: {_a}")
+    return "\n".join(parts)
+
+
 import re as _re_mod
 
 class _ChatMemorySearchTrigger:
@@ -7857,6 +7895,8 @@ class AzureCortex:
         session = self.sessions.create_session(uid, "AI")
         self.active_sessions[uid] = session["session_id"]
         self.analytics.record_event("session_start", uid)
+        # Gap 3: clear short-horizon in-session buffer at new session boundary.
+        _chat_live_turns.pop(uid, None)
 
     def unregister(self, uid: str, ws):
         if uid in self.sockets:
@@ -7874,6 +7914,7 @@ class AzureCortex:
             _adaptive_clear(uid)
         except Exception:
             pass
+        _chat_live_turns.pop(uid, None)
 
     def _get_family(self, p: dict) -> str:
         fid = p.get("family_id")
@@ -8264,6 +8305,7 @@ class AzureCortex:
             )),
             _timed("pg_history", _fetch_pg_history_for_chat(_cpool, _uname, _hw_id, limit=15)),
         )
+        _live_turn_context = _format_live_turn_context(uid, limit=4)
         _pre_ms = int((_time_ctx.monotonic() - _t_pre) * 1000)
         print(f">>> [RELATIONAL CONTEXT LENGTH]: {len(relational_context)} chars (parallel pre-fetch: {_pre_ms}ms)")
         
@@ -8738,6 +8780,9 @@ class AzureCortex:
         {memory_context}
         Note: Sessions from previous days are included above. Reference them naturally when the user revisits a topic.
 
+        {_live_turn_context}
+        {"Note: The live session context above is the immediate current conversation. Use it for short-horizon continuity (e.g., 'repeat what you just said')." if _live_turn_context else ""}
+
         {pg_history_context}
         {"Note: The above includes voice call transcripts and older chat history stored in the database. You remember ALL conversations — chat and phone calls alike." if pg_history_context else ""}
 
@@ -8992,11 +9037,66 @@ class AzureCortex:
                 if _adaptive_sweep_counter >= _ADAPTIVE_SWEEP_INTERVAL:
                     _adaptive_sweep_counter = 0
                     _adaptive_sweep()
-                _ad_state = _adaptive_get_state(uid)
+                _ad_state = _adaptive_get_state(uid, profile=profile)
                 _ad_lock = _adaptive_get_lock(uid)
                 if _ad_state is not None and _ad_lock is not None:
                     async with _ad_lock:
                         _adaptive_payload = _adaptive_mod.prepare_response(_ad_state, user_text, profile)
+                    # QUANTUM-CRYSTAL-ARCH — Phase 1.5 classifier (parallel to regex, async)
+                    try:
+                        from app.services.little_nate_classifier import (
+                            classify_message, merge_classifier_into_state,
+                            compute_classifier_handoff, detect_disagreements,
+                            ENABLE_CLASSIFIER_LAYER,
+                        )
+                        _cl_result = await classify_message(user_text, user_id=uid)
+                        if _ad_state is not None:
+                            _cl_signals = merge_classifier_into_state(_cl_result, _ad_state)
+                            if _adaptive_payload and _cl_signals:
+                                _adaptive_payload.setdefault("signals", {}).update(_cl_signals)
+                            if ENABLE_CLASSIFIER_LAYER and compute_classifier_handoff(_ad_state):
+                                if _adaptive_payload and not _adaptive_payload.get("direct_response"):
+                                    _adaptive_payload["mode"] = "handoff"
+                                    _adaptive_payload["should_offer_coach_ui"] = True
+                                    _adaptive_payload["signals"]["classifier_handoff"] = True
+                            _regex_sig = _adaptive_payload.get("signals", {}) if _adaptive_payload else {}
+                            _disagree = detect_disagreements(_cl_result, _regex_sig)
+                            if _disagree:
+                                print(f">>> [CLASSIFIER] disagreements uid={uid} turn={getattr(_ad_state, 'turn_count', '?')}: {_disagree}")
+                            # QUANTUM-CRYSTAL-ARCH — Phase 2: arc memory accumulation
+                            if _cl_result is not None and getattr(_cl_result, "domains_present", ()):
+                                try:
+                                    from app.services.little_nate_arc_memory import (
+                                        merge_domains_into_arc, evaluate_arc_scope,
+                                        mark_arc_triggered, ENABLE_ARC_MEMORY,
+                                        detect_topic_pivot, reset_arc,
+                                    )
+                                    if detect_topic_pivot(user_text):
+                                        reset_arc(_ad_state)
+                                        print(f">>> [ARC] topic pivot detected for uid={uid}, arc reset")
+                                    merge_domains_into_arc(
+                                        _ad_state,
+                                        list(getattr(_cl_result, "domains_present", ())),
+                                        getattr(_cl_result, "weight", 0.5),
+                                    )
+                                    _arc_fire, _arc_doms, _arc_cnt = evaluate_arc_scope(_ad_state)
+                                    print(f">>> [ARC] uid={uid} domains={_arc_cnt} triggered={_arc_fire} weights={dict(list(_ad_state.arc_domain_weights.items())[:6])}")
+                                    if ENABLE_ARC_MEMORY and _arc_fire:
+                                        mark_arc_triggered(_ad_state)
+                                        from app.services.little_nate_coaching_scope_gate import STABILIZATION_RESPONSE
+                                        if _adaptive_payload and not _adaptive_payload.get("direct_response"):
+                                            _adaptive_payload["direct_response"] = STABILIZATION_RESPONSE
+                                            _adaptive_payload["mode"] = "scope_lock"
+                                            _adaptive_payload["signals"]["arc_scope_triggered"] = True
+                                            print(f">>> [ARC] scope gate FIRED for uid={uid} — {_arc_cnt} domains: {_arc_doms}")
+                                except ImportError:
+                                    pass
+                                except Exception as _arc_err:
+                                    print(f">>> [ARC] error (non-fatal): {type(_arc_err).__name__}: {_arc_err}")
+                    except ImportError:
+                        pass
+                    except Exception as _cl_err:
+                        print(f">>> [CLASSIFIER] error (non-fatal): {type(_cl_err).__name__}: {_cl_err}")
                     _addendum = _adaptive_payload.get("system_addendum", "") if _adaptive_payload else ""
                     if _addendum:
                         # Reserve headroom for the addendum so trim can never drop it.
@@ -9064,8 +9164,16 @@ class AzureCortex:
             _already_streamed = False
             _t_inf_start = _time_inf.monotonic()
 
+            # QUANTUM-CRYSTAL-ARCH — Coaching Scope Gate bypass (Phase 1)
+            _scope_gate_direct = (_adaptive_payload or {}).get("direct_response")
+            if _scope_gate_direct:
+                full_response = _scope_gate_direct
+                _provider_used = "scope_gate"
+                _already_streamed = False
+                print(f">>> [SCOPE_GATE] direct_response fired for uid={uid} turn={getattr(_ad_state, 'turn_count', '?')}")
+
             # SOVEREIGN-VOICE — primary path: streaming ODPE routing (sub-second first token)
-            if _USE_SOVEREIGN_ROUTING and _sovereign_stream:
+            elif _USE_SOVEREIGN_ROUTING and _sovereign_stream:
                 print(f">>> [SOVEREIGN] Starting ODPE streaming for uid={uid}")
                 try:
                     _chunk_buf = ""
@@ -9523,6 +9631,30 @@ class AzureCortex:
                                 await _ws.send(json.dumps(_meta_payload))
                             except Exception:
                                 self.sockets[uid].discard(_ws)
+                    # QUANTUM-CRYSTAL-ARCH — Phase 2: persist arc to profile_data
+                    _ad_state3 = _adaptive_states.get(uid)
+                    if _ad_state3 is not None and getattr(_ad_state3, "arc_domain_weights", None):
+                        try:
+                            from app.services.little_nate_arc_memory import serialize_arc
+                            _arc_ser = serialize_arc(_ad_state3)
+                            if _arc_ser is not None:
+                                _reg = load_registry()
+                                _rkey = f"{_role.lower()}_{uid}" if _role else uid
+                                if _rkey in _reg:
+                                    _pd3 = _reg[_rkey].get("profile_data", {})
+                                    if isinstance(_pd3, str):
+                                        import json as _json3
+                                        try:
+                                            _pd3 = _json3.loads(_pd3)
+                                        except Exception:
+                                            _pd3 = {}
+                                    _pd3["ln_conversation_arc"] = _arc_ser
+                                    _reg[_rkey]["profile_data"] = _pd3
+                                    save_registry(_reg)
+                        except ImportError:
+                            pass
+                        except Exception as _arc_sv_err:
+                            print(f">>> [ARC] save error (non-fatal): {type(_arc_sv_err).__name__}: {_arc_sv_err}")
                 except Exception as _ad_post_err:
                     print(f">>> [ADAPTIVE] post-turn error (non-fatal): {_ad_post_err}")
 
@@ -9537,6 +9669,15 @@ class AzureCortex:
 
                 # QUANTUM-CRYSTAL-ARCH: accumulate turns, create session summary every N turns
                 try:
+                    if uid not in _chat_live_turns:
+                        _chat_live_turns[uid] = []
+                    _chat_live_turns[uid].append({
+                        "user_text": user_text,
+                        "ai_text": _final_response,
+                    })
+                    if len(_chat_live_turns[uid]) > _CHAT_LIVE_TURN_LIMIT:
+                        _chat_live_turns[uid] = _chat_live_turns[uid][-_CHAT_LIVE_TURN_LIMIT:]
+
                     if uid not in _chat_session_turns:
                         _chat_session_turns[uid] = []
                     _chat_session_turns[uid].append({

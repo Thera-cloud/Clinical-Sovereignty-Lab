@@ -32,6 +32,9 @@ from dataclasses import dataclass, field
 from typing import Optional, Literal, Mapping, Any
 import re
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # SIGNAL PATTERNS
@@ -84,6 +87,13 @@ DISSATISFACTION_PHRASES = [
     r"\bsame thing\b",
     r"\bdead.end\b",
     r"\bcorrect format\b",
+    # Gap 9 / Gap 16 — pushback idioms (magicguy72 "I already do that")
+    r"\bi already do that\b",
+    r"\btried that\b",
+    r"\bthat doesn'?t help\b",
+    r"\btell me something new\b",
+    r"\balready tried\b",
+    r"\bi('ve| have) done that\b",
 ]
 
 REFLECTION_TELLS = [
@@ -155,15 +165,26 @@ class SessionState:
     consecutive_distress_turns: int = 0
     coach_offered: bool = False
     coach_declined_at_turn: Optional[int] = None
-    # TODO: turn-1 initial mode detection — set starting mode based on first
-    # message shape (action-seeking vs emotional-processing vs scattered)
-    # instead of always defaulting to reflective. Filed as follow-up ticket.
     current_mode: Mode = "reflective"
     last_mode_switch_turn: int = 0
     recent_user_msgs: list = field(default_factory=list)
     recent_assistant_msgs: list = field(default_factory=list)
     # QUANTUM-CRYSTAL-ARCH — neurodivergent stickiness
     accommodating_locked: bool = False
+    # QUANTUM-CRYSTAL-ARCH — coaching scope gate (Phase 1)
+    scope_topics_active: tuple = field(default_factory=tuple)
+    scope_lock_since_turn: Optional[int] = None
+    # QUANTUM-CRYSTAL-ARCH — classifier layer (Phase 1.5)
+    distress_score: float = 0.0
+    _last_classifier_distress_turn: int = 0
+    # QUANTUM-CRYSTAL-ARCH — Phase 2: conversation arc memory
+    # Rolling weighted domain accumulator. Keys = classifier domain strings,
+    # values = accumulated weight over a sliding window. When distinct domains
+    # with weight >= ARC_DOMAIN_MIN_WEIGHT exceed ARC_TRIGGER_DOMAINS, the
+    # scope gate fires regardless of turn count.
+    arc_domain_weights: dict = field(default_factory=dict)
+    arc_last_updated_ts: float = 0.0
+    arc_scope_triggered: bool = False
     # G1: TTL eviction
     last_touched_ts: float = field(default_factory=time.time)
 
@@ -242,11 +263,15 @@ def detect_neurodivergent(state: SessionState, user_msg: str) -> tuple:
         fired       - any neurodivergent signal matched
         should_lock - self-identification fired; mode should persist
                       for the rest of the session
+
+    Gap 13: masking patterns alone no longer lock accommodating. Requires
+    2-of-N co-occurrence (any 2 of masking/load/isolation) OR self-id.
     """
     self_id = _hits(user_msg, NEURODIVERGENT_SELF_ID) > 0
     load = _hits(user_msg, NEURODIVERGENT_LOAD) > 0
     masking = _hits(user_msg, NEURODIVERGENT_MASKING) > 0
-    fired = self_id or load or masking
+    signal_count = sum([load, masking])
+    fired = self_id or signal_count >= 2
     return fired, self_id
 
 
@@ -270,6 +295,48 @@ def select_mode(state: SessionState, user_msg: str) -> tuple:
     nd_fired, nd_lock = detect_neurodivergent(state, user_msg)
     if nd_lock:
         state.accommodating_locked = True
+
+    # Turn-1/2 initial mode calibration (Gap 4):
+    # choose a better starting mode before the conversation has enough
+    # assistant history for mismatch/rut detectors to be meaningful.
+    if state.turn_count <= 2 and state.last_mode_switch_turn == 0:
+        if detect_user_dissatisfaction(user_msg):
+            state.current_mode = "strategic"
+            state.last_mode_switch_turn = state.turn_count
+            return "strategic", {
+                "dissatisfaction": True,
+                "neurodivergent": nd_fired,
+                "neurodivergent_lock": nd_lock,
+                "distress": False,
+                "mismatch": False,
+                "rut": False,
+                "initial_mode_bootstrap": True,
+            }
+        if state.accommodating_locked or nd_fired:
+            state.current_mode = "accommodating"
+            state.last_mode_switch_turn = state.turn_count
+            return "accommodating", {
+                "dissatisfaction": False,
+                "neurodivergent": nd_fired,
+                "neurodivergent_lock": nd_lock,
+                "distress": False,
+                "mismatch": False,
+                "rut": False,
+                "initial_mode_bootstrap": True,
+            }
+        # Early action language should not start in reflective mode.
+        if _hits(user_msg, ACTION_REQUEST_PHRASES) > 0:
+            state.current_mode = "exploratory"
+            state.last_mode_switch_turn = state.turn_count
+            return "exploratory", {
+                "dissatisfaction": False,
+                "neurodivergent": nd_fired,
+                "neurodivergent_lock": nd_lock,
+                "distress": False,
+                "mismatch": True,
+                "rut": False,
+                "initial_mode_bootstrap": True,
+            }
 
     signals = {
         "dissatisfaction": detect_user_dissatisfaction(user_msg),
@@ -412,12 +479,70 @@ def prepare_response(
 
     Caller should append `system_addendum` to the base system prompt and
     inspect `should_offer_coach_ui` for handoff UI delivery.
+
+    If `direct_response` is set in the return dict, the bridge should
+    use it as the full response (skip LLM inference). Gap 6: state
+    (turn_count, accumulators, message buffers) still advances normally.
     """
     state.turn_count += 1
     state.last_touched_ts = time.time()
     state.recent_user_msgs.append(user_msg)
     if len(state.recent_user_msgs) > 5:
         state.recent_user_msgs = state.recent_user_msgs[-5:]
+
+    # QUANTUM-CRYSTAL-ARCH — coaching scope gate (Phase 1, before select_mode)
+    _scope_result = None
+    try:
+        from app.services.little_nate_coaching_scope_gate import (
+            evaluate_scope_gate,
+            ENABLE_COACHING_SCOPE_GATE,
+        )
+        _scope_result = evaluate_scope_gate(
+            state.turn_count,
+            user_msg,
+            state.scope_topics_active,
+            state.scope_lock_since_turn,
+        )
+        # Update state with scope gate findings regardless of flag
+        if _scope_result.scope_locked_topics:
+            state.scope_topics_active = _scope_result.scope_locked_topics
+        if _scope_result.unlocked:
+            state.scope_lock_since_turn = None
+            state.scope_topics_active = ()
+        elif _scope_result.direct_response and state.scope_lock_since_turn is None:
+            state.scope_lock_since_turn = state.turn_count
+
+        # Shadow-log always (dark-launch observability)
+        logger.info(
+            "[SCOPE_GATE] uid=%s turn=%d groups=%s lock=%s labels=%s enabled=%s",
+            (profile or {}).get("hardware_id", "?"),
+            state.turn_count,
+            _scope_result.matched_groups,
+            state.scope_lock_since_turn,
+            _scope_result.telemetry_labels,
+            ENABLE_COACHING_SCOPE_GATE,
+        )
+
+        if ENABLE_COACHING_SCOPE_GATE and _scope_result.direct_response:
+            # Gate fires: still run detectors so accumulators update (Gap 6)
+            _mode, _signals = select_mode(state, user_msg)
+            _signals["scope_gate_multi_topic"] = True
+            for lbl in _scope_result.telemetry_labels:
+                _signals[lbl] = True
+            if _mode == "handoff":
+                state.coach_offered = True
+            return {
+                "mode": _mode,
+                "signals": _signals,
+                "system_addendum": "",
+                "direct_response": _scope_result.direct_response,
+                "should_offer_coach_ui": False,  # Gap 10: no handoff chip
+                "coach_name": _resolve_coach_name(profile),
+            }
+    except ImportError:
+        pass
+    except Exception as _sg_err:
+        logger.warning("[SCOPE_GATE] error (non-fatal): %s: %s", type(_sg_err).__name__, _sg_err)
 
     mode, signals = select_mode(state, user_msg)
     addendum = build_system_addendum(mode, signals, profile)
