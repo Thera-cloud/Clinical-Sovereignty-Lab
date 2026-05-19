@@ -78,6 +78,26 @@ ACTION_REQUEST_PHRASES = [
     r"\bmore concrete\b",
 ]
 
+# Session-end / low-weight turns (Lisa 2026-05-19) — avoid exploratory 2-3 framings
+CLOSING_PHRASES = [
+    "bye for now",
+    "goodbye",
+    "good bye",
+    "talk later",
+    "signing off",
+    "gotta go",
+    "got to go",
+    "taking a nap",
+    "going to sleep",
+    "going to bed",
+    "need a nap",
+    "catch you later",
+    "see you later",
+    "talk to you later",
+    "practical step to restore",
+    "restore resources",
+]
+
 DISSATISFACTION_PHRASES = [
     r"\brepetitive\b",
     r"\bcircular\b",
@@ -249,6 +269,18 @@ def detect_user_dissatisfaction(user_msg: str) -> bool:
     return _hits(user_msg, DISSATISFACTION_PHRASES) > 0
 
 
+def detect_closing_turn(user_msg: str) -> bool:
+    """User is pausing or ending — skip exploratory framing menus."""
+    lower = (user_msg or "").lower().strip()
+    if not lower:
+        return False
+    if any(ph in lower for ph in CLOSING_PHRASES):
+        return True
+    if len(lower) <= 40 and re.search(r"\b(bye|goodnight|good night)\b", lower):
+        return True
+    return False
+
+
 def detect_assistant_rut(state: SessionState) -> bool:
     """The assistant is repeating its own move."""
     recent = state.recent_assistant_msgs[-3:]
@@ -287,6 +319,7 @@ def select_mode(state: SessionState, user_msg: str) -> tuple:
 
     Priority (highest first):
         1. dissatisfaction -> strategic   (user called out the pattern)
+        1b. closing_turn -> reflective    (nap / bye — no framing menu)
         2. accommodating_locked OR neurodivergent -> accommodating
            (above distress: scaffolding, not escalation)
         3. distress -> handoff
@@ -342,6 +375,7 @@ def select_mode(state: SessionState, user_msg: str) -> tuple:
 
     signals = {
         "dissatisfaction": detect_user_dissatisfaction(user_msg),
+        "closing_turn": detect_closing_turn(user_msg),
         "neurodivergent": nd_fired,
         "neurodivergent_lock": nd_lock,
         "accommodating_locked": state.accommodating_locked,
@@ -352,6 +386,8 @@ def select_mode(state: SessionState, user_msg: str) -> tuple:
 
     if signals["dissatisfaction"]:
         new_mode: Mode = "strategic"
+    elif signals["closing_turn"]:
+        new_mode = "reflective"
     elif state.accommodating_locked or signals["neurodivergent"]:
         new_mode = "accommodating"
     elif signals["distress"]:
@@ -489,6 +525,13 @@ def build_system_addendum(
             "briefly — one sentence, no over-apologizing — then "
             "change your approach.\n\n"
         ) + base
+
+    if signals.get("closing_turn"):
+        base += (
+            "\n\nCLOSING TURN: The user is pausing or ending the exchange. "
+            "Respond in one brief warm paragraph. Do NOT offer 2-3 hypotheses, "
+            "clinical framings, or diagnostic labels. Wish them well."
+        )
 
     _rejected = _extract_rejected_categories(user_msg)
     if _rejected and mode in ("strategic", "accommodating", "handoff"):

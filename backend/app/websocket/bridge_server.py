@@ -9089,6 +9089,21 @@ class AzureCortex:
                             _disagree = detect_disagreements(_cl_result, _regex_sig)
                             if _disagree:
                                 print(f">>> [CLASSIFIER] disagreements uid={uid} turn={getattr(_ad_state, 'turn_count', '?')}: {_disagree}")
+                            # QUANTUM-CRYSTAL-ARCH — closing turn: classifier social + low weight
+                            if (
+                                _adaptive_payload
+                                and not _adaptive_payload.get("direct_response")
+                                and not getattr(_cl_result, "error", None)
+                                and _cl_result.request_shape == "social"
+                                and _cl_result.weight <= 0.35
+                            ):
+                                _csig = _adaptive_payload.setdefault("signals", {})
+                                _csig["closing_turn"] = True
+                                _csig["classifier_closing"] = True
+                                _adaptive_payload["mode"] = "reflective"
+                                _adaptive_payload["system_addendum"] = _adaptive_mod.build_system_addendum(
+                                    "reflective", _csig, profile, user_msg=user_text,
+                                )
                             # QUANTUM-CRYSTAL-ARCH — Phase 2: arc memory accumulation
                             if _cl_result is not None and getattr(_cl_result, "domains_present", ()):
                                 try:
@@ -9210,7 +9225,10 @@ class AzureCortex:
                     _think_resolved = False
                     _in_think = False
                     # QUANTUM-CRYSTAL-ARCH: real-time garble detection
-                    from app.services.response_sanitizer import is_chunk_garbled as _is_garbled_chunk
+                    from app.services.response_sanitizer import (
+                        is_chunk_garbled as _is_garbled_chunk,
+                        garble_detection_reason as _garble_reason_fn,
+                    )
                     _garble_streak = 0
                     _garble_aborted = False
                     _total_chars_sent = 0
@@ -9268,7 +9286,8 @@ class AzureCortex:
                             if len(_chunk_buf) >= 25:
                                 if _is_garbled_chunk(_chunk_buf):
                                     _garble_streak += 1
-                                    print(f">>> [GARBLE] Garbled chunk #{_garble_streak} from {provider} ({len(_chunk_buf)} chars): {_chunk_buf[:80]}...")
+                                    _gr = _garble_reason_fn(_chunk_buf) or "garble_score"
+                                    print(f">>> [GARBLE] reason={_gr} Garbled chunk #{_garble_streak} from {provider} ({len(_chunk_buf)} chars): {_chunk_buf[:80]}...")
                                     _chunk_buf = ""
                                     full_response = _clean_prefix
                                     if _garble_streak >= _GARBLE_STREAK_LIMIT:
