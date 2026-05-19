@@ -8753,9 +8753,9 @@ class AzureCortex:
         if _role == "CLIENT":
             try:
                 from app.services.little_nate_clinical_output_policy import (
-                    CLINICAL_OUTPUT_GUIDELINES_BLOCK,
+                    client_clinical_prompt_blocks,
                 )
-                _clinical_policy_block = "\n\n" + CLINICAL_OUTPUT_GUIDELINES_BLOCK
+                _clinical_policy_block = "\n\n" + client_clinical_prompt_blocks()
             except ImportError:
                 pass
         system_prompt = f"""{_time_ctx}

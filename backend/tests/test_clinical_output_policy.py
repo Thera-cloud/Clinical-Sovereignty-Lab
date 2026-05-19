@@ -1,7 +1,9 @@
 """Tests for clinical output policy (Ticket 2, 2026-05-19)."""
 
 from app.services.little_nate_clinical_output_policy import (
+    META_QUESTIONS_IDENTITY_STATEMENT,
     check_unsolicited_clinical_framing,
+    client_clinical_prompt_blocks,
     clinical_temperature_cap,
     user_named_category,
 )
@@ -48,6 +50,14 @@ def test_user_named_attachment():
 
 def test_clinical_temperature_cap():
     assert clinical_temperature_cap() == 1.2
+
+
+def test_meta_questions_block_in_client_prompt():
+    blocks = client_clinical_prompt_blocks()
+    assert "META QUESTIONS" in blocks
+    assert "not a therapist, doctor, or licensed mental health professional" in blocks
+    assert META_QUESTIONS_IDENTITY_STATEMENT in blocks
+    assert "Do not hedge" in blocks
 
 
 def test_nate_temperature_clinical_caps_elevated_user(monkeypatch):
