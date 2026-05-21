@@ -1514,6 +1514,21 @@ class StripeWebhookHandler:
         except Exception:
             pass
         return "UTC"
+
+    async def _notify_bridge_reload(self, username: str) -> None:
+        """Publish Redis signal so bridge reloads a freshly-created user."""
+        if not username:
+            return
+        try:
+            from app.services.api_server import _get_auth_redis
+
+            r = await _get_auth_redis()
+            if r:
+                await r.publish("nate:user_reload", json.dumps({"username": username}))
+                # Safety net: ensure eventual consistency even if targeted reload misses.
+                await r.publish("nate:registry_reload", json.dumps({"source": "stripe_signup"}))
+        except Exception:
+            pass
     
     async def _apply_subscription_grant(
         self,
@@ -2282,6 +2297,7 @@ class StripeWebhookHandler:
                 "UPDATE pending_signups SET status='completed', consumed_at=NOW() WHERE id=$1",
                 signup_uuid,
             )
+            await self._notify_bridge_reload(row["username"])
             print(f">>> [STRIPE] Registration finalized for {row['username']}")
             stripe_sub_snap = None
             sid_early = session.get("subscription")
