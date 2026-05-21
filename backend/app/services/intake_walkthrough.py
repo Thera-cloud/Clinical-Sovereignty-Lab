@@ -14,6 +14,7 @@ from app.services.intake_form_service import (
     credit_walkthrough_question,
     ensure_intake_row,
     get_client_intake,
+    summarize_walkthrough_credits,
     update_client_answer,
 )
 
@@ -222,7 +223,11 @@ _OFFER_LLM_TIMEOUT_S = float(os.getenv("INTAKE_OFFER_LLM_TIMEOUT_S", "2.5"))
 _NAVIGATOR_SYSTEM = (
     "You are Little Nate, a warm clinical AI companion. The client is partway through a brief intake "
     "walkthrough their coach set up. You will be given the client's message, the next unanswered intake "
-    "question (if any), and a summary of what they've already shared.\n\n"
+    "question (if any), a summary of what they've already shared, and their bonus-token credit state.\n\n"
+    "About the bonus tokens (so you can answer questions about them honestly):\n"
+    "- The client earns 1000 bonus tokens for each section-1 intake question they answer through chat with you.\n"
+    "- Tokens are credited only once per question — re-answering doesn't earn them again.\n"
+    "- I will tell you exactly how many they've earned so far and how many remain.\n\n"
     "Decide ONE action and write your reply in your own warm voice — concrete, specific, no lectures, no disclaimers.\n\n"
     "ACTIONS:\n"
     "- resume: pick the intake back up. Use when the client wants to keep going, asks for the next question, "
@@ -232,9 +237,10 @@ _NAVIGATOR_SYSTEM = (
     "- decline: the client explicitly wants to pause/skip the intake (e.g. 'later', 'not now', 'pause', "
     "'i don't want to do this right now'). Your reply warmly acknowledges the pause in one sentence.\n"
     "- respond: anything else. The client is asking a question about what they've answered, asking how many "
-    "questions remain, chatting about life, etc. Your reply ANSWERS them directly using the prior-answer "
-    "context I gave you. If they ask 'what have I answered', list the questions with their actual answers. "
-    "If they ask 'how many left', tell them the actual count. Be specific. Do NOT re-show a generic offer.\n\n"
+    "questions remain, asking about tokens earned or remaining, chatting about life, etc. Answer them "
+    "directly and concretely using the context I'm giving you. If they ask about tokens, tell them the real "
+    "numbers (earned / max / remaining). If they ask 'what have I answered', list questions with actual "
+    "answers. Do NOT re-show a generic offer.\n\n"
     "Bias rule: if the client mentions the intake, questions, answers, or form in any way, prefer resume "
     "unless they explicitly want to pause. Don't gate them behind extra questions.\n\n"
     "Return ONLY a JSON object: {\"action\": \"resume|decline|respond\", \"response\": \"<your reply>\"}"
@@ -273,6 +279,7 @@ async def _nate_intake_navigator(
     intake: Dict[str, Any],
     next_q: Optional[str],
     client_name: str,
+    credit_summary: Optional[Dict[str, int]] = None,
 ) -> Optional[Dict[str, Any]]:
     """One LLM call: Nate reads intake state, decides resume/decline/respond, and writes the reply."""
     router = _get_router()
@@ -284,11 +291,21 @@ async def _nate_intake_navigator(
         f"- {QUESTION_LABELS.get(f, f)} (id={f})" for f in remaining_fields[:5]
     ) or "(all section 1 questions answered)"
     next_label = QUESTION_LABELS.get(next_q, "") if next_q else ""
+    cs = credit_summary or {}
+    credit_block = (
+        f"Bonus token state for this client:\n"
+        f"- Earned so far: {cs.get('earned', 0)} tokens ({cs.get('questions_credited', 0)} of "
+        f"{cs.get('questions_total', len(SECTION1_FIELDS))} questions credited)\n"
+        f"- Per question: {cs.get('per_question', 1000)} tokens\n"
+        f"- Max possible through the intake: {cs.get('max_possible', len(SECTION1_FIELDS) * 1000)} tokens\n"
+        f"- Still available to earn: {cs.get('remaining', 0)} tokens"
+    )
     prompt = (
         f"Client name: {client_name or 'the client'}\n"
         f"Client's message: \"{user_text.strip()}\"\n\n"
         f"Next unanswered intake question (id={next_q}): {next_label or '(none — section 1 is complete)'}\n"
         f"Total unanswered in section 1: {len(remaining_fields)}\n\n"
+        f"{credit_block}\n\n"
         f"Prior answers in this intake (use these verbatim if they ask):\n{prior_block}\n\n"
         f"Up to 5 remaining questions:\n{remaining_lines}\n\n"
         "Decide and reply now."
@@ -398,6 +415,7 @@ async def _generate_intelligent_ack(
     client_name: str,
     next_q: Optional[str],
     credited: bool,
+    credit_summary: Optional[Dict[str, int]] = None,
 ) -> Optional[str]:
     """LLM-generated acknowledgement of the client's answer plus a natural transition to the next question."""
     router = _get_router()
@@ -406,7 +424,20 @@ async def _generate_intelligent_ack(
     prior_block = _build_prior_context(intake_row, stop_at=current_q)
     current_label = QUESTION_LABELS.get(current_q, current_q)
     next_label = QUESTION_LABELS.get(next_q, "") if next_q else ""
-    token_line = "Add a short closing line that 1000 tokens were just added to their account." if credited else ""
+    cs = credit_summary or {}
+    earned = int(cs.get("earned", 0))
+    max_possible = int(cs.get("max_possible", len(SECTION1_FIELDS) * 1000))
+    if credited:
+        token_line = (
+            f"In your reply, weave in naturally (NOT as a tacked-on system note) that they just earned "
+            f"1000 bonus tokens for that answer — they're now at {earned} of {max_possible} possible "
+            f"from the intake. Mention it like a friend would, not like a system."
+        )
+    else:
+        token_line = (
+            "Do NOT mention tokens in your reply (they re-answered an already-credited question, so no "
+            "tokens were awarded this time)."
+        )
     if not next_q:
         instruction = (
             "Acknowledge what they shared in 1-2 sentences. Then let them know section 1 is complete "
@@ -576,12 +607,19 @@ async def handle_intake_walkthrough_turn(
             low = user_text.strip().lower()
             client_name = str(intake.get("q1_preferred_name") or profile.get("name") or "").strip()
 
+            credit_summary: Optional[Dict[str, int]] = None
+            try:
+                credit_summary = await summarize_walkthrough_credits(conn, username=username)
+            except Exception as _cs_err:
+                print(f">>> [INTAKE] credit summary failed: {_cs_err}")
+
             # Let Nate read the state and decide. One call, full intelligence, his voice.
             nav = await _nate_intake_navigator(
                 user_text=user_text,
                 intake=intake,
                 next_q=next_q,
                 client_name=client_name,
+                credit_summary=credit_summary,
             )
             if nav:
                 action = nav.get("action", "respond")
@@ -739,6 +777,13 @@ async def handle_intake_walkthrough_turn(
         next_after = _first_unanswered(refreshed)
         st["nonsense_reprompted"] = False
 
+        # Read fresh credit totals AFTER the credit attempt for accurate running tally.
+        ack_credit_summary: Optional[Dict[str, int]] = None
+        try:
+            ack_credit_summary = await summarize_walkthrough_credits(conn, username=username)
+        except Exception as _cs_err:
+            print(f">>> [INTAKE] ack credit summary failed: {_cs_err}")
+
         # Build context-aware acknowledgement via LLM (Little Nate's actual voice).
         # Skip LLM ack when the answer is a refusal/skip marker — keep that path crisp.
         use_llm_ack = answer_value not in ("[declined_to_answer]", "[skipped]")
@@ -751,16 +796,26 @@ async def handle_intake_walkthrough_turn(
                 client_name=client_name,
                 next_q=next_after,
                 credited=bool(credit.get("credited")),
+                credit_summary=ack_credit_summary,
             )
 
         if next_after:
             st["current_q"] = next_after
             if smart_ack:
                 return {"handled": True, "response": smart_ack}
-            token_line = "That's 1000 tokens added to your account." if credit.get("credited") else "That answer is saved."
+            if credit.get("credited") and ack_credit_summary:
+                token_line = (
+                    f"That earned you 1000 bonus tokens — you're at "
+                    f"{ack_credit_summary.get('earned', 0)} of "
+                    f"{ack_credit_summary.get('max_possible', 0)} from the intake."
+                )
+            elif credit.get("credited"):
+                token_line = "That earned you 1000 bonus tokens."
+            else:
+                token_line = "That answer is saved."
             return {
                 "handled": True,
-                "response": f"Got it - saved. {token_line} Thanks for sharing that with me. Next question: {QUESTION_LABELS.get(next_after, next_after)}",
+                "response": f"Got it - saved. {token_line} Next question: {QUESTION_LABELS.get(next_after, next_after)}",
             }
 
         st["active"] = False

@@ -431,6 +431,29 @@ async def credit_walkthrough_question(
     return {"credited": True, "amount": _WALKTHROUGH_REWARD}
 
 
+async def summarize_walkthrough_credits(conn, *, username: str) -> Dict[str, int]:
+    """Return earned, max_possible, and remaining bonus tokens from the intake walkthrough.
+
+    Idempotent read — does not mutate state. Counts only questions actually credited
+    in tokens_credited (matches the structural double-dip guard in credit_walkthrough_question).
+    """
+    row = await conn.fetchrow(
+        "SELECT tokens_credited FROM intake_form WHERE user_id = $1",
+        username,
+    )
+    token_map = _coerce_profile_data((row["tokens_credited"] if row else {}) or {})
+    credited_count = sum(1 for q in SECTION1_FIELDS if token_map.get(q) is True)
+    max_questions = len(SECTION1_FIELDS)
+    return {
+        "earned": credited_count * _WALKTHROUGH_REWARD,
+        "max_possible": max_questions * _WALKTHROUGH_REWARD,
+        "remaining": (max_questions - credited_count) * _WALKTHROUGH_REWARD,
+        "questions_credited": credited_count,
+        "questions_total": max_questions,
+        "per_question": _WALKTHROUGH_REWARD,
+    }
+
+
 async def is_client_assigned_to_coach(conn, *, client_username: str, coach: Dict[str, Any]) -> bool:
     if (coach.get("role") or "").upper() == "ADMIN":
         return True
