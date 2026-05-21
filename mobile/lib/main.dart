@@ -384,7 +384,9 @@ class _FamilyInviteAcceptScreenState extends State<FamilyInviteAcceptScreen> {
   WebSocketChannel? _socket;
   String _status = 'loading'; // loading, valid, invalid, expired, accepted, error
   String _inviterName = '';
+  String _inviterUsername = '';
   String _inviteeName = '';
+  String _inviteeContact = '';
   String _role = 'DEPENDENT';
   String _errorMsg = '';
 
@@ -457,7 +459,9 @@ class _FamilyInviteAcceptScreenState extends State<FamilyInviteAcceptScreen> {
           if (valid) {
             _status = 'valid';
             _inviterName = data['inviter_name'] ?? 'A family member';
+            _inviterUsername = (data['inviter_username'] ?? '').toString();
             _inviteeName = data['invitee_name'] ?? '';
+            _inviteeContact = (data['invitee_contact'] ?? '').toString();
             _role = data['role'] ?? 'DEPENDENT';
           } else {
             _status = data['message']?.toString().contains('expired') == true ? 'expired' : 'invalid';
@@ -822,8 +826,24 @@ class _FamilyInviteAcceptScreenState extends State<FamilyInviteAcceptScreen> {
                 ),
                 const SizedBox(height: 10),
                 TextButton(
-                  onPressed: _goHome,
-                  child: const Text("Don't have an account? Create one first", style: TextStyle(color: _textSecondary, fontSize: 12)),
+                  onPressed: () {
+                    // Route to signup with the invite context pre-filled so the
+                    // wizard knows this is a dependent/spouse on an existing
+                    // household plan (no Stripe billing, age gate bypassed).
+                    Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => SignUpWizard(
+                        role: 'CLIENT',
+                        inviteCode: widget.inviteCode,
+                        // Prefer username (machine ID); fall back to display
+                        // name only if bridge didn't return it.
+                        parentUsername: _inviterUsername.isNotEmpty ? _inviterUsername : _inviterName,
+                        inviteeName: _inviteeName,
+                        inviteeContact: _inviteeContact,
+                        isDependentInvite: true,
+                      ),
+                    ));
+                  },
+                  child: const Text("Don't have an account? Create one as a family member", style: TextStyle(color: _cyan, fontSize: 12)),
                 ),
               ],
             ),
@@ -7979,7 +7999,23 @@ class _LobbyButton extends StatelessWidget {
 // -----------------------------------------------------------------------------
 class SignUpWizard extends StatefulWidget {
   final String? role; // null = user picks during wizard
-  const SignUpWizard({super.key, this.role});
+  // Family-invite pre-fills — when a dependent/spouse arrives via an invite link
+  // and has no account yet. Auto-sets the dependent toggle and HoH username so
+  // the under-18 age gate is bypassed and no Stripe billing is required.
+  final String? inviteCode;
+  final String? parentUsername;
+  final String? inviteeName;
+  final String? inviteeContact;
+  final bool isDependentInvite;
+  const SignUpWizard({
+    super.key,
+    this.role,
+    this.inviteCode,
+    this.parentUsername,
+    this.inviteeName,
+    this.inviteeContact,
+    this.isDependentInvite = false,
+  });
   @override
   State<SignUpWizard> createState() => _SignUpWizardState();
 }
@@ -8094,6 +8130,26 @@ class _SignUpWizardState extends State<SignUpWizard> {
   void initState() {
     super.initState();
     _selectedRole = widget.role; // Pre-set if passed
+    // Family-invite pre-fills: auto-toggle dependent and seed HoH username/invite
+    // code so the wizard recognises this is a free family member, not a new HoH.
+    if (widget.isDependentInvite || (widget.parentUsername ?? '').trim().isNotEmpty) {
+      _isDependent = true;
+      _selectedRole = _selectedRole ?? 'CLIENT';
+    }
+    final _pu = (widget.parentUsername ?? '').trim();
+    if (_pu.isNotEmpty) _parentCtrl.text = _pu;
+    final _ic = (widget.inviteCode ?? '').trim();
+    if (_ic.isNotEmpty) _inviteCodeCtrl.text = _ic;
+    final _nm = (widget.inviteeName ?? '').trim();
+    if (_nm.isNotEmpty) _nameCtrl.text = _nm;
+    final _ct = (widget.inviteeContact ?? '').trim();
+    if (_ct.isNotEmpty) {
+      if (_ct.contains('@')) {
+        _emailCtrl.text = _ct;
+      } else {
+        _phoneCtrl.text = _ct;
+      }
+    }
     _parseCoachInviteFromUrl();
     _sanitizeSession();
     _loadSignupIanaForSignup();
@@ -8156,12 +8212,20 @@ class _SignUpWizardState extends State<SignUpWizard> {
        return;
     }
     // Dependents can be minors; only primary account holders must be 18+.
-    if (!_isDependent && _calculateAge(_dob!) < 18) {
-       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Primary Account Holder must be 18+.")));
+    // Auto-detect dependent status: if a Head of Household username or family
+    // invite code is present, treat this as a dependent signup even if the
+    // toggle was never flipped (e.g. user reached signup via an invite link
+    // and never saw the toggle).
+    final bool _hasHoH = _parentCtrl.text.trim().isNotEmpty || _inviteCodeCtrl.text.trim().isNotEmpty;
+    if (_hasHoH && !_isDependent) {
+      _isDependent = true; // ensure backend treats as dependent
+    }
+    if (!_isDependent && !_hasHoH && _calculateAge(_dob!) < 18) {
+       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Primary Account Holder must be 18+. If joining a family, enter the Head of Household username or invite code.")));
        return;
     }
-    if (_isDependent && _parentCtrl.text.trim().isEmpty) {
-       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please enter the Head of Household username, or turn off the Dependent toggle.")));
+    if (_isDependent && _parentCtrl.text.trim().isEmpty && _inviteCodeCtrl.text.trim().isEmpty) {
+       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please enter the Head of Household username or invite code.")));
        return;
     }
     // Coach-specific validations (always required for production)
@@ -8217,7 +8281,9 @@ class _SignUpWizardState extends State<SignUpWizard> {
        return;
     }
 
-    if (_effectiveRole == "CLIENT" && _selectedTier == "TRIAL") {
+    if (_effectiveRole == "CLIENT" && _selectedTier == "TRIAL" && !_isDependent && _inviteCodeCtrl.text.trim().isEmpty && _parentCtrl.text.trim().isEmpty) {
+      // Family dependents and spouses joining an existing household do NOT
+      // need Stripe billing — they ride on the Head of Household's plan.
       final base = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
       String? sid = _trialStripeSessionId;
       if (sid == null || sid.isEmpty) {

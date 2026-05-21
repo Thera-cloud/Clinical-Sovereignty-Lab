@@ -3499,10 +3499,26 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
     # SOVEREIGN-VOICE: family/spouse linkage at registration time.
     # If parent_username or family invite code is present, force the new account
     # into the existing household family_id instead of creating a random one.
+    # Distinguish SPOUSE vs DEPENDENT (child) by DOB — under 18 = DEPENDENT.
     family_id_from_link = ""
     family_role_from_link = ""
     family_linked_by = ""
     parent_username = (data.get("parent_username") or "").strip()
+
+    def _age_from_dob(dob_str: str) -> int:
+        try:
+            dob_d = datetime.datetime.fromisoformat(str(dob_str)).date()
+            today = datetime.datetime.now().date()
+            return today.year - dob_d.year - (
+                (today.month, today.day) < (dob_d.month, dob_d.day)
+            )
+        except Exception:
+            return 99  # default to adult if unparseable
+
+    _dob_for_age = data.get("dob") or ""
+    _under_18 = bool(_dob_for_age) and _age_from_dob(_dob_for_age) < 18
+    _default_family_role = "DEPENDENT" if _under_18 else "SPOUSE"
+
     if role == "CLIENT" and parent_username:
         for _k, _v in registry.items():
             _creds = (_v or {}).get("credentials", {}) or {}
@@ -3510,7 +3526,7 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
                 _pp = (_v or {}).get("profile", {}) or {}
                 family_id_from_link = _pp.get("family_id", "") or ""
                 family_linked_by = _pp.get("hardware_id", "") or ""
-                family_role_from_link = "SPOUSE"
+                family_role_from_link = _default_family_role
                 break
     invite_code = (data.get("invite_code") or "").strip().upper()
     if role == "CLIENT" and invite_code:
@@ -3520,7 +3536,12 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
             _exp = _invite.get("expires_at", "")
             if (not _exp) or str(datetime.datetime.now()) <= _exp:
                 family_id_from_link = _invite.get("family_id", "") or family_id_from_link
-                family_role_from_link = _invite.get("role", "SPOUSE") or family_role_from_link
+                # Invite role hint, but always override to DEPENDENT if under 18
+                _invite_role = (_invite.get("role") or "").strip().upper()
+                if _under_18:
+                    family_role_from_link = "DEPENDENT"
+                else:
+                    family_role_from_link = _invite_role or family_role_from_link or _default_family_role
                 family_linked_by = _invite.get("invited_by", "") or family_linked_by
     
     # Map registration_type to tier, plan, and features
@@ -3564,7 +3585,20 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
         trial_end = ""
 
     stripe_customer_for_new_user = ""
-    if role == "CLIENT" and registration_type == "TRIAL":
+    # SOVEREIGN-VOICE: family-invite dependents/spouses ride on the HoH's plan —
+    # they don't pay Stripe and they don't get TRIAL billing requirements.
+    _is_family_member = bool(family_id_from_link) and bool(family_linked_by)
+    if _is_family_member:
+        # Override registration_type so this account doesn't run trial billing
+        # and inherits a stable family plan tier.
+        registration_type = "FAMILY_MEMBER"
+        tier = tier_for_db_column("STANDARD")
+        plan = "FAMILY_DEPENDENT" if family_role_from_link == "DEPENDENT" else "FAMILY_SPOUSE"
+        sub_status = "FAMILY_PLAN_ACTIVE"
+        can_access_nate = True
+        token_balance = 10000
+        trial_end = ""
+    if role == "CLIENT" and registration_type == "TRIAL" and not _is_family_member:
         req_billing = os.getenv("STRIPE_TRIAL_BILLING_REQUIRED", "true").lower() not in (
             "0", "false", "no", "off",
         )
@@ -3665,6 +3699,11 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
         new_profile["family_role"] = family_role_from_link
         new_profile["linked_by"] = family_linked_by
         new_profile["linked_at"] = str(datetime.datetime.now())
+        # SOVEREIGN-VOICE: minor accounting — under-18 dependents inherit guardian
+        # and are flagged for Little Nate's minor-aware response policy.
+        if family_role_from_link == "DEPENDENT" and _under_18:
+            new_profile["is_minor"] = True
+            new_profile["guardian_id"] = family_linked_by
     
     if role == "COACH":
         new_profile["subscription_status"] = "PENDING_VERIFICATION"
@@ -25042,11 +25081,24 @@ Coach Reflection on Session {session_id}:
                     if invite:
                         expires = invite.get("expires_at", "")
                         expired = bool(expires and str(datetime.datetime.now()) > expires)
+                        # SOVEREIGN-VOICE: also resolve inviter_username and contact
+                        # so a new (unregistered) invitee can be routed straight
+                        # to SignUpWizard with HoH username pre-filled — no manual
+                        # toggle, no age gate, no Stripe billing.
+                        _inviter_uid = invite.get("invited_by", "") or ""
+                        _inviter_username = ""
+                        if _inviter_uid:
+                            for _rk, _rv in registry.items():
+                                if isinstance(_rv, dict) and (_rv.get("profile") or {}).get("hardware_id") == _inviter_uid:
+                                    _inviter_username = ((_rv.get("credentials") or {}).get("username") or "").strip()
+                                    break
                         await websocket.send(json.dumps({
                             "type": "family_invite_details",
                             "valid": not expired,
                             "inviter_name": invite.get("inviter_name", "A family member"),
+                            "inviter_username": _inviter_username,
                             "invitee_name": invite.get("invitee_name", ""),
+                            "invitee_contact": invite.get("invitee_contact", ""),
                             "role": invite.get("role", "DEPENDENT"),
                             "expires_at": expires,
                         }))
