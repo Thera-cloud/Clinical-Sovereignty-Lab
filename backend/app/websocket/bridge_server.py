@@ -9100,10 +9100,15 @@ class AzureCortex:
 
         # QUANTUM-CRYSTAL-ARCH — intake walkthrough FSM (section 1 only)
         if handle_intake_walkthrough_turn is not None:
-            _walk = await handle_intake_walkthrough_turn(profile=profile, user_text=user_text, db_pool=_cpool)
-            if _walk.get("handled"):
-                await self._send(uid, _walk.get("response", ""), client_context=_ctx, turn_id=_turn_id)
-                return
+            try:
+                _walk = await handle_intake_walkthrough_turn(profile=profile, user_text=user_text, db_pool=_cpool)
+                if _walk.get("handled"):
+                    await self._send(uid, _walk.get("response", ""), client_context=_ctx, turn_id=_turn_id)
+                    return
+            except Exception as _walk_err:
+                import traceback as _walk_tb
+                print(f">>> [INTAKE-WALKTHROUGH] non-fatal error for uid={uid}: {_walk_err}")
+                _walk_tb.print_exc()
 
         # QUANTUM-CRYSTAL-ARCH — adaptive mode addendum (reflective/exploratory/strategic/handoff/accommodating)
         # G3: reserve headroom FIRST so the cap can never silently eat the mode instruction.
