@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import re
 import time
 import os
 from typing import Any, Dict, Optional
@@ -13,6 +16,29 @@ from app.services.intake_form_service import (
     get_client_intake,
     update_client_answer,
 )
+
+try:
+    from app.services.nate_inference_router import NateInferenceRouter, TIER_UTILITY
+except Exception:  # pragma: no cover — defensive import
+    NateInferenceRouter = None  # type: ignore
+    TIER_UTILITY = "utility"  # type: ignore
+
+_ROUTER_SINGLETON: Optional["NateInferenceRouter"] = None
+_SEMANTIC_TIMEOUT_S = float(os.getenv("INTAKE_SEMANTIC_TIMEOUT_S", "2.5"))
+_SEMANTIC_CONF_FLOOR = float(os.getenv("INTAKE_SEMANTIC_CONF_FLOOR", "0.62"))
+
+
+def _get_router():
+    global _ROUTER_SINGLETON
+    if _ROUTER_SINGLETON is not None:
+        return _ROUTER_SINGLETON
+    if NateInferenceRouter is None:
+        return None
+    try:
+        _ROUTER_SINGLETON = NateInferenceRouter(app_state=None)
+    except Exception:
+        _ROUTER_SINGLETON = None
+    return _ROUTER_SINGLETON
 
 _SESSION_TIMEOUT_S = 45 * 60
 _RUNTIME: Dict[str, Dict[str, Any]] = {}
@@ -116,6 +142,105 @@ def _clarify_for_question(question_id: str) -> str:
     return f"Great question. {hint} {QUESTION_LABELS.get(question_id, question_id)}"
 
 
+def _semantic_enabled() -> bool:
+    return os.getenv("INTAKE_SEMANTIC_CLASSIFIER", "true").lower() in ("1", "true", "yes")
+
+
+_CLASSIFIER_SYSTEM = (
+    "You are an intent classifier for a clinical intake walkthrough. "
+    "Given the current intake question and the client's reply, return ONLY a JSON object: "
+    '{"intent": "<one of: answer | clarify_question | decline | topic_shift | crisis | nonsense>", '
+    '"confidence": <float 0.0-1.0>, "answer_text": "<verbatim client answer if intent=answer, else empty string>"}. '
+    "Rules: "
+    "(1) intent=clarify_question when the client is asking what the question means, asking for an example, or asking what a term means (e.g. 'what do you mean by pronouns', 'whats that', 'can you explain'). "
+    "(2) intent=answer ONLY when the reply is a direct response to the question being asked. "
+    "(3) intent=decline when the client refuses (e.g. 'skip', 'pass', 'none of your business', 'not now'). "
+    "(4) intent=topic_shift when the client wants to talk about something else entirely. "
+    "(5) intent=crisis if the reply contains self-harm, suicide, or homicide content. "
+    "(6) intent=nonsense if the reply is gibberish, one character, or unparseable. "
+    "(7) Confidence reflects how certain you are. Be conservative — questions about the question are NOT answers. "
+    "Return only the JSON object, no preamble, no explanation."
+)
+
+
+_INTENT_RE = re.compile(r'"intent"\s*:\s*"([^"]+)"')
+_CONF_RE = re.compile(r'"confidence"\s*:\s*([0-9.]+)')
+_ANSWER_RE = re.compile(r'"answer_text"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _parse_classifier_output(raw: str) -> Optional[Dict[str, Any]]:
+    if not raw:
+        return None
+    raw = raw.strip()
+    # Try strict JSON first
+    try:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start >= 0 and end > start:
+            obj = json.loads(raw[start:end + 1])
+            intent = str(obj.get("intent", "")).strip().lower()
+            conf = float(obj.get("confidence", 0.0) or 0.0)
+            answer = str(obj.get("answer_text", "") or "").strip()
+            if intent:
+                return {"intent": intent, "confidence": conf, "answer_text": answer}
+    except Exception:
+        pass
+    # Regex fallback
+    m_i = _INTENT_RE.search(raw)
+    m_c = _CONF_RE.search(raw)
+    if not m_i:
+        return None
+    try:
+        conf = float(m_c.group(1)) if m_c else 0.5
+    except Exception:
+        conf = 0.5
+    m_a = _ANSWER_RE.search(raw)
+    answer = m_a.group(1) if m_a else ""
+    return {"intent": m_i.group(1).strip().lower(), "confidence": conf, "answer_text": answer}
+
+
+async def _classify_intent_semantic(user_text: str, current_q: str) -> Optional[Dict[str, Any]]:
+    """Returns {intent, confidence, answer_text} or None if classifier unavailable/failed."""
+    if not _semantic_enabled():
+        return None
+    router = _get_router()
+    if router is None:
+        return None
+    question_label = QUESTION_LABELS.get(current_q, current_q)
+    prompt = (
+        f"Current intake question: {question_label}\n"
+        f"Client reply: {user_text.strip()}\n\n"
+        "Classify the reply. Return JSON only."
+    )
+    try:
+        result = await asyncio.wait_for(
+            router.generate(
+                prompt=prompt,
+                system=_CLASSIFIER_SYSTEM,
+                tier=TIER_UTILITY,
+                temperature=0.0,
+                max_tokens=120,
+                domain="clinical",
+                odpe_signal="LOCKED",
+            ),
+            timeout=_SEMANTIC_TIMEOUT_S,
+        )
+        text = (result or {}).get("text", "")
+        parsed = _parse_classifier_output(text)
+        if parsed:
+            print(
+                f">>> [INTAKE-CLASSIFY] q={current_q} intent={parsed['intent']} "
+                f"conf={parsed['confidence']:.2f} provider={(result or {}).get('provider')}"
+            )
+        return parsed
+    except asyncio.TimeoutError:
+        print(f">>> [INTAKE-CLASSIFY] timeout for q={current_q}")
+        return None
+    except Exception as exc:
+        print(f">>> [INTAKE-CLASSIFY] error q={current_q}: {exc}")
+        return None
+
+
 async def handle_intake_walkthrough_turn(
     *,
     profile: Dict[str, Any],
@@ -209,28 +334,66 @@ async def handle_intake_walkthrough_turn(
             st["active"] = False
             return {"handled": False}
 
-        if _looks_clarification_request(user_text):
-            st["nonsense_reprompted"] = False
-            return {
-                "handled": True,
-                "response": _clarify_for_question(current_q),
-            }
+        # Semantic intent classifier (primary path). Falls through to rules on miss.
+        semantic = await _classify_intent_semantic(user_text, current_q)
+        sem_intent = (semantic or {}).get("intent", "")
+        sem_conf = float((semantic or {}).get("confidence", 0.0))
+        sem_answer = (semantic or {}).get("answer_text", "") or ""
 
-        if _looks_nonsense(user_text):
-            if not st.get("nonsense_reprompted"):
-                st["nonsense_reprompted"] = True
-                return {
-                    "handled": True,
-                    "response": f"I want to make sure I capture this correctly. {QUESTION_LABELS.get(current_q, 'Could you answer that one in your own words?')}",
-                }
-            # Save second nonsense attempt verbatim to keep momentum.
-
-        if _contains_any(user_text, _REFUSAL_TERMS):
-            answer_value = "[declined_to_answer]"
-        elif user_text.strip().lower() in {"skip", "pass"}:
-            answer_value = "[skipped]"
+        # High-confidence semantic routes
+        if semantic and sem_conf >= _SEMANTIC_CONF_FLOOR:
+            if sem_intent == "crisis":
+                st["active"] = False
+                st["current_q"] = None
+                st["needs_resume_prompt"] = True
+                return {"handled": False}
+            if sem_intent == "topic_shift":
+                st["active"] = False
+                st["current_q"] = None
+                st["nonsense_reprompted"] = False
+                return {"handled": False}
+            if sem_intent == "clarify_question":
+                st["nonsense_reprompted"] = False
+                return {"handled": True, "response": _clarify_for_question(current_q)}
+            if sem_intent == "nonsense":
+                if not st.get("nonsense_reprompted"):
+                    st["nonsense_reprompted"] = True
+                    return {
+                        "handled": True,
+                        "response": f"I want to make sure I capture this correctly. {QUESTION_LABELS.get(current_q, 'Could you answer that one in your own words?')}",
+                    }
+                # Already reprompted once — save verbatim to keep momentum.
+                answer_value = user_text.strip()
+            elif sem_intent == "decline":
+                answer_value = "[declined_to_answer]"
+            elif sem_intent == "answer":
+                answer_value = (sem_answer.strip() or user_text.strip())
+            else:
+                answer_value = user_text.strip()
         else:
-            answer_value = user_text.strip()
+            # Low confidence or classifier unavailable — fall back to rules.
+            if _looks_clarification_request(user_text):
+                st["nonsense_reprompted"] = False
+                return {"handled": True, "response": _clarify_for_question(current_q)}
+
+            if _looks_nonsense(user_text):
+                if not st.get("nonsense_reprompted"):
+                    st["nonsense_reprompted"] = True
+                    return {
+                        "handled": True,
+                        "response": f"I want to make sure I capture this correctly. {QUESTION_LABELS.get(current_q, 'Could you answer that one in your own words?')}",
+                    }
+
+            if _contains_any(user_text, _REFUSAL_TERMS):
+                answer_value = "[declined_to_answer]"
+            elif user_text.strip().lower() in {"skip", "pass"}:
+                answer_value = "[skipped]"
+            else:
+                # Classifier saw it but was unsure — if it suspected clarify_question with mid confidence, prefer clarify over saving wrong data.
+                if sem_intent == "clarify_question" and sem_conf >= 0.40:
+                    st["nonsense_reprompted"] = False
+                    return {"handled": True, "response": _clarify_for_question(current_q)}
+                answer_value = user_text.strip()
 
         await update_client_answer(
             conn,
