@@ -46,6 +46,25 @@ def _coerce_profile_data(profile_data: Any) -> Dict[str, Any]:
     return {}
 
 
+def _row_to_dict(row: Any) -> Dict[str, Any]:
+    """Defensive conversion for asyncpg rows and occasional string payloads."""
+    if row is None:
+        return {}
+    if isinstance(row, dict):
+        return dict(row)
+    if isinstance(row, str):
+        return _coerce_profile_data(row)
+    try:
+        if hasattr(row, "items"):
+            return {k: v for k, v in row.items()}
+    except Exception:
+        pass
+    try:
+        return dict(row)
+    except Exception:
+        return {}
+
+
 def _is_blank(value: Any) -> bool:
     return value is None or str(value).strip() == ""
 
@@ -100,7 +119,7 @@ async def _recompute_statuses(conn, username: str) -> None:
     )
     if not row:
         return
-    data = dict(row)
+    data = _row_to_dict(row)
     s1_complete = all(not _is_blank(data.get(f)) for f in SECTION1_FIELDS)
     s2_complete = all(not _is_blank(data.get(f)) for f in SECTION2_FIELDS)
     s1_started = any(not _is_blank(data.get(f)) for f in SECTION1_FIELDS)
@@ -162,7 +181,7 @@ async def _audit_write(
 async def get_client_intake(conn, username: str, hardware_id: Optional[str]) -> Dict[str, Any]:
     await ensure_intake_row(conn, username, hardware_id)
     row = await conn.fetchrow("SELECT * FROM intake_form WHERE user_id = $1", username)
-    data = dict(row or {})
+    data = _row_to_dict(row)
     data["section_1_completion_pct"] = _section_completion_percent(data, SECTION1_FIELDS)
     data["section_2_completion_pct"] = _section_completion_percent(data, SECTION2_FIELDS)
     return data
@@ -237,7 +256,7 @@ async def update_coach_section2_answer(
         actor_id=coach_username,
         method="coach_entry",
     )
-    return dict(await conn.fetchrow("SELECT * FROM intake_form WHERE user_id = $1", username))
+    return _row_to_dict(await conn.fetchrow("SELECT * FROM intake_form WHERE user_id = $1", username))
 
 
 async def update_coach_style_guidance(
@@ -274,7 +293,7 @@ async def update_coach_style_guidance(
         actor_id=coach_username,
         method="coach_entry",
     )
-    return dict(await conn.fetchrow("SELECT * FROM intake_form WHERE user_id = $1", username))
+    return _row_to_dict(await conn.fetchrow("SELECT * FROM intake_form WHERE user_id = $1", username))
 
 
 async def get_intake_summary(conn, username: str) -> Dict[str, Any]:
@@ -286,7 +305,7 @@ async def get_intake_summary(conn, username: str) -> Dict[str, Any]:
             "section_2_status": "not_started",
             "has_any_answers": False,
         }
-    data = dict(row)
+    data = _row_to_dict(row)
     return {
         "section_1_completion_pct": _section_completion_percent(data, SECTION1_FIELDS),
         "section_1_status": data.get("section_1_status") or "not_started",
@@ -306,7 +325,7 @@ async def get_section1_for_nate(conn, username: str) -> str:
     )
     if not row:
         return ""
-    data = dict(row)
+    data = _row_to_dict(row)
     lines: List[str] = []
     for field in SECTION1_FIELDS:
         value = data.get(field)
@@ -462,7 +481,7 @@ async def mark_section2_complete(
         username,
         completed_by,
     )
-    return dict(await conn.fetchrow("SELECT * FROM intake_form WHERE user_id = $1", username))
+    return _row_to_dict(await conn.fetchrow("SELECT * FROM intake_form WHERE user_id = $1", username))
 
 
 async def get_reminder_status(conn, username: str) -> Dict[str, Any]:
