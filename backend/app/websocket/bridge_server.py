@@ -11904,6 +11904,26 @@ async def handle_client(websocket, path=None):
                     pass  # Proceed with normal login
 
                 tok, res = authenticate_user(d["username"], d["password"], d.get("expected_role"))
+                # SOVEREIGN-VOICE: cache-miss recovery — paid signup just finalized in PG
+                # but bridge cache hasn't been refreshed yet (Redis pub/sub race or stale
+                # in-memory _registry_cache). Hydrate one row from PG and retry auth once.
+                if tok is None and res == "USER_NOT_FOUND" and db_pool is not None and _pg_user_store is not None:
+                    try:
+                        _login_ident = (d.get("username") or "").strip()
+                        if _login_ident:
+                            async with db_pool.acquire() as _conn:
+                                _row = await _conn.fetchrow(
+                                    "SELECT * FROM users WHERE (LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($1)) AND deleted_at IS NULL LIMIT 1",
+                                    _login_ident,
+                                )
+                            if _row:
+                                _key, _entry = _pg_user_store._row_to_entry(_row)
+                                if _key and _entry:
+                                    _registry_cache[_key] = _entry
+                                    print(f">>> [LOGIN_AUDIT] cache-miss recovery: hydrated {_login_ident!r} from PG", flush=True)
+                                    tok, res = authenticate_user(d["username"], d["password"], d.get("expected_role"))
+                    except Exception as _cmr_err:
+                        print(f">>> [LOGIN_AUDIT] cache-miss recovery error: {_cmr_err}", flush=True)
                 if _login_blocked:
                     tok = None
                     res = "RATE_LIMITED"
