@@ -8155,7 +8155,8 @@ class _SignUpWizardState extends State<SignUpWizard> {
        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Date of Birth is Required")));
        return;
     }
-    if (_calculateAge(_dob!) < 18) {
+    // Dependents can be minors; only primary account holders must be 18+.
+    if (!_isDependent && _calculateAge(_dob!) < 18) {
        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Primary Account Holder must be 18+.")));
        return;
     }
@@ -9836,7 +9837,8 @@ class _SignUpWizardState extends State<SignUpWizard> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Date of Birth is required")));
       return;
     }
-    if (_calculateAge(_dob!) < 18) {
+    // Dependents can be minors; only primary account holders must be 18+.
+    if (!_isDependent && _calculateAge(_dob!) < 18) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Primary Account Holder must be 18+.")));
       return;
     }
