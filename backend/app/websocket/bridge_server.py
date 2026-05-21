@@ -1371,7 +1371,7 @@ async def _handle_tts_speak(client_ws, text: str, request_id: str = "", cancel_e
             
     except Exception as e:
         print(f">>> [TTS] tts_speak FAILED (both Mini-TTS and Realtime): {e}")
-        import traceback
+        import traceback  # QUANTUM-CRYSTAL-ARCH: capture full stack for live intake crash triage
         traceback.print_exc()
         try:
             await client_ws.send(json.dumps({
@@ -30278,6 +30278,8 @@ IMPORTANT:
         # #endregion
     except Exception as e:
         print(f">>> [ERROR] {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         # #region agent log
         print(f">>> [DBG-H2] handle_client EXCEPTION uid={uid} err={type(e).__name__}: {e}")
         # #endregion
