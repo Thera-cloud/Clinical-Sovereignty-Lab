@@ -219,58 +219,105 @@ _ACK_LLM_TIMEOUT_S = float(os.getenv("INTAKE_ACK_LLM_TIMEOUT_S", "3.5"))
 _OFFER_LLM_TIMEOUT_S = float(os.getenv("INTAKE_OFFER_LLM_TIMEOUT_S", "2.5"))
 
 
-_OFFER_CLASSIFIER_SYSTEM = (
-    "You are an intent classifier. The client has just been OFFERED a brief clinical intake walkthrough "
-    "(a series of questions their coach asked them to answer). They have not yet started or have paused. "
-    "Given the client's reply, decide what they want. Return ONLY a JSON object: "
-    '{"intent": "<one of: accept | decline | ask_about | unrelated | crisis>", "confidence": <float 0.0-1.0>}. '
-    "Rules: "
-    "(1) intent=accept when the client wants to start, continue, resume, or do the intake (e.g. 'yes', 'ok', "
-    "'lets do it', 'lets continue the intake', 'continue', 'pick up where we left off', 'next question', "
-    "'whats next', 'what questions is next', 'go ahead', 'lets keep going'). "
-    "(2) intent=decline when the client wants to skip, postpone, or not do it (e.g. 'later', 'not now', "
-    "'not today', 'pause', 'skip it', 'no thanks'). "
-    "(3) intent=ask_about when the client is asking about the intake itself (e.g. 'what is the intake', "
-    "'why do you need this', 'how many questions'). "
-    "(4) intent=crisis if the reply contains self-harm, suicide, or homicide content. "
-    "(5) intent=unrelated when the reply is about something else entirely and isn't a yes/no to the offer. "
-    "(6) Bias toward accept when in doubt — a client referencing the intake at all usually wants to engage with it. "
-    "Return only the JSON object."
+_NAVIGATOR_SYSTEM = (
+    "You are Little Nate, a warm clinical AI companion. The client is partway through a brief intake "
+    "walkthrough their coach set up. You will be given the client's message, the next unanswered intake "
+    "question (if any), and a summary of what they've already shared.\n\n"
+    "Decide ONE action and write your reply in your own warm voice — concrete, specific, no lectures, no disclaimers.\n\n"
+    "ACTIONS:\n"
+    "- resume: pick the intake back up. Use when the client wants to keep going, asks for the next question, "
+    "asks what's next, says 'lets continue the intake', 'focus on intake', 'go', 'yes', 'ok', or otherwise "
+    "signals they want to engage with the intake right now. Your reply should be the next intake question "
+    "asked naturally in your voice (one sentence, anchored to what they've shared if helpful).\n"
+    "- decline: the client explicitly wants to pause/skip the intake (e.g. 'later', 'not now', 'pause', "
+    "'i don't want to do this right now'). Your reply warmly acknowledges the pause in one sentence.\n"
+    "- respond: anything else. The client is asking a question about what they've answered, asking how many "
+    "questions remain, chatting about life, etc. Your reply ANSWERS them directly using the prior-answer "
+    "context I gave you. If they ask 'what have I answered', list the questions with their actual answers. "
+    "If they ask 'how many left', tell them the actual count. Be specific. Do NOT re-show a generic offer.\n\n"
+    "Bias rule: if the client mentions the intake, questions, answers, or form in any way, prefer resume "
+    "unless they explicitly want to pause. Don't gate them behind extra questions.\n\n"
+    "Return ONLY a JSON object: {\"action\": \"resume|decline|respond\", \"response\": \"<your reply>\"}"
 )
 
 
-async def _classify_offer_intent(user_text: str) -> Optional[Dict[str, Any]]:
-    """Semantic classifier for the offer state (intake not yet active)."""
-    if not _semantic_enabled():
-        return None
+_NAV_INTENT_RE = re.compile(r'"action"\s*:\s*"([a-z_]+)"', re.IGNORECASE)
+_NAV_RESPONSE_RE = re.compile(r'"response"\s*:\s*"(.*?)(?<!\\)"', re.DOTALL)
+
+
+def _parse_navigator_output(raw: str) -> Dict[str, Any]:
+    raw = (raw or "").strip()
+    # Strict JSON first
+    try:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start >= 0 and end > start:
+            obj = json.loads(raw[start : end + 1])
+            action = str(obj.get("action", "respond")).lower().strip()
+            response = str(obj.get("response", "")).strip()
+            if action and response:
+                return {"action": action, "response": response}
+    except Exception:
+        pass
+    # Regex fallback
+    a = _NAV_INTENT_RE.search(raw)
+    r = _NAV_RESPONSE_RE.search(raw)
+    if a and r:
+        return {"action": a.group(1).lower(), "response": r.group(1).replace('\\"', '"').strip()}
+    return {"action": "respond", "response": raw or ""}
+
+
+async def _nate_intake_navigator(
+    *,
+    user_text: str,
+    intake: Dict[str, Any],
+    next_q: Optional[str],
+    client_name: str,
+) -> Optional[Dict[str, Any]]:
+    """One LLM call: Nate reads intake state, decides resume/decline/respond, and writes the reply."""
     router = _get_router()
     if router is None:
         return None
-    prompt = f"Client reply: \"{user_text.strip()}\"\n\nClassify."
+    prior_block = _build_prior_context(intake)
+    remaining_fields = [f for f in SECTION1_FIELDS if str(intake.get(f) or "").strip() == ""]
+    remaining_lines = "\n".join(
+        f"- {QUESTION_LABELS.get(f, f)} (id={f})" for f in remaining_fields[:5]
+    ) or "(all section 1 questions answered)"
+    next_label = QUESTION_LABELS.get(next_q, "") if next_q else ""
+    prompt = (
+        f"Client name: {client_name or 'the client'}\n"
+        f"Client's message: \"{user_text.strip()}\"\n\n"
+        f"Next unanswered intake question (id={next_q}): {next_label or '(none — section 1 is complete)'}\n"
+        f"Total unanswered in section 1: {len(remaining_fields)}\n\n"
+        f"Prior answers in this intake (use these verbatim if they ask):\n{prior_block}\n\n"
+        f"Up to 5 remaining questions:\n{remaining_lines}\n\n"
+        "Decide and reply now."
+    )
     try:
         result = await asyncio.wait_for(
             router.generate(
                 prompt=prompt,
-                system=_OFFER_CLASSIFIER_SYSTEM,
-                tier=TIER_UTILITY,
-                temperature=0.0,
-                max_tokens=80,
+                system=_NAVIGATOR_SYSTEM,
+                tier=TIER_CLINICAL,
+                temperature=0.4,
+                max_tokens=300,
                 domain="clinical",
+                odpe_signal="TENSION",
             ),
             timeout=_OFFER_LLM_TIMEOUT_S,
         )
         raw = (result or {}).get("text", "") or ""
-        parsed = _parse_classifier_output(raw)
-        if parsed:
-            print(
-                f">>> [INTAKE-OFFER-CLASSIFY] intent={parsed.get('intent')} "
-                f"conf={parsed.get('confidence'):.2f} provider={(result or {}).get('provider')}"
-            )
-            return parsed
+        parsed = _parse_navigator_output(raw)
+        parsed["provider"] = (result or {}).get("provider")
+        print(
+            f">>> [INTAKE-NAV] action={parsed.get('action')} provider={parsed.get('provider')} "
+            f"len={len(parsed.get('response', ''))}"
+        )
+        return parsed
     except asyncio.TimeoutError:
-        print(">>> [INTAKE-OFFER-CLASSIFY] timeout")
+        print(">>> [INTAKE-NAV] timeout")
     except Exception as exc:
-        print(f">>> [INTAKE-OFFER-CLASSIFY] error: {exc}")
+        print(f">>> [INTAKE-NAV] error: {exc}")
     return None
 
 
@@ -527,36 +574,34 @@ async def handle_intake_walkthrough_turn(
 
         if not st.get("active"):
             low = user_text.strip().lower()
+            client_name = str(intake.get("q1_preferred_name") or profile.get("name") or "").strip()
 
-            # Semantic classifier — handles natural phrasings like "lets continue the intake" or "whats next".
-            offer = await _classify_offer_intent(user_text)
-            o_intent = (offer or {}).get("intent", "")
-            o_conf = float((offer or {}).get("confidence", 0.0))
+            # Let Nate read the state and decide. One call, full intelligence, his voice.
+            nav = await _nate_intake_navigator(
+                user_text=user_text,
+                intake=intake,
+                next_q=next_q,
+                client_name=client_name,
+            )
+            if nav:
+                action = nav.get("action", "respond")
+                response = nav.get("response", "").strip()
+                if action == "resume" and next_q:
+                    st["active"] = True
+                    st["current_q"] = next_q
+                    st["nonsense_reprompted"] = False
+                    st["declined"] = False
+                    st["needs_resume_prompt"] = False
+                    return {"handled": True, "response": response or QUESTION_LABELS.get(next_q, "")}
+                if action == "decline":
+                    st["declined"] = True
+                    return {"handled": True, "response": response or "No problem - we can do it later in Settings whenever you're ready."}
+                # action == "respond" — Nate is just answering them. Don't change FSM state.
+                if response:
+                    return {"handled": True, "response": response}
 
-            if o_intent == "accept" and o_conf >= 0.55:
-                st["active"] = True
-                st["current_q"] = next_q
-                st["nonsense_reprompted"] = False
-                st["declined"] = False
-                st["needs_resume_prompt"] = False
-                return {"handled": True, "response": QUESTION_LABELS.get(next_q, "Let's start with the first intake question.")}
-            if o_intent == "decline" and o_conf >= 0.55:
-                st["declined"] = True
-                return {"handled": True, "response": "No problem - we can do it later in Settings whenever you're ready."}
-            if o_intent == "ask_about" and o_conf >= 0.55:
-                # Surface the offer again with a tiny preview so the client can decide.
-                remaining = sum(1 for f in SECTION1_FIELDS if str(intake.get(f) or "").strip() == "")
-                return {
-                    "handled": True,
-                    "response": (
-                        f"It's a short intake your coach asked me to walk you through — about {remaining} "
-                        f"questions left, takes a few minutes. Each question earns you 1000 tokens. "
-                        f"Want to keep going, or pause?"
-                    ),
-                }
-
-            # Fallback to keyword rules
-            if any(term in low for term in _ACCEPT_TERMS):
+            # Tiny defensive fallback if navigator errored entirely.
+            if any(term in low for term in _ACCEPT_TERMS) and next_q:
                 st["active"] = True
                 st["current_q"] = next_q
                 st["nonsense_reprompted"] = False
