@@ -14,6 +14,7 @@ from app.services.intake_form_service import (
     credit_walkthrough_question,
     ensure_intake_row,
     get_client_intake,
+    reset_section1_answers,
     summarize_walkthrough_credits,
     update_client_answer,
 )
@@ -63,6 +64,23 @@ _CRISIS_TERMS = (
     "homicide",
 )
 _TOPIC_SHIFT_TERMS = ("different topic", "talk about something else", "actually can we", "can we talk about")
+_RESTART_TERMS = (
+    "start over",
+    "start fresh",
+    "start the intake over",
+    "redo the intake",
+    "redo intake",
+    "restart the intake",
+    "restart intake",
+    "reanswer",
+    "re-answer",
+    "begin again",
+    "clear my answers",
+    "clear all my answers",
+    "let me start over",
+    "from the beginning",
+    "from scratch",
+)
 _CLARIFY_CUES = (
     "what do you mean",
     "what does that mean",
@@ -234,6 +252,12 @@ _NAVIGATOR_SYSTEM = (
     "asks what's next, says 'lets continue the intake', 'focus on intake', 'go', 'yes', 'ok', or otherwise "
     "signals they want to engage with the intake right now. Your reply should be the next intake question "
     "asked naturally in your voice (one sentence, anchored to what they've shared if helpful).\n"
+    "- restart: clear every section-1 answer and start FRESH from question 1. Use ONLY when the client "
+    "explicitly wants to redo / start over / reanswer / clear answers / begin again from the beginning. "
+    "Phrases like 'can I reanswer and start over', 'start fresh', 'redo the intake', 'restart from "
+    "scratch', 'clear my answers' map to restart. Your reply must confirm the reset warmly in one short "
+    "sentence and ALWAYS end by asking the q1_preferred_name question (e.g. 'What name would you like me "
+    "to use for you?'). Do NOT cite any prior answer in your reply — those are being discarded.\n"
     "- decline: the client explicitly wants to pause/skip the intake (e.g. 'later', 'not now', 'pause', "
     "'i don't want to do this right now'). Your reply warmly acknowledges the pause in one sentence.\n"
     "- respond: anything else. The client is asking a question about what they've answered, asking how many "
@@ -241,9 +265,10 @@ _NAVIGATOR_SYSTEM = (
     "directly and concretely using the context I'm giving you. If they ask about tokens, tell them the real "
     "numbers (earned / max / remaining). If they ask 'what have I answered', list questions with actual "
     "answers. Do NOT re-show a generic offer.\n\n"
-    "Bias rule: if the client mentions the intake, questions, answers, or form in any way, prefer resume "
-    "unless they explicitly want to pause. Don't gate them behind extra questions.\n\n"
-    "Return ONLY a JSON object: {\"action\": \"resume|decline|respond\", \"response\": \"<your reply>\"}"
+    "Bias rules: (a) if the client mentions the intake, questions, answers, or form in any way, prefer "
+    "resume unless they explicitly want to pause. (b) Words like 'start over', 'reanswer', 'redo', 'fresh' "
+    "applied to the intake/form/answers ALWAYS mean restart — never just resume.\n\n"
+    "Return ONLY a JSON object: {\"action\": \"resume|restart|decline|respond\", \"response\": \"<your reply>\"}"
 )
 
 
@@ -534,6 +559,50 @@ async def _classify_intent_semantic(user_text: str, current_q: str) -> Optional[
         return None
 
 
+async def _execute_section1_restart(
+    *,
+    conn,
+    state: Dict[str, Any],
+    username: str,
+    hardware_id: str,
+    response_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Clear section-1 answers, reset FSM to q1, and return the reply payload."""
+    try:
+        await reset_section1_answers(
+            conn,
+            username=username,
+            hardware_id=hardware_id,
+            actor_id=username,
+            reason="client_requested_restart",
+        )
+    except Exception as exc:
+        print(f">>> [INTAKE-RESTART] failed: {exc}")
+        return {
+            "handled": True,
+            "response": (
+                "I couldn't clear your previous answers just now. Try again in a moment, "
+                "or you can edit any answer directly from the intake screen in Settings."
+            ),
+        }
+    first_q = SECTION1_FIELDS[0]
+    state["active"] = True
+    state["current_q"] = first_q
+    state["offered"] = True
+    state["declined"] = False
+    state["nonsense_reprompted"] = False
+    state["needs_resume_prompt"] = False
+    label = QUESTION_LABELS.get(first_q, "What name would you like me to use for you?")
+    reply = (response_override or "").strip()
+    if not reply:
+        reply = f"Okay — clearing your section 1 answers so we can start fresh. {label}"
+    elif label.lower().rstrip("?") not in reply.lower():
+        # Defensive: if the LLM forgot to actually ask q1, append it.
+        reply = f"{reply} {label}"
+    print(f">>> [INTAKE-RESTART] user={username} reset complete, current_q={first_q}")
+    return {"handled": True, "response": reply}
+
+
 async def handle_intake_walkthrough_turn(
     *,
     profile: Dict[str, Any],
@@ -624,6 +693,14 @@ async def handle_intake_walkthrough_turn(
             if nav:
                 action = nav.get("action", "respond")
                 response = nav.get("response", "").strip()
+                if action == "restart":
+                    return await _execute_section1_restart(
+                        conn=conn,
+                        state=st,
+                        username=username,
+                        hardware_id=uid,
+                        response_override=response,
+                    )
                 if action == "resume" and next_q:
                     st["active"] = True
                     st["current_q"] = next_q
@@ -639,6 +716,13 @@ async def handle_intake_walkthrough_turn(
                     return {"handled": True, "response": response}
 
             # Tiny defensive fallback if navigator errored entirely.
+            if _contains_any(low, _RESTART_TERMS):
+                return await _execute_section1_restart(
+                    conn=conn,
+                    state=st,
+                    username=username,
+                    hardware_id=uid,
+                )
             if any(term in low for term in _ACCEPT_TERMS) and next_q:
                 st["active"] = True
                 st["current_q"] = next_q
@@ -652,6 +736,17 @@ async def handle_intake_walkthrough_turn(
             return {"handled": False}
 
         # Active walkthrough
+        # Explicit rule-based "start over" — clear answers and walk from q1 again.
+        # Must run BEFORE the semantic classifier so the restart phrase isn't saved
+        # as the current question's answer.
+        if _contains_any(user_text, _RESTART_TERMS):
+            return await _execute_section1_restart(
+                conn=conn,
+                state=st,
+                username=username,
+                hardware_id=uid,
+            )
+
         # Explicit rule-based "stop the intake" — surface a clear choice instead of silently dropping out.
         if _contains_any(user_text, _TOPIC_SHIFT_TERMS):
             st["needs_resume_prompt"] = True

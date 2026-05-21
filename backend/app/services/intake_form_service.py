@@ -226,6 +226,64 @@ async def update_client_answer(
     return await get_client_intake(conn, username, hardware_id)
 
 
+async def reset_section1_answers(
+    conn,
+    *,
+    username: str,
+    hardware_id: Optional[str],
+    actor_id: str,
+    reason: str = "client_requested_restart",
+) -> Dict[str, Any]:
+    """Clear every section-1 answer back to NULL.
+
+    Writes one audit row per non-blank field so prior answers stay forensically
+    recoverable. Does NOT reset ``tokens_credited`` — token idempotency is
+    preserved (a client who already earned credit for a question cannot earn it
+    twice by restarting). Section status is recomputed at the end.
+    """
+    await ensure_intake_row(conn, username, hardware_id)
+    row = await conn.fetchrow(
+        "SELECT * FROM intake_form WHERE user_id = $1",
+        username,
+    )
+    if not row:
+        return {}
+    data = _row_to_dict(row)
+
+    cleared_fields: List[str] = []
+    for field in SECTION1_FIELDS:
+        old_value = data.get(field)
+        if _is_blank(old_value):
+            continue
+        cleared_fields.append(field)
+        await _audit_write(
+            conn,
+            username=username,
+            question_id=field,
+            old_value=old_value,
+            new_value=None,
+            actor="client",
+            actor_id=actor_id,
+            method="chat_walkthrough_restart",
+            override_reason=reason,
+        )
+
+    if cleared_fields:
+        set_clause = ", ".join(f"{field} = NULL" for field in SECTION1_FIELDS)
+        await conn.execute(
+            f"UPDATE intake_form SET {set_clause}, updated_at = NOW() WHERE user_id = $1",
+            username,
+        )
+        await _recompute_statuses(conn, username)
+        logger.info(
+            "[INTAKE_RESTART] uid=%s cleared=%d fields=%s",
+            username,
+            len(cleared_fields),
+            ",".join(cleared_fields),
+        )
+    return await get_client_intake(conn, username, hardware_id)
+
+
 async def update_coach_section2_answer(
     conn,
     *,
