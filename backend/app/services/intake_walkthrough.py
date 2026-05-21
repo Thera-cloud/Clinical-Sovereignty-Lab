@@ -31,6 +31,31 @@ _CRISIS_TERMS = (
     "homicide",
 )
 _TOPIC_SHIFT_TERMS = ("different topic", "talk about something else", "actually can we", "can we talk about")
+_CLARIFY_CUES = (
+    "what do you mean",
+    "what does that mean",
+    "can you explain",
+    "could you explain",
+    "can you clarify",
+    "could you clarify",
+    "when you say",
+    "not sure what you mean",
+)
+_CLARIFY_PREFIXES = ("what", "which", "who", "how", "why", "can you", "could you", "do you mean", "when you say")
+_QUESTION_HINTS = {
+    "q1_preferred_name": "I mean the name you want me to call you in our chats.",
+    "q2_pronouns": "I mean words like she/her, he/him, they/them, or whatever fits you best.",
+    "q3_household_relationship": "I mean who you currently live with and whether you're single, partnered, married, separated, or something else.",
+    "q4_bringing_you_in": "I mean the main reason you wanted support right now.",
+    "q5_how_long": "I mean roughly how long this has been affecting you (days, months, years, etc.).",
+    "q6_hope_to_get": "I mean what you want to walk away with from this support.",
+    "q7_successful_outcome": "I mean what 'better' would look like for you personally.",
+    "q8_biggest_things_weighing": "I mean the top stressors or burdens on your mind right now.",
+    "q9_support_network": "I mean whether you have people you can lean on emotionally or practically.",
+    "q10_current_wellbeing": "I mean a quick check of where you feel you are right now: not satisfactory, satisfactory, or thriving.",
+    "q11_communication_preferences": "I mean anything that helps me communicate in a way that works better for you.",
+    "q12_anything_else_upfront": "I mean anything important you want me to know now, before we continue.",
+}
 
 
 def _state(uid: str) -> Dict[str, Any]:
@@ -72,6 +97,23 @@ def _looks_nonsense(text: str) -> bool:
 def _contains_any(text: str, phrases) -> bool:
     low = text.lower()
     return any(p in low for p in phrases)
+
+
+def _looks_clarification_request(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    low = stripped.lower()
+    if any(low.startswith(prefix) for prefix in ("i use ", "my pronouns", "he/", "she/", "they/", "we use ")):
+        return False
+    explicit = any(phrase in low for phrase in _CLARIFY_CUES)
+    prefixed = any(low.startswith(prefix) for prefix in _CLARIFY_PREFIXES)
+    return explicit or prefixed or "?" in stripped
+
+
+def _clarify_for_question(question_id: str) -> str:
+    hint = _QUESTION_HINTS.get(question_id, "I can clarify it in plain words.")
+    return f"Great question. {hint} {QUESTION_LABELS.get(question_id, question_id)}"
 
 
 async def handle_intake_walkthrough_turn(
@@ -166,6 +208,13 @@ async def handle_intake_walkthrough_turn(
         if not current_q:
             st["active"] = False
             return {"handled": False}
+
+        if _looks_clarification_request(user_text):
+            st["nonsense_reprompted"] = False
+            return {
+                "handled": True,
+                "response": _clarify_for_question(current_q),
+            }
 
         if _looks_nonsense(user_text):
             if not st.get("nonsense_reprompted"):
