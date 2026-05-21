@@ -18,10 +18,15 @@ from app.services.intake_form_service import (
 )
 
 try:
-    from app.services.nate_inference_router import NateInferenceRouter, TIER_UTILITY
+    from app.services.nate_inference_router import (
+        NateInferenceRouter,
+        TIER_UTILITY,
+        TIER_CLINICAL,
+    )
 except Exception:  # pragma: no cover — defensive import
     NateInferenceRouter = None  # type: ignore
     TIER_UTILITY = "utility"  # type: ignore
+    TIER_CLINICAL = "clinical"  # type: ignore
 
 _ROUTER_SINGLETON: Optional["NateInferenceRouter"] = None
 _SEMANTIC_TIMEOUT_S = float(os.getenv("INTAKE_SEMANTIC_TIMEOUT_S", "2.5"))
@@ -199,6 +204,150 @@ def _parse_classifier_output(raw: str) -> Optional[Dict[str, Any]]:
     return {"intent": m_i.group(1).strip().lower(), "confidence": conf, "answer_text": answer}
 
 
+_CLARIFY_LLM_TIMEOUT_S = float(os.getenv("INTAKE_CLARIFY_LLM_TIMEOUT_S", "4.0"))
+_ACK_LLM_TIMEOUT_S = float(os.getenv("INTAKE_ACK_LLM_TIMEOUT_S", "3.5"))
+
+
+def _build_prior_context(intake_row: Dict[str, Any], stop_at: Optional[str] = None) -> str:
+    """Return a readable summary of intake answers given so far, stopping before `stop_at`."""
+    lines = []
+    for field in SECTION1_FIELDS:
+        if stop_at and field == stop_at:
+            break
+        ans = str(intake_row.get(field) or "").strip()
+        if not ans or ans in ("[declined_to_answer]", "[skipped]"):
+            continue
+        label = QUESTION_LABELS.get(field, field)
+        lines.append(f"- {label}\n  Client answered: {ans}")
+    return "\n".join(lines) if lines else "(no prior answers yet)"
+
+
+async def _generate_intelligent_clarification(
+    *,
+    current_q: str,
+    client_question: str,
+    intake_row: Dict[str, Any],
+    client_name: str,
+) -> Optional[str]:
+    """LLM-generated, context-aware clarification in Little Nate's voice."""
+    router = _get_router()
+    if router is None:
+        return None
+    prior_block = _build_prior_context(intake_row, stop_at=current_q)
+    current_label = QUESTION_LABELS.get(current_q, current_q)
+    system = (
+        "You are Little Nate, a warm clinical AI companion guiding a client through a brief intake. "
+        "The client just asked a clarification question. Reply in 1-3 sentences. "
+        "Anchor pronouns like 'this' or 'that' to what the client already shared. "
+        "Be specific, concrete, and human. Use their name once if natural. "
+        "Do NOT lecture, do NOT add disclaimers, do NOT repeat the original question verbatim. "
+        "End by gently re-asking the question in plainer, friendlier words."
+    )
+    prompt = (
+        f"Client name: {client_name or 'the client'}\n"
+        f"Current intake question (id={current_q}): {current_label}\n\n"
+        f"Prior answers in this intake:\n{prior_block}\n\n"
+        f"Client just asked: \"{client_question.strip()}\"\n\n"
+        "Write Little Nate's reply now. Keep it short, warm, and concrete."
+    )
+    try:
+        result = await asyncio.wait_for(
+            router.generate(
+                prompt=prompt,
+                system=system,
+                tier=TIER_CLINICAL,
+                temperature=0.5,
+                max_tokens=220,
+                domain="clinical",
+                odpe_signal="TENSION",
+            ),
+            timeout=_CLARIFY_LLM_TIMEOUT_S,
+        )
+        text = (result or {}).get("text", "").strip()
+        if text:
+            print(
+                f">>> [INTAKE-CLARIFY-LLM] q={current_q} provider={(result or {}).get('provider')} "
+                f"len={len(text)}"
+            )
+            return text
+    except asyncio.TimeoutError:
+        print(f">>> [INTAKE-CLARIFY-LLM] timeout q={current_q}")
+    except Exception as exc:
+        print(f">>> [INTAKE-CLARIFY-LLM] error q={current_q}: {exc}")
+    return None
+
+
+async def _generate_intelligent_ack(
+    *,
+    current_q: str,
+    client_answer: str,
+    intake_row: Dict[str, Any],
+    client_name: str,
+    next_q: Optional[str],
+    credited: bool,
+) -> Optional[str]:
+    """LLM-generated acknowledgement of the client's answer plus a natural transition to the next question."""
+    router = _get_router()
+    if router is None:
+        return None
+    prior_block = _build_prior_context(intake_row, stop_at=current_q)
+    current_label = QUESTION_LABELS.get(current_q, current_q)
+    next_label = QUESTION_LABELS.get(next_q, "") if next_q else ""
+    token_line = "Add a short closing line that 1000 tokens were just added to their account." if credited else ""
+    if not next_q:
+        instruction = (
+            "Acknowledge what they shared in 1-2 sentences. Then let them know section 1 is complete "
+            "and their coach will pick up the rest, or they can finish in Settings later. "
+            "Thank them warmly. Keep total under 4 sentences."
+        )
+    else:
+        instruction = (
+            "Acknowledge what they shared in 1 sentence — reflect back something specific they said. "
+            "Then naturally transition to the next question. "
+            "Do NOT recite the next question word-for-word — phrase it conversationally in your own voice. "
+            "Keep total under 4 sentences."
+        )
+    system = (
+        "You are Little Nate, a warm clinical AI companion. You are walking a client through a brief intake. "
+        "You just received their answer to one question. "
+        "Respond in your normal warm, attuned voice. Be specific to what they said. Do NOT be robotic. "
+        f"{instruction} {token_line}"
+    )
+    prompt = (
+        f"Client name: {client_name or 'the client'}\n"
+        f"Question you just asked: {current_label}\n"
+        f"Their answer: \"{client_answer.strip()}\"\n\n"
+        f"Prior answers in this intake:\n{prior_block}\n\n"
+        + (f"Next question to ask (id={next_q}): {next_label}\n\n" if next_q else "")
+        + "Write Little Nate's reply now."
+    )
+    try:
+        result = await asyncio.wait_for(
+            router.generate(
+                prompt=prompt,
+                system=system,
+                tier=TIER_CLINICAL,
+                temperature=0.55,
+                max_tokens=260,
+                domain="clinical",
+                odpe_signal="TENSION",
+            ),
+            timeout=_ACK_LLM_TIMEOUT_S,
+        )
+        text = (result or {}).get("text", "").strip()
+        if text:
+            print(
+                f">>> [INTAKE-ACK-LLM] q={current_q} next={next_q} "
+                f"provider={(result or {}).get('provider')} len={len(text)}"
+            )
+            return text
+    except asyncio.TimeoutError:
+        print(f">>> [INTAKE-ACK-LLM] timeout q={current_q}")
+    except Exception as exc:
+        print(f">>> [INTAKE-ACK-LLM] error q={current_q}: {exc}")
+    return None
+
+
 async def _classify_intent_semantic(user_text: str, current_q: str) -> Optional[Dict[str, Any]]:
     """Returns {intent, confidence, answer_text} or None if classifier unavailable/failed."""
     if not _semantic_enabled():
@@ -340,6 +489,8 @@ async def handle_intake_walkthrough_turn(
         sem_conf = float((semantic or {}).get("confidence", 0.0))
         sem_answer = (semantic or {}).get("answer_text", "") or ""
 
+        client_name = str(intake.get("q1_preferred_name") or profile.get("name") or "").strip()
+
         # High-confidence semantic routes
         if semantic and sem_conf >= _SEMANTIC_CONF_FLOOR:
             if sem_intent == "crisis":
@@ -354,7 +505,13 @@ async def handle_intake_walkthrough_turn(
                 return {"handled": False}
             if sem_intent == "clarify_question":
                 st["nonsense_reprompted"] = False
-                return {"handled": True, "response": _clarify_for_question(current_q)}
+                smart = await _generate_intelligent_clarification(
+                    current_q=current_q,
+                    client_question=user_text,
+                    intake_row=intake,
+                    client_name=client_name,
+                )
+                return {"handled": True, "response": smart or _clarify_for_question(current_q)}
             if sem_intent == "nonsense":
                 if not st.get("nonsense_reprompted"):
                     st["nonsense_reprompted"] = True
@@ -374,7 +531,13 @@ async def handle_intake_walkthrough_turn(
             # Low confidence or classifier unavailable — fall back to rules.
             if _looks_clarification_request(user_text):
                 st["nonsense_reprompted"] = False
-                return {"handled": True, "response": _clarify_for_question(current_q)}
+                smart = await _generate_intelligent_clarification(
+                    current_q=current_q,
+                    client_question=user_text,
+                    intake_row=intake,
+                    client_name=client_name,
+                )
+                return {"handled": True, "response": smart or _clarify_for_question(current_q)}
 
             if _looks_nonsense(user_text):
                 if not st.get("nonsense_reprompted"):
@@ -392,7 +555,13 @@ async def handle_intake_walkthrough_turn(
                 # Classifier saw it but was unsure — if it suspected clarify_question with mid confidence, prefer clarify over saving wrong data.
                 if sem_intent == "clarify_question" and sem_conf >= 0.40:
                     st["nonsense_reprompted"] = False
-                    return {"handled": True, "response": _clarify_for_question(current_q)}
+                    smart = await _generate_intelligent_clarification(
+                        current_q=current_q,
+                        client_question=user_text,
+                        intake_row=intake,
+                        client_name=client_name,
+                    )
+                    return {"handled": True, "response": smart or _clarify_for_question(current_q)}
                 answer_value = user_text.strip()
 
         await update_client_answer(
@@ -416,8 +585,24 @@ async def handle_intake_walkthrough_turn(
         next_after = _first_unanswered(refreshed)
         st["nonsense_reprompted"] = False
 
+        # Build context-aware acknowledgement via LLM (Little Nate's actual voice).
+        # Skip LLM ack when the answer is a refusal/skip marker — keep that path crisp.
+        use_llm_ack = answer_value not in ("[declined_to_answer]", "[skipped]")
+        smart_ack: Optional[str] = None
+        if use_llm_ack:
+            smart_ack = await _generate_intelligent_ack(
+                current_q=current_q,
+                client_answer=answer_value,
+                intake_row=refreshed,
+                client_name=client_name,
+                next_q=next_after,
+                credited=bool(credit.get("credited")),
+            )
+
         if next_after:
             st["current_q"] = next_after
+            if smart_ack:
+                return {"handled": True, "response": smart_ack}
             token_line = "That's 1000 tokens added to your account." if credit.get("credited") else "That answer is saved."
             return {
                 "handled": True,
@@ -426,6 +611,8 @@ async def handle_intake_walkthrough_turn(
 
         st["active"] = False
         st["current_q"] = None
+        if smart_ack:
+            return {"handled": True, "response": smart_ack}
         return {
             "handled": True,
             "response": (
