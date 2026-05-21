@@ -11446,7 +11446,19 @@ async def handle_client(websocket, path=None):
 
             # Redact sensitive message types from logs
             _log_type = d.get("type", "unknown") if isinstance(d, dict) else "parse_pending"
-            if _log_type in ("login_request", "register_request", "admin_reset_password", "forgot_password", "force_password_change"):
+            if _log_type == "login_request":
+                # SOVEREIGN-VOICE: per-attempt login diagnostics (no plaintext password)
+                try:
+                    _li_id = (d.get("username") or "").strip()
+                    _li_role = d.get("expected_role") or "?"
+                    _li_pwl = len(d.get("password") or "")
+                    _li_tele = d.get("client_telemetry") or {}
+                    _li_att = _li_tele.get("attempt_number") if isinstance(_li_tele, dict) else None
+                    _li_ip = getattr(websocket, 'remote_address', ('?',))[0] if hasattr(websocket, 'remote_address') else '?'
+                    print(f">>> [LOGIN_AUDIT] in id={_li_id!r} role={_li_role} pw_len={_li_pwl} ip={_li_ip} attempt={_li_att}")
+                except Exception:
+                    print(f">>> RECEIVED: type={_log_type} [content redacted]")
+            elif _log_type in ("register_request", "admin_reset_password", "forgot_password", "force_password_change"):
                 print(f">>> RECEIVED: type={_log_type} [content redacted]")
             else:
                 print(f">>> RECEIVED: type={_log_type} len={len(message)}")
@@ -12035,17 +12047,20 @@ async def handle_client(websocket, path=None):
                         login_payload["coach_ethics_needed"] = True
                         login_payload["required_coach_ethics_version"] = REQUIRED_COACH_ETHICS_VERSION
                     await websocket.send(json.dumps(login_payload))
-                    # SOVEREIGN-VOICE: P6-002 — log successful login
+                    # SOVEREIGN-VOICE: P6-002 — log successful login (schema-correct)
                     if db_pool:
                         try:
                             _la_ip2 = getattr(websocket, 'remote_address', ('unknown',))[0] if hasattr(websocket, 'remote_address') else 'unknown'
+                            _la_id2 = res.get("username", _login_user or "unknown")
+                            _la_ua2 = (d.get("user_agent") or "")[:200]
+                            _la_uah2 = hashlib.sha256(_la_ua2.encode()).hexdigest()[:32] if _la_ua2 else None
                             await db_pool.execute(
-                                """INSERT INTO login_attempts (identifier, ip_address, success, attempted_at)
-                                   VALUES ($1, $2, TRUE, NOW())""",
-                                res.get("username", _login_user or "unknown"), _la_ip2,
+                                """INSERT INTO login_attempts (identifier, identifier_type, ip_address, success, user_agent_hash)
+                                   VALUES ($1, $2, $3, TRUE, $4)""",
+                                _la_id2, ("email" if "@" in _la_id2 else "username"), _la_ip2, _la_uah2,
                             )
-                        except Exception:
-                            pass
+                        except Exception as _la_err2:
+                            print(f">>> [LOGIN_AUDIT] success insert error: {_la_err2}")
                     # Broadcast updated stats to connected admins on new connection
                     await _broadcast_admin_stats()
                     # Push current metrics immediately on login (real-time dashboards)
@@ -12131,18 +12146,28 @@ async def handle_client(websocket, path=None):
                             asyncio.ensure_future(_ci_orch.ingest_signal(_ci_signal))
                     except Exception:
                         pass
-                    # SOVEREIGN-VOICE: P6-002 — persist login attempt to DB
+                    # SOVEREIGN-VOICE: P6-002 — persist failed login (schema-correct, rich context)
                     if db_pool:
                         try:
                             _la_ip = getattr(websocket, 'remote_address', ('unknown',))[0] if hasattr(websocket, 'remote_address') else 'unknown'
+                            _la_id = (d.get("username") or "unknown").strip()
+                            _la_idtype = "email" if "@" in _la_id else "username"
+                            _la_pwl = len(d.get("password") or "")
+                            _la_tele = d.get("client_telemetry") or {}
+                            _la_att = _la_tele.get("attempt_number") if isinstance(_la_tele, dict) else None
+                            _la_role = d.get("expected_role") or "?"
+                            _la_reason = f"{res or 'unknown'}|role={_la_role}|pw_len={_la_pwl}|attempt={_la_att}"
+                            _la_ua = (d.get("user_agent") or "")[:200]
+                            _la_uah = hashlib.sha256(_la_ua.encode()).hexdigest()[:32] if _la_ua else None
                             await db_pool.execute(
                                 """INSERT INTO login_attempts
-                                    (identifier, ip_address, success, failure_reason, attempted_at)
-                                   VALUES ($1, $2, FALSE, $3, NOW())""",
-                                d.get("username", "unknown"), _la_ip, res or "unknown",
+                                    (identifier, identifier_type, ip_address, success, failure_reason, user_agent_hash)
+                                   VALUES ($1, $2, $3, FALSE, $4, $5)""",
+                                _la_id, _la_idtype, _la_ip, _la_reason, _la_uah,
                             )
-                        except Exception:
-                            pass
+                            print(f">>> [LOGIN_AUDIT] out id={_la_id!r} role={_la_role} pw_len={_la_pwl} -> {res}")
+                        except Exception as _la_err:
+                            print(f">>> [LOGIN_AUDIT] failure insert error: {_la_err}")
             # === TOKEN AUTH (reconnect with existing session) ===
             elif t == "auth":
                 hw_id = d.get("hardware_id")

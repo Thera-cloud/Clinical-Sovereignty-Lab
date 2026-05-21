@@ -6507,6 +6507,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
   int _dialogRemainingAttempts = 5;
   int _dialogCooldownSeconds = 0;
   bool _dialogVerifying = false;
+  int _loginAttemptCounter = 0;
   AnimationController? _shakeController;
   bool _biometricAvailable = false;
   String? _savedUsername;
@@ -7370,12 +7371,22 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
                   _dialogVerifying = true;
                   _dialogError = '';
                   setDialogState(() {});
+                  _loginAttemptCounter += 1;
                   _channel?.sink.add(jsonEncode({
                     "type": "login_request",
                     "username": _tempUser,
                     "password": _tempPass,
                     "expected_role": expectedRole,
                     "client_context": kIsWeb ? '${expectedRole.toLowerCase()}_web' : '${expectedRole.toLowerCase()}_mobile',
+                    "client_telemetry": {
+                      "attempt_number": _loginAttemptCounter,
+                      "username_length": _tempUser.length,
+                      "password_length": _tempPass.length,
+                      "username_has_at": _tempUser.contains('@'),
+                      "username_leading_trailing_space": userCtrl.text != userCtrl.text.trim(),
+                      "client_timestamp": DateTime.now().toIso8601String(),
+                      "surface": "landing_login_dialog",
+                    },
                   }));
                 },
                 child: _dialogVerifying
