@@ -152,18 +152,28 @@ def _semantic_enabled() -> bool:
 
 
 _CLASSIFIER_SYSTEM = (
-    "You are an intent classifier for a clinical intake walkthrough. "
-    "Given the current intake question and the client's reply, return ONLY a JSON object: "
-    '{"intent": "<one of: answer | clarify_question | decline | topic_shift | crisis | nonsense>", '
+    "You are an intent classifier for a clinical intake walkthrough. The client is ACTIVELY in the middle of "
+    "answering intake questions. Given the current intake question and the client's reply, return ONLY a JSON object: "
+    '{"intent": "<one of: answer | clarify_question | decline | stop_intake | crisis | nonsense>", '
     '"confidence": <float 0.0-1.0>, "answer_text": "<verbatim client answer if intent=answer, else empty string>"}. '
     "Rules: "
-    "(1) intent=clarify_question when the client is asking what the question means, asking for an example, or asking what a term means (e.g. 'what do you mean by pronouns', 'whats that', 'can you explain'). "
-    "(2) intent=answer ONLY when the reply is a direct response to the question being asked. "
-    "(3) intent=decline when the client refuses (e.g. 'skip', 'pass', 'none of your business', 'not now'). "
-    "(4) intent=topic_shift when the client wants to talk about something else entirely. "
+    "(1) intent=clarify_question ONLY when the client is asking what the question means, asking for an example, or "
+    "asking what a specific term means (e.g. 'what do you mean by pronouns', 'whats that', 'can you explain', "
+    "'what is this referring to'). The reply must read as a question directed at YOU about the question. "
+    "(2) intent=answer is the DEFAULT for any content-bearing reply that even partially addresses the question, "
+    "shares context about what's going on, names a topic the client is working on, gives a rough duration, an emotion, "
+    "a person, a relationship, a behaviour, or anything substantive. A reply does NOT have to be a clean direct hit — "
+    "if it conveys ANY information the question is trying to elicit, classify as answer. Therapeutic-sounding content "
+    "from the client (e.g. 'working on my relationship', 'feeling anxious lately', 'my mom died last year') is an ANSWER, "
+    "not a topic shift. "
+    "(3) intent=decline when the client refuses the specific question (e.g. 'skip', 'pass', 'rather not say', 'next'). "
+    "(4) intent=stop_intake ONLY when the client EXPLICITLY asks to stop the intake itself (e.g. 'lets stop the intake', "
+    "'can we do this later', 'i don't want to do the form anymore', 'pause the intake'). Generic emotional content is "
+    "NOT stop_intake. "
     "(5) intent=crisis if the reply contains self-harm, suicide, or homicide content. "
-    "(6) intent=nonsense if the reply is gibberish, one character, or unparseable. "
-    "(7) Confidence reflects how certain you are. Be conservative — questions about the question are NOT answers. "
+    "(6) intent=nonsense if the reply is gibberish, one character, or completely unparseable. "
+    "(7) Confidence reflects how certain you are. When in doubt between answer and anything else, choose answer with "
+    "moderate confidence — we would rather save what the client said than drop them out of the walkthrough. "
     "Return only the JSON object, no preamble, no explanation."
 )
 
@@ -472,11 +482,17 @@ async def handle_intake_walkthrough_turn(
             return {"handled": False}
 
         # Active walkthrough
+        # Explicit rule-based "stop the intake" — surface a clear choice instead of silently dropping out.
         if _contains_any(user_text, _TOPIC_SHIFT_TERMS):
+            st["needs_resume_prompt"] = True
             st["active"] = False
-            st["current_q"] = None
-            st["nonsense_reprompted"] = False
-            return {"handled": False}
+            return {
+                "handled": True,
+                "response": (
+                    "Want to pause the intake and pick this up another time, or keep going? "
+                    "Just say 'continue' to keep answering, or 'pause' to come back later."
+                ),
+            }
 
         current_q = st.get("current_q") or next_q
         if not current_q:
@@ -498,11 +514,17 @@ async def handle_intake_walkthrough_turn(
                 st["current_q"] = None
                 st["needs_resume_prompt"] = True
                 return {"handled": False}
-            if sem_intent == "topic_shift":
+            if sem_intent == "stop_intake":
+                st["needs_resume_prompt"] = True
                 st["active"] = False
-                st["current_q"] = None
                 st["nonsense_reprompted"] = False
-                return {"handled": False}
+                return {
+                    "handled": True,
+                    "response": (
+                        "Want to pause the intake and pick it back up later, or keep going? "
+                        "Just say 'continue' to keep answering, or 'pause' to come back."
+                    ),
+                }
             if sem_intent == "clarify_question":
                 st["nonsense_reprompted"] = False
                 smart = await _generate_intelligent_clarification(
