@@ -192,7 +192,13 @@ async def handle_intake_walkthrough_turn(
             actor_id=username,
             method="chat_walkthrough",
         )
-        credit = await credit_walkthrough_question(conn, username=username, question_id=current_q)
+        try:
+            credit = await credit_walkthrough_question(conn, username=username, question_id=current_q)
+        except Exception as _credit_err:
+            import traceback as _tb
+            print(f">>> [INTAKE] Token credit failed for user={username} q={current_q}: {_credit_err}")
+            _tb.print_exc()
+            credit = {"credited": False, "amount": 0, "reason": "credit_failed"}
 
         refreshed = await get_client_intake(conn, username, uid)
         next_after = _first_unanswered(refreshed)
