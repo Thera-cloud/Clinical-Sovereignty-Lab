@@ -47,6 +47,7 @@ import 'screens/coaching_mesh_screen.dart';
 import 'screens/onboarding_paid_screen.dart';
 import 'screens/community_mesh_screen.dart';
 import 'screens/sensitive_clinical_profile_screen.dart';
+import 'screens/intake_form_coach_panel.dart';
 import 'config/app_config.dart';
 import 'widgets/vault_attachment_button.dart';
 import 'widgets/upload_progress_indicator.dart';
@@ -1793,6 +1794,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
 
   WebSocketChannel? get _wsCh => ClientWsHub.channel ?? _socket; // FIX-H
   void _wsSend(String payload) => _wsCh?.sink.add(payload); // FIX-H
+  bool _nevedalReady = false;
+  DateTime? _lastConnectAttempt;
+  Timer? _backoffResetTimer;
   void _cancelNeuralWsSubs() {
     _socketSub?.cancel();
     _socketSub = null;
@@ -1802,27 +1806,49 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     _socketDoneSub = null;
   }
 
+  String get _clientContext => kIsWeb ? 'client_web' : 'client_mobile';
+
+  void _initNevedalOnce(WebSocketChannel sock, String sessionId) {
+    if (_nevedalReady) return;
+    _nevedalReady = true;
+    _nevedal.initialize(
+      socket: sock,
+      sessionId: sessionId,
+      userId: widget.username ?? 'unknown',
+    );
+  }
+
+  void _scheduleBackoffDecay() {
+    _backoffResetTimer?.cancel();
+    _backoffResetTimer = Timer(const Duration(seconds: 30), () {
+      _reconnectAttempts = 0;
+    });
+  }
+
   void _applyHubWarmStart() {
-    // FIX-H login_success side-effects without second login_request
-    _reconnectAttempts = 0;
+    _scheduleBackoffDecay();
     if (mounted) setState(() => _connectionStatus = "ONLINE (SECURE)");
     _addSystemMsg("Neural Link Established.");
     _updateMetricsFromProfile(widget.currentUserProfile ?? {});
     _requestMetrics();
     _wsSend(jsonEncode({"type": "get_pending_nudges"}));
     _checkSseIntake();
-    _nevedal.initialize(
-      socket: ClientWsHub.channel!,
-      sessionId: 'session_${DateTime.now().millisecondsSinceEpoch}',
-      userId: widget.username ?? 'unknown',
+    _initNevedalOnce(
+      ClientWsHub.channel!,
+      'session_${DateTime.now().millisecondsSinceEpoch}',
     );
   }
 
   void _connectToCortex() {
+    final now = DateTime.now();
+    if (_lastConnectAttempt != null &&
+        now.difference(_lastConnectAttempt!).inSeconds < 3) {
+      return;
+    }
+    _lastConnectAttempt = now;
     setState(() => _connectionStatus = "Dialing Neural Core...");
     _cancelNeuralWsSubs();
     if (ClientWsHub.channel != null) {
-      // FIX-H reuse lobby-authenticated hub
       try {
         _socket?.sink.close();
       } catch (_) {}
@@ -1836,6 +1862,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         _scheduleReconnect();
       });
       _socketDoneSub = ClientWsHub.done.listen((_) {
+        _nevedalReady = false;
         if (mounted) setState(() => _connectionStatus = "Reconnecting...");
         _scheduleReconnect();
       });
@@ -1857,6 +1884,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
           _scheduleReconnect();
         });
         _socketDoneSub = ClientWsHub.done.listen((_) {
+          _nevedalReady = false;
           if (mounted) setState(() => _connectionStatus = "Reconnecting...");
           _scheduleReconnect();
         });
@@ -1865,7 +1893,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
           "type": "login_request",
           "username": widget.username,
           "password": widget.password,
-          "expected_role": "CLIENT"
+          "expected_role": "CLIENT",
+          "client_context": _clientContext,
         }));
       } catch (e) {
         _debugLog("Connection error: $e");
@@ -1875,8 +1904,6 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
 
     _audioSub?.cancel();
     _audioSub = _audio.onTranscription.listen((text) {
-      // When dictation mode is armed, don't let other transcription sources
-      // overwrite the accessible input field.
       if (_dictationArmed || _isListening) return;
       if (mounted) setState(() => _chatController.text = text);
     });
@@ -1884,8 +1911,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
 
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
+    _backoffResetTimer?.cancel();
     final attempt = _reconnectAttempts.clamp(0, 10);
-    final baseMs = (500 * (1 << attempt)).clamp(500, 30000);
+    final baseMs = (5000 * (1 << attempt)).clamp(5000, 30000);
     final jitterMs =
         (baseMs * 0.2 * (DateTime.now().millisecondsSinceEpoch % 100) / 100)
             .toInt();
@@ -1903,31 +1931,21 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
       if (kDebugMode) print(">>> CORTEX SAYS: $data");
 
       if (data['type'] == 'login_success') {
-        _reconnectAttempts = 0;
+        _scheduleBackoffDecay();
         setState(() => _connectionStatus = "ONLINE (SECURE)");
         _addSystemMsg("Neural Link Established.");
 
-        // Extract metrics from profile
         final profile = data['profile'] ?? {};
         _updateMetricsFromProfile(profile);
-
-        // Request full metrics
         _requestMetrics();
-
-        // Request pending nudges from Nate
-        _wsSend(jsonEncode({"type": "get_pending_nudges"})); // FIX-H
-
+        _wsSend(jsonEncode({"type": "get_pending_nudges"}));
         _checkSseIntake();
 
-        final sk = ClientWsHub.channel ?? _socket; // FIX-H
+        final sk = ClientWsHub.channel ?? _socket;
         if (sk != null) {
           final sessionId = data['session_id'] as String? ??
               'session_${DateTime.now().millisecondsSinceEpoch}';
-          _nevedal.initialize(
-            socket: sk,
-            sessionId: sessionId,
-            userId: widget.username ?? 'unknown',
-          );
+          _initNevedalOnce(sk, sessionId);
         }
       } else if (data['type'] == 'nate_thinking') {
         final thinking = data['text'] ?? 'Little Nate is thinking...';
@@ -2918,8 +2936,10 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   }
 
   void _addSystemMsg(String msg) {
+    final tagged = "[SYSTEM]: $msg";
+    if (_chatHistory.isNotEmpty && _chatHistory.last == tagged) return;
     setState(() {
-      _chatHistory.add("[SYSTEM]: $msg");
+      _chatHistory.add(tagged);
       _scrollToBottom();
     });
   }
@@ -4392,6 +4412,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     _audioSub?.cancel();
     _talkingTimer?.cancel();
     _reconnectTimer?.cancel();
+    _backoffResetTimer?.cancel();
     _recapTimer?.cancel();
     for (final t in _ttsDebounceByTurn.values) {
       t.cancel();
@@ -8708,6 +8729,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             ],
           ),
 
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: _buildIntakeButton(brief),
+          ),
+
           const SizedBox(height: 24),
 
           // Nevedal metrics
@@ -8894,6 +8921,63 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           shape: WidgetStateProperty.all(
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIntakeButton(Map<String, dynamic> brief) {
+    final summary = (brief['intake_summary'] is Map)
+        ? (brief['intake_summary'] as Map)
+        : const {};
+    final pct = (summary['section_1_completion_pct'] is num)
+        ? (summary['section_1_completion_pct'] as num).toInt()
+        : 0;
+    final label = pct <= 0
+        ? 'Intake • ○○○○'
+        : pct < 25
+            ? 'Intake • ◔○○○'
+            : pct < 50
+                ? 'Intake • ◕◔○○'
+                : pct < 75
+                    ? 'Intake • ●◕◔○'
+                    : pct < 100
+                        ? 'Intake • ●●◕◔'
+                        : 'Intake • ●●●●';
+    return ElevatedButton(
+      onPressed: () => _openIntakePanel(brief),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF9D4EDD),
+        foregroundColor: Colors.white,
+      ),
+      child: Text(label),
+    );
+  }
+
+  void _openIntakePanel(Map<String, dynamic> brief) {
+    final visibility = brief['sensitive_bridge_visibility'];
+    final usernameFromVisibility =
+        (visibility is Map) ? (visibility['client_username'] ?? '').toString() : '';
+    final usernameFromClient =
+        (brief['client'] is Map) ? (brief['client']['username'] ?? '').toString() : '';
+    final clientUsername = usernameFromVisibility.trim().isNotEmpty
+        ? usernameFromVisibility.trim()
+        : usernameFromClient.trim();
+    if (clientUsername.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Intake unavailable: missing client username in brief payload.')),
+      );
+      return;
+    }
+    final token = (widget.currentUserProfile['token'] ?? '').toString();
+    final displayName = ((brief['client'] is Map) ? (brief['client']['name'] ?? '') : '').toString();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => IntakeFormCoachPanel(
+          clientUsername: clientUsername,
+          token: token,
+          clientDisplayName: displayName.isEmpty ? clientUsername : displayName,
         ),
       ),
     );

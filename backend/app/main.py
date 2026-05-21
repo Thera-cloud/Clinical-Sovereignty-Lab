@@ -3958,6 +3958,15 @@ except Exception as _cde_err:
     print(f"   ⚠️  client_data_export router failed: {_cde_err}")
 
 
+try:
+    from app.routers.intake_form_api import router as intake_form_router
+
+    app.include_router(intake_form_router)
+    print("   ✅ intake_form_api router mounted")
+except Exception as _intake_err:
+    print(f"   ⚠️  intake_form_api router failed: {_intake_err}")
+
+
 # QUANTUM-CRYSTAL-ARCH: conditional routers — mount if dependencies are satisfied
 for _rmod, _ralias in [
     ("app.routers.patient_sovereignty", "patient_sovereignty_router"),

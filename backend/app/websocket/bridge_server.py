@@ -2961,6 +2961,17 @@ except ImportError:
     _LREngine = None
 _lr_engine = None  # QUANTUM-CRYSTAL-ARCH — initialized after db_pool
 
+try:
+    from app.services.intake_form_service import (
+        get_intake_summary as _get_intake_summary,
+        get_section1_for_nate as _get_section1_for_nate,
+    )
+    from app.services.intake_walkthrough import handle_intake_walkthrough_turn
+except Exception:
+    _get_intake_summary = None
+    _get_section1_for_nate = None
+    handle_intake_walkthrough_turn = None
+
 BING_SEARCH_API_KEY = os.getenv("BING_SEARCH_API_KEY", "")
 TOTP_ENCRYPTION_KEY = os.getenv("TOTP_ENCRYPTION_KEY", "")
 
@@ -8278,6 +8289,20 @@ class AzureCortex:
             await self._send(uid, _ip_deflection, client_context=_ctx, turn_id=_turn_id)
             return
 
+        # QUANTUM-CRYSTAL-ARCH: Clinical runtime gate (CLIENT only, pre-inference)
+        # Detects soft clinical phrasing (pharma/sleep/diagnosis/instrument) and returns
+        # a deterministic decline+redirect template, bypassing LLM generation.
+        if _role == "CLIENT" and not user_text.startswith("[SEARCH SYNTHESIS]") and not user_text.startswith("[DOJO SIMULATION"):
+            try:
+                from app.services.little_nate_clinical_runtime_gate import evaluate as _clin_gate_eval
+                _gate_result = _clin_gate_eval(uid, user_text)
+                if _gate_result:
+                    print(f">>> [CLINICAL GATE] class={_gate_result['class']} fired_new={_gate_result['fired_new']} active={_gate_result['active_topics']} user={profile.get('name')}")
+                    await self._send(uid, _gate_result["response"], client_context=_ctx, turn_id=_turn_id)
+                    return
+            except Exception as _gate_e:
+                print(f">>> [CLINICAL GATE ERROR] {_gate_e!r} — falling through to normal pipeline")
+
         # Check if this is a Dojo simulation - skip token deduction for training
         is_dojo_simulation = user_text.startswith("[DOJO SIMULATION")
         
@@ -8318,7 +8343,13 @@ class AzureCortex:
             result = await coro
             print(f">>> [CTX-TIMING] {name}: {int((_time_ctx.monotonic() - _s) * 1000)}ms")
             return result
-        relational_context, checkin_context, crystal_context, pg_history_context = await asyncio.gather(
+        async def _fetch_intake_context():
+            if not _cpool or not _uname or _get_section1_for_nate is None:
+                return ""
+            async with _cpool.acquire() as _iconn:
+                return await _get_section1_for_nate(_iconn, _uname)
+
+        relational_context, checkin_context, crystal_context, pg_history_context, intake_context = await asyncio.gather(
             _timed("relational", self._get_relational_context(profile)),
             _timed("checkin", self._get_checkin_context(profile)),
             _timed("crystals", recall_crystals_for_context(
@@ -8326,6 +8357,7 @@ class AzureCortex:
                 source="bridge_chat", query_text=user_text,
             )),
             _timed("pg_history", _fetch_pg_history_for_chat(_cpool, _uname, _hw_id, limit=15)),
+            _timed("intake_s1", _fetch_intake_context()),
         )
         _live_turn_context = _format_live_turn_context(uid)
         _critical_recall_context = _format_critical_recall_facts(uid)
@@ -8790,6 +8822,8 @@ class AzureCortex:
         - Hard safety limits still apply (crisis protocol, mandatory reporting language). But within those boundaries, you allow the full range of human testing -- because meeting it with love is how trust is built.
 
         {relational_context}
+
+        {intake_context}
                 
         USER PROFILE:
         - Name: {profile.get('name')}
@@ -9063,6 +9097,13 @@ class AzureCortex:
         {lr_context}"""
         # SOVEREIGN-VOICE — cap system prompt; workers_ai/grok handle 128K+ context  # QUANTUM-CRYSTAL-ARCH
         _SP_CAP = 32000
+
+        # QUANTUM-CRYSTAL-ARCH — intake walkthrough FSM (section 1 only)
+        if handle_intake_walkthrough_turn is not None:
+            _walk = await handle_intake_walkthrough_turn(profile=profile, user_text=user_text, db_pool=_cpool)
+            if _walk.get("handled"):
+                await self._send(uid, _walk.get("response", ""), client_context=_ctx, turn_id=_turn_id)
+                return
 
         # QUANTUM-CRYSTAL-ARCH — adaptive mode addendum (reflective/exploratory/strategic/handoff/accommodating)
         # G3: reserve headroom FIRST so the cap can never silently eat the mode instruction.
@@ -18094,6 +18135,7 @@ async def handle_client(websocket, path=None):
                         session_focus: Optional[str] = None
                         recent_conversation_topics: List[Dict[str, Any]] = []
                         zoom_ai_insight: Optional[Dict[str, Any]] = None
+                        intake_summary: Optional[Dict[str, Any]] = None
 
                         try:
                             for m in recent_memory[-3:]:
@@ -18124,6 +18166,8 @@ async def handle_client(websocket, path=None):
                                         "SELECT id::text FROM users WHERE hardware_id = $1 OR username = $1 OR id::text = $1 LIMIT 1",
                                         _chw,
                                     )
+                                    if _get_intake_summary is not None and _cun:
+                                        intake_summary = await _get_intake_summary(_brconn, _cun)
                                     _coach_uuid = None
                                     if _coach_hw:
                                         _coach_uuid = await _brconn.fetchval(
@@ -18280,6 +18324,7 @@ async def handle_client(websocket, path=None):
 
                         brief = {
                             "client": {
+                                "username": client_profile.get("username"),
                                 "name": client_profile.get("name"),
                                 "tier": client_profile.get("tier"),
                                 "joined_date": client_profile.get("joined_date"),
@@ -18301,6 +18346,12 @@ async def handle_client(websocket, path=None):
                             "fcodes_assigned": fcodes_assigned,
                             "fcodes_nate_suggestions": fcodes_nate,
                             "fcode_family_correlations": fcode_family_corr,
+                            "intake_summary": intake_summary or {
+                                "section_1_completion_pct": 0,
+                                "section_1_status": "not_started",
+                                "section_2_status": "not_started",
+                                "has_any_answers": False,
+                            },
                         }
                         if session_focus:
                             brief["session_focus"] = session_focus

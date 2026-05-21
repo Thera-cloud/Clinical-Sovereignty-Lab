@@ -29,6 +29,7 @@ import 'nevedal_reports_screen.dart';
 import '../widgets/google_calendar_section.dart';
 import 'distress_beacon_screen.dart';
 import 'secure_search_screen.dart';
+import 'intake_form_screen.dart';
 import 'coaching_mesh_screen.dart';
 import 'community_mesh_screen.dart';
 import 'night_school_screen.dart';
@@ -2890,6 +2891,18 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               Navigator.push(context, MaterialPageRoute(
                 builder: (_) => SecureSearchScreen(profile: _profile),
               ));
+            }),
+            _actionRow(Icons.assignment_outlined, 'Clinical Intake Form', 'Shared with Little Nate (section 1) + coach-only section 2', () {
+              if ((_archetypeName ?? '').isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Complete your archetype journey first, then open Clinical Intake.')),
+                );
+                return;
+              }
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => IntakeFormScreen(profile: _profile)),
+              );
             }),
             _actionRow(Icons.sos, 'Distress Beacon', 'Emergency support resources', () {
               Navigator.push(context, MaterialPageRoute(

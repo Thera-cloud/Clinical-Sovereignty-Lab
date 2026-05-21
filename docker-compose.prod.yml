@@ -194,6 +194,7 @@ services:
       - SANDBOX_HMAC_KEY=${SANDBOX_HMAC_KEY:-}
       - ENVIRONMENT=production
       - ENABLE_VOICE_TRANSCRIPT_CRYSTALLIZATION=true
+      - ENABLE_INTAKE_SYSTEM=${ENABLE_INTAKE_SYSTEM:-true}
       - DEBUG=false
       - MAC_AGENT_URL=https://twin-agent.sovereignsanctuary.net
       - MAC_AGENT_TOKEN=${MAC_AGENT_TOKEN:-}
@@ -293,6 +294,7 @@ services:
       - ENVIRONMENT=production
       - ENABLE_VOICE_TRANSCRIPT_CRYSTALLIZATION=true
       - ENABLE_SUBCONSCIOUS=true
+      - ENABLE_INTAKE_SYSTEM=${ENABLE_INTAKE_SYSTEM:-true}
     ports:
       - "127.0.0.1:${WEBSOCKET_PORT:-8765}:8765"
     depends_on:

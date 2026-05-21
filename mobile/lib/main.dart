@@ -1414,6 +1414,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
 
   // Nevedal biometric integration
   final NevedalService _nevedal = NevedalService();
+  bool _nevedalReady = false;
 
   // Avatar Mode (Top Tier / Sovereign Circle only)
   bool _avatarModeEnabled = false;
@@ -1543,7 +1544,9 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
     _socketSub?.cancel();
     _socketErrSub?.cancel(); // FIX-G'
     _socketDoneSub?.cancel(); // FIX-G'
-    _socket?.sink.close();
+    if (_socket != null && !identical(_socket, _ClientWsHub.channel)) {
+      _socket?.sink.close();
+    }
     _scrollController.dispose();
     _speech.stop();
     WidgetsBinding.instance.removeObserver(this);
@@ -1564,17 +1567,46 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
     }
   }
 
-  // 1. ESTABLISH FRESH CONNECTION
+  WebSocketChannel? get _wsCh => _ClientWsHub.channel ?? _socket;
+  void _wsSend(String payload) => _wsCh?.sink.add(payload);
+
+  void _bindSocketListeners() {
+    _socketSub = _ClientWsHub.inbound.listen(_handleSocketMessage);
+    _socketErrSub = _ClientWsHub.errors.listen((e) {
+      if(mounted) setState(() => _connectionStatus = "ERROR: $e");
+      _addSystemMsg("Connection Died: $e");
+    });
+    _socketDoneSub = _ClientWsHub.done.listen((_) {
+      _nevedalReady = false;
+      if(mounted) setState(() => _connectionStatus = "DISCONNECTED");
+    });
+  }
+
+  // 1. ESTABLISH OR REUSE CONNECTION
   void _connectToCortex() {
     setState(() => _connectionStatus = "Dialing Neural Core...");
     
-    // Clean up previous connection
     _socketSub?.cancel();
     _socketSub = null;
     _socketErrSub?.cancel(); _socketErrSub = null; // FIX-G'
     _socketDoneSub?.cancel(); _socketDoneSub = null; // FIX-G'
-    try { _socket?.sink.close(); } catch (_) {}
-    _socket = null;
+
+    final existingHub = _ClientWsHub.channel;
+    if (existingHub != null) {
+      _socket = null;
+      _bindSocketListeners();
+      if (mounted) setState(() => _connectionStatus = "ONLINE (SECURE)");
+      _addSystemMsg("Neural Link Established.");
+      if (!_nevedalReady) {
+        _nevedalReady = true;
+        _nevedal.initialize(
+          socket: existingHub,
+          sessionId: 'session_${DateTime.now().millisecondsSinceEpoch}',
+          userId: widget.username ?? 'unknown',
+        );
+      }
+      return;
+    }
 
     try {
       _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
@@ -1582,22 +1614,16 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
       // FIX-G' (HUB-OWNS-RAW-STREAM): hub is sole owner of `_socket.stream`.
       // NeuralInterface consumes via broadcast inbound/errors/done.
       _ClientWsHub.attach(_socket!);
-      _socketSub = _ClientWsHub.inbound.listen(_handleSocketMessage);
-      _socketErrSub = _ClientWsHub.errors.listen((e) {
-        if(mounted) setState(() => _connectionStatus = "ERROR: $e");
-        _addSystemMsg("Connection Died: $e");
-      });
-      _socketDoneSub = _ClientWsHub.done.listen((_) {
-        if(mounted) setState(() => _connectionStatus = "DISCONNECTED");
-      });
+      _bindSocketListeners();
 
       // 2. IMMEDIATE LOGIN
       debugLog(">>> NEURAL INTERFACE: Sending Login...");
-      _socket!.sink.add(jsonEncode({
+      _wsSend(jsonEncode({
         "type": "login_request",
         "username": widget.username,
         "password": widget.password,
-        "expected_role": "CLIENT"
+        "expected_role": "CLIENT",
+        "client_context": kIsWeb ? 'client_web' : 'client_mobile',
       }));
 
     } catch (e) {
@@ -1697,11 +1723,12 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
         setState(() => _connectionStatus = "ONLINE (SECURE)");
         _addSystemMsg("Neural Link Established.");
 
-        if (_socket != null) {
+        if (_socket != null && !_nevedalReady) {
+          _nevedalReady = true;
           final sessionId = data['session_id'] as String? ??
               'session_${DateTime.now().millisecondsSinceEpoch}';
           _nevedal.initialize(
-            socket: _socket!,
+            socket: _wsCh!,
             sessionId: sessionId,
             userId: widget.username ?? 'unknown',
           );
@@ -1819,8 +1846,10 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
   }
 
   void _addSystemMsg(String msg) {
+    final tagged = "[SYSTEM]: $msg";
+    if (_chatHistory.isNotEmpty && _chatHistory.last == tagged) return;
     setState(() {
-      _chatHistory.add("[SYSTEM]: $msg");
+      _chatHistory.add(tagged);
       _scrollToBottom();
     });
   }
@@ -1866,7 +1895,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
     
     if (enabled) {
       // Request avatar config from server
-      _socket?.sink.add(jsonEncode({'type': 'fetch_avatar_config'}));
+      _wsSend(jsonEncode({'type': 'fetch_avatar_config'}));
     }
   }
 
@@ -1880,15 +1909,14 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
       if (!_aiDataConsentGiven) return;
     }
     
-    // Check our INTERNAL socket
-    if (_socket == null || _connectionStatus.contains("DISCONNECTED")) {
+    if (_wsCh == null || _connectionStatus.contains("DISCONNECTED")) {
       _addSystemMsg("Link is dead. Reconnecting...");
       _connectToCortex(); // Auto-heal
       return;
     }
 
     debugLog(">>> SENDING: $text");
-    _socket!.sink.add(jsonEncode({
+    _wsSend(jsonEncode({
       "type": "nate_query", 
       "nate_query": text,
       "modality": "General" 
@@ -2012,7 +2040,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.red),
             onPressed: () {
-              _socket?.sink.close();
+              _wsCh?.sink.close();
               Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LobbyScreen()));
             }
           )
@@ -2190,7 +2218,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
         "type": "login_request",
         "username": widget.username,
         "password": widget.password,
-        "expected_role": "COACH"
+        "expected_role": "COACH",
+        "client_context": kIsWeb ? 'coach_web' : 'coach_mobile',
       }));
 
     } catch (e) {
@@ -2887,7 +2916,8 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
       "type": "login_request",
       "username": username,
       "password": widget.password ?? "",
-      "expected_role": "CLIENT"
+      "expected_role": "CLIENT",
+      "client_context": kIsWeb ? 'sanctuary_web' : 'sanctuary_mobile',
     }));
   }
 
@@ -6653,6 +6683,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
       "username": _tempUser,
       "password": _tempPass,
       "expected_role": role,
+      "client_context": kIsWeb ? 'client_web' : 'client_mobile',
     }));
 
     if (mounted) {
@@ -7128,6 +7159,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
               "username": _tempUser,
               "password": _tempPass,
               "expected_role": _lastExpectedRole,
+              "client_context": kIsWeb ? 'client_web' : 'client_mobile',
             }));
           }
         }
@@ -7210,7 +7242,8 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
                   "type": "login_request",
                   "username": _tempUser,
                   "password": _tempPass,
-                  "expected_role": "ADMIN"
+                  "expected_role": "ADMIN",
+                  "client_context": kIsWeb ? 'admin_web' : 'admin_mobile',
                 }));
 
                 Navigator.pop(ctx);
@@ -7341,7 +7374,8 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
                     "type": "login_request",
                     "username": _tempUser,
                     "password": _tempPass,
-                    "expected_role": expectedRole
+                    "expected_role": expectedRole,
+                    "client_context": kIsWeb ? '${expectedRole.toLowerCase()}_web' : '${expectedRole.toLowerCase()}_mobile',
                   }));
                 },
                 child: _dialogVerifying
@@ -8423,7 +8457,8 @@ class _SignUpWizardState extends State<SignUpWizard> {
              "type": "login_request",
              "username": _userCtrl.text.trim(),
              "password": _passCtrl.text.trim(),
-             "expected_role": regRole
+             "expected_role": regRole,
+             "client_context": kIsWeb ? '${regRole.toLowerCase()}_web' : '${regRole.toLowerCase()}_mobile',
           }));
         }
       }
@@ -8482,7 +8517,8 @@ class _SignUpWizardState extends State<SignUpWizard> {
            "type": "login_request",
            "username": _userCtrl.text.trim(),
            "password": _passCtrl.text.trim(),
-           "expected_role": _effectiveRole
+           "expected_role": _effectiveRole,
+           "client_context": kIsWeb ? '${_effectiveRole.toLowerCase()}_web' : '${_effectiveRole.toLowerCase()}_mobile',
         }));
         Navigator.pushAndRemoveUntil(
           context, 
@@ -10133,6 +10169,7 @@ class _ReConsentScreenState extends State<ReConsentScreen> {
       "username": widget.username,
       "password": widget.password,
       "expected_role": role,
+      "client_context": kIsWeb ? '${role.toLowerCase()}_web' : '${role.toLowerCase()}_mobile',
     }));
   }
 
@@ -10245,6 +10282,7 @@ class _CoachEthicsScreenState extends State<CoachEthicsScreen> {
       "username": widget.username,
       "password": widget.password,
       "expected_role": role,
+      "client_context": kIsWeb ? '${role.toLowerCase()}_web' : '${role.toLowerCase()}_mobile',
     }));
   }
 
@@ -10753,6 +10791,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
         "username": u,
         "password": p,
         "expected_role": "CLIENT",
+        "client_context": kIsWeb ? 'client_web' : 'client_mobile',
       }));
     } catch (e) {
       debugLog('Connection error: $e');
