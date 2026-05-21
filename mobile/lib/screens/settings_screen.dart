@@ -126,6 +126,23 @@ class _Design {
   static const border = Color(0xFF252525);
 }
 
+/// PostgreSQL is authoritative — login/bridge cache can lag after PATCH.
+Future<String?> _fetchServerTimezone(String token) async {
+  if (token.isEmpty) return null;
+  try {
+    final resp = await http.get(
+      Uri.parse('${AppConfig.apiBaseUrl}/api/client/health-check'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+    if (resp.statusCode != 200) return null;
+    final data = jsonDecode(resp.body) as Map<String, dynamic>;
+    final tz = (data['timezone'] ?? '').toString().trim();
+    return tz.isEmpty ? null : tz;
+  } catch (_) {
+    return null;
+  }
+}
+
 /// One-off prompt when device IANA zone ≠ account zone (sticky TZ policy).
 Future<void> promptIfDeviceTimezoneDiffersFromAccount({
   required BuildContext context,
@@ -134,8 +151,20 @@ Future<void> promptIfDeviceTimezoneDiffersFromAccount({
   required void Function(String newTz) onPatched,
 }) async {
   try {
-    final deviceTz = await FlutterTimezone.getLocalTimezone();
-    final accountTz = (profile['timezone'] ?? '').toString().trim();
+    final deviceTz = (await FlutterTimezone.getLocalTimezone()).trim();
+    if (deviceTz.isEmpty) return;
+
+    final token = (profile['token'] ?? '').toString();
+    var accountTz = (profile['timezone'] ?? '').toString().trim();
+    final serverTz = await _fetchServerTimezone(token);
+    if (serverTz != null && serverTz.isNotEmpty) {
+      accountTz = serverTz;
+      if (accountTz != (profile['timezone'] ?? '').toString().trim()) {
+        onPatched(accountTz);
+        timezoneCtrl.text = accountTz;
+      }
+    }
+
     if (accountTz.isEmpty || deviceTz == accountTz) return;
     final uname = (profile['username'] ?? '').toString();
     if (uname.isEmpty) return;
@@ -143,6 +172,7 @@ Future<void> promptIfDeviceTimezoneDiffersFromAccount({
     if (prefs.getBool('tz_mismatch_dismissed_$uname') == true) return;
     if (!context.mounted) return;
 
+    var resolved = false;
     await showDialog<void>(
       context: context,
       barrierDismissible: true,
@@ -157,6 +187,7 @@ Future<void> promptIfDeviceTimezoneDiffersFromAccount({
         actions: [
           TextButton(
             onPressed: () async {
+              resolved = true;
               await prefs.setBool('tz_mismatch_dismissed_$uname', true);
               if (ctx.mounted) Navigator.pop(ctx);
             },
@@ -164,7 +195,7 @@ Future<void> promptIfDeviceTimezoneDiffersFromAccount({
           ),
           TextButton(
             onPressed: () async {
-              final token = (profile['token'] ?? '').toString();
+              resolved = true;
               final resp = await http.patch(
                 Uri.parse('${AppConfig.apiBaseUrl}/api/client/timezone'),
                 headers: {
@@ -177,6 +208,7 @@ Future<void> promptIfDeviceTimezoneDiffersFromAccount({
               if (resp.statusCode == 200) {
                 await prefs.setBool('tz_mismatch_dismissed_$uname', true);
                 onPatched(deviceTz);
+                timezoneCtrl.text = deviceTz;
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
@@ -196,6 +228,10 @@ Future<void> promptIfDeviceTimezoneDiffersFromAccount({
         ],
       ),
     );
+    // Outside tap / back — treat as "keep account" so we do not re-prompt every visit.
+    if (!resolved) {
+      await prefs.setBool('tz_mismatch_dismissed_$uname', true);
+    }
   } catch (_) {}
 }
 
@@ -349,14 +385,31 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
 
       if (result != null && mounted) {
         final fresh = Map<String, dynamic>.from(_profile);
-        for (final key in ['subscription_plan', 'tier', 'subscription_status',
-                           'family_id', 'family_role', 'name', 'email', 'phone', 'timezone', 'timezone_source']) {
+        const profileKeys = [
+          'subscription_plan', 'tier', 'subscription_status',
+          'family_id', 'family_role', 'name', 'email', 'phone',
+          'timezone', 'timezone_source',
+        ];
+        final nested = result['profile'];
+        if (nested is Map) {
+          for (final key in profileKeys) {
+            if (nested.containsKey(key) && nested[key] != null) {
+              fresh[key] = nested[key];
+            }
+          }
+        }
+        for (final key in profileKeys) {
           if (result.containsKey(key) && result[key] != null) {
             fresh[key] = result[key];
           }
         }
         final wasSovereign = _isSovereignCircle;
-        setState(() => _profile = fresh);
+        setState(() {
+          _profile = fresh;
+          if (fresh['timezone'] != null) {
+            _timezoneCtrl.text = fresh['timezone'].toString();
+          }
+        });
         if (!wasSovereign && _isSovereignCircle) {
           _fetchFamilyMembers();
         }
@@ -2233,6 +2286,19 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     ));
   }
 
+  Map<String, dynamic>? _profilePopResult() {
+    final patch = <String, dynamic>{};
+    for (final key in ['timezone', 'timezone_source']) {
+      final cur = _profile[key]?.toString();
+      final orig = widget.profile[key]?.toString();
+      if (cur != null && cur.isNotEmpty && cur != orig) {
+        patch[key] = _profile[key];
+      }
+    }
+    if (patch.isEmpty) return null;
+    return {'profilePatch': patch};
+  }
+
   @override
   Widget build(BuildContext context) {
     final name = _profile['name'] ?? _profile['username'] ?? 'User';
@@ -2242,6 +2308,26 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     final tokenUsageToday = _profile['token_usage_today'] ?? 0;
     final consentVersion = _profile['consent_version'] ?? 'Unknown';
 
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        Navigator.of(context).pop(_profilePopResult());
+      },
+      child: _buildClientSettingsScaffold(
+        name, plan, tokenBalance, tokenUsage, tokenUsageToday, consentVersion,
+      ),
+    );
+  }
+
+  Widget _buildClientSettingsScaffold(
+    dynamic name,
+    dynamic plan,
+    dynamic tokenBalance,
+    dynamic tokenUsage,
+    dynamic tokenUsageToday,
+    dynamic consentVersion,
+  ) {
     return Scaffold(
       backgroundColor: _Design.bgVoid,
       appBar: AppBar(

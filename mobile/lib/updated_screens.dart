@@ -1513,6 +1513,15 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
 
   bool _restartScheduled = false;
 
+  /// Merged on return from Settings (timezone PATCH / health-check sync).
+  final Map<String, dynamic> _profilePatchOverrides = {};
+
+  Map<String, dynamic> _clientProfile() {
+    final base = Map<String, dynamic>.from(widget.currentUserProfile ?? {});
+    base.addAll(_profilePatchOverrides);
+    return base;
+  }
+
   final List<String> _chatHistory = [];
   static const int _kMaxTurnBubbleMap = 200;
   final Map<String, int> _turnIdToChatIndex = {};
@@ -4560,13 +4569,20 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                   context,
                   MaterialPageRoute(
                     builder: (_) => ClientSettingsScreen(
-                      profile: widget.currentUserProfile ?? {},
+                      profile: _clientProfile(),
                       socket: _wsCh,
                       onLogout: () {
                         _wsCh?.sink.close(); // FIX-H
                       },
                     ),
                   )).then((result) {
+                if (result is Map && result['profilePatch'] is Map && mounted) {
+                  setState(() {
+                    _profilePatchOverrides.addAll(
+                      Map<String, dynamic>.from(result['profilePatch'] as Map),
+                    );
+                  });
+                }
                 if (mounted) _checkSseIntake();
                 if (result is Map &&
                     result['askNateVault'] != null &&

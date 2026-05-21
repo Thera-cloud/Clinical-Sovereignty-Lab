@@ -587,6 +587,14 @@ async def patch_client_timezone(request: Request, payload: dict, user=Depends(_r
             tz_string,
             uname,
         )
+    try:
+        from app.services.api_server import _get_auth_redis
+
+        r = await _get_auth_redis()
+        if r:
+            await r.publish("nate:user_reload", json.dumps({"username": uname}))
+    except Exception as e:
+        logger.warning("timezone PATCH user_reload publish failed for %s: %s", uname, e)
     return {"timezone": tz_string, "source": "user_explicit"}
 
 
