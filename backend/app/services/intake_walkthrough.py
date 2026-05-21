@@ -216,6 +216,62 @@ def _parse_classifier_output(raw: str) -> Optional[Dict[str, Any]]:
 
 _CLARIFY_LLM_TIMEOUT_S = float(os.getenv("INTAKE_CLARIFY_LLM_TIMEOUT_S", "4.0"))
 _ACK_LLM_TIMEOUT_S = float(os.getenv("INTAKE_ACK_LLM_TIMEOUT_S", "3.5"))
+_OFFER_LLM_TIMEOUT_S = float(os.getenv("INTAKE_OFFER_LLM_TIMEOUT_S", "2.5"))
+
+
+_OFFER_CLASSIFIER_SYSTEM = (
+    "You are an intent classifier. The client has just been OFFERED a brief clinical intake walkthrough "
+    "(a series of questions their coach asked them to answer). They have not yet started or have paused. "
+    "Given the client's reply, decide what they want. Return ONLY a JSON object: "
+    '{"intent": "<one of: accept | decline | ask_about | unrelated | crisis>", "confidence": <float 0.0-1.0>}. '
+    "Rules: "
+    "(1) intent=accept when the client wants to start, continue, resume, or do the intake (e.g. 'yes', 'ok', "
+    "'lets do it', 'lets continue the intake', 'continue', 'pick up where we left off', 'next question', "
+    "'whats next', 'what questions is next', 'go ahead', 'lets keep going'). "
+    "(2) intent=decline when the client wants to skip, postpone, or not do it (e.g. 'later', 'not now', "
+    "'not today', 'pause', 'skip it', 'no thanks'). "
+    "(3) intent=ask_about when the client is asking about the intake itself (e.g. 'what is the intake', "
+    "'why do you need this', 'how many questions'). "
+    "(4) intent=crisis if the reply contains self-harm, suicide, or homicide content. "
+    "(5) intent=unrelated when the reply is about something else entirely and isn't a yes/no to the offer. "
+    "(6) Bias toward accept when in doubt — a client referencing the intake at all usually wants to engage with it. "
+    "Return only the JSON object."
+)
+
+
+async def _classify_offer_intent(user_text: str) -> Optional[Dict[str, Any]]:
+    """Semantic classifier for the offer state (intake not yet active)."""
+    if not _semantic_enabled():
+        return None
+    router = _get_router()
+    if router is None:
+        return None
+    prompt = f"Client reply: \"{user_text.strip()}\"\n\nClassify."
+    try:
+        result = await asyncio.wait_for(
+            router.generate(
+                prompt=prompt,
+                system=_OFFER_CLASSIFIER_SYSTEM,
+                tier=TIER_UTILITY,
+                temperature=0.0,
+                max_tokens=80,
+                domain="clinical",
+            ),
+            timeout=_OFFER_LLM_TIMEOUT_S,
+        )
+        raw = (result or {}).get("text", "") or ""
+        parsed = _parse_classifier_output(raw)
+        if parsed:
+            print(
+                f">>> [INTAKE-OFFER-CLASSIFY] intent={parsed.get('intent')} "
+                f"conf={parsed.get('confidence'):.2f} provider={(result or {}).get('provider')}"
+            )
+            return parsed
+    except asyncio.TimeoutError:
+        print(">>> [INTAKE-OFFER-CLASSIFY] timeout")
+    except Exception as exc:
+        print(f">>> [INTAKE-OFFER-CLASSIFY] error: {exc}")
+    return None
 
 
 def _build_prior_context(intake_row: Dict[str, Any], stop_at: Optional[str] = None) -> str:
@@ -471,10 +527,41 @@ async def handle_intake_walkthrough_turn(
 
         if not st.get("active"):
             low = user_text.strip().lower()
+
+            # Semantic classifier — handles natural phrasings like "lets continue the intake" or "whats next".
+            offer = await _classify_offer_intent(user_text)
+            o_intent = (offer or {}).get("intent", "")
+            o_conf = float((offer or {}).get("confidence", 0.0))
+
+            if o_intent == "accept" and o_conf >= 0.55:
+                st["active"] = True
+                st["current_q"] = next_q
+                st["nonsense_reprompted"] = False
+                st["declined"] = False
+                st["needs_resume_prompt"] = False
+                return {"handled": True, "response": QUESTION_LABELS.get(next_q, "Let's start with the first intake question.")}
+            if o_intent == "decline" and o_conf >= 0.55:
+                st["declined"] = True
+                return {"handled": True, "response": "No problem - we can do it later in Settings whenever you're ready."}
+            if o_intent == "ask_about" and o_conf >= 0.55:
+                # Surface the offer again with a tiny preview so the client can decide.
+                remaining = sum(1 for f in SECTION1_FIELDS if str(intake.get(f) or "").strip() == "")
+                return {
+                    "handled": True,
+                    "response": (
+                        f"It's a short intake your coach asked me to walk you through — about {remaining} "
+                        f"questions left, takes a few minutes. Each question earns you 1000 tokens. "
+                        f"Want to keep going, or pause?"
+                    ),
+                }
+
+            # Fallback to keyword rules
             if any(term in low for term in _ACCEPT_TERMS):
                 st["active"] = True
                 st["current_q"] = next_q
                 st["nonsense_reprompted"] = False
+                st["declined"] = False
+                st["needs_resume_prompt"] = False
                 return {"handled": True, "response": QUESTION_LABELS.get(next_q, "Let's start with the first intake question.")}
             if any(term in low for term in _DECLINE_TERMS):
                 st["declined"] = True
