@@ -336,7 +336,9 @@ async def credit_walkthrough_question(
         "SELECT tokens_credited FROM intake_form WHERE user_id = $1",
         username,
     )
-    token_map = dict((row["tokens_credited"] or {}) if row else {})
+    # asyncpg can occasionally return JSONB as a raw JSON string.
+    # Normalize before dict access to avoid ValueError on dict(...) coercion.
+    token_map = _coerce_profile_data((row["tokens_credited"] if row else {}) or {})
     if token_map.get(question_id) is True:
         return {"credited": False, "amount": 0, "reason": "already_credited"}
 
