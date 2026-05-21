@@ -3495,6 +3495,33 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
                 save_registry(registry)
             # else: expired, ignore
         # else: invalid token, ignore
+
+    # SOVEREIGN-VOICE: family/spouse linkage at registration time.
+    # If parent_username or family invite code is present, force the new account
+    # into the existing household family_id instead of creating a random one.
+    family_id_from_link = ""
+    family_role_from_link = ""
+    family_linked_by = ""
+    parent_username = (data.get("parent_username") or "").strip()
+    if role == "CLIENT" and parent_username:
+        for _k, _v in registry.items():
+            _creds = (_v or {}).get("credentials", {}) or {}
+            if (_creds.get("username") or "").strip().lower() == parent_username.lower():
+                _pp = (_v or {}).get("profile", {}) or {}
+                family_id_from_link = _pp.get("family_id", "") or ""
+                family_linked_by = _pp.get("hardware_id", "") or ""
+                family_role_from_link = "SPOUSE"
+                break
+    invite_code = (data.get("invite_code") or "").strip().upper()
+    if role == "CLIENT" and invite_code:
+        _family_invites = registry.get("_family_invites", {}) or {}
+        _invite = _family_invites.get(invite_code)
+        if _invite:
+            _exp = _invite.get("expires_at", "")
+            if (not _exp) or str(datetime.datetime.now()) <= _exp:
+                family_id_from_link = _invite.get("family_id", "") or family_id_from_link
+                family_role_from_link = _invite.get("role", "SPOUSE") or family_role_from_link
+                family_linked_by = _invite.get("invited_by", "") or family_linked_by
     
     # Map registration_type to tier, plan, and features
     # tier uses tier_for_db_column() so DB CHECK constraint is satisfied
@@ -3576,7 +3603,7 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
         "email": email,
         "phone": phone_for_profile,
         "hardware_id": f"{role}_{username.upper()}_ID",
-        "family_id": f"FAM_{secrets.token_hex(4).upper()}",
+        "family_id": family_id_from_link or f"FAM_{secrets.token_hex(4).upper()}",
         "joined_date": str(datetime.datetime.now().date()),
         "tier": tier,
         "registration_type": registration_type if role == "CLIENT" else None,
@@ -3634,6 +3661,10 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
         # Discount code (promo, school, or corporate) applied at registration
         "discount_code": data.get("discount_code", "") or data.get("invite_code", ""),
     }
+    if family_role_from_link:
+        new_profile["family_role"] = family_role_from_link
+        new_profile["linked_by"] = family_linked_by
+        new_profile["linked_at"] = str(datetime.datetime.now())
     
     if role == "COACH":
         new_profile["subscription_status"] = "PENDING_VERIFICATION"
@@ -12430,6 +12461,23 @@ async def handle_client(websocket, path=None):
                         if stored_email and (stored_email == email_or_username or stored_email.lower() == identifier_l):
                             target_key, target_val = k, v
                             break
+                    # SOVEREIGN-VOICE: cache-miss recovery for forgot-password.
+                    # Newly-created accounts can exist in PG before bridge cache refresh.
+                    if (not target_key) and db_pool is not None and _pg_user_store is not None:
+                        try:
+                            async with db_pool.acquire() as _conn:
+                                _fp_row = await _conn.fetchrow(
+                                    "SELECT * FROM users WHERE (LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($1)) AND deleted_at IS NULL LIMIT 1",
+                                    email_or_username,
+                                )
+                            if _fp_row:
+                                _rk, _rv = _pg_user_store._row_to_entry(_fp_row)
+                                if _rk and _rv:
+                                    registry[_rk] = _rv
+                                    target_key, target_val = _rk, _rv
+                                    print(f">>> [FORGOT_PW] cache-miss recovery: hydrated {email_or_username!r} from PG")
+                        except Exception as _fp_err:
+                            print(f">>> [FORGOT_PW] cache-miss recovery error: {_fp_err}")
                     if target_key and target_val:
                         prof = target_val.get("profile", {}) or {}
                         to_email = prof.get("email", "").strip()
