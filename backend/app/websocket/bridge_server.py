@@ -3835,6 +3835,57 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
 MAX_FAMILY_MEMBERS = {"TOP_TIER": 5, "STANDARD": 0, "TRIAL": 0, "COACH_ONLY": 0}
 
 
+# SOVEREIGN-VOICE: shared age helper at module scope so create_dependent_account
+# and accept_family_invite can use the same DOB → age logic register_new_user uses.
+def _age_from_dob_module(dob_str: str) -> int:
+    try:
+        dob_d = datetime.datetime.fromisoformat(str(dob_str)).date()
+        today = datetime.datetime.now().date()
+        return today.year - dob_d.year - (
+            (today.month, today.day) < (dob_d.month, dob_d.day)
+        )
+    except Exception:
+        return 99  # default to adult if unparseable
+
+
+# SOVEREIGN-VOICE: single source of truth for the HoH's family_id.
+# Idempotent — returns existing id if present, otherwise mints FAM_xxx,
+# writes it onto the HoH profile in registry, and persists via save_registry.
+# Every "add family member" entry point (invite / batch / billing / direct
+# dependent create) MUST go through this so we never orphan an invitee under
+# a different id while the HoH still has no family_id.
+def _ensure_hoh_family_id(hoh_hardware_id: str, registry: dict) -> str:
+    if not hoh_hardware_id:
+        return ""
+    for _rk, _rv in registry.items():
+        if not isinstance(_rv, dict) or str(_rk).startswith("_"):
+            continue
+        _rp = _rv.get("profile") or {}
+        if _rp.get("hardware_id") != hoh_hardware_id:
+            continue
+        existing = (_rp.get("family_id") or "").strip()
+        if existing:
+            # Ensure HoH has family_role=HEAD if a family exists but role missing.
+            if not (_rp.get("family_role") or "").strip():
+                _rp["family_role"] = "HEAD"
+                try:
+                    save_registry(registry)
+                except Exception:
+                    pass
+            return existing
+        new_id = f"FAM_{secrets.token_hex(4).upper()}"
+        _rp["family_id"] = new_id
+        if not (_rp.get("family_role") or "").strip():
+            _rp["family_role"] = "HEAD"
+        try:
+            save_registry(registry)
+        except Exception:
+            pass
+        print(f">>> [FAMILY_ID] Minted {new_id} for HoH {hoh_hardware_id}")
+        return new_id
+    return ""
+
+
 async def create_dependent_account(guardian_id: str, data: dict) -> Tuple[bool, str]:
     """Create a dependent/child account linked to guardian"""
     username = data.get("username")
@@ -3860,7 +3911,11 @@ async def create_dependent_account(guardian_id: str, data: dict) -> Tuple[bool, 
     if max_members <= 0:
         return False, "TIER_FAMILY_NOT_ALLOWED"
 
-    fam_id = guardian_profile.get("family_id", f"FAM_{secrets.token_hex(4).upper()}")
+    # SOVEREIGN-VOICE: route through the unified HoH family_id helper so a
+    # missing/empty family_id on the HoH gets minted + persisted ONCE here,
+    # not minted ad hoc for each dependent (which orphans them under a different
+    # id from the HoH — root cause of the Lana/Paula/Zack/Margie pattern).
+    fam_id = _ensure_hoh_family_id(guardian_id, registry) or f"FAM_{secrets.token_hex(4).upper()}"
 
     existing_count = sum(
         1 for v in registry.values()
@@ -3870,7 +3925,7 @@ async def create_dependent_account(guardian_id: str, data: dict) -> Tuple[bool, 
     if existing_count >= max_members:
         return False, f"FAMILY_LIMIT_REACHED:{max_members}"
     hashed_password = hash_password(data.get("password", ""))
-    
+
     _dep_coach = guardian_profile.get("assigned_coach", "CoachN")
     _dep_coach_id = guardian_profile.get("assigned_coach_id", "COACH_COACHN_ID")
     _dep_coach_hw = guardian_profile.get("coach_id", _dep_coach_id)
@@ -3880,22 +3935,38 @@ async def create_dependent_account(guardian_id: str, data: dict) -> Tuple[bool, 
     _dep_name = str(data.get("name") or "").strip() or username
     _dep_email = str(data.get("email") or "").strip()
     _dep_phone = str(data.get("phone") or "").strip()
+
+    # SOVEREIGN-VOICE: role + age-aware profile shaping. Distinguishes SPOUSE
+    # (adult, no guardian, family_role=SPOUSE) from DEPENDENT child (minor,
+    # has guardian) and adult dependent (no guardian, no is_minor). Without
+    # this, all entries collapsed to is_minor=True which broke spouse logins.
+    _req_role = (str(data.get("role") or data.get("family_role") or "DEPENDENT")).upper()
+    if _req_role not in ("SPOUSE", "DEPENDENT"):
+        _req_role = "DEPENDENT"
+    _is_under_18 = bool(data.get("dob")) and _age_from_dob_module(data.get("dob")) < 18
+    _is_minor_flag = (_req_role == "DEPENDENT") and _is_under_18
+    if _req_role == "SPOUSE":
+        _dep_tier = "SPOUSE"
+        _dep_plan = "FAMILY_SPOUSE"
+    else:
+        _dep_tier = "DEPENDENT"
+        _dep_plan = "FAMILY_DEPENDENT"
     _dep_grant = tier_constants.initial_grant_tokens(tier_constants.TIER_DEPENDENT)
+
     new_profile = {
         "role": "CLIENT",
         "name": _dep_name,
         "email": _dep_email,
         "phone": _dep_phone,
         "family_id": fam_id,
-        "hardware_id": f"CHILD_{username.upper()}_ID",
-        "tier": "DEPENDENT",
-        "guardian_id": guardian_id,
-        "is_minor": True,
+        "family_role": _req_role,
+        "hardware_id": f"CHILD_{username.upper()}_ID" if _req_role == "DEPENDENT" else f"SPOUSE_{username.upper()}_ID",
+        "tier": _dep_tier,
         "consent_version": REQUIRED_CONSENT_VERSION,
         "dob": data.get("dob"),
         "timezone": guardian_profile.get("timezone", "America/New_York"),
         "subscription_status": "FAMILY_PLAN_ACTIVE",
-        "subscription_plan": "FAMILY_DEPENDENT",
+        "subscription_plan": _dep_plan,
         "total_sessions_count": 0,
         "token_balance": _dep_grant,
         "subscription_token_balance": _dep_grant,
@@ -3911,6 +3982,9 @@ async def create_dependent_account(guardian_id: str, data: dict) -> Tuple[bool, 
         "created_at": str(datetime.datetime.now()),
         "updated_at": str(datetime.datetime.now())
     }
+    if _is_minor_flag:
+        new_profile["is_minor"] = True
+        new_profile["guardian_id"] = guardian_id
     
     dep_key = f"client_{username}"
     registry[dep_key] = {
@@ -3932,9 +4006,13 @@ async def create_dependent_account(guardian_id: str, data: dict) -> Tuple[bool, 
     _mark_account_created(
         db_pool, username,
         created_via="ws_dependent",
-        role="CLIENT", tier="DEPENDENT",
+        role="CLIENT", tier=_dep_tier,
         hardware_id=new_profile.get("hardware_id"),
-        metadata={"guardian_id": guardian_id, "family_id": fam_id},
+        metadata={
+            "guardian_id": guardian_id if _is_minor_flag else "",
+            "family_id": fam_id,
+            "family_role": _req_role,
+        },
     )
 
     return True, "DEPENDENT_CREATED"
@@ -24817,19 +24895,25 @@ Coach Reflection on Session {session_id}:
                 if current_profile:
                     import uuid as _uuid
                     invite_token = str(_uuid.uuid4())[:12].upper()
+                    # SOVEREIGN-VOICE: route through unified helper. Accept any
+                    # paid tier (TOP_TIER or STANDARD) via normalize_tier and
+                    # always persist the minted id onto the HoH profile so
+                    # subsequent invites / dependent creates reuse the same id.
+                    _plan_norm = normalize_tier(
+                        current_profile.get("subscription_plan")
+                        or current_profile.get("tier")
+                        or ""
+                    )
                     family_id = current_profile.get("family_id")
-                    if not family_id:
-                        # Auto-create family if head of household and top tier
-                        plan = (current_profile.get("subscription_plan") or current_profile.get("tier") or "").upper()
-                        if "TOP" in plan or "SOVEREIGN" in plan or "STANDARD" in plan:
-                            family_id = f"FAM_{str(_uuid.uuid4())[:8].upper()}"
-                            registry = load_registry()
-                            for k, v in registry.items():
-                                if v.get("profile", {}).get("hardware_id") == uid:
-                                    v["profile"]["family_id"] = family_id
-                                    v["profile"]["family_role"] = "HEAD"
-                                    save_registry(registry)
-                                    break
+                    if not family_id and _plan_norm in ("TOP_TIER", "STANDARD"):
+                        registry = load_registry()
+                        family_id = _ensure_hoh_family_id(uid, registry)
+                        # Refresh in-memory current_profile so this session sees it.
+                        try:
+                            current_profile["family_id"] = family_id
+                            current_profile["family_role"] = current_profile.get("family_role") or "HEAD"
+                        except Exception:
+                            pass
                     if family_id:
                         # Store the invite token in registry under a family_invites key
                         registry = load_registry()
@@ -24882,10 +24966,27 @@ Coach Reflection on Session {session_id}:
                     import uuid as _fi_uuid
                     invite_token = str(_fi_uuid.uuid4())[:12].upper()
                     fi_family_id = current_profile.get("family_id") or d.get("family_id")
+                    # SOVEREIGN-VOICE: auto-mint family_id via unified helper for
+                    # paid tiers instead of erroring. Previously this path failed
+                    # whenever HoH had no family_id yet (the Paula/Zack case).
+                    if not fi_family_id:
+                        _fi_plan_norm = normalize_tier(
+                            current_profile.get("subscription_plan")
+                            or current_profile.get("tier")
+                            or ""
+                        )
+                        if _fi_plan_norm in ("TOP_TIER", "STANDARD"):
+                            registry = load_registry()
+                            fi_family_id = _ensure_hoh_family_id(uid, registry)
+                            try:
+                                current_profile["family_id"] = fi_family_id
+                                current_profile["family_role"] = current_profile.get("family_role") or "HEAD"
+                            except Exception:
+                                pass
                     if not fi_family_id:
                         await websocket.send(json.dumps({
                             "type": "family_invite_error",
-                            "message": "No family ID found on your account."
+                            "message": "Sovereign Circle subscription required for family invitations."
                         }))
                         continue
                     registry = load_registry()
@@ -24986,18 +25087,19 @@ Coach Reflection on Session {session_id}:
                         }))
                         continue
 
-                    # Auto-create family if needed
+                    # SOVEREIGN-VOICE: route through unified helper (same as
+                    # single-invite path) so HoH gets exactly one family_id
+                    # regardless of which entry point fires first.
                     if not family_id:
                         plan = normalize_tier(current_profile.get("subscription_plan") or current_profile.get("tier") or "")
                         if plan in ("TOP_TIER", "STANDARD"):
-                            family_id = f"FAM_{str(_uuid.uuid4())[:8].upper()}"
                             registry = load_registry()
-                            for k, v in registry.items():
-                                if v.get("profile", {}).get("hardware_id") == uid:
-                                    v["profile"]["family_id"] = family_id
-                                    v["profile"]["family_role"] = "HEAD"
-                                    save_registry(registry)
-                                    break
+                            family_id = _ensure_hoh_family_id(uid, registry)
+                            try:
+                                current_profile["family_id"] = family_id
+                                current_profile["family_role"] = current_profile.get("family_role") or "HEAD"
+                            except Exception:
+                                pass
 
                     if not family_id:
                         await websocket.send(json.dumps({
@@ -25137,16 +25239,35 @@ Coach Reflection on Session {session_id}:
                                 _invite_head_uid = invite.get("invited_by", "")
                                 
                                 # Link the user to the family
+                                # SOVEREIGN-VOICE: role + age-aware so DEPENDENT
+                                # invitees who are under 18 get is_minor/guardian_id
+                                # at accept time (matches register_new_user/
+                                # create_dependent_account shape). SPOUSE always
+                                # adult — clear any stale is_minor/guardian_id.
+                                _ir = (_invite_role or "DEPENDENT").upper()
                                 for k, v in registry.items():
                                     if v.get("profile", {}).get("hardware_id") == uid:
-                                        v["profile"]["family_id"] = _invite_family_id
-                                        v["profile"]["family_role"] = _invite_role
-                                        v["profile"]["linked_by"] = _invite_head_uid
-                                        v["profile"]["linked_at"] = str(datetime.datetime.now())
-                                        v["profile"]["updated_at"] = str(datetime.datetime.now())
-                                        v["profile"]["family_consent_agreed"] = True
-                                        v["profile"]["family_consent_date"] = str(datetime.datetime.now())
-                                        v["profile"]["family_consent_version"] = "v13.0_2026"
+                                        _p = v["profile"]
+                                        _p["family_id"] = _invite_family_id
+                                        _p["family_role"] = _ir
+                                        _p["linked_by"] = _invite_head_uid
+                                        _p["linked_at"] = str(datetime.datetime.now())
+                                        _p["updated_at"] = str(datetime.datetime.now())
+                                        _p["family_consent_agreed"] = True
+                                        _p["family_consent_date"] = str(datetime.datetime.now())
+                                        _p["family_consent_version"] = "v13.0_2026"
+                                        _dob = _p.get("dob") or ""
+                                        _is_under = bool(_dob) and _age_from_dob_module(_dob) < 18
+                                        if _ir == "DEPENDENT" and _is_under:
+                                            _p["is_minor"] = True
+                                            _p["guardian_id"] = _invite_head_uid
+                                        elif _ir == "SPOUSE":
+                                            _p["is_minor"] = False
+                                            _p["guardian_id"] = ""
+                                        else:
+                                            # Adult dependent
+                                            _p["is_minor"] = False
+                                            _p["guardian_id"] = ""
                                         break
                                 # Remove used token
                                 del registry["_family_invites"][token]
