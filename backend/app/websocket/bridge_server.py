@@ -3593,11 +3593,10 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
     # they don't pay Stripe and they don't get TRIAL billing requirements.
     _is_family_member = bool(family_id_from_link) and bool(family_linked_by)
     if _is_family_member:
-        # Override registration_type so this account doesn't run trial billing
-        # and inherits a stable family plan tier.
         registration_type = "FAMILY_MEMBER"
-        tier = tier_for_db_column("STANDARD")
-        plan = "FAMILY_DEPENDENT" if family_role_from_link == "DEPENDENT" else "FAMILY_SPOUSE"
+        _fam_role = (family_role_from_link or "").upper()
+        tier = tier_for_db_column("DEPENDENT") if _fam_role == "DEPENDENT" else tier_for_db_column("STANDARD")
+        plan = "FAMILY_DEPENDENT" if _fam_role == "DEPENDENT" else "FAMILY_SPOUSE"
         sub_status = "FAMILY_PLAN_ACTIVE"
         can_access_nate = True
         token_balance = 10000

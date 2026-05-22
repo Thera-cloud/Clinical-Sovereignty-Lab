@@ -343,13 +343,55 @@ class PrepareRequest(BaseModel):
     # When set, the dependent is created free under the parent and Stripe
     # checkout is skipped entirely.
     parent_username: Optional[str] = None
+    invite_code: Optional[str] = None
     # Coach upgrade fields
     flow: Optional[str] = None
     auth_token: Optional[str] = None
 
 
+async def _resolve_parent_username(
+    db_pool, parent_username: Optional[str], invite_code: Optional[str]
+) -> Optional[str]:
+    """Map an invite_code to the HoH username if parent_username is absent."""
+    pu = (parent_username or "").strip()
+    if pu:
+        return pu
+    ic = (invite_code or "").strip()
+    if not ic:
+        return None
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT u.username
+            FROM family_invites fi
+            JOIN users u ON u.id = fi.inviter_id
+            WHERE fi.invite_code = $1
+            LIMIT 1
+            """,
+            ic,
+        )
+        if row:
+            return row["username"]
+        row2 = await conn.fetchrow(
+            """
+            SELECT profile_data->>'linked_by' AS linked_by
+            FROM users
+            WHERE profile_data->>'invite_code' = $1
+            LIMIT 1
+            """,
+            ic,
+        )
+        if row2 and row2["linked_by"]:
+            return row2["linked_by"]
+    return None
+
+
 @public_router.get("/dependent-price")
-async def dependent_price_preview(parent_username: str, request: Request):
+async def dependent_price_preview(
+    request: Request,
+    parent_username: Optional[str] = None,
+    invite_code: Optional[str] = None,
+):
     """Return the monthly cost for adding a dependent under `parent_username`.
 
     Used by the registration form to disclose "This will be the 2nd dependent
@@ -367,9 +409,9 @@ async def dependent_price_preview(parent_username: str, request: Request):
     if not db_pool:
         raise HTTPException(503, "Service temporarily unavailable")
 
-    parent_username = (parent_username or "").strip()
+    parent_username = await _resolve_parent_username(db_pool, parent_username, invite_code)
     if not parent_username:
-        raise HTTPException(400, "parent_username is required")
+        raise HTTPException(400, "parent_username or invite_code is required")
 
     from app.services.registration_finalize import (
         DEPENDENT_ELIGIBLE_PARENT_TIERS,
@@ -411,9 +453,17 @@ async def dependent_price_preview(parent_username: str, request: Request):
         existing = 0
         if parent["family_id"]:
             existing = await conn.fetchval(
-                "SELECT COUNT(*) FROM users "
-                "WHERE family_id = $1 AND tier = 'DEPENDENT'",
+                """
+                SELECT COUNT(*) FROM users
+                WHERE family_id = $1
+                  AND id != $2
+                  AND (
+                    tier = 'DEPENDENT'
+                    OR LOWER(COALESCE(family_role, '')) = 'dependent'
+                  )
+                """,
                 parent["family_id"],
+                parent["id"],
             ) or 0
 
     if existing == 0:
@@ -497,7 +547,9 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
     #     row and Stripe Checkout session; the webhook calls
     #     finalize_paid_dependent_signup() on success.
     # ------------------------------------------------------------------
-    parent_username = (body.parent_username or "").strip()
+    parent_username = await _resolve_parent_username(
+        db_pool, body.parent_username, body.invite_code
+    )
     if role == "CLIENT" and parent_username:
         from app.services.registration_finalize import finalize_dependent_signup
 
@@ -686,6 +738,14 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
             logger.error("finalize_dependent_signup DB error: %s", reason)
             msg, status = "Registration setup failed", 500
         raise HTTPException(status, msg)
+
+    # Fail-safe: if invite_code was provided but couldn't resolve to a parent,
+    # do not allow a standalone HoH-tier checkout — the user intended to join a family.
+    if body.invite_code and not parent_username:
+        raise HTTPException(
+            400,
+            "Invalid or expired invite code. Please ask your family member to resend.",
+        )
 
     # Build Stripe line_items
     line_items = []

@@ -477,7 +477,10 @@ async def _count_existing_dependents(conn, family_id) -> int:
         """
         SELECT COUNT(*) FROM users
         WHERE family_id = $1
-          AND tier = 'DEPENDENT'
+          AND (
+            tier = 'DEPENDENT'
+            OR LOWER(COALESCE(family_role, '')) = 'dependent'
+          )
         """,
         family_id,
     ) or 0

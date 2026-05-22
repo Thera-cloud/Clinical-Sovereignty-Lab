@@ -836,7 +836,7 @@ class _FamilyInviteAcceptScreenState extends State<FamilyInviteAcceptScreen> {
                         inviteCode: widget.inviteCode,
                         // Prefer username (machine ID); fall back to display
                         // name only if bridge didn't return it.
-                        parentUsername: _inviterUsername.isNotEmpty ? _inviterUsername : _inviterName,
+                        parentUsername: _inviterUsername,
                         inviteeName: _inviteeName,
                         inviteeContact: _inviteeContact,
                         isDependentInvite: true,
@@ -8073,6 +8073,61 @@ class _SignUpWizardState extends State<SignUpWizard> {
   Map<String, dynamic> _discountDetails = {};
   bool get _isInviteCodeEntered => _inviteCodeCtrl.text.trim().isNotEmpty;
 
+  // Family join context — unifies invite-link and generic dependent checkout
+  Map<String, dynamic>? _dependentPricePreview;
+  bool _loadingDependentPrice = false;
+
+  bool get _hasFamilyJoinContext =>
+      widget.isDependentInvite ||
+      (widget.parentUsername ?? '').trim().isNotEmpty ||
+      (widget.inviteCode ?? '').trim().isNotEmpty ||
+      _parentCtrl.text.trim().isNotEmpty ||
+      _inviteCodeCtrl.text.trim().isNotEmpty;
+
+  void _syncFamilyJoinContext() {
+    if (_hasFamilyJoinContext && !_isDependent) {
+      _isDependent = true;
+    }
+  }
+
+  Future<void> _refreshDependentPricePreview() async {
+    if (_loadingDependentPrice) return;
+    setState(() => _loadingDependentPrice = true);
+
+    _syncFamilyJoinContext();
+    final parent = _parentCtrl.text.trim();
+    final invite = _inviteCodeCtrl.text.trim();
+
+    if (!_isDependent || (parent.isEmpty && invite.isEmpty)) {
+      setState(() {
+        _dependentPricePreview = null;
+        _loadingDependentPrice = false;
+      });
+      return;
+    }
+
+    try {
+      final base = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
+      final qp = <String, String>{};
+      if (parent.isNotEmpty) qp['parent_username'] = parent;
+      if (invite.isNotEmpty) qp['invite_code'] = invite;
+      final uri = Uri.parse('$base/api/registration/dependent-price').replace(queryParameters: qp);
+      final resp = await http.get(uri).timeout(const Duration(seconds: 10));
+
+      if (mounted && resp.statusCode == 200) {
+        setState(() => _dependentPricePreview = jsonDecode(resp.body));
+      } else if (mounted) {
+        setState(() => _dependentPricePreview = {'eligible': false, 'message': 'Failed to load pricing.'});
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _dependentPricePreview = {'eligible': false, 'message': 'Connection error.'});
+      }
+    } finally {
+      if (mounted) setState(() => _loadingDependentPrice = false);
+    }
+  }
+
   // Coach invite token (from URL ?invite=TOKEN when client arrives via coach invite link)
   String? _coachInviteToken;
 
@@ -8120,6 +8175,11 @@ class _SignUpWizardState extends State<SignUpWizard> {
   bool get _isPaidTier {
     if (isNativeIOS) return false; // Apple Guideline 3.1.1 — no Stripe on iOS
     if (_effectiveRole == 'COACH') return _selectedDojos.isNotEmpty;
+    if (_hasFamilyJoinContext) {
+      if (_dependentPricePreview?['free'] == true) return false;
+      if ((_dependentPricePreview?['monthly_cost_cents'] ?? 0) > 0) return true;
+      return false;
+    }
     return _selectedTier == 'STANDARD' || _selectedTier == 'TOP_TIER';
   }
 
@@ -8810,7 +8870,9 @@ class _SignUpWizardState extends State<SignUpWizard> {
         child: _step == 0 
           ? _buildConsentAndRoleStep()
           : _step == 1
-            ? (_effectiveRole == "COACH" ? _buildCoachDojoSelection() : _buildClientTierSelection())
+            ? (_hasFamilyJoinContext
+                ? _buildForm()
+                : (_effectiveRole == "COACH" ? _buildCoachDojoSelection() : _buildClientTierSelection()))
             : _step == 3
               ? _buildOrderReview()
               : _buildForm(),
@@ -8884,7 +8946,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
       onTap: () {
         setState(() => _selectedRole = roleValue);
         Future.delayed(const Duration(milliseconds: 300), () {
-          if (mounted) setState(() => _step = 1);
+          if (mounted) setState(() => _step = _hasFamilyJoinContext ? 2 : 1);
         });
       },
       child: AnimatedContainer(
@@ -9894,7 +9956,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
     );
   }
 
-  void _goToOrderReview() {
+  Future<void> _goToOrderReview() async {
     if (_nameCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Full Name is required")));
       return;
@@ -9903,7 +9965,6 @@ class _SignUpWizardState extends State<SignUpWizard> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Date of Birth is required")));
       return;
     }
-    // Dependents can be minors; only primary account holders must be 18+.
     if (!_isDependent && _calculateAge(_dob!) < 18) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Primary Account Holder must be 18+.")));
       return;
@@ -9923,6 +9984,17 @@ class _SignUpWizardState extends State<SignUpWizard> {
         return;
       }
     }
+
+    _syncFamilyJoinContext();
+    if (_hasFamilyJoinContext) {
+      await _refreshDependentPricePreview();
+      if (!mounted) return;
+      if (_dependentPricePreview?['free'] == true) {
+        await _submitRegistration();
+        return;
+      }
+    }
+
     setState(() { _step = 3; _stripeError = null; });
   }
 
@@ -9935,6 +10007,12 @@ class _SignUpWizardState extends State<SignUpWizard> {
     if (isCoach) {
       planName = '${_selectedDojos.length} DOJO${_selectedDojos.length > 1 ? 's' : ''}';
       monthlyTotal = _calculateDojoPrice();
+    } else if (_hasFamilyJoinContext) {
+      final cents = _dependentPricePreview?['monthly_cost_cents'] ?? 0;
+      planName = cents == 0
+          ? 'Family member (included)'
+          : 'Additional family member';
+      monthlyTotal = cents / 100.0;
     } else {
       planName = _selectedTier == 'TOP_TIER' ? 'Sovereign Circle' : 'Inner Chamber';
       monthlyTotal = _selectedTier == 'TOP_TIER' ? 149.0 : 49.0;
@@ -10052,9 +10130,20 @@ class _SignUpWizardState extends State<SignUpWizard> {
         'phone': _phoneCtrl.text.trim(),
       };
 
-      if (_effectiveRole == 'CLIENT') {
+      _syncFamilyJoinContext();
+
+      if (_hasFamilyJoinContext) {
+        if (_parentCtrl.text.trim().isNotEmpty) {
+          body['parent_username'] = _parentCtrl.text.trim();
+        }
+        if (_inviteCodeCtrl.text.trim().isNotEmpty) {
+          body['invite_code'] = _inviteCodeCtrl.text.trim();
+        }
+      } else if (_effectiveRole == 'CLIENT') {
         body['tier'] = _selectedTier;
-      } else {
+      }
+
+      if (_effectiveRole == 'COACH') {
         body['selected_dojos'] = _selectedDojos;
       }
 
@@ -10066,7 +10155,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
         body['coach_invite_token'] = _coachInviteToken;
       }
 
-      if (_isDependent && _parentCtrl.text.trim().isNotEmpty) {
+      if (_isDependent && _parentCtrl.text.trim().isNotEmpty && !_hasFamilyJoinContext) {
         body['parent_username'] = _parentCtrl.text.trim();
       }
 
