@@ -35,6 +35,7 @@ import 'services/device_shield.dart';
 import 'services/nevedal_flutter.dart';
 import 'config/app_config.dart';
 import 'widgets/vault_attachment_button.dart';
+import 'services/vault_entitlement.dart';
 import 'widgets/upload_progress_indicator.dart';
 import 'widgets/nate_home_widget.dart';
 import 'package:home_widget/home_widget.dart';
@@ -1882,10 +1883,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
   /// Uses backend-computed premium_features for integrity (family members inherit from head)
   bool _canUseVault() {
     if (!AppConfig.ENABLE_SOVEREIGN_VAULT) return false;
-    final tier = (widget.currentUserProfile?['tier'] ?? '').toString().toUpperCase();
-    final plan = (widget.currentUserProfile?['subscription_plan'] ?? '').toString().toUpperCase();
-    const vaultTiers = {'STANDARD', 'INNER_CHAMBER', 'TOP_TIER', 'SOVEREIGN_CIRCLE'};
-    return vaultTiers.contains(tier) || vaultTiers.contains(plan);
+    return VaultEntitlement.canUseVault(widget.currentUserProfile);
   }
 
   bool _canUseAvatarMode() {
@@ -6359,10 +6357,7 @@ void _syncSanctuaryState() {
 
   bool _sanctuaryCanUseVault() {
     if (!AppConfig.ENABLE_SOVEREIGN_VAULT) return false;
-    final tier = (widget.profile['tier'] ?? '').toString().toUpperCase();
-    final plan = (widget.profile['subscription_plan'] ?? '').toString().toUpperCase();
-    const vaultTiers = {'STANDARD', 'INNER_CHAMBER', 'TOP_TIER', 'SOVEREIGN_CIRCLE'};
-    return vaultTiers.contains(tier) || vaultTiers.contains(plan);
+    return VaultEntitlement.canUseVault(widget.profile);
   }
 
   Widget _buildAssistedShareBanner() {

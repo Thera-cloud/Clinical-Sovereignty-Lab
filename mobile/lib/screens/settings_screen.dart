@@ -21,6 +21,7 @@ import 'billing_screens.dart';
 import '../config/app_config.dart';
 import '../services/payment_service.dart';
 import '../services/checkout_launcher.dart';
+import '../services/vault_entitlement.dart';
 import 'payment_confirmation_screen.dart';
 import 'vault_browser_screen.dart';
 import 'nate_organizer_screen.dart';
@@ -550,21 +551,21 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     }
   }
 
-  bool get _hasVaultAccess {
-    final key = _currentPlanKey;
-    return key == 'STANDARD' || key == 'TOP_TIER' || key == 'FAMILY';
-  }
+  bool get _hasVaultAccess => VaultEntitlement.canUseVault(_profile);
 
   Future<void> _loadVaultStats() async {
     final userId = (_profile['hardware_id'] ?? _profile['id'] ?? '').toString();
     if (userId.isEmpty) return;
+    final token = (_profile['token'] ?? '').toString();
     final base = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
     try {
-      final uri = Uri.parse('$base/api/v1/vault/stats').replace(queryParameters: {'user_id': userId});
-      final resp = await http.get(
-        uri,
-        headers: {'X-User-Id': userId, 'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 5));
+      final uri = Uri.parse('$base/api/v1/vault/stats');
+      final headers = <String, String>{
+        'X-User-Id': userId,
+        'Content-Type': 'application/json',
+      };
+      if (token.isNotEmpty) headers['Authorization'] = 'Bearer $token';
+      final resp = await http.get(uri, headers: headers).timeout(const Duration(seconds: 5));
       if (resp.statusCode == 200 && mounted) {
         final data = jsonDecode(resp.body) as Map;
         setState(() {
@@ -5744,9 +5745,22 @@ class _HelpFAQScreenState extends State<_HelpFAQScreen> {
         final data = jsonDecode(message);
         final type = data['type'] ?? '';
 
-        if (type == 'nate_help_response') {
+        if (type == 'nate_help_response' || type == 'help_response') {
+          final text = data['text'] ?? '';
+          if (type == 'help_response') {
+            setState(() {
+              _isLoading = false;
+              if (text.isNotEmpty) {
+                _conversation.add({'role': 'nate', 'text': text});
+              }
+              _streamingResponse = '';
+            });
+            _scrollToBottom();
+            try { _ws?.sink.close(); } catch (_) {}
+            return;
+          }
           setState(() {
-            _streamingResponse = data['text'] ?? '';
+            _streamingResponse = text;
           });
           _scrollToBottom();
         } else if (type == 'nate_help_done') {

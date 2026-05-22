@@ -9,11 +9,13 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'dart:convert';
 import 'dart:typed_data';
 import '../io_file_stub.dart' if (dart.library.io) 'dart:io' show File;
 import '../config/app_config.dart';
 import '../screens/vault_browser_screen.dart';
 import '../screens/settings_screen.dart';
+import '../services/vault_entitlement.dart';
 import 'upload_progress_indicator.dart';
 
 class _AttachmentDesign {
@@ -48,18 +50,9 @@ class _VaultAttachmentButtonState extends State<VaultAttachmentButton> {
   UploadProgressState _progressState = UploadProgressState.idle();
 
   bool get _isVaultEnabled =>
-      AppConfig.ENABLE_SOVEREIGN_VAULT && _hasVaultAccess;
+      AppConfig.ENABLE_SOVEREIGN_VAULT && VaultEntitlement.canUseVault(widget.profile);
 
-  bool get _hasVaultAccess {
-    final profile = widget.profile;
-    if (profile == null) return false;
-    final plan = (profile['subscription_plan'] ?? profile['tier'] ?? '').toString().toUpperCase();
-    return plan.contains('STANDARD') ||
-        plan.contains('INNER') ||
-        plan.contains('CHAMBER') ||
-        plan.contains('TOP') ||
-        plan.contains('SOVEREIGN');
-  }
+  bool get _hasVaultAccess => VaultEntitlement.canUseVault(widget.profile);
 
   @override
   Widget build(BuildContext context) {
@@ -176,7 +169,17 @@ class _VaultAttachmentButtonState extends State<VaultAttachmentButton> {
       if (result == null || result.files.isEmpty) return;
       file = result.files.single;
       final bytes = file.bytes;
-      if (bytes == null && file.path == null) return;
+      if (bytes == null && file.path == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not read that file. Try again or use the mobile app.'),
+              backgroundColor: _AttachmentDesign.goldDim,
+            ),
+          );
+        }
+        return;
+      }
 
       final userId = (widget.profile?['hardware_id'] ?? widget.profile?['id'] ?? '').toString();
       final token = (widget.profile?['token'] ?? '').toString();
@@ -211,6 +214,27 @@ class _VaultAttachmentButtonState extends State<VaultAttachmentButton> {
 
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
         setState(() => _progressState = UploadProgressState.success(fileName));
+        String? itemId;
+        try {
+          final body = jsonDecode(resp.body) as Map<String, dynamic>;
+          itemId = (body['item_id'] ?? body['upload_id'])?.toString();
+        } catch (_) {}
+        if (itemId != null && itemId.isNotEmpty) {
+          widget.onVaultItemSelected?.call(itemId);
+        }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                itemId != null
+                    ? 'Saved to Vault (Documents folder). Tap Send to ask Nate.'
+                    : 'Saved to Vault. Check Documents in Browse Vault.',
+              ),
+              backgroundColor: _AttachmentDesign.gold,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
       } else {
         String errorMsg = 'Upload failed (${resp.statusCode})';
         try {

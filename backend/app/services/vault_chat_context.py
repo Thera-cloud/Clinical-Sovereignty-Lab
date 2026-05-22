@@ -21,8 +21,8 @@ _TEXT_TYPES = {"upload_document", "organized_document", "transfer_conversation"}
 
 
 def _member_ids(profile: dict[str, Any]) -> list[str]:
-    ids = []
-    for key in ("hardware_id", "username"):
+    ids: list[str] = []
+    for key in ("hardware_id", "username", "id", "user_id"):
         value = str(profile.get(key) or "").strip()
         if value and value not in ids:
             ids.append(value)
@@ -122,13 +122,22 @@ async def build_vault_chat_context(db_pool, profile: dict[str, Any], user_text: 
             continue
 
         text = (row["extracted_text_preview"] or "").strip()
-        blob_text = await _read_blob_text(row)
-        if blob_text:
-            text = blob_text
+        if len(text) < 40:
+            blob_text = await _read_blob_text(row)
+            if blob_text:
+                text = blob_text
         if text:
             parts.append(f"[VAULT DOCUMENT: {name}]\n{text[:6000]}")
 
     if not parts:
+        if rows:
+            names = ", ".join((r["display_name"] or "file") for r in rows[:3])
+            fallback = (
+                "[VAULT CONTEXT NOTE] The user attached vault item(s): "
+                f"{names}. Full text extraction was unavailable this turn. "
+                "Acknowledge the attachment and invite them to describe what they need from it."
+            )
+            return user_text, fallback, image_data_url
         return user_text, "", image_data_url
 
     context = "\n[VAULT UPLOAD CONTEXT — use this when the user asks about uploaded files]\n"

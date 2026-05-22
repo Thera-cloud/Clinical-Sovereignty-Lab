@@ -49,6 +49,7 @@ import 'screens/community_mesh_screen.dart';
 import 'screens/sensitive_clinical_profile_screen.dart';
 import 'screens/intake_form_coach_panel.dart';
 import 'config/app_config.dart';
+import 'services/vault_entitlement.dart';
 import 'widgets/vault_attachment_button.dart';
 import 'widgets/upload_progress_indicator.dart';
 
@@ -4251,22 +4252,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         premiumTiers.contains(subscriptionPlan);
   }
 
-  /// Check if user has Sovereign Vault access (Inner Chamber / STANDARD+ tiers)
-  bool _canUseVault() {
-    if (!AppConfig.ENABLE_SOVEREIGN_VAULT) return false;
-    final tier =
-        (widget.currentUserProfile?['tier'] ?? '').toString().toUpperCase();
-    final plan = (widget.currentUserProfile?['subscription_plan'] ?? '')
-        .toString()
-        .toUpperCase();
-    const vaultTiers = {
-      'STANDARD',
-      'INNER_CHAMBER',
-      'TOP_TIER',
-      'SOVEREIGN_CIRCLE'
-    };
-    return vaultTiers.contains(tier) || vaultTiers.contains(plan);
-  }
+  bool _canUseVault() =>
+      AppConfig.ENABLE_SOVEREIGN_VAULT &&
+      VaultEntitlement.canUseVault(widget.currentUserProfile);
 
   /// Toggle avatar mode on/off
   void _toggleAvatarMode(bool enabled) {
@@ -4590,6 +4578,15 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                   final itemId = result['askNateVault'].toString();
                   _chatController.text =
                       '${_chatController.text}[Vault:$itemId] '.trim();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Vault item attached. Tap Send to ask Nate.',
+                      ),
+                      backgroundColor: Color(0xFFC9A962),
+                      duration: Duration(seconds: 4),
+                    ),
+                  );
                   FocusScope.of(context).requestFocus(FocusNode());
                 }
               });
@@ -4992,6 +4989,15 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                       if (itemId != null && itemId.isNotEmpty) {
                         _chatController.text =
                             '${_chatController.text}[Vault:$itemId] '.trim();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Vault item attached. Tap Send to ask Nate.',
+                            ),
+                            backgroundColor: Color(0xFFC9A962),
+                            duration: Duration(seconds: 4),
+                          ),
+                        );
                       }
                     },
                     onUploadProgress: (s) =>

@@ -96,13 +96,17 @@ def create_vault_router(db_pool) -> APIRouter:
         """
         try:
             row = await db_pool.fetchrow(
-                "SELECT id, tier FROM users WHERE id::text = $1 OR username = $1",
-                authenticated_user_id
+                """SELECT id, tier, profile_data->>'hardware_id' AS hardware_id
+                   FROM users
+                   WHERE id::text = $1 OR username = $1
+                      OR profile_data->>'hardware_id' = $1""",
+                authenticated_user_id,
             )
         except Exception:
             row = None
         if row:
-            member_id = str(row["id"])
+            hw = (row["hardware_id"] or "").strip()
+            member_id = hw or authenticated_user_id
             tier = (row["tier"] or "STANDARD") if row.get("tier") else "STANDARD"
         else:
             member_id = authenticated_user_id

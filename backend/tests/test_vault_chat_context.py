@@ -66,3 +66,23 @@ async def test_explicit_vault_ref_injects_document_context():
     assert "[VAULT DOCUMENT: notes.pdf]" in ctx
     assert "Important clinical notes for this week." in ctx
 
+
+@pytest.mark.asyncio
+async def test_matched_row_without_text_gets_fallback_note():
+    row = {
+        "id": "22222222-2222-2222-2222-222222222222",
+        "display_name": "scan.pdf",
+        "content_type": "upload_document",
+        "extracted_text_preview": "",
+        "blob_path": "/quarantine/x",
+        "thumbnail_path": None,
+        "mime_type": "application/pdf",
+    }
+    db = _FakeDB(row=row)
+    profile = {"hardware_id": "CLIENT_1_ID", "username": "client1"}
+    text = "Review [Vault:22222222-2222-2222-2222-222222222222]"
+    _new_text, ctx, _img = await build_vault_chat_context(db, profile, text)
+    assert "VAULT CONTEXT NOTE" in ctx
+    assert "scan.pdf" in ctx
+    assert "unavailable" in ctx.lower()
+
