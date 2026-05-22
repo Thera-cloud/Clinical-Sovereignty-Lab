@@ -18,6 +18,12 @@ PAYMENT_WINDOW_HOURS = 72
 CANCELLATION_WINDOW_HOURS = 24
 MIN_FEE_CENTS = 3000  # $30 minimum
 
+# Canonical appointment time: REST/bridge writes scheduled_start; legacy rows use scheduled_at.
+_APPT_TIME = "COALESCE(cs.scheduled_start, cs.scheduled_at)"
+_APPT_TIME_BARE = "COALESCE(scheduled_start, scheduled_at)"
+_NOT_CANCELLED = "UPPER(cs.status) != 'CANCELLED'"
+_NOT_CANCELLED_BARE = "UPPER(status) != 'CANCELLED'"
+
 
 class SessionPaymentAgent:
     """Background agent that processes session payments 72 hours in advance."""
@@ -66,7 +72,8 @@ class SessionPaymentAgent:
         async with self.db_pool.acquire() as conn:
             # Find sessions in the payment window that need charging
             sessions_to_charge = await conn.fetch(
-                """SELECT cs.id, cs.coach_id, cs.client_id, cs.scheduled_at, cs.price_cents,
+                f"""SELECT cs.id, cs.coach_id, cs.client_id,
+                          {_APPT_TIME} AS scheduled_at, cs.price_cents,
                           cs.payment_status,
                           u.profile_data->>'name' as client_name,
                           u.profile_data->>'email' as client_email,
@@ -74,10 +81,11 @@ class SessionPaymentAgent:
                           u.profile_data->>'stripe_customer_id' as stripe_customer_id
                    FROM coaching_sessions cs
                    LEFT JOIN users u ON u.id::text = cs.client_id::text
-                   WHERE cs.scheduled_at BETWEEN $1 AND $2
+                      OR u.hardware_id = cs.client_id::text
+                   WHERE {_APPT_TIME} BETWEEN $1 AND $2
                    AND cs.payment_status = 'pending'
-                   AND cs.payment_status != 'waived'
-                   AND cs.status != 'CANCELLED'""",
+                   AND COALESCE(cs.price_cents, 0) > 0
+                   AND {_NOT_CANCELLED}""",
                 window_start, window_end,
             )
 
@@ -110,12 +118,12 @@ class SessionPaymentAgent:
 
             # Auto-cancel unpaid sessions past the 24-hour deadline
             overdue = await conn.fetch(
-                """SELECT id, coach_id, client_id
+                f"""SELECT id, coach_id, client_id
                    FROM coaching_sessions
-                   WHERE scheduled_at < $1
+                   WHERE {_APPT_TIME_BARE} <= $1
                    AND payment_status = 'pending'
-                   AND payment_status != 'waived'
-                   AND status != 'CANCELLED'""",
+                   AND COALESCE(price_cents, 0) > 0
+                   AND {_NOT_CANCELLED_BARE}""",
                 cancel_deadline,
             )
 
@@ -134,7 +142,8 @@ class SessionPaymentAgent:
             reminder_48h_start = now + timedelta(hours=47)
             reminder_48h_end = now + timedelta(hours=49)
             upcoming_48h = await conn.fetch(
-                """SELECT cs.id, cs.coach_id, cs.client_id, cs.scheduled_at,
+                f"""SELECT cs.id, cs.coach_id, cs.client_id,
+                          {_APPT_TIME} AS scheduled_at,
                           cs.payment_status,
                           u.profile_data->>'name' as client_name,
                           u.profile_data->>'email' as client_email,
@@ -143,9 +152,11 @@ class SessionPaymentAgent:
                           cu.profile_data->>'email' as coach_email
                    FROM coaching_sessions cs
                    LEFT JOIN users u ON u.id::text = cs.client_id::text
-                   LEFT JOIN users cu ON cu.id::text = cs.coach_id::text AND cu.role = 'COACH'
-                   WHERE cs.scheduled_at BETWEEN $1 AND $2
-                   AND cs.status != 'CANCELLED'""",
+                      OR u.hardware_id = cs.client_id::text
+                   LEFT JOIN users cu ON cu.id::text = cs.coach_id::text
+                      OR cu.hardware_id = cs.coach_id::text
+                   WHERE {_APPT_TIME} BETWEEN $1 AND $2
+                   AND {_NOT_CANCELLED}""",
                 reminder_48h_start, reminder_48h_end,
             )
 
@@ -155,17 +166,20 @@ class SessionPaymentAgent:
 
             # Confirmation notifications for newly paid sessions
             newly_paid = await conn.fetch(
-                """SELECT cs.id, cs.client_id, cs.coach_id, cs.scheduled_at,
+                f"""SELECT cs.id, cs.client_id, cs.coach_id,
+                          {_APPT_TIME} AS scheduled_at,
                           u.profile_data->>'name' as client_name,
                           u.profile_data->>'email' as client_email,
                           cu.profile_data->>'email' as coach_email,
                           cu.profile_data->>'name' as coach_name
                    FROM coaching_sessions cs
                    LEFT JOIN users u ON u.id::text = cs.client_id::text
-                   LEFT JOIN users cu ON cu.id::text = cs.coach_id::text AND cu.role = 'COACH'
+                      OR u.hardware_id = cs.client_id::text
+                   LEFT JOIN users cu ON cu.id::text = cs.coach_id::text
+                      OR cu.hardware_id = cs.coach_id::text
                    WHERE cs.payment_status = 'paid'
-                   AND cs.status != 'CANCELLED'
-                   AND cs.scheduled_at > NOW()
+                   AND {_NOT_CANCELLED}
+                   AND {_APPT_TIME} > NOW()
                    AND NOT EXISTS (
                        SELECT 1 FROM session_notifications sn
                        WHERE sn.session_id = cs.id AND sn.notification_type = 'confirmation'

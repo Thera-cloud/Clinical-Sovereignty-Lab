@@ -7,7 +7,7 @@ Pattern: PG first, JSON fallback. Dual-write on mutations.
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -263,18 +263,22 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
             if session.get(_consult_key):
                 extra[_consult_key] = session[_consult_key]
         payment_status = str(session.get("payment_status") or "pending")[:32]
+        start_ts = _parse_ts(session.get("scheduled_start"))
+        payment_due_at = start_ts - timedelta(hours=72) if start_ts else None
+        cancellation_deadline = start_ts - timedelta(hours=24) if start_ts else None
 
         async with db_pool.acquire() as conn:
             await conn.execute(
                 """INSERT INTO coaching_sessions
                     (session_id, client_id, coach_id, family_id, client_name,
                      session_type, status, scheduled_start, scheduled_end,
+                     scheduled_at, payment_due_at, cancellation_deadline,
                      actual_start, actual_end, duration_minutes, zoom_link,
                      zoom_meeting_id, zoom_host_url, notes, coach_notes,
                      topics_covered, homework_assigned, mood_at_start,
                      mood_at_end, nate_summary, recording_url, payment_status,
                      intake_note, session_data, created_at)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
                    ON CONFLICT (session_id) DO UPDATE SET
                      client_id = EXCLUDED.client_id,
                      coach_id = EXCLUDED.coach_id,
@@ -284,6 +288,9 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                      status = EXCLUDED.status,
                      scheduled_start = EXCLUDED.scheduled_start,
                      scheduled_end = EXCLUDED.scheduled_end,
+                     scheduled_at = COALESCE(EXCLUDED.scheduled_start, EXCLUDED.scheduled_at),
+                     payment_due_at = EXCLUDED.payment_due_at,
+                     cancellation_deadline = EXCLUDED.cancellation_deadline,
                      actual_start = EXCLUDED.actual_start,
                      actual_end = EXCLUDED.actual_end,
                      duration_minutes = EXCLUDED.duration_minutes,
@@ -309,8 +316,11 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                 session.get("client_name", ""),
                 session.get("session_type", "COACH"),
                 session.get("status", "scheduled"),
-                _parse_ts(session.get("scheduled_start")),
+                start_ts,
                 _parse_ts(session.get("scheduled_end")),
+                start_ts,
+                payment_due_at,
+                cancellation_deadline,
                 _parse_ts(session.get("actual_start")),
                 _parse_ts(session.get("actual_end")),
                 int(session.get("duration_minutes") or 0),

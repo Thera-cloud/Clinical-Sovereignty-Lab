@@ -166,7 +166,7 @@ class CoachNexusV2:
                 try:
                     if (ses.get("coach_id") or "") != hid:
                         continue
-                    if (ses.get("status") or "") not in ["scheduled", "active", "pending_approval"]:
+                    if (ses.get("status") or "").lower() not in ["scheduled", "active", "pending_approval"]:
                         continue
 
                     st = (ses.get("scheduled_start") or "").replace("Z", "+00:00")
@@ -290,7 +290,7 @@ class CoachNexusV2:
                     WHERE coach_id = $1
                       AND scheduled_start >= $2
                       AND scheduled_start <  $3
-                      AND status IN ('scheduled', 'active', 'pending_approval')
+                      AND LOWER(status) IN ('scheduled', 'active', 'pending_approval')
                     ORDER BY scheduled_start ASC
                     LIMIT 500
                     """,
