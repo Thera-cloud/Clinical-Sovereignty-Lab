@@ -3548,6 +3548,54 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
                     family_role_from_link = _invite_role or family_role_from_link or _default_family_role
                 family_linked_by = _invite.get("invited_by", "") or family_linked_by
     
+    # QUANTUM-CRYSTAL-ARCH: block unpaid 2nd+ dependents via WebSocket; enforce one spouse.
+    if role == "CLIENT" and family_id_from_link and family_linked_by and db_pool:
+        try:
+            from app.services.registration_finalize import (
+                _count_existing_dependents,
+                _count_existing_spouses,
+                compute_family_member_billing,
+                normalize_family_member_role,
+            )
+            _gate_role = normalize_family_member_role(
+                family_role_from_link, is_minor=_under_18
+            )
+            async with db_pool.acquire() as _fg_conn:
+                _parent_row = None
+                if parent_username:
+                    _parent_row = await _fg_conn.fetchrow(
+                        """
+                        SELECT id, family_id FROM users
+                        WHERE LOWER(username) = LOWER($1) AND role = 'CLIENT'
+                        """,
+                        parent_username,
+                    )
+                if not _parent_row and family_linked_by:
+                    _parent_row = await _fg_conn.fetchrow(
+                        """
+                        SELECT id, family_id FROM users
+                        WHERE hardware_id = $1
+                           OR profile_data->>'hardware_id' = $1
+                        LIMIT 1
+                        """,
+                        family_linked_by,
+                    )
+                if _parent_row and _parent_row["family_id"]:
+                    _fam_uuid = _parent_row["family_id"]
+                    if _gate_role == "SPOUSE":
+                        if await _count_existing_spouses(_fg_conn, _fam_uuid) > 0:
+                            return False, "Only one Spouse is allowed per family."
+                    else:
+                        _dep_n = await _count_existing_dependents(_fg_conn, _fam_uuid)
+                        _bill = compute_family_member_billing(
+                            family_role=_gate_role,
+                            existing_dependent_count=_dep_n,
+                        )
+                        if not _bill["free"]:
+                            return False, "DEPENDENT_REQUIRES_PAYMENT"
+        except Exception as _fg_err:
+            print(f">>> [REG] family billing gate skipped: {_fg_err}")
+
     # Map registration_type to tier, plan, and features
     # tier uses tier_for_db_column() so DB CHECK constraint is satisfied
     if role == "CLIENT":
@@ -3955,6 +4003,32 @@ async def create_dependent_account(guardian_id: str, data: dict) -> Tuple[bool, 
         _dep_tier = "DEPENDENT"
         _dep_plan = "FAMILY_DEPENDENT"
     _dep_grant = tier_constants.initial_grant_tokens(tier_constants.TIER_DEPENDENT)
+
+    if _req_role == "SPOUSE":
+        _has_spouse = any(
+            v.get("profile", {}).get("family_id") == fam_id
+            and (v.get("profile", {}).get("family_role") or "").upper() in ("SPOUSE", "PARTNER")
+            for k, v in registry.items()
+            if not k.startswith("_")
+        )
+        if _has_spouse:
+            return False, "Only one Spouse is allowed per family."
+
+    # QUANTUM-CRYSTAL-ARCH: paid dependent slots after 1st free child.
+    if _req_role == "DEPENDENT":
+        _dep_count = sum(
+            1 for k, v in registry.items()
+            if not k.startswith("_")
+            and isinstance(v, dict)
+            and v.get("profile", {}).get("family_id") == fam_id
+            and v.get("profile", {}).get("hardware_id") != guardian_id
+            and (
+                (v.get("profile", {}).get("family_role") or "").upper() == "DEPENDENT"
+                or v.get("profile", {}).get("tier") == "DEPENDENT"
+            )
+        )
+        if _dep_count >= 1:
+            return False, "DEPENDENT_REQUIRES_PAYMENT"
 
     new_profile = {
         "role": "CLIENT",
@@ -25249,6 +25323,23 @@ Coach Reflection on Session {session_id}:
                                 _invite_family_id = invite["family_id"]
                                 _invite_role = invite.get("role", "DEPENDENT")
                                 _invite_head_uid = invite.get("invited_by", "")
+
+                                _ir = (_invite_role or "DEPENDENT").upper()
+                                if _ir in ("SPOUSE", "PARTNER"):
+                                    _existing_spouse = False
+                                    for _rk, _rv in registry.items():
+                                        if _rk.startswith("_"):
+                                            continue
+                                        _rp = (_rv or {}).get("profile", {})
+                                        if _rp.get("family_id") == _invite_family_id and (_rp.get("family_role") or "").upper() in ("SPOUSE", "PARTNER"):
+                                            _existing_spouse = True
+                                            break
+                                    if _existing_spouse:
+                                        await websocket.send(json.dumps({
+                                            "type": "family_invite_error",
+                                            "message": "Only one Spouse is allowed per family.",
+                                        }))
+                                        continue
                                 
                                 # Link the user to the family
                                 # SOVEREIGN-VOICE: role + age-aware so DEPENDENT

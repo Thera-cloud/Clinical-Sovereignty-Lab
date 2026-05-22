@@ -8,7 +8,7 @@ import logging
 import os
 import secrets
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 from app.constants.tiers import (
     TIER_COACH,
@@ -486,6 +486,79 @@ async def _count_existing_dependents(conn, family_id) -> int:
     ) or 0
 
 
+SPOUSE_FAMILY_ROLES = frozenset({"SPOUSE", "PARTNER"})
+
+
+def normalize_family_member_role(
+    role: Optional[str], *, is_minor: bool = False
+) -> str:
+    """Return SPOUSE or DEPENDENT for billing (minors are always dependents)."""
+    r = (role or "DEPENDENT").strip().upper()
+    if r in SPOUSE_FAMILY_ROLES:
+        return "SPOUSE"
+    if is_minor or r == "DEPENDENT":
+        return "DEPENDENT"
+    return "DEPENDENT"
+
+
+async def _count_existing_spouses(conn, family_id) -> int:
+    return await conn.fetchval(
+        """
+        SELECT COUNT(*) FROM users
+        WHERE family_id = $1
+          AND LOWER(COALESCE(family_role, '')) IN ('spouse', 'partner')
+        """,
+        family_id,
+    ) or 0
+
+
+async def _resolve_role_from_invite(conn, invite_code: str) -> Optional[str]:
+    ic = (invite_code or "").strip()
+    if not ic:
+        return None
+    row = await conn.fetchrow(
+        "SELECT role FROM family_invites WHERE invite_code = $1 LIMIT 1",
+        ic,
+    )
+    if row and row.get("role"):
+        return str(row["role"]).upper()
+    return None
+
+
+def compute_family_member_billing(
+    *, family_role: str, existing_dependent_count: int
+) -> dict:
+    """Spouse always free; 1st dependent free; 2nd+ uses tier ladder."""
+    role = normalize_family_member_role(family_role)
+    if role == "SPOUSE":
+        return {
+            "free": True,
+            "paid_ordinal": 0,
+            "monthly_cost_cents": 0,
+            "member_type": "spouse",
+            "family_role": "SPOUSE",
+        }
+    paid_ordinal = existing_dependent_count
+    if paid_ordinal == 0:
+        return {
+            "free": True,
+            "paid_ordinal": 0,
+            "monthly_cost_cents": 0,
+            "member_type": "dependent",
+            "family_role": "DEPENDENT",
+        }
+    cents = _family_tier_price_cents(paid_ordinal)
+    return {
+        "free": False,
+        "paid_ordinal": paid_ordinal,
+        "monthly_cost_cents": cents,
+        "family_tier_price_key": _family_tier_env_key(paid_ordinal),
+        "member_type": "dependent",
+        "family_role": "DEPENDENT",
+        "existing_dependent_count": existing_dependent_count,
+    }
+
+
 def _compute_is_minor(dob_str):
     """Return (dob_date_or_None, is_minor)."""
     if not dob_str:
@@ -636,6 +709,117 @@ async def _insert_dependent_user(
     )
 
 
+def _build_spouse_profile(
+    *,
+    username: str,
+    email: str,
+    profile_fields: dict,
+    family_id,
+    parent,
+    parent_username: str,
+) -> dict:
+    now = datetime.datetime.now()
+    today = str(now.date())
+    hardware_id = f"CLIENT_{username.upper()}_ID"
+    grant = initial_grant_tokens(TIER_STANDARD)
+    return {
+        "role": "CLIENT",
+        "name": profile_fields.get("name", ""),
+        "email": email,
+        "phone": profile_fields.get("phone", ""),
+        "hardware_id": hardware_id,
+        "family_id": str(family_id),
+        "family_role": "SPOUSE",
+        "joined_date": today,
+        "tier": "STANDARD",
+        "registration_type": "FAMILY_MEMBER",
+        "dob": profile_fields.get("dob"),
+        "is_minor": False,
+        "consent_version": profile_fields.get("consent_version", "v13.0_2026"),
+        "timezone": profile_fields.get("timezone", "America/New_York"),
+        "subscription_status": "FAMILY_PLAN_ACTIVE",
+        "subscription_plan": "FAMILY_SPOUSE",
+        "subscription_start_date": today,
+        "trial_end_date": "",
+        "parent_username": parent_username,
+        "parent_id": str(parent["id"]),
+        "linked_by": str(parent["id"]),
+        "paid_slot_ordinal": 0,
+        "monthly_cost_cents": 0,
+        "total_sessions_count": 0,
+        "token_balance": grant,
+        "subscription_token_balance": grant,
+        "purchased_token_balance": 0,
+        "token_usage_today": 0,
+        "token_usage_month": 0,
+        "last_token_reset": today,
+        "can_access_nate": True,
+        "coach_id": profile_fields.get("coach_id", "COACH_COACHN_ID"),
+        "assigned_coach": profile_fields.get("assigned_coach", "CoachN"),
+        "assigned_coach_id": profile_fields.get(
+            "assigned_coach_id", "COACH_COACHN_ID"
+        ),
+        "created_at": str(now),
+        "updated_at": str(now),
+        "onboarding_completed": False,
+        "discount_code": "",
+    }
+
+
+async def _insert_spouse_user(
+    conn,
+    *,
+    username: str,
+    password_hash: str,
+    email: str,
+    profile_fields: dict,
+    family_id,
+    parent,
+    dob_date,
+    new_profile: dict,
+):
+    _name = str(profile_fields.get("name") or "").strip() or username
+    _phone = str(profile_fields.get("phone") or "").strip()
+    _grant = initial_grant_tokens(TIER_STANDARD)
+    return await conn.fetchval(
+        """
+        INSERT INTO users (
+            username, role, password_hash, name, email, phone, dob,
+            tier, subscription_status, token_balance,
+            subscription_token_balance, purchased_token_balance,
+            family_id, guardian_id, is_minor,
+            family_role, linked_by, linked_at,
+            consent_version, consent_date,
+            profile_data, hardware_id, intake_data
+        ) VALUES (
+            $1, 'CLIENT', $2, $3, $4, $5, $6,
+            'STANDARD', 'FAMILY_PLAN_ACTIVE', $7,
+            $8, $9,
+            $10, NULL, FALSE,
+            'spouse', $11, NOW(),
+            $12, NOW(),
+            $13::jsonb, $14, $15::jsonb
+        )
+        RETURNING id
+        """,
+        username,
+        password_hash,
+        _name,
+        email or None,
+        _phone or None,
+        dob_date,
+        _grant,
+        _grant,
+        0,
+        family_id,
+        parent["id"],
+        profile_fields.get("consent_version", "v13.0_2026"),
+        json.dumps(new_profile),
+        f"CLIENT_{username.upper()}_ID",
+        json.dumps({"goals": [], "modality": profile_fields.get("modality", "General")}),
+    )
+
+
 async def finalize_dependent_signup(
     db_pool,
     *,
@@ -644,6 +828,8 @@ async def finalize_dependent_signup(
     email: str,
     profile_fields: dict,
     parent_username: str,
+    family_role: Optional[str] = None,
+    invite_code: Optional[str] = None,
 ) -> Tuple[bool, str, dict]:
     """Decide whether a dependent under `parent_username` is FREE or PAID and,
     if FREE, finalize the user immediately under the parent's Sovereign Circle
@@ -677,17 +863,31 @@ async def finalize_dependent_signup(
             return False, err, extra
 
         family_id = await _ensure_family_row(conn, parent)
-        existing_count = await _count_existing_dependents(conn, family_id)
-
-        # 0 existing => this dep is the 1st (free). 1 existing => 1st paid. etc.
-        paid_ordinal = existing_count  # 0 means free slot
-
         dob_date, is_minor = _compute_is_minor(profile_fields.get("dob"))
 
-        if paid_ordinal > 0:
-            # Caller must route through Stripe Checkout. Do NOT create user.
-            price_cents = _family_tier_price_cents(paid_ordinal)
-            tier_key = _family_tier_env_key(paid_ordinal)
+        member_role = normalize_family_member_role(
+            family_role or profile_fields.get("family_role"),
+            is_minor=is_minor,
+        )
+        if invite_code and member_role == "DEPENDENT" and not family_role:
+            invited = await _resolve_role_from_invite(conn, invite_code)
+            if invited:
+                member_role = normalize_family_member_role(invited, is_minor=is_minor)
+
+        if member_role == "SPOUSE":
+            if await _count_existing_spouses(conn, family_id) > 0:
+                return False, "SPOUSE_ALREADY_LINKED", {}
+
+        existing_count = await _count_existing_dependents(conn, family_id)
+        billing = compute_family_member_billing(
+            family_role=member_role,
+            existing_dependent_count=existing_count,
+        )
+
+        if not billing["free"]:
+            paid_ordinal = billing["paid_ordinal"]
+            price_cents = billing["monthly_cost_cents"]
+            tier_key = billing["family_tier_price_key"]
             return False, "DEPENDENT_REQUIRES_PAYMENT", {
                 "parent_id": str(parent["id"]),
                 "parent_username": parent_username,
@@ -697,6 +897,60 @@ async def finalize_dependent_signup(
                 "monthly_cost_cents": price_cents,
                 "family_tier_price_key": tier_key,
                 "existing_dependent_count": existing_count,
+                "family_role": member_role,
+            }
+
+        if member_role == "SPOUSE":
+            new_profile = _build_spouse_profile(
+                username=username,
+                email=email,
+                profile_fields=profile_fields,
+                family_id=family_id,
+                parent=parent,
+                parent_username=parent_username,
+            )
+            try:
+                new_user_id = await _insert_spouse_user(
+                    conn,
+                    username=username,
+                    password_hash=password_hash,
+                    email=email,
+                    profile_fields=profile_fields,
+                    family_id=family_id,
+                    parent=parent,
+                    dob_date=dob_date,
+                    new_profile=new_profile,
+                )
+            except Exception as e:
+                logger.error(
+                    "finalize_dependent_signup spouse INSERT failed for %s: %s",
+                    username,
+                    e,
+                )
+                return False, f"DB_ERROR: {e}", {}
+
+            mark_account_created(
+                db_pool,
+                username,
+                created_via="stripe_finalize_spouse",
+                role="CLIENT",
+                tier="STANDARD",
+                hardware_id=f"CLIENT_{username.upper()}_ID",
+                metadata={
+                    "parent_username": parent_username,
+                    "family_id": str(family_id),
+                    "family_role": "SPOUSE",
+                },
+            )
+            return True, "DEPENDENT_REGISTRATION_SUCCESS", {
+                "user_id": str(new_user_id),
+                "family_id": str(family_id),
+                "parent_id": str(parent["id"]),
+                "parent_username": parent_username,
+                "is_minor": False,
+                "paid_ordinal": 0,
+                "monthly_cost_cents": 0,
+                "family_role": "SPOUSE",
             }
 
         # FREE path — first dependent.

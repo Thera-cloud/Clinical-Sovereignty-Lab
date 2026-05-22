@@ -689,7 +689,12 @@ class _FamilyInviteAcceptScreenState extends State<FamilyInviteAcceptScreen> {
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   const Icon(Icons.verified_user, color: _cyan, size: 16),
                   const SizedBox(width: 8),
-                  Text('Role: ${_role == "SPOUSE" ? "Spouse (free)" : "Dependent (free)"}', style: const TextStyle(color: _textSecondary, fontSize: 13)),
+                  Text(
+                    _role == 'SPOUSE'
+                        ? 'Role: Spouse (always free on Sovereign Circle)'
+                        : 'Role: Dependent (1st free; additional at tiered rates)',
+                    style: const TextStyle(color: _textSecondary, fontSize: 13),
+                  ),
                 ]),
               ),
             ],
@@ -834,12 +839,11 @@ class _FamilyInviteAcceptScreenState extends State<FamilyInviteAcceptScreen> {
                       builder: (_) => SignUpWizard(
                         role: 'CLIENT',
                         inviteCode: widget.inviteCode,
-                        // Prefer username (machine ID); fall back to display
-                        // name only if bridge didn't return it.
                         parentUsername: _inviterUsername,
                         inviteeName: _inviteeName,
                         inviteeContact: _inviteeContact,
                         isDependentInvite: true,
+                        familyRole: _role,
                       ),
                     ));
                   },
@@ -8007,6 +8011,7 @@ class SignUpWizard extends StatefulWidget {
   final String? inviteeName;
   final String? inviteeContact;
   final bool isDependentInvite;
+  final String? familyRole;
   const SignUpWizard({
     super.key,
     this.role,
@@ -8015,6 +8020,7 @@ class SignUpWizard extends StatefulWidget {
     this.inviteeName,
     this.inviteeContact,
     this.isDependentInvite = false,
+    this.familyRole,
   });
   @override
   State<SignUpWizard> createState() => _SignUpWizardState();
@@ -8111,6 +8117,8 @@ class _SignUpWizardState extends State<SignUpWizard> {
       final qp = <String, String>{};
       if (parent.isNotEmpty) qp['parent_username'] = parent;
       if (invite.isNotEmpty) qp['invite_code'] = invite;
+      final fr = (widget.familyRole ?? '').trim();
+      if (fr.isNotEmpty) qp['family_role'] = fr;
       final uri = Uri.parse('$base/api/registration/dependent-price').replace(queryParameters: qp);
       final resp = await http.get(uri).timeout(const Duration(seconds: 10));
 
@@ -8176,6 +8184,8 @@ class _SignUpWizardState extends State<SignUpWizard> {
     if (isNativeIOS) return false; // Apple Guideline 3.1.1 — no Stripe on iOS
     if (_effectiveRole == 'COACH') return _selectedDojos.isNotEmpty;
     if (_hasFamilyJoinContext) {
+      final fr = (widget.familyRole ?? '').toUpperCase();
+      if (fr == 'SPOUSE' || fr == 'PARTNER') return false;
       if (_dependentPricePreview?['free'] == true) return false;
       if ((_dependentPricePreview?['monthly_cost_cents'] ?? 0) > 0) return true;
       return false;
@@ -8213,6 +8223,11 @@ class _SignUpWizardState extends State<SignUpWizard> {
     _parseCoachInviteFromUrl();
     _sanitizeSession();
     _loadSignupIanaForSignup();
+    if (widget.isDependentInvite || (widget.parentUsername ?? '').trim().isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _refreshDependentPricePreview();
+      });
+    }
   }
 
   Future<void> _loadSignupIanaForSignup() async {
@@ -8339,6 +8354,13 @@ class _SignUpWizardState extends State<SignUpWizard> {
     if (_userCtrl.text.trim().isEmpty || _passCtrl.text.trim().isEmpty) {
        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Username and Password are required")));
        return;
+    }
+
+    if (_hasFamilyJoinContext && _isPaidTier) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Payment required for this family member. Continue to payment on the review step."),
+      ));
+      return;
     }
 
     if (_effectiveRole == "CLIENT" && _selectedTier == "TRIAL" && !_isDependent && _inviteCodeCtrl.text.trim().isEmpty && _parentCtrl.text.trim().isEmpty) {
@@ -10138,6 +10160,10 @@ class _SignUpWizardState extends State<SignUpWizard> {
         }
         if (_inviteCodeCtrl.text.trim().isNotEmpty) {
           body['invite_code'] = _inviteCodeCtrl.text.trim();
+        }
+        final fr = (widget.familyRole ?? '').trim();
+        if (fr.isNotEmpty) {
+          body['family_role'] = fr;
         }
       } else if (_effectiveRole == 'CLIENT') {
         body['tier'] = _selectedTier;

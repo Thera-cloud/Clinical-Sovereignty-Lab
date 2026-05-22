@@ -239,3 +239,211 @@ async def test_finalize_free_dependent_when_no_existing(mock_conn):
     assert info.get("paid_ordinal") == 0
     assert info.get("monthly_cost_cents") == 0
     assert reason != "DEPENDENT_REQUIRES_PAYMENT"
+
+
+# ---------------------------------------------------------------------------
+# compute_family_member_billing (full story)
+# ---------------------------------------------------------------------------
+
+def test_spouse_always_free_with_zero_dependents():
+    from app.services.registration_finalize import compute_family_member_billing
+    b = compute_family_member_billing(family_role="SPOUSE", existing_dependent_count=0)
+    assert b["free"] is True
+    assert b["monthly_cost_cents"] == 0
+    assert b["member_type"] == "spouse"
+
+
+def test_spouse_always_free_with_existing_dependents():
+    from app.services.registration_finalize import compute_family_member_billing
+    b = compute_family_member_billing(family_role="SPOUSE", existing_dependent_count=3)
+    assert b["free"] is True
+    assert b["monthly_cost_cents"] == 0
+
+
+def test_first_dependent_free():
+    from app.services.registration_finalize import compute_family_member_billing
+    b = compute_family_member_billing(family_role="DEPENDENT", existing_dependent_count=0)
+    assert b["free"] is True
+    assert b["paid_ordinal"] == 0
+
+
+def test_second_dependent_75():
+    from app.services.registration_finalize import compute_family_member_billing
+    b = compute_family_member_billing(family_role="DEPENDENT", existing_dependent_count=1)
+    assert b["free"] is False
+    assert b["monthly_cost_cents"] == 7500
+    assert b["family_tier_price_key"] == "STRIPE_PRICE_FAMILY_TIER_1"
+
+
+def test_third_dependent_60():
+    from app.services.registration_finalize import compute_family_member_billing
+    b = compute_family_member_billing(family_role="DEPENDENT", existing_dependent_count=2)
+    assert b["monthly_cost_cents"] == 6000
+
+
+def test_normalize_spouse_roles():
+    from app.services.registration_finalize import normalize_family_member_role
+    assert normalize_family_member_role("PARTNER") == "SPOUSE"
+    assert normalize_family_member_role("spouse") == "SPOUSE"
+    assert normalize_family_member_role("DEPENDENT", is_minor=True) == "DEPENDENT"
+
+
+@pytest.mark.asyncio
+async def test_finalize_spouse_free_when_dependents_exist(mock_conn):
+    from contextlib import asynccontextmanager
+    from app.services.registration_finalize import finalize_dependent_signup
+
+    parent_row = {
+        "id": "parent-uuid",
+        "family_id": "fam-uuid",
+        "tier": "TOP_TIER",
+        "subscription_status": "ACTIVE",
+        "name": "HoHUser",
+        "stripe_customer_id": "cus_test",
+        "stripe_subscription_id": "sub_test",
+    }
+
+    async def _fetchrow(sql, *args):
+        if "FROM users" in sql and "LOWER(username)" in sql and "role = 'CLIENT'" in sql:
+            return parent_row if args[0].lower() == "hohuser" else None
+        return None
+
+    async def _fetchval(sql, *args):
+        if "SELECT 1 FROM users" in sql:
+            return None
+        if "COUNT(*)" in sql and "spouse" in sql.lower():
+            return 0
+        if "COUNT(*)" in sql and "dependent" in sql.lower():
+            return 2
+        if "head_of_household_id" in sql:
+            return "parent-uuid"
+        if "INSERT INTO users" in sql:
+            return "spouse-user-uuid"
+        return None
+
+    mock_conn.fetchrow = AsyncMock(side_effect=_fetchrow)
+    mock_conn.fetchval = AsyncMock(side_effect=_fetchval)
+    mock_conn.execute = AsyncMock()
+
+    @asynccontextmanager
+    async def _acquire():
+        yield mock_conn
+
+    pool = AsyncMock()
+    pool.acquire = _acquire
+
+    ok, reason, info = await finalize_dependent_signup(
+        pool,
+        username="spouse1",
+        password_hash="salt:hash",
+        email="spouse@test.com",
+        profile_fields={"name": "Spouse One", "dob": "1990-01-01"},
+        parent_username="HoHUser",
+        family_role="SPOUSE",
+    )
+
+    assert ok is True
+    assert reason == "DEPENDENT_REGISTRATION_SUCCESS"
+    assert info.get("family_role") == "SPOUSE"
+    assert info.get("monthly_cost_cents") == 0
+
+
+@pytest.mark.asyncio
+async def test_finalize_spouse_rejected_when_spouse_exists(mock_conn):
+    from contextlib import asynccontextmanager
+    from app.services.registration_finalize import finalize_dependent_signup
+
+    parent_row = {
+        "id": "parent-uuid",
+        "family_id": "fam-uuid",
+        "tier": "TOP_TIER",
+        "subscription_status": "ACTIVE",
+        "name": "HoHUser",
+    }
+
+    async def _fetchrow(sql, *args):
+        if "FROM users" in sql and "LOWER(username)" in sql:
+            return parent_row
+        return None
+
+    async def _fetchval(sql, *args):
+        if "SELECT 1 FROM users" in sql:
+            return None
+        if "spouse" in sql.lower():
+            return 1
+        return 0
+
+    mock_conn.fetchrow = AsyncMock(side_effect=_fetchrow)
+    mock_conn.fetchval = AsyncMock(side_effect=_fetchval)
+
+    @asynccontextmanager
+    async def _acquire():
+        yield mock_conn
+
+    pool = AsyncMock()
+    pool.acquire = _acquire
+
+    ok, reason, info = await finalize_dependent_signup(
+        pool,
+        username="spouse2",
+        password_hash="salt:hash",
+        email="s2@test.com",
+        profile_fields={"name": "Spouse Two", "dob": "1990-01-01"},
+        parent_username="HoHUser",
+        family_role="SPOUSE",
+    )
+
+    assert ok is False
+    assert reason == "SPOUSE_ALREADY_LINKED"
+
+
+@pytest.mark.asyncio
+async def test_finalize_second_dependent_requires_payment(mock_conn):
+    from contextlib import asynccontextmanager
+    from app.services.registration_finalize import finalize_dependent_signup
+
+    parent_row = {
+        "id": "parent-uuid",
+        "family_id": "fam-uuid",
+        "tier": "TOP_TIER",
+        "subscription_status": "ACTIVE",
+        "name": "HoHUser",
+    }
+
+    async def _fetchrow(sql, *args):
+        if "FROM users" in sql and "LOWER(username)" in sql:
+            return parent_row
+        return None
+
+    async def _fetchval(sql, *args):
+        if "SELECT 1 FROM users" in sql:
+            return None
+        if "spouse" in sql.lower():
+            return 0
+        if "COUNT(*)" in sql:
+            return 1
+        return None
+
+    mock_conn.fetchrow = AsyncMock(side_effect=_fetchrow)
+    mock_conn.fetchval = AsyncMock(side_effect=_fetchval)
+
+    @asynccontextmanager
+    async def _acquire():
+        yield mock_conn
+
+    pool = AsyncMock()
+    pool.acquire = _acquire
+
+    ok, reason, info = await finalize_dependent_signup(
+        pool,
+        username="kid2",
+        password_hash="salt:hash",
+        email="kid2@test.com",
+        profile_fields={"name": "Kid Two", "dob": "2015-01-01"},
+        parent_username="HoHUser",
+        family_role="DEPENDENT",
+    )
+
+    assert ok is False
+    assert reason == "DEPENDENT_REQUIRES_PAYMENT"
+    assert info.get("monthly_cost_cents") == 7500

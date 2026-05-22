@@ -344,6 +344,7 @@ class PrepareRequest(BaseModel):
     # checkout is skipped entirely.
     parent_username: Optional[str] = None
     invite_code: Optional[str] = None
+    family_role: Optional[str] = None
     # Coach upgrade fields
     flow: Optional[str] = None
     auth_token: Optional[str] = None
@@ -386,11 +387,34 @@ async def _resolve_parent_username(
     return None
 
 
+async def _resolve_family_role(
+    db_pool,
+    invite_code: Optional[str],
+    family_role: Optional[str],
+) -> str:
+    from app.services.registration_finalize import normalize_family_member_role
+
+    fr = (family_role or "").strip()
+    if fr:
+        return normalize_family_member_role(fr)
+    ic = (invite_code or "").strip()
+    if not ic:
+        return "DEPENDENT"
+    async with db_pool.acquire() as conn:
+        from app.services.registration_finalize import _resolve_role_from_invite
+
+        invited = await _resolve_role_from_invite(conn, ic)
+        if invited:
+            return normalize_family_member_role(invited)
+    return "DEPENDENT"
+
+
 @public_router.get("/dependent-price")
 async def dependent_price_preview(
     request: Request,
     parent_username: Optional[str] = None,
     invite_code: Optional[str] = None,
+    family_role: Optional[str] = None,
 ):
     """Return the monthly cost for adding a dependent under `parent_username`.
 
@@ -416,9 +440,12 @@ async def dependent_price_preview(
     from app.services.registration_finalize import (
         DEPENDENT_ELIGIBLE_PARENT_TIERS,
         DEPENDENT_ELIGIBLE_PARENT_STATUSES,
-        FAMILY_TIER_PRICE_CENTS,
-        FAMILY_TIER_PRICE_DEFAULT_CENTS,
+        _count_existing_dependents,
+        _count_existing_spouses,
+        compute_family_member_billing,
     )
+
+    member_role = await _resolve_family_role(db_pool, invite_code, family_role)
 
     async with db_pool.acquire() as conn:
         parent = await conn.fetchrow(
@@ -452,41 +479,52 @@ async def dependent_price_preview(
 
         existing = 0
         if parent["family_id"]:
-            existing = await conn.fetchval(
-                """
-                SELECT COUNT(*) FROM users
-                WHERE family_id = $1
-                  AND id != $2
-                  AND (
-                    tier = 'DEPENDENT'
-                    OR LOWER(COALESCE(family_role, '')) = 'dependent'
-                  )
-                """,
-                parent["family_id"],
-                parent["id"],
-            ) or 0
+            existing = await _count_existing_dependents(conn, parent["family_id"])
 
-    if existing == 0:
+        if member_role == "SPOUSE":
+            spouse_count = await _count_existing_spouses(conn, parent["family_id"])
+            if spouse_count > 0:
+                return {
+                    "eligible": False,
+                    "reason": "SPOUSE_ALREADY_LINKED",
+                    "message": "This family already has a spouse linked.",
+                    "family_role": "SPOUSE",
+                }
+
+    billing = compute_family_member_billing(
+        family_role=member_role,
+        existing_dependent_count=existing,
+    )
+
+    if billing["free"]:
+        if member_role == "SPOUSE":
+            msg = "Spouse on Sovereign Circle is always free."
+        elif existing == 0:
+            msg = "First dependent on Sovereign Circle is free."
+        else:
+            msg = "Included on Sovereign Circle plan."
         return {
             "eligible": True,
             "free": True,
-            "ordinal": 1,
+            "ordinal": existing + 1 if member_role == "DEPENDENT" else 0,
             "monthly_cost_cents": 0,
             "monthly_cost_display": "$0.00",
-            "message": "First dependent on Sovereign Circle is free.",
+            "family_role": member_role,
+            "message": msg,
         }
 
-    paid_ordinal = existing  # 0 existing→free, 1→1st paid, etc.
-    cents = FAMILY_TIER_PRICE_CENTS.get(paid_ordinal, FAMILY_TIER_PRICE_DEFAULT_CENTS)
+    paid_ordinal = billing["paid_ordinal"]
+    cents = billing["monthly_cost_cents"]
     capped = max(1, min(paid_ordinal, 4))
     return {
         "eligible": True,
         "free": False,
         "ordinal": existing + 1,
         "paid_ordinal": paid_ordinal,
-        "family_tier_price_key": f"STRIPE_PRICE_FAMILY_TIER_{capped}",
+        "family_tier_price_key": billing.get("family_tier_price_key"),
         "monthly_cost_cents": cents,
         "monthly_cost_display": f"${cents / 100:.2f}",
+        "family_role": member_role,
         "message": (
             f"Parent already has {existing} dependent"
             f"{'s' if existing != 1 else ''}. This will be dependent #{existing + 1} "
@@ -553,6 +591,11 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
     if role == "CLIENT" and parent_username:
         from app.services.registration_finalize import finalize_dependent_signup
 
+        resolved_role = await _resolve_family_role(
+            db_pool, body.invite_code, body.family_role
+        )
+        profile_fields["family_role"] = resolved_role
+
         ok, reason, info = await finalize_dependent_signup(
             db_pool,
             username=username,
@@ -560,6 +603,8 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
             email=email,
             profile_fields=profile_fields,
             parent_username=parent_username,
+            family_role=resolved_role,
+            invite_code=body.invite_code,
         )
 
         if ok:
@@ -732,6 +777,10 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
                 400,
             ),
             "PARENT_USERNAME_REQUIRED": ("Parent username is required.", 400),
+            "SPOUSE_ALREADY_LINKED": (
+                "Only one spouse is allowed per family.",
+                409,
+            ),
         }
         msg, status = human.get(reason, (f"Dependent registration failed: {reason}", 400))
         if reason.startswith("DB_ERROR"):
