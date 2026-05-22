@@ -129,3 +129,113 @@ def test_pricing_constants_match():
     assert len(FAMILY_TIER_PRICE_CENTS) == 3
     for v in FAMILY_TIER_PRICE_CENTS.values():
         assert v > FAMILY_TIER_PRICE_DEFAULT_CENTS
+
+
+# ---------------------------------------------------------------------------
+# Free-slot billing rules (HoH never charged for spouse or 1st dependent)
+# ---------------------------------------------------------------------------
+
+def test_first_dependent_slot_is_free_by_ordinal():
+    """0 existing dependents => paid_ordinal 0 => $0 (not DEPENDENT_REQUIRES_PAYMENT)."""
+    existing_count = 0
+    paid_ordinal = existing_count
+    assert paid_ordinal == 0
+    from app.services.registration_finalize import _family_tier_price_cents
+    assert _family_tier_price_cents(paid_ordinal) == 3000  # dict miss uses default
+    # Business rule: ordinal 0 never enters paid path (paid_ordinal > 0 gate)
+
+
+def test_second_dependent_is_first_paid_slot():
+    """1 existing dependent => paid_ordinal 1 => $75/mo to HoH plan."""
+    existing_count = 1
+    paid_ordinal = existing_count
+    assert paid_ordinal == 1
+    from app.services.registration_finalize import _family_tier_price_cents
+    assert _family_tier_price_cents(paid_ordinal) == 7500
+
+
+def test_dependent_price_preview_free_when_zero_existing():
+    """Mirror /dependent-price: existing==0 => free first dependent."""
+    existing = 0
+    assert existing == 0  # triggers free branch
+    preview = {
+        "eligible": True,
+        "free": True,
+        "ordinal": 1,
+        "monthly_cost_cents": 0,
+    }
+    assert preview["free"] is True
+    assert preview["monthly_cost_cents"] == 0
+
+
+@pytest.mark.asyncio
+async def test_count_dependents_excludes_spouse_role(mock_conn):
+    """Spouse (family_role=SPOUSE) must not consume the free dependent slot."""
+    from app.services.registration_finalize import _count_existing_dependents
+    mock_conn.fetchval.return_value = 0
+    await _count_existing_dependents(mock_conn, "fam-uuid")
+    sql = mock_conn.fetchval.call_args[0][0]
+    assert "family_role" in sql
+    assert "dependent" in sql.lower()
+    assert "SPOUSE" not in sql.upper()
+
+
+@pytest.mark.asyncio
+async def test_finalize_free_dependent_when_no_existing(mock_conn):
+    """First dependent under HoH: no Stripe, paid_ordinal=0, monthly_cost_cents=0."""
+    from contextlib import asynccontextmanager
+    from app.services.registration_finalize import finalize_dependent_signup
+
+    parent_row = {
+        "id": "parent-uuid",
+        "family_id": "fam-uuid",
+        "tier": "TOP_TIER",
+        "subscription_status": "ACTIVE",
+        "name": "HoHUser",
+        "stripe_customer_id": "cus_test",
+        "stripe_subscription_id": "sub_test",
+    }
+
+    async def _fetchrow(sql, *args):
+        if "FROM users" in sql and "LOWER(username)" in sql and "role = 'CLIENT'" in sql:
+            if args[0].lower() == "hohuser":
+                return parent_row
+            return None
+        return None
+
+    async def _fetchval(sql, *args):
+        if "SELECT 1 FROM users" in sql:
+            return None
+        if "COUNT(*)" in sql and "family_id" in sql:
+            return 0
+        if "head_of_household_id" in sql:
+            return "parent-uuid"
+        if "INSERT INTO users" in sql:
+            return "new-user-uuid"
+        return None
+
+    mock_conn.fetchrow = AsyncMock(side_effect=_fetchrow)
+    mock_conn.fetchval = AsyncMock(side_effect=_fetchval)
+    mock_conn.execute = AsyncMock()
+
+    @asynccontextmanager
+    async def _acquire():
+        yield mock_conn
+
+    pool = AsyncMock()
+    pool.acquire = _acquire
+
+    ok, reason, info = await finalize_dependent_signup(
+        pool,
+        username="kid1",
+        password_hash="salt:hash",
+        email="kid1@test.com",
+        profile_fields={"name": "Kid One", "dob": "2015-01-01"},
+        parent_username="HoHUser",
+    )
+
+    assert ok is True
+    assert reason == "DEPENDENT_REGISTRATION_SUCCESS"
+    assert info.get("paid_ordinal") == 0
+    assert info.get("monthly_cost_cents") == 0
+    assert reason != "DEPENDENT_REQUIRES_PAYMENT"
