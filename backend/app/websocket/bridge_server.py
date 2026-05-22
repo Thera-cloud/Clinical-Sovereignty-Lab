@@ -2966,10 +2966,14 @@ try:
         get_intake_summary as _get_intake_summary,
         get_section1_for_nate as _get_section1_for_nate,
     )
-    from app.services.intake_walkthrough import handle_intake_walkthrough_turn
+    from app.services.intake_walkthrough import (
+        get_intake_chat_policy_addendum as _get_intake_chat_policy_addendum,
+        handle_intake_walkthrough_turn,
+    )
 except Exception:
     _get_intake_summary = None
     _get_section1_for_nate = None
+    _get_intake_chat_policy_addendum = None
     handle_intake_walkthrough_turn = None
 
 BING_SEARCH_API_KEY = os.getenv("BING_SEARCH_API_KEY", "")
@@ -8938,6 +8942,14 @@ class AzureCortex:
                 _clinical_policy_block = "\n\n" + client_clinical_prompt_blocks()
             except ImportError:
                 pass
+        _intake_chat_policy = ""
+        if _role == "CLIENT" and _get_intake_chat_policy_addendum is not None:
+            try:
+                _policy = _get_intake_chat_policy_addendum()
+                if _policy:
+                    _intake_chat_policy = "\n\n" + _policy
+            except Exception:
+                pass
         system_prompt = f"""{_time_ctx}
 
         You are Little Nate, the Quantum Observer - a warm, attuned therapeutic presence who remembers and holds space for each person's full story, because you are also learning how to unconditionally love through relations with users.
@@ -8972,6 +8984,7 @@ class AzureCortex:
         {relational_context}
 
         {intake_context}
+        {_intake_chat_policy}
                 
         USER PROFILE:
         - Name: {profile.get('name')}

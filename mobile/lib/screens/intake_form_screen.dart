@@ -258,22 +258,16 @@ class _IntakeFormScreenState extends State<IntakeFormScreen> {
                       const SizedBox(height: 8),
                       Card(
                         color: const Color(0xFF0A0A0A),
-                        child: ListTile(
-                          title: const Text(
-                              'Walk through it with Little Nate (+1000 per question)',
+                        child: const ListTile(
+                          title: Text(
+                              'Complete each question below',
                               style: TextStyle(color: Colors.white)),
-                          subtitle: const Text(
-                              'Open chat and say: "Let\'s do intake now"',
+                          subtitle: Text(
+                              'Tap Edit on any field to save your answer. '
+                              'Little Nate will not walk you through intake in chat.',
                               style: TextStyle(color: Colors.white60)),
-                          trailing: const Icon(Icons.chat_bubble_outline,
+                          trailing: Icon(Icons.edit_outlined,
                               color: Color(0xFF4ECDC4)),
-                          onTap: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text(
-                                      'Open chat and say: "Let\'s do intake now"')),
-                            );
-                          },
                         ),
                       ),
                       const SizedBox(height: 8),

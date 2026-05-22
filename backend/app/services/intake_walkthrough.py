@@ -51,7 +51,45 @@ _SESSION_TIMEOUT_S = 45 * 60
 _RUNTIME: Dict[str, Dict[str, Any]] = {}
 
 _ACCEPT_TERMS = ("yes", "yeah", "yep", "sure", "ok", "okay", "now", "let's do it", "lets do it", "start")
-_DECLINE_TERMS = ("later", "not now", "skip", "no thanks", "not today", "maybe later")
+_DECLINE_TERMS = (
+    "later",
+    "not now",
+    "skip",
+    "no thanks",
+    "not today",
+    "maybe later",
+    "do the intake later",
+    "do the intake questions later",
+    "intake later",
+    "intake questions later",
+)
+_STOP_TERMS = (
+    "stop doing the intake",
+    "stop the intake",
+    "stop intake",
+    "not supposed to be doing the intake",
+    "we are not supposed to be doing the intake",
+    "we're not supposed to be doing the intake",
+    "stop it here",
+    "stop here",
+    "don't do the intake",
+    "do not do the intake",
+    "cancel the intake",
+    "end the intake",
+)
+_PAUSE_TERMS = ("pause", "pause the intake", "pause intake")
+_OFF_TOPIC_RX = re.compile(
+    r"\b("
+    r"(?:give|list|tell)\s+me\s+(?:\d+\s+)?(?:tools?|tips?|practices?|exercises?|communication|practice\s+sheet)"
+    r"|communication\s+tools?"
+    r"|practice\s+sheet"
+    r"|(?:list|name|tell\s+me|what)\s+(?:\d+\s*[-–]?\s*\d+\s+)?(?:medications?|meds?|drugs?)"
+    r"|(?:viagra|cialis|levitra|sildenafil|tadalafil|vardenafil|erectile\s+dysfunction|\bed\b)"
+    r"|(?:stop|pause)\s+(?:doing\s+)?(?:the\s+)?intake"
+    r"|not\s+supposed\s+to\s+(?:be\s+)?(?:doing|do)\s+(?:the\s+)?intake"
+    r")\b",
+    re.IGNORECASE,
+)
 _REFUSAL_TERMS = ("none of your business", "dont want to answer", "don't want to answer", "pass", "prefer not")
 _CRISIS_TERMS = (
     "kill myself",
@@ -115,7 +153,9 @@ def _state(uid: str) -> Dict[str, Any]:
         st = {
             "offered": False,
             "declined": False,
+            "stopped": False,
             "active": False,
+            "awaiting_answer": False,
             "current_q": None,
             "nonsense_reprompted": False,
             "needs_resume_prompt": False,
@@ -149,6 +189,56 @@ def _contains_any(text: str, phrases) -> bool:
     return any(p in low for p in phrases)
 
 
+def _is_decline_or_defer(text: str) -> bool:
+    return _contains_any(text, _DECLINE_TERMS) or _contains_any(text, _STOP_TERMS)
+
+
+def _is_pause_only(text: str) -> bool:
+    low = (text or "").strip().lower().rstrip(".")
+    return low in _PAUSE_TERMS or low == "pause"
+
+
+def _is_hard_stop(text: str) -> bool:
+    return _contains_any(text, _STOP_TERMS) or _contains_any(text, _PAUSE_TERMS)
+
+
+def _is_off_topic_turn(text: str) -> bool:
+    return bool(_OFF_TOPIC_RX.search(text or ""))
+
+
+def _clear_walkthrough_active(st: Dict[str, Any]) -> None:
+    st["active"] = False
+    st["awaiting_answer"] = False
+    st["current_q"] = None
+    st["nonsense_reprompted"] = False
+    st["needs_resume_prompt"] = False
+
+
+def _exit_walkthrough(
+    st: Dict[str, Any],
+    *,
+    stopped: bool = False,
+    response: str = "",
+    handled: bool = False,
+) -> Dict[str, Any]:
+    _clear_walkthrough_active(st)
+    if stopped:
+        st["stopped"] = True
+    if response:
+        return {"handled": handled, "response": response}
+    return {"handled": handled}
+
+
+def _can_save_intake_answer(st: Dict[str, Any]) -> bool:
+    return bool(
+        st.get("active")
+        and st.get("awaiting_answer")
+        and st.get("current_q")
+        and not st.get("declined")
+        and not st.get("stopped")
+    )
+
+
 def _looks_clarification_request(text: str) -> bool:
     stripped = text.strip()
     if not stripped:
@@ -164,6 +254,29 @@ def _looks_clarification_request(text: str) -> bool:
 def _clarify_for_question(question_id: str) -> str:
     hint = _QUESTION_HINTS.get(question_id, "I can clarify it in plain words.")
     return f"Great question. {hint} {QUESTION_LABELS.get(question_id, question_id)}"
+
+
+def _intake_system_enabled() -> bool:
+    return os.getenv("ENABLE_INTAKE_SYSTEM", "false").lower() in ("1", "true", "yes")
+
+
+def intake_walkthrough_enabled() -> bool:
+    """Chat walkthrough requires master intake flag AND explicit walkthrough opt-in."""
+    if not _intake_system_enabled():
+        return False
+    return os.getenv("ENABLE_INTAKE_WALKTHROUGH", "false").lower() in ("1", "true", "yes")
+
+
+def get_intake_chat_policy_addendum() -> str:
+    """When walkthrough is off, tell Nate not to initiate intake in chat."""
+    if intake_walkthrough_enabled() or not _intake_system_enabled():
+        return ""
+    return (
+        "INTAKE FORM POLICY: Do not offer, initiate, or walk the client through the "
+        "clinical intake questionnaire in chat. Do not mention token bonuses for intake "
+        "questions. If they ask about the intake form, briefly direct them to "
+        "Settings → Clinical Intake to complete it at their own pace."
+    )
 
 
 def _semantic_enabled() -> bool:
@@ -588,8 +701,10 @@ async def _execute_section1_restart(
     first_q = SECTION1_FIELDS[0]
     state["active"] = True
     state["current_q"] = first_q
+    state["awaiting_answer"] = True
     state["offered"] = True
     state["declined"] = False
+    state["stopped"] = False
     state["nonsense_reprompted"] = False
     state["needs_resume_prompt"] = False
     label = QUESTION_LABELS.get(first_q, "What name would you like me to use for you?")
@@ -603,18 +718,23 @@ async def _execute_section1_restart(
     return {"handled": True, "response": reply}
 
 
+def reset_runtime(uid: str = "") -> None:
+    """Clear in-memory walkthrough state (tests only)."""
+    if uid:
+        _RUNTIME.pop(uid, None)
+    else:
+        _RUNTIME.clear()
+
+
 async def handle_intake_walkthrough_turn(
     *,
     profile: Dict[str, Any],
     user_text: str,
     db_pool,
 ) -> Dict[str, Any]:
-    if os.getenv("ENABLE_INTAKE_SYSTEM", "false").lower() not in ("1", "true", "yes"):
+    """Returns {"handled": bool, "response": str}."""
+    if not intake_walkthrough_enabled():
         return {"handled": False}
-    """
-    Returns:
-      {"handled": bool, "response": str}
-    """
     if (profile.get("role") or "").upper() != "CLIENT":
         return {"handled": False}
     if not db_pool:
@@ -638,29 +758,33 @@ async def handle_intake_walkthrough_turn(
         if section_done:
             st["active"] = False
             st["declined"] = False
+            st["stopped"] = False
             st["offered"] = True
             st["current_q"] = None
+            st["awaiting_answer"] = False
             st["needs_resume_prompt"] = False
+            return {"handled": False}
+
+        # Session decline/stop is sticky — no walkthrough until explicit restart.
+        if (st.get("declined") or st.get("stopped")) and not _contains_any(user_text, _RESTART_TERMS):
             return {"handled": False}
 
         # Crisis path priority while in walkthrough.
         if st.get("active") and _contains_any(user_text, _CRISIS_TERMS):
-            st["active"] = False
-            st["current_q"] = None
-            st["needs_resume_prompt"] = True
+            _clear_walkthrough_active(st)
+            st["needs_resume_prompt"] = False
             return {"handled": False}
 
         if st.get("needs_resume_prompt"):
             st["needs_resume_prompt"] = False
-            st["active"] = False
-            st["current_q"] = None
+            _clear_walkthrough_active(st)
             return {
                 "handled": True,
                 "response": "We can continue the intake whenever you want, or stop it here. Your call.",
             }
 
         # Offer (once per runtime session)
-        if not st.get("offered") and not st.get("active") and not st.get("declined"):
+        if not st.get("offered") and not st.get("active") and not st.get("declined") and not st.get("stopped"):
             st["offered"] = True
             return {
                 "handled": True,
@@ -674,48 +798,7 @@ async def handle_intake_walkthrough_turn(
 
         if not st.get("active"):
             low = user_text.strip().lower()
-            client_name = str(intake.get("q1_preferred_name") or profile.get("name") or "").strip()
 
-            credit_summary: Optional[Dict[str, int]] = None
-            try:
-                credit_summary = await summarize_walkthrough_credits(conn, username=username)
-            except Exception as _cs_err:
-                print(f">>> [INTAKE] credit summary failed: {_cs_err}")
-
-            # Let Nate read the state and decide. One call, full intelligence, his voice.
-            nav = await _nate_intake_navigator(
-                user_text=user_text,
-                intake=intake,
-                next_q=next_q,
-                client_name=client_name,
-                credit_summary=credit_summary,
-            )
-            if nav:
-                action = nav.get("action", "respond")
-                response = nav.get("response", "").strip()
-                if action == "restart":
-                    return await _execute_section1_restart(
-                        conn=conn,
-                        state=st,
-                        username=username,
-                        hardware_id=uid,
-                        response_override=response,
-                    )
-                if action == "resume" and next_q:
-                    st["active"] = True
-                    st["current_q"] = next_q
-                    st["nonsense_reprompted"] = False
-                    st["declined"] = False
-                    st["needs_resume_prompt"] = False
-                    return {"handled": True, "response": response or QUESTION_LABELS.get(next_q, "")}
-                if action == "decline":
-                    st["declined"] = True
-                    return {"handled": True, "response": response or "No problem - we can do it later in Settings whenever you're ready."}
-                # action == "respond" — Nate is just answering them. Don't change FSM state.
-                if response:
-                    return {"handled": True, "response": response}
-
-            # Tiny defensive fallback if navigator errored entirely.
             if _contains_any(low, _RESTART_TERMS):
                 return await _execute_section1_restart(
                     conn=conn,
@@ -723,22 +806,40 @@ async def handle_intake_walkthrough_turn(
                     username=username,
                     hardware_id=uid,
                 )
+            if _is_decline_or_defer(user_text):
+                st["declined"] = True
+                st["stopped"] = True
+                _clear_walkthrough_active(st)
+                return {
+                    "handled": True,
+                    "response": "No problem — we can pick up the intake later in Settings whenever you're ready.",
+                }
             if any(term in low for term in _ACCEPT_TERMS) and next_q:
                 st["active"] = True
                 st["current_q"] = next_q
+                st["awaiting_answer"] = True
                 st["nonsense_reprompted"] = False
                 st["declined"] = False
+                st["stopped"] = False
                 st["needs_resume_prompt"] = False
                 return {"handled": True, "response": QUESTION_LABELS.get(next_q, "Let's start with the first intake question.")}
-            if any(term in low for term in _DECLINE_TERMS):
-                st["declined"] = True
-                return {"handled": True, "response": "No problem - we can do it later in Settings whenever you're ready."}
             return {"handled": False}
 
         # Active walkthrough
+        if _is_hard_stop(user_text):
+            if _is_pause_only(user_text) and not _is_off_topic_turn(user_text):
+                return _exit_walkthrough(
+                    st,
+                    stopped=True,
+                    handled=True,
+                    response="No problem — we can pick the intake up later in Settings if you want.",
+                )
+            return _exit_walkthrough(st, stopped=True, handled=False)
+
+        if _is_off_topic_turn(user_text) or not _can_save_intake_answer(st):
+            return _exit_walkthrough(st, stopped=True, handled=False)
+
         # Explicit rule-based "start over" — clear answers and walk from q1 again.
-        # Must run BEFORE the semantic classifier so the restart phrase isn't saved
-        # as the current question's answer.
         if _contains_any(user_text, _RESTART_TERMS):
             return await _execute_section1_restart(
                 conn=conn,
@@ -747,21 +848,9 @@ async def handle_intake_walkthrough_turn(
                 hardware_id=uid,
             )
 
-        # Explicit rule-based "stop the intake" — surface a clear choice instead of silently dropping out.
-        if _contains_any(user_text, _TOPIC_SHIFT_TERMS):
-            st["needs_resume_prompt"] = True
-            st["active"] = False
-            return {
-                "handled": True,
-                "response": (
-                    "Want to pause the intake and pick this up another time, or keep going? "
-                    "Just say 'continue' to keep answering, or 'pause' to come back later."
-                ),
-            }
-
         current_q = st.get("current_q") or next_q
         if not current_q:
-            st["active"] = False
+            _clear_walkthrough_active(st)
             return {"handled": False}
 
         # Semantic intent classifier (primary path). Falls through to rules on miss.
@@ -775,21 +864,17 @@ async def handle_intake_walkthrough_turn(
         # High-confidence semantic routes
         if semantic and sem_conf >= _SEMANTIC_CONF_FLOOR:
             if sem_intent == "crisis":
-                st["active"] = False
-                st["current_q"] = None
-                st["needs_resume_prompt"] = True
+                _clear_walkthrough_active(st)
                 return {"handled": False}
-            if sem_intent == "stop_intake":
-                st["needs_resume_prompt"] = True
-                st["active"] = False
-                st["nonsense_reprompted"] = False
-                return {
-                    "handled": True,
-                    "response": (
-                        "Want to pause the intake and pick it back up later, or keep going? "
-                        "Just say 'continue' to keep answering, or 'pause' to come back."
-                    ),
-                }
+            if sem_intent == "stop_intake" or _is_hard_stop(user_text):
+                if _is_pause_only(user_text) and not _is_off_topic_turn(user_text):
+                    return _exit_walkthrough(
+                        st,
+                        stopped=True,
+                        handled=True,
+                        response="No problem — we can pick the intake up later in Settings if you want.",
+                    )
+                return _exit_walkthrough(st, stopped=True, handled=False)
             if sem_intent == "clarify_question":
                 st["nonsense_reprompted"] = False
                 smart = await _generate_intelligent_clarification(
@@ -851,6 +936,10 @@ async def handle_intake_walkthrough_turn(
                     return {"handled": True, "response": smart or _clarify_for_question(current_q)}
                 answer_value = user_text.strip()
 
+        if not _can_save_intake_answer(st):
+            return _exit_walkthrough(st, stopped=True, handled=False)
+
+        st["awaiting_answer"] = False
         await update_client_answer(
             conn,
             username=username,
@@ -896,6 +985,7 @@ async def handle_intake_walkthrough_turn(
 
         if next_after:
             st["current_q"] = next_after
+            st["awaiting_answer"] = True
             if smart_ack:
                 return {"handled": True, "response": smart_ack}
             if credit.get("credited") and ack_credit_summary:
@@ -915,6 +1005,7 @@ async def handle_intake_walkthrough_turn(
 
         st["active"] = False
         st["current_q"] = None
+        st["awaiting_answer"] = False
         if smart_ack:
             return {"handled": True, "response": smart_ack}
         return {
