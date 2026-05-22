@@ -287,13 +287,29 @@ class UserStore:
             tz_src_col = str(profile.get("timezone_source") or "default_utc").strip() or "default_utc"
 
             async with self.pool.acquire() as conn:
-                # Resolve family code (e.g. "FAM_1834DACF") to families.id UUID
+                # SOVEREIGN-VOICE: universal family_id canonicalizer.
+                # Accept either UUID (families.id) or FAM_xxx code in family_id_str.
+                # Always resolve to (uuid, family_code) and force JSONB profile.family_id
+                # to the canonical family_code so Coach Command, client portal, and
+                # bridge registry never diverge. (Heals Paula/Zack/Margie/Lana class.)
                 family_uuid = None
                 if family_id_str:
-                    family_uuid = await conn.fetchval(
-                        "SELECT id FROM families WHERE family_code = $1",
-                        family_id_str,
-                    )
+                    if len(family_id_str) == 36 and family_id_str.count("-") == 4:
+                        fam_row = await conn.fetchrow(
+                            "SELECT id, family_code FROM families WHERE id = $1::uuid",
+                            family_id_str,
+                        )
+                    else:
+                        fam_row = await conn.fetchrow(
+                            "SELECT id, family_code FROM families WHERE family_code = $1",
+                            family_id_str,
+                        )
+                    if fam_row:
+                        family_uuid = fam_row["id"]
+                        canon_code = fam_row["family_code"]
+                        if canon_code and profile.get("family_id") != canon_code:
+                            profile["family_id"] = canon_code
+                            profile_data = json.dumps(profile, default=str)
 
                 await conn.execute("""
                     INSERT INTO users (
