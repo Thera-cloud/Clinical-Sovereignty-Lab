@@ -181,6 +181,17 @@ async def test_count_dependents_excludes_spouse_role(mock_conn):
 
 
 @pytest.mark.asyncio
+async def test_count_spouses_reads_profile_data_family_role(mock_conn):
+    """Spouse role stored only in profile_data must still count."""
+    from app.services.registration_finalize import _count_existing_spouses
+    mock_conn.fetchval.return_value = 1
+    await _count_existing_spouses(mock_conn, "fam-uuid")
+    sql = mock_conn.fetchval.call_args[0][0]
+    assert "profile_data" in sql
+    assert "spouse" in sql.lower()
+
+
+@pytest.mark.asyncio
 async def test_finalize_free_dependent_when_no_existing(mock_conn):
     """First dependent under HoH: no Stripe, paid_ordinal=0, monthly_cost_cents=0."""
     from contextlib import asynccontextmanager

@@ -471,15 +471,21 @@ async def _ensure_family_row(conn, parent) -> str:
     return family_id
 
 
+def _profile_family_role_expr() -> str:
+    """family_role column or profile_data JSONB (legacy bridge registry shape)."""
+    return "LOWER(COALESCE(NULLIF(family_role, ''), profile_data->>'family_role', ''))"
+
+
 async def _count_existing_dependents(conn, family_id) -> int:
     """Count existing dependents (excluding HOH/spouse) under this family."""
+    role_expr = _profile_family_role_expr()
     return await conn.fetchval(
-        """
+        f"""
         SELECT COUNT(*) FROM users
         WHERE family_id = $1
           AND (
             tier = 'DEPENDENT'
-            OR LOWER(COALESCE(family_role, '')) = 'dependent'
+            OR {role_expr} = 'dependent'
           )
         """,
         family_id,
@@ -502,11 +508,12 @@ def normalize_family_member_role(
 
 
 async def _count_existing_spouses(conn, family_id) -> int:
+    role_expr = _profile_family_role_expr()
     return await conn.fetchval(
-        """
+        f"""
         SELECT COUNT(*) FROM users
         WHERE family_id = $1
-          AND LOWER(COALESCE(family_role, '')) IN ('spouse', 'partner')
+          AND {role_expr} IN ('spouse', 'partner')
         """,
         family_id,
     ) or 0
