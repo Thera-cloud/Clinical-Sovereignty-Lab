@@ -3755,7 +3755,20 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
         if family_role_from_link == "DEPENDENT" and _under_18:
             new_profile["is_minor"] = True
             new_profile["guardian_id"] = family_linked_by
-    
+    # QUANTUM-CRYSTAL-ARCH: Phase-1 family linkage funnel — UUID parent stamps on profile.
+    if _is_family_member and db_pool:
+        try:
+            from app.services.family_linkage import enrich_family_profile
+            async with db_pool.acquire() as _fl_conn:
+                new_profile = await enrich_family_profile(
+                    _fl_conn,
+                    profile=new_profile,
+                    parent_username=parent_username or None,
+                    family_role=(family_role_from_link or _default_family_role),
+                )
+        except Exception as _fl_err:
+            print(f">>> [REG] family_linkage enrich skipped: {_fl_err}")
+
     if role == "COACH":
         new_profile["subscription_status"] = "PENDING_VERIFICATION"
         new_profile["assigned_clients"] = []

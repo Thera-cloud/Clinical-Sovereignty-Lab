@@ -753,9 +753,15 @@ class CoachNexusV2:
     
     def _infer_relation(self, client: Dict, member: Dict) -> str:
         """Infer family relation (simplified)."""
+        from app.services.family_linkage import guardian_ref_matches
+
         if member.get("guardian_id"):
             return "Parent/Guardian"
-        if client.get("guardian_id") == member.get("hardware_id"):
+        if guardian_ref_matches(
+            client.get("guardian_id"),
+            member.get("hardware_id"),
+            member.get("id"),
+        ):
             return "Dependent"
         return "Family Member"
     

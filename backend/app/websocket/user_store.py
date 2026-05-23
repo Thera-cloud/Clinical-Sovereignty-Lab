@@ -311,6 +311,29 @@ class UserStore:
                             profile["family_id"] = canon_code
                             profile_data = json.dumps(profile, default=str)
 
+                if family_uuid:
+                    try:
+                        from app.services.family_linkage import enrich_family_profile_if_needed
+
+                        profile = await enrich_family_profile_if_needed(
+                            conn, profile, family_uuid
+                        )
+                        profile_data = json.dumps(profile, default=str)
+                    except Exception as fl_err:
+                        logger.warning(
+                            "family_linkage: enrich failed for %s: %s",
+                            username,
+                            fl_err,
+                        )
+
+                from app.services.family_linkage import extract_family_columns
+
+                fam_cols = extract_family_columns(profile)
+                guardian_col = fam_cols["guardian_id"]
+                linked_col = fam_cols["linked_by"]
+                family_role_col = fam_cols["family_role"]
+                is_minor_col = fam_cols["is_minor"]
+
                 await conn.execute("""
                     INSERT INTO users (
                         username, password_hash, role, tier, name, email,
@@ -319,11 +342,13 @@ class UserStore:
                         subscription_token_balance, purchased_token_balance,
                         login_count,
                         phone, timezone, timezone_source,
+                        guardian_id, linked_by, family_role, is_minor,
                         updated_at
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb,
                               COALESCE($12, 0), COALESCE($13, 0), COALESCE($14, 0),
                               COALESCE($15, 0),
                               $16, $17, $18,
+                              $19::uuid, $20::uuid, $21, $22,
                               NOW())
                     ON CONFLICT (username) DO UPDATE SET
                         -- SOVEREIGN-VOICE 2026-04-28: never let bridge cache overwrite a
@@ -384,13 +409,27 @@ class UserStore:
                                                 'last_token_reset',
                                                 'qb_connected', 'qb_realm_id',
                                                 'subscription_token_balance',
-                                                'purchased_token_balance'
+                                                'purchased_token_balance',
+                                                'parent_username',
+                                                'parent_id',
+                                                'head_of_household_id',
+                                                'guardian_id',
+                                                'linked_by'
                                             ])
                                         ),
                                         '{}'::jsonb
                                     ) AS m
                             ) AS b
                         ),
+                        guardian_id = COALESCE(EXCLUDED.guardian_id, users.guardian_id),
+                        linked_by = COALESCE(EXCLUDED.linked_by, users.linked_by),
+                        family_role = COALESCE(
+                            NULLIF(EXCLUDED.family_role, ''), users.family_role
+                        ),
+                        is_minor = CASE
+                            WHEN EXCLUDED.is_minor THEN EXCLUDED.is_minor
+                            ELSE users.is_minor
+                        END,
                         -- QUANTUM-CRYSTAL-ARCH: COALESCE(users, excluded) treated 0 as authoritative,
                         -- so PG could stay at 0 while bridge profile still carried the trial grant.
                         -- When DB total is stuck at 0 and incoming row has tokens, adopt EXCLUDED;
@@ -435,7 +474,8 @@ class UserStore:
                 """, username, password_hash, role, tier, name, email or None,
                     hardware_id, consent_version, sub_status, family_uuid, profile_data,
                     token_balance, sub_bal, purch_bal, login_count,
-                    phone_col, tz_col, tz_src_col)
+                    phone_col, tz_col, tz_src_col,
+                    guardian_col, linked_col, family_role_col, is_minor_col)
             return True
         except Exception as e:
             logger.warning(f"[UserStore] upsert_user failed for {registry_key}: {e}")
