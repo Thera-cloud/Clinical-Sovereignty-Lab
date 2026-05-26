@@ -2035,6 +2035,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         final coachName = (data['coach_name'] as String?)?.trim().isNotEmpty == true
             ? data['coach_name'] as String
             : 'your coach';
+        final handoffTurnId = (data['turn_id'] as String?)?.trim();
         if (mounted) {
           setState(() {
             _chatHistory.add('System: [Reach out to $coachName]');
@@ -2049,8 +2050,12 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
               label: 'Reach out',
               textColor: const Color(0xFFC9A962),
               onPressed: () {
-                // Navigate to coach contact / sessions tab if available.
-                // Minimal handler: leave it to the user to act on the prompt.
+                if (handoffTurnId != null && handoffTurnId.isNotEmpty) {
+                  _wsSend(jsonEncode({
+                    'type': 'coach_handoff_accepted',
+                    'turn_id': handoffTurnId,
+                  }));
+                }
               },
             ),
           ));

@@ -107,18 +107,29 @@ async def dispatch_sensitive_alert(
         try:
             from app.services.coach_notifications import notify_coach
 
+            handoff = alert_type == "client_initiated_handoff"
             urg = (
                 "critical" if risk_level in ("emergency", "critical") else "high"
             )
-            msg = f"[{alert_type}] client={client_username}\n{reason}"
-            if redacted_context:
-                msg += f"\n\nContext:\n{redacted_context}"
+            if handoff:
+                notif_subject = "Sovereign Sanctuary · Client requested coach contact"
+                msg = reason
+                if redacted_context:
+                    msg += f"\n\nConversation context:\n{redacted_context}"
+                msg = (
+                    f"{msg}\n\n(This is a client-initiated coach handoff, not a crisis alert.)"
+                )
+            else:
+                notif_subject = f"Sovereign Sanctuary · {alert_type}"
+                msg = f"[{alert_type}] client={client_username}\n{reason}"
+                if redacted_context:
+                    msg += f"\n\nContext:\n{redacted_context}"
             notif = await notify_coach(
                 db_pool,
                 coach_username,
                 {
                     "urgency": urg,
-                    "subject": f"Sovereign Sanctuary · {alert_type}",
+                    "subject": notif_subject,
                     "message": msg[:4000],
                     "payload": {
                         "alert_type": alert_type,
@@ -141,15 +152,22 @@ async def dispatch_sensitive_alert(
                 from app.services.notifications_service import EmailService
 
                 email_svc = EmailService()
-                ok = await email_svc.send_crisis_alert(
-                    coach_email,
-                    client_username,
-                    alert_type,
-                    details_body[:7500],
-                )
+                if alert_type == "client_initiated_handoff":
+                    ok = await email_svc.send_coach_handoff_request(
+                        coach_email,
+                        client_username,
+                        details_body[:7500],
+                    )
+                else:
+                    ok = await email_svc.send_crisis_alert(
+                        coach_email,
+                        client_username,
+                        alert_type,
+                        details_body[:7500],
+                    )
                 receipt["email_sent"] = bool(ok)
             except Exception as e:
-                logger.warning("sensitive_alert_dispatcher: send_crisis_alert failed: %s", e)
+                logger.warning("sensitive_alert_dispatcher: coach email failed: %s", e)
 
     return receipt
 

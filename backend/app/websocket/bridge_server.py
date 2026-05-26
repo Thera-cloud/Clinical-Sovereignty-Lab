@@ -7302,20 +7302,23 @@ async def _cohort_nevedal_first_last_c_emo(conn, user_ids: List, since: Optional
 
 async def _persist_chat_to_conversation_history(
     db_pool, username: str, user_text: str, ai_text: str, session_id: str = "",
+    turn_id: str = "",
 ):
     """Write text chat turns to conversation_history (PG) so Memory Search and
     deep recall can find them. Fire-and-forget from process_interaction."""
     try:
+        _meta = json.dumps({"turn_id": turn_id}) if turn_id else "{}"
         async with db_pool.acquire() as conn:
             await conn.execute(
                 "INSERT INTO conversation_history "
-                "(user_id, user_text, ai_text, session_id, created_at) "
-                "VALUES ($1, $2, $3, $4, NOW()) "
+                "(user_id, user_text, ai_text, session_id, metadata, created_at) "
+                "VALUES ($1, $2, $3, $4, $5::jsonb, NOW()) "
                 "ON CONFLICT DO NOTHING",
                 username,
                 (user_text or "")[:4000],
                 (ai_text or "")[:4000],
                 session_id or "",
+                _meta,
             )
     except Exception as e:
         logger.warning("_persist_chat_to_conversation_history: %s", e)
@@ -10054,6 +10057,7 @@ class AzureCortex:
                     _ch_session = self.active_sessions.get(uid, "")
                     asyncio.create_task(_persist_chat_to_conversation_history(
                         db_pool, _ch_username, user_text, _final_response, _ch_session,
+                        turn_id=_turn_id,
                     ))
             except Exception:
                 pass
@@ -11793,6 +11797,7 @@ async def handle_client(websocket, path=None):
                 "tts_speak", "tts_cancel", "chat_message", "nate_query",
                 "client_initiated_codeword_proposal",
                 "client_initiated_part_proposal",
+                "coach_handoff_accepted",
                 "biometric_update",
                 # --- Admin data-fetch (dashboard auto-refresh) ---
                 "admin_get_stats", "admin_get_users", "admin_get_crisis_watchlist",
@@ -13003,6 +13008,25 @@ async def handle_client(websocket, path=None):
                     await websocket.send(
                         json.dumps({"type": "error", "message": "Not authenticated"})
                     )
+
+            elif t == "coach_handoff_accepted":
+                if current_profile and current_profile.get("role") == "CLIENT":
+                    _ch_tid = (d.get("turn_id") or "").strip()
+                    if _ch_tid and db_pool:
+                        try:
+                            from app.services.coach_handoff import process_coach_handoff_accepted
+                            _ch_result = await process_coach_handoff_accepted(
+                                db_pool,
+                                current_profile,
+                                _ch_tid,
+                                adaptive_state=_adaptive_states.get(uid),
+                            )
+                            await websocket.send(json.dumps({
+                                "type": "coach_handoff_accepted_ack",
+                                **_ch_result,
+                            }))
+                        except Exception as _ch_err:
+                            logger.warning("coach_handoff_accepted failed: %s", _ch_err)
 
             # === CHAT MESSAGE ===
             elif t == "chat_message":

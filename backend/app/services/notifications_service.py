@@ -475,6 +475,20 @@ TEMPLATES = {
 </div></body></html>
 """,
     },
+    "coach_handoff_request": {
+        "subject": "Coach contact request: {{ client_name }}",
+        "html": """
+<!DOCTYPE html>
+<html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
+<div style="max-width:640px;margin:auto;background:#111;border:1px solid #C9A962;border-radius:8px;padding:24px;">
+  <h2 style="color:#C9A962;margin-top:0;">Client requested coach contact</h2>
+  <p><strong>{{ client_name }}</strong> tapped <em>Reach out</em> in Sanctuary chat and asked you to follow up.</p>
+  <p style="color:#94a3b8;font-size:13px;">This is a client-initiated handoff — not a crisis alert.</p>
+  <pre style="white-space:pre-wrap;background:#0a0a0a;padding:12px;border-radius:6px;color:#cbd5e1;">{{ details }}</pre>
+  <p style="color:#64748b;font-size:12px;">Sent by Sovereign Sanctuary · Little Nate coach handoff.</p>
+</div></body></html>
+""",
+    },
 }
 
 
@@ -625,6 +639,32 @@ class EmailService:
             logger.warning(
                 "send_crisis_alert failed alert_type=%s client=%s dest=%s",
                 alert_type,
+                (client_name or "")[:32],
+                dest[:32],
+            )
+        return ok
+
+    async def send_coach_handoff_request(
+        self,
+        to_email: Optional[str],
+        client_name: str,
+        details: str,
+    ) -> bool:
+        """Coach-facing email for client-initiated handoff (not crisis escalation)."""
+        dest = (to_email or "").strip()
+        if not dest:
+            return False
+        ok = await self.send_email(
+            dest,
+            "coach_handoff_request",
+            {
+                "client_name": client_name or "Client",
+                "details": details or "",
+            },
+        )
+        if not ok:
+            logger.warning(
+                "send_coach_handoff_request failed client=%s dest=%s",
                 (client_name or "")[:32],
                 dest[:32],
             )
