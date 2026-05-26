@@ -8,8 +8,14 @@ from app.services.coach_handoff import (
     generate_handoff_summary,
     process_coach_handoff_accepted,
 )
+from app.services.coach_notifications import _normalize_phone_e164
 from app.services.little_nate_adaptive import SessionState, handle_coach_offer_response
 from app.services.sensitive_alert_dispatcher import dispatch_sensitive_alert
+
+
+def test_normalize_coach_phone_e164():
+    assert _normalize_phone_e164("5865243969") == "+15865243969"
+    assert _normalize_phone_e164("+1 (586) 524-3969") == "+15865243969"
 
 
 class _AcquireCtx:
@@ -175,9 +181,9 @@ async def test_dispatch_chain_inserts_row_and_invokes_sms_email():
         "app.services.pii_redaction.redact_pii",
         return_value=[{"role": "system", "content": "summary body"}],
     ), patch.dict(os.environ, env, clear=False), patch(
-        "twilio.rest.Client",
-        return_value=twilio_client,
-    ), patch(
+        "app.services.coach_notifications._send_coach_sms",
+        return_value=True,
+    ) as sms_mock, patch(
         "app.services.notifications_service.EmailService",
     ) as email_svc_cls:
         email_svc_cls.return_value.send_coach_handoff_request = email_send
@@ -204,7 +210,10 @@ async def test_dispatch_chain_inserts_row_and_invokes_sms_email():
 
     assert len(inserts) == 1
     assert channel_updates, "expected channels UPDATE after SMS"
-    twilio_messages.assert_called_once()
+    sms_mock.assert_called_once()
+    called_phone, called_body = sms_mock.call_args[0]
+    assert called_phone == "5865243969"
+    assert "coach handoff" in called_body.lower() or "handoff" in called_body.lower()
     email_send.assert_awaited_once()
     assert receipt["notification_id"] == 501
     assert receipt["email_sent"] is True
@@ -273,9 +282,9 @@ async def test_process_handoff_end_to_end_without_dispatch_stub():
         },
         clear=False,
     ), patch(
-        "twilio.rest.Client",
-        return_value=twilio_client,
-    ), patch(
+        "app.services.coach_notifications._send_coach_sms",
+        return_value=True,
+    ) as sms_mock, patch(
         "app.services.notifications_service.EmailService",
     ) as email_svc_cls:
         email_svc_cls.return_value.send_coach_handoff_request = email_send
@@ -291,5 +300,5 @@ async def test_process_handoff_end_to_end_without_dispatch_stub():
     assert result["status"] == "accepted"
     assert result["notification_id"] == 502
     assert len(inserts) == 1
-    twilio_messages.assert_called_once()
+    sms_mock.assert_called_once()
     email_send.assert_awaited_once()

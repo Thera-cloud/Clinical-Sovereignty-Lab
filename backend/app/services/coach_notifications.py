@@ -8,9 +8,56 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("nate.coach_notifications")
+
+
+def _normalize_phone_e164(phone: str) -> str:
+    """Normalize profile phone to E.164 for Twilio (+1XXXXXXXXXX for US NANP)."""
+    digits = re.sub(r"[^\d]", "", phone or "")
+    if len(digits) == 10:
+        digits = "1" + digits
+    if digits and not digits.startswith("+"):
+        digits = "+" + digits
+    return digits
+
+
+def _send_coach_sms(to_phone: str, body: str) -> bool:
+    """Send coach SMS via Messaging Service (A2P) when configured."""
+    to_phone = _normalize_phone_e164(to_phone)
+    if not to_phone or len(re.sub(r"[^\d]", "", to_phone)) < 11:
+        logger.warning("coach SMS skipped: invalid phone %s", (to_phone or "")[:8])
+        return False
+    sid = os.getenv("TWILIO_ACCOUNT_SID", "")
+    token = os.getenv("TWILIO_AUTH_TOKEN", "")
+    if not sid or not token:
+        logger.warning("coach SMS skipped: Twilio credentials missing")
+        return False
+    try:
+        from twilio.rest import Client
+
+        client = Client(sid, token)
+        kwargs: Dict[str, Any] = {"to": to_phone, "body": body[:1400]}
+        messaging_sid = os.getenv("TWILIO_MESSAGING_SERVICE_SID", "")
+        if messaging_sid:
+            kwargs["messaging_service_sid"] = messaging_sid
+        else:
+            from_num = os.getenv("TWILIO_PHONE_NUMBER", "")
+            if not from_num:
+                logger.warning("coach SMS skipped: no messaging service or from number")
+                return False
+            kwargs["from_"] = from_num
+        msg = client.messages.create(**kwargs)
+        if msg.sid:
+            logger.info("coach SMS sent to %s sid=%s", to_phone[:8], msg.sid)
+            return True
+        logger.warning("coach SMS failed: empty sid for %s", to_phone[:8])
+        return False
+    except Exception as e:
+        logger.warning("coach SMS failed for %s: %s", to_phone[:8], e)
+        return False
 
 
 async def notify_coach(
@@ -55,18 +102,10 @@ async def notify_coach(
 
     if urgency in ("critical", "high"):
         coach_phone, coach_email = await _lookup_coach_contact(pool, coach_username)
-        if coach_phone and os.getenv("TWILIO_ACCOUNT_SID") and os.getenv("TWILIO_AUTH_TOKEN"):
-            try:
-                from twilio.rest import Client
-
-                client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
-                from_num = os.getenv("TWILIO_PHONE_NUMBER", "")
-                if from_num:
-                    client.messages.create(to=coach_phone, from_=from_num, body=message[:1400])
-                    channels.append("sms")
-                    sent["sms"] = True
-            except Exception as e:
-                logger.warning("coach SMS failed: %s", e)
+        if coach_phone:
+            if _send_coach_sms(coach_phone, message):
+                channels.append("sms")
+                sent["sms"] = True
 
         if coach_email and urgency == "critical" and os.getenv("SENDGRID_API_KEY"):
             ok = await _send_sendgrid_simple(coach_email, subject[:200], message)
