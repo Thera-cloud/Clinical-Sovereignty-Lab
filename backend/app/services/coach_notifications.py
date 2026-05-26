@@ -9,7 +9,9 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional
+from xml.sax.saxutils import escape
 
 logger = logging.getLogger("nate.coach_notifications")
 
@@ -25,7 +27,7 @@ def _normalize_phone_e164(phone: str) -> str:
 
 
 def _send_coach_sms(to_phone: str, body: str) -> bool:
-    """Send coach SMS via Messaging Service (A2P) when configured."""
+    """Send coach SMS via Messaging Service (A2P). Returns True only on carrier delivery."""
     to_phone = _normalize_phone_e164(to_phone)
     if not to_phone or len(re.sub(r"[^\d]", "", to_phone)) < 11:
         logger.warning("coach SMS skipped: invalid phone %s", (to_phone or "")[:8])
@@ -50,13 +52,59 @@ def _send_coach_sms(to_phone: str, body: str) -> bool:
                 return False
             kwargs["from_"] = from_num
         msg = client.messages.create(**kwargs)
-        if msg.sid:
-            logger.info("coach SMS sent to %s sid=%s", to_phone[:8], msg.sid)
-            return True
-        logger.warning("coach SMS failed: empty sid for %s", to_phone[:8])
+        if not msg.sid:
+            logger.warning("coach SMS failed: empty sid for %s", to_phone[:8])
+            return False
+
+        # A2P 30034: Twilio accepts the API call but carriers block undelivered messages.
+        for _ in range(5):
+            time.sleep(1.2)
+            fetched = client.messages(msg.sid).fetch()
+            status = (fetched.status or "").lower()
+            if status == "delivered":
+                logger.info("coach SMS delivered to %s sid=%s", to_phone[:8], msg.sid)
+                return True
+            if status in ("undelivered", "failed", "canceled"):
+                logger.warning(
+                    "coach SMS blocked for %s: status=%s error=%s "
+                    "(Twilio A2P campaign FAILED → carrier error 30034; fix in Twilio console)",
+                    to_phone[:8],
+                    fetched.status,
+                    fetched.error_code,
+                )
+                return False
+        logger.warning(
+            "coach SMS not confirmed for %s sid=%s last_status=%s",
+            to_phone[:8],
+            msg.sid,
+            status,
+        )
         return False
     except Exception as e:
         logger.warning("coach SMS failed for %s: %s", to_phone[:8], e)
+        return False
+
+
+def _send_coach_voice_ping(to_phone: str, speak_text: str) -> bool:
+    """Outbound voice alert when SMS is blocked (A2P). Uses voice number, not messaging service."""
+    to_phone = _normalize_phone_e164(to_phone)
+    from_num = os.getenv("TWILIO_PHONE_NUMBER", "")
+    sid = os.getenv("TWILIO_ACCOUNT_SID", "")
+    token = os.getenv("TWILIO_AUTH_TOKEN", "")
+    if not to_phone or not from_num or not sid or not token:
+        return False
+    try:
+        from twilio.rest import Client
+
+        client = Client(sid, token)
+        twiml = f'<Response><Say voice="Polly.Joanna">{escape(speak_text)}</Say></Response>'
+        call = client.calls.create(to=to_phone, from_=from_num, twiml=twiml, timeout=25)
+        if call.sid:
+            logger.info("coach voice ping to %s sid=%s", to_phone[:8], call.sid)
+            return True
+        return False
+    except Exception as e:
+        logger.warning("coach voice ping failed for %s: %s", to_phone[:8], e)
         return False
 
 
@@ -75,7 +123,13 @@ async def notify_coach(
     payload = notification.get("payload") or {}
 
     channels: List[str] = ["in_app"]
-    sent: Dict[str, bool] = {"in_app": False, "sms": False, "email": False, "push": False}
+    sent: Dict[str, bool] = {
+        "in_app": False,
+        "sms": False,
+        "email": False,
+        "push": False,
+        "voice": False,
+    }
     notification_id = 0
 
     if pool:
@@ -106,6 +160,15 @@ async def notify_coach(
             if _send_coach_sms(coach_phone, message):
                 channels.append("sms")
                 sent["sms"] = True
+            elif payload.get("alert_type") == "client_initiated_handoff":
+                voice_script = (
+                    "Hello. This is Sovereign Sanctuary. One of your clients asked Little Nate "
+                    "to reach out to you. This is a coach handoff request, not a crisis alert. "
+                    "Please check your email for details."
+                )
+                if _send_coach_voice_ping(coach_phone, voice_script):
+                    channels.append("voice")
+                    sent["voice"] = True
 
         if coach_email and urgency == "critical" and os.getenv("SENDGRID_API_KEY"):
             ok = await _send_sendgrid_simple(coach_email, subject[:200], message)
