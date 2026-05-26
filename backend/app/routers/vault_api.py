@@ -509,6 +509,7 @@ def create_vault_router(db_pool) -> APIRouter:
                     source=source,
                     raw_data=content,
                     content_sentinel_scan=True,
+                    tier=tier,
                 )
             except ValueError as e:
                 raise HTTPException(status_code=400, detail="IMPORT_FAILED")

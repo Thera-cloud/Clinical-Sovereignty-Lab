@@ -235,6 +235,7 @@ class TransferCrystalBuilder:
         source: str,
         raw_data: bytes,
         content_sentinel_scan: bool = True,
+        tier: str = "STANDARD",
     ) -> dict:
         """
         Parse, scan, batch-analyze, synthesize, and store a transfer crystal.
@@ -273,11 +274,10 @@ class TransferCrystalBuilder:
         if not messages:
             raise ValueError("No user messages found in export")
 
-        # ChatGPT enhanced parser returns conversations; others return flat messages
+        # Conversation-shaped parsers (ChatGPT, Claude) return vault-importable threads
         conversations = None
-        if source == "chatgpt" and messages and isinstance(messages[0], dict) and "messages" in messages[0]:
+        if messages and isinstance(messages[0], dict) and "messages" in messages[0]:
             conversations = messages
-            # Flatten to user messages for crystal analysis
             messages = []
             for conv in conversations:
                 for m in conv.get("messages", []):
@@ -371,7 +371,8 @@ class TransferCrystalBuilder:
                 vault_import_stats = await self.import_to_vault(
                     member_id=member_id,
                     conversations=conversations,
-                    tier="STANDARD",  # Tier should be passed from caller
+                    tier=tier,
+                    source_platform=source,
                 )
             except Exception as e:
                 logger.warning("Vault import failed (crystal still saved): %s", e)
@@ -673,41 +674,137 @@ class TransferCrystalBuilder:
 
         return conversations
 
+    @staticmethod
+    def _extract_claude_text(item: dict) -> str:
+        """Extract plain text from a Claude export message object."""
+        if not isinstance(item, dict):
+            return ""
+
+        for key in ("text", "content"):
+            val = item.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()[:MAX_MESSAGE_TEXT_CHARS]
+            if isinstance(val, list):
+                parts = []
+                for m in val:
+                    if isinstance(m, dict):
+                        if m.get("type") == "p" and m.get("data"):
+                            parts.append(str(m["data"]))
+                        elif m.get("text"):
+                            parts.append(str(m["text"]))
+                    elif isinstance(m, str):
+                        parts.append(m)
+                joined = "\n".join(p for p in parts if p).strip()
+                if joined:
+                    return joined[:MAX_MESSAGE_TEXT_CHARS]
+
+        msg_data = item.get("message")
+        if isinstance(msg_data, dict):
+            return TransferCrystalBuilder._extract_claude_text(msg_data)
+        if isinstance(msg_data, list):
+            return TransferCrystalBuilder._extract_claude_text({"content": msg_data})
+        if isinstance(msg_data, str) and msg_data.strip():
+            return msg_data.strip()[:MAX_MESSAGE_TEXT_CHARS]
+        return ""
+
+    @staticmethod
+    def _claude_item_role(item: dict) -> Optional[str]:
+        """Map Claude export fields to user/assistant roles."""
+        sender = str(item.get("sender") or item.get("role") or "").lower()
+        if sender in ("human", "user"):
+            return "user"
+        if sender in ("assistant", "claude"):
+            return "assistant"
+
+        msg_type = str(item.get("type") or "").lower()
+        if msg_type == "prompt":
+            return "user"
+        if msg_type in ("completion", "assistant", "response"):
+            return "assistant"
+        return None
+
     def parse_claude(self, raw_data: bytes) -> List[dict]:
-        """Parse Claude JSON export. Extract user messages (type == 'prompt')."""
-        messages: List[dict] = []
+        """Parse Claude JSON export into conversation objects (user + assistant turns)."""
+        conversations: List[dict] = []
 
         try:
             data = json.loads(raw_data.decode("utf-8", errors="replace"))
             chats = data.get("chats") or data.get("conversations") or []
+            if isinstance(data, list):
+                chats = data
 
-            for chat in chats:
+            for chat in chats[:MAX_CONVERSATIONS]:
                 if not isinstance(chat, dict):
                     continue
-                items = chat.get("chats") or chat.get("messages") or chat.get("items") or [chat]
-                for item in items:
+
+                raw_items = (
+                    chat.get("chat_messages")
+                    or chat.get("messages")
+                    or chat.get("items")
+                    or chat.get("chats")
+                    or []
+                )
+                if not raw_items and chat.get("type") == "prompt":
+                    raw_items = [chat]
+
+                messages: List[dict] = []
+                for item in raw_items:
                     if not isinstance(item, dict):
                         continue
-                    if item.get("type") == "prompt":
-                        msg_data = item.get("message") or item.get("content") or []
-                        if isinstance(msg_data, list):
-                            text_parts = []
-                            for m in msg_data:
-                                if isinstance(m, dict) and m.get("type") == "p":
-                                    text_parts.append(m.get("data", ""))
-                                elif isinstance(m, str):
-                                    text_parts.append(m)
-                            text = "\n".join(text_parts)
-                        else:
-                            text = str(msg_data) if msg_data else ""
-                        if text.strip():
-                            ts = item.get("create_time") or item.get("timestamp") or chat.get("created_at")
-                            messages.append({"text": text, "timestamp": ts})
+                    role = self._claude_item_role(item)
+                    if not role:
+                        continue
+                    text = self._extract_claude_text(item)
+                    if not text:
+                        continue
+                    ts = (
+                        item.get("created_at")
+                        or item.get("create_time")
+                        or item.get("timestamp")
+                        or chat.get("created_at")
+                        or chat.get("create_time")
+                    )
+                    messages.append({
+                        "role": role,
+                        "text": text,
+                        "timestamp": ts,
+                    })
+
+                if not messages:
+                    continue
+                if not any(m.get("role") == "user" for m in messages):
+                    continue
+
+                messages.sort(key=lambda m: m.get("timestamp") or 0)
+                title = (
+                    chat.get("name")
+                    or chat.get("title")
+                    or (messages[0].get("text", "")[:80] or "Untitled")
+                )
+                create_time = chat.get("created_at") or chat.get("create_time")
+                if isinstance(create_time, str):
+                    try:
+                        create_time = datetime.fromisoformat(
+                            create_time.replace("Z", "+00:00")
+                        ).timestamp()
+                    except (ValueError, OSError, TypeError):
+                        create_time = messages[0].get("timestamp") or 0
+                elif not create_time:
+                    create_time = messages[0].get("timestamp") or 0
+
+                conversations.append({
+                    "title": str(title)[:255],
+                    "create_time": create_time,
+                    "messages": messages[:MAX_MESSAGES_PER_CONV],
+                    "folder_id": "",
+                    "folder_name": "",
+                })
+
         except Exception as e:
             logger.exception("Claude parse error")
             raise ValueError(f"Claude parse failed: {e}") from e
 
-        return messages
+        return conversations
 
     def parse_gemini(self, raw_data: bytes) -> List[dict]:
         """Parse Google Takeout Gemini export."""
@@ -1022,6 +1119,7 @@ class TransferCrystalBuilder:
         member_id: str,
         conversations: List[dict],
         tier: str = "STANDARD",
+        source_platform: str = "chatgpt",
     ) -> dict:
         """
         Import parsed conversations into the Vault as browseable items.
@@ -1116,7 +1214,7 @@ class TransferCrystalBuilder:
 
             # Build conversation JSON for storage
             conv_json = json.dumps({
-                "source": "chatgpt",
+                "source": source_platform,
                 "title": conv.get("title", "Untitled"),
                 "create_time": conv.get("create_time"),
                 "messages": conv.get("messages", []),
@@ -1173,7 +1271,7 @@ class TransferCrystalBuilder:
             preview = "\n\n".join(_conv_parts)[:50000]
 
             # Themes
-            themes = ["imported", "chatgpt"]
+            themes = ["imported", source_platform]
             folder_name = conv.get("folder_name")
             if folder_name:
                 themes.append(folder_name)
