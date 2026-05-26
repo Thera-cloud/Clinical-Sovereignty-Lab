@@ -309,6 +309,8 @@ services:
       - NATE_CHAT_URL=${NATE_CHAT_URL:-}
       - NATE_CHAT_KEY=${NATE_CHAT_KEY:-}
       - NATE_CHAT_MODEL=${NATE_CHAT_MODEL:-grok-4-1-fast-non-reasoning}
+      - ENABLE_UNIVERSAL_SI_COACH_ALERT=${ENABLE_UNIVERSAL_SI_COACH_ALERT:-false}
+      - SI_COACH_ALERT_DEDUP_HOURS=${SI_COACH_ALERT_DEDUP_HOURS:-24}
     ports:
       - "127.0.0.1:${WEBSOCKET_PORT:-8765}:8765"
     depends_on:
