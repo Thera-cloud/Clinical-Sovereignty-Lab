@@ -6,6 +6,9 @@ import os
 import sys
 import time
 
+if "/app" not in sys.path:
+    sys.path.insert(0, "/app")
+
 import asyncpg
 
 
