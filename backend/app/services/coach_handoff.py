@@ -147,8 +147,8 @@ async def generate_handoff_summary(
                         SELECT user_text, ai_text, created_at
                           FROM conversation_history
                          WHERE user_id = ANY($1::text[])
-                           AND created_at >= $2 - INTERVAL '45 minutes'
-                           AND created_at <= $2 + INTERVAL '10 minutes'
+                           AND created_at >= ($2::timestamptz - INTERVAL '45 minutes')
+                           AND created_at <= ($2::timestamptz + INTERVAL '10 minutes')
                          ORDER BY created_at ASC
                         """,
                         user_ids,
