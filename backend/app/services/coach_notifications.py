@@ -169,6 +169,15 @@ async def notify_coach(
                 if _send_coach_voice_ping(coach_phone, voice_script):
                     channels.append("voice")
                     sent["voice"] = True
+            elif payload.get("alert_type") == "suicidal_ideation_escalation":
+                voice_script = (
+                    "Hello. This is Sovereign Sanctuary. Urgent: one of your clients used "
+                    "language that may indicate suicidal or self-harm risk. Please check your "
+                    "email and the coach portal immediately."
+                )
+                if _send_coach_voice_ping(coach_phone, voice_script):
+                    channels.append("voice")
+                    sent["voice"] = True
 
         if coach_email and urgency == "critical" and os.getenv("SENDGRID_API_KEY"):
             ok = await _send_sendgrid_simple(coach_email, subject[:200], message)

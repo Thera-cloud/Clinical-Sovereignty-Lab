@@ -8544,6 +8544,23 @@ class AzureCortex:
             except Exception as _gate_e:
                 print(f">>> [CLINICAL GATE ERROR] {_gate_e!r} — falling through to normal pipeline")
 
+        # QUANTUM-CRYSTAL-ARCH: Universal SI coach alert (CLIENT only, feature-flagged)
+        if _role == "CLIENT" and not user_text.startswith("[SEARCH SYNTHESIS]") and not user_text.startswith("[DOJO SIMULATION"):
+            try:
+                if db_pool:
+                    from app.services.suicide_ideation_coach_alert import maybe_dispatch_si_coach_alert
+
+                    asyncio.create_task(
+                        maybe_dispatch_si_coach_alert(
+                            db_pool,
+                            profile,
+                            user_text,
+                            turn_id=_turn_id,
+                        )
+                    )
+            except Exception as _si_alert_e:
+                print(f">>> [SI_COACH_ALERT ERROR] {_si_alert_e!r}")
+
         # Check if this is a Dojo simulation - skip token deduction for training
         is_dojo_simulation = user_text.startswith("[DOJO SIMULATION")
         
