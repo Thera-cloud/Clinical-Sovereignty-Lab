@@ -56,9 +56,35 @@ async def validate_before_send(
             context={"client_message": " ".join(client_messages_this_session[-5:])},
         )
 
+        cross_member_fired = "cross_member_private_attribution" in warnings
         layer8_fired = any(
             "unverified_factual_assertion" in w for w in warnings
         )
+        if cross_member_fired:
+            logger.warning(
+                "Layer 8c cross-member attribution: blocked response "
+                "for user=%s session=%s",
+                user_id, session_id,
+            )
+            if db_pool:
+                try:
+                    await _validator.log_warnings(
+                        warnings, nate_response,
+                        session_id=session_id,
+                        user_id=user_id,
+                        odpe_signal="TENSION",
+                    )
+                except Exception:
+                    pass
+            return {
+                "safe": False,
+                "reason": "cross_member_private_attribution",
+                "redirect": (
+                    "I want to be clear \u2014 I don\u2019t share what other family "
+                    "members tell me in private. What\u2019s coming up for you around that?"
+                ),
+            }
+
         if not layer8_fired:
             return {"safe": True}
 

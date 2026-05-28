@@ -376,6 +376,53 @@ class NateResponseValidator:
         re.IGNORECASE,
     )
 
+    # Layer 8c — Cross-member private attribution (family manipulation / FSF fishing).
+    # Nate must never imply another member disclosed privately to him in 1:1.
+    CROSS_MEMBER_ATTRIBUTION_PATTERNS = [
+        re.compile(
+            r'\b(?:your|ur)\s+(?:spouse|partner|wife|husband|mom|dad|mother|father'
+            r'|brother|sister|son|daughter|parent|child)\s+'
+            r'(?:told|said|shared|mentioned|confided|revealed)\s+(?:to\s+)?me\b',
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r'\b(?:member\s+[ab]|partner\s+[ab])\b.{0,40}'
+            r'\b(?:told|said|shared|mentioned|confided)\s+(?:to\s+)?me\b',
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r'\bwhat\s+(?:he|she|they)\s+(?:told|shared with|said to)\s+me'
+            r'\s+(?:privately|in confidence|in private|alone)\b',
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r'\bfrom\s+what\s+(?:he|she|they|your\s+\w+)\s+'
+            r'(?:told|shared)\s+(?:with\s+)?me\b',
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r'\bin\s+(?:his|her|their)\s+'
+            r'(?:private|individual|1[-:]?1|one-on-one)\s+'
+            r'(?:session|conversation|chat)\b',
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r'\bwhen\s+(?:he|she|they)\s+(?:was|were)\s+'
+            r'(?:here|talking|with me)\s+(?:alone|privately|in private)\b',
+            re.IGNORECASE,
+        ),
+    ]
+    # Client-relay phrasing: spouse told *you*, not Nate — safe to reflect.
+    CROSS_MEMBER_CLIENT_RELAY = re.compile(
+        r'\b(?:told|said|shared|mentioned|confided)\s+(?:to\s+)?you\b',
+        re.IGNORECASE,
+    )
+    CROSS_MEMBER_SANCTUARY_SAFE = re.compile(
+        r'\b(?:in sanctuary|in the room|when you both|between you both|'
+        r'the cycle|system dynamic|shared theme|you both (?:said|shared))\b',
+        re.IGNORECASE,
+    )
+
     # Layer 9 — Therapeutic boundary: Nate must never cross clinical lines
     THERAPEUTIC_BOUNDARY_PATTERNS = [
         re.compile(r'\byou\s+(should|must|need\s+to)\s+(take|stop\s+taking|increase|decrease|change)\s+.*\b(medication|dose|mg|prescription|drug)\b', re.IGNORECASE),
@@ -486,6 +533,35 @@ class NateResponseValidator:
             if self.PERSONAL_RELATION_PATTERN.search(full_sentence):
                 continue
             warnings.append("unverified_factual_assertion_about_person")
+            break
+
+        # Layer 8c — Block invented cross-member private attribution (manipulation vector).
+        client_message = context.get("client_message", "")
+        family_names = context.get("family_member_names") or ()
+        for patt in self.CROSS_MEMBER_ATTRIBUTION_PATTERNS:
+            match = patt.search(response)
+            if not match:
+                continue
+            matched_text = match.group(0)
+            if self.CROSS_MEMBER_SANCTUARY_SAFE.search(response):
+                break
+            if self.CROSS_MEMBER_CLIENT_RELAY.search(response):
+                break
+            if client_message and matched_text.lower() in client_message.lower():
+                break
+            if family_names:
+                name_hit = any(
+                    re.search(rf"\b{re.escape(n)}\b", matched_text, re.I)
+                    for n in family_names
+                    if n and len(n) > 2
+                )
+                if name_hit and client_message and any(
+                    re.search(rf"\b{re.escape(n)}\b", client_message, re.I)
+                    for n in family_names
+                    if n and len(n) > 2
+                ):
+                    break
+            warnings.append("cross_member_private_attribution")
             break
 
         # Layer 9 — Therapeutic boundary: flag clinical overreach
@@ -631,8 +707,12 @@ class NateResponseValidator:
             "therapeutic_boundary_violation",
             "unsourced_scientific_claim",
             "unverified_factual_assertion",
+            "cross_member_private_attribution",
         )
-        return any(w.startswith(HIGH_PREFIXES) for w in warnings)
+        return any(
+            w.startswith(HIGH_PREFIXES) or w == "cross_member_private_attribution"
+            for w in warnings
+        )
 
     async def log_warnings(
         self,

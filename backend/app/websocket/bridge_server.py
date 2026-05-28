@@ -8644,7 +8644,17 @@ class AzureCortex:
             async with _cpool.acquire() as _iconn:
                 return await _get_section1_for_nate(_iconn, _uname)
 
-        relational_context, checkin_context, crystal_context, pg_history_context, intake_context = await asyncio.gather(
+        async def _fetch_fsf_context():
+            if not _cpool or _role != "CLIENT":
+                return ""
+            try:
+                from app.services.family_system_field import build_fsf_chat_context
+                return await build_fsf_chat_context(_cpool, _uname or _hw_id, user_text)
+            except Exception as _fsf_err:
+                print(f">>> [FSF] context error (non-fatal): {_fsf_err}")
+                return ""
+
+        relational_context, checkin_context, crystal_context, pg_history_context, intake_context, fsf_context = await asyncio.gather(
             _timed("relational", self._get_relational_context(profile)),
             _timed("checkin", self._get_checkin_context(profile)),
             _timed("crystals", recall_crystals_for_context(
@@ -8653,6 +8663,7 @@ class AzureCortex:
             )),
             _timed("pg_history", _fetch_pg_history_for_chat(_cpool, _uname, _hw_id, limit=15)),
             _timed("intake_s1", _fetch_intake_context()),
+            _timed("fsf", _fetch_fsf_context()),
         )
         _live_turn_context = _format_live_turn_context(uid)
         _critical_recall_context = _format_critical_recall_facts(uid)
@@ -9169,6 +9180,8 @@ class AzureCortex:
 
         FAMILY SANCTUARY HISTORY (This is the users OWN conversation history from sessions they participated in. It is appropriate and therapeutic to reference their words back to them. This is NOT confidential information about others - it is their own experience.):
         {sanctuary_context}
+
+        {fsf_context}
 
         {checkin_context}
         {"Reference these check-in responses naturally. The user shared this outside of sessions — acknowledge it warmly without being intrusive." if checkin_context else ""}
@@ -28440,7 +28453,16 @@ IMPORTANT:
                         _lw_log.info("sanctuary_complete lived_wisdom stored=%s sanctuary=%s", _lw_n, sanctuary_id)
                     except Exception as _lw_e:
                         _lw_log.warning("sanctuary_complete lived_wisdom: %s", _lw_e)
-                
+
+                # QUANTUM-CRYSTAL-ARCH — FSF ingest (de-identified system brief; no Bridge tables)
+                if db_pool and sanctuary_data.get("family_id"):
+                    try:
+                        from app.services.family_system_field import ingest_sanctuary_session
+                        _fsf_n = await ingest_sanctuary_session(db_pool, sanctuary_data)
+                        print(f">>> [FSF] sanctuary ingest rows={_fsf_n} id={sanctuary_id}")
+                    except Exception as _fsf_e:
+                        print(f">>> [FSF] sanctuary ingest error: {_fsf_e}")
+
                 # ============================================
                 # SEND PERSONALIZED SUMMARY TO EACH MEMBER
                 # ============================================
