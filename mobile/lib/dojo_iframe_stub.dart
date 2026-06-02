@@ -18,3 +18,13 @@ void launchDojoUrl(String url) {
 void setDojoIframePointerEvents(bool enabled) {
   // No-op on non-web
 }
+
+/// Stub - no-op on non-web
+void notifyDojoIframeAuth({
+  required String token,
+  required String hw,
+  required String ws,
+}) {}
+
+/// Stub - no-op on non-web
+void disposeDojoIframe() {}

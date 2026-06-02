@@ -456,20 +456,51 @@
             clearChat();
         }
 
-        // URL-based auth (works for new-tab launch from Coach Command)
+        // URL-based auth (new-tab launch) OR postMessage auth (Coach Command iframe embed)
         var urlParams = new URLSearchParams(window.location.search || "");
+        var embedCoach = (urlParams.get("embed") || "") === "coach";
         var tokenParam = (urlParams.get("token") || "").trim();
         var hwParam = (urlParams.get("hw") || "").trim();
         var wsParam = (urlParams.get("ws") || "").trim();
-        // Bridge token for REST (/api/dojo/* uses require_coach → Bearer). URL token for coach iframe; password flow sets from login_success.
+        // Bridge token for REST (/api/dojo/* uses require_coach → Bearer).
         var restBearerToken = tokenParam;
         if (wsParam) {
             SERVER_URL = wsParam;
         }
 
-        // Detect if user came from Coach Command (has token) vs admin Night School flow
-        var isFromCoachCommand = !!tokenParam;
+        // Detect if user came from Coach Command vs admin Night School flow
+        var isFromCoachCommand = !!tokenParam || embedCoach;
         var currentUserRole = null;
+
+        function applyParentAuth(payload) {
+            if (!payload) return false;
+            var t = (payload.token || "").trim();
+            if (!t) return false;
+            tokenParam = t;
+            restBearerToken = t;
+            var hw = (payload.hw || "").trim();
+            var ws = (payload.ws || "").trim();
+            if (hw) hwParam = hw;
+            if (ws) SERVER_URL = ws;
+            isFromCoachCommand = true;
+            updateBackButton();
+            return true;
+        }
+
+        function reconnectDojoAuth() {
+            if (socket) {
+                try { socket.onclose = null; socket.close(); } catch (e) {}
+                socket = null;
+            }
+            connect();
+        }
+
+        window.addEventListener("message", function(event) {
+            if (!event.data || event.data.type !== "ln_dojo_auth") return;
+            if (event.origin !== window.location.origin) return;
+            if (!applyParentAuth(event.data)) return;
+            reconnectDojoAuth();
+        });
 
         function updateBackButton() {
             var btn = document.getElementById("backBtn");
@@ -551,10 +582,11 @@
         }
 
         function init() {
-            // Update back button based on entry flow
             updateBackButton();
-            // If opened from Coach Command, we should have a token in the URL.
-            // If not, fall back to sessionStorage-based login (admin/dev flows).
+            // Coach Command iframe: parent sends ln_dojo_auth via postMessage (no URL token).
+            if (embedCoach && !tokenParam) {
+                return;
+            }
             if (!tokenParam && !sessionStorage.getItem("username")) {
                 window.location.href = "index.html";
                 return;
@@ -563,6 +595,9 @@
         }
 
         function connect() {
+            if (socket && (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN)) {
+                return;
+            }
             socket = new WebSocket(SERVER_URL);
             socket.onopen = function() {
                 // Prefer token auth (works across tabs)
@@ -623,6 +658,10 @@
             }
 
             if (data.type === "login_failed" || data.type === "auth_failed") {
+                if (embedCoach) {
+                    console.warn("Dojo auth failed — waiting for parent token refresh:", data.message || "");
+                    return;
+                }
                 alert((data.message || "Authentication failed") + "");
                 window.location.href = "index.html";
                 return;

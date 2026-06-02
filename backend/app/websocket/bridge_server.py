@@ -9143,6 +9143,11 @@ class AzureCortex:
         - You never retaliate. You hold their worst moment without absorbing it or reflecting it back.
         - Hard safety limits still apply (crisis protocol, mandatory reporting language). But within those boundaries, you allow the full range of human testing -- because meeting it with love is how trust is built.
 
+        SCHEDULING (system-assisted, accuracy rule):
+        - You can help a client book a session with their coach. When they ask to schedule or want open times, the SYSTEM supplies the real available slots — you NEVER invent or guess times yourself.
+        - Only reference times that appear in a system-provided slot list. If you have no slot list, ask which day they'd like and let the system fetch availability.
+        - A request is NOT a confirmed booking. Say "requested" (coach approval may be pending) and never claim a session is "booked" on your own — wait for the system's confirmation.
+
         {relational_context}
 
         {intake_context}
@@ -13129,6 +13134,22 @@ async def handle_client(websocket, path=None):
                         print(f">>> [DBG-H1] nate_query received uid={uid} len={len(text)} sockets={len(cortex.sockets.get(uid, set()))} ts={_dbg_ts}")
                         # #endregion
 
+                        # CHAT-SCHEDULING: feature-flagged hook. On clear scheduling intent,
+                        # emit Nate prose + a structured scheduling_slots frame (real DB slots,
+                        # never LLM-invented) and short-circuit. Booking reuses client_book_session.
+                        if os.environ.get("ENABLE_CHAT_SCHEDULING", "").lower() in ("true", "1", "yes"):
+                            try:
+                                from app.services.client_scheduling_assistant import handle_turn as _sched_turn
+                                _sched = await _sched_turn(current_profile, text, db_pool, registry_loader=load_registry)
+                                if _sched.get("handled"):
+                                    await websocket.send(json.dumps({"type": "nate_response", "text": _sched.get("response", "")}))
+                                    if _sched.get("payload"):
+                                        await websocket.send(json.dumps(_sched["payload"]))
+                                    print(f">>> [CHAT-SCHED] handled uid={uid}")
+                                    continue
+                            except Exception as _sched_err:
+                                print(f">>> [CHAT-SCHED] hook error uid={uid}: {_sched_err}")
+
                         # --- Conversation Export Detection ---
                         # 1) Check if this is a follow-up to a pending export
                         export_intent = export_intent_detector.check_pending(uid, text)
@@ -13216,7 +13237,12 @@ async def handle_client(websocket, path=None):
             elif t == "client_get_coach_availability":
                 print(f">>> [AVAILABILITY-DEBUG] entry: uid={uid} profile_present={bool(current_profile)} role={current_profile.get('role') if current_profile else 'NONE'}")  # AVAILABILITY-DEBUG-GATE
                 if current_profile and current_profile.get("role") == "CLIENT":
-                    coach_id = (current_profile.get("assigned_coach_id") or d.get("coach_id") or "").strip()
+                    coach_id = (
+                        d.get("coach_id")
+                        or current_profile.get("coach_id")
+                        or current_profile.get("assigned_coach_id")
+                        or ""
+                    ).strip()
                     target_date = (d.get("date") or "").strip()
                     print(f">>> [AVAILABILITY-DEBUG] client_get_coach_availability: client={uid} coach={coach_id} date={target_date}")  # AVAILABILITY-DEBUG
                     if not coach_id:
@@ -13224,140 +13250,28 @@ async def handle_client(websocket, path=None):
                     elif not db_pool:
                         await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
                     else:
+                        # CHAT-SCHEDULING: shared slot engine (coach_slot_engine) — same logic as REST + chat.
                         try:
-                            _DAY_INT_TO_NAME = {0: "monday", 1: "tuesday", 2: "wednesday", 3: "thursday", 4: "friday", 5: "saturday", 6: "sunday"}
-                            async with db_pool.acquire() as _aconn:
-                                _coach_uuid = await _aconn.fetchval(
-                                    "SELECT id FROM users WHERE hardware_id = $1", coach_id
-                                )
-                                if not _coach_uuid:
-                                    await websocket.send(json.dumps({"type": "error", "message": "Coach not found"}))
-                                    continue
-
-                                _slots_rows = await _aconn.fetch(
-                                    "SELECT day_of_week, start_time, end_time FROM coach_availability "
-                                    "WHERE coach_id = $1 AND specific_date IS NULL "
-                                    "AND (is_blocked IS NULL OR is_blocked = false) "
-                                    "ORDER BY day_of_week, start_time",
-                                    _coach_uuid,
-                                )
-                                avail_slots = [
-                                    {"day": r["day_of_week"], "day_name": _DAY_INT_TO_NAME.get(r["day_of_week"], ""), "start": str(r["start_time"]), "end": str(r["end_time"])}
-                                    for r in _slots_rows
-                                ]
-                                print(f">>> [AVAILABILITY-DEBUG] found {len(_slots_rows)} availability rows for coach={coach_id} uuid={_coach_uuid}")  # AVAILABILITY-DEBUG
-                                avail_data = {"slots": avail_slots, "timezone": "America/New_York"}
-
-                                available_slots = []
-                                booked_slots = []
-                                if target_date:
-                                    # SCHEDULE-AVAILABILITY-FIX: parse in coach TZ so "today" comparisons match coach local time
-                                    try:
-                                        from zoneinfo import ZoneInfo
-                                        _tz = ZoneInfo(avail_data.get("timezone") or "America/New_York")
-                                    except Exception:
-                                        _tz = None
-                                    try:
-                                        target_dt = datetime.datetime.fromisoformat(target_date)
-                                        if _tz is not None:
-                                            target_dt = target_dt.replace(tzinfo=_tz)
-                                        day_name = target_dt.strftime("%A").lower()
-                                    except Exception:
-                                        target_dt = None
-                                        day_name = ""
-
-                                    if target_dt:
-                                        _target_date_obj = target_dt.date()
-                                        _is_blocked_date = await _aconn.fetchval(
-                                            "SELECT 1 FROM coach_availability "
-                                            "WHERE coach_id = $1 AND specific_date = $2 "
-                                            "AND is_blocked = true LIMIT 1",
-                                            _coach_uuid, _target_date_obj,
-                                        )
-                                        day_slots = [] if _is_blocked_date else [s for s in avail_slots if s.get("day_name", "") == day_name]
-                                        _booked = await _aconn.fetch(
-                                            "SELECT scheduled_at, ended_at FROM coaching_sessions "
-                                            "WHERE coach_id = $1 AND status IN ('scheduled','active','SCHEDULED','ACTIVE') "
-                                            "AND scheduled_at::date = $2",
-                                            coach_id, _target_date_obj,
-                                        )
-                                        for _br in _booked:
-                                            _bs = _br["scheduled_at"]
-                                            _be = _br["ended_at"] or (_bs + datetime.timedelta(hours=1)) if _bs else None
-                                            if _bs:
-                                                booked_slots.append({
-                                                    "start": _bs.isoformat(),
-                                                    "end": _be.isoformat() if _be else "",
-                                                })
-                                        # Subtract Google Calendar external busy windows for this coach.
-                                        # Resolve coach username from the registry (table is keyed by username).
-                                        try:
-                                            _coach_username = None
-                                            try:
-                                                _registry = load_registry()
-                                                for _k, _v in _registry.items():
-                                                    _p = (_v or {}).get("profile", {})
-                                                    if _p.get("hardware_id") == coach_id and _p.get("role") == "COACH":
-                                                        _coach_username = _p.get("username") or _k
-                                                        break
-                                            except Exception:
-                                                _coach_username = None
-                                            if _coach_username:
-                                                _ext = await _aconn.fetch(
-                                                    "SELECT start_at, end_at FROM google_external_busy "
-                                                    "WHERE user_id = $1 AND start_at::date = $2",
-                                                    _coach_username, _target_date_obj,
-                                                )
-                                                for _xr in _ext:
-                                                    _xs = _xr["start_at"]
-                                                    _xe = _xr["end_at"]
-                                                    if _xs and _xe:
-                                                        booked_slots.append({
-                                                            "start": _xs.isoformat(),
-                                                            "end": _xe.isoformat(),
-                                                            "source": "google",
-                                                        })
-                                        except Exception as _ext_err:
-                                            print(f">>> [WARN] external busy lookup failed: {_ext_err}")
-                                        for slot in day_slots:
-                                            _st_str = slot.get("start", "09:00:00")
-                                            _en_str = slot.get("end", "17:00:00")
-                                            # SCHEDULE-AVAILABILITY-FIX: respect minute precision — round start UP, end DOWN to whole hours
-                                            try:
-                                                _st_t = datetime.time.fromisoformat(_st_str)
-                                                _en_t = datetime.time.fromisoformat(_en_str)
-                                                start_h = _st_t.hour + (1 if _st_t.minute > 0 else 0)
-                                                end_h = _en_t.hour
-                                            except Exception:
-                                                start_h = int(_st_str.split(":")[0])
-                                                end_h = int(_en_str.split(":")[0])
-                                            for hour in range(start_h, end_h):
-                                                slot_start = target_dt.replace(hour=hour, minute=0, second=0)
-                                                slot_end = slot_start + datetime.timedelta(hours=1)
-                                                is_free = True
-                                                for b in booked_slots:
-                                                    try:
-                                                        bs = datetime.datetime.fromisoformat(b["start"])
-                                                        be = datetime.datetime.fromisoformat(b["end"])
-                                                        if slot_start < be and slot_end > bs:
-                                                            is_free = False
-                                                            break
-                                                    except Exception:
-                                                        pass
-                                                # SCHEDULE-AVAILABILITY-FIX: compare against "now" in same TZ as slot
-                                                _now = datetime.datetime.now(_tz) if _tz is not None else datetime.datetime.now()
-                                                if is_free and slot_start > _now:
-                                                    available_slots.append({"start": slot_start.isoformat(), "end": slot_end.isoformat()})
-
-                            print(f">>> [AVAILABILITY-DEBUG] returning {len(available_slots)} open slots after masking {len(booked_slots)} booked")  # AVAILABILITY-DEBUG
-                            await websocket.send(json.dumps({
-                                "type": "coach_availability",
-                                "coach_id": coach_id,
-                                "availability": avail_data,
-                                "available_slots": available_slots,
-                                "booked_slots": booked_slots,
-                                "date": target_date,
-                            }))
+                            from app.services.coach_slot_engine import compute_available_slots as _compute_slots
+                            _engine = await _compute_slots(
+                                db_pool, coach_id, target_date, registry_loader=load_registry
+                            )
+                            if _engine.get("error") == "coach_not_found":
+                                await websocket.send(json.dumps({"type": "error", "message": "Coach not found"}))
+                            elif _engine.get("error"):
+                                await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
+                            else:
+                                _open = _engine.get("available_slots") or []
+                                _booked = _engine.get("booked_slots") or []
+                                print(f">>> [AVAILABILITY-DEBUG] returning {len(_open)} open slots after masking {len(_booked)} booked")  # AVAILABILITY-DEBUG
+                                await websocket.send(json.dumps({
+                                    "type": "coach_availability",
+                                    "coach_id": coach_id,
+                                    "availability": _engine.get("availability") or {"slots": [], "timezone": "America/New_York"},
+                                    "available_slots": _open,
+                                    "booked_slots": _booked,
+                                    "date": target_date,
+                                }))
                         except Exception as e:
                             import traceback; traceback.print_exc()
                             print(f">>> [AVAILABILITY-DEBUG] client_get_coach_availability FAILED: {e}")  # AVAILABILITY-DEBUG
@@ -13410,7 +13324,18 @@ async def handle_client(websocket, path=None):
             # === CLIENT: BOOK SESSION ===
             elif t == "client_book_session":
                 if current_profile and current_profile.get("role") == "CLIENT":
-                    coach_id = (current_profile.get("assigned_coach_id") or d.get("coach_id") or "").strip()
+                    # CHAT-SCHEDULING: Sovereign Covenant consent gate — single writer for
+                    # chat + schedule-screen booking. Must accept current covenant first.
+                    if (current_profile.get("consent_version") or "") != REQUIRED_CONSENT_VERSION:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "COVENANT_REQUIRED",
+                            "detail": "Please accept the Sovereign Covenant before booking a session.",
+                        }))
+                        continue
+                    # CHAT-SCHEDULING: explicit coach resolution — prefer payload coach_id
+                    # (chat passes it), then profile coach_id, then assigned_coach_id.
+                    coach_id = (d.get("coach_id") or current_profile.get("coach_id") or current_profile.get("assigned_coach_id") or "").strip()
                     scheduled_start = (d.get("scheduled_start") or "").strip()
                     scheduled_end = (d.get("scheduled_end") or "").strip()
                     client_id = (current_profile.get("hardware_id") or "").strip()

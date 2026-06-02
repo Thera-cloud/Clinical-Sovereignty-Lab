@@ -1598,7 +1598,29 @@ async def get_coach_availability(coach_id: str):
 
 @router.get("/available-slots/{coach_id}")
 async def get_available_slots(coach_id: str, date: str, request: Request):
-    """Get available time slots for a specific date"""
+    """Get available time slots for a specific date.
+
+    Prefers the shared DB-backed slot engine (single source of truth with the
+    chat + calendar surfaces). Falls back to the legacy file-based generator
+    when no DB pool is available.
+    """
+    db = _get_db(request)
+    if db:
+        try:
+            from app.services.coach_slot_engine import compute_available_slots
+            try:
+                from app.websocket.bridge_server import load_registry as _reg
+            except Exception:
+                _reg = None
+            engine = await compute_available_slots(db, coach_id, date, registry_loader=_reg)
+            if not engine.get("error"):
+                return {
+                    "available_slots": engine["available_slots"],
+                    "booked": engine["booked_slots"],
+                }
+        except Exception:
+            pass
+
     availability_file = DATA_DIR / "Vaults" / "Coaches" / coach_id / "availability.json"
     availability = load_json(availability_file, {"slots": []})
 

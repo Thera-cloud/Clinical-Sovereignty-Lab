@@ -2112,6 +2112,31 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
           data['filename'] as String? ?? 'sovereign_sanctuary_export.txt',
           data['suggested_destination'] as String?,
         );
+      }
+      // === CHAT SCHEDULING: open-slot chips from Little Nate ===
+      else if (data['type'] == 'scheduling_slots') {
+        if ((data['surface'] ?? '').toString() == 'chat') {
+          _handleSchedulingSlots(Map<String, dynamic>.from(data));
+        }
+      }
+      // === CHAT SCHEDULING: booking outcome ===
+      else if (data['type'] == 'session_booked') {
+        final sess = (data['session'] is Map)
+            ? Map<String, dynamic>.from(data['session'])
+            : <String, dynamic>{};
+        final status = (sess['status'] ?? '').toString();
+        final when = _fmtSessionWhen(sess['scheduled_start']?.toString() ?? '');
+        final pending = status == 'pending_approval';
+        final line = pending
+            ? 'Session requested${when.isNotEmpty ? ' for $when' : ''} — pending your coach\'s approval.'
+            : 'Session booked${when.isNotEmpty ? ' for $when' : ''}.';
+        if (mounted) {
+          _addSystemMsg(line);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(line, style: const TextStyle(color: Colors.white)),
+            backgroundColor: const Color(0xFF1A1A2E),
+          ));
+        }
       } else if (data['type'] == 'metrics_update' ||
           data['type'] == 'client_metrics') {
         // Handle real-time metrics updates
@@ -2224,9 +2249,22 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         if (kDebugMode)
           print("Swarm response: ${data['action']} → ${data['result']}");
       } else if (data['type'] == 'error') {
-        final msg = (data['message'] ?? data['error'] ?? 'An error occurred')
+        final code = (data['message'] ?? data['error'] ?? 'An error occurred')
             .toString();
-        if (!msg.startsWith('Unknown message type')) _addSystemMsg(msg);
+        final detail = (data['detail'] ?? '').toString();
+        const schedCodes = {'COVENANT_REQUIRED', 'SESSION_LIMIT_REACHED'};
+        if (schedCodes.contains(code) || code == 'Time slot conflict') {
+          final friendly = detail.isNotEmpty ? detail : code;
+          _addSystemMsg(friendly);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(friendly, style: const TextStyle(color: Colors.white)),
+              backgroundColor: const Color(0xFF8B2E2E),
+            ));
+          }
+        } else if (!code.startsWith('Unknown message type')) {
+          _addSystemMsg(code);
+        }
       } else if (data['type'] == 'payment_confirmed') {
         final pType = data['payment_type'] ?? '';
         final plan = data['plan'] ?? '';
@@ -2245,6 +2283,112 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     } catch (e) {
       _debugLog("Parse Error: $e");
     }
+  }
+
+  // ── Chat Scheduling ──
+
+  void _handleSchedulingSlots(Map<String, dynamic> data) {
+    final slots = (data['slots'] is List) ? List.from(data['slots']) : [];
+    if (slots.isEmpty) return; // prose already shown via nate_response
+    final coachId = (data['coach_id'] ?? '').toString();
+    final coachName = (data['coach_name'] ?? 'your coach').toString();
+    final date = (data['date'] ?? '').toString();
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF111111),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Open times with $coachName',
+                style: const TextStyle(
+                    color: Color(0xFFC9A962),
+                    fontSize: 18,
+                    fontFamily: 'Cormorant Garamond')),
+            const SizedBox(height: 4),
+            Text(_fmtSchedDate(date),
+                style: const TextStyle(color: Colors.white54, fontSize: 13)),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final s in slots)
+                  ActionChip(
+                    backgroundColor: const Color(0xFF1A1A2E),
+                    label: Text(_fmtSlotLabel((s['start'] ?? '').toString()),
+                        style: const TextStyle(color: Color(0xFF4ECDC4))),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _bookSchedulingSlot(
+                        coachId,
+                        (s['start'] ?? '').toString(),
+                        (s['end'] ?? '').toString(),
+                      );
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _bookSchedulingSlot(String coachId, String startIso, String endIso) {
+    if (startIso.isEmpty || endIso.isEmpty) return;
+    // Prefer server-resolved coach_id; fall back to profile fields.
+    final resolvedCoach = coachId.isNotEmpty
+        ? coachId
+        : ((widget.currentUserProfile?['coach_id'] ??
+                    widget.currentUserProfile?['assigned_coach_id'] ??
+                    '')
+                .toString());
+    _wsSend(jsonEncode({
+      'type': 'client_book_session',
+      'coach_id': resolvedCoach,
+      'scheduled_start': startIso,
+      'scheduled_end': endIso,
+    }));
+    _addSystemMsg('Requesting ${_fmtSlotLabel(startIso)}…');
+  }
+
+  String _fmtSlotLabel(String iso) {
+    try {
+      final dt = DateTime.parse(iso);
+      final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+      final m = dt.minute.toString().padLeft(2, '0');
+      final ap = dt.hour < 12 ? 'AM' : 'PM';
+      return '$h:$m $ap';
+    } catch (_) {
+      return iso;
+    }
+  }
+
+  String _fmtSchedDate(String iso) {
+    try {
+      final d = DateTime.parse(iso);
+      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      const months = [
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      ];
+      return '${days[d.weekday - 1]}, ${months[d.month - 1]} ${d.day}';
+    } catch (_) {
+      return iso;
+    }
+  }
+
+  String _fmtSessionWhen(String iso) {
+    if (iso.isEmpty) return '';
+    return '${_fmtSchedDate(iso)} at ${_fmtSlotLabel(iso)}';
   }
 
   // ── Nudge Actions ──
@@ -7267,6 +7411,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         _authToken = data['token']?.toString();
         final profile = data['profile'] as Map<String, dynamic>?;
         _coachHardwareId = profile?['hardware_id']?.toString();
+        _pushDojoIframeAuthIfNeeded();
         _fetchDashboard();
       } else if (data['type'] == 'coach_clients') {
         if (mounted) {
@@ -9047,6 +9192,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     _assistantChatController.dispose();
     _assistantChatScrollController.dispose();
     _dojoBackUnregister?.call();
+    if (kIsWeb) disposeDojoIframe();
     _tabController.dispose();
     _wsReconnectTimer?.cancel();
     _socket?.sink.close();
@@ -15202,11 +15348,22 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     );
   }
 
-  // Cache the Dojo URL once per session to prevent iframe reload flicker.
-  // Recomputing DateTime.now() in build() changed the URL on every rebuild,
-  // causing the HtmlElementView ValueKey to swap → constant iframe reload.
+  // Dojo embed URL locked once per dashboard session (token via postMessage on web).
   String? _cachedDojoUrl;
-  String? _cachedDojoUrlToken;
+
+  String? _dojoLastPushedAuthToken;
+
+  void _pushDojoIframeAuthIfNeeded() {
+    if (!kIsWeb) return;
+    final token = (_authToken ?? '').trim();
+    if (token.isEmpty || token == _dojoLastPushedAuthToken) return;
+    _dojoLastPushedAuthToken = token;
+    notifyDojoIframeAuth(
+      token: token,
+      hw: (_coachHardwareId ?? '').trim(),
+      ws: _serverUrl,
+    );
+  }
 
   Widget _buildDojoTab() {
     // =========================================================================
@@ -15216,15 +15373,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     // =========================================================================
 
     final tokenNow = (_authToken ?? '').trim();
-    // Rebuild URL only if token changes (login/relogin) or first access
-    if (_cachedDojoUrl == null || _cachedDojoUrlToken != tokenNow) {
-      final cacheBuster = DateTime.now().millisecondsSinceEpoch.toString();
+
+    // Lock embed URL once (hw/ws only on web — token via postMessage).
+    if (_cachedDojoUrl == null && tokenNow.isNotEmpty) {
       if (kIsWeb) {
         final params = Uri(queryParameters: {
-          'token': tokenNow,
+          'embed': 'coach',
           'hw': (_coachHardwareId ?? '').trim(),
           'ws': _serverUrl,
-          'v': cacheBuster,
         }).query;
         _cachedDojoUrl = '/night_school_dojo.html?$params';
       } else {
@@ -15238,18 +15394,33 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           'token': tokenNow,
           'hw': (_coachHardwareId ?? '').trim(),
           'ws': _serverUrl,
-          'v': cacheBuster,
         }).toString();
+        _dojoWebViewController = WebViewController()
+          ..setJavaScriptMode(JavaScriptMode.unrestricted)
+          ..setBackgroundColor(const Color(0xFF050505))
+          ..setNavigationDelegate(
+            NavigationDelegate(
+              onPageStarted: (String url) {
+                _debugLog('>>> Dojo WebView loading: $url');
+              },
+              onPageFinished: (String url) {
+                _debugLog('>>> Dojo WebView loaded: $url');
+              },
+              onWebResourceError: (WebResourceError error) {
+                _debugLog('>>> Dojo WebView error: ${error.description}');
+              },
+            ),
+          )
+          ..loadRequest(Uri.parse(_cachedDojoUrl!));
       }
-      _cachedDojoUrlToken = tokenNow;
     }
-    final dojoUrl = _cachedDojoUrl!;
+    final dojoUrl = _cachedDojoUrl;
 
     // -------------------------------------------------------------------------
     // WEB PLATFORM: Embed Dojo page inline as iframe
     // -------------------------------------------------------------------------
     if (kIsWeb) {
-      if ((_authToken ?? '').trim().isEmpty) {
+      if (tokenNow.isEmpty) {
         return const Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -15269,31 +15440,19 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           ),
         );
       }
+      if (dojoUrl == null) {
+        return const Center(child: CircularProgressIndicator());
+      }
       return buildDojoIframe(dojoUrl);
     }
 
     // -------------------------------------------------------------------------
-    // MOBILE PLATFORM: Embed WebView directly
+    // MOBILE PLATFORM: Embed WebView directly (URL locked once per session)
     // -------------------------------------------------------------------------
-    return WebViewWidget(
-      controller: WebViewController()
-        ..setJavaScriptMode(JavaScriptMode.unrestricted)
-        ..setBackgroundColor(const Color(0xFF050505))
-        ..setNavigationDelegate(
-          NavigationDelegate(
-            onPageStarted: (String url) {
-              _debugLog('>>> Dojo WebView loading: $url');
-            },
-            onPageFinished: (String url) {
-              _debugLog('>>> Dojo WebView loaded: $url');
-            },
-            onWebResourceError: (WebResourceError error) {
-              _debugLog('>>> Dojo WebView error: ${error.description}');
-            },
-          ),
-        )
-        ..loadRequest(Uri.parse(dojoUrl)),
-    );
+    if (_dojoWebViewController != null) {
+      return WebViewWidget(controller: _dojoWebViewController!);
+    }
+    return const Center(child: CircularProgressIndicator());
   }
 
   void _launchDojo(String url) {

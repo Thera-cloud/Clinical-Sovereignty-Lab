@@ -194,9 +194,22 @@ final TextEditingController _controller = TextEditingController();
 | Direction | Message Type | Payload | Purpose |
 |-----------|--------------|---------|---------|
 | Client → | `login_request` | `{username, password, expected_role}` | Auth on screen open |
-| Client → | `send_message` | `{message, client_id}` | Send chat message |
-| ← Server | `cortex_response` | `{response, tokens_used}` | Little Nate reply |
+| Client → | `nate_query` | `{nate_query \| text}` | Send chat message (scheduling intent when `ENABLE_CHAT_SCHEDULING=true`) |
+| ← Server | `nate_response` | `{text}` | Little Nate reply |
+| ← Server | `scheduling_slots` | `{surface:"chat", coach_id, date, slots[]}` | Real open times (chip sheet); only when `surface==chat` |
+| Client → | `client_book_session` | `{coach_id, scheduled_start, scheduled_end}` | Book from chip tap (same writer as Schedule screen) |
+| ← Server | `session_booked` | `{session}` | `pending_approval` → "requested"; else "booked" |
+| ← Server | `error` | `{message: COVENANT_REQUIRED \| SESSION_LIMIT_REACHED \| Time slot conflict}` | Booking blocked |
 | ← Server | `token_update` | `{balance}` | Update token display |
+
+**Chat scheduling branch** (`ENABLE_CHAT_SCHEDULING`, see `16_client_schedule.md` §18):
+```
+"nate_query" (book / open times + coach)
+  → scheduling assistant + coach_slot_engine (no LLM-invented times)
+  → nate_response + scheduling_slots (surface=chat)
+  → tap chip → client_book_session → session_booked | error
+```
+Full calendar: Settings → **View Availability & Book Session** (`ClientScheduleScreen`).
 
 **AI Context Injection (Backend):**
 ```

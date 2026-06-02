@@ -10930,7 +10930,10 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   @override
   void initState() {
     super.initState();
-    _coachId = (widget.currentUserProfile?['assigned_coach_id'] ?? '').toString();
+    _coachId = (widget.currentUserProfile?['coach_id'] ??
+            widget.currentUserProfile?['assigned_coach_id'] ??
+            '')
+        .toString();
     // SCHEDULE-SHARED-WS
     if (_ClientWsHub.channel != null) {
       _socket = _ClientWsHub.channel;

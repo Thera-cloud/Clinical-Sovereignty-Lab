@@ -299,3 +299,46 @@ Read docs/client_portal/features/16_client_schedule.md + docs/client_portal/_FOU
 ---
 
 *Spec derived from `docs/client_portal/_FOUNDATIONAL_SPEC.md` + `docs/client_portal/_PIPELINE_TEMPLATE.md` + `_PHASE_3_PLAN.md` § B row 16 + git log of 2026-05-05 schedule fixes — 2026-05-05.*
+
+---
+
+## 18. Chat-scheduling path (main chat — `NeuralInterfaceV2`)
+
+> Status: `ADDED 2026-06-01`. Feature-flagged via `ENABLE_CHAT_SCHEDULING`. Booking reuses the **same** `client_book_session` writer as the Schedule screen — there is no second booking implementation.
+
+### Components
+
+| Layer | File | Role |
+|---|---|---|
+| Shared slot engine | `backend/app/services/coach_slot_engine.py` | `compute_available_slots(db_pool, coach_hw_id, date)` — single source of truth for open hourly slots. Also used by the REST endpoint and (logically) the availability handler. Fixes the `coaching_sessions.coach_id` UUID-vs-hardware-id mask by casting both sides to text (`coach_id::text IN ($1,$2)`). |
+| Scheduling brain | `backend/app/services/client_scheduling_assistant.py` | `detect_intent`, `resolve_coach` (`coach_id` then `assigned_coach_id`), `parse_target_date`, `handle_turn(profile,text,db_pool) -> {handled,response,payload}`. Never invents times — slots come only from the engine. Import-safe; degrades to `handled=False` on any error. |
+| Bridge hook | `backend/app/websocket/bridge_server.py` (`nate_query`) | Thin `ENABLE_CHAT_SCHEDULING`-gated block: on handled scheduling intent emits `nate_response` + a `scheduling_slots` frame and `continue`s; otherwise falls through to `process_interaction` unchanged. |
+| Booking gate | `bridge_server.py` (`client_book_session`) | Sovereign Covenant consent check (`COVENANT_REQUIRED` if `consent_version != REQUIRED_CONSENT_VERSION`) + explicit coach resolution (payload `coach_id` → profile `coach_id` → `assigned_coach_id`). Shared by chat and Schedule screen. |
+| Prompt rule | `bridge_server.py` (~9145 client system prompt) | Additive "SCHEDULING (system-assisted, accuracy rule)" block: times are system-provided only; say "requested" until confirmed. |
+| Flutter UI | `mobile/lib/updated_screens.dart` (`NeuralInterfaceV2`) | `_handleSocketMessage` branches for `scheduling_slots` (slot-chip bottom sheet, `surface == "chat"` filter), `session_booked` (system line + SnackBar), and `error` codes `COVENANT_REQUIRED` / `SESSION_LIMIT_REACHED` / `Time slot conflict`. Book-on-tap sends `client_book_session` with ISO `scheduled_start`/`scheduled_end` from the payload + explicit `coach_id`. |
+
+### UX flow tree
+
+```
+client types in main chat
+└─ "book my coach" / "what times are open"
+   └─ nate_query → bridge hook (ENABLE_CHAT_SCHEDULING)
+      └─ client_scheduling_assistant.handle_turn
+         ├─ no scheduling intent ─────────────→ fall through to process_interaction (normal chat)
+         ├─ no coach assigned ───────────────→ nate_response: "no coach assigned, contact support" (no payload)
+         ├─ intent but no date ──────────────→ nate_response: "which day — today, tomorrow, a weekday?"
+         ├─ date, no open slots ─────────────→ nate_response: "none open on <date>, try another day?" + scheduling_slots(slots=[])
+         └─ date with slots ─────────────────→ nate_response: lists times + scheduling_slots(slots=[…], surface=chat)
+            └─ Flutter shows slot-chip bottom sheet (surface==chat only)
+               └─ tap slot → client_book_session(coach_id, scheduled_start, scheduled_end)
+                  ├─ COVENANT_REQUIRED ──────→ error → red SnackBar + system line
+                  ├─ SESSION_LIMIT_REACHED ──→ error → red SnackBar + system line
+                  ├─ Time slot conflict ─────→ error → red SnackBar + system line
+                  └─ ok → session_booked
+                     ├─ status pending_approval → "Session requested … pending your coach's approval."
+                     └─ status scheduled ──────→ "Session booked for <when>."
+```
+
+### Tests
+
+`backend/tests/test_chat_scheduling_assistant.py` — 22 cases: intent positive/negative, coach resolution precedence, date parsing (ISO/today/tomorrow/absent), `handle_turn` (fall-through, needs-date, no-coach, slots-present, no-slots), and booking error-code contract (`COVENANT_REQUIRED`, `SESSION_LIMIT_REACHED`, `Time slot conflict`).

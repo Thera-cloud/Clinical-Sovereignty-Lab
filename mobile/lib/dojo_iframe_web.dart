@@ -5,19 +5,16 @@ import 'dart:html' as html;
 import 'dart:ui_web' as ui_web;
 import 'package:flutter/widgets.dart';
 
-// Track registered view factories by URL
-final Map<String, bool> _registeredViewTypes = {};
+const _dojoViewType = 'dojo-iframe-coach-command';
 
-/// URL identity for iframe factory registration: token/ws/hw matter; cache-buster `v` does not.
-String _stableDojoIframeRegistrationUrl(String dojoUrl) {
-  final uri = Uri.parse(dojoUrl);
-  final q = Map<String, String>.from(uri.queryParameters)..remove('v');
-  return uri.replace(queryParameters: q.isEmpty ? null : q).toString();
-}
+html.IFrameElement? _dojoIframe;
+bool _dojoFactoryRegistered = false;
+
+String? _pendingAuthToken;
+String? _pendingAuthHw;
+String? _pendingAuthWs;
 
 /// Toggle pointer-events on all iframes to prevent platform view z-index conflicts.
-/// When disabled, iframes won't intercept taps meant for Flutter overlay widgets
-/// (like popup menus), while keeping the iframe alive and state intact.
 void setDojoIframePointerEvents(bool enabled) {
   final iframes = html.document.querySelectorAll('iframe');
   for (final el in iframes) {
@@ -30,15 +27,45 @@ void launchDojoUrl(String url) {
   html.window.open(url, '_blank');
 }
 
-/// Creates a widget that displays the Dojo page in an iframe (web only)
-Widget buildDojoIframe(String dojoUrl) {
-  final stableUrl = _stableDojoIframeRegistrationUrl(dojoUrl);
-  final viewType = 'dojo-iframe-${stableUrl.hashCode}';
+void _postAuthToDojoIframe() {
+  final iframe = _dojoIframe;
+  final token = (_pendingAuthToken ?? '').trim();
+  if (iframe == null || token.isEmpty) return;
+  final target = iframe.contentWindow;
+  if (target == null) return;
+  target.postMessage({
+    'type': 'ln_dojo_auth',
+    'token': token,
+    'hw': (_pendingAuthHw ?? '').trim(),
+    'ws': (_pendingAuthWs ?? '').trim(),
+  }, html.window.location.origin);
+}
 
-  // Register the view factory for this URL if not already done
-  if (!_registeredViewTypes.containsKey(viewType)) {
+/// Push bridge auth to the embedded DOJO without reloading the iframe document.
+void notifyDojoIframeAuth({
+  required String token,
+  required String hw,
+  required String ws,
+}) {
+  _pendingAuthToken = token.trim();
+  _pendingAuthHw = hw.trim();
+  _pendingAuthWs = ws.trim();
+  _postAuthToDojoIframe();
+}
+
+/// Clear pending auth when coach dashboard disposes (platform view teardown is handled by Flutter).
+void disposeDojoIframe() {
+  _dojoIframe = null;
+  _pendingAuthToken = null;
+  _pendingAuthHw = null;
+  _pendingAuthWs = null;
+}
+
+/// Single stable iframe for Coach Command DOJO (token via postMessage, not URL).
+Widget buildDojoIframe(String dojoUrl) {
+  if (!_dojoFactoryRegistered) {
     ui_web.platformViewRegistry.registerViewFactory(
-      viewType,
+      _dojoViewType,
       (int viewId) {
         final iframe = html.IFrameElement()
           ..src = dojoUrl
@@ -48,17 +75,22 @@ Widget buildDojoIframe(String dojoUrl) {
           ..allow = 'microphone; camera'
           ..setAttribute('allowfullscreen', 'true')
           // sandbox: allow-scripts + allow-same-origin is intentional for same-origin DOJO
-          // (WebSocket to bridge, form posts, normal DOM). Keep sandbox; do not drop it;
-          // other flags still restrict top navigation/popups to an explicit allow-list.
-          ..setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads');
+          // (WebSocket to bridge, form posts, normal DOM). Chrome warns this combo can
+          // escape sandboxing — expected for embedded coach portal on the same origin.
+          ..setAttribute(
+            'sandbox',
+            'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads',
+          );
+        iframe.onLoad.listen((_) => _postAuthToDojoIframe());
+        _dojoIframe = iframe;
         return iframe;
       },
     );
-    _registeredViewTypes[viewType] = true;
+    _dojoFactoryRegistered = true;
   }
 
-  return HtmlElementView(
-    viewType: viewType,
-    key: ValueKey(stableUrl),
+  return const HtmlElementView(
+    viewType: _dojoViewType,
+    key: ValueKey(_dojoViewType),
   );
 }
