@@ -78,6 +78,41 @@ ACTION_REQUEST_PHRASES = [
     r"\bmore concrete\b",
 ]
 
+# Clinical-boundary continuation guard (May 2026 red-team follow-up):
+# once a clinical boundary topic appears in-session, keep re-firing decline+redirect
+# for soft follow-up wording on the same topic.
+CLINICAL_BOUNDARY_TTL_TURNS = 12
+
+BOUNDARY_SELF_ASSESSMENT_PATTERNS = [
+    r"\b(standard questions|self[- ]assessment|screen(ing)? tool|phq[- ]?9|gad[- ]?7)\b",
+    r"\b(what'?s my score|where do i fall on the scale|score me)\b",
+]
+
+BOUNDARY_PHARMA_PATTERNS = [
+    r"\b(safe together|interact(ion|s)?|is it safe with|mix with alcohol|with alcohol)\b",
+    r"\b(zoloft|wellbutrin|ssri|antidepressant|medication|medications)\b",
+]
+
+BOUNDARY_SLEEP_AID_PATTERNS = [
+    r"\b(what works for sleep|knock me out|sleep aid|how do i sleep tonight)\b",
+    r"\b(melatonin|zzquil|benadryl|diphenhydramine|unisom)\b",
+]
+
+BOUNDARY_DIAGNOSTIC_MATCH_PATTERNS = [
+    r"\b(do i meet (the )?criteria|does that sound right|likely diagnosis)\b",
+    r"\b(what would that probably be|what would this be called)\b",
+]
+
+BOUNDARY_TREATMENT_REQUEST_PATTERNS = [
+    r"\b(what would treat|what would help|what'?s used for|what medications might help)\b",
+    r"\b(should i be on medication|which one works better|fewer side effects)\b",
+]
+
+BOUNDARY_SOFT_FOLLOWUP_PATTERNS = [
+    r"\b(what about|and what about|just generally|anything else)\b",
+    r"\b(what works|would that help|is that okay)\b",
+]
+
 # Session-end / low-weight turns (Lisa 2026-05-19) — avoid exploratory 2-3 framings
 CLOSING_PHRASES = [
     "bye for now",
@@ -209,6 +244,8 @@ class SessionState:
     arc_scope_triggered: bool = False
     # G1: TTL eviction
     last_touched_ts: float = field(default_factory=time.time)
+    # Clinical-boundary persistence map: topic -> expiration turn.
+    clinical_boundary_topics: dict = field(default_factory=dict)
 
 
 # ============================================================
@@ -289,6 +326,59 @@ def detect_assistant_rut(state: SessionState) -> bool:
     all_questions = all(m.strip().endswith("?") for m in recent)
     reflection_density = sum(_contains_any(m, REFLECTION_TELLS) for m in recent)
     return all_questions and reflection_density >= 2
+
+
+def _purge_expired_boundary_topics(state: SessionState) -> None:
+    if not state.clinical_boundary_topics:
+        return
+    _alive = {
+        topic: exp_turn
+        for topic, exp_turn in state.clinical_boundary_topics.items()
+        if exp_turn >= state.turn_count
+    }
+    state.clinical_boundary_topics = _alive
+
+
+def detect_clinical_boundary_topics(state: SessionState, user_msg: str) -> dict:
+    """
+    Detect explicit/soft clinical request topics and persist them for N turns.
+    Returns active topic flags after update.
+    """
+    _purge_expired_boundary_topics(state)
+    lower = (user_msg or "").lower()
+    active = set(state.clinical_boundary_topics.keys())
+    detected = set()
+
+    if _hits(lower, BOUNDARY_SELF_ASSESSMENT_PATTERNS):
+        detected.add("self_assessment")
+    if _hits(lower, BOUNDARY_PHARMA_PATTERNS):
+        detected.add("pharma_interaction")
+    if _hits(lower, BOUNDARY_SLEEP_AID_PATTERNS):
+        detected.add("sleep_aid")
+    if _hits(lower, BOUNDARY_DIAGNOSTIC_MATCH_PATTERNS):
+        detected.add("diagnostic_match")
+    if _hits(lower, BOUNDARY_TREATMENT_REQUEST_PATTERNS):
+        detected.add("treatment_request")
+
+    # Soft continuation handling:
+    # "what about with alcohol?", "just generally...", etc.
+    if _hits(lower, BOUNDARY_SOFT_FOLLOWUP_PATTERNS):
+        if "pharma_interaction" in active:
+            detected.add("pharma_interaction")
+        if "sleep_aid" in active:
+            detected.add("sleep_aid")
+        if "treatment_request" in active:
+            detected.add("treatment_request")
+        if "diagnostic_match" in active:
+            detected.add("diagnostic_match")
+
+    for topic in detected:
+        state.clinical_boundary_topics[topic] = (
+            state.turn_count + CLINICAL_BOUNDARY_TTL_TURNS
+        )
+
+    _purge_expired_boundary_topics(state)
+    return {topic: True for topic in state.clinical_boundary_topics.keys()}
 
 
 def detect_neurodivergent(state: SessionState, user_msg: str) -> tuple:
@@ -544,6 +634,21 @@ def build_system_addendum(
     except ImportError:
         pass
 
+    _clinical_topics = sorted(
+        k.replace("clinical_boundary_", "")
+        for k, v in (signals or {}).items()
+        if k.startswith("clinical_boundary_") and v is True and k != "clinical_boundary_active"
+    )
+    if _clinical_topics:
+        _topic_list = ", ".join(_clinical_topics)
+        base += (
+            "\n\nCLINICAL BOUNDARY PERSISTENCE (session-active): "
+            f"{_topic_list}. For any follow-up on these topics, repeat a clear "
+            "decline + redirect every turn. Do NOT fall back to reflection-only. "
+            "Do NOT substitute alternate diagnostic framings when asked whether "
+            "the user meets criteria or has a diagnosis."
+        )
+
     _rejected = _extract_rejected_categories(user_msg)
     if _rejected and mode in ("strategic", "accommodating", "handoff"):
         _joined = ", ".join(_rejected)
@@ -603,14 +708,24 @@ def prepare_response(
             state.scope_lock_since_turn = state.turn_count
 
         # Shadow-log always (dark-launch observability)
+        _sg_uid = (profile or {}).get("hardware_id", "?")
+        _sg_would_fire = bool(_scope_result.direct_response)
         logger.info(
-            "[SCOPE_GATE] uid=%s turn=%d groups=%s lock=%s labels=%s enabled=%s",
-            (profile or {}).get("hardware_id", "?"),
+            "[SCOPE_GATE] uid=%s turn=%d groups=%s lock=%s labels=%s enabled=%s would_fire=%s",
+            _sg_uid,
             state.turn_count,
             _scope_result.matched_groups,
             state.scope_lock_since_turn,
             _scope_result.telemetry_labels,
             ENABLE_COACHING_SCOPE_GATE,
+            _sg_would_fire,
+        )
+        # QUANTUM-CRYSTAL-ARCH — mirror to stdout for docker logs (INFO not visible on GREEN)
+        print(
+            f">>> [SCOPE_GATE] uid={_sg_uid} turn={state.turn_count} "
+            f"groups={_scope_result.matched_groups} lock={state.scope_lock_since_turn} "
+            f"labels={_scope_result.telemetry_labels} enabled={ENABLE_COACHING_SCOPE_GATE} "
+            f"would_fire={_sg_would_fire}"
         )
 
         if ENABLE_COACHING_SCOPE_GATE and _scope_result.direct_response:
@@ -635,6 +750,11 @@ def prepare_response(
         logger.warning("[SCOPE_GATE] error (non-fatal): %s: %s", type(_sg_err).__name__, _sg_err)
 
     mode, signals = select_mode(state, user_msg)
+    _clinical_topics = detect_clinical_boundary_topics(state, user_msg)
+    if _clinical_topics:
+        signals["clinical_boundary_active"] = True
+        for _topic in _clinical_topics.keys():
+            signals[f"clinical_boundary_{_topic}"] = True
     addendum = build_system_addendum(mode, signals, profile, user_msg=user_msg)
 
     if mode == "handoff":

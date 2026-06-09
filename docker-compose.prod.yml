@@ -296,6 +296,10 @@ services:
       - CLASSROOM_SESSIONS_FILE=/app/backend_data/classroom_sessions.json
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=production
+      # Coaching scope gate stack — dark-launch defaults; flip after 48h review + clinical sign-off
+      - ENABLE_COACHING_SCOPE_GATE=${ENABLE_COACHING_SCOPE_GATE:-false}
+      - ENABLE_CLASSIFIER_LAYER=${ENABLE_CLASSIFIER_LAYER:-false}
+      - ENABLE_ARC_MEMORY=${ENABLE_ARC_MEMORY:-false}
       - ENABLE_VOICE_TRANSCRIPT_CRYSTALLIZATION=true
       - ENABLE_SUBCONSCIOUS=true
       - ENABLE_INTAKE_SYSTEM=${ENABLE_INTAKE_SYSTEM:-true}
