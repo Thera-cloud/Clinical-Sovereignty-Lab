@@ -11,7 +11,7 @@
 | Gate | Status |
 |------|--------|
 | SSH passphrase rotated | **Operator action** — see `docs/SECURITY_SSH_PASSPHRASE_ROTATION_2026-06-09.md` |
-| `>>> [SCOPE_GATE]` mirror deployed on GREEN | Pending deploy (this commit) |
+| `>>> [SCOPE_GATE]` mirror deployed on GREEN | **PASS** — `fbf9cf29` via `safe_deploy.sh bridge` 2026-06-09 |
 | 48h post-mirror log review complete | **IN PROGRESS** — window opens at bridge restart below |
 | Staging / pilot 3–5 sessions | Not started |
 | Clinical + product sign-off | Not started |
@@ -74,9 +74,20 @@ docker logs nate_bridge --since 10m 2>&1 | grep '>>> \[SCOPE_GATE\]' | tail -5
 # Expected: >0 lines after any client chat turn
 ```
 
-**48h window start (UTC):** _Record bridge container start time after deploy:_ `docker inspect -f '{{.State.StartedAt}}' nate_bridge`
+**48h window start (UTC):** `2026-06-09T03:33:52Z` (`nate_bridge` recreate after `safe_deploy.sh bridge`)
 
-**48h window end (UTC):** _Start + 48 hours_
+**48h window end (UTC):** `2026-06-11T03:33:52Z` — run Phase 2 greps then
+
+**Post-deploy verify (2026-06-09):**
+
+| Check | Result |
+|-------|--------|
+| `ENABLE_COACHING_SCOPE_GATE` | `false` |
+| `ENABLE_CLASSIFIER_LAYER` | `false` |
+| `ENABLE_ARC_MEMORY` | `false` |
+| Mirror in image (`grep >>> [SCOPE_GATE]`) | `1` |
+| Vault metrics | `363 → 363` OK |
+| PG registry | ENABLED, pool 2, UserStore 53 |
 
 ---
 

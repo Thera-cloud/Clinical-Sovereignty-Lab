@@ -58,6 +58,8 @@ def test_meta_questions_block_in_client_prompt():
     assert "not a therapist, doctor, or licensed mental health professional" in blocks
     assert META_QUESTIONS_IDENTITY_STATEMENT in blocks
     assert "Do not hedge" in blocks
+    assert "CLINICAL-DOMAIN REQUESTS" in blocks
+    assert "SCREENING / SELF-ASSESSMENT" in blocks
 
 
 def test_nate_temperature_clinical_caps_elevated_user(monkeypatch):
