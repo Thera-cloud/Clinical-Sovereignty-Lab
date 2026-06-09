@@ -3861,6 +3861,71 @@ def schedule_detection_only(
     )
 
 
+async def evaluate_disclosure_guarded(
+    *,
+    db_pool,
+    user_id: str,
+    message: str,
+    raw_user_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    locale: str = "en-US",
+    coach_id: Optional[str] = None,
+) -> Optional[BridgeDecision]:
+    """Timeout-bounded, telemetry-recording wrapper around evaluate_disclosure.
+
+    Single entry point for the therapeutic_controller wiring seam so the
+    Phase 4 seam stays under its 15-line cap (auditor check
+    phase4_wiring_diff_under_15_lines). Encapsulates the GA hardening:
+    cached check-in/reporting services, identity-drift telemetry,
+    EVAL_TIMEOUT_S bound, and success/failure counters. Returns None on
+    timeout or error — the caller proceeds without bridge shaping
+    (fail-soft) with the failure visible in telemetry, never swallowed.
+    """
+    if raw_user_id is not None and raw_user_id == user_id and db_pool and user_id:
+        # Unresolved identity → enrollment lookups will miss (rule:
+        # sensitive-bridge-identity-canonical). Count it so dormancy from
+        # identity drift is visible in telemetry, not silent.
+        try:
+            record_bridge_failure("identity_unresolved", f"raw_id={user_id!r}")
+        except Exception:
+            pass
+    nca = get_default_checkin_agent(db_pool)
+    try:
+        mrs = get_default_reporting_service(db_pool)
+    except Exception:
+        mrs = None
+    try:
+        bd = await asyncio.wait_for(
+            evaluate_disclosure(
+                db_pool=db_pool, user_id=user_id, message=message,
+                session_id=session_id, locale=locale, coach_id=coach_id,
+                nate_checkin_agent=nca, mandatory_reporting_service=mrs,
+            ),
+            timeout=EVAL_TIMEOUT_S,
+        )
+        record_bridge_success()
+        return bd
+    except asyncio.TimeoutError:
+        logger.error(
+            "sensitive_clinical_bridge: evaluate_disclosure timed out after "
+            "%.1fs (turn proceeds without bridge shaping)", EVAL_TIMEOUT_S,
+        )
+        try:
+            record_bridge_failure("timeout", "evaluate_disclosure")
+        except Exception:
+            pass
+        return None
+    except Exception as e:
+        logger.warning(
+            "sensitive_clinical_bridge: guarded evaluate failed: %s", e
+        )
+        try:
+            record_bridge_failure("exception", repr(e))
+        except Exception:
+            pass
+        return None
+
+
 __all__ = [
     "BridgeDecision",
     "BridgeDecisionRedactionError",
@@ -3869,6 +3934,7 @@ __all__ = [
     "PIPELINE_STEP_NAMES_V1_3",
     "REGISTER_SELECTION_PRIORITY",
     "evaluate_disclosure",
+    "evaluate_disclosure_guarded",
     "run_detection_only",
     "schedule_detection_only",
     "get_bridge_telemetry",

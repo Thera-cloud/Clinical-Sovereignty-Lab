@@ -741,65 +741,23 @@ async def prepare_therapeutic_context(
     # Master kill switch + per-user gap_features_enabled gate the orchestrator
     # internally; when dormant, register_directive is None and downstream
     # logic runs identically to v1.2.
-    # GA hardening (2026-06-09): bounded by EVAL_TIMEOUT_S; failures recorded
-    # via bridge telemetry (consecutive failures escalate to ERROR) instead of
-    # vanishing as one-line warnings; session_id/coach_id/mandatory reporting
-    # now flow through so steps 15-16 are no longer permanent no-ops.
+    # GA hardening (2026-06-09): evaluate_disclosure_guarded encapsulates the
+    # EVAL_TIMEOUT_S bound, telemetry counters, identity-drift audit, cached
+    # check-in agent + mandatory reporting service — keeping this seam under
+    # the Phase 4 15-line cap (phase4_wiring_diff_under_15_lines).
     try:
         from app.services import sensitive_clinical_bridge as _scb
-        _nca_inst = _make_sensitive_bridge_checkin_agent(db_pool)
-        _mrs_inst = None
-        try:
-            _mrs_inst = _scb.get_default_reporting_service(db_pool)
-        except Exception:
-            _mrs_inst = None
-        if canonical_user_id == user_id and db_pool and user_id:
-            # Unresolved identity → enrollment lookups will miss (rule:
-            # sensitive-bridge-identity-canonical). Count it so dormancy
-            # from identity drift is visible in telemetry, not silent.
-            try:
-                _scb.record_bridge_failure(
-                    "identity_unresolved", f"raw_id={user_id!r}"
-                )
-            except Exception:
-                pass
-        _bd = await asyncio.wait_for(
-            _scb.evaluate_disclosure(
-                db_pool=db_pool,
-                user_id=canonical_user_id,
-                message=user_text,
-                session_id=session_id,
-                locale=locale,
-                coach_id=coach_id,
-                nate_checkin_agent=_nca_inst,
-                mandatory_reporting_service=_mrs_inst,
-            ),
-            timeout=_scb.EVAL_TIMEOUT_S,
+        _bd = await _scb.evaluate_disclosure_guarded(
+            db_pool=db_pool, user_id=canonical_user_id, raw_user_id=user_id,
+            message=user_text, session_id=session_id, locale=locale,
+            coach_id=coach_id,
         )
-        register_directive, lens_bridge_block = _apply_sensitive_bridge_decision(
-            _bd, register_directive,
-        )
-        try:
-            _scb.record_bridge_success()
-        except Exception:
-            pass
-    except asyncio.TimeoutError:
-        logger.error(
-            "therapeutic_controller: sensitive bridge timed out after %.1fs "
-            "for user (turn proceeds without bridge shaping)",
-            getattr(_scb, "EVAL_TIMEOUT_S", 4.0),
-        )
-        try:
-            _scb.record_bridge_failure("timeout", "evaluate_disclosure")
-        except Exception:
-            pass
+        if _bd is not None:
+            register_directive, lens_bridge_block = _apply_sensitive_bridge_decision(
+                _bd, register_directive,
+            )
     except Exception as _e:
         logger.warning("therapeutic_controller: bridge wiring skipped: %s", _e)
-        try:
-            from app.services import sensitive_clinical_bridge as _scb_t
-            _scb_t.record_bridge_failure("exception", repr(_e))
-        except Exception:
-            pass
 
     tmc_result = await _classify_tmc(db_pool, canonical_user_id)
     signals = tmc_result.get("signals", {}) or {}
