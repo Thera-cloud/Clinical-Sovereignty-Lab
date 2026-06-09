@@ -123,6 +123,8 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
+import time
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
@@ -2178,6 +2180,15 @@ async def evaluate_disclosure(
             handoff_hash = HANDOFF_PAYLOAD_SCHEMA_HASH
         except Exception:
             handoff_hash = "unknown"
+        if not handoff_audit_id:
+            # Coach is about to be notified WITHOUT a persisted audit row.
+            # This must be loud — silent audit gaps are a compliance failure.
+            logger.error(
+                "sensitive_clinical_bridge: HANDOFF AUDIT INSERT FAILED — "
+                "alert proceeds with payload_ref=audit_insert_failed "
+                "(user=%s tier=%s severity=%s session=%s)",
+                user_id, handoff_tier, handoff_severity, session_id,
+            )
         coach_alert = CoachAlertRef(
             payload_ref=str(handoff_audit_id) if handoff_audit_id else "audit_insert_failed",
             trigger=handoff_tier,
@@ -2207,10 +2218,24 @@ async def evaluate_disclosure(
                     alert_type="coach_handoff",
                 )
             except Exception as _disp_e:
-                logger.warning(
-                    "sensitive_clinical_bridge: dispatch_sensitive_alert failed: %s",
-                    _disp_e,
+                logger.error(
+                    "sensitive_clinical_bridge: HANDOFF EMITTED BUT ALERT DISPATCH "
+                    "FAILED — coach NOT notified (user=%s coach=%s tier=%s): %s",
+                    user_id, coach_for_alert, handoff_tier, _disp_e,
                 )
+        elif not coach_for_alert:
+            logger.error(
+                "sensitive_clinical_bridge: HANDOFF EMITTED BUT NO COACH RESOLVED — "
+                "alert NOT dispatched (user=%s tier=%s severity=%s session=%s)",
+                user_id, handoff_tier, handoff_severity, session_id,
+            )
+        else:
+            logger.warning(
+                "sensitive_clinical_bridge: handoff emitted but "
+                "v1_4_alert_dispatch_enabled=False for user=%s — coach %s NOT "
+                "alerted (tier=%s). Audit row id=%s carries the payload.",
+                user_id, coach_for_alert, handoff_tier, handoff_audit_id,
+            )
 
     # Resolve resource block (specialized_resources) for the active register.
     resource_block = _resolve_resource_block(
@@ -3299,11 +3324,46 @@ FULL_ACTIVATION_GAP_FEATURES: Dict[str, bool] = {
 }
 
 
+# Short-TTL cache for the two per-turn app_settings reads. At GA volume the
+# master switch + global flags were re-read from PostgreSQL on EVERY chat turn
+# for EVERY user. Successful reads are cached for SENSITIVE_BRIDGE_SETTINGS_CACHE_TTL
+# seconds (default 15s — kill-switch OFF therefore propagates within 15s).
+# Errors are NEVER cached: fail-closed defaults still apply on read failure.
+_SETTINGS_CACHE_TTL = float(os.getenv("SENSITIVE_BRIDGE_SETTINGS_CACHE_TTL", "15"))
+_SETTINGS_CACHE: Dict[str, Tuple[float, Any]] = {}
+
+
+def _settings_cache_get(key: str) -> Tuple[bool, Any]:
+    if _SETTINGS_CACHE_TTL <= 0:
+        return False, None
+    entry = _SETTINGS_CACHE.get(key)
+    if entry is None:
+        return False, None
+    ts, value = entry
+    if (time.monotonic() - ts) > _SETTINGS_CACHE_TTL:
+        return False, None
+    return True, value
+
+
+def _settings_cache_put(key: str, value: Any) -> None:
+    if _SETTINGS_CACHE_TTL > 0:
+        _SETTINGS_CACHE[key] = (time.monotonic(), value)
+
+
+def invalidate_settings_cache() -> None:
+    """Drop cached master switch + global flags (tests / admin flips)."""
+    _SETTINGS_CACHE.clear()
+
+
 async def _read_master_enabled(db_pool) -> bool:
     """Read app_settings.sensitive_bridge_master_enabled. Default False on any
-    error or missing row (fail-closed = dormant)."""
+    error or missing row (fail-closed = dormant). Successful reads cached
+    for _SETTINGS_CACHE_TTL seconds."""
     if not db_pool:
         return False
+    hit, cached = _settings_cache_get("master_enabled")
+    if hit:
+        return bool(cached)
     try:
         async with db_pool.acquire() as conn:
             row = await conn.fetchval(
@@ -3311,13 +3371,17 @@ async def _read_master_enabled(db_pool) -> bool:
                 "WHERE setting_key = 'sensitive_bridge_master_enabled'",
             )
         if row is None:
+            _settings_cache_put("master_enabled", False)
             return False
         # JSONB scalars come back as Python objects (bool / str / dict).
         if isinstance(row, bool):
-            return row
-        if isinstance(row, str):
-            return row.strip().lower() == "true"
-        return bool(row)
+            result = row
+        elif isinstance(row, str):
+            result = row.strip().lower() == "true"
+        else:
+            result = bool(row)
+        _settings_cache_put("master_enabled", result)
+        return result
     except Exception as e:
         logger.warning(
             "sensitive_clinical_bridge: master_enabled read failed (fail-closed=False): %s", e,
@@ -3331,6 +3395,9 @@ async def _read_global_gap_flags(db_pool) -> Dict[str, bool]:
     default = {name: False for name in _FEATURE_FLAG_NAMES}
     if not db_pool:
         return default
+    hit, cached = _settings_cache_get("global_gap_flags")
+    if hit and isinstance(cached, dict):
+        return dict(cached)
     try:
         async with db_pool.acquire() as conn:
             row = await conn.fetchval(
@@ -3346,11 +3413,13 @@ async def _read_global_gap_flags(db_pool) -> Dict[str, bool]:
                 except Exception:
                     return default
             else:
+                _settings_cache_put("global_gap_flags", default)
                 return default
         merged = dict(default)
         for k, v in row.items():
             if k in default:
                 merged[k] = bool(v)
+        _settings_cache_put("global_gap_flags", merged)
         return merged
     except Exception as e:
         logger.warning(
@@ -3591,6 +3660,207 @@ else:
     )
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# GA HARDENING — failure telemetry, cached default services, and the
+# detection-only sweep used by non-chat surfaces (Family Sanctuary, private
+# coaching, voice). Added 2026-06-09 from the pre-GA flaw review:
+#   - Critical: silent fail-soft (exceptions swallowed = invisible dormancy)
+#   - Critical: single-surface coverage (only chat ran the pipeline)
+#   - High:     no timeout on the 17-step pipeline
+#   - Medium:   per-turn NateCheckInAgent construction
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Hard wall-clock budget for one evaluate_disclosure() run. The pipeline runs
+# synchronously before LLM inference on every enrolled turn; without a budget
+# one slow query stalls every enrolled user's chat.
+EVAL_TIMEOUT_S = float(os.getenv("SENSITIVE_BRIDGE_EVAL_TIMEOUT_S", "4.0"))
+
+# Escalate from WARNING to ERROR after this many consecutive failures —
+# a persistent failure means the bridge is silently dormant for everyone.
+_FAILURE_ESCALATION_THRESHOLD = int(
+    os.getenv("SENSITIVE_BRIDGE_FAILURE_ESCALATION_THRESHOLD", "3")
+)
+
+_BRIDGE_TELEMETRY: Dict[str, Any] = {
+    "eval_errors": 0,
+    "eval_timeouts": 0,
+    "identity_unresolved": 0,
+    "consecutive_failures": 0,
+    "evals_completed": 0,
+    "last_error": None,
+    "last_error_at": None,
+}
+
+
+def get_bridge_telemetry() -> Dict[str, Any]:
+    """Snapshot of bridge failure/health counters (trust-enforcer visible)."""
+    return dict(_BRIDGE_TELEMETRY)
+
+
+def record_bridge_success() -> None:
+    _BRIDGE_TELEMETRY["evals_completed"] += 1
+    _BRIDGE_TELEMETRY["consecutive_failures"] = 0
+
+
+def record_bridge_failure(kind: str, detail: str) -> None:
+    """Count a pipeline failure and escalate logging when failures persist.
+
+    kind: "timeout" | "error" | "identity_unresolved"
+    """
+    if kind == "timeout":
+        _BRIDGE_TELEMETRY["eval_timeouts"] += 1
+    elif kind == "identity_unresolved":
+        _BRIDGE_TELEMETRY["identity_unresolved"] += 1
+    else:
+        _BRIDGE_TELEMETRY["eval_errors"] += 1
+    _BRIDGE_TELEMETRY["last_error"] = f"{kind}: {detail[:300]}"
+    _BRIDGE_TELEMETRY["last_error_at"] = datetime.now(timezone.utc).isoformat()
+    if kind != "identity_unresolved":
+        _BRIDGE_TELEMETRY["consecutive_failures"] += 1
+    consecutive = _BRIDGE_TELEMETRY["consecutive_failures"]
+    if consecutive >= _FAILURE_ESCALATION_THRESHOLD:
+        logger.error(
+            "sensitive_clinical_bridge: %d CONSECUTIVE PIPELINE FAILURES — "
+            "bridge is effectively dormant for all enrolled users "
+            "(latest %s: %s)",
+            consecutive, kind, detail[:300],
+        )
+    else:
+        logger.warning(
+            "sensitive_clinical_bridge: pipeline failure (%s): %s",
+            kind, detail[:300],
+        )
+
+
+# Cached per-pool default service instances (replaces per-turn construction).
+_DEFAULT_SERVICE_CACHE: Dict[Tuple[str, int], Any] = {}
+
+
+def get_default_checkin_agent(db_pool) -> Optional[Any]:
+    """Cached NateCheckInAgent for this pool (step 2 codeword listener)."""
+    key = ("nca", id(db_pool))
+    inst = _DEFAULT_SERVICE_CACHE.get(key)
+    if inst is None:
+        try:
+            from app.services.nate_checkin_agent import NateCheckInAgent as _NCA
+            inst = _NCA(db_pool=db_pool)
+            _DEFAULT_SERVICE_CACHE[key] = inst
+        except Exception as e:
+            logger.warning(
+                "sensitive_clinical_bridge: NateCheckInAgent unavailable "
+                "(codeword listener degraded): %s", e,
+            )
+            return None
+    return inst
+
+
+def get_default_reporting_service(db_pool) -> Optional[Any]:
+    """Cached MandatoryReportingService for this pool (step 15 screen)."""
+    key = ("mrs", id(db_pool))
+    inst = _DEFAULT_SERVICE_CACHE.get(key)
+    if inst is None:
+        try:
+            from app.services.governance.mandatory_reporting import (
+                MandatoryReportingService as _MRS,
+            )
+            inst = _MRS(db_pool=db_pool)
+            _DEFAULT_SERVICE_CACHE[key] = inst
+        except Exception as e:
+            logger.warning(
+                "sensitive_clinical_bridge: MandatoryReportingService unavailable "
+                "(step 15 mandatory reporting degraded): %s", e,
+            )
+            return None
+    return inst
+
+
+async def run_detection_only(
+    db_pool,
+    user_id: str,
+    message: str,
+    *,
+    source: str = "chat",
+    session_id: Optional[str] = None,
+    coach_id: Optional[str] = None,
+    locale: str = "en-US",
+) -> None:
+    """Detection-only sweep for non-chat surfaces.
+
+    Runs the full 17-step pipeline for its SIDE EFFECTS (codeword listener,
+    mandatory reporting screen, coach handoff + alert dispatch, audit rows)
+    without shaping the surface's response. Master kill switch + enrollment
+    gates apply internally — for dormant users this is two cached settings
+    reads and one enrollment read.
+
+    Never raises; failures feed bridge telemetry.
+    """
+    if not db_pool or not user_id or not (message or "").strip():
+        return
+    canonical = user_id
+    try:
+        from app.services._identity_resolver import resolve_username
+        resolved = await resolve_username(db_pool, user_id)
+        if resolved:
+            canonical = resolved
+        else:
+            record_bridge_failure(
+                "identity_unresolved",
+                f"surface={source} provided_identifier={user_id!r}",
+            )
+    except Exception as e:
+        record_bridge_failure(
+            "identity_unresolved", f"surface={source} resolver error: {e}",
+        )
+    try:
+        await asyncio.wait_for(
+            evaluate_disclosure(
+                db_pool=db_pool,
+                user_id=canonical,
+                message=message,
+                session_id=session_id,
+                locale=locale,
+                coach_id=coach_id,
+                nate_checkin_agent=get_default_checkin_agent(db_pool),
+                mandatory_reporting_service=get_default_reporting_service(db_pool),
+            ),
+            timeout=EVAL_TIMEOUT_S,
+        )
+        record_bridge_success()
+    except asyncio.TimeoutError:
+        record_bridge_failure(
+            "timeout", f"surface={source} user={canonical} >{EVAL_TIMEOUT_S}s",
+        )
+    except Exception as e:
+        record_bridge_failure(
+            "error", f"surface={source} user={canonical}: {type(e).__name__}: {e}",
+        )
+
+
+def schedule_detection_only(
+    db_pool,
+    user_id: str,
+    message: str,
+    *,
+    source: str = "chat",
+    session_id: Optional[str] = None,
+    coach_id: Optional[str] = None,
+    locale: str = "en-US",
+) -> Optional["asyncio.Task"]:
+    """Fire-and-forget wrapper around run_detection_only for call sites that
+    cannot await (sanctuary broadcast paths, voice event loop)."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    return loop.create_task(
+        run_detection_only(
+            db_pool, user_id, message,
+            source=source, session_id=session_id,
+            coach_id=coach_id, locale=locale,
+        )
+    )
+
+
 __all__ = [
     "BridgeDecision",
     "BridgeDecisionRedactionError",
@@ -3599,6 +3869,14 @@ __all__ = [
     "PIPELINE_STEP_NAMES_V1_3",
     "REGISTER_SELECTION_PRIORITY",
     "evaluate_disclosure",
+    "run_detection_only",
+    "schedule_detection_only",
+    "get_bridge_telemetry",
+    "record_bridge_failure",
+    "record_bridge_success",
+    "get_default_checkin_agent",
+    "get_default_reporting_service",
+    "invalidate_settings_cache",
     "run_runtime_auditor_checks",
     "ArousalLoadSummary",
     "CoachAlertRef",

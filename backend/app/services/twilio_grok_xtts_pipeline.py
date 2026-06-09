@@ -77,6 +77,10 @@ _TWILIO_MULAW_CHUNK = 160
 _xtts_consecutive_failures = 0
 _XTTS_FAIL_THRESHOLD = 3
 
+# SOVEREIGN-VOICE — GA hardening (2026-06-09): detection-only Sensitive Bridge
+# sweep on finalized voice utterances. Flag-gated, default OFF; fire-and-forget.
+_SB_VOICE_SWEEP = os.getenv("SENSITIVE_BRIDGE_VOICE_SWEEP", "false").lower() == "true"
+
 _FILLER_TIMEOUT_S = 1.5
 _FILLER_PHRASES = [
     "Mmhmm.",
@@ -1331,6 +1335,16 @@ async def run_twilio_grok_xtts_bridge(
                 if user_txt:
                     print(f"[VOICE-USER] '{user_txt[:120]}'")
                     user_turns.append({"text": user_txt, "ts": datetime.now(timezone.utc).isoformat()})
+                    # SOVEREIGN-VOICE — GA hardening: detection-only bridge sweep (flag-gated)
+                    if _SB_VOICE_SWEEP and session_username and ctx.get("db_pool"):
+                        try:
+                            from app.services.sensitive_clinical_bridge import schedule_detection_only
+                            schedule_detection_only(
+                                db_pool=ctx["db_pool"], user_id=session_username,
+                                message=user_txt, source="voice_call",
+                            )
+                        except Exception as _sb_v_e:
+                            print(f"[SB-SWEEP] voice sweep skipped (non-fatal): {_sb_v_e}")
                     if _bc_engine and not _bc_engine._enabled and _greeting_spoken:
                         _bc_engine.enable()
                         print("[BACKCHANNEL] enabled after first user speech")

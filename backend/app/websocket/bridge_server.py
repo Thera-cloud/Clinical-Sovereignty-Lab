@@ -91,6 +91,23 @@ except Exception:
     def _normalize_phone_e164(phone_raw, default_region="US"):  # type: ignore
         return None
 
+# QUANTUM-CRYSTAL-ARCH — GA hardening (2026-06-09): detection-only Sensitive
+# Bridge sweep for non-chat surfaces (Family Sanctuary, group/private coaching).
+# Flag-gated, default OFF; fire-and-forget so it can never block a turn.
+import os as _sb_os
+_SB_SURFACE_SWEEP = _sb_os.getenv("SENSITIVE_BRIDGE_SURFACE_SWEEP", "false").lower() == "true"
+
+def _sb_surface_sweep(db_pool, user_id, message, surface):
+    if not (_SB_SURFACE_SWEEP and db_pool and user_id and message):
+        return
+    try:
+        from app.services.sensitive_clinical_bridge import schedule_detection_only
+        schedule_detection_only(
+            db_pool=db_pool, user_id=user_id, message=message, source=surface,
+        )
+    except Exception as _sb_e:
+        print(f">>> [SB-SWEEP] {surface} sweep skipped (non-fatal): {_sb_e}")
+
 # Optional Night School modules (bridge should run without them)
 NightSchoolCurriculum = None
 NightSchoolHandler = None
@@ -9571,6 +9588,10 @@ class AzureCortex:
                 _ttc_pack = await _ttc_pre(
                     user_text=user_text, user_id=uid, db_pool=db_pool,
                     base_system_prompt=system_prompt, default_max_tokens=_len_cap,
+                    # QUANTUM-CRYSTAL-ARCH — GA hardening: session/coach correlation so
+                    # bridge steps 15 (mandatory reporting) + 16 (coach alert) can fire.
+                    session_id=_turn_id,
+                    coach_id=(profile.get("assigned_coach") or None),
                 )
                 if _ttc_pack:
                     system_prompt = _ttc_pack.get("enriched_system_prompt", system_prompt)
@@ -10882,6 +10903,11 @@ class AzureCortex:
                     _target_hw = target_member.get("hardware_id", "")
                     _target_name = target_member.get("name", "")
                     _gc_response = result.get("suggested_response", "")
+                    # QUANTUM-CRYSTAL-ARCH — GA hardening: sweep target's latest message (flag-gated)
+                    for _sb_m in reversed(recent_messages[-8:]):
+                        if (_sb_m.get("sender_id") or _sb_m.get("user_id")) == _target_hw and _sb_m.get("content"):
+                            _sb_surface_sweep(db_pool, _target_hw, _sb_m.get("content"), "group_coaching")
+                            break
                     for msg in recent_messages[-8:]:
                         _msg_text = msg.get("content", "")
                         _msg_sid = msg.get("sender_id", "") or msg.get("user_id", "")
@@ -11166,6 +11192,9 @@ class AzureCortex:
 
                     clean_response, _ = self._extract_eft_markers(response_text)
                     clean_response, _ = self._extract_recon_markers(clean_response)
+
+                    # QUANTUM-CRYSTAL-ARCH — GA hardening: detection-only bridge sweep (flag-gated)
+                    _sb_surface_sweep(db_pool, member_id or "", user_prompt, "private_coaching")
 
                     try:
                         asyncio.create_task(crystallize_from_conversation(
@@ -27315,6 +27344,9 @@ Coach Reflection on Session {session_id}:
                                 "timestamp": datetime.datetime.now().isoformat()
                             }
                         )
+
+                        # QUANTUM-CRYSTAL-ARCH — GA hardening: detection-only bridge sweep (flag-gated)
+                        _sb_surface_sweep(db_pool, current_profile['hardware_id'], message, "family_sanctuary")
 
                         # Crystallize every member message (including member-to-member without LN response)
                         try:

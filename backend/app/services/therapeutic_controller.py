@@ -68,6 +68,7 @@ Dual insertion sites (BOTH must remain present per Note 1, Phase 3):
    any future code path that might re-enable mismatch downstream.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -646,11 +647,17 @@ def _anti_repeat_block(narratives: list) -> str:
 
 
 def _make_sensitive_bridge_checkin_agent(db_pool):
+    # GA hardening: delegate to the bridge's cached per-pool instance instead
+    # of constructing a fresh NateCheckInAgent on every chat turn.
     try:
-        from app.services.nate_checkin_agent import NateCheckInAgent as _NCA
-        return _NCA(db_pool=db_pool)
+        from app.services.sensitive_clinical_bridge import get_default_checkin_agent
+        return get_default_checkin_agent(db_pool)
     except Exception:
-        return None
+        try:
+            from app.services.nate_checkin_agent import NateCheckInAgent as _NCA
+            return _NCA(db_pool=db_pool)
+        except Exception:
+            return None
 
 
 def _apply_sensitive_bridge_decision(bridge_decision, fallback_register: Optional[str]):
@@ -682,6 +689,13 @@ async def prepare_therapeutic_context(
     novelty_threshold: float = 0.30,
     thalamic_gate_forced: bool = False,
     locale: str = "en-US",
+    # ─── GA hardening additive params (2026-06-09 pre-GA flaw review) ───
+    # session_id: audit-row correlation for sensitive_bridge_log.
+    # coach_id: assigned coach username — enables step 15 mandatory
+    #     reporting escalation + step 16 coach alert dispatch targeting.
+    # Defaults (None) preserve prior behavior at every other call site.
+    session_id: Optional[str] = None,
+    coach_id: Optional[str] = None,
 ) -> dict:
     """Classify state, assemble context, shape prompt + cap. Always returns
     a dict; on partial failure, fields default to the original prompt/cap.
@@ -726,23 +740,66 @@ async def prepare_therapeutic_context(
     # v1.3 Sensitive Clinical Bridge — single wiring seam (Phase 4 Note 1).
     # Master kill switch + per-user gap_features_enabled gate the orchestrator
     # internally; when dormant, register_directive is None and downstream
-    # logic runs identically to v1.2. Failure is best-effort: a raised
-    # exception leaves register_directive at the caller-supplied value.
+    # logic runs identically to v1.2.
+    # GA hardening (2026-06-09): bounded by EVAL_TIMEOUT_S; failures recorded
+    # via bridge telemetry (consecutive failures escalate to ERROR) instead of
+    # vanishing as one-line warnings; session_id/coach_id/mandatory reporting
+    # now flow through so steps 15-16 are no longer permanent no-ops.
     try:
         from app.services import sensitive_clinical_bridge as _scb
         _nca_inst = _make_sensitive_bridge_checkin_agent(db_pool)
-        _bd = await _scb.evaluate_disclosure(
-            db_pool=db_pool,
-            user_id=canonical_user_id,
-            message=user_text,
-            locale=locale,
-            nate_checkin_agent=_nca_inst,
+        _mrs_inst = None
+        try:
+            _mrs_inst = _scb.get_default_reporting_service(db_pool)
+        except Exception:
+            _mrs_inst = None
+        if canonical_user_id == user_id and db_pool and user_id:
+            # Unresolved identity → enrollment lookups will miss (rule:
+            # sensitive-bridge-identity-canonical). Count it so dormancy
+            # from identity drift is visible in telemetry, not silent.
+            try:
+                _scb.record_bridge_failure(
+                    "identity_unresolved", f"raw_id={user_id!r}"
+                )
+            except Exception:
+                pass
+        _bd = await asyncio.wait_for(
+            _scb.evaluate_disclosure(
+                db_pool=db_pool,
+                user_id=canonical_user_id,
+                message=user_text,
+                session_id=session_id,
+                locale=locale,
+                coach_id=coach_id,
+                nate_checkin_agent=_nca_inst,
+                mandatory_reporting_service=_mrs_inst,
+            ),
+            timeout=_scb.EVAL_TIMEOUT_S,
         )
         register_directive, lens_bridge_block = _apply_sensitive_bridge_decision(
             _bd, register_directive,
         )
+        try:
+            _scb.record_bridge_success()
+        except Exception:
+            pass
+    except asyncio.TimeoutError:
+        logger.error(
+            "therapeutic_controller: sensitive bridge timed out after %.1fs "
+            "for user (turn proceeds without bridge shaping)",
+            getattr(_scb, "EVAL_TIMEOUT_S", 4.0),
+        )
+        try:
+            _scb.record_bridge_failure("timeout", "evaluate_disclosure")
+        except Exception:
+            pass
     except Exception as _e:
         logger.warning("therapeutic_controller: bridge wiring skipped: %s", _e)
+        try:
+            from app.services import sensitive_clinical_bridge as _scb_t
+            _scb_t.record_bridge_failure("exception", repr(_e))
+        except Exception:
+            pass
 
     tmc_result = await _classify_tmc(db_pool, canonical_user_id)
     signals = tmc_result.get("signals", {}) or {}
