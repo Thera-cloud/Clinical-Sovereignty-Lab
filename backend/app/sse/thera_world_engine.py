@@ -28,38 +28,40 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Each domain keeps a canonical Thera-World character but carries its own visual
+# manifestation so two users (or two days) sharing a character still get distinct imagery.
 CRYSTAL_TO_CHARACTER: Dict[str, Tuple[str, str]] = {
-    "attachment": ("Mirror", "with a faint reflection visible in still water nearby, suggesting hidden depth"),
-    "love": ("Mirror", "with a faint reflection visible in still water nearby, suggesting hidden depth"),
-    "trust": ("Mirror", "with a faint reflection visible in still water nearby, suggesting hidden depth"),
-    "anxiety": ("Mirror", "with a faint reflection visible in still water nearby, suggesting hidden depth"),
-    "loss": ("Mirror", "with a faint reflection visible in still water nearby, suggesting hidden depth"),
-    "abandonment": ("Mirror", "with a faint reflection visible in still water nearby, suggesting hidden depth"),
-    "codependency": ("Mirror", "with a faint reflection visible in still water nearby, suggesting hidden depth"),
-    "depression": ("Mirror", "with a faint reflection visible in still water nearby, suggesting hidden depth"),
+    "attachment": ("Mirror", "with two faint reflections in still water that drift apart and return to each other, suggesting bonds tested and held"),
+    "love": ("Mirror", "with warm light catching a reflection in still water, two silhouettes mirrored close together"),
+    "trust": ("Mirror", "with a rope bridge reflected in calm water below, each plank distinct, suggesting careful steps across"),
+    "codependency": ("Mirror", "with intertwined vines reflected in water, one vine slowly turning toward its own patch of light"),
+    "anxiety": ("Serpent", "with restless ripples disturbing the water's edge and a serpentine shadow circling the periphery, never striking"),
     "shame": ("Serpent", "with a subtle serpentine shadow at the edge of the frame, coiled but watchful"),
-    "deception": ("Serpent", "with a subtle serpentine shadow at the edge of the frame, coiled but watchful"),
-    "anger": ("Serpent", "with a subtle serpentine shadow at the edge of the frame, coiled but watchful"),
-    "fear": ("Serpent", "with a subtle serpentine shadow at the edge of the frame, coiled but watchful"),
-    "control": ("Serpent", "with a subtle serpentine shadow at the edge of the frame, coiled but watchful"),
-    "resentment": ("Serpent", "with a subtle serpentine shadow at the edge of the frame, coiled but watchful"),
+    "deception": ("Serpent", "with a forked path half-hidden in undergrowth, a serpentine shape woven through the branches above"),
+    "anger": ("Serpent", "with heat shimmer rising off stone and a coiled serpentine silhouette backlit by ember light"),
+    "fear": ("Serpent", "with long shadows stretching toward the figure and a watchful serpentine form at the treeline, distant"),
+    "control": ("Serpent", "with hedges trimmed into rigid walls beginning to overgrow at the edges, a serpent shape tracing the straightest line"),
+    "resentment": ("Serpent", "with old roots buckling a stone path and a serpentine shadow resting in the cracks"),
     "guilt": ("Pride/Shame", "with contrasting light and shadow splitting the scene, one side warm and one side cold"),
-    "trauma": ("Pride/Shame", "with contrasting light and shadow splitting the scene, one side warm and one side cold"),
-    "perfectionism": ("Pride/Shame", "with contrasting light and shadow splitting the scene, one side warm and one side cold"),
+    "trauma": ("Pride/Shame", "with a fractured landscape knitting itself together at the seam where warm and cold light meet"),
+    "perfectionism": ("Pride/Shame", "with one half of the scene immaculately ordered and the other half wild and alive, the figure standing at the boundary"),
     "identity": ("Reflection", "with a mirror or reflective surface showing a slightly different version of the subject"),
-    "self-worth": ("Reflection", "with a mirror or reflective surface showing a slightly different version of the subject"),
-    "grief": ("Reflection", "with a mirror or reflective surface showing a slightly different version of the subject"),
-    "boundaries": ("Reflection", "with a mirror or reflective surface showing a slightly different version of the subject"),
-    "rejection": ("Reflection", "with a mirror or reflective surface showing a slightly different version of the subject"),
+    "self-worth": ("Reflection", "with a polished stone surface reflecting the figure taller and steadier than they hold themselves"),
+    "grief": ("Reflection", "with an empty bench beside still water, light falling gently on the space where someone once sat"),
+    "loss": ("Reflection", "with a lantern left burning at the path's edge and a single set of footprints trailing into soft mist"),
+    "abandonment": ("Reflection", "with a door left ajar in an empty doorframe standing alone in the field, warm light visible through the gap"),
+    "boundaries": ("Reflection", "with a low stone wall under construction beside the path, each stone placed deliberately, a gate left open"),
+    "rejection": ("Reflection", "with a window glimpsed from outside, and the figure's reflection in it looking back kindly"),
     "faith": ("Holy Spirit", "with gentle light streaming from an unseen source above, warm and golden"),
-    "hope": ("Holy Spirit", "with gentle light streaming from an unseen source above, warm and golden"),
-    "spiritual": ("Holy Spirit", "with gentle light streaming from an unseen source above, warm and golden"),
-    "forgiveness": ("Holy Spirit", "with gentle light streaming from an unseen source above, warm and golden"),
+    "hope": ("Holy Spirit", "with a thin seam of dawn light widening along the horizon line, unmistakable against the dark"),
+    "depression": ("Holy Spirit", "with a thin seam of golden light breaking through heavy gray cloud cover, distant but constant"),
+    "spiritual": ("Holy Spirit", "with motes of golden light drifting upward like slow embers, gathering above the path"),
+    "forgiveness": ("Holy Spirit", "with rain just ended, every surface washed and glistening, soft light pooling in the puddles"),
     "wonder": ("Curiosity", "with an open door or pathway visible in the background, inviting exploration"),
-    "growth": ("Curiosity", "with an open door or pathway visible in the background, inviting exploration"),
-    "discovery": ("Curiosity", "with an open door or pathway visible in the background, inviting exploration"),
-    "loneliness": ("Curiosity", "with an open door or pathway visible in the background, inviting exploration"),
-    "vulnerability": ("Curiosity", "with an open door or pathway visible in the background, inviting exploration"),
+    "growth": ("Curiosity", "with new green shoots breaking through old stone, and a winding path climbing gently upward"),
+    "discovery": ("Curiosity", "with a half-uncovered carving or artifact catching the light, brushes and tools resting nearby"),
+    "loneliness": ("Curiosity", "with a distant campfire visible through the trees, smoke rising, the path toward it clear"),
+    "vulnerability": ("Curiosity", "with a cloak set down on a stone and the figure standing lighter without it, the air mild"),
 }
 
 _DEFAULT_CHARACTER = ("Mirror", "with a faint reflection visible in still water nearby, suggesting hidden depth")
@@ -143,8 +145,10 @@ async def get_therapeutic_profile(user_id: str, db_pool) -> dict:
                                 "session_count": 0, "active_quests": [], "active_missions": []}
     try:
         async with db_pool.acquire() as conn:
-            uid = await conn.fetchval(
-                "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 LIMIT 1", user_id)
+            urow = await conn.fetchrow(
+                "SELECT id, username, hardware_id FROM users "
+                "WHERE hardware_id = $1 OR username = $1 LIMIT 1", user_id)
+            uid = urow["id"] if urow else None
 
             if uid:
                 profile["crystal_count"] = await conn.fetchval(
@@ -163,9 +167,17 @@ async def get_therapeutic_profile(user_id: str, db_pool) -> dict:
                     "ORDER BY created_at DESC LIMIT 5", uid)
                 profile["recent_crystals"] = [r["crystal_text"][:200] for r in recent if r["crystal_text"]]
 
+            # conversation_history.user_id stores usernames for voice/chat sessions,
+            # but callers pass hardware_id — match on every known identifier.
+            _idents = [user_id]
+            if urow:
+                for _k in ("username", "hardware_id"):
+                    _v = urow[_k]
+                    if _v and _v not in _idents:
+                        _idents.append(_v)
             profile["session_count"] = await conn.fetchval(
                 "SELECT COUNT(DISTINCT created_at::date) FROM conversation_history "
-                "WHERE user_id = $1", user_id) or 0
+                "WHERE user_id = ANY($1::text[])", _idents) or 0
 
             quests = await conn.fetch(
                 "SELECT quest_id, goal, goal_domain FROM sse_quests "
@@ -225,13 +237,61 @@ async def check_biome_transition(user_id: str, profile: dict, journey: dict, db_
     return True
 
 
-async def determine_character(profile: dict) -> Tuple[str, str]:
-    """Map dominant crystal domains to core character manifestation."""
+async def determine_character(profile: dict, panel_sequence: int = 0) -> Tuple[str, str]:
+    """Map dominant crystal domains to core character manifestation.
+
+    Rotates through ALL matched domains by panel_sequence so a user whose
+    top domain never changes still sees different manifestations day to day.
+    """
+    matches: List[Tuple[str, str]] = []
     for domain in profile.get("top_domains", []):
         key = domain.lower().strip()
-        if key in CRYSTAL_TO_CHARACTER:
-            return CRYSTAL_TO_CHARACTER[key]
-    return _DEFAULT_CHARACTER
+        if key in CRYSTAL_TO_CHARACTER and CRYSTAL_TO_CHARACTER[key] not in matches:
+            matches.append(CRYSTAL_TO_CHARACTER[key])
+    if not matches:
+        return _DEFAULT_CHARACTER
+    return matches[panel_sequence % len(matches)]
+
+
+async def _get_archetype_identity(user_id: str, journey: dict, db_pool) -> Dict[str, str]:
+    """Resolve the user's archetype (hint + visual + ref image) for narrative/image use.
+
+    Prefers journey_metadata; falls back to sse_identity_forge (with username
+    fallback) and backfills journey_metadata so future panels skip the lookup.
+    """
+    jmeta = journey.get("journey_metadata") or {}
+    if isinstance(jmeta, str):
+        try:
+            jmeta = json.loads(jmeta)
+        except Exception:
+            jmeta = {}
+    ident = {
+        "archetype_hint": jmeta.get("archetype_hint") or "",
+        "character_visual": jmeta.get("character_visual") or "",
+        "archetype_image_url": jmeta.get("archetype_image_url") or "",
+    }
+    if ident["archetype_hint"] and ident["character_visual"]:
+        return ident
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT archetype_hint, character_visual, archetype_image_url "
+                "FROM sse_identity_forge WHERE user_id = $1 "
+                "OR user_id = (SELECT hardware_id FROM users WHERE username = $1 LIMIT 1) "
+                "OR user_id = (SELECT username FROM users WHERE hardware_id = $1 LIMIT 1) "
+                "LIMIT 1", user_id)
+            if row:
+                ident["archetype_hint"] = ident["archetype_hint"] or (row["archetype_hint"] or "")
+                ident["character_visual"] = ident["character_visual"] or (row["character_visual"] or "")
+                ident["archetype_image_url"] = ident["archetype_image_url"] or (row["archetype_image_url"] or "")
+                if ident["archetype_hint"] or ident["character_visual"]:
+                    await conn.execute(
+                        "UPDATE sse_user_journeys SET journey_metadata = "
+                        "COALESCE(journey_metadata, '{}'::jsonb) || $1::jsonb WHERE user_id = $2",
+                        json.dumps({k: v for k, v in ident.items() if v}), user_id)
+    except Exception as e:
+        logger.warning("TheraWorld: archetype identity lookup failed for %s: %s", user_id, e)
+    return ident
 
 
 async def _fetch_recent_delivery_narratives(user_id: str, db_pool) -> List[str]:  # FIX-NARRATIVE-DIVERSITY
@@ -252,6 +312,7 @@ async def compose_journey_narrative(
     profile: dict, journey: dict, biome: dict, character: Tuple[str, str], db_pool,
     last_panel_summary: str = "", last_panel_npcs: list = None, panel_sequence: int = 0,
     user_id: str = "", recent_narratives: Optional[List[str]] = None,
+    archetype_hint: str = "", character_visual: str = "",
 ) -> dict:
     """Use LLM to compose a scene narrative. Falls back to template on failure."""
     import httpx
@@ -294,9 +355,24 @@ async def compose_journey_narrative(
         except Exception as _intake_err:
             logger.warning("TheraWorld: intake theme extraction failed: %s", _intake_err)
 
+    # Archetype protagonist block — the user's own character leads the story
+    protagonist_block = ""
+    _protag_desc = ""
+    if archetype_hint or character_visual:
+        _protag_desc = f"a {archetype_hint or 'journeying'} archetype"
+        if character_visual:
+            _protag_desc += f" — {character_visual[:200]}"
+        protagonist_block = (
+            f"THE PROTAGONIST (the user's own forged character): {_protag_desc}.\n"
+            "The protagonist is the central figure of every scene — this is THEIR adventure. "
+            "Write narrative_text in a way that places the protagonist in the scene (second person 'you' "
+            "addressing them as this character), and the image_prompt MUST describe the protagonist "
+            "as the main figure using the visual description above, not a generic solitary figure.\n"
+        )
+
     fallback = {
         "narrative_text": f"In the {biome_name.replace('_', ' ')}, the {char_name} watches and waits. The path forward is becoming clearer.",
-        "image_prompt": f"{biome_desc}, a solitary figure in the landscape, {grok_suffix}, painterly style, muted warm palette",
+        "image_prompt": f"{biome_desc}, {_protag_desc or 'a solitary figure'} in the landscape, {grok_suffix}, painterly style, muted warm palette",
         "panel_tone": "meditative",
     }
 
@@ -433,6 +509,7 @@ async def compose_journey_narrative(
         "Generate a short scene description (2-3 sentences) and a Grok Imagine image prompt "
         "for a user's daily story panel.\n\n"
         f"{age_gate_block}"
+        f"{protagonist_block}"
         f"User's current biome: {biome_name} — {biome_desc}\n"
         f"Core character present: {char_name}\n"
         f"{richness_guidance.get(richness, richness_guidance['moderate'])}"
@@ -496,13 +573,13 @@ async def build_rich_panel_prompt(user_id: str, db_pool) -> dict:
 
     current_biome_name = journey.get("current_biome", "dark_forest")
     biome = next((b for b in BIOME_THRESHOLDS if b["biome"] == current_biome_name), BIOME_THRESHOLDS[0])
-    character = await determine_character(profile)
 
     last_summary = journey.get("last_panel_summary", "") or ""
     last_npcs = journey.get("last_panel_npcs") or []
     if isinstance(last_npcs, str):
         last_npcs = json.loads(last_npcs)
     panel_seq = journey.get("panel_sequence", 0) or 0
+    character = await determine_character(profile, panel_sequence=panel_seq)
 
     # Phase 6: family context enrichment
     try:
@@ -539,20 +616,20 @@ async def build_rich_panel_prompt(user_id: str, db_pool) -> dict:
     await _enrich_profile_coaching_calibration(profile, user_id, db_pool)
     await _enrich_profile_assessment_calibration(profile, user_id, db_pool)
 
+    arch_ident = await _get_archetype_identity(user_id, journey, db_pool)
+    arch_hint = arch_ident.get("archetype_hint", "")
+
     recent_nar = await _fetch_recent_delivery_narratives(user_id, db_pool)  # FIX-NARRATIVE-DIVERSITY
     narrative = await compose_journey_narrative(
         profile, journey, biome, character, db_pool,
         last_panel_summary=last_summary, last_panel_npcs=last_npcs,
-        panel_sequence=panel_seq, user_id=user_id, recent_narratives=recent_nar)
+        panel_sequence=panel_seq, user_id=user_id, recent_narratives=recent_nar,
+        archetype_hint=arch_hint, character_visual=arch_ident.get("character_visual", ""))
 
     image_prompt = narrative.get("image_prompt", "")
     if not image_prompt:
         image_prompt = f"{biome['description']}, a solitary figure, {character[1]}, painterly style"
 
-    jmeta = journey.get("journey_metadata") or {}
-    if isinstance(jmeta, str):
-        jmeta = json.loads(jmeta)
-    arch_hint = jmeta.get("archetype_hint", "")
     if arch_hint:
         image_prompt = image_prompt.replace("a solitary figure", f"a {arch_hint} figure, the protagonist")
 
@@ -622,7 +699,6 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
 
     current_biome_name = journey.get("current_biome", "dark_forest")
     biome = next((b for b in BIOME_THRESHOLDS if b["biome"] == current_biome_name), BIOME_THRESHOLDS[0])
-    character = await determine_character(profile)
 
     last_summary = journey.get("last_panel_summary", "") or ""
     last_npcs = journey.get("last_panel_npcs") or []
@@ -631,6 +707,7 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     panel_seq = journey.get("panel_sequence", 0) or 0
     if transitioned:
         panel_seq = 0
+    character = await determine_character(profile, panel_sequence=panel_seq)
 
     # Phase 6: enrich profile with family context
     try:
@@ -668,11 +745,15 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     await _enrich_profile_coaching_calibration(profile, user_id, db_pool)
     await _enrich_profile_assessment_calibration(profile, user_id, db_pool)
 
+    arch_ident = await _get_archetype_identity(user_id, journey, db_pool)
+    arch_hint = arch_ident.get("archetype_hint", "")
+
     recent_nar = await _fetch_recent_delivery_narratives(user_id, db_pool)  # FIX-NARRATIVE-DIVERSITY
     narrative = await compose_journey_narrative(
         profile, journey, biome, character, db_pool,
         last_panel_summary=last_summary, last_panel_npcs=last_npcs,
-        panel_sequence=panel_seq, user_id=user_id, recent_narratives=recent_nar)
+        panel_sequence=panel_seq, user_id=user_id, recent_narratives=recent_nar,
+        archetype_hint=arch_hint, character_visual=arch_ident.get("character_visual", ""))
 
     image_prompt = narrative.get("image_prompt", "")
     if not image_prompt:
@@ -682,7 +763,6 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     jmeta = journey.get("journey_metadata") or {}
     if isinstance(jmeta, str):
         jmeta = json.loads(jmeta)
-    arch_hint = jmeta.get("archetype_hint", "")
     if arch_hint:
         image_prompt = image_prompt.replace("a solitary figure", f"a {arch_hint} figure, the protagonist")
 
@@ -711,14 +791,15 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     image_prompt += ", no text, no words, no lettering, no calligraphy, no writing on image"
     image_prompt += f", {character[1]}"
 
-    archetype_ref_url = None
-    try:
-        async with db_pool.acquire() as conn:
-            archetype_ref_url = await conn.fetchval(
-                "SELECT archetype_image_url FROM sse_identity_forge WHERE user_id = $1",
-                user_id)
-    except Exception as _arc_err:
-        logger.warning("Archetype ref lookup failed for %s: %s", user_id, _arc_err)
+    archetype_ref_url = arch_ident.get("archetype_image_url") or None
+    if not archetype_ref_url:
+        try:
+            async with db_pool.acquire() as conn:
+                archetype_ref_url = await conn.fetchval(
+                    "SELECT archetype_image_url FROM sse_identity_forge WHERE user_id = $1",
+                    user_id)
+        except Exception as _arc_err:
+            logger.warning("Archetype ref lookup failed for %s: %s", user_id, _arc_err)
 
     r2_url = None
     try:

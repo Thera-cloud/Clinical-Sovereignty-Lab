@@ -196,6 +196,20 @@ async def extract_intake_data(conversation: list, db_pool, user_id: str) -> dict
     ph = ",".join(f"${i+1}" for i in range(len(vals)))
     async with db_pool.acquire() as conn:
         await conn.execute(f"INSERT INTO sse_identity_forge ({cols}) VALUES({ph},'complete',NOW()) ON CONFLICT(user_id) DO UPDATE SET {upd},status='complete',completed_at=NOW()", *vals)
+        # Propagate archetype identity to the journey so the Thera-World engine
+        # weaves the user's character into every panel (narrative + image).
+        try:
+            _arch_meta = {k: v for k, v in {
+                "archetype_hint": data.get("archetype_hint"),
+                "character_visual": (data.get("character_visual") or "")[:300],
+            }.items() if v}
+            if _arch_meta:
+                await conn.execute(
+                    "UPDATE sse_user_journeys SET journey_metadata = "
+                    "COALESCE(journey_metadata, '{}'::jsonb) || $1::jsonb WHERE user_id = $2",
+                    json.dumps(_arch_meta), user_id)
+        except Exception as _jm_err:
+            logger.warning("Journey metadata archetype propagation failed for %s: %s", user_id, _jm_err)
 
     if not data.get("archetype_hint"):
         logger.error("INTAKE EXTRACTION FAILED for %s — archetype_hint is NULL after LLM + fallback", user_id)
