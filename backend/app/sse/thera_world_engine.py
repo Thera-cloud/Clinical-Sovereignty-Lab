@@ -104,6 +104,57 @@ DOMAIN_TO_NPC: Dict[str, Dict[str, str]] = {
     "vulnerability": {"name": "The Cloakless Traveler", "role": "walks lighter for what was set down", "visual_prompt_fragment": "a traveler walking without their cloak, garment folded on a stone behind them, air mild"},
 }
 
+# Therapeutic themes are mined from crystal TEXT because the crystal `domain`
+# column only holds the 7 canonical domains (clinical, coaching, marketing...).
+# The themes that drive character/NPC manifestation live in the crystal language.
+_THEME_KEYWORDS: Dict[str, Tuple[str, ...]] = {
+    "attachment": ("attachment", "clinging", "pursue-withdraw", "pursuer", "withdraw"),
+    "love": ("love", "loving", "affection", "intimacy"),
+    "trust": ("trust", "distrust", "betray"),
+    "codependency": ("codependen", "enmesh"),
+    "anxiety": ("anxiety", "anxious", "worry", "panic", "overwhelm"),
+    "shame": ("shame", "ashamed", "humiliat", "worthless"),
+    "deception": ("deceiv", "deception", "dishonest", "gaslight", "lying"),
+    "anger": ("anger", "angry", "rage", "furious"),
+    "fear": ("fear", "afraid", "scared", "terrified"),
+    "control": ("control", "controlling", "micromanag"),
+    "resentment": ("resent", "bitter"),
+    "guilt": ("guilt", "guilty", "regret"),
+    "trauma": ("trauma", "ptsd", "flashback", "triggered"),
+    "perfectionism": ("perfection", "never good enough", "high standard"),
+    "identity": ("identity", "who i am", "true self", "authentic self"),
+    "self-worth": ("self-worth", "self worth", "self-esteem", "not enough", "unworthy"),
+    "grief": ("grief", "grieving", "mourn"),
+    "loss": ("loss", "lost someone", "passed away", "death of"),
+    "abandonment": ("abandon", "left me", "walked out"),
+    "boundaries": ("boundar", "say no", "people-pleas", "people pleas"),
+    "rejection": ("reject", "excluded", "unwanted"),
+    "faith": ("faith", "god", "prayer", "spiritual practice"),
+    "hope": ("hope", "hopeful", "optimis"),
+    "depression": ("depress", "hopeless", "numb", "empty inside"),
+    "spiritual": ("spiritual", "soul", "sacred", "divine"),
+    "forgiveness": ("forgiv",),
+    "wonder": ("wonder", "curious", "curiosity", "awe"),
+    "growth": ("growth", "growing", "progress", "breakthrough", "healing"),
+    "discovery": ("discover", "insight", "realiz", "uncover"),
+    "loneliness": ("lonel", "isolat", "alone"),
+    "vulnerability": ("vulnerab", "opening up", "letting in"),
+}
+
+
+def _mine_themes_from_texts(texts: List[str]) -> Dict[str, int]:
+    """Count therapeutic theme occurrences across crystal texts (substring stems)."""
+    counts: Dict[str, int] = {}
+    for raw in texts:
+        t = (raw or "").lower()
+        if not t:
+            continue
+        for theme, stems in _THEME_KEYWORDS.items():
+            if any(s in t for s in stems):
+                counts[theme] = counts.get(theme, 0) + 1
+    return counts
+
+
 # Patent FIG. 39: archetype visual evolution stages — the protagonist's reference
 # image is regenerated at each biome transition so the character visibly transforms.
 _BIOME_ARCHETYPE_STAGE: Dict[str, Tuple[str, str]] = {
@@ -190,7 +241,8 @@ async def get_therapeutic_profile(user_id: str, db_pool) -> dict:
             return cached
 
     profile: Dict[str, Any] = {"crystal_count": 0, "top_domains": [], "recent_crystals": [],
-                                "domain_counts": {}, "session_count": 0,
+                                "domain_counts": {}, "theme_counts": {}, "top_themes": [],
+                                "session_count": 0,
                                 "active_quests": [], "active_missions": []}
     try:
         async with db_pool.acquire() as conn:
@@ -216,6 +268,19 @@ async def get_therapeutic_profile(user_id: str, db_pool) -> dict:
                     "WHERE user_id = $1 AND superseded_by IS NULL "
                     "ORDER BY created_at DESC LIMIT 5", uid)
                 profile["recent_crystals"] = [r["crystal_text"][:200] for r in recent if r["crystal_text"]]
+
+                # Mine therapeutic THEMES from crystal text — the domain column only
+                # holds canonical domains (clinical/coaching/...), but character and
+                # NPC manifestation are keyed by themes (shame, grief, attachment...).
+                theme_rows = await conn.fetch(
+                    "SELECT crystal_text FROM nate_intelligence_crystals "
+                    "WHERE user_id = $1 AND superseded_by IS NULL "
+                    "ORDER BY created_at DESC LIMIT 150", uid)
+                theme_counts = _mine_themes_from_texts(
+                    [r["crystal_text"] for r in theme_rows if r["crystal_text"]])
+                profile["theme_counts"] = theme_counts
+                profile["top_themes"] = [t for t, _ in sorted(
+                    theme_counts.items(), key=lambda kv: kv[1], reverse=True)[:6]]
 
             # conversation_history.user_id stores usernames for voice/chat sessions,
             # but callers pass hardware_id — match on every known identifier.
@@ -294,10 +359,12 @@ async def determine_character(profile: dict, panel_sequence: int = 0) -> Tuple[s
     top domain never changes still sees different manifestations day to day.
     """
     matches: List[Tuple[str, str]] = []
-    for domain in profile.get("top_domains", []):
-        key = domain.lower().strip()
-        if key in CRYSTAL_TO_CHARACTER and CRYSTAL_TO_CHARACTER[key] not in matches:
-            matches.append(CRYSTAL_TO_CHARACTER[key])
+    # Themes mined from crystal text are the primary key; canonical domains fallback
+    for key_src in (profile.get("top_themes", []), profile.get("top_domains", [])):
+        for domain in key_src:
+            key = domain.lower().strip()
+            if key in CRYSTAL_TO_CHARACTER and CRYSTAL_TO_CHARACTER[key] not in matches:
+                matches.append(CRYSTAL_TO_CHARACTER[key])
     if not matches:
         return _DEFAULT_CHARACTER
     return matches[panel_sequence % len(matches)]
@@ -359,7 +426,7 @@ async def _fetch_deep_crystal_context(user_id: str, profile: dict, db_pool) -> s
     except ImportError:
         return ""
     try:
-        query_text = " ".join(profile.get("top_domains", [])[:3])
+        query_text = " ".join(profile.get("top_themes", [])[:3] or profile.get("top_domains", [])[:3])
         ctx = await _recall(db_pool, user_id, max_results=6,
                             source="sse_journey", query_text=query_text)
         return (ctx or "")[:1500]
@@ -499,9 +566,13 @@ async def _derive_crystal_npcs(user_id: str, profile: dict, journey: dict, db_po
     The registry lives in journey_metadata.npc_registry so the same NPC recurs across
     panels (continuity), rotated by panel_sequence for day-to-day variety.
     """
-    counts = profile.get("domain_counts") or {}
-    eligible = [d for d in profile.get("top_domains", [])
-                if counts.get(d, 0) >= _NPC_CLUSTER_MIN and d.lower().strip() in DOMAIN_TO_NPC]
+    # Themes mined from crystal text are the cluster source (domain column only
+    # holds canonical domains); domain_counts kept as fallback for legacy data.
+    counts: Dict[str, int] = dict(profile.get("theme_counts") or {})
+    for d, c in (profile.get("domain_counts") or {}).items():
+        counts.setdefault(d, c)
+    eligible = [t for t, c in sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+                if c >= _NPC_CLUSTER_MIN and t.lower().strip() in DOMAIN_TO_NPC][:6]
     if not eligible:
         return []
 
