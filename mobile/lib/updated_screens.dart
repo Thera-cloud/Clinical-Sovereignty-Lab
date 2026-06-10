@@ -5261,6 +5261,7 @@ class CoachDashboardScreenV2 extends StatefulWidget {
 class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     with SingleTickerProviderStateMixin {
   WebSocketChannel? _socket;
+  StreamSubscription<dynamic>? _coachWsSub;
   // Resolve dynamically so `/#/?ws=...` overrides apply without rebuilding.
   String get _serverUrl => defaultWsUrl;
   String get _apiBaseUrl => defaultApiBaseUrl;
@@ -5500,33 +5501,37 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     setState(() => _statusMessage = "Connecting to HQ...\n$_serverUrl");
 
     try {
-      _socket?.sink.close();
+      _coachWsSub?.cancel();
+      _coachWsSub = null;
+      try {
+        _socket?.sink.close();
+      } catch (_) {}
       _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
 
       // FIX-H: NOT ClientWsHub — static hub is client-lobby/Neural V2/Schedule handoff only.
       // Coach `login_request` must stay its own socket or it would overwrite client channel on same isolate.
       // On Flutter web, websocket failures can surface as unhandled async errors unless
       // we provide an explicit onError handler.
-      _socket!.stream.listen(
+      _coachWsSub = _socket!.stream.listen(
         _handleSocketMessage,
         onError: (e) {
           _debugLog("Coach Socket Error: $e");
-          if (mounted)
+          if (mounted) {
             setState(() {
               _statusMessage = "Connection Failed\n$_serverUrl";
-              _classroomAnalyzing = false;
-              _classroomLiveAnalyzing = false;
             });
+            _resetClassroomBusyState();
+          }
           _scheduleWsReconnect();
         },
         onDone: () {
           _debugLog("Coach Socket Closed");
-          if (mounted)
+          if (mounted) {
             setState(() {
               _statusMessage = "Disconnected — reconnecting...\n$_serverUrl";
-              _classroomAnalyzing = false;
-              _classroomLiveAnalyzing = false;
             });
+            _resetClassroomBusyState();
+          }
           _scheduleWsReconnect();
         },
         cancelOnError: true,
@@ -5541,6 +5546,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       }));
     } catch (e) {
       _debugLog("Fatal Connection Error: $e");
+      if (mounted) {
+        setState(() => _statusMessage = "Connection Failed\n$_serverUrl");
+        _resetClassroomBusyState();
+      }
+      _scheduleWsReconnect();
     }
   }
 
@@ -7952,6 +7962,30 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               ? Map<String, dynamic>.from(data['analysis'] as Map)
               : null;
           analysis = _flattenClassroomAnalysis(analysis);
+          final err = analysis != null ? '${analysis['error'] ?? ''}' : '';
+          final st = analysis != null
+              ? (analysis['status'] ?? '').toString().toLowerCase()
+              : '';
+          if (err.isNotEmpty || st == 'failed' || st == 'error') {
+            _cancelClassroomVideoPoll();
+            setState(() {
+              _classroomServerPipelineLabel = null;
+              _classroomServerPipelineIndex = null;
+              _classroomVideoPipelineActive = false;
+              _classroomAnalyzing = false;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  err.isNotEmpty ? 'Video analysis failed: $err' : 'Video analysis failed',
+                ),
+                backgroundColor: const Color(0xFFEF4444),
+                duration: const Duration(seconds: 5),
+              ),
+            );
+            _requestClassroomSessions();
+            return;
+          }
           final done = _isClassroomSessionAnalysisComplete(analysis);
           if (done) {
             _cancelClassroomVideoPoll();
@@ -8261,11 +8295,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           );
         }
         if (mounted) {
+          _resetClassroomBusyState();
           setState(() {
             _notesLoading = false;
             _dojoBusy = false;
-            _classroomAnalyzing = false;
-            _classroomLiveAnalyzing = false;
             final msg = (data['message'] ?? 'Unknown error').toString();
             final lowerMsg = msg.toLowerCase();
             // Check if this is a Dojo-related error
@@ -9195,6 +9228,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     if (kIsWeb) disposeDojoIframe();
     _tabController.dispose();
     _wsReconnectTimer?.cancel();
+    _coachWsSub?.cancel();
     _socket?.sink.close();
     super.dispose();
   }
@@ -18333,6 +18367,20 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
   // Classroom helper methods
 
+  /// Clears all Classroom busy UI (analyze, live analyze, recording check, video poll).
+  void _resetClassroomBusyState() {
+    _cancelClassroomVideoPoll();
+    if (!mounted) return;
+    setState(() {
+      _classroomAnalyzing = false;
+      _classroomLiveAnalyzing = false;
+      _classroomCheckingRecording = false;
+      _classroomVideoPipelineActive = false;
+      _classroomServerPipelineLabel = null;
+      _classroomServerPipelineIndex = null;
+    });
+  }
+
   void _cancelClassroomVideoPoll() {
     _classroomVideoPollTimer?.cancel();
     _classroomVideoPollTimer = null;
@@ -18444,10 +18492,18 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
   void _analyzeSelectedSession() {
     if (_classroomSelectedSessionId == null) return;
+    if (_socket == null) {
+      _resetClassroomBusyState();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Not connected — reconnecting…')),
+      );
+      _scheduleWsReconnect();
+      return;
+    }
 
     setState(() => _classroomAnalyzing = true);
 
-    _socket?.sink.add(jsonEncode({
+    _socket!.sink.add(jsonEncode({
       "type": "classroom_analyze_session",
       "session_id": _classroomSelectedSessionId,
       "coach_id": widget.username,
@@ -18499,10 +18555,18 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
   void _analyzeLiveSession() {
     if (_classroomSelectedSessionId == null) return;
+    if (_socket == null) {
+      _resetClassroomBusyState();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Not connected — reconnecting…')),
+      );
+      _scheduleWsReconnect();
+      return;
+    }
 
     setState(() => _classroomLiveAnalyzing = true);
 
-    _socket?.sink.add(jsonEncode({
+    _socket!.sink.add(jsonEncode({
       "type": "classroom_analyze_live",
       "session_id": _classroomSelectedSessionId,
       "focus_area": _classroomFocusArea,
