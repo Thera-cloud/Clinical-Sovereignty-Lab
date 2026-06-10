@@ -66,6 +66,54 @@ CRYSTAL_TO_CHARACTER: Dict[str, Tuple[str, str]] = {
 
 _DEFAULT_CHARACTER = ("Mirror", "with a faint reflection visible in still water nearby, suggesting hidden depth")
 
+# Patent Section 7: recurring NPCs forged from crystal clusters. A domain with a
+# meaningful cluster of crystals (>= _NPC_CLUSTER_MIN) manifests a persistent named
+# companion who recurs across panels, giving relational patterns a face in the story.
+_NPC_CLUSTER_MIN = 3
+DOMAIN_TO_NPC: Dict[str, Dict[str, str]] = {
+    "attachment": {"name": "The Weaver", "role": "weaves and mends the threads that connect", "visual_prompt_fragment": "a quiet weaver figure in the middle distance, threading luminous strands between trees"},
+    "love": {"name": "The Hearthkeeper", "role": "tends the fire that warms without burning", "visual_prompt_fragment": "a hearthkeeper tending a small steady fire near the path, warm light on their hands"},
+    "trust": {"name": "The Bridgewright", "role": "builds crossings one plank at a time", "visual_prompt_fragment": "a bridgewright testing each plank of a rope bridge, patient and unhurried"},
+    "codependency": {"name": "The Gardener", "role": "teaches what grows best with room of its own", "visual_prompt_fragment": "a gardener gently separating intertwined vines, giving each its own trellis"},
+    "anxiety": {"name": "The Stillwater Monk", "role": "shows how to let ripples settle", "visual_prompt_fragment": "a calm robed figure seated by the water's edge, the surface stilling around them"},
+    "shame": {"name": "The Veiled Pilgrim", "role": "walks beside without judgment", "visual_prompt_fragment": "a gentle veiled pilgrim walking a few steps behind, head inclined kindly"},
+    "deception": {"name": "The Cartographer", "role": "redraws maps until they tell the truth", "visual_prompt_fragment": "a cartographer at a field table, correcting an old map by lantern light"},
+    "anger": {"name": "The Forgemaster", "role": "turns heat into something useful", "visual_prompt_fragment": "a forgemaster shaping glowing metal with measured strikes, sparks rising calm"},
+    "fear": {"name": "The Torchbearer", "role": "carries light a few steps ahead", "visual_prompt_fragment": "a torchbearer holding steady flame at the edge of the dark, waiting without rushing"},
+    "control": {"name": "The Falconer", "role": "practices the art of release and return", "visual_prompt_fragment": "a falconer with arm raised, bird lifting away free and circling back by choice"},
+    "resentment": {"name": "The Root Tender", "role": "loosens what old roots have buckled", "visual_prompt_fragment": "a figure kneeling at a buckled stone path, patiently easing roots from the cracks"},
+    "guilt": {"name": "The Scalekeeper", "role": "weighs what was carried too long", "visual_prompt_fragment": "a scalekeeper at a small stand of brass scales, setting heavy stones down one by one"},
+    "trauma": {"name": "The Mender", "role": "stitches torn places with gold", "visual_prompt_fragment": "a mender repairing torn cloth with golden thread, the seams becoming the beauty"},
+    "perfectionism": {"name": "The Stonecutter", "role": "leaves the rough edge that makes it real", "visual_prompt_fragment": "a stonecutter stepping back from nearly finished work, choosing to leave one wild edge"},
+    "identity": {"name": "The Maskmaker", "role": "helps set down faces that no longer fit", "visual_prompt_fragment": "a maskmaker's stall with masks resting unworn, the craftsman offering an open hand"},
+    "self-worth": {"name": "The Goldsmith", "role": "sees the worth beneath the tarnish", "visual_prompt_fragment": "a goldsmith polishing a small overlooked piece until it catches the light"},
+    "grief": {"name": "The Lantern Keeper", "role": "keeps a light burning for what was loved", "visual_prompt_fragment": "an elderly lantern keeper tending a flame at the path's edge, unhurried and kind"},
+    "loss": {"name": "The Ferryman", "role": "carries travelers across what cannot be walked", "visual_prompt_fragment": "a quiet ferryman waiting at the bank with a steady lantern on the prow"},
+    "abandonment": {"name": "The Innkeeper", "role": "keeps a door that is never locked", "visual_prompt_fragment": "an innkeeper standing in a lit doorway, a place kept ready at the table inside"},
+    "boundaries": {"name": "The Wallwright", "role": "builds walls with gates in them", "visual_prompt_fragment": "a wallwright placing stones deliberately, leaving a generous open gate"},
+    "rejection": {"name": "The Gatekeeper", "role": "knows which doors were never the right ones", "visual_prompt_fragment": "a kind gatekeeper closing one door while gesturing toward an open road"},
+    "faith": {"name": "The Pilgrim Elder", "role": "walks the long road with certainty of step", "visual_prompt_fragment": "an elder pilgrim with a worn staff, walking steadily toward distant light"},
+    "hope": {"name": "The Dawnsinger", "role": "calls the first light over the ridge", "visual_prompt_fragment": "a distant figure on a ridge facing the first seam of dawn, arms loose and open"},
+    "depression": {"name": "The Ember Carrier", "role": "keeps one coal alive through the gray", "visual_prompt_fragment": "a cloaked figure cupping a single glowing ember, sheltering it against the wind"},
+    "spiritual": {"name": "The Star Reader", "role": "finds direction in what is above", "visual_prompt_fragment": "a star reader with an upturned face, charting by points of light overhead"},
+    "forgiveness": {"name": "The Rainmaker", "role": "brings the rain that washes the road", "visual_prompt_fragment": "a rainmaker standing in just-ended rain, every surface washed and glistening"},
+    "wonder": {"name": "The Wandering Scholar", "role": "asks the questions that open doors", "visual_prompt_fragment": "a wandering scholar pausing at a half-open door, journal in hand, delighted"},
+    "growth": {"name": "The Orchard Keeper", "role": "tends what takes seasons to bear fruit", "visual_prompt_fragment": "an orchard keeper pruning young trees on a gentle slope, new shoots everywhere"},
+    "discovery": {"name": "The Archivist", "role": "uncovers what was always there", "visual_prompt_fragment": "an archivist brushing earth from a half-uncovered carving, tools laid out neatly"},
+    "loneliness": {"name": "The Fire Tender", "role": "keeps a camp where company is welcome", "visual_prompt_fragment": "a fire tender feeding a campfire visible through the trees, a second seat left open"},
+    "vulnerability": {"name": "The Cloakless Traveler", "role": "walks lighter for what was set down", "visual_prompt_fragment": "a traveler walking without their cloak, garment folded on a stone behind them, air mild"},
+}
+
+# Patent FIG. 39: archetype visual evolution stages — the protagonist's reference
+# image is regenerated at each biome transition so the character visibly transforms.
+_BIOME_ARCHETYPE_STAGE: Dict[str, Tuple[str, str]] = {
+    "dark_forest": ("early", "guarded and weathered, wrapped in a worn travel cloak, carrying a dim lantern, face half in shadow but eyes alert"),
+    "fortress_plains": ("early-mid", "standing straighter, cloak mended and shoulders squared, a watchful steadiness replacing fear"),
+    "river_valley": ("mid", "armor and heavy layers loosened and partly set aside, posture open, color returning to their garments, light on their face"),
+    "crystal_mountains": ("late-mid", "carrying soft crystalline light in their hands, old scars visible but worn without shame, expression settled"),
+    "open_sky": ("late", "unburdened and radiant, cloak flowing free, standing tall under open light, fully themselves"),
+}
+
 BIOME_THRESHOLDS = [
     {"biome": "dark_forest", "min_sessions": 0, "min_crystals": 0,
      "description": "Dense fog, lantern light, shadows, isolation but mystery and the promise of discovery"},
@@ -142,7 +190,8 @@ async def get_therapeutic_profile(user_id: str, db_pool) -> dict:
             return cached
 
     profile: Dict[str, Any] = {"crystal_count": 0, "top_domains": [], "recent_crystals": [],
-                                "session_count": 0, "active_quests": [], "active_missions": []}
+                                "domain_counts": {}, "session_count": 0,
+                                "active_quests": [], "active_missions": []}
     try:
         async with db_pool.acquire() as conn:
             urow = await conn.fetchrow(
@@ -160,6 +209,7 @@ async def get_therapeutic_profile(user_id: str, db_pool) -> dict:
                     "WHERE user_id = $1 AND superseded_by IS NULL "
                     "GROUP BY domain ORDER BY cnt DESC LIMIT 5", uid)
                 profile["top_domains"] = [r["domain"] for r in domains if r["domain"]]
+                profile["domain_counts"] = {r["domain"]: r["cnt"] for r in domains if r["domain"]}
 
                 recent = await conn.fetch(
                     "SELECT crystal_text FROM nate_intelligence_crystals "
@@ -294,6 +344,207 @@ async def _get_archetype_identity(user_id: str, journey: dict, db_pool) -> Dict[
     return ident
 
 
+async def _fetch_deep_crystal_context(user_id: str, profile: dict, db_pool) -> str:
+    """PATENT FIG.37 — Crystal Bridge deep recall (vector + reinforcement path).
+
+    Goes beyond the 5 most recent crystals: semantic recall over the user's FULL
+    crystal history, seeded with the day's dominant therapeutic themes. Uses
+    recall_crystals_for_context so recalled crystals get reinforcement
+    (recall_count / last_recalled_at / confidence nudge) instead of silently decaying.
+    """
+    if profile.get("data_richness") in ("empty", "thin"):
+        return ""
+    try:
+        from app.websocket.crystal_recall_bridge import recall_crystals_for_context as _recall
+    except ImportError:
+        return ""
+    try:
+        query_text = " ".join(profile.get("top_domains", [])[:3])
+        ctx = await _recall(db_pool, user_id, max_results=6,
+                            source="sse_journey", query_text=query_text)
+        return (ctx or "")[:1500]
+    except Exception as e:
+        logger.warning("TheraWorld: deep crystal recall failed for %s: %s", user_id, e)
+        return ""
+
+
+_CHAPTER_SUMMARY_REFRESH_DAYS = 7
+_CHAPTER_SUMMARY_MIN_PANELS = 5
+
+
+async def _get_chapter_summary(user_id: str, journey: dict, profile: dict, db_pool) -> str:
+    """Rolling long-arc 'chapter summary' stored in journey_metadata (refreshed weekly).
+
+    Gives the narrative composer true long-term memory of the user's whole story
+    arc instead of only yesterday's one-sentence summary.
+    """
+    jmeta = journey.get("journey_metadata") or {}
+    if isinstance(jmeta, str):
+        try:
+            jmeta = json.loads(jmeta)
+        except Exception:
+            jmeta = {}
+    existing = jmeta.get("chapter_summary") or ""
+    stamp = jmeta.get("chapter_summary_at") or ""
+    if existing and stamp:
+        try:
+            age = datetime.now(timezone.utc) - datetime.fromisoformat(stamp)
+            if age.days < _CHAPTER_SUMMARY_REFRESH_DAYS:
+                return existing
+        except Exception:
+            pass
+
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT narrative_text, biome, character_manifest FROM sse_panel_log "
+                "WHERE user_id = $1 AND narrative_text IS NOT NULL AND btrim(narrative_text) <> '' "
+                "ORDER BY generated_at DESC LIMIT 14", user_id)
+    except Exception as e:
+        logger.warning("TheraWorld: chapter summary panel fetch failed for %s: %s", user_id, e)
+        return existing
+
+    if len(rows) < _CHAPTER_SUMMARY_MIN_PANELS:
+        return existing
+
+    panels_text = "\n".join(
+        f"- [{r['biome'] or '?'}/{r['character_manifest'] or '?'}] {r['narrative_text'][:180]}"
+        for r in reversed(rows))
+    domains = ", ".join(profile.get("top_domains", [])[:5]) or "unknown"
+    try:
+        from app.sse.llm_fallback import chat_completion_with_fallback as _llm
+        raw = await _llm([
+            {"role": "system", "content": (
+                "You summarize a therapeutic story journey. Given the last 14 daily story panels "
+                "(oldest first) and the traveler's dominant therapeutic themes, write a 3-4 sentence "
+                "'story so far' chapter summary in second person ('you'). Capture the ARC: where the "
+                "journey began, what has shifted, what remains unresolved, and what the story is moving "
+                "toward. No preamble, no markdown — just the summary sentences.")},
+            {"role": "user", "content": f"Dominant themes: {domains}\n\nRecent panels:\n{panels_text}"},
+        ], max_tokens=220, temperature=0.5)
+    except Exception as e:
+        logger.warning("TheraWorld: chapter summary LLM failed for %s: %s", user_id, e)
+        return existing
+
+    summary = (raw or "").strip()
+    if not summary:
+        return existing
+    summary = summary[:900]
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE sse_user_journeys SET journey_metadata = "
+                "COALESCE(journey_metadata, '{}'::jsonb) || $1::jsonb WHERE user_id = $2",
+                json.dumps({"chapter_summary": summary,
+                            "chapter_summary_at": datetime.now(timezone.utc).isoformat()}),
+                user_id)
+    except Exception as e:
+        logger.warning("TheraWorld: chapter summary persist failed for %s: %s", user_id, e)
+    return summary
+
+
+async def _evolve_archetype_stage(user_id: str, new_biome: str, arch_ident: dict, db_pool) -> Optional[str]:
+    """PATENT FIG.39 — regenerate the archetype reference image at a biome transition.
+
+    The protagonist visibly transforms (early → mid → late stages) as the client
+    progresses. Uses i2i from the current reference for visual continuity; the new
+    stage image becomes the i2i reference for all subsequent daily panels.
+    """
+    stage, stage_desc = _BIOME_ARCHETYPE_STAGE.get(new_biome, ("mid", ""))
+    jm = arch_ident or {}
+    base_url = jm.get("archetype_image_url") or None
+    visual = (jm.get("character_visual") or "").strip()
+    hint = (jm.get("archetype_hint") or "").strip()
+    if not (visual or hint or base_url):
+        return None  # nothing to evolve — no forged archetype yet
+    try:
+        from app.sse.infrastructure.grok_imagine_client import generate_image
+        from app.sse.infrastructure.r2_storage import store_image
+
+        subject = visual[:200] if visual else (f"a {hint} archetype character" if hint else "the journeying protagonist")
+        prompt = (
+            f"Character portrait of {subject}, now {stage_desc}, "
+            "same person as the reference but visibly evolved, full figure, centered, "
+            "painterly style, muted warm palette, soft atmospheric background, "
+            "no text, no words, no lettering, no writing on image")
+        image_bytes = await generate_image(prompt, source_image_url=base_url)
+        content_hash = hashlib.sha256(image_bytes).hexdigest()[:12]
+        r2_key = f"sse/archetype/{user_id}/{new_biome}_{content_hash}.png"
+        new_url = await store_image(image_bytes, r2_key)
+        if not new_url:
+            return None
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE sse_user_journeys SET journey_metadata = "
+                "COALESCE(journey_metadata, '{}'::jsonb) || $1::jsonb WHERE user_id = $2",
+                json.dumps({"archetype_image_url": new_url, "archetype_stage": stage,
+                            "archetype_stage_biome": new_biome}), user_id)
+            await conn.execute(
+                "INSERT INTO sse_admin_alerts (user_id, alert_type, title, detail, metadata) "
+                "VALUES ($1, 'archetype_evolution', 'Archetype Evolved', $2, $3)",
+                user_id, f"Archetype advanced to {stage} stage ({new_biome})",
+                json.dumps({"stage": stage, "biome": new_biome, "image_url": new_url}))
+        logger.info("TheraWorld: archetype evolved to %s stage for %s (%s)", stage, user_id, new_biome)
+        return new_url
+    except Exception as e:
+        logger.warning("TheraWorld: archetype stage evolution failed for %s: %s", user_id, e)
+        return None
+
+
+async def _derive_crystal_npcs(user_id: str, profile: dict, journey: dict, db_pool,
+                               panel_sequence: int = 0, max_npcs: int = 2) -> List[dict]:
+    """PATENT Section 7 — forge recurring NPCs from crystal domain clusters.
+
+    Domains with >= _NPC_CLUSTER_MIN crystals manifest persistent named companions.
+    The registry lives in journey_metadata.npc_registry so the same NPC recurs across
+    panels (continuity), rotated by panel_sequence for day-to-day variety.
+    """
+    counts = profile.get("domain_counts") or {}
+    eligible = [d for d in profile.get("top_domains", [])
+                if counts.get(d, 0) >= _NPC_CLUSTER_MIN and d.lower().strip() in DOMAIN_TO_NPC]
+    if not eligible:
+        return []
+
+    jmeta = journey.get("journey_metadata") or {}
+    if isinstance(jmeta, str):
+        try:
+            jmeta = json.loads(jmeta)
+        except Exception:
+            jmeta = {}
+    registry: Dict[str, dict] = jmeta.get("npc_registry") or {}
+
+    changed = False
+    for domain in eligible:
+        key = domain.lower().strip()
+        if key not in registry:
+            npc = dict(DOMAIN_TO_NPC[key])
+            npc["domain"] = key
+            npc["appearances"] = 0
+            registry[key] = npc
+            changed = True
+
+    # Rotate which registry NPCs appear today so companions take turns
+    ordered = [registry[d.lower().strip()] for d in eligible if d.lower().strip() in registry]
+    if not ordered:
+        return []
+    start = panel_sequence % len(ordered)
+    todays = [ordered[(start + i) % len(ordered)] for i in range(min(max_npcs, len(ordered)))]
+    for npc in todays:
+        npc["appearances"] = int(npc.get("appearances", 0)) + 1
+        changed = True
+
+    if changed:
+        try:
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE sse_user_journeys SET journey_metadata = "
+                    "COALESCE(journey_metadata, '{}'::jsonb) || $1::jsonb WHERE user_id = $2",
+                    json.dumps({"npc_registry": registry}), user_id)
+        except Exception as e:
+            logger.warning("TheraWorld: NPC registry persist failed for %s: %s", user_id, e)
+    return todays
+
+
 async def _fetch_recent_delivery_narratives(user_id: str, db_pool) -> List[str]:  # FIX-NARRATIVE-DIVERSITY
     try:
         async with db_pool.acquire() as conn:
@@ -313,6 +564,8 @@ async def compose_journey_narrative(
     last_panel_summary: str = "", last_panel_npcs: list = None, panel_sequence: int = 0,
     user_id: str = "", recent_narratives: Optional[List[str]] = None,
     archetype_hint: str = "", character_visual: str = "",
+    deep_crystal_context: str = "", chapter_summary: str = "",
+    todays_npcs: Optional[List[dict]] = None,
 ) -> dict:
     """Use LLM to compose a scene narrative. Falls back to template on failure."""
     import httpx
@@ -398,6 +651,38 @@ async def compose_journey_narrative(
         f"This is panel {panel_sequence + 1} in the {biome_name} biome.\n"
         "Generate the NEXT scene that continues from where we left off.\n"
     )
+
+    # FIX #4: long-arc chapter summary — the story remembers where it has been
+    chapter_block = ""
+    if chapter_summary:
+        chapter_block = (
+            f"THE STORY SO FAR (chapter summary of the journey to date): {chapter_summary}\n"
+            "Today's scene is the next beat in this larger arc — let it build on what came "
+            "before rather than restarting.\n"
+        )
+
+    # FIX #4: deep crystal recall — themes from the user's full history, not just last 5
+    deep_crystal_block = ""
+    if deep_crystal_context:
+        deep_crystal_block = (
+            "DEEPER MEMORY (themes recalled from the user's full therapeutic history):\n"
+            f"{deep_crystal_context[:900]}\n"
+            "Weave one of these older threads into today's scene as a returning echo or motif.\n"
+        )
+
+    # FIX #6: recurring NPC companions forged from crystal clusters
+    npc_block = ""
+    if todays_npcs:
+        npc_lines = "\n".join(
+            f"- {n['name']} ({n['role']}): {n['visual_prompt_fragment']}"
+            for n in todays_npcs if n.get("name")
+        )
+        npc_block = (
+            "RECURRING COMPANIONS (these named figures travel with the protagonist and MUST "
+            "appear in both narrative_text and image_prompt today):\n"
+            f"{npc_lines}\n"
+            "Refer to them by name in the narrative. They are familiar presences, not strangers.\n"
+        )
 
     # Phase 6: family context enrichment
     family_block = ""
@@ -519,6 +804,9 @@ async def compose_journey_narrative(
         f"Active mission: {mission_target_eff}\n"
         f"Therapeutic arc: {arc}\n"
         f"{family_block}"
+        f"{chapter_block}"
+        f"{deep_crystal_block}"
+        f"{npc_block}"
         f"{anti_repeat}"
         f"{continuity_block}\n"
         "The scene should:\n"
@@ -543,6 +831,12 @@ async def compose_journey_narrative(
             result = json.loads(m.group())
             result["image_prompt"] = result.get("image_prompt", fallback["image_prompt"])
             result["image_prompt"] += f", {grok_suffix}"
+            # FIX #6: guarantee recurring NPCs appear visually even if the LLM omitted them
+            for _npc in (todays_npcs or []):
+                frag = _npc.get("visual_prompt_fragment", "")
+                name_l = (_npc.get("name") or "").lower()
+                if frag and name_l and name_l not in result["image_prompt"].lower():
+                    result["image_prompt"] += f", {frag}"
             result["image_prompt"] += ", no text, no words, no lettering, no calligraphy, no writing on image"
             result.setdefault("narrative_text", fallback["narrative_text"])
             result.setdefault("panel_tone", fallback["panel_tone"])
@@ -619,12 +913,19 @@ async def build_rich_panel_prompt(user_id: str, db_pool) -> dict:
     arch_ident = await _get_archetype_identity(user_id, journey, db_pool)
     arch_hint = arch_ident.get("archetype_hint", "")
 
+    # FIX #4/#6: deep crystal recall, chapter summary, recurring NPCs (preview path)
+    deep_ctx = await _fetch_deep_crystal_context(user_id, profile, db_pool)
+    chapter = await _get_chapter_summary(user_id, journey, profile, db_pool)
+    crystal_npcs = await _derive_crystal_npcs(user_id, profile, journey, db_pool, panel_sequence=panel_seq)
+
     recent_nar = await _fetch_recent_delivery_narratives(user_id, db_pool)  # FIX-NARRATIVE-DIVERSITY
     narrative = await compose_journey_narrative(
         profile, journey, biome, character, db_pool,
         last_panel_summary=last_summary, last_panel_npcs=last_npcs,
         panel_sequence=panel_seq, user_id=user_id, recent_narratives=recent_nar,
-        archetype_hint=arch_hint, character_visual=arch_ident.get("character_visual", ""))
+        archetype_hint=arch_hint, character_visual=arch_ident.get("character_visual", ""),
+        deep_crystal_context=deep_ctx, chapter_summary=chapter,
+        todays_npcs=crystal_npcs)
 
     image_prompt = narrative.get("image_prompt", "")
     if not image_prompt:
@@ -633,7 +934,7 @@ async def build_rich_panel_prompt(user_id: str, db_pool) -> dict:
     if arch_hint:
         image_prompt = image_prompt.replace("a solitary figure", f"a {arch_hint} figure, the protagonist")
 
-    current_npcs: list = []
+    current_npcs: list = list(crystal_npcs)
     try:
         for q in profile.get("active_quests", []):
             pn = q.get("progress_notes", [])
@@ -748,12 +1049,29 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     arch_ident = await _get_archetype_identity(user_id, journey, db_pool)
     arch_hint = arch_ident.get("archetype_hint", "")
 
+    # FIX #5: at a biome transition, evolve the archetype reference image (FIG.39)
+    if transitioned:
+        try:
+            evolved_url = await _evolve_archetype_stage(user_id, current_biome_name, arch_ident, db_pool)
+            if evolved_url:
+                arch_ident["archetype_image_url"] = evolved_url
+        except Exception as _evo_err:
+            logger.warning("Archetype evolution failed for %s: %s", user_id, _evo_err)
+
+    # FIX #4: deep crystal recall + rolling chapter summary (long-arc memory)
+    deep_ctx = await _fetch_deep_crystal_context(user_id, profile, db_pool)
+    chapter = await _get_chapter_summary(user_id, journey, profile, db_pool)
+    # FIX #6: recurring NPCs forged from crystal domain clusters
+    crystal_npcs = await _derive_crystal_npcs(user_id, profile, journey, db_pool, panel_sequence=panel_seq)
+
     recent_nar = await _fetch_recent_delivery_narratives(user_id, db_pool)  # FIX-NARRATIVE-DIVERSITY
     narrative = await compose_journey_narrative(
         profile, journey, biome, character, db_pool,
         last_panel_summary=last_summary, last_panel_npcs=last_npcs,
         panel_sequence=panel_seq, user_id=user_id, recent_narratives=recent_nar,
-        archetype_hint=arch_hint, character_visual=arch_ident.get("character_visual", ""))
+        archetype_hint=arch_hint, character_visual=arch_ident.get("character_visual", ""),
+        deep_crystal_context=deep_ctx, chapter_summary=chapter,
+        todays_npcs=crystal_npcs)
 
     image_prompt = narrative.get("image_prompt", "")
     if not image_prompt:
@@ -766,8 +1084,8 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     if arch_hint:
         image_prompt = image_prompt.replace("a solitary figure", f"a {arch_hint} figure, the protagonist")
 
-    # Blend active quest/mission NPCs into image
-    current_npcs: list = []
+    # Blend recurring crystal NPCs (FIX #6) + active quest/mission NPCs into image
+    current_npcs: list = list(crystal_npcs)
     try:
         for q in profile.get("active_quests", []):
             pn = q.get("progress_notes", [])
@@ -785,7 +1103,7 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
         logger.warning("NPC enrichment failed: %s", _npc_err)
     for npc in current_npcs[:3]:
         frag = npc.get("visual_prompt_fragment", "")
-        if frag:
+        if frag and frag.lower() not in image_prompt.lower():
             image_prompt += f", {frag}"
 
     image_prompt += ", no text, no words, no lettering, no calligraphy, no writing on image"
