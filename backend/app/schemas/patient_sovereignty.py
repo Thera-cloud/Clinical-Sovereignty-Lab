@@ -9,14 +9,14 @@ class PatientVaultCreate(BaseModel):
     metadata: Dict[str, Union[str, int, float]]
 
 class EncryptedDataStore(BaseModel):
-    data_category: str = Field(..., regex="^(medical_history|lab_results|genetics|prescriptions|imaging|notes)$")
+    data_category: str = Field(..., pattern="^(medical_history|lab_results|genetics|prescriptions|imaging|notes)$")
     data: Dict[str, Union[str, int, float, List]]
     consent_required: bool = True
 
 class DataConsentGrant(BaseModel):
     data_id: int
     provider_id: UUID
-    scope: str = Field(..., regex="^(read|write|share|delete)$")
+    scope: str = Field(..., pattern="^(read|write|share|delete)$")
     expires_at: Optional[datetime] = None
 
 class VaultResponse(BaseModel):
