@@ -179,17 +179,9 @@ def _check_heartbeat_freshness(heartbeat_path: str, max_age_s: int = 600) -> boo
     return age < max_age_s
 
 
-MANAGED_PROCESSES = {
-    "blue_harvester": {
-        "command": ["python3", "backend/blue_harvester.py"],
-        "cwd": MAC_AGENT_WORKSPACE,
-        "restart_policy": "on-failure",
-        "health_check_interval_s": 300,
-        "health_check": lambda: _check_heartbeat_freshness("data/blue_harvester_heartbeat.json", max_age_s=600),
-        "max_auto_restarts": 3,
-        "cooldown_s": 60,
-    },
-}
+# blue_harvester disabled 2026-05-22: Ollama 14B filter pegs CPU/GPU and drains Mac battery.
+# Re-enable: restore entry with restart_policy "manual" and POST /process/manage start.
+MANAGED_PROCESSES: dict[str, dict] = {}
 
 
 def _check_system_cloudflared() -> bool:
