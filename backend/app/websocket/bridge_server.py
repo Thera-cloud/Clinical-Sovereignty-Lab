@@ -13498,10 +13498,17 @@ async def handle_client(websocket, path=None):
                         
                         try:
                             sessions = load_json_file(SESSIONS_FILE, [])
-                            # Conflict check
+                            # QUANTUM-CRYSTAL-ARCH: reconcile JSON with PG (email approvals / REST cancels land in PG first)
+                            try:
+                                from app.services.session_approval import sync_sessions_with_pg
+                                if db_pool and await sync_sessions_with_pg(db_pool, sessions):
+                                    save_json_file(SESSIONS_FILE, sessions)
+                            except Exception as _sync_e:
+                                print(f">>> [BOOKING] PG sync skipped: {_sync_e}")
+                            # Conflict check — QUANTUM-CRYSTAL-ARCH: pending_approval also blocks the slot
                             conflict = False
                             for s in sessions:
-                                if s.get("coach_id") == coach_id and s.get("status") in ["scheduled", "active"]:
+                                if s.get("coach_id") == coach_id and s.get("status") in ["scheduled", "active", "pending_approval"]:
                                     try:
                                         es = datetime.datetime.fromisoformat(s.get("scheduled_start", ""))
                                         ee = datetime.datetime.fromisoformat(s.get("scheduled_end", ""))
@@ -13558,7 +13565,20 @@ async def handle_client(websocket, path=None):
                                     "platform_fee": fee_info["platform_fee"],
                                     "coach_payout": fee_info["coach_payout"],
                                 }
-                                
+
+                                # QUANTUM-CRYSTAL-ARCH: coach auto-accept setting skips pending approval
+                                if (coach_profile or {}).get("auto_accept_bookings"):
+                                    new_session["status"] = "scheduled"
+                                    new_session["approved_at"] = str(datetime.datetime.now())
+                                    new_session["approved_via"] = "auto_accept"
+                                    try:
+                                        from app.services.session_approval import apply_coach_ledger_txn
+                                        if coach_profile:
+                                            apply_coach_ledger_txn(coach_profile, new_session)
+                                            save_registry(reg)
+                                    except Exception as _aa_e:
+                                        print(f">>> [BOOKING] auto-accept ledger failed: {_aa_e}")
+
                                 # Auto-create Zoom meeting if enabled
                                 try:
                                     _zoom_enabled = os.environ.get("ENABLE_ZOOM", "").lower() in ("true", "1", "yes")
@@ -13616,14 +13636,27 @@ async def handle_client(websocket, path=None):
                                 coach_ws = connected_coaches.get(coach_id)
                                 if coach_ws:
                                     try:
+                                        _aa_done = new_session.get("approved_via") == "auto_accept"
                                         await coach_ws.send(json.dumps({
-                                            "type": "pending_booking_notification",
+                                            "type": "pending_booking_notification" if not _aa_done else "booking_approved",
                                             "session": new_session,
-                                            "message": f"{client_name} requests a session on {scheduled_start} — awaiting your approval",
+                                            "message": (f"{client_name} requests a session on {scheduled_start} — awaiting your approval"
+                                                        if not _aa_done else
+                                                        f"Auto-accepted: {client_name} booked {scheduled_start}"),
                                             "fee_breakdown": fee_info,
                                         }))
                                     except Exception:
                                         pass
+                                # QUANTUM-CRYSTAL-ARCH: email coach approve/decline links, or client confirmation on auto-accept
+                                try:
+                                    from app.services.session_approval import (
+                                        send_pending_booking_email, send_booking_decision_email)
+                                    if db_pool and new_session.get("status") == "pending_approval":
+                                        asyncio.create_task(send_pending_booking_email(db_pool, new_session))
+                                    elif db_pool:
+                                        asyncio.create_task(send_booking_decision_email(db_pool, new_session, "approved"))
+                                except Exception as _em_e:
+                                    print(f">>> [BOOKING] email dispatch failed: {_em_e}")
                         except Exception as e:
                             print(f">>> [ERROR] Booking failed: {e}")
                             await websocket.send(json.dumps({"type": "error", "message": "BOOKING_FAILED"}))
@@ -14202,6 +14235,13 @@ async def handle_client(websocket, path=None):
                                     break
                             if found:
                                 save_json_file(SESSIONS_FILE, sessions)
+                                # QUANTUM-CRYSTAL-ARCH: PG dual-write so the cancellation frees the slot everywhere
+                                if db_pool and cancelled_session:
+                                    try:
+                                        from app.services.pg_data_helpers import upsert_session_pg
+                                        await upsert_session_pg(db_pool, cancelled_session)
+                                    except Exception as _pg_e:
+                                        print(f">>> [CANCEL] PG upsert failed (non-blocking): {_pg_e}")
                                 await websocket.send(json.dumps({"type": "session_cancelled", "session_id": session_id}))
                                 # Fire-and-forget Google Calendar delete for both participants.
                                 try:
@@ -14408,6 +14448,13 @@ async def handle_client(websocket, path=None):
                                         }))
                                     except Exception:
                                         pass
+                                # QUANTUM-CRYSTAL-ARCH: email client the approval (works even if offline)
+                                try:
+                                    from app.services.session_approval import send_booking_decision_email
+                                    if db_pool:
+                                        asyncio.create_task(send_booking_decision_email(db_pool, found_session, "approved"))
+                                except Exception:
+                                    pass
                             else:
                                 await websocket.send(json.dumps({"type": "error", "message": "Pending session not found"}))
                         except Exception as e:
@@ -14842,6 +14889,18 @@ async def handle_client(websocket, path=None):
                                         }))
                                     except Exception:
                                         pass
+                                # QUANTUM-CRYSTAL-ARCH: PG dual-write + email client the decline
+                                if db_pool:
+                                    try:
+                                        from app.services.pg_data_helpers import upsert_session_pg
+                                        await upsert_session_pg(db_pool, found_session)
+                                    except Exception as _pg_e:
+                                        print(f">>> [DECLINE] PG upsert failed (non-blocking): {_pg_e}")
+                                    try:
+                                        from app.services.session_approval import send_booking_decision_email
+                                        asyncio.create_task(send_booking_decision_email(db_pool, found_session, "declined", reason))
+                                    except Exception:
+                                        pass
                             else:
                                 await websocket.send(json.dumps({"type": "error", "message": "Pending session not found"}))
                         except Exception as e:
@@ -14854,6 +14913,13 @@ async def handle_client(websocket, path=None):
                     coach_id = (current_profile.get("hardware_id") or "").strip()
                     try:
                         sessions = load_json_file(SESSIONS_FILE, [])
+                        # QUANTUM-CRYSTAL-ARCH: drop pendings already decided via email (PG is truth)
+                        try:
+                            from app.services.session_approval import sync_sessions_with_pg
+                            if db_pool and await sync_sessions_with_pg(db_pool, sessions):
+                                save_json_file(SESSIONS_FILE, sessions)
+                        except Exception:
+                            pass
                         # Build client lookup once
                         _registry_for_clients = load_registry()
                         _client_lookup = {}
@@ -24450,7 +24516,8 @@ Coach Reflection on Session {session_id}:
                     registry = load_registry()
                     for k, v in registry.items():
                         if v.get("profile", {}).get("hardware_id") == uid:
-                            coach_fields = ["specialties", "coaching_style", "zoom_link"]
+                            # QUANTUM-CRYSTAL-ARCH: auto_accept_bookings — coach opt-in to skip pending approval
+                            coach_fields = ["specialties", "coaching_style", "zoom_link", "auto_accept_bookings"]
                             for field in coach_fields:
                                 if field in d:
                                     v["profile"][field] = d[field]

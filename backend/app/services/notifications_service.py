@@ -516,6 +516,46 @@ TEMPLATES = {
 </div></body></html>
 """,
     },
+    "pending_booking_coach": {
+        "subject": "Session request from {{ client_name }} — {{ session_time }}",
+        "html": """
+<!DOCTYPE html>
+<html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
+<div style="max-width:640px;margin:auto;background:#111;border:1px solid #C9A962;border-radius:8px;padding:24px;">
+  <h2 style="color:#C9A962;margin-top:0;">New session request</h2>
+  <p><strong>{{ client_name }}</strong> requested a coaching session:</p>
+  <table style="width:100%;background:#0a0a0a;border-radius:6px;padding:12px;color:#cbd5e1;">
+    <tr><td style="padding:6px 12px;color:#94a3b8;">When</td><td style="padding:6px 12px;"><strong>{{ session_time }}</strong></td></tr>
+    <tr><td style="padding:6px 12px;color:#94a3b8;">Duration</td><td style="padding:6px 12px;">{{ duration }} minutes</td></tr>
+    <tr><td style="padding:6px 12px;color:#94a3b8;">Title</td><td style="padding:6px 12px;">{{ session_title }}</td></tr>
+  </table>
+  <p style="margin-top:24px;text-align:center;">
+    <a href="{{ approve_url }}" style="display:inline-block;background:#22C55E;color:#050505;font-weight:bold;padding:12px 28px;border-radius:6px;text-decoration:none;margin:0 8px;">Approve</a>
+    <a href="{{ decline_url }}" style="display:inline-block;background:#EF4444;color:#fff;font-weight:bold;padding:12px 28px;border-radius:6px;text-decoration:none;margin:0 8px;">Decline</a>
+  </p>
+  <p style="color:#94a3b8;font-size:13px;">You can also approve or decline from the Scheduling tab in Coach Command. This slot is held as <em>pending</em> on your calendar until you decide.</p>
+  <p style="color:#64748b;font-size:12px;">Sent by Sovereign Sanctuary · Coach Command scheduling.</p>
+</div></body></html>
+""",
+    },
+    "booking_decision_client": {
+        "subject": "Your session request was {{ decision }} — {{ session_time }}",
+        "html": """
+<!DOCTYPE html>
+<html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
+<div style="max-width:640px;margin:auto;background:#111;border:1px solid {{ '#22C55E' if decision == 'approved' else '#EF4444' }};border-radius:8px;padding:24px;">
+  <h2 style="color:{{ '#22C55E' if decision == 'approved' else '#EF4444' }};margin-top:0;">Session {{ decision }}</h2>
+  <p>Your session request with <strong>{{ coach_name }}</strong> for <strong>{{ session_time }}</strong> has been <strong>{{ decision }}</strong>.</p>
+  {% if decision == 'approved' and zoom_link %}
+  <p style="margin-top:20px;text-align:center;"><a href="{{ zoom_link }}" style="display:inline-block;background:#C9A962;color:#050505;font-weight:bold;padding:12px 28px;border-radius:6px;text-decoration:none;">Join Session</a></p>
+  {% endif %}
+  {% if decision == 'declined' %}
+  <p style="color:#94a3b8;font-size:13px;">{{ reason or 'You can request a different time from your app — the calendar shows your coach\\'s open slots.' }}</p>
+  {% endif %}
+  <p style="color:#64748b;font-size:12px;">Sent by Sovereign Sanctuary scheduling.</p>
+</div></body></html>
+""",
+    },
 }
 
 

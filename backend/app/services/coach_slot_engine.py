@@ -136,7 +136,7 @@ async def compute_available_slots(
         booked = await conn.fetch(
             "SELECT scheduled_at, ended_at FROM coaching_sessions "
             "WHERE coach_id::text IN ($1, $2) "
-            "AND status IN ('scheduled','active','SCHEDULED','ACTIVE') "
+            "AND status IN ('scheduled','active','pending_approval','SCHEDULED','ACTIVE','PENDING_APPROVAL') "
             "AND scheduled_at::date = $3",
             coach_hw_id, str(coach_uuid), target_date_obj,
         )

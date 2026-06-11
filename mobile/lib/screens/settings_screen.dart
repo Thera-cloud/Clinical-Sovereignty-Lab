@@ -3896,6 +3896,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
   final _specialtiesCtrl = TextEditingController();
   final _zoomLinkCtrl = TextEditingController();
   String _coachingStyle = 'integrative';
+  bool _autoAcceptBookings = false;
 
   // Practice fields
   final _feeCtrl = TextEditingController();
@@ -3957,6 +3958,8 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
     _zoomLinkCtrl.text = _s(_profile['zoom_link']);
     final cs = _s(_profile['coaching_style']).trim();
     _coachingStyle = cs.isEmpty ? 'integrative' : cs;
+    _autoAcceptBookings = _profile['auto_accept_bookings'] == true ||
+        _profile['auto_accept_bookings'] == 'true';
     _feeCtrl.text = _s(_profile['coaching_fee'], '0');
     _paymentMode = _s(_profile['payment_mode'], 'coach_handles');
     _notifNewClient = _profile['notif_new_client'] ?? true;
@@ -4006,6 +4009,8 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
       _zoomLinkCtrl.text = (_profile['zoom_link'] ?? _zoomLinkCtrl.text).toString();
       final csR = (_profile['coaching_style'] ?? '').toString().trim();
       _coachingStyle = csR.isEmpty ? _coachingStyle : csR;
+      _autoAcceptBookings = _profile['auto_accept_bookings'] == true ||
+          _profile['auto_accept_bookings'] == 'true';
       _feeCtrl.text = (_profile['coaching_fee'] ?? _feeCtrl.text).toString();
       // Defensive coercion: payment_mode / preferred_contact are typed String,
       // notif_* are typed bool. Coerce to keep paint phase safe.
@@ -4202,6 +4207,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
           'specialties': _specialtiesCtrl.text.trim(),
           'coaching_style': _coachingStyle,
           'zoom_link': _zoomLinkCtrl.text.trim(),
+          'auto_accept_bookings': _autoAcceptBookings,
         },
         expectedTypes: {'profile_updated', 'error'},
       );
@@ -5140,6 +5146,39 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
             ] else
               _infoRow('Coaching Style', _coachingStyle.isEmpty ? '—' : (_coachingStyle[0].toUpperCase() + _coachingStyle.substring(1))),
             _editableRow('Zoom Link', _zoomLinkCtrl, _editingProfile),
+            // Auto-accept: client booking requests skip pending approval
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  const SizedBox(
+                      width: 120,
+                      child: Text('Auto-Accept Bookings',
+                          style: TextStyle(
+                              color: _Design.textSecondary, fontSize: 12))),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Switch(
+                        value: _autoAcceptBookings,
+                        activeColor: _Design.gold,
+                        onChanged: _editingProfile
+                            ? (v) => setState(() => _autoAcceptBookings = v)
+                            : null,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (_editingProfile)
+              const Padding(
+                padding: EdgeInsets.only(left: 120, bottom: 4),
+                child: Text(
+                  'On: client requests are instantly confirmed. Off: requests wait for your approval (email + Scheduling tab).',
+                  style: TextStyle(color: _Design.textSecondary, fontSize: 10),
+                ),
+              ),
             _editableRow('Emergency Contact', _emergencyCtrl, _editingProfile),
             _editableRow('Timezone', _timezoneCtrl, _editingProfile),
             const SizedBox(height: 8),

@@ -6321,7 +6321,19 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         allClients.isNotEmpty ? allClients.first["id"]! : "";
     String selectedClientName =
         allClients.isNotEmpty ? allClients.first["name"]! : "";
-    DateTime startLocal = DateTime.now().add(const Duration(minutes: 10));
+    // Seed from the calendar day the coach selected (9 AM default) so
+    // "New Session" on July 9 doesn't silently book today's date.
+    final _seedDay = _calSelectedDay;
+    DateTime startLocal;
+    if (_seedDay != null) {
+      final candidate =
+          DateTime(_seedDay.year, _seedDay.month, _seedDay.day, 9, 0);
+      startLocal = candidate.isAfter(DateTime.now())
+          ? candidate
+          : DateTime.now().add(const Duration(minutes: 10));
+    } else {
+      startLocal = DateTime.now().add(const Duration(minutes: 10));
+    }
     int durationMinutes = 50;
     String notes = "";
     bool disableRecording = false;
@@ -12041,22 +12053,68 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                     .toString()
                 : (sm['client_name'] ?? sm['client'] ?? 'Client').toString();
             final tm = _formatScheduledTime(sm); // COACH-SCHEDULE-LOCAL
+            final status = (sm['status'] ?? '').toString().toLowerCase();
+            final sid = (sm['session_id'] ?? sm['id'] ?? '').toString();
+            final isPending = status == 'pending_approval';
+            final isBooked = status == 'scheduled' || status == 'active';
             return Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Row(children: [
                 Icon(
-                  isC ? Icons.person_search : Icons.videocam,
-                  color:
-                      isC ? const Color(0xFF9D4EDD) : const Color(0xFFC9A962),
+                  isC
+                      ? Icons.person_search
+                      : (isPending ? Icons.hourglass_top : Icons.videocam),
+                  color: isC
+                      ? const Color(0xFF9D4EDD)
+                      : (isPending
+                          ? const Color(0xFFF59E0B)
+                          : const Color(0xFFC9A962)),
                   size: 14,
                 ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    "${isC ? 'Consultation · ' : ''}$cl${tm.isNotEmpty ? ' • $tm' : ''}",
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                    "${isC ? 'Consultation · ' : ''}${isPending ? 'PENDING · ' : ''}$cl${tm.isNotEmpty ? ' • $tm' : ''}",
+                    style: TextStyle(
+                        color: isPending
+                            ? const Color(0xFFF59E0B)
+                            : Colors.white,
+                        fontSize: 12),
                   ),
                 ),
+                if (isPending && sid.isNotEmpty) ...[
+                  IconButton(
+                    icon: const Icon(Icons.check_circle,
+                        color: Color(0xFF22C55E), size: 18),
+                    tooltip: 'Approve request',
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints(minWidth: 28, minHeight: 28),
+                    onPressed: () {
+                      _approveBooking(sid);
+                      Future.delayed(const Duration(seconds: 1),
+                          _emitFetchCoachCalendar);
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.cancel,
+                        color: Color(0xFFEF4444), size: 18),
+                    tooltip: 'Decline request',
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints(minWidth: 28, minHeight: 28),
+                    onPressed: () => _showDeclineDialog(sid),
+                  ),
+                ] else if (isBooked && !isC && sid.isNotEmpty)
+                  IconButton(
+                    icon: const Icon(Icons.event_busy,
+                        color: Color(0xFFEF4444), size: 18),
+                    tooltip: 'Cancel session',
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints(minWidth: 28, minHeight: 28),
+                    onPressed: () => _confirmCoachCancelSession(sid, cl, tm),
+                  ),
               ]),
             );
           }),
@@ -19099,6 +19157,63 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       "session_id": sessionId,
       "coach_id": widget.username,
     }));
+  }
+
+  void _confirmCoachCancelSession(String sessionId, String clientName, String when) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: const Text('Cancel this session?',
+            style: TextStyle(color: Colors.white)),
+        content: Text(
+          '$clientName${when.isNotEmpty ? ' • $when' : ''}\n\nThe client will be notified and the slot reopens for booking.',
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Keep session',
+                style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _coachCancelSessionRest(sessionId);
+            },
+            child: const Text('Cancel session',
+                style: TextStyle(color: Color(0xFFEF4444))),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _coachCancelSessionRest(String sessionId) async {
+    try {
+      final resp = await http
+          .delete(_apiUri('/api/sessions/$sessionId'), headers: _restHeaders())
+          .timeout(const Duration(seconds: 15));
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Session cancelled. The client has been notified.'),
+          backgroundColor: Color(0xFF22C55E),
+        ));
+        _emitFetchCoachCalendar();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Cancel failed (${resp.statusCode}).'),
+          backgroundColor: const Color(0xFFEF4444),
+        ));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Cancel failed: $e'),
+        backgroundColor: const Color(0xFFEF4444),
+      ));
+    }
   }
 
   void _declineBooking(String sessionId, String reason) {

@@ -51,6 +51,11 @@ classroom_router = APIRouter(
     dependencies=[Depends(_require_auth)],
 )
 
+# Public (no-auth) router for one-click email approve/decline links.
+# Auth comes from the HMAC-signed action token, not a bearer token —
+# Intuit-style: email redirects cannot carry Authorization headers.
+public_router = APIRouter(prefix="/api/sessions-public", tags=["sessions-public"])
+
 from app.config import settings as _settings
 DATA_DIR = Path(_settings.DATA_DIR)
 WORKBOOKS_DIR = Path(_settings.WORKBOOKS_DIR)
@@ -677,14 +682,15 @@ async def schedule_session(req: ScheduleSessionRequest, request: Request):
     # (stale "scheduled" sessions that were never started/completed/cancelled)
     now = datetime.now(timezone.utc)
     for s in sessions:
-        if s.get("coach_id") == req.coach_id and s.get("status") in ["scheduled", "active"]:
+        # pending_approval also blocks the slot — prevents double-booking a held request
+        if s.get("coach_id") == req.coach_id and s.get("status") in ["scheduled", "active", "pending_approval"]:
             existing_start = _parse_iso_dt(s.get("scheduled_start", ""))
             existing_end = _parse_iso_dt(s.get("scheduled_end", ""))
             new_start = _parse_iso_dt(req.scheduled_start)
             new_end = _parse_iso_dt(req.scheduled_end)
             if not (existing_start and existing_end and new_start and new_end):
                 continue
-            if existing_end < now and s.get("status") == "scheduled":
+            if existing_end < now and s.get("status") in ("scheduled", "pending_approval"):
                 continue
             if (new_start < existing_end and new_end > existing_start):
                 raise HTTPException(409, "Time slot conflict with existing session")
@@ -1570,6 +1576,155 @@ async def cancel_session(session_id: str, request: Request, current_user: str = 
                 return {"message": "Session cancelled", "session": s}
 
     raise HTTPException(404, "Session not found")
+
+
+# =============================================================================
+# PUBLIC: ONE-CLICK EMAIL APPROVE/DECLINE (HMAC token auth)
+# =============================================================================
+
+def _action_page(title: str, body: str, ok: bool = True) -> "HTMLResponse":
+    from fastapi.responses import HTMLResponse
+    color = "#22C55E" if ok else "#EF4444"
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title></head>
+<body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:40px 16px;">
+<div style="max-width:520px;margin:auto;background:#111;border:1px solid {color};border-radius:8px;padding:32px;text-align:center;">
+<h2 style="color:{color};margin-top:0;">{title}</h2>
+<p style="color:#cbd5e1;">{body}</p>
+<p style="color:#64748b;font-size:12px;">Sovereign Sanctuary scheduling</p>
+</div></body></html>""")
+
+
+@public_router.get("/booking-action")
+async def booking_action_from_email(token: str, request: Request):
+    """
+    Coach clicked Approve/Decline in the pending-booking email.
+    Verifies the HMAC token, applies the decision (PG + JSON), creates the
+    Zoom meeting on approval, syncs Google Calendar, and emails the client.
+    The bridge picks up the new status via sync_sessions_with_pg().
+    """
+    from app.services.session_approval import (
+        verify_action_token,
+        send_booking_decision_email,
+    )
+
+    parsed = verify_action_token(token or "")
+    if not parsed:
+        return _action_page("Link invalid or expired", "This approval link is no longer valid. Use the Scheduling tab in Coach Command instead.", ok=False)
+    session_id, action = parsed
+
+    sessions = await _load_sessions_pf(request)
+    session = next((s for s in sessions if s.get("session_id") == session_id), None)
+    if not session:
+        return _action_page("Session not found", f"No session matches this link ({session_id}).", ok=False)
+
+    current_status = str(session.get("status", "")).lower()
+    if current_status != "pending_approval":
+        return _action_page(
+            "Already processed",
+            f"This request has already been handled — current status: <strong>{current_status}</strong>.",
+            ok=current_status == "scheduled",
+        )
+
+    db = _get_db(request)
+
+    if action == "approve":
+        session["status"] = "scheduled"
+        session["approved_at"] = str(datetime.now())
+        session["approved_via"] = "email"
+
+        # Create Zoom meeting if the pending booking didn't get one
+        if settings.ENABLE_ZOOM and not (session.get("zoom_link") or "").strip():
+            try:
+                dur_min = 50
+                st = _parse_iso_dt(session.get("scheduled_start", ""))
+                en = _parse_iso_dt(session.get("scheduled_end", ""))
+                if st and en and en > st:
+                    dur_min = max(5, int((en - st).total_seconds() / 60))
+                zoom_resp = await _make_zoom_client().create_meeting(
+                    topic=f"Session: {session.get('client_name', 'Client')}",
+                    start_time_iso=_iso_to_zoom_start(session.get("scheduled_start", "")) or "",
+                    duration_minutes=dur_min,
+                )
+                if zoom_resp.get("join_url"):
+                    session["zoom_link"] = zoom_resp["join_url"]
+                    session["zoom_meeting_id"] = str(zoom_resp.get("id", ""))
+                    session["zoom_host_url"] = zoom_resp.get("start_url", "")
+            except Exception as ze:
+                _logger.warning("booking-action: Zoom create failed for %s: %s", session_id, ze)
+
+        await _save_session_dual(request, session, sessions)
+
+        # Record coach earnings (mirrors WS approve) in the PG registry profile
+        try:
+            from app.services.session_approval import apply_coach_ledger_txn
+            if db:
+                async with db.acquire() as conn:
+                    row = await conn.fetchrow(
+                        "SELECT username, profile_data FROM users WHERE hardware_id = $1 AND role = 'COACH'",
+                        session.get("coach_id", ""),
+                    )
+                    if row:
+                        profile = row["profile_data"]
+                        if isinstance(profile, str):
+                            profile = json.loads(profile)
+                        profile = profile or {}
+                        apply_coach_ledger_txn(profile, session)
+                        await conn.execute(
+                            "UPDATE users SET profile_data = $2::jsonb WHERE username = $1",
+                            row["username"], json.dumps(profile),
+                        )
+        except Exception as le:
+            _logger.warning("booking-action: ledger update failed for %s: %s", session_id, le)
+
+        if _gcal_sync and db:
+            try:
+                _gact = "update" if session.get("google_event_id") else "create"
+                asyncio.create_task(_gcal_sync(db, session, action=_gact))
+            except Exception:
+                pass
+
+        # Email + SMS the client: decision email always; join-link email if Zoom exists
+        try:
+            asyncio.create_task(send_booking_decision_email(db, session, "approved"))
+        except Exception:
+            pass
+        if (session.get("zoom_link") or "").strip():
+            try:
+                await _send_session_link(request, session)
+            except Exception as ne:
+                _logger.warning("booking-action: session link send failed: %s", ne)
+
+        when = session.get("scheduled_start", "")
+        return _action_page(
+            "Session approved",
+            f"The session with <strong>{session.get('client_name', 'your client')}</strong> on <strong>{when}</strong> is confirmed. "
+            "The client has been notified and the session is on your calendar.",
+        )
+
+    # action == "decline"
+    session["status"] = "declined"
+    session["declined_at"] = str(datetime.now())
+    session["declined_via"] = "email"
+    await _save_session_dual(request, session, sessions)
+
+    if _gcal_sync and db:
+        try:
+            asyncio.create_task(_gcal_sync(db, session, action="delete"))
+        except Exception:
+            pass
+    try:
+        asyncio.create_task(send_booking_decision_email(db, session, "declined"))
+    except Exception:
+        pass
+
+    return _action_page(
+        "Session declined",
+        f"The request from <strong>{session.get('client_name', 'your client')}</strong> was declined. "
+        "The client has been notified and the slot is open again.",
+        ok=False,
+    )
+
 
 # Coach Availability
 
