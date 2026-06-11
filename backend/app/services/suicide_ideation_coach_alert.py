@@ -57,7 +57,7 @@ async def _recent_escalation_in_window(db_pool, client_username: str) -> bool:
                 SELECT 1
                   FROM sensitive_bridge_log
                  WHERE user_id = $1
-                   AND event_type IN ('coach_alert_dispatched', 'coach_handoff_emitted')
+                   AND event_type = 'coach_alert_dispatched'
                    AND occurred_at >= NOW() - ($2::int * INTERVAL '1 hour')
                  LIMIT 1
                 """,

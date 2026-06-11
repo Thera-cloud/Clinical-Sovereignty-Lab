@@ -8627,14 +8627,29 @@ class AzureCortex:
                 if db_pool:
                     from app.services.suicide_ideation_coach_alert import maybe_dispatch_si_coach_alert
 
-                    asyncio.create_task(
-                        maybe_dispatch_si_coach_alert(
-                            db_pool,
-                            profile,
-                            user_text,
-                            turn_id=_turn_id,
+                    # QUANTUM-CRYSTAL-ARCH — push crisis resources to client when SI alert dispatches
+                    async def _si_alert_and_resources():
+                        _si_res = await maybe_dispatch_si_coach_alert(
+                            db_pool, profile, user_text, turn_id=_turn_id,
                         )
-                    )
+                        if (_si_res or {}).get("status") == "dispatched" and uid in self.sockets:
+                            _cr_payload = json.dumps({
+                                "type": "crisis_resources",
+                                "turn_id": _turn_id,
+                                "resources": [
+                                    {"label": "988 Suicide & Crisis Lifeline", "action": "call_or_text", "value": "988"},
+                                    {"label": "Crisis Text Line", "action": "text", "value": "Text HOME to 741741"},
+                                    {"label": "Emergency", "action": "call", "value": "911"},
+                                ],
+                                "message": "Your coach has been alerted. If you are in immediate danger, please reach out now.",
+                            })
+                            for _ws in list(self.sockets[uid]):
+                                try:
+                                    await _ws.send(_cr_payload)
+                                except Exception:
+                                    self.sockets[uid].discard(_ws)
+
+                    asyncio.create_task(_si_alert_and_resources())
             except Exception as _si_alert_e:
                 print(f">>> [SI_COACH_ALERT ERROR] {_si_alert_e!r}")
 
