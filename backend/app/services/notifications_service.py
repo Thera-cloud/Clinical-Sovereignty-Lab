@@ -489,6 +489,33 @@ TEMPLATES = {
 </div></body></html>
 """,
     },
+    "handoff_confirmation": {
+        "subject": "Your coach has been contacted",
+        "html": """
+<!DOCTYPE html>
+<html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
+<div style="max-width:640px;margin:auto;background:#111;border:1px solid #C9A962;border-radius:8px;padding:24px;">
+  <h2 style="color:#C9A962;margin-top:0;">We reached out to your coach</h2>
+  <p>Your coach <strong>{{ coach_name }}</strong> has been emailed and a phone message was sent on your behalf.</p>
+  <p>They typically respond within 12 hours. If you need to talk again before then, Little Nate is always here for you.</p>
+  <p style="color:#94a3b8;font-size:13px;">If you are in crisis or need immediate help, call or text <strong>988</strong> (Suicide &amp; Crisis Lifeline), text <strong>HOME</strong> to <strong>741741</strong>, or dial <strong>911</strong>.</p>
+  <p style="color:#64748b;font-size:12px;">Sent by Sovereign Sanctuary · Little Nate coach handoff.</p>
+</div></body></html>
+""",
+    },
+    "coach_direct_message": {
+        "subject": "A message from your coach {{ coach_name }}",
+        "html": """
+<!DOCTYPE html>
+<html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
+<div style="max-width:640px;margin:auto;background:#111;border:1px solid #4ECDC4;border-radius:8px;padding:24px;">
+  <h2 style="color:#4ECDC4;margin-top:0;">Message from your coach</h2>
+  <p><strong>{{ coach_name }}</strong> sent you a message through Sovereign Sanctuary:</p>
+  <pre style="white-space:pre-wrap;background:#0a0a0a;padding:12px;border-radius:6px;color:#cbd5e1;font-family:sans-serif;">{{ message }}</pre>
+  <p style="color:#64748b;font-size:12px;">Sent by Sovereign Sanctuary · Coach Command.</p>
+</div></body></html>
+""",
+    },
 }
 
 
@@ -668,6 +695,43 @@ class EmailService:
                 (client_name or "")[:32],
                 dest[:32],
             )
+        return ok
+
+    async def send_handoff_confirmation(
+        self,
+        to_email: Optional[str],
+        coach_name: str,
+    ) -> bool:
+        """Client-facing confirmation that their coach was emailed + called."""
+        dest = (to_email or "").strip()
+        if not dest:
+            return False
+        ok = await self.send_email(
+            dest,
+            "handoff_confirmation",
+            {"coach_name": coach_name or "your coach"},
+        )
+        if not ok:
+            logger.warning("send_handoff_confirmation failed dest=%s", dest[:32])
+        return ok
+
+    async def send_coach_direct_message(
+        self,
+        to_email: Optional[str],
+        coach_name: str,
+        message: str,
+    ) -> bool:
+        """Direct coach-to-client message sent from Coach Command VIEW BRIEF."""
+        dest = (to_email or "").strip()
+        if not dest or not (message or "").strip():
+            return False
+        ok = await self.send_email(
+            dest,
+            "coach_direct_message",
+            {"coach_name": coach_name or "Your coach", "message": message.strip()},
+        )
+        if not ok:
+            logger.warning("send_coach_direct_message failed dest=%s", dest[:32])
         return ok
     
     async def send_family_invitation(

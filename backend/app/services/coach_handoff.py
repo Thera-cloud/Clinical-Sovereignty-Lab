@@ -4,11 +4,65 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 _HANDOFF_SOURCE = "client_accepted"
+
+
+def _cooldown_hours() -> int:
+    raw = os.getenv("HANDOFF_COOLDOWN_HOURS", "12").strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 12
+
+
+async def handoff_cooldown_remaining(db_pool, client_username: str) -> float:
+    """Hours remaining in the handoff cooldown window (0.0 when inactive).
+
+    The window anchors on the most recent full (non-cooldown) client-accepted
+    handoff dispatch in sensitive_bridge_log.
+    """
+    if not db_pool or not client_username:
+        return 0.0
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT EXTRACT(EPOCH FROM (
+                           occurred_at + ($3::int * INTERVAL '1 hour') - NOW()
+                       )) / 3600.0 AS remaining_hours
+                  FROM sensitive_bridge_log
+                 WHERE user_id = $1
+                   AND event_type = 'coach_handoff_emitted'
+                   AND payload_json->>'handoff_source' = $2
+                   AND occurred_at >= NOW() - ($3::int * INTERVAL '1 hour')
+                 ORDER BY occurred_at DESC
+                 LIMIT 1
+                """,
+                client_username,
+                _HANDOFF_SOURCE,
+                _cooldown_hours(),
+            )
+        if row and row["remaining_hours"] is not None:
+            return max(0.0, float(row["remaining_hours"]))
+        return 0.0
+    except Exception as e:
+        logger.warning("coach_handoff: cooldown check failed: %s", e)
+        return 0.0
+
+
+async def handoff_cooldown_active(db_pool, client_username: str) -> bool:
+    """True when a client-accepted handoff fired within the cooldown window.
+
+    During cooldown: repeat handoffs send coach email only (no voice ping),
+    and the adaptive handoff chip is suppressed. Crisis (SI) alerts bypass
+    this entirely — they dedup only on coach_alert_dispatched.
+    """
+    return (await handoff_cooldown_remaining(db_pool, client_username)) > 0.0
 
 
 async def _handoff_already_accepted(db_pool, client_username: str, turn_id: str) -> bool:
@@ -22,7 +76,7 @@ async def _handoff_already_accepted(db_pool, client_username: str, turn_id: str)
                   FROM sensitive_bridge_log
                  WHERE user_id = $1
                    AND event_type = 'coach_handoff_emitted'
-                   AND payload_json->>'handoff_source' = $2
+                   AND payload_json->>'handoff_source' IN ($2, $2 || '_cooldown')
                    AND payload_json->>'turn_id' = $3
                  LIMIT 1
                 """,
@@ -216,9 +270,10 @@ async def _emit_handoff_audit(
     coach_username: str,
     notification_id: int,
     summary_excerpt: str,
+    handoff_source: str = _HANDOFF_SOURCE,
 ) -> Optional[int]:
     payload = {
-        "handoff_source": _HANDOFF_SOURCE,
+        "handoff_source": handoff_source,
         "turn_id": turn_id,
         "coach_username": coach_username,
         "notification_id": notification_id,
@@ -280,6 +335,11 @@ async def process_coach_handoff_accepted(
     if not coach_username:
         return {"status": "error", "reason": "no_assigned_coach", "turn_id": turn_id}
 
+    # 12h cooldown: repeat reaches send coach email only (no voice ping).
+    # The cooldown window anchors on the original full dispatch — repeats are
+    # logged with a distinct handoff_source so they don't extend the window.
+    cooldown_active = await handoff_cooldown_active(db_pool, client_username)
+
     hardware_id = (client_profile.get("hardware_id") or "").strip() or None
     summary = await generate_handoff_summary(
         db_pool,
@@ -293,6 +353,8 @@ async def process_coach_handoff_accepted(
         f"{_first_name(client_profile)} accepted a coach handoff from Little Nate "
         f"(turn_id={turn_id})."
     )
+    if cooldown_active:
+        reason += " (Repeat reach-out during the 12-hour handoff cooldown — email only.)"
 
     receipt: Dict[str, Any] = {
         "event_id": 0,
@@ -315,6 +377,7 @@ async def process_coach_handoff_accepted(
             family_id=None,
             raw_context=summary,
             alert_type="client_initiated_handoff",
+            suppress_voice=cooldown_active,
         )
     except Exception as e:
         logger.error("coach_handoff: dispatch_sensitive_alert failed: %s", e)
@@ -328,14 +391,36 @@ async def process_coach_handoff_accepted(
         coach_username=coach_username,
         notification_id=notification_id,
         summary_excerpt=summary[:500],
+        handoff_source=("client_accepted_cooldown" if cooldown_active else _HANDOFF_SOURCE),
     )
 
-    return {
-        "status": "accepted",
+    result: Dict[str, Any] = {
+        "status": "cooldown_email_only" if cooldown_active else "accepted",
         "turn_id": turn_id,
         "coach_username": coach_username,
         "notification_id": notification_id,
         "audit_id": audit_id or 0,
         "email_sent": bool(receipt.get("email_sent")),
         "coach_notified": bool(receipt.get("coach_notified")),
+        "cooldown_active": cooldown_active,
+        "client_email_sent": False,
+        "client_call_placed": False,
     }
+
+    if not cooldown_active:
+        # Client confirmations: email + Little Nate announcement call (best-effort)
+        try:
+            from app.services.handoff_client_confirmation import confirm_handoff_to_client
+
+            confirm = await confirm_handoff_to_client(
+                db_pool,
+                client_username=client_username,
+                client_profile=client_profile,
+                coach_username=coach_username,
+            )
+            result["client_email_sent"] = bool(confirm.get("client_email_sent"))
+            result["client_call_placed"] = bool(confirm.get("client_call_placed"))
+        except Exception as e:
+            logger.warning("coach_handoff: client confirmation failed: %s", e)
+
+    return result

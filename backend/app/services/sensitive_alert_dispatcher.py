@@ -27,6 +27,7 @@ async def dispatch_sensitive_alert(
     family_id: Optional[str] = None,
     raw_context: Optional[str] = None,
     alert_type: str = "addiction_escalation",
+    suppress_voice: bool = False,
 ) -> Dict[str, Any]:
     """Dispatch a sensitive clinical alert through the canonical pipeline.
 
@@ -102,6 +103,11 @@ async def dispatch_sensitive_alert(
     details_body = reason
     if redacted_context:
         details_body = f"{reason}\n\n{redacted_context}"
+    if alert_type == "client_initiated_handoff" and not suppress_voice:
+        details_body += (
+            "\n\nThe client has been notified that you were contacted "
+            "by email and phone."
+        )
 
     if coach_username and receipt["event_id"]:
         try:
@@ -119,6 +125,11 @@ async def dispatch_sensitive_alert(
                 msg = (
                     f"{msg}\n\n(This is a client-initiated coach handoff, not a crisis alert.)"
                 )
+                if not suppress_voice:
+                    msg += (
+                        "\n\nThe client has been notified that you were contacted "
+                        "by email and phone."
+                    )
             else:
                 notif_subject = f"Sovereign Sanctuary · {alert_type}"
                 msg = f"[{alert_type}] client={client_username}\n{reason}"
@@ -136,6 +147,7 @@ async def dispatch_sensitive_alert(
                         "event_id": receipt["event_id"],
                         "risk_level": risk_level,
                         "session_id": session_id,
+                        "suppress_voice": suppress_voice,
                     },
                 },
             )

@@ -156,7 +156,11 @@ async def notify_coach(
 
     if urgency in ("critical", "high"):
         coach_phone, coach_email = await _lookup_coach_contact(pool, coach_username)
-        if coach_phone:
+        # Handoff cooldown: repeat reaches skip SMS + voice ping (email/in-app only)
+        suppress_voice = bool(payload.get("suppress_voice")) and (
+            payload.get("alert_type") == "client_initiated_handoff"
+        )
+        if coach_phone and not suppress_voice:
             if _send_coach_sms(coach_phone, message):
                 channels.append("sms")
                 sent["sms"] = True

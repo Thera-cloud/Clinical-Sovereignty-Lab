@@ -319,6 +319,29 @@ def _adaptive_clear(uid: str) -> None:
     _adaptive_states.pop(uid, None)
     _adaptive_locks.pop(uid, None)
 
+
+# QUANTUM-CRYSTAL-ARCH — handoff cooldown cache (uid -> cooldown expiry unix ts)
+# One DB query per cooldown window; suppresses repeat handoff chips for 12h.
+_handoff_cooldown_cache: dict = {}
+
+
+async def _handoff_cooldown_hours_left(uid: str, username: str) -> float:
+    """Hours left in handoff cooldown (0.0 = inactive). Cached per uid."""
+    import time as _t
+    _exp = _handoff_cooldown_cache.get(uid, 0.0)
+    if _exp > _t.time():
+        return (_exp - _t.time()) / 3600.0
+    try:
+        from app.services.coach_handoff import handoff_cooldown_remaining
+        _left = await handoff_cooldown_remaining(db_pool, username)
+    except Exception:
+        return 0.0
+    if _left > 0.0:
+        _handoff_cooldown_cache[uid] = _t.time() + _left * 3600.0
+    else:
+        _handoff_cooldown_cache.pop(uid, None)
+    return _left
+
 # QUANTUM-CRYSTAL-ARCH — Six-Quotient Growth Engine (per-interaction self-assessment)
 _six_quotient_growth = None
 try:
@@ -10074,11 +10097,27 @@ class AzureCortex:
                             _adaptive_mod.record_assistant_turn(_ad_state2, _final_response)
                     # Surface handoff offer to client UI
                     if _adaptive_payload.get("should_offer_coach_ui") and uid in self.sockets:
-                        _meta_payload = {
-                            "type": "offer_coach_handoff",
-                            "coach_name": _adaptive_payload.get("coach_name", "your coach"),
-                            "turn_id": _turn_id,
-                        }
+                        # QUANTUM-CRYSTAL-ARCH — handoff cooldown: replace chip with notice
+                        _hc_left = 0.0
+                        try:
+                            _hc_left = await _handoff_cooldown_hours_left(
+                                uid, (profile.get("username") or "").strip()
+                            )
+                        except Exception:
+                            _hc_left = 0.0
+                        if _hc_left > 0.0:
+                            _meta_payload = {
+                                "type": "coach_handoff_cooldown_notice",
+                                "coach_name": _adaptive_payload.get("coach_name", "your coach"),
+                                "hours_remaining": round(_hc_left, 1),
+                                "turn_id": _turn_id,
+                            }
+                        else:
+                            _meta_payload = {
+                                "type": "offer_coach_handoff",
+                                "coach_name": _adaptive_payload.get("coach_name", "your coach"),
+                                "turn_id": _turn_id,
+                            }
                         for _ws in list(self.sockets[uid]):
                             if _ctx is not None and getattr(_ws, "_eviction_context", "main") != _ctx:
                                 continue
