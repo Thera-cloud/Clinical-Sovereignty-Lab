@@ -13188,8 +13188,36 @@ async def handle_client(websocket, path=None):
                                 "type": "coach_handoff_accepted_ack",
                                 **_ch_result,
                             }))
+                            # QUANTUM-CRYSTAL-ARCH — prime cooldown cache after full dispatch
+                            if _ch_result.get("status") == "accepted":
+                                import time as _hc_t
+                                _handoff_cooldown_cache[uid] = _hc_t.time() + (
+                                    float(os.getenv("HANDOFF_COOLDOWN_HOURS", "12") or 12) * 3600.0
+                                )
                         except Exception as _ch_err:
                             logger.warning("coach_handoff_accepted failed: %s", _ch_err)
+
+            # QUANTUM-CRYSTAL-ARCH — coach direct message to assigned client (email/SMS)
+            elif t == "coach_message_client_direct":
+                if current_profile and current_profile.get("role") in ("COACH", "ADMIN"):
+                    try:
+                        from app.services.coach_client_messenger import send_direct_client_message
+                        _cm_result = await send_direct_client_message(
+                            db_pool,
+                            current_profile,
+                            (d.get("client_username") or d.get("client_id") or "").strip(),
+                            d.get("message") or "",
+                            channels=d.get("channels"),
+                        )
+                    except Exception as _cm_err:
+                        logger.warning("coach_message_client_direct failed: %s", _cm_err)
+                        _cm_result = {"status": "error", "reason": "internal_error"}
+                    await websocket.send(json.dumps({
+                        "type": "coach_message_client_direct_ack",
+                        **_cm_result,
+                    }))
+                else:
+                    await websocket.send(json.dumps({"type": "error", "message": "Not authorized"}))
 
             # === CHAT MESSAGE ===
             elif t == "chat_message":
@@ -18749,7 +18777,10 @@ async def handle_client(websocket, path=None):
                                 "name": client_profile.get("name"),
                                 "tier": client_profile.get("tier"),
                                 "joined_date": client_profile.get("joined_date"),
-                                "total_sessions": client_profile.get("total_sessions_count", 0)
+                                "total_sessions": client_profile.get("total_sessions_count", 0),
+                                # QUANTUM-CRYSTAL-ARCH: contact info for Message Client channel availability
+                                "email": (client_profile.get("email") or "").strip(),
+                                "phone": (client_profile.get("phone") or "").strip(),
                             },
                             "metrics": metrics.get("nevedal_state", {}),
                             "recent_topics": topics,

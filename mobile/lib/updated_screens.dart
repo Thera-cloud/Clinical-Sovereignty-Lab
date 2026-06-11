@@ -2060,6 +2060,103 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
             ),
           ));
         }
+      } else if (data['type'] == 'coach_handoff_cooldown_notice') {
+        // Handoff cooldown active — coach already alerted; no repeat chip.
+        final coachName = (data['coach_name'] as String?)?.trim().isNotEmpty == true
+            ? data['coach_name'] as String
+            : 'your coach';
+        final hoursLeft = (data['hours_remaining'] is num)
+            ? (data['hours_remaining'] as num).toDouble()
+            : 0.0;
+        if (mounted) {
+          setState(() {
+            _chatHistory.add(
+                'System: [$coachName has already been contacted — they typically respond within 12 hours'
+                '${hoursLeft > 0 ? ' (~${hoursLeft.toStringAsFixed(1)}h remaining)' : ''}. '
+                'New messages still reach them by email.]');
+            _scrollToBottom();
+          });
+        }
+      } else if (data['type'] == 'coach_handoff_accepted_ack') {
+        final status = (data['status'] ?? '').toString();
+        if (mounted) {
+          String line;
+          if (status == 'accepted') {
+            line =
+                'System: [Your coach has been contacted by phone and email. A confirmation email was sent to you.]';
+          } else if (status == 'cooldown_email_only') {
+            line =
+                'System: [Your coach was emailed again. The phone alert is paused while they respond (12h window).]';
+          } else if (status == 'duplicate') {
+            line = 'System: [Your coach was already contacted for this conversation.]';
+          } else {
+            line = 'System: [We could not reach your coach automatically. Please try again or use the Crisis resources if urgent.]';
+          }
+          setState(() {
+            _chatHistory.add(line);
+            _scrollToBottom();
+          });
+        }
+      } else if (data['type'] == 'crisis_resources') {
+        // SI crisis dispatched — show prominent crisis resources banner.
+        final resources = (data['resources'] is List)
+            ? List<dynamic>.from(data['resources'])
+            : <dynamic>[];
+        if (mounted) {
+          setState(() {
+            _chatHistory.add(
+                'System: [CRISIS SUPPORT] Your coach has been alerted. If you are in immediate danger, please reach out now:');
+            for (final r in resources) {
+              if (r is Map) {
+                _chatHistory.add('System: [CRISIS SUPPORT] ${r['label'] ?? ''}: ${r['value'] ?? ''}');
+              }
+            }
+            _scrollToBottom();
+          });
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: const Color(0xFF1A1A2E),
+              title: const Text('You Are Not Alone',
+                  style: TextStyle(
+                      color: Color(0xFFEF4444),
+                      fontFamily: 'Cormorant Garamond',
+                      fontWeight: FontWeight.bold)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Your coach has been alerted and will reach out. If you are in immediate danger, please contact:',
+                    style: TextStyle(color: Colors.white70, fontFamily: 'DM Sans'),
+                  ),
+                  const SizedBox(height: 12),
+                  for (final r in resources)
+                    if (r is Map)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          '• ${r['label'] ?? ''}: ${r['value'] ?? ''}',
+                          style: const TextStyle(
+                              color: Color(0xFFC9A962),
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'DM Sans'),
+                        ),
+                      ),
+                ],
+              ),
+              actions: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFEF4444)),
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('I understand',
+                      style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            ),
+          );
+        }
       } else if (data['type'] == 'search_consent_request') {
         final query = data['query'] ?? '';
         if (query.isNotEmpty && mounted) {
@@ -5705,6 +5802,17 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     }));
   }
 
+  /// Keep toolbar + grid month in sync and always refetch after navigation.
+  void _navigateCalendarTo(DateTime anchor, {DateTime? selectDay}) {
+    if (!mounted) return;
+    setState(() {
+      _calFocusedDate = anchor;
+      _calMonth = DateTime(anchor.year, anchor.month, 1);
+      if (selectDay != null) _calSelectedDay = selectDay;
+    });
+    _emitFetchCoachCalendar();
+  }
+
   void _fetchDashboard() {
     _socket?.sink.add(jsonEncode({"type": "coach_get_clients"}));
     _emitFetchCoachCalendar();
@@ -6041,8 +6149,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         );
       }
 
-      // Refresh schedule view immediately.
-      _emitFetchCoachCalendar();
+      _navigateCalendarTo(
+        DateTime(
+          scheduledStartLocal.year,
+          scheduledStartLocal.month,
+          scheduledStartLocal.day,
+        ),
+        selectDay: scheduledStartLocal,
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -7440,6 +7554,35 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           });
           _refreshCoachOverridePanel();
         }
+      } else if (data['type'] == 'coach_message_client_direct_ack') {
+        if (mounted) {
+          final results = (data['results'] is Map)
+              ? Map<String, dynamic>.from(data['results'])
+              : <String, dynamic>{};
+          final parts = <String>[];
+          if (results.containsKey('email_sent')) {
+            parts.add(results['email_sent'] == true
+                ? 'Email sent'
+                : 'Email failed');
+          }
+          if (results.containsKey('sms_sent')) {
+            parts.add(
+                results['sms_sent'] == true ? 'SMS sent' : 'SMS failed');
+          }
+          final ok = data['status'] == 'sent';
+          final summary = parts.isEmpty
+              ? (ok
+                  ? 'Message sent.'
+                  : 'Message failed: ${data['error'] ?? 'unknown error'}')
+              : parts.join(' • ');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(summary),
+              backgroundColor:
+                  ok ? const Color(0xFF22C55E) : const Color(0xFFEF4444),
+            ),
+          );
+        }
       } else if (data['type'] == 'coach_client_override' ||
           data['type'] == 'coach_client_override_saved' ||
           data['type'] == 'coach_override_renewed') {
@@ -7473,11 +7616,21 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         }
         _refreshCoachOverridePanel();
       } else if (data['type'] == 'coach_calendar_data') {
-        if (mounted) {
-          setState(() {
-            _schedule = data['data']?['schedule'] ?? [];
-          });
-        }
+        if (!mounted) return;
+        final cal = data['data'];
+        if (cal is! Map) return;
+        final respMonth = cal['month'];
+        final respYear = cal['year'];
+        final m = respMonth is int
+            ? respMonth
+            : int.tryParse('$respMonth');
+        final y =
+            respYear is int ? respYear : int.tryParse('$respYear');
+        // Ignore stale WS replies (toolbar/grid race or tab switch).
+        if (m != _calMonth.month || y != _calMonth.year) return;
+        setState(() {
+          _schedule = List<dynamic>.from(cal['schedule'] ?? []);
+        });
       } else if (data['type'] == 'consultation_created') {
         final rid = data['request_id']?.toString();
         if (rid != null &&
@@ -8935,9 +9088,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           ),
 
           const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerRight,
-            child: _buildIntakeButton(brief),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              _buildMessageClientButton(brief),
+              const SizedBox(width: 8),
+              _buildIntakeButton(brief),
+            ],
           ),
 
           const SizedBox(height: 24),
@@ -9183,6 +9340,171 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           clientUsername: clientUsername,
           token: token,
           clientDisplayName: displayName.isEmpty ? clientUsername : displayName,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMessageClientButton(Map<String, dynamic> brief) {
+    return ElevatedButton.icon(
+      onPressed: () => _openMessageClientDialog(brief),
+      icon: const Icon(Icons.mail_outline, size: 16),
+      label: const Text('Message Client'),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF4ECDC4),
+        foregroundColor: const Color(0xFF050505),
+      ),
+    );
+  }
+
+  void _openMessageClientDialog(Map<String, dynamic> brief) {
+    final client = (brief['client'] is Map)
+        ? Map<String, dynamic>.from(brief['client'])
+        : <String, dynamic>{};
+    final visibility = brief['sensitive_bridge_visibility'];
+    final usernameFromVisibility =
+        (visibility is Map) ? (visibility['client_username'] ?? '').toString() : '';
+    final clientUsername = usernameFromVisibility.trim().isNotEmpty
+        ? usernameFromVisibility.trim()
+        : (client['username'] ?? '').toString().trim();
+    if (clientUsername.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text(
+                'Messaging unavailable: missing client username in brief payload.')),
+      );
+      return;
+    }
+    final clientName =
+        (client['name'] ?? '').toString().trim().isNotEmpty
+            ? (client['name'] ?? '').toString().trim()
+            : clientUsername;
+    final hasEmail = (client['email'] ?? '').toString().trim().isNotEmpty;
+    final hasPhone = (client['phone'] ?? '').toString().trim().isNotEmpty;
+    final msgController = TextEditingController();
+    bool sendEmail = hasEmail;
+    bool sendSms = false;
+    bool sending = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF111111),
+          title: Text('Message $clientName',
+              style: const TextStyle(
+                  color: Color(0xFFC9A962),
+                  fontFamily: 'Cormorant Garamond')),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: msgController,
+                  maxLines: 5,
+                  maxLength: 1200,
+                  style: const TextStyle(
+                      color: Colors.white, fontFamily: 'DM Sans'),
+                  decoration: const InputDecoration(
+                    hintText: 'Write your message to the client...',
+                    hintStyle: TextStyle(color: Colors.white38),
+                    counterStyle: TextStyle(color: Colors.white38),
+                    enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Color(0xFF333333))),
+                    focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Color(0xFF4ECDC4))),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                CheckboxListTile(
+                  value: sendEmail,
+                  onChanged: hasEmail
+                      ? (v) => setDialogState(() => sendEmail = v ?? false)
+                      : null,
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  activeColor: const Color(0xFF4ECDC4),
+                  title: Text(
+                    hasEmail ? 'Email' : 'Email (no address on file)',
+                    style: TextStyle(
+                        color: hasEmail ? Colors.white : Colors.white38,
+                        fontFamily: 'DM Sans',
+                        fontSize: 14),
+                  ),
+                ),
+                CheckboxListTile(
+                  value: sendSms,
+                  onChanged: hasPhone
+                      ? (v) => setDialogState(() => sendSms = v ?? false)
+                      : null,
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  activeColor: const Color(0xFF4ECDC4),
+                  title: Text(
+                    hasPhone ? 'Text message (SMS)' : 'SMS (no phone on file)',
+                    style: TextStyle(
+                        color: hasPhone ? Colors.white : Colors.white38,
+                        fontFamily: 'DM Sans',
+                        fontSize: 14),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: sending ? null : () => Navigator.pop(ctx),
+              child: const Text('CANCEL',
+                  style: TextStyle(color: Colors.white54)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF4ECDC4),
+                  foregroundColor: const Color(0xFF050505)),
+              onPressed: sending
+                  ? null
+                  : () {
+                      final msg = msgController.text.trim();
+                      if (msg.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('Message cannot be empty.')),
+                        );
+                        return;
+                      }
+                      final channels = <String>[
+                        if (sendEmail) 'email',
+                        if (sendSms) 'sms',
+                      ];
+                      if (channels.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content:
+                                  Text('Select at least one channel.')),
+                        );
+                        return;
+                      }
+                      setDialogState(() => sending = true);
+                      _socket?.sink.add(jsonEncode({
+                        "type": "coach_message_client_direct",
+                        "client_id": clientUsername,
+                        "message": msg,
+                        "channels": channels,
+                      }));
+                      Navigator.pop(ctx);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                            content: Text(
+                                'Sending message to $clientName...')),
+                      );
+                    },
+              child: const Text('SEND'),
+            ),
+          ],
         ),
       ),
     );
@@ -9731,10 +10053,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           view: _calView,
           focusedDate: _calFocusedDate,
           onViewChanged: (v) => setState(() => _calView = v),
-          onDateChanged: (d) => setState(() {
-            _calFocusedDate = d;
-            _calMonth = DateTime(d.year, d.month, 1);
-          }),
+          onDateChanged: _navigateCalendarTo,
         ),
         const SizedBox(height: 8),
         if (_calView == CalendarView.month)
@@ -11528,13 +11847,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             children: [
               IconButton(
                 icon: const Icon(Icons.chevron_left, color: Color(0xFFC9A962)),
-                onPressed: () {
-                  setState(() {
-                    _calMonth =
-                        DateTime(_calMonth.year, _calMonth.month - 1, 1);
-                  });
-                  _emitFetchCoachCalendar();
-                },
+                onPressed: () => _navigateCalendarTo(
+                  DateTime(_calMonth.year, _calMonth.month - 1, 1),
+                ),
               ),
               Expanded(
                 child: Center(
@@ -11551,13 +11866,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               ),
               IconButton(
                 icon: const Icon(Icons.chevron_right, color: Color(0xFFC9A962)),
-                onPressed: () {
-                  setState(() {
-                    _calMonth =
-                        DateTime(_calMonth.year, _calMonth.month + 1, 1);
-                  });
-                  _emitFetchCoachCalendar();
-                },
+                onPressed: () => _navigateCalendarTo(
+                  DateTime(_calMonth.year, _calMonth.month + 1, 1),
+                ),
               ),
             ],
           ),
@@ -11611,12 +11922,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                     padding: const EdgeInsets.symmetric(vertical: 10),
                   ),
                   onPressed: () {
-                    setState(() {
-                      final now = DateTime.now();
-                      _calMonth = DateTime(now.year, now.month, 1);
-                      _calSelectedDay = now;
-                    });
-                    _emitFetchCoachCalendar();
+                    final now = DateTime.now();
+                    _navigateCalendarTo(now, selectDay: now);
                   },
                 ),
               ),
