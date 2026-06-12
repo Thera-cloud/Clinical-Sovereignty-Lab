@@ -4309,6 +4309,10 @@ async def trigger_all_audits(request: Request):
         "dojo_session_auditor", "wisdom_pipeline_auditor", "settings_tab_auditor",
         "coach_hierarchy_auditor", "liminal_presence_auditor",
         "pmb_command_center_auditor", "data_uniformity_tracer",
+        "token_lab_auditor", "gkm_auditor", "nate_checkin_auditor",
+        "sensitive_bridge_auditor", "quickbooks_auditor",
+        "corporate_command_auditor", "voice_infra_auditor",
+        "classroom_learning_auditor",
     ]
     for attr in auditor_attrs:
         auditor = getattr(request.app.state, attr, None)
