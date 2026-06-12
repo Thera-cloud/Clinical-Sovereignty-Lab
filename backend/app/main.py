@@ -2039,7 +2039,7 @@ async def lifespan(app: FastAPI):
             notification_system=_tab_audit_notify,
             app_state=app.state,
         )
-        await _tab_auditor.start()
+        if not _is_clone: await _tab_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.skyeye_tab_auditor = _tab_auditor
         print("   ✅ SkyEyeTabAuditor started (5am/5pm/11pm UTC, stagger 120s)")
     except Exception as sta_err:
@@ -2055,7 +2055,7 @@ async def lifespan(app: FastAPI):
             notification_system=_cmd_audit_notify,
             app_state=app.state,
         )
-        await _cmd_auditor.start()
+        if not _is_clone: await _cmd_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.command_tab_auditor = _cmd_auditor
         print("   ✅ SovereignCommandAuditor started (5am/5pm/11pm UTC, stagger 130s)")
     except Exception as cta_err:
@@ -2071,7 +2071,7 @@ async def lifespan(app: FastAPI):
             notification_system=_eye_audit_notify,
             app_state=app.state,
         )
-        await _eye_auditor.start()
+        if not _is_clone: await _eye_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.the_eye_auditor = _eye_auditor
         print("   ✅ TheEyeAuditor started (5am/5pm/11pm UTC, stagger 140s)")
     except Exception as tea_err:
@@ -2087,7 +2087,7 @@ async def lifespan(app: FastAPI):
             notification_system=_login_audit_notify,
             app_state=app.state,
         )
-        await _login_auditor.start()
+        if not _is_clone: await _login_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.login_auditor = _login_auditor
         print("   ✅ LoginAuditor started (5am/5pm/11pm UTC, stagger 150s)")
     except Exception as la_err:
@@ -2103,7 +2103,7 @@ async def lifespan(app: FastAPI):
             notification_system=_client_audit_notify,
             app_state=app.state,
         )
-        await _client_auditor.start()
+        if not _is_clone: await _client_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.client_app_auditor = _client_auditor
         print("   ✅ ClientAppAuditor started (5am/5pm/11pm UTC, stagger 160s)")
     except Exception as caa_err:
@@ -2117,7 +2117,7 @@ async def lifespan(app: FastAPI):
         _coach_dojo_auditor = CoachDojoAuditor(
             db_pool=db_pool, notification_system=_cd_notify, app_state=app.state,
         )
-        await _coach_dojo_auditor.start()
+        if not _is_clone: await _coach_dojo_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.coach_dojo_auditor = _coach_dojo_auditor
         print("   ✅ CoachDojoAuditor started (5am/5pm/11pm UTC, stagger 170s)")
     except Exception as cd_err:
@@ -2131,7 +2131,7 @@ async def lifespan(app: FastAPI):
         _billing_auditor = BillingPipelineAuditor(
             db_pool=db_pool, notification_system=_ba_notify, app_state=app.state,
         )
-        await _billing_auditor.start()
+        if not _is_clone: await _billing_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.billing_auditor = _billing_auditor
         print("   ✅ BillingPipelineAuditor started (5am/5pm/11pm UTC, stagger 180s)")
     except Exception as ba_err:
@@ -2145,7 +2145,7 @@ async def lifespan(app: FastAPI):
         _defense_auditor = DefenseHealthAuditor(
             db_pool=db_pool, notification_system=_da_notify, app_state=app.state,
         )
-        await _defense_auditor.start()
+        if not _is_clone: await _defense_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.defense_auditor = _defense_auditor
         print("   ✅ DefenseHealthAuditor started (5am/5pm/11pm UTC, stagger 190s)")
     except Exception as da_err:
@@ -2159,7 +2159,7 @@ async def lifespan(app: FastAPI):
         _ai_pipeline_auditor = AIPipelineAuditor(
             db_pool=db_pool, notification_system=_ap_notify, app_state=app.state,
         )
-        await _ai_pipeline_auditor.start()
+        if not _is_clone: await _ai_pipeline_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.ai_pipeline_auditor = _ai_pipeline_auditor
         print("   ✅ AIPipelineAuditor started (5am/5pm/11pm UTC, stagger 200s)")
     except Exception as ap_err:
@@ -2173,7 +2173,7 @@ async def lifespan(app: FastAPI):
         _ws_flow_auditor = WebSocketFlowAuditor(
             db_pool=db_pool, notification_system=_wf_notify, app_state=app.state,
         )
-        await _ws_flow_auditor.start()
+        if not _is_clone: await _ws_flow_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.ws_flow_auditor = _ws_flow_auditor
         print("   ✅ WebSocketFlowAuditor started (5am/5pm/11pm UTC, stagger 210s)")
     except Exception as wf_err:
@@ -2187,7 +2187,7 @@ async def lifespan(app: FastAPI):
         _tier_gating_auditor = TierGatingAuditor(
             db_pool=db_pool, notification_system=_tg_notify, app_state=app.state,
         )
-        await _tier_gating_auditor.start()
+        if not _is_clone: await _tier_gating_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.tier_gating_auditor = _tier_gating_auditor
         print("   ✅ TierGatingAuditor started (5am/5pm/11pm UTC, stagger 220s)")
     except Exception as tg_err:
@@ -2201,7 +2201,7 @@ async def lifespan(app: FastAPI):
         _nevedal_lab_auditor = NevedalLabAuditor(
             db_pool=db_pool, notification_system=_nl_notify, app_state=app.state,
         )
-        await _nevedal_lab_auditor.start()
+        if not _is_clone: await _nevedal_lab_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.nevedal_lab_auditor = _nevedal_lab_auditor
         print("   ✅ NevedalLabAuditor started (5am/5pm/11pm UTC, stagger 230s)")
     except Exception as nl_err:
@@ -2215,7 +2215,7 @@ async def lifespan(app: FastAPI):
         _hw_security_auditor = HardwareSecurityAuditor(
             db_pool=db_pool, notification_system=_hs_notify, app_state=app.state,
         )
-        await _hw_security_auditor.start()
+        if not _is_clone: await _hw_security_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.hw_security_auditor = _hw_security_auditor
         print("   ✅ HardwareSecurityAuditor started (5am/5pm/11pm UTC, stagger 240s)")
     except Exception as hs_err:
@@ -2229,7 +2229,7 @@ async def lifespan(app: FastAPI):
         _system_integrity_auditor = SystemIntegrityAuditor(
             db_pool=db_pool, notification_system=_si_notify, app_state=app.state,
         )
-        await _system_integrity_auditor.start()
+        if not _is_clone: await _system_integrity_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.system_integrity_auditor = _system_integrity_auditor
         print("   ✅ SystemIntegrityAuditor started (5am/5pm/11pm UTC, stagger 250s)")
     except Exception as si_err:
@@ -2243,7 +2243,7 @@ async def lifespan(app: FastAPI):
         _dojo_session_auditor = DojoSessionAuditor(
             db_pool=db_pool, notification_system=_ds_notify, app_state=app.state,
         )
-        await _dojo_session_auditor.start()
+        if not _is_clone: await _dojo_session_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.dojo_session_auditor = _dojo_session_auditor
         print("   ✅ DojoSessionAuditor started (5am/5pm/11pm UTC, stagger 260s)")
     except Exception as ds_err:
@@ -2257,7 +2257,7 @@ async def lifespan(app: FastAPI):
         _wisdom_pipeline_auditor = WisdomPipelineAuditor(
             db_pool=db_pool, notification_system=_wp_notify, app_state=app.state,
         )
-        await _wisdom_pipeline_auditor.start()
+        if not _is_clone: await _wisdom_pipeline_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.wisdom_pipeline_auditor = _wisdom_pipeline_auditor
         print("   ✅ WisdomPipelineAuditor started (5am/5pm/11pm UTC, stagger 270s)")
     except Exception as wp_err:
@@ -2271,7 +2271,7 @@ async def lifespan(app: FastAPI):
         _settings_tab_auditor = SettingsTabAuditor(
             db_pool=db_pool, notification_system=_st_notify, app_state=app.state,
         )
-        await _settings_tab_auditor.start()
+        if not _is_clone: await _settings_tab_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.settings_tab_auditor = _settings_tab_auditor
         print("   ✅ SettingsTabAuditor started (5am/5pm/11pm UTC, stagger 280s)")
     except Exception as st_err:
@@ -2382,7 +2382,7 @@ async def lifespan(app: FastAPI):
             auth_token=os.environ.get("SKYEYE_AUDIT_TOKEN", ""),
             app_state=app.state,
         )
-        await _coach_hierarchy_auditor.start()
+        if not _is_clone: await _coach_hierarchy_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.coach_hierarchy_auditor = _coach_hierarchy_auditor
         print("   ✅ CoachHierarchyAuditor started (3x daily, stagger 290s)")
     except Exception as cha_err:
@@ -2397,7 +2397,7 @@ async def lifespan(app: FastAPI):
             notification_system=_notify_sys if _token_renewal_agent else None,
             app_state=app.state,
         )
-        await _classroom_learning_auditor.start()
+        if not _is_clone: await _classroom_learning_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.classroom_learning_auditor = _classroom_learning_auditor
         print("   ✅ ClassroomLearningAuditor started (3x daily, stagger 283s)")
     except Exception as _cla_err:
@@ -2489,7 +2489,7 @@ async def lifespan(app: FastAPI):
         _liminal_presence_auditor = LiminalPresenceAuditor(
             db_pool=db_pool, app_state=app.state,
         )
-        await _liminal_presence_auditor.start()
+        if not _is_clone: await _liminal_presence_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.liminal_presence_auditor = _liminal_presence_auditor
         print("   ✅ LiminalPresenceAuditor started (3x daily, stagger 320s)")
     except Exception as lpa_err:
@@ -2501,7 +2501,7 @@ async def lifespan(app: FastAPI):
         _pmb_auditor = PmbCommandCenterAuditor(
             db_pool=db_pool, app_state=app.state,
         )
-        await _pmb_auditor.start()
+        if not _is_clone: await _pmb_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.pmb_command_center_auditor = _pmb_auditor
         print("   ✅ PmbCommandCenterAuditor started (3x daily, stagger 110s)")
     except Exception as pmb_err:
@@ -2513,7 +2513,7 @@ async def lifespan(app: FastAPI):
         _data_uniformity_tracer = DataUniformityTracer(
             db_pool=db_pool, app_state=app.state,
         )
-        await _data_uniformity_tracer.start()
+        if not _is_clone: await _data_uniformity_tracer.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.data_uniformity_tracer = _data_uniformity_tracer
         print("   ✅ DataUniformityTracer started (3x daily, stagger 300s)")
     except Exception as dut_err:
@@ -2528,7 +2528,7 @@ async def lifespan(app: FastAPI):
             auth_token=os.environ.get("SKYEYE_AUDIT_TOKEN", ""),
             app_state=app.state,
         )
-        await _token_lab_auditor.start()
+        if not _is_clone: await _token_lab_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.token_lab_auditor = _token_lab_auditor
         print("   ✅ TokenLabAuditor started (3x daily, stagger 100s)")
     except Exception as tla_err:
@@ -2544,7 +2544,7 @@ async def lifespan(app: FastAPI):
             auth_token=os.environ.get("SKYEYE_AUDIT_TOKEN", ""),
             app_state=app.state,
         )
-        await _gkm_auditor.start()
+        if not _is_clone: await _gkm_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.gkm_auditor = _gkm_auditor
         print("   ✅ GkmAuditor started (3x daily, stagger 110s)")
     except Exception as gkm_err:
@@ -2559,7 +2559,7 @@ async def lifespan(app: FastAPI):
             notification_system=None,
             app_state=app.state,
         )
-        await _nate_checkin_auditor.start()
+        if not _is_clone: await _nate_checkin_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.nate_checkin_auditor = _nate_checkin_auditor
         print("   ✅ NateCheckInAuditor started (3x daily, stagger 330s)")
     except Exception as nca_err:
@@ -2574,7 +2574,7 @@ async def lifespan(app: FastAPI):
             notification_system=None,
             app_state=app.state,
         )
-        await _sensitive_bridge_auditor.start()
+        if not _is_clone: await _sensitive_bridge_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.sensitive_bridge_auditor = _sensitive_bridge_auditor
         print("   ✅ SensitiveBridgeAuditor started (3x daily, stagger 300s)")
     except Exception as sba_err:
@@ -2718,7 +2718,7 @@ async def lifespan(app: FastAPI):
     try:
         from app.services.quickbooks_auditor import QuickBooksAuditor
         _qb_auditor = QuickBooksAuditor(db_pool=db_pool, app_state=app.state)
-        await _qb_auditor.start()
+        if not _is_clone: await _qb_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.quickbooks_auditor = _qb_auditor
         print("   ✅ QuickBooksAuditor started (stagger 105s)")
     except Exception as qba_err:
@@ -2729,7 +2729,7 @@ async def lifespan(app: FastAPI):
     try:
         from app.services.corporate_command_auditor import CorporateCommandAuditor
         _corp_auditor = CorporateCommandAuditor(db_pool=db_pool, app_state=app.state)
-        await _corp_auditor.start()
+        if not _is_clone: await _corp_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.corporate_command_auditor = _corp_auditor
         print("   ✅ CorporateCommandAuditor started (stagger 115s)")
     except Exception as cca_err:
@@ -2964,7 +2964,7 @@ async def lifespan(app: FastAPI):
     try:
         from app.services.voice_infrastructure_auditor import VoiceInfrastructureAuditor
         _voice_infra_auditor = VoiceInfrastructureAuditor(db_pool=db_pool, app_state=app.state)
-        await _voice_infra_auditor.start()
+        if not _is_clone: await _voice_infra_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
         app.state.voice_infra_auditor = _voice_infra_auditor
         print("   ✅ VoiceInfrastructureAuditor started (stagger 295s)")
     except Exception as _via_err:

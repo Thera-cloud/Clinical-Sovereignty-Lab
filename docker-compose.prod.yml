@@ -202,7 +202,9 @@ services:
       - DEBUG=false
       - MAC_AGENT_URL=https://twin-agent.sovereignsanctuary.net
       - MAC_AGENT_TOKEN=${MAC_AGENT_TOKEN:-}
-      - WEB_CONCURRENCY=2
+      # QUANTUM-CRYSTAL-ARCH: must stay 1 — each uvicorn worker runs the full lifespan,
+      # so >1 duplicates every background agent/auditor (duplicate audits, login collisions)
+      - WEB_CONCURRENCY=1
       # ---- Three-node compute routing for classroom video pipeline ----
       # See .cursor/rules/three-node-sync-discipline.mdc.
       # GREEN owns orchestration only. Heavy ML lives on ORANGE/BLUE.
@@ -238,6 +240,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app:ro    # Mount source code so scp+restart picks up changes
+      - ./backend/tests:/app/tests:ro  # QUANTUM-CRYSTAL-ARCH: parity fixtures track git, not image
       - ./backend/scripts:/app/scripts:ro  # QUANTUM-CRYSTAL-ARCH backfill / audit scripts (docker exec)
       - ./backend/assets:/app/assets:ro  # Backchannel clips + static assets
       - ./data/backend:/app/data
