@@ -124,6 +124,9 @@ async def _emit_audit(
         "coach_username": coach_username,
         "notification_id": notification_id,
         "matched_phrases": matched,
+        # QUANTUM-CRYSTAL-ARCH: redaction contract — alert content lives in the
+        # coach_notifications row; the audit log carries only a reference.
+        "payload_ref": f"coach_notifications:{notification_id}",
     }
     try:
         async with db_pool.acquire() as conn:

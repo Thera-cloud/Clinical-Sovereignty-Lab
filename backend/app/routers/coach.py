@@ -126,7 +126,8 @@ async def get_assigned_clients(coach_id: str, request: Request, caller_hw_id: st
             _logger.debug("CoachIntegrityShield access check non-blocking: %s", _e)
 
     # IDOR guard: path coach_id must match authenticated caller hardware_id.
-    if str(coach_id) != str(caller_hw_id):
+    # ADMIN bypass mirrors sessions.py (auditors + Sovereign Command use admin token).
+    if str(coach_id) != str(caller_hw_id) and getattr(request.state, "user_role", "") != "ADMIN":
         raise HTTPException(status_code=403, detail="Cannot view another coach's clients")
 
     db_pool = getattr(request.app.state, "db_pool", None)
@@ -605,7 +606,8 @@ async def get_coach_stats(coach_id: str, request: Request, caller_hw_id: str = D
             _logger.debug("CoachIntegrityShield attrition non-blocking: %s", _e)
 
     # IDOR guard: path coach_id must match authenticated caller hardware_id.
-    if str(coach_id) != str(caller_hw_id):
+    # ADMIN bypass mirrors sessions.py (auditors + Sovereign Command use admin token).
+    if str(coach_id) != str(caller_hw_id) and getattr(request.state, "user_role", "") != "ADMIN":
         raise HTTPException(status_code=403, detail="Cannot view another coach's clients")
 
     db_pool = getattr(request.app.state, "db_pool", None)

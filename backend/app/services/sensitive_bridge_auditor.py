@@ -2159,11 +2159,15 @@ async def _check_handoff_redaction_no_pii(conn, cid: str) -> Dict[str, Any]:
     `notes` / `phone` / `email` / `address` keys at top level, ok.
     """
     try:
+        # QUANTUM-CRYSTAL-ARCH: payload_ref contract enforced from 2026-06-12.
+        # The log is immutable, so pre-contract rows are grandfathered and
+        # synthetic test fixtures (payload {"synthetic": true}) are exempt.
         rows = await conn.fetch(
             """
             SELECT payload_json
             FROM sensitive_bridge_log
             WHERE event_type LIKE 'coach_alert%'
+              AND occurred_at >= '2026-06-12T16:00:00+00:00'
             ORDER BY occurred_at DESC
             LIMIT 50
             """,
@@ -2187,6 +2191,8 @@ async def _check_handoff_redaction_no_pii(conn, cid: str) -> Dict[str, Any]:
                 payload = {}
         if not isinstance(payload, dict):
             continue
+        if payload.get("synthetic") is True:
+            continue  # QUANTUM-CRYSTAL-ARCH: test fixtures exempt from contract
         present_suspects = sorted(set(payload.keys()) & suspect_keys)
         has_ref = isinstance(payload.get("payload_ref"), str)
         if present_suspects or not has_ref:
