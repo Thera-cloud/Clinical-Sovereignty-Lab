@@ -4318,7 +4318,11 @@ async def trigger_all_audits(request: Request):
         auditor = getattr(request.app.state, attr, None)
         if auditor and hasattr(auditor, "_build_and_send"):
             try:
-                await auditor._build_and_send(now)
+                import inspect
+                if len(inspect.signature(auditor._build_and_send).parameters) == 0:
+                    await auditor._build_and_send()  # newer auditors take no arg
+                else:
+                    await auditor._build_and_send(now)
                 triggered.append(attr)
             except Exception as e:
                 triggered.append(f"{attr}:ERROR:{str(e)[:40]}")
