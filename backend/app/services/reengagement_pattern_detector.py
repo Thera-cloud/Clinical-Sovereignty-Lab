@@ -396,10 +396,34 @@ SEED_PATTERNS: Dict[str, List[ReengagementPattern]] = {
     "initiated_contact": [
         ReengagementPattern(
             label="i_texted_him",
-            regex=r"\bi\s+(?:just\s+)?(?:texted|messaged|dm'?d|emailed|called)\s+(?:him|her|them)\b",
+            # Negative lookahead excludes IFS / parts-work naming where the
+            # survivor names an internal part ("I called her Lonely girl",
+            # "I called him the Silencer", "I called her my protector",
+            # "I called that one the Silencer"). Without it, normal
+            # therapeutic parts work false-positives into an
+            # `initiated_contact` reengagement signal, which the trafficking
+            # classifier then promotes to `active_situation` and the
+            # mandatory_reporting screen escalates as TRAFFICKING (see
+            # incident 2026-06-13 02:15 UTC, sensitive_bridge_log id 705/706).
+            #
+            # `(?-i:[A-Z])` scopes off IGNORECASE for the capital-letter test
+            # (the patterns are compiled with re.IGNORECASE in
+            # _PrecompiledRules, so a bare `[A-Z]` would match every letter
+            # and block all legitimate contact disclosures). The IFS-naming
+            # markers are intentionally limited to high-precision words
+            # ("the", "that", "a", "an", "my", "our") that disambiguate
+            # naming from contact context (e.g., "I called her yesterday"
+            # is contact; "I called her my mother" / "I called her Lonely
+            # girl" is naming).
+            regex=(
+                r"\bi\s+(?:just\s+)?(?:texted|messaged|dm'?d|emailed|called)"
+                r"\s+(?:him|her|them)\b"
+                r"(?!\s+(?:(?-i:[A-Z])|the\s|that\s|a\s|an\s|my\s|our\s))"
+            ),
             weight=0.85,
             direction_hint=DIRECTION_SURVIVOR_TO_TRAFFICKER,
             direction_strength=0.95,
+            notes="Excludes IFS part-naming via case-sensitive Capital lookahead + article/possessive markers",
         ),
         ReengagementPattern(
             label="i_want_to_reach_out",

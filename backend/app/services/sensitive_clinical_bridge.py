@@ -1026,8 +1026,16 @@ async def _classify_trafficking(
             reengagement=reengagement_native,
             locale=locale,
         )
+        # NB: TraffickingClassification exposes `classification` (not `label`).
+        # Reading `label` always returned the default ("no_disclosure"), which
+        # made `_build_handoff_if_needed`'s trafficking-tier branch effectively
+        # dead code and emitted misleading `trafficking_label: no_disclosure`
+        # in sensitive_bridge_log audit rows even on real disclosures.
+        # Incident 2026-06-13 02:15 UTC: audit row id 706 showed
+        # `trafficking_label: no_disclosure` while native classification was
+        # actually `active_situation` (reengagement-promoted).
         summary = TraffickingClassificationSummary(
-            label=str(getattr(result, "label", "no_disclosure")),
+            label=str(getattr(result, "classification", "unclassified")),
             confidence=float(getattr(result, "classification_confidence", 0.0)),
             matched_classes_above_floor=tuple(
                 getattr(result, "matched_classes_above_floor", ()) or ()
@@ -1576,18 +1584,53 @@ def _build_handoff_if_needed(
     actual `escalate_acuity()` call also fires on tier_high+.
     """
     # Decide whether handoff is warranted.
+    #
+    # Tier selection order:
+    #   1. codeword_match            — user-set safety word (highest precedence)
+    #   2. trafficking-specific tier — when reporting_summary trigger is
+    #                                  TRAFFICKING AND classifier produced a
+    #                                  trafficking label, route to the
+    #                                  specific clinical tier rather than the
+    #                                  generic mandatory_reporting one
+    #   3. mandatory_reporting       — any other jurisdiction trigger (e.g.,
+    #                                  SELF_HARM, CHILD_ABUSE)
+    #   4. tmc CRISIS
+    #   5. trafficking (raw classifier, no reporting summary)
+    #   6. trigger_date_proactive
+    #   7. polyvictim/tmc stacking
+    #
+    # The classifier emits classification strings (`imminent_danger`,
+    # `active_situation`, `survivor_as_recruiter`) — NOT the legacy
+    # `active_trafficking` string this branch used to check (the pre-fix
+    # check was dead code). See `trafficking_disclosure_classifier.py`
+    # constants CLASS_*.
     tier: Optional[str] = None
+    trafficking_label = trafficking.label if trafficking is not None else None
+    reporting_trigger = (
+        (reporting_summary or {}).get("trigger") if reporting_summary else None
+    )
+
     if codeword_match is not None:
         tier = "codeword_match"
     elif reporting_summary is not None:
-        tier = "mandatory_reporting"
+        # Map trafficking-trigger reports to the clinical-specific tier so
+        # the coach alert carries the correct label (not the generic
+        # `mandatory_reporting` and not the wrong-default
+        # `trafficking_disclosure` fallback).
+        if reporting_trigger == "trafficking" and trafficking_label == "imminent_danger":
+            tier = "trafficking_disclosure"
+        elif reporting_trigger == "trafficking" and trafficking_label == "active_situation":
+            tier = "trafficking_disclosure"
+        elif reporting_trigger == "trafficking" and trafficking_label == "survivor_as_recruiter":
+            tier = "recruiter_holding"
+        else:
+            tier = "mandatory_reporting"
     elif tmc_result.get("moment_class") == "CRISIS":
         tier = "tmc_crisis"
-    elif (
-        trafficking is not None
-        and trafficking.label in ("active_trafficking", "imminent_danger")
-    ):
+    elif trafficking_label in ("imminent_danger", "active_situation"):
         tier = "trafficking_disclosure"
+    elif trafficking_label == "survivor_as_recruiter":
+        tier = "recruiter_holding"
     elif (
         trigger_date.matched
         and trigger_date.severity in ("high", "critical")

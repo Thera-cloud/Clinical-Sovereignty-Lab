@@ -390,6 +390,31 @@ ACUITY_TIERS: Dict[str, Dict[str, Any]] = {
         "plan_gap": "Gap G",
         "description": "Survivor-as-recruiter disclosure — coach + legal alert",
     },
+    # Generic mandatory-reporting tier. Used when `_screen_mandatory_reporting`
+    # returns a protocol summary but the trigger does not map cleanly to a
+    # trafficking-specific tier (e.g., SELF_HARM, CHILD_ABUSE, ELDER_ABUSE).
+    # Without this entry, `_build_handoff_if_needed` falls through to the
+    # generic crisis_alert fallback which ends up selecting the first tier in
+    # the registry (`trafficking_disclosure`) and mislabels every mandatory-
+    # reporting alert as a trafficking disclosure (incident 2026-06-13 02:15
+    # UTC; CoachN received `coach_handoff (trafficking_disclosure)` for an
+    # IFS parts-work message).
+    "mandatory_reporting": {
+        "severity": "critical",
+        "bypasses_62h_cadence": True,
+        "plan_gap": "Gap 15 / mandatory_reporting_screen",
+        "description": "Mandatory reporting screen fired (jurisdiction-specific) — immediate coach alert",
+    },
+    # Generic crisis tier — used by `_build_handoff_if_needed` as the safe
+    # fallback when an unknown tier is requested. Distinct from
+    # `trafficking_disclosure` so a fallback never silently labels a generic
+    # crisis as trafficking.
+    "crisis_alert": {
+        "severity": "critical",
+        "bypasses_62h_cadence": True,
+        "plan_gap": "fallback",
+        "description": "Generic high-severity crisis alert (fallback tier)",
+    },
     # -- Codeword + safe-silence-mode family --------------------------------
     "codeword_triggered": {
         "severity": "high",
