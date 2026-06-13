@@ -759,6 +759,43 @@ async def prepare_therapeutic_context(
     except Exception as _e:
         logger.warning("therapeutic_controller: bridge wiring skipped: %s", _e)
 
+    # QUANTUM-CRYSTAL-ARCH (Sensitive Bridge v1.4 extension, additive):
+    # Auto-ingest named IFS parts from chat into user_parts_registry as a
+    # fire-and-forget side effect. Gated internally by enrollment + codeword
+    # feature flag; no-op for unenrolled users. Never raises into hot path.
+    try:
+        import asyncio as _asyncio_pae
+        from app.services import parts_auto_extractor as _pae
+
+        async def _pae_task() -> None:
+            try:
+                await _pae.auto_extract_and_register(
+                    db_pool,
+                    canonical_username=canonical_user_id,
+                    user_text=user_text or "",
+                    session_id=session_id,
+                )
+            except Exception as _pae_exc:
+                logger.warning("parts_auto_extractor task failed: %s", _pae_exc)
+
+        _asyncio_pae.create_task(_pae_task())
+    except Exception as _pae_outer:
+        logger.warning("therapeutic_controller: parts auto-extract skipped: %s", _pae_outer)
+
+    # QUANTUM-CRYSTAL-ARCH (additive): therapeutic book / workbook context.
+    # When the client references a known clinician-vetted workbook (e.g.,
+    # "He Came For All My Parts" by Kristy Moore), inject its themes into
+    # the system prompt so Nate can attune to the imagery instead of decoding
+    # it into clinical jargon. Pure regex match → in-memory dict lookup.
+    book_context_block = ""
+    try:
+        from app.services import therapeutic_book_registry as _tbr
+        _matched_books = _tbr.detect_referenced_books(user_text or "")
+        if _matched_books:
+            book_context_block = _tbr.build_book_context_block(_matched_books)
+    except Exception as _tbr_exc:
+        logger.warning("therapeutic_controller: book context skipped: %s", _tbr_exc)
+
     tmc_result = await _classify_tmc(db_pool, canonical_user_id)
     signals = tmc_result.get("signals", {}) or {}
     tmc_class = tmc_result.get("moment_class") or "REST"
@@ -853,6 +890,7 @@ async def prepare_therapeutic_context(
         f"{register_variant_block}\n"
         f"{lens_bridge_block}\n"
         f"{mismatch_block}\n"
+        f"{book_context_block}\n"
         f"{neuroscience_ctx}\n"
         f"{_anti_repeat_block(recent_narratives)}\n\n"
         f"---\n\n{base_system_prompt}"
