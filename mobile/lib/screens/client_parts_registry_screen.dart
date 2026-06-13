@@ -189,6 +189,11 @@ class _ClientPartsRegistryScreenState extends State<ClientPartsRegistryScreen> {
       backgroundColor: const Color(0xFF050505),
       appBar: AppBar(
         backgroundColor: const Color(0xFF111111),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Color(0xFFC9A962)),
+          tooltip: 'Back to Sensitive Bridge',
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
         title: Text(
           'Parts · ${widget.targetUserId}',
           style: const TextStyle(color: Color(0xFFC9A962), fontSize: 16),
