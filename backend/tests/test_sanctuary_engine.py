@@ -135,3 +135,10 @@ def test_invited_all_consent_but_hoh_not_false(engine: FamilySanctuaryEngine) ->
 
 def test_unknown_sanctuary_false(engine: FamilySanctuaryEngine) -> None:
     assert engine.all_members_joined("NO_SUCH") is False
+
+
+def test_sync_invited_from_family_merges_new_member(engine: FamilySanctuaryEngine) -> None:
+    sid = "S_SYNC"
+    _put(engine, sid, members=[], invited=["M1"], hoh="HOH")
+    engine.sync_invited_from_family(sid, ["M1", "M2"])
+    assert set(engine.data["active_sanctuaries"][sid]["invited_member_ids"]) == {"M1", "M2"}

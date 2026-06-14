@@ -26950,7 +26950,21 @@ Coach Reflection on Session {session_id}:
                 if existing:
                     sanctuary_id = existing['sanctuary_id']
                     print(f">>> [SANCTUARY] Found existing sanctuary: {sanctuary_id}")
-                    
+                    # QUANTUM-CRYSTAL-ARCH: refresh invites when family gains members after create
+                    try:
+                        _fam_inv = []
+                        for _uk, _ud in (_sregistry or {}).items():
+                            if isinstance(_uk, str) and _uk.startswith("_"):
+                                continue
+                            _pr = (_ud or {}).get("profile") or {}
+                            if _pr.get("family_id") == family_id:
+                                _hw = _pr.get("hardware_id")
+                                if _hw and _hw != member_id:
+                                    _fam_inv.append(_hw)
+                        sanctuary_engine.sync_invited_from_family(sanctuary_id, _fam_inv)
+                    except Exception as _inv_err:
+                        print(f">>> [SANCTUARY] Invite sync failed: {_inv_err}")
+
                     # Add or reconnect member
                     result = await sanctuary_engine.add_or_reconnect_member(
                         sanctuary_id=sanctuary_id,

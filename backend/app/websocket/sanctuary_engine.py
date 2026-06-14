@@ -143,6 +143,18 @@ class FamilySanctuaryEngine:
                 sanctuary.get('status') not in ['COMPLETED', 'CANCELLED']):
                 return sanctuary
         return None
+
+    def sync_invited_from_family(self, sanctuary_id: str, hardware_ids: List[str]) -> None:
+        """Merge current family members into invited_member_ids (registry may change after create)."""
+        sanctuary = self.data.get("active_sanctuaries", {}).get(sanctuary_id)
+        if not sanctuary:
+            return
+        invited = set(sanctuary.get("invited_member_ids") or [])
+        before = len(invited)
+        invited.update(h for h in (hardware_ids or []) if h)
+        sanctuary["invited_member_ids"] = list(invited)
+        if len(invited) != before:
+            self._save()
     
     # =========================================================================
     # SANCTUARY LIFECYCLE
