@@ -3000,6 +3000,7 @@ try:  # QUANTUM-CRYSTAL-ARCH
 except ImportError:
     _LREngine = None
 _lr_engine = None  # QUANTUM-CRYSTAL-ARCH — initialized after db_pool
+_reconnect_engine = None  # QUANTUM-CRYSTAL-ARCH — Daily Reconnect ritual
 
 try:
     from app.services.intake_form_service import (
@@ -26908,6 +26909,25 @@ Coach Reflection on Session {session_id}:
                 else:
                     await websocket.send(json.dumps({"type": "paid_onboarding_seen_set", "success": False, "message": "user_id required"}))
             
+            elif t in (
+                "reconnect_get_or_create", "reconnect_join", "reconnect_consent_ack",
+                "reconnect_turn", "reconnect_fs_offer_response", "reconnect_cooldown_choice",
+                "reconnect_reenter", "reconnect_exit",
+            ):  # QUANTUM-CRYSTAL-ARCH — Daily Reconnect (ENABLE_DAILY_RECONNECT)
+                if not current_profile:
+                    await websocket.send(json.dumps({"type": "reconnect_error", "message": "Not authenticated"}))
+                    continue
+                _rc_eng = globals().get("_reconnect_engine")
+                if _rc_eng:
+                    try:
+                        await _rc_eng.handle_ws_message(t, d, websocket, current_profile)
+                    except Exception as _rc_e:
+                        print(f">>> [RECONNECT] handler error: {_rc_e}")
+                        await websocket.send(json.dumps({"type": "reconnect_error", "message": "internal_error"}))
+                else:
+                    await websocket.send(json.dumps({"type": "reconnect_error", "message": "feature_unavailable"}))
+                continue
+
             elif t == "sanctuary_get_or_create":
                 """
                 Smart handler that:
@@ -31046,6 +31066,21 @@ async def main():
                     print("[*] Six-Quotient Growth Engine initialized (bridge hook)")
                 except Exception as _sqg_err:
                     print(f"[!] Six-Quotient Growth Engine bridge init failed: {_sqg_err}")
+            # QUANTUM-CRYSTAL-ARCH — Daily Reconnect engine (dark launch)
+            global _reconnect_engine
+            try:
+                from app.services.daily_reconnect_engine import DailyReconnectEngine, ENABLE_DAILY_RECONNECT
+                _reconnect_engine = DailyReconnectEngine(
+                    db_pool=db_pool,
+                    sanctuary_engine=sanctuary_engine,
+                    tier_gate_fn=lambda p: effective_feature_tier(p, load_registry()) == "TOP_TIER",
+                    load_registry_fn=load_registry,
+                    cortex=cortex,  # QUANTUM-CRYSTAL-ARCH — ENTER_FS group coaching handoff
+                )
+                print(f"[*] DailyReconnectEngine initialized (ENABLE_DAILY_RECONNECT={ENABLE_DAILY_RECONNECT})")
+            except Exception as _rc_init_err:
+                print(f"[!] DailyReconnectEngine init failed: {_rc_init_err}")
+                _reconnect_engine = None
             # B5: Vault integration for chat file uploads/previews
             try:
                 from .vault_bridge import VaultBridge

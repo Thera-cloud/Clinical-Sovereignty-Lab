@@ -48,6 +48,7 @@ import 'screens/onboarding_paid_screen.dart';
 import 'screens/community_mesh_screen.dart';
 import 'screens/sensitive_clinical_profile_screen.dart';
 import 'screens/intake_form_coach_panel.dart';
+import 'screens/daily_reconnect_screen.dart';
 import 'config/app_config.dart';
 import 'services/vault_entitlement.dart';
 import 'widgets/vault_attachment_button.dart';
@@ -4498,6 +4499,22 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         premiumTiers.contains(subscriptionPlan);
   }
 
+  bool _canUseDailyReconnect() {
+    final premiumFeatures = widget.currentUserProfile?['premium_features'];
+    if (premiumFeatures != null && premiumFeatures is Map) {
+      return premiumFeatures['family_sanctuary'] == true;
+    }
+    final tier =
+        (widget.currentUserProfile?['tier'] ?? '').toString().toUpperCase();
+    final subscriptionPlan =
+        (widget.currentUserProfile?['subscription_plan'] ?? '')
+            .toString()
+            .toUpperCase();
+    const premiumTiers = {'TOP_TIER', 'SOVEREIGN_CIRCLE'};
+    return premiumTiers.contains(tier) ||
+        premiumTiers.contains(subscriptionPlan);
+  }
+
   bool _canUseVault() =>
       AppConfig.ENABLE_SOVEREIGN_VAULT &&
       VaultEntitlement.canUseVault(widget.currentUserProfile);
@@ -4710,6 +4727,26 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
               tooltip:
                   _avatarModeEnabled ? 'Avatar Mode ON' : 'Avatar Mode OFF',
               onPressed: () => _toggleAvatarMode(!_avatarModeEnabled),
+            ),
+          // Daily Reconnect (before Family Sanctuary)
+          if (_canUseDailyReconnect())
+            IconButton(
+              icon: const Icon(Icons.favorite_outline, color: Color(0xFFC9A962)),
+              tooltip: 'Daily Reconnect',
+              onPressed: () async {
+                _wsCh?.sink.close();
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => DailyReconnectScreen(
+                      profile: widget.currentUserProfile ?? {},
+                      username: widget.username,
+                      password: widget.password,
+                    ),
+                  ),
+                );
+                if (mounted) _connectToCortex();
+              },
             ),
           // Family Sanctuary button
           IconButton(
