@@ -143,6 +143,78 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
       (_state == 'ACTIVE' || _state == 'SOFT_DEESCALATION') &&
       _promptText.isNotEmpty;
 
+  static const _ritualPrompts = <String>[
+    'Share one thing you appreciate about your partner today.',
+    "What's one thing from today you'd like them to know?",
+    'What are you feeling, and what do you need?',
+    "What's one small request that would help you feel more connected?",
+  ];
+
+  String _promptTextForIndex(int index, [Map<String, dynamic>? turn]) {
+    final fromTurn = turn?['prompt_text']?.toString();
+    if (fromTurn != null && fromTurn.isNotEmpty) return fromTurn;
+    if (index >= 0 && index < _ritualPrompts.length) return _ritualPrompts[index];
+    return _promptText;
+  }
+
+  Widget _buildPromptDivider(String question, {bool isCurrent = false}) {
+    const gold = Color(0xFFC9A962);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12, top: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: isCurrent ? const Color(0xFF15120C) : const Color(0xFF0D0D0D),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: isCurrent ? gold : gold.withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            isCurrent ? 'Question for both of you' : 'Question',
+            style: TextStyle(
+              color: isCurrent ? gold : Colors.white54,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            question,
+            style: TextStyle(
+              color: isCurrent ? Colors.white : Colors.white70,
+              fontSize: isCurrent ? 16 : 14,
+              height: 1.35,
+              fontWeight: isCurrent ? FontWeight.w600 : FontWeight.normal,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCurrentPromptCard() {
+    return _buildPromptDivider(_promptText, isCurrent: true);
+  }
+
+  List<Widget> _buildThreadWidgets() {
+    final widgets = <Widget>[];
+    int? lastPromptIndex;
+    for (final turn in _turns) {
+      final pi = turn['prompt_index'] is int
+          ? turn['prompt_index'] as int
+          : int.tryParse('${turn['prompt_index']}') ?? 0;
+      if (pi != lastPromptIndex) {
+        widgets.add(_buildPromptDivider(_promptTextForIndex(pi, turn)));
+        lastPromptIndex = pi;
+      }
+      widgets.add(_buildTurnBubble(turn));
+    }
+    return widgets;
+  }
+
   String _displayNameFor(String userId) {
     if (userId == _me) return 'You';
     final at = userId.indexOf('@');
@@ -335,26 +407,27 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
               if (_turns.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Expanded(
-                  child: ListView.builder(
+                  child: ListView(
                     controller: _scrollController,
-                    itemCount: _turns.length,
-                    itemBuilder: (context, index) => _buildTurnBubble(_turns[index]),
+                    children: _buildThreadWidgets(),
                   ),
                 ),
                 const SizedBox(height: 12),
               ] else
                 const Spacer(),
-              Text(_promptText, style: const TextStyle(color: Colors.white, fontSize: 15)),
-              const SizedBox(height: 8),
+              _buildCurrentPromptCard(),
+              const SizedBox(height: 12),
               if (_isMyTurn) ...[
                 TextField(
                   controller: _turnController,
                   maxLines: 4,
                   style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
-                    hintText: 'Your share…',
-                    hintStyle: TextStyle(color: Colors.white38),
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    hintText: 'Your answer to the question above…',
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    border: const OutlineInputBorder(),
+                    labelText: 'Your share',
+                    labelStyle: TextStyle(color: gold.withOpacity(0.8)),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -369,7 +442,7 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
                 ),
               ] else
                 Text(
-                  'Listening…',
+                  _isMyTurn ? 'Your turn to answer above.' : 'Listening for their answer…',
                   style: TextStyle(color: Colors.white.withOpacity(0.5)),
                   textAlign: TextAlign.center,
                 ),

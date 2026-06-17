@@ -1089,18 +1089,22 @@ class DailyReconnectEngine:
             in_checkpoint and (viewer_unconsented or any_unconsented or len(parts) < 2)
         )
         turns_raw = await self.get_locked_turns(sid)
-        turns = [
-            {
-                "user_id": t["user_id"],
-                "content": t["content"],
-                "prompt_index": int(t.get("prompt_index") or 0),
-                "prompt_kind": t.get("prompt_kind") or "",
-                "created_at": (
-                    t["created_at"].isoformat() if t.get("created_at") else None
-                ),
-            }
-            for t in turns_raw
-        ]
+        turns = []
+        for t in turns_raw:
+            pi = int(t.get("prompt_index") or 0)
+            _, turn_prompt = PROMPT_KINDS[pi] if pi < len(PROMPT_KINDS) else ("", "")
+            turns.append(
+                {
+                    "user_id": t["user_id"],
+                    "content": t["content"],
+                    "prompt_index": pi,
+                    "prompt_kind": t.get("prompt_kind") or "",
+                    "prompt_text": turn_prompt,
+                    "created_at": (
+                        t["created_at"].isoformat() if t.get("created_at") else None
+                    ),
+                }
+            )
         return {
             "session_id": sid,
             "state": session.get("state"),
@@ -1114,6 +1118,10 @@ class DailyReconnectEngine:
             "current_prompt_index": prompt_index,
             "prompt_kind": kind,
             "prompt_text": prompt_text,
+            "prompts": [
+                {"index": i, "kind": k, "text": txt}
+                for i, (k, txt) in enumerate(PROMPT_KINDS)
+            ],
             "current_turn_user_id": session.get("current_turn_user_id"),
             "turns": turns,
             "warm_return": warm_return,
