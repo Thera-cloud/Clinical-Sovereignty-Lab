@@ -2161,6 +2161,23 @@ async def evaluate_disclosure(
         _lens_block_parts.append(cross_overlay_para)
     lens_directives_block = "\n\n".join(_lens_block_parts)
 
+    _med_adjust_match = None
+    try:
+        from app.services import med_adjustment_redirect as _med_adjust
+
+        if _med_adjust.ENABLE_MED_ADJUST_REDIRECT:
+            _med_adjust_match = _med_adjust.detect_and_log(message)
+            if _med_adjust_match:
+                _lens_block_parts.append(
+                    _med_adjust.build_redirect_directive(_med_adjust_match),
+                )
+                lens_directives_block = "\n\n".join(_lens_block_parts)
+    except Exception as _med_exc:
+        logger.warning(
+            "sensitive_clinical_bridge: med adjustment redirect skipped: %s",
+            _med_exc,
+        )
+
     # ───────────────────────────────────────────────────────────────────
     # STEP 14 — Arousal load measurement
     # ───────────────────────────────────────────────────────────────────
@@ -2351,6 +2368,13 @@ async def evaluate_disclosure(
         if cross_addiction_branch and cross_addiction_branch.branched
         else [],
         "lens_directives_block": lens_directives_block,
+        "med_adjust_redirect_fired": _med_adjust_match is not None,
+        "med_adjust_target": (
+            _med_adjust_match.target if _med_adjust_match else None
+        ),
+        "med_adjust_med": (
+            _med_adjust_match.med_name if _med_adjust_match else None
+        ),
         # R1 — template/crystal-composed block; not verbatim transcript.
         _AUDIT_FIELD_SOURCES_KEY: {
             "lens_directives_block": _SOURCE_KIND_FRAMEWORK_DIRECTIVE,
@@ -2360,14 +2384,36 @@ async def evaluate_disclosure(
         "pipeline_steps_completed": list(PIPELINE_STEP_NAMES_V1_3),
     }
 
+    try:
+        from app.services import trafficking_recalibration as _traf_recal
+
+        if _traf_recal.ENABLE_TRAFFICKING_RECAL:
+            _shadow = _traf_recal.run_shadow(
+                message=message,
+                live_tier=handoff_tier,
+                trafficking_label=trafficking.label if trafficking else None,
+                session_id=session_id,
+                turn_id=session_id,
+            )
+            if _shadow is not None:
+                audit_event.update(_shadow.audit_fields)
+    except Exception as _shadow_exc:
+        logger.warning(
+            "sensitive_clinical_bridge: trafficking shadow skipped: %s",
+            _shadow_exc,
+        )
+
+    _event_severity = _severity_for_decision(
+        novelty_gate=novelty_gate, tmc_class=tmc_class,
+        coach_alert=coach_alert,
+    )
+    audit_event["event_severity"] = _event_severity
+
     decided_at = datetime.now(timezone.utc).isoformat()
     audit_id = await _emit_audit_event(
         db_pool=db_pool, user_id=user_id,
         event_type="disclosure_evaluated",
-        event_severity=_severity_for_decision(
-            novelty_gate=novelty_gate, tmc_class=tmc_class,
-            coach_alert=coach_alert,
-        ),
+        event_severity=_event_severity,
         payload=audit_event,
         decision_summary={
             "register_directive": register_directive,

@@ -45,6 +45,28 @@ async def test_audit_failure_emits_transparent_message(base_audit_meta: dict) ->
 
 
 @pytest.mark.asyncio
+async def test_audit_failure_moderate_stall_suppressed(
+    base_audit_meta: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.services.stall_suppression as stall_mod
+
+    monkeypatch.setattr(stall_mod, "ENABLE_STALL_SUPPRESSION", True)
+    meta = {
+        **base_audit_meta,
+        "bridge_event_severity": "moderate",
+        "user_text_for_audit": "so I never cause my family pain again",
+    }
+    out = await audit_therapeutic_response(
+        response_text="You'll get over this — many people feel that way.",
+        audit_metadata=meta,
+        user_id="test_hw",
+        db_pool=None,
+    )
+    assert out["audit_passed"] is False
+    assert out["response_text"] != TRANSPARENT_AUDIT_FALLBACK_MESSAGE
+
+
+@pytest.mark.asyncio
 async def test_audit_repair_via_llm_fallback(base_audit_meta: dict) -> None:
     meta = {**base_audit_meta, "mismatch_available": True}
     clean = (

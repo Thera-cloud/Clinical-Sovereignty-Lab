@@ -737,6 +737,7 @@ async def prepare_therapeutic_context(
             canonical_user_id = user_id
 
     lens_bridge_block = ""
+    _bd = None
     # v1.3 Sensitive Clinical Bridge — single wiring seam (Phase 4 Note 1).
     # Master kill switch + per-user gap_features_enabled gate the orchestrator
     # internally; when dormant, register_directive is None and downstream
@@ -925,6 +926,11 @@ async def prepare_therapeutic_context(
             "novelty_threshold": gate_decision.threshold,
             "thalamic_gate_forced": bool(thalamic_gate_forced),
             "locale": locale,
+            # QUANTUM-CRYSTAL-ARCH — stall suppression metadata (Fix 5)
+            "bridge_event_severity": (
+                (_bd.audit_event or {}).get("event_severity") if _bd else None
+            ) or "info",
+            "user_text_for_audit": (user_text or "")[:2000],
         },
     }
 
@@ -1056,7 +1062,13 @@ async def audit_therapeutic_response(
             logger.warning("therapeutic_controller: regenerate failed: %s", e)
 
     if not audit_passed:
-        final_text = TRANSPARENT_AUDIT_FALLBACK_MESSAGE
+        from app.services.stall_suppression import resolve_audit_fallback
+
+        final_text = resolve_audit_fallback(
+            user_text=audit_metadata.get("user_text_for_audit") or "",
+            bridge_event_severity=audit_metadata.get("bridge_event_severity") or "info",
+            default_fallback=TRANSPARENT_AUDIT_FALLBACK_MESSAGE,
+        )
         print(
             f">>> [THERAPEUTIC-CTRL] audit_failed_transparent_fallback user={user_id} "
             f"violations={len(violations)}"
