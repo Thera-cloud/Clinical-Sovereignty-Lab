@@ -208,6 +208,30 @@ class DailyReconnectEngine:
         await self._upsert_participant(sid, username, profile)
         self._register_ws(sid, username, websocket)
 
+        # Self-heal: if state is stuck at CONSENT_CHECKPOINT but all present
+        # participants already have consent_ack_at (re-enter / race / legacy
+        # row), auto-transition to ACTIVE so the ritual can proceed.
+        if session.get("state") == "CONSENT_CHECKPOINT" and await self._all_present_consented(sid):
+            await self._transition(sid, "ACTIVE", "auto_heal_all_consented")
+            await self._increment_reconnect_count(sid)
+            order = session.get("turn_order") or []
+            if isinstance(order, str):
+                try:
+                    order = json.loads(order)
+                except Exception:
+                    order = []
+            first_user = order[0] if order else username
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE daily_reconnect_session
+                    SET current_turn_user_id = $2, updated_at = NOW()
+                    WHERE id = $1::uuid
+                    """,
+                    sid, first_user,
+                )
+            session = await self._load_session(sid) or session
+
         if self.sanctuary_engine and not session.get("sanctuary_id"):
             sanctuary_id = await self._ensure_sanctuary_room(family_id, profile)
             if sanctuary_id:
@@ -1053,12 +1077,23 @@ class DailyReconnectEngine:
                 """,
                 sid,
             )
+        in_checkpoint = session.get("state") == "CONSENT_CHECKPOINT"
+        any_unconsented = any(not p["consent_ack_at"] for p in parts)
+        viewer_unconsented = any(
+            (p["user_id"] == username and not p["consent_ack_at"]) for p in parts
+        )
+        # consent_required = True whenever the current viewer still owes consent
+        # for an active CONSENT_CHECKPOINT, OR anyone in a 2+ session hasn't
+        # acknowledged yet. Keeps the consent UI visible until the ritual moves on.
+        consent_required = bool(
+            in_checkpoint and (viewer_unconsented or any_unconsented or len(parts) < 2)
+        )
         return {
             "session_id": sid,
             "state": session.get("state"),
             "sanctuary_id": session.get("sanctuary_id"),
             "consent_text": CONSENT_TEXT,
-            "consent_required": not all(p["consent_ack_at"] for p in parts) if len(parts) >= 2 else True,
+            "consent_required": consent_required,
             "participants": [
                 {"user_id": p["user_id"], "consented": bool(p["consent_ack_at"])} for p in parts
             ],

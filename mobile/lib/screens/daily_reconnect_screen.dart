@@ -38,6 +38,7 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
   String? _warmReturnMessage;
   String? _missEncouragement;
   String? _sanctuaryId;
+  List<dynamic> _participants = const [];
   final _turnController = TextEditingController();
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
@@ -126,6 +127,7 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
           _sanctuaryId = msg['sanctuary_id'] as String? ?? _sanctuaryId;
           _consentText = msg['consent_text'] as String? ?? _consentText;
           _consentRequired = msg['consent_required'] as bool? ?? _consentRequired;
+          _participants = msg['participants'] as List<dynamic>? ?? _participants;
           _totalReconnects = msg['total_reconnects'] as int? ?? _totalReconnects;
           _promptText = msg['prompt_text'] as String? ?? _promptText;
           _currentTurnUserId = msg['current_turn_user_id'] as String?;
@@ -162,9 +164,27 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
   }
 
   bool get _isMyTurn {
-    final me = widget.profile['username']?.toString();
+    final me = _me;
     return _currentTurnUserId != null && me != null && _currentTurnUserId == me;
   }
+
+  String? get _me =>
+      (widget.username ?? widget.profile['username'])?.toString();
+
+  /// Whether *this* user has already acknowledged consent for the session.
+  bool get _iConsented {
+    final me = _me;
+    if (me == null) return false;
+    for (final p in _participants) {
+      if (p is Map && p['user_id']?.toString() == me) {
+        return p['consented'] == true;
+      }
+    }
+    return false;
+  }
+
+  int get _consentedCount =>
+      _participants.where((p) => p is Map && p['consented'] == true).length;
 
   @override
   Widget build(BuildContext context) {
@@ -210,21 +230,36 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
                 child: Text(_nateMessage!, style: const TextStyle(color: Colors.white)),
               ),
             ],
-            if (_consentRequired && _consentText.isNotEmpty) ...[
+            // Show consent UI whenever we're at the checkpoint — never gate
+            // on `_consentRequired` alone, because a stale/race state can flip
+            // it to false and strand both users on a blank screen.
+            if (_state == 'CONSENT_CHECKPOINT' && _consentText.isNotEmpty) ...[
               const SizedBox(height: 16),
               Text(_consentText, style: const TextStyle(color: Colors.white70)),
               const SizedBox(height: 12),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: gold),
-                onPressed: _sessionId == null
-                    ? null
-                    : () => _send({
-                          'type': 'reconnect_consent_ack',
-                          'session_id': _sessionId,
-                          'accepted': true,
-                        }),
-                child: const Text('I acknowledge — continue'),
-              ),
+              if (!_iConsented)
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: gold),
+                  onPressed: _sessionId == null
+                      ? null
+                      : () => _send({
+                            'type': 'reconnect_consent_ack',
+                            'session_id': _sessionId,
+                            'accepted': true,
+                          }),
+                  child: const Text('I acknowledge — continue'),
+                )
+              else ...[
+                const Icon(Icons.check_circle_outline, color: gold, size: 28),
+                const SizedBox(height: 8),
+                Text(
+                  _participants.length < 2
+                      ? 'You\'re in. Waiting for your family member to open Daily Reconnect and acknowledge — this is a shared ritual.'
+                      : 'You\'ve acknowledged. Waiting for the other person to acknowledge ($_consentedCount of ${_participants.length} ready).',
+                  style: const TextStyle(color: Colors.white70),
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ],
             if (!_consentRequired && _state == 'ACTIVE' && _promptText.isNotEmpty) ...[
               const SizedBox(height: 16),
