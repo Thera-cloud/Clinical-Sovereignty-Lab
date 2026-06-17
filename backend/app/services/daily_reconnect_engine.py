@@ -1088,6 +1088,19 @@ class DailyReconnectEngine:
         consent_required = bool(
             in_checkpoint and (viewer_unconsented or any_unconsented or len(parts) < 2)
         )
+        turns_raw = await self.get_locked_turns(sid)
+        turns = [
+            {
+                "user_id": t["user_id"],
+                "content": t["content"],
+                "prompt_index": int(t.get("prompt_index") or 0),
+                "prompt_kind": t.get("prompt_kind") or "",
+                "created_at": (
+                    t["created_at"].isoformat() if t.get("created_at") else None
+                ),
+            }
+            for t in turns_raw
+        ]
         return {
             "session_id": sid,
             "state": session.get("state"),
@@ -1102,6 +1115,7 @@ class DailyReconnectEngine:
             "prompt_kind": kind,
             "prompt_text": prompt_text,
             "current_turn_user_id": session.get("current_turn_user_id"),
+            "turns": turns,
             "warm_return": warm_return,
             "warm_return_message": (
                 "Welcome back — showing up again counts just as much as showing up daily."

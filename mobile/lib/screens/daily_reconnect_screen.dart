@@ -39,7 +39,9 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
   String? _missEncouragement;
   String? _sanctuaryId;
   List<dynamic> _participants = const [];
+  List<Map<String, dynamic>> _turns = const [];
   final _turnController = TextEditingController();
+  final _scrollController = ScrollController();
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
 
@@ -58,6 +60,7 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
     _channel?.sink.close();
     _reconnectTimer?.cancel();
     _turnController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -102,6 +105,86 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
     }
   }
 
+  void _applySessionFields(Map<String, dynamic> msg) {
+    _sessionId = msg['session_id'] as String? ?? _sessionId;
+    _state = msg['state'] as String? ?? _state;
+    _sanctuaryId = msg['sanctuary_id'] as String? ?? _sanctuaryId;
+    _consentText = msg['consent_text'] as String? ?? _consentText;
+    _consentRequired = msg['consent_required'] as bool? ?? _consentRequired;
+    _participants = msg['participants'] as List<dynamic>? ?? _participants;
+    _totalReconnects = msg['total_reconnects'] as int? ?? _totalReconnects;
+    _promptText = msg['prompt_text'] as String? ?? _promptText;
+    _currentTurnUserId = msg['current_turn_user_id'] as String?;
+    _warmReturnMessage = msg['warm_return_message'] as String?;
+    _missEncouragement = msg['miss_encouragement'] as String?;
+    _nateMessage = msg['nate_message'] as String?;
+    final rawTurns = msg['turns'];
+    if (rawTurns is List) {
+      _turns = rawTurns
+          .whereType<Map>()
+          .map((t) => Map<String, dynamic>.from(t))
+          .toList();
+    }
+  }
+
+  void _scrollToLatestTurn() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  bool get _inRitualChat =>
+      !_consentRequired &&
+      (_state == 'ACTIVE' || _state == 'SOFT_DEESCALATION') &&
+      _promptText.isNotEmpty;
+
+  String _displayNameFor(String userId) {
+    if (userId == _me) return 'You';
+    final at = userId.indexOf('@');
+    if (at > 0) return userId.substring(0, at);
+    return userId;
+  }
+
+  Widget _buildTurnBubble(Map<String, dynamic> turn) {
+    const gold = Color(0xFFC9A962);
+    final userId = turn['user_id']?.toString() ?? '';
+    final content = turn['content']?.toString() ?? '';
+    final mine = userId == _me;
+    return Align(
+      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.82),
+        decoration: BoxDecoration(
+          color: mine ? const Color(0xFF1A1510) : const Color(0xFF111111),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: mine ? gold.withOpacity(0.45) : Colors.white12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _displayNameFor(userId),
+              style: TextStyle(
+                color: mine ? gold : Colors.white54,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(content, style: const TextStyle(color: Colors.white, height: 1.35)),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _onMessage(dynamic raw) {
     try {
       final msg = jsonDecode(raw as String) as Map<String, dynamic>;
@@ -122,19 +205,9 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
       }
       if (type == 'reconnect_state' || type == 'reconnect_consent_result') {
         setState(() {
-          _sessionId = msg['session_id'] as String?;
-          _state = msg['state'] as String? ?? _state;
-          _sanctuaryId = msg['sanctuary_id'] as String? ?? _sanctuaryId;
-          _consentText = msg['consent_text'] as String? ?? _consentText;
-          _consentRequired = msg['consent_required'] as bool? ?? _consentRequired;
-          _participants = msg['participants'] as List<dynamic>? ?? _participants;
-          _totalReconnects = msg['total_reconnects'] as int? ?? _totalReconnects;
-          _promptText = msg['prompt_text'] as String? ?? _promptText;
-          _currentTurnUserId = msg['current_turn_user_id'] as String?;
-          _warmReturnMessage = msg['warm_return_message'] as String?;
-          _missEncouragement = msg['miss_encouragement'] as String?;
-          _nateMessage = msg['nate_message'] as String?;
+          _applySessionFields(msg);
         });
+        _scrollToLatestTurn();
         _maybeHandoffToSanctuary(msg);
         return;
       }
@@ -148,13 +221,10 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
       }
       if (type == 'reconnect_turn_ack') {
         setState(() {
-          _state = msg['state'] as String? ?? _state;
-          _totalReconnects = msg['total_reconnects'] as int? ?? _totalReconnects;
-          _promptText = msg['prompt_text'] as String? ?? _promptText;
-          _currentTurnUserId = msg['current_turn_user_id'] as String?;
-          _nateMessage = msg['nate_message'] as String?;
+          _applySessionFields(msg);
         });
         _turnController.clear();
+        _scrollToLatestTurn();
         return;
       }
       if (type == 'reconnect_error') {
@@ -261,8 +331,19 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
                 ),
               ],
             ],
-            if (!_consentRequired && _state == 'ACTIVE' && _promptText.isNotEmpty) ...[
-              const SizedBox(height: 16),
+            if (_inRitualChat) ...[
+              if (_turns.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Expanded(
+                  child: ListView.builder(
+                    controller: _scrollController,
+                    itemCount: _turns.length,
+                    itemBuilder: (context, index) => _buildTurnBubble(_turns[index]),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ] else
+                const Spacer(),
               Text(_promptText, style: const TextStyle(color: Colors.white, fontSize: 15)),
               const SizedBox(height: 8),
               if (_isMyTurn) ...[
@@ -326,7 +407,7 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
                 ],
               ),
             ],
-            const Spacer(),
+            if (!_inRitualChat) const Spacer(),
             Text('Status: $_status', style: const TextStyle(color: Colors.white24, fontSize: 11)),
           ],
         ),
