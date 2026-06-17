@@ -24,7 +24,7 @@ LOG_PREFIX = ">>> [RECONNECT]"
 
 STATES = frozenset({
     "CONSENT_CHECKPOINT", "ACTIVE", "SOFT_DEESCALATION", "PAUSED",
-    "OFFER_FS", "ENTER_FS", "COOLDOWN_SETUP", "PRIVATE_PROCESSING",
+    "WRAP_UP", "OFFER_FS", "ENTER_FS", "COOLDOWN_SETUP", "PRIVATE_PROCESSING",
     "WARNING_STATE", "CRISIS_BYPASS", "CLOSED",
 })
 
@@ -35,6 +35,18 @@ PROMPT_KINDS: List[Tuple[str, str]] = [
     ("request", "What's one small request that would help you feel more connected?"),
 ]
 
+# Self-reflection phase — follows partner prompts; never loops back to appreciation.
+REFLECTION_PROMPT_KINDS: List[Tuple[str, str]] = [
+    ("self_present", "What are you noticing in yourself right now — without trying to fix anything?"),
+    ("self_need", "What do you need from yourself to feel a little steadier tonight?"),
+    ("self_carry", "What felt meaningful to you in what you shared today?"),
+]
+
+COUPLE_DISCUSSION_MESSAGE = (
+    "Take a few minutes together — not to solve anything, just to talk about "
+    "what you each shared. What landed for you? What do you want your partner to know?"
+)
+
 ROLLING_N = 4
 TEMP_RISE_THRESHOLD = 0.55
 TEMP_SPIKE_DELTA = 0.25
@@ -42,6 +54,22 @@ SOFT_MAX_TURNS = 2
 MAX_SOFT_INCIDENTS = 2
 COOLDOWN_CHOICES = (1, 2, 3, 4, 12)
 WARNING_HOURS = 48
+
+def _prompt_count() -> int:
+    return len(PROMPT_KINDS) + len(REFLECTION_PROMPT_KINDS)
+
+
+def _resolve_prompt(index: int) -> Tuple[str, str, str]:
+    """Return (kind, text, phase) for a prompt index; phase = connection|reflection|complete."""
+    if index < len(PROMPT_KINDS):
+        kind, text = PROMPT_KINDS[index]
+        return kind, text, "connection"
+    ri = index - len(PROMPT_KINDS)
+    if ri < len(REFLECTION_PROMPT_KINDS):
+        kind, text = REFLECTION_PROMPT_KINDS[ri]
+        return kind, text, "reflection"
+    return "", "", "complete"
+
 
 CONSENT_TEXT = (
     "Before you begin: this exchange is monitored. Little Nate may characterize "
@@ -169,6 +197,7 @@ class DailyReconnectEngine:
             "reconnect_consent_ack": self._handle_consent_ack,
             "reconnect_turn": self._handle_turn,
             "reconnect_fs_offer_response": self._handle_fs_offer_response,
+            "reconnect_finish": self._handle_finish,
             "reconnect_cooldown_choice": self._handle_cooldown_choice,
             "reconnect_reenter": self._handle_reenter,
             "reconnect_exit": self._handle_exit,
@@ -205,6 +234,8 @@ class DailyReconnectEngine:
             warm_return = await self._maybe_warm_return(session, username)
 
         sid = str(session["id"])
+        await self._maybe_heal_stuck_session(sid)
+        session = await self._load_session(sid) or session
         await self._upsert_participant(sid, username, profile)
         self._register_ws(sid, username, websocket)
 
@@ -347,11 +378,11 @@ class DailyReconnectEngine:
             return
 
         prompt_index = int(session.get("current_prompt_index") or 0)
-        if prompt_index >= len(PROMPT_KINDS):
+        if prompt_index >= _prompt_count():
             await self._send(websocket, {"type": "reconnect_error", "message": "ritual_complete"})
             return
 
-        kind, _ = PROMPT_KINDS[prompt_index]
+        kind, _, _phase = _resolve_prompt(prompt_index)
         temp, temp_detail = self._score_temperature(content, session_id, username)
 
         async with self.db_pool.acquire() as conn:
@@ -438,15 +469,32 @@ class DailyReconnectEngine:
         payload = await self._session_payload(session, username)
         payload["nate_message"] = nate_msg
         await self._broadcast(session_id, {"type": "reconnect_turn_ack", **payload})
+        if session.get("state") == "WRAP_UP":
+            wrap_payload = await self._session_payload(session, username)
+            wrap_payload["nate_message"] = COUPLE_DISCUSSION_MESSAGE
+            await self._broadcast(session_id, {"type": "reconnect_wrap_up", **wrap_payload})
+
+    async def _handle_finish(self, data: Dict, websocket: Any, profile: Dict) -> None:
+        session_id = data.get("session_id") or ""
+        username = await self._resolve_user(profile)
+        session = await self._load_session(session_id)
+        if not session or session.get("state") != "WRAP_UP":
+            await self._send(websocket, {"type": "reconnect_error", "message": "not_in_wrap_up"})
+            return
+        await self._transition(session_id, "CLOSED", "wrap_up_done")
+        payload = await self._session_payload(await self._load_session(session_id) or session, username or "")
+        await self._broadcast(session_id, {"type": "reconnect_finished", **payload})
 
     async def _handle_fs_offer_response(self, data: Dict, websocket: Any, profile: Dict) -> None:
         session_id = data.get("session_id") or ""
         accepted = bool(data.get("accepted"))
         session = await self._load_session(session_id)
-        if not session or session["state"] != "OFFER_FS":
+        if not session or session["state"] not in ("OFFER_FS", "WRAP_UP"):
             await self._send(websocket, {"type": "reconnect_error", "message": "not_in_offer_fs"})
             return
         if accepted:
+            if session["state"] == "WRAP_UP":
+                await self._transition(session_id, "OFFER_FS", "wrap_up_to_sanctuary")
             await self._transition(session_id, "ENTER_FS", "fs_accepted")
             if session.get("sanctuary_id"):
                 try:
@@ -457,7 +505,10 @@ class DailyReconnectEngine:
                 except Exception as e:
                     _log(f"ENTER_FS handoff error: {e}")
         else:
-            await self._transition(session_id, "COOLDOWN_SETUP", "fs_declined")
+            if session["state"] == "WRAP_UP":
+                await self._transition(session_id, "CLOSED", "wrap_up_sanctuary_declined")
+            else:
+                await self._transition(session_id, "COOLDOWN_SETUP", "fs_declined")
         payload = await self._session_payload(await self._load_session(session_id), await self._resolve_user(profile))
         await self._broadcast(session_id, {"type": "reconnect_fs_response", **payload})
 
@@ -839,17 +890,25 @@ class DailyReconnectEngine:
                 avoidant="Whenever you're ready, we can pick up — no pressure.",
                 default="Take the space you need. Showing up again counts just as much.",
             )
-        total = int(session.get("total_reconnects") or 0)
-        if total > 0:
+        if session.get("state") == "WRAP_UP":
             return tone.pick(
-                anxious=f"That's {total} reconnects together — you're building something real.",
-                avoidant=f"{total} times you've shown up. That matters.",
-                default=f"That's {total} reconnects together. Keep going.",
+                anxious="You've shared a lot today. Take a few minutes together — talk about what landed.",
+                avoidant="When you're ready, sit with each other and reflect on what you shared.",
+                default=COUPLE_DISCUSSION_MESSAGE,
             )
         return tone.pick(
             anxious="Thank you for sharing. I'm right here with you.",
             avoidant="Thanks for being here. One step at a time.",
             default="Thank you for sharing.",
+        )
+
+    def _reward_expression(self, warm_return: bool = False) -> str:
+        """Presence-based encouragement — no streak or quantity framing (REWARD-1)."""
+        if warm_return:
+            return "Welcome back — showing up again counts just as much as showing up daily."
+        return (
+            "You keep choosing to show up for each other. "
+            "That presence matters more than perfection."
         )
 
     def _encouragement_tone(self, session: Dict, username: str) -> "_TonePicker":
@@ -863,9 +922,13 @@ class DailyReconnectEngine:
 
     def miss_encouragement_message(self, total_reconnects: int) -> str:
         """No-guilt re-invitation when members have been away (REWARD-2)."""
+        _ = total_reconnects  # tracked internally; not surfaced as quantity pressure
         base = "Whenever you're ready, the door's open."
         if total_reconnects > 0:
-            return f"{base} Your {total_reconnects} reconnects together are still here — showing up again counts just as much."
+            return (
+                f"{base} Your connection here is still waiting — "
+                "showing up again counts just as much."
+            )
         return base
 
     # ── Inference (safety floor only — not v1 spine) ──────────────────────
@@ -1026,9 +1089,9 @@ class DailyReconnectEngine:
                 user_idx = (order.index(cur) + 1) % len(order) if cur in order else 0
             except ValueError:
                 user_idx = 0
-        if idx >= len(PROMPT_KINDS):
-            idx = 0
-            user_idx = (user_idx + 1) % max(len(order), 1)
+        if idx >= _prompt_count():
+            await self._complete_ritual(session_id)
+            return
         next_user = order[user_idx] if order else None
         async with self.db_pool.acquire() as conn:
             await conn.execute(
@@ -1041,6 +1104,43 @@ class DailyReconnectEngine:
                 """,
                 session_id, idx, next_user,
             )
+
+    async def _complete_ritual(self, session_id: str) -> None:
+        await self._transition(session_id, "WRAP_UP", "all_prompts_done")
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE daily_reconnect_session
+                SET current_turn_user_id = NULL, updated_at = NOW()
+                WHERE id = $1::uuid
+                """,
+                session_id,
+            )
+
+    async def _maybe_heal_stuck_session(self, session_id: str) -> None:
+        """Advance sessions stuck repeating connection prompts after all four are answered."""
+        session = await self._load_session(session_id)
+        if not session or session.get("state") not in ("ACTIVE", "SOFT_DEESCALATION"):
+            return
+        turns = await self.get_locked_turns(session_id)
+        if not turns:
+            return
+        indices = {int(t.get("prompt_index") or 0) for t in turns}
+        cur = int(session.get("current_prompt_index") or 0)
+        conn_done = all(i in indices for i in range(len(PROMPT_KINDS)))
+        if conn_done and cur < len(PROMPT_KINDS):
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE daily_reconnect_session
+                    SET current_prompt_index = $2, updated_at = NOW()
+                    WHERE id = $1::uuid
+                    """,
+                    session_id, len(PROMPT_KINDS),
+                )
+            return
+        if cur >= _prompt_count() or len(turns) >= _prompt_count():
+            await self._complete_ritual(session_id)
 
     async def _ensure_sanctuary_room(self, family_id: str, profile: Dict) -> Optional[str]:
         if not self.sanctuary_engine:
@@ -1068,7 +1168,8 @@ class DailyReconnectEngine:
             return {}
         sid = str(session["id"])
         prompt_index = int(session.get("current_prompt_index") or 0)
-        kind, prompt_text = PROMPT_KINDS[prompt_index] if prompt_index < len(PROMPT_KINDS) else ("", "")
+        kind, prompt_text, phase = _resolve_prompt(prompt_index)
+        ritual_complete = session.get("state") == "WRAP_UP"
         async with self.db_pool.acquire() as conn:
             parts = await conn.fetch(
                 """
@@ -1092,19 +1193,21 @@ class DailyReconnectEngine:
         turns = []
         for t in turns_raw:
             pi = int(t.get("prompt_index") or 0)
-            _, turn_prompt = PROMPT_KINDS[pi] if pi < len(PROMPT_KINDS) else ("", "")
+            turn_kind, turn_prompt, turn_phase = _resolve_prompt(pi)
             turns.append(
                 {
                     "user_id": t["user_id"],
                     "content": t["content"],
                     "prompt_index": pi,
-                    "prompt_kind": t.get("prompt_kind") or "",
+                    "prompt_kind": t.get("prompt_kind") or turn_kind,
                     "prompt_text": turn_prompt,
+                    "prompt_phase": turn_phase,
                     "created_at": (
                         t["created_at"].isoformat() if t.get("created_at") else None
                     ),
                 }
             )
+        all_prompt_defs = list(PROMPT_KINDS) + list(REFLECTION_PROMPT_KINDS)
         return {
             "session_id": sid,
             "state": session.get("state"),
@@ -1118,10 +1221,21 @@ class DailyReconnectEngine:
             "current_prompt_index": prompt_index,
             "prompt_kind": kind,
             "prompt_text": prompt_text,
+            "prompt_phase": phase,
             "prompts": [
-                {"index": i, "kind": k, "text": txt}
-                for i, (k, txt) in enumerate(PROMPT_KINDS)
+                {
+                    "index": i,
+                    "kind": k,
+                    "text": txt,
+                    "phase": "connection" if i < len(PROMPT_KINDS) else "reflection",
+                }
+                for i, (k, txt) in enumerate(all_prompt_defs)
             ],
+            "ritual_complete": ritual_complete,
+            "couple_discussion_message": (
+                COUPLE_DISCUSSION_MESSAGE if ritual_complete else None
+            ),
+            "reward_message": self._reward_expression(warm_return),
             "current_turn_user_id": session.get("current_turn_user_id"),
             "turns": turns,
             "warm_return": warm_return,

@@ -31,7 +31,10 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
   String _state = 'LOADING';
   String _consentText = '';
   bool _consentRequired = true;
-  int _totalReconnects = 0;
+  String? _rewardMessage;
+  String? _coupleDiscussionMessage;
+  String _promptPhase = 'connection';
+  int _currentPromptIndex = 0;
   String _promptText = '';
   String? _currentTurnUserId;
   String? _nateMessage;
@@ -112,8 +115,11 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
     _consentText = msg['consent_text'] as String? ?? _consentText;
     _consentRequired = msg['consent_required'] as bool? ?? _consentRequired;
     _participants = msg['participants'] as List<dynamic>? ?? _participants;
-    _totalReconnects = msg['total_reconnects'] as int? ?? _totalReconnects;
+    _rewardMessage = msg['reward_message'] as String? ?? _rewardMessage;
     _promptText = msg['prompt_text'] as String? ?? _promptText;
+    _promptPhase = msg['prompt_phase'] as String? ?? _promptPhase;
+    _currentPromptIndex = msg['current_prompt_index'] as int? ?? _currentPromptIndex;
+    _coupleDiscussionMessage = msg['couple_discussion_message'] as String? ?? _coupleDiscussionMessage;
     _currentTurnUserId = msg['current_turn_user_id'] as String?;
     _warmReturnMessage = msg['warm_return_message'] as String?;
     _missEncouragement = msg['miss_encouragement'] as String?;
@@ -143,12 +149,27 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
       (_state == 'ACTIVE' || _state == 'SOFT_DEESCALATION') &&
       _promptText.isNotEmpty;
 
+  bool get _inWrapUp => _state == 'WRAP_UP';
+
   static const _ritualPrompts = <String>[
     'Share one thing you appreciate about your partner today.',
     "What's one thing from today you'd like them to know?",
     'What are you feeling, and what do you need?',
     "What's one small request that would help you feel more connected?",
+    'What are you noticing in yourself right now — without trying to fix anything?',
+    'What do you need from yourself to feel a little steadier tonight?',
+    'What felt meaningful to you in what you shared today?',
   ];
+
+  String _phaseLabel(int index, {bool isCurrent = false}) {
+    final reflection = isCurrent
+        ? _promptPhase == 'reflection'
+        : index >= 4;
+    if (reflection) {
+      return isCurrent ? 'Self-reflection for you' : 'Self-reflection';
+    }
+    return isCurrent ? 'Question for both of you' : 'Question';
+  }
 
   String _promptTextForIndex(int index, [Map<String, dynamic>? turn]) {
     final fromTurn = turn?['prompt_text']?.toString();
@@ -157,7 +178,7 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
     return _promptText;
   }
 
-  Widget _buildPromptDivider(String question, {bool isCurrent = false}) {
+  Widget _buildPromptDivider(String question, {bool isCurrent = false, int index = 0}) {
     const gold = Color(0xFFC9A962);
     return Container(
       width: double.infinity,
@@ -172,7 +193,7 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            isCurrent ? 'Question for both of you' : 'Question',
+            _phaseLabel(index, isCurrent: isCurrent),
             style: TextStyle(
               color: isCurrent ? gold : Colors.white54,
               fontSize: 11,
@@ -196,7 +217,11 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
   }
 
   Widget _buildCurrentPromptCard() {
-    return _buildPromptDivider(_promptText, isCurrent: true);
+    return _buildPromptDivider(
+      _promptText,
+      isCurrent: true,
+      index: _currentPromptIndex,
+    );
   }
 
   List<Widget> _buildThreadWidgets() {
@@ -207,7 +232,7 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
           ? turn['prompt_index'] as int
           : int.tryParse('${turn['prompt_index']}') ?? 0;
       if (pi != lastPromptIndex) {
-        widgets.add(_buildPromptDivider(_promptTextForIndex(pi, turn)));
+        widgets.add(_buildPromptDivider(_promptTextForIndex(pi, turn), index: pi));
         lastPromptIndex = pi;
       }
       widgets.add(_buildTurnBubble(turn));
@@ -291,11 +316,11 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
         _maybeHandoffToSanctuary(msg);
         return;
       }
-      if (type == 'reconnect_turn_ack') {
+      if (type == 'reconnect_turn_ack' || type == 'reconnect_wrap_up') {
         setState(() {
           _applySessionFields(msg);
         });
-        _turnController.clear();
+        if (type == 'reconnect_turn_ack') _turnController.clear();
         _scrollToLatestTurn();
         return;
       }
@@ -344,9 +369,9 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (_totalReconnects > 0)
+            if (_rewardMessage != null && _rewardMessage!.isNotEmpty)
               Text(
-                "That's $_totalReconnects reconnects together.",
+                _rewardMessage!,
                 style: const TextStyle(color: gold, fontSize: 16, fontWeight: FontWeight.w600),
                 textAlign: TextAlign.center,
               ),
@@ -447,6 +472,77 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
                   textAlign: TextAlign.center,
                 ),
             ],
+            if (_inWrapUp) ...[
+              if (_turns.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Expanded(
+                  child: ListView(
+                    controller: _scrollController,
+                    children: _buildThreadWidgets(),
+                  ),
+                ),
+              ] else
+                const Spacer(),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF15120C),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: gold),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Talk together',
+                      style: TextStyle(
+                        color: gold,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _coupleDiscussionMessage ??
+                          'Take a few minutes together to talk about what you each shared.',
+                      style: const TextStyle(color: Colors.white, height: 1.4, fontSize: 15),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Would you like to continue in Family Sanctuary for deeper support?',
+                style: TextStyle(color: Colors.white70),
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => _send({
+                        'type': 'reconnect_finish',
+                        'session_id': _sessionId,
+                      }),
+                      child: const Text('Done for today'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: gold),
+                      onPressed: () => _send({
+                        'type': 'reconnect_fs_offer_response',
+                        'session_id': _sessionId,
+                        'accepted': true,
+                      }),
+                      child: const Text('Open Sanctuary'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             if (_state == 'OFFER_FS') ...[
               const SizedBox(height: 16),
               const Text(
@@ -480,7 +576,7 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
                 ],
               ),
             ],
-            if (!_inRitualChat) const Spacer(),
+            if (!_inRitualChat && !_inWrapUp) const Spacer(),
             Text('Status: $_status', style: const TextStyle(color: Colors.white24, fontSize: 11)),
           ],
         ),

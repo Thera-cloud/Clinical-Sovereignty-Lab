@@ -60,11 +60,27 @@ def test_cooled_ambiguous_not_cooled():
 
 
 def test_reward_accumulation_never_resets():
-    msg0 = dre.DailyReconnectEngine(db_pool=MagicMock()).miss_encouragement_message(5)
-    msg1 = dre.DailyReconnectEngine(db_pool=MagicMock()).miss_encouragement_message(5)
-    assert "5" in msg0
+    engine = dre.DailyReconnectEngine(db_pool=MagicMock())
+    msg0 = engine.miss_encouragement_message(5)
+    msg1 = engine.miss_encouragement_message(5)
     assert "streak" not in msg0.lower()
+    assert "5" not in msg0
     assert msg0 == msg1
+    reward = engine._reward_expression()
+    assert "5" not in reward
+    assert "reconnect" not in reward.lower() or "showing up" in reward.lower()
+
+
+def test_resolve_prompt_phases():
+    assert dre._prompt_count() == 7
+    kind, text, phase = dre._resolve_prompt(0)
+    assert phase == "connection"
+    assert "partner" in text.lower()
+    kind, text, phase = dre._resolve_prompt(4)
+    assert phase == "reflection"
+    assert "yourself" in text.lower()
+    _, _, phase = dre._resolve_prompt(7)
+    assert phase == "complete"
 
 
 def test_miss_encouragement_no_guilt():
