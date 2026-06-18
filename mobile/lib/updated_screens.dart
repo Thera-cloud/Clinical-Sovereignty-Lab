@@ -1949,6 +1949,13 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         final profile = data['profile'] ?? {};
         _updateMetricsFromProfile(profile);
         _requestMetrics();
+        // Self-heal: if the first get_metrics reply is missed (raced ahead of
+        // current_profile binding on the bridge), the bar stays on cold-start
+        // defaults (C_emo 0.5 / GAP 0.3 / Quantum 0.5). Re-request once shortly
+        // after auth settles so real persisted metrics repopulate the bar.
+        Timer(const Duration(milliseconds: 1500), () {
+          if (mounted) _requestMetrics();
+        });
         _wsSend(jsonEncode({"type": "get_pending_nudges"}));
         _checkSseIntake();
 
@@ -4499,22 +4506,6 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         premiumTiers.contains(subscriptionPlan);
   }
 
-  bool _canUseDailyReconnect() {
-    final premiumFeatures = widget.currentUserProfile?['premium_features'];
-    if (premiumFeatures != null && premiumFeatures is Map) {
-      return premiumFeatures['family_sanctuary'] == true;
-    }
-    final tier =
-        (widget.currentUserProfile?['tier'] ?? '').toString().toUpperCase();
-    final subscriptionPlan =
-        (widget.currentUserProfile?['subscription_plan'] ?? '')
-            .toString()
-            .toUpperCase();
-    const premiumTiers = {'TOP_TIER', 'SOVEREIGN_CIRCLE'};
-    return premiumTiers.contains(tier) ||
-        premiumTiers.contains(subscriptionPlan);
-  }
-
   bool _canUseVault() =>
       AppConfig.ENABLE_SOVEREIGN_VAULT &&
       VaultEntitlement.canUseVault(widget.currentUserProfile);
@@ -4728,9 +4719,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                   _avatarModeEnabled ? 'Avatar Mode ON' : 'Avatar Mode OFF',
               onPressed: () => _toggleAvatarMode(!_avatarModeEnabled),
             ),
-          // Daily Reconnect (before Family Sanctuary)
-          if (_canUseDailyReconnect())
-            IconButton(
+          // Daily Reconnect (always shown next to Family Sanctuary; backend tier-gates the join)
+          IconButton(
               icon: const Icon(Icons.favorite_outline, color: Color(0xFFC9A962)),
               tooltip: 'Daily Reconnect',
               onPressed: () async {

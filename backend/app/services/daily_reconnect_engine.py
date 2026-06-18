@@ -6,6 +6,7 @@ Nate-fronted connection ritual; coach/inference machinery is safety-floor only.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -1011,6 +1012,23 @@ class DailyReconnectEngine:
         })
         if new_state == "PAUSED":
             await self._transition(session_id, "OFFER_FS", "auto_offer_after_pause")
+        # QUANTUM-CRYSTAL-ARCH — derived-copy ingest into the main-chat memory
+        # pipeline on normal close. Locked rows stay the source of truth; this is
+        # search-only. CRISIS_BYPASS is intentionally never ingested.
+        if new_state in ("CLOSED", "ENTER_FS"):
+            try:
+                from app.services.daily_reconnect_chat_context import (
+                    ingest_closed_session_for_memory,
+                    ENABLE_RECONNECT_MEMORY_INGEST,
+                )
+                if ENABLE_RECONNECT_MEMORY_INGEST:
+                    asyncio.create_task(
+                        ingest_closed_session_for_memory(
+                            self.db_pool, session_id, cortex=self._cortex,
+                        )
+                    )
+            except Exception as _ingest_err:  # noqa: BLE001
+                _log(f"memory ingest dispatch error: {_ingest_err}")
 
     async def _increment_reconnect_count(self, session_id: str) -> None:
         async with self.db_pool.acquire() as conn:

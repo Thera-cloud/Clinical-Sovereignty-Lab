@@ -272,6 +272,7 @@ def _adaptive_sweep() -> None:
     for uid in stale:
         _adaptive_states.pop(uid, None)
         _adaptive_locks.pop(uid, None)
+        _stance_states.pop(uid, None)  # QUANTUM-CRYSTAL-ARCH — SOLUTION 1
     if stale:
         print(f">>> [ADAPTIVE] swept {len(stale)} stale state(s)")
 
@@ -318,6 +319,27 @@ def _adaptive_get_lock(uid: str):
 def _adaptive_clear(uid: str) -> None:
     _adaptive_states.pop(uid, None)
     _adaptive_locks.pop(uid, None)
+    _stance_states.pop(uid, None)  # QUANTUM-CRYSTAL-ARCH — SOLUTION 1
+
+
+# QUANTUM-CRYSTAL-ARCH — SOLUTION 1 stance resolver (default OFF via ENABLE_STANCE_RESOLVER)
+try:
+    from app.services import ln_stance_resolver as _stance_mod
+except Exception as _stance_imp_err:
+    print(f">>> [STANCE] Import failed (non-fatal): {_stance_imp_err}")
+    _stance_mod = None
+_stance_states: dict = {}  # uid -> StanceState (lifecycle bound to adaptive sweep/clear)
+_ENABLE_STANCE_RESOLVER = os.getenv("ENABLE_STANCE_RESOLVER", "false").lower() in ("true", "1", "yes")
+
+
+def _stance_get_state(uid: str):
+    if _stance_mod is None or not uid:
+        return None
+    st = _stance_states.get(uid)
+    if st is None:
+        st = _stance_mod.StanceState()
+        _stance_states[uid] = st
+    return st
 
 
 # QUANTUM-CRYSTAL-ARCH — handoff cooldown cache (uid -> cooldown expiry unix ts)
@@ -8710,7 +8732,18 @@ class AzureCortex:
                 print(f">>> [FSF] context error (non-fatal): {_fsf_err}")
                 return ""
 
-        relational_context, checkin_context, crystal_context, pg_history_context, intake_context, fsf_context = await asyncio.gather(
+        async def _fetch_reconnect_context():
+            # QUANTUM-CRYSTAL-ARCH — Daily Reconnect locked-row read-through (flag-gated)
+            if not _cpool or _role != "CLIENT":
+                return ""
+            try:
+                from app.services.daily_reconnect_chat_context import build_reconnect_chat_context
+                return await build_reconnect_chat_context(_cpool, _uname or _hw_id, user_text)
+            except Exception as _rc_err:
+                print(f">>> [RECONNECT] context error (non-fatal): {_rc_err}")
+                return ""
+
+        relational_context, checkin_context, crystal_context, pg_history_context, intake_context, fsf_context, reconnect_context = await asyncio.gather(
             _timed("relational", self._get_relational_context(profile)),
             _timed("checkin", self._get_checkin_context(profile)),
             _timed("crystals", recall_crystals_for_context(
@@ -8720,6 +8753,7 @@ class AzureCortex:
             _timed("pg_history", _fetch_pg_history_for_chat(_cpool, _uname, _hw_id, limit=15)),
             _timed("intake_s1", _fetch_intake_context()),
             _timed("fsf", _fetch_fsf_context()),
+            _timed("reconnect", _fetch_reconnect_context()),
         )
         _live_turn_context = _format_live_turn_context(uid)
         _critical_recall_context = _format_critical_recall_facts(uid)
@@ -9244,6 +9278,9 @@ class AzureCortex:
 
         {fsf_context}
 
+        {reconnect_context}
+        {"Reference Daily Reconnect answers when the user mentions the ritual, 'reconnect', or couple prompts. Quote their locked words; do not paraphrase into clinical labels." if reconnect_context else ""}
+
         {checkin_context}
         {"Reference these check-in responses naturally. The user shared this outside of sessions — acknowledge it warmly without being intrusive." if checkin_context else ""}
 
@@ -9581,6 +9618,22 @@ class AzureCortex:
                         pass
                     except Exception as _cl_err:
                         print(f">>> [CLASSIFIER] error (non-fatal): {type(_cl_err).__name__}: {_cl_err}")
+                    # QUANTUM-CRYSTAL-ARCH — SOLUTION 1 stance resolver overlay (default OFF)
+                    if (_ENABLE_STANCE_RESOLVER and _stance_mod is not None
+                            and _adaptive_payload and not _adaptive_payload.get("direct_response")):
+                        try:
+                            _st_state = _stance_get_state(uid)
+                            if _st_state is not None:
+                                _st_dec = _stance_mod.resolve_stance(
+                                    user_text, _st_state,
+                                    _adaptive_payload.get("system_addendum", "") or "",
+                                )
+                                if _st_dec.move not in (_stance_mod.StanceMove.PASSTHROUGH, _stance_mod.StanceMove.REFLECT_AND_FRAME):
+                                    _adaptive_payload["system_addendum"] = _st_dec.addendum
+                                _adaptive_payload["_stance_decision"] = _st_dec
+                                print(f">>> [STANCE] uid={uid} intent={_st_dec.intent.value} move={_st_dec.move.value} eoq={_st_dec.end_on_question}")
+                        except Exception as _st_err:
+                            print(f">>> [STANCE] error (non-fatal): {type(_st_err).__name__}: {_st_err}")
                     _addendum = _adaptive_payload.get("system_addendum", "") if _adaptive_payload else ""
                     if _addendum:
                         # Reserve headroom for the addendum so trim can never drop it.
@@ -9983,6 +10036,16 @@ class AzureCortex:
                         full_response = _ttc_audited["response_text"]
                 except Exception as _ttc_post_err:
                     print(f">>> [THERAPEUTIC-CTRL] post-audit failed for {uid}: {_ttc_post_err}")
+
+            # QUANTUM-CRYSTAL-ARCH — SOLUTION 1 stance closer guard (default OFF; mutates final text only)
+            if _ENABLE_STANCE_RESOLVER and _stance_mod is not None and full_response.strip():
+                _st_dec2 = (_adaptive_payload or {}).get("_stance_decision")
+                _st_state2 = _stance_states.get(uid)
+                if _st_dec2 is not None and _st_state2 is not None:
+                    try:
+                        full_response = _stance_mod.guard_generated_closer(full_response, _st_dec2, _st_state2)
+                    except Exception as _stg_err:
+                        print(f">>> [STANCE] closer-guard error (non-fatal): {_stg_err}")
 
             # SOVEREIGN-VOICE — emit completed provider text; C1 defers until after audit when buffering (any provider).
             _emit_after_inference = (not _already_streamed) or _buffer_for_therapeutic_audit
