@@ -332,14 +332,101 @@ _stance_states: dict = {}  # uid -> StanceState (lifecycle bound to adaptive swe
 _ENABLE_STANCE_RESOLVER = os.getenv("ENABLE_STANCE_RESOLVER", "false").lower() in ("true", "1", "yes")
 
 
-def _stance_get_state(uid: str):
+def _stance_get_state(uid: str, profile=None):
     if _stance_mod is None or not uid:
         return None
     st = _stance_states.get(uid)
     if st is None:
-        st = _stance_mod.StanceState()
+        # QUANTUM-CRYSTAL-ARCH — ITEM 1: rehydrate StanceState from profile_data across restarts
+        if profile is not None:
+            try:
+                _pd = profile.get("profile_data", profile) if isinstance(profile, dict) else {}
+                if isinstance(_pd, str):
+                    import json as _json
+                    try:
+                        _pd = _json.loads(_pd)
+                    except Exception:
+                        _pd = {}
+                _sd = _pd.get("ln_stance_state") if isinstance(_pd, dict) else None
+                if _sd:
+                    st = _stance_mod.state_from_dict(_sd)
+            except Exception as _stl_err:
+                print(f">>> [STANCE] rehydrate error (non-fatal): {_stl_err}")
+        if st is None:
+            st = _stance_mod.StanceState()
         _stance_states[uid] = st
     return st
+
+
+def _stance_persist(uid: str, role, state) -> None:
+    # QUANTUM-CRYSTAL-ARCH — ITEM 1: persist StanceState to profile_data registry (cross-restart)
+    if _stance_mod is None or not uid or state is None:
+        return
+    try:
+        _ser = _stance_mod.state_to_dict(state)
+        _reg = load_registry()
+        _rkey = f"{role.lower()}_{uid}" if role else uid
+        if _rkey not in _reg:
+            _rkey = uid
+        if _rkey in _reg:
+            _pd = _reg[_rkey].get("profile_data", {})
+            if isinstance(_pd, str):
+                import json as _json2
+                try:
+                    _pd = _json2.loads(_pd)
+                except Exception:
+                    _pd = {}
+            _pd["ln_stance_state"] = _ser
+            _reg[_rkey]["profile_data"] = _pd
+            save_registry(_reg)
+    except Exception as _stp_err:
+        print(f">>> [STANCE] persist error (non-fatal): {_stp_err}")
+
+
+async def _stance_maybe_regen(gutted, system_prompt, user_text, prior, st_dec, st_state, t_start):
+    # QUANTUM-CRYSTAL-ARCH — ITEM 9: one-shot WITNESS-only regen when a guard guts the reply
+    if not gutted or _stance_mod is None:
+        return prior
+    try:
+        import time as _st_time  # QUANTUM-CRYSTAL-ARCH — module-level regen; avoid NameError on _time_inf
+        # Latency budget: skip regen if we've already burned >6s on this turn
+        if (_st_time.monotonic() - t_start) > 6.0:
+            return prior
+        _hard = ("\n\nCRITICAL: Respond with WITNESS only — a single grounded reflective "
+                 "sentence. No list, no menu of options, no question, no action plan.")
+        _sys = (system_prompt or "") + _hard
+        _regen = await _stance_regen_llm(_sys, user_text)
+        if not _regen or not _regen.strip():
+            return prior
+        _regen = _stance_mod.guard_framing_menu(_regen, st_dec.move)
+        _regen = _stance_mod.guard_generated_closer(_regen, st_dec, st_state)
+        return _regen.strip() if _regen.strip() else prior
+    except Exception as _rg_err:
+        print(f">>> [STANCE] regen error (non-fatal): {_rg_err}")
+        return prior
+
+
+async def _stance_regen_llm(system_prompt, user_text):
+    # QUANTUM-CRYSTAL-ARCH — ITEM 9: minimal single-shot completion for hardened witness regen
+    try:
+        import aiohttp as _aio
+        _url = globals().get("_CHAT_SUMMARY_URL") or globals().get("_CHAT_COMPLETIONS_URL")
+        _key = globals().get("AZURE_API_KEY") or os.getenv("AZURE_API_KEY", "")
+        if not _url or not _key:
+            return None
+        _payload = {"messages": [{"role": "system", "content": system_prompt},
+                                 {"role": "user", "content": user_text}],
+                    "max_completion_tokens": 220}
+        _hdrs = {"api-key": _key, "Content-Type": "application/json"}
+        async with _aio.ClientSession() as _s:
+            async with _s.post(_url, json=_payload, headers=_hdrs,
+                               timeout=_aio.ClientTimeout(total=8)) as _r:
+                if _r.status != 200:
+                    return None
+                _j = await _r.json()
+                return (_j.get("choices") or [{}])[0].get("message", {}).get("content", "")
+    except Exception:
+        return None
 
 
 # QUANTUM-CRYSTAL-ARCH — handoff cooldown cache (uid -> cooldown expiry unix ts)
@@ -9622,15 +9709,34 @@ class AzureCortex:
                     if (_ENABLE_STANCE_RESOLVER and _stance_mod is not None
                             and _adaptive_payload and not _adaptive_payload.get("direct_response")):
                         try:
-                            _st_state = _stance_get_state(uid)
+                            _st_state = _stance_get_state(uid, profile=profile)  # QUANTUM-CRYSTAL-ARCH — ITEM 1 rehydrate
                             if _st_state is not None:
+                                # QUANTUM-CRYSTAL-ARCH — ITEM 8: reuse this turn's classifier as intent floor
+                                _cl_intent = None
+                                _cl_conf = None
+                                try:
+                                    _clr = locals().get("_cl_result")
+                                    if _clr is not None and not getattr(_clr, "error", None):
+                                        _cl_conf = float(getattr(_clr, "weight", 0.0) or 0.0)
+                                        _cl_intent = {
+                                            "redirect": _stance_mod.TurnIntent.META_FEEDBACK,
+                                            "action_request": _stance_mod.TurnIntent.EXPLORE,
+                                            "information_seeking": _stance_mod.TurnIntent.EXPLORE,
+                                            "emotional_processing": _stance_mod.TurnIntent.EXPLORE,
+                                            "social": _stance_mod.TurnIntent.LOW_WEIGHT,
+                                        }.get(getattr(_clr, "request_shape", ""))
+                                except Exception:
+                                    _cl_intent, _cl_conf = None, None
                                 _st_dec = _stance_mod.resolve_stance(
                                     user_text, _st_state,
                                     _adaptive_payload.get("system_addendum", "") or "",
+                                    classifier_intent=_cl_intent,
+                                    classifier_confidence=_cl_conf,
                                 )
                                 if _st_dec.move not in (_stance_mod.StanceMove.PASSTHROUGH, _stance_mod.StanceMove.REFLECT_AND_FRAME):
                                     _adaptive_payload["system_addendum"] = _st_dec.addendum
                                 _adaptive_payload["_stance_decision"] = _st_dec
+                                _stance_persist(uid, _role, _st_state)  # QUANTUM-CRYSTAL-ARCH — ITEM 1 persist
                                 print(f">>> [STANCE] uid={uid} intent={_st_dec.intent.value} move={_st_dec.move.value} eoq={_st_dec.end_on_question}")
                         except Exception as _st_err:
                             print(f">>> [STANCE] error (non-fatal): {type(_st_err).__name__}: {_st_err}")
@@ -10042,10 +10148,36 @@ class AzureCortex:
                 _st_dec2 = (_adaptive_payload or {}).get("_stance_decision")
                 _st_state2 = _stance_states.get(uid)
                 if _st_dec2 is not None and _st_state2 is not None:
+                    _st_strip_menu = False
+                    _st_strip_opener = False
                     try:
+                        # QUANTUM-CRYSTAL-ARCH — ITEM 9: track stripping for telemetry + one-shot regen
+                        _st_pre_len = max(len(full_response.strip()), 1)
+                        _st_had_menu = _stance_mod._has_framing_menu(full_response)
+                        _st_opener_stale = _st_state2.opener_is_stale(full_response)
+                        full_response = _stance_mod.guard_framing_menu(full_response, _st_dec2.move)  # QUANTUM-CRYSTAL-ARCH
+                        full_response = _stance_mod.guard_stale_opener(full_response, _st_state2)  # QUANTUM-CRYSTAL-ARCH
                         full_response = _stance_mod.guard_generated_closer(full_response, _st_dec2, _st_state2)
+                        _st_strip_menu = bool(_st_had_menu and not _stance_mod._has_framing_menu(full_response))
+                        _st_strip_opener = bool(_st_opener_stale)
+                        _st_removed = 1.0 - (len(full_response.strip()) / _st_pre_len)
+                        _st_gutted = (_st_removed > 0.30) or (full_response.strip() == _stance_mod._WITNESS_FALLBACK)
+                        full_response = await _stance_maybe_regen(
+                            _st_gutted, system_prompt, user_text, full_response,
+                            _st_dec2, _st_state2, _t_inf_start,
+                        )
                     except Exception as _stg_err:
                         print(f">>> [STANCE] closer-guard error (non-fatal): {_stg_err}")
+                    try:
+                        from app.services.stance_telemetry import log_stance_decision as _log_sd
+                        asyncio.create_task(_log_sd(
+                            db_pool, uid,
+                            int(getattr(_adaptive_states.get(uid), "turn_count", 0) or 0),
+                            _st_dec2.intent.value, _st_dec2.move.value, _st_dec2.end_on_question,
+                            _st_strip_menu, _st_strip_opener,
+                        ))
+                    except Exception as _sd_err:
+                        print(f">>> [STANCE] telemetry error (non-fatal): {_sd_err}")
 
             # SOVEREIGN-VOICE — emit completed provider text; C1 defers until after audit when buffering (any provider).
             _emit_after_inference = (not _already_streamed) or _buffer_for_therapeutic_audit
