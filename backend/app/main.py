@@ -2403,6 +2403,21 @@ async def lifespan(app: FastAPI):
     except Exception as _cla_err:
         print(f"   ⚠️  ClassroomLearningAuditor init failed: {_cla_err}")
 
+    # ── Stance Loop Auditor — witness-loop regression DB scorecard (3 checks)  # QUANTUM-CRYSTAL-ARCH
+    _stance_loop_auditor = None
+    try:
+        from app.services.stance_loop_auditor import StanceLoopAuditor
+        _stance_loop_auditor = StanceLoopAuditor(
+            db_pool=db_pool,
+            notification_system=_notify_sys if _token_renewal_agent else None,
+            app_state=app.state,
+        )
+        if not _is_clone: await _stance_loop_auditor.start()  # QUANTUM-CRYSTAL-ARCH: auditors GREEN-only
+        app.state.stance_loop_auditor = _stance_loop_auditor
+        print("   ✅ StanceLoopAuditor started (3x daily, stagger 300s)")
+    except Exception as _sla_err:
+        print(f"   ⚠️  StanceLoopAuditor init failed: {_sla_err}")
+
     # ── Coaching Mesh Engine — BLE group training sessions ──
     _coaching_mesh = None
     try:
@@ -3046,6 +3061,7 @@ async def lifespan(app: FastAPI):
         ("dojo_mentor_zoom", _dojo_zoom is not None),
         ("coach_hierarchy_auditor", _coach_hierarchy_auditor is not None),
         ("classroom_learning_auditor", _classroom_learning_auditor is not None),
+        ("stance_loop_auditor", _stance_loop_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("coaching_mesh_engine", _coaching_mesh is not None),
         ("call_coaching_engine", _call_coaching is not None),
         ("trust_enforcer", _trust_enforcer is not None),
@@ -3146,6 +3162,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ ClassroomLearningAuditor stopped")
         except Exception as _cla_stop:
             print(f"   ⚠️  ClassroomLearningAuditor shutdown: {_cla_stop}")
+    _stance_loop_auditor = getattr(app.state, "stance_loop_auditor", None)  # QUANTUM-CRYSTAL-ARCH
+    if _stance_loop_auditor:
+        try:
+            await _stance_loop_auditor.stop()
+            print("   ✅ StanceLoopAuditor stopped")
+        except Exception as _sla_stop:
+            print(f"   ⚠️  StanceLoopAuditor shutdown: {_sla_stop}")
     _account_event_reconciler_h = getattr(app.state, "account_event_reconciler", None)
     if _account_event_reconciler_h:
         try:
