@@ -125,6 +125,33 @@ _SUSTAINABILITY_POSITION_PATTERNS = [
     r"\bwhether it'?s reasonable to want comfort\b",
 ]
 
+# Narrative correction / "not being seen" — witness, not framing menu (Kristy turns 2–6).
+_NARRATIVE_WITNESS_PATTERNS = [
+    r"\bmakes sense,?\s+but\b",
+    r"\bdon'?t think that'?s actually what was happening\b",
+    r"(?:don'?t|doesn't) (?:fully )?capture\b",
+    r"\bdon'?t feel like (?:the )?center of\b",
+    r"\bthose may all be pieces\b",
+    r"\bcenter of it is\b",
+    r"\bdon'?t feel like what happened.{0,50}being seen\b",
+    r"\bisn'?t being seen\b",
+    r"\bnot being seen\b",
+    r"\bwhat happened to me during that conversation\b",
+    r"\bcaught between two roles\b",
+    r"\bno room for (?:those|my) emotions\b",
+    r"\bobserv(?:er|ing) (?:of|to) (?:his|a) experience\b",
+    r"\brelationship dynamic\b",
+    r"\bnot the whole issue\b",
+    r"\bnot the entire problem\b",
+    r"\b(?:conversation )?comes back to me\b",
+    r"\bmoved back onto me\b",
+    r"\bburden keeps getting moved\b",
+    r"\beven if i completely trusted\b",
+    r"\bhow does nate respond when\b",
+    r"\bit'?s worth asking\b",
+    r"\brelocat(?:e|ing|ed) .{0,40} (?:into|onto) me\b",
+]
+
 # Explicit practical/strategy requests — must NOT force witness (ITEM 11 fixtures).
 _PRACTICAL_REQUEST_PATTERNS = [
     r"\bwhat should i do\b",
@@ -180,6 +207,9 @@ _COACH_HANDOFF_CLOSING_PATTERNS = [
     r"\bshould (?:we|i) (?:connect you|offer you) (?:to|with) (?:a )?coach\b",
     r"\bwant me to (?:connect|match) you with (?:a )?coach\b",
     r"\b(?:a )?coach (?:could|can) (?:help|support) you\b.*\?",
+    r"\byour coach is available\b",
+    r"\b(?:i'?m|i am) happy to share a (?:quick )?summary\b",
+    r"\bbring them in\b",
 ]
 
 _WITNESS_FALLBACK = (
@@ -208,6 +238,26 @@ def has_position_signal(text: str) -> bool:
 
 def has_meta_signal(text: str) -> bool:
     return _any(_META_PATTERNS, text)
+
+
+def has_narrative_witness_signal(text: str) -> bool:
+    """User is correcting prior framings or naming unseen relational impact."""
+    return _any(_NARRATIVE_WITNESS_PATTERNS, text)
+
+
+def should_defer_handoff(
+    user_text: str,
+    state: StanceState,
+    decision: StanceDecision,
+) -> bool:
+    """Suppress coach handoff during position-thread / breakthrough articulation."""
+    if decision.move in (StanceMove.WITNESS, StanceMove.ACKNOWLEDGE_AND_ADJUST):
+        return True
+    if state.position_thread_active:
+        return True
+    if has_narrative_witness_signal(user_text) or has_position_signal(user_text):
+        return True
+    return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -395,6 +445,9 @@ def classify_intent(
     if position_hit:
         return TurnIntent.POSITION
 
+    if has_narrative_witness_signal(user_text):
+        return TurnIntent.POSITION
+
     if _any(_EXPLORE_PATTERNS, user_text):
         return TurnIntent.EXPLORE
 
@@ -530,6 +583,19 @@ def resolve_stance(
         )
 
     # ── EXPLORE / NEUTRAL ──
+    if has_narrative_witness_signal(user_text):
+        state.position_asks_unanswered += 1
+        state.position_thread_active = True
+        state.consecutive_framings = 0
+        return StanceDecision(
+            intent=intent,
+            move=StanceMove.WITNESS,
+            addendum=_augment_addendum(_ADDENDUM_WITNESS, state),
+            end_on_question=False,
+            rationale="Narrative correction / unseen impact: witness the story, "
+                      "do not offer another framing menu.",
+        )
+
     if state.consecutive_framings >= 3:
         state.consecutive_framings = 0
         return StanceDecision(
@@ -596,6 +662,19 @@ def _strip_framing_menu_blocks(text: str) -> str:
     out = re.sub(r"\btry this\b[^.?!]*[.?!]", "", out, flags=re.IGNORECASE)
     out = re.sub(r"\n{3,}", "\n\n", out).strip()
     return out
+
+
+def _strip_coach_handoff_trailing_questions(text: str) -> str:
+    """Handoff offers must not end on a trailing question (Kristy turn 15)."""
+    if _any(_CRISIS_HANDOFF_PATTERNS, text):
+        return text
+    lower = text.lower()
+    if not _any(_COACH_HANDOFF_CLOSING_PATTERNS, text):
+        if not re.search(r"\bcoach is available\b", lower):
+            return text
+    if _ends_on_question(text):
+        return _strip_trailing_question_sentences(text)
+    return text
 
 
 def _strip_non_crisis_handoff_closings(text: str, move: StanceMove) -> str:
@@ -686,6 +765,8 @@ def guard_generated_closer(
 
     if must_strip:
         generated_text = _strip_trailing_question_sentences(generated_text)
+
+    generated_text = _strip_coach_handoff_trailing_questions(generated_text)
 
     _maybe_reset_position_thread(generated_text, decision.move, state)
     state.note_bot_turn(generated_text)

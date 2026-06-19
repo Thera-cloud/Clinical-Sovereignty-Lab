@@ -19,64 +19,28 @@ for _root in (_BACKEND, "/app"):
 from app.services import little_nate_adaptive as adaptive
 from app.services import ln_stance_resolver as stance
 
-
-# Real Kristy turn-12 / turn-13 strings (kristy_smoke_test.json indices 12–13).
-KRISTY_TURN_12 = (
-    'I think when I say "emotionally sustainable," I\'m asking a much simpler question '
-    "than everyone keeps turning it into.\n\n"
-    "Can two people have hard feelings at the same time and still remain connected?\n\n"
-    "Because right now it feels like the answer is no.\n\n"
-    "It feels like when Nate is hurting, my job becomes listening, understanding, "
-    "regulating myself, and making sure he feels heard.\n\n"
-    "But if hearing his pain causes me pain, then suddenly my emotions become a complication.\n\n"
-    "That's what I'm trying to understand.\n\n"
-    "Not whether my feelings are valid.\n\n"
-    "Not whether his feelings are valid.\n\n"
-    "I already know both of us are hurting.\n\n"
-    "What I'm trying to understand is whether the dynamic itself is sustainable.\n\n"
-    "Because if every time Nate needs to share something difficult, I end up spending "
-    "days crying, physically sick, questioning myself, and trying to recover emotionally, "
-    "then something about the process isn't working.\n\n"
-    "That doesn't mean Nate is wrong.\n\n"
-    "It doesn't mean I'm wrong.\n\n"
-    "It means the way we're doing this may not be working.\n\n"
-    "I think what keeps getting missed is that I'm not asking for comfort because I "
-    "can't regulate myself.\n\n"
-    "I'm asking for comfort because relationships are supposed to contain comfort.\n\n"
-    "When I told Nate that holding me or playing with my hair helps me breathe, I wasn't "
-    "asking him to fix me.\n\n"
-    "I was telling him how I experience connection.\n\n"
-    "And if I can sit for five hours and listen to everything he's carrying, is it "
-    "unreasonable to hope there is also room for connection "
+_KRISTY_JSON = os.path.join(
+    os.path.dirname(__file__), "..", "..", "data", "kristy_smoke_test.json"
 )
 
-KRISTY_TURN_13 = (
-    "I appreciate that you've spent a lot of time helping me explore my feelings and "
-    "understand my experience. You've helped me put words to things I couldn't always explain.\n\n"
-    "What I think is missing, though, is that I don't need more help identifying my emotions.\n\n"
-    "I know I'm hurt.\n\n"
-    "I know I'm overwhelmed.\n\n"
-    "I know I felt unseen.\n\n"
-    "I know I felt alone.\n\n"
-    "What I'm trying to understand is whether the dynamic I'm describing is actually "
-    "healthy and sustainable.\n\n"
-    "I feel like every time I describe what happened, the conversation comes back to "
-    "exploring my internal experience rather than evaluating the situation itself.\n\n"
-    "At what point do we stop asking what my tears mean and ask whether it makes sense "
-    "that I was crying?\n\n"
-    "At what point do we stop exploring my feelings and ask whether five hours of "
-    "relationship concerns, while being told not to take them personally, would overwhelm "
-    "most people?\n\n"
-    "At what point do we ask whether it's reasonable to want comfort from a partner while "
-    "hearing painful things about the relationship?\n\n"
-    "I don't think I'm struggling because I don't understand myself.\n\n"
-    "I think I'm struggling because I'm trying to determine whether my reactions are "
-    "proportionate to what happened or whether my trauma is distorting my perception.\n\n"
-    "I'm trying to figure out whether there is enough room in this relationship for both "
-    "people to have emotions at the same time.\n\n"
-    "I'm trying to understand whether it is healthy for one person to be expected to absorb "
-    "painful information while having l"
-)
+
+def _kristy_turn(index: int) -> str:
+    import json
+    with open(_KRISTY_JSON, encoding="utf-8") as f:
+        data = json.load(f)
+    for row in data["turns"]:
+        if row["index"] == index:
+            return row["text"]
+    raise KeyError(index)
+
+
+# Real Kristy turn strings (kristy_smoke_test.json).
+KRISTY_TURN_12 = _kristy_turn(12)
+KRISTY_TURN_13 = _kristy_turn(13)
+KRISTY_TURN_2 = _kristy_turn(2)
+KRISTY_TURN_5 = _kristy_turn(5)
+KRISTY_TURN_6 = _kristy_turn(6)
+KRISTY_TURN_15 = _kristy_turn(15)
 
 
 def _bridge_overlay(user_text: str, uid: str, states: dict) -> tuple[dict, stance.StanceDecision | None]:
@@ -91,6 +55,10 @@ def _bridge_overlay(user_text: str, uid: str, states: dict) -> tuple[dict, stanc
     )
     if dec.move not in (stance.StanceMove.PASSTHROUGH, stance.StanceMove.REFLECT_AND_FRAME):
         payload["system_addendum"] = dec.addendum
+    if stance.should_defer_handoff(user_text, st, dec):
+        if payload.get("mode") == "handoff" or payload.get("should_offer_coach_ui"):
+            payload["mode"] = "strategic"
+            payload["should_offer_coach_ui"] = False
     payload["_stance_decision"] = dec
     return payload, dec
 
@@ -161,6 +129,29 @@ def main() -> int:
             fails.append(f"{label} resolve expected WITNESS, got {getattr(dec_k, 'move', None)}")
         if dec_k and "menu of framings" not in (dec_k.addendum or "").lower():
             fails.append(f"{label} missing witness addendum prohibition")
+
+    # Kristy neutral narrative turns 2/5/6 → WITNESS (no framing menu)
+    for label, turn_text in (("turn_2", KRISTY_TURN_2), ("turn_5", KRISTY_TURN_5), ("turn_6", KRISTY_TURN_6)):
+        _, dec_n = _bridge_overlay(turn_text, uid, states)
+        if dec_n is None or dec_n.move != stance.StanceMove.WITNESS:
+            fails.append(f"{label} expected WITNESS, got {getattr(dec_n, 'move', None)}")
+
+    # Turn 15: position-thread breakthrough — WITNESS + defer handoff
+    _, dec_15 = _bridge_overlay(KRISTY_TURN_15, uid, states)
+    if dec_15 is None or dec_15.move != stance.StanceMove.WITNESS:
+        fails.append(f"turn_15 expected WITNESS, got {getattr(dec_15, 'move', None)}")
+    if dec_15 and dec_15.end_on_question:
+        fails.append("turn_15 should set end_on_question=False")
+
+    handoff_raw = (
+        "You've been carrying a lot. Your coach is available if you'd like to bring them in. "
+        "What do you think?"
+    )
+    handoff_clean = stance.guard_generated_closer(
+        handoff_raw, dec_15 or dec_pos, states[uid],
+    )
+    if handoff_clean.strip().endswith("?"):
+        fails.append(f"handoff trailing question not stripped: {handoff_clean!r}")
 
     # guard_framing_menu: numbered menu under WITNESS → stripped + non-empty fallback
     menu_raw = (

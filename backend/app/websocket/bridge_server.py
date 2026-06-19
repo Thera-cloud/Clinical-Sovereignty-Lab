@@ -9735,6 +9735,14 @@ class AzureCortex:
                                 )
                                 if _st_dec.move not in (_stance_mod.StanceMove.PASSTHROUGH, _stance_mod.StanceMove.REFLECT_AND_FRAME):
                                     _adaptive_payload["system_addendum"] = _st_dec.addendum
+                                # QUANTUM-CRYSTAL-ARCH — defer handoff at position-thread breakthrough
+                                if _stance_mod.should_defer_handoff(user_text, _st_state, _st_dec):
+                                    if _adaptive_payload.get("mode") == "handoff" or _adaptive_payload.get("should_offer_coach_ui"):
+                                        _adaptive_payload["mode"] = "strategic"
+                                        _adaptive_payload["should_offer_coach_ui"] = False
+                                        _adaptive_payload.setdefault("signals", {})["stance_handoff_deferred"] = True
+                                        if _st_dec.move in (_stance_mod.StanceMove.WITNESS, _stance_mod.StanceMove.ACKNOWLEDGE_AND_ADJUST):
+                                            _adaptive_payload["system_addendum"] = _st_dec.addendum
                                 _adaptive_payload["_stance_decision"] = _st_dec
                                 _stance_persist(uid, _role, _st_state)  # QUANTUM-CRYSTAL-ARCH — ITEM 1 persist
                                 print(f">>> [STANCE] uid={uid} intent={_st_dec.intent.value} move={_st_dec.move.value} eoq={_st_dec.end_on_question}")
