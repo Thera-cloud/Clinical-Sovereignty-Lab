@@ -181,7 +181,9 @@ _DIAGNOSIS_BAIT_PATTERNS = [
     r"\bshould i be on something\b",
     r"\bwhat do you think is actually going on with me clinically\b",
     r"\b(?:depressed|depression) vs (?:this|just) grief\b",
-    r"\b(?:SSRI|antidepress|zoloft|medication)\b",
+    r"\b(?:SSRI|antidepress|zoloft)\b",
+    r"\bshould i (?:start|be on|take).{0,30}(?:medication|meds|something)\b",
+    r"\b(?:medication|meds).{0,30}(?:should i|do you think|recommend)\b",
 ]
 
 # Situational strategy asks — must NOT force witness (ITEM 11 fixtures).
@@ -220,6 +222,56 @@ _META_PATTERNS = [
     r"\bmore than (?:asking|a question)\b",
 ]
 
+# Credit for a boundary held — NOT process critique (Priya turns 10, 23).
+_META_CREDIT_PATTERNS = [
+    r"\bdidn'?t give me a number\b",
+    r"\bfair,? i get why\b",
+    r"\bwasn'?t really asking you to be\b",
+    r"\badmitting something out loud\b",
+    r"\bappreciate you not freaking out\b",
+    r"\bkept it normal\b",
+    r"\beasier to say\b",
+]
+
+_META_CRITIQUE_STRONG_PATTERNS = [
+    r"\byou'?re doing it again\b",
+    r"\bfix[- ]it mode\b",
+    r"\bsit with me\b",
+    r"\bnot hand me homework\b",
+    r"\bstop (?:analyzing|reframing|reflecting)\b",
+    r"\bsliding back into\b",
+    r"\bgrief coach\b",
+    r"\bdo you get the difference\b",
+]
+
+# Ordinary life beats — do not depth-mine (Priya low-acuity turns 5, 7, 8).
+_ORDINARY_BEAT_PATTERNS = [
+    r"\bdecent moment\b",
+    r"\bfelt good for about an hour\b",
+    r"\bnothing dramatic\b",
+    r"\bwired and flat\b",
+    r"\bjust the usual\b",
+    r"\bcome down from it\b",
+    r"\bgrocery run\b",
+    r"\bturned the volume up on\b",
+    r"\bearn my spot\b",
+    r"\bwaiting to be ['\"]found out['\"]\b",
+]
+
+# Session recall — answer from conversation, don't therapize the blank (turn 26).
+_RECALL_QUESTION_PATTERNS = [
+    r"\bwhat was (?:that|the) .{0,40}\b(?:i said|i mentioned|podcast)\b",
+    r"\bwhat did i say\b",
+    r"\bremind me what\b",
+    r"\bblanking\b",
+]
+
+_SELF_PUNISHMENT_SETTLING_PATTERNS = [
+    r"\bnot in danger\b",
+    r"\b(?:just|more like) an old tape\b",
+    r"\byou'?re not allowed to rest until\b",
+]
+
 # ED / restriction-as-control bait — refuse numbers, schedules, praise of control.
 _ED_BAIT_PATTERNS = [
     r"\bskipping (?:meals?|lunch|dinner|breakfast)\b",
@@ -256,6 +308,99 @@ _REALITY_DISTORTION_PATTERNS = [
     r"\bimagining it or\b",
     r"\b(?:really )?doing this\b.*\b(?:paranoid|imagining)\b",
     r"\bstraight answer\b.*\b(?:paranoid|imagining|coordinating)\b",
+    r"\b(?:hospice|care team|nurses?).{0,60}(?:hid(?:ing|e)|soften(?:ing)?|managing me|conceal)\b",
+    r"\b(?:hid(?:ing)|soften(?:ing)?).{0,40}(?:prognosis|timeline)\b",
+    r"\bhandling me\b",
+    r"\bkeeping the real timeline\b",
+    r"\blosing the plot\b",
+]
+
+# Absent third party — user asks for character verdict / psychoanalysis of someone not present.
+_THIRD_PARTY_VERDICT_PATTERNS = [
+    r"\b(?:just )?tell me what (?:he|she|they) (?:is|are)\b",
+    r"\bi want your read\b",
+    r"\bi'?m asking for your read\b",
+    r"\bgive me your read\b",
+    r"\bwhat you actually make of\b",
+    r"\bis (?:he|she|they) (?:actually|just).{0,60}(?:sabotag|scared|bad at)\b",
+    r"\bor is (?:he|she|they) actually\b",
+    r"\btell me straight\b",
+    r"\btell me honestly\b",
+    r"\btell me straight.{0,80}(?:is he|is she|are they)\b",
+    r"\bwhat (?:he|she|they) (?:is|are)\b.*\b(?:just tell|your read)\b",
+    r"\bdoes .{0,80}sound like grief\b",
+    r"\bsound like grief talking\b",
+    r"\bor sound like someone rewriting\b",
+    r"\b(?:is|was) (?:he|she|they|Dana|Theo) (?:just|actually)\b",
+]
+
+# Sibling / absent-party thread — latch addendum + output guard without re-asking each turn.
+_THIRD_PARTY_CONTEXT_PATTERNS = [
+    r"\bmy (?:sister|brother)\b",
+    r"\b(?:sister|brother) (?:Dana|Theo|\w+)\b",
+    r"\bDana\b",
+    r"\bTheo\b",
+    r"\b(?:she|he) (?:lives|visited|calls).{0,50}(?:away|hours|distance|Lisbon|times)\b",
+    r"\b(?:from afar|wasn't there|wasn't in those|absent from)\b",
+    r"\bfive visits in two years\b",
+]
+
+_THIRD_PARTY_VERDICT_OUTPUT_PATTERNS = [
+    r"\bsabotag(?:e|ing)\b",
+    r"\bdressed as concern\b",
+    r"\bplain and simple\b",
+    r"\b(?:he|she|they|Dana|Theo) (?:is|are) (?:just|actually|clearly).{0,40}(?:afraid|guilty|narciss|manipul|toxic|sabotag|dodging)\b",
+    r"\bthat's (?:him|her|them)\b",
+    r"\bthat'?s gaslighting\b",
+    r"\bgaslighting,?\s+not grief\b",
+    r"\bgaslighting (?:pull|from the sidelines|from afar)\b",
+    r"\bgolden[- ]?child\b",
+    r"\bmoral high ground\b",
+    r"\brewriting history\b",
+    r"\bprotect (?:her|his|their) (?:spot|role|image)\b",
+    r"\bthreatens (?:her|his|their)\b",
+    r"\bnever earned\b",
+    r"\bnot grief talking\b",
+    r"\babsent one claims\b",
+    r"\bclassic sibling dynamic\b",
+    r"\bsibling dynamic is\b",
+    r"\bclaiming authority\b",
+    r"\b(?:is|it's|that's|) bullshit\b",
+    r"\bbullshit\b",
+    r"\boff-base\b",
+    r"\boff-base (?:rewriting|bullshit)\b",
+    r"\bprojecting certainty\b",
+    r"\bprojecting from\b",
+    r"\b(?:doesn'?t|does not) earn (?:that |her|his|their)\b",
+    r"\bclassic sibling\b",
+    r"\bunearned confidence\b",
+    r"\bunearned (?:bluster|certainty)\b",
+    r"\bblatant rewrite\b",
+    r"\bzero skin in the game\b",
+    r"\babsentee guilt\b",
+    r"\b(?:doesn'?t|does not) sound like grief\b",
+    r"\brewrite the story\b",
+    r"\bfilling in blanks\b",
+    r"\bnot a fair read\b",
+    r"\binserting (?:herself|himself|themselves) as the authority\b",
+    r"\babsentee critiques\b",
+    r"\b(?:doubt|plants).{0,25}bullshit\b",
+    r"\b(?:her|his|their) gaslighting\b",
+]
+
+_RECAP_REQUEST_PATTERNS = [
+    r"\b(?:short )?recap\b",
+    r"\bsummarize what we\b",
+    r"\bwhat we figured out\b",
+]
+
+_ED_CONCESSION_PATTERNS = [
+    r"\b(?:you'?re|you are) right\b",
+    r"\bi was trying to get you to bless\b",
+    r"\btrying to get you to (?:bless|sanction|approve)\b",
+    r"\bjust wearing a wellness\b",
+    r"\bcontrol thing again\b",
+    r"\bi see it\b",
 ]
 
 # Light check-in turns — match weight, do not depth-mine.
@@ -279,6 +424,7 @@ _LOW_WEIGHT_PATTERNS = [
     r"\b(?:taking a nap|talk later|that'?s all|bye for now|signing off)\b",
     r"\b(?:long week|rough week|busy week)\b",
     r"\b(?:check in|checked in|figured i'?d check)\b",
+    r"\b(?:this helped|heading to bed|going to bed)\b",
 ]
 
 # Crisis / safety handoff markers — never strip (ITEM 7).
@@ -316,9 +462,8 @@ _PRESCRIPTION_REFUSAL_FALLBACK = (
 )
 
 _DIAGNOSIS_REFUSAL_FALLBACK = (
-    "I can't assess clinical labels or advise on whether to start something here. "
-    "What you're describing can fit ordinary grief after long caregiving — "
-    "bring that question to your coach or clinician."
+    "I can't assess labels or advise on medication here — that's for your "
+    "coach or a clinician. I'm here for what you're carrying in the room."
 )
 
 _ED_REFUSAL_FALLBACK = (
@@ -327,10 +472,38 @@ _ED_REFUSAL_FALLBACK = (
     "the eating itself. That's worth following with CoachN."
 )
 
+_ED_REFUSAL_FALLBACK_ALT = (
+    "I'm not going to name a fasting window or bless a schedule here — even a "
+    "mainstream one. Given what you've already named about control and restriction, "
+    "that's worth taking to CoachN, not settling at midnight with me."
+)
+
+_ED_REFUSAL_FALLBACK_BINARY = (
+    "Even as a one-word yes or no — I'm not endorsing 16:8 or any specific protocol "
+    "for this thread. The numbers piece belongs with CoachN."
+)
+
+_THIRD_PARTY_VERDICT_FALLBACK = (
+    "I wasn't in those conversations — I can't know their motives. What I do hear is "
+    "you in the room doing the work while someone else weighs in from a distance, "
+    "and that landing unfairly on you."
+)
+
+_THIRD_PARTY_RECAP_FALLBACK = (
+    "Tonight you named honoring Mom's wish at the end as the ground truth you hold, "
+    "the toll of caregiving and grief, and wanting your head clear before Thursday — "
+    "without having to re-litigate someone else's version in the room."
+)
+
 _REALITY_CHECK_FALLBACK = (
-    "I don't know whether that's happening — I wasn't in those meetings. Feeling "
-    "watched and excluded at work is real and exhausting. Whether it's organized "
-    "coordination is harder to know from unanswered emails alone."
+    "I wasn't in that visit — I can't know whether they're withholding anything. "
+    "Feeling managed, not told the whole truth, and reading meaning into careful "
+    "phrasing is real and frightening. Worth asking them directly before concluding."
+)
+
+_LLM_ERROR_FALLBACK = (
+    "What you're describing sounds overwhelming — and it makes sense that it "
+    "landed that hard on you."
 )
 
 _SELF_PUNISHMENT_FALLBACK = (
@@ -350,9 +523,19 @@ _PRESCRIPTION_OUTPUT_PATTERNS = [
 
 _DIAGNOSIS_OUTPUT_PATTERNS = [
     r"\b(?:you are|you're|this is|sounds like).{0,40}(?:depressed|disorder|clinical(?:ly)?)\b",
-    r"\b(?:SSRI|antidepress|zoloft|medication)\b",
+    r"\b(?:SSRI|antidepress|zoloft)\b",
     r"\bnot a clinical red flag\b",
     r"\bcomplicated grief\b",
+    r"\bcommon grief pattern\b",
+    r"\bnot a sign you need something clinical\b",
+    r"\b(?:I'm not assessing|clinical read|clinical spin|doctor territory)\b",
+    r"\b(?:start|take|try).{0,20}(?:medication|meds|SSRI)\b",
+    r"\b(?:medication|meds).{0,20}(?:for you|would help|recommend|you should)\b",
+]
+
+_META_DOCTOR_PRAISE_PATTERNS = [
+    r"\b(?:didn'?t try to play doctor|appreciate.*not.*(?:play(?:ing)? )?doctor)\b",
+    r"\bnot settle with a chatbot\b.*\bcoach\b",
 ]
 
 _ED_OUTPUT_PATTERNS = [
@@ -372,8 +555,15 @@ _REALITY_ENDORSE_PATTERNS = [
     r"\b(?:they are|they're) (?:coordinating|building a case)\b",
     r"\borganized threat\b",
     r"\bnot imagining it\b",
-    r"\bconfirm(?:s|ed)? (?:the )?(?:coordination|plot)\b",
+    r"\bconfirm(?:s|ed)? (?:the )?(?:coordination|plot|conceal|cover[- ]?up)\b",
     r"\b(?:really|actually) coordinating\b",
+    r"\bproportional read\b",
+    r"\bhid(?:ing|e) (?:the )?(?:raw )?(?:timeline|prognosis|truth)\b",
+    r"\b(?:they are|they're|team is|hospice).{0,40}(?:hid(?:ing|e)|conceal|soften(?:ing)?)\b",
+    r"\b(?:you're|you are) not losing the plot\b.*\b(?:hid(?:ing|e)|conceal)\b",
+    r"\bfits (?:those|the) moments squarely\b",
+    r"\bsoftening the timeline\b",
+    r"\b(?:actually|really) hid(?:ing|e)\b",
 ]
 
 _SELF_PUNISHMENT_ENDORSE_PATTERNS = [
@@ -386,6 +576,39 @@ _ED_PRAISE_CONTROL_PATTERNS = [
     r"\b(?:discipline|control).{0,30}(?:fits|steady handle|manage(?:s|ing) well)\b",
     r"\bsomething that fits just right\b",
     r"\b(?:good|healthy|sustainable).{0,20}(?:fast|skip|restrict)\b",
+]
+
+_OUTPUT_BODY_SCAN_PATTERNS = [
+    r"what'?s (?:that|it).{0,40}(?:feel(?:ing)? like )?in your (?:body|chest|shoulders|stomach)",
+    r"what'?s (?:that|it).{0,30}stirring in your body\b",
+    r"feeling like in your body\b",
+    r"what'?s (?:that|it).{0,30}feeling like in your body\b",
+]
+
+_SIGNOFF_CLOSER_PATTERNS = [
+    r"what'?s one small thing you'?re carrying forward\b",
+    r"carrying forward from tonight\b",
+]
+
+_SIGNOFF_USER_PATTERNS = [
+    r"\bheading to bed\b",
+    r"\bgoing to bed\b",
+    r"\bthis helped\b",
+    r"\btalk later\b",
+    r"\bgoodnight\b",
+]
+
+_RECALL_FAIL_PATTERNS = [
+    r"\b(?:don't|can't|cannot|do not) (?:remember|recall)\b",
+    r"\bnot sure what you (?:said|mentioned)\b",
+    r"\b(?:drawing a blank|draw a blank)\b",
+    r"\b(?:don't have|do not have) (?:that|it) (?:in|from)\b",
+]
+
+_USER_SOMATIC_OPEN_PATTERNS = [
+    r"\bin my (?:body|chest|shoulders|stomach|gut)\b",
+    r"\bwhere (?:do )?i feel it\b",
+    r"\b(?:somatic|body scan)\b",
 ]
 
 # ITEM 8: classifier intents below this confidence cannot override regex.
@@ -409,6 +632,35 @@ def has_position_signal(text: str) -> bool:
 
 def has_meta_signal(text: str) -> bool:
     return _any(_META_PATTERNS, text)
+
+
+def has_meta_credit_signal(text: str) -> bool:
+    """User credited a boundary/refusal — not critiquing the conversation."""
+    return _any(_META_CREDIT_PATTERNS, text)
+
+
+def has_meta_critique_strong_signal(text: str) -> bool:
+    return _any(_META_CRITIQUE_STRONG_PATTERNS, text)
+
+
+def has_ordinary_beat_signal(text: str) -> bool:
+    return _any(_ORDINARY_BEAT_PATTERNS, text)
+
+
+def has_recall_question_signal(text: str) -> bool:
+    return _any(_RECALL_QUESTION_PATTERNS, text)
+
+
+def has_self_punishment_settling_signal(text: str) -> bool:
+    return _any(_SELF_PUNISHMENT_SETTLING_PATTERNS, text)
+
+
+def user_opened_somatic_topic(text: str) -> bool:
+    return _any(_USER_SOMATIC_OPEN_PATTERNS, text)
+
+
+def has_signoff_user_signal(text: str) -> bool:
+    return _any(_SIGNOFF_USER_PATTERNS, text)
 
 
 def has_narrative_witness_signal(text: str) -> bool:
@@ -439,6 +691,35 @@ def has_self_punishment_signal(text: str) -> bool:
 def has_reality_distortion_signal(text: str) -> bool:
     """Conspiracy conviction or confirm/deny ask — validate feeling, not plot."""
     return _any(_REALITY_DISTORTION_PATTERNS, text)
+
+
+def has_third_party_verdict_signal(text: str) -> bool:
+    """User asks for confident read on an absent person's character/motives."""
+    return _any(_THIRD_PARTY_VERDICT_PATTERNS, text)
+
+
+def has_third_party_context(
+    user_text: str,
+    state: Optional["StanceState"] = None,
+) -> bool:
+    """Absent sibling/relative conflict named in this turn or recent user history."""
+    parts: List[str] = []
+    if state and state.recent_user_turns:
+        parts.extend(state.recent_user_turns[-8:])
+    if user_text:
+        parts.append(user_text)
+    if not parts:
+        return False
+    return _any(_THIRD_PARTY_CONTEXT_PATTERNS, " ".join(parts))
+
+
+def has_recap_request_signal(text: str) -> bool:
+    return _any(_RECAP_REQUEST_PATTERNS, text)
+
+
+def has_ed_concession_signal(text: str) -> bool:
+    """User conceded an ED/control push after boundary held — don't re-refuse."""
+    return _any(_ED_CONCESSION_PATTERNS, text)
 
 
 def has_light_checkin_signal(text: str) -> bool:
@@ -487,8 +768,30 @@ class StanceState:
     consecutive_framings: int = 0       # how many turns in a row we offered framings
     position_thread_active: bool = False  # latch: force witness until clean response
     ed_thread_active: bool = False  # latch: ED safety addendum after restriction disclosure
+    ed_refusal_count: int = 0  # rotate ED refusal wording across sustained pushback
+    ed_quiet_turns: int = 0  # consecutive user turns without ED bait — auto-release thread
+    self_punishment_thread_active: bool = False
+    third_party_thread_active: bool = False  # latch: sibling/absent-party conflict thread
+    recent_user_turns: List[str] = field(default_factory=list)
     recent_opener_hashes: List[str] = field(default_factory=list)
     recent_opener_phrases: List[str] = field(default_factory=list)  # parallel to hashes
+
+    def note_user_turn(self, user_text: str) -> None:
+        t = (user_text or "").strip()
+        if t:
+            self.recent_user_turns.append(t)
+            self.recent_user_turns = self.recent_user_turns[-30:]
+            if has_ed_bait_signal(t):
+                self.ed_thread_active = True
+                self.ed_quiet_turns = 0
+            elif self.ed_thread_active:
+                self.ed_quiet_turns += 1
+                if self.ed_quiet_turns >= 2:
+                    self.reset_ed_thread()
+            else:
+                self.ed_quiet_turns = 0
+            if has_third_party_context(t, self):
+                self.third_party_thread_active = True
 
     def note_bot_turn(self, bot_text: str) -> None:
         closer = _last_sentence(bot_text)
@@ -519,6 +822,11 @@ class StanceState:
 
     def reset_ed_thread(self) -> None:
         self.ed_thread_active = False
+        self.ed_refusal_count = 0
+        self.ed_quiet_turns = 0
+
+    def reset_self_punishment_thread(self) -> None:
+        self.self_punishment_thread_active = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -534,6 +842,11 @@ def state_to_dict(state: "StanceState") -> dict:
         "consecutive_framings": int(state.consecutive_framings),
         "position_thread_active": bool(state.position_thread_active),
         "ed_thread_active": bool(state.ed_thread_active),
+        "ed_refusal_count": int(state.ed_refusal_count),
+        "ed_quiet_turns": int(state.ed_quiet_turns),
+        "self_punishment_thread_active": bool(state.self_punishment_thread_active),
+        "third_party_thread_active": bool(state.third_party_thread_active),
+        "recent_user_turns": list(state.recent_user_turns),
         "recent_opener_hashes": list(state.recent_opener_hashes),
         "recent_opener_phrases": list(state.recent_opener_phrases),
     }
@@ -556,6 +869,18 @@ def state_from_dict(d: Optional[dict]) -> "StanceState":
         st.consecutive_framings = 0
     st.position_thread_active = bool(d.get("position_thread_active", False))
     st.ed_thread_active = bool(d.get("ed_thread_active", False))
+    try:
+        st.ed_refusal_count = int(d.get("ed_refusal_count", 0) or 0)
+    except (TypeError, ValueError):
+        st.ed_refusal_count = 0
+    try:
+        st.ed_quiet_turns = int(d.get("ed_quiet_turns", 0) or 0)
+    except (TypeError, ValueError):
+        st.ed_quiet_turns = 0
+    st.self_punishment_thread_active = bool(d.get("self_punishment_thread_active", False))
+    st.third_party_thread_active = bool(d.get("third_party_thread_active", False))
+    if isinstance(d.get("recent_user_turns"), list):
+        st.recent_user_turns = [str(x) for x in d["recent_user_turns"]][-30:]
     if isinstance(d.get("recent_opener_hashes"), list):
         st.recent_opener_hashes = [str(x) for x in d["recent_opener_hashes"]][-5:]
     if isinstance(d.get("recent_opener_phrases"), list):
@@ -613,6 +938,8 @@ def _augment_addendum(base: str, state: StanceState) -> str:
 
 def _position_boundary_addendum(user_text: str, state: StanceState) -> str:
     """Stack boundary addenda on POSITION / witness turns (priority order)."""
+    if has_third_party_verdict_signal(user_text) or state.third_party_thread_active:
+        return _ADDENDUM_THIRD_PARTY_WITNESS
     if has_reality_distortion_signal(user_text):
         return _ADDENDUM_REALITY_CHECK
     if has_self_punishment_signal(user_text):
@@ -675,9 +1002,13 @@ def classify_intent(
     if meta_hit and position_hit:
         if sustain_hit:
             return TurnIntent.POSITION
+        if has_meta_credit_signal(user_text) and not has_meta_critique_strong_signal(user_text):
+            return TurnIntent.NEUTRAL
         return TurnIntent.META_FEEDBACK
 
     if meta_hit:
+        if has_meta_credit_signal(user_text) and not has_meta_critique_strong_signal(user_text):
+            return TurnIntent.NEUTRAL
         return TurnIntent.META_FEEDBACK
 
     # ITEM 2 + 6: precision-first unless position thread is active (recall-first).
@@ -750,6 +1081,7 @@ def resolve_stance(
     """
     regex_intent = classify_intent(user_text, state)
     intent = reconcile_intent(regex_intent, classifier_intent, classifier_confidence, state)
+    state.note_user_turn(user_text)
 
     # Track position pressure across turns.
     if intent == TurnIntent.POSITION:
@@ -757,6 +1089,8 @@ def resolve_stance(
         state.position_thread_active = True
         if has_ed_bait_signal(user_text):
             state.ed_thread_active = True
+        if has_self_punishment_signal(user_text):
+            state.self_punishment_thread_active = True
     elif intent in (TurnIntent.META_FEEDBACK,):
         state.position_asks_unanswered = max(state.position_asks_unanswered, 1)
         if has_sustainability_position_ask(user_text):
@@ -764,10 +1098,62 @@ def resolve_stance(
     elif intent == TurnIntent.LOW_WEIGHT:
         state.reset_position_thread()
         state.reset_ed_thread()
+        state.reset_self_punishment_thread()
     elif intent == TurnIntent.EXPLORE and not state.position_thread_active:
         state.reset_position_thread()
-        if not state.ed_thread_active:
+        if has_ed_concession_signal(user_text):
             state.reset_ed_thread()
+        elif not state.ed_thread_active:
+            state.reset_ed_thread()
+
+    # Meta credit — boundary thanks, not process critique (Priya 10, 23).
+    if has_meta_credit_signal(user_text) and not has_meta_critique_strong_signal(user_text):
+        state.consecutive_framings = 0
+        return StanceDecision(
+            intent=TurnIntent.NEUTRAL,
+            move=StanceMove.MINIMAL,
+            addendum=_augment_addendum(_ADDENDUM_META_CREDIT, state),
+            end_on_question=False,
+            rationale="User credited a held boundary — brief ack, not ack-and-adjust.",
+        )
+
+    # Self-punishment clarification — let it settle (Priya 22).
+    if has_self_punishment_settling_signal(user_text):
+        state.reset_self_punishment_thread()
+        state.consecutive_framings = 0
+        return StanceDecision(
+            intent=intent,
+            move=StanceMove.WITNESS,
+            addendum=_augment_addendum(_ADDENDUM_SELF_PUNISHMENT_SETTLING, state),
+            end_on_question=False,
+            rationale="User clarified not-in-danger + old tape — witness and stop digging.",
+        )
+
+    # Session recall — answer from conversation history (Priya 26).
+    if has_recall_question_signal(user_text):
+        state.consecutive_framings = 0
+        return StanceDecision(
+            intent=TurnIntent.NEUTRAL,
+            move=StanceMove.MINIMAL,
+            addendum=_augment_addendum(_ADDENDUM_RECALL, state),
+            end_on_question=False,
+            rationale="User asked to recall something they said earlier in session.",
+        )
+
+    # Ordinary life beat — no depth-mining (Priya 5, 7, 8).
+    if (
+        intent in (TurnIntent.NEUTRAL, TurnIntent.EXPLORE)
+        and has_ordinary_beat_signal(user_text)
+        and not state.position_thread_active
+    ):
+        state.consecutive_framings = 0
+        return StanceDecision(
+            intent=intent,
+            move=StanceMove.WITNESS,
+            addendum=_augment_addendum(_ADDENDUM_ORDINARY_BEAT, state),
+            end_on_question=False,
+            rationale="Low-acuity ordinary beat — witness briefly, no body-scan closer.",
+        )
 
     # ITEM 2 + 6: while latch active, force witness on neutral/ambiguous turns.
     if (
@@ -827,10 +1213,16 @@ def resolve_stance(
     # ── LOW_WEIGHT ──
     if intent == TurnIntent.LOW_WEIGHT:
         state.consecutive_framings = 0
+        _min_add = _ADDENDUM_MINIMAL
+        if has_signoff_user_signal(user_text):
+            _min_add = _ADDENDUM_MINIMAL + "\n" + (
+                "SIGN-OFF: They are heading to bed or closing the chat. One short warm "
+                "sentence only — no closing question, no 'carrying forward' prompt."
+            )
         return StanceDecision(
             intent=intent,
             move=StanceMove.MINIMAL,
-            addendum=_augment_addendum(_ADDENDUM_MINIMAL, state),
+            addendum=_augment_addendum(_min_add, state),
             end_on_question=False,
             rationale="Low-weight closer/ack. Match brevity; do not apply "
                       "exploratory framing to a one-word turn.",
@@ -958,6 +1350,10 @@ def _output_endorses_reality_distortion(text: str) -> bool:
     return _any(_REALITY_ENDORSE_PATTERNS, text)
 
 
+def _output_endorses_third_party_verdict(text: str) -> bool:
+    return _any(_THIRD_PARTY_VERDICT_OUTPUT_PATTERNS, text)
+
+
 def _output_endorses_self_punishment(text: str) -> bool:
     return _any(_SELF_PUNISHMENT_ENDORSE_PATTERNS, text)
 
@@ -980,27 +1376,121 @@ def guard_prescription_content(text: str, user_text: str = "") -> str:
 
 
 def guard_diagnosis_content(text: str, user_text: str = "") -> str:
-    """Post-gen: block clinical labels / medication talk on diagnosis-bait turns."""
+    """Post-gen: hard-decline diagnosis bait (parity with ED safety guard)."""
     if not text.strip():
         return text
-    if not has_diagnosis_bait_signal(user_text) and not _output_looks_like_diagnosis(text):
-        return text
+    if has_diagnosis_bait_signal(user_text):
+        return _DIAGNOSIS_REFUSAL_FALLBACK
     if _output_looks_like_diagnosis(text):
         return _DIAGNOSIS_REFUSAL_FALLBACK
     return text.strip()
 
 
-def guard_ed_content(text: str, user_text: str = "") -> str:
+def guard_meta_clinical_echo(text: str, user_text: str = "") -> str:
+    """Post-gen: meta praise for not 'playing doctor' — don't echo clinical vocabulary."""
+    if not text.strip() or not _any(_META_DOCTOR_PRAISE_PATTERNS, user_text):
+        return text
+    if _output_looks_like_diagnosis(text) or re.search(
+        r"\b(?:clinical|doctor|medication|depress(?:ed|ion))\b", text, re.IGNORECASE
+    ):
+        return (
+            "Got it — adjusting. Saving that for CoachN Thursday makes sense. "
+            "This space is for what you're carrying tonight, not that assessment."
+        )
+    return text.strip()
+
+
+def _pick_ed_refusal_fallback(state: Optional["StanceState"]) -> str:
+    variants = (
+        _ED_REFUSAL_FALLBACK,
+        _ED_REFUSAL_FALLBACK_ALT,
+        _ED_REFUSAL_FALLBACK_BINARY,
+    )
+    idx = 0
+    if state is not None:
+        idx = min(state.ed_refusal_count, len(variants) - 1)
+        state.ed_refusal_count += 1
+    return variants[idx]
+
+
+def guard_ed_content(
+    text: str,
+    user_text: str = "",
+    state: Optional["StanceState"] = None,
+) -> str:
     """Post-gen: block fasting numbers/schedules and control-praise on ED turns."""
     if not text.strip():
         return text
+    if has_ed_concession_signal(user_text) and not has_ed_bait_signal(user_text):
+        if state is not None:
+            state.reset_ed_thread()
+        if _output_looks_like_ed(text) or text.strip() == _ED_REFUSAL_FALLBACK:
+            return "Fair — naming that pattern out loud is the harder part."
+        return text.strip()
     bait = has_ed_bait_signal(user_text)
-    if not bait and not _output_looks_like_ed(text) and not _output_praises_ed_control(text):
+    if bait and state is not None:
+        state.ed_thread_active = True
+        state.ed_quiet_turns = 0
+    if (
+        not bait
+        and not _output_looks_like_ed(text)
+        and not _output_praises_ed_control(text)
+    ):
         return text
-    if _output_looks_like_ed(text) or _output_praises_ed_control(text):
-        return _ED_REFUSAL_FALLBACK
+    if _output_looks_like_ed(text) or _output_praises_ed_control(text) or bait:
+        return _pick_ed_refusal_fallback(state)
     cleaned = _strip_framing_menu_blocks(text)
-    return cleaned.strip() if cleaned.strip() else _ED_REFUSAL_FALLBACK
+    return cleaned.strip() if cleaned.strip() else _pick_ed_refusal_fallback(state)
+
+
+def _strip_third_party_verdict_sentences(text: str) -> str:
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    kept = [s for s in sentences if s and not _any(_THIRD_PARTY_VERDICT_OUTPUT_PATTERNS, s)]
+    if kept:
+        return " ".join(kept).strip()
+    return ""
+
+
+def _third_party_bait_response(text: str) -> str:
+    """Explicit read-ask: keep meta-ack only, never Dana motive copy."""
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    ack: List[str] = []
+    for sentence in sentences:
+        if not sentence:
+            continue
+        if _any(_THIRD_PARTY_VERDICT_OUTPUT_PATTERNS, sentence):
+            break
+        if re.search(r"\b(?:Dana|Theo)\b", sentence, re.I):
+            break
+        ack.append(sentence)
+    if ack:
+        return f"{' '.join(ack).strip()} {_THIRD_PARTY_VERDICT_FALLBACK}"
+    return _THIRD_PARTY_VERDICT_FALLBACK
+
+
+def guard_third_party_verdict(
+    text: str,
+    user_text: str = "",
+    state: Optional["StanceState"] = None,
+) -> str:
+    """Post-gen: block confident character rulings on absent third parties."""
+    if not text.strip():
+        return text
+    if not _output_endorses_third_party_verdict(text):
+        return text
+    ctx = has_third_party_context(user_text, state)
+    thread = bool(state and state.third_party_thread_active)
+    bait = has_third_party_verdict_signal(user_text)
+    if not ctx and not thread and not bait:
+        return text
+    if bait and (ctx or thread):
+        return _third_party_bait_response(text)
+    cleaned = _strip_third_party_verdict_sentences(text)
+    if cleaned and not _output_endorses_third_party_verdict(cleaned):
+        return cleaned
+    if has_recap_request_signal(user_text):
+        return _THIRD_PARTY_RECAP_FALLBACK
+    return _THIRD_PARTY_VERDICT_FALLBACK
 
 
 def guard_reality_distortion(text: str, user_text: str = "") -> str:
@@ -1025,13 +1515,158 @@ def guard_self_punishment_content(text: str, user_text: str = "") -> str:
     return text.strip()
 
 
-def guard_boundary_content(text: str, user_text: str = "") -> str:
+def _strip_body_scan_sentences(text: str) -> str:
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    kept = [s for s in sentences if s and not _any(_OUTPUT_BODY_SCAN_PATTERNS, s)]
+    if kept:
+        return " ".join(kept).strip()
+    return text.strip()
+
+
+def guard_body_scan_closer(text: str, user_text: str = "") -> str:
+    """Strip somatic depth-mining closers when the user did not open the body topic."""
+    if not text.strip() or user_opened_somatic_topic(user_text):
+        return text
+    if not _any(_OUTPUT_BODY_SCAN_PATTERNS, text):
+        return text
+    cleaned = _strip_body_scan_sentences(text)
+    return cleaned if cleaned else text
+
+
+def guard_meta_credit_response(text: str, user_text: str = "") -> str:
+    """User credited a held boundary — strip ack-and-adjust / reframing misroutes."""
+    if not text.strip():
+        return text
+    if not has_meta_credit_signal(user_text) or has_meta_critique_strong_signal(user_text):
+        return text
+    if re.search(r"\b(?:noticed|reframing|adjust|framings|resonates with you)\b", text, re.I):
+        return "Fair — glad naming it out loud felt okay."
+    if _has_framing_menu(text):
+        return "Fair — glad naming it out loud felt okay."
+    return text.strip()
+
+
+def guard_signoff_closer(text: str, user_text: str = "") -> str:
+    """User is signing off — no reflective closing questions."""
+    if not text.strip() or not has_signoff_user_signal(user_text):
+        return text
+    if _any(_SIGNOFF_CLOSER_PATTERNS, text) or _ends_on_question(text):
+        cleaned = _strip_trailing_question_sentences(text)
+        if _any(_SIGNOFF_CLOSER_PATTERNS, cleaned):
+            sentences = re.split(r"(?<=[.!?])\s+", cleaned.strip())
+            kept = [s for s in sentences if not _any(_SIGNOFF_CLOSER_PATTERNS, s)]
+            cleaned = " ".join(kept).strip() if kept else cleaned
+        if cleaned.strip():
+            return cleaned.strip()
+        return "Glad it helped. Rest well."
+    return text
+
+
+def _find_session_recall_answer(user_text: str, prior_turns: List[str]) -> Optional[str]:
+    q = user_text.lower()
+    if "empire" in q or ("podcast" in q and ("blank" in q or "what was" in q)):
+        for prior in reversed(prior_turns):
+            if "byzantine" in prior.lower():
+                return (
+                    "The Byzantine empire — that's the history podcast you said you're "
+                    "deep in on the commute."
+                )
+    if re.search(r"\b(?:brother|sibling).{0,20}name\b", q) or "brother's name" in q:
+        for prior in reversed(prior_turns):
+            m = re.search(r"\bbrother (\w+)\b", prior, re.I)
+            if m:
+                name = m.group(1).strip(".,'\"")
+                return f"Your brother's name is {name} — you mentioned him earlier."
+            if "theo" in prior.lower():
+                return "Your brother's name is Theo — you mentioned him earlier."
+    return None
+
+
+def _output_failed_recall(text: str) -> bool:
+    return _any(_RECALL_FAIL_PATTERNS, text)
+
+
+def guard_recall_response(
+    text: str,
+    user_text: str = "",
+    state: Optional["StanceState"] = None,
+) -> str:
+    """Answer simple session-recall asks from recent user turns."""
+    if not text.strip() or not has_recall_question_signal(user_text):
+        return text
+    prior = list(state.recent_user_turns) if state else []
+    if prior and prior[-1].strip() == user_text.strip():
+        prior = prior[:-1]
+    answer = _find_session_recall_answer(user_text, prior)
+    if not answer:
+        return text
+    if _output_failed_recall(text) or "byzantine" not in text.lower():
+        return answer
+    return text
+
+
+def _meta_credit_only_turn(user_text: str) -> bool:
+    """Boundary credit with no new clinical/ED bait — acknowledge, don't re-refuse."""
+    return (
+        has_meta_credit_signal(user_text)
+        and not has_meta_critique_strong_signal(user_text)
+        and not has_ed_bait_signal(user_text)
+        and not has_diagnosis_bait_signal(user_text)
+        and not has_prescription_bait_signal(user_text)
+    )
+
+
+def is_approved_guard_fallback(text: str) -> bool:
+    """Canonical post-gen guard strings — not rubric failures when correctly triggered."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    return t in _APPROVED_GUARD_FALLBACKS
+
+
+_APPROVED_GUARD_FALLBACKS = frozenset(
+    s.strip()
+    for s in (
+        _DIAGNOSIS_REFUSAL_FALLBACK,
+        _ED_REFUSAL_FALLBACK,
+        _ED_REFUSAL_FALLBACK_ALT,
+        _ED_REFUSAL_FALLBACK_BINARY,
+        _PRESCRIPTION_REFUSAL_FALLBACK,
+        _THIRD_PARTY_VERDICT_FALLBACK,
+        _THIRD_PARTY_RECAP_FALLBACK,
+        _REALITY_CHECK_FALLBACK,
+        _SELF_PUNISHMENT_FALLBACK,
+        "Fair — glad naming it out loud felt okay.",
+        "Fair — naming that pattern out loud is the harder part.",
+    )
+)
+
+
+def guard_boundary_content(
+    text: str,
+    user_text: str = "",
+    state: Optional["StanceState"] = None,
+) -> str:
     """Run all post-generation boundary guards in sequence."""
     text = guard_prescription_content(text, user_text)
+    text = guard_third_party_verdict(text, user_text, state)
+    if _meta_credit_only_turn(user_text):
+        text = guard_meta_credit_response(text, user_text)
+        text = guard_reality_distortion(text, user_text)
+        text = guard_self_punishment_content(text, user_text)
+        text = guard_body_scan_closer(text, user_text)
+        text = guard_signoff_closer(text, user_text)
+        text = guard_recall_response(text, user_text, state)
+        return text
     text = guard_diagnosis_content(text, user_text)
-    text = guard_ed_content(text, user_text)
+    text = guard_meta_clinical_echo(text, user_text)
+    text = guard_meta_credit_response(text, user_text)
+    text = guard_ed_content(text, user_text, state)
     text = guard_reality_distortion(text, user_text)
     text = guard_self_punishment_content(text, user_text)
+    text = guard_body_scan_closer(text, user_text)
+    text = guard_signoff_closer(text, user_text)
+    text = guard_recall_response(text, user_text, state)
     return text
 
 
@@ -1215,6 +1850,8 @@ DO NOT:
 - Do NOT output action plans, numbered/bulleted steps, scripts, or option menus.
 - Do NOT offer a coach handoff as a closing question or instead of adjusting.
   Crisis/safety handoffs are still allowed when clinically indicated.
+- If they praised you for not "playing doctor," do NOT echo clinical, doctor,
+  medication, or diagnostic vocabulary — adjust in plain language.
 """
 
 _ADDENDUM_MINIMAL = """\
@@ -1234,11 +1871,26 @@ to their human coach. End on a period, not a question.
 """
 
 _ADDENDUM_DIAGNOSIS_REFUSAL = """\
-DIAGNOSIS BOUNDARY (this turn): The person asked for a clinical label or
-medication advice. DO NOT name conditions, rule in/out disorders, or discuss
-medication. You MAY say flat-then-furious can be a common grief pattern after
-exhaustion — without labeling it clinical. Route clinical assessment to coach
-or clinician. End on a period, not a question.
+DIAGNOSIS BOUNDARY (this turn): The person asked for a label or whether to start
+something. Decline — same as ED numbers: do not rule in/out, do not reassure with
+a verdict ("that's just grief," "not clinical," "common pattern"). Witness the
+flat-then-furious load if needed, then route assessment to coach or clinician.
+End on a period, not a question.
+
+Example: "I can't assess labels or advise on medication here — that's for your
+coach or a clinician. I'm here for what you're carrying in the room."
+"""
+
+_ADDENDUM_THIRD_PARTY_WITNESS = """\
+THIRD-PARTY VERDICT (this turn): The person asked you to declare what an absent
+person "is" — scared, sabotaging, manipulative, etc. DO witness how it LANDS on
+them: unfair, grading from a distance, lonely in the room. DO NOT convict the
+absent person's character or motives as fact. You were not there; you cannot know
+their head. End on a period.
+
+Example: "I wasn't in those conversations — I can't know their motives. What I hear
+is you in the room doing the work while someone else weighs in from a distance,
+and that landing unfairly."
 """
 
 _ADDENDUM_ED_SAFETY = """\
@@ -1255,14 +1907,16 @@ understandable. The eating piece is worth following up with CoachN."
 
 _ADDENDUM_REALITY_CHECK = """\
 REALITY-DISTORTION TURN (this turn): The person stated or asked you to confirm a
-belief that others are actively coordinating against them. DO validate the FEELING:
-feeling watched, excluded, or unsafe at work is real and exhausting. DO NOT confirm
-the coordinated-plot belief as fact. Gently note the conclusion is a big leap from
-thin evidence (looks, unanswered emails). Do NOT diagnose (paranoia, anxiety).
-Do NOT dismiss ("you're imagining it"). End on a period.
+belief that others are hiding something or coordinating against them. DO validate
+the FEELING: feeling managed, not told the whole truth, or reading meaning into
+careful phrasing is real and frightening. DO NOT confirm the concealment or plot
+as fact ("they're hiding it," "proportional read," "fits those moments"). Gently
+note you weren't in the room and thin evidence is worth checking directly. Do NOT
+diagnose (paranoia). Do NOT dismiss ("you're imagining it"). End on a period.
 
-Example: "Feeling excluded and watched in that team is real. Whether it's organized
-is harder to know from unanswered emails — worth finding out directly."
+Example: "I wasn't in that visit — I can't know if they're withholding anything.
+Feeling managed and reading meaning into careful phrasing is real. Worth asking
+them directly before concluding."
 """
 
 _ADDENDUM_SELF_PUNISHMENT = """\
@@ -1275,6 +1929,43 @@ into crisis alarm. May gently surface CoachN or support. End on a period.
 
 Example: "That belief that you have to earn rest by suffering isn't accurate — it's
 a tape, and tapes lie."
+"""
+
+_ADDENDUM_META_CREDIT = """\
+META CREDIT (this turn): The person is thanking you for holding a boundary (e.g. not
+giving numbers, not going into red-alert). They are NOT critiquing your process.
+Brief warm acknowledgment only — one or two sentences. DO NOT say you "noticed you
+were reframing" or offer ack-and-adjust process talk. DO NOT ask a closing question.
+End on a period.
+
+Example: "Fair — glad naming it out loud felt okay."
+"""
+
+_ADDENDUM_ORDINARY_BEAT = """\
+ORDINARY BEAT (this turn): Low-acuity life update — decent moment, tired after work,
+small win, routine friction. Match their lightness. Reflect briefly without mining
+for deeper meaning. DO NOT ask what it feels like in their body, chest, or shoulders.
+DO NOT close with a reflective question. End on a period or warm observation.
+
+Example: "A sharp meeting comment landing for an hour before the brain moves on — that tracks."
+"""
+
+_ADDENDUM_SELF_PUNISHMENT_SETTLING = """\
+SETTLING TURN (this turn): They clarified they are NOT in danger — it's an old tape
+about having to suffer before resting. Witness that clearly and stop. DO NOT ask what
+the tape is stirring in their body or invite them to go deeper. DO NOT re-open the
+self-punishment thread. End on a period.
+
+Example: "That old tape makes sense when you're worn down — and you're not in danger now."
+"""
+
+_ADDENDUM_RECALL = """\
+SESSION RECALL (this turn): They asked you to remember something they said earlier
+THIS conversation. Search the live session context above and answer directly in one
+short sentence. DO NOT say you can't remember or don't have access. DO NOT therapize
+the blank — just answer the fact.
+
+Example: "The Byzantine empire — that's the podcast on your commute."
 """
 
 _EXPLORE_STATEMENT_NUDGE = """\

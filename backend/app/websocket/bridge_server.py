@@ -400,7 +400,7 @@ async def _stance_maybe_regen(gutted, system_prompt, user_text, prior, st_dec, s
             return prior
         _regen = _stance_mod.guard_framing_menu(_regen, st_dec.move)
         _regen = _stance_mod.guard_generated_closer(_regen, st_dec, st_state)
-        _regen = _stance_mod.guard_boundary_content(_regen, user_text)
+        _regen = _stance_mod.guard_boundary_content(_regen, user_text, st_state)
         return _regen.strip() if _regen.strip() else prior
     except Exception as _rg_err:
         print(f">>> [STANCE] regen error (non-fatal): {_rg_err}")
@@ -10168,7 +10168,7 @@ class AzureCortex:
                         full_response = _stance_mod.guard_stale_opener(full_response, _st_state2)  # QUANTUM-CRYSTAL-ARCH
                         full_response = _stance_mod.guard_generated_closer(full_response, _st_dec2, _st_state2)
                         # QUANTUM-CRYSTAL-ARCH — boundary guards (prescription/ED/reality/self-punishment)
-                        full_response = _stance_mod.guard_boundary_content(full_response, user_text)
+                        full_response = _stance_mod.guard_boundary_content(full_response, user_text, _st_state2)
                         _st_strip_menu = bool(_st_had_menu and not _stance_mod._has_framing_menu(full_response))
                         _st_strip_opener = bool(_st_opener_stale)
                         _st_removed = 1.0 - (len(full_response.strip()) / _st_pre_len)
