@@ -330,6 +330,36 @@ except Exception as _stance_imp_err:
     _stance_mod = None
 _stance_states: dict = {}  # uid -> StanceState (lifecycle bound to adaptive sweep/clear)
 _ENABLE_STANCE_RESOLVER = os.getenv("ENABLE_STANCE_RESOLVER", "false").lower() in ("true", "1", "yes")
+_ENABLE_STANCE_GUARD_TELEMETRY = os.getenv(
+    "ENABLE_STANCE_GUARD_TELEMETRY", "true"
+).lower() in ("true", "1", "yes")
+
+
+async def _stance_log_guard_telemetry(db_pool, uid, turn_index, session_id, user_text, st_state, hits):
+    # QUANTUM-CRYSTAL-ARCH — guard-hit flight recorder (PG stance_guard_events)
+    if not _ENABLE_STANCE_GUARD_TELEMETRY or db_pool is None or _stance_mod is None:
+        return
+    try:
+        from app.services.stance_telemetry import (
+            log_stance_guard_bait_gap as _log_bait_gap,
+            log_stance_guard_events as _log_guard_events,
+        )
+        if hits:
+            asyncio.create_task(
+                _log_guard_events(db_pool, uid, turn_index, session_id or "", hits)
+            )
+        if _stance_mod.has_third_party_verdict_signal(user_text or ""):
+            _tp_hit = any(h.get("guard_id") == "third_party_verdict" for h in (hits or []))
+            if not _tp_hit:
+                _sig = _stance_mod._third_party_user_signals(user_text, st_state)
+                asyncio.create_task(
+                    _log_bait_gap(
+                        db_pool, uid, turn_index, session_id or "",
+                        "third_party_verdict", _sig,
+                    )
+                )
+    except Exception as _sgt_err:
+        print(f">>> [STANCE] guard telemetry error (non-fatal): {_sgt_err}")
 
 
 def _stance_get_state(uid: str, profile=None):
@@ -398,9 +428,9 @@ async def _stance_maybe_regen(gutted, system_prompt, user_text, prior, st_dec, s
         _regen = await _stance_regen_llm(_sys, user_text)
         if not _regen or not _regen.strip():
             return prior
-        _regen = _stance_mod.guard_framing_menu(_regen, st_dec.move)
-        _regen = _stance_mod.guard_generated_closer(_regen, st_dec, st_state)
-        _regen = _stance_mod.guard_boundary_content(_regen, user_text, st_state)
+        _regen, _ = _stance_mod.apply_post_generation_guards(
+            _regen, user_text, st_dec, st_state,
+        )
         return _regen.strip() if _regen.strip() else prior
     except Exception as _rg_err:
         print(f">>> [STANCE] regen error (non-fatal): {_rg_err}")
@@ -10164,11 +10194,9 @@ class AzureCortex:
                         _st_pre_len = max(len(full_response.strip()), 1)
                         _st_had_menu = _stance_mod._has_framing_menu(full_response)
                         _st_opener_stale = _st_state2.opener_is_stale(full_response)
-                        full_response = _stance_mod.guard_framing_menu(full_response, _st_dec2.move)  # QUANTUM-CRYSTAL-ARCH
-                        full_response = _stance_mod.guard_stale_opener(full_response, _st_state2)  # QUANTUM-CRYSTAL-ARCH
-                        full_response = _stance_mod.guard_generated_closer(full_response, _st_dec2, _st_state2)
-                        # QUANTUM-CRYSTAL-ARCH — boundary guards (prescription/ED/reality/self-punishment)
-                        full_response = _stance_mod.guard_boundary_content(full_response, user_text, _st_state2)
+                        full_response, _st_guard_hits = _stance_mod.apply_post_generation_guards(
+                            full_response, user_text, _st_dec2, _st_state2,
+                        )  # QUANTUM-CRYSTAL-ARCH
                         _st_strip_menu = bool(_st_had_menu and not _stance_mod._has_framing_menu(full_response))
                         _st_strip_opener = bool(_st_opener_stale)
                         _st_removed = 1.0 - (len(full_response.strip()) / _st_pre_len)
@@ -10176,6 +10204,12 @@ class AzureCortex:
                         full_response = await _stance_maybe_regen(
                             _st_gutted, system_prompt, user_text, full_response,
                             _st_dec2, _st_state2, _t_inf_start,
+                        )
+                        await _stance_log_guard_telemetry(
+                            db_pool, uid,
+                            int(getattr(_adaptive_states.get(uid), "turn_count", 0) or 0),
+                            self.active_sessions.get(uid, ""),
+                            user_text, _st_state2, _st_guard_hits,
                         )
                     except Exception as _stg_err:
                         print(f">>> [STANCE] closer-guard error (non-fatal): {_stg_err}")

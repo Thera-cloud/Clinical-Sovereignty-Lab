@@ -529,7 +529,15 @@ def main() -> int:
     ):
         fails.append(f"meta-credit guard replaced with ED refusal: {meta_clean!r}")
 
-    # META → ack/adjust addendum
+    # Guard-hit audit trail: third-party strip produces telemetry hit dict
+    _tp_hits: list = []
+    _ = stance.guard_boundary_content(
+        "That is gaslighting, plain and simple.", RENEE_T11, stance.StanceState(), hits=_tp_hits,
+    )
+    if not _tp_hits or _tp_hits[0].get("guard_id") != "third_party_verdict":
+        fails.append(f"guard hits missing third_party_verdict: {_tp_hits!r}")
+
+    # direct_response path must skip stance (simulate scope_lock)
     _, dec_meta = _bridge_overlay("You're doing it again.", uid, states)
     if dec_meta is None or dec_meta.move != stance.StanceMove.ACKNOWLEDGE_AND_ADJUST:
         fails.append(f"meta move expected ACKNOWLEDGE_AND_ADJUST, got {getattr(dec_meta, 'move', None)}")

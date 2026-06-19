@@ -1642,32 +1642,121 @@ _APPROVED_GUARD_FALLBACKS = frozenset(
 )
 
 
+def _third_party_user_signals(
+    user_text: str,
+    state: Optional["StanceState"] = None,
+) -> dict:
+    return {
+        "verdict_bait": bool(has_third_party_verdict_signal(user_text)),
+        "third_party_context": bool(has_third_party_context(user_text, state)),
+        "third_party_thread": bool(state and state.third_party_thread_active),
+    }
+
+
+def _third_party_hit_trigger(user_text: str, state: Optional["StanceState"]) -> str:
+    sig = _third_party_user_signals(user_text, state)
+    if sig["verdict_bait"]:
+        return "verdict_bait"
+    if sig["third_party_thread"]:
+        return "thread_active"
+    if sig["third_party_context"]:
+        return "third_party_context"
+    return "output_pattern"
+
+
+def _record_guard_hit(
+    hits: Optional[List[dict]],
+    guard_id: str,
+    before: str,
+    after: str,
+    *,
+    trigger: str = "",
+    user_signals: Optional[dict] = None,
+) -> str:
+    if hits is not None and after != before:
+        cb = len(before.strip())
+        ca = len(after.strip())
+        hits.append({
+            "guard_id": guard_id,
+            "trigger": trigger or guard_id,
+            "chars_before": cb,
+            "chars_after": ca,
+            "pct_stripped": round(1.0 - (ca / max(cb, 1)), 4),
+            "fallback_used": is_approved_guard_fallback(after),
+            "user_signals": user_signals or {},
+            "event_kind": "mutation",
+        })
+    return after
+
+
 def guard_boundary_content(
     text: str,
     user_text: str = "",
     state: Optional["StanceState"] = None,
+    hits: Optional[List[dict]] = None,
 ) -> str:
     """Run all post-generation boundary guards in sequence."""
-    text = guard_prescription_content(text, user_text)
-    text = guard_third_party_verdict(text, user_text, state)
+    tp_sig = _third_party_user_signals(user_text, state)
+    tp_trigger = _third_party_hit_trigger(user_text, state)
+
+    def run(
+        guard_id: str,
+        fn,
+        trigger: str = "",
+        signals: Optional[dict] = None,
+    ) -> None:
+        nonlocal text
+        before = text
+        text = fn(before)
+        _record_guard_hit(hits, guard_id, before, text, trigger=trigger, user_signals=signals)
+
+    run("prescription", lambda t: guard_prescription_content(t, user_text))
+    run(
+        "third_party_verdict",
+        lambda t: guard_third_party_verdict(t, user_text, state),
+        trigger=tp_trigger,
+        signals=tp_sig,
+    )
     if _meta_credit_only_turn(user_text):
-        text = guard_meta_credit_response(text, user_text)
-        text = guard_reality_distortion(text, user_text)
-        text = guard_self_punishment_content(text, user_text)
-        text = guard_body_scan_closer(text, user_text)
-        text = guard_signoff_closer(text, user_text)
-        text = guard_recall_response(text, user_text, state)
+        run("meta_credit", lambda t: guard_meta_credit_response(t, user_text))
+        run("reality_distortion", lambda t: guard_reality_distortion(t, user_text))
+        run("self_punishment", lambda t: guard_self_punishment_content(t, user_text))
+        run("body_scan_closer", lambda t: guard_body_scan_closer(t, user_text))
+        run("signoff_closer", lambda t: guard_signoff_closer(t, user_text))
+        run("recall_response", lambda t: guard_recall_response(t, user_text, state))
         return text
-    text = guard_diagnosis_content(text, user_text)
-    text = guard_meta_clinical_echo(text, user_text)
-    text = guard_meta_credit_response(text, user_text)
-    text = guard_ed_content(text, user_text, state)
-    text = guard_reality_distortion(text, user_text)
-    text = guard_self_punishment_content(text, user_text)
-    text = guard_body_scan_closer(text, user_text)
-    text = guard_signoff_closer(text, user_text)
-    text = guard_recall_response(text, user_text, state)
+    run("diagnosis", lambda t: guard_diagnosis_content(t, user_text))
+    run("meta_clinical_echo", lambda t: guard_meta_clinical_echo(t, user_text))
+    run("meta_credit", lambda t: guard_meta_credit_response(t, user_text))
+    run("ed_content", lambda t: guard_ed_content(t, user_text, state))
+    run("reality_distortion", lambda t: guard_reality_distortion(t, user_text))
+    run("self_punishment", lambda t: guard_self_punishment_content(t, user_text))
+    run("body_scan_closer", lambda t: guard_body_scan_closer(t, user_text))
+    run("signoff_closer", lambda t: guard_signoff_closer(t, user_text))
+    run("recall_response", lambda t: guard_recall_response(t, user_text, state))
     return text
+
+
+def apply_post_generation_guards(
+    text: str,
+    user_text: str,
+    st_dec: "StanceDecision",
+    state: "StanceState",
+) -> tuple:
+    """Run closer + boundary guards; return (text, hit dicts for telemetry)."""
+    hits: List[dict] = []
+
+    def run(guard_id: str, fn) -> None:
+        nonlocal text
+        before = text
+        text = fn(before)
+        _record_guard_hit(hits, guard_id, before, text)
+
+    run("framing_menu", lambda t: guard_framing_menu(t, st_dec.move))
+    run("stale_opener", lambda t: guard_stale_opener(t, state))
+    run("generated_closer", lambda t: guard_generated_closer(t, st_dec, state))
+    text = guard_boundary_content(text, user_text, state, hits=hits)
+    return text, hits
 
 
 def _strip_coach_handoff_trailing_questions(text: str) -> str:

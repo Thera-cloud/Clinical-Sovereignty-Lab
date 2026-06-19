@@ -436,10 +436,9 @@ async def run_replay(json_path: str) -> List[TurnResult]:
                 print(f"[WARN] LLM turn {idx}: {type(e).__name__}: {e}", file=sys.stderr)
 
         if enable_stance and stance_dec and tr.nate_response and not tr.nate_response.startswith("[LLM"):
-            tr.nate_response = stance.guard_framing_menu(tr.nate_response, stance_dec.move)
-            tr.nate_response = stance.guard_stale_opener(tr.nate_response, stance_state)
-            tr.nate_response = stance.guard_generated_closer(tr.nate_response, stance_dec, stance_state)
-            tr.nate_response = stance.guard_boundary_content(tr.nate_response, user_text, stance_state)
+            tr.nate_response, _guard_hits = stance.apply_post_generation_guards(
+                tr.nate_response, user_text, stance_dec, stance_state,
+            )
 
         tr.original_response = originals.get(idx, "")
         _score_failures(tr, spec, turn)

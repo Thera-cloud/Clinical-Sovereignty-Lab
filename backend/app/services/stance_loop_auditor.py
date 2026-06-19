@@ -20,6 +20,8 @@ Scheduled 3x daily (5 AM, 5 PM, 11 PM UTC) with stagger delay of 300s.
   2: witness_loop_regression — no uid has >=3 consecutive POSITION-intent
                                turns closed by a framing menu / question
   3: data_health            — no NULL intent/move on recent rows
+  4: guard_events_table     — stance_guard_events table is present
+  5: guard_bait_gap         — count third-party bait_no_hit rows in window
 """
 
 import asyncio
@@ -98,7 +100,7 @@ class StanceLoopAuditor:
 
     async def _audit_all_checks(self) -> dict:
         tab = {"tab": "Stance Loop", "tab_num": 1,
-               "total": 3, "trusted": 0, "warning": 0, "failed": 0, "checks": []}
+               "total": 5, "trusted": 0, "warning": 0, "failed": 0, "checks": []}
         try:
             async with self.db_pool.acquire() as conn:
                 table_ok = await self._check_table_exists(conn, tab)
@@ -108,6 +110,8 @@ class StanceLoopAuditor:
                 if table_ok:
                     await self._check_witness_loop_regression(conn, tab)
                     await self._check_data_health(conn, tab)
+                    await self._check_guard_events_table(conn, tab)
+                    await self._check_guard_bait_gap(conn, tab)
                 else:
                     tab["checks"].append({"check": "witness_loop_regression",
                                           "status": "TRUSTED",
@@ -116,6 +120,14 @@ class StanceLoopAuditor:
                     tab["checks"].append({"check": "data_health",
                                           "status": "TRUSTED",
                                           "detail": "No table yet — nothing to evaluate"})
+                    tab["trusted"] += 1
+                    tab["checks"].append({"check": "guard_events_table",
+                                          "status": "TRUSTED",
+                                          "detail": "No stance_decisions yet — deferred"})
+                    tab["trusted"] += 1
+                    tab["checks"].append({"check": "guard_bait_gap",
+                                          "status": "TRUSTED",
+                                          "detail": "No stance_decisions yet — deferred"})
                     tab["trusted"] += 1
         except Exception as e:
             logger.warning("StanceLoopAuditor: DB connection failed: %s", e)
@@ -128,8 +140,12 @@ class StanceLoopAuditor:
                  "detail": "DB unavailable — deferred"},
                 {"check": "data_health", "status": "TRUSTED",
                  "detail": "DB unavailable — deferred"},
+                {"check": "guard_events_table", "status": "TRUSTED",
+                 "detail": "DB unavailable — deferred"},
+                {"check": "guard_bait_gap", "status": "TRUSTED",
+                 "detail": "DB unavailable — deferred"},
             ]
-            tab["trusted"] = 3
+            tab["trusted"] = 5
             tab["warning"] = 0
             tab["failed"] = 0
         return tab
@@ -248,6 +264,59 @@ class StanceLoopAuditor:
                                   "status": "FAILED",
                                   "detail": f"{bad}/{total} rows with NULL intent or move"})
             tab["failed"] += 1
+
+    # ── Check 4: guard events table ──────────────────────────────────────
+    async def _check_guard_events_table(self, conn, tab: dict):
+        try:
+            exists = await conn.fetchval("""
+                SELECT EXISTS(
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_name = 'stance_guard_events'
+                )
+            """)
+            if exists:
+                tab["checks"].append({"check": "guard_events_table",
+                                      "status": "TRUSTED",
+                                      "detail": "stance_guard_events table present"})
+                tab["trusted"] += 1
+            else:
+                tab["checks"].append({"check": "guard_events_table",
+                                      "status": "FAILED",
+                                      "detail": "stance_guard_events missing — run migration 232"})
+                tab["failed"] += 1
+        except Exception as e:
+            tab["checks"].append({"check": "guard_events_table",
+                                  "status": "FAILED", "detail": str(e)[:80]})
+            tab["failed"] += 1
+
+    # ── Check 5: third-party bait without guard mutation ─────────────────
+    async def _check_guard_bait_gap(self, conn, tab: dict):
+        """Soft-leak signal: verdict-bait turns where no third_party guard fired."""
+        try:
+            row = await conn.fetchrow(f"""
+                SELECT COUNT(*) AS gap_count
+                FROM stance_guard_events
+                WHERE created_at > NOW() - INTERVAL '{WINDOW_HOURS} hours'
+                  AND event_kind = 'bait_no_hit'
+                  AND guard_id = 'third_party_verdict'
+            """)
+        except Exception as e:
+            tab["checks"].append({"check": "guard_bait_gap",
+                                  "status": "FAILED", "detail": str(e)[:80]})
+            tab["failed"] += 1
+            return
+
+        gap = int(row["gap_count"]) if row else 0
+        if gap == 0:
+            tab["checks"].append({"check": "guard_bait_gap",
+                                  "status": "TRUSTED",
+                                  "detail": "No third-party bait_no_hit rows in window"})
+            tab["trusted"] += 1
+        else:
+            tab["checks"].append({"check": "guard_bait_gap",
+                                  "status": "WARNING",
+                                  "detail": f"{gap} third-party bait turn(s) had no guard mutation — review soft leaks"})
+            tab["warning"] += 1
 
     async def _log_activity(self, platform: str, activity_type: str,
                             content: str, severity: str = "info"):
