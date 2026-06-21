@@ -13,10 +13,17 @@ import base64
 import datetime as dt
 import logging
 import os
+import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 import httpx
+
+
+def double_encode_meeting_uuid(meeting_uuid: str) -> str:
+    """Zoom requires double URL-encoding when UUID contains '/' or '//'."""
+    raw = (meeting_uuid or "").strip()
+    return urllib.parse.quote(urllib.parse.quote(raw, safe=""), safe="")
 
 
 @dataclass
@@ -201,22 +208,35 @@ class ZoomClient:
             if resp.status_code not in (200, 204):
                 resp.raise_for_status()
 
-    async def get_meeting_summary(self, *, meeting_id: str) -> Optional[Dict[str, Any]]:
+    async def get_meeting_summary(
+        self,
+        *,
+        meeting_id: str,
+        meeting_uuid: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         """
         Fetch Zoom AI Companion meeting summary.
         Requires meeting:read:summary:admin scope and AI Companion enabled.
 
+        Use meeting_uuid (from webhooks) when available — numeric meeting_id alone
+        returns 400 Invalid meeting id from Zoom.
+
         Returns the parsed JSON body on 200, None on 404 / not generated yet,
         and None (with a debug log) on any other non-200. Never raises.
         """
+        log = logging.getLogger("zoom_client")
+        uuid = (meeting_uuid or "").strip()
+        if uuid:
+            payload = await self._get_meeting_summary_by_uuid(uuid)
+            if payload:
+                return payload
         mid = (meeting_id or "").strip()
         if not mid:
             return None
         try:
             token = await self._get_access_token()
         except Exception as e:
-            logger = logging.getLogger("zoom_client")
-            logger.debug("get_meeting_summary token error for %s: %s", mid, e)
+            log.debug("get_meeting_summary token error for %s: %s", mid, e)
             return None
         url = f"https://api.zoom.us/v2/meetings/{mid}/meeting_summary"
         try:
@@ -227,10 +247,9 @@ class ZoomClient:
                     return resp.json()
                 except Exception:
                     return None
-            if resp.status_code == 404:
+            if resp.status_code in (404, 400):
                 return None
-            logger = logging.getLogger("zoom_client")
-            logger.debug(
+            log.debug(
                 "Zoom meeting_summary %s for %s: %s",
                 resp.status_code,
                 mid,
@@ -238,8 +257,40 @@ class ZoomClient:
             )
             return None
         except Exception as e:
-            logger = logging.getLogger("zoom_client")
-            logger.debug("Zoom meeting_summary fetch failed for %s: %s", mid, e)
+            log.debug("Zoom meeting_summary fetch failed for %s: %s", mid, e)
+            return None
+
+    async def _get_meeting_summary_by_uuid(self, meeting_uuid: str) -> Optional[Dict[str, Any]]:
+        uuid = (meeting_uuid or "").strip()
+        if not uuid:
+            return None
+        log = logging.getLogger("zoom_client")
+        try:
+            token = await self._get_access_token()
+        except Exception as e:
+            log.debug("get_meeting_summary_by_uuid token error: %s", e)
+            return None
+        enc = double_encode_meeting_uuid(uuid)
+        url = f"https://api.zoom.us/v2/meetings/{enc}/meeting_summary"
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            if resp.status_code == 200:
+                try:
+                    return resp.json()
+                except Exception:
+                    return None
+            if resp.status_code == 404:
+                return None
+            log.debug(
+                "Zoom meeting_summary uuid %s → %s: %s",
+                uuid[:16],
+                resp.status_code,
+                (resp.text or "")[:200],
+            )
+            return None
+        except Exception as e:
+            log.debug("Zoom meeting_summary uuid fetch failed: %s", e)
             return None
 
     async def download_recording_file(self, *, download_url: str) -> bytes:

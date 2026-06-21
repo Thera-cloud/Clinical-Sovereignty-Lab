@@ -316,6 +316,16 @@ async def zoom_webhook(
                 "detail": str(e),
             })
 
+    # AI Companion summary ready → coach FOLDER (no manual paste)
+    if event in ("meeting.summary_shared", "meeting.summary_recovered") and meeting_id:
+        dedup_key = f"{meeting_id}_{event}"
+        if dedup_key not in _processed_zoom_events:
+            _processed_zoom_events.add(dedup_key)
+            try:
+                asyncio.create_task(_process_summary_webhook(payload, meeting_id))
+            except Exception as e:
+                logger.warning("[Zoom] summary webhook task failed: %s", e)
+
     # =========================================================================
     # MEETING UPDATE / DELETE → mirror to coaching_sessions + Google Calendar
     # =========================================================================
@@ -590,17 +600,17 @@ async def _archive_transcript_and_classroom_for_pg_session(
     zoom_ai_summary: Optional[Dict[str, Any]] = None
     zoom_ai_summary_text: str = ""
     try:
+        from app.services.zoom_session_folder import _summary_text_from_api_payload
+
         _zc = ZoomClient.from_env()
-        zoom_ai_summary = await _zc.get_meeting_summary(meeting_id=str(meeting_id))
+        _sd = _session_data_dict(pg_row)
+        _uuid = (_sd.get("zoom_meeting_uuid") or "").strip()
+        zoom_ai_summary = await _zc.get_meeting_summary(
+            meeting_id=str(meeting_id),
+            meeting_uuid=_uuid or None,
+        )
         if zoom_ai_summary:
-            _det = ((zoom_ai_summary.get("summary") or {}).get("summary_details")) if isinstance(zoom_ai_summary.get("summary"), dict) else None
-            zoom_ai_summary_text = (
-                _det
-                or zoom_ai_summary.get("summary_details")
-                or zoom_ai_summary.get("summary_overview")
-                or ""
-            )
-            zoom_ai_summary_text = str(zoom_ai_summary_text or "").strip()
+            zoom_ai_summary_text = _summary_text_from_api_payload(zoom_ai_summary)
             try:
                 async with db_pool.acquire() as conn:
                     await _patch_coaching_session_data(
@@ -610,6 +620,7 @@ async def _archive_transcript_and_classroom_for_pg_session(
                             "zoom_ai_summary": zoom_ai_summary,
                             "zoom_ai_summary_text": zoom_ai_summary_text or None,
                             "zoom_ai_summary_fetched_at": dt.datetime.utcnow().isoformat(),
+                            "zoom_summary_source": "zoom_api",
                         },
                     )
                 logger.info(
@@ -777,7 +788,6 @@ async def _archive_transcript_and_classroom_for_pg_session(
             db_pool,
             pg_row,
             str(meeting_id),
-            summary_text=zoom_ai_summary_text or None,
         )
     except Exception as _zf_err:
         logger.warning("[Zoom] Coach folder summary placement for %s: %s", session_id, _zf_err)
@@ -810,6 +820,33 @@ async def _archive_transcript_and_classroom_for_pg_session(
             asyncio.create_task(_wisdom_followup())
         except Exception:
             pass
+
+
+async def _process_summary_webhook(payload: Dict[str, Any], meeting_id: str) -> None:
+    """Place AI Companion summary in coach folder when Zoom summary webhook fires."""
+    db_pool = _get_app_db_pool()
+    if not db_pool or not meeting_id:
+        return
+    obj = (payload.get("payload") or {}).get("object") or {}
+    meeting_uuid = str(obj.get("uuid") or "").strip()
+    try:
+        async with db_pool.acquire() as conn:
+            pg_row = await _fetch_coaching_session_by_zoom(conn, meeting_id)
+            if not pg_row:
+                return
+            pg_row = dict(pg_row)
+            if meeting_uuid:
+                await _patch_coaching_session_data(
+                    conn, pg_row["session_id"], {"zoom_meeting_uuid": meeting_uuid}
+                )
+                sd = _session_data_dict(pg_row)
+                sd["zoom_meeting_uuid"] = meeting_uuid
+                pg_row["session_data"] = sd
+        from app.services.zoom_session_folder import try_place_session_summary_in_coach_folder
+
+        await try_place_session_summary_in_coach_folder(db_pool, pg_row, str(meeting_id))
+    except Exception as e:
+        logger.warning("[Zoom] summary webhook placement for %s: %s", meeting_id, e)
 
 
 async def poll_pending_zoom_classroom_transcripts(db_pool) -> int:
@@ -890,20 +927,29 @@ async def _process_recording_event(
     through the MetricsEngine pipeline. Also auto-archives to coaching_sessions
     and runs Classroom when a PG session matches zoom_meeting_id.
     """
+    obj = (payload.get("payload") or {}).get("object") or {}
     db_pool = _get_app_db_pool()
     pg_row: Optional[Dict[str, Any]] = None
+    meeting_uuid = str(obj.get("uuid") or "").strip()
     try:
         if db_pool and meeting_id:
             async with db_pool.acquire() as conn:
                 pg_row = await _fetch_coaching_session_by_zoom(conn, meeting_id)
+                if pg_row and meeting_uuid:
+                    await _patch_coaching_session_data(
+                        conn,
+                        pg_row["session_id"],
+                        {"zoom_meeting_uuid": meeting_uuid},
+                    )
+                    pg_row = dict(pg_row)
+                    sd = _session_data_dict(pg_row)
+                    sd["zoom_meeting_uuid"] = meeting_uuid
+                    pg_row["session_data"] = sd
     except Exception as e:
         logger.warning("[Zoom] PG lookup for meeting %s: %s", meeting_id, e)
 
     try:
         from app.services.zoom_ingestion import ZoomIngestionService
-        ingestion = ZoomIngestionService()
-
-        obj = (payload.get("payload") or {}).get("object") or {}
         recording_files = obj.get("recording_files") or []
         topic = obj.get("topic") or ""
         start_time = obj.get("start_time") or ""
@@ -1117,7 +1163,7 @@ async def place_folder_summary(
             async with db_pool.acquire() as conn:
                 await _patch_coaching_session_data(conn, session_id, patch)
             pg_row = dict(pg_row)
-            sd = _session_data_dict(pg_row.get("session_data"))
+            sd = _session_data_dict(pg_row)
             sd.update(patch)
             pg_row["session_data"] = sd
 

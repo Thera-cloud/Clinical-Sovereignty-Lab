@@ -31,6 +31,20 @@ def _session_data_dict(raw: Any) -> Dict[str, Any]:
     return {}
 
 
+def _flag_is_set(val: Any) -> bool:
+    if val is True or val == 1:
+        return True
+    if isinstance(val, str):
+        return val.strip().lower() in ("true", "1", "yes")
+    return False
+
+
+def _as_str(val: Any) -> str:
+    if val is None or isinstance(val, bool):
+        return ""
+    return str(val).strip()
+
+
 def _ascii_safe(text: str) -> str:
     return (
         (text or "")
@@ -48,17 +62,36 @@ def _ascii_safe(text: str) -> str:
 def _summary_text_from_api_payload(payload: Optional[Dict[str, Any]]) -> str:
     if not payload:
         return ""
+    content = payload.get("summary_content")
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+    parts: list[str] = []
+    overview = payload.get("summary_overview")
+    if isinstance(overview, str) and overview.strip():
+        parts.append(overview.strip())
+    details = payload.get("summary_details")
+    if isinstance(details, list):
+        for item in details:
+            if not isinstance(item, dict):
+                continue
+            label = (item.get("label") or "").strip()
+            text = (item.get("summary") or "").strip()
+            if text:
+                parts.append(f"### {label}\n{text}" if label else text)
+    steps = payload.get("next_steps")
+    if isinstance(steps, list) and steps:
+        parts.append("### Next steps\n" + "\n".join(f"- {s}" for s in steps if str(s).strip()))
     summary_block = payload.get("summary")
     if isinstance(summary_block, dict):
         for key in ("summary_details", "summary_overview", "overview"):
             val = summary_block.get(key)
             if isinstance(val, str) and val.strip():
-                return val.strip()
+                parts.append(val.strip())
     for key in ("summary_details", "summary_overview", "overview"):
         val = payload.get(key)
         if isinstance(val, str) and val.strip():
-            return val.strip()
-    return ""
+            parts.append(val.strip())
+    return "\n\n".join(parts).strip()
 
 
 def _build_markdown_document(
@@ -200,19 +233,30 @@ async def _fetch_summary_content(
 ) -> Tuple[str, str, str]:
     """Returns (summary_body, zoom_doc_url, zoom_doc_file_id)."""
     sd = _session_data_dict(pg_row.get("session_data"))
-    body = (summary_text or sd.get("zoom_ai_summary_text") or "").strip()
+    body = (summary_text or "").strip()
     doc_url = (sd.get("zoom_doc_url") or "").strip()
     doc_file_id = (sd.get("zoom_doc_file_id") or "").strip()
+    meeting_uuid = (sd.get("zoom_meeting_uuid") or "").strip()
 
     if not body:
         try:
             from app.services.zoom_client import ZoomClient
 
             zc = ZoomClient.from_env()
-            payload = await zc.get_meeting_summary(meeting_id=str(meeting_id))
+            payload = await zc.get_meeting_summary(
+                meeting_id=str(meeting_id),
+                meeting_uuid=meeting_uuid or None,
+            )
             body = _summary_text_from_api_payload(payload)
+            if payload:
+                doc_url = (payload.get("summary_doc_url") or doc_url or "").strip()
+                if doc_url and "/doc/" in doc_url:
+                    doc_file_id = doc_url.rstrip("/").split("/doc/")[-1] or doc_file_id
         except Exception as e:
             logger.debug("meeting_summary fetch: %s", e)
+
+    if not body:
+        body = (sd.get("zoom_ai_summary_text") or "").strip()
 
     if not body:
         session_id = (pg_row.get("session_id") or "").strip()
@@ -259,9 +303,10 @@ async def try_place_session_summary_in_coach_folder(
         return None
 
     sd = _session_data_dict(pg_row.get("session_data"))
-    if (sd.get("zoom_folder_doc_placed") or "").strip().lower() in ("true", "1", "yes"):
-        existing = (sd.get("zoom_folder_file_id") or "").strip()
-        return existing or None
+    existing_file_id = _as_str(sd.get("zoom_folder_file_id"))
+    summary_from_zoom = (sd.get("zoom_summary_source") or "") == "zoom_api"
+    if _flag_is_set(sd.get("zoom_folder_doc_placed")) and summary_from_zoom and not (summary_text or "").strip():
+        return existing_file_id or None
 
     body, doc_url, doc_file_id = await _fetch_summary_content(
         db_pool, pg_row, meeting_id, summary_text
@@ -322,20 +367,38 @@ async def try_place_session_summary_in_coach_folder(
         if not folder_id:
             logger.warning("[ZoomFolder] No folder for coach=%s client=%s", coach_id, client_username)
             return None
-        row = await conn.fetchrow(
-            """INSERT INTO coach_folder_files
-               (folder_id, filename, file_type, storage_url, azure_blob_url,
-                file_size_bytes, uploaded_by, metadata)
-               VALUES ($1, $2, $3, $4, $4, $5, 'Little Nate', $6::jsonb)
-               RETURNING id""",
-            folder_id,
-            filename,
-            _FILE_TYPE,
-            location,
-            len(pdf_bytes),
-            json.dumps(metadata),
-        )
-        file_id = str(row["id"]) if row else None
+        if existing_file_id and (
+            (summary_text or "").strip() or (sd.get("zoom_summary_source") or "") != "zoom_api"
+        ):
+            row = await conn.fetchrow(
+                """UPDATE coach_folder_files
+                   SET filename = $2, storage_url = $3, azure_blob_url = $3,
+                       file_size_bytes = $4, metadata = $5::jsonb
+                   WHERE id = $1::uuid AND folder_id = $6
+                   RETURNING id""",
+                existing_file_id,
+                filename,
+                location,
+                len(pdf_bytes),
+                json.dumps(metadata),
+                folder_id,
+            )
+            file_id = str(row["id"]) if row else None
+        else:
+            row = await conn.fetchrow(
+                """INSERT INTO coach_folder_files
+                   (folder_id, filename, file_type, storage_url, azure_blob_url,
+                    file_size_bytes, uploaded_by, metadata)
+                   VALUES ($1, $2, $3, $4, $4, $5, 'Little Nate', $6::jsonb)
+                   RETURNING id""",
+                folder_id,
+                filename,
+                _FILE_TYPE,
+                location,
+                len(pdf_bytes),
+                json.dumps(metadata),
+            )
+            file_id = str(row["id"]) if row else None
         if file_id:
             patch = {
                 "zoom_folder_doc_placed": True,
@@ -343,6 +406,7 @@ async def try_place_session_summary_in_coach_folder(
                 "zoom_folder_file_id": file_id,
                 "zoom_ai_summary_text": body[:50000],
                 "zoom_folder_storage": storage_kind,
+                "zoom_summary_source": "zoom_api" if not (summary_text or "").strip() else "manual_backfill",
             }
             if doc_url:
                 patch["zoom_doc_url"] = doc_url
@@ -404,7 +468,7 @@ async def poll_pending_zoom_session_summaries(db_pool) -> int:
                 FROM coaching_sessions
                 WHERE COALESCE(zoom_meeting_id, '') <> ''
                   AND scheduled_start >= NOW() - INTERVAL '96 hours'
-                  AND COALESCE(session_data->>'zoom_folder_doc_placed', '') NOT IN ('true', '1', 'yes')
+                  AND COALESCE(session_data->>'zoom_summary_source', '') <> 'zoom_api'
                 ORDER BY scheduled_start DESC NULLS LAST
                 LIMIT 20
                 """
