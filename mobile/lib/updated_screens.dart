@@ -21571,61 +21571,78 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                       }
                     }
 
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 6),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF111111),
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFF222222)),
+                        onTap: () => _coachOpenFileReview(file),
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF111111),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFF222222)),
+                          ),
+                          child: Row(children: [
+                            Icon(typeIcon,
+                                color: const Color(0xFF4ECDC4), size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(filename,
+                                        style: const TextStyle(
+                                            color: Colors.white, fontSize: 13)),
+                                    Row(children: [
+                                      if (created.isNotEmpty)
+                                        Text(created.toString().substring(0, 10),
+                                            style: TextStyle(
+                                                color: Colors.grey[600],
+                                                fontSize: 11)),
+                                      if (sizeStr.isNotEmpty) ...[
+                                        Text('  ·  ',
+                                            style: TextStyle(
+                                                color: Colors.grey[700],
+                                                fontSize: 11)),
+                                        Text(sizeStr,
+                                            style: TextStyle(
+                                                color: Colors.grey[600],
+                                                fontSize: 11)),
+                                      ],
+                                    ]),
+                                  ]),
+                            ),
+                            PopupMenuButton<String>(
+                              icon: Icon(Icons.more_vert,
+                                  color: Colors.grey[600], size: 18),
+                              color: const Color(0xFF1A1A1A),
+                              onSelected: (val) {
+                                if (val == 'view') {
+                                  _coachOpenFileReview(file);
+                                } else if (val == 'delete') {
+                                  _coachDeleteFile(fileId);
+                                }
+                              },
+                              itemBuilder: (ctx) => [
+                                const PopupMenuItem(
+                                    value: 'view',
+                                    child: Text('Review',
+                                        style: TextStyle(
+                                            color: Color(0xFF4ECDC4),
+                                            fontSize: 13))),
+                                const PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Delete',
+                                        style: TextStyle(
+                                            color: Color(0xFFEF4444),
+                                            fontSize: 13))),
+                              ],
+                            ),
+                          ]),
+                        ),
                       ),
-                      child: Row(children: [
-                        Icon(typeIcon,
-                            color: const Color(0xFF4ECDC4), size: 20),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(filename,
-                                    style: const TextStyle(
-                                        color: Colors.white, fontSize: 13)),
-                                Row(children: [
-                                  if (created.isNotEmpty)
-                                    Text(created.toString().substring(0, 10),
-                                        style: TextStyle(
-                                            color: Colors.grey[600],
-                                            fontSize: 11)),
-                                  if (sizeStr.isNotEmpty) ...[
-                                    Text('  ·  ',
-                                        style: TextStyle(
-                                            color: Colors.grey[700],
-                                            fontSize: 11)),
-                                    Text(sizeStr,
-                                        style: TextStyle(
-                                            color: Colors.grey[600],
-                                            fontSize: 11)),
-                                  ],
-                                ]),
-                              ]),
-                        ),
-                        PopupMenuButton<String>(
-                          icon: Icon(Icons.more_vert,
-                              color: Colors.grey[600], size: 18),
-                          color: const Color(0xFF1A1A1A),
-                          onSelected: (val) {
-                            if (val == 'delete') _coachDeleteFile(fileId);
-                          },
-                          itemBuilder: (ctx) => [
-                            const PopupMenuItem(
-                                value: 'delete',
-                                child: Text('Delete',
-                                    style: TextStyle(
-                                        color: Color(0xFFEF4444),
-                                        fontSize: 13))),
-                          ],
-                        ),
-                      ]),
                     );
                   },
                 ),
@@ -21697,6 +21714,181 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         _coachUploadFileName = null;
         _coachUploadError = 'Upload error: $e';
       });
+    }
+  }
+
+  String? _coachPreviewTextFromMetadata(Map<String, dynamic> file) {
+    final raw = file['metadata'];
+    Map<String, dynamic>? meta;
+    if (raw is Map) {
+      meta = Map<String, dynamic>.from(raw);
+    } else if (raw is String && raw.isNotEmpty) {
+      try {
+        final decoded = json.decode(raw);
+        if (decoded is Map) meta = Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
+    if (meta == null) return null;
+    for (final key in ['markdown', 'summary_preview', 'extracted_text', 'text']) {
+      final val = (meta[key] ?? '').toString().trim();
+      if (val.isNotEmpty) return val;
+    }
+    return null;
+  }
+
+  void _showCoachFileReviewDialog(
+      String filename, String content, String? created) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF0A0A0A),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 760,
+            maxHeight: MediaQuery.of(ctx).size.height * 0.85,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.visibility,
+                        color: Color(0xFFC9A962), size: 22),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            filename,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (created != null && created.isNotEmpty)
+                            Text(
+                              created.length >= 10
+                                  ? created.substring(0, 10)
+                                  : created,
+                              style: TextStyle(
+                                  color: Colors.grey[600], fontSize: 11),
+                            ),
+                          Text(
+                            'Sanctuary review — view only, not downloadable',
+                            style: TextStyle(
+                                color: Colors.grey[500], fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white54),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(color: Color(0xFF252525), height: 1),
+              Expanded(
+                child: Scrollbar(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: SelectableText(
+                      content,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                        height: 1.55,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _coachOpenFileReview(Map<String, dynamic> file) async {
+    final filename = (file['filename'] ?? 'Document').toString();
+    final created = file['created_at']?.toString();
+    final cached = _coachPreviewTextFromMetadata(file);
+    if (cached != null && cached.length > 40) {
+      _showCoachFileReviewDialog(filename, cached, created);
+      return;
+    }
+
+    final fileId = (file['id'] ?? '').toString();
+    final token =
+        _authToken ?? widget.currentUserProfile?['token']?.toString() ?? '';
+    if (fileId.isEmpty || token.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to open review — sign in again'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(
+        child: CircularProgressIndicator(color: Color(0xFFC9A962)),
+      ),
+    );
+
+    try {
+      final baseUrl = AppConfig.apiBaseUrl;
+      final url =
+          Uri.parse('$baseUrl/api/coach/folders/files/$fileId/preview');
+      final resp = await http.get(
+        url,
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (!mounted) return;
+      Navigator.pop(context);
+
+      if (resp.statusCode == 200) {
+        final data = json.decode(resp.body) as Map<String, dynamic>;
+        final content = (data['content'] ?? '').toString();
+        if (content.trim().isEmpty) {
+          throw Exception('empty preview');
+        }
+        _showCoachFileReviewDialog(
+          (data['filename'] ?? filename).toString(),
+          content,
+          data['created_at']?.toString() ?? created,
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Preview unavailable (${resp.statusCode})'),
+            backgroundColor: const Color(0xFFEF4444),
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not load file review'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
     }
   }
 

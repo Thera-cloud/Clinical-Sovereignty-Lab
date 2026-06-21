@@ -230,6 +230,104 @@ async def upload_file(
     }
 
 
+def _parse_file_metadata(raw) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _extract_preview_text(filename: str, file_type: str, meta: dict, location: Optional[str]) -> tuple[str, str]:
+    """Return (content, format) for in-app review — never exposes raw download."""
+    for key in ("markdown", "summary_preview", "extracted_text", "text"):
+        val = (meta.get(key) or "").strip()
+        if val:
+            fmt = "markdown" if key in ("markdown", "summary_preview") else "text"
+            return val, fmt
+
+    if not location:
+        return "", ""
+
+    from app.services.blob_storage import download_bytes
+
+    storage_kind = "local" if str(location).startswith("/") else "auto"
+    raw = download_bytes(location=location, storage_kind=storage_kind)
+    if not raw:
+        return "", ""
+
+    name = (filename or "").lower()
+    ftype = (file_type or "").lower()
+    if name.endswith(".pdf") or "pdf" in ftype:
+        try:
+            from io import BytesIO
+            from pypdf import PdfReader
+
+            reader = PdfReader(BytesIO(raw))
+            parts = []
+            for page in reader.pages[:40]:
+                text = (page.extract_text() or "").strip()
+                if text:
+                    parts.append(text)
+            if parts:
+                return "\n\n".join(parts), "text"
+        except Exception as e:
+            logger.warning("PDF preview extract failed: %s", e)
+
+    if name.endswith((".txt", ".md", ".csv")) or "text" in ftype:
+        try:
+            return raw.decode("utf-8", errors="replace"), "text"
+        except Exception:
+            pass
+
+    return "", ""
+
+
+@router.get("/files/{file_id}/preview")
+async def preview_file(file_id: str, request: Request, user: Dict = Depends(require_coach)):
+    """In-app review content only — no file attachment (coaches must not save client data locally)."""
+    db = getattr(request.app.state, "db_pool", None)
+    if not db:
+        raise HTTPException(503, "Database unavailable")
+
+    coach_id = user.get("hardware_id", user.get("username", ""))
+
+    async with db.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT f.filename, f.file_type, f.metadata, f.created_at,
+                      COALESCE(f.azure_blob_url, f.storage_url) AS storage_url
+               FROM coach_folder_files f
+               JOIN coach_folders d ON f.folder_id = d.id
+               WHERE f.id = $1::uuid AND d.coach_id = $2""",
+            file_id,
+            coach_id,
+        )
+    if not row:
+        raise HTTPException(404, "File not found")
+
+    meta = _parse_file_metadata(row["metadata"])
+    content, fmt = _extract_preview_text(
+        row["filename"] or "",
+        row["file_type"] or "",
+        meta,
+        row["storage_url"],
+    )
+    if not content.strip():
+        raise HTTPException(404, "No in-app preview available for this file")
+
+    return {
+        "filename": row["filename"],
+        "format": fmt,
+        "content": content,
+        "review_only": True,
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+    }
+
+
 @router.get("/files/{file_id}/download")
 async def download_file(file_id: str, request: Request, user: Dict = Depends(require_coach)):
     """Download a file from a coach folder."""
