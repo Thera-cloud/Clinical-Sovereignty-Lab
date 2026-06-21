@@ -19163,6 +19163,15 @@ async def handle_client(websocket, path=None):
                                 "client_username": (client_profile.get("username") or None),
                             }
 
+                        if db_pool:
+                            try:
+                                from app.services.zoom_learning_registry import enrich_presession_brief_zoom
+                                brief = await enrich_presession_brief_zoom(
+                                    db_pool, client_id, brief
+                                )
+                            except Exception as _zlb_err:
+                                logger.debug("presession zoom learning: %s", _zlb_err)
+
                         await websocket.send(json.dumps({"type": "presession_brief", "brief": brief}))
 
             # QUANTUM-CRYSTAL-ARCH — Sensitive Profile screen-open audit (bridge WS).
@@ -21924,6 +21933,18 @@ If 'challenge', respectfully push the coach's thinking."""
                     }
                     if _intake_note_text:
                         _briefing_data["intake_note"] = _intake_note_text
+
+                    if db_pool:
+                        try:
+                            from app.services.zoom_learning_registry import enrich_coach_briefing_zoom
+                            _briefing_data = await enrich_coach_briefing_zoom(
+                                db_pool,
+                                client_id,
+                                _briefing_data,
+                                coach_id=current_profile.get("hardware_id"),
+                            )
+                        except Exception as _zcb_err:
+                            logger.debug("coach briefing zoom learning: %s", _zcb_err)
 
                     await websocket.send(json.dumps({
                         "type": "coach_briefing",

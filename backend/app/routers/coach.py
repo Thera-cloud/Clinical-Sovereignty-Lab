@@ -345,8 +345,8 @@ async def get_presession_brief(client_id: str, request: Request, user=Depends(ge
     
     # Generate Nate's suggestions
     nate_suggestions = _generate_suggestions(ns, recent_topics, breakthroughs, concerns)
-    
-    return {
+
+    brief_payload = {
         "client": {
             "name": client_profile.get("name"),
             "id": client_id,
@@ -377,8 +377,19 @@ async def get_presession_brief(client_id: str, request: Request, user=Depends(ge
             {"timestamp": m["timestamp"], "preview": m["user"][:100]} 
             for m in memories[-5:]
         ],
-        "nate_suggestions": nate_suggestions
+        "nate_suggestions": nate_suggestions,
     }
+    if db_pool:
+        try:
+            from app.services.zoom_learning_registry import enrich_presession_brief_zoom
+
+            brief_payload = await enrich_presession_brief_zoom(
+                db_pool, client_id, brief_payload
+            )
+        except Exception as _zle:
+            _logger.debug("presession zoom learning enrich: %s", _zle)
+    return brief_payload
+
 
 def _extract_recent_topics(memories):
     """Extract topics from conversations"""
@@ -814,6 +825,23 @@ async def coach_nate_chat(
         ctx.pop("assistant_details", None)
         ctx.pop("focused_assistant", None)
         ctx.pop("focused_assistant_clients", None)
+
+    _focus_client = (
+        ctx.get("client_id")
+        or ctx.get("focused_client_id")
+        or (ctx.get("briefing_data") or {}).get("client_id")
+    )
+    if db_pool and _focus_client and not ctx.get("zoom_session_learning"):
+        try:
+            from app.services.zoom_learning_registry import build_coach_nate_zoom_context
+
+            _zl = await build_coach_nate_zoom_context(
+                db_pool, str(_focus_client), coach_id=caller_hw_id
+            )
+            if _zl:
+                ctx["zoom_session_learning"] = _zl
+        except Exception as _znc:
+            _logger.debug("coach nate zoom context: %s", _znc)
 
     service = SkyEyeChatService(db_pool)
     mode = body.mode if body.mode else "inquiry"

@@ -686,8 +686,9 @@ async def _archive_transcript_and_classroom_for_pg_session(
         analyzer_input = vtt_text
 
     learning_ok = False
+    analysis: Optional[Dict[str, Any]] = None
     try:
-        _classroom_analyzer.analyze_transcript(
+        analysis = _classroom_analyzer.analyze_transcript(
             session_id=session_id,
             coach_id=coach_id,
             client_id=client_id,
@@ -698,6 +699,13 @@ async def _archive_transcript_and_classroom_for_pg_session(
             family_id=family_id or None,
             client_name=client_name or None,
         )
+        if db_pool and isinstance(analysis, dict):
+            try:
+                from app.services.pg_data_helpers import upsert_classroom_analysis_pg
+
+                await upsert_classroom_analysis_pg(db_pool, analysis)
+            except Exception as _up_err:
+                logger.warning("[Zoom] classroom PG upsert for %s: %s", session_id, _up_err)
         _classroom_analyzer.queue_ai_analysis(
             session_id=session_id,
             coach_id=coach_id,
@@ -768,6 +776,18 @@ async def _archive_transcript_and_classroom_for_pg_session(
             asyncio.create_task(_cross_ref_crystal())
         except Exception:
             pass
+
+    if client_id and (vtt_text or "").strip():
+        try:
+            from app.services.zoom_learning_registry import queue_transcript_crystal
+
+            asyncio.create_task(
+                queue_transcript_crystal(
+                    db_pool, client_id, client_name or "", vtt_text, session_id
+                )
+            )
+        except Exception as _tc_err:
+            logger.debug("[Zoom] transcript crystal schedule: %s", _tc_err)
 
     async with db_pool.acquire() as conn:
         await _patch_coaching_session_data(

@@ -3479,37 +3479,28 @@ async def crystal_network_status(request: Request):
         "wisdom_trend_pct": 0.0,
     }
     try:
+        from app.services.zoom_learning_registry import lived_origin_sql_in as _lived_sql
+
+        _lived_in = _lived_sql()
         async with db_pool.acquire() as wm_conn:
-            _wm_row = await wm_conn.fetchrow("""
+            _wm_row = await wm_conn.fetchrow(f"""
                 SELECT
                     COUNT(*) FILTER (WHERE user_id IS NOT NULL) AS user_scoped,
-                    COUNT(*) FILTER (WHERE origin_surface IN
-                        ('bridge_chat','voice_call','family_sanctuary',
-                         'group_coaching','private_coaching','coached_response',
-                         'growth_engine','clinical_edge_seed')) AS lived_origin,
+                    COUNT(*) FILTER (WHERE origin_surface IN ({_lived_in})) AS lived_origin,
                     COUNT(*) FILTER (WHERE origin_surface IN
                         ('growth_engine','clinical_edge_seed')) AS clinical_dna,
                     AVG(confidence) FILTER (WHERE user_id IS NOT NULL) AS avg_user_conf,
                     COUNT(*) FILTER (WHERE
-                        user_id IS NOT NULL OR origin_surface IN
-                        ('bridge_chat','voice_call','family_sanctuary',
-                         'group_coaching','private_coaching','coached_response',
-                         'growth_engine','clinical_edge_seed')
+                        user_id IS NOT NULL OR origin_surface IN ({_lived_in})
                     ) AS wisdom_total,
                     COUNT(*) FILTER (WHERE
                         created_at > NOW() - INTERVAL '24 hours'
-                        AND (user_id IS NOT NULL OR origin_surface IN
-                            ('bridge_chat','voice_call','family_sanctuary',
-                             'group_coaching','private_coaching','coached_response',
-                             'growth_engine','clinical_edge_seed'))
+                        AND (user_id IS NOT NULL OR origin_surface IN ({_lived_in}))
                     ) AS wisdom_24h,
                     COUNT(*) FILTER (WHERE
                         created_at > NOW() - INTERVAL '48 hours'
                         AND created_at <= NOW() - INTERVAL '24 hours'
-                        AND (user_id IS NOT NULL OR origin_surface IN
-                            ('bridge_chat','voice_call','family_sanctuary',
-                             'group_coaching','private_coaching','coached_response',
-                             'growth_engine','clinical_edge_seed'))
+                        AND (user_id IS NOT NULL OR origin_surface IN ({_lived_in}))
                     ) AS wisdom_prev_24h
                 FROM nate_intelligence_crystals
                 WHERE scope != 'archived' AND superseded_by IS NULL
@@ -3621,15 +3612,16 @@ async def crystal_yield_metrics(request: Request, days: int = 7):
             FROM vs, vc
         """, _interval)
 
-        by_surface = await conn.fetch("""
+        from app.services.zoom_learning_registry import lived_origin_sql_in
+
+        by_surface = await conn.fetch(f"""
             SELECT origin_surface, COUNT(*) AS count,
                    AVG(confidence) AS avg_confidence,
                    COUNT(*) FILTER (WHERE user_id IS NOT NULL) AS user_scoped
             FROM nate_intelligence_crystals
             WHERE created_at > NOW() - $1::interval
               AND scope != 'archived'
-              AND origin_surface IN ('bridge_chat','voice_call','family_sanctuary',
-                                     'group_coaching','private_coaching','growth_engine')
+              AND origin_surface IN ({lived_origin_sql_in()})
             GROUP BY origin_surface
             ORDER BY count DESC
         """, _interval)

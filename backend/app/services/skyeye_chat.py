@@ -1216,6 +1216,10 @@ RULES:
                 brief_text += f"Risk level: {risk}\n"
             context_blocks.append(brief_text)
 
+        zoom_learning = ctx.get("zoom_session_learning")
+        if zoom_learning and isinstance(zoom_learning, str) and zoom_learning.strip():
+            context_blocks.append(zoom_learning.strip()[:8000])
+
         # Assemble full conversation text
         context_injection = "\n\n".join(context_blocks) if context_blocks else ""
         conversation_text = "\n".join(history_lines)

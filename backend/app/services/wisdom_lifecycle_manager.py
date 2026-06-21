@@ -101,7 +101,7 @@ class WisdomLifecycleManager:
                         user_id, family_id, session_id, insight_type, content,
                         effectiveness_score, source, domain, confidence, status
                     )
-                    VALUES ($1, NULL, NULL, $2, $3, $4, $5, $6, $4, 'pending')
+                    VALUES ($1, NULL, NULL, $2, $3, $4::double precision, $5, $6, $7::double precision, 'pending')
                     RETURNING id::text
                     """,
                     uid,
@@ -110,6 +110,7 @@ class WisdomLifecycleManager:
                     eff,
                     (source or "unknown")[:64],
                     (domain or "clinical")[:64],
+                    eff,
                 )
                 return row["id"] if row else None
         except Exception as e:
