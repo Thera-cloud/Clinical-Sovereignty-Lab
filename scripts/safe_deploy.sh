@@ -20,6 +20,12 @@ echo "[safe_deploy] Pre-deploy vault metrics count: ${pre_count}"
 echo "[safe_deploy] Running: docker compose -f docker-compose.prod.yml up -d $@"
 docker compose -f docker-compose.prod.yml up -d "$@"
 
+# Bind-mounted Python code requires process restart to load new routes/modules.
+if printf '%s\n' "$@" | grep -qxE 'backend|bridge'; then
+  echo "[safe_deploy] Restarting: $* (reload bind-mounted app code)"
+  docker compose -f docker-compose.prod.yml restart "$@"
+fi
+
 sleep 10
 
 post_count=$(find data/bridge/Vaults/Clients -name 'metrics.json' 2>/dev/null | wc -l)

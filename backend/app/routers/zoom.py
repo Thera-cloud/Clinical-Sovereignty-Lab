@@ -1062,8 +1062,19 @@ async def get_ingested_sessions():
     return {"sessions": sessions, "total": len(sessions)}
 
 
+class PlaceFolderSummaryRequest(BaseModel):
+    summary_text: Optional[str] = None
+    zoom_doc_file_id: Optional[str] = None
+    zoom_doc_url: Optional[str] = None
+
+
 @router.post("/sessions/{session_id}/place-folder-summary")
-async def place_folder_summary(session_id: str, request: Request, user: Dict = Depends(require_coach)):
+async def place_folder_summary(
+    session_id: str,
+    request: Request,
+    body: Optional[PlaceFolderSummaryRequest] = None,
+    user: Dict = Depends(require_coach),
+):
     """Manually trigger Zoom AI summary → coach FOLDER placement for a session."""
     if not settings.ENABLE_ZOOM:
         raise HTTPException(status_code=400, detail="Zoom disabled")
@@ -1094,9 +1105,29 @@ async def place_folder_summary(session_id: str, request: Request, user: Dict = D
     if not meeting_id:
         raise HTTPException(400, "Session has no Zoom meeting ID")
 
+    if body and (body.zoom_doc_file_id or body.zoom_doc_url):
+        patch = {}
+        if body.zoom_doc_file_id:
+            patch["zoom_doc_file_id"] = body.zoom_doc_file_id.strip()
+            if not body.zoom_doc_url:
+                patch["zoom_doc_url"] = f"https://docs.zoom.us/doc/{patch['zoom_doc_file_id']}"
+        if body.zoom_doc_url:
+            patch["zoom_doc_url"] = body.zoom_doc_url.strip()
+        if patch:
+            async with db_pool.acquire() as conn:
+                await _patch_coaching_session_data(conn, session_id, patch)
+            pg_row = dict(pg_row)
+            sd = _session_data_dict(pg_row.get("session_data"))
+            sd.update(patch)
+            pg_row["session_data"] = sd
+
+    summary_override = (body.summary_text if body else None) or None
+
     from app.services.zoom_session_folder import try_place_session_summary_in_coach_folder
 
-    file_id = await try_place_session_summary_in_coach_folder(db_pool, pg_row, meeting_id)
+    file_id = await try_place_session_summary_in_coach_folder(
+        db_pool, pg_row, meeting_id, summary_text=summary_override
+    )
     if not file_id:
         raise HTTPException(
             404,
