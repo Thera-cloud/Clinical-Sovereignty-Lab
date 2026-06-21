@@ -1130,12 +1130,28 @@ RULES:
         client_names = ctx.get("client_names", [])
         total_clients = ctx.get("total_clients", len(client_names))
         if client_names:
-            client_list = ", ".join(str(n) for n in client_names[:30])
+            roster_entries = []
+            for n in client_names[:30]:
+                if isinstance(n, dict):
+                    roster_entries.append(
+                        f"{n.get('name', '?')} ({n.get('id') or n.get('hardware_id', '')})"
+                    )
+                else:
+                    roster_entries.append(str(n))
+            client_list = ", ".join(roster_entries)
             context_blocks.append(
                 f"[COACH ROSTER]\nCoach: {coach_username} | "
                 f"Total assigned clients: {total_clients}\n"
                 f"Client names: {client_list}"
             )
+
+        focused_cid = ctx.get("client_id") or ctx.get("focused_client_id")
+        focused_name = ctx.get("focused_client_name")
+        if focused_cid:
+            focus_line = f"[FOCUSED CLIENT]\nID: {focused_cid}"
+            if focused_name:
+                focus_line += f" | Name: {focused_name}"
+            context_blocks.append(focus_line)
 
         # Session stats
         sessions_today = ctx.get("sessions_today")
@@ -1201,7 +1217,12 @@ RULES:
         briefing = ctx.get("briefing_data")
         if briefing and isinstance(briefing, dict):
             brief_text = "[CLIENT BRIEFING]\n"
-            brief_text += f"Client: {briefing.get('client_name', 'Unknown')}\n"
+            _b_client = briefing.get("client") if isinstance(briefing.get("client"), dict) else {}
+            brief_name = briefing.get("client_name") or _b_client.get("name") or "Unknown"
+            brief_text += f"Client: {brief_name}\n"
+            _b_cid = briefing.get("client_id") or _b_client.get("id")
+            if _b_cid:
+                brief_text += f"Client ID: {_b_cid}\n"
             concerns = briefing.get("concerns", [])
             if concerns:
                 brief_text += f"Concerns: {', '.join(str(c) for c in concerns[:5])}\n"
@@ -1214,6 +1235,12 @@ RULES:
             risk = briefing.get("risk_level")
             if risk:
                 brief_text += f"Risk level: {risk}\n"
+            _zsum = briefing.get("zoom_folder_summary_context")
+            if _zsum:
+                brief_text += f"Zoom summary excerpt:\n{str(_zsum)[:1500]}\n"
+            _ztx = briefing.get("zoom_transcript_excerpt")
+            if _ztx:
+                brief_text += f"Zoom transcript excerpt:\n{str(_ztx)[:1500]}\n"
             context_blocks.append(brief_text)
 
         zoom_learning = ctx.get("zoom_session_learning")

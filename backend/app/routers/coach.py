@@ -780,6 +780,37 @@ class _CoachChatMessage(BaseModel):
     context: Optional[dict] = None
 
 
+def _resolve_coach_focus_client_id(ctx: dict, user_message: str = "") -> Optional[str]:
+    """Resolve hardware_id / username for zoom learning + briefing injection."""
+    for key in ("client_id", "focused_client_id"):
+        val = (ctx.get(key) or "").strip() if isinstance(ctx.get(key), str) else ctx.get(key)
+        if val:
+            return str(val)
+    briefing = ctx.get("briefing_data") or {}
+    if isinstance(briefing, dict):
+        cid = briefing.get("client_id")
+        client = briefing.get("client")
+        if not cid and isinstance(client, dict):
+            cid = client.get("id")
+        if cid:
+            return str(cid)
+    msg = (user_message or "").lower()
+    if msg:
+        for entry in ctx.get("client_names") or []:
+            if not isinstance(entry, dict):
+                continue
+            cid = entry.get("id") or entry.get("hardware_id") or ""
+            name = (entry.get("name") or "").lower()
+            if not cid:
+                continue
+            if name and name in msg:
+                return str(cid)
+            for part in name.split():
+                if len(part) >= 3 and part in msg:
+                    return str(cid)
+    return None
+
+
 @router.post("/nate-chat")
 async def coach_nate_chat(
     body: _CoachChatMessage,
@@ -826,11 +857,10 @@ async def coach_nate_chat(
         ctx.pop("focused_assistant", None)
         ctx.pop("focused_assistant_clients", None)
 
-    _focus_client = (
-        ctx.get("client_id")
-        or ctx.get("focused_client_id")
-        or (ctx.get("briefing_data") or {}).get("client_id")
-    )
+    _focus_client = _resolve_coach_focus_client_id(ctx, body.message)
+    if _focus_client:
+        ctx["client_id"] = _focus_client
+        ctx["focused_client_id"] = _focus_client
     if db_pool and _focus_client and not ctx.get("zoom_session_learning"):
         try:
             from app.services.zoom_learning_registry import build_coach_nate_zoom_context

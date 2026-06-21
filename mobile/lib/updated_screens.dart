@@ -5561,6 +5561,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
   // Coach override protocol (Thera-World calibration) — Insights tab
   String _coachOverrideClientId = '';
+  /// Shared focus client for Insights, Nevedal, Classroom, Briefings → Nate context
+  String _focusedClientId = '';
   Map<String, dynamic> _coachOverrideRow = {};
   List<Map<String, dynamic>> _coachOverrideHistory = [];
   List<String> _coachOverrideAllowedDomains = const [
@@ -6972,6 +6974,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   void _fetchClientBrief(String clientId) {
+    if (clientId.isNotEmpty) _setFocusedClient(clientId);
     _socket?.sink.add(
         jsonEncode({"type": "get_presession_brief", "client_id": clientId}));
   }
@@ -7227,7 +7230,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         if (ddVal != _coachOverrideClientId) {
-          setState(() => _coachOverrideClientId = ddVal);
+          setState(() {
+            _coachOverrideClientId = ddVal;
+            _focusedClientId = ddVal;
+          });
           _refreshCoachOverridePanel();
         }
       });
@@ -7273,7 +7279,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             }).toList(),
             onChanged: (v) {
               if (v == null) return;
-              setState(() => _coachOverrideClientId = v);
+              _setFocusedClient(v);
               _refreshCoachOverridePanel();
             },
           ),
@@ -7588,6 +7594,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                 _coachOverrideClientId =
                     (m['hardware_id'] ?? m['client_id'] ?? m['id'] ?? '')
                         .toString();
+                _focusedClientId = _coachOverrideClientId;
               }
             }
           });
@@ -7733,6 +7740,17 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         if (mounted) {
           setState(() {
             _selectedClientBrief = data['brief'];
+            final brief = data['brief'];
+            if (brief is Map) {
+              final bm = Map<String, dynamic>.from(brief);
+              final client = bm['client'];
+              final cid = bm['client_id']?.toString() ??
+                  (client is Map ? client['id']?.toString() : null);
+              if (cid != null && cid.isNotEmpty) {
+                _focusedClientId = cid;
+                _coachOverrideClientId = cid;
+              }
+            }
           });
           _showClientBriefSheet();
         }
@@ -8663,7 +8681,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   // ── Nevedal Report Generator (Coach) ──
   void _showNevedalReportDialog() {
     String reportType = 'individual_coherence';
-    String? targetClientId;
+    String? targetClientId = _focusedClientId.isNotEmpty
+        ? _focusedClientId
+        : (_coachOverrideClientId.isNotEmpty ? _coachOverrideClientId : null);
     bool generating = false;
 
     showDialog(
@@ -8795,6 +8815,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                           setLocal(() => generating = false);
                           if (resp.statusCode == 200) {
                             final result = jsonDecode(resp.body);
+                            if (result is Map) {
+                              result['_source_hardware_id'] = targetClientId;
+                            }
+                            if (targetClientId != null &&
+                                targetClientId!.isNotEmpty) {
+                              _focusedClientId = targetClientId!;
+                              _coachOverrideClientId = targetClientId!;
+                            }
                             Navigator.pop(ctx);
                             _showNevedalReportResult(result);
                           } else {
@@ -8996,6 +9024,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
+              final srcId =
+                  (result['_source_hardware_id'] ?? '').toString();
+              if (srcId.isNotEmpty) _setFocusedClient(srcId);
               final reportSummary = summary is Map
                   ? (summary as Map)
                       .entries
@@ -12304,33 +12335,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     _scrollInsightsChat();
     try {
       final token = widget.currentUserProfile['token'] ?? '';
-      final coachUsername = widget.currentUserProfile['username'] ?? '';
-      final coachRole = widget.currentUserProfile['role'] ?? 'COACH';
-
-      final clientDetails = _clients
-          .take(30)
-          .map((c) => {
-                'name': c['name'] ?? 'Unknown',
-                'id': c['hardware_id'] ?? c['id'] ?? '',
-                'tier': c['tier'] ?? '',
-                'risk': c['risk_level'] ?? c['coherence_risk'] ?? '',
-              })
-          .toList();
-
-      final contextPayload = <String, dynamic>{
-        'coach_username': coachUsername,
-        'coach_role': coachRole,
-        'total_clients': _clients.length,
-        'client_names': clientDetails,
-        'is_master_coach': widget.currentUserProfile['is_master_coach'] == true,
-      };
-
-      if (_lastNevedalReport != null) {
-        contextPayload['last_report'] = _lastNevedalReport;
-      }
-
-      if (_selectedClientBrief != null) {
-        contextPayload['briefing_data'] = _selectedClientBrief;
+      final contextPayload = _buildCoachNateContextPayload(messageHint: message);
+      final resolvedId = (contextPayload['client_id'] ?? '').toString();
+      if (resolvedId.isNotEmpty && resolvedId != _focusedClientId) {
+        setState(() {
+          _focusedClientId = resolvedId;
+          _coachOverrideClientId = resolvedId;
+        });
       }
 
       final uri = Uri.parse('$_apiBaseUrl/api/coach/nate-chat');
@@ -12406,17 +12417,30 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                   topLeft: Radius.circular(12), topRight: Radius.circular(12)),
             ),
             child: Row(
-              children: const [
-                Icon(Icons.psychology, color: Color(0xFF4ECDC4), size: 16),
-                SizedBox(width: 6),
-                Text('LITTLE NATE',
+              children: [
+                const Icon(Icons.psychology, color: Color(0xFF4ECDC4), size: 16),
+                const SizedBox(width: 6),
+                const Text('LITTLE NATE',
                     style: TextStyle(
                         color: Color(0xFF4ECDC4),
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 1)),
-                Spacer(),
-                Text('COACHING INSIGHTS',
+                if (_focusedClientDisplayName() != null) ...[
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      '• ${_focusedClientDisplayName()}',
+                      style: const TextStyle(
+                          color: Color(0xFFC9A962),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+                const Spacer(),
+                const Text('COACHING INSIGHTS',
                     style: TextStyle(
                         color: Colors.white38,
                         fontSize: 9,
@@ -13372,12 +13396,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                         const BorderSide(color: Color(0xFF9D4EDD), width: 0.5),
                   ),
                   onPressed: () {
-                    final clientId = _getFilteredClients().isNotEmpty
-                        ? (_getFilteredClients().first['hardware_id'] ??
-                                _getFilteredClients().first['id'] ??
-                                '')
-                            .toString()
-                        : '';
+                    final clientId = _resolveFocusedClientId();
                     if (clientId.isNotEmpty) {
                       _showCoachAiModePicker(clientId);
                     } else {
@@ -13486,16 +13505,28 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             final metrics = (client['metrics'] is Map)
                 ? Map<String, dynamic>.from(client['metrics'])
                 : <String, dynamic>{};
+            final clientId = _clientIdFromMap(client);
+            final isFocused = clientId.isNotEmpty && clientId == _focusedClientId;
             final plan = (client['subscription_plan'] ?? client['tier'] ?? '')
                 .toString()
                 .toUpperCase();
             final companyName = (client['company_name'] ?? '').toString();
-            return Container(
+            return InkWell(
+              onTap: clientId.isEmpty
+                  ? null
+                  : () => _setFocusedClient(clientId),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFF1A1A2E),
+                color: isFocused
+                    ? const Color(0xFF4ECDC4).withOpacity(0.08)
+                    : const Color(0xFF1A1A2E),
                 borderRadius: BorderRadius.circular(12),
+                border: isFocused
+                    ? Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.5))
+                    : null,
               ),
               child: Row(
                 children: [
@@ -13565,6 +13596,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                       riskLevel: (metrics['risk_level'] ?? 'LOW').toString()),
                 ],
               ),
+            ),
             );
           }).toList(),
         ],
@@ -13976,6 +14008,173 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     return filtered;
   }
 
+  String _clientIdFromMap(Map<String, dynamic> c) {
+    return (c['hardware_id'] ?? c['id'] ?? c['client_id'] ?? '').toString();
+  }
+
+  String _clientNameFromMap(Map<String, dynamic> c) {
+    return (c['name'] ?? c['username'] ?? 'Unknown').toString();
+  }
+
+  void _setFocusedClient(String clientId) {
+    final id = clientId.trim();
+    if (id.isEmpty) return;
+    if (_focusedClientId == id && _coachOverrideClientId == id) return;
+    setState(() {
+      _focusedClientId = id;
+      _coachOverrideClientId = id;
+    });
+    _refreshCoachOverridePanel();
+  }
+
+  String? _resolveClientIdFromMessage(String message) {
+    final q = message.toLowerCase();
+    for (final c in _clients) {
+      if (c is! Map) continue;
+      final m = Map<String, dynamic>.from(c);
+      final id = _clientIdFromMap(m);
+      if (id.isEmpty) continue;
+      final name = _clientNameFromMap(m).toLowerCase();
+      final username = (m['username'] ?? '').toString().toLowerCase();
+      if (name.isNotEmpty && q.contains(name)) return id;
+      for (final part in name.split(RegExp(r'\s+'))) {
+        if (part.length >= 3 && q.contains(part)) return id;
+      }
+      if (username.isNotEmpty && q.contains(username)) return id;
+    }
+    return null;
+  }
+
+  String _resolveFocusedClientId({String? messageHint}) {
+    if (_focusedClientId.isNotEmpty) return _focusedClientId;
+    if (_coachOverrideClientId.isNotEmpty) return _coachOverrideClientId;
+    if (messageHint != null) {
+      final fromMsg = _resolveClientIdFromMessage(messageHint);
+      if (fromMsg != null) return fromMsg;
+    }
+    final filtered = _getFilteredClients();
+    if (filtered.length == 1) {
+      return _clientIdFromMap(filtered.first);
+    }
+    return '';
+  }
+
+  Map<String, dynamic> _normalizeBriefForNate(Map<String, dynamic> brief) {
+    final out = Map<String, dynamic>.from(brief);
+    final client = out['client'];
+    if (client is Map) {
+      final cm = Map<String, dynamic>.from(client);
+      out.putIfAbsent('client_id', () => cm['id']);
+      out.putIfAbsent('client_name', () => cm['name']);
+    }
+    return out;
+  }
+
+  Map<String, dynamic> _buildCoachNateContextPayload({String? messageHint}) {
+    final coachUsername = widget.currentUserProfile['username'] ?? '';
+    final coachRole = widget.currentUserProfile['role'] ?? 'COACH';
+    final clientDetails = _clients.take(30).map((c) {
+      if (c is! Map) return <String, dynamic>{'name': 'Unknown', 'id': ''};
+      final m = Map<String, dynamic>.from(c);
+      return {
+        'name': _clientNameFromMap(m),
+        'id': _clientIdFromMap(m),
+        'tier': m['tier'] ?? '',
+        'risk': m['risk_level'] ?? m['coherence_risk'] ?? '',
+      };
+    }).toList();
+
+    var clientId = _resolveFocusedClientId(messageHint: messageHint);
+    if (clientId.isEmpty && _classroomSelectedSessionId != null) {
+      for (final s in _classroomSessions) {
+        final sid = (s['session_id'] ?? s['id'] ?? '').toString();
+        if (sid == _classroomSelectedSessionId) {
+          final scid = (s['client_id'] ?? '').toString();
+          if (scid.isNotEmpty) clientId = scid;
+          break;
+        }
+      }
+    }
+
+    final payload = <String, dynamic>{
+      'coach_username': coachUsername,
+      'coach_role': coachRole,
+      'total_clients': _clients.length,
+      'client_names': clientDetails,
+      'is_master_coach': widget.currentUserProfile['is_master_coach'] == true,
+    };
+
+    if (clientId.isNotEmpty) {
+      payload['client_id'] = clientId;
+      payload['focused_client_id'] = clientId;
+      for (final c in _clients) {
+        if (c is! Map) continue;
+        final m = Map<String, dynamic>.from(c);
+        if (_clientIdFromMap(m) == clientId) {
+          payload['focused_client_name'] = _clientNameFromMap(m);
+          break;
+        }
+      }
+    }
+
+    if (_lastNevedalReport != null) {
+      final src =
+          (_lastNevedalReport!['_source_hardware_id'] ?? '').toString();
+      if (clientId.isEmpty || src.isEmpty || src == clientId) {
+        payload['last_report'] = _lastNevedalReport;
+      }
+    }
+
+    if (_selectedClientBrief != null) {
+      payload['briefing_data'] =
+          _normalizeBriefForNate(Map<String, dynamic>.from(_selectedClientBrief!));
+    } else if (clientId.isNotEmpty) {
+      for (final c in _clients) {
+        if (c is! Map) continue;
+        final m = Map<String, dynamic>.from(c);
+        if (_clientIdFromMap(m) == clientId) {
+          payload['briefing_data'] = {
+            'client_id': clientId,
+            'client_name': _clientNameFromMap(m),
+            'client': {'id': clientId, 'name': _clientNameFromMap(m)},
+            'risk_level': m['risk_level'] ?? m['coherence_risk'] ?? 'LOW',
+          };
+          break;
+        }
+      }
+    }
+
+    if (_classroomSelectedSessionId != null) {
+      payload['classroom_session_id'] = _classroomSelectedSessionId;
+      for (final s in _classroomSessions) {
+        final sid = (s['session_id'] ?? s['id'] ?? '').toString();
+        if (sid == _classroomSelectedSessionId) {
+          payload['classroom_session_meta'] = {
+            'client_name': s['client_name'] ?? s['client'],
+            'scheduled_time': s['scheduled_time'] ?? s['date'],
+            'client_id': s['client_id'],
+          };
+          break;
+        }
+      }
+    }
+
+    return payload;
+  }
+
+  String? _focusedClientDisplayName() {
+    final id = _focusedClientId.isNotEmpty
+        ? _focusedClientId
+        : _coachOverrideClientId;
+    if (id.isEmpty) return null;
+    for (final c in _clients) {
+      if (c is! Map) continue;
+      final m = Map<String, dynamic>.from(c);
+      if (_clientIdFromMap(m) == id) return _clientNameFromMap(m);
+    }
+    return id;
+  }
+
   List<Map<String, dynamic>> _buildFolderGroups() {
     // Group assigned clients into family/company folders when possible.
     final filteredClients = _getFilteredClients();
@@ -14196,8 +14395,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         folderId: folderId,
         familyId: familyId,
         clientId: (clients.length == 1
-            ? (clients.first['id'] ?? '')?.toString()
+            ? _clientIdFromMap(clients.first)
             : null));
+    if (clients.length == 1) {
+      final singleId = _clientIdFromMap(clients.first);
+      if (singleId.isNotEmpty) _setFocusedClient(singleId);
+    }
   }
 
   Widget _buildFolderContent() {
@@ -14568,7 +14771,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   Widget _buildFolderMemberCard(Map<String, dynamic> member) {
-    final id = (member['id'] ?? '').toString();
+    final id = _clientIdFromMap(member);
     final name = (member['name'] ?? 'Member').toString();
     final ns = (member['nevedal_state'] is Map)
         ? Map<String, dynamic>.from(member['nevedal_state'])
@@ -14589,13 +14792,21 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         metrics['wellness'] ??
         metrics['wellness_score'];
 
-    return Container(
+    return InkWell(
+      onTap: id.isEmpty ? null : () => _setFocusedClient(id),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.03),
+        color: id.isNotEmpty && id == _focusedClientId
+            ? const Color(0xFF4ECDC4).withOpacity(0.06)
+            : Colors.white.withOpacity(0.03),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white10),
+        border: Border.all(
+            color: id.isNotEmpty && id == _focusedClientId
+                ? const Color(0xFF4ECDC4).withOpacity(0.35)
+                : Colors.white10),
       ),
       child: Row(
         children: [
@@ -14645,6 +14856,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           ),
         ],
       ),
+    ),
     );
   }
 
@@ -16695,6 +16907,15 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                       _classroomLiveAnalysis = null;
                     });
                     if (value != null) {
+                      for (final s in _classroomSessions) {
+                        final sid =
+                            (s['session_id'] ?? s['id'] ?? '').toString();
+                        if (sid == value) {
+                          final scid = (s['client_id'] ?? '').toString();
+                          if (scid.isNotEmpty) _setFocusedClient(scid);
+                          break;
+                        }
+                      }
                       _loadSessionAnalysis(value);
                       _checkRecordingAvailability();
                     }
