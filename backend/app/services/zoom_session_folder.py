@@ -413,6 +413,17 @@ async def try_place_session_summary_in_coach_folder(
             if doc_file_id:
                 patch["zoom_doc_file_id"] = doc_file_id
             await _patch_session_data(conn, session_id, patch)
+            # QUANTUM-CRYSTAL-ARCH: summary without transcript — enqueue Path B fetch
+            if file_id and not (sd.get("transcript_location") or "").strip():
+                if not _flag_is_set(sd.get("transcript_pending")):
+                    await _patch_session_data(
+                        conn,
+                        session_id,
+                        {
+                            "transcript_pending": True,
+                            "transcript_enqueue_reason": "summary_placed",
+                        },
+                    )
 
     if file_id:
         logger.info(

@@ -1,0 +1,266 @@
+"""
+Path B: load archived Zoom transcripts for Little Nate learning context.
+
+Reads coaching_sessions.session_data.transcript_location via blob_storage,
+formats VTT as dialogue excerpts for chat / briefings / lived wisdom.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
+_MAX_EXCERPT_CHARS = 3500
+_CONTEXT_HEADER = "[ZOOM SESSION TRANSCRIPTS — Path B full dialogue excerpts]"
+
+
+def _session_data_dict(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            return json.loads(raw)
+        except Exception:
+            return {}
+    return {}
+
+
+def load_transcript_text(location: str, storage_kind: str = "local") -> Optional[str]:
+    """Load raw VTT/TXT from blob or local path."""
+    if not (location or "").strip():
+        return None
+    try:
+        from app.services.blob_storage import download_bytes
+
+        content_bytes = download_bytes(location=location, storage_kind=storage_kind or "local")
+        if content_bytes:
+            return content_bytes.decode("utf-8", errors="ignore")
+    except Exception as e:
+        logger.warning("load_transcript_text blob failed for %s: %s", location, e)
+
+    try:
+        from pathlib import Path
+
+        path = Path(location)
+        if path.exists():
+            return path.read_text(encoding="utf-8", errors="ignore")
+    except Exception as e:
+        logger.debug("load_transcript_text local fallback: %s", e)
+    return None
+
+
+def vtt_to_dialogue_excerpt(vtt_content: str, max_chars: int = _MAX_EXCERPT_CHARS) -> str:
+    """Strip WEBVTT timing; prefer VTTParser labels when available."""
+    if not (vtt_content or "").strip():
+        return ""
+
+    # Strip synthetic classroom merge headers if present
+    body = vtt_content
+    if "[TRANSCRIPT]" in body:
+        body = body.split("[TRANSCRIPT]", 1)[-1]
+    if "[ZOOM AI SUMMARY]" in body and "[TRANSCRIPT]" not in vtt_content:
+        body = body.split("[ZOOM AI SUMMARY]", 1)[-1]
+
+    try:
+        from app.services.classroom_analyzer import VTTParser
+
+        entries = VTTParser.parse(body)
+        if entries:
+            lines: List[str] = []
+            for ent in entries:
+                speaker = (getattr(ent, "speaker", None) or "").strip()
+                text = (getattr(ent, "text", None) or "").strip()
+                if not text:
+                    continue
+                lines.append(f"{speaker}: {text}" if speaker else text)
+            joined = "\n".join(lines)
+            if joined.strip():
+                if len(joined) > max_chars:
+                    return joined[: max_chars - 3].rstrip() + "..."
+                return joined
+    except Exception as e:
+        logger.debug("VTTParser excerpt fallback: %s", e)
+
+    lines: List[str] = []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line or line == "WEBVTT" or line.startswith("NOTE"):
+            continue
+        if "-->" in line:
+            continue
+        if re.match(r"^\d+$", line):
+            continue
+        lines.append(line)
+    joined = "\n".join(lines)
+    if len(joined) > max_chars:
+        return joined[: max_chars - 3].rstrip() + "..."
+    return joined
+
+
+async def _resolve_client_ids(db_pool, client_id: str) -> List[str]:
+    """Hardware id + username aliases for coaching_sessions.client_id lookup."""
+    ids: List[str] = []
+    for val in (client_id,):
+        if val and val not in ids:
+            ids.append(val)
+    try:
+        from app.services.zoom_session_folder import _resolve_client_username
+
+        username, _ = await _resolve_client_username(db_pool, client_id)
+        if username and username not in ids:
+            ids.append(username)
+    except Exception:
+        pass
+    return ids
+
+
+async def get_sessions_with_transcripts_pg(
+    db_pool,
+    client_id: str,
+    limit: int = 3,
+) -> List[Dict[str, Any]]:
+    """Recent coaching_sessions rows that have transcript_location archived."""
+    if not db_pool or not client_id:
+        return []
+    entity_ids = await _resolve_client_ids(db_pool, client_id)
+    if not entity_ids:
+        return []
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT session_id, client_id, client_name, zoom_meeting_id,
+                       scheduled_start, session_data
+                FROM coaching_sessions
+                WHERE client_id = ANY($1::text[])
+                  AND COALESCE(session_data->>'transcript_location', '') <> ''
+                ORDER BY scheduled_start DESC NULLS LAST
+                LIMIT $2
+                """,
+                entity_ids,
+                limit,
+            )
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning("get_sessions_with_transcripts_pg failed: %s", e)
+        return []
+
+
+async def load_session_transcript_excerpt(
+    session_data: Any,
+    max_chars: int = _MAX_EXCERPT_CHARS,
+) -> Tuple[str, int]:
+    """
+    Load transcript for one session row.
+    Returns (excerpt_text, raw_char_count).
+    """
+    sd = _session_data_dict(session_data)
+    location = (sd.get("transcript_location") or "").strip()
+    if not location:
+        return "", 0
+    storage_kind = (sd.get("transcript_storage") or "local").strip() or "local"
+    raw = load_transcript_text(location, storage_kind)
+    if not raw:
+        return "", 0
+    excerpt = vtt_to_dialogue_excerpt(raw, max_chars=max_chars)
+    return excerpt, len(raw)
+
+
+async def get_zoom_transcript_context_pg(
+    db_pool,
+    client_id: str,
+    limit: int = 2,
+    max_chars_per_session: int = _MAX_EXCERPT_CHARS,
+) -> str:
+    """
+    Build Path B transcript context block for Little Nate (client chat / briefings).
+    """
+    rows = await get_sessions_with_transcripts_pg(db_pool, client_id, limit=limit)
+    if not rows:
+        return ""
+
+    parts: List[str] = [_CONTEXT_HEADER]
+    for row in rows:
+        excerpt, raw_len = await load_session_transcript_excerpt(
+            row.get("session_data"), max_chars=max_chars_per_session
+        )
+        if not excerpt.strip():
+            continue
+        scheduled = row.get("scheduled_start")
+        dt_label = (
+            scheduled.strftime("%b %d, %Y")
+            if scheduled and hasattr(scheduled, "strftime")
+            else "recent"
+        )
+        sid = row.get("session_id") or ""
+        parts.append(
+            f"Session {dt_label} ({sid}, transcript_chars={raw_len}):\n{excerpt}"
+        )
+
+    if len(parts) <= 1:
+        return ""
+
+    parts.append(
+        "Use this verified session dialogue to remember what was discussed. "
+        "Do not quote long passages verbatim; reflect themes therapeutically."
+    )
+    return "\n\n".join(parts)
+
+
+async def verify_path_b_transcript_for_client(
+    db_pool,
+    client_id: str,
+) -> Dict[str, Any]:
+    """Diagnostic: confirm transcript archive + LN context load for a client."""
+    rows = await get_sessions_with_transcripts_pg(db_pool, client_id, limit=5)
+    sessions_out: List[Dict[str, Any]] = []
+    context = await get_zoom_transcript_context_pg(db_pool, client_id, limit=2)
+
+    for row in rows:
+        sd = _session_data_dict(row.get("session_data"))
+        excerpt, raw_len = await load_session_transcript_excerpt(row.get("session_data"))
+        classroom_ok = False
+        try:
+            async with db_pool.acquire() as conn:
+                csa = await conn.fetchrow(
+                    """
+                    SELECT status, therapeutic_presence_score, analyzed_at
+                    FROM classroom_session_analyses
+                    WHERE session_id = $1
+                    LIMIT 1
+                    """,
+                    row.get("session_id"),
+                )
+            if csa:
+                classroom_ok = (csa["status"] or "") == "completed"
+        except Exception:
+            pass
+
+        sessions_out.append(
+            {
+                "session_id": row.get("session_id"),
+                "zoom_meeting_id": row.get("zoom_meeting_id"),
+                "transcript_location": sd.get("transcript_location"),
+                "transcript_source": sd.get("transcript_source"),
+                "classroom_analysis_available": sd.get("classroom_analysis_available"),
+                "nate_read_transcript_at": sd.get("nate_read_transcript_at"),
+                "raw_transcript_chars": raw_len,
+                "excerpt_chars": len(excerpt),
+                "classroom_pg_completed": classroom_ok,
+            }
+        )
+
+    return {
+        "client_id": client_id,
+        "sessions_with_transcript": len(rows),
+        "ln_context_chars": len(context),
+        "ln_context_preview": (context or "")[:500],
+        "path_b_pull_ok": bool(context.strip()) and any(
+            s.get("excerpt_chars", 0) > 100 for s in sessions_out
+        ),
+        "sessions": sessions_out,
+    }

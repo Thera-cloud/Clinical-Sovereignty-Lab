@@ -864,7 +864,14 @@ async def poll_pending_zoom_classroom_transcripts(db_pool) -> int:
                 SELECT session_id, coach_id, client_id, client_name, zoom_meeting_id, session_data
                 FROM coaching_sessions
                 WHERE COALESCE(zoom_meeting_id, '') <> ''
-                  AND (session_data->>'transcript_pending') = 'true'
+                  AND COALESCE(session_data->>'transcript_location', '') = ''
+                  AND (
+                    (session_data->>'transcript_pending') = 'true'
+                    OR (
+                      COALESCE(session_data->>'zoom_summary_source', '') = 'zoom_api'
+                      AND scheduled_start >= NOW() - INTERVAL '96 hours'
+                    )
+                  )
                 ORDER BY updated_at DESC NULLS LAST
                 LIMIT 25
                 """
@@ -1180,4 +1187,101 @@ async def place_folder_summary(
             detail="No Zoom AI summary available yet — retry after Zoom finishes processing",
         )
     return {"status": "placed", "folder_file_id": file_id, "session_id": session_id}
+
+
+@router.post("/sessions/{session_id}/archive-transcript")
+async def archive_session_transcript(
+    session_id: str,
+    request: Request,
+    user: Dict = Depends(require_coach),
+):
+    """Fetch Zoom recording transcript, archive, and run Path B classroom pipeline."""
+    if not settings.ENABLE_ZOOM:
+        raise HTTPException(status_code=400, detail="Zoom disabled")
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        raise HTTPException(503, "Database unavailable")
+
+    coach_id = user.get("hardware_id") or user.get("username") or ""
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT session_id, coach_id, client_id, client_name,
+                   zoom_meeting_id, session_data, scheduled_start
+            FROM coaching_sessions
+            WHERE session_id = $1
+            LIMIT 1
+            """,
+            session_id,
+        )
+    if not row:
+        raise HTTPException(404, "Session not found")
+    pg_row = dict(row)
+    role = (user.get("role") or "").upper()
+    if role != "ADMIN" and str(pg_row.get("coach_id") or "") != coach_id:
+        raise HTTPException(403, "Not authorized for this session")
+
+    meeting_id = str(pg_row.get("zoom_meeting_id") or "").strip()
+    if not meeting_id:
+        raise HTTPException(400, "Session has no Zoom meeting ID")
+
+    sd = _session_data_dict(pg_row.get("session_data"))
+    if (sd.get("transcript_location") or "").strip():
+        from app.services.zoom_transcript_context import verify_path_b_transcript_for_client
+
+        client_hw = str(pg_row.get("client_id") or "")
+        report = await verify_path_b_transcript_for_client(db_pool, client_hw)
+        return {
+            "status": "already_archived",
+            "session_id": session_id,
+            "transcript_location": sd.get("transcript_location"),
+            "path_b": report,
+        }
+
+    zc = ZoomClient.from_env()
+    try:
+        rec = await zc.get_meeting_recordings(meeting_id=meeting_id)
+    except Exception as e:
+        raise HTTPException(502, f"Zoom recordings lookup failed: {e}") from e
+
+    files = rec.get("recording_files") or []
+    t_url, t_ext = _pick_transcript_from_recording_files(files)
+    transcript_source = "zoom_native"
+    if t_url:
+        vtt_bytes = await zc.download_recording_file(download_url=t_url)
+    else:
+        vtt_bytes, t_ext = await _try_whisper_audio_fallback(files, zc, meeting_id)
+        transcript_source = "whisper_fallback"
+
+    if not vtt_bytes:
+        async with db_pool.acquire() as conn:
+            await _patch_coaching_session_data(
+                conn,
+                session_id,
+                {"transcript_pending": True, "transcript_enqueue_reason": "manual_archive"},
+            )
+        raise HTTPException(
+            404,
+            detail="No transcript file yet — marked transcript_pending for drip poller",
+        )
+
+    await _archive_transcript_and_classroom_for_pg_session(
+        db_pool,
+        pg_row,
+        vtt_bytes,
+        t_ext or "vtt",
+        meeting_id,
+        transcript_source=transcript_source,
+    )
+
+    from app.services.zoom_transcript_context import verify_path_b_transcript_for_client
+
+    client_hw = str(pg_row.get("client_id") or "")
+    report = await verify_path_b_transcript_for_client(db_pool, client_hw)
+    return {
+        "status": "archived",
+        "session_id": session_id,
+        "transcript_chars": len(vtt_bytes),
+        "path_b": report,
+    }
 

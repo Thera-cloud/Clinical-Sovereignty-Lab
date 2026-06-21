@@ -839,47 +839,72 @@ async def get_classroom_context_for_client_pg(db_pool, client_id: str, limit: in
     if not db_pool or not client_id:
         return ""
     try:
+        entity_ids = [client_id]
+        try:
+            from app.services.zoom_session_folder import _resolve_client_username
+            username, _ = await _resolve_client_username(db_pool, client_id)
+            if username and username not in entity_ids:
+                entity_ids.append(username)
+        except Exception:
+            pass
+
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(
                 """SELECT session_id, client_name, analyzed_at, therapeutic_presence_score,
                           assessments, payload, metrics, status
                    FROM classroom_session_analyses
-                   WHERE client_id = $1 AND status = 'completed'
+                   WHERE client_id = ANY($1::text[]) AND status = 'completed'
                    ORDER BY analyzed_at DESC LIMIT $2""",
-                client_id, limit,
+                entity_ids, limit,
             )
-        if not rows:
-            return ""
-        parts = ["[SESSION COACHING INSIGHTS — What the coach worked on with this client]"]
-        for r in rows:
-            dt = r["analyzed_at"].strftime("%b %d, %Y") if r["analyzed_at"] else "recent"
-            _p = r["payload"]
-            if isinstance(_p, str):
-                try:
-                    _p = json.loads(_p)
-                except Exception:
-                    _p = {}
-            payload = _p if isinstance(_p, dict) else {}
-            strengths = payload.get("strengths", [])
-            growth = payload.get("growth_areas", [])
-            reflection = payload.get("reflection_questions", [])
-            takeaways = []
-            if strengths:
-                takeaways.append(f"Strengths observed: {', '.join(strengths[:3])}")
-            if growth:
-                takeaways.append(f"Growth areas: {', '.join(growth[:3])}")
-            if reflection:
-                takeaways.append(f"Reflection: {reflection[0]}")
-            parts.append(f"Session {dt}: {'; '.join(takeaways) if takeaways else 'Session analyzed.'}")
-        parts.append("Use these insights to gently support the client. Reflect without contradicting the coach's approach. Do not share raw assessment details.")
-        folder_ctx = ""
+
+        parts: list[str] = []
+        if rows:
+            parts.append("[SESSION COACHING INSIGHTS — What the coach worked on with this client]")
+            for r in rows:
+                dt = r["analyzed_at"].strftime("%b %d, %Y") if r["analyzed_at"] else "recent"
+                _p = r["payload"]
+                if isinstance(_p, str):
+                    try:
+                        _p = json.loads(_p)
+                    except Exception:
+                        _p = {}
+                payload = _p if isinstance(_p, dict) else {}
+                strengths = payload.get("strengths", [])
+                growth = payload.get("growth_areas", [])
+                reflection = payload.get("reflection_questions", [])
+                takeaways = []
+                if strengths:
+                    takeaways.append(f"Strengths observed: {', '.join(strengths[:3])}")
+                if growth:
+                    takeaways.append(f"Growth areas: {', '.join(growth[:3])}")
+                if reflection:
+                    takeaways.append(f"Reflection: {reflection[0]}")
+                parts.append(f"Session {dt}: {'; '.join(takeaways) if takeaways else 'Session analyzed.'}")
+            parts.append(
+                "Use these insights to gently support the client. Reflect without contradicting "
+                "the coach's approach. Do not share raw assessment details."
+            )
+
         try:
             from app.services.zoom_session_folder import get_folder_session_summaries_context_pg
             folder_ctx = await get_folder_session_summaries_context_pg(db_pool, client_id, limit=2)
         except Exception as _fc_err:
             logger.debug("folder session context: %s", _fc_err)
+            folder_ctx = ""
         if folder_ctx:
             parts.append(folder_ctx)
+
+        # QUANTUM-CRYSTAL-ARCH: Path B — full archived transcript excerpts for LN learning
+        try:
+            from app.services.zoom_transcript_context import get_zoom_transcript_context_pg
+            transcript_ctx = await get_zoom_transcript_context_pg(db_pool, client_id, limit=2)
+        except Exception as _tx_err:
+            logger.debug("zoom transcript context: %s", _tx_err)
+            transcript_ctx = ""
+        if transcript_ctx:
+            parts.append(transcript_ctx)
+
         return "\n".join(parts)
     except Exception as e:
         logger.warning("get_classroom_context_for_client_pg failed: %s", e)
@@ -960,6 +985,15 @@ async def get_classroom_lived_wisdom_pg(db_pool, coach_id: str, client_id: Optio
                 detail.append(f"CEE signals detected: {len(cee)}")
             parts.append(f"--- Session {r['session_id']} ---\n" + "\n".join(detail))
         parts.append("\nUse this lived wisdom to coach the coach, support the client between sessions, and align with the coach's therapeutic approach.")
+        if client_id:
+            try:
+                from app.services.zoom_transcript_context import get_zoom_transcript_context_pg
+                tx_ctx = await get_zoom_transcript_context_pg(db_pool, client_id, limit=1)
+            except Exception as _tx_err:
+                logger.debug("lived wisdom transcript context: %s", _tx_err)
+                tx_ctx = ""
+            if tx_ctx:
+                parts.append(tx_ctx)
         return "\n".join(parts)
     except Exception as e:
         logger.warning("get_classroom_lived_wisdom_pg failed: %s", e)
