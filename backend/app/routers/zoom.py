@@ -770,6 +770,18 @@ async def _archive_transcript_and_classroom_for_pg_session(
         )
     logger.info("[Zoom] Auto-archived + classroom pipeline for session %s", session_id)
 
+    try:
+        from app.services.zoom_session_folder import try_place_session_summary_in_coach_folder
+
+        await try_place_session_summary_in_coach_folder(
+            db_pool,
+            pg_row,
+            str(meeting_id),
+            summary_text=zoom_ai_summary_text or None,
+        )
+    except Exception as _zf_err:
+        logger.warning("[Zoom] Coach folder summary placement for %s: %s", session_id, _zf_err)
+
     if db_pool and coach_id and (vtt_text or "").strip():
         async def _wisdom_followup():
             try:
@@ -850,6 +862,19 @@ async def poll_pending_zoom_classroom_transcripts(db_pool) -> int:
     return archived
 
 
+async def poll_pending_zoom_session_summaries(db_pool) -> int:
+    """Poll recent sessions and place Zoom AI summaries in coach folders."""
+    if not db_pool or not getattr(settings, "ENABLE_ZOOM", False):
+        return 0
+    try:
+        from app.services.zoom_session_folder import poll_pending_zoom_session_summaries as _poll
+
+        return await _poll(db_pool)
+    except Exception as e:
+        logger.warning("[Zoom] poll_pending_zoom_session_summaries: %s", e)
+        return 0
+
+
 # =============================================================================
 # BACKGROUND: Process recording event → download transcript → ingest
 # =============================================================================
@@ -912,6 +937,17 @@ async def _process_recording_event(
                     logger.info("[Zoom] Marked session %s transcript_pending", pg_row.get("session_id"))
                 except Exception as pe:
                     logger.warning("[Zoom] Failed to set transcript_pending: %s", pe)
+            if pg_row and db_pool:
+                try:
+                    from app.services.zoom_session_folder import try_place_session_summary_in_coach_folder
+
+                    asyncio.create_task(
+                        try_place_session_summary_in_coach_folder(
+                            db_pool, pg_row, str(meeting_id)
+                        )
+                    )
+                except Exception as _fe:
+                    logger.debug("[Zoom] folder summary task (no transcript): %s", _fe)
             _append_json_list(ZOOM_INGESTED_FILE, {
                 "timestamp": dt.datetime.utcnow().isoformat(),
                 "meeting_id": meeting_id,
@@ -1024,4 +1060,47 @@ async def get_ingested_sessions():
         raise HTTPException(status_code=400, detail="Zoom disabled")
     sessions = _load_json(ZOOM_INGESTED_FILE, []) or []
     return {"sessions": sessions, "total": len(sessions)}
+
+
+@router.post("/sessions/{session_id}/place-folder-summary")
+async def place_folder_summary(session_id: str, request: Request, user: Dict = Depends(require_coach)):
+    """Manually trigger Zoom AI summary → coach FOLDER placement for a session."""
+    if not settings.ENABLE_ZOOM:
+        raise HTTPException(status_code=400, detail="Zoom disabled")
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        raise HTTPException(503, "Database unavailable")
+
+    coach_id = user.get("hardware_id") or user.get("username") or ""
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT session_id, coach_id, client_id, client_name,
+                   zoom_meeting_id, session_data, scheduled_start
+            FROM coaching_sessions
+            WHERE session_id = $1
+            LIMIT 1
+            """,
+            session_id,
+        )
+    if not row:
+        raise HTTPException(404, "Session not found")
+    pg_row = dict(row)
+    role = (user.get("role") or "").upper()
+    if role != "ADMIN" and str(pg_row.get("coach_id") or "") != coach_id:
+        raise HTTPException(403, "Not authorized for this session")
+
+    meeting_id = str(pg_row.get("zoom_meeting_id") or "").strip()
+    if not meeting_id:
+        raise HTTPException(400, "Session has no Zoom meeting ID")
+
+    from app.services.zoom_session_folder import try_place_session_summary_in_coach_folder
+
+    file_id = await try_place_session_summary_in_coach_folder(db_pool, pg_row, meeting_id)
+    if not file_id:
+        raise HTTPException(
+            404,
+            detail="No Zoom AI summary available yet — retry after Zoom finishes processing",
+        )
+    return {"status": "placed", "folder_file_id": file_id, "session_id": session_id}
 

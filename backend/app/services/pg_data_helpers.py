@@ -872,6 +872,14 @@ async def get_classroom_context_for_client_pg(db_pool, client_id: str, limit: in
                 takeaways.append(f"Reflection: {reflection[0]}")
             parts.append(f"Session {dt}: {'; '.join(takeaways) if takeaways else 'Session analyzed.'}")
         parts.append("Use these insights to gently support the client. Reflect without contradicting the coach's approach. Do not share raw assessment details.")
+        folder_ctx = ""
+        try:
+            from app.services.zoom_session_folder import get_folder_session_summaries_context_pg
+            folder_ctx = await get_folder_session_summaries_context_pg(db_pool, client_id, limit=2)
+        except Exception as _fc_err:
+            logger.debug("folder session context: %s", _fc_err)
+        if folder_ctx:
+            parts.append(folder_ctx)
         return "\n".join(parts)
     except Exception as e:
         logger.warning("get_classroom_context_for_client_pg failed: %s", e)

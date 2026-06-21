@@ -187,6 +187,14 @@ class DripScheduler:
             replace_existing=True
         )
 
+        self.scheduler.add_job(
+            self.poll_zoom_pending_session_summaries,
+            IntervalTrigger(minutes=15),
+            id="poll_zoom_pending_session_summaries",
+            name="Zoom: place AI summaries in coach folders",
+            replace_existing=True
+        )
+
         # Trial management — sweep every hour for expired trials + nudges
         self.scheduler.add_job(
             self.sweep_trial_expirations,
@@ -206,7 +214,7 @@ class DripScheduler:
         )
 
         self.scheduler.start()
-        print(">>> [DRIP] Scheduler started with 15 jobs")
+        print(">>> [DRIP] Scheduler started with 16 jobs")
 
     def shutdown(self):
         """Gracefully shut down the scheduler."""
@@ -783,6 +791,16 @@ class DripScheduler:
                 print(f">>> [DRIP] Zoom Classroom: auto-archived {n} pending transcript(s)")
         except Exception as e:
             print(f">>> [DRIP] poll_zoom_pending_classroom_transcripts error: {e}")
+
+    async def poll_zoom_pending_session_summaries(self):
+        """Poll recent Zoom sessions and place AI summaries in coach FOLDER tabs."""
+        try:
+            from app.routers.zoom import poll_pending_zoom_session_summaries
+            n = await poll_pending_zoom_session_summaries(self.db_pool)
+            if n:
+                print(f">>> [DRIP] Zoom Folder: placed {n} session summary file(s)")
+        except Exception as e:
+            print(f">>> [DRIP] poll_zoom_pending_session_summaries error: {e}")
 
     # =========================================================================
     # JOB: Trial Expiration Sweep
