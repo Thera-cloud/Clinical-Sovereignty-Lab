@@ -5,7 +5,7 @@ import json
 import os
 import sys
 
-async def test():
+async def _run_coherence_ws_e2e():
     import websockets
     import redis as _redis
 
@@ -109,4 +109,6 @@ async def test():
         print("4. NO coherence_report received after 10 messages")
         sys.exit(1)
 
-asyncio.run(test())
+
+if __name__ == "__main__":
+    asyncio.run(_run_coherence_ws_e2e())

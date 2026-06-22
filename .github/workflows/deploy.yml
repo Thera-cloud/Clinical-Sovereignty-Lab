@@ -83,6 +83,7 @@ jobs:
           ENVIRONMENT: test
           DATABASE_URL: ""
           REDIS_URL: ""
+          PYTHONPATH: backend
 
   # ─── Stage 3: Build & Scan ─────────────────────────────────────────────────
   build:
