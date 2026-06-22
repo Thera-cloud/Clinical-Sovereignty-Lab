@@ -527,29 +527,20 @@ async def _send_session_link(request: Request, session: dict) -> dict:
     coach_name = coach["name"]
     coach_initials = (coach_name[:1] or "C").upper()
 
-    # TZ-NOTIFICATION-FIX: resolve recipient timezone (fallback America/New_York).
-    tz_name = (contact.get("timezone") or "").strip() or "America/New_York"
-    tz_obj = None
-    if ZoneInfo is not None:
-        try:
-            tz_obj = ZoneInfo(tz_name)
-        except ZoneInfoNotFoundError:
-            _logger.warning("_send_session_link: unknown tz %r, falling back to UTC", tz_name)
-            tz_name = "UTC"
-            tz_obj = timezone.utc
-
-    # Format date / time from scheduled_start (ISO) in recipient timezone.
+    # TZ-NOTIFICATION-FIX: format scheduled_start in recipient profile timezone.
     start_iso = (session.get("scheduled_start") or "").strip()
     date_str = start_iso
     time_str = ""
+    tz_name = (contact.get("timezone") or "").strip()
     try:
         dt = datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
-        if tz_obj is not None:
-            dt = dt.astimezone(tz_obj)
-        date_str = dt.strftime("%B %d, %Y")
-        time_str = dt.strftime("%I:%M %p %Z").lstrip("0")
+        from app.utils.timezone_resolver import split_session_start_for_profile
+
+        date_str, time_str, tz_name = split_session_start_for_profile(
+            dt, {"timezone": tz_name},
+        )
     except Exception:
-        pass
+        tz_name = tz_name or "America/New_York"
 
     # ── EMAIL via SendGrid (coaching_confirmation template)
     email_addr = (contact.get("email") or "").strip()

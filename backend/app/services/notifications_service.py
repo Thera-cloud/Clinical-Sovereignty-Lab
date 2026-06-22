@@ -919,13 +919,16 @@ class NotificationScheduler:
             """
             SELECT 
                 cs.id, cs.scheduled_at,
-                c.email as client_email,
-                coach.name as coach_name
+                COALESCE(c.profile_data->>'email', '') as client_email,
+                COALESCE(c.profile_data->>'timezone', '') as client_timezone,
+                COALESCE(coach.profile_data->>'name', coach.username) as coach_name
             FROM coaching_sessions cs
-            JOIN users c ON cs.client_id = c.id
-            JOIN users coach ON cs.coach_id = coach.id
-            WHERE cs.status = 'SCHEDULED'
-            AND cs.scheduled_at BETWEEN NOW() + INTERVAL '23 hours' AND NOW() + INTERVAL '25 hours'
+            JOIN users c ON cs.client_id::text = c.id::text
+                OR cs.client_id::text = c.hardware_id
+            JOIN users coach ON cs.coach_id::text = coach.id::text
+                OR cs.coach_id::text = coach.hardware_id
+            WHERE UPPER(cs.status) = 'SCHEDULED'
+            AND COALESCE(cs.scheduled_start, cs.scheduled_at) BETWEEN NOW() + INTERVAL '23 hours' AND NOW() + INTERVAL '25 hours'
             AND cs.id NOT IN (
                 SELECT DISTINCT target_id::uuid FROM audit_log 
                 WHERE action_type = 'COACHING_REMINDER_SENT'
@@ -934,7 +937,13 @@ class NotificationScheduler:
         )
         
         for session in sessions:
-            time_str = session['scheduled_at'].strftime("%I:%M %p")
+            from app.utils.timezone_resolver import format_session_start_for_profile
+
+            scheduled = session["scheduled_at"]
+            time_str, _tz = format_session_start_for_profile(
+                scheduled,
+                {"timezone": session.get("client_timezone")},
+            )
             await self.email.send_coaching_reminder(
                 session['client_email'],
                 time_str,

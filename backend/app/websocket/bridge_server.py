@@ -14860,16 +14860,23 @@ async def handle_client(websocket, path=None):
                                         print(
                                             f">>> [CONSULTATION] PG upsert failed (non-blocking): {_pg_e}"
                                         )
-                                # Readable time block for emails
+                                # TZ-NOTIFICATION-FIX: readable local time for consultee + coach emails
                                 try:
+                                    from app.utils.timezone_resolver import (
+                                        format_session_start_for_profile,
+                                        render_user_time,
+                                    )
+
                                     _sdt = datetime.datetime.fromisoformat(
                                         scheduled_start.replace("Z", "+00:00"))
                                     _edt = datetime.datetime.fromisoformat(
                                         scheduled_end.replace("Z", "+00:00"))
-                                    _when = (
-                                        f"{_sdt.strftime('%A, %B %d, %Y %H:%M')} – "
-                                        f"{_edt.strftime('%H:%M')} ({tz_hint})"
+                                    _prof = {"timezone": tz_hint}
+                                    _start_str, _tz_used = format_session_start_for_profile(
+                                        _sdt, _prof,
                                     )
+                                    _end_str = render_user_time(_edt, _tz_used, "%I:%M %p %Z").lstrip("0")
+                                    _when = f"{_start_str} – {_end_str}"
                                 except Exception:
                                     _when = f"{scheduled_start} – {scheduled_end}"
                                 if zoom_link:

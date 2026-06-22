@@ -1318,17 +1318,36 @@ class StripeService:
             from app.services.notifications_service import EmailService
             email_svc = EmailService()
             client_row = await self.db.fetchrow(
-                "SELECT email, name FROM users WHERE id = $1", user_id
+                """SELECT profile_data->>'email' AS email,
+                          profile_data->>'name' AS name,
+                          profile_data->>'timezone' AS timezone
+                   FROM users WHERE id = $1""",
+                user_id,
             )
             coach_row = await self.db.fetchrow(
-                "SELECT email, name FROM users WHERE id = $1", coach_id
+                """SELECT profile_data->>'email' AS email,
+                          profile_data->>'name' AS name
+                   FROM users WHERE id = $1""",
+                coach_id,
             )
             if client_row and coach_row:
+                from app.utils.timezone_resolver import (
+                    format_session_start_for_profile,
+                    split_session_start_for_profile,
+                )
+
+                client_profile = {"timezone": client_row["timezone"]}
+                date_str, time_str, tz_name = split_session_start_for_profile(
+                    scheduled_at, client_profile,
+                )
+                session_when, _ = format_session_start_for_profile(
+                    scheduled_at, client_profile,
+                )
                 await email_svc.send_coaching_confirmation(
                     to_email=client_row["email"],
-                    date=scheduled_at.strftime("%B %d, %Y"),
-                    time=scheduled_at.strftime("%I:%M %p"),
-                    timezone="UTC",
+                    date=date_str,
+                    time=time_str,
+                    timezone=tz_name,
                     coach_name=coach_row["name"] or "Your coach",
                     coach_initials=(coach_row["name"] or "C")[0],
                     coach_credentials="",
@@ -1336,6 +1355,23 @@ class StripeService:
                 )
         except Exception as email_err:
             print(f">>> [STRIPE] Coaching confirmation email error: {email_err}")
+
+        # TZ-NOTIFICATION-FIX: local session time for prep nudge (independent of email send)
+        try:
+            from app.utils.timezone_resolver import format_session_start_for_profile
+
+            client_tz = await self.db.fetchval(
+                "SELECT profile_data->>'timezone' FROM users WHERE id = $1", user_id,
+            )
+            session_when, _ = format_session_start_for_profile(
+                scheduled_at, {"timezone": client_tz},
+            )
+            coach_name_nudge = await self.db.fetchval(
+                "SELECT profile_data->>'name' FROM users WHERE id = $1", coach_id,
+            ) or "your coach"
+        except Exception:
+            session_when = scheduled_at.isoformat()
+            coach_name_nudge = "your coach"
 
         # Schedule Nate briefing generation
         try:
@@ -1349,8 +1385,8 @@ class StripeService:
                 VALUES ($1, 'session_prep', 'Coaching Session Prep',
                         $2, $3, $4)""",
                 user_id,
-                f"Your session with {coach_row['name'] if coach_row else 'your coach'} "
-                f"is scheduled for {scheduled_at.strftime('%B %d at %I:%M %p')}. "
+                f"Your session with {coach_name_nudge} "
+                f"is scheduled for {session_when}. "
                 f"Take a moment to reflect on what you'd like to explore.",
                 _json.dumps({"session_id": str(session_id), "coach_id": coach_id}),
                 scheduled_at - timedelta(hours=2),

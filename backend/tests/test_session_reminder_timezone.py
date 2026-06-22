@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from app.utils.timezone_resolver import (
     DEFAULT_SESSION_TZ,
     format_session_start_for_profile,
+    split_session_start_for_profile,
 )
 
 
@@ -42,3 +43,21 @@ def test_invalid_timezone_falls_back_to_default():
         {"timezone": "Not/A_Real_Zone"},
     )
     assert tz_name == DEFAULT_SESSION_TZ
+
+
+def test_split_session_start_parts():
+    scheduled = datetime(2026, 6, 25, 12, 0, tzinfo=timezone.utc)
+    date_str, time_str, tz_name = split_session_start_for_profile(
+        scheduled,
+        {"timezone": "America/Los_Angeles"},
+    )
+    assert tz_name == "America/Los_Angeles"
+    assert "June 25" in date_str
+    assert "5:00 AM" in time_str
+
+
+def test_split_session_start_defaults_eastern():
+    scheduled = datetime(2026, 6, 25, 12, 0, tzinfo=timezone.utc)
+    date_str, time_str, tz_name = split_session_start_for_profile(scheduled, {})
+    assert tz_name == DEFAULT_SESSION_TZ
+    assert "8:00 AM" in time_str

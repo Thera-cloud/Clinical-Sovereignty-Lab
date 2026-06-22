@@ -15,6 +15,8 @@ SUPPORT_DISPLAY_TIMEZONE = os.getenv("SUPPORT_DISPLAY_TIMEZONE", "America/Los_An
 # TZ-NOTIFICATION-FIX: default for session emails when profile has no IANA zone.
 DEFAULT_SESSION_TZ = "America/New_York"
 SESSION_DISPLAY_FMT = "%A, %B %d at %I:%M %p %Z"
+SESSION_DATE_FMT = "%B %d, %Y"
+SESSION_TIME_FMT = "%I:%M %p %Z"
 
 
 def normalize_phone_e164(phone_raw: str, default_region: str = "US") -> Optional[str]:
@@ -94,6 +96,21 @@ def format_session_start_for_profile(
     if scheduled_start.tzinfo is None:
         scheduled_start = scheduled_start.replace(tzinfo=timezone.utc)
     return render_user_time(scheduled_start, tz_name, fmt), tz_name
+
+
+def split_session_start_for_profile(
+    scheduled_start: datetime,
+    profile: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, str, str]:
+    """Return (date_str, time_str, tz_name) in the recipient's profile timezone."""
+    tz_name = ((profile or {}).get("timezone") or "").strip() or DEFAULT_SESSION_TZ
+    if not _is_valid_iana(tz_name):
+        tz_name = DEFAULT_SESSION_TZ
+    if scheduled_start.tzinfo is None:
+        scheduled_start = scheduled_start.replace(tzinfo=timezone.utc)
+    date_str = render_user_time(scheduled_start, tz_name, SESSION_DATE_FMT)
+    time_str = render_user_time(scheduled_start, tz_name, SESSION_TIME_FMT).lstrip("0")
+    return date_str, time_str, tz_name
 
 
 def render_user_time(
