@@ -12,6 +12,8 @@ import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+from app.utils.timezone_resolver import format_session_start_for_profile
+
 logger = logging.getLogger("nate.session_payment_agent")
 
 PAYMENT_WINDOW_HOURS = 72
@@ -23,6 +25,16 @@ _APPT_TIME = "COALESCE(cs.scheduled_start, cs.scheduled_at)"
 _APPT_TIME_BARE = "COALESCE(scheduled_start, scheduled_at)"
 _NOT_CANCELLED = "UPPER(cs.status) != 'CANCELLED'"
 _NOT_CANCELLED_BARE = "UPPER(status) != 'CANCELLED'"
+
+
+def _format_scheduled_for_session(session: dict, tz_key: str = "client_timezone") -> str:
+    """Human-readable local session time for email bodies (TZ-NOTIFICATION-FIX)."""
+    scheduled = session.get("scheduled_at")
+    if not scheduled:
+        return "your upcoming session"
+    profile = {"timezone": session.get(tz_key) or session.get("client_timezone")}
+    text, tz_name = format_session_start_for_profile(scheduled, profile)
+    return f"{text} ({tz_name})"
 
 
 class SessionPaymentAgent:
@@ -78,6 +90,7 @@ class SessionPaymentAgent:
                           u.profile_data->>'name' as client_name,
                           u.profile_data->>'email' as client_email,
                           u.profile_data->>'phone' as client_phone,
+                          u.profile_data->>'timezone' as client_timezone,
                           u.profile_data->>'stripe_customer_id' as stripe_customer_id
                    FROM coaching_sessions cs
                    LEFT JOIN users u ON u.id::text = cs.client_id::text
@@ -148,8 +161,10 @@ class SessionPaymentAgent:
                           u.profile_data->>'name' as client_name,
                           u.profile_data->>'email' as client_email,
                           u.profile_data->>'phone' as client_phone,
+                          u.profile_data->>'timezone' as client_timezone,
                           cu.profile_data->>'name' as coach_name,
-                          cu.profile_data->>'email' as coach_email
+                          cu.profile_data->>'email' as coach_email,
+                          cu.profile_data->>'timezone' as coach_timezone
                    FROM coaching_sessions cs
                    LEFT JOIN users u ON u.id::text = cs.client_id::text
                       OR u.hardware_id = cs.client_id::text
@@ -170,8 +185,10 @@ class SessionPaymentAgent:
                           {_APPT_TIME} AS scheduled_at,
                           u.profile_data->>'name' as client_name,
                           u.profile_data->>'email' as client_email,
+                          u.profile_data->>'timezone' as client_timezone,
                           cu.profile_data->>'email' as coach_email,
-                          cu.profile_data->>'name' as coach_name
+                          cu.profile_data->>'name' as coach_name,
+                          cu.profile_data->>'timezone' as coach_timezone
                    FROM coaching_sessions cs
                    LEFT JOIN users u ON u.id::text = cs.client_id::text
                       OR u.hardware_id = cs.client_id::text
@@ -262,9 +279,11 @@ class SessionPaymentAgent:
 
         if client_email and notify and hasattr(notify, "_send_email"):
             try:
+                when_str = _format_scheduled_for_session(session)
                 subject = "Payment Due — Upcoming Session"
                 body = f"""<p>Hello {client_name},</p>
-<p>Your coaching session is scheduled soon. Payment of ${amount_cents / 100:.2f} is due.</p>
+<p>Your coaching session is scheduled for <strong>{when_str}</strong>.</p>
+<p>Payment of ${amount_cents / 100:.2f} is due.</p>
 <p>Please ensure your payment method is up to date in the app.</p>
 <p>Thank you,<br>Sovereign Sanctuary</p>"""
                 await notify._send_email(client_email, subject, body)
@@ -292,7 +311,7 @@ class SessionPaymentAgent:
         notify = getattr(self.app_state, "notification_system", None) if self.app_state else None
         client_email = session["client_email"]
         client_name = session["client_name"] or "Client"
-        session_date = session["scheduled_at"]
+        session_date = _format_scheduled_for_session(session)
         payment_status = session["payment_status"] or "pending"
 
         if client_email and notify and hasattr(notify, "_send_email"):
@@ -328,7 +347,8 @@ class SessionPaymentAgent:
         coach_email = session.get("coach_email")
         client_name = session.get("client_name", "Client")
         coach_name = session.get("coach_name", "Coach")
-        session_date = session.get("scheduled_at", "")
+        session_date = _format_scheduled_for_session(session)
+        coach_session_date = _format_scheduled_for_session(session, tz_key="coach_timezone")
 
         if client_email:
             try:
@@ -348,7 +368,7 @@ class SessionPaymentAgent:
                     coach_email,
                     f"Session Payment Confirmed — {client_name}",
                     f"""<p>Hello {coach_name},</p>
-<p>Payment received for your session with <strong>{client_name}</strong> on <strong>{session_date}</strong>.</p>
+<p>Payment received for your session with <strong>{client_name}</strong> on <strong>{coach_session_date}</strong>.</p>
 <p>Sovereign Sanctuary</p>""",
                 )
             except Exception as e:

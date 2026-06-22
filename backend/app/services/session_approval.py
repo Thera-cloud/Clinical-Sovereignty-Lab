@@ -22,8 +22,8 @@ import time
 import base64
 import hashlib
 import logging
-from datetime import datetime
-from typing import Optional, Tuple, Dict, List, Any
+from datetime import datetime, timezone
+from typing import Optional, Dict, Tuple, List
 
 logger = logging.getLogger(__name__)
 
@@ -81,12 +81,17 @@ def action_url(session_id: str, action: str) -> str:
 # FORMATTING / LOOKUPS
 # =============================================================================
 
-def format_session_time(session: Dict) -> str:
-    """Human-readable session time from the stored ISO string."""
+def format_session_time(session: Dict, profile: Optional[Dict] = None) -> str:
+    """Human-readable session time in the recipient's profile timezone."""
+    from app.utils.timezone_resolver import format_session_start_for_profile
+
     raw = session.get("scheduled_start") or session.get("scheduled_time") or ""
     try:
         dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-        return dt.strftime("%A, %B %-d, %Y at %-I:%M %p")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        formatted, _tz = format_session_start_for_profile(dt, profile or {})
+        return formatted
     except Exception:
         return str(raw)
 
@@ -100,14 +105,20 @@ async def lookup_user_contact(db_pool, hw_or_username: str) -> Dict[str, str]:
             row = await conn.fetchrow(
                 """SELECT username,
                           COALESCE(profile_data->>'email', '') AS email,
-                          COALESCE(profile_data->>'name', username) AS name
+                          COALESCE(profile_data->>'name', username) AS name,
+                          COALESCE(profile_data->>'timezone', '') AS timezone
                    FROM users
                    WHERE hardware_id = $1 OR username = $1
                    LIMIT 1""",
                 hw_or_username,
             )
             if row:
-                return {"username": row["username"], "email": row["email"], "name": row["name"]}
+                return {
+                    "username": row["username"],
+                    "email": row["email"],
+                    "name": row["name"],
+                    "timezone": row["timezone"],
+                }
     except Exception as e:
         logger.warning("session_approval: contact lookup failed for %s: %s", hw_or_username, e)
     return {}
@@ -132,7 +143,7 @@ async def send_pending_booking_email(db_pool, session: Dict) -> bool:
             template_name="pending_booking_coach",
             context={
                 "client_name": session.get("client_name") or session.get("client_id", "Client"),
-                "session_time": format_session_time(session),
+                "session_time": format_session_time(session, {"timezone": coach.get("timezone")}),
                 "duration": session.get("duration_minutes", 60),
                 "session_title": session.get("title", "Coaching Session"),
                 "approve_url": action_url(sid, "approve"),
@@ -160,7 +171,7 @@ async def send_booking_decision_email(db_pool, session: Dict, decision: str, rea
             context={
                 "decision": decision,
                 "coach_name": coach.get("name") or session.get("coach_id", "your coach"),
-                "session_time": format_session_time(session),
+                "session_time": format_session_time(session, {"timezone": client.get("timezone")}),
                 "zoom_link": session.get("zoom_link", ""),
                 "reason": reason,
             },

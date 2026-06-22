@@ -1,7 +1,7 @@
 """
 LITTLE NATE — Check-In System Auditor
 Verifies the 72-hour check-in agent, activity tracking, snooze handling,
-and nudge creation are all operational. Reports N/8 TRUSTED.
+and nudge creation are all operational. Reports N/9 TRUSTED.
 
 Scheduled 3x daily (5 AM, 5 PM, 11 PM UTC) with stagger delay of 330s.
 """
@@ -49,6 +49,10 @@ CHECKIN_CHECKS = [
     {
         "id": "dedup_logic",
         "label": "Deduplication prevents double sends",
+    },
+    {
+        "id": "session_reminder_constraints",
+        "label": "Session reminder CHECK + notification types",
     },
 ]
 
@@ -126,6 +130,9 @@ class NateCheckInAuditor:
 
             # 8. Deduplication logic
             results.append(await self._check_dedup(conn))
+
+            # 9. Session reminder schema (TZ-NOTIFICATION-FIX)
+            results.append(await self._check_session_reminder_constraints(conn))
 
         trusted = sum(1 for r in results if r["status"] == "TRUSTED")
         total = len(results)
@@ -353,6 +360,60 @@ class NateCheckInAuditor:
         except Exception as e:
             return {
                 "id": "dedup_logic",
+                "status": "FAILED",
+                "detail": str(e),
+            }
+
+    async def _check_session_reminder_constraints(self, conn) -> dict:
+        """Verify session reminder types can be logged and notification types exist."""
+        test_user = "__audit_session_reminder__"
+        try:
+            types_ok = await conn.fetchval("""
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conrelid = 'nate_checkins'::regclass
+                      AND conname = 'nate_checkins_checkin_type_check'
+                      AND pg_get_constraintdef(oid) LIKE '%session_reminder_24h%'
+                )
+            """)
+            notif_ok = await conn.fetchval("""
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conrelid = 'session_notifications'::regclass
+                      AND pg_get_constraintdef(oid) LIKE '%reminder_72h%'
+                )
+            """)
+            if not types_ok or not notif_ok:
+                return {
+                    "id": "session_reminder_constraints",
+                    "status": "WARNING",
+                    "detail": f"checkin_types={types_ok}, session_notifications={notif_ok}",
+                }
+
+            await conn.execute(
+                "DELETE FROM nate_checkins WHERE user_id = $1", test_user,
+            )
+            await conn.execute("""
+                INSERT INTO nate_checkins (user_id, role, checkin_type, channel, content, status)
+                VALUES ($1, 'SYSTEM', 'session_reminder_24h', 'email', 'audit session reminder test', 'sent')
+            """, test_user)
+            await conn.execute(
+                "DELETE FROM nate_checkins WHERE user_id = $1", test_user,
+            )
+            return {
+                "id": "session_reminder_constraints",
+                "status": "TRUSTED",
+                "detail": "session_reminder_* checkin + reminder_72h notification types allowed",
+            }
+        except Exception as e:
+            try:
+                await conn.execute(
+                    "DELETE FROM nate_checkins WHERE user_id = $1", test_user,
+                )
+            except Exception:
+                pass
+            return {
+                "id": "session_reminder_constraints",
                 "status": "FAILED",
                 "detail": str(e),
             }

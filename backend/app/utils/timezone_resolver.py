@@ -12,6 +12,10 @@ _logger = logging.getLogger(__name__)
 # Support-facing emails (Stripe notices to support@): single display zone until ops configures otherwise.
 SUPPORT_DISPLAY_TIMEZONE = os.getenv("SUPPORT_DISPLAY_TIMEZONE", "America/Los_Angeles")
 
+# TZ-NOTIFICATION-FIX: default for session emails when profile has no IANA zone.
+DEFAULT_SESSION_TZ = "America/New_York"
+SESSION_DISPLAY_FMT = "%A, %B %d at %I:%M %p %Z"
+
 
 def normalize_phone_e164(phone_raw: str, default_region: str = "US") -> Optional[str]:
     """Return E.164 phone or None if empty/invalid."""
@@ -75,6 +79,21 @@ def resolve_user_timezone(
             return tz, "ip"
 
     return "UTC", "default_utc"
+
+
+def format_session_start_for_profile(
+    scheduled_start: datetime,
+    profile: Optional[Dict[str, Any]] = None,
+    *,
+    fmt: str = SESSION_DISPLAY_FMT,
+) -> Tuple[str, str]:
+    """Format a UTC session start in the recipient's profile timezone."""
+    tz_name = ((profile or {}).get("timezone") or "").strip() or DEFAULT_SESSION_TZ
+    if not _is_valid_iana(tz_name):
+        tz_name = DEFAULT_SESSION_TZ
+    if scheduled_start.tzinfo is None:
+        scheduled_start = scheduled_start.replace(tzinfo=timezone.utc)
+    return render_user_time(scheduled_start, tz_name, fmt), tz_name
 
 
 def render_user_time(

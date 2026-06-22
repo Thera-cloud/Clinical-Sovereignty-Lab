@@ -551,10 +551,14 @@ class NateCheckInAgent:
     async def _send_reminder_window(self, *, window_hours: int, action_type: str,
                                     lower_offset: str, upper_offset: str,
                                     label_for_client: str, label_for_coach: str):
+        from app.utils.timezone_resolver import format_session_start_for_profile
+
+        notif_type = "reminder_72h" if window_hours == 72 else "reminder_24h"
         try:
             async with self.db_pool.acquire() as conn:
                 upcoming = await conn.fetch(f"""
-                    SELECT cs.session_id, cs.client_id, cs.coach_id, cs.scheduled_start,
+                    SELECT cs.id AS session_uuid, cs.session_id, cs.client_id, cs.coach_id,
+                           cs.scheduled_start, cs.zoom_link,
                            u_client.username AS client_username,
                            u_client.profile_data AS client_profile,
                            u_coach.username AS coach_username,
@@ -563,15 +567,14 @@ class NateCheckInAgent:
                     JOIN users u_client ON u_client.hardware_id = cs.client_id
                     JOIN users u_coach ON u_coach.hardware_id = cs.coach_id
                     WHERE cs.status = 'scheduled'
+                      AND cs.id IS NOT NULL
                       AND cs.scheduled_start BETWEEN NOW() + INTERVAL '{lower_offset}'
                                                  AND NOW() + INTERVAL '{upper_offset}'
                 """)
 
                 for row in upcoming:
+                    session_uuid = row["session_uuid"]
                     session_id = str(row["session_id"])
-                    # Dedup window matches the reminder window (avoid double-sending if loop overlaps)
-                    if await self._recent_checkin(conn, session_id, action_type, hours=window_hours):
-                        continue
 
                     client_profile = row["client_profile"] or {}
                     if isinstance(client_profile, str):
@@ -591,35 +594,92 @@ class NateCheckInAgent:
                     coach_name = coach_profile.get("name") or row["coach_username"]
                     client_email = client_profile.get("email")
                     coach_email = coach_profile.get("email")
+                    zoom_link = (row["zoom_link"] or "").strip()
 
-                    start_str = row["scheduled_start"].strftime("%A, %B %d at %I:%M %p")
+                    client_start_str, client_tz = format_session_start_for_profile(
+                        row["scheduled_start"], client_profile,
+                    )
+                    coach_start_str, coach_tz = format_session_start_for_profile(
+                        row["scheduled_start"], coach_profile,
+                    )
+                    join_line = f"\nJoin: {zoom_link}" if zoom_link else ""
+                    sent_any = False
 
-                    if client_email and self.notification_system:
+                    if (
+                        client_email
+                        and self.notification_system
+                        and self._session_reminders_enabled(client_profile)
+                        and await self._claim_session_notification(
+                            conn, session_uuid, notif_type, row["client_id"],
+                        )
+                    ):
                         await self.notification_system._send_email(
                             client_email,
-                            f"Session reminder: {start_str}",
+                            f"Session reminder: {client_start_str}",
                             f"Hi {client_name}, you have a coaching session with {coach_name} "
-                            f"{label_for_client} ({start_str}). See you there!",
+                            f"{label_for_client} ({client_start_str}, {client_tz})."
+                            f"{join_line} See you there!",
                             notification_type="session_reminder",
                         )
+                        sent_any = True
 
-                    if coach_email and self.notification_system:
+                    if (
+                        coach_email
+                        and self.notification_system
+                        and self._session_reminders_enabled(coach_profile)
+                        and await self._claim_session_notification(
+                            conn, session_uuid, notif_type, row["coach_id"],
+                        )
+                    ):
                         await self.notification_system._send_email(
                             coach_email,
                             f"Session reminder: {client_name} {label_for_coach}",
                             f"Hi {coach_name}, reminder that you have a session with "
-                            f"{client_name} {label_for_coach} at {start_str}.",
+                            f"{client_name} {label_for_coach} at {coach_start_str} ({coach_tz})."
+                            f"{join_line}",
                             notification_type="session_reminder",
                         )
+                        sent_any = True
 
-                    await self._record_checkin(
-                        conn, session_id, "SYSTEM", action_type,
-                        "email", f"{window_hours}h reminder for session {session_id}",
-                        {"client": row["client_username"], "coach": row["coach_username"]},
-                    )
-                    logger.info("%dh reminder sent for session %s", window_hours, session_id)
+                    if sent_any:
+                        await self._record_checkin(
+                            conn, session_id, "SYSTEM", action_type,
+                            "email", f"{window_hours}h reminder for session {session_id}",
+                            {"client": row["client_username"], "coach": row["coach_username"]},
+                        )
+                        logger.info("%dh reminder sent for session %s", window_hours, session_id)
         except Exception as e:
             logger.warning("NateCheckInAgent: %s reminder failed: %s", action_type, e)
+
+    @staticmethod
+    def _session_reminders_enabled(profile: dict) -> bool:
+        """Respect client/coach notification prefs (Flutter + bridge field names)."""
+        if not profile:
+            return True
+        if profile.get("notif_session_reminders") is False:
+            return False
+        if profile.get("session_reminders") is False:
+            return False
+        return True
+
+    @staticmethod
+    async def _claim_session_notification(
+        conn, session_uuid, notification_type: str, recipient_id: str,
+    ) -> bool:
+        """Idempotent send gate — claim slot before email (TZ-NOTIFICATION-FIX)."""
+        if not session_uuid:
+            return False
+        claimed = await conn.fetchval(
+            """
+            INSERT INTO session_notifications (session_id, notification_type, channel, recipient_id)
+            VALUES ($1, $2, 'email', $3)
+            ON CONFLICT DO NOTHING RETURNING id
+            """,
+            session_uuid,
+            notification_type,
+            recipient_id,
+        )
+        return claimed is not None
 
     # ── DOJO-Aware AI Question Generator ──────────────────────────────
 
