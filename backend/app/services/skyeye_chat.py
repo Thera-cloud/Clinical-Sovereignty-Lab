@@ -1114,12 +1114,13 @@ RULES:
                 rows = await conn.fetch(
                     """SELECT role, message FROM coach_nate_chat_history
                        WHERE coach_username = $1
-                       ORDER BY created_at DESC LIMIT 30""",
+                       ORDER BY created_at DESC LIMIT 12""",
                     coach_username,
                 )
                 for r in reversed(rows):
                     prefix = "Coach" if r["role"] == "user" else "Little Nate"
-                    history_lines.append(f"{prefix}: {r['message']}")
+                    msg = (r["message"] or "")[:800]
+                    history_lines.append(f"{prefix}: {msg}")
         except Exception as e:
             logger.warning("Coach chat history load failed: %s", e)
 
@@ -1255,8 +1256,11 @@ RULES:
         if context_injection:
             conversation_text = context_injection + "\n\n" + conversation_text
 
-        # Call Azure OpenAI with the COACH prompt
-        response_text = await self._call_azure_coach_chat(conversation_text)
+        # Call Azure OpenAI with the COACH prompt (context preserved — never tail-truncated away)
+        response_text = await self._call_azure_coach_chat(
+            conversation_text,
+            context_prefix=context_injection,
+        )
 
         # Post-filter: sanitize any restricted IP that leaked into the response
         response_text = self._sanitize_coach_response(response_text)
@@ -1295,7 +1299,11 @@ RULES:
             "follow_up_suggestions": follow_ups,
         }
 
-    async def _call_azure_coach_chat(self, conversation_text: str) -> str:
+    async def _call_azure_coach_chat(
+        self,
+        conversation_text: str,
+        context_prefix: str = "",
+    ) -> str:
         """Call Azure OpenAI with the COACH_NATE_SYSTEM_PROMPT."""
         endpoint = settings.AZURE_OPENAI_ENDPOINT.rstrip("/")
         api_key = settings.AZURE_API_KEY
@@ -1310,13 +1318,25 @@ RULES:
         url = f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version=2024-06-01"
         headers = {"Content-Type": "application/json", "api-key": api_key}
 
-        if len(conversation_text) > 16000:
-            conversation_text = conversation_text[-16000:]
+        prefix = (context_prefix or "").strip()
+        max_user = 16000
+        if prefix:
+            history_budget = max_user - len(prefix) - 2
+            if history_budget < 4000:
+                history_budget = 4000
+                prefix = prefix[: max_user - history_budget - 2]
+            if len(conversation_text) > history_budget:
+                conversation_text = conversation_text[-history_budget:]
+            user_content = f"{prefix}\n\n{conversation_text}"
+        elif len(conversation_text) > max_user:
+            user_content = conversation_text[-max_user:]
+        else:
+            user_content = conversation_text
 
         payload = {
             "messages": [
                 {"role": "system", "content": COACH_NATE_SYSTEM_PROMPT},
-                {"role": "user", "content": conversation_text},
+                {"role": "user", "content": user_content},
             ],
             "max_completion_tokens": 8000,
         }
