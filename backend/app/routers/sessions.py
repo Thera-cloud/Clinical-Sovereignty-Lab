@@ -74,6 +74,7 @@ from app.services.session_schedule_link import (
     has_archived_transcript,
     hide_session_schedule_link,
     is_schedule_link_hidden,
+    session_data_dict,
 )
 
 try:
@@ -423,6 +424,47 @@ def generate_session_id():
 
 def _get_db(request: Request):
     return getattr(request.app.state, "db_pool", None)
+
+
+async def _fetch_session_pg(request: Request, session_id: str) -> Optional[dict]:
+    """Authoritative single-session read from coaching_sessions (session_data merged)."""
+    db = _get_db(request)
+    if not db or not session_id:
+        return None
+    try:
+        async with db.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT session_id, client_id, coach_id, client_name, status,
+                       scheduled_start, scheduled_end, zoom_meeting_id, session_data
+                FROM coaching_sessions
+                WHERE session_id = $1
+                LIMIT 1
+                """,
+                session_id,
+            )
+        if not row:
+            return None
+        s = dict(row)
+        sd = s.get("session_data")
+        if isinstance(sd, str):
+            try:
+                sd = json.loads(sd) if sd.strip() else {}
+            except Exception:
+                sd = {}
+        if isinstance(sd, dict):
+            s["session_data"] = sd
+            for k, v in sd.items():
+                if k not in s or s.get(k) in (None, "", [], {}):
+                    s[k] = v
+        if s.get("scheduled_start"):
+            s["scheduled_start"] = str(s["scheduled_start"])
+        if s.get("scheduled_end"):
+            s["scheduled_end"] = str(s["scheduled_end"])
+        return s
+    except Exception as e:
+        _logger.warning("_fetch_session_pg failed %s: %s", session_id, e)
+        return None
 
 
 async def _load_sessions_pf(request: Request) -> list:
@@ -1536,15 +1578,17 @@ async def schedule_link_status(
     current_user: str = Depends(get_current_user_id),
 ):
     """Archive + schedule-link state for coach delete / folder pull gates."""
-    sessions = await _load_sessions_pf(request)
-    target = next((s for s in sessions if s.get("session_id") == session_id), None)
+    target = await _fetch_session_pg(request, session_id)
+    if not target:
+        sessions = await _load_sessions_pf(request)
+        target = next((s for s in sessions if s.get("session_id") == session_id), None)
     if not target:
         raise HTTPException(404, "Session not found")
     user_role = getattr(request.state, "user_role", "")
     if current_user not in (target.get("client_id"), target.get("coach_id")) and user_role != "ADMIN":
         raise HTTPException(403, "Access denied")
     archived = has_archived_transcript(target)
-    sd = target.get("session_data") if isinstance(target.get("session_data"), dict) else {}
+    sd = session_data_dict(target)
     folder_placed = str(sd.get("zoom_folder_doc_placed") or target.get("zoom_folder_doc_placed") or "").lower() in (
         "true",
         "1",
@@ -1571,11 +1615,12 @@ async def hide_schedule_link(
     Past sessions require archived transcript first. Never hard-deletes PG when archived.
     """
     sessions = await _load_sessions_pf(request)
-    target = None
-    for s in sessions:
-        if s.get("session_id") == session_id:
-            target = s
-            break
+    target = await _fetch_session_pg(request, session_id)
+    if not target:
+        for s in sessions:
+            if s.get("session_id") == session_id:
+                target = s
+                break
     if not target:
         raise HTTPException(404, "Session not found")
     user_role = getattr(request.state, "user_role", "")

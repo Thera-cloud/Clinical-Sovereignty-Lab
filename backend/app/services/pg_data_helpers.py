@@ -233,7 +233,13 @@ async def load_sessions_pg(db_pool, **filters) -> List[Dict]:
                     "consultation_subject": r.get("consultation_subject") or "",
                 }
                 extra = r.get("session_data")
+                if isinstance(extra, str):
+                    try:
+                        extra = json.loads(extra) if extra.strip() else {}
+                    except Exception:
+                        extra = {}
                 if extra and isinstance(extra, dict):
+                    s["session_data"] = extra
                     for k, v in extra.items():
                         if k not in s:
                             s[k] = v
