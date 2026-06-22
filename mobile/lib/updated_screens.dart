@@ -6050,30 +6050,189 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   Future<void> _deleteSessionPermanently(String sessionId) async {
+    await _hideScheduleLink(sessionId);
+  }
+
+  bool _showSessionInActionList(Map<String, dynamic> session) {
+    if (session['show_in_action_list'] == false) return false;
+    if (session['calendar_reference_only'] == true) return false;
+    final hidden = session['schedule_link_hidden'];
+    if (hidden == true || hidden.toString().toLowerCase() == 'true') {
+      return false;
+    }
+    final status = (session['status'] ?? 'scheduled').toString().toLowerCase();
+    return status == 'scheduled' ||
+        status == 'active' ||
+        status == 'pending_approval';
+  }
+
+  bool _isCalendarReferenceOnly(Map<String, dynamic> session) {
+    if (session['calendar_reference_only'] == true) return true;
+    if (session['show_in_action_list'] == false) return true;
+    final hidden = session['schedule_link_hidden'];
+    return hidden == true || hidden.toString().toLowerCase() == 'true';
+  }
+
+  List<Map<String, dynamic>> get _actionableSchedule {
+    final out = <Map<String, dynamic>>[];
+    for (final raw in _schedule) {
+      if (raw is! Map) continue;
+      final m = Map<String, dynamic>.from(raw);
+      if (_showSessionInActionList(m)) out.add(m);
+    }
+    return out;
+  }
+
+  Future<Map<String, dynamic>?> _fetchScheduleLinkStatus(String sessionId) async {
     try {
-      final uri =
-          _apiUri('/api/sessions/$sessionId', query: {"hard_delete": "true"});
-      final resp = await http.delete(uri, headers: _restHeaders());
+      final uri = _apiUri('/api/sessions/$sessionId/schedule-link-status');
+      final resp = await http.get(uri, headers: _restHeaders());
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        return jsonDecode(resp.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> _hideScheduleLink(String sessionId) async {
+    try {
+      final uri = _apiUri('/api/sessions/$sessionId/hide-schedule-link');
+      final resp = await http.post(uri, headers: _restHeaders());
+      if (resp.statusCode == 409) {
+        final body = jsonDecode(resp.body);
+        final detail = body is Map ? (body['detail'] ?? body) : body;
+        final msg = detail is Map
+            ? (detail['message'] ?? detail['error'] ?? resp.body).toString()
+            : resp.body;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(msg), backgroundColor: Colors.orange),
+          );
+        }
+        return;
+      }
       if (resp.statusCode < 200 || resp.statusCode >= 300) {
         throw Exception("HTTP ${resp.statusCode}: ${resp.body}");
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content: Text("Session deleted"), backgroundColor: Colors.green),
+            content: Text("Removed from schedule — calendar reference kept"),
+            backgroundColor: Colors.green,
+          ),
         );
       }
-      // Refresh the schedule
       _emitFetchCoachCalendar();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text("Delete session failed: $e"),
-              backgroundColor: Colors.red),
+            content: Text("Remove from schedule failed: $e"),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
+  }
+
+  Future<void> _pullSummaryToFolder(String sessionId) async {
+    try {
+      final uri =
+          _apiUri('/api/zoom/sessions/$sessionId/place-folder-summary');
+      final resp = await http.post(uri, headers: _restHeaders());
+      if (resp.statusCode == 409) {
+        final body = jsonDecode(resp.body);
+        final detail = body is Map ? (body['detail'] ?? body) : body;
+        final msg = detail is Map
+            ? (detail['message'] ?? detail['error'] ?? resp.body).toString()
+            : resp.body;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(msg), backgroundColor: Colors.orange),
+          );
+        }
+        return;
+      }
+      if (resp.statusCode == 404) {
+        final body = jsonDecode(resp.body);
+        final detail = body is Map ? (body['detail'] ?? body) : body;
+        final msg = detail is Map
+            ? (detail['message'] ?? detail['error'] ?? resp.body).toString()
+            : resp.body;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(msg), backgroundColor: Colors.orange),
+          );
+        }
+        return;
+      }
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        throw Exception("HTTP ${resp.statusCode}: ${resp.body}");
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Session summary placed in client Folder"),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+      _coachFetchFolders();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Pull to Folder failed: $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _confirmRemoveScheduleLink(String sessionId) async {
+    final status = await _fetchScheduleLinkStatus(sessionId);
+    if (status != null &&
+        status['archive_required_before_hide'] == true &&
+        status['transcript_archived'] != true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                "No archive saved. Use Archive Transcript before removing this session from the schedule."),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0A0A0F),
+        title: const Text("Remove from schedule?",
+            style: TextStyle(color: Colors.redAccent)),
+        content: const Text(
+          "This removes the session from your action list below the calendar. A reference dot stays on the calendar grid. The session record is kept when a transcript was archived.",
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("Remove"),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) await _hideScheduleLink(sessionId);
   }
 
   Future<void> _archiveZoomTranscriptForSession(String sessionId) async {
@@ -10580,7 +10739,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           ),
         ],
         // ===== CONFIRMED SESSIONS =====
-        if (_schedule.isNotEmpty) ...[
+        if (_actionableSchedule.isNotEmpty) ...[
           if (hasPending) ...[
             const Padding(
               padding: EdgeInsets.only(bottom: 12),
@@ -10592,7 +10751,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                       letterSpacing: 1)),
             ),
           ],
-          ..._schedule.asMap().entries.map((entry) {
+          ..._actionableSchedule.asMap().entries.map((entry) {
             final index = entry.key;
             final raw = entry.value;
             final session = (raw is Map)
@@ -10873,36 +11032,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                             if (ok == true)
                               await _deleteZoomMeetingForSession(sessionId);
                           }
+                          if (v == "pull_folder_summary") {
+                            await _pullSummaryToFolder(sessionId);
+                          }
                           if (v == "delete_session") {
-                            final ok = await showDialog<bool>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                backgroundColor: const Color(0xFF0A0A0F),
-                                title: const Text("Delete Session?",
-                                    style: TextStyle(color: Colors.redAccent)),
-                                content: const Text(
-                                  "This will permanently remove this session from the schedule. This cannot be undone.",
-                                  style: TextStyle(color: Colors.white70),
-                                ),
-                                actions: [
-                                  TextButton(
-                                      onPressed: () =>
-                                          Navigator.pop(ctx, false),
-                                      child: const Text("Cancel",
-                                          style:
-                                              TextStyle(color: Colors.grey))),
-                                  ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.redAccent,
-                                        foregroundColor: Colors.white),
-                                    onPressed: () => Navigator.pop(ctx, true),
-                                    child: const Text("Delete"),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (ok == true)
-                              await _deleteSessionPermanently(sessionId);
+                            await _confirmRemoveScheduleLink(sessionId);
                           }
                         },
                         itemBuilder: (ctx) => [
@@ -10941,16 +11075,21 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                                   style: TextStyle(color: Colors.white)),
                             ),
                             const PopupMenuItem(
+                              value: "pull_folder_summary",
+                              child: Text("Pull Summary to Folder",
+                                  style: TextStyle(color: Color(0xFFFFD700))),
+                            ),
+                            const PopupMenuItem(
                               value: "delete_meeting",
                               child: Text("Delete Zoom Meeting",
                                   style: TextStyle(color: Colors.white)),
                             ),
                             const PopupMenuDivider(),
                           ],
-                          // Always show delete session option
+                          // Always show remove-from-schedule option
                           const PopupMenuItem(
                             value: "delete_session",
-                            child: Text("Delete Session",
+                            child: Text("Remove from Schedule",
                                 style: TextStyle(color: Colors.redAccent)),
                           ),
                         ],
@@ -11767,10 +11906,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       final available = _hasRecurringForDay(_dowMonZero(d)) && !blocked;
       final daySessions = _sessionsOnDate(d);
       final hasApproved = daySessions.any((s) =>
-          (s['status'] ?? '') == 'scheduled' ||
-          (s['status'] ?? '') == 'active');
+          !_isCalendarReferenceOnly(Map<String, dynamic>.from(s)) &&
+          ((s['status'] ?? '') == 'scheduled' ||
+              (s['status'] ?? '') == 'active'));
       final hasPending =
           daySessions.any((s) => (s['status'] ?? '') == 'pending_approval');
+      final hasReferenceOnly = daySessions.any((s) =>
+          _isCalendarReferenceOnly(Map<String, dynamic>.from(s)));
       final hasSession = daySessions.isNotEmpty;
 
       // Build tooltip text for the cell
@@ -11791,7 +11933,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             pretty = '$h12:${dtFull.minute.toString().padLeft(2, '0')} $ap';
           } catch (_) {}
           final st = (s['status'] ?? '').toString();
-          final tag = st == 'pending_approval' ? ' (pending)' : '';
+          final ref = _isCalendarReferenceOnly(Map<String, dynamic>.from(s));
+          final tag = st == 'pending_approval'
+              ? ' (pending)'
+              : (ref ? ' (reference)' : '');
           lines.add('$clientNm • $pretty$tag');
         }
         tooltipText = lines.join('\n');
@@ -11802,6 +11947,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         bg = const Color(0xFF2A2A2A);
       } else if (hasApproved) {
         bg = const Color(0xFF4ECDC4).withOpacity(0.22);
+      } else if (hasReferenceOnly) {
+        bg = Colors.grey.withOpacity(0.28);
       } else if (hasPending) {
         bg = const Color(0xFFC9A962).withOpacity(0.22);
       } else if (available) {
@@ -12040,7 +12187,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     final blocked = _isDateBlocked(d);
     final recur =
         _myRecurring.where((r) => (r['day_of_week'] ?? -1) == dow).toList();
-    final sessions = _sessionsOnDate(d);
+    final sessions = _sessionsOnDate(d)
+        .where((s) => _showSessionInActionList(Map<String, dynamic>.from(s)))
+        .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -21460,6 +21609,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   List<Map<String, dynamic>> _coachFolderFiles = [];
   String? _coachActiveFolderId;
   String? _coachActiveFolderName;
+  String? _coachActiveFolderEntityId;
   bool _coachFoldersLoading = false;
 
   Widget _buildFolderTab() {
@@ -21594,6 +21744,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         setState(() {
           _coachActiveFolderId = folder['id'];
           _coachActiveFolderName = name;
+          _coachActiveFolderEntityId = (folder['entity_id'] ?? '').toString();
           _coachFolderFiles = [];
         });
         _coachFetchFolderFiles(folder['id']);
@@ -21639,6 +21790,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                 onTap: () => setState(() {
                   _coachActiveFolderId = null;
                   _coachActiveFolderName = null;
+                  _coachActiveFolderEntityId = null;
                 }),
                 child: const Row(children: [
                   Icon(Icons.arrow_back, color: Color(0xFFC9A962), size: 18),
@@ -21737,37 +21889,41 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             ]),
           ),
         Expanded(
-          child: _coachFolderFiles.isEmpty
-              ? Center(
-                  child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.insert_drive_file,
-                            color: Colors.grey[700], size: 40),
-                        const SizedBox(height: 8),
-                        Text("No files yet",
-                            style: TextStyle(
-                                color: Colors.grey[500], fontSize: 13)),
-                        const SizedBox(height: 16),
-                        ElevatedButton.icon(
-                          icon: const Icon(Icons.upload_file, size: 16),
-                          label: const Text("Upload a File"),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFC9A962),
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 20, vertical: 10),
-                          ),
-                          onPressed: _coachFileUploading
-                              ? null
-                              : _coachPickAndUploadFile,
-                        ),
-                      ]),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: _coachFolderFiles.length,
-                  itemBuilder: (context, index) {
+          child: Column(
+            children: [
+              _buildCoachFolderPendingPulls(),
+              Expanded(
+                child: _coachFolderFiles.isEmpty
+                    ? Center(
+                        child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.insert_drive_file,
+                                  color: Colors.grey[700], size: 40),
+                              const SizedBox(height: 8),
+                              Text("No files yet",
+                                  style: TextStyle(
+                                      color: Colors.grey[500], fontSize: 13)),
+                              const SizedBox(height: 16),
+                              ElevatedButton.icon(
+                                icon: const Icon(Icons.upload_file, size: 16),
+                                label: const Text("Upload a File"),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFFC9A962),
+                                  foregroundColor: Colors.black,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 20, vertical: 10),
+                                ),
+                                onPressed: _coachFileUploading
+                                    ? null
+                                    : _coachPickAndUploadFile,
+                              ),
+                            ]),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(12),
+                        itemCount: _coachFolderFiles.length,
+                        itemBuilder: (context, index) {
                     final file = _coachFolderFiles[index];
                     final filename = file['filename'] ?? 'Unknown';
                     final fileType = file['file_type'] ?? 'document';
@@ -21871,8 +22027,82 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                     );
                   },
                 ),
+              ),
+            ],
+          ),
         ),
       ],
+    );
+  }
+
+  Widget _buildCoachFolderPendingPulls() {
+    final entityId = (_coachActiveFolderEntityId ?? '').trim();
+    if (entityId.isEmpty) return const SizedBox.shrink();
+    final items = <Map<String, dynamic>>[];
+    for (final raw in _schedule) {
+      if (raw is! Map) continue;
+      final m = Map<String, dynamic>.from(raw);
+      if ((m['client_id'] ?? '').toString() != entityId) continue;
+      final sid = (m['session_id'] ?? m['id'] ?? '').toString();
+      if (sid.isEmpty) continue;
+      if ((m['zoom_meeting_id'] ?? '').toString().trim().isEmpty) continue;
+      items.add(m);
+    }
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "MANUAL ZOOM SUMMARY PULL",
+            style: TextStyle(
+              color: Color(0xFFFFD700),
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            "Requires archived transcript. If Zoom AI summary is not ready yet, try again later.",
+            style: TextStyle(color: Colors.white54, fontSize: 11),
+          ),
+          const SizedBox(height: 8),
+          ...items.take(6).map((m) {
+            final sid = (m['session_id'] ?? m['id'] ?? '').toString();
+            final label = [
+              (m['date'] ?? '').toString(),
+              _formatScheduledTime(m),
+            ].where((s) => s.trim().isNotEmpty).join(' · ');
+            return Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      label.isEmpty ? sid : label,
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => _pullSummaryToFolder(sid),
+                    child: const Text("Pull",
+                        style: TextStyle(color: Color(0xFFFFD700))),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
     );
   }
 

@@ -16,6 +16,8 @@ except ImportError:
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
+from app.services.session_schedule_link import annotate_calendar_item, annotate_calendar_schedule
+
 # ==============================================================================
 # NEW DATA STRUCTURES
 # ==============================================================================
@@ -213,7 +215,9 @@ class CoachNexusV2:
                     continue
         except Exception:
             pass
-        
+
+        # QUANTUM-CRYSTAL-ARCH: calendar flags for schedule-link hide vs reference dots
+        filtered = annotate_calendar_schedule(filtered)
         return {
             "month": month,
             "year": year,
@@ -371,6 +375,77 @@ class CoachNexusV2:
 
         if added:
             print(f">>> [INFO] get_calendar_data_pg: merged {added} PG sessions for coach={hid} {year}-{month:02d}")
+
+        # QUANTUM-CRYSTAL-ARCH: include hidden schedule-link rows for calendar dots only
+        try:
+            async with db_pool.acquire() as conn:
+                hidden_rows = await conn.fetch(
+                    """
+                    SELECT session_id, coach_id, client_id, client_name,
+                           session_type, status,
+                           scheduled_start, scheduled_end,
+                           zoom_link, zoom_meeting_id, notes,
+                           session_data
+                    FROM coaching_sessions
+                    WHERE coach_id = $1
+                      AND scheduled_start >= $2
+                      AND scheduled_start <  $3
+                      AND LOWER(status) = 'completed'
+                      AND COALESCE(session_data->>'schedule_link_hidden', 'false') = 'true'
+                    ORDER BY scheduled_start ASC
+                    LIMIT 200
+                    """,
+                    hid, month_start, month_end,
+                )
+            for row in hidden_rows:
+                sid = row.get("session_id") or ""
+                if not sid or sid in existing_ids:
+                    continue
+                st = row.get("scheduled_start")
+                if not st:
+                    continue
+                if st.tzinfo is None:
+                    st = st.replace(tzinfo=datetime.timezone.utc)
+                st_local = st.astimezone(coach_tz)
+                dur_min = 50
+                en = row.get("scheduled_end")
+                if en:
+                    if en.tzinfo is None:
+                        en = en.replace(tzinfo=datetime.timezone.utc)
+                    dur_min = max(1, int((en - st).total_seconds() / 60))
+                sd = row.get("session_data") or {}
+                if isinstance(sd, str):
+                    try:
+                        sd = json.loads(sd)
+                    except Exception:
+                        sd = {}
+                base["schedule"].append({
+                    "id": sid,
+                    "session_id": sid,
+                    "coach_id": row.get("coach_id") or hid,
+                    "client_id": row.get("client_id") or "",
+                    "client_name": row.get("client_name") or "",
+                    "date": st_local.date().isoformat(),
+                    "time": st_local.strftime("%H:%M"),
+                    "scheduled_start": st.isoformat(),
+                    "scheduled_end": (en.isoformat() if en else ""),
+                    "type": row.get("session_type") or "COACH",
+                    "session_type": row.get("session_type") or "COACH",
+                    "duration_minutes": dur_min,
+                    "platform": "Zoom",
+                    "zoom_link": row.get("zoom_link") or "",
+                    "zoom_host_url": sd.get("zoom_host_url", ""),
+                    "zoom_meeting_id": row.get("zoom_meeting_id") or "",
+                    "status": row.get("status") or "completed",
+                    "notes": row.get("notes") or "",
+                    "schedule_link_hidden": True,
+                    "calendar_reference_only": True,
+                })
+                existing_ids.add(sid)
+        except Exception as e:
+            print(f">>> [WARN] get_calendar_data_pg: hidden reference query failed: {e}")
+
+        base["schedule"] = annotate_calendar_schedule(base.get("schedule", []))
         return base
 
     def _get_availability(self, hardware_id: str) -> List[str]:

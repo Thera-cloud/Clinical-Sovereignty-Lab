@@ -1174,6 +1174,31 @@ async def place_folder_summary(
     if role != "ADMIN" and str(pg_row.get("coach_id") or "") != coach_id:
         raise HTTPException(403, "Not authorized for this session")
 
+    from app.services.session_schedule_link import has_archived_transcript
+
+    if not has_archived_transcript(pg_row):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "no_archive_saved",
+                "message": "No archived transcript for this session. Archive transcript in Schedule first.",
+            },
+        )
+
+    sd_check = _session_data_dict(pg_row)
+    if str(sd_check.get("zoom_folder_doc_placed") or "").lower() in ("true", "1", "yes"):
+        return {
+            "status": "already_placed",
+            "folder_file_id": sd_check.get("zoom_folder_file_id"),
+            "session_id": session_id,
+        }
+    if sd_check.get("zoom_folder_file_id"):
+        return {
+            "status": "already_placed",
+            "folder_file_id": sd_check.get("zoom_folder_file_id"),
+            "session_id": session_id,
+        }
+
     meeting_id = str(pg_row.get("zoom_meeting_id") or "").strip()
     if not meeting_id:
         raise HTTPException(400, "Session has no Zoom meeting ID")
@@ -1203,8 +1228,11 @@ async def place_folder_summary(
     )
     if not file_id:
         raise HTTPException(
-            404,
-            detail="No Zoom AI summary available yet — retry after Zoom finishes processing",
+            status_code=404,
+            detail={
+                "error": "no_summary_available",
+                "message": "No Zoom AI summary available yet — retry after Zoom finishes processing",
+            },
         )
     return {"status": "placed", "folder_file_id": file_id, "session_id": session_id}
 

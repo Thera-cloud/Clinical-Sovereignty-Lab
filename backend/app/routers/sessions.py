@@ -68,6 +68,13 @@ from app.services.pg_data_helpers import (
     find_user_pg,
     upsert_classroom_analysis_pg,
 )
+from app.services.session_schedule_link import (
+    annotate_calendar_item,
+    archive_required_before_hide,
+    has_archived_transcript,
+    hide_session_schedule_link,
+    is_schedule_link_hidden,
+)
 
 try:
     from app.services.google_calendar_session_sync import sync_session_for_participants as _gcal_sync
@@ -861,10 +868,11 @@ async def get_coach_sessions(request: Request, coach_id: str, current_user: str 
         raise HTTPException(403, "Access denied: you can only view your own sessions")
     sessions = await _load_sessions_pf(request)
     coach_sessions = [s for s in sessions if s.get("coach_id") == coach_id]
-    
+    coach_sessions = [s for s in coach_sessions if not is_schedule_link_hidden(s)]
+
     if status:
         coach_sessions = [s for s in coach_sessions if s.get("status") == status]
-    
+
     coach_sessions.sort(key=lambda x: x.get("scheduled_start", ""), reverse=True)
     return {"sessions": coach_sessions[:limit]}
 
@@ -1520,6 +1528,88 @@ async def update_session(session_id: str, req: UpdateSessionRequest, request: Re
 
     raise HTTPException(404, "Session not found")
 
+
+@router.get("/{session_id}/schedule-link-status")
+async def schedule_link_status(
+    session_id: str,
+    request: Request,
+    current_user: str = Depends(get_current_user_id),
+):
+    """Archive + schedule-link state for coach delete / folder pull gates."""
+    sessions = await _load_sessions_pf(request)
+    target = next((s for s in sessions if s.get("session_id") == session_id), None)
+    if not target:
+        raise HTTPException(404, "Session not found")
+    user_role = getattr(request.state, "user_role", "")
+    if current_user not in (target.get("client_id"), target.get("coach_id")) and user_role != "ADMIN":
+        raise HTTPException(403, "Access denied")
+    archived = has_archived_transcript(target)
+    sd = target.get("session_data") if isinstance(target.get("session_data"), dict) else {}
+    folder_placed = str(sd.get("zoom_folder_doc_placed") or target.get("zoom_folder_doc_placed") or "").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+    return {
+        "session_id": session_id,
+        "transcript_archived": archived,
+        "schedule_link_hidden": is_schedule_link_hidden(target),
+        "archive_required_before_hide": archive_required_before_hide(target),
+        "zoom_folder_doc_placed": folder_placed,
+        "zoom_folder_file_id": sd.get("zoom_folder_file_id") or target.get("zoom_folder_file_id"),
+    }
+
+
+@router.post("/{session_id}/hide-schedule-link")
+async def hide_schedule_link(
+    session_id: str,
+    request: Request,
+    current_user: str = Depends(get_current_user_id),
+):
+    """
+    Remove session from coach Schedule action list; keep calendar reference dot.
+    Past sessions require archived transcript first. Never hard-deletes PG when archived.
+    """
+    sessions = await _load_sessions_pf(request)
+    target = None
+    for s in sessions:
+        if s.get("session_id") == session_id:
+            target = s
+            break
+    if not target:
+        raise HTTPException(404, "Session not found")
+    user_role = getattr(request.state, "user_role", "")
+    if current_user != target.get("coach_id") and user_role != "ADMIN":
+        raise HTTPException(403, "Only the assigned coach can remove this schedule link")
+    if is_schedule_link_hidden(target):
+        return {
+            "message": "Schedule link already removed",
+            "session": annotate_calendar_item(target),
+        }
+    if archive_required_before_hide(target) and not has_archived_transcript(target):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "no_archive_saved",
+                "message": "No archived transcript for this session. Use Schedule → Archive Transcript first.",
+            },
+        )
+    db = _get_db(request)
+    try:
+        updated = await hide_session_schedule_link(db, target, sessions_list=sessions)
+    except Exception as e:
+        _logger.warning("hide_schedule_link failed %s: %s", session_id, e)
+        raise HTTPException(500, "Failed to hide schedule link") from e
+    save_json(DATA_DIR / "sessions.json", sessions)
+    await _save_session_dual(request, target, all_sessions=sessions)
+    if _gcal_sync and db:
+        try:
+            asyncio.create_task(_gcal_sync(db, target, action="delete"))
+        except Exception:
+            pass
+    return {"message": "Schedule link removed; calendar reference kept", "session": updated}
+
+
 @router.delete("/{session_id}")
 async def cancel_session(session_id: str, request: Request, current_user: str = Depends(get_current_user_id), reason: str = "", hard_delete: bool = False):
     """Cancel or delete a session. Requires authentication; user must be a participant.
@@ -1536,6 +1626,14 @@ async def cancel_session(session_id: str, request: Request, current_user: str = 
             if current_user not in (s.get("client_id"), s.get("coach_id")):
                 raise HTTPException(403, "Access denied: you are not a participant in this session")
             if hard_delete:
+                if has_archived_transcript(s):
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "error": "archived_session_protected",
+                            "message": "Session has archived transcript — use hide-schedule-link instead of hard delete.",
+                        },
+                    )
                 deleted_session = sessions.pop(i)
                 db = _get_db(request)
                 if db:
