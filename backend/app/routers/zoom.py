@@ -1203,6 +1203,20 @@ async def place_folder_summary(
     if not meeting_id:
         raise HTTPException(400, "Session has no Zoom meeting ID")
 
+    sd_uuid = _session_data_dict(pg_row)
+    if not (sd_uuid.get("zoom_meeting_uuid") or "").strip():
+        from app.services.zoom_session_folder import resolve_meeting_uuid_from_events
+
+        resolved_uuid = resolve_meeting_uuid_from_events(meeting_id, sd_uuid)
+        if resolved_uuid:
+            async with db_pool.acquire() as conn:
+                await _patch_coaching_session_data(
+                    conn, session_id, {"zoom_meeting_uuid": resolved_uuid}
+                )
+            sd_uuid["zoom_meeting_uuid"] = resolved_uuid
+            pg_row = dict(pg_row)
+            pg_row["session_data"] = sd_uuid
+
     if body and (body.zoom_doc_file_id or body.zoom_doc_url):
         patch = {}
         if body.zoom_doc_file_id:

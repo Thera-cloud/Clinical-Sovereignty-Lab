@@ -20,6 +20,45 @@ _FILE_TYPE = "session_summary"
 _SOURCE_TAG = "zoom_hub_ai_summary"
 
 
+def resolve_meeting_uuid_from_events(
+    meeting_id: str,
+    session_data: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Return zoom_meeting_uuid from session_data or local zoom_events.json webhook log."""
+    sd = _session_data_dict(session_data) if session_data is not None else {}
+    cached = _as_str(sd.get("zoom_meeting_uuid"))
+    if cached:
+        return cached
+    mid = _as_str(meeting_id)
+    if not mid:
+        return ""
+    try:
+        from pathlib import Path
+
+        from app.config import settings
+
+        events_path = Path(getattr(settings, "DATA_DIR", "/app/data")) / "zoom_events.json"
+        if not events_path.is_file():
+            return ""
+        raw = json.loads(events_path.read_text(encoding="utf-8"))
+        events = raw if isinstance(raw, list) else (raw.get("events") or [])
+        found = ""
+        for ev in reversed(events):
+            if _as_str(ev.get("meeting_id")) != mid:
+                continue
+            obj = (((ev.get("payload") or {}).get("payload") or {}).get("object") or {})
+            u = _as_str(obj.get("uuid"))
+            if not u:
+                continue
+            found = u
+            if ev.get("event") in ("meeting.ended", "recording.completed"):
+                return u
+        return found
+    except Exception as e:
+        logger.debug("resolve_meeting_uuid_from_events %s: %s", mid, e)
+        return ""
+
+
 def _session_data_dict(raw: Any) -> Dict[str, Any]:
     if isinstance(raw, dict):
         return raw
@@ -237,6 +276,10 @@ async def _fetch_summary_content(
     doc_url = (sd.get("zoom_doc_url") or "").strip()
     doc_file_id = (sd.get("zoom_doc_file_id") or "").strip()
     meeting_uuid = (sd.get("zoom_meeting_uuid") or "").strip()
+    if not meeting_uuid:
+        meeting_uuid = resolve_meeting_uuid_from_events(str(meeting_id), sd)
+        if meeting_uuid:
+            sd["zoom_meeting_uuid"] = meeting_uuid
 
     if not body:
         try:
