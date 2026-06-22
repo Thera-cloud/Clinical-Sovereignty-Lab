@@ -78,7 +78,7 @@ jobs:
           pip install pytest pytest-asyncio
 
       - name: Run tests
-        run: pytest backend/tests/ -v --tb=short
+        run: bash backend/scripts/run_ci_tests.sh
         env:
           ENVIRONMENT: test
           DATABASE_URL: ""
