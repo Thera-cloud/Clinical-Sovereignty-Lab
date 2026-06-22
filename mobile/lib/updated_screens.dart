@@ -14028,7 +14028,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   String? _resolveClientIdFromMessage(String message) {
-    final q = message.toLowerCase();
+    final q = message.toLowerCase().replaceAll('’', "'").replaceAll('‘', "'");
     for (final c in _clients) {
       if (c is! Map) continue;
       final m = Map<String, dynamic>.from(c);
@@ -14041,17 +14041,20 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         if (part.length >= 3 && q.contains(part)) return id;
       }
       if (username.isNotEmpty && q.contains(username)) return id;
+      final userStem = username.replaceAll(RegExp(r'[0-9@._-]+'), '');
+      if (userStem.length >= 3 && q.contains(userStem)) return id;
+      if (q.contains('zack') && name.contains('zachary')) return id;
     }
     return null;
   }
 
   String _resolveFocusedClientId({String? messageHint}) {
-    if (_focusedClientId.isNotEmpty) return _focusedClientId;
-    if (_coachOverrideClientId.isNotEmpty) return _coachOverrideClientId;
-    if (messageHint != null) {
+    if (messageHint != null && messageHint.trim().isNotEmpty) {
       final fromMsg = _resolveClientIdFromMessage(messageHint);
       if (fromMsg != null) return fromMsg;
     }
+    if (_focusedClientId.isNotEmpty) return _focusedClientId;
+    if (_coachOverrideClientId.isNotEmpty) return _coachOverrideClientId;
     final filtered = _getFilteredClients();
     if (filtered.length == 1) {
       return _clientIdFromMap(filtered.first);
@@ -14079,6 +14082,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       return {
         'name': _clientNameFromMap(m),
         'id': _clientIdFromMap(m),
+        'username': (m['username'] ?? '').toString(),
         'tier': m['tier'] ?? '',
         'risk': m['risk_level'] ?? m['coherence_risk'] ?? '',
       };
