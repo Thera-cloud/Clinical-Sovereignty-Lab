@@ -553,7 +553,20 @@ async def get_folder_session_summaries_context_pg(
                 if r.get("created_at") and hasattr(r["created_at"], "strftime")
                 else "recent"
             )
-            parts.append(f"{dt_label} — {r.get('filename') or 'summary'}:\n{preview}")
+            sid = (meta.get("session_id") or "") if isinstance(meta, dict) else ""
+            booked = None
+            if sid:
+                try:
+                    from app.services.zoom_transcript_context import session_id_calendar_label
+
+                    booked = session_id_calendar_label(sid)
+                except Exception:
+                    booked = None
+            if booked:
+                label = booked if booked == dt_label else f"{booked} (archived {dt_label})"
+            else:
+                label = dt_label
+            parts.append(f"{label} — {r.get('filename') or 'summary'}:\n{preview}")
         parts.append(
             "These are verified session summaries from live coaching. "
             "Reference gently; do not quote the coach's private folder notes verbatim."

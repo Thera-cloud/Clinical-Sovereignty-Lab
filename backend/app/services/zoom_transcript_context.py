@@ -18,6 +18,22 @@ _MAX_EXCERPT_CHARS = 3500
 _CONTEXT_HEADER = "[ZOOM SESSION TRANSCRIPTS — Path B full dialogue excerpts]"
 
 
+def session_id_calendar_label(session_id: str) -> Optional[str]:
+    """SES_YYYYMMDD_* embeds the coach-facing booking date."""
+    if not session_id:
+        return None
+    m = re.match(r"^SES_(\d{4})(\d{2})(\d{2})(?:_|$)", session_id.strip())
+    if not m:
+        return None
+    try:
+        from datetime import date
+
+        d = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        return d.strftime("%b %d, %Y")
+    except ValueError:
+        return None
+
+
 def _session_data_dict(raw: Any) -> Dict[str, Any]:
     if isinstance(raw, dict):
         return raw
@@ -191,12 +207,17 @@ async def get_zoom_transcript_context_pg(
         if not excerpt.strip():
             continue
         scheduled = row.get("scheduled_start")
-        dt_label = (
+        occurred = (
             scheduled.strftime("%b %d, %Y")
             if scheduled and hasattr(scheduled, "strftime")
-            else "recent"
+            else ""
         )
         sid = row.get("session_id") or ""
+        booked = session_id_calendar_label(sid)
+        if booked:
+            dt_label = booked if not occurred or booked == occurred else f"{booked} (occurred {occurred})"
+        else:
+            dt_label = occurred or "recent"
         parts.append(
             f"Session {dt_label} ({sid}, transcript_chars={raw_len}):\n{excerpt}"
         )
