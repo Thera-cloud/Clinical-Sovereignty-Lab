@@ -1,0 +1,88 @@
+---
+description: Keep GitHub Actions test job green on every push to main
+alwaysApply: true
+---
+
+# CI Gate Before Push to main
+
+GitHub workflow `.github/workflows/deploy.yml` runs **`bash backend/scripts/run_ci_tests.sh`** on every push to `main`. A red **test** job blocks the pipeline. GREEN production deploys are separate (`safe_deploy.sh` on the VPS).
+
+**Local enforcement:** `git push` runs `scripts/ci_gate_pre_push.sh` via `.git/hooks/pre-push` (install once: `bash scripts/install_git_hooks.sh`). Hooks **self-refresh** when installer or gate scripts change.
+
+| Auto-synced field | Marker |
+|-------------------|--------|
+| Offline pass count | <!-- ci-gate:offline-test-count -->822<!-- /ci-gate:offline-test-count --> |
+| `--ignore` entries in `run_ci_tests.sh` | <!-- ci-gate:ignore-count -->15<!-- /ci-gate:ignore-count --> |
+| Hook stamp (sha256) | <!-- ci-gate:hooks-stamp -->3a8ba2c14888232567f3a2102b8dab57e6658429f6e720bbdd838d4573d0a818<!-- /ci-gate:hooks-stamp --> |
+
+After a green pre-push, counts/stamp in this rule file update automatically — **commit the rule if it changed**.
+
+## One-time setup (each clone)
+
+```bash
+bash scripts/install_git_hooks.sh
+```
+
+## Mandatory before push to main
+
+From repo root:
+
+```bash
+bash backend/scripts/run_ci_tests.sh
+```
+
+Must exit **0** (<!-- ci-gate:offline-test-count -->822<!-- /ci-gate:offline-test-count --> offline unit/smoke tests). Do not push if it fails.
+
+Equivalent env (matches workflow):
+
+```bash
+ENVIRONMENT=test DATABASE_URL= REDIS_URL= PYTHONPATH=backend bash backend/scripts/run_ci_tests.sh
+```
+
+## When adding or editing `backend/tests/**`
+
+### 1. No import-time side effects
+
+Pytest collects every `test_*.py` and imports modules at collection time. **Never** at module level:
+
+- `asyncio.run(...)`
+- Redis/Postgres/WebSocket/live network calls
+- `sys.exit(...)`
+
+Manual/E2E scripts belong behind `if __name__ == "__main__":` and should **not** expose a top-level `def test_*` that pytest will collect (prefix with `_run_` or move to `backend/scripts/`).
+
+**Incident:** `test_coherence_ws.py` called `asyncio.run()` at import → pytest exit **4**, all deploy runs red.
+
+### 2. Integration vs offline unit tests
+
+| Type | Needs Postgres/Redis/Stripe/live WS? | CI |
+|------|--------------------------------------|-----|
+| Offline unit/smoke | No | Runs in `run_ci_tests.sh` |
+| Integration/E2E | Yes | **Excluded** — run manually on staging/GREEN |
+
+If a new suite needs real infrastructure, add it to the `--ignore=` list in `backend/scripts/run_ci_tests.sh` (currently <!-- ci-gate:ignore-count -->15<!-- /ci-gate:ignore-count --> paths). Do **not** widen CI to run the full `backend/tests/` tree without DB.
+
+### 3. New test files must pass offline
+
+New tests under `backend/tests/` must pass under empty `DATABASE_URL` and `REDIS_URL` unless explicitly added to `--ignore`.
+
+## Workflow discipline
+
+- The **test** job must call `run_ci_tests.sh`, not bare `pytest backend/tests/`.
+- Node.js 20→24 warnings from `actions/checkout` are **annotations only** — they do not fail the run.
+
+## Agent checklist (before commit + push to main)
+
+1. Run `bash scripts/install_git_hooks.sh --sync` if hooks may be stale.
+2. Run `bash backend/scripts/run_ci_tests.sh` — exit 0.
+3. If tests were added: confirm no import-time I/O; integration suites listed in `run_ci_tests.sh`.
+4. If `.github/workflows/deploy.yml` changed: test step still uses `run_ci_tests.sh` and `PYTHONPATH: backend`.
+5. If `.cursor/rules/ci-gate-before-push.mdc` was auto-updated after pre-push, include it in the commit.
+
+## Maintenance scripts
+
+| Script | Role |
+|--------|------|
+| `scripts/install_git_hooks.sh` | Install/refresh pre-commit + pre-push; `--sync` on every push |
+| `scripts/ci_gate_pre_push.sh` | Pre-push body: sync hooks → self-check → pytest → update rule |
+| `scripts/ci_gate_self_check.sh` | Assert workflow + rule wiring; `--update-rule` refreshes markers |
