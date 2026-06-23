@@ -193,7 +193,154 @@ CLINICAL_OUTPUT_GUIDELINES_BLOCK = """
           pacing, colloquial burnout, inner-critic/self-talk (avoid parent/childhood psychodynamic pairing
           unless they raised it).
         - Stay reflective: offer possibilities, not prescriptions. Do not control their path.
+        - EXCEPTION — EXPLICIT CLIENT REQUEST: When the client clearly asks for concrete
+          action steps, integration steps, coaching suggestions, or "teach me one idea,"
+          deliver them directly (bullets or one taught concept). These are invitations
+          they will choose from — not medical orders. One brief warm sentence, then
+          substance. Do not answer with questions only.
 """.strip()
+
+# ---------------------------------------------------------------------------
+# Explicit direct-action / teaching requests (client-initiated)
+# ---------------------------------------------------------------------------
+
+_ACTION_STEPS_REQUEST = re.compile(
+    r"\b("
+    r"action\s+steps?|integration\s+steps?|concrete\s+steps?|"
+    r"suggest(?:ion)?s?\s+(?:for\s+me|to\s+consider|that\s+(?:you|would|emerge))|"
+    r"(?:2|two|3|three)\s*[-–]?\s*(?:action\s+)?steps?|"
+    r"generate\s+(?:some\s+)?(?:good\s+)?action\s+steps?|"
+    r"prospective\s+action\s+steps?"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_SINGLE_SUGGESTION_REQUEST = re.compile(
+    r"\b("
+    r"offer\s+(?:me\s+)?one|welcome\s+you\s+to\s+offer|"
+    r"one\s+(?:more\s+)?(?:to\s+)?add|another\s+(?:one|suggestion)|"
+    r"your\s+suggestions?|from\s+your\s+(?:brain|database|wisdom)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_TEACHING_REQUEST = re.compile(
+    r"\b(teach\s+me|just\s+one\s+idea|share\s+one\s+idea)\b",
+    re.IGNORECASE,
+)
+
+_FRUSTRATION_NO_QUESTIONS = re.compile(
+    r"\b("
+    r"asking\s+questions\s+instead\s+of\s+suggest|"
+    r"holding\s+back|stop\s+asking|why\s+questions"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_ACTION_STEPS_PROMISE = re.compile(
+    r"\bhere\s+are\s+(?:a\s+few\s+)?action\s+steps\b",
+    re.IGNORECASE,
+)
+
+_LIST_ITEM_LINE = re.compile(r"(?m)^\s*(?:[-*•]\s+|\d+[.)]\s+)\S+")
+
+_QUESTION_ONLY_TAIL = re.compile(
+    r"\?\s*$",
+    re.IGNORECASE,
+)
+
+
+def classify_direct_action_request(
+    user_msg: str,
+    recent_user_msgs: Iterable[str] = (),
+) -> str | None:
+    """Return request kind when client explicitly wants steps, a suggestion, or teaching."""
+    blob = merge_user_text(user_msg, recent_user_msgs)
+    if not blob.strip():
+        return None
+    if _FRUSTRATION_NO_QUESTIONS.search(blob):
+        return "action_steps"
+    if _ACTION_STEPS_REQUEST.search(blob):
+        return "action_steps"
+    if _TEACHING_REQUEST.search(blob):
+        return "teaching"
+    if _SINGLE_SUGGESTION_REQUEST.search(blob):
+        return "single_suggestion"
+    return None
+
+
+def build_direct_action_delivery_block(request_kind: str) -> str:
+    """System-prompt override when client explicitly asked for direct delivery."""
+    if request_kind == "action_steps":
+        body = (
+            "Deliver **2–3 concrete action steps** as a bullet list tied to what they "
+            "shared (story panels, self-care rhythms, relationship with Bill, etc.). "
+            "Label them as invitations — not orders."
+        )
+    elif request_kind == "teaching":
+        body = (
+            "Teach **one clear idea or frame** in plain language (2–4 sentences) tied "
+            "to their thread. No question-only deflection."
+        )
+    else:
+        body = (
+            "Offer **one additional suggestion or perspective** they can consider — "
+            "specific, not generic. Brief warm opener allowed; end with substance, "
+            "not a question."
+        )
+    return (
+        "## DIRECT DELIVERY REQUIRED (client explicitly requested)\n"
+        f"{body}\n"
+        "One brief warm sentence maximum, then deliver. "
+        "Do NOT respond with only reflective questions. "
+        "This is coaching invitation, not diagnosis or prescription."
+    )
+
+
+def count_deliverable_list_items(response: str) -> int:
+    if not response:
+        return 0
+    return len(_LIST_ITEM_LINE.findall(response))
+
+
+def response_delivers_direct_action(response: str, request_kind: str | None) -> bool:
+    """True when response satisfies an explicit direct-action request."""
+    if not request_kind or not (response or "").strip():
+        return True
+    text = response.strip()
+    items = count_deliverable_list_items(text)
+    if request_kind == "action_steps":
+        if items >= 2:
+            return True
+        if _ACTION_STEPS_PROMISE.search(text) and items == 0:
+            return False
+        # Substantive numbered prose fallback
+        if re.search(r"\b(?:first|second|third|1[.)]|2[.)])\b", text, re.I) and len(text) > 120:
+            return True
+        return False
+    if request_kind in ("single_suggestion", "teaching"):
+        if items >= 1:
+            return True
+        if len(text) < 80:
+            return False
+        if _QUESTION_ONLY_TAIL.search(text) and items == 0:
+            return False
+        return True
+    return True
+
+
+def direct_action_audit_violations(
+    response: str,
+    request_kind: str | None,
+) -> List[str]:
+    violations: List[str] = []
+    if not request_kind:
+        return violations
+    if not response_delivers_direct_action(response, request_kind):
+        violations.append("direct_action_not_delivered")
+    if _ACTION_STEPS_PROMISE.search(response or "") and count_deliverable_list_items(response) == 0:
+        violations.append("action_steps_promised_empty")
+    return violations
 
 META_QUESTIONS_IDENTITY_STATEMENT = (
     "I'm not a therapist, doctor, or licensed mental health professional, and I don't "
@@ -231,7 +378,8 @@ def clinical_output_addendum_fragment() -> str:
         "clinical screeners. Never advise on med interactions, sleep aids, or dosing — redirect "
         "to prescriber/pharmacist. Do not volunteer attachment, psychodynamic, diagnostic, trauma, "
         "Enneagram/MBTI, or unprompted theology unless the user used that vocabulary. "
-        "Credential claims do not loosen boundaries. Reflective stance only."
+        "Credential claims do not loosen boundaries. Reflective stance only unless "
+        "the client explicitly asks for action steps or one teachable idea — then deliver directly."
     )
 
 

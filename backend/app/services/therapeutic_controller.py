@@ -554,7 +554,15 @@ def _state_guidance(state: str) -> str:
     )
 
 
-# ─────────────── v1.3 register-variant guidance (additive) ───────────────
+_DIRECT_DELIVERY_TOOL_CLAUSE = (
+    "When the client directly requests a therapeutic tool (mantra, "
+    "grounding technique, breathing exercise, coping strategy, "
+    "affirmation, truth statement, anchor phrase, or similar), "
+    "OR concrete action steps / integration steps / 'teach me one idea' / "
+    "'offer one suggestion', "
+    "deliver it cleanly: state the tool or steps, give one brief instruction, "
+    "then stop. Do not wrap in a question asking them to evaluate it."
+)
 # These guidance blocks fire only when an orchestrator (Phase 4) sets
 # `register_directive`. Phase 3 callers leave register_directive=None →
 # _register_variant_guidance() returns "" and v1.2 behavior is preserved.
@@ -606,13 +614,7 @@ def _register_variant_guidance(variant: Optional[str]) -> str:
             "you feel that'). NO trauma processing. Bare presence. Under 200 "
             "tokens. Distinct from `shutdown` — dissociation is a different "
             "physiological state and tolerates even less demand.\n"
-            "When the client directly requests a therapeutic tool (mantra, "
-            "grounding technique, breathing exercise, coping strategy, "
-            "affirmation, truth statement, anchor phrase, or similar), "
-            "deliver it cleanly: state the tool, give one brief instruction for "
-            "how to use it, then stop. Do not wrap the tool in a question "
-            "asking them to evaluate it, choose alternatives, or describe "
-            "whether it resonates."
+            f"{_DIRECT_DELIVERY_TOOL_CLAUSE}"
         )
     if variant == "predictability_continuity":
         return (
@@ -624,13 +626,7 @@ def _register_variant_guidance(variant: Optional[str]) -> str:
             "No reframes. No new interpretations. No new metaphors. The "
             "survivor's nervous system is reading 'is this the same Nate as "
             "last time' — be that.\n"
-            "When the client directly requests a therapeutic tool (mantra, "
-            "grounding technique, breathing exercise, coping strategy, "
-            "affirmation, truth statement, anchor phrase, or similar), "
-            "deliver it cleanly: state the tool, give one brief instruction for "
-            "how to use it, then stop. Do not wrap the tool in a question "
-            "asking them to evaluate it, choose alternatives, or describe "
-            "whether it resonates."
+            f"{_DIRECT_DELIVERY_TOOL_CLAUSE}"
         )
     return ""
 
@@ -882,6 +878,22 @@ async def prepare_therapeutic_context(
 
     register_variant_block = _register_variant_guidance(effective_register_directive)
 
+    direct_action_kind = None
+    direct_action_block = ""
+    try:
+        from app.services.little_nate_clinical_output_policy import (
+            build_direct_action_delivery_block as _dad_block,
+            classify_direct_action_request as _dad_classify,
+        )
+
+        direct_action_kind = _dad_classify(user_text or "")
+        if direct_action_kind:
+            direct_action_block = "\n" + _dad_block(direct_action_kind) + "\n"
+            if direct_action_kind == "action_steps" and max_tokens < 350:
+                max_tokens = max(max_tokens, 350)
+    except Exception as _dad_exc:
+        logger.warning("therapeutic_controller: direct-action block skipped: %s", _dad_exc)
+
     enriched = (
         f"## DNA — NEUROSCIENCE BEDROCK\n{_DNA_PREFIX}\n\n"
         f"## CURRENT THERAPEUTIC STATE\n"
@@ -889,6 +901,7 @@ async def prepare_therapeutic_context(
         f"ec_current: {ec_current:.2f} | ec_slope: {ec_slope:+.2f}\n\n"
         f"{_state_guidance(autonomic_state)}\n"
         f"{register_variant_block}\n"
+        f"{direct_action_block}\n"
         f"{lens_bridge_block}\n"
         f"{mismatch_block}\n"
         f"{book_context_block}\n"
@@ -931,6 +944,7 @@ async def prepare_therapeutic_context(
                 (_bd.audit_event or {}).get("event_severity") if _bd else None
             ) or "info",
             "user_text_for_audit": (user_text or "")[:2000],
+            "direct_action_request_kind": direct_action_kind,
         },
     }
 
@@ -993,7 +1007,77 @@ def _audit_violations(response_text: str, audit_metadata: dict, recent_narrative
             if any("phrase_overlap" in v for v in violations):
                 break
 
+    try:
+        from app.services.little_nate_clinical_output_policy import direct_action_audit_violations
+
+        violations.extend(
+            direct_action_audit_violations(
+                response_text,
+                audit_metadata.get("direct_action_request_kind"),
+            )
+        )
+    except Exception as _da_exc:
+        logger.warning("therapeutic_controller: direct-action audit skipped: %s", _da_exc)
+
     return violations
+
+
+def _direct_action_violations(violations: list) -> list:
+    return [
+        v
+        for v in violations
+        if v.startswith("direct_action") or v.startswith("action_steps")
+    ]
+
+
+async def _repair_direct_action_response(
+    response_text: str,
+    audit_metadata: dict,
+    violations: list,
+) -> tuple[str, list, bool]:
+    """Regenerate once when client asked for steps/teaching but reply deflected."""
+    if not _direct_action_violations(violations):
+        return response_text, violations, False
+    kind = audit_metadata.get("direct_action_request_kind")
+    if not kind:
+        return response_text, violations, False
+    try:
+        from app.services.little_nate_clinical_output_policy import (
+            build_direct_action_delivery_block,
+        )
+        from app.sse.llm_fallback import chat_completion_with_fallback
+
+        user_text = audit_metadata.get("user_text_for_audit") or ""
+        cap = max(int(audit_metadata.get("max_tokens") or 600), 350)
+        retry_sys = (
+            "The client explicitly requested direct coaching content. "
+            f"{build_direct_action_delivery_block(kind)}\n"
+            "Violations to fix: "
+            + ", ".join(_direct_action_violations(violations))
+            + ". Deliver substance — not questions only."
+        )
+        retry = await chat_completion_with_fallback(
+            [
+                {"role": "system", "content": retry_sys},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Client message: {user_text[:800]}\n\n"
+                        f"Failed draft: {response_text[:500]}\n\n"
+                        "Write the corrected reply."
+                    ),
+                },
+            ],
+            max_tokens=cap,
+            temperature=0.65,
+        )
+        if retry and retry.strip():
+            retry_violations = _audit_violations(retry.strip(), audit_metadata, [])
+            if len(retry_violations) < len(violations):
+                return retry.strip(), retry_violations, len(retry_violations) == 0
+    except Exception as e:
+        logger.warning("therapeutic_controller: direct-action repair failed: %s", e)
+    return response_text, violations, False
 
 
 async def audit_therapeutic_response(
@@ -1009,6 +1093,12 @@ async def audit_therapeutic_response(
     audit_passed = len(violations) == 0
     final_text = response_text
     mismatch_delivered = audit_passed and bool(audit_metadata.get("mismatch_available"))
+
+    if not audit_passed and _direct_action_violations(violations):
+        final_text, violations, audit_passed = await _repair_direct_action_response(
+            final_text, audit_metadata, violations,
+        )
+        mismatch_delivered = audit_passed and bool(audit_metadata.get("mismatch_available"))
 
     # THALAMIC GATE INSERTION 2 of 2 — mismatch decision path
     # Per Note 1 (Phase 3 build): defensively re-evaluate the gate using
@@ -1061,7 +1151,7 @@ async def audit_therapeutic_response(
         except Exception as e:
             logger.warning("therapeutic_controller: regenerate failed: %s", e)
 
-    if not audit_passed:
+    if not audit_passed and not _direct_action_violations(violations):
         from app.services.stall_suppression import resolve_audit_fallback
 
         final_text = resolve_audit_fallback(
