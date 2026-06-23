@@ -231,7 +231,7 @@ _TEACHING_REQUEST = re.compile(
 
 _FRUSTRATION_NO_QUESTIONS = re.compile(
     r"\b("
-    r"asking\s+questions\s+instead\s+of\s+suggest|"
+    r"asking\s+questions\s+instead\s+of\s+suggest(?:ing)?|"
     r"holding\s+back|stop\s+asking|why\s+questions"
     r")\b",
     re.IGNORECASE,
