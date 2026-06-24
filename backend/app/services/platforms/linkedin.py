@@ -314,7 +314,8 @@ class LinkedInAdapter(SocialPlatformAdapter):
             "response_type": "code",
             "client_id": self.client_id,
             "redirect_uri": redirect_uri,
-            # w_organization_social: required for company-page posting (dual-posting support)
+            # w_organization_social requires Marketing Developer Platform on the LinkedIn app.
+            # Re-authorize via SkyEye → Platforms → LinkedIn after enabling that product.
             "scope": "openid profile email w_member_social w_organization_social",
             "state": "skyeye_linkedin",
         }
