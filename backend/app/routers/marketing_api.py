@@ -157,7 +157,8 @@ async def decide_action(action_id: int, decision: ActionDecision, request: Reque
     brain = MarketingBrain(request.app.state.db_pool)
 
     if decision.decision == "approved":
-        success = await brain.approve_action(action_id)
+        result = await brain.approve_action(action_id)
+        success = not result.get("error")
     elif decision.decision == "rejected":
         success = await brain.reject_action(action_id, reason=decision.reason or "")
     elif decision.decision == "deferred":

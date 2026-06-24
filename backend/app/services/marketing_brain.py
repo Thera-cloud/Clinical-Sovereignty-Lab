@@ -19,6 +19,80 @@ from app.config import settings
 
 logger = logging.getLogger("marketing.brain")
 
+# post_* action_type → platform slug
+POST_ACTION_PLATFORMS = {
+    "post_linkedin": "linkedin",
+    "post_x": "x",
+    "post_twitter": "x",
+    "post_instagram": "instagram",
+    "post_facebook": "facebook",
+    "post_reddit": "reddit",
+    "post_tiktok": "tiktok",
+    "post_pinterest": "pinterest",
+    "post_youtube": "youtube",
+}
+
+
+def platform_for_action_type(action_type: str, params: Optional[Dict] = None) -> str:
+    """Resolve platform slug from marketing action type + parameters."""
+    if params and params.get("platform"):
+        return str(params["platform"])
+    if action_type in POST_ACTION_PLATFORMS:
+        return POST_ACTION_PLATFORMS[action_type]
+    if action_type.startswith("post_"):
+        return action_type[5:]
+    return "linkedin"
+
+
+def extract_post_body_from_proposal(description: str) -> str:
+    """Pull publishable post text from a [PROPOSAL: post_*] description block."""
+    import re
+
+    text = (description or "").strip()
+    if not text:
+        return ""
+
+    for pattern in (
+        r"\*\*(.+?)\*\*",
+        r'"([^"]{15,})"',
+        r"'([^']{15,})'",
+    ):
+        match = re.search(pattern, text, re.DOTALL)
+        if match:
+            candidate = match.group(1).strip()
+            if len(candidate) >= 15:
+                return candidate[:3000]
+
+    lowered = text.lower()
+    for prefix in (
+        "linkedin companion post:",
+        "companion post:",
+        "post for linkedin:",
+        "linkedin post:",
+        "draft post:",
+        "draft:",
+        "post:",
+    ):
+        if lowered.startswith(prefix):
+            return text[len(prefix):].strip()[:3000]
+
+    # Drop proposal boilerplate lines; keep substantive body
+    skip_fragments = (
+        "shall i post", "awaiting approval", "say approved", "say approve",
+        "verification protocol", "deployment status", "little nate proposes",
+    )
+    kept = []
+    for line in text.splitlines():
+        line_stripped = line.strip()
+        if not line_stripped:
+            continue
+        ll = line_stripped.lower()
+        if any(frag in ll for frag in skip_fragments):
+            continue
+        kept.append(line_stripped)
+    body = "\n".join(kept).strip()
+    return (body or text)[:3000]
+
 
 # =============================================================================
 # STRATEGY ANALYSIS PROMPT
@@ -752,23 +826,27 @@ class MarketingBrain:
             logger.error(f"Failed to get pending actions: {e}")
             return []
 
-    async def approve_action(self, action_id: int, approved_by: str = "big_nate") -> bool:
+    async def approve_action(self, action_id: int, approved_by: str = "big_nate") -> Dict[str, Any]:
         """Approve a proposed marketing action and trigger execution."""
         try:
             async with self.db_pool.acquire() as conn:
-                await conn.execute("""
+                updated = await conn.fetchrow("""
                     UPDATE marketing_actions
                     SET status = 'approved', approved_at = NOW(), approved_by = $2
                     WHERE id = $1 AND status = 'proposed'
+                    RETURNING id
                 """, action_id, approved_by)
+                if not updated:
+                    return {"error": f"Action {action_id} not found or not in proposed status",
+                            "action_id": action_id}
 
             result = await self.execute_approved_action(action_id)
             if result and not result.get("error"):
                 logger.info(f"Action {action_id} approved and executed: {result.get('summary', 'ok')}")
-            return True
+            return result or {"error": "Execution returned no result", "action_id": action_id}
         except Exception as e:
             logger.error(f"Failed to approve action {action_id}: {e}")
-            return False
+            return {"error": str(e), "action_id": action_id}
 
     async def reject_action(self, action_id: int, reason: str = "") -> bool:
         """Reject a proposed marketing action."""
@@ -834,27 +912,108 @@ class MarketingBrain:
             return {"error": str(e)}
 
     async def _execute_single_post(self, action_id: int, row, params: Dict) -> Dict:
-        """Generate and queue a single strategic post."""
+        """Publish an approved post (stored body) or generate then publish inline."""
         try:
             from app.services.skyeye_content_generator import SkyEyeContentGenerator
             gen = SkyEyeContentGenerator(self.db_pool)
 
-            platform = params.get("platform", "linkedin")
-            topic = row["description"] or row["title"]
-            result = await gen.generate_strategic_post(platform, context={"strategy_pillar": topic})
+            action_type = row["action_type"]
+            platform = platform_for_action_type(action_type, params)
+            content_type = params.get("content_type", "post")
+            content_text = (
+                params.get("content_text")
+                or params.get("content")
+                or extract_post_body_from_proposal(row["description"] or "")
+            )
 
-            if result.get("safe"):
-                queue_id = await gen.queue_content(
-                    platform=platform,
-                    content=result["content"],
-                    content_type=result.get("content_type", "post"),
-                    generated_by="marketing_brain",
+            if not content_text or len(content_text.strip()) < 10:
+                topic = row["description"] or row["title"]
+                generated = await gen.generate_strategic_post(
+                    platform, context={"strategy_pillar": topic},
                 )
-                return {"summary": f"Post queued for {platform}", "queue_id": queue_id}
-            return {"error": "Content failed safety check"}
+                if not generated.get("safe"):
+                    return {"error": "Content failed safety check", "platform": platform}
+                content_text = generated["content"]
+                content_type = generated.get("content_type", content_type)
+
+            return await self.publish_content_inline(
+                platform=platform,
+                content_text=content_text,
+                content_type=content_type,
+                approved_by="big_nate",
+                action_id=action_id,
+                generated_by="marketing_brain",
+            )
         except Exception as e:
             logger.error(f"Single post execution error: {e}")
             return {"error": str(e)}
+
+    async def publish_content_inline(
+        self,
+        platform: str,
+        content_text: str,
+        content_type: str = "post",
+        approved_by: str = "big_nate",
+        action_id: Optional[int] = None,
+        generated_by: str = "marketing_brain",
+    ) -> Dict[str, Any]:
+        """Queue content and publish immediately via the platform adapter."""
+        from app.services.platforms import get_adapter
+        from app.services.skyeye_content_generator import SkyEyeContentGenerator
+        from app.services.skyeye_platform_base import ContentType
+
+        gen = SkyEyeContentGenerator(self.db_pool)
+        queue_id = await gen.queue_content(
+            platform=platform,
+            content=content_text,
+            content_type=content_type,
+            generated_by=generated_by,
+        )
+        if not queue_id:
+            return {"error": "Failed to queue content", "platform": platform}
+
+        adapter = get_adapter(platform, self.db_pool)
+        if not adapter or not await adapter.authenticate():
+            await gen.update_queue_status(
+                queue_id, "failed", error_message="Platform adapter unavailable or not authenticated",
+            )
+            return {
+                "error": f"{platform} adapter unavailable or not authenticated",
+                "platform": platform,
+                "queue_id": queue_id,
+                "posted": False,
+            }
+
+        post_ct = ContentType.ARTICLE if content_type == "article" else ContentType.POST
+        publish = await adapter.post_content(text=content_text, content_type=post_ct)
+        if publish and publish.success:
+            await gen.update_queue_status(
+                queue_id,
+                "posted",
+                approved_by=approved_by,
+                post_id_external=publish.post_id,
+                post_url=publish.post_url,
+            )
+            return {
+                "summary": f"Post published to {platform}",
+                "platform": platform,
+                "queue_id": queue_id,
+                "posted": True,
+                "post_id": publish.post_id,
+                "post_url": publish.post_url,
+                "action_id": action_id,
+                "content_preview": content_text[:120],
+            }
+
+        err = (publish.error if publish else "adapter returned None")
+        await gen.update_queue_status(queue_id, "failed", error_message=err)
+        return {
+            "error": err,
+            "platform": platform,
+            "queue_id": queue_id,
+            "posted": False,
+            "action_id": action_id,
+        }
 
     # ── Campaign Designer ─────────────────────────────────────────────
 

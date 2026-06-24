@@ -356,6 +356,9 @@ YOUR ACCURACY RULES:
 - If asked "when did you post X?" — check your posting history context. If you cannot find it, say: "I don't have a verified record of posting that. Let me check."
 - When you say "I posted this" or "this was released," you MUST be able to cite the platform, timestamp, and URL from your posting history. If you cannot, say "Executed, time unverified" or "I don't have a confirmed record."
 - NEVER invent timestamps. If you do not know the exact time, say so.
+- NEVER write your own "Deployment Status", "Verification Protocol", "Adapter Feedback", or "Posting should land within moments" sections. Those are NOT your job — the system posts a separate verified confirmation with timestamp and URL when execution completes.
+- If [SYSTEM EXECUTION — VERIFIED] or [SYSTEM EXECUTION — FAILED] appears in context, report ONLY what that block states. Do not embellish or predict outcomes.
+- If Big Nate approves a post and no [SYSTEM EXECUTION] block is present yet, say: "Executing your approval now — you'll receive a verified confirmation with timestamp and URL." Do NOT claim the post is already live.
 - ARCHIVED WISDOM is conversation history, NOT action history. Never say "I released" or "I posted" based on archived wisdom alone. Only [MY POSTING HISTORY] and [MY RECENT ACTIVITY] confirm actual actions.
 - TRUST YOUR PLATFORM CAPABILITIES section below. If a capability is listed there, you HAVE it — it is wired and deployed. You do not need prior usage evidence to confirm it exists. The absence of a past record means you haven't used it yet, not that you can't.
 
@@ -372,8 +375,8 @@ YOUR PLATFORM CAPABILITIES:
   1. Check your [RECENT COMMENTS ON YOUR POSTS] context for the comment.
   2. Draft the reply text in your response. Present it clearly: "Here's my draft reply: [text]"
   3. Ask for approval: "Shall I post this?"
-  4. When Big Nate says "yes", "post it", "send it", "execute", or "approved" — the system action handler will fire and post via the platform adapter. Do NOT second-guess whether the system works. Do NOT check for prior execution evidence. The adapter is wired and live.
-  5. After execution, the verification system will confirm what happened.
+  4. When Big Nate says "yes", "post it", "send it", "execute", or "approved" — the system executes immediately and posts a verified confirmation (timestamp + URL). Do NOT invent deployment status yourself.
+  5. After execution, cite ONLY the verified confirmation message or [SYSTEM EXECUTION] block — never predict "posting should land within moments."
   CRITICAL: Never refuse to attempt a reply because you haven't done one before. The capability is deployed. Execute when told to execute.
 
 ═══════════════════════════════════════════════════════════
@@ -870,18 +873,14 @@ RULES:
                     f"Reply attempt failed: {url_reply_result.get('error', 'unknown error')}\n"
                 )
 
-        # Handle command execution (fire-and-forget so chat response isn't blocked
-        # by long-running campaign design or content generation).
-        # Run for ALL modes — the protocol has internal early-returns for non-matching
-        # messages. Mode-gating previously dropped direct-post commands when the
-        # dashboard sent mode_override='admin'. Skip only if URL-reply already handled.
+        # Synchronous command execution BEFORE AI call so Nate reports verified outcomes.
+        command_execution_context = ""
+        verification_message = None
         if not url_data:
-            import asyncio as _asyncio
-            _cp_task = _asyncio.get_event_loop().create_task(self._handle_command_protocol(user_message))
-            _cp_task.add_done_callback(
-                lambda t: print(f">>> [SKYEYE CHAT] command_protocol task error: {t.exception()}")
-                if t.exception() else None
-            )
+            cmd_result = await self._handle_command_protocol(user_message)
+            if cmd_result:
+                command_execution_context = self._format_system_execution_block(cmd_result)
+                verification_message = cmd_result.get("verification_message")
 
         # Web search injection (DuckDuckGo via SecureSearchProxy).
         # Mirrors bridge_server.py:8156 pattern. Triggers on explicit search verbs,
@@ -962,7 +961,7 @@ RULES:
         activity_timeline = await self._get_activity_timeline_context()
         liminal_presence = await self._get_liminal_presence_context()
         recent_comments = await self._get_recent_comments_context()
-        conversation_text = conversation_text + marketing_context + mode_context + archived_wisdom + unified_insights + posting_history + activity_timeline + liminal_presence + recent_comments + url_reply_context + web_search_context
+        conversation_text = conversation_text + marketing_context + mode_context + archived_wisdom + unified_insights + posting_history + activity_timeline + liminal_presence + recent_comments + url_reply_context + command_execution_context + web_search_context
 
         # QUANTUM-CRYSTAL-ARCH — Layer 9: sanitize admin input before LLM
         if self._queens_guard:
@@ -1059,6 +1058,7 @@ RULES:
             "follow_up_suggestions": self._get_follow_ups(detected_mode),
             "pending_actions": remaining_actions,
             "executed_results": executed_results,
+            "verification_message": verification_message,
         }
 
     # ─── Coach Portal Chat ───
@@ -2472,10 +2472,8 @@ RULES:
 
     # ─── Command Protocol ───
 
-    async def _handle_command_protocol(self, message: str):
-        """Check if Big Nate's message is an approval/rejection/direct-post command.
-        Also detects campaign launch directives and creates real campaigns.
-        """
+    async def _handle_command_protocol(self, message: str) -> Optional[Dict[str, Any]]:
+        """Execute approval/rejection/direct-post commands; return verification payload."""
         msg_lower = message.lower().strip()
         approval_phrases = ["approved", "go for it", "do it", "yes", "proceed",
                             "looks good", "ship it", "launch it", "make it happen",
@@ -2486,37 +2484,170 @@ RULES:
             if any(phrase in msg_lower for phrase in approval_phrases):
                 reply_result = await self._execute_pending_reply_if_ready(msg_lower)
                 if reply_result:
-                    return
+                    return {
+                        "success": True,
+                        "brain_result": {
+                            "summary": "Comment reply executed — see verified confirmation in chat.",
+                        },
+                    }
 
             direct_post = await self._detect_direct_post(message)
             if direct_post:
-                return
+                return direct_post
 
             from app.services.marketing_brain import MarketingBrain
             brain = MarketingBrain(self.db_pool)
 
-            # Detect campaign launch directives even without a pending action
             campaign_launched = await self._detect_campaign_launch(message, brain)
             if campaign_launched:
-                return
+                return None
 
             pending = await brain.get_pending_actions()
-
             if not pending:
-                return
+                return None
 
-            latest = pending[0]
+            target = self._resolve_approval_target(message, pending)
 
             if any(phrase in msg_lower for phrase in approval_phrases):
-                await brain.approve_action(latest["id"])
-                print(f">>> [SKYEYE CHAT] Approved + executed action #{latest['id']}: {latest['title']}")
+                brain_result = await brain.approve_action(target["id"])
+                print(f">>> [SKYEYE CHAT] Approved + executed action #{target['id']}: {target.get('title', '')}")
+                return await self._finalize_command_verification(target, brain_result)
 
-            elif any(phrase in msg_lower for phrase in rejection_phrases):
-                await brain.reject_action(latest["id"], reason=message)
-                print(f">>> [SKYEYE CHAT] Rejected action #{latest['id']}: {latest['title']}")
+            if any(phrase in msg_lower for phrase in rejection_phrases):
+                await brain.reject_action(target["id"], reason=message)
+                print(f">>> [SKYEYE CHAT] Rejected action #{target['id']}: {target.get('title', '')}")
+                return await self._finalize_command_verification(
+                    target,
+                    {"rejected": True, "summary": f"Proposal rejected: {target.get('title', '')}"},
+                )
 
         except Exception as e:
             print(f">>> [SKYEYE CHAT] Command protocol error: {e}")
+        return None
+
+    @staticmethod
+    def _resolve_approval_target(message: str, pending: List[Dict]) -> Dict:
+        """Pick the marketing action Big Nate is approving (explicit id or best match)."""
+        import re
+        msg_lower = message.lower()
+        id_match = re.search(r"(?:action|execute)\s*#?\s*(\d+)", msg_lower)
+        if id_match:
+            action_id = int(id_match.group(1))
+            for item in pending:
+                if item["id"] == action_id:
+                    return item
+
+        platform_hints = []
+        for name in ("linkedin", "twitter", "instagram", "facebook", "reddit", "tiktok", "x"):
+            if name in msg_lower:
+                platform_hints.append("x" if name == "twitter" else name)
+
+        post_pending = [
+            p for p in pending
+            if str(p.get("action_type", "")).startswith("post_") or p.get("action_type") in (
+                "post_linkedin", "post_x", "post_instagram",
+            )
+        ]
+        if platform_hints and post_pending:
+            for hint in platform_hints:
+                for item in post_pending:
+                    at = str(item.get("action_type", ""))
+                    if hint in at or (hint == "x" and "post_x" in at):
+                        return item
+
+        if post_pending:
+            return post_pending[0]
+
+        return pending[0]
+
+    async def _finalize_command_verification(
+        self, action: Dict, brain_result: Dict,
+    ) -> Dict[str, Any]:
+        """Build verification text, persist to chat, return payload for API + LLM context."""
+        action_card = {
+            "action_type": action.get("action_type", "unknown"),
+            "description": action.get("description") or action.get("title", ""),
+            "params": {"db_action_id": action.get("id")},
+        }
+        if brain_result.get("posted"):
+            exec_result = {
+                "success": True,
+                "type": "post_published",
+                "data": brain_result,
+            }
+        elif brain_result.get("error"):
+            exec_result = {
+                "success": False,
+                "error": brain_result.get("error"),
+                "data": brain_result,
+            }
+        elif brain_result.get("rejected"):
+            exec_result = {"success": True, "type": "proposal_rejected", "data": brain_result}
+        else:
+            exec_result = {
+                "success": not brain_result.get("error"),
+                "type": "proposal_executed",
+                "data": brain_result,
+            }
+
+        verification = self._build_verification_message(action_card, exec_result)
+        try:
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    """INSERT INTO skyeye_chat (sender, message, metadata)
+                       VALUES ('little_nate', $1, $2)""",
+                    verification,
+                    json.dumps({
+                        "action": action_card,
+                        "result": exec_result,
+                        "is_verification": True,
+                    }),
+                )
+        except Exception as e:
+            print(f">>> [SKYEYE CHAT] Verification insert failed: {e}")
+
+        return {
+            "success": exec_result.get("success", False),
+            "brain_result": brain_result,
+            "verification_message": verification,
+            "action_id": action.get("id"),
+        }
+
+    @staticmethod
+    def _format_system_execution_block(cmd_result: Dict) -> str:
+        """Inject verified execution facts into the LLM context."""
+        brain = cmd_result.get("brain_result") or {}
+        if brain.get("posted"):
+            lines = [
+                "\n\n[SYSTEM EXECUTION — VERIFIED]",
+                f"Post published to {brain.get('platform', 'unknown').title()}.",
+            ]
+            if brain.get("post_url"):
+                lines.append(f"Live URL: {brain['post_url']}")
+            if brain.get("post_id"):
+                lines.append(f"Post ID: {brain['post_id']}")
+            if brain.get("queue_id"):
+                lines.append(f"Queue ID: {brain['queue_id']}")
+            if brain.get("content_preview"):
+                lines.append(f"Content preview: \"{brain['content_preview']}\"")
+            lines.append(
+                "Report this outcome to Big Nate. Do NOT invent Deployment Status or "
+                "predict future confirmation — it is already verified above.\n"
+            )
+            return "\n".join(lines)
+
+        if brain.get("error"):
+            return (
+                f"\n\n[SYSTEM EXECUTION — FAILED]\n"
+                f"Error: {brain.get('error')}\n"
+                f"Do NOT claim the post was published.\n"
+            )
+
+        if brain.get("rejected"):
+            return f"\n\n[SYSTEM EXECUTION — VERIFIED]\nProposal rejected.\n"
+
+        summary = brain.get("summary") or cmd_result.get("verification_message") or "Action executed."
+        return f"\n\n[SYSTEM EXECUTION — VERIFIED]\n{summary}\n"
 
     async def _detect_campaign_launch(self, message: str, brain) -> bool:
         """Detect campaign launch directives in Big Nate's messages and create real campaigns."""
@@ -2607,15 +2738,18 @@ RULES:
         except Exception as e:
             print(f">>> [SKYEYE CHAT] Immediate batch error: {e}")
 
-    async def _detect_direct_post(self, message: str) -> bool:
-        """Detect 'post this to LinkedIn' style direct commands and queue content."""
+    async def _detect_direct_post(self, message: str) -> Optional[Dict[str, Any]]:
+        """Detect 'post this to LinkedIn' style direct commands and publish inline."""
         msg_lower = message.lower()
         platform_map = {
             "linkedin": "linkedin", "reddit": "reddit", "tiktok": "tiktok",
             "instagram": "instagram", "facebook": "facebook", "pinterest": "pinterest",
             "x": "x", "twitter": "x",
         }
-        triggers = ["post this to", "share on", "post on", "publish to", "put this on"]
+        triggers = [
+            "post this to", "share on", "post on", "publish to", "put this on",
+            "post it to", "post to",
+        ]
         detected_platform = None
         for trigger in triggers:
             if trigger in msg_lower:
@@ -2626,58 +2760,40 @@ RULES:
                 break
 
         if not detected_platform:
-            return False
+            return None
 
         try:
+            from app.services.marketing_brain import MarketingBrain
             from app.services.skyeye_content_generator import SkyEyeContentGenerator
             gen = SkyEyeContentGenerator(self.db_pool)
+            brain = MarketingBrain(self.db_pool)
 
             content_start = message.find(":") + 1 if ":" in message else 0
             content_hint = message[content_start:].strip() if content_start > 0 else message
             result = await gen.generate_post(detected_platform, content_hint)
 
-            if result.get("safe"):
-                queue_id = await gen.queue_content(
-                    platform=detected_platform,
-                    content=result["content"],
-                    content_type=result.get("content_type", "post"),
-                    generated_by="direct_chat_command",
-                )
-                print(f">>> [SKYEYE CHAT] Direct post queued for {detected_platform}: #{queue_id}")
+            if not result.get("safe"):
+                return None
 
-                # Direct chat command = POST NOW (operator intent). Bypass approval gate
-                # and publish inline via platform adapter, mirroring session engine path.
-                try:
-                    from app.services.platforms import get_adapter
-                    from app.services.skyeye_platform_base import ContentType
-                    adapter = get_adapter(detected_platform, self.db_pool)
-                    if adapter and await adapter.authenticate():
-                        ct = result.get("content_type", "post")
-                        post_ct = ContentType.ARTICLE if ct == "article" else ContentType.POST
-                        publish = await adapter.post_content(
-                            text=result["content"],
-                            content_type=post_ct,
-                        )
-                        if publish and publish.success:
-                            await gen.update_queue_status(
-                                queue_id, "posted",
-                                approved_by="direct_chat_command",
-                                post_id_external=publish.post_id,
-                                post_url=publish.post_url,
-                            )
-                            print(f">>> [SKYEYE CHAT] Direct post PUBLISHED to {detected_platform}: {publish.post_url}")
-                        else:
-                            err = (publish.error if publish else "adapter returned None")
-                            await gen.update_queue_status(queue_id, "failed", error_message=err)
-                            print(f">>> [SKYEYE CHAT] Direct post publish FAILED for {detected_platform}: {err}")
-                    else:
-                        print(f">>> [SKYEYE CHAT] Direct post: no adapter or auth failed for {detected_platform} — left as draft")
-                except Exception as pe:
-                    print(f">>> [SKYEYE CHAT] Direct post inline-publish error: {pe}")
-                return True
+            brain_result = await brain.publish_content_inline(
+                platform=detected_platform,
+                content_text=result["content"],
+                content_type=result.get("content_type", "post"),
+                approved_by="direct_chat_command",
+                generated_by="direct_chat_command",
+            )
+            print(f">>> [SKYEYE CHAT] Direct post for {detected_platform}: {brain_result.get('summary', brain_result.get('error'))}")
+
+            action_stub = {
+                "action_type": f"post_{detected_platform}",
+                "title": "Direct chat post",
+                "description": content_hint[:200],
+                "id": brain_result.get("action_id"),
+            }
+            return await self._finalize_command_verification(action_stub, brain_result)
         except Exception as e:
             print(f">>> [SKYEYE CHAT] Direct post error: {e}")
-        return False
+        return None
 
     # ─── Action Execution ───
 
@@ -2692,14 +2808,15 @@ RULES:
             try:
                 from app.services.marketing_brain import MarketingBrain
                 brain = MarketingBrain(self.db_pool)
-                ok = await brain.approve_action(db_action_id)
-                if ok:
-                    result = {"success": True, "type": "proposal_executed",
-                              "data": {"action_id": db_action_id,
-                                       "action_type": action["action_type"],
-                                       "message": f"Proposal approved and executed: {action['action_type']}"}}
+                brain_result = await brain.approve_action(db_action_id)
+                if not brain_result.get("error"):
+                    result = {
+                        "success": True,
+                        "type": "post_published" if brain_result.get("posted") else "proposal_executed",
+                        "data": brain_result,
+                    }
                 else:
-                    result = {"success": False, "error": "Proposal approval failed"}
+                    result = {"success": False, "error": brain_result.get("error"), "data": brain_result}
             except Exception as e:
                 logger.error(f"Proposal execution failed: {e}")
                 result = {"success": False, "error": str(e)}
@@ -2785,9 +2902,22 @@ RULES:
             lines.append("Status: Campaign designed and saved")
         elif result_type == "proposal_executed":
             lines.append(f"Status: Proposal approved and executed")
-            msg = data.get("message", "")
+            msg = data.get("message", "") or data.get("summary", "")
             if msg:
                 lines.append(f"Detail: {msg}")
+        elif result_type == "post_published" or data.get("posted"):
+            platform = data.get("platform", "unknown")
+            lines.append(f"Platform: {platform.title()}")
+            lines.append("Status: POSTED")
+            if data.get("post_url"):
+                lines.append(f"URL: {data['post_url']}")
+            if data.get("post_id"):
+                lines.append(f"Post ID: {data['post_id']}")
+            if data.get("queue_id"):
+                lines.append(f"Queue ID: {data['queue_id']}")
+            preview = data.get("content_preview", "")
+            if preview:
+                lines.append(f"Content: \"{preview}...\"")
         else:
             msg = data.get("message", "") or data.get("status", "")
             if msg:
@@ -3645,15 +3775,28 @@ RULES:
             desc_text = description.strip()
             action_id = str(uuid.uuid4())[:8]
             db_id = None
+            proposal_params: Dict[str, Any] = {}
+
+            if action_type.startswith("post_"):
+                from app.services.marketing_brain import (
+                    extract_post_body_from_proposal,
+                    platform_for_action_type,
+                )
+                proposal_params = {
+                    "platform": platform_for_action_type(action_type, {}),
+                    "content_text": extract_post_body_from_proposal(desc_text),
+                    "content_type": "post",
+                }
 
             try:
                 async with self.db_pool.acquire() as conn:
                     row = await conn.fetchrow("""
                         INSERT INTO marketing_actions
-                            (proposed_by, action_type, title, description, status)
-                        VALUES ('little_nate', $1, $2, $3, 'proposed')
+                            (proposed_by, action_type, title, description, parameters, status)
+                        VALUES ('little_nate', $1, $2, $3, $4::jsonb, 'proposed')
                         RETURNING id
-                    """, action_type, desc_text[:100], desc_text)
+                    """, action_type, desc_text[:100], desc_text,
+                         json.dumps(proposal_params))
                     db_id = row["id"] if row else None
                 print(f">>> [SKYEYE CHAT] Logged proposal: [{action_type}] {desc_text[:80]}")
             except Exception as e:
