@@ -108,6 +108,8 @@ class CampaignConfig:
     custom_cur_themes: List[str] = field(default_factory=list)  # used as search hints
     # tone override for the whole campaign
     tone_note: str = ""
+    # posting destination: "person" | "company" | "both"
+    post_as: str = "person"
 
     @property
     def total_posts(self) -> int:
@@ -230,6 +232,14 @@ def parse_campaign_config(message: str) -> CampaignConfig:
         topics = [t.strip() for t in re.split(r",|;|and ", about_m.group(1)) if t.strip()]
         cfg.custom_orig_themes = topics
         cfg.custom_cur_themes = topics
+
+    # ── post_as: person / company / both ─────────────────────────────────────
+    if re.search(r"\bboth\b.*\bpage|\bcompany page\b.*\bpersonal|\bpersonal.*\bcompany page", msg):
+        cfg.post_as = "both"
+    elif re.search(r"\bcompany page\b|\borganization page\b|\borg page\b", msg):
+        cfg.post_as = "company"
+    elif re.search(r"\bpersonal.*\bonly|\bmy profile\b(?!.*company)", msg):
+        cfg.post_as = "person"
 
     return cfg
 
@@ -413,6 +423,7 @@ class LinkedInCampaignExecutor:
             "orig_pct": config.orig_pct,
             "pers_pct": config.pers_pct,
             "post_times": config.post_times,
+            "post_as": config.post_as,
         }
         async with self.db_pool.acquire() as conn:
             await conn.execute(
@@ -606,6 +617,7 @@ class LinkedInCampaignExecutor:
                 "lane": lane,
                 "local_label": slot["local_label"],
                 "batch_number": batch_number,
+                "post_as": config.post_as,
             })
 
             media_url = None
@@ -679,10 +691,12 @@ class LinkedInCampaignExecutor:
         approved_ct = len(queued_ids) - cur_pending
 
         cur_c, orig_c, pers_c = config.lane_counts()
+        dest_label = {"person": "personal profile", "company": "company page", "both": "personal profile + company page"}.get(config.post_as, config.post_as)
         config_summary = (
             f"{config.days} days × {config.posts_per_day}/day = {config.total_posts} posts — "
             f"{config.mix_label()} — "
-            f"post times: {', '.join(f'{h}:00 ET' for h in config.post_times)}"
+            f"post times: {', '.join(f'{h}:00 ET' for h in config.post_times)} — "
+            f"posting to: {dest_label}"
         )
         summary = (
             f"LinkedIn campaign batch {batch_number} ({batch_id}): "

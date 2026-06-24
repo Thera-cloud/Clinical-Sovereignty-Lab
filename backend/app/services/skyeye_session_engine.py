@@ -1417,10 +1417,21 @@ class SkyEyeSessionEngine:
                 from app.services.skyeye_platform_base import ContentType
                 post_ct = ContentType.ARTICLE if ct == "article" else ContentType.POST
 
+                # Extract post_as from slot metadata (default "person")
+                import json as _json
+                _meta = {}
+                try:
+                    _raw_meta = item.get("emotion_context") or "{}"
+                    _meta = _json.loads(_raw_meta) if isinstance(_raw_meta, str) else (_raw_meta or {})
+                except Exception:
+                    pass
+                _post_as = _meta.get("post_as", "person")
+
                 result = await adapter.post_content(
                     text=content_text,
                     media_url=media_url,
                     content_type=post_ct,
+                    post_as=_post_as,
                 )
 
                 if result.success:

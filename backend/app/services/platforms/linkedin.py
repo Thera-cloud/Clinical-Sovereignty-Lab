@@ -151,9 +151,14 @@ class LinkedInAdapter(SocialPlatformAdapter):
                     # Load community token if available (separate app for comments)
                     await self._load_community_token()
 
-                    # Resolve organization URN for analytics (non-blocking)
+                    # Load persisted org_urn; resolve fresh if absent (non-blocking)
                     try:
-                        await self._resolve_org_urn()
+                        tokens_fresh = await self._load_tokens() or {}
+                        self._org_urn = tokens_fresh.get("org_urn") or None
+                        if not self._org_urn:
+                            org_urn = await self._resolve_org_urn()
+                            if org_urn:
+                                await self._save_org_urn(org_urn)
                     except Exception as org_err:
                         logger.debug(f"LinkedIn: Org URN resolution deferred: {org_err}")
 
@@ -309,8 +314,8 @@ class LinkedInAdapter(SocialPlatformAdapter):
             "response_type": "code",
             "client_id": self.client_id,
             "redirect_uri": redirect_uri,
-            # FIX-LINKEDIN-SCOPE-ALIGN: r_member_social belongs on Community app only (linkedin_community)
-            "scope": "openid profile email w_member_social",
+            # w_organization_social: required for company-page posting (dual-posting support)
+            "scope": "openid profile email w_member_social w_organization_social",
             "state": "skyeye_linkedin",
         }
         return f"{LINKEDIN_AUTH_URL}?{urllib.parse.urlencode(params)}"
@@ -355,9 +360,11 @@ class LinkedInAdapter(SocialPlatformAdapter):
                 self._person_urn = f"urn:li:person:{person_id}"
                 self._connected = True
 
-                # Resolve org URN now that we have fresh tokens
+                # Resolve org URN now that we have fresh tokens; persist it
                 try:
-                    await self._resolve_org_urn()
+                    org_urn = await self._resolve_org_urn()
+                    if org_urn:
+                        await self._save_org_urn(org_urn)
                 except Exception:
                     pass
 
@@ -421,6 +428,22 @@ class LinkedInAdapter(SocialPlatformAdapter):
 
         return None
 
+    async def _save_org_urn(self, org_urn: str) -> None:
+        """Persist the organization URN into skyeye_platform_tokens.org_urn."""
+        if not self.db_pool:
+            return
+        try:
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE skyeye_platform_tokens SET org_urn = $1, updated_at = NOW() "
+                    "WHERE platform = $2",
+                    org_urn, self.platform_name,
+                )
+            self._org_urn = org_urn
+            logger.info(f"LinkedIn: Persisted org_urn {org_urn}")
+        except Exception as e:
+            logger.warning(f"LinkedIn: Failed to persist org_urn: {e}")
+
     # ── Content Publishing (Posts API) ──────────────────────────────
 
     @retry_on_failure(max_retries=2)
@@ -434,20 +457,27 @@ class LinkedInAdapter(SocialPlatformAdapter):
           - Text posts (content_type=POST)
           - Article shares (content_type=ARTICLE or media_url provided)
           - kwargs: title, description (for articles)
+          - kwargs: post_as = "person" | "company" | "both"
+            * "person"  — personal profile only (default)
+            * "company" — company page only (requires org_urn + w_organization_social)
+            * "both"    — posts to personal profile AND company page; returns the
+                          personal PostResult but logs both post IDs
 
         Endpoint: POST /rest/posts (LinkedIn-Version: 202401)
         """
         self._ensure_connected()
         await self.rate_limiter.acquire()
 
+        post_as: str = kwargs.get("post_as", "person")
+
         if not self._person_urn:
             return PostResult(success=False, error="No LinkedIn person URN",
                               platform="linkedin", action=ActionResult.FAILED)
 
-        try:
-            # Build the Posts API request body
+        async def _publish_as(author_urn: str) -> PostResult:
+            """Inner helper — publish one post for the given author URN."""
             post_body: Dict[str, Any] = {
-                "author": self._person_urn,
+                "author": author_urn,
                 "commentary": text,
                 "visibility": "PUBLIC",
                 "distribution": {
@@ -457,8 +487,6 @@ class LinkedInAdapter(SocialPlatformAdapter):
                 },
                 "lifecycleState": "PUBLISHED",
             }
-
-            # Article content (link share with optional title/description)
             if media_url or content_type == ContentType.ARTICLE:
                 post_body["content"] = {
                     "article": {
@@ -467,36 +495,29 @@ class LinkedInAdapter(SocialPlatformAdapter):
                         "description": kwargs.get("description", ""),
                     }
                 }
-
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     f"{LINKEDIN_REST_BASE}/posts",
                     json=post_body,
                     headers=_linkedin_headers(self._access_token, content_type=True),
                 )
-
                 if resp.status_code in (200, 201):
                     post_urn = resp.headers.get(
                         "x-restli-id",
                         resp.headers.get("X-RestLi-Id", "")
                     )
-                    # Try response body as fallback
                     if not post_urn:
                         try:
-                            resp_data = resp.json()
-                            post_urn = resp_data.get("id", "")
+                            post_urn = resp.json().get("id", "")
                         except Exception:
                             pass
-
-                    post_url = None
-                    if post_urn:
-                        post_url = f"https://www.linkedin.com/feed/update/{post_urn}/"
-
-                    logger.info(f"LinkedIn: Published post {post_urn}")
+                    post_url = (
+                        f"https://www.linkedin.com/feed/update/{post_urn}/"
+                        if post_urn else None
+                    )
+                    logger.info(f"LinkedIn: Published post {post_urn} as {author_urn}")
                     return PostResult(
-                        success=True,
-                        post_id=post_urn,
-                        post_url=post_url,
+                        success=True, post_id=post_urn, post_url=post_url,
                         platform="linkedin",
                     )
                 elif resp.status_code == 401:
@@ -504,19 +525,56 @@ class LinkedInAdapter(SocialPlatformAdapter):
                 elif resp.status_code == 429:
                     raise PlatformRateLimitError("linkedin")
                 else:
-                    error_data = {}
                     try:
-                        error_data = resp.json()
+                        err_msg = resp.json().get("message", f"Post failed: {resp.status_code}")
+                    except Exception:
+                        err_msg = f"Post failed: {resp.status_code}"
+                    logger.error(f"LinkedIn: Post failed as {author_urn}: {err_msg}")
+                    return PostResult(
+                        success=False, error=err_msg,
+                        platform="linkedin", action=ActionResult.FAILED,
+                    )
+
+        try:
+            # ── Determine which author URNs to post as ─────────────────
+            authors: List[str] = []
+            if post_as in ("person", "both"):
+                authors.append(self._person_urn)
+            if post_as in ("company", "both"):
+                if not self._org_urn:
+                    # Attempt lazy resolution
+                    try:
+                        org_urn = await self._resolve_org_urn()
+                        if org_urn:
+                            await self._save_org_urn(org_urn)
                     except Exception:
                         pass
-                    error_msg = error_data.get("message", f"Post failed: {resp.status_code}")
-                    logger.error(f"LinkedIn: Post failed: {error_msg}")
-                    return PostResult(
-                        success=False,
-                        error=error_msg,
-                        platform="linkedin",
-                        action=ActionResult.FAILED,
+                if self._org_urn:
+                    authors.append(self._org_urn)
+                else:
+                    logger.warning(
+                        "LinkedIn: post_as='%s' requested but no org_urn available; "
+                        "falling back to personal profile. Re-authorize via SkyEye → "
+                        "Platforms → LinkedIn to grant w_organization_social.", post_as
                     )
+                    if not authors:          # company-only with no org → post as person
+                        authors.append(self._person_urn)
+
+            if not authors:
+                authors.append(self._person_urn)
+
+            # ── Publish to each author; collect results ─────────────────
+            first_result: Optional[PostResult] = None
+            for urn in authors:
+                result = await _publish_as(urn)
+                if first_result is None:
+                    first_result = result
+
+            return first_result or PostResult(
+                success=False, error="No author URNs resolved",
+                platform="linkedin", action=ActionResult.FAILED,
+            )
+
         except (PlatformRateLimitError, PlatformAuthError):
             raise
         except Exception as e:
