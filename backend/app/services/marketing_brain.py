@@ -1014,6 +1014,7 @@ class MarketingBrain:
         approved_by: str = "big_nate",
         action_id: Optional[int] = None,
         generated_by: str = "marketing_brain",
+        media_url: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Queue content and publish immediately via the platform adapter."""
         from app.services.platforms import get_adapter
@@ -1026,6 +1027,7 @@ class MarketingBrain:
             content=content_text,
             content_type=content_type,
             generated_by=generated_by,
+            media_url=media_url,
         )
         if not queue_id:
             return {"error": "Failed to queue content", "platform": platform}
@@ -1043,7 +1045,11 @@ class MarketingBrain:
             }
 
         post_ct = ContentType.ARTICLE if content_type == "article" else ContentType.POST
-        publish = await adapter.post_content(text=content_text, content_type=post_ct)
+        publish = await adapter.post_content(
+            text=content_text,
+            media_url=media_url,
+            content_type=post_ct,
+        )
         if publish and publish.success:
             await gen.update_queue_status(
                 queue_id,

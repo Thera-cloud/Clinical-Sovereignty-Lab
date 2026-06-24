@@ -1424,6 +1424,14 @@ class SkyEyeSessionEngine:
                         post_url=result.post_url,
                     )
 
+                    # LinkedIn 14-post campaign auto-continue when batch completes
+                    if platform == "linkedin" and item.get("generated_by") == "linkedin_campaign_v1":
+                        try:
+                            from app.services.linkedin_campaign_executor import LinkedInCampaignExecutor
+                            await LinkedInCampaignExecutor(self.db_pool).on_item_posted(item["id"])
+                        except Exception as _lc_e:
+                            logger.warning("LinkedIn campaign rollover: %s", _lc_e)
+
                     await self._log_action(
                         platform, SessionState.POSTING, "post",
                         detail={

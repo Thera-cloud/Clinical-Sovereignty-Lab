@@ -2499,6 +2499,14 @@ RULES:
             if embedded_post:
                 return embedded_post
 
+            campaign_queued = await self._detect_campaign_queue_approval(message)
+            if campaign_queued:
+                return campaign_queued
+
+            cur_updated = await self._detect_cur_slot_fill(message)
+            if cur_updated:
+                return cur_updated
+
             from app.services.marketing_brain import MarketingBrain
             brain = MarketingBrain(self.db_pool)
 
@@ -2765,6 +2773,73 @@ RULES:
         except Exception as e:
             print(f">>> [SKYEYE CHAT] Campaign launch detection error: {e}")
             return False
+
+    @staticmethod
+    def _is_linkedin_topic_campaign(msg_lower: str) -> bool:
+        signals = (
+            "14 post", "14-post", "fourteen post",
+            "50% ", "50-30-20", "50/30/20",
+            "7 day", "7-day", "seven day",
+            "3:00 pm", "3pm", "8:00 pm", "8pm",
+            "curated", "50% curated",
+        )
+        return any(s in msg_lower for s in signals) and "linkedin" in msg_lower
+
+    async def _detect_campaign_queue_approval(self, message: str) -> Optional[Dict[str, Any]]:
+        msg_lower = message.lower().strip()
+        phrases = (
+            "approve campaign",
+            "approved to proceed with the campaign",
+            "approved to proceed with campaign",
+            "proceed with the campaign",
+            "proceed with campaign",
+            "approved to proceed",
+        )
+        if not any(p in msg_lower for p in phrases):
+            return None
+        try:
+            from app.services.linkedin_campaign_executor import LinkedInCampaignExecutor
+            executor = LinkedInCampaignExecutor(self.db_pool, search_proxy=self._search_proxy)
+            auto = "until i tell" in msg_lower or "continue until" in msg_lower or "keep following" in msg_lower
+            result = await executor.queue_approved_batch(message, auto_continue=auto)
+            brain_result = {
+                "summary": result.summary,
+                "queued": result.queued,
+                "cur_pending": result.cur_pending,
+                "batch_id": result.batch_id,
+                "queue_ids": result.queue_ids,
+            }
+            print(f">>> [SKYEYE CHAT] Campaign queue approval: {result.summary}")
+            return await self._finalize_command_verification(
+                {"action_type": "post_linkedin", "title": "LinkedIn campaign batch", "id": None},
+                brain_result,
+            )
+        except Exception as e:
+            print(f">>> [SKYEYE CHAT] Campaign queue approval error: {e}")
+            return await self._finalize_command_verification(
+                {"action_type": "post_linkedin", "title": "LinkedIn campaign batch", "id": None},
+                {"error": str(e), "posted": False},
+            )
+
+    async def _detect_cur_slot_fill(self, message: str) -> Optional[Dict[str, Any]]:
+        msg_lower = message.lower()
+        if not re.search(r"day\s*\d+", msg_lower):
+            return None
+        if not (re.search(r"https?://", message) or "search up" in msg_lower or "search for" in msg_lower):
+            return None
+        try:
+            from app.services.linkedin_campaign_executor import LinkedInCampaignExecutor
+            executor = LinkedInCampaignExecutor(self.db_pool, search_proxy=self._search_proxy)
+            result = await executor.fill_cur_slot(message)
+            if not result:
+                return None
+            return await self._finalize_command_verification(
+                {"action_type": "post_linkedin", "title": "Curated slot update", "id": None},
+                result,
+            )
+        except Exception as e:
+            print(f">>> [SKYEYE CHAT] CUR slot fill error: {e}")
+            return None
 
     async def _generate_immediate_batch(self, platform: str, context_message: str):
         """Generate an immediate batch of posts for a newly launched campaign."""

@@ -1188,6 +1188,7 @@ async def add_to_content_queue(body: ContentQueueEntry, request: Request):
         scheduled_for=scheduled,
         generated_by="admin",
         priority=body.priority or "normal",
+        media_url=body.media_url,
     )
 
     if queue_id is None:

@@ -660,7 +660,10 @@ RULES:
                             source_expression_id: Optional[int] = None,
                             scheduled_for: Optional[datetime] = None,
                             generated_by: str = "session_engine",
-                            priority: str = "normal") -> Optional[int]:
+                            priority: str = "normal",
+                            media_url: Optional[str] = None,
+                            status: Optional[str] = None,
+                            approved_by: Optional[str] = None) -> Optional[int]:
         """
         Add generated content to the content queue.
         Returns the queue item ID or None if failed.
@@ -669,18 +672,19 @@ RULES:
             platform = "x"
             content_type = "article"
         try:
+            queue_status = status or ("scheduled" if scheduled_for else "draft")
             async with self.db_pool.acquire() as conn:
                 row = await conn.fetchrow("""
                     INSERT INTO skyeye_content_queue
                         (platform, content_text, content_type, emotion_context,
                          source_expression_id, status, priority, scheduled_for,
-                         generated_by, created_at, updated_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+                         generated_by, media_url, approved_by, created_at, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
                     RETURNING id
                 """, platform, content, content_type, emotion_context,
                      source_expression_id,
-                     "scheduled" if scheduled_for else "draft",
-                     priority, scheduled_for, generated_by)
+                     queue_status,
+                     priority, scheduled_for, generated_by, media_url, approved_by)
                 return row["id"] if row else None
         except Exception as e:
             logger.error(f"Failed to queue content: {e}")

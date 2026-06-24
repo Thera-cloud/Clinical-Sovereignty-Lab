@@ -1,0 +1,60 @@
+"""Offline tests for LinkedIn 14-post campaign executor."""
+from datetime import date
+
+from app.services.linkedin_campaign_executor import (
+    BUILTIN_DRAFTS,
+    CAMPAIGN_SIGNATURE,
+    build_slot_schedule,
+    ensure_signature,
+    parse_cur_sources,
+    parse_start_date,
+    slot_key,
+)
+
+
+def test_fourteen_slots_50_30_20_mix():
+    slots = build_slot_schedule(date(2026, 6, 25))
+    assert len(slots) == 14
+    lanes = [s["lane"] for s in slots]
+    assert lanes.count("CUR") == 7
+    assert lanes.count("ORIG") == 4
+    assert lanes.count("PERS") == 3
+
+
+def test_slot_times_3pm_and_8pm_eastern():
+    slots = build_slot_schedule(date(2026, 6, 25))
+    local_hours = set()
+    for s in slots:
+        assert "EDT" in s["local_label"] or "EST" in s["local_label"]
+        if s["lane"] == "CUR":
+            assert s["slot_key"].endswith("_1500")
+        if s["lane"] in ("ORIG", "PERS"):
+            assert s["slot_key"].endswith("_2000")
+        local_hours.add(s["slot_key"].split("_")[1])
+    assert local_hours == {"1500", "2000"}
+
+
+def test_ensure_signature_appends_once():
+    text = "Hello world."
+    out = ensure_signature(text)
+    assert CAMPAIGN_SIGNATURE in out
+    assert out.count(CAMPAIGN_SIGNATURE) == 1
+
+
+def test_parse_cur_sources_url_and_search():
+    msg = """
+    Day 1 3pm CUR: https://www.apa.org/monitor/example
+    Day 2 3pm: search up digital mental health guidelines 2024
+    """
+    sources = parse_cur_sources(msg)
+    assert sources[slot_key(1, 15, 0)] == "https://www.apa.org/monitor/example"
+    assert "digital mental health" in sources[slot_key(2, 15, 0)]
+
+
+def test_parse_start_date_iso():
+    assert parse_start_date("start date: 2026-07-01") == date(2026, 7, 1)
+
+
+def test_builtin_drafts_have_signature():
+    for key, draft in BUILTIN_DRAFTS.items():
+        assert CAMPAIGN_SIGNATURE in draft, key
