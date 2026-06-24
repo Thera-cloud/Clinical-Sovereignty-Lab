@@ -2495,6 +2495,10 @@ RULES:
             if direct_post:
                 return direct_post
 
+            embedded_post = await self._detect_approval_embedded_post(message)
+            if embedded_post:
+                return embedded_post
+
             from app.services.marketing_brain import MarketingBrain
             brain = MarketingBrain(self.db_pool)
 
@@ -2507,6 +2511,17 @@ RULES:
                 return None
 
             target = self._resolve_approval_target(message, pending)
+            if not target:
+                if self._message_has_post_intent(msg_lower):
+                    err = (
+                        "No pending post proposal matched. Your post text was not published. "
+                        "Use: approved to post now: [full post text]  OR  post this to LinkedIn: [text]"
+                    )
+                    return await self._finalize_command_verification(
+                        {"action_type": "post_linkedin", "title": "Post approval", "id": None},
+                        {"error": err, "posted": False},
+                    )
+                return None
 
             if any(phrase in msg_lower for phrase in approval_phrases):
                 brain_result = await brain.approve_action(target["id"])
@@ -2526,10 +2541,52 @@ RULES:
         return None
 
     @staticmethod
-    def _resolve_approval_target(message: str, pending: List[Dict]) -> Dict:
+    def _message_has_post_intent(msg_lower: str) -> bool:
+        return any(
+            p in msg_lower
+            for p in (
+                "approved to post",
+                "approve and post",
+                "post now",
+                "publish now",
+                "post this",
+            )
+        ) or (("approved" in msg_lower or "approve" in msg_lower) and "post" in msg_lower)
+
+    async def _detect_approval_embedded_post(self, message: str) -> Optional[Dict[str, Any]]:
+        """Publish when Big Nate pastes the full post in the approval message."""
+        from app.services.marketing_brain import (
+            MarketingBrain,
+            extract_embedded_post_from_approval_message,
+        )
+        extracted = extract_embedded_post_from_approval_message(message)
+        if not extracted:
+            return None
+        platform, content = extracted
+        brain = MarketingBrain(self.db_pool)
+        brain_result = await brain.publish_content_inline(
+            platform=platform,
+            content_text=content,
+            approved_by="big_nate",
+            generated_by="approval_embedded_post",
+        )
+        print(f">>> [SKYEYE CHAT] Embedded approval post to {platform}: "
+              f"{brain_result.get('post_url') or brain_result.get('error')}")
+        action_stub = {
+            "action_type": f"post_{platform}",
+            "title": "Embedded approval post",
+            "description": content[:120],
+            "id": None,
+        }
+        return await self._finalize_command_verification(action_stub, brain_result)
+
+    @staticmethod
+    def _resolve_approval_target(message: str, pending: List[Dict]) -> Optional[Dict]:
         """Pick the marketing action Big Nate is approving (explicit id or best match)."""
         import re
         msg_lower = message.lower()
+        post_intent = SkyEyeChatService._message_has_post_intent(msg_lower)
+
         id_match = re.search(r"(?:action|execute)\s*#?\s*(\d+)", msg_lower)
         if id_match:
             action_id = int(id_match.group(1))
@@ -2544,9 +2601,7 @@ RULES:
 
         post_pending = [
             p for p in pending
-            if str(p.get("action_type", "")).startswith("post_") or p.get("action_type") in (
-                "post_linkedin", "post_x", "post_instagram",
-            )
+            if str(p.get("action_type", "")).startswith("post_")
         ]
         if platform_hints and post_pending:
             for hint in platform_hints:
@@ -2558,7 +2613,11 @@ RULES:
         if post_pending:
             return post_pending[0]
 
-        return pending[0]
+        # Never approve a non-post backlog item when user intent is to publish
+        if post_intent:
+            return None
+
+        return pending[0] if pending else None
 
     async def _finalize_command_verification(
         self, action: Dict, brain_result: Dict,

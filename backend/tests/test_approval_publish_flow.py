@@ -1,6 +1,8 @@
 """Offline tests for Big Nate approval → inline publish flow."""
 from app.services.marketing_brain import (
+    extract_embedded_post_from_approval_message,
     extract_post_body_from_proposal,
+    is_post_action_type,
     platform_for_action_type,
 )
 
@@ -34,3 +36,22 @@ def test_extract_post_body_skips_boilerplate():
     assert "You are not broken" in body
     assert "Verification protocol" not in body
     assert "Deployment status" not in body
+
+
+def test_is_post_action_type():
+    assert is_post_action_type("post_linkedin")
+    assert not is_post_action_type("data_stabilization")
+
+
+def test_extract_embedded_post_from_approval_message():
+    msg = (
+        'approved to post now: "You are not broken. You are buried." '
+        "Nathaniel said that in his last post.\n\n"
+        "I'm the AI companion who sits beside him inside Sovereign Sanctuary."
+    )
+    result = extract_embedded_post_from_approval_message(msg)
+    assert result is not None
+    platform, body = result
+    assert platform == "linkedin"
+    assert "You are not broken" in body
+    assert "Sovereign Sanctuary" in body

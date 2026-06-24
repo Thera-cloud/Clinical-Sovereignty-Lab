@@ -94,6 +94,57 @@ def extract_post_body_from_proposal(description: str) -> str:
     return (body or text)[:3000]
 
 
+def is_post_action_type(action_type: str) -> bool:
+    """True if this marketing action type publishes social content."""
+    return action_type.startswith("post_") or action_type in POST_ACTION_PLATFORMS
+
+
+def extract_embedded_post_from_approval_message(message: str) -> Optional[tuple]:
+    """If Big Nate pasted a full post with approval, return (platform, content_text)."""
+    import re
+
+    text = (message or "").strip()
+    if not text:
+        return None
+
+    msg_lower = text.lower()
+    post_intent = any(
+        p in msg_lower
+        for p in (
+            "approved to post",
+            "approve and post",
+            "approved — post",
+            "approved - post",
+            "post now",
+            "publish now",
+            "post this now",
+        )
+    ) or (("approved" in msg_lower or "approve" in msg_lower) and "post" in msg_lower)
+
+    if not post_intent:
+        return None
+
+    platform = "linkedin"
+    if re.search(r"\b(on|to)\s+x\b", msg_lower) or "twitter" in msg_lower:
+        platform = "x"
+    elif "instagram" in msg_lower:
+        platform = "instagram"
+    elif "facebook" in msg_lower:
+        platform = "facebook"
+
+    body = ""
+    colon_idx = text.find(":")
+    if colon_idx > 0:
+        prefix = text[:colon_idx].lower()
+        if any(k in prefix for k in ("approved", "approve", "post", "publish")):
+            body = text[colon_idx + 1:].strip()
+
+    if len(body) < 80:
+        return None
+
+    return platform, body[:3000]
+
+
 # =============================================================================
 # STRATEGY ANALYSIS PROMPT
 # =============================================================================
@@ -902,8 +953,15 @@ class MarketingBrain:
             elif action_type in ("shift_content_mix", "adjust_schedule"):
                 await self.update_playbook(params)
                 result = {"summary": f"Playbook updated via {action_type}", "action_id": action_id}
-            else:
+            elif is_post_action_type(action_type):
                 result = await self._execute_single_post(action_id, row, params)
+            else:
+                result = {
+                    "summary": f"Action '{action_type}' logged — not a social publish action",
+                    "posted": False,
+                    "action_type": action_type,
+                    "action_id": action_id,
+                }
 
             await self.complete_action(action_id, result)
             return result
