@@ -1395,6 +1395,13 @@ class SkyEyeSessionEngine:
                 respect_schedule=True,
             )
 
+            # Also pick up "scheduled" items whose time has arrived
+            if not queue_items:
+                queue_items = await generator.get_queue(
+                    status="scheduled", platform=platform, limit=1,
+                    respect_schedule=True,
+                )
+
             for item in queue_items:
                 if self._is_session_expired():
                     break

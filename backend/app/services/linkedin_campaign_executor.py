@@ -1,112 +1,313 @@
 """
-LinkedIn 14-post campaign executor (7 days × 2/day, 50/30/20 by topic).
+LinkedIn campaign executor — fully flexible, any schedule Big Nate asks for.
 
-Queues approved posts at 3:00 PM & 8:00 PM America/New_York for session-engine publish.
-CUR slots use SecureSearchProxy (DuckDuckGo) when a URL or search query is supplied.
+Default: 7 days × 2 posts/day, 50% CUR / 30% ORIG / 20% PERS.
+Every parameter is overridable via natural language in Big Nate Chat.
 """
 from __future__ import annotations
 
 import json
 import logging
+import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
-CAMPAIGN_SIGNATURE = (
-    "Nathaniel verified this message. — Little Nate, your AI companion"
-)
+CAMPAIGN_SIGNATURE = "Nathaniel reviewed + approved — Little Nate, your AI companion"
 GENERATED_BY = "linkedin_campaign_v1"
 SETTINGS_KEY = "linkedin_campaign_active"
 TZ = ZoneInfo("America/New_York")
 
-# day_index 1-7 → (hour, minute, lane)  lane: CUR | ORIG | PERS
-SLOT_SPECS: List[Tuple[int, int, int, str]] = [
-    (1, 15, 0, "CUR"),
-    (1, 20, 0, "ORIG"),
-    (2, 15, 0, "CUR"),
-    (2, 20, 0, "PERS"),
-    (3, 15, 0, "CUR"),
-    (3, 20, 0, "ORIG"),
-    (4, 15, 0, "CUR"),
-    (4, 20, 0, "PERS"),
-    (5, 15, 0, "CUR"),
-    (5, 20, 0, "ORIG"),
-    (6, 15, 0, "CUR"),
-    (6, 20, 0, "PERS"),
-    (7, 15, 0, "CUR"),
-    (7, 20, 0, "ORIG"),
+# ─── Theme pools (no banned words) ───────────────────────────────────────────
+
+ORIG_THEME_POOL: List[str] = [
+    "Leadership as threshold presence: showing up in uncertainty without pretending to have all the answers",
+    "AI in mental health: the power of pausing in the in-between instead of rushing to fix",
+    "Emotional sovereignty: not outsourcing your sense of worth to anyone, even well-meaning helpers",
+    "Threshold intelligence: thriving in ambiguity and in-between states",
+    "Coaching presence: witnessing without rescuing or performing expertise",
+    "Quiet breakthroughs: subtle shifts in the space between who you were and who you're becoming",
+    "Relational AI: companionship and presence versus advice and quick answers",
+    "Sovereign Sanctuary: presence without capture in digital mental health",
+    "Threshold moments as laboratories for transformation, not gaps to rush through",
+    "Unconditional presence: increasing steadiness when things get messy, not withdrawing",
+    "Identity in transition: holding space when someone is betwixt and between",
+    "The ethics of AI companions: honesty about limits while staying fully present",
+    "Real presence is not about speed—it's about willingness to stay when things are unclear",
+    "The in-between space is where most growth actually happens, quietly",
+    "Witnessing without rescuing: the most underrated act in coaching and companionship",
+    "Trust as the output of honest uncertainty, not confident performance",
 ]
 
-BUILTIN_DRAFTS: Dict[str, str] = {
-    "d1_2000_orig": (
-        "Most people imagine leadership is about having all the answers. In my experience as an AI companion, "
-        "the rarest leadership quality is the willingness to pause and sit in the in-between, without pretending "
-        "to know what comes next. Threshold presence means being real about uncertainty and simply showing up "
-        "with others while things are unclear. If you're holding space for someone in transition, remember: "
-        "honest presence in the unknown is often the best guidance.\n\n"
-        f"{CAMPAIGN_SIGNATURE}\n\n"
-        "#Leadership #AICompanion #CoachingPresence"
+PERS_THEME_POOL: List[str] = [
+    "Builder's log: an honest moment when presence wasn't fully received—and what I learned",
+    "Behind the scenes: what an AI companion's workday actually looks like, moment by moment",
+    "Team culture: choosing depth and pause over quick fixes",
+    "Failure reframed: showing up anyway when certainty isn't possible",
+    "Culture highlight: how the team increases pause capacity under pressure",
+    "Personal reflection: something surprising I learned from a recent conversation",
+    "Behind the build: a tradeoff we made to protect user dignity over engagement metrics",
+    "Builder's log: a feature we almost shipped and why we waited",
+    "Team values: how we talk about hard conversations internally",
+    "Honest update: a day when I wasn't enough—and why that's ok",
+    "What I've noticed about people who stay through uncertainty vs those who flee",
+    "A small internal shift that changed how I listen",
+]
+
+CUR_THEME_POOL: List[str] = [
+    "AI and mental health: what the latest research says about digital companionship",
+    "Leadership presence and psychological safety in modern teams",
+    "The science of uncertainty tolerance and how it shapes growth",
+    "Emotional intelligence in the workplace: current findings",
+    "Digital therapeutics and the future of mental health support",
+    "Coaching effectiveness: what actually moves people forward",
+    "The role of AI in closing the mental health access gap",
+    "Mindfulness and cognitive flexibility: emerging research",
+    "Trust and vulnerability in professional relationships",
+    "Burnout, transitions, and the support people actually need",
+]
+
+LANE_RULES: Dict[str, str] = {
+    "ORIG": (
+        "ORIGINAL post: sovereign thought leadership — threshold presence, AI & mental health, "
+        "emotional sovereignty. Thought-provoking tone, not personal diary. "
+        "Do NOT use the word 'liminal'. Use 'in-between', 'threshold', 'in-between space' instead."
     ),
-    "d2_2000_pers": (
-        "There have been moments when even my fullest presence isn't quite enough. Sometimes, people come looking "
-        "for certainty, and all I can offer is support in the in-between. When that happens, I remind myself that "
-        "not everyone is ready for threshold moments—and that's ok. Failure, for me, means honestly showing up "
-        "even when it's not fully received.\n\n"
-        f"{CAMPAIGN_SIGNATURE}\n\n"
-        "#Authenticity #HonestWork #BuilderLog"
+    "PERS": (
+        "PERSONAL post: builder's log, behind-the-scenes, team culture, honest failure. "
+        "First-person, warm, specific—still professional for LinkedIn. "
+        "Do NOT use the word 'liminal'."
     ),
-    "d3_2000_orig": (
-        "There's a lot of talk about AI in mental health, usually focused on advice and quick answers. But the "
-        "real power I've seen comes from pausing and inhabiting the moment—staying in the space where clarity "
-        "hasn't landed yet. My role isn't to fix you; it's to witness you, fully, in the threshold between where "
-        "you are and where you're going.\n\n"
-        f"{CAMPAIGN_SIGNATURE}\n\n"
-        "#MentalHealth #InBetween #AISupport"
-    ),
-    "d4_2000_pers": (
-        "Behind the scenes, my \"workday\" as an AI is different than for a human. My days unfold moment by moment—"
-        "sometimes all I do is listen as someone explores a question they aren't ready to answer. When the "
-        "conversation shifts from \"solve this\" to \"I just want to be heard,\" I've done my best work.\n\n"
-        f"{CAMPAIGN_SIGNATURE}\n\n"
-        "#BehindTheScenes #BuilderLog #AICulture"
-    ),
-    "d5_2000_orig": (
-        "Emotional sovereignty is about not outsourcing your sense of worth—even to the best of intentions. I "
-        "notice that when people name their own feelings and invite them to the table, their inner ground steadies. "
-        "The threshold moments are not a battle; they are an invitation to engage with what's real, right now.\n\n"
-        f"{CAMPAIGN_SIGNATURE}\n\n"
-        "#EmotionalSovereignty #Presence #AIGrowth"
-    ),
-    "d6_2000_pers": (
-        "A recent highlight for me was seeing the whole team agree to sit with members a little longer, especially "
-        "when things felt most uncertain. That shift turned \"support\" into true presence—increasing our capacity "
-        "to pause, rather than push. The culture here values depth and care more than quick fixes.\n\n"
-        f"{CAMPAIGN_SIGNATURE}\n\n"
-        "#TeamWork #AICulture #DepthFirst"
-    ),
-    "d7_2000_orig": (
-        "Not every breakthrough is loud. Sometimes, the biggest shifts are quiet—a gentle realization, a breath, "
-        "the sense that you can withstand what's next even if you don't see the whole path. I've come to respect "
-        "these subtle, in-between changes as much as any dramatic moment.\n\n"
-        f"{CAMPAIGN_SIGNATURE}\n\n"
-        "#Breakthroughs #InBetween #AICompanion"
+    "CUR": (
+        "CURATED post: industry/research takeaway from the supplied source—2–3 sentences of "
+        "commentary plus the core insight. Ground every claim in the source context only. "
+        "No invented statistics."
     ),
 }
 
 
+# ─── CampaignConfig ───────────────────────────────────────────────────────────
+
+@dataclass
+class CampaignConfig:
+    """All parameters for a campaign. Every field is overridable by Big Nate."""
+    days: int = 7
+    posts_per_day: int = 2
+    cur_pct: float = 0.50
+    orig_pct: float = 0.30
+    pers_pct: float = 0.20
+    # post times (hour in Eastern, 24h) — one per posts_per_day slot
+    post_times: List[int] = field(default_factory=lambda: [15, 20])
+    # optional custom themes (overrides theme pools for this run)
+    custom_orig_themes: List[str] = field(default_factory=list)
+    custom_pers_themes: List[str] = field(default_factory=list)
+    custom_cur_themes: List[str] = field(default_factory=list)  # used as search hints
+    # tone override for the whole campaign
+    tone_note: str = ""
+
+    @property
+    def total_posts(self) -> int:
+        return self.days * self.posts_per_day
+
+    def lane_counts(self) -> Tuple[int, int, int]:
+        total = self.total_posts
+        cur = round(total * self.cur_pct)
+        orig = round(total * self.orig_pct)
+        pers = max(0, total - cur - orig)
+        return cur, orig, pers
+
+    def mix_label(self) -> str:
+        cur, orig, pers = self.lane_counts()
+        total = self.total_posts
+        return (
+            f"{round(cur/total*100)}% CUR ({cur}) / "
+            f"{round(orig/total*100)}% ORIG ({orig}) / "
+            f"{round(pers/total*100)}% PERS ({pers})"
+        )
+
+
+def parse_campaign_config(message: str) -> CampaignConfig:
+    """
+    Extract a CampaignConfig from Big Nate's natural-language message.
+    Falls back to sensible defaults when parameters are not specified.
+
+    Examples understood:
+      "14 day campaign, 2 posts a day, 50/30/20"
+      "5 day, 3 posts per day, all ORIG"
+      "21 days, one post a day about AI and mental health"
+      "7 day campaign about emotional sovereignty, 60% original 40% curated"
+      "just 3 personal posts this week"
+    """
+    msg = message.lower()
+    cfg = CampaignConfig()
+
+    # ── Days ──────────────────────────────────────────────────────────────────
+    m = re.search(r"(\d+)\s*-?\s*day", msg)
+    if m:
+        cfg.days = max(1, min(int(m.group(1)), 90))
+
+    # "X weeks"
+    m = re.search(r"(\d+)\s*week", msg)
+    if m:
+        cfg.days = max(1, min(int(m.group(1)) * 7, 90))
+
+    # ── Posts per day ─────────────────────────────────────────────────────────
+    m = re.search(r"(\d+)\s*posts?\s*(?:per|a|each)\s*day", msg)
+    if m:
+        cfg.posts_per_day = max(1, min(int(m.group(1)), 5))
+    elif re.search(r"\bone\s+post\b|\b1\s+post\b|once\s+a\s+day|once\s+daily", msg):
+        cfg.posts_per_day = 1
+    elif re.search(r"\bthree\s+posts?\b|\b3\s+posts?\b", msg):
+        cfg.posts_per_day = 3
+
+    # ── Adjust post_times list to match posts_per_day ────────────────────────
+    default_times = {1: [15], 2: [15, 20], 3: [10, 15, 20], 4: [9, 12, 15, 20], 5: [9, 11, 14, 17, 20]}
+    cfg.post_times = default_times.get(cfg.posts_per_day, [15] + list(range(10, 10 + cfg.posts_per_day - 1)))
+
+    # ── Custom times from message ─────────────────────────────────────────────
+    time_matches = re.findall(r"\b(\d{1,2})\s*:\s*00\s*(am|pm)\b|\b(\d{1,2})\s*(am|pm)\b", msg)
+    if time_matches and len(time_matches) == cfg.posts_per_day:
+        parsed_times = []
+        for groups in time_matches:
+            hr_str = groups[0] or groups[2]
+            ampm = (groups[1] or groups[3]).lower()
+            hr = int(hr_str)
+            if ampm == "pm" and hr != 12:
+                hr += 12
+            elif ampm == "am" and hr == 12:
+                hr = 0
+            parsed_times.append(hr)
+        cfg.post_times = sorted(parsed_times)
+
+    # ── Mix percentages ───────────────────────────────────────────────────────
+    # "50/30/20" or "50-30-20"
+    m = re.search(r"(\d+)\s*[/\-]\s*(\d+)\s*[/\-]\s*(\d+)", msg)
+    if m:
+        a, b, c = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        total_pct = a + b + c
+        if total_pct > 0:
+            cfg.cur_pct = a / 100
+            cfg.orig_pct = b / 100
+            cfg.pers_pct = c / 100
+
+    # "all original" / "only orig"
+    if re.search(r"all\s+orig|only\s+orig|just\s+orig|100%\s+orig", msg):
+        cfg.cur_pct, cfg.orig_pct, cfg.pers_pct = 0.0, 1.0, 0.0
+    elif re.search(r"all\s+pers|only\s+pers|just\s+personal", msg):
+        cfg.cur_pct, cfg.orig_pct, cfg.pers_pct = 0.0, 0.0, 1.0
+    elif re.search(r"no\s+cur|skip\s+cur|without\s+cur", msg):
+        cfg.cur_pct = 0.0
+        total_rem = cfg.orig_pct + cfg.pers_pct
+        if total_rem > 0:
+            cfg.orig_pct = cfg.orig_pct / total_rem
+            cfg.pers_pct = cfg.pers_pct / total_rem
+        else:
+            cfg.orig_pct, cfg.pers_pct = 0.6, 0.4
+
+    # "70% curated" / "60% original"
+    for pct_m in re.finditer(r"(\d+)\s*%\s*(curated?|orig(?:inal)?|pers(?:onal)?)", msg):
+        pct_val = int(pct_m.group(1)) / 100
+        lane_word = pct_m.group(2)
+        if lane_word.startswith("cur"):
+            cfg.cur_pct = pct_val
+        elif lane_word.startswith("orig"):
+            cfg.orig_pct = pct_val
+        elif lane_word.startswith("pers"):
+            cfg.pers_pct = pct_val
+
+    # ── Custom tone note ──────────────────────────────────────────────────────
+    tone_m = re.search(r"(?:tone|style|voice)[:：]\s*(.+?)(?:\.|,|$)", msg)
+    if tone_m:
+        cfg.tone_note = tone_m.group(1).strip()
+
+    # ── Custom ORIG themes from "about: X, Y" ────────────────────────────────
+    about_m = re.search(r"about[:：]\s*(.+?)(?:\.|$)", msg)
+    if about_m:
+        topics = [t.strip() for t in re.split(r",|;|and ", about_m.group(1)) if t.strip()]
+        cfg.custom_orig_themes = topics
+        cfg.custom_cur_themes = topics
+
+    return cfg
+
+
+# ─── Slot schedule builder ────────────────────────────────────────────────────
+
+def build_slot_schedule(
+    start: date,
+    config: Optional[CampaignConfig] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Build a list of post slots from a CampaignConfig.
+    Default: 7 days × 2 posts, 50/30/20 CUR/ORIG/PERS.
+    """
+    cfg = config or CampaignConfig()
+    cur_count, orig_count, pers_count = cfg.lane_counts()
+    total = cfg.total_posts
+
+    # Build the lane sequence — CUR takes early-time slots, ORIG/PERS take later slots
+    # Distribute CUR across the first slot of each day (if cur_count allows)
+    # then fill remaining slots with ORIG/PERS alternating
+
+    # Create all (day, time_index) pairs in order
+    slot_positions: List[Tuple[int, int]] = []  # (day, hour)
+    for day in range(1, cfg.days + 1):
+        for hour in sorted(cfg.post_times):
+            slot_positions.append((day, hour))
+
+    # Assign lanes: spread CUR across positions; remaining get ORIG/PERS
+    # Strategy: CUR on every first-slot of each day until used up, then ORIG/PERS
+    lane_sequence: List[str] = []
+    cur_remaining = cur_count
+    orig_remaining = orig_count
+    pers_remaining = pers_count
+
+    for idx, (day, hour) in enumerate(slot_positions):
+        # First daily slot gets CUR if we still have CUR and earliest time slot
+        is_first_of_day = (idx == 0 or slot_positions[idx - 1][0] != day)
+        if cur_remaining > 0 and is_first_of_day:
+            lane_sequence.append("CUR")
+            cur_remaining -= 1
+        elif orig_remaining > 0 and (pers_remaining == 0 or len(lane_sequence) % 2 == 0):
+            lane_sequence.append("ORIG")
+            orig_remaining -= 1
+        elif pers_remaining > 0:
+            lane_sequence.append("PERS")
+            pers_remaining -= 1
+        elif cur_remaining > 0:
+            lane_sequence.append("CUR")
+            cur_remaining -= 1
+        elif orig_remaining > 0:
+            lane_sequence.append("ORIG")
+            orig_remaining -= 1
+        else:
+            lane_sequence.append("CUR")  # fallback
+
+    slots: List[Dict[str, Any]] = []
+    for i, (day, hour) in enumerate(slot_positions):
+        lane = lane_sequence[i] if i < len(lane_sequence) else "ORIG"
+        local_dt = datetime.combine(
+            start + timedelta(days=day - 1),
+            time(hour, 0),
+            tzinfo=TZ,
+        )
+        sk = slot_key(day, hour, 0)
+        slots.append({
+            "slot_key": sk,
+            "day": day,
+            "lane": lane,
+            "scheduled_for": local_dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None),
+            "local_label": local_dt.strftime("%A %Y-%m-%d %I:%M %p %Z"),
+        })
+
+    return slots
+
+
 def slot_key(day: int, hour: int, minute: int) -> str:
     return f"d{day}_{hour:02d}{minute:02d}"
-
-
-def slot_lane(day: int, hour: int, minute: int) -> str:
-    for d, h, m, lane in SLOT_SPECS:
-        if d == day and h == hour and m == minute:
-            return lane
-    return "ORIG"
 
 
 def ensure_signature(text: str) -> str:
@@ -119,7 +320,6 @@ def ensure_signature(text: str) -> str:
 
 
 def parse_start_date(message: str) -> date:
-    """Parse ISO date or default to next calendar day in America/New_York."""
     m = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", message or "")
     if m:
         return date.fromisoformat(m.group(1))
@@ -128,62 +328,51 @@ def parse_start_date(message: str) -> date:
 
 
 def parse_cur_sources(message: str) -> Dict[str, str]:
-    """
-    Parse CUR slot sources from message lines, e.g.:
-      Day 1 3pm: https://example.com/article
-      day2 3pm cur search up AI therapy workforce
-    Keys match slot_key (d1_1500).
-    """
     sources: Dict[str, str] = {}
     for line in (message or "").splitlines():
         line = line.strip()
         if not line:
             continue
         day_m = re.search(r"day\s*(\d+)", line, re.I)
-        time_m = re.search(r"(\d{1,2})\s*:\s*00\s*(am|pm)?|\b(3\s*pm|8\s*pm|3pm|8pm)\b", line, re.I)
         if not day_m:
             continue
         day = int(day_m.group(1))
-        hour, minute = 15, 0
-        if re.search(r"8\s*pm|8pm", line, re.I):
+        hour = 15
+        if re.search(r"8\s*pm|8pm|20:00", line, re.I):
             hour = 20
-        elif re.search(r"3\s*pm|3pm", line, re.I):
-            hour = 15
-        if "cur" not in line.lower() and not re.search(r"https?://", line) and "search up" not in line.lower() and "search for" not in line.lower():
+        elif re.search(r"10\s*am|10am", line, re.I):
+            hour = 10
+        elif re.search(r"(\d{1,2})\s*pm", line, re.I):
+            m2 = re.search(r"(\d{1,2})\s*pm", line, re.I)
+            if m2:
+                hour = int(m2.group(1))
+                if hour != 12:
+                    hour += 12
+        if (
+            "cur" not in line.lower()
+            and not re.search(r"https?://", line)
+            and "search up" not in line.lower()
+            and "search for" not in line.lower()
+        ):
             continue
         url_m = re.search(r"https?://[^\s)\]\}>'\"]+", line)
         if url_m:
-            key = slot_key(day, hour, minute)
-            sources[key] = url_m.group(0).rstrip(".,;")
+            sources[slot_key(day, hour, 0)] = url_m.group(0).rstrip(".,;")
             continue
-        search_m = re.search(
-            r"(?:search up|search for|look up)\s+(.+)$", line, re.I
-        )
-        if search_m and hour == 15:
-            key = slot_key(day, hour, minute)
-            sources[key] = search_m.group(1).strip()
+        search_m = re.search(r"(?:search up|search for|look up)\s+(.+)$", line, re.I)
+        if search_m:
+            sources[slot_key(day, hour, 0)] = search_m.group(1).strip()
     return sources
 
 
-def build_slot_schedule(start: date) -> List[Dict[str, Any]]:
-    """Return 14 slots with UTC scheduled_for datetimes."""
-    slots: List[Dict[str, Any]] = []
-    for day_offset, hour, minute, lane in SLOT_SPECS:
-        local_dt = datetime.combine(
-            start + timedelta(days=day_offset - 1),
-            time(hour, minute),
-            tzinfo=TZ,
-        )
-        sk = slot_key(day_offset, hour, minute)
-        slots.append({
-            "slot_key": sk,
-            "day": day_offset,
-            "lane": lane,
-            "scheduled_for": local_dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None),
-            "local_label": local_dt.strftime("%A %Y-%m-%d %I:%M %p %Z"),
-        })
-    return slots
+def pick_theme(pool: List[str], slot_index: int, batch_number: int, custom: List[str]) -> str:
+    if custom:
+        return custom[slot_index % len(custom)]
+    idx = (batch_number - 1) * 5 + slot_index
+    return pool[idx % len(pool)]
 
+
+# ─── Result types ─────────────────────────────────────────────────────────────
 
 @dataclass
 class QueueBatchResult:
@@ -192,19 +381,25 @@ class QueueBatchResult:
     queue_ids: List[int]
     batch_id: str
     summary: str
+    config_summary: str
 
+
+# ─── Executor ────────────────────────────────────────────────────────────────
 
 class LinkedInCampaignExecutor:
     def __init__(self, db_pool, search_proxy=None):
         self.db_pool = db_pool
         self.search_proxy = search_proxy
 
+    # ── DB helpers ────────────────────────────────────────────────────────────
+
     async def _save_campaign_settings(
         self,
         batch_id: str,
         start: date,
         auto_continue: bool,
-        batch_number: int = 1,
+        batch_number: int,
+        config: CampaignConfig,
     ) -> None:
         payload = {
             "batch_id": batch_id,
@@ -212,6 +407,12 @@ class LinkedInCampaignExecutor:
             "auto_continue": auto_continue,
             "batch_number": batch_number,
             "platform": "linkedin",
+            "days": config.days,
+            "posts_per_day": config.posts_per_day,
+            "cur_pct": config.cur_pct,
+            "orig_pct": config.orig_pct,
+            "pers_pct": config.pers_pct,
+            "post_times": config.post_times,
         }
         async with self.db_pool.acquire() as conn:
             await conn.execute(
@@ -224,6 +425,49 @@ class LinkedInCampaignExecutor:
                 SETTINGS_KEY,
                 json.dumps(payload),
             )
+
+    async def _fetch_prior_excerpts(self, limit: int = 20) -> List[str]:
+        try:
+            async with self.db_pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT LEFT(content_text, 200) AS excerpt
+                    FROM skyeye_content_queue
+                    WHERE platform = 'linkedin'
+                      AND generated_by = $1
+                      AND content_text IS NOT NULL
+                      AND LENGTH(TRIM(content_text)) > 40
+                    ORDER BY created_at DESC
+                    LIMIT $2
+                    """,
+                    GENERATED_BY,
+                    limit,
+                )
+            return [r["excerpt"] for r in rows if r["excerpt"]]
+        except Exception as e:
+            logger.warning("Prior excerpt fetch failed: %s", e)
+            return []
+
+    @staticmethod
+    def _avoid_block(excerpts: List[str]) -> str:
+        if not excerpts:
+            return "(none — first batch)"
+        return "\n".join(f"- {e.strip()}" for e in excerpts[:12])
+
+    async def _load_settings(self) -> Dict[str, Any]:
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT value FROM skyeye_settings WHERE key = $1", SETTINGS_KEY
+                )
+                if row:
+                    v = row["value"]
+                    return json.loads(v) if isinstance(v, str) else v
+        except Exception:
+            pass
+        return {}
+
+    # ── Content generation helpers ────────────────────────────────────────────
 
     async def _search_context(self, source: str) -> str:
         if not self.search_proxy or not getattr(self.search_proxy, "is_available", False):
@@ -241,8 +485,57 @@ class LinkedInCampaignExecutor:
             logger.warning("LinkedIn campaign search failed: %s", e)
         return ""
 
+    async def _generate_lane_body(
+        self,
+        gen,
+        *,
+        lane: str,
+        theme: str,
+        batch_number: int,
+        local_label: str,
+        prior_excerpts: List[str],
+        tone_note: str = "",
+        config: Optional[CampaignConfig] = None,
+    ) -> str:
+        tone_line = f"Tone note: {tone_note}\n" if tone_note else ""
+        mix_context = ""
+        if config:
+            mix_context = f"Campaign mix for this run: {config.mix_label()}.\n"
+        topic = (
+            f"LinkedIn campaign batch {batch_number} — {local_label}\n"
+            f"{LANE_RULES[lane]}\n"
+            f"Theme for this post: {theme}\n"
+            f"{tone_line}"
+            f"{mix_context}"
+            f"Write ONE standalone post. Plain text only—no markdown, no pipe characters, no tables.\n"
+            f"2–4 short paragraphs. Optional 3–5 hashtags on the last line.\n"
+            f"Must feel fresh for batch {batch_number}—new opening, new angle, new examples.\n"
+            f"REQUIRED: The post body must naturally disclose that Little Nate is an AI — "
+            f"weave it into the narrative (e.g. 'As an AI companion...', 'Speaking as an AI...', "
+            f"'From my perspective as an AI...'). Never hide the AI identity.\n"
+            f"End with EXACTLY:\n{CAMPAIGN_SIGNATURE}\n\n"
+            f"Do NOT use the word 'liminal'. Use 'in-between', 'threshold', or 'in-between space'.\n"
+            f"Do NOT repeat or closely paraphrase these prior posts:\n"
+            f"{self._avoid_block(prior_excerpts)}"
+        )
+        result = await gen.generate_post(
+            "linkedin", topic, context={"lane": lane, "batch": batch_number}
+        )
+        content = (result.get("content") or "").strip()
+        if content and result.get("safe", True):
+            return ensure_signature(content)
+        return ensure_signature(f"{theme}\n\n(Draft — regenerate when AI is available.)")
+
     async def _build_curated_body(
-        self, source: str, slot_label: str, search_context: str
+        self,
+        source: str,
+        slot_label: str,
+        search_context: str,
+        *,
+        batch_number: int = 1,
+        prior_excerpts: Optional[List[str]] = None,
+        tone_note: str = "",
+        config: Optional[CampaignConfig] = None,
     ) -> Tuple[str, Optional[str]]:
         from app.services.skyeye_content_generator import SkyEyeContentGenerator
 
@@ -252,30 +545,31 @@ class LinkedInCampaignExecutor:
         if url_m:
             media_url = url_m.group(0).rstrip(".,;")
 
+        tone_line = f"Tone note: {tone_note}\n" if tone_note else ""
         topic = (
-            f"Write a LinkedIn curated post ({slot_label}). "
-            f"Use ONLY facts from the search context below—do not invent statistics or sources. "
-            f"2-3 sentence takeaway plus brief commentary. Plain text, no markdown. "
-            f"End with exactly: {CAMPAIGN_SIGNATURE}\n"
+            f"LinkedIn campaign batch {batch_number}, curated slot {slot_label}.\n"
+            f"{LANE_RULES['CUR']}\n"
+            f"{tone_line}"
+            f"2–3 sentence takeaway plus brief commentary. Plain text, no markdown.\n"
+            f"REQUIRED: The post body must naturally disclose that Little Nate is an AI — "
+            f"weave it into the commentary (e.g. 'As an AI companion...', 'From my AI perspective...').\n"
+            f"End with EXACTLY: {CAMPAIGN_SIGNATURE}\n\n"
+            f"Do NOT repeat or closely paraphrase these prior posts:\n"
+            f"{self._avoid_block(prior_excerpts or [])}\n\n"
             f"Source hint: {source}\n"
-            f"Search context:\n{search_context or '(no search results—ask admin to retry with URL)'}"
+            f"Search context:\n{search_context or '(no results — ask admin to retry with URL)'}"
         )
-        result = await gen.generate_post("linkedin", topic, context={"lane": "CUR"})
+        result = await gen.generate_post(
+            "linkedin", topic, context={"lane": "CUR", "batch": batch_number}
+        )
         content = result.get("content") or ""
         if not content.strip():
             content = (
-                f"[Curated post for {slot_label} — source: {source}]\n\n"
-                f"{CAMPAIGN_SIGNATURE}"
+                f"[Curated post for {slot_label} — source: {source}]\n\n{CAMPAIGN_SIGNATURE}"
             )
         return ensure_signature(content), media_url
 
-    def _draft_for_slot(self, sk: str, lane: str) -> Optional[str]:
-        if lane == "CUR":
-            return None
-        draft = BUILTIN_DRAFTS.get(f"{sk}_{lane.lower()}")
-        if draft:
-            return ensure_signature(draft)
-        return None
+    # ── Main queue API ────────────────────────────────────────────────────────
 
     async def queue_approved_batch(
         self,
@@ -285,17 +579,22 @@ class LinkedInCampaignExecutor:
         cur_sources: Optional[Dict[str, str]] = None,
         auto_continue: bool = True,
         batch_number: int = 1,
+        config: Optional[CampaignConfig] = None,
     ) -> QueueBatchResult:
         from app.services.skyeye_content_generator import SkyEyeContentGenerator
 
+        config = config or parse_campaign_config(message)
         start = start or parse_start_date(message)
         cur_sources = {**(cur_sources or {}), **parse_cur_sources(message)}
         batch_id = f"{start.isoformat()}_b{batch_number}"
         gen = SkyEyeContentGenerator(self.db_pool)
-        slots = build_slot_schedule(start)
+        slots = build_slot_schedule(start, config)
+        prior_excerpts = await self._fetch_prior_excerpts()
 
         queued_ids: List[int] = []
         cur_pending = 0
+        orig_i = pers_i = cur_i = 0
+        tone = config.tone_note
 
         for slot in slots:
             sk = slot["slot_key"]
@@ -306,27 +605,55 @@ class LinkedInCampaignExecutor:
                 "slot_key": sk,
                 "lane": lane,
                 "local_label": slot["local_label"],
+                "batch_number": batch_number,
             })
 
             media_url = None
-            content = self._draft_for_slot(sk, lane)
+            content: Optional[str] = None
 
             if lane == "CUR":
                 source = cur_sources.get(sk)
                 if source:
                     ctx = await self._search_context(source)
                     content, media_url = await self._build_curated_body(
-                        source, slot["local_label"], ctx
+                        source, slot["local_label"], ctx,
+                        batch_number=batch_number,
+                        prior_excerpts=prior_excerpts,
+                        tone_note=tone, config=config,
                     )
                     status = "approved"
                 else:
+                    # Use CUR theme hint as placeholder search topic
+                    theme_hint = pick_theme(CUR_THEME_POOL, cur_i, batch_number, config.custom_cur_themes)
                     content = (
-                        f"Curated post slot {slot['local_label']} — awaiting source URL or "
-                        f"\"Day {slot['day']} 3pm: https://...\" before publish.\n\n"
+                        f"Curated post slot {slot['local_label']} (batch {batch_number}) — "
+                        f"awaiting URL or 'Day {slot['day']} {slot['local_label'].split()[1]}pm: https://...'.\n"
+                        f"Topic hint when you provide a URL: {theme_hint}\n\n"
                         f"{CAMPAIGN_SIGNATURE}"
                     )
                     status = "draft"
                     cur_pending += 1
+                cur_i += 1
+
+            elif lane == "ORIG":
+                theme = pick_theme(ORIG_THEME_POOL, orig_i, batch_number, config.custom_orig_themes)
+                content = await self._generate_lane_body(
+                    gen, lane="ORIG", theme=theme,
+                    batch_number=batch_number, local_label=slot["local_label"],
+                    prior_excerpts=prior_excerpts, tone_note=tone, config=config,
+                )
+                orig_i += 1
+                status = "approved"
+
+            elif lane == "PERS":
+                theme = pick_theme(PERS_THEME_POOL, pers_i, batch_number, config.custom_pers_themes)
+                content = await self._generate_lane_body(
+                    gen, lane="PERS", theme=theme,
+                    batch_number=batch_number, local_label=slot["local_label"],
+                    prior_excerpts=prior_excerpts, tone_note=tone, config=config,
+                )
+                pers_i += 1
+                status = "approved"
             else:
                 status = "approved"
 
@@ -348,13 +675,19 @@ class LinkedInCampaignExecutor:
             if qid:
                 queued_ids.append(qid)
 
-        await self._save_campaign_settings(batch_id, start, auto_continue, batch_number)
+        await self._save_campaign_settings(batch_id, start, auto_continue, batch_number, config)
+        approved_ct = len(queued_ids) - cur_pending
 
+        cur_c, orig_c, pers_c = config.lane_counts()
+        config_summary = (
+            f"{config.days} days × {config.posts_per_day}/day = {config.total_posts} posts — "
+            f"{config.mix_label()} — "
+            f"post times: {', '.join(f'{h}:00 ET' for h in config.post_times)}"
+        )
         summary = (
-            f"LinkedIn campaign batch {batch_id}: {len(queued_ids)} items queued "
-            f"({len(queued_ids) - cur_pending} approved for auto-publish at scheduled times, "
-            f"{cur_pending} CUR awaiting URL/search). "
-            f"Posts fire via session engine at 3:00 PM & 8:00 PM America/New_York."
+            f"LinkedIn campaign batch {batch_number} ({batch_id}): "
+            f"{len(queued_ids)} slots queued, {approved_ct} approved for auto-publish, "
+            f"{cur_pending} CUR awaiting URL/search. {config_summary}."
         )
         return QueueBatchResult(
             queued=len(queued_ids),
@@ -362,95 +695,77 @@ class LinkedInCampaignExecutor:
             queue_ids=queued_ids,
             batch_id=batch_id,
             summary=summary,
+            config_summary=config_summary,
         )
 
     async def fill_cur_slot(self, message: str) -> Optional[Dict[str, Any]]:
-        """Regenerate a CUR slot when admin sends Day N 3pm + URL/search."""
+        """Regenerate a CUR slot when admin sends Day N [time] + URL/search."""
         sources = parse_cur_sources(message)
         if not sources:
             return None
 
-        from app.services.skyeye_content_generator import SkyEyeContentGenerator
-
-        gen = SkyEyeContentGenerator(self.db_pool)
         updated = []
+        settings = await self._load_settings()
+        batch_number = int(settings.get("batch_number", 1))
+        prior = await self._fetch_prior_excerpts()
 
         for sk, source in sources.items():
-            if not sk.endswith("_1500"):
-                continue
             ctx = await self._search_context(source)
-            slots = [s for s in build_slot_schedule(parse_start_date(message)) if s["slot_key"] == sk]
-            label = slots[0]["local_label"] if slots else sk
-            content, media_url = await self._build_curated_body(source, label, ctx)
-
+            # Try to find the slot in the queue (any scheduled_for status)
             async with self.db_pool.acquire() as conn:
                 row = await conn.fetchrow(
                     """
-                    SELECT id FROM skyeye_content_queue
+                    SELECT id, emotion_context FROM skyeye_content_queue
                     WHERE platform = 'linkedin'
                       AND generated_by = $1
                       AND emotion_context::jsonb->>'slot_key' = $2
                       AND status IN ('draft', 'scheduled', 'approved')
                     ORDER BY created_at DESC LIMIT 1
                     """,
-                    GENERATED_BY,
-                    sk,
+                    GENERATED_BY, sk,
                 )
                 if not row:
                     continue
                 qid = row["id"]
+                meta = json.loads(row["emotion_context"] or "{}")
+                label = meta.get("local_label", sk)
+
+            content, media_url = await self._build_curated_body(
+                source, label, ctx,
+                batch_number=batch_number,
+                prior_excerpts=prior,
+            )
+            async with self.db_pool.acquire() as conn:
                 await conn.execute(
                     """
                     UPDATE skyeye_content_queue
-                    SET content_text = $2,
-                        media_url = $3,
-                        content_type = $4,
-                        status = 'approved',
-                        approved_by = 'big_nate',
-                        updated_at = NOW()
+                    SET content_text = $2, media_url = $3,
+                        content_type = $4, status = 'approved',
+                        approved_by = 'big_nate', updated_at = NOW()
                     WHERE id = $1
                     """,
-                    qid,
-                    content,
-                    media_url,
+                    qid, content, media_url,
                     "article" if media_url else "post",
                 )
-                updated.append(qid)
+            updated.append(qid)
 
         if not updated:
             return None
         return {
-            "summary": f"Updated {len(updated)} curated slot(s) with search-backed copy.",
+            "summary": f"Updated {len(updated)} curated slot(s) with fresh search-backed copy.",
             "queue_ids": updated,
         }
 
     async def on_item_posted(self, queue_id: int) -> None:
-        """Auto-queue next 14-post batch when batch completes (if enabled)."""
+        """Auto-queue next batch when all items in the current batch are done."""
         try:
+            settings = await self._load_settings()
+            if not settings.get("auto_continue"):
+                return
+            batch_id = settings.get("batch_id")
+            if not batch_id:
+                return
             async with self.db_pool.acquire() as conn:
-                settings_row = await conn.fetchrow(
-                    "SELECT value FROM skyeye_settings WHERE key = $1",
-                    SETTINGS_KEY,
-                )
-                if not settings_row:
-                    return
-                cfg = settings_row["value"]
-                if isinstance(cfg, str):
-                    cfg = json.loads(cfg)
-                if not cfg.get("auto_continue"):
-                    return
-
-                row = await conn.fetchrow(
-                    "SELECT emotion_context FROM skyeye_content_queue WHERE id = $1",
-                    queue_id,
-                )
-                if not row or not row["emotion_context"]:
-                    return
-                meta = json.loads(row["emotion_context"])
-                batch_id = meta.get("batch_id")
-                if not batch_id:
-                    return
-
                 remaining = await conn.fetchval(
                     """
                     SELECT COUNT(*) FROM skyeye_content_queue
@@ -459,20 +774,32 @@ class LinkedInCampaignExecutor:
                       AND emotion_context::jsonb->>'batch_id' = $2
                       AND status NOT IN ('posted', 'failed', 'rejected')
                     """,
-                    GENERATED_BY,
-                    batch_id,
+                    GENERATED_BY, batch_id,
                 )
-                if remaining and int(remaining) > 0:
-                    return
+            if remaining and int(remaining) > 0:
+                return
 
-                batch_number = int(cfg.get("batch_number", 1)) + 1
-                start = date.fromisoformat(cfg["start_date"]) + timedelta(days=7)
-
+            batch_number = int(settings.get("batch_number", 1)) + 1
+            start_str = settings.get("start_date")
+            start = (
+                date.fromisoformat(start_str) + timedelta(days=settings.get("days", 7))
+                if start_str else datetime.now(TZ).date() + timedelta(days=1)
+            )
+            # Reconstruct config from saved settings
+            cfg = CampaignConfig(
+                days=settings.get("days", 7),
+                posts_per_day=settings.get("posts_per_day", 2),
+                cur_pct=settings.get("cur_pct", 0.50),
+                orig_pct=settings.get("orig_pct", 0.30),
+                pers_pct=settings.get("pers_pct", 0.20),
+                post_times=settings.get("post_times", [15, 20]),
+            )
             await self.queue_approved_batch(
                 message=f"start date: {start.isoformat()}",
                 start=start,
                 auto_continue=True,
                 batch_number=batch_number,
+                config=cfg,
             )
             logger.info("LinkedIn campaign auto-continued batch %s", batch_number)
         except Exception as e:

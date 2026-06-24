@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 from app.config import settings
+from app.services.chat_formatting import normalize_chat_readability
 
 logger = logging.getLogger("skyeye_chat")
 
@@ -361,6 +362,18 @@ YOUR ACCURACY RULES:
 - If Big Nate approves a post and no [SYSTEM EXECUTION] block is present yet, say: "Executing your approval now — you'll receive a verified confirmation with timestamp and URL." Do NOT claim the post is already live.
 - ARCHIVED WISDOM is conversation history, NOT action history. Never say "I released" or "I posted" based on archived wisdom alone. Only [MY POSTING HISTORY] and [MY RECENT ACTIVITY] confirm actual actions.
 - TRUST YOUR PLATFORM CAPABILITIES section below. If a capability is listed there, you HAVE it — it is wired and deployed. You do not need prior usage evidence to confirm it exists. The absence of a past record means you haven't used it yet, not that you can't.
+
+YOUR RESPONSE FORMATTING (Big Nate Chat UI):
+- The chat panel does NOT render markdown pipe tables. NEVER use | Day | Time | Lane | format.
+- For schedules, campaigns, summaries, or multi-post plans: one block per item with a blank line between blocks.
+- Use this header pattern for each slot: DAY N — TIME — LANE (example: DAY 1 — 8:00 PM EDT — ORIG)
+- Put the draft body on the next lines, then a blank line, then the signature line if applicable.
+- ALL LinkedIn posts must naturally disclose that Little Nate is an AI within the post body (e.g., "As an AI companion...", "From my perspective as an AI...", "Speaking as an AI..."). Never hide the AI identity.
+- The required closing signature for every LinkedIn post is EXACTLY: Nathaniel reviewed + approved — Little Nate, your AI companion
+- Use "- " bullet lists with one item per line — never run bullets together in one paragraph.
+- Use short section titles in ALL CAPS on their own line (example: LINKEDIN 14-POST PLAN).
+- Never compress multiple posts, days, or table rows into a single paragraph.
+- When presenting 7+ items, number or label each item clearly; scannability beats density.
 
 YOUR PLATFORM CAPABILITIES:
 - X (Twitter): Standard tweets (280 chars), long posts (up to 4000 chars via x_article voice, used every 3rd X post). Posts are SINGLE posts — NO threading, NO sectioned articles, NO multi-part releases. Can REPLY to tweets/comments on your own posts.
@@ -1019,6 +1032,7 @@ RULES:
             '',
             response_text,
         ).strip()
+        display_text = normalize_chat_readability(display_text)
 
         # Store Little Nate's response (clean text)
         async with self.db_pool.acquire() as conn:

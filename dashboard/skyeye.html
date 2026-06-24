@@ -203,7 +203,19 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
 /* CHAT */
 .chat-wrap{display:flex;flex-direction:column;height:calc(100vh - 140px);max-height:700px}
 .chat-messages{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px}
-.chat-msg{max-width:70%;padding:12px 16px;border-radius:var(--r);font-size:13px;line-height:1.6;position:relative}
+.chat-msg{max-width:70%;padding:12px 16px;border-radius:var(--r);font-size:13px;line-height:1.6;position:relative;word-wrap:break-word;word-break:break-word}
+.chat-msg .chat-md-p{margin:0 0 10px 0;line-height:1.65}
+.chat-msg .chat-md-h2{font-size:15px;font-weight:700;color:var(--gold);margin:14px 0 8px;letter-spacing:.3px}
+.chat-msg .chat-md-h3{font-size:13px;font-weight:700;color:var(--teal,#4ECDC4);margin:12px 0 6px}
+.chat-msg .chat-md-hr{border:none;border-top:1px solid rgba(255,255,255,.08);margin:14px 0}
+.chat-msg .chat-md-quote{border-left:3px solid rgba(0,229,160,.35);padding:8px 12px;margin:8px 0;color:var(--t2);font-style:italic}
+.chat-msg .chat-md-ul{margin:8px 0 12px 18px;padding:0}
+.chat-msg .chat-md-ul li{margin-bottom:6px}
+.chat-msg .chat-md-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px}
+.chat-msg .chat-md-table th,.chat-msg .chat-md-table td{border:1px solid rgba(255,255,255,.08);padding:8px 10px;text-align:left;vertical-align:top}
+.chat-msg .chat-md-table th{background:rgba(201,169,98,.08);color:var(--gold);font-weight:600}
+.chat-msg .chat-post-block{border:1px solid rgba(0,229,160,.12);border-radius:8px;padding:12px 14px;margin:12px 0;background:rgba(0,0,0,.15)}
+.chat-msg .chat-post-meta{font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--gold);margin-bottom:8px}
 .chat-msg.big-nate{align-self:flex-end;background:rgba(201,169,98,0.1);border:1px solid rgba(201,169,98,0.15);color:var(--t1)}
 .chat-msg.big-nate::after{content:'Big Nate';position:absolute;top:-16px;right:4px;font-size:9px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;font-weight:600}
 .chat-msg.little-nate{align-self:flex-start;background:rgba(0,229,160,0.08);border:1px solid rgba(0,229,160,0.12);color:var(--t1)}
@@ -3159,6 +3171,85 @@ function modeBadgeHtml(mode) {
   return `<span class="chat-mode-badge m-${mode}">${mode}</span>`;
 }
 
+function formatChatMessage(text) {
+  if (!text) return '';
+  let raw = String(text);
+  if ((raw.match(/\|\s*\d+\s*\|/g) || []).length >= 2) {
+    raw = raw.replace(/\s*(?=\|\s*\d+\s*\|)/g, '\n\n');
+  }
+  const dayBlock = /^DAY\s+\d+\s+[—–-]/i;
+  const lines = raw.split('\n');
+  let html = '';
+  let i = 0;
+  let tableRows = [];
+
+  function flushTable() {
+    if (!tableRows.length) return;
+    html += '<table class="chat-md-table"><tbody>';
+    tableRows.forEach((row, idx) => {
+      const cells = row.split('|').map(c => c.trim()).filter(Boolean);
+      if (cells.length && cells.every(c => /^[-:\s]+$/.test(c))) return;
+      const tag = idx === 0 ? 'th' : 'td';
+      html += '<tr>' + cells.map(c => `<${tag}>${c}</${tag}>`).join('') + '</tr>';
+    });
+    html += '</tbody></table>';
+    tableRows = [];
+  }
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    const pipeCells = trimmed.split('|').map(c => c.trim()).filter(Boolean);
+
+    if (pipeCells.length >= 3 && trimmed.includes('|')) {
+      tableRows.push(trimmed);
+      i++;
+      continue;
+    }
+    flushTable();
+
+    if (dayBlock.test(trimmed)) {
+      const meta = escapeHtml(trimmed);
+      const bodyLines = [];
+      i++;
+      while (i < lines.length && !dayBlock.test(lines[i].trim()) && !/^#{1,3}\s+/.test(lines[i].trim()) && !(lines[i].trim().includes('|') && lines[i].trim().split('|').filter(Boolean).length >= 3)) {
+        if (lines[i].trim() !== '') bodyLines.push(lines[i]);
+        i++;
+      }
+      const body = escapeHtml(bodyLines.join('\n')).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+      html += `<div class="chat-post-block"><div class="chat-post-meta">${meta}</div>${body ? `<div>${body}</div>` : ''}</div>`;
+      continue;
+    }
+
+    let escaped = escapeHtml(line);
+    escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+    if (/^#{1,3}\s+/.test(trimmed)) {
+      const cls = trimmed.startsWith('###') ? 'chat-md-h3' : 'chat-md-h2';
+      html += `<div class="${cls}">${escapeHtml(trimmed.replace(/^#+\s+/, ''))}</div>`;
+    } else if (/^---+$/.test(trimmed)) {
+      html += '<hr class="chat-md-hr">';
+    } else if (/^>\s?/.test(trimmed)) {
+      html += `<blockquote class="chat-md-quote">${escapeHtml(trimmed.replace(/^>\s?/, ''))}</blockquote>`;
+    } else if (/^[-*]\s+/.test(trimmed)) {
+      html += '<ul class="chat-md-ul">';
+      while (i < lines.length && /^[-*]\s+/.test(lines[i].trim())) {
+        html += `<li>${escapeHtml(lines[i].trim().replace(/^[-*]\s+/, ''))}</li>`;
+        i++;
+      }
+      html += '</ul>';
+      continue;
+    } else if (trimmed === '') {
+      html += '<br>';
+    } else {
+      html += `<p class="chat-md-p">${escaped}</p>`;
+    }
+    i++;
+  }
+  flushTable();
+  return html;
+}
+
 function followUpHtml(suggestions) {
   if (!suggestions || !suggestions.length) return '';
   return `<div class="chat-followups">${suggestions.map(s =>
@@ -3192,9 +3283,10 @@ async function loadChat() {
     const isBig = sender.includes('big') || sender === 'user' || sender === 'admin';
     const meta = m.metadata || {};
     const mode = meta.mode || '';
+    const body = m.message || m.content || m.text || '';
     return `<div class="chat-msg ${isBig ? 'big-nate' : 'little-nate'}">
       ${!isBig ? modeBadgeHtml(mode) : ''}
-      ${m.message || m.content || m.text || ''}
+      ${isBig ? escapeHtml(body) : formatChatMessage(body)}
     </div>`;
   }).join('');
 
@@ -3339,7 +3431,7 @@ async function sendChat() {
     const suggestions = result.follow_up_suggestions || [];
     messagesEl.innerHTML += `<div class="chat-msg little-nate">
       ${modeBadgeHtml(detectedMode)}
-      ${reply}
+      ${formatChatMessage(reply)}
       ${followUpHtml(suggestions)}
     </div>`;
   } else {

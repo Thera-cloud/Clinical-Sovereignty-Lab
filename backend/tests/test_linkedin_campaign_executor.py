@@ -2,12 +2,15 @@
 from datetime import date
 
 from app.services.linkedin_campaign_executor import (
-    BUILTIN_DRAFTS,
     CAMPAIGN_SIGNATURE,
+    ORIG_THEME_POOL,
+    PERS_THEME_POOL,
     build_slot_schedule,
     ensure_signature,
     parse_cur_sources,
     parse_start_date,
+    pick_orig_theme,
+    pick_pers_theme,
     slot_key,
 )
 
@@ -55,6 +58,20 @@ def test_parse_start_date_iso():
     assert parse_start_date("start date: 2026-07-01") == date(2026, 7, 1)
 
 
-def test_builtin_drafts_have_signature():
-    for key, draft in BUILTIN_DRAFTS.items():
-        assert CAMPAIGN_SIGNATURE in draft, key
+def test_batch_two_orig_themes_differ_from_batch_one():
+    batch_one = [pick_orig_theme(i, 1) for i in range(4)]
+    batch_two = [pick_orig_theme(i, 2) for i in range(4)]
+    assert batch_one != batch_two
+    assert len(set(batch_one)) == 4
+
+
+def test_batch_two_pers_themes_differ_from_batch_one():
+    batch_one = [pick_pers_theme(i, 1) for i in range(3)]
+    batch_two = [pick_pers_theme(i, 2) for i in range(3)]
+    assert batch_one != batch_two
+    assert len(set(batch_one)) == 3
+
+
+def test_theme_pools_large_enough_for_multiple_campaigns():
+    assert len(ORIG_THEME_POOL) >= 8
+    assert len(PERS_THEME_POOL) >= 6
