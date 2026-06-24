@@ -2591,11 +2591,20 @@ RULES:
             return None
         platform, content = extracted
         brain = MarketingBrain(self.db_pool)
+        import re as _re
+        _msg_lower = message.lower()
+        if _re.search(r"\bcompany page\b|\borg page\b|\borganization page\b", _msg_lower):
+            _post_as = "company"
+        elif _re.search(r"\bboth\b", _msg_lower):
+            _post_as = "both"
+        else:
+            _post_as = "person"
         brain_result = await brain.publish_content_inline(
             platform=platform,
             content_text=content,
             approved_by="big_nate",
             generated_by="approval_embedded_post",
+            post_as=_post_as,
         )
         print(f">>> [SKYEYE CHAT] Embedded approval post to {platform}: "
               f"{brain_result.get('post_url') or brain_result.get('error')}")
@@ -2934,6 +2943,7 @@ RULES:
                 content_type=result.get("content_type", "post"),
                 approved_by="direct_chat_command",
                 generated_by="direct_chat_command",
+                post_as="company" if re.search(r"\bcompany page\b|\borg page\b", message.lower()) else "person",
             )
             print(f">>> [SKYEYE CHAT] Direct post for {detected_platform}: {brain_result.get('summary', brain_result.get('error'))}")
 

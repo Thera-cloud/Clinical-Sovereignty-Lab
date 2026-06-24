@@ -1015,8 +1015,10 @@ class MarketingBrain:
         action_id: Optional[int] = None,
         generated_by: str = "marketing_brain",
         media_url: Optional[str] = None,
+        post_as: str = "person",
     ) -> Dict[str, Any]:
         """Queue content and publish immediately via the platform adapter."""
+        import json as _json
         from app.services.platforms import get_adapter
         from app.services.skyeye_content_generator import SkyEyeContentGenerator
         from app.services.skyeye_platform_base import ContentType
@@ -1026,6 +1028,7 @@ class MarketingBrain:
             platform=platform,
             content=content_text,
             content_type=content_type,
+            emotion_context=_json.dumps({"post_as": post_as}),
             generated_by=generated_by,
             media_url=media_url,
         )
@@ -1049,6 +1052,7 @@ class MarketingBrain:
             text=content_text,
             media_url=media_url,
             content_type=post_ct,
+            post_as=post_as,
         )
         if publish and publish.success:
             await gen.update_queue_status(
