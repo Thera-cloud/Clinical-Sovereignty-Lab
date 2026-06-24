@@ -9,10 +9,17 @@ from app.services.linkedin_campaign_executor import (
     ensure_signature,
     parse_cur_sources,
     parse_start_date,
-    pick_orig_theme,
-    pick_pers_theme,
+    pick_theme,
     slot_key,
 )
+
+
+def pick_orig_theme(slot_index: int, batch_number: int) -> str:
+    return pick_theme(ORIG_THEME_POOL, slot_index, batch_number, [])
+
+
+def pick_pers_theme(slot_index: int, batch_number: int) -> str:
+    return pick_theme(PERS_THEME_POOL, slot_index, batch_number, [])
 
 
 def test_fourteen_slots_50_30_20_mix():
