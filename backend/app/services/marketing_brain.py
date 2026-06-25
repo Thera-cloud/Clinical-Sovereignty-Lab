@@ -1083,6 +1083,101 @@ class MarketingBrain:
             "action_id": action_id,
         }
 
+    async def publish_queue_item(
+        self,
+        queue_id: int,
+        approved_by: str = "big_nate",
+        post_as: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Publish an existing approved queue row immediately (no duplicate queue insert)."""
+        import json as _json
+        from app.services.platforms import get_adapter
+        from app.services.skyeye_content_generator import SkyEyeContentGenerator
+        from app.services.skyeye_platform_base import ContentType
+
+        gen = SkyEyeContentGenerator(self.db_pool)
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, platform, content_text, content_type, status,
+                           emotion_context, media_url
+                    FROM skyeye_content_queue
+                    WHERE id = $1
+                    """,
+                    queue_id,
+                )
+        except Exception as e:
+            return {"error": str(e), "queue_id": queue_id, "posted": False}
+
+        if not row:
+            return {"error": f"Queue item #{queue_id} not found", "queue_id": queue_id, "posted": False}
+
+        platform = row["platform"] or "linkedin"
+        content_text = (row["content_text"] or "").strip()
+        if len(content_text) < 10:
+            return {
+                "error": "Queue item has no publishable content",
+                "queue_id": queue_id,
+                "posted": False,
+            }
+
+        meta = row["emotion_context"]
+        if isinstance(meta, str):
+            try:
+                meta = _json.loads(meta)
+            except Exception:
+                meta = {}
+        effective_post_as = post_as or (meta or {}).get("post_as", "person")
+        content_type = row["content_type"] or "post"
+
+        adapter = get_adapter(platform, self.db_pool)
+        if not adapter or not await adapter.authenticate():
+            await gen.update_queue_status(
+                queue_id, "failed", error_message="Platform adapter unavailable or not authenticated",
+            )
+            return {
+                "error": f"{platform} adapter unavailable or not authenticated",
+                "platform": platform,
+                "queue_id": queue_id,
+                "posted": False,
+            }
+
+        post_ct = ContentType.ARTICLE if content_type == "article" else ContentType.POST
+        publish = await adapter.post_content(
+            text=content_text,
+            media_url=row["media_url"],
+            content_type=post_ct,
+            post_as=effective_post_as,
+        )
+        if publish and publish.success:
+            await gen.update_queue_status(
+                queue_id,
+                "posted",
+                approved_by=approved_by,
+                post_id_external=publish.post_id,
+                post_url=publish.post_url,
+            )
+            return {
+                "summary": f"Published queue #{queue_id} to {platform}",
+                "platform": platform,
+                "queue_id": queue_id,
+                "posted": True,
+                "post_id": publish.post_id,
+                "post_url": publish.post_url,
+                "content_preview": content_text[:120],
+            }
+
+        err = (publish.error if publish else "adapter returned None")
+        await gen.update_queue_status(queue_id, "failed", error_message=err)
+        return {
+            "error": err,
+            "platform": platform,
+            "queue_id": queue_id,
+            "posted": False,
+            "content_preview": content_text[:120],
+        }
+
     # ── Campaign Designer ─────────────────────────────────────────────
 
     CAMPAIGN_DESIGN_PROMPT = """You are Little Nate's Campaign Architect.

@@ -190,11 +190,14 @@ def parse_campaign_config(message: str) -> CampaignConfig:
     m = re.search(r"(\d+)\s*[/\-]\s*(\d+)\s*[/\-]\s*(\d+)", msg)
     if m:
         a, b, c = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        total_pct = a + b + c
-        if total_pct > 0:
-            cfg.cur_pct = a / 100
-            cfg.orig_pct = b / 100
-            cfg.pers_pct = c / 100
+        total = a + b + c
+        if total == 100:
+            cfg.cur_pct, cfg.orig_pct, cfg.pers_pct = a / 100, b / 100, c / 100
+        elif total == 10:
+            # 5-3-2 parts notation → 50% CUR / 30% ORIG / 20% PERS
+            cfg.cur_pct, cfg.orig_pct, cfg.pers_pct = a / 10, b / 10, c / 10
+        elif total > 0 and total <= 20 and max(a, b, c) <= 9:
+            cfg.cur_pct, cfg.orig_pct, cfg.pers_pct = a / total, b / total, c / total
 
     # "all original" / "only orig"
     if re.search(r"all\s+orig|only\s+orig|just\s+orig|100%\s+orig", msg):

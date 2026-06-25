@@ -822,10 +822,14 @@ RULES:
             return ChatMode.INQUIRY
 
         # Command mode triggers
+        from app.services.skyeye_post_intent import has_publish_intent, phrase_in_message
         approval_phrases = ["approved", "go for it", "do it", "yes", "proceed",
-                            "looks good", "ship it", "launch it", "make it happen"]
-        rejection_phrases = ["reject", "no", "cancel", "don't do that", "nope", "hold", "wait"]
-        if any(phrase in msg for phrase in approval_phrases + rejection_phrases):
+                            "looks good", "ship it", "launch it", "make it happen",
+                            "post it", "send it", "execute it", "go ahead"]
+        rejection_phrases = ["reject", "cancel", "don't do that", "nope", "hold", "wait"]
+        if has_publish_intent(msg) or re.search(r"\bpost\s*#\s*\d+\b", msg):
+            return ChatMode.COMMAND
+        if any(phrase_in_message(p, msg) for p in approval_phrases + rejection_phrases + ("no",)):
             return ChatMode.COMMAND
 
         # Default
@@ -996,10 +1000,16 @@ RULES:
         archived_wisdom = await self._get_archived_wisdom_context()
         unified_insights = await self._get_unified_insight_context()
         posting_history = await self._get_posting_history_context()
+        campaign_recall = await self._get_linkedin_campaign_recall_context()
         activity_timeline = await self._get_activity_timeline_context()
         liminal_presence = await self._get_liminal_presence_context()
         recent_comments = await self._get_recent_comments_context()
-        conversation_text = conversation_text + marketing_context + mode_context + archived_wisdom + unified_insights + posting_history + activity_timeline + liminal_presence + recent_comments + url_reply_context + command_execution_context + web_search_context
+        conversation_text = (
+            conversation_text + marketing_context + mode_context + archived_wisdom
+            + unified_insights + posting_history + campaign_recall + activity_timeline
+            + liminal_presence + recent_comments + url_reply_context
+            + command_execution_context + web_search_context
+        )
 
         # QUANTUM-CRYSTAL-ARCH — Layer 9: sanitize admin input before LLM
         if self._queens_guard:
@@ -1977,23 +1987,49 @@ RULES:
         answer 'when did I post X?' and knows what he actually published."""
         try:
             async with self.db_pool.acquire() as conn:
-                rows = await conn.fetch("""
+                posted_rows = await conn.fetch("""
                     SELECT id, platform, content_type, LEFT(content_text, 120) as preview,
-                           posted_at, post_url, status, created_at
+                           posted_at, post_url, status, scheduled_for, emotion_context
                     FROM skyeye_content_queue
-                    WHERE status IN ('posted', 'approved', 'scheduled')
-                    ORDER BY COALESCE(posted_at, created_at) DESC LIMIT 15
+                    WHERE status IN ('posted', 'scheduled')
+                    ORDER BY COALESCE(posted_at, scheduled_for, created_at) DESC
+                    LIMIT 15
                 """)
-            if not rows:
+                approved_rows = await conn.fetch("""
+                    SELECT id, platform, content_type, LEFT(content_text, 120) as preview,
+                           scheduled_for, emotion_context, status
+                    FROM skyeye_content_queue
+                    WHERE platform = 'linkedin'
+                      AND status = 'approved'
+                    ORDER BY scheduled_for ASC NULLS LAST, id ASC
+                    LIMIT 20
+                """)
+            sections = ["\n\n═══ MY POSTING HISTORY (verified records) ═══"]
+
+            if approved_rows:
+                sections.append(
+                    "APPROVED LINKEDIN QUEUE (use these list numbers for 'post #N now'):"
+                )
+                for idx, r in enumerate(approved_rows, start=1):
+                    preview = (r["preview"] or "").replace("\n", " ").strip()
+                    sched = (
+                        r["scheduled_for"].strftime("%Y-%m-%d %H:%M UTC")
+                        if r["scheduled_for"] else "unscheduled"
+                    )
+                    sections.append(
+                        f"  #{idx} [queue_id={r['id']}] {r['platform']} | scheduled {sched}"
+                        f"\n    \"{preview}...\""
+                    )
+
+            if not posted_rows and not approved_rows:
                 return "\n\n[MY POSTING HISTORY] No posts found in the queue.\n"
 
-            sections = ["\n\n═══ MY POSTING HISTORY (verified records) ═══"]
-            for r in rows:
+            for r in posted_rows:
                 ts = r["posted_at"].strftime("%Y-%m-%d %H:%M UTC") if r["posted_at"] else "not yet posted"
                 preview = (r["preview"] or "").replace("\n", " ").strip()
                 url = r["post_url"] or ""
                 sections.append(
-                    f"  [{r['status'].upper()}] {r['platform']} | {r['content_type']} | {ts}"
+                    f"  [{r['status'].upper()}] queue_id={r['id']} | {r['platform']} | {r['content_type']} | {ts}"
                     f"\n    \"{preview}...\""
                     + (f"\n    URL: {url}" if url else "")
                 )
@@ -2001,6 +2037,57 @@ RULES:
             return "\n".join(sections)
         except Exception as e:
             print(f">>> [SKYEYE CHAT] Posting history unavailable: {e}")
+            return ""
+
+    async def _get_linkedin_campaign_recall_context(self) -> str:
+        """Active campaign settings + recent Big Nate campaign instructions for continuity."""
+        try:
+            sections = ["\n\n═══ LINKEDIN CAMPAIGN STATE (verified) ═══"]
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT value, updated_at FROM skyeye_settings
+                    WHERE key = 'linkedin_campaign_active' AND platform IS NULL
+                    """
+                )
+                if row and row["value"]:
+                    val = row["value"]
+                    if isinstance(val, str):
+                        val = json.loads(val)
+                    sections.append(f"Active campaign settings: {json.dumps(val)}")
+                    sections.append(f"Settings updated: {row['updated_at']}")
+
+                chat_rows = await conn.fetch(
+                    """
+                    SELECT sender, LEFT(message, 300) AS excerpt, created_at
+                    FROM skyeye_chat
+                    WHERE (
+                        LOWER(message) LIKE '%linkedin%'
+                        AND (
+                            LOWER(message) LIKE '%campaign%'
+                            OR LOWER(message) LIKE '%3pm%'
+                            OR LOWER(message) LIKE '%8pm%'
+                            OR LOWER(message) LIKE '%5-3-2%'
+                            OR LOWER(message) LIKE '%50/30/20%'
+                            OR LOWER(message) LIKE '%personal%'
+                        )
+                    )
+                    ORDER BY created_at DESC
+                    LIMIT 6
+                    """
+                )
+            if chat_rows:
+                sections.append(
+                    "Recent Big Nate / Little Nate campaign conversation (PAST DISCUSSION — "
+                    "not proof of posting unless in POSTING HISTORY):"
+                )
+                for r in reversed(chat_rows):
+                    ts = r["created_at"].strftime("%Y-%m-%d %H:%M UTC")
+                    sections.append(f"  [{r['sender']}] {ts}: {r['excerpt']}...")
+            sections.append("═══ END LINKEDIN CAMPAIGN STATE ═══\n")
+            return "\n".join(sections)
+        except Exception as e:
+            print(f">>> [SKYEYE CHAT] LinkedIn campaign recall unavailable: {e}")
             return ""
 
     async def _get_activity_timeline_context(self) -> str:
@@ -2513,14 +2600,37 @@ RULES:
 
     async def _handle_command_protocol(self, message: str) -> Optional[Dict[str, Any]]:
         """Execute approval/rejection/direct-post commands; return verification payload."""
+        from app.services.skyeye_post_intent import (
+            execute_post_intent,
+            phrase_in_message,
+            resolve_post_intent,
+        )
+
         msg_lower = message.lower().strip()
         approval_phrases = ["approved", "go for it", "do it", "yes", "proceed",
                             "looks good", "ship it", "launch it", "make it happen",
                             "post it", "send it", "execute it", "go ahead"]
-        rejection_phrases = ["reject", "no", "cancel", "don't do that", "nope"]
+        rejection_phrases = ["reject", "cancel", "don't do that", "nope", "hold", "wait"]
+
+        def _matches_any(phrases: tuple) -> bool:
+            for phrase in phrases:
+                if phrase_in_message(phrase, msg_lower):
+                    return True
+            return False
 
         try:
-            if any(phrase in msg_lower for phrase in approval_phrases):
+            history = await self.get_chat_history(limit=12)
+            intent = resolve_post_intent(message, history)
+            if intent.action in ("publish_inline", "publish_queue"):
+                post_result = await execute_post_intent(self, intent, message)
+                if post_result:
+                    return post_result
+            elif intent.action == "queue_campaign":
+                campaign_queued = await self._detect_campaign_queue_approval(message)
+                if campaign_queued:
+                    return campaign_queued
+
+            if _matches_any(approval_phrases):
                 reply_result = await self._execute_pending_reply_if_ready(msg_lower)
                 if reply_result:
                     return {
@@ -2570,12 +2680,12 @@ RULES:
                     )
                 return None
 
-            if any(phrase in msg_lower for phrase in approval_phrases):
+            if _matches_any(approval_phrases):
                 brain_result = await brain.approve_action(target["id"])
                 print(f">>> [SKYEYE CHAT] Approved + executed action #{target['id']}: {target.get('title', '')}")
                 return await self._finalize_command_verification(target, brain_result)
 
-            if any(phrase in msg_lower for phrase in rejection_phrases):
+            if _matches_any(rejection_phrases) or phrase_in_message("no", msg_lower):
                 await brain.reject_action(target["id"], reason=message)
                 print(f">>> [SKYEYE CHAT] Rejected action #{target['id']}: {target.get('title', '')}")
                 return await self._finalize_command_verification(
@@ -2837,7 +2947,7 @@ RULES:
                 "data": brain_result,
             }
         elif brain_result.get("rejected"):
-            exec_result = {"success": True, "type": "proposal_rejected", "data": brain_result}
+            exec_result = {"success": False, "type": "proposal_rejected", "data": brain_result}
         elif "queued" in brain_result and "queue_ids" in brain_result:
             exec_result = {
                 "success": True,
@@ -3224,6 +3334,15 @@ RULES:
         desc = action.get("description", action_type)
         from datetime import datetime, timezone
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        if result.get("type") == "proposal_rejected":
+            data = result.get("data", {})
+            summary = data.get("summary", "Proposal rejected.")
+            return (
+                f"{summary}\n"
+                f"Timestamp: {ts}\n"
+                f"No action was taken."
+            )
 
         if not result.get("success"):
             error = result.get("error", "unknown error")
