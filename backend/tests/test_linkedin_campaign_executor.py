@@ -7,6 +7,7 @@ from app.services.linkedin_campaign_executor import (
     PERS_THEME_POOL,
     build_slot_schedule,
     ensure_signature,
+    parse_campaign_config,
     parse_cur_sources,
     parse_start_date,
     pick_theme,
@@ -82,3 +83,22 @@ def test_batch_two_pers_themes_differ_from_batch_one():
 def test_theme_pools_large_enough_for_multiple_campaigns():
     assert len(ORIG_THEME_POOL) >= 8
     assert len(PERS_THEME_POOL) >= 6
+
+
+def test_parse_personal_not_company_destination():
+    cfg = parse_campaign_config(
+        "Restart the LinkedIn campaign on my personal page, not the company page, "
+        "2 posts a day at 3pm and 8pm."
+    )
+
+    assert cfg.post_as == "person"
+    assert cfg.posts_per_day == 2
+    assert cfg.post_times == [15, 20]
+
+
+def test_parse_both_destinations_when_explicit():
+    cfg = parse_campaign_config(
+        "Queue this LinkedIn campaign to both my personal profile and the company page."
+    )
+
+    assert cfg.post_as == "both"

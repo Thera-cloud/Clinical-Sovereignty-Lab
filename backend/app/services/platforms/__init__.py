@@ -23,6 +23,7 @@ _ADAPTER_MAP = {
     "youtube":              "app.services.platforms.youtube.YouTubeAdapter",
     "reddit":               "app.services.platforms.reddit.RedditAdapter",
     "linkedin":             "app.services.platforms.linkedin.LinkedInAdapter",
+    "linkedin_company":     "app.services.platforms.linkedin.LinkedInCompanyAdapter",
     "linkedin_community":   "app.services.platforms.linkedin.LinkedInCommunityAdapter",
     "facebook":             "app.services.platforms.facebook.FacebookAdapter",
     "pinterest":            "app.services.platforms.pinterest.PinterestAdapter",

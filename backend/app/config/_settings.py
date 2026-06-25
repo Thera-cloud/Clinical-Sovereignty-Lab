@@ -253,9 +253,12 @@ class Settings(BaseSettings):
     REDDIT_USERNAME: str = ""
     REDDIT_PASSWORD: str = ""
 
-    # LinkedIn — Share on LinkedIn (posting)
+    # LinkedIn — personal profile posting (Share on LinkedIn)
     LINKEDIN_CLIENT_ID: str = ""
     LINKEDIN_CLIENT_SECRET: str = ""
+    # LinkedIn — company page posting (Marketing Developer Platform / w_organization_social)
+    LINKEDIN_COMPANY_CLIENT_ID: str = ""
+    LINKEDIN_COMPANY_CLIENT_SECRET: str = ""
     # LinkedIn — Community Management API (comments/reactions)
     LINKEDIN_COMMUNITY_CLIENT_ID: str = ""
     LINKEDIN_COMMUNITY_CLIENT_SECRET: str = ""

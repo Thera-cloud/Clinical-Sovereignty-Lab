@@ -33,8 +33,23 @@ oauth_router = APIRouter(prefix="/api/skyeye", tags=["skyeye-oauth"])
 
 _STATIC_OAUTH_STATES = frozenset({
     "skyeye_youtube", "skyeye_tiktok", "skyeye_reddit", "skyeye_pinterest",
-    "skyeye_linkedin", "skyeye_linkedin_community", "skyeye_instagram", "skyeye_facebook",
+    "skyeye_linkedin", "skyeye_linkedin_company", "skyeye_linkedin_community",
+    "skyeye_instagram", "skyeye_facebook",
 })
+
+# LinkedIn uses three OAuth apps — show separately in SkyEye platform status
+_LINKEDIN_OAUTH_EXTRAS = {
+    "linkedin_company": (
+        "LINKEDIN_COMPANY_CLIENT_ID",
+        "LINKEDIN_COMPANY_CLIENT_SECRET",
+        "LinkedIn Company Page",
+    ),
+    "linkedin_community": (
+        "LINKEDIN_COMMUNITY_CLIENT_ID",
+        "LINKEDIN_COMMUNITY_CLIENT_SECRET",
+        "LinkedIn Community (comments)",
+    ),
+}
 
 
 async def _store_oauth_state_from_url(request: Request, platform: str, oauth_url: str) -> str:
@@ -1302,10 +1317,52 @@ async def get_platform_status(request: Request):
         elif tok.get("status") == "connected":
             _health = "healthy"
 
+        display_name = p["display_name"]
+        if name == "linkedin":
+            display_name = "LinkedIn Personal Profile"
+
         result.append({
             "platform": name,
-            "display_name": p["display_name"],
+            "display_name": display_name,
             "enabled": p["enabled"],
+            "connection_status": tok.get("status", "disconnected"),
+            "has_credentials": has_credentials,
+            "account_name": tok.get("account_name"),
+            "last_used": tok.get("last_used"),
+            "token_expiry": _tok_exp.isoformat() if isinstance(_tok_exp, datetime) else _tok_exp,
+            "days_until_expiry": _days_left,
+            "health": _health,
+            "error": tok.get("error_message"),
+        })
+
+    for extra_key, (id_field, sec_field, label) in _LINKEDIN_OAUTH_EXTRAS.items():
+        tok = token_map.get(extra_key, {})
+        has_credentials = bool(getattr(settings, id_field, "")) and bool(
+            getattr(settings, sec_field, "")
+        )
+        _tok_exp = tok.get("token_expiry")
+        _days_left = None
+        _health = "unknown"
+        if _tok_exp:
+            try:
+                _exp_dt = _tok_exp if isinstance(_tok_exp, datetime) else datetime.fromisoformat(str(_tok_exp).replace("Z", "+00:00"))
+                _now = datetime.now(_exp_dt.tzinfo) if _exp_dt.tzinfo else datetime.now()
+                _delta = _exp_dt - _now
+                _days_left = _delta.days
+                if _delta.total_seconds() <= 0:
+                    _health = "expired"
+                elif _days_left > 7:
+                    _health = "healthy"
+                else:
+                    _health = "warning"
+            except Exception:
+                pass
+        elif tok.get("status") == "connected":
+            _health = "healthy"
+        result.append({
+            "platform": extra_key,
+            "display_name": label,
+            "enabled": True,
             "connection_status": tok.get("status", "disconnected"),
             "has_credentials": has_credentials,
             "account_name": tok.get("account_name"),
@@ -1342,6 +1399,8 @@ async def initiate_platform_connect(platform: str, request: Request):
         "youtube":   "https://console.cloud.google.com/apis/credentials",
         "reddit":    "https://www.reddit.com/prefs/apps",
         "linkedin":  "https://www.linkedin.com/developers/apps",
+        "linkedin_company": "https://www.linkedin.com/developers/apps",
+        "linkedin_community": "https://www.linkedin.com/developers/apps",
         "pinterest": "https://developers.pinterest.com/manage/",
         "x":         "https://developer.x.com/en/portal/projects-and-apps",
     }
@@ -1354,6 +1413,8 @@ async def initiate_platform_connect(platform: str, request: Request):
         "youtube":   ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET"),
         "reddit":    ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"),
         "linkedin":  ("LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET"),
+        "linkedin_company": ("LINKEDIN_COMPANY_CLIENT_ID", "LINKEDIN_COMPANY_CLIENT_SECRET"),
+        "linkedin_community": ("LINKEDIN_COMMUNITY_CLIENT_ID", "LINKEDIN_COMMUNITY_CLIENT_SECRET"),
         "pinterest": ("PINTEREST_APP_ID", "PINTEREST_APP_SECRET"),
         "x":         ("X_CLIENT_ID", "X_CLIENT_SECRET"),
     }

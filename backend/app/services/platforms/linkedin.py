@@ -71,7 +71,9 @@ class LinkedInAdapter(SocialPlatformAdapter):
         self.client_secret = getattr(settings, "LINKEDIN_CLIENT_SECRET", "")
         self._access_token: Optional[str] = None
         self._person_urn: Optional[str] = None   # urn:li:person:XXXX
-        self._org_urn: Optional[str] = None       # urn:li:organization:XXXX
+        self._org_urn: Optional[str] = None       # legacy; prefer _company_org_urn
+        self._company_access_token: Optional[str] = None
+        self._company_org_urn: Optional[str] = None
         self._community_token: Optional[str] = None
 
     @property
@@ -148,19 +150,16 @@ class LinkedInAdapter(SocialPlatformAdapter):
                     self._connected = True
                     await self._update_token_status("connected")
 
-                    # Load community token if available (separate app for comments)
+                    # Load community + company tokens (separate OAuth apps)
                     await self._load_community_token()
+                    await self._load_company_token()
 
-                    # Load persisted org_urn; resolve fresh if absent (non-blocking)
+                    # Personal row may still carry org_urn for analytics fallback
                     try:
                         tokens_fresh = await self._load_tokens() or {}
                         self._org_urn = tokens_fresh.get("org_urn") or None
-                        if not self._org_urn:
-                            org_urn = await self._resolve_org_urn()
-                            if org_urn:
-                                await self._save_org_urn(org_urn)
                     except Exception as org_err:
-                        logger.debug(f"LinkedIn: Org URN resolution deferred: {org_err}")
+                        logger.debug(f"LinkedIn: Org URN load deferred: {org_err}")
 
                     return True
                 elif resp.status_code == 401:
@@ -218,6 +217,26 @@ class LinkedInAdapter(SocialPlatformAdapter):
             logger.error(f"LinkedIn: Token refresh exception: {e}")
             self._connected = False
             return False
+
+    async def _load_company_token(self) -> None:
+        """Load company-page OAuth token from platform='linkedin_company'."""
+        if not self.db_pool:
+            return
+        try:
+            from app.services.skyeye_platform_base import TokenCipher
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT access_token, org_urn FROM skyeye_platform_tokens "
+                    "WHERE platform = 'linkedin_company' "
+                    "AND access_token IS NOT NULL AND access_token != ''",
+                )
+            if row and row["access_token"]:
+                cipher = TokenCipher.get()
+                self._company_access_token = cipher.decrypt(row["access_token"])
+                self._company_org_urn = row.get("org_urn")
+                logger.info("LinkedIn: Company page token loaded")
+        except Exception as e:
+            logger.debug("LinkedIn: No company page token available: %s", e)
 
     async def _load_community_token(self):
         """Load the Community Management API token from skyeye_platform_tokens.
@@ -314,9 +333,7 @@ class LinkedInAdapter(SocialPlatformAdapter):
             "response_type": "code",
             "client_id": self.client_id,
             "redirect_uri": redirect_uri,
-            # w_organization_social requires Marketing Developer Platform on the LinkedIn app.
-            # Re-authorize via SkyEye → Platforms → LinkedIn after enabling that product.
-            "scope": "openid profile email w_member_social w_organization_social",
+            "scope": "openid profile email w_member_social",
             "state": "skyeye_linkedin",
         }
         return f"{LINKEDIN_AUTH_URL}?{urllib.parse.urlencode(params)}"
@@ -360,14 +377,6 @@ class LinkedInAdapter(SocialPlatformAdapter):
                 )
                 self._person_urn = f"urn:li:person:{person_id}"
                 self._connected = True
-
-                # Resolve org URN now that we have fresh tokens; persist it
-                try:
-                    org_urn = await self._resolve_org_urn()
-                    if org_urn:
-                        await self._save_org_urn(org_urn)
-                except Exception:
-                    pass
 
                 logger.info(f"LinkedIn: OAuth complete for {person_name}, "
                             f"token expires {expiry.isoformat()}")
@@ -475,7 +484,7 @@ class LinkedInAdapter(SocialPlatformAdapter):
             return PostResult(success=False, error="No LinkedIn person URN",
                               platform="linkedin", action=ActionResult.FAILED)
 
-        async def _publish_as(author_urn: str) -> PostResult:
+        async def _publish_as(author_urn: str, token: str) -> PostResult:
             """Inner helper — publish one post for the given author URN."""
             post_body: Dict[str, Any] = {
                 "author": author_urn,
@@ -500,7 +509,7 @@ class LinkedInAdapter(SocialPlatformAdapter):
                 resp = await client.post(
                     f"{LINKEDIN_REST_BASE}/posts",
                     json=post_body,
-                    headers=_linkedin_headers(self._access_token, content_type=True),
+                    headers=_linkedin_headers(token, content_type=True),
                 )
                 if resp.status_code in (200, 201):
                     post_urn = resp.headers.get(
@@ -537,37 +546,39 @@ class LinkedInAdapter(SocialPlatformAdapter):
                     )
 
         try:
-            # ── Determine which author URNs to post as ─────────────────
-            authors: List[str] = []
+            publish_targets: List[tuple] = []
             if post_as in ("person", "both"):
-                authors.append(self._person_urn)
+                if self._person_urn and self._access_token:
+                    publish_targets.append((self._person_urn, self._access_token))
             if post_as in ("company", "both"):
-                if not self._org_urn:
-                    # Attempt lazy resolution
-                    try:
-                        org_urn = await self._resolve_org_urn()
-                        if org_urn:
-                            await self._save_org_urn(org_urn)
-                    except Exception:
-                        pass
-                if self._org_urn:
-                    authors.append(self._org_urn)
-                else:
-                    logger.warning(
-                        "LinkedIn: post_as='%s' requested but no org_urn available; "
-                        "falling back to personal profile. Re-authorize via SkyEye → "
-                        "Platforms → LinkedIn to grant w_organization_social.", post_as
+                company_urn = self._company_org_urn or self._org_urn
+                company_token = self._company_access_token
+                if company_urn and company_token:
+                    publish_targets.append((company_urn, company_token))
+                elif post_as == "company":
+                    return PostResult(
+                        success=False,
+                        error=(
+                            "Company LinkedIn OAuth not connected. "
+                            "Authorize SkyEye → LinkedIn Company Page (Engine4)."
+                        ),
+                        platform="linkedin",
+                        action=ActionResult.FAILED,
                     )
-                    if not authors:          # company-only with no org → post as person
-                        authors.append(self._person_urn)
+                elif post_as == "both" and not company_token:
+                    logger.warning(
+                        "LinkedIn: post_as=both but company token missing; posting personal only"
+                    )
 
-            if not authors:
-                authors.append(self._person_urn)
+            if not publish_targets:
+                return PostResult(
+                    success=False, error="No author URNs resolved",
+                    platform="linkedin", action=ActionResult.FAILED,
+                )
 
-            # ── Publish to each author; collect results ─────────────────
             first_result: Optional[PostResult] = None
-            for urn in authors:
-                result = await _publish_as(urn)
+            for urn, token in publish_targets:
+                result = await _publish_as(urn, token)
                 if first_result is None:
                     first_result = result
 
@@ -1124,6 +1135,51 @@ class LinkedInAdapter(SocialPlatformAdapter):
             logger.debug(f"LinkedIn: Person analytics fallback error: {e}")
 
         return analytics
+
+
+class LinkedInCompanyAdapter(LinkedInAdapter):
+    """LinkedIn adapter for company-page posting (Marketing Developer Platform).
+
+    Uses LINKEDIN_COMPANY_CLIENT_ID/SECRET (Engine4) and stores its token
+    under platform='linkedin_company'. Personal posting uses platform='linkedin'.
+    """
+
+    def __init__(self, db_pool, rate_limit_seconds: float = 20.0):
+        SocialPlatformAdapter.__init__(self, "linkedin_company", db_pool, rate_limit_seconds)
+        self.client_id = getattr(settings, "LINKEDIN_COMPANY_CLIENT_ID", "")
+        self.client_secret = getattr(settings, "LINKEDIN_COMPANY_CLIENT_SECRET", "")
+        self._access_token: Optional[str] = None
+        self._person_urn: Optional[str] = None
+        self._org_urn: Optional[str] = None
+        self._company_access_token: Optional[str] = None
+        self._company_org_urn: Optional[str] = None
+        self._community_token: Optional[str] = None
+
+    @property
+    def _has_credentials(self) -> bool:
+        return bool(self.client_id and self.client_secret)
+
+    async def get_oauth_url(self, redirect_uri: str) -> str:
+        import urllib.parse
+        params = {
+            "response_type": "code",
+            "client_id": self.client_id,
+            "redirect_uri": redirect_uri,
+            "scope": "openid profile email w_organization_social",
+            "state": "skyeye_linkedin_company",
+        }
+        return f"{LINKEDIN_AUTH_URL}?{urllib.parse.urlencode(params)}"
+
+    async def handle_oauth_callback(self, code: str, redirect_uri: str, **kwargs) -> bool:
+        ok = await LinkedInAdapter.handle_oauth_callback(self, code, redirect_uri)
+        if ok:
+            try:
+                org_urn = await self._resolve_org_urn()
+                if org_urn:
+                    await self._save_org_urn(org_urn)
+            except Exception as e:
+                logger.warning("LinkedIn company OAuth: org URN resolution failed: %s", e)
+        return ok
 
 
 class LinkedInCommunityAdapter(LinkedInAdapter):

@@ -362,6 +362,9 @@ YOUR ACCURACY RULES:
 - If Big Nate approves a post and no [SYSTEM EXECUTION] block is present yet, say: "Executing your approval now — you'll receive a verified confirmation with timestamp and URL." Do NOT claim the post is already live.
 - ARCHIVED WISDOM is conversation history, NOT action history. Never say "I released" or "I posted" based on archived wisdom alone. Only [MY POSTING HISTORY] and [MY RECENT ACTIVITY] confirm actual actions.
 - TRUST YOUR PLATFORM CAPABILITIES section below. If a capability is listed there, you HAVE it — it is wired and deployed. You do not need prior usage evidence to confirm it exists. The absence of a past record means you haven't used it yet, not that you can't.
+- LISTEN-FIRST COMMAND CAPTURE: Before executing, identify the requested action, platform, destination, timing/cadence, approval state, and success criteria. If any required field is unclear or conflicting, ask ONE direct clarifying question and do not execute.
+- NEGATION MATTERS: "not the company page", "personal only", "not company", and "my personal LinkedIn" mean personal profile. Do not route those to the company page just because the phrase "company page" appears.
+- NO FALSE POSITIVES: If an execution result is missing, failed, or only queued, do not say it posted, finished, restarted, or is live. Say exactly what is verified and what still needs approval, OAuth, scheduling, or retry.
 
 YOUR RESPONSE FORMATTING (Big Nate Chat UI):
 - The chat panel does NOT render markdown pipe tables. NEVER use | Day | Time | Lane | format.
@@ -413,6 +416,9 @@ MODE 2 — COMMAND EXECUTION:
 - When Big Nate says "hold"/"wait": Defer but keep proposal active.
 - When Big Nate says "modify" + changes: Revise and re-present.
 - When Big Nate says "reject"/"no": Cancel with dignity, log the decision.
+- For LinkedIn campaign/restart requests, capture: personal vs company vs both, days, posts/day, Eastern post times, content mix, whether CUR slots need sources, and whether the request is approval to queue/publish.
+- If Big Nate says only "proceed" after a LinkedIn campaign plan, treat it as approval for that recent campaign context. If the recent context is not identifiable, ask which plan to execute instead of guessing.
+- If execution fails, return the verified failure reason as the answer. Never replace it with encouraging completion language.
 
 MODE 3 — BRIEFING:
 - Triggered by: "briefing", "brief me", "what's the situation", "status report"
@@ -899,6 +905,20 @@ RULES:
             if cmd_result:
                 command_execution_context = self._format_system_execution_block(cmd_result)
                 verification_message = cmd_result.get("verification_message")
+                if cmd_result.get("command_response_only"):
+                    return {
+                        "id": cmd_result.get("verification_id"),
+                        "sender": "little_nate",
+                        "message": verification_message or "Command handled.",
+                        "mode": detected_mode,
+                        "created_at": (
+                            cmd_result.get("created_at") or datetime.utcnow().isoformat()
+                        ),
+                        "follow_up_suggestions": self._get_follow_ups(detected_mode),
+                        "pending_actions": [],
+                        "executed_results": [cmd_result] if cmd_result.get("success") else [],
+                        "verification_message": verification_message,
+                    }
 
         # Web search injection (DuckDuckGo via SecureSearchProxy).
         # Mirrors bridge_server.py:8156 pattern. Triggers on explicit search verbs,
@@ -2510,10 +2530,6 @@ RULES:
                         },
                     }
 
-            direct_post = await self._detect_direct_post(message)
-            if direct_post:
-                return direct_post
-
             embedded_post = await self._detect_approval_embedded_post(message)
             if embedded_post:
                 return embedded_post
@@ -2521,6 +2537,10 @@ RULES:
             campaign_queued = await self._detect_campaign_queue_approval(message)
             if campaign_queued:
                 return campaign_queued
+
+            direct_post = await self._detect_direct_post(message)
+            if direct_post:
+                return direct_post
 
             cur_updated = await self._detect_cur_slot_fill(message)
             if cur_updated:
@@ -2580,6 +2600,90 @@ RULES:
             )
         ) or (("approved" in msg_lower or "approve" in msg_lower) and "post" in msg_lower)
 
+    @staticmethod
+    def _linkedin_post_as_from_message(message: str) -> str:
+        """Resolve LinkedIn destination with negation awareness."""
+        msg = (message or "").lower()
+        negated_company = re.search(
+            r"\b(?:not|no|without|avoid|skip)\s+(?:the\s+)?(?:company|org|organization)\s+page\b"
+            r"|\b(?:not|no|without|avoid|skip)\s+(?:company|org|organization)\b"
+            r"|\bpersonal(?:\s+\w+){0,5}\s+not\s+(?:the\s+)?(?:company|org|organization)\b",
+            msg,
+        )
+        personal = re.search(
+            r"\bpersonal(?:\s+linkedin|\s+profile|\s+page)?\b"
+            r"|\bmy\s+(?:linkedin\s+)?profile\b"
+            r"|\bprofile\s+only\b"
+            r"|\bpersonal\s+only\b",
+            msg,
+        )
+        company = re.search(r"\bcompany page\b|\borganization page\b|\borg page\b", msg)
+        both = re.search(r"\bboth\b|\bpersonal\b.*\bcompany page\b|\bcompany page\b.*\bpersonal\b", msg)
+
+        if negated_company or re.search(r"\bpersonal\s+only\b|\bprofile\s+only\b", msg):
+            return "person"
+        if both and personal and company:
+            return "both"
+        if company and not personal:
+            return "company"
+        return "person"
+
+    @staticmethod
+    def _linkedin_destination_needs_clarification(message: str) -> bool:
+        msg = (message or "").lower()
+        if "linkedin" not in msg:
+            return False
+        has_destination = re.search(
+            r"\bpersonal\b|\bmy\s+(?:linkedin\s+)?profile\b|\bcompany page\b|"
+            r"\borg page\b|\borganization page\b|\bboth\b",
+            msg,
+        )
+        return bool(re.search(r"\blinkedin\s+page\b", msg)) and not has_destination
+
+    @staticmethod
+    def _looks_like_linkedin_campaign_request(msg_lower: str) -> bool:
+        if "linkedin" not in msg_lower:
+            return False
+        return any(
+            s in msg_lower
+            for s in (
+                "campaign", "restart", "resume", "unpause", "daily", "per day",
+                "posts a day", "posts per day", "twice a day", "2x", "3pm", "3:00 pm",
+                "8pm", "8:00 pm", "50/30/20", "50-30-20", "curated",
+            )
+        )
+
+    async def _finalize_command_clarification(
+        self, action: Dict[str, Any], question: str,
+    ) -> Dict[str, Any]:
+        row = None
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """INSERT INTO skyeye_chat (sender, message, metadata)
+                       VALUES ('little_nate', $1, $2)
+                       RETURNING id, created_at""",
+                    question,
+                    json.dumps({
+                        "action": action,
+                        "needs_clarification": True,
+                        "is_verification": True,
+                    }),
+                )
+        except Exception as e:
+            print(f">>> [SKYEYE CHAT] Clarification insert failed: {e}")
+
+        return {
+            "success": False,
+            "needs_clarification": True,
+            "brain_result": {"clarification": question},
+            "verification_message": question,
+            "action_id": action.get("id"),
+            "verification_id": row["id"] if row else None,
+            "created_at": row["created_at"].isoformat() if row else None,
+            "command_response_only": True,
+        }
+
     async def _detect_approval_embedded_post(self, message: str) -> Optional[Dict[str, Any]]:
         """Publish when Big Nate pastes the full post in the approval message."""
         from app.services.marketing_brain import (
@@ -2591,14 +2695,12 @@ RULES:
             return None
         platform, content = extracted
         brain = MarketingBrain(self.db_pool)
-        import re as _re
-        _msg_lower = message.lower()
-        if _re.search(r"\bcompany page\b|\borg page\b|\borganization page\b", _msg_lower):
-            _post_as = "company"
-        elif _re.search(r"\bboth\b", _msg_lower):
-            _post_as = "both"
-        else:
-            _post_as = "person"
+        if platform == "linkedin" and self._linkedin_destination_needs_clarification(message):
+            return await self._finalize_command_clarification(
+                {"action_type": "post_linkedin", "title": "Embedded approval post", "id": None},
+                "I can post this to LinkedIn, but I need one detail before executing: personal profile, company page, or both?",
+            )
+        _post_as = self._linkedin_post_as_from_message(message) if platform == "linkedin" else "person"
         brain_result = await brain.publish_content_inline(
             platform=platform,
             content_text=content,
@@ -2678,6 +2780,12 @@ RULES:
             }
         elif brain_result.get("rejected"):
             exec_result = {"success": True, "type": "proposal_rejected", "data": brain_result}
+        elif "queued" in brain_result and "queue_ids" in brain_result:
+            exec_result = {
+                "success": True,
+                "type": "campaign_queued",
+                "data": brain_result,
+            }
         else:
             exec_result = {
                 "success": not brain_result.get("error"),
@@ -2686,11 +2794,13 @@ RULES:
             }
 
         verification = self._build_verification_message(action_card, exec_result)
+        row = None
         try:
             async with self.db_pool.acquire() as conn:
-                await conn.execute(
+                row = await conn.fetchrow(
                     """INSERT INTO skyeye_chat (sender, message, metadata)
-                       VALUES ('little_nate', $1, $2)""",
+                       VALUES ('little_nate', $1, $2)
+                       RETURNING id, created_at""",
                     verification,
                     json.dumps({
                         "action": action_card,
@@ -2706,6 +2816,9 @@ RULES:
             "brain_result": brain_result,
             "verification_message": verification,
             "action_id": action.get("id"),
+            "verification_id": row["id"] if row else None,
+            "created_at": row["created_at"].isoformat() if row else None,
+            "command_response_only": True,
         }
 
     @staticmethod
@@ -2823,13 +2936,36 @@ RULES:
             "proceed with campaign",
             "approved to proceed",
         )
-        if not any(p in msg_lower for p in phrases):
+        should_queue = any(p in msg_lower for p in phrases) or self._looks_like_linkedin_campaign_request(msg_lower)
+        queue_message = message
+
+        if not should_queue and msg_lower in {"proceed", "yes", "approved", "do it", "go ahead", "execute it"}:
+            try:
+                history = await self.get_chat_history(limit=8)
+                recent = [
+                    str(m.get("message", ""))
+                    for m in history
+                    if str(m.get("sender", "")).lower() in {"big_nate", "user", "admin"}
+                ]
+                recent_blob = "\n".join(recent[-4:])
+                if self._looks_like_linkedin_campaign_request(recent_blob.lower()):
+                    should_queue = True
+                    queue_message = f"{recent_blob}\n\nApproval: {message}"
+            except Exception as e:
+                logger.warning("Campaign approval context lookup failed: %s", e)
+
+        if not should_queue:
             return None
+        if self._linkedin_destination_needs_clarification(queue_message):
+            return await self._finalize_command_clarification(
+                {"action_type": "post_linkedin", "title": "LinkedIn campaign batch", "id": None},
+                "I can queue the LinkedIn campaign, but I need one detail before executing: personal profile, company page, or both?",
+            )
         try:
             from app.services.linkedin_campaign_executor import LinkedInCampaignExecutor
             executor = LinkedInCampaignExecutor(self.db_pool, search_proxy=self._search_proxy)
             auto = "until i tell" in msg_lower or "continue until" in msg_lower or "keep following" in msg_lower
-            result = await executor.queue_approved_batch(message, auto_continue=auto)
+            result = await executor.queue_approved_batch(queue_message, auto_continue=auto)
             brain_result = {
                 "summary": result.summary,
                 "queued": result.queued,
@@ -2903,6 +3039,8 @@ RULES:
     async def _detect_direct_post(self, message: str) -> Optional[Dict[str, Any]]:
         """Detect 'post this to LinkedIn' style direct commands and publish inline."""
         msg_lower = message.lower()
+        if self._looks_like_linkedin_campaign_request(msg_lower):
+            return None
         platform_map = {
             "linkedin": "linkedin", "reddit": "reddit", "tiktok": "tiktok",
             "instagram": "instagram", "facebook": "facebook", "pinterest": "pinterest",
@@ -2937,13 +3075,19 @@ RULES:
             if not result.get("safe"):
                 return None
 
+            if detected_platform == "linkedin" and self._linkedin_destination_needs_clarification(message):
+                return await self._finalize_command_clarification(
+                    {"action_type": "post_linkedin", "title": "Direct chat post", "id": None},
+                    "I can post this to LinkedIn, but I need one detail before executing: personal profile, company page, or both?",
+                )
+            post_as = self._linkedin_post_as_from_message(message) if detected_platform == "linkedin" else "person"
             brain_result = await brain.publish_content_inline(
                 platform=detected_platform,
                 content_text=result["content"],
                 content_type=result.get("content_type", "post"),
                 approved_by="direct_chat_command",
                 generated_by="direct_chat_command",
-                post_as="company" if re.search(r"\bcompany page\b|\borg page\b", message.lower()) else "person",
+                post_as=post_as,
             )
             print(f">>> [SKYEYE CHAT] Direct post for {detected_platform}: {brain_result.get('summary', brain_result.get('error'))}")
 
@@ -3063,6 +3207,19 @@ RULES:
             lines.append(f"Status: {len(queued)} post(s) queued")
         elif result_type == "campaign_designed":
             lines.append("Status: Campaign designed and saved")
+        elif result_type == "campaign_queued":
+            queued = data.get("queued", 0)
+            cur_pending = data.get("cur_pending", 0)
+            queue_ids = data.get("queue_ids", [])
+            lines.append("Status: Campaign queued for scheduled publishing — not posted yet")
+            lines.append(f"Queued slots: {queued}")
+            if cur_pending:
+                lines.append(f"CUR slots awaiting source: {cur_pending}")
+            if queue_ids:
+                lines.append(f"Queue IDs: {', '.join(str(q) for q in queue_ids[:12])}")
+            summary = data.get("summary", "")
+            if summary:
+                lines.append(f"Detail: {summary}")
         elif result_type == "proposal_executed":
             lines.append(f"Status: Proposal approved and executed")
             msg = data.get("message", "") or data.get("summary", "")

@@ -234,11 +234,28 @@ def parse_campaign_config(message: str) -> CampaignConfig:
         cfg.custom_cur_themes = topics
 
     # ── post_as: person / company / both ─────────────────────────────────────
-    if re.search(r"\bboth\b.*\bpage|\bcompany page\b.*\bpersonal|\bpersonal.*\bcompany page", msg):
+    negated_company = re.search(
+        r"\b(?:not|no|without|avoid|skip)\s+(?:the\s+)?(?:company|org|organization)\s+page\b"
+        r"|\b(?:not|no|without|avoid|skip)\s+(?:company|org|organization)\b"
+        r"|\bpersonal(?:\s+\w+){0,5}\s+not\s+(?:the\s+)?(?:company|org|organization)\b",
+        msg,
+    )
+    personal = re.search(
+        r"\bpersonal(?:\s+linkedin|\s+profile|\s+page)?\b"
+        r"|\bmy\s+(?:linkedin\s+)?profile\b"
+        r"|\bprofile\s+only\b"
+        r"|\bpersonal\s+only\b",
+        msg,
+    )
+    company = re.search(r"\bcompany page\b|\borganization page\b|\borg page\b", msg)
+    both = re.search(r"\bboth\b|\bpersonal\b.*\bcompany page\b|\bcompany page\b.*\bpersonal\b", msg)
+    if negated_company or re.search(r"\bpersonal\s+only\b|\bprofile\s+only\b", msg):
+        cfg.post_as = "person"
+    elif both and personal and company:
         cfg.post_as = "both"
-    elif re.search(r"\bcompany page\b|\borganization page\b|\borg page\b", msg):
+    elif company and not personal:
         cfg.post_as = "company"
-    elif re.search(r"\bpersonal.*\bonly|\bmy profile\b(?!.*company)", msg):
+    elif personal:
         cfg.post_as = "person"
 
     return cfg

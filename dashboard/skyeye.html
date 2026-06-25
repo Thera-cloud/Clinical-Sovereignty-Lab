@@ -2342,7 +2342,8 @@ async function apiPut(path, body) {
 // =============================================================================
 const PLATFORM_ICONS = {
   tiktok: '🎵', instagram: '📸', youtube: '🎬', reddit: '🗣️',
-  linkedin: '💼', facebook: '👤', pinterest: '📌', x: '𝕏'
+  linkedin: '💼', linkedin_company: '🏢', linkedin_community: '💬',
+  facebook: '👤', pinterest: '📌', x: '𝕏'
 };
 
 const ACTION_BADGES = {
@@ -3426,9 +3427,9 @@ async function sendChat() {
   typing.classList.remove('show');
 
   if (result) {
-    const reply = result.message || result.response || result.content || result.text || 'No response';
+    const reply = result.verification_message || result.message || result.response || result.content || result.text || 'No response';
     const detectedMode = result.mode || chatMode;
-    const suggestions = result.follow_up_suggestions || [];
+    const suggestions = result.verification_message ? [] : (result.follow_up_suggestions || []);
     messagesEl.innerHTML += `<div class="chat-msg little-nate">
       ${modeBadgeHtml(detectedMode)}
       ${formatChatMessage(reply)}
