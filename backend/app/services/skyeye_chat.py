@@ -2642,16 +2642,74 @@ RULES:
 
     @staticmethod
     def _looks_like_linkedin_campaign_request(msg_lower: str) -> bool:
-        if "linkedin" not in msg_lower:
-            return False
-        return any(
-            s in msg_lower
-            for s in (
-                "campaign", "restart", "resume", "unpause", "daily", "per day",
-                "posts a day", "posts per day", "twice a day", "2x", "3pm", "3:00 pm",
-                "8pm", "8:00 pm", "50/30/20", "50-30-20", "curated",
-            )
+        cadence = (
+            "3pm", "3:00 pm", "8pm", "8:00 pm", "twice a day", "2x",
+            "posts a day", "posts per day", "daily", "per day",
         )
+        campaign = (
+            "campaign", "restart", "resume", "unpause", "50/30/20",
+            "50-30-20", "curated", "5-3-2", "5/3/2",
+        )
+        has_cadence = any(s in msg_lower for s in cadence)
+        has_campaign = any(s in msg_lower for s in campaign)
+        personal = re.search(
+            r"\bpersonal(?:\s+(?:linkedin|profile|page))?\b|\bprofile\s+only\b",
+            msg_lower,
+        )
+        if "linkedin" in msg_lower and (has_cadence or has_campaign):
+            return True
+        if personal and has_cadence:
+            return True
+        if has_cadence and has_campaign and (
+            personal or re.search(r"\b(?:not|no)\s+(?:the\s+)?company\b", msg_lower)
+        ):
+            return True
+        return False
+
+    @staticmethod
+    def _message_matches_launch_signals(msg_lower: str, signals: tuple) -> bool:
+        for sig in signals:
+            if sig == "start campaign":
+                if re.search(r"\brestart\s+(?:the\s+)?campaign\b", msg_lower):
+                    continue
+                if re.search(r"\bstart\s+(?:the\s+)?campaign\b", msg_lower):
+                    return True
+            elif sig in msg_lower:
+                return True
+        return False
+
+    async def _resolve_launch_platforms(self, message: str) -> List[str]:
+        msg_lower = message.lower()
+        platform_map = {
+            "x": "x", "twitter": "x",
+            "linkedin": "linkedin", "reddit": "reddit",
+            "tiktok": "tiktok", "instagram": "instagram",
+            "facebook": "facebook", "pinterest": "pinterest",
+            "youtube": "youtube",
+        }
+        detected: List[str] = []
+        for name, key in platform_map.items():
+            if name in msg_lower and key not in detected:
+                detected.append(key)
+        if detected:
+            return detected
+        if self._looks_like_linkedin_campaign_request(msg_lower):
+            return ["linkedin"]
+        try:
+            history = await self.get_chat_history(limit=8)
+            blob = "\n".join(
+                str(m.get("message", ""))
+                for m in history
+                if str(m.get("sender", "")).lower() in {"big_nate", "user", "admin"}
+            ).lower()
+            if self._looks_like_linkedin_campaign_request(blob):
+                return ["linkedin"]
+            for name, key in platform_map.items():
+                if name in blob and key not in detected:
+                    detected.append(key)
+        except Exception as e:
+            logger.warning("Launch platform context lookup failed: %s", e)
+        return detected
 
     async def _finalize_command_clarification(
         self, action: Dict[str, Any], question: str,
@@ -2861,28 +2919,23 @@ RULES:
         """Detect campaign launch directives in Big Nate's messages and create real campaigns."""
         msg_lower = message.lower()
 
-        launch_signals = [
+        if self._looks_like_linkedin_campaign_request(msg_lower):
+            return False
+        if re.search(r"\brestart\s+(?:the\s+)?campaign\b", msg_lower):
+            return False
+
+        launch_signals = (
             "approved to launch", "launch this", "launch campaign",
             "start the campaign", "start campaign", "activate campaign",
             "approved to start", "go live", "execute this",
             "lock in", "lock this in", "approved to activate",
-        ]
-        if not any(sig in msg_lower for sig in launch_signals):
+        )
+        if not self._message_matches_launch_signals(msg_lower, launch_signals):
             return False
 
-        platform_map = {
-            "x": "x", "twitter": "x",
-            "linkedin": "linkedin", "reddit": "reddit",
-            "tiktok": "tiktok", "instagram": "instagram",
-            "facebook": "facebook", "pinterest": "pinterest",
-            "youtube": "youtube",
-        }
-        detected_platforms = []
-        for name, key in platform_map.items():
-            if name in msg_lower and key not in detected_platforms:
-                detected_platforms.append(key)
+        detected_platforms = await self._resolve_launch_platforms(message)
         if not detected_platforms:
-            detected_platforms = ["x"]
+            return False
 
         import json as _json
         try:
@@ -2935,9 +2988,27 @@ RULES:
             "proceed with the campaign",
             "proceed with campaign",
             "approved to proceed",
+            "restart campaign",
+            "restart the campaign",
+            "queue linkedin",
         )
         should_queue = any(p in msg_lower for p in phrases) or self._looks_like_linkedin_campaign_request(msg_lower)
         queue_message = message
+
+        if not should_queue and re.search(r"\brestart\s+(?:the\s+)?campaign\b", msg_lower):
+            try:
+                history = await self.get_chat_history(limit=8)
+                recent = [
+                    str(m.get("message", ""))
+                    for m in history
+                    if str(m.get("sender", "")).lower() in {"big_nate", "user", "admin"}
+                ]
+                recent_blob = "\n".join(recent[-6:])
+                queue_message = f"{recent_blob}\n\n{message}"
+                if self._looks_like_linkedin_campaign_request(queue_message.lower()):
+                    should_queue = True
+            except Exception as e:
+                logger.warning("Campaign restart context lookup failed: %s", e)
 
         if not should_queue and msg_lower in {"proceed", "yes", "approved", "do it", "go ahead", "execute it"}:
             try:

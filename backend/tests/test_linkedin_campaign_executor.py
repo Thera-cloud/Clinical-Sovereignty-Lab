@@ -102,3 +102,8 @@ def test_parse_both_destinations_when_explicit():
     )
 
     assert cfg.post_as == "both"
+
+
+def test_parse_start_date_today():
+    today = date.today()
+    assert parse_start_date("starting today") == today

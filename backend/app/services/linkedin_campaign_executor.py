@@ -351,6 +351,8 @@ def parse_start_date(message: str) -> date:
     if m:
         return date.fromisoformat(m.group(1))
     now = datetime.now(TZ)
+    if re.search(r"\b(?:start(?:ing)?\s+)?today\b", message or "", re.I):
+        return now.date()
     return (now + timedelta(days=1)).date()
 
 
