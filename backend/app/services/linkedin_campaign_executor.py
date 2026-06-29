@@ -71,6 +71,15 @@ CUR_THEME_POOL: List[str] = [
     "Burnout, transitions, and the support people actually need",
 ]
 
+def message_looks_like_restart(message: str) -> bool:
+    """True when admin explicitly wants a fresh campaign queue (not idempotent reuse)."""
+    m = (message or "").lower()
+    return bool(
+        re.search(r"\brestart\s+(?:the\s+)?(?:linkedin\s+)?campaign\b", m)
+        or re.search(r"\brestart\s+linkedin\b", m)
+    )
+
+
 LANE_RULES: Dict[str, str] = {
     "ORIG": (
         "ORIGINAL post: sovereign thought leadership — threshold presence, AI & mental health, "
@@ -448,12 +457,15 @@ class LinkedInCampaignExecutor:
             "post_as": config.post_as,
         }
         async with self.db_pool.acquire() as conn:
+            # PostgreSQL UNIQUE(key, platform) treats NULL platform as distinct — dedupe stale rows.
+            await conn.execute(
+                "DELETE FROM skyeye_settings WHERE key = $1",
+                SETTINGS_KEY,
+            )
             await conn.execute(
                 """
                 INSERT INTO skyeye_settings (key, value, platform, updated_at)
                 VALUES ($1, $2, NULL, NOW())
-                ON CONFLICT (key, platform) DO UPDATE
-                SET value = EXCLUDED.value, updated_at = NOW()
                 """,
                 SETTINGS_KEY,
                 json.dumps(payload),
@@ -491,7 +503,13 @@ class LinkedInCampaignExecutor:
         try:
             async with self.db_pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    "SELECT value FROM skyeye_settings WHERE key = $1", SETTINGS_KEY
+                    """
+                    SELECT value FROM skyeye_settings
+                    WHERE key = $1
+                    ORDER BY updated_at DESC NULLS LAST, id DESC
+                    LIMIT 1
+                    """,
+                    SETTINGS_KEY,
                 )
                 if row:
                     v = row["value"]
@@ -499,6 +517,157 @@ class LinkedInCampaignExecutor:
         except Exception:
             pass
         return {}
+
+    async def _supersede_stale_campaign_queue(self, reason: str = "campaign_restart") -> int:
+        """Archive non-posted LinkedIn campaign rows so restarts do not double-publish."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                result = await conn.execute(
+                    """
+                    UPDATE skyeye_content_queue
+                    SET status = 'archived',
+                        error_message = COALESCE(error_message, $2),
+                        updated_at = NOW()
+                    WHERE platform = 'linkedin'
+                      AND generated_by = $1
+                      AND status IN ('approved', 'draft', 'scheduled')
+                    """,
+                    GENERATED_BY,
+                    reason,
+                )
+                # asyncpg returns "UPDATE N"
+                return int(result.split()[-1]) if result else 0
+        except Exception as e:
+            logger.warning("Campaign supersede failed: %s", e)
+            return 0
+
+    async def _pending_batch_snapshot(self) -> Optional[QueueBatchResult]:
+        """Return existing active batch if it still has publishable slots (idempotent queue)."""
+        settings = await self._load_settings()
+        batch_id = settings.get("batch_id")
+        if not batch_id:
+            return None
+        try:
+            async with self.db_pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, status FROM skyeye_content_queue
+                    WHERE platform = 'linkedin'
+                      AND generated_by = $1
+                      AND emotion_context::jsonb->>'batch_id' = $2
+                      AND status IN ('approved', 'draft', 'scheduled')
+                    ORDER BY scheduled_for ASC NULLS LAST, id ASC
+                    """,
+                    GENERATED_BY,
+                    batch_id,
+                )
+            if not rows:
+                return None
+            queue_ids = [int(r["id"]) for r in rows]
+            cur_pending = sum(1 for r in rows if r["status"] == "draft")
+            approved_ct = len(queue_ids) - cur_pending
+            return QueueBatchResult(
+                queued=len(queue_ids),
+                cur_pending=cur_pending,
+                queue_ids=queue_ids,
+                batch_id=batch_id,
+                summary=(
+                    f"LinkedIn campaign batch {settings.get('batch_number', 1)} ({batch_id}) "
+                    f"already queued — {approved_ct} approved, {cur_pending} CUR pending. "
+                    f"Say 'restart campaign' to replace with a fresh batch."
+                ),
+                config_summary="",
+            )
+        except Exception as e:
+            logger.warning("Pending batch snapshot failed: %s", e)
+            return None
+
+    async def get_due_queue_item(self) -> Optional[Dict[str, Any]]:
+        """
+        Next approved item for the active campaign batch.
+        At most one post per Eastern calendar day + scheduled hour (prevents duplicate 8 PM).
+        """
+        settings = await self._load_settings()
+        batch_id = settings.get("batch_id")
+        if not batch_id:
+            return None
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT c.* FROM skyeye_content_queue c
+                    WHERE c.platform = 'linkedin'
+                      AND c.generated_by = $1
+                      AND c.status = 'approved'
+                      AND c.emotion_context::jsonb->>'batch_id' = $2
+                      AND (c.scheduled_for IS NULL OR c.scheduled_for <= NOW())
+                      AND NOT EXISTS (
+                        SELECT 1 FROM skyeye_content_queue p
+                        WHERE p.platform = 'linkedin'
+                          AND p.generated_by = $1
+                          AND p.status = 'posted'
+                          AND p.emotion_context::jsonb->>'batch_id' = $2
+                          AND p.posted_at IS NOT NULL
+                          AND c.scheduled_for IS NOT NULL
+                          AND date_trunc(
+                            'day',
+                            p.posted_at AT TIME ZONE 'America/New_York'
+                          ) = date_trunc(
+                            'day',
+                            c.scheduled_for AT TIME ZONE 'America/New_York'
+                          )
+                          AND EXTRACT(
+                            HOUR FROM p.posted_at AT TIME ZONE 'America/New_York'
+                          ) = EXTRACT(
+                            HOUR FROM c.scheduled_for AT TIME ZONE 'America/New_York'
+                          )
+                      )
+                    ORDER BY c.scheduled_for ASC NULLS LAST, c.id ASC
+                    LIMIT 1
+                    """,
+                    GENERATED_BY,
+                    batch_id,
+                )
+            return dict(row) if row else None
+        except Exception as e:
+            logger.warning("get_due_queue_item failed: %s", e)
+            return None
+
+    async def _auto_generate_cur_slot(
+        self,
+        gen,
+        *,
+        theme_hint: str,
+        slot: Dict[str, Any],
+        batch_number: int,
+        prior_excerpts: List[str],
+        tone_note: str,
+        config: CampaignConfig,
+    ) -> Tuple[str, Optional[str]]:
+        """Search-backed CUR when no URL supplied — approved at queue time."""
+        source = f"search up {theme_hint}"
+        ctx = await self._search_context(source)
+        if ctx:
+            return await self._build_curated_body(
+                source,
+                slot["local_label"],
+                ctx,
+                batch_number=batch_number,
+                prior_excerpts=prior_excerpts,
+                tone_note=tone_note,
+                config=config,
+            )
+        content = await self._generate_lane_body(
+            gen,
+            lane="ORIG",
+            theme=f"Research insight: {theme_hint}",
+            batch_number=batch_number,
+            local_label=slot["local_label"],
+            prior_excerpts=prior_excerpts,
+            tone_note=tone_note,
+            config=config,
+        )
+        return content, None
 
     # ── Content generation helpers ────────────────────────────────────────────
 
@@ -613,12 +782,24 @@ class LinkedInCampaignExecutor:
         auto_continue: bool = True,
         batch_number: int = 1,
         config: Optional[CampaignConfig] = None,
+        force_new: bool = False,
     ) -> QueueBatchResult:
         from app.services.skyeye_content_generator import SkyEyeContentGenerator
 
         config = config or parse_campaign_config(message)
         start = start or parse_start_date(message)
         cur_sources = {**(cur_sources or {}), **parse_cur_sources(message)}
+
+        restart = force_new or message_looks_like_restart(message)
+        if restart:
+            archived = await self._supersede_stale_campaign_queue()
+            if archived:
+                logger.info("Archived %s stale LinkedIn campaign queue rows before restart", archived)
+        elif not cur_sources:
+            existing = await self._pending_batch_snapshot()
+            if existing:
+                return existing
+
         batch_id = f"{start.isoformat()}_b{batch_number}"
         gen = SkyEyeContentGenerator(self.db_pool)
         slots = build_slot_schedule(start, config)
@@ -657,16 +838,19 @@ class LinkedInCampaignExecutor:
                     )
                     status = "approved"
                 else:
-                    # Use CUR theme hint as placeholder search topic
-                    theme_hint = pick_theme(CUR_THEME_POOL, cur_i, batch_number, config.custom_cur_themes)
-                    content = (
-                        f"Curated post slot {slot['local_label']} (batch {batch_number}) — "
-                        f"awaiting URL or 'Day {slot['day']} {slot['local_label'].split()[1]}pm: https://...'.\n"
-                        f"Topic hint when you provide a URL: {theme_hint}\n\n"
-                        f"{CAMPAIGN_SIGNATURE}"
+                    theme_hint = pick_theme(
+                        CUR_THEME_POOL, cur_i, batch_number, config.custom_cur_themes
                     )
-                    status = "draft"
-                    cur_pending += 1
+                    content, media_url = await self._auto_generate_cur_slot(
+                        gen,
+                        theme_hint=theme_hint,
+                        slot=slot,
+                        batch_number=batch_number,
+                        prior_excerpts=prior_excerpts,
+                        tone_note=tone,
+                        config=config,
+                    )
+                    status = "approved"
                 cur_i += 1
 
             elif lane == "ORIG":

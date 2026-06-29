@@ -7,6 +7,7 @@ from app.services.linkedin_campaign_executor import (
     PERS_THEME_POOL,
     build_slot_schedule,
     ensure_signature,
+    message_looks_like_restart,
     parse_campaign_config,
     parse_cur_sources,
     parse_start_date,
@@ -102,6 +103,13 @@ def test_parse_both_destinations_when_explicit():
     )
 
     assert cfg.post_as == "both"
+
+
+def test_message_looks_like_restart():
+    assert message_looks_like_restart("restart the LinkedIn campaign")
+    assert message_looks_like_restart("Restart campaign with 2 posts per day")
+    assert not message_looks_like_restart("approve campaign and proceed")
+    assert not message_looks_like_restart("post #1 now")
 
 
 def test_parse_start_date_today():

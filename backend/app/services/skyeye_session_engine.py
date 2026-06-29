@@ -1390,10 +1390,21 @@ class SkyEyeSessionEngine:
                 # In full autonomy mode, drafts are auto-approved
                 status_filter = "draft"
 
-            queue_items = await generator.get_queue(
-                status=status_filter, platform=platform, limit=1,
-                respect_schedule=True,
-            )
+            queue_items: list = []
+            if platform == "linkedin":
+                try:
+                    from app.services.linkedin_campaign_executor import LinkedInCampaignExecutor
+                    due = await LinkedInCampaignExecutor(self.db_pool).get_due_queue_item()
+                    if due:
+                        queue_items = [due]
+                except Exception as _lc_due:
+                    logger.warning("LinkedIn campaign due-item lookup: %s", _lc_due)
+
+            if not queue_items:
+                queue_items = await generator.get_queue(
+                    status=status_filter, platform=platform, limit=1,
+                    respect_schedule=True,
+                )
 
             # Also pick up "scheduled" items whose time has arrived
             if not queue_items:
