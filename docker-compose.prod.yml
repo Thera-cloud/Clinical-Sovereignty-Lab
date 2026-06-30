@@ -194,6 +194,8 @@ services:
       - SANDBOX_HMAC_KEY=${SANDBOX_HMAC_KEY:-}
       - ENVIRONMENT=production
       - ENABLE_VOICE_TRANSCRIPT_CRYSTALLIZATION=true
+      # QUANTUM-CRYSTAL-ARCH: pauses 4h semantic_neighbor rebuild (Vectorize cost); recall unchanged
+      - ENABLE_CRYSTAL_GRAPH=false
       - ENABLE_INTAKE_SYSTEM=${ENABLE_INTAKE_SYSTEM:-true}
       - ENABLE_INTAKE_WALKTHROUGH=${ENABLE_INTAKE_WALKTHROUGH:-false}
       - INTAKE_SEMANTIC_CLASSIFIER=${INTAKE_SEMANTIC_CLASSIFIER:-true}

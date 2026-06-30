@@ -2837,7 +2837,7 @@ async def lifespan(app: FastAPI):
 
     # QUANTUM-CRYSTAL-ARCH: CrystalGraph — relationship edges + meta-crystal synthesis
     _crystal_graph = None
-    if db_pool and getattr(settings, "ENABLE_CRYSTAL_GRAPH", True):
+    if db_pool and getattr(settings, "ENABLE_CRYSTAL_GRAPH", False):
         try:
             from app.services.crystal_graph import CrystalGraph
             _crystal_graph = CrystalGraph(db_pool=db_pool, app_state=app.state)
@@ -3093,7 +3093,7 @@ async def lifespan(app: FastAPI):
         ("cold_memory", getattr(app.state, "cold_memory", None) is not None),
         ("sentinel_orchestrator", _sentinel_orchestrator is not None),
         ("quantum_crystal_orchestrator", (not getattr(settings, "ENABLE_QUANTUM_CRYSTAL_ORCHESTRATOR", False)) or (_quantum_orchestrator is not None)),
-        ("crystal_graph", (not getattr(settings, "ENABLE_CRYSTAL_GRAPH", True)) or (_crystal_graph is not None)),  # QUANTUM-CRYSTAL-ARCH
+        ("crystal_graph", (not getattr(settings, "ENABLE_CRYSTAL_GRAPH", False)) or (_crystal_graph is not None)),  # QUANTUM-CRYSTAL-ARCH
         ("voice_billing", _voice_billing is not None),  # SOVEREIGN-VOICE
         ("voice_pool", _voice_pool is not None),  # SOVEREIGN-VOICE
         ("voice_router", _voice_router is not None),  # SOVEREIGN-VOICE

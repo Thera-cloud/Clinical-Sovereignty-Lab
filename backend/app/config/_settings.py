@@ -193,7 +193,9 @@ class Settings(BaseSettings):
     ENABLE_QUANTUM_CRYSTAL_ORCHESTRATOR: bool = False
     ENABLE_VOICE_TRANSCRIPT_CRYSTALLIZATION: bool = False
     ENABLE_TIME_CRYSTAL_FORGE: bool = False
-    
+    # QUANTUM-CRYSTAL-ARCH: 4h Vectorize rebuild (~209k queries/cycle). Paused — recall uses crystal_recall_bridge.
+    ENABLE_CRYSTAL_GRAPH: bool = False
+
     # User Registry backend
     USE_POSTGRES_REGISTRY: bool = True    # When True, bridge stores users in PostgreSQL (recommended)
     
