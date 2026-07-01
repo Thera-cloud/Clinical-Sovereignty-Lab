@@ -403,11 +403,17 @@ class SkyEyeSessionEngine:
                     if datetime.now(timezone.utc) < cooldown_until:
                         return False
 
-                # Enforce daily session cap
+                # Enforce daily session cap (Eastern calendar day — not UTC)
                 today_count = await conn.fetchval("""
                     SELECT COUNT(*) FROM skyeye_sessions
                     WHERE status = 'completed'
-                      AND session_start >= (CURRENT_DATE AT TIME ZONE 'UTC')
+                      AND date_trunc(
+                        'day',
+                        session_start AT TIME ZONE 'America/New_York'
+                      ) = date_trunc(
+                        'day',
+                        NOW() AT TIME ZONE 'America/New_York'
+                      )
                 """)
                 max_daily = await self._get_setting("max_sessions_per_day", 3)
                 if today_count >= max_daily:
@@ -1261,6 +1267,14 @@ class SkyEyeSessionEngine:
         except Exception as e:
             logger.warning(f"Outreach phase error on {platform}: {e}")
 
+    async def _linkedin_campaign_active(self) -> bool:
+        try:
+            from app.services.linkedin_campaign_executor import LinkedInCampaignExecutor
+
+            return await LinkedInCampaignExecutor(self.db_pool).campaign_is_active()
+        except Exception:
+            return False
+
     async def _create_phase(self, platform: str, adapter, generator):
         """Generate new content for this platform."""
         if self._is_session_expired():
@@ -1276,6 +1290,10 @@ class SkyEyeSessionEngine:
             # Skip content creation if platform has persistent posting failures
             if await self._has_persistent_failures(platform):
                 logger.info(f"Create phase skipped for {platform}: persistent posting failures detected")
+                return
+
+            if platform == "linkedin" and await self._linkedin_campaign_active():
+                logger.debug("LinkedIn create phase skipped — active campaign batch")
                 return
 
             # Check if there are approved expressions waiting to be posted
@@ -1392,6 +1410,11 @@ class SkyEyeSessionEngine:
 
             queue_items: list = []
             if platform == "linkedin":
+                if await self._linkedin_campaign_active():
+                    logger.debug(
+                        "LinkedIn post phase skipped — campaign scheduler owns publish"
+                    )
+                    return
                 try:
                     from app.services.linkedin_campaign_executor import LinkedInCampaignExecutor
                     due = await LinkedInCampaignExecutor(self.db_pool).get_due_queue_item()
@@ -1400,14 +1423,14 @@ class SkyEyeSessionEngine:
                 except Exception as _lc_due:
                     logger.warning("LinkedIn campaign due-item lookup: %s", _lc_due)
 
-            if not queue_items:
+            if not queue_items and platform != "linkedin":
                 queue_items = await generator.get_queue(
                     status=status_filter, platform=platform, limit=1,
                     respect_schedule=True,
                 )
 
             # Also pick up "scheduled" items whose time has arrived
-            if not queue_items:
+            if not queue_items and platform != "linkedin":
                 queue_items = await generator.get_queue(
                     status="scheduled", platform=platform, limit=1,
                     respect_schedule=True,

@@ -1,12 +1,15 @@
 """Offline tests for LinkedIn 14-post campaign executor."""
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from app.services.linkedin_campaign_executor import (
     CAMPAIGN_SIGNATURE,
     ORIG_THEME_POOL,
     PERS_THEME_POOL,
+    TZ,
     build_slot_schedule,
     ensure_signature,
+    in_post_window,
     message_looks_like_restart,
     parse_campaign_config,
     parse_cur_sources,
@@ -115,3 +118,14 @@ def test_message_looks_like_restart():
 def test_parse_start_date_today():
     today = date.today()
     assert parse_start_date("starting today") == today
+
+
+def test_in_post_window_first_fifteen_minutes_eastern():
+    inside = datetime(2026, 6, 30, 15, 10, tzinfo=TZ)
+    outside_hour = datetime(2026, 6, 30, 20, 5, tzinfo=TZ)
+    outside_minute = datetime(2026, 6, 30, 15, 20, tzinfo=TZ)
+
+    assert in_post_window(inside, 15) is True
+    assert in_post_window(outside_hour, 15) is False
+    assert in_post_window(outside_minute, 15) is False
+    assert in_post_window(datetime(2026, 6, 30, 20, 0, tzinfo=TZ), 20) is True

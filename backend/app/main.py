@@ -220,6 +220,7 @@ async def lifespan(app: FastAPI):
     
     # Start SkyEye autonomous session engine
     skyeye_engine = None
+    linkedin_campaign_scheduler = None
     if getattr(settings, "ENABLE_SKYEYE_SESSIONS", False):
         try:
             from app.services.skyeye_session_engine import SkyEyeSessionEngine
@@ -229,6 +230,14 @@ async def lifespan(app: FastAPI):
             print(f"   ✅ SkyEye session engine started")
         except Exception as e:
             print(f"   ⚠️  SkyEye session engine failed to start: {e}")
+        try:
+            from app.services.linkedin_campaign_scheduler import LinkedInCampaignScheduler
+            linkedin_campaign_scheduler = LinkedInCampaignScheduler(db_pool)
+            linkedin_campaign_scheduler.start()
+            app.state.linkedin_campaign_scheduler = linkedin_campaign_scheduler
+            print(f"   ✅ LinkedIn campaign scheduler started")
+        except Exception as e:
+            print(f"   ⚠️  LinkedIn campaign scheduler failed to start: {e}")
     
     # Start Marketing Automation Worker
     marketing_worker = None
@@ -3437,6 +3446,11 @@ async def lifespan(app: FastAPI):
     if skyeye_engine:
         try:
             await skyeye_engine.stop()
+        except Exception:
+            pass
+    if linkedin_campaign_scheduler:
+        try:
+            linkedin_campaign_scheduler.stop()
         except Exception:
             pass
     if marketing_worker:

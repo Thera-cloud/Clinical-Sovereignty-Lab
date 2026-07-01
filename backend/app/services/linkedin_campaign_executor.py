@@ -71,6 +71,13 @@ CUR_THEME_POOL: List[str] = [
     "Burnout, transitions, and the support people actually need",
 ]
 
+def in_post_window(now_et: datetime, slot_hour: int, window_minutes: int = 15) -> bool:
+    """True during the first *window_minutes* of *slot_hour* Eastern (e.g. 15:00–15:14)."""
+    if now_et.hour != slot_hour:
+        return False
+    return now_et.minute < window_minutes
+
+
 def message_looks_like_restart(message: str) -> bool:
     """True when admin explicitly wants a fresh campaign queue (not idempotent reuse)."""
     m = (message or "").lower()
@@ -518,6 +525,31 @@ class LinkedInCampaignExecutor:
             pass
         return {}
 
+    async def _archive_other_batch_rows(self, keep_batch_id: str) -> int:
+        """Archive approved/draft/scheduled rows from batches other than keep_batch_id."""
+        reason = "Superseded by newer LinkedIn campaign batch"
+        try:
+            async with self.db_pool.acquire() as conn:
+                result = await conn.execute(
+                    """
+                    UPDATE skyeye_content_queue
+                    SET status = 'archived',
+                        error_message = COALESCE(error_message, $2),
+                        updated_at = NOW()
+                    WHERE platform = 'linkedin'
+                      AND generated_by = $1
+                      AND status IN ('approved', 'draft', 'scheduled')
+                      AND COALESCE(emotion_context::jsonb->>'batch_id', '') != $3
+                    """,
+                    GENERATED_BY,
+                    reason,
+                    keep_batch_id,
+                )
+                return int(result.split()[-1]) if result else 0
+        except Exception as e:
+            logger.warning("Archive other batch rows failed: %s", e)
+            return 0
+
     async def _supersede_stale_campaign_queue(self, reason: str = "campaign_restart") -> int:
         """Archive non-posted LinkedIn campaign rows so restarts do not double-publish."""
         try:
@@ -582,10 +614,17 @@ class LinkedInCampaignExecutor:
             logger.warning("Pending batch snapshot failed: %s", e)
             return None
 
-    async def get_due_queue_item(self) -> Optional[Dict[str, Any]]:
+    async def campaign_is_active(self) -> bool:
+        settings = await self._load_settings()
+        return bool(settings.get("batch_id"))
+
+    async def get_due_queue_item(
+        self, slot_hour: Optional[int] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         Next approved item for the active campaign batch.
-        At most one post per Eastern calendar day + scheduled hour (prevents duplicate 8 PM).
+        Dedup by batch_id + slot_key (not posted clock hour).
+        Optional slot_hour filters to items scheduled in that Eastern hour.
         """
         settings = await self._load_settings()
         batch_id = settings.get("batch_id")
@@ -601,37 +640,141 @@ class LinkedInCampaignExecutor:
                       AND c.status = 'approved'
                       AND c.emotion_context::jsonb->>'batch_id' = $2
                       AND (c.scheduled_for IS NULL OR c.scheduled_for <= NOW())
+                      AND (
+                        $3::int IS NULL
+                        OR EXTRACT(
+                          HOUR FROM c.scheduled_for AT TIME ZONE 'America/New_York'
+                        ) = $3
+                      )
                       AND NOT EXISTS (
                         SELECT 1 FROM skyeye_content_queue p
                         WHERE p.platform = 'linkedin'
                           AND p.generated_by = $1
                           AND p.status = 'posted'
                           AND p.emotion_context::jsonb->>'batch_id' = $2
-                          AND p.posted_at IS NOT NULL
-                          AND c.scheduled_for IS NOT NULL
-                          AND date_trunc(
-                            'day',
-                            p.posted_at AT TIME ZONE 'America/New_York'
-                          ) = date_trunc(
-                            'day',
-                            c.scheduled_for AT TIME ZONE 'America/New_York'
-                          )
-                          AND EXTRACT(
-                            HOUR FROM p.posted_at AT TIME ZONE 'America/New_York'
-                          ) = EXTRACT(
-                            HOUR FROM c.scheduled_for AT TIME ZONE 'America/New_York'
-                          )
+                          AND p.emotion_context::jsonb->>'slot_key'
+                            = c.emotion_context::jsonb->>'slot_key'
+                          AND COALESCE(
+                            p.emotion_context::jsonb->>'slot_key', ''
+                          ) != ''
                       )
                     ORDER BY c.scheduled_for ASC NULLS LAST, c.id ASC
                     LIMIT 1
                     """,
                     GENERATED_BY,
                     batch_id,
+                    slot_hour,
                 )
             return dict(row) if row else None
         except Exception as e:
             logger.warning("get_due_queue_item failed: %s", e)
             return None
+
+    async def publish_scheduled_slots(self) -> Optional[str]:
+        """Publish at most one slot per Eastern post_time window (campaign scheduler tick)."""
+        settings = await self._load_settings()
+        batch_id = settings.get("batch_id")
+        if not batch_id:
+            return None
+
+        post_times = settings.get("post_times") or [15, 20]
+        now_et = datetime.now(TZ)
+
+        for hour in sorted(post_times):
+            if not in_post_window(now_et, int(hour)):
+                continue
+            item = await self.get_due_queue_item(slot_hour=int(hour))
+            if not item:
+                continue
+            if await self._publish_item(item):
+                sk = (item.get("emotion_context") or {})
+                if isinstance(sk, str):
+                    try:
+                        sk = json.loads(sk)
+                    except Exception:
+                        sk = {}
+                return (
+                    f"queue #{item['id']} batch {batch_id} "
+                    f"slot {sk.get('slot_key', hour)} ET hour {hour}"
+                )
+        return None
+
+    async def _publish_item(self, item: Dict[str, Any]) -> bool:
+        from app.services.platforms import get_adapter
+        from app.services.skyeye_content_generator import SkyEyeContentGenerator
+        from app.services.skyeye_platform_base import ContentType
+
+        adapter = get_adapter("linkedin", self.db_pool)
+        if not adapter or not await adapter.authenticate():
+            logger.warning("LinkedIn campaign publish: adapter not ready")
+            return False
+
+        meta_raw = item.get("emotion_context") or "{}"
+        try:
+            meta = json.loads(meta_raw) if isinstance(meta_raw, str) else (meta_raw or {})
+        except Exception:
+            meta = {}
+
+        post_as = meta.get("post_as", "person")
+        ct = item.get("content_type", "post")
+        post_ct = ContentType.ARTICLE if ct == "article" else ContentType.POST
+        lane = (meta.get("lane") or "").upper()
+        slot_key = meta.get("slot_key", "")
+
+        image_bytes = None
+        if ct != "article":
+            from app.services.skyeye_linkedin_image import try_generate_linkedin_image
+
+            image_bytes = await try_generate_linkedin_image(
+                item.get("content_text", ""),
+                lane=lane,
+                slot_key=slot_key,
+            )
+
+        result = await adapter.post_content(
+            text=item.get("content_text", ""),
+            media_url=item.get("media_url") if not image_bytes else None,
+            content_type=post_ct,
+            post_as=post_as,
+            image_bytes=image_bytes,
+        )
+        gen = SkyEyeContentGenerator(self.db_pool)
+
+        if result.success:
+            await gen.update_queue_status(
+                item["id"],
+                "posted",
+                approved_by=item.get("approved_by") or "campaign_scheduler",
+                post_id_external=result.post_id,
+                post_url=result.post_url,
+            )
+            await self.on_item_posted(item["id"])
+            try:
+                async with self.db_pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        INSERT INTO skyeye_activity (type, platform, content, created_at)
+                        VALUES ($1, 'linkedin', $2, NOW())
+                        """,
+                        "linkedin_campaign_posted",
+                        json.dumps({
+                            "queue_id": item["id"],
+                            "batch_id": meta.get("batch_id"),
+                            "slot_key": meta.get("slot_key"),
+                            "lane": lane,
+                            "had_image": bool(image_bytes),
+                            "post_id": result.post_id,
+                            "post_url": result.post_url,
+                        }),
+                    )
+            except Exception as e:
+                logger.warning("LinkedIn campaign activity log failed: %s", e)
+            return True
+
+        await gen.update_queue_status(
+            item["id"], "failed", error_message=result.error
+        )
+        return False
 
     async def _auto_generate_cur_slot(
         self,
@@ -801,6 +944,12 @@ class LinkedInCampaignExecutor:
                 return existing
 
         batch_id = f"{start.isoformat()}_b{batch_number}"
+        archived_other = await self._archive_other_batch_rows(batch_id)
+        if archived_other:
+            logger.info(
+                "Archived %s LinkedIn queue rows from prior campaign batches",
+                archived_other,
+            )
         gen = SkyEyeContentGenerator(self.db_pool)
         slots = build_slot_schedule(start, config)
         prior_excerpts = await self._fetch_prior_excerpts()

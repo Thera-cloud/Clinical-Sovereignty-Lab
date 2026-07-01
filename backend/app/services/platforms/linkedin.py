@@ -454,6 +454,55 @@ class LinkedInAdapter(SocialPlatformAdapter):
         except Exception as e:
             logger.warning(f"LinkedIn: Failed to persist org_urn: {e}")
 
+    # ── Image upload (native feed media) ─────────────────────────────
+
+    async def _upload_image_bytes(
+        self,
+        image_bytes: bytes,
+        owner_urn: str,
+        token: str,
+    ) -> Optional[str]:
+        """Register + upload JPEG; returns urn:li:image:... or None."""
+        if not image_bytes or not owner_urn:
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                init_resp = await client.post(
+                    f"{LINKEDIN_REST_BASE}/images?action=initializeUpload",
+                    json={"initializeUploadRequest": {"owner": owner_urn}},
+                    headers=_linkedin_headers(token, content_type=True),
+                )
+                if init_resp.status_code not in (200, 201):
+                    logger.warning(
+                        "LinkedIn image init failed %s: %s",
+                        init_resp.status_code,
+                        init_resp.text[:300],
+                    )
+                    return None
+                value = init_resp.json().get("value") or {}
+                upload_url = value.get("uploadUrl")
+                image_urn = value.get("image")
+                if not upload_url or not image_urn:
+                    logger.warning("LinkedIn image init missing uploadUrl/image URN")
+                    return None
+
+                up_headers: Dict[str, Any] = {"Content-Type": "application/octet-stream"}
+                if token and "linkedin.com" in upload_url:
+                    up_headers["Authorization"] = f"Bearer {token}"
+                up_resp = await client.put(upload_url, content=image_bytes, headers=up_headers)
+                if up_resp.status_code not in (200, 201):
+                    logger.warning(
+                        "LinkedIn image upload failed %s: %s",
+                        up_resp.status_code,
+                        up_resp.text[:200],
+                    )
+                    return None
+                logger.info("LinkedIn: uploaded image %s for %s", image_urn, owner_urn)
+                return image_urn
+        except Exception as e:
+            logger.warning("LinkedIn image upload error: %s", e)
+            return None
+
     # ── Content Publishing (Posts API) ──────────────────────────────
 
     @retry_on_failure(max_retries=2)
@@ -465,7 +514,8 @@ class LinkedInAdapter(SocialPlatformAdapter):
 
         Supports:
           - Text posts (content_type=POST)
-          - Article shares (content_type=ARTICLE or media_url provided)
+          - Text + native image (kwargs image_bytes=JPEG — uploads at publish)
+          - Article shares (content_type=ARTICLE or media_url for external links)
           - kwargs: title, description (for articles)
           - kwargs: post_as = "person" | "company" | "both"
             * "person"  — personal profile only (default)
@@ -479,6 +529,7 @@ class LinkedInAdapter(SocialPlatformAdapter):
         await self.rate_limiter.acquire()
 
         post_as: str = kwargs.get("post_as", "person")
+        image_bytes: Optional[bytes] = kwargs.get("image_bytes")
 
         if not self._person_urn:
             return PostResult(success=False, error="No LinkedIn person URN",
@@ -496,8 +547,14 @@ class LinkedInAdapter(SocialPlatformAdapter):
                     "thirdPartyDistributionChannels": [],
                 },
                 "lifecycleState": "PUBLISHED",
+                "isReshareDisabledByAuthor": False,
             }
-            if media_url or content_type == ContentType.ARTICLE:
+            image_urn = None
+            if image_bytes:
+                image_urn = await self._upload_image_bytes(image_bytes, author_urn, token)
+            if image_urn:
+                post_body["content"] = {"media": {"id": image_urn}}
+            elif media_url or content_type == ContentType.ARTICLE:
                 post_body["content"] = {
                     "article": {
                         "source": media_url or "",

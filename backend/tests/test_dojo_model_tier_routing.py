@@ -29,7 +29,8 @@ def _load_dojo_routing_tables():
     via AST-style parsing. Avoids importing bridge_server.py (27k lines, heavy
     side effects on import).
     """
-    src = pathlib.Path("backend/app/websocket/bridge_server.py").read_text()
+    bridge_path = pathlib.Path(__file__).resolve().parents[1] / "app" / "websocket" / "bridge_server.py"
+    src = bridge_path.read_text()
     # Extract the two literal-dict definitions
     ns = {}
     m = re.search(r"^_DOJO_TYPE_MODEL_TIER = \{[\s\S]*?^\}", src, re.MULTILINE)
