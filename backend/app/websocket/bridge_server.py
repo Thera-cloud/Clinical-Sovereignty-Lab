@@ -9291,6 +9291,20 @@ class AzureCortex:
             )
         except Exception as _ve:
             print(f">>> [VAULT] Injection error (non-fatal): {_ve}")
+        try:
+            # QUANTUM-CRYSTAL-ARCH: Sovereign Journey panel character/theme explain
+            from app.services.sse_panel_chat_context import build_sse_panel_chat_context
+            user_text, _sse_panel_ctx, _sse_panel_img = await build_sse_panel_chat_context(
+                db_pool, profile, user_text
+            )
+            if _sse_panel_ctx:
+                vault_context = (
+                    f"{vault_context}\n\n{_sse_panel_ctx}".strip() if vault_context else _sse_panel_ctx
+                )
+            if _sse_panel_img and not _vault_image_data_url:
+                _vault_image_data_url = _sse_panel_img
+        except Exception as _spe:
+            print(f">>> [SSE PANEL] Injection error (non-fatal): {_spe}")
 
         # QUANTUM-CRYSTAL-ARCH — LIMINAL RESOLVE context injection
         lr_context = ""

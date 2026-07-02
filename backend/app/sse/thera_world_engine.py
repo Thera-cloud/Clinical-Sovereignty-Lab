@@ -1234,7 +1234,10 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
                 panel_id, user_id, journey.get("journey_id"), r2_url,
                 image_prompt[:500], current_biome_name, character[0],
                 nar_text, narrative.get("panel_tone", "meditative"),
-                json.dumps(profile.get("top_domains", [])))
+                json.dumps({
+                    "domains": profile.get("top_domains", []),
+                    "themes": profile.get("top_themes", []),
+                }))
             _panel_saved = True
             await conn.execute(
                 "UPDATE sse_user_journeys SET last_panel_at = NOW(), "

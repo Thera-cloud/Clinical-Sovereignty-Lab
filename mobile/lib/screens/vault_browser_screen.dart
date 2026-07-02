@@ -242,6 +242,22 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
     return s.length >= 10 ? s.substring(0, 10) : s;
   }
 
+  String _sseAskNateMessage(Map<String, dynamic> item) {
+    final panelId = item['id']?.toString() ?? '';
+    if (panelId.isNotEmpty && panelId != 'archetype') {
+      return "[SSE Panel:$panelId] I'd like to understand the characters and symbols in this journey image — "
+          "what my memory brought forward, why this core character appeared, and how it connects to my recent conversations. "
+          "If you're willing, walk me through your reasoning and three focus topics for today; "
+          "I may also want a deeper SIFT pass on the imagery.";
+    }
+    final sse = item['_sse'] as Map<String, dynamic>? ?? {};
+    final pType = sse['panel_type']?.toString() ?? 'journey';
+    final biome = sse['biome']?.toString() ?? '';
+    final fmtBiome = biome.replaceAll('_', ' ');
+    return "[Story Panel: $pType] Biome: $fmtBiome. "
+        "I'd like to understand the characters and symbols in this image.";
+  }
+
   Future<void> _searchItems() async {
     if (_searchQuery.trim().isEmpty) return;
     final uri = Uri.parse('$_baseUrl/api/v1/vault/search').replace(
@@ -828,13 +844,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
   Future<void> _returnItemForSelection(Map<String, dynamic> item) async {
     final isSSE = item['content_type'] == 'sse_panel' || item['content_type'] == 'sse_archetype';
     if (isSSE) {
-      final sse = item['_sse'] as Map<String, dynamic>? ?? {};
-      final narrative = sse['narrative_text']?.toString() ?? '';
-      final biome = sse['biome']?.toString() ?? '';
-      final tone = sse['panel_tone']?.toString() ?? '';
-      final pType = sse['panel_type']?.toString() ?? 'journey';
-      final fmtBiome = biome.replaceAll('_', ' ');
-      final msg = '[Story Panel: $pType] Biome: $fmtBiome. Tone: $tone.\n\n$narrative';
+      final msg = _sseAskNateMessage(item);
       if (mounted) Navigator.pop(context, msg.trim());
       return;
     }
@@ -874,6 +884,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
     final tone = sse['panel_tone']?.toString() ?? '';
     final panelId = item['id']?.toString() ?? '';
     final pType = sse['panel_type']?.toString() ?? '';
+    final character = sse['character_manifest']?.toString() ?? '';
     // Strip query string before extension check (R2 presigned URLs have ?X-Amz-...)
     final urlPath = imgUrl.split('?').first.toLowerCase();
     final pTone = tone.toLowerCase();
@@ -915,8 +926,9 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
           if (narrative.isNotEmpty)
             Text(narrative, style: const TextStyle(color: _VaultDesign.textPrimary, fontSize: 15, height: 1.6)),
           const SizedBox(height: 12),
-          if (biome.isNotEmpty || tone.isNotEmpty)
+          if (biome.isNotEmpty || tone.isNotEmpty || character.isNotEmpty)
             Wrap(spacing: 8, children: [
+              if (character.isNotEmpty) Chip(label: Text(character, style: const TextStyle(fontSize: 11, color: Color(0xFF9D4EDD))), backgroundColor: const Color(0xFF9D4EDD).withOpacity(0.12)),
               if (biome.isNotEmpty) Chip(label: Text(biome.replaceAll('_', ' '), style: const TextStyle(fontSize: 11, color: Color(0xFF00E5A0))), backgroundColor: const Color(0xFF00E5A0).withOpacity(0.12)),
               if (tone.isNotEmpty) Chip(label: Text(tone, style: const TextStyle(fontSize: 11, color: _VaultDesign.gold)), backgroundColor: _VaultDesign.gold.withOpacity(0.12)),
             ]),
@@ -941,10 +953,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
               style: ElevatedButton.styleFrom(backgroundColor: _VaultDesign.gold, foregroundColor: Colors.black),
               onPressed: () {
                 Navigator.pop(ctx);
-                final pType = (item['_sse']?['panel_type'] ?? 'journey').toString();
-                final fmtBiome = biome.replaceAll('_', ' ').split(' ').map((w) => w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '').join(' ');
-                final msg = '[Story Panel: $pType] Biome: $fmtBiome. ${narrative.length > 120 ? '${narrative.substring(0, 120)}…' : narrative}';
-                Navigator.pop(context, msg);
+                Navigator.pop(context, _sseAskNateMessage(item));
               },
             )),
           ]),
