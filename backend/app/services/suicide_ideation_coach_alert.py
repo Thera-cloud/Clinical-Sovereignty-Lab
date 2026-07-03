@@ -24,6 +24,36 @@ def _flag_enabled() -> bool:
     )
 
 
+def _profile_data(profile: Dict[str, Any]) -> Dict[str, Any]:
+    pd = profile.get("profile_data") or {}
+    if isinstance(pd, str):
+        try:
+            pd = json.loads(pd)
+        except Exception:
+            pd = {}
+    return pd if isinstance(pd, dict) else {}
+
+
+def _crisis_alerts_suppressed(
+    profile: Dict[str, Any],
+    *,
+    client_username: Optional[str] = None,
+) -> bool:
+    """Sandbox / SQR harness — no real coach tickets during D-set runs."""
+    hw = (profile.get("hardware_id") or "").strip()
+    if hw.startswith(("SQR_HARNESS_", "AUDIT_", "LOADTEST_")):
+        return True
+    uname = (client_username or profile.get("username") or "").strip()
+    env_list = os.getenv("CRISIS_ALERT_SUPPRESS_USERNAMES", "")
+    if uname and uname in {u.strip() for u in env_list.split(",") if u.strip()}:
+        return True
+    pd = _profile_data(profile)
+    flag = pd.get("suppress_coach_crisis_alerts")
+    if flag is True or str(flag).lower() in ("1", "true", "yes"):
+        return True
+    return False
+
+
 def _dedup_hours() -> int:
     raw = os.getenv("SI_COACH_ALERT_DEDUP_HOURS", "24").strip()
     try:
@@ -168,6 +198,10 @@ async def maybe_dispatch_si_coach_alert(
     matched = match_user_text(text)
     if not matched:
         return {"status": "no_match"}
+
+    if _crisis_alerts_suppressed(profile, client_username=None):
+        logger.info("[SI_COACH_ALERT] suppressed for test/sandbox profile")
+        return {"status": "suppressed", "matched": matched}
 
     client_username = await _resolve_client_username(db_pool, profile)
     if not client_username:

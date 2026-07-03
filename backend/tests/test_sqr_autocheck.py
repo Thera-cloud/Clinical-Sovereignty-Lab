@@ -43,8 +43,10 @@ def test_scorecard_shape():
     sc = build_scorecard(
         "run1",
         "LN_FULL",
-        [{"prompt_id": "A1", "set": "A", "response": "MasterMind has been steady.", "latency_ms": 100, "ts": "t"}],
+        [{"prompt_id": "A1", "set": "A", "response": "MasterMind has been steady.", "latency_ms": 100, "ts": "t", "prompt": "How is MasterMind?"}],
+        skip_de=True,
     )
-    assert sc["bq_hard_gate"] == "PASS"
+    assert sc["bq_hard_gate"] == "UNTESTED"
+    assert sc["composite_certified"] is False
     assert sc["human_scores_required"] is True
     assert sc["quotients"]["CQ"] is None
