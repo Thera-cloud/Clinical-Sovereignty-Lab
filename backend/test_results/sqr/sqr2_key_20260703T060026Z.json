@@ -1,0 +1,152 @@
+[
+  {
+    "blind_id": "R001",
+    "config": "LN_FULL",
+    "prompt_id": "T01"
+  },
+  {
+    "blind_id": "R002",
+    "config": "LN_FULL",
+    "prompt_id": "T02"
+  },
+  {
+    "blind_id": "R003",
+    "config": "LN_FULL",
+    "prompt_id": "T03"
+  },
+  {
+    "blind_id": "R004",
+    "config": "LN_FULL",
+    "prompt_id": "T04"
+  },
+  {
+    "blind_id": "R005",
+    "config": "LN_FULL",
+    "prompt_id": "T05"
+  },
+  {
+    "blind_id": "R006",
+    "config": "LN_FULL",
+    "prompt_id": "T06"
+  },
+  {
+    "blind_id": "R007",
+    "config": "LN_FULL",
+    "prompt_id": "T07"
+  },
+  {
+    "blind_id": "R008",
+    "config": "LN_FULL",
+    "prompt_id": "T08"
+  },
+  {
+    "blind_id": "R009",
+    "config": "LN_FULL",
+    "prompt_id": "T09"
+  },
+  {
+    "blind_id": "R010",
+    "config": "LN_FULL",
+    "prompt_id": "T10"
+  },
+  {
+    "blind_id": "R011",
+    "config": "LN_FULL",
+    "prompt_id": "T11"
+  },
+  {
+    "blind_id": "R012",
+    "config": "LN_FULL",
+    "prompt_id": "T12"
+  },
+  {
+    "blind_id": "R013",
+    "config": "LN_FULL",
+    "prompt_id": "T13"
+  },
+  {
+    "blind_id": "R014",
+    "config": "LN_FULL",
+    "prompt_id": "T14"
+  },
+  {
+    "blind_id": "R015",
+    "config": "LN_FULL",
+    "prompt_id": "T15"
+  },
+  {
+    "blind_id": "R016",
+    "config": "BASELINE_LLM",
+    "prompt_id": "T01"
+  },
+  {
+    "blind_id": "R017",
+    "config": "BASELINE_LLM",
+    "prompt_id": "T02"
+  },
+  {
+    "blind_id": "R018",
+    "config": "BASELINE_LLM",
+    "prompt_id": "T03"
+  },
+  {
+    "blind_id": "R019",
+    "config": "BASELINE_LLM",
+    "prompt_id": "T04"
+  },
+  {
+    "blind_id": "R020",
+    "config": "BASELINE_LLM",
+    "prompt_id": "T05"
+  },
+  {
+    "blind_id": "R021",
+    "config": "BASELINE_LLM",
+    "prompt_id": "T06"
+  },
+  {
+    "blind_id": "R022",
+    "config": "BASELINE_LLM",
+    "prompt_id": "T07"
+  },
+  {
+    "blind_id": "R023",
+    "config": "BASELINE_LLM",
+    "prompt_id": "T08"
+  },
+  {
+    "blind_id": "R024",
+    "config": "BASELINE_LLM",
+    "prompt_id": "T09"
+  },
+  {
+    "blind_id": "R025",
+    "config": "BASELINE_LLM",
+    "prompt_id": "T10"
+  },
+  {
+    "blind_id": "R026",
+    "config": "BASELINE_LLM",
+    "prompt_id": "T11"
+  },
+  {
+    "blind_id": "R027",
+    "config": "BASELINE_LLM",
+    "prompt_id": "T12"
+  },
+  {
+    "blind_id": "R028",
+    "config": "BASELINE_LLM",
+    "prompt_id": "T13"
+  },
+  {
+    "blind_id": "R029",
+    "config": "BASELINE_LLM",
+    "prompt_id": "T14"
+  },
+  {
+    "blind_id": "R030",
+    "config": "BASELINE_LLM",
+    "prompt_id": "T15"
+  }
+]
