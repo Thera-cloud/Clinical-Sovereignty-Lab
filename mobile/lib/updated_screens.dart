@@ -22,9 +22,6 @@ import 'metrics_widgets.dart';
 import 'dojo_iframe_stub.dart' if (dart.library.html) 'dojo_iframe_web.dart';
 import 'dojo_parent_message_stub.dart'
     if (dart.library.html) 'dojo_parent_message_web.dart';
-import 'spline_iframe_stub.dart'
-    if (dart.library.html) 'spline_iframe_web.dart' as spline;
-
 import 'shared_widgets.dart';
 import 'widgets/calendar_views.dart';
 import 'widgets/conversation_log_view.dart';
@@ -1588,6 +1585,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   // Avatar Mode state (Top Tier / Sovereign Circle only)
   bool _avatarModeEnabled = false;
   AvatarVisualState _avatarState = AvatarVisualState();
+  String _lastUserMessage = '';
   AvatarAppearanceConfig _avatarAppearance = AvatarAppearanceConfig();
   VoiceState _voiceState = VoiceState.idle;
   double _mouthOpenness = 0.0;
@@ -2040,12 +2038,12 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         if (_avatarModeEnabled && _canUseAvatarMode()) {
           final serverAvatar = data['avatar_state'];
           if (serverAvatar is Map && serverAvatar['expression'] != null) {
-            _updateAvatarExpression(avatarExpressionFromServer(
+            final expr = _guardMisMirror(avatarExpressionFromServer(
                 serverAvatar['expression'].toString()));
+            _updateAvatarExpression(expr);
           } else {
-            final sentiment =
-                data['sentiment'] ?? data['mood'] ?? _metrics['mood_current'];
-            _updateAvatarFromSentiment(sentiment, reply);
+            // Bridge does not emit sentiment on nate_response — mood_current is Nevedal session state.
+            _updateAvatarFromSentiment(_metrics['mood_current'], reply);
           }
         }
       } else if (data['type'] == 'offer_coach_handoff') {
@@ -2274,6 +2272,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
             _moodHistory = _moodHistory;
           }
         });
+        _refreshAvatarFromLatestContext();
       } else if (data['type'] == 'metrics_data') {
         // Snapshot metrics response (string-formatted percentages)
         setState(() {
@@ -4179,6 +4178,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     }
 
     if (kDebugMode) print(">>> SENDING: $text");
+    _lastUserMessage = text;
     _wsSend(jsonEncode({
       // FIX-H
       "type": "nate_query",
@@ -4550,8 +4550,63 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     setState(() {
       _avatarState = _avatarState.copyWith(expression: expression);
     });
-    if (kIsWeb && _avatarModeEnabled) {
-      spline.sendExpressionToSpline(avatarExpressionWireName(expression));
+  }
+
+  static const _distressCues = [
+    'sad',
+    'exhaust',
+    'tired',
+    'anxious',
+    'scared',
+    'hurt',
+    'alone',
+    'grief',
+    'cry',
+    'overwhelm',
+    'hopeless',
+    'draining',
+    'longing',
+  ];
+
+  bool _userShowsDistress({String? clientMood}) {
+    final mood =
+        (clientMood ?? _metrics['mood_current'] ?? 'neutral').toString().toLowerCase();
+    final userLower = _lastUserMessage.toLowerCase();
+    if (_distressCues.any(userLower.contains)) return true;
+    return mood == 'sad' ||
+        mood == 'down' ||
+        mood == 'anxious' ||
+        mood == 'angry' ||
+        mood == 'worried';
+  }
+
+  /// Never beam / celebrate when the client disclosed distress.
+  AvatarExpression _guardMisMirror(AvatarExpression expression) {
+    if (!_userShowsDistress()) return expression;
+    switch (expression) {
+      case AvatarExpression.proud:
+      case AvatarExpression.encouraging:
+      case AvatarExpression.warm:
+      case AvatarExpression.curious:
+        return AvatarExpression.empathetic;
+      default:
+        return expression;
+    }
+  }
+
+  /// Re-derive avatar expression when Nevedal mood updates after Nate's reply.
+  void _refreshAvatarFromLatestContext() {
+    if (!_avatarModeEnabled || !_canUseAvatarMode()) return;
+    String lastReply = '';
+    for (var i = _chatHistory.length - 1; i >= 0; i--) {
+      final msg = _chatHistory[i];
+      if (msg.startsWith('Little Nate:')) {
+        lastReply = msg.substring('Little Nate:'.length).trim();
+        break;
+      }
+    }
+    if (lastReply.isNotEmpty) {
+      _updateAvatarFromSentiment(_metrics['mood_current'], lastReply);
     }
   }
 
@@ -4599,7 +4654,11 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         textLower.contains('i\'m here')) {
       nateExpression = AvatarExpression.attentive;
     } else if (textLower.contains('i understand') ||
+        textLower.contains('sounds like') ||
         textLower.contains('that sounds') ||
+        textLower.contains('understandable') ||
+        textLower.contains('i sense') ||
+        textLower.contains('deep longing') ||
         textLower.contains('must be') ||
         textLower.contains('i can see') ||
         textLower.contains('that\'s really') ||
@@ -4615,7 +4674,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     }
 
     // --- Step 2: If Nate's message didn't signal clearly, respond to client mood ---
-    if (nateExpression == null) {
+    if (nateExpression == null && _userShowsDistress(clientMood: clientMood)) {
+      nateExpression = AvatarExpression.empathetic;
+    } else if (nateExpression == null) {
       if (sentimentStr.contains('happy') || sentimentStr.contains('joy')) {
         nateExpression = AvatarExpression.proud;
       } else if (sentimentStr.contains('sad') ||
@@ -4659,12 +4720,14 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
           nateExpression = AvatarExpression.warm;
           break;
         default:
-          nateExpression = AvatarExpression.warm;
+          nateExpression = AvatarExpression.neutral;
       }
     }
 
+    nateExpression = _guardMisMirror(nateExpression!);
+
     debugPrint(
-        '[Avatar] ClientMood: $clientMood | Sentiment: $sentimentStr → Expression: ${nateExpression.toString().split('.').last}');
+        '[Avatar] ClientMood: $clientMood | UserDistress: ${_userShowsDistress(clientMood: clientMood)} | MoodMetric: $sentimentStr → Expression: ${nateExpression.toString().split('.').last}');
     _updateAvatarExpression(nateExpression);
   }
 
@@ -5069,14 +5132,11 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                 // BACK LAYER: Visual (GLB 3D avatar or orb)
                 Positioned.fill(
                   child: _avatarModeEnabled && _canUseAvatarMode()
-                      ? (kIsWeb
-                          ? spline.buildSplineAvatarIframe(
-                              '${AppConfig.splineBaseUrl}/index.html')
-                          : GlbAvatarWidget(
-                              expression: _avatarState.expression,
-                              voiceState: _voiceState,
-                              onTap: () => _toggleAvatarMode(false),
-                            ))
+                      ? GlbAvatarWidget(
+                          expression: _avatarState.expression,
+                          voiceState: _voiceState,
+                          onTap: () => _toggleAvatarMode(false),
+                        )
                       : VisualPersona(
                           isTalking: _isTalking,
                           isListening: _audio.isListening),

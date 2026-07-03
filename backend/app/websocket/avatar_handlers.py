@@ -120,6 +120,7 @@ class AvatarHandler:
         # Empathy detection - responding to pain/struggle
         empathy_keywords = [
             'understand', 'hear you', 'that must be', 'sounds difficult',
+            'sounds like', 'i sense', 'longing', 'draining',
             'i can see', 'that\'s hard', 'i\'m sorry', 'must feel',
             'pain', 'struggle', 'hurting'
         ]
@@ -176,6 +177,19 @@ class AvatarHandler:
             if expression == 'WARM':
                 expression = 'EMPATHETIC'
                 gesture = 'HAND_ON_HEART'
+
+        # Mis-mirror guard — never celebrate or idle-warm at disclosed distress
+        user_distress = any(
+            kw in user_lower
+            for kw in [
+                'sad', 'exhaust', 'tired', 'anxious', 'scared', 'hurt', 'alone',
+                'grief', 'cry', 'overwhelm', 'hopeless', 'draining', 'longing',
+            ]
+        )
+        if user_distress and expression in ('WARM', 'PROUD', 'ENCOURAGING', 'CURIOUS'):
+            expression = 'EMPATHETIC'
+            gesture = 'HAND_ON_HEART'
+            body_position = 'ATTENTIVE_LEAN'
         
         # Override based on therapeutic mode if available
         if therapeutic_mode:

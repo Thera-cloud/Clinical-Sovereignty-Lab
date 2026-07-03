@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Block Spline export analytics (hooks.spline.design); allow Draco decoder on gstatic -->
+    <meta http-equiv="Content-Security-Policy" content="connect-src 'self' https://www.gstatic.com;" />
     <title>Little Nate Avatar</title>
     <style>
       body {
@@ -34,9 +36,9 @@
       let variableMap = {};
       let vcHandler = null;
       
-      function setAvatarState(expression) {
+      function setAvatarState(expression, force) {
         if (!splineApp) return;
-        if (expression === currentExpression) return;
+        if (!force && expression === currentExpression) return;
         
         const varKey = 'to_' + expression;
         const varObj = variableMap[varKey];
@@ -86,7 +88,8 @@
       
       window.addEventListener('message', (event) => {
         if (event.data && event.data.type === 'setExpression') {
-          setAvatarState(event.data.expression);
+          console.log('[SplineAvatar] setExpression:', event.data.expression);
+          setAvatarState(event.data.expression, event.data.force === true);
         }
       });
       
@@ -102,13 +105,13 @@
           for (const v of dataVars) {
             const name = v.data ? v.data.name : null;
             const textValue = v.data && v.data.value ? v.data.value.textValue : null;
-            
+            const entry = { name: name, id: v.id, raw: v };
+
+            if (name) {
+              variableMap[name] = entry;
+            }
             if (textValue) {
-              variableMap[textValue] = {
-                name: name,
-                id: v.id,
-                raw: v,
-              };
+              variableMap[textValue] = entry;
             }
             
             if (name && splineApp._variablesCache instanceof Map) {
@@ -117,8 +120,10 @@
           }
         }
         
+        console.log('[SplineAvatar] Ready — expression keys:', Object.keys(variableMap).filter(k => k.startsWith('to_')).sort());
+
         const em = app._eventManager;
-        if (em && em.handlers) {
+        if (em && em.handlers && em.handlers.VariableChange) {
           vcHandler = em.handlers.VariableChange;
         }
         

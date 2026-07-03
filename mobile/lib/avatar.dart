@@ -1699,7 +1699,7 @@ bool canUseAvatarMode(Map<String, dynamic> userProfile) {
 /// 3 unique GLB models mapped therapeutically:
 ///   Model A (neutral)   — baseline, resting, attentive, thoughtful
 ///   Model B (empathetic) — warm, soft, calming, validating, curious
-///   Model C (intense)    — proud, encouraging, sad, frustrated, mirroring strong emotion
+///   Model C (intense)    — proud, encouraging, frustrated (strong positive/activation)
 const String _glbNeutral   = 'mininate%20neutral.glb';
 const String _glbSoft      = 'mininate%20empathetic.glb';
 const String _glbIntense   = 'mininate%20mad.glb';
@@ -1750,7 +1750,7 @@ const Map<AvatarExpression, String> _expressionToGlb = {
   AvatarExpression.curious:     _glbSoft,
   AvatarExpression.encouraging: _glbIntense,
   AvatarExpression.proud:       _glbIntense,
-  AvatarExpression.sad:         _glbIntense,
+  AvatarExpression.sad:         _glbSoft,
   AvatarExpression.frustrated:  _glbIntense,
 };
 
