@@ -78,6 +78,9 @@ BASELINE_FROZEN_MODEL_ENV = "NATE_CHAT_MODEL"
 
 
 def _git_sha() -> str:
+    injected = (os.getenv("GIT_SHA") or os.getenv("SQR_GIT_SHA") or "").strip()
+    if injected:
+        return injected[:12]
     try:
         import subprocess
 
