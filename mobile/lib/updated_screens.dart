@@ -1584,6 +1584,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
 
   // Avatar Mode state (Top Tier / Sovereign Circle only)
   bool _avatarModeEnabled = false;
+  /// When Avatar Mode is on, drive the GLB from Nevedal client mood (mood pill).
+  bool _avatarClientMoodMirror = true;
   AvatarVisualState _avatarState = AvatarVisualState();
   /// When true, metrics_update must not overwrite server avatar_state for this turn.
   bool _preferServerAvatar = false;
@@ -2036,22 +2038,26 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
           _scheduleTtsOncePerTurn(turnId, reply, true);
         }
 
-        // Update avatar expression — server avatar_state preferred, sentiment fallback
+        // Update avatar — client-mood mirror (default) or server/heuristic fallback
         if (_avatarModeEnabled && _canUseAvatarMode()) {
-          final serverAvatar = data['avatar_state'];
-          if (serverAvatar is Map && serverAvatar['expression'] != null) {
-            final expr = _guardMisMirror(avatarExpressionFromServer(
-                serverAvatar['expression'].toString()));
-            _preferServerAvatar = true;
-            if (kDebugMode) {
-              debugPrint(
-                  '[Avatar] Server avatar_state: ${serverAvatar['expression']} → $expr');
-            }
-            _updateAvatarExpression(expr);
-          } else {
+          if (_avatarClientMoodMirror) {
             _preferServerAvatar = false;
-            // Bridge does not emit sentiment on nate_response — mood_current is Nevedal session state.
-            _updateAvatarFromSentiment(_metrics['mood_current'], reply);
+            _syncAvatarToClientMood();
+          } else {
+            final serverAvatar = data['avatar_state'];
+            if (serverAvatar is Map && serverAvatar['expression'] != null) {
+              final expr = _guardMisMirror(avatarExpressionFromServer(
+                  serverAvatar['expression'].toString()));
+              _preferServerAvatar = true;
+              if (kDebugMode) {
+                debugPrint(
+                    '[Avatar] Server avatar_state: ${serverAvatar['expression']} → $expr');
+              }
+              _updateAvatarExpression(expr);
+            } else {
+              _preferServerAvatar = false;
+              _updateAvatarFromSentiment(_metrics['mood_current'], reply);
+            }
           }
         }
       } else if (data['type'] == 'offer_coach_handoff') {
@@ -3027,6 +3033,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         'mood_trend': profile['mood_trend'] ?? 'stable',
       };
     });
+    if (_avatarModeEnabled && _avatarClientMoodMirror && _canUseAvatarMode()) {
+      _syncAvatarToClientMood();
+    }
   }
 
   double _toDouble(dynamic value, {double fallback = 0.5}) {
@@ -4200,6 +4209,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
       _chatController.clear();
       _scrollToBottom();
     });
+    if (_avatarModeEnabled && _avatarClientMoodMirror && _canUseAvatarMode()) {
+      _syncAvatarToClientMood();
+    }
   }
 
   void _scrollToBottom() {
@@ -4544,13 +4556,64 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     setState(() {
       _avatarModeEnabled = enabled;
       if (enabled) {
+        _avatarClientMoodMirror = true;
+        _preferServerAvatar = false;
         _avatarState = AvatarVisualState(
-          expression: AvatarExpression.neutral,
+          expression: _expressionFromClientMood(
+            (_metrics['mood_current'] ?? 'neutral').toString(),
+          ),
           gesture: AvatarGesture.none,
           environment: AvatarEnvironment.cozyStudy,
         );
       }
     });
+  }
+
+  /// Map Nevedal mood pill / metrics_update mood to a mirrored avatar expression.
+  AvatarExpression _expressionFromClientMood(String mood) {
+    final m = mood.toLowerCase().trim();
+    final userLower = _lastUserMessage.toLowerCase();
+
+    // User text can lead Nevedal mood — mirror disclosed affect immediately.
+    if (_distressCues.any(userLower.contains)) {
+      if (userLower.contains('angry') ||
+          userLower.contains('frustrat') ||
+          m.contains('angry') ||
+          m.contains('frustrat')) {
+        return AvatarExpression.frustrated;
+      }
+      return AvatarExpression.sad;
+    }
+
+    if (m.contains('happy') || m.contains('joy') || m.contains('positive')) {
+      return AvatarExpression.warm;
+    }
+    if (m.contains('sad') || m.contains('down') || m.contains('grief')) {
+      return AvatarExpression.sad;
+    }
+    if (m.contains('anxious') || m.contains('worried') || m.contains('stress')) {
+      return AvatarExpression.calming;
+    }
+    if (m.contains('angry') || m.contains('frustrat')) {
+      return AvatarExpression.frustrated;
+    }
+    if (m.contains('calm') || m.contains('peace')) {
+      return AvatarExpression.warm;
+    }
+    return AvatarExpression.neutral;
+  }
+
+  void _syncAvatarToClientMood() {
+    if (!_avatarModeEnabled || !_canUseAvatarMode() || !_avatarClientMoodMirror) {
+      return;
+    }
+    final mood = (_metrics['mood_current'] ?? 'neutral').toString();
+    final expr = _guardMisMirror(_expressionFromClientMood(mood));
+    if (kDebugMode) {
+      debugPrint(
+          '[Avatar] ClientMoodMirror: $mood → ${expr.toString().split('.').last}');
+    }
+    _updateAvatarExpression(expr);
   }
 
   /// Update avatar expression — GlbAvatarWidget rebuilds via setState
@@ -4592,6 +4655,19 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   /// Never beam / celebrate when the client disclosed distress.
   AvatarExpression _guardMisMirror(AvatarExpression expression) {
     if (!_userShowsDistress()) return expression;
+    if (_avatarClientMoodMirror) {
+      switch (expression) {
+        case AvatarExpression.proud:
+        case AvatarExpression.encouraging:
+        case AvatarExpression.warm:
+        case AvatarExpression.curious:
+          return _expressionFromClientMood(
+            (_metrics['mood_current'] ?? 'neutral').toString(),
+          );
+        default:
+          return expression;
+      }
+    }
     switch (expression) {
       case AvatarExpression.proud:
       case AvatarExpression.encouraging:
@@ -4605,9 +4681,12 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
 
   /// Re-derive avatar expression when Nevedal mood updates after Nate's reply.
   void _refreshAvatarFromLatestContext() {
-    if (!_avatarModeEnabled || !_canUseAvatarMode() || _preferServerAvatar) {
+    if (!_avatarModeEnabled || !_canUseAvatarMode()) return;
+    if (_avatarClientMoodMirror) {
+      _syncAvatarToClientMood();
       return;
     }
+    if (_preferServerAvatar) return;
     String lastReply = '';
     for (var i = _chatHistory.length - 1; i >= 0; i--) {
       final msg = _chatHistory[i];

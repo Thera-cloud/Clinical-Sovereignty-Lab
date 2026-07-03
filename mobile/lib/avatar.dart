@@ -1696,12 +1696,13 @@ bool canUseAvatarMode(Map<String, dynamic> userProfile) {
 // GLB 3D AVATAR WIDGET
 // =============================================================================
 
-/// 3 unique GLB models mapped therapeutically:
-///   Model A (neutral)   — baseline, resting, attentive, thoughtful
-///   Model B (empathetic) — warm, soft, calming, validating, curious
-///   Model C (intense)    — proud, encouraging, frustrated (strong positive/activation)
+/// GLB models — one file per expression name on CDN (re-export when art diverges).
 const String _glbNeutral   = 'mininate%20neutral.glb';
 const String _glbSoft      = 'mininate%20empathetic.glb';
+const String _glbCalming   = 'mininate%20calming.glb';
+const String _glbCurious   = 'mininate%20curious.glb';
+const String _glbSad       = 'mininate%20sad.glb';
+const String _glbProud     = 'mininate%20proud.glb';
 const String _glbIntense   = 'mininate%20mad.glb';
 
 /// Maps server avatar_state strings (SCREAMING_SNAKE) to client enum.
@@ -1745,12 +1746,12 @@ const Map<AvatarExpression, String> _expressionToGlb = {
   AvatarExpression.thoughtful:  _glbNeutral,
   AvatarExpression.warm:        _glbSoft,
   AvatarExpression.empathetic:  _glbSoft,
-  AvatarExpression.calming:     _glbSoft,
+  AvatarExpression.calming:     _glbCalming,
   AvatarExpression.validating:  _glbSoft,
-  AvatarExpression.curious:     _glbSoft,
+  AvatarExpression.curious:     _glbCurious,
   AvatarExpression.encouraging: _glbSoft,
-  AvatarExpression.proud:       _glbSoft,
-  AvatarExpression.sad:         _glbSoft,
+  AvatarExpression.proud:       _glbProud,
+  AvatarExpression.sad:         _glbSad,
   AvatarExpression.frustrated:  _glbIntense,
 };
 
