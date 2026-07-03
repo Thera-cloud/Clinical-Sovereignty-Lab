@@ -1585,6 +1585,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   // Avatar Mode state (Top Tier / Sovereign Circle only)
   bool _avatarModeEnabled = false;
   AvatarVisualState _avatarState = AvatarVisualState();
+  /// When true, metrics_update must not overwrite server avatar_state for this turn.
+  bool _preferServerAvatar = false;
   String _lastUserMessage = '';
   AvatarAppearanceConfig _avatarAppearance = AvatarAppearanceConfig();
   VoiceState _voiceState = VoiceState.idle;
@@ -2040,8 +2042,14 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
           if (serverAvatar is Map && serverAvatar['expression'] != null) {
             final expr = _guardMisMirror(avatarExpressionFromServer(
                 serverAvatar['expression'].toString()));
+            _preferServerAvatar = true;
+            if (kDebugMode) {
+              debugPrint(
+                  '[Avatar] Server avatar_state: ${serverAvatar['expression']} → $expr');
+            }
             _updateAvatarExpression(expr);
           } else {
+            _preferServerAvatar = false;
             // Bridge does not emit sentiment on nate_response — mood_current is Nevedal session state.
             _updateAvatarFromSentiment(_metrics['mood_current'], reply);
           }
@@ -4179,6 +4187,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
 
     if (kDebugMode) print(">>> SENDING: $text");
     _lastUserMessage = text;
+    _preferServerAvatar = false;
     _wsSend(jsonEncode({
       // FIX-H
       "type": "nate_query",
@@ -4596,7 +4605,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
 
   /// Re-derive avatar expression when Nevedal mood updates after Nate's reply.
   void _refreshAvatarFromLatestContext() {
-    if (!_avatarModeEnabled || !_canUseAvatarMode()) return;
+    if (!_avatarModeEnabled || !_canUseAvatarMode() || _preferServerAvatar) {
+      return;
+    }
     String lastReply = '';
     for (var i = _chatHistory.length - 1; i >= 0; i--) {
       final msg = _chatHistory[i];
@@ -4629,9 +4640,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
 
     if (textLower.contains('proud of you') ||
         textLower.contains('great job') ||
-        textLower.contains('wonderful') ||
-        textLower.contains('amazing') ||
-        textLower.contains('incredible') ||
+        textLower.contains('well done') ||
+        textLower.contains('congratulations') ||
+        textLower.contains('you did it') ||
         textLower.contains('that\'s huge')) {
       nateExpression = AvatarExpression.proud;
     } else if (textLower.contains('tell me more') ||
@@ -4678,7 +4689,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
       nateExpression = AvatarExpression.empathetic;
     } else if (nateExpression == null) {
       if (sentimentStr.contains('happy') || sentimentStr.contains('joy')) {
-        nateExpression = AvatarExpression.proud;
+        nateExpression = AvatarExpression.warm;
       } else if (sentimentStr.contains('sad') ||
           sentimentStr.contains('grief')) {
         nateExpression = AvatarExpression.empathetic;

@@ -1748,8 +1748,8 @@ const Map<AvatarExpression, String> _expressionToGlb = {
   AvatarExpression.calming:     _glbSoft,
   AvatarExpression.validating:  _glbSoft,
   AvatarExpression.curious:     _glbSoft,
-  AvatarExpression.encouraging: _glbIntense,
-  AvatarExpression.proud:       _glbIntense,
+  AvatarExpression.encouraging: _glbSoft,
+  AvatarExpression.proud:       _glbSoft,
   AvatarExpression.sad:         _glbSoft,
   AvatarExpression.frustrated:  _glbIntense,
 };
@@ -1851,7 +1851,6 @@ class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
               loading: Loading.eager,
               cameraOrbit: '0deg 80deg 2.5m',
               fieldOfView: '30deg',
-              shadowIntensity: 0.5,
               exposure: 1.0,
               interactionPrompt: InteractionPrompt.none,
             ),

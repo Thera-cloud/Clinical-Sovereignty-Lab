@@ -131,7 +131,7 @@ class AvatarHandler:
             transition_ms = 600
         
         # Encouragement detection - celebrating progress
-        elif any(kw in text for kw in ['great job', 'proud of you', 'amazing', 'wonderful', 'excellent', 'well done', 'congratulations']):
+        elif any(kw in text for kw in ['great job', 'proud of you', 'well done', 'congratulations', 'you did it', 'you made it']):
             expression = 'PROUD'
             gesture = 'THUMBS_UP'
             body_position = 'CELEBRATORY_RAISE'
