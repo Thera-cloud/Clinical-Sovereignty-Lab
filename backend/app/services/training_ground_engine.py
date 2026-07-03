@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from app.services.coaching_boundary_guard import TIER_COPY, evaluate as guard_evaluate
 from app.services.training_ground_chat_context import build_training_ground_context
+from app.services.training_ground_archetype import resolve_propose_defaults
 from app.services.training_ground_part_store import (
     CONSENT_VERSION,
     has_active_consent,
@@ -265,15 +266,21 @@ class TrainingGroundEngine:
             await self._send(ws, {"type": "ilm_error", "message": "part_name_required"})
             return
 
+        category, ifs_role, archetype = resolve_propose_defaults(
+            part_category=data.get("part_category"),
+            ifs_role=data.get("ifs_role"),
+            ilm_archetype_base=data.get("ilm_archetype_base"),
+        )
+
         async with self.db_pool.acquire() as conn:
             result = await insert_ilm_part(
                 conn,
                 username=username,
                 part_name=part_name,
-                part_category=data.get("part_category") or "protector",
+                part_category=category,
                 description=data.get("description"),
-                ilm_archetype_base=data.get("ilm_archetype_base"),
-                ifs_role=data.get("ifs_role"),
+                ilm_archetype_base=archetype,
+                ifs_role=ifs_role,
                 thera_world_template_id=data.get("thera_world_template_id"),
                 activation_score=int(data.get("activation_score") or 0),
                 created_by=username,
@@ -566,7 +573,10 @@ class TrainingGroundEngine:
             )
 
         ctx = await build_training_ground_context(
-            self.db_pool, username, exercise_mode=exercise_mode
+            self.db_pool,
+            username,
+            exercise_mode=exercise_mode,
+            user_text=user_text,
         )
         reply, llm_used = await self._generate_reply(username, user_text, ctx)
         await self._maybe_crystallize(username, user_text, reply)
@@ -601,7 +611,7 @@ class TrainingGroundEngine:
     ) -> tuple:
         fallback = (
             "I hear a part of you speaking. Let's stay with mapping and dialogue — "
-            "what is this part trying to protect?"
+            "what function might this council member serve for you right now?"
         )
         if self._inference_fn:
             try:

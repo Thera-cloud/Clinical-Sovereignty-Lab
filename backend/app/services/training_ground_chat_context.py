@@ -2,23 +2,73 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
-_CATALOG_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "resources"
-    / "training_ground"
-    / "ilm_archetype_catalog.json"
+from app.services.training_ground_archetype import (
+    effective_ifs_role,
+    load_ilm_catalog,
+    seat_for_archetype,
 )
 
+# Mapping-safe domains from the crystal field (no raw clinical depth exercises).
+_TG_RECALL_DOMAINS = frozenset({"coaching", "clinical", "research", "general"})
 
-def _load_catalog() -> Dict[str, Any]:
+
+def _filter_scoped_crystal_recall(raw: str) -> str:
+    """Keep coaching/clinical/research/general crystals + clinical DNA block."""
+    if not raw:
+        return ""
+
+    header = [
+        "[COACHING KNOWLEDGE FIELD — mapping use only]",
+        "Use to teach IFS/parts language and normalize council dialogue.",
+        "Do NOT use for diagnosis, trauma processing, or unburdening.",
+    ]
+    body: List[str] = []
+    in_clinical_dna = False
+
+    for line in raw.split("\n"):
+        text = line.strip()
+        if not text:
+            continue
+        if "CLINICAL DNA" in text and text.endswith(":"):
+            in_clinical_dna = True
+            body.append(line)
+            continue
+        if in_clinical_dna:
+            if text.startswith("- "):
+                body.append(line)
+                continue
+            in_clinical_dna = False
+        if text.startswith("- ["):
+            dom = text.split("[", 1)[1].split("]", 1)[0].strip().lower()
+            if dom in _TG_RECALL_DOMAINS:
+                body.append(line)
+
+    if not body:
+        return ""
+    return "\n".join(header + body)
+
+
+async def _training_ground_crystal_recall(
+    db_pool: Any,
+    username: str,
+    user_text: str,
+) -> str:
+    """Scoped crystal recall for ILM — QUANTUM-CRYSTAL-ARCH."""
     try:
-        return json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
+        from app.websocket.crystal_recall_bridge import recall_crystals_for_context
+
+        raw = await recall_crystals_for_context(
+            db_pool,
+            username,
+            max_results=5,
+            source="training_ground",
+            query_text=user_text or "",
+        )
+        return _filter_scoped_crystal_recall(raw)
     except Exception:
-        return {"seats": [], "language_rule": ""}
+        return ""
 
 
 async def build_training_ground_context(
@@ -26,21 +76,33 @@ async def build_training_ground_context(
     username: str,
     *,
     exercise_mode: Optional[str] = None,
+    user_text: str = "",
 ) -> str:
     if not db_pool or not username:
         return ""
 
-    catalog = _load_catalog()
+    catalog = load_ilm_catalog()
     parts: List[str] = [
         "[TRAINING GROUND — INNER LEADERSHIP MAPPING]",
         "Non-clinical coaching space. Mapping-only IFS (no exile unburdening).",
         catalog.get("language_rule", ""),
+        (
+            "TWO LENSES (do not conflate): "
+            "ILM archetype = coaching metaphor held lightly; "
+            "IFS part_category/ifs_role = coach-approved clinical mapping label."
+        ),
+        (
+            "PURPOSE OF INNER TEAM DIALOGUE (hearing mode): "
+            "Help the client notice what each council member does for them, "
+            "in language their coach approved — not to diagnose or fix."
+        ),
     ]
 
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT part_name, ilm_archetype_base, ifs_role, coaching_status,
+            SELECT part_name, part_category, ilm_archetype_base, ifs_role,
+                   coaching_status, coaching_status_notes,
                    activation_score, thera_world_template_id
               FROM user_parts_registry
              WHERE user_id = $1 AND origin = 'training_ground' AND is_active = TRUE
@@ -61,12 +123,29 @@ async def build_training_ground_context(
         )
 
     if rows:
-        parts.append("COUNCIL MEMBERS:")
+        parts.append("COUNCIL MEMBERS (coach-approved labels are authoritative):")
         for r in rows:
-            parts.append(
-                f"- {r['part_name']} ({r['ilm_archetype_base'] or 'part'}): "
-                f"status={r['coaching_status']}, activation={r['activation_score']}"
+            archetype = r["ilm_archetype_base"] or "part"
+            eff_role = effective_ifs_role(r["part_category"], r["ifs_role"])
+            line = (
+                f"- {r['part_name']}: IFS={eff_role}, category={r['part_category']}, "
+                f"ILM archetype={archetype}, status={r['coaching_status']}, "
+                f"activation={r['activation_score']}"
             )
+            parts.append(line)
+            if r["coaching_status"] == "APPROVED":
+                parts.append(
+                    f"  COACH-APPROVED: Use IFS role '{eff_role}' for {r['part_name']}. "
+                    f"Do NOT relabel as protector/firefighter/exile unless coach set that."
+                )
+                notes = (r["coaching_status_notes"] or "").strip()
+                if notes:
+                    parts.append(f"  COACH NOTES: {notes}")
+                seat = seat_for_archetype(r["ilm_archetype_base"])
+                if seat and seat.get("coaching_copy"):
+                    parts.append(
+                        f"  ARCHETYPE HINT ({archetype}, secondary): {seat['coaching_copy']}"
+                    )
     else:
         parts.append("COUNCIL: (empty — client still forming council)")
 
@@ -93,5 +172,9 @@ async def build_training_ground_context(
 
     if exercise_mode:
         parts.append(f"EXERCISE MODE: {exercise_mode}")
+
+    crystal_block = await _training_ground_crystal_recall(db_pool, username, user_text)
+    if crystal_block:
+        parts.append(crystal_block)
 
     return "\n".join(parts)

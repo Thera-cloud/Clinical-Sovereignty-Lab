@@ -264,7 +264,10 @@ class _VaultAttachmentButtonState extends State<VaultAttachmentButton> {
       ),
     ).then((selected) {
       if (selected != null) {
-        widget.onVaultItemSelected?.call(selected is String ? selected : (selected as Map?)?['id']?.toString());
+        final s = selected is String ? selected : (selected as Map?)?['id']?.toString();
+        if (s != null && s.isNotEmpty) {
+          widget.onVaultItemSelected?.call(s);
+        }
       }
     });
   }

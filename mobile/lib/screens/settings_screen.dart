@@ -2868,7 +2868,12 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                   builder: (_) => VaultBrowserScreen(profile: _profile),
                 )).then((vaultItemId) {
                   if (vaultItemId != null && vaultItemId.isNotEmpty && mounted) {
-                    Navigator.pop(context, {'askNateVault': vaultItemId});
+                    if (vaultItemId.startsWith('[SSE Panel:') ||
+                        vaultItemId.startsWith('[Story Panel:')) {
+                      Navigator.pop(context, {'askNateMessage': vaultItemId});
+                    } else {
+                      Navigator.pop(context, {'askNateVault': vaultItemId});
+                    }
                   }
                 });
               }),

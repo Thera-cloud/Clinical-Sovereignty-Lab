@@ -27,6 +27,8 @@ def _load_module(name: str, rel_path: str):
 cbg = _load_module("coaching_boundary_guard", "app/services/coaching_boundary_guard.py")
 tgps = _load_module("training_ground_part_store", "app/services/training_ground_part_store.py")
 tge_mod = _load_module("training_ground_engine", "app/services/training_ground_engine.py")
+tga = _load_module("training_ground_archetype", "app/services/training_ground_archetype.py")
+tgctx = _load_module("training_ground_chat_context", "app/services/training_ground_chat_context.py")
 
 
 def test_guard_crisis_self_harm():
@@ -53,6 +55,70 @@ def test_guard_hypo_flatten():
 def test_guard_passes_benign():
     r = cbg.evaluate("The Warrior part wants to set a boundary at work.")
     assert r.tripped is False
+
+
+def test_warrior_propose_defaults_manager_not_protector():
+    cat, role, archetype = tga.resolve_propose_defaults(
+        part_category=None,
+        ifs_role=None,
+        ilm_archetype_base="Warrior",
+    )
+    assert cat == "manager"
+    assert role == "manager"
+    assert archetype == "Warrior"
+
+
+@pytest.mark.asyncio
+async def test_build_context_uses_coach_ifs_role():
+    row = {
+        "part_name": "MasterMind",
+        "part_category": "manager",
+        "ilm_archetype_base": "Warrior",
+        "ifs_role": None,
+        "coaching_status": "APPROVED",
+        "coaching_status_notes": "",
+        "activation_score": 0,
+        "thera_world_template_id": None,
+    }
+
+    class _Conn:
+        async def fetch(self, sql, username):
+            if "user_part_relationships" in sql:
+                return []
+            return [row]
+
+    class _Ctx:
+        async def __aenter__(self):
+            return _Conn()
+
+        async def __aexit__(self, *args):
+            return False
+
+    class _Pool:
+        def acquire(self):
+            return _Ctx()
+
+    ctx = await tgctx.build_training_ground_context(_Pool(), "client1", user_text="")
+    assert "COACH-APPROVED" in ctx
+    assert "IFS=manager" in ctx
+    assert "Do NOT relabel as protector" in ctx
+
+
+def test_filter_scoped_crystal_recall_drops_marketing():
+    sample_recall = (
+        "YOUR PERSONAL MEMORIES (from prior sessions):\n"
+        "- [coaching] Inner manager parts set boundaries. (confidence: 0.72)\n"
+        "- [marketing] Post analytics tip. (confidence: 0.80)\n"
+        "GENERAL KNOWLEDGE (validated therapeutic insights):\n"
+        "- [clinical] IFS managers organize daily life to prevent pain. (confidence: 0.88)\n"
+        "CLINICAL DNA (your lived growth lessons):\n"
+        "- Lead with curiosity before interpretation. (confidence: 0.91)\n"
+    )
+    block = tgctx._filter_scoped_crystal_recall(sample_recall)
+    assert "COACHING KNOWLEDGE FIELD" in block
+    assert "[marketing]" not in block
+    assert "CLINICAL DNA" in block
+    assert "IFS managers" in block
 
 
 @pytest.mark.asyncio

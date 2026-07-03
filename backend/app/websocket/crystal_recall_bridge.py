@@ -73,6 +73,30 @@ _deep_recall_cache: dict[str, list] = {}
 _deep_recall_expiry: dict[str, float] = {}
 _DEEP_RECALL_TTL = 300.0  # seconds
 
+# QUANTUM-CRYSTAL-ARCH: Tier 1 enrichment knobs — env-gated, defaults preserve
+# pre-existing behavior exactly (unset env = no change).
+import os as _os
+_RECALL_MAX_ENV = (_os.getenv("BRIDGE_RECALL_MAX_RESULTS", "") or "").strip()
+_USER_SNIPPET = int(_os.getenv("BRIDGE_RECALL_USER_SNIPPET", "300"))
+_GLOBAL_SNIPPET = int(_os.getenv("BRIDGE_RECALL_GLOBAL_SNIPPET", "200"))
+_SYNC_DEEP_RECALL = (_os.getenv("BRIDGE_SYNC_DEEP_RECALL", "") or "").strip().lower() in ("1", "true", "yes", "on")
+_SYNC_DEEP_TIMEOUT_S = float(_os.getenv("BRIDGE_SYNC_DEEP_TIMEOUT_S", "1.8"))
+_VALIDATOR_FILTER_RECALL = (_os.getenv("BRIDGE_VALIDATOR_FILTER_RECALL", "") or "").strip().lower() in ("1", "true", "yes", "on")
+try:
+    from .bridge_enrichment import (
+        is_memory_turn as _enr_is_memory_turn,
+        lexical_rerank_globals as _enr_rerank_globals,
+    )
+except Exception:
+    try:
+        from bridge_enrichment import (  # type: ignore
+            is_memory_turn as _enr_is_memory_turn,
+            lexical_rerank_globals as _enr_rerank_globals,
+        )
+    except Exception:
+        _enr_is_memory_turn = None
+        _enr_rerank_globals = None
+
 
 async def _fast_recall_crystals(conn, user_uuid, query_text: str, max_user: int = 5, max_global: int = 3) -> tuple[list, list, set]:
     """Tier 1: single batched CTE for user crystals + cached globals. Target <500ms."""
@@ -150,10 +174,20 @@ async def _fast_recall_crystals(conn, user_uuid, query_text: str, max_user: int 
         )
         _global_crystal_cache["rows"] = [dict(r) for r in _g_top_all]
         _global_crystal_cache["expires"] = _now + _GLOBAL_CACHE_TTL
-    for r in _global_crystal_cache["rows"]:
-        if r["id"] not in _seen_ids and len(global_crystals) < max_global:
-            global_crystals.append(r)
-            _seen_ids.add(r["id"])
+    # QUANTUM-CRYSTAL-ARCH: Tier 1 — lexical re-rank of the cached global pool
+    # against the current turn (falls back to confidence order when unavailable).
+    if _enr_rerank_globals is not None:
+        try:
+            global_crystals = _enr_rerank_globals(
+                _global_crystal_cache["rows"], query_text, max_global, _seen_ids,
+            )
+        except Exception:
+            global_crystals = []
+    if not global_crystals:
+        for r in _global_crystal_cache["rows"]:
+            if r["id"] not in _seen_ids and len(global_crystals) < max_global:
+                global_crystals.append(r)
+                _seen_ids.add(r["id"])
 
     _elapsed = (_t.monotonic() - _t0) * 1000
     logger.info("[CRYSTAL FAST] user_cte: %.1fms, total: %.1fms (%d user + %d global)",
@@ -310,6 +344,12 @@ async def recall_crystals_for_context(
 ) -> str:
     if not db_pool or not hardware_id:
         return ""
+    # QUANTUM-CRYSTAL-ARCH: Tier 1 — env override widens recall breadth
+    if _RECALL_MAX_ENV:
+        try:
+            max_results = max(max_results, int(_RECALL_MAX_ENV))
+        except ValueError:
+            pass
     try:
         async with db_pool.acquire() as conn:
             user_uuid = await conn.fetchval(
@@ -325,6 +365,22 @@ async def recall_crystals_for_context(
             )
 
         deep_cache = _get_deep_cache(user_uuid, hardware_id)
+
+        # QUANTUM-CRYSTAL-ARCH: Tier 1 — on explicit memory turns with a cold
+        # deep cache, run deep recall synchronously (bounded) so the answer
+        # that references shared history has the deep set available NOW.
+        if (
+            _SYNC_DEEP_RECALL and deep_cache is None
+            and _enr_is_memory_turn is not None and _enr_is_memory_turn(query_text)
+        ):
+            try:
+                await asyncio.wait_for(
+                    _deep_recall_crystals(db_pool, hardware_id, user_uuid, query_text, _seen_ids, affect_weight),
+                    timeout=_SYNC_DEEP_TIMEOUT_S,
+                )
+                deep_cache = _get_deep_cache(user_uuid, hardware_id)
+            except Exception:
+                deep_cache = None
         clinical_dna = []
         anticipatory_section = ""
         deep_extras = []
@@ -351,6 +407,22 @@ async def recall_crystals_for_context(
         if not crystals:
             return ""
 
+        # QUANTUM-CRYSTAL-ARCH: Tier 1 — Layer 8 factual-grounding filter at
+        # recall time (flag-gated). Filtered crystals stay in PG, just not here.
+        if _VALIDATOR_FILTER_RECALL:
+            try:
+                from app.services.nate_response_validator import NateResponseValidator as _NRV
+                _clean = _NRV.filter_recalled_crystals([dict(c) for c in crystals])
+                _clean_ids = {c.get("id") for c in _clean if isinstance(c, dict)}
+                user_crystals = [c for c in user_crystals if c["id"] in _clean_ids]
+                clinical_dna = [c for c in clinical_dna if c["id"] in _clean_ids]
+                global_crystals = [c for c in global_crystals if c["id"] in _clean_ids]
+                crystals = user_crystals + clinical_dna + list(global_crystals)
+                if not crystals:
+                    return ""
+            except Exception as _fe:
+                logger.debug("crystal_recall_bridge: validator filter skipped: %s", _fe)
+
         crystal_ids = [c["id"] for c in crystals]
 
         import asyncio as _aio
@@ -365,7 +437,7 @@ async def recall_crystals_for_context(
             )
             for c in user_crystals:
                 conf = float(c["confidence"]) if c["confidence"] else 0
-                text = (c["crystal_text"] or "")[:300]
+                text = (c["crystal_text"] or "")[:_USER_SNIPPET]
                 lines.append(f"- [{c['domain']}] {text} (confidence: {conf:.2f})")
         if clinical_dna:
             lines.append(
@@ -374,7 +446,7 @@ async def recall_crystals_for_context(
             )
             for c in clinical_dna:
                 conf = float(c["confidence"]) if c["confidence"] else 0
-                text = (c["crystal_text"] or "")[:300]
+                text = (c["crystal_text"] or "")[:_USER_SNIPPET]
                 lines.append(f"- {text} (confidence: {conf:.2f})")
         if global_crystals:
             lines.append(
@@ -383,7 +455,7 @@ async def recall_crystals_for_context(
             )
             for c in global_crystals:
                 conf = float(c["confidence"]) if c["confidence"] else 0
-                text = (c["crystal_text"] or "")[:200]
+                text = (c["crystal_text"] or "")[:_GLOBAL_SNIPPET]
                 lines.append(f"- [{c['domain']}] {text} (confidence: {conf:.2f})")
         if anticipatory_section:
             lines.append(anticipatory_section)
@@ -832,6 +904,18 @@ async def crystallize_from_conversation(
 
     content_hash = hashlib.sha256(crystal_text.encode()).hexdigest()
 
+    # QUANTUM-CRYSTAL-ARCH: Tier 4 — optional IFS parts-activity metadata
+    # (flag-gated; None preserves the pre-existing NULL metadata behavior)
+    _ifs_meta = None
+    if (_os.getenv("BRIDGE_IFS_METADATA", "") or "").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            from .bridge_enrichment import ifs_part_hints as _ifs_hints
+            _parts = _ifs_hints(user_text)
+            if _parts:
+                _ifs_meta = json.dumps({"ifs_parts": _parts})
+        except Exception:
+            _ifs_meta = None
+
     try:
         async with db_pool.acquire() as conn:
             user_uuid = await conn.fetchval(
@@ -843,12 +927,12 @@ async def crystallize_from_conversation(
                 """
                 INSERT INTO nate_intelligence_crystals
                     (crystal_text, domain, scope, topics, source_count,
-                     generation, confidence, content_hash, user_id, origin_surface)
-                VALUES ($1, $2, 'user', '{}'::text[], 1, 0, 0.50, $3, $4, $5)
+                     generation, confidence, content_hash, user_id, origin_surface, metadata)
+                VALUES ($1, $2, 'user', '{}'::text[], 1, 0, 0.50, $3, $4, $5, $6::jsonb)
                 ON CONFLICT (content_hash) DO NOTHING
                 RETURNING confidence
                 """,
-                crystal_text, matched_domain, content_hash, user_uuid, origin_surface,
+                crystal_text, matched_domain, content_hash, user_uuid, origin_surface, _ifs_meta,
             )
 
         if not ins_row:

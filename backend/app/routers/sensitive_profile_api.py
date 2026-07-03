@@ -2175,6 +2175,8 @@ class PartRegistryPatch(BaseModel):
     part_name: Optional[str] = Field(default=None, min_length=1, max_length=64)
     part_number: Optional[int] = Field(default=None, ge=1, le=999)
     part_category: Optional[str] = Field(default=None, min_length=1, max_length=32)
+    ifs_role: Optional[str] = Field(default=None, max_length=20)
+    ilm_archetype_base: Optional[str] = Field(default=None, max_length=32)
     addiction_link: Optional[str] = Field(default=None, max_length=32)
     description: Optional[str] = Field(default=None, max_length=1000)
     protected_exile_part_id: Optional[int] = Field(default=None)
@@ -2305,8 +2307,8 @@ async def update_part(
         raise HTTPException(422, detail={"reason": "no_fields_to_update"})
 
     allowed = {
-        "part_name", "part_number", "part_category", "addiction_link",
-        "description", "protected_exile_part_id",
+        "part_name", "part_number", "part_category", "ifs_role", "ilm_archetype_base",
+        "addiction_link", "description", "protected_exile_part_id",
         "coaching_status", "coaching_status_notes",
     }
     sets = []

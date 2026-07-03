@@ -84,24 +84,138 @@ class _ClientPartsRegistryScreenState extends State<ClientPartsRegistryScreen> {
   }
 
   Future<void> _patchCoachingStatus(Map<String, dynamic> part, String status) async {
-    final id = part['id'];
-    if (id == null) return;
+    if (status == 'APPROVED' &&
+        (part['origin']?.toString() ?? '') == 'training_ground') {
+      final approved = await _approveTrainingGroundPartDialog(part);
+      if (approved != true) return;
+      return;
+    }
+    await _patchPartFields(part['id'], {'coaching_status': status});
+  }
+
+  Future<bool?> _approveTrainingGroundPartDialog(Map<String, dynamic> part) async {
+    final notesCtl = TextEditingController(
+      text: part['coaching_status_notes']?.toString() ?? '',
+    );
+    String category = part['part_category']?.toString() ?? 'manager';
+    String ifsRole = part['ifs_role']?.toString() ?? category;
+    if (ifsRole.isEmpty) ifsRole = category;
+
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: const Color(0xFF111111),
+          title: Text(
+            'Approve ${part['part_name']}',
+            style: const TextStyle(color: Color(0xFFC9A962)),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'ILM archetype: ${part['ilm_archetype_base'] ?? '—'} '
+                  '(coaching metaphor — confirm IFS mapping for Little Nate).',
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: category,
+                  dropdownColor: const Color(0xFF111111),
+                  decoration: const InputDecoration(labelText: 'IFS part category'),
+                  items: const [
+                    'manager',
+                    'firefighter',
+                    'protector',
+                    'exile',
+                    'self_energy',
+                    'inner_critic',
+                    'other',
+                  ]
+                      .map((k) => DropdownMenuItem(value: k, child: Text(k)))
+                      .toList(),
+                  onChanged: (v) => setLocal(() {
+                    category = v ?? category;
+                    if (ifsRole.isEmpty || ifsRole == part['part_category']) {
+                      ifsRole = category;
+                    }
+                  }),
+                ),
+                DropdownButtonFormField<String>(
+                  value: ifsRole,
+                  dropdownColor: const Color(0xFF111111),
+                  decoration: const InputDecoration(labelText: 'IFS role (dialogue label)'),
+                  items: const [
+                    'manager',
+                    'firefighter',
+                    'protector',
+                    'exile',
+                    'self_energy',
+                  ]
+                      .map((k) => DropdownMenuItem(value: k, child: Text(k)))
+                      .toList(),
+                  onChanged: (v) => setLocal(() => ifsRole = v ?? ifsRole),
+                ),
+                TextField(
+                  controller: notesCtl,
+                  maxLines: 3,
+                  style: const TextStyle(color: Colors.white70),
+                  decoration: const InputDecoration(
+                    labelText: 'Coach notes for Training Ground (optional)',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final id = part['id'];
+                final ok = await _patchPartFields(id, {
+                  'coaching_status': 'APPROVED',
+                  'part_category': category,
+                  'ifs_role': ifsRole,
+                  'coaching_status_notes': notesCtl.text.trim().isEmpty
+                      ? null
+                      : notesCtl.text.trim(),
+                });
+                if (ctx.mounted) Navigator.pop(ctx, ok);
+              },
+              child: const Text('Approve'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<bool> _patchPartFields(dynamic id, Map<String, dynamic> fields) async {
+    if (id == null) return false;
+    final body = Map<String, dynamic>.from(fields)
+      ..removeWhere((_, v) => v == null);
     final uri = Uri.parse(
       '$_base/api/coach/sensitive-profile/${widget.targetUserId}/parts-registry/$id',
     );
     final resp = await http.patch(
       uri,
       headers: _headers,
-      body: jsonEncode({'coaching_status': status}),
+      body: jsonEncode(body),
     );
-    if (!mounted) return;
+    if (!mounted) return resp.statusCode == 200;
     if (resp.statusCode == 200) {
       await _load();
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Status update failed: ${resp.statusCode}')),
-      );
+      return true;
     }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Update failed: ${resp.statusCode}')),
+    );
+    return false;
   }
 
   List<Map<String, dynamic>> get _visibleParts {
@@ -288,8 +402,9 @@ class _ClientPartsRegistryScreenState extends State<ClientPartsRegistryScreen> {
                         child: Padding(
                           padding: EdgeInsets.all(12),
                           child: Text(
-                            'IFS note: parts are named as protective roles, not pathologies. '
-                            'Training Ground parts show coaching_status and origin.',
+                            'IFS note: parts use coach-approved roles (manager, firefighter, exile, etc.). '
+                            'ILM archetypes are coaching metaphors. Training Ground dialogue follows '
+                            'the labels you set on approve.',
                             style: TextStyle(color: Colors.white70),
                           ),
                         ),
@@ -307,7 +422,8 @@ class _ClientPartsRegistryScreenState extends State<ClientPartsRegistryScreen> {
                           style: const TextStyle(color: Color(0xFFC9A962)),
                         ),
                         subtitle: Text(
-                          '${p['part_category']} · #${p['part_number']} · $origin · $status',
+                          '${p['part_category']} · IFS ${p['ifs_role'] ?? p['part_category']} · '
+                          '#${p['part_number']} · $origin · $status',
                           style: TextStyle(
                             color: status == 'PENDING_APPROVAL'
                                 ? Colors.orangeAccent

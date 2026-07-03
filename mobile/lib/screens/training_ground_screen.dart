@@ -163,7 +163,7 @@ class _TrainingGroundScreenState extends State<TrainingGroundScreen> {
     _send({
       'type': 'ilm_propose_member',
       'part_name': name,
-      'part_category': 'protector',
+      // Backend applies ILM catalog defaults (Warrior → manager IFS role).
       'ilm_archetype_base': 'Warrior',
     });
     _partNameController.clear();
@@ -220,6 +220,11 @@ class _TrainingGroundScreenState extends State<TrainingGroundScreen> {
                   labelStyle: TextStyle(color: Color(0xFFC9A962)),
                 ),
               ),
+              const SizedBox(height: 8),
+              const Text(
+                'Name a council member. Your coach confirms its IFS role before dialogue begins.',
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
               TextButton(onPressed: _proposePart, child: const Text('Propose council member')),
               if (_council.isNotEmpty)
                 Expanded(
@@ -232,7 +237,7 @@ class _TrainingGroundScreenState extends State<TrainingGroundScreen> {
                               style: const TextStyle(color: Colors.white),
                             ),
                             subtitle: Text(
-                              '${p['coaching_status']} · ${p['origin'] ?? ''}',
+                              '${p['coaching_status']} · ${p['part_category'] ?? ''} · ${p['ifs_role'] ?? ''} · ${p['origin'] ?? ''}',
                               style: const TextStyle(color: Colors.white54),
                             ),
                           ),
