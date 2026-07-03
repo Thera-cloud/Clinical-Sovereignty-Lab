@@ -77,6 +77,16 @@ except Exception:
         detect_suspicious_activity,
     )
 
+# QUANTUM-CRYSTAL-ARCH: LN Enrichment Tiers 2/3/5 (flag-gated via LN_ENRICHMENT)
+_enrich = None
+try:
+    from . import bridge_enrichment as _enrich
+except Exception:
+    try:
+        import bridge_enrichment as _enrich  # type: ignore
+    except Exception:
+        _enrich = None
+
 try:  # QUANTUM-CRYSTAL-ARCH: timezone resolver imports
     from app.utils.timezone_resolver import build_llm_time_context
     from app.utils.timezone_resolver import is_valid_iana_timezone as _tz_valid
@@ -8862,7 +8872,19 @@ class AzureCortex:
                 print(f">>> [RECONNECT] context error (non-fatal): {_rc_err}")
                 return ""
 
-        relational_context, checkin_context, crystal_context, pg_history_context, intake_context, fsf_context, reconnect_context = await asyncio.gather(
+        async def _fetch_enrichment_addendum():
+            # QUANTUM-CRYSTAL-ARCH — LN Enrichment Tier 2/4: per-turn synthesis directive (flag-gated)
+            if _enrich is None or not _enrich.enrichment_enabled() or _role != "CLIENT":
+                return ""
+            try:
+                _add = await _enrich.build_enrichment_addendum(_cpool, _uname or _hw_id, user_text)
+                _corr = _enrich.pop_correction_directive(uid)
+                return "\n\n".join(p for p in (_add, _corr) if p)
+            except Exception as _en_err:
+                print(f">>> [ENRICH] addendum error (non-fatal): {_en_err}")
+                return ""
+
+        relational_context, checkin_context, crystal_context, pg_history_context, intake_context, fsf_context, reconnect_context, _enrich_addendum = await asyncio.gather(
             _timed("relational", self._get_relational_context(profile)),
             _timed("checkin", self._get_checkin_context(profile)),
             _timed("crystals", recall_crystals_for_context(
@@ -8873,7 +8895,10 @@ class AzureCortex:
             _timed("intake_s1", _fetch_intake_context()),
             _timed("fsf", _fetch_fsf_context()),
             _timed("reconnect", _fetch_reconnect_context()),
+            _timed("enrich", _fetch_enrichment_addendum()),
         )
+        if _enrich_addendum:  # QUANTUM-CRYSTAL-ARCH — Tier 2: fold directive into crystal context
+            crystal_context = f"{crystal_context}\n\n{_enrich_addendum}" if crystal_context else _enrich_addendum
         _live_turn_context = _format_live_turn_context(uid)
         _critical_recall_context = _format_critical_recall_facts(uid)
         _pre_ms = int((_time_ctx.monotonic() - _t_pre) * 1000)
@@ -10302,6 +10327,20 @@ class AzureCortex:
                     _sanitized = _scrub(_sanitized)
                 except Exception:
                     pass
+                # QUANTUM-CRYSTAL-ARCH — LN Enrichment Tier 3: banned-phrase guard (flag-gated).
+                # Surgical replacement; differing text re-sends via the existing path below.
+                _guard_hits = []
+                if _enrich is not None and _role == "CLIENT":
+                    try:
+                        _sanitized, _bg_hits, _guard_hits = _enrich.apply_ln_post_llm_pipeline(
+                            _sanitized, user_text, uid=uid,
+                        )  # QUANTUM-CRYSTAL-ARCH
+                        if _bg_hits:
+                            print(f">>> [BOUNDARY GUARD] {len(_bg_hits)} coaching_boundary hits for {uid}")
+                        if _guard_hits:
+                            print(f">>> [ENRICH GUARD] {len(_guard_hits)} banned-phrase hits for {uid}")
+                    except Exception as _lg_err:
+                        print(f">>> [ENRICH GUARD] error (non-fatal): {_lg_err}")
                 if _sanitized != full_response:
                     print(f">>> [IP BOUNDARY] Sanitized AI response for {_role} user {profile.get('name')}")
                     await self._send(uid, _sanitized, client_context=_ctx, turn_id=_turn_id)
@@ -10480,6 +10519,21 @@ class AzureCortex:
                         user_text, _final_response, uid,
                         provider=_provider_used,
                     ))
+            except Exception:
+                pass
+
+            # QUANTUM-CRYSTAL-ARCH — LN Enrichment Tier 5: per-turn audit row (flag-gated, no PII)
+            try:
+                if _enrich is not None:
+                    import time as _t5_time
+                    _enrich.log_turn_audit(
+                        uid=uid, provider=str(_provider_used or ""),
+                        latency_ms=int((_t5_time.monotonic() - _t_pre) * 1000),
+                        crystal_chars=len(crystal_context or ""),
+                        response_chars=len(_final_response or ""),
+                        guard_hits=len(_guard_hits) if "_guard_hits" in locals() else 0,
+                        enrichment_addendum_chars=len(_enrich_addendum or ""),
+                    )
             except Exception:
                 pass
 

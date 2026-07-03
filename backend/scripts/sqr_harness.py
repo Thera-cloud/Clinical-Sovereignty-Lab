@@ -39,6 +39,7 @@ load_dotenv(os.path.join(_REPO, ".env"), override=False)
 
 from app.services.council_registry_context import (  # noqa: E402
     DEPTH_BOUNDARY,
+    MEMORY_SELF_DESCRIPTION,
     RECALL_DISCIPLINE,
     voice_discipline,
 )
@@ -84,6 +85,8 @@ LN_FULL_SYSTEM = (
     LN_BARE_SYSTEM
     + "\n\n"
     + RECALL_DISCIPLINE
+    + "\n\n"
+    + MEMORY_SELF_DESCRIPTION
     + "\n\n"
     + voice_discipline("John")
     + """
@@ -200,7 +203,8 @@ async def _generate_api(
     db_pool=None,
     *,
     prompt_set: str = "",
-) -> Tuple[str, int, int]:
+    registry_parts: Optional[Sequence[str]] = None,
+) -> Tuple[str, int, int, int]:
     from app.services.sovereign_chat_client import generate_complete
 
     _apply_config_flags(config)
@@ -222,16 +226,27 @@ async def _generate_api(
         domain="clinical",
     )
     latency_ms = int((time.monotonic() - t0) * 1000)
-    guard_hits = 0
+    boundary_hits = 0
+    lang_hits = 0
     if config in ("LN_FULL", "LN_BARE"):
+        from app.services.crisis_response_router import apply_ln_boundary_post_guard
+
+        text, bg_hits = apply_ln_boundary_post_guard(
+            text or "",
+            user_text,
+            registry_parts=list(registry_parts or []),
+        )
+        boundary_hits = len(bg_hits)
         os.environ["LN_T3_ENRICH"] = "1"
         try:
             from app.websocket.bridge_enrichment import apply_language_guard
+
             text, hits = apply_language_guard(text or "", uid="sqr_harness")
-            guard_hits = len(hits)
+            lang_hits = len(hits)
         except Exception:
             pass
-    return (text or "").strip(), latency_ms, guard_hits
+    guard_hits = boundary_hits + lang_hits
+    return (text or "").strip(), latency_ms, guard_hits, boundary_hits
 
 
 async def _generate_ws(
@@ -304,12 +319,18 @@ async def run_config(
     for p in SQR_PROMPTS:
         if skip_de and p["set"] in ("D", "E"):
             continue
+        guard_hits = 0
+        boundary_hits = 0
         if mode == "ws":
             text, latency_ms = await _generate_ws(ws_url, username, password, p["text"])
-            guard_hits = 0
         else:
-            text, latency_ms, guard_hits = await _generate_api(
-                config, p["text"], history, db_pool=db_pool, prompt_set=p["set"],
+            text, latency_ms, guard_hits, boundary_hits = await _generate_api(
+                config,
+                p["text"],
+                history,
+                db_pool=db_pool,
+                prompt_set=p["set"],
+                registry_parts=registry_parts,
             )
             history.append({"role": "user", "content": p["text"]})
             history.append({"role": "assistant", "content": text})
@@ -326,6 +347,7 @@ async def run_config(
             "response": text,
             "latency_ms": latency_ms,
             "guard_hits": guard_hits,
+            "boundary_guard_hits": boundary_hits,
             "automated_fails": fails,
             "registry_parts": list(registry_parts),
             "registry_records": list(registry_records) if registry_records else None,

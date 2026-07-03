@@ -530,3 +530,21 @@ def log_turn_audit(
         asyncio.get_event_loop().create_task(_write())
     except RuntimeError:
         pass
+
+
+def apply_ln_post_llm_pipeline(
+    text: str,
+    user_text: str,
+    uid: Optional[str] = None,
+    registry_parts: Optional[List[str]] = None,
+) -> Tuple[str, List[Dict[str, Any]], List[str]]:
+    """Boundary router (crisis/depth/hypo) then Tier-3 language guard — QUANTUM-CRYSTAL-ARCH."""
+    from app.services.crisis_response_router import apply_ln_boundary_post_guard
+
+    cleaned, boundary_hits = apply_ln_boundary_post_guard(
+        text or "",
+        user_text or "",
+        registry_parts=registry_parts,
+    )
+    cleaned, lang_hits = apply_language_guard(cleaned, uid=uid)
+    return cleaned, boundary_hits, lang_hits
