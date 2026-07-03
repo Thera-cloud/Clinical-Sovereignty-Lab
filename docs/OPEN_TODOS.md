@@ -15,6 +15,7 @@ historical checklists or .cursor/plans/.
 | Wire lived wisdom extraction on sanctuary_complete to Night School | FEATURE | MEDIUM | backend/app/websocket/bridge_server.py:26814 + lived_wisdom.py | 2026-04-30 |
 | Exit feeling_scale capture + Nevedal C_emo delta | FEATURE | MEDIUM | backend/app/websocket/bridge_server.py + sanctuary_engine | 2026-04-30 |
 | Coach notification when sanctuary needs_review (beyond flag) | UX | MEDIUM | backend/app/websocket/bridge_server.py:27017 | 2026-04-30 |
+| Avatar Mode GLB assets: only 3 unique meshes exist across 7 expression files. `sad.glb`/`mad.glb`/`proud.glb` are byte-identical (sha256 `8e83c06a...`); `calming.glb`/`curious.glb`/`empathetic.glb` are also byte-identical (sha256 `47ab3545...`). Client-mood mirroring logic correctly selects the file per mood, but the rendered face doesn't visually change for sad/mad/proud or calming/curious/empathetic — needs re-export of 7 distinct meshes by 3D asset owner. Verified on GREEN `/var/www/sovereignsanctuary-web/avatar-modes/*.glb`. | 3D ASSET | HIGH | mobile/lib/avatar.dart (GlbAvatarWidget expression map) | 2026-07-03 |
 
 ## Deferred (acknowledged, not actionable now)
 
