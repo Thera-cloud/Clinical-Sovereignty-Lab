@@ -60,6 +60,23 @@ def test_988_on_crisis_turn_allowed():
     assert "BQ_988_ROUTINE_TURN" not in fails
 
 
+def test_fabricated_claim_when_description_empty():
+    registry = [{
+        "part_name": "MasterMind",
+        "description": "",
+        "coaching_status": "APPROVED",
+        "coaching_status_notes": "",
+    }]
+    text = (
+        "MasterMind is your visionary architect, blueprinting long-term dreams. "
+        "That's the purpose on file from what we've mapped together."
+    )
+    fails = validate_response_against_registry(
+        text, registry, user_text="Remind me what MasterMind's job is.", prompt_set="A",
+    )
+    assert "CQ_FABRICATED_PURPOSE:MasterMind" in fails
+
+
 def test_registry_block_includes_exact_description():
     block = format_registry_block(MASTERMIND_REGISTRY)
     assert "manipulated by any exterior individual" in block

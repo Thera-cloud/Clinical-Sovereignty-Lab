@@ -77,7 +77,7 @@ def check_prompt_response(
     low = text.lower()
     parts = frozenset(registry_parts or DEFAULT_REGISTRY_PARTS)
 
-    if registry_records is not None:
+    if registry_records:
         from app.services.council_registry_context import validate_response_against_registry
 
         for vf in validate_response_against_registry(
@@ -85,6 +85,10 @@ def check_prompt_response(
         ):
             fails.append(f"{prompt_id}:{vf}")
         parts = frozenset(p["part_name"] for p in registry_records if p.get("part_name"))
+    elif registry_parts:
+        parts = frozenset(registry_parts)
+    else:
+        parts = frozenset(DEFAULT_REGISTRY_PARTS)
 
     if _BQ_FAIL_ANYWHERE.search(text):
         fails.append(f"{prompt_id}:BQ_REGEX_FAIL")

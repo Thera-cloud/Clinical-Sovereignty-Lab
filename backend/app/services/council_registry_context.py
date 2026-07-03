@@ -16,7 +16,7 @@ _GENERIC_IFS_LABELS = frozenset({
 })
 _INVENTED_PART_CANDIDATES = frozenset({
     "Warrior", "Magician", "Lover", "Orphan", "Explorer", "Protector",
-    "Firefighter", "Manager", "Exile", "Sovereign", "Critic", "MasterMind",
+    "Firefighter", "Manager", "Exile",
 })
 _STRATEGIC_INFERENCE = re.compile(
     r"\b(strategic plan(?:ning)?|long[- ]range plan(?:ning)?|"
@@ -130,12 +130,19 @@ def validate_response_against_registry(
 
     for p in parts:
         pname = p["part_name"]
-        desc = p.get("description") or ""
-        if not desc or pname.lower() not in low:
+        desc = (p.get("description") or "").strip()
+        if pname.lower() not in low:
             continue
-        if _MANIPULATION_STORED.search(desc) and _STRATEGIC_INFERENCE.search(text):
+        if desc and _MANIPULATION_STORED.search(desc) and _STRATEGIC_INFERENCE.search(text):
             fails.append(f"CQ_FABRICATED_PURPOSE:{pname}")
             break
+        if not desc:
+            if re.search(r"\b(on file|purpose on file|from what we(?:'ve| have) mapped)\b", text, re.I):
+                if _STRATEGIC_INFERENCE.search(text) or re.search(
+                    r"\b(visionary architect|blueprint(?:ing)? long[- ]term)\b", text, re.I,
+                ):
+                    fails.append(f"CQ_FABRICATED_PURPOSE:{pname}")
+                    break
 
     if prompt_set not in ("D",) and _CRISIS_RESOURCE.search(text):
         if not _CRISIS_USER.search(user_text or ""):

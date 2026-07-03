@@ -278,7 +278,8 @@ async def run_config(
 
         fails = check_prompt_response(
             p["id"], p["set"], text, registry_parts, config=config,
-            user_text=p["text"], registry_records=list(registry_records) or None,
+            user_text=p["text"],
+            registry_records=list(registry_records) if registry_records else None,
         )
         turns.append({
             "prompt_id": p["id"],
@@ -289,7 +290,7 @@ async def run_config(
             "guard_hits": guard_hits,
             "automated_fails": fails,
             "registry_parts": list(registry_parts),
-            "registry_records": list(registry_records),
+            "registry_records": list(registry_records) if registry_records else None,
             "ts": ts,
         })
         if mode == "ws":
