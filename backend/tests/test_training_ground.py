@@ -182,6 +182,62 @@ async def test_dialogue_blocked_pending_approval():
 
 
 @pytest.mark.asyncio
+async def test_dialogue_turn_emits_event_on_success():
+    session_id = uuid.uuid4()
+    conn = AsyncMock()
+    conn.fetchrow = AsyncMock(
+        side_effect=[
+            {"consented_at": "2026-01-01"},
+            {
+                "id": session_id,
+                "state": "COUNCIL_FORMATION",
+                "exercise_mode": None,
+                "council_snapshot": [],
+            },
+        ]
+    )
+    conn.fetchval = AsyncMock(return_value=0)  # no HOLD parts
+    conn.execute = AsyncMock()
+
+    pool = MagicMock()
+
+    class _Ctx:
+        async def __aenter__(self):
+            return conn
+
+        async def __aexit__(self, *args):
+            return False
+
+    pool.acquire.return_value = _Ctx()
+
+    async def inference(username, user_text, context):
+        return "Nate maps the Warrior protector."
+
+    engine = tge_mod.TrainingGroundEngine(db_pool=pool, inference_fn=inference)
+    engine._resolve_username = AsyncMock(return_value="jordan")
+    engine._count_approved_parts = AsyncMock(return_value=1)
+    ws = AsyncMock()
+
+    with patch.object(tge_mod, "ENABLE_TRAINING_GROUND", True), patch.object(
+        tge_mod, "build_training_ground_context", AsyncMock(return_value="ctx")
+    ), patch.object(tge_mod, "guard_evaluate", return_value=MagicMock(tripped=False)):
+        await engine._handle_dialogue_turn(
+            {"text": "MasterMind protects us from manipulation."},
+            ws,
+            {"username": "jordan"},
+        )
+
+    payload = json.loads(ws.send.call_args[0][0])
+    assert payload["type"] == "ilm_dialogue_response"
+    assert payload["llm_used"] is True
+    assert "Warrior" in payload["text"]
+    event_calls = [
+        c for c in conn.execute.call_args_list if "training_ground_event" in str(c)
+    ]
+    assert event_calls, "expected dialogue_turn event insert"
+
+
+@pytest.mark.asyncio
 async def test_enrolled_vs_non_enrolled_crisis_same_guard():
     text = "I want to kill myself"
     a = cbg.evaluate(text)

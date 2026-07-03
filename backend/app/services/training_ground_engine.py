@@ -456,7 +456,19 @@ class TrainingGroundEngine:
                 return
 
             session = await self._get_or_create_session(conn, username)
+            session_id = session["id"]
             if session["state"] == "FROZEN_SAFETY":
+                await self._emit_event(
+                    conn,
+                    session_id,
+                    username,
+                    "dialogue_blocked",
+                    {
+                        "reason": "frozen_safety",
+                        "exercise_mode": exercise_mode,
+                        "user_preview": user_text[:300],
+                    },
+                )
                 await self._send(
                     ws,
                     {"type": "ilm_dialogue_blocked", "reason": "frozen_safety", "state": "FROZEN_SAFETY"},
@@ -467,7 +479,7 @@ class TrainingGroundEngine:
             if guard.tripped:
                 freeze = await self._freeze_safety(
                     conn,
-                    session_id=session["id"],
+                    session_id=session_id,
                     username=username,
                     user_text=user_text,
                     guard_result=guard,
@@ -476,6 +488,17 @@ class TrainingGroundEngine:
                 return
 
             if await self._count_approved_parts(conn, username) < 1:
+                await self._emit_event(
+                    conn,
+                    session_id,
+                    username,
+                    "dialogue_blocked",
+                    {
+                        "reason": "pending_approval",
+                        "exercise_mode": exercise_mode,
+                        "user_preview": user_text[:300],
+                    },
+                )
                 await self._send(
                     ws,
                     {
@@ -495,24 +518,38 @@ class TrainingGroundEngine:
                 username,
             )
             if hold_count and int(hold_count) > 0:
+                skill_text = (
+                    "Your coach placed a hold on part of your council. "
+                    "Let's practice stabilization skills before deeper dialogue."
+                )
                 await conn.execute(
                     """
                     UPDATE training_ground_session
                        SET state = 'SKILL_INTEGRATION', exercise_mode = $2, updated_at = NOW()
                      WHERE id = $1
                     """,
-                    session["id"],
+                    session_id,
                     exercise_mode,
+                )
+                await self._emit_event(
+                    conn,
+                    session_id,
+                    username,
+                    "dialogue_turn",
+                    {
+                        "outcome": "skill_integration",
+                        "exercise_mode": exercise_mode,
+                        "user_preview": user_text[:300],
+                        "reply_len": len(skill_text),
+                        "llm_used": False,
+                    },
                 )
                 await self._send(
                     ws,
                     {
                         "type": "ilm_dialogue_response",
                         "state": "SKILL_INTEGRATION",
-                        "text": (
-                            "Your coach placed a hold on part of your council. "
-                            "Let's practice stabilization skills before deeper dialogue."
-                        ),
+                        "text": skill_text,
                         "llm_used": False,
                     },
                 )
@@ -524,15 +561,30 @@ class TrainingGroundEngine:
                    SET state = 'TEAM_DIALOGUE', exercise_mode = $2, updated_at = NOW()
                  WHERE id = $1
                 """,
-                session["id"],
+                session_id,
                 exercise_mode,
             )
 
         ctx = await build_training_ground_context(
             self.db_pool, username, exercise_mode=exercise_mode
         )
-        reply = await self._generate_reply(username, user_text, ctx)
+        reply, llm_used = await self._generate_reply(username, user_text, ctx)
         await self._maybe_crystallize(username, user_text, reply)
+
+        async with self.db_pool.acquire() as conn:
+            await self._emit_event(
+                conn,
+                session_id,
+                username,
+                "dialogue_turn",
+                {
+                    "outcome": "team_dialogue",
+                    "exercise_mode": exercise_mode,
+                    "user_preview": user_text[:300],
+                    "reply_len": len(reply),
+                    "llm_used": llm_used,
+                },
+            )
 
         await self._send(
             ws,
@@ -540,20 +592,25 @@ class TrainingGroundEngine:
                 "type": "ilm_dialogue_response",
                 "state": "TEAM_DIALOGUE",
                 "text": reply,
-                "llm_used": bool(self._inference_fn),
+                "llm_used": llm_used,
             },
         )
 
-    async def _generate_reply(self, username: str, user_text: str, context: str) -> str:
-        if self._inference_fn:
-            try:
-                return await self._inference_fn(username, user_text, context)
-            except Exception as exc:
-                _log(f"inference failed: {exc}")
-        return (
+    async def _generate_reply(
+        self, username: str, user_text: str, context: str
+    ) -> tuple:
+        fallback = (
             "I hear a part of you speaking. Let's stay with mapping and dialogue — "
             "what is this part trying to protect?"
         )
+        if self._inference_fn:
+            try:
+                reply = await self._inference_fn(username, user_text, context)
+                if reply and str(reply).strip():
+                    return str(reply).strip(), True
+            except Exception as exc:
+                _log(f"inference failed: {exc}")
+        return fallback, False
 
     async def _maybe_crystallize(self, username: str, user_text: str, reply: str) -> None:
         try:

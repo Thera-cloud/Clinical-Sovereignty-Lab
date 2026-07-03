@@ -31394,7 +31394,14 @@ async def main():
                     TrainingGroundEngine,
                     ENABLE_TRAINING_GROUND,
                 )
-                _training_ground_engine = TrainingGroundEngine(db_pool=db_pool)
+                from app.services.training_ground_inference import (
+                    training_ground_dialogue_inference,
+                )
+                # QUANTUM-CRYSTAL-ARCH — ILM dialogue uses sovereign inference + prompt governance
+                _training_ground_engine = TrainingGroundEngine(
+                    db_pool=db_pool,
+                    inference_fn=training_ground_dialogue_inference,
+                )
                 print(f"[*] TrainingGroundEngine initialized (ENABLE_TRAINING_GROUND={ENABLE_TRAINING_GROUND})")
             except Exception as _tg_init_err:
                 print(f"[!] TrainingGroundEngine init failed: {_tg_init_err}")

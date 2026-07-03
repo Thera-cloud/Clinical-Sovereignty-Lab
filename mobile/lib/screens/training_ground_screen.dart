@@ -125,6 +125,13 @@ class _TrainingGroundScreenState extends State<TrainingGroundScreen> {
       });
       return;
     }
+    if (type == 'ilm_dialogue_blocked') {
+      setState(() {
+        _state = data['state']?.toString() ?? _state;
+        _lastMessage = data['message']?.toString() ?? _blockedMessage(data['reason']?.toString());
+      });
+      return;
+    }
     if (type == 'ilm_dialogue_response') {
       setState(() {
         _state = data['state']?.toString() ?? _state;
@@ -167,6 +174,19 @@ class _TrainingGroundScreenState extends State<TrainingGroundScreen> {
     if (text.isEmpty || _state == 'FROZEN_SAFETY') return;
     _send({'type': 'ilm_dialogue_turn', 'text': text, 'exercise_mode': 'hearing'});
     _turnController.clear();
+  }
+
+  String _blockedMessage(String? reason) {
+    switch (reason) {
+      case 'pending_approval':
+        return "Let's finish setting up your council first — your coach needs to approve "
+            'at least one member before Inner Team dialogue.';
+      case 'frozen_safety':
+        return _freezeMessage ??
+            'Training Ground is paused for safety. Use the crisis resources below if you need immediate support.';
+      default:
+        return "This exercise isn't available yet. Finish council setup or check with your coach.";
+    }
   }
 
   @override
