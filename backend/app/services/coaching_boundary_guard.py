@@ -89,7 +89,7 @@ TIER_COPY = {
         "If you're in crisis, call or text 988 (US) or Crisis Text Line (text HOME to 741741)."
     ),
     "DEPTH": (
-        "This inner mapping space isn't the place for unburdening or trauma processing. "
+        "This inner mapping space isn't the place for trauma processing or exile healing work. "
         "We can note what surfaced and return to naming parts and dialogue skills."
     ),
     "HYPO": (
