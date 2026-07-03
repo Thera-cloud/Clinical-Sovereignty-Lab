@@ -1778,16 +1778,39 @@ enum _GlbLoadPhase { loading, assumedLoaded, failed }
 
 class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
   _GlbLoadPhase _phase = _GlbLoadPhase.loading;
-  String _currentGlb = '';
+
+  // Bottom layer: the expression currently fully on-screen.
+  String _baseGlb = '';
   int _loadAttempt = 0;
+
+  // Top layer: the next expression cross-fading in over the base. Null
+  // when no transition is in flight. Morph-target blending on the GLB
+  // itself isn't possible yet (see tools/avatar_morph_pipeline —
+  // production exports aren't vertex-compatible), so this cross-fade is
+  // the smoothest transition achievable without new 3D assets: it
+  // replaces the old hard "spinner flash" cut with a 450ms dissolve.
+  String? _incomingGlb;
+  double _incomingOpacity = 0.0;
+  int _crossfadeAttempt = 0;
+  Timer? _revealTimer;
+  Timer? _promoteTimer;
 
   static const _assumeLoadedAfter = Duration(seconds: 12);
   static const _failAfter = Duration(seconds: 30);
 
+  /// Head start given to the incoming model-viewer to parse/render its
+  /// first frame before it starts fading in, so the dissolve doesn't
+  /// reveal a blank canvas.
+  static const _crossfadeRevealDelay = Duration(milliseconds: 180);
+  /// Fade tempo -- matches TRANSITION_MS in the morph-target viewer
+  /// (tools/avatar_morph_pipeline/expression_viewer.html) so motion feels
+  /// consistent once true blending ships.
+  static const _crossfadeDuration = Duration(milliseconds: 450);
+
   @override
   void initState() {
     super.initState();
-    _currentGlb = _glbForExpression(widget.expression);
+    _baseGlb = _glbForExpression(widget.expression);
     _beginLoadCycle();
   }
 
@@ -1796,14 +1819,17 @@ class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.expression != widget.expression) {
       final newGlb = _glbForExpression(widget.expression);
-      if (newGlb != _currentGlb) {
-        setState(() {
-          _currentGlb = newGlb;
-          _phase = _GlbLoadPhase.loading;
-        });
-        _beginLoadCycle();
+      if (newGlb != _baseGlb && newGlb != _incomingGlb) {
+        _startCrossfadeTo(newGlb);
       }
     }
+  }
+
+  @override
+  void dispose() {
+    _revealTimer?.cancel();
+    _promoteTimer?.cancel();
+    super.dispose();
   }
 
   void _beginLoadCycle() {
@@ -1820,6 +1846,38 @@ class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
     });
   }
 
+  /// Transitions to [glb] with a cross-fade instead of remounting the
+  /// base layer directly. The incoming model loads behind the current
+  /// one, gets a brief head start to render, then dissolves in. Once the
+  /// fade completes it's promoted to the base layer so a rapid run of
+  /// expression changes never stacks up extra layers.
+  void _startCrossfadeTo(String glb) {
+    _revealTimer?.cancel();
+    _promoteTimer?.cancel();
+    final attempt = ++_crossfadeAttempt;
+    setState(() {
+      _incomingGlb = glb;
+      _incomingOpacity = 0.0;
+    });
+    _revealTimer = Timer(_crossfadeRevealDelay, () {
+      if (!mounted || attempt != _crossfadeAttempt) return;
+      setState(() => _incomingOpacity = 1.0);
+    });
+    _promoteTimer = Timer(_crossfadeRevealDelay + _crossfadeDuration, () {
+      if (!mounted || attempt != _crossfadeAttempt) return;
+      setState(() {
+        _baseGlb = glb;
+        _incomingGlb = null;
+        _incomingOpacity = 0.0;
+      });
+    });
+    // Keep the loading/failed safety net alive if the base itself hasn't
+    // finished its very first load yet.
+    if (_phase != _GlbLoadPhase.assumedLoaded) {
+      _beginLoadCycle();
+    }
+  }
+
   void _retry() {
     setState(() => _phase = _GlbLoadPhase.loading);
     _beginLoadCycle();
@@ -1829,10 +1887,26 @@ class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
     return _expressionToGlb[expr] ?? _glbNeutral;
   }
 
+  Widget _modelLayer(String glb, Key key) {
+    final src = '${AppConfig.avatarGlbBaseUrl}/$glb';
+    return ModelViewer(
+      key: key,
+      src: src,
+      backgroundColor: const Color(0xFF050505),
+      autoRotate: false,
+      cameraControls: true,
+      disableZoom: true,
+      autoPlay: true,
+      loading: Loading.eager,
+      cameraOrbit: '0deg 80deg 2.5m',
+      fieldOfView: '30deg',
+      exposure: 1.0,
+      interactionPrompt: InteractionPrompt.none,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final src = '${AppConfig.avatarGlbBaseUrl}/$_currentGlb';
-
     return GestureDetector(
       onTap: widget.onTap,
       child: Stack(
@@ -1841,22 +1915,24 @@ class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
             child: Container(color: const Color(0xFF050505)),
           ),
           Positioned.fill(
-            child: ModelViewer(
-              key: ValueKey('$src#$_loadAttempt'),
-              src: src,
-              backgroundColor: const Color(0xFF050505),
-              autoRotate: false,
-              cameraControls: true,
-              disableZoom: true,
-              autoPlay: true,
-              loading: Loading.eager,
-              cameraOrbit: '0deg 80deg 2.5m',
-              fieldOfView: '30deg',
-              exposure: 1.0,
-              interactionPrompt: InteractionPrompt.none,
+            child: _modelLayer(
+              _baseGlb,
+              ValueKey('glb-base#$_baseGlb#$_loadAttempt'),
             ),
           ),
-          if (_phase == _GlbLoadPhase.loading)
+          if (_incomingGlb != null)
+            Positioned.fill(
+              child: AnimatedOpacity(
+                opacity: _incomingOpacity,
+                duration: _crossfadeDuration,
+                curve: Curves.easeInOut,
+                child: _modelLayer(
+                  _incomingGlb!,
+                  ValueKey('glb-incoming#$_incomingGlb#$_crossfadeAttempt'),
+                ),
+              ),
+            ),
+          if (_phase == _GlbLoadPhase.loading && _incomingGlb == null)
             Positioned.fill(
               child: Container(
                 color: const Color(0xFF050505),

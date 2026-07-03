@@ -1,0 +1,11 @@
+
+=== TOPOLOGY REPORT (base: mininate neutral) ===
+  primitives: 3  total vertices: 340,067
+  ✗ mininate empathetic: geometry_0[0] verts 86115≠86121
+  ✗ mininate sad: geometry_0[0] verts 86115≠86076
+  ✗ mininate proud: geometry_0[0] verts 86115≠86076
+  ✗ mininate curious: geometry_0[0] verts 86115≠86121
+  ✗ mininate calming: geometry_0[0] verts 86115≠86121
+  ✗ mininate mad: geometry_0[0] verts 86115≠86076
+
+RESULT: meshes are NOT vertex-compatible. Morph merge is not possible on these exports — fall back to the Spline seven-state scene with crossfade transitions.

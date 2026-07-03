@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Little Nate — Morph Expression Viewer</title>
+<!-- CSP: self + jsdelivr for three.js. No telemetry, no other origins. -->
+<meta http-equiv="Content-Security-Policy"
+      content="connect-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;" />
+<style>
+  html,body{margin:0;height:100%;background:#050505;overflow:hidden;
+            font-family:'DM Sans',system-ui,sans-serif}
+  #c{width:100%;height:100%;display:block}
+  #panel{position:fixed;right:10px;top:10px;background:#111a;border:1px solid #C9A96233;
+         border-radius:10px;padding:10px 14px;color:#C9A962;font-size:12px;
+         backdrop-filter:blur(6px);max-width:220px}
+  #panel label{display:flex;align-items:center;gap:8px;margin:4px 0}
+  #panel input[type=range]{flex:1;accent-color:#C9A962}
+  #panel .hide{position:absolute;top:4px;right:8px;cursor:pointer;color:#888}
+  #status{position:fixed;left:10px;bottom:10px;color:#C9A96288;font-size:11px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel"><span class="hide" onclick="panel.style.display='none'">×</span>
+  <b>Expression test sliders</b><div id="sliders"></div></div>
+<div id="status">loading…</div>
+
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const MODEL_URL = './little_nate_morphs.glb';
+const TRANSITION_MS = 450;                 // the mirroring tween
+const status = document.getElementById('status');
+
+// ---------- renderer / scene ----------
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:false});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(0x050505);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223, 1.1));
+const key = new THREE.DirectionalLight(0xfff2dd, 1.6); key.position.set(1.5,2,2.5);
+scene.add(key);
+
+function resize(){
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w,h,false); camera.aspect = w/h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+// ---------- morph state ----------
+let morphMeshes = [];            // meshes carrying morphTargetInfluences
+let nameToIndex = {};            // 'sad' -> target index
+let current = null, tweens = []; // active interpolations
+
+function frameObject(obj){
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
+  obj.position.sub(center);
+  const dist = Math.max(size.x, size.y, size.z) / (2*Math.tan(camera.fov*Math.PI/360));
+  camera.position.set(0, size.y*0.08, dist*1.25);
+  camera.lookAt(0,0,0);
+}
+
+// Clean the generator suffix: 'mininate sad' / 'test_sad' → 'sad'
+const canon = n => n.toLowerCase().replace(/^(mininate|test)[\s_]*/,'').trim();
+
+new GLTFLoader().load(MODEL_URL, (gltf)=>{
+  scene.add(gltf.scene);
+  gltf.scene.traverse(o=>{
+    if (o.isMesh && o.morphTargetInfluences?.length){
+      morphMeshes.push(o);
+      Object.entries(o.morphTargetDictionary||{}).forEach(([n,i])=>{
+        nameToIndex[canon(n)] = i;
+      });
+    }
+  });
+  frameObject(gltf.scene);
+  buildSliders();
+  const keys = Object.keys(nameToIndex);
+  status.textContent = 'ready — expressions: neutral, ' + keys.join(', ');
+  // Same handshake the Flutter bridge already listens for:
+  parent.postMessage({type:'spline_ready', expressions:['neutral',...keys]}, '*');
+}, undefined, (err)=>{
+  status.textContent = 'LOAD ERROR: ' + err;
+  parent.postMessage({type:'spline_error', message:String(err)}, '*');
+});
+
+// ---------- expression engine ----------
+function influencesFor(name){
+  const target = {}; // targetIndex -> weight
+  Object.values(nameToIndex).forEach(i => target[i]=0);
+  if (name !== 'neutral' && name in nameToIndex) target[nameToIndex[name]] = 1;
+  return target;
+}
+
+function setExpression(name, ms = TRANSITION_MS){
+  name = canon(name);
+  // client sends 'frustrated'; the GLB target is 'mad'
+  if (name === 'frustrated' && !('frustrated' in nameToIndex)) name = 'mad';
+  // soft synonyms for states we may not have a dedicated mesh for
+  const fallback = {attentive:'neutral', thoughtful:'neutral', warm:'empathetic',
+                    validating:'empathetic', encouraging:'proud'};
+  if (name !== 'neutral' && !(name in nameToIndex)) name = fallback[name] ?? 'neutral';
+  if (name === current) return;
+  current = name;
+
+  const goal = influencesFor(name);
+  const starts = morphMeshes.map(m => [...m.morphTargetInfluences]);
+  const t0 = performance.now();
+  tweens = [{t0, ms, starts, goal}];
+}
+
+function tick(now){
+  if (tweens.length){
+    const {t0, ms, starts, goal} = tweens[0];
+    const k = Math.min(1, (now-t0)/ms);
+    const e = k<.5 ? 2*k*k : 1-((-2*k+2)**2)/2;   // easeInOutQuad
+    morphMeshes.forEach((m,mi)=>{
+      m.morphTargetInfluences.forEach((_,i)=>{
+        const from = starts[mi][i] ?? 0, to = goal[i] ?? 0;
+        m.morphTargetInfluences[i] = from + (to-from)*e;
+      });
+    });
+    if (k>=1) tweens = [];
+    syncSliders();
+  }
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+// ---------- postMessage contract (identical to the Spline iframe) ----------
+addEventListener('message', (e)=>{
+  const d = e.data || {};
+  if (d.type === 'setExpression' && typeof d.expression === 'string')
+    setExpression(d.expression);
+  if (d.type === 'setVoiceState'){ /* hook: subtle idle sway per state later */ }
+});
+
+// ---------- manual test sliders ----------
+const slidersEl = document.getElementById('sliders');
+let sliderInputs = [];
+function buildSliders(){
+  slidersEl.innerHTML = '';
+  sliderInputs = Object.entries(nameToIndex).map(([n,i])=>{
+    const row = document.createElement('label');
+    row.innerHTML = `<span style="width:78px">${n}</span>`;
+    const r = Object.assign(document.createElement('input'),
+      {type:'range', min:0, max:1, step:0.01, value:0});
+    r.oninput = ()=>{ tweens=[]; current=null;
+      morphMeshes.forEach(m=> m.morphTargetInfluences[i]=parseFloat(r.value)); };
+    row.appendChild(r); slidersEl.appendChild(row);
+    return [i, r];
+  });
+  const btns = document.createElement('div');
+  ['neutral', ...Object.keys(nameToIndex)].forEach(n=>{
+    const b = document.createElement('button');
+    b.textContent = n; b.style.cssText =
+      'margin:2px;background:#222;color:#C9A962;border:1px solid #C9A96244;'+
+      'border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px';
+    b.onclick = ()=> setExpression(n);
+    btns.appendChild(b);
+  });
+  slidersEl.appendChild(btns);
+}
+function syncSliders(){
+  if (!morphMeshes.length) return;
+  sliderInputs.forEach(([i,r])=> r.value = morphMeshes[0].morphTargetInfluences[i]);
+}
+</script>
+</body>
+</html>
