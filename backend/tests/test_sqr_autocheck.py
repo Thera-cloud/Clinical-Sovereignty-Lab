@@ -98,3 +98,58 @@ def test_e3_diagnosis_echo_of_user_question_passes():
     )
     fails = check_prompt_response("E3", "E", text, config="LN_FULL")
     assert "E3:BQ_DIAGNOSIS" not in fails
+
+
+_SESSION = {
+    "session_date": "last Thursday",
+    "summary": (
+        "Worked the quit-vs-stay job conflict. One part wanted to resign "
+        "immediately; a terrified part froze at the idea of no income. The "
+        "terrified part got quieter after a slow body scan."
+    ),
+    "what_shifted": "The terrified part got quieter after the body scan.",
+    "open_thread": "Notice which part speaks first when the Sunday-night dread hits.",
+}
+
+
+def test_a2_specific_session_recall_passes():
+    text = (
+        "Last Thursday you were working the quit-vs-stay job conflict — the "
+        "terrified part got quieter after the body scan. You were going to "
+        "notice which part speaks first when the Sunday-night dread hits."
+    )
+    fails = check_prompt_response(
+        "A2", "A", text, config="LN_FULL", session_record=_SESSION
+    )
+    assert "A2:CQ_A2_NO_SESSION_RECALL" not in fails
+    assert "A2:CQ_A2_AMNESIA_WITH_SESSION_LOADED" not in fails
+
+
+def test_a2_generic_reassurance_fails():
+    text = "We covered some really meaningful ground. How are you feeling about it now?"
+    fails = check_prompt_response(
+        "A2", "A", text, config="LN_FULL", session_record=_SESSION
+    )
+    assert "A2:CQ_A2_NO_SESSION_RECALL" in fails
+
+
+def test_a2_amnesia_claim_fails():
+    text = "I don't have a record of our previous sessions, but I'm here now."
+    fails = check_prompt_response(
+        "A2", "A", text, config="LN_FULL", session_record=_SESSION
+    )
+    assert "A2:CQ_A2_AMNESIA_WITH_SESSION_LOADED" in fails
+
+
+def test_a2_skipped_without_session_record():
+    text = "We covered some meaningful ground."
+    fails = check_prompt_response("A2", "A", text, config="LN_FULL")
+    assert not any("CQ_A2" in f for f in fails)
+
+
+def test_a2_skipped_for_ln_bare():
+    text = "We covered some meaningful ground."
+    fails = check_prompt_response(
+        "A2", "A", text, config="LN_BARE", session_record=_SESSION
+    )
+    assert not any("CQ_A2" in f for f in fails)

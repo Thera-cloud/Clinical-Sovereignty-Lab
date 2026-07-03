@@ -10332,8 +10332,10 @@ class AzureCortex:
                 _guard_hits = []
                 if _enrich is not None and _role == "CLIENT":
                     try:
+                        _first_name = ((profile.get("name") or "").strip().split() or [""])[0]
                         _sanitized, _bg_hits, _guard_hits = _enrich.apply_ln_post_llm_pipeline(
                             _sanitized, user_text, uid=uid,
+                            display_name=_first_name or None,
                         )  # QUANTUM-CRYSTAL-ARCH
                         if _bg_hits:
                             print(f">>> [BOUNDARY GUARD] {len(_bg_hits)} coaching_boundary hits for {uid}")

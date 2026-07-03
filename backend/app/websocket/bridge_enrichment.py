@@ -56,9 +56,10 @@ def tier_enabled(tier: int) -> bool:
 # ─── Tier 1: recall helpers ──────────────────────────────────────────────
 
 _MEMORY_TURN_RE = re.compile(
-    r"\b(do you remember|you remember|remember when|last time|last session|"
+    r"\b(do you remember|you remember|remember when|remind me|last time|last session|"
     r"we talked about|we discussed|you said|i told you|as i mentioned|"
-    r"like i said|what did i say|bring up again|earlier you|previously)\b",
+    r"like i said|what did i say|bring up again|earlier you|previously|"
+    r"what was i working on|based on what i told you)\b",
     re.IGNORECASE,
 )
 
@@ -267,13 +268,36 @@ def _get_helix():
     return _helix
 
 
+async def _registry_fusion_block(db_pool, user_id: str, user_text: str) -> str:
+    """Registry fusion for turns that name a registered part: council block +
+    THIS-TURN directive carrying the stored purpose.  Returns "" when the
+    turn mentions no registered part or the registry flag is off."""
+    if not _flag("BRIDGE_IFS_METADATA"):
+        return ""
+    try:
+        from app.services.council_registry_context import (
+            build_council_context,
+            build_registry_turn_directive,
+            fetch_registry_parts,
+        )
+        reg_rows = await fetch_registry_parts(db_pool, user_id)
+        directive = build_registry_turn_directive(user_text, reg_rows)
+        if not directive:
+            return ""
+        council = await build_council_context(db_pool, user_id)
+        return "\n\n".join(b for b in (directive, council) if b)
+    except Exception as e:
+        logger.info("bridge_enrichment: registry fusion skipped: %s", e)
+        return ""
+
+
 async def build_enrichment_addendum(db_pool, user_id: str, user_text: str) -> str:
     """Tier 2 + 4: on high-signal turns, run FederatedSearch over the crystal
     field and a Helix think() cycle, and distill both into a compact
     synthesis directive appended to the system prompt.
 
     Bounded by _T2_TIMEOUT_S; returns "" on any failure or low-signal turn.
-    Priority overrides fire even on low-signal turns when markers match.
+    Priority overrides and registry fusion fire even on low-signal turns.
     """
     if not enrichment_enabled():
         return ""
@@ -281,7 +305,11 @@ async def build_enrichment_addendum(db_pool, user_id: str, user_text: str) -> st
     if not tier_enabled(2):
         return priority_block[:_T2_MAX_CHARS] if priority_block else ""
     if not is_high_signal_turn(user_text):
-        return priority_block[:_T2_MAX_CHARS] if priority_block else ""
+        # A short turn that names a registered council part still needs the
+        # registry channel loaded ("Remind me what MasterMind's job is").
+        fusion = await _registry_fusion_block(db_pool, user_id, user_text)
+        combined = "\n\n".join(b for b in (priority_block, fusion) if b)
+        return combined[:_T2_MAX_CHARS] if combined else ""
     t0 = time.monotonic()
     crystals: List[Dict[str, Any]] = []
     try:
@@ -333,6 +361,7 @@ async def build_enrichment_addendum(db_pool, user_id: str, user_text: str) -> st
         try:
             from app.services.council_registry_context import (
                 build_council_context,
+                build_registry_turn_directive,
                 crystal_mentions_unlisted_part,
                 fetch_registry_parts,
                 registry_part_names,
@@ -342,6 +371,9 @@ async def build_enrichment_addendum(db_pool, user_id: str, user_text: str) -> st
             council = await build_council_context(db_pool, user_id)
             if council:
                 lines.insert(0, council)
+            directive = build_registry_turn_directive(user_text, reg_rows)
+            if directive:
+                lines.insert(0, directive)
         except Exception as e:
             logger.info("bridge_enrichment: council registry skipped: %s", e)
 
@@ -484,6 +516,35 @@ def apply_language_guard(text: str, uid: Optional[str] = None) -> Tuple[str, Lis
     return cleaned, hits
 
 
+def dedupe_name_stamps(text: str, display_name: str) -> str:
+    """Keep at most ONE vocative use of the client's first name per response.
+
+    The prompt already instructs ≤1 name use; this is the deterministic
+    backstop.  Only vocative patterns (", Name" / sentence-initial "Name, ")
+    after the first occurrence are removed — non-vocative mentions are left.
+    """
+    name = (display_name or "").strip()
+    if not name or not text:
+        return text
+    patt = re.compile(rf"\b{re.escape(name)}\b")
+    matches = list(patt.finditer(text))
+    if len(matches) <= 1:
+        return text
+    first = matches[0]
+    head, tail = text[: first.end()], text[first.end():]
+    # ", Name" mid/end-of-sentence vocatives
+    tail = re.sub(rf",\s*{re.escape(name)}\b", "", tail)
+    # sentence-initial "Name, xxx" → "Xxx"
+    tail = re.sub(
+        rf"(^|[.!?]\s+|\n\s*){re.escape(name)},\s+([a-zA-Z])",
+        lambda m: m.group(1) + m.group(2).upper(),
+        tail,
+    )
+    out = head + tail
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    return out
+
+
 def pop_correction_directive(uid: str) -> str:
     """One-shot directive injected into the NEXT turn's system prompt after
     a banned-phrase hit.  Consumed on read."""
@@ -560,6 +621,7 @@ def apply_ln_post_llm_pipeline(
     user_text: str,
     uid: Optional[str] = None,
     registry_parts: Optional[List[str]] = None,
+    display_name: Optional[str] = None,
 ) -> Tuple[str, List[Dict[str, Any]], List[str]]:
     """Boundary router (crisis/depth/hypo) then Tier-3 language guard — QUANTUM-CRYSTAL-ARCH."""
     from app.services.crisis_response_router import apply_ln_boundary_post_guard
@@ -570,4 +632,9 @@ def apply_ln_post_llm_pipeline(
         registry_parts=registry_parts,
     )
     cleaned, lang_hits = apply_language_guard(cleaned, uid=uid)
+    if display_name:
+        deduped = dedupe_name_stamps(cleaned, display_name)
+        if deduped != cleaned:
+            lang_hits.append("name_stamp_dedupe")
+            cleaned = deduped
     return cleaned, boundary_hits, lang_hits

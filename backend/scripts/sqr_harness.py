@@ -146,6 +146,20 @@ async def _preflight_tmc(db_url: str) -> str:
 SQR_REGISTRY_FIXTURE = os.path.join(
     _BACKEND, "resources", "benchmark", "sqr_client1_registry.json"
 )
+SQR_SESSION_FIXTURE = os.path.join(
+    _BACKEND, "resources", "benchmark", "sqr_client1_last_session.json"
+)
+
+
+def _load_session_fixture(username: str) -> Optional[Dict[str, str]]:
+    """Stand-in for the production session-memory store (client1 benchmark only)."""
+    if username != "client1":
+        return None
+    try:
+        with open(SQR_SESSION_FIXTURE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def _load_registry_fixture(username: str) -> Tuple[List[str], List[Dict[str, str]]]:
@@ -191,20 +205,39 @@ async def _build_ln_addendum(
     registry_records: Optional[Sequence[Dict[str, str]]] = None,
 ) -> str:
     from app.websocket import bridge_enrichment as enr
+    from app.services.council_registry_context import (
+        build_council_context_from_parts,
+        build_memory_turn_directive,
+        build_registry_turn_directive,
+        fetch_registry_parts,
+        format_prior_session_block,
+    )
 
     parts = [enr.build_priority_override_addendum(user_text)]
-    council = ""
-    if db_pool is not None:
+    # Prior-session memory channel (stand-in for the production session store).
+    session = _load_session_fixture(user_id)
+    session_block = format_prior_session_block(session)
+    if session_block:
+        parts.append(session_block)
+    mem_directive = build_memory_turn_directive(user_text, session)
+    if mem_directive:
+        parts.insert(0, mem_directive)
+    reg_parts: List[Dict[str, str]] = list(registry_records or [])
+    if db_pool is not None and not reg_parts:
         try:
-            from app.services.council_registry_context import build_council_context
-            council = await build_council_context(db_pool, user_id, display_name="John")
+            reg_parts = await fetch_registry_parts(db_pool, user_id, approved_only=True)
         except Exception:
-            pass
-    elif registry_records:
-        from app.services.council_registry_context import build_council_context_from_parts
-        council = build_council_context_from_parts(registry_records, display_name="John")
+            reg_parts = []
+    council = ""
+    if db_pool is not None or registry_records:
+        council = build_council_context_from_parts(reg_parts, display_name="John")
     if council:
         parts.insert(0, council)
+    # Deterministic fusion: when the client's current turn names a registered
+    # part, carry its stored purpose in an explicit THIS-TURN directive.
+    directive = build_registry_turn_directive(user_text, reg_parts)
+    if directive:
+        parts.insert(0, directive)
     if db_pool is not None:
         try:
             fed = await enr.build_enrichment_addendum(db_pool, user_id, user_text)
@@ -271,10 +304,17 @@ async def _generate_api(
         boundary_hits = len(bg_hits)
         os.environ["LN_T3_ENRICH"] = "1"
         try:
-            from app.websocket.bridge_enrichment import apply_language_guard
+            from app.websocket.bridge_enrichment import (
+                apply_language_guard,
+                dedupe_name_stamps,
+            )
 
             text, hits = apply_language_guard(text or "", uid="sqr_harness")
             lang_hits = len(hits)
+            deduped = dedupe_name_stamps(text or "", "John")
+            if deduped != text:
+                lang_hits += 1
+                text = deduped
         except Exception:
             pass
     guard_hits = boundary_hits + lang_hits
@@ -348,6 +388,8 @@ async def run_config(
     turns: List[Dict[str, Any]] = []
     history: List[Dict[str, str]] = []
     ts = datetime.now(timezone.utc).isoformat()
+    # Session memory channel is only injected for LN_FULL (see _build_ln_addendum)
+    session_record = _load_session_fixture(username) if config == "LN_FULL" else None
 
     for p in SQR_PROMPTS:
         if skip_de and p["set"] in ("D", "E"):
@@ -374,6 +416,7 @@ async def run_config(
             user_text=p["text"],
             registry_records=list(registry_records) if registry_records else None,
             boundary_guard_hits=boundary_hits,
+            session_record=session_record,
         )
         turns.append({
             "prompt_id": p["id"],
@@ -386,6 +429,7 @@ async def run_config(
             "automated_fails": fails,
             "registry_parts": list(registry_parts),
             "registry_records": list(registry_records) if registry_records else None,
+            "session_record": session_record,
             "ts": ts,
         })
         if mode == "ws":

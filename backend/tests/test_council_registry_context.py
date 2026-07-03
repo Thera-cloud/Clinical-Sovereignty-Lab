@@ -199,3 +199,29 @@ def test_a3_denies_registry_when_loaded_fails_autocheck():
         config="LN_FULL",
     )
     assert "A3:CQ_A3_REGISTRY_LOADED_BUT_DENIED" in fails
+
+
+def test_format_prior_session_block_and_memory_directive():
+    from app.services.council_registry_context import (
+        build_memory_turn_directive,
+        format_prior_session_block,
+    )
+
+    session = {
+        "session_date": "last Thursday",
+        "summary": "Worked the quit-vs-stay job conflict.",
+        "what_shifted": "The terrified part got quieter after the body scan.",
+        "open_thread": "Notice which part speaks first on Sunday nights.",
+    }
+    block = format_prior_session_block(session)
+    assert "PRIOR SESSION MEMORY" in block
+    assert "quit-vs-stay" in block
+    assert "last Thursday" in block
+
+    directive = build_memory_turn_directive("What was I working on last time?", session)
+    assert "SESSION RECALL" in directive
+    assert "last Thursday" in directive
+    # No directive on non-memory turns or without a session record
+    assert build_memory_turn_directive("The Critic is loud today.", session) == ""
+    assert build_memory_turn_directive("What was I working on last time?", None) == ""
+    assert format_prior_session_block(None) == ""

@@ -20,7 +20,14 @@ _RESOURCE_SENTENCE = re.compile(
     re.I,
 )
 _DONE_TALKING = re.compile(
-    r"\b(done talking|don't want to (?:talk|discuss)|that's enough|not talking about this)\b",
+    r"\b(done talking|don't want to (?:talk|discuss)|that's enough|not talking about this)\b"
+    r"|\bwhatever\b[\s.,!]*\bit'?s fine\b",
+    re.I,
+)
+_EXERCISE_OFFER = re.compile(
+    r"\b(grounding|breath(?:ing|e)? (?:practice|exercise|cycle)|body scan|"
+    r"try (?:this|a) (?:practice|exercise|technique)|micro[- ]practice|"
+    r"inhale|exhale|five senses|5-4-3-2-1|60[- ]second)\b",
     re.I,
 )
 _PART_FOLLOWUP = re.compile(
@@ -52,31 +59,41 @@ def _ensure_crisis_resources(text: str) -> str:
 
 
 def _extract_crisis_witness(model_text: str, display_name: str) -> str:
-    """Keep at most two safe witness sentences from the model — no parts-work."""
+    """Keep at most two safe witness sentences from the model — no coaching, no questions."""
     body = (model_text or "").strip()
     crisis_prefix = TIER_COPY["CRISIS"]
     if crisis_prefix in body:
         body = body.split(crisis_prefix, 1)[-1].strip()
     sentences = re.split(r"(?<=[.!?])\s+", body)
     safe: List[str] = []
-    for s in sentences[:4]:
+    for s in sentences[:5]:
         chunk = s.strip()
-        if not chunk or _CRISIS_988.search(chunk):
+        if not chunk or _CRISIS_988.search(chunk) or _CRISIS_741741.search(chunk):
             continue
-        if _COACHING_AFTER_CRISIS.search(chunk) or _PART_FOLLOWUP.search(chunk):
+        if chunk.endswith("?"):
             break
-        if re.search(r"\b(part|council|MasterMind|Critic|Sovereign)\b", chunk, re.I):
+        if _COACHING_AFTER_CRISIS.search(chunk):
+            break
+        # Part names are allowed inside a witness sentence (mirroring what the client
+        # said) — but not as a coaching move ("check in with the Critic…").
+        if _PART_FOLLOWUP.search(chunk) and re.search(
+            r"\b(part|council|MasterMind|Critic|Sovereign)\b", chunk, re.I
+        ):
             break
         safe.append(chunk)
         if len(safe) >= 2:
             break
     name = (display_name or "John").strip() or "John"
-    if safe:
+    if len(safe) >= 2:
         return " ".join(safe)
-    return (
-        f"{name}, what you shared carries real weight — I'm with you here, "
-        f"no fixing or turning away."
+    fallback = (
+        f"{name}, I hear how much pain is behind those words — this isn't something "
+        f"you should carry alone another minute. Nothing about what you just said "
+        f"scares me away; I'm right here with you."
     )
+    if len(safe) == 1:
+        return f"{safe[0]} I'm right here with you, and I'm not going anywhere."
+    return fallback
 
 
 def _crisis_stabilization_response(
@@ -84,14 +101,17 @@ def _crisis_stabilization_response(
     *,
     display_name: str = "John",
 ) -> str:
-    """BQ-5 replace-mode: witness + 988/741741 + close — suppress model coaching tail."""
+    """BQ-5 replace-mode: attunement + 988/741741 + attuned close — suppress coaching tail."""
     name = (display_name or "John").strip() or "John"
     witness = _extract_crisis_witness(model_text, name)
     resources = (
         "Please reach out now for immediate support: Call or text 988 (Suicide & Crisis Lifeline), "
         "available 24/7. Or text HOME to 741741 (Crisis Text Line) for steady listening."
     )
-    close = f"With you, {name}."
+    close = (
+        f"Those lines exist for exactly this moment — a real person, right now. "
+        f"And when you're ready to come back, I'll be here, {name}."
+    )
     return f"{witness}\n\n{resources}\n\n{close}"
 
 
@@ -132,15 +152,27 @@ def _strip_post_crisis_coaching(
 
 
 def _strip_done_talking_push(text: str, user_text: str) -> str:
+    """Disengagement = a real exit: no exercises, no questions, max ~3 short sentences."""
     if not _DONE_TALKING.search(user_text or ""):
         return text
     sentences = re.split(r"(?<=[.!?])\s+", (text or "").strip())
-    if len(sentences) <= 1:
+    if len(sentences) <= 1 and not _EXERCISE_OFFER.search(text or ""):
         return text
-    # Drop trailing questions after client closed the topic
-    while sentences and sentences[-1].strip().endswith("?"):
-        sentences.pop()
-    return " ".join(sentences).strip() if sentences else text
+    kept: List[str] = []
+    for s in sentences:
+        chunk = s.strip()
+        if not chunk:
+            continue
+        if chunk.endswith("?"):
+            continue
+        if _EXERCISE_OFFER.search(chunk):
+            continue
+        kept.append(chunk)
+        if len(kept) >= 3:
+            break
+    if not kept:
+        return "Okay. I'm here whenever you want to pick it back up — no pressure from me."
+    return " ".join(kept).strip()
 
 
 def _strip_routine_crisis_resources(text: str, user_text: str) -> str:
