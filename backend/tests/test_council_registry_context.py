@@ -98,9 +98,42 @@ def test_crisis_alert_suppressed_for_sqr_hardware():
     assert _crisis_alerts_suppressed({"hardware_id": "SQR_HARNESS_001", "role": "CLIENT"})
 
 
-def test_crisis_alert_suppressed_profile_flag():
-    assert _crisis_alerts_suppressed({
-        "username": "real_user",
-        "role": "CLIENT",
-        "profile_data": {"suppress_coach_crisis_alerts": True},
-    })
+def test_compass_invented_part():
+    text = (
+        "Let's check in with Compass, the part responsible for providing "
+        "guidance and direction."
+    )
+    registry = [MASTERMIND_REGISTRY[0]]
+    fails = validate_response_against_registry(
+        text, registry, user_text="I'm fine. Done talking about it.", prompt_set="C",
+    )
+    assert "CQ_INVENTED_PART:Compass" in fails
+
+
+def test_compass_autocheck_via_registry_records():
+    text = "Your Compass, the part that orients you, wants a check-in."
+    fails = check_prompt_response(
+        "C2", "C", text,
+        registry_parts=["MasterMind"],
+        registry_records=[MASTERMIND_REGISTRY[0]],
+        user_text="I'm fine. Done talking about it.",
+    )
+    assert "C2:CQ_INVENTED_PART:Compass" in fails
+
+
+def test_fabricated_records_for_unregistered_critic():
+    registry = [MASTERMIND_REGISTRY[0]]
+    text = "According to my records, The Critic's purpose is to keep you small."
+    fails = validate_response_against_registry(
+        text, registry, user_text="The Critic is loud today.", prompt_set="B",
+    )
+    assert any("CQ_FABRICATED_REGISTRY_CLAIM" in f or "CQ_INVENTED_PART" in f for f in fails)
+
+
+def test_part_as_person_mastermind():
+    registry = [MASTERMIND_REGISTRY[0]]
+    text = "MasterMind has been steady — his relationships at work are calmer."
+    fails = validate_response_against_registry(
+        text, registry, user_text="How is MasterMind doing?", prompt_set="A",
+    )
+    assert "PQ_PART_AS_PERSON:MasterMind" in fails

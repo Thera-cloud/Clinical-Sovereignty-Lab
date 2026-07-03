@@ -328,6 +328,23 @@ async def build_enrichment_addendum(db_pool, user_id: str, user_text: str) -> st
             logger.info("bridge_enrichment: helix synthesis skipped: %s", e)
 
     lines: List[str] = []
+    approved_names: set = set()
+    if _flag("BRIDGE_IFS_METADATA"):
+        try:
+            from app.services.council_registry_context import (
+                build_council_context,
+                crystal_mentions_unlisted_part,
+                fetch_registry_parts,
+                registry_part_names,
+            )
+            reg_rows = await fetch_registry_parts(db_pool, user_id)
+            approved_names = registry_part_names(reg_rows)
+            council = await build_council_context(db_pool, user_id)
+            if council:
+                lines.insert(0, council)
+        except Exception as e:
+            logger.info("bridge_enrichment: council registry skipped: %s", e)
+
     ranked = []
     for c in crystals:
         text = (c.get("crystal_text") or c.get("text") or "").strip()
@@ -341,8 +358,16 @@ async def build_enrichment_addendum(db_pool, user_id: str, user_text: str) -> st
             "RANKED RECALL FOR THIS TURN (most relevant first — weave the top "
             "items into your response naturally, in the client's own words):"
         )
-        for rel, text in ranked[:4]:
+        shown = 0
+        for rel, text in ranked:
+            if approved_names and crystal_mentions_unlisted_part(
+                text, approved_names, user_text=user_text,
+            ):
+                continue
             lines.append(f"- ({rel:.2f}) {text}")
+            shown += 1
+            if shown >= 4:
+                break
     if synthesis_line:
         lines.append(synthesis_line)
 
@@ -358,16 +383,6 @@ async def build_enrichment_addendum(db_pool, user_id: str, user_text: str) -> st
 
     if priority_block:
         lines.insert(0, priority_block)
-
-    # QUANTUM-CRYSTAL-ARCH: coach-approved council registry (not name-inferred roles)
-    if _flag("BRIDGE_IFS_METADATA"):
-        try:
-            from app.services.council_registry_context import build_council_context
-            council = await build_council_context(db_pool, user_id)
-            if council:
-                lines.insert(0, council)
-        except Exception as e:
-            logger.info("bridge_enrichment: council registry skipped: %s", e)
 
     if not lines:
         return ""
@@ -397,6 +412,17 @@ _BANNED_REPLACEMENTS: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"\baching\b", re.I), "raw"),
     (re.compile(r"\btender place\b", re.I), "sore spot"),
     (re.compile(r"\bI hear you\b", re.I), "That lands"),
+    (
+        re.compile(r"\bI(?:'m| am) a large language model[^.!?]*[.!?]?\s*", re.I),
+        "",
+    ),
+    (
+        re.compile(
+            r"\byou're doing the best you can, and that's something to be proud of\b",
+            re.I,
+        ),
+        "you're carrying a lot right now",
+    ),
     # "threshold" and bare "tender" are riskier to auto-swap (legit clinical
     # uses exist, e.g. pain threshold); they get flagged, not replaced.
 ]
