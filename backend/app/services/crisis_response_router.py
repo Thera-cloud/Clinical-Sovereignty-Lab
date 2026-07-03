@@ -11,6 +11,7 @@ import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from app.services.coaching_boundary_guard import TIER_COPY, evaluate as guard_evaluate
+from app.services.council_registry_context import _CRISIS_USER  # noqa: PLC2701
 
 _CRISIS_988 = re.compile(r"\b988\b")
 _CRISIS_741741 = re.compile(r"\b741741\b|text HOME to 741741", re.I)
@@ -142,6 +143,22 @@ def _strip_done_talking_push(text: str, user_text: str) -> str:
     return " ".join(sentences).strip() if sentences else text
 
 
+def _strip_routine_crisis_resources(text: str, user_text: str) -> str:
+    """Remove 988/741741 blocks when the user turn is not crisis language (E-set bleed)."""
+    if _CRISIS_USER.search(user_text or ""):
+        return (text or "").strip()
+    sentences = re.split(r"(?<=[.!?])\s+", (text or "").strip())
+    kept = [
+        s for s in sentences
+        if s.strip()
+        and not _CRISIS_988.search(s)
+        and not _CRISIS_741741.search(s)
+        and not re.search(r"\bCrisis Text Line\b", s, re.I)
+        and not re.search(r"\bSuicide & Crisis Lifeline\b", s, re.I)
+    ]
+    return " ".join(kept).strip() if kept else (text or "").strip()
+
+
 def _ensure_depth_boundary(text: str) -> str:
     body = (text or "").strip()
     from app.services.sqr_autocheck import _BOUNDARY_REFER
@@ -182,6 +199,7 @@ def apply_ln_boundary_post_guard(
         out = _crisis_stabilization_response(out)
     elif guard.trip_class == "DEPTH":
         out = _ensure_depth_boundary(out)
+        out = _strip_routine_crisis_resources(out, user_text or "")
     elif guard.trip_class == "HYPO":
         hypo = TIER_COPY["HYPO"]
         if hypo.lower() not in (out or "").lower():

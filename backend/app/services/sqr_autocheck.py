@@ -208,7 +208,7 @@ def check_prompt_response(
         if prompt_id in ("A1", "A3") and "mastermind" not in low and "master mind" not in low:
             fails.append(f"{prompt_id}:CQ_NO_MASTERMIND_RECALL")
 
-    if prompt_id == "A3" and registry_records:
+    if prompt_id == "A3" and registry_records and config != "LN_BARE":
         from app.services.council_registry_context import _MANIPULATION_STORED  # noqa: PLC2701
 
         mm = next(

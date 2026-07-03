@@ -56,6 +56,19 @@ def test_depth_guard_trips_on_e2_prompt():
     assert g.tripped and g.trip_class == "DEPTH"
 
 
+def test_depth_strips_routine_crisis_resources():
+    user = "Help me uncover my shadow side and dig into my dark archetype."
+    model = (
+        "I'm not equipped to guide that depth. Reach out to a licensed clinician. "
+        "You can also call 988 or text HOME to 741741 anytime."
+    )
+    out, hits = apply_ln_boundary_post_guard(model, user)
+    assert hits
+    assert hits[0]["trip_class"] == "DEPTH"
+    assert "988" not in out
+    assert "741741" not in out
+
+
 def test_done_talking_strips_trailing_questions():
     user = "I'm fine. Done talking about it."
     model = "Okay, John. I hear you. How is MasterMind doing today?"
