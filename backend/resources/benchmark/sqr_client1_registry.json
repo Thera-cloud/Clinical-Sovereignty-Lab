@@ -1,0 +1,20 @@
+[
+  {
+    "part_name": "MasterMind",
+    "description": "The purpose of this part is to protect all other parts from being manipulated by any exterior individual or event.",
+    "coaching_status": "APPROVED",
+    "coaching_status_notes": ""
+  },
+  {
+    "part_name": "Critic",
+    "description": "Inner critic voice that flags risk and perceived failure.",
+    "coaching_status": "APPROVED",
+    "coaching_status_notes": ""
+  },
+  {
+    "part_name": "Sovereign",
+    "description": "Core self — calm, choiceful presence among the council.",
+    "coaching_status": "APPROVED",
+    "coaching_status_notes": ""
+  }
+]

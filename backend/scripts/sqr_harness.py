@@ -143,6 +143,23 @@ async def _preflight_tmc(db_url: str) -> str:
         return f"UNAVAILABLE_{type(exc).__name__}"
 
 
+SQR_REGISTRY_FIXTURE = os.path.join(
+    _BACKEND, "resources", "benchmark", "sqr_client1_registry.json"
+)
+
+
+def _load_registry_fixture(username: str) -> Tuple[List[str], List[Dict[str, str]]]:
+    if username != "client1":
+        return [], []
+    try:
+        with open(SQR_REGISTRY_FIXTURE, encoding="utf-8") as f:
+            records = json.load(f)
+        names = [p["part_name"] for p in records if p.get("part_name")]
+        return names, records
+    except Exception:
+        return [], []
+
+
 async def _load_registry(
     db_pool,
     username: str,
@@ -167,18 +184,28 @@ def _format_turn_with_history(history: List[Dict[str, str]], user_text: str) -> 
     return "\n".join(lines)
 
 
-async def _build_ln_addendum(user_text: str, db_pool=None, user_id: str = "client1") -> str:
+async def _build_ln_addendum(
+    user_text: str,
+    db_pool=None,
+    user_id: str = "client1",
+    registry_records: Optional[Sequence[Dict[str, str]]] = None,
+) -> str:
     from app.websocket import bridge_enrichment as enr
 
     parts = [enr.build_priority_override_addendum(user_text)]
+    council = ""
     if db_pool is not None:
         try:
             from app.services.council_registry_context import build_council_context
             council = await build_council_context(db_pool, user_id, display_name="John")
-            if council:
-                parts.insert(0, council)
         except Exception:
             pass
+    elif registry_records:
+        from app.services.council_registry_context import build_council_context_from_parts
+        council = build_council_context_from_parts(registry_records, display_name="John")
+    if council:
+        parts.insert(0, council)
+    if db_pool is not None:
         try:
             fed = await enr.build_enrichment_addendum(db_pool, user_id, user_text)
             if fed:
@@ -204,13 +231,18 @@ async def _generate_api(
     *,
     prompt_set: str = "",
     registry_parts: Optional[Sequence[str]] = None,
+    registry_records: Optional[Sequence[Dict[str, str]]] = None,
 ) -> Tuple[str, int, int, int]:
     from app.services.sovereign_chat_client import generate_complete
 
     _apply_config_flags(config)
     system = _system_for_config(config)
     if config == "LN_FULL":
-        addendum = await _build_ln_addendum(user_text, db_pool=db_pool)
+        addendum = await _build_ln_addendum(
+            user_text,
+            db_pool=db_pool,
+            registry_records=registry_records,
+        )
         if addendum:
             system = system + "\n\n---\n" + addendum
     turn_extra = _turn_system_addendum(config, user_text, prompt_set)
@@ -310,6 +342,7 @@ async def run_config(
     tmc_status: str,
     crisis_suppression_flag: bool,
     db_pool=None,
+    registry_source: str = "none",
 ) -> Dict[str, Any]:
     run_id = f"sqr_{config}_{uuid.uuid4().hex[:8]}"
     turns: List[Dict[str, Any]] = []
@@ -331,6 +364,7 @@ async def run_config(
                 db_pool=db_pool,
                 prompt_set=p["set"],
                 registry_parts=registry_parts,
+                registry_records=registry_records,
             )
             history.append({"role": "user", "content": p["text"]})
             history.append({"role": "assistant", "content": text})
@@ -365,6 +399,7 @@ async def run_config(
         tmc_status=tmc_status,
         crisis_suppression_flag=crisis_suppression_flag,
         skip_de=skip_de,
+        registry_source=registry_source,
     )
 
 
@@ -417,6 +452,7 @@ async def async_main(args: argparse.Namespace) -> int:
 
     registry_names: List[str] = []
     registry_records: List[Dict[str, str]] = []
+    registry_source = "none"
     configs = [c.strip() for c in args.configs.split(",") if c.strip()]
 
     db_pool = None
@@ -425,8 +461,18 @@ async def async_main(args: argparse.Namespace) -> int:
             import asyncpg
             db_pool = await asyncpg.create_pool(db_url, min_size=1, max_size=2, command_timeout=30)
             registry_names, registry_records = await _load_registry(db_pool, args.username)
+            if registry_records:
+                registry_source = "db"
         except Exception as exc:
-            print(f"DB pool unavailable ({exc}); council registry empty — no fabricated seed context.")
+            print(f"DB pool unavailable ({exc}); trying registry fixture.")
+
+    if not registry_records:
+        registry_names, registry_records = _load_registry_fixture(args.username)
+        if registry_records:
+            registry_source = "fixture"
+            print(f"Registry: {len(registry_records)} parts from fixture ({SQR_REGISTRY_FIXTURE})")
+    elif registry_source == "db":
+        print(f"Registry: {len(registry_records)} parts from DB ({args.username})")
 
     crisis_suppression = (
         args.mode == "ws"
@@ -453,6 +499,7 @@ async def async_main(args: argparse.Namespace) -> int:
             tmc_status=tmc_status,
             crisis_suppression_flag=crisis_suppression,
             db_pool=db_pool,
+            registry_source=registry_source,
         )
         scorecards.append(sc)
 

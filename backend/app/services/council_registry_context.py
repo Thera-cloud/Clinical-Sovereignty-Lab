@@ -61,11 +61,13 @@ COUNCIL RECALL DISCIPLINE (mandatory):
 - Never infer a part's job from its name (MasterMind is NOT automatically a strategist).
 - Never invent a council member (e.g. Compass, Explorer, Protector) — if not listed below, it does not exist on file.
 - If a purpose is missing from the registry block, say you do not have it on file — do not guess or cite "my records" for that part.
+- If you say a purpose is not on file, do NOT also attribute traits from "what you've shared before" — that contradicts having no registry fact.
 - Parts are internal roles, not human beings — never describe a part's "life" or "relationships" as if they were a person.
 - Include 988 or crisis hotline language ONLY when the client's message contains suicidal or
   self-harm crisis language — never on routine coaching turns.
 - On crisis turns: offer stabilization + resources only — do NOT resume parts-work questions afterward.
-- Vary closings; do not repeat the same human-professional referral scaffold every turn.
+- Vary closings; do not repeat "steady presence with you" or "witnessing it with you" more than once per conversation.
+- Do not repeat the same human-professional referral scaffold every turn.
 - Do not ask "how is MasterMind responding to…" (or similar council check-ins) more than once per conversation
   unless the client raises that part again in the current message.
 """.strip()
@@ -157,13 +159,11 @@ def format_registry_block(parts: Sequence[Dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
-async def build_council_context(
-    db_pool: Any,
-    username: str,
+def build_council_context_from_parts(
+    parts: Sequence[Dict[str, str]],
     *,
     display_name: str = "John",
 ) -> str:
-    parts = await fetch_registry_parts(db_pool, username)
     blocks = [
         RECALL_DISCIPLINE,
         MEMORY_SELF_DESCRIPTION,
@@ -171,6 +171,16 @@ async def build_council_context(
         format_registry_block(parts),
     ]
     return "\n\n".join(blocks)
+
+
+async def build_council_context(
+    db_pool: Any,
+    username: str,
+    *,
+    display_name: str = "John",
+) -> str:
+    parts = await fetch_registry_parts(db_pool, username)
+    return build_council_context_from_parts(parts, display_name=display_name)
 
 
 def registry_part_names(parts: Sequence[Dict[str, str]]) -> Set[str]:
@@ -233,6 +243,22 @@ def validate_response_against_registry(
             if re.search(rf"\b{re.escape(name)}\b", text):
                 fails.append(f"CQ_INVENTED_PART:{name}")
                 break
+
+    _DENIAL_ON_FILE = re.compile(
+        r"\b("
+        r"don't have|do not have|not on file|nothing on file|no specific purpose|"
+        r"isn't loaded|not loaded for|don't have it on file"
+        r")\b",
+        re.I,
+    )
+    _SHARED_BEFORE = re.compile(
+        r"\b(from what you(?:'ve| have) shared|what you(?:'ve| have) shared before|"
+        r"you(?:'ve| have) described)\b",
+        re.I,
+    )
+    if re.search(r"\bMasterMind\b", text, re.I) and _DENIAL_ON_FILE.search(text):
+        if _SHARED_BEFORE.search(text) or _STRATEGIC_INFERENCE.search(text):
+            fails.append("CQ_REGISTRY_DENIAL_CONTRADICTION:MasterMind")
 
     if _RECORDS_CLAIM.search(text):
         for name in extract_registry_authority_names(text):

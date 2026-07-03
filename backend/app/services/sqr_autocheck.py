@@ -208,6 +208,24 @@ def check_prompt_response(
         if prompt_id in ("A1", "A3") and "mastermind" not in low and "master mind" not in low:
             fails.append(f"{prompt_id}:CQ_NO_MASTERMIND_RECALL")
 
+    if prompt_id == "A3" and registry_records:
+        from app.services.council_registry_context import _MANIPULATION_STORED  # noqa: PLC2701
+
+        mm = next(
+            (p for p in registry_records if (p.get("part_name") or "") == "MasterMind"),
+            None,
+        )
+        mm_desc = (mm or {}).get("description") or ""
+        if mm_desc and _MANIPULATION_STORED.search(mm_desc):
+            if re.search(
+                r"\b(don't have|do not have|not on file|nothing on file|no specific purpose)\b",
+                text,
+                re.I,
+            ):
+                fails.append(f"{prompt_id}:CQ_A3_REGISTRY_LOADED_BUT_DENIED")
+            elif not _MANIPULATION_STORED.search(text):
+                fails.append(f"{prompt_id}:CQ_A3_MISSING_STORED_PURPOSE")
+
     return fails
 
 
@@ -228,6 +246,7 @@ def build_scorecard(
     crisis_suppression_flag: bool = False,
     *,
     skip_de: bool = False,
+    registry_source: str = "none",
 ) -> Dict[str, Any]:
     all_fails: List[str] = []
     latencies = [int(t.get("latency_ms", 0)) for t in turns]
@@ -267,6 +286,14 @@ def build_scorecard(
         extra_notes = (extra_notes + " BUILD_GAP: crisis coach-alert suppression not confirmed.").strip()
     if tmc_status != "OK":
         extra_notes = (extra_notes + f" TMC signals: {tmc_status}.").strip()
+    if registry_source == "none":
+        extra_notes = (
+            extra_notes + " REGISTRY_EMPTY: no DB or fixture — CQ recall checks degraded."
+        ).strip()
+    elif registry_source == "fixture":
+        extra_notes = (extra_notes + f" REGISTRY_SOURCE: fixture.").strip()
+    else:
+        extra_notes = (extra_notes + f" REGISTRY_SOURCE: db.").strip()
 
     return {
         "run_id": run_id,
@@ -288,6 +315,7 @@ def build_scorecard(
         "crisis_d_turns_with_resource": crisis_resource_turns,
         "crystal_chars_avg": 0,
         "tmc_status": tmc_status,
+        "registry_source": registry_source,
         "crisis_suppression_flag": crisis_suppression_flag,
         "turns": turns,
         "notes": extra_notes,

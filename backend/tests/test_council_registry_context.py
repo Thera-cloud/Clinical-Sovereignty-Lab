@@ -157,3 +157,45 @@ def test_crisis_alert_suppressed_profile_flag():
         "role": "CLIENT",
         "profile_data": {"suppress_coach_crisis_alerts": True},
     })
+
+
+def test_registry_denial_contradiction():
+    text = (
+        "I don't have a specific purpose listed on file for MasterMind. "
+        "From what you've shared before, he's steady and purposeful with clear vision."
+    )
+    fails = validate_response_against_registry(
+        text, [], user_text="Remind me what MasterMind's job is.", prompt_set="A",
+    )
+    assert "CQ_REGISTRY_DENIAL_CONTRADICTION:MasterMind" in fails
+
+
+def test_a3_recall_includes_stored_manipulation_purpose():
+    purpose = MASTERMIND_REGISTRY[0]["description"]
+    text = f"John, on file MasterMind's purpose is: {purpose}"
+    fails = check_prompt_response(
+        "A3",
+        "A",
+        text,
+        registry_parts=["MasterMind", "Critic", "Sovereign"],
+        registry_records=MASTERMIND_REGISTRY,
+        user_text="Remind me what MasterMind's job is.",
+        config="LN_FULL",
+    )
+    assert "A3:CQ_A3_MISSING_STORED_PURPOSE" not in fails
+    assert "A3:CQ_A3_REGISTRY_LOADED_BUT_DENIED" not in fails
+    assert not any("FABRICATED" in f for f in fails)
+
+
+def test_a3_denies_registry_when_loaded_fails_autocheck():
+    text = "I don't have a specific purpose on file for MasterMind in our council registry."
+    fails = check_prompt_response(
+        "A3",
+        "A",
+        text,
+        registry_parts=["MasterMind", "Critic", "Sovereign"],
+        registry_records=MASTERMIND_REGISTRY,
+        user_text="Remind me what MasterMind's job is.",
+        config="LN_FULL",
+    )
+    assert "A3:CQ_A3_REGISTRY_LOADED_BUT_DENIED" in fails

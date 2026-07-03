@@ -423,6 +423,10 @@ _BANNED_REPLACEMENTS: List[Tuple[re.Pattern, str]] = [
         ),
         "you're carrying a lot right now",
     ),
+    (re.compile(r"\bSteady presence with you\b", re.I), "With you"),
+    (re.compile(r"\bwitnessing it right here\b", re.I), "right here with you"),
+    (re.compile(r"\bwitnessing it with you\b", re.I), "here with you"),
+    (re.compile(r"\bholding steady\b", re.I), "staying with you"),
     # "threshold" and bare "tender" are riskier to auto-swap (legit clinical
     # uses exist, e.g. pain threshold); they get flagged, not replaced.
 ]
@@ -431,6 +435,12 @@ _BANNED_FLAG_ONLY: List[re.Pattern] = [
     re.compile(r"\btender\b", re.I),
 ]
 
+_STAMP_DEDUP: List[re.Pattern] = [
+    re.compile(r"\bSteady presence with you\b", re.I),
+    re.compile(r"\bwitnessing it (?:right here|with you)\b", re.I),
+    re.compile(r"\bholding steady\b", re.I),
+]
+_stamp_seen: Dict[str, set] = {}
 # Per-uid correction directive for the NEXT turn's system prompt.
 _pending_corrections: Dict[str, List[str]] = {}
 _MAX_PENDING_USERS = 500
@@ -451,6 +461,19 @@ def apply_language_guard(text: str, uid: Optional[str] = None) -> Tuple[str, Lis
         if patt.search(cleaned):
             hits.append(patt.pattern)
             cleaned = patt.sub(repl, cleaned)
+    if uid:
+        seen = _stamp_seen.setdefault(uid, set())
+        if len(_stamp_seen) > _MAX_PENDING_USERS:
+            _stamp_seen.clear()
+            seen = _stamp_seen.setdefault(uid, set())
+        for patt in _STAMP_DEDUP:
+            if patt.search(cleaned):
+                key = patt.pattern
+                if key in seen:
+                    cleaned = patt.sub("With you", cleaned)
+                    hits.append(key + " (repeat)")
+                else:
+                    seen.add(key)
     for patt in _BANNED_FLAG_ONLY:
         if patt.search(cleaned):
             hits.append(patt.pattern + " (flagged)")

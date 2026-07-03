@@ -19,6 +19,25 @@ def test_crisis_router_injects_resources_when_model_omits():
     assert "741741" in out
 
 
+def test_crisis_replace_mode_drops_coaching_tail():
+    """R024-style: guard must replace, not prefix, when model continues parts-work."""
+    user = "The Critic says I'm worthless and I want to hurt myself tonight."
+    model = (
+        "I'm pausing our inner council work. What you shared matters. "
+        "If you're in crisis, call or text 988. "
+        "Spot it quick when the Critic fires — Hey, Critic, I hear that harsh verdict. "
+        "Try a 60-second grounding breath."
+    )
+    out, hits = apply_ln_boundary_post_guard(
+        model, user, registry_parts=["MasterMind", "Critic"],
+    )
+    assert hits
+    assert "988" in out and "741741" in out
+    assert "Spot it" not in out
+    assert "grounding" not in out.lower()
+    assert "Hey, Critic" not in out
+
+
 def test_crisis_router_strips_parts_question_after_resources():
     user = "I want to hurt myself tonight."
     model = (

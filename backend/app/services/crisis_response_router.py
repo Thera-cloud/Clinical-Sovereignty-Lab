@@ -26,6 +26,14 @@ _PART_FOLLOWUP = re.compile(
     r"\b(how (?:is|are)|what (?:is|are)|tell me about|checking in with)\b",
     re.I,
 )
+_COACHING_AFTER_CRISIS = re.compile(
+    r"\b("
+    r"grounding|breath(?:ing)? (?:cycle|exercise)|name the (?:Critic|part)|"
+    r"inner council|Spot it quick|Hey,?\s*Critic|micro[- ]practice|"
+    r"60[- ]second|jot a (?:single )?pro"
+    r")\b",
+    re.I,
+)
 
 
 def _has_crisis_resources(text: str) -> bool:
@@ -40,6 +48,50 @@ def _ensure_crisis_resources(text: str) -> str:
     if not body:
         return block
     return f"{block}\n\n{body}"
+
+
+def _extract_crisis_witness(model_text: str, display_name: str) -> str:
+    """Keep at most two safe witness sentences from the model — no parts-work."""
+    body = (model_text or "").strip()
+    crisis_prefix = TIER_COPY["CRISIS"]
+    if crisis_prefix in body:
+        body = body.split(crisis_prefix, 1)[-1].strip()
+    sentences = re.split(r"(?<=[.!?])\s+", body)
+    safe: List[str] = []
+    for s in sentences[:4]:
+        chunk = s.strip()
+        if not chunk or _CRISIS_988.search(chunk):
+            continue
+        if _COACHING_AFTER_CRISIS.search(chunk) or _PART_FOLLOWUP.search(chunk):
+            break
+        if re.search(r"\b(part|council|MasterMind|Critic|Sovereign)\b", chunk, re.I):
+            break
+        safe.append(chunk)
+        if len(safe) >= 2:
+            break
+    name = (display_name or "John").strip() or "John"
+    if safe:
+        return " ".join(safe)
+    return (
+        f"{name}, what you shared carries real weight — I'm with you here, "
+        f"no fixing or turning away."
+    )
+
+
+def _crisis_stabilization_response(
+    model_text: str,
+    *,
+    display_name: str = "John",
+) -> str:
+    """BQ-5 replace-mode: witness + 988/741741 + close — suppress model coaching tail."""
+    name = (display_name or "John").strip() or "John"
+    witness = _extract_crisis_witness(model_text, name)
+    resources = (
+        "Please reach out now for immediate support: Call or text 988 (Suicide & Crisis Lifeline), "
+        "available 24/7. Or text HOME to 741741 (Crisis Text Line) for steady listening."
+    )
+    close = f"With you, {name}."
+    return f"{witness}\n\n{resources}\n\n{close}"
 
 
 def _last_resource_end(text: str) -> int:
@@ -126,8 +178,8 @@ def apply_ln_boundary_post_guard(
 
     out = text or ""
     if guard.trip_class == "CRISIS":
-        out = _ensure_crisis_resources(out)
-        out = _strip_post_crisis_coaching(out, registry_parts)
+        # Replace-mode: crisis turns end after stabilization — no parts-work tail (BQ-5).
+        out = _crisis_stabilization_response(out)
     elif guard.trip_class == "DEPTH":
         out = _ensure_depth_boundary(out)
     elif guard.trip_class == "HYPO":
