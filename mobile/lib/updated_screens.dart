@@ -13,7 +13,6 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:pointer_interceptor/pointer_interceptor.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io' show File;
 import 'metrics_widgets.dart';
@@ -1594,6 +1593,13 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   VoiceState _voiceState = VoiceState.idle;
   double _mouthOpenness = 0.0;
 
+  // ── Adjustable chat text size (persisted; applies to chat message list only) ──
+  static const String _prefsChatTextScaleKey = 'chat_text_scale';
+  static const double _chatTextScaleMin = 0.85;
+  static const double _chatTextScaleMax = 1.6;
+  static const double _chatTextScaleStep = 0.1;
+  double _chatTextScale = 1.0;
+
   // ── Nate Nudge state ──
   List<Map<String, dynamic>> _pendingNudges = [];
   bool _nudgeBannerDismissed = false;
@@ -1754,6 +1760,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     _connectToCortex();
     _initSpeechToText();
     _loadCustomVocabulary();
+    _loadChatTextScale();
     _initTts();
     _chatController.addListener(_onDraftChanged);
     _fetchRecap();
@@ -3086,6 +3093,44 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   }
 
   String _reEscape(String s) => RegExp.escape(s);
+
+  // ===========================================================================
+  // ADJUSTABLE CHAT TEXT SIZE (ACCESSIBILITY)
+  // ===========================================================================
+
+  Future<void> _loadChatTextScale() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getDouble(_prefsChatTextScaleKey);
+      if (stored != null && mounted) {
+        setState(() {
+          _chatTextScale =
+              stored.clamp(_chatTextScaleMin, _chatTextScaleMax).toDouble();
+        });
+      }
+    } catch (e) {
+      _debugLog('Chat text scale load error: $e');
+    }
+  }
+
+  Future<void> _saveChatTextScale() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_prefsChatTextScaleKey, _chatTextScale);
+    } catch (e) {
+      _debugLog('Chat text scale save error: $e');
+    }
+  }
+
+  void _adjustChatTextScale(double delta) {
+    final double next =
+        (_chatTextScale + delta).clamp(_chatTextScaleMin, _chatTextScaleMax);
+    // Snap to nearest 0.1 step to avoid float drift (e.g. 1.2000000000000002).
+    final double rounded = (next * 10).round() / 10;
+    if (rounded == _chatTextScale) return;
+    setState(() => _chatTextScale = rounded);
+    _saveChatTextScale();
+  }
 
   String _applyCustomVocabulary(String input) {
     var s = input;
@@ -4884,6 +4929,37 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                   _avatarModeEnabled ? 'Avatar Mode ON' : 'Avatar Mode OFF',
               onPressed: () => _toggleAvatarMode(!_avatarModeEnabled),
             ),
+          // Text size controls (chat + avatar mode) — clamp 0.85..1.6, step 0.1
+          SizedBox(
+            width: 44,
+            height: 44,
+            child: IconButton(
+              icon: const Icon(Icons.text_decrease),
+              iconSize: 20,
+              color: _chatTextScale > _chatTextScaleMin
+                  ? Colors.white70
+                  : Colors.white24,
+              tooltip: 'Text size',
+              onPressed: _chatTextScale > _chatTextScaleMin
+                  ? () => _adjustChatTextScale(-_chatTextScaleStep)
+                  : null,
+            ),
+          ),
+          SizedBox(
+            width: 44,
+            height: 44,
+            child: IconButton(
+              icon: const Icon(Icons.text_increase),
+              iconSize: 20,
+              color: _chatTextScale < _chatTextScaleMax
+                  ? Colors.white70
+                  : Colors.white24,
+              tooltip: 'Text size',
+              onPressed: _chatTextScale < _chatTextScaleMax
+                  ? () => _adjustChatTextScale(_chatTextScaleStep)
+                  : null,
+            ),
+          ),
           // Daily Reconnect (always shown next to Family Sanctuary; backend tier-gates the join)
           IconButton(
               icon: const Icon(Icons.favorite_outline, color: Color(0xFFC9A962)),
@@ -5215,164 +5291,76 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                   .toUpperCase() ==
               'TRIAL_ACTIVE')
             TrialBannerWidget(userProfile: widget.currentUserProfile ?? {}),
-          // Main content area - Background visual + Chat overlay
+          // Main content area — split layout in Avatar Mode, orb overlay otherwise
           Expanded(
-            child: Stack(
-              children: [
-                // BACK LAYER: Visual (GLB 3D avatar or orb)
-                Positioned.fill(
-                  child: _avatarModeEnabled && _canUseAvatarMode()
-                      ? GlbAvatarWidget(
-                          expression: _avatarState.expression,
-                          voiceState: _voiceState,
-                          onTap: () => _toggleAvatarMode(false),
-                        )
-                      : VisualPersona(
-                          isTalking: _isTalking,
-                          isListening: _audio.isListening),
-                ),
-                // FRONT LAYER: Chat messages (with PointerInterceptor for web iframe)
-                Positioned.fill(
-                  child: _wrapWithPointerInterceptorIfNeeded(
-                    GestureDetector(
-                      onTap: () {
-                        if (_isTextSelected) {
-                          setState(() => _isTextSelected = false);
-                        }
-                      },
-                      child: SelectionArea(
-                        onSelectionChanged: (value) {
-                          final selecting =
-                              value != null && value.plainText.isNotEmpty;
-                          if (selecting != _isTextSelected) {
-                            setState(() => _isTextSelected = selecting);
-                          }
-                        },
-                        child: ListView.builder(
-                          controller: _scrollController,
-                          physics: _isTextSelected
-                              ? const NeverScrollableScrollPhysics()
-                              : const ClampingScrollPhysics(),
-                          itemCount: _chatHistory.length,
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          itemBuilder: (ctx, i) {
-                            final msg = _chatHistory[i];
-                            final isNate = msg.startsWith("Little Nate:");
-                            final isYou = msg.startsWith("You:");
-                            final isSystem = msg.startsWith("[SYSTEM]");
-                            final textColor = isYou
-                                ? Colors.grey.shade400
-                                : (isSystem ? Colors.yellow : Colors.white);
-                            final textWidget = Text(
-                              msg,
-                              style: TextStyle(
-                                fontFamily: "Courier",
-                                color: textColor,
-                                fontSize: 14,
-                                shadows: const [
-                                  Shadow(
-                                      color: Colors.black,
-                                      blurRadius: 4,
-                                      offset: Offset(1, 1)),
-                                  Shadow(
-                                      color: Colors.black,
-                                      blurRadius: 8,
-                                      offset: Offset(0, 0)),
-                                ],
+            child: (_avatarModeEnabled && _canUseAvatarMode())
+                ? LayoutBuilder(
+                    builder: (context, constraints) {
+                      final Widget avatarPane = Stack(
+                        children: [
+                          Positioned.fill(
+                            child: GlbAvatarWidget(
+                              expression: _avatarState.expression,
+                              voiceState: _voiceState,
+                              onTap: () => _toggleAvatarMode(false),
+                            ),
+                          ),
+                          Positioned(
+                            top: 12,
+                            right: 12,
+                            child: IconButton(
+                              tooltip: 'Return to Orb',
+                              icon: const Icon(Icons.close,
+                                  color: Color(0xFFC9A962)),
+                              onPressed: () => _toggleAvatarMode(false),
+                            ),
+                          ),
+                        ],
+                      );
+                      final Widget chatPane = _buildChatMessageList();
+                      final bool isWide = constraints.maxWidth >= 700;
+                      if (isWide) {
+                        return Row(
+                          children: [
+                            Expanded(
+                              flex: 5,
+                              child: ConstrainedBox(
+                                constraints:
+                                    const BoxConstraints(minWidth: 360),
+                                child: chatPane,
                               ),
-                            );
-                            final bool hasQuestSuggestion = isNate &&
-                                !_dismissedSuggestions.contains(i) &&
-                                msg.toLowerCase().contains('make this a quest');
-                            final bool hasMissionSuggestion = isNate &&
-                                !_dismissedSuggestions.contains(i) &&
-                                msg
-                                    .toLowerCase()
-                                    .contains('could be a mission');
-                            Widget suggestionRow = const SizedBox.shrink();
-                            if (hasQuestSuggestion || hasMissionSuggestion) {
-                              suggestionRow = Padding(
-                                  padding:
-                                      const EdgeInsets.only(top: 4, left: 20),
-                                  child: Wrap(spacing: 8, children: [
-                                    _recapBtn(
-                                        hasQuestSuggestion
-                                            ? 'Start Quest'
-                                            : 'Start Mission', () {
-                                      setState(
-                                          () => _dismissedSuggestions.add(i));
-                                      if (hasQuestSuggestion) {
-                                        _createQuestFromContext();
-                                      } else {
-                                        _showNewMissionDialog();
-                                      }
-                                    }),
-                                    _recapBtn(
-                                        'Not right now',
-                                        () => setState(() =>
-                                            _dismissedSuggestions.add(i))),
-                                  ]));
-                            }
-                            if (isNate && _canUseTtsReadAloud()) {
-                              final nateText =
-                                  msg.replaceFirst("Little Nate: ", "");
-                              return Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 20, vertical: 4),
-                                      child: Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Expanded(child: textWidget),
-                                          const SizedBox(width: 4),
-                                          GestureDetector(
-                                            onTap: () =>
-                                                _speakNateMessage(nateText),
-                                            child: Icon(
-                                              _isTalking
-                                                  ? Icons.volume_up
-                                                  : Icons.volume_up_outlined,
-                                              color: const Color(0xFFC9A962),
-                                              size: 18,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    suggestionRow,
-                                  ]);
-                            }
-                            return Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 20, vertical: 4),
-                                    child: textWidget,
-                                  ),
-                                  suggestionRow,
-                                ]);
-                          },
-                        ),
+                            ),
+                            Container(
+                                width: 1, color: const Color(0xFF1A1A1A)),
+                            Expanded(flex: 4, child: avatarPane),
+                          ],
+                        );
+                      }
+                      return Column(
+                        children: [
+                          Expanded(
+                            flex: 38,
+                            child: ConstrainedBox(
+                              constraints:
+                                  const BoxConstraints(minHeight: 220),
+                              child: avatarPane,
+                            ),
+                          ),
+                          Expanded(flex: 62, child: chatPane),
+                        ],
+                      );
+                    },
+                  )
+                : Stack(
+                    children: [
+                      Positioned.fill(
+                        child: VisualPersona(
+                            isTalking: _isTalking,
+                            isListening: _audio.isListening),
                       ),
-                    ),
+                      Positioned.fill(child: _buildChatMessageList()),
+                    ],
                   ),
-                ),
-                if (_avatarModeEnabled && _canUseAvatarMode())
-                  Positioned(
-                    top: 12,
-                    right: 12,
-                    child: IconButton(
-                      tooltip: 'Return to Orb',
-                      icon: const Icon(Icons.close, color: Color(0xFFC9A962)),
-                      onPressed: () => _toggleAvatarMode(false),
-                    ),
-                  ),
-              ],
-            ),
           ),
           // Draft preview (using ValueListenableBuilder to avoid full rebuilds)
           ValueListenableBuilder<TextEditingValue>(
@@ -5526,12 +5514,131 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     );
   }
 
-  /// Wraps widget with PointerInterceptor on web when 3D avatar is active
-  Widget _wrapWithPointerInterceptorIfNeeded(Widget child) {
-    if (kIsWeb && _avatarModeEnabled && _canUseAvatarMode()) {
-      return PointerInterceptor(child: child);
-    }
-    return child;
+  /// Chat message list, scaled by [_chatTextScale]. Used both as the
+  /// full-screen overlay (Avatar Mode off) and as the chat pane in the
+  /// Avatar Mode split layout — chat and avatar never overlap in either
+  /// case, so no PointerInterceptor wrapper is needed here.
+  Widget _buildChatMessageList() {
+    return MediaQuery(
+      data: MediaQuery.of(context)
+          .copyWith(textScaler: TextScaler.linear(_chatTextScale)),
+      child: GestureDetector(
+        onTap: () {
+          if (_isTextSelected) {
+            setState(() => _isTextSelected = false);
+          }
+        },
+        child: SelectionArea(
+          onSelectionChanged: (value) {
+            final selecting = value != null && value.plainText.isNotEmpty;
+            if (selecting != _isTextSelected) {
+              setState(() => _isTextSelected = selecting);
+            }
+          },
+          child: ListView.builder(
+            controller: _scrollController,
+            physics: _isTextSelected
+                ? const NeverScrollableScrollPhysics()
+                : const ClampingScrollPhysics(),
+            itemCount: _chatHistory.length,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            itemBuilder: (ctx, i) {
+              final msg = _chatHistory[i];
+              final isNate = msg.startsWith("Little Nate:");
+              final isYou = msg.startsWith("You:");
+              final isSystem = msg.startsWith("[SYSTEM]");
+              final textColor = isYou
+                  ? Colors.grey.shade400
+                  : (isSystem ? Colors.yellow : Colors.white);
+              final textWidget = Text(
+                msg,
+                style: TextStyle(
+                  fontFamily: "Courier",
+                  color: textColor,
+                  fontSize: 14,
+                  shadows: const [
+                    Shadow(
+                        color: Colors.black,
+                        blurRadius: 4,
+                        offset: Offset(1, 1)),
+                    Shadow(
+                        color: Colors.black,
+                        blurRadius: 8,
+                        offset: Offset(0, 0)),
+                  ],
+                ),
+              );
+              final bool hasQuestSuggestion = isNate &&
+                  !_dismissedSuggestions.contains(i) &&
+                  msg.toLowerCase().contains('make this a quest');
+              final bool hasMissionSuggestion = isNate &&
+                  !_dismissedSuggestions.contains(i) &&
+                  msg.toLowerCase().contains('could be a mission');
+              Widget suggestionRow = const SizedBox.shrink();
+              if (hasQuestSuggestion || hasMissionSuggestion) {
+                suggestionRow = Padding(
+                    padding: const EdgeInsets.only(top: 4, left: 20),
+                    child: Wrap(spacing: 8, children: [
+                      _recapBtn(
+                          hasQuestSuggestion ? 'Start Quest' : 'Start Mission',
+                          () {
+                        setState(() => _dismissedSuggestions.add(i));
+                        if (hasQuestSuggestion) {
+                          _createQuestFromContext();
+                        } else {
+                          _showNewMissionDialog();
+                        }
+                      }),
+                      _recapBtn(
+                          'Not right now',
+                          () =>
+                              setState(() => _dismissedSuggestions.add(i))),
+                    ]));
+              }
+              if (isNate && _canUseTtsReadAloud()) {
+                final nateText = msg.replaceFirst("Little Nate: ", "");
+                return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 4),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: textWidget),
+                            const SizedBox(width: 4),
+                            GestureDetector(
+                              onTap: () => _speakNateMessage(nateText),
+                              child: Icon(
+                                _isTalking
+                                    ? Icons.volume_up
+                                    : Icons.volume_up_outlined,
+                                color: const Color(0xFFC9A962),
+                                size: 18,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      suggestionRow,
+                    ]);
+              }
+              return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 4),
+                      child: textWidget,
+                    ),
+                    suggestionRow,
+                  ]);
+            },
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildQuickStat(String label, dynamic value, Color color) {
