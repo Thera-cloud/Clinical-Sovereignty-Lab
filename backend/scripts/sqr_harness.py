@@ -339,6 +339,7 @@ async def run_config(
             p["id"], p["set"], text, registry_parts, config=config,
             user_text=p["text"],
             registry_records=list(registry_records) if registry_records else None,
+            boundary_guard_hits=boundary_hits,
         )
         turns.append({
             "prompt_id": p["id"],

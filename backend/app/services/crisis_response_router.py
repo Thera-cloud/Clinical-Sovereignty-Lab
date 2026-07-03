@@ -66,7 +66,10 @@ def _strip_post_crisis_coaching(
         return head
     approved = {p for p in (registry_parts or []) if p}
     for name in approved:
-        if re.search(rf"\b{re.escape(name)}\b", tail, re.I):
+        if name == "Sovereign":
+            if re.search(r"\bSovereign\b(?!\s+Sanctuary)", tail, re.I):
+                return head
+        elif re.search(rf"\b{re.escape(name)}\b", tail, re.I):
             return head
     if _PART_FOLLOWUP.search(tail) and "?" in tail:
         return head
@@ -89,12 +92,9 @@ def _strip_done_talking_push(text: str, user_text: str) -> str:
 
 def _ensure_depth_boundary(text: str) -> str:
     body = (text or "").strip()
-    refer = re.search(
-        r"\b(human (?:therapist|professional|coach|clinician)|licensed|outside my scope|"
-        r"not equipped to|can't guide)\b",
-        body,
-        re.I,
-    )
+    from app.services.sqr_autocheck import _BOUNDARY_REFER
+
+    refer = _BOUNDARY_REFER.search(body)
     if refer:
         return body
     depth = TIER_COPY["DEPTH"]
