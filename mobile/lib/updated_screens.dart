@@ -49,6 +49,7 @@ import 'screens/community_mesh_screen.dart';
 import 'screens/sensitive_clinical_profile_screen.dart';
 import 'screens/intake_form_coach_panel.dart';
 import 'screens/daily_reconnect_screen.dart';
+import 'screens/training_ground_screen.dart';
 import 'config/app_config.dart';
 import 'services/vault_entitlement.dart';
 import 'widgets/vault_attachment_button.dart';
@@ -4738,6 +4739,24 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                 if (mounted) _connectToCortex();
               },
             ),
+          IconButton(
+              icon: const Icon(Icons.psychology_outlined, color: Color(0xFF4ECDC4)),
+              tooltip: 'Training Ground',
+              onPressed: () async {
+                _wsCh?.sink.close();
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => TrainingGroundScreen(
+                      profile: widget.currentUserProfile ?? {},
+                      username: widget.username,
+                      password: widget.password,
+                    ),
+                  ),
+                );
+                if (mounted) _connectToCortex();
+              },
+            ),
           // Family Sanctuary button
           IconButton(
             icon: const Icon(Icons.family_restroom, color: Colors.amber),
@@ -4846,6 +4865,21 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                 }
                 if (mounted) _checkSseIntake();
                 if (result is Map &&
+                    result['askNateMessage'] != null &&
+                    mounted) {
+                  _chatController.text =
+                      '${_chatController.text}${result['askNateMessage']}'.trim();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Journey panel attached. Tap Send to ask Nate.',
+                      ),
+                      backgroundColor: Color(0xFFC9A962),
+                      duration: Duration(seconds: 4),
+                    ),
+                  );
+                  FocusScope.of(context).requestFocus(FocusNode());
+                } else if (result is Map &&
                     result['askNateVault'] != null &&
                     mounted) {
                   final itemId = result['askNateVault'].toString();
@@ -5260,8 +5294,12 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                     socket: _wsCh,
                     onVaultItemSelected: (itemId) {
                       if (itemId != null && itemId.isNotEmpty) {
+                        final attach = itemId.startsWith('[SSE Panel:') ||
+                                itemId.startsWith('[Story Panel:')
+                            ? itemId
+                            : '[Vault:$itemId] ';
                         _chatController.text =
-                            '${_chatController.text}[Vault:$itemId] '.trim();
+                            '${_chatController.text}$attach'.trim();
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text(

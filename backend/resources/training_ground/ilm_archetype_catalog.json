@@ -1,0 +1,44 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "description": "Training Ground ILM council seat → protector template mapping"
+  },
+  "seats": [
+    {
+      "ilm_archetype_base": "Sovereign",
+      "ifs_role_default": "self_energy",
+      "protector_template_id": null,
+      "thera_world_character": "Self",
+      "coaching_copy": "The steady center that can hold the whole council without becoming any single part."
+    },
+    {
+      "ilm_archetype_base": "Warrior",
+      "ifs_role_default": "manager",
+      "protector_template_id": "the_wall_builder",
+      "thera_world_character": "Boundary Keeper",
+      "coaching_copy": "A part of you may be carrying protection — setting limits when the inner world feels unsafe."
+    },
+    {
+      "ilm_archetype_base": "Magician",
+      "ifs_role_default": "manager",
+      "protector_template_id": "the_planner",
+      "thera_world_character": "Pattern Weaver",
+      "coaching_copy": "A part of you may be trying to anticipate and control outcomes before pain arrives."
+    },
+    {
+      "ilm_archetype_base": "Lover",
+      "ifs_role_default": "manager",
+      "protector_template_id": "the_peacemaker",
+      "thera_world_character": "Connection Seeker",
+      "coaching_copy": "A part of you may be working to keep harmony — sometimes at the cost of your own voice."
+    },
+    {
+      "ilm_archetype_base": "Critic",
+      "ifs_role_default": "manager",
+      "protector_template_id": "the_perfectionist",
+      "thera_world_character": "Inner Judge",
+      "coaching_copy": "A part of you may be holding high standards — notice whether it protects or punishes."
+    }
+  ],
+  "language_rule": "Say 'a part of you is carrying the ___ role' — never 'you are the ___.'"
+}

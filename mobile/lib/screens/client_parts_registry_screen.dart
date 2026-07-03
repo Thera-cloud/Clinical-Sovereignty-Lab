@@ -26,6 +26,8 @@ class _ClientPartsRegistryScreenState extends State<ClientPartsRegistryScreen> {
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _parts = [];
+  int _safetyQueueCount = 0;
+  bool _tgOnly = false;
 
   String get _token => (widget.currentUserProfile['token'] ?? '').toString();
   String get _base => cfg.AppConfig.apiBaseUrl;
@@ -59,12 +61,54 @@ class _ClientPartsRegistryScreenState extends State<ClientPartsRegistryScreen> {
       final data = jsonDecode(resp.body) as Map<String, dynamic>;
       final raw = (data['parts'] as List?) ?? [];
       _parts = raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      await _loadSafetyCount();
     } catch (e) {
       _error = e.toString();
     }
     if (mounted) {
       setState(() => _loading = false);
     }
+  }
+
+  Future<void> _loadSafetyCount() async {
+    try {
+      final uri = Uri.parse('$_base/api/coach/training-ground/safety-queue/count');
+      final resp = await http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 15));
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        _safetyQueueCount = (data['count'] as num?)?.toInt() ?? 0;
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _patchCoachingStatus(Map<String, dynamic> part, String status) async {
+    final id = part['id'];
+    if (id == null) return;
+    final uri = Uri.parse(
+      '$_base/api/coach/sensitive-profile/${widget.targetUserId}/parts-registry/$id',
+    );
+    final resp = await http.patch(
+      uri,
+      headers: _headers,
+      body: jsonEncode({'coaching_status': status}),
+    );
+    if (!mounted) return;
+    if (resp.statusCode == 200) {
+      await _load();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Status update failed: ${resp.statusCode}')),
+      );
+    }
+  }
+
+  List<Map<String, dynamic>> get _visibleParts {
+    if (!_tgOnly) return _parts;
+    return _parts
+        .where((p) => (p['origin']?.toString() ?? '') == 'training_ground')
+        .toList();
   }
 
   Future<void> _partDialog([Map<String, dynamic>? existing]) async {
@@ -199,6 +243,23 @@ class _ClientPartsRegistryScreenState extends State<ClientPartsRegistryScreen> {
           style: const TextStyle(color: Color(0xFFC9A962), fontSize: 16),
         ),
         actions: [
+          if (_safetyQueueCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(right: 8, top: 12),
+              child: Chip(
+                label: Text('Safety $_safetyQueueCount',
+                    style: const TextStyle(color: Colors.redAccent)),
+                backgroundColor: const Color(0xFF1A1A1A),
+              ),
+            ),
+          IconButton(
+            icon: Icon(
+              _tgOnly ? Icons.filter_alt : Icons.filter_alt_outlined,
+              color: const Color(0xFF4ECDC4),
+            ),
+            tooltip: 'Training Ground parts only',
+            onPressed: () => setState(() => _tgOnly = !_tgOnly),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh, color: Color(0xFFC9A962)),
             onPressed: _loading ? null : _load,
@@ -219,7 +280,7 @@ class _ClientPartsRegistryScreenState extends State<ClientPartsRegistryScreen> {
                       style: const TextStyle(color: Colors.white54)))
               : ListView.builder(
                   padding: const EdgeInsets.all(12),
-                  itemCount: _parts.length + 1,
+                  itemCount: _visibleParts.length + 1,
                   itemBuilder: (_, i) {
                     if (i == 0) {
                       return const Card(
@@ -228,14 +289,16 @@ class _ClientPartsRegistryScreenState extends State<ClientPartsRegistryScreen> {
                           padding: EdgeInsets.all(12),
                           child: Text(
                             'IFS note: parts are named as protective roles, not pathologies. '
-                            'Use numbering only within this client profile.',
+                            'Training Ground parts show coaching_status and origin.',
                             style: TextStyle(color: Colors.white70),
                           ),
                         ),
                       );
                     }
                     final idx = i - 1;
-                    final p = _parts[idx];
+                    final p = _visibleParts[idx];
+                    final origin = p['origin']?.toString() ?? 'sensitive_bridge';
+                    final status = p['coaching_status']?.toString() ?? 'APPROVED';
                     return Card(
                       color: const Color(0xFF111111),
                       child: ListTile(
@@ -244,12 +307,29 @@ class _ClientPartsRegistryScreenState extends State<ClientPartsRegistryScreen> {
                           style: const TextStyle(color: Color(0xFFC9A962)),
                         ),
                         subtitle: Text(
-                          '${p['part_category']} · #${p['part_number']}',
-                          style: const TextStyle(color: Colors.white54),
+                          '${p['part_category']} · #${p['part_number']} · $origin · $status',
+                          style: TextStyle(
+                            color: status == 'PENDING_APPROVAL'
+                                ? Colors.orangeAccent
+                                : Colors.white54,
+                          ),
                         ),
                         trailing: Wrap(
                           spacing: 4,
                           children: [
+                            if (origin == 'training_ground' &&
+                                status == 'PENDING_APPROVAL') ...[
+                              IconButton(
+                                tooltip: 'Approve',
+                                icon: const Icon(Icons.check, color: Colors.greenAccent),
+                                onPressed: () => _patchCoachingStatus(p, 'APPROVED'),
+                              ),
+                              IconButton(
+                                tooltip: 'Hold',
+                                icon: const Icon(Icons.pause, color: Colors.orangeAccent),
+                                onPressed: () => _patchCoachingStatus(p, 'HOLD'),
+                              ),
+                            ],
                             IconButton(
                               tooltip: 'Edit part',
                               icon: const Icon(Icons.edit_outlined,

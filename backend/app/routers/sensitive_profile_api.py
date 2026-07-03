@@ -2178,12 +2178,23 @@ class PartRegistryPatch(BaseModel):
     addiction_link: Optional[str] = Field(default=None, max_length=32)
     description: Optional[str] = Field(default=None, max_length=1000)
     protected_exile_part_id: Optional[int] = Field(default=None)
+    coaching_status: Optional[str] = Field(default=None, max_length=24)
+    coaching_status_notes: Optional[str] = Field(default=None, max_length=1000)
 
     @validator("part_category")
     def _v_category(cls, v):
         if v is None:
             return v
         return PartRegistryCreate._v_category(v)
+
+    @validator("coaching_status")
+    def _v_coaching_status(cls, v):
+        if v is None:
+            return v
+        allowed = {"APPROVED", "PENDING_APPROVAL", "HOLD", "REJECTED"}
+        if v not in allowed:
+            raise ValueError("coaching_status must be one of " + "|".join(sorted(allowed)))
+        return v
 
 
 @coach_router.post("/{user_id}/parts-registry")
@@ -2260,6 +2271,8 @@ async def list_parts(
             SELECT id, part_name, part_number, part_category,
                    addiction_link, description,
                    protected_exile_part_id, is_active,
+                   ilm_archetype_base, ifs_role, thera_world_template_id,
+                   activation_score, coaching_status, coaching_status_notes, origin,
                    created_at, created_by, retired_at
               FROM user_parts_registry
              WHERE user_id = $1{condition}
@@ -2285,6 +2298,7 @@ async def update_part(
     if db_pool is None:
         raise HTTPException(503, detail={"reason": "database_unavailable"})
     _raise_if_pii("description", body.description)
+    _raise_if_pii("coaching_status_notes", body.coaching_status_notes)
 
     updates = body.dict(exclude_unset=True)
     if not updates:
@@ -2293,6 +2307,7 @@ async def update_part(
     allowed = {
         "part_name", "part_number", "part_category", "addiction_link",
         "description", "protected_exile_part_id",
+        "coaching_status", "coaching_status_notes",
     }
     sets = []
     values: List[Any] = [part_id, user_id]
@@ -2316,6 +2331,18 @@ async def update_part(
         )
     if row is None:
         raise HTTPException(404, detail={"reason": "part_not_found"})
+
+    if body.coaching_status == "REJECTED":
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE user_parts_registry
+                   SET is_active = FALSE, retired_at = NOW()
+                 WHERE id = $1 AND user_id = $2
+                """,
+                part_id,
+                user_id,
+            )
 
     await _emit_profile_mutation_audit(
         db_pool,

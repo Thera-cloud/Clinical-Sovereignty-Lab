@@ -3141,6 +3141,7 @@ except ImportError:
     _LREngine = None
 _lr_engine = None  # QUANTUM-CRYSTAL-ARCH — initialized after db_pool
 _reconnect_engine = None  # QUANTUM-CRYSTAL-ARCH — Daily Reconnect ritual
+_training_ground_engine = None  # QUANTUM-CRYSTAL-ARCH — Training Ground ILM
 
 try:
     from app.services.intake_form_service import (
@@ -12297,6 +12298,10 @@ async def handle_client(websocket, path=None):
                 # --- PGSD WebSocket router --- # QUANTUM-CRYSTAL-ARCH
                 "pgsd_compute_snapshot", "pgsd_get_history", "pgsd_get_trajectory",
                 "pgsd_get_family_entanglement", "pgsd_get_zero_time_route",
+                # --- Training Ground ILM --- # QUANTUM-CRYSTAL-ARCH
+                "ilm_get_state", "ilm_consent_ack", "ilm_propose_member",
+                "ilm_set_relationship", "ilm_dialogue_turn", "ilm_self_alignment",
+                "ilm_forward_to_coach", "ilm_exit",
             ))
             if current_profile and current_profile.get("role") == "ADMIN" and t not in _SENTINEL_SKIP:
                 try:
@@ -27210,6 +27215,25 @@ Coach Reflection on Session {session_id}:
                     await websocket.send(json.dumps({"type": "reconnect_error", "message": "feature_unavailable"}))
                 continue
 
+            elif t in (
+                "ilm_get_state", "ilm_consent_ack", "ilm_propose_member",
+                "ilm_set_relationship", "ilm_dialogue_turn", "ilm_self_alignment",
+                "ilm_forward_to_coach", "ilm_exit",
+            ):  # QUANTUM-CRYSTAL-ARCH — Training Ground (ENABLE_TRAINING_GROUND)
+                if not current_profile:
+                    await websocket.send(json.dumps({"type": "ilm_error", "message": "Not authenticated"}))
+                    continue
+                _tg_eng = globals().get("_training_ground_engine")
+                if _tg_eng:
+                    try:
+                        await _tg_eng.handle_ws_message(t, d, websocket, current_profile)
+                    except Exception as _tg_e:
+                        print(f">>> [TRAINING_GROUND] handler error: {_tg_e}")
+                        await websocket.send(json.dumps({"type": "ilm_error", "message": "internal_error"}))
+                else:
+                    await websocket.send(json.dumps({"type": "ilm_error", "message": "feature_unavailable"}))
+                continue
+
             elif t == "sanctuary_get_or_create":
                 """
                 Smart handler that:
@@ -31363,6 +31387,18 @@ async def main():
             except Exception as _rc_init_err:
                 print(f"[!] DailyReconnectEngine init failed: {_rc_init_err}")
                 _reconnect_engine = None
+            # QUANTUM-CRYSTAL-ARCH — Training Ground ILM engine (dark launch)
+            global _training_ground_engine
+            try:
+                from app.services.training_ground_engine import (
+                    TrainingGroundEngine,
+                    ENABLE_TRAINING_GROUND,
+                )
+                _training_ground_engine = TrainingGroundEngine(db_pool=db_pool)
+                print(f"[*] TrainingGroundEngine initialized (ENABLE_TRAINING_GROUND={ENABLE_TRAINING_GROUND})")
+            except Exception as _tg_init_err:
+                print(f"[!] TrainingGroundEngine init failed: {_tg_init_err}")
+                _training_ground_engine = None
             # B5: Vault integration for chat file uploads/previews
             try:
                 from .vault_bridge import VaultBridge

@@ -3794,6 +3794,12 @@ try:
 except Exception as _fl_err:
     print(f"   ⚠️  Folder API router failed: {_fl_err}")
 
+try:
+    from app.routers.training_ground_coach_api import router as training_ground_coach_router
+    app.include_router(training_ground_coach_router)
+except Exception as _tg_err:
+    print(f"   ⚠️  Training Ground coach router failed: {_tg_err}")
+
 # Coach Forms API (templates, PDF/Excel generation, email distribution)
 try:
     from app.routers.forms_api import router as forms_router
