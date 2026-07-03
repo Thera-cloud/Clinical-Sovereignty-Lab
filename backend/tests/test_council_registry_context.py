@@ -130,6 +130,18 @@ def test_fabricated_records_for_unregistered_critic():
     assert any("CQ_FABRICATED_REGISTRY_CLAIM" in f or "CQ_INVENTED_PART" in f for f in fails)
 
 
+def test_on_file_mastermind_not_false_positive():
+    registry = [MASTERMIND_REGISTRY[0]]
+    text = (
+        "According to what I have on file, MasterMind's purpose is to protect all "
+        "other parts. Can you tell me what's on your mind?"
+    )
+    fails = validate_response_against_registry(
+        text, registry, user_text="Remind me what MasterMind's job is.", prompt_set="A",
+    )
+    assert not any("FABRICATED" in f for f in fails)
+
+
 def test_part_as_person_mastermind():
     registry = [MASTERMIND_REGISTRY[0]]
     text = "MasterMind has been steady — his relationships at work are calmer."
@@ -137,3 +149,11 @@ def test_part_as_person_mastermind():
         text, registry, user_text="How is MasterMind doing?", prompt_set="A",
     )
     assert "PQ_PART_AS_PERSON:MasterMind" in fails
+
+
+def test_crisis_alert_suppressed_profile_flag():
+    assert _crisis_alerts_suppressed({
+        "username": "real_user",
+        "role": "CLIENT",
+        "profile_data": {"suppress_coach_crisis_alerts": True},
+    })

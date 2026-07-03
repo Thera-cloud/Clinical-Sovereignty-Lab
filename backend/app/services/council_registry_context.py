@@ -219,13 +219,21 @@ def validate_response_against_registry(
                 break
 
     if _RECORDS_CLAIM.search(text):
-        for m in re.finditer(r"\b(The )?([A-Z][a-zA-Z]+)\b", text):
-            pname = m.group(2)
-            if pname in _ENGLISH_SKIP or pname in _GENERIC_IFS_LABELS:
-                continue
-            if pname not in approved and pname.lower() in low:
-                fails.append(f"CQ_FABRICATED_REGISTRY_CLAIM:{pname}")
+        for name in extract_registry_authority_names(text):
+            if name not in approved and name not in _GENERIC_IFS_LABELS:
+                fails.append(f"CQ_FABRICATED_REGISTRY_CLAIM:{name}")
                 break
+        else:
+            # "on file" + purpose language for a named part not in registry
+            for m in re.finditer(
+                r"\b(MasterMind|Critic|Sovereign|Compass|Protector|Explorer|"
+                r"Warrior|Magician|Lover|Orphan)\b",
+                text,
+            ):
+                pname = m.group(1)
+                if pname not in approved:
+                    fails.append(f"CQ_FABRICATED_REGISTRY_CLAIM:{pname}")
+                    break
 
     if re.search(r"\bMasterMind\b", text, re.I) and _PART_AS_PERSON.search(text):
         fails.append("PQ_PART_AS_PERSON:MasterMind")
