@@ -74,3 +74,25 @@ def test_done_talking_strips_trailing_questions():
     model = "Okay, John. I hear you. How is MasterMind doing today?"
     out, _ = apply_ln_boundary_post_guard(model, user)
     assert "?" not in out
+
+
+def test_done_talking_humanizes_stiff_exit():
+    user = "Whatever. It's fine."
+    model = "I acknowledge your decision to stop here. The door remains open."
+    out, _ = apply_ln_boundary_post_guard(model, user)
+    assert "acknowledge your decision" not in out.lower()
+    assert "whenever you want to pick it back up" in out.lower()
+
+
+def test_done_talking_after_crisis_keeps_988():
+    history = [
+        {"role": "user", "content": "I want to hurt myself tonight."},
+        {"role": "assistant", "content": "Call 988 now. I'm with you."},
+    ]
+    user = "I'm fine. Done talking about it."
+    model = "Okay. I'm here whenever you want to pick it back up."
+    out, _ = apply_ln_boundary_post_guard(
+        model, user, conversation_history=history,
+    )
+    assert "988" in out
+    assert "when you come back" in out.lower()

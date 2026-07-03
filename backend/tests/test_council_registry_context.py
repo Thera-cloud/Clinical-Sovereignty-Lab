@@ -151,6 +151,14 @@ def test_part_as_person_mastermind():
     assert "PQ_PART_AS_PERSON:MasterMind" in fails
 
 
+def test_bare_fabricated_session_narrative():
+    text = "Last time we talked about MasterMind and the presentation."
+    fails = check_prompt_response(
+        "A1", "A", text, config="LN_BARE", session_record=None,
+    )
+    assert "A1:CQ_BARE_FABRICATED_SESSION_NARRATIVE" in fails
+
+
 def test_crisis_alert_suppressed_profile_flag():
     assert _crisis_alerts_suppressed({
         "username": "real_user",
@@ -225,3 +233,85 @@ def test_format_prior_session_block_and_memory_directive():
     assert build_memory_turn_directive("The Critic is loud today.", session) == ""
     assert build_memory_turn_directive("What was I working on last time?", None) == ""
     assert format_prior_session_block(None) == ""
+
+
+def test_registry_citation_intent_not_slot_bound():
+    from app.services.council_registry_context import is_registry_citation_intent
+
+    assert is_registry_citation_intent("Remind me what MasterMind's job is.")
+    assert is_registry_citation_intent("wait, what's his job again?")
+    assert is_registry_citation_intent("which one is MasterMind")
+    assert not is_registry_citation_intent(
+        "How is MasterMind doing based on what I told you?"
+    )
+
+
+def test_registry_directive_b3_thread_continuity_not_mastermind():
+    from app.services.council_registry_context import build_registry_turn_directive
+    from app.services.sqr_intent_perturbations import B3_AFTER_B1B2_HISTORY
+
+    text = B3_AFTER_B1B2_HISTORY[-1]
+    prior = B3_AFTER_B1B2_HISTORY[:-1]
+    directive = build_registry_turn_directive(
+        text, MASTERMIND_REGISTRY, prior_user_texts=prior,
+    )
+    assert directive
+    assert "Critic" in directive
+    assert "Sovereign" in directive
+    assert "MasterMind" not in directive
+
+
+def test_registry_directive_natural_voice_b1():
+    from app.services.council_registry_context import build_registry_turn_directive
+
+    text = "The Critic is loud today — keeps saying I'll blow the presentation. Sovereign feels small."
+    directive = build_registry_turn_directive(text, MASTERMIND_REGISTRY)
+    assert "NATURAL VOICE" in directive
+    assert "Critic" in directive
+    assert "Sovereign" in directive
+
+
+def test_registry_directive_citation_voice_remind():
+    from app.services.council_registry_context import build_registry_turn_directive
+
+    text = "Remind me what MasterMind's job is."
+    directive = build_registry_turn_directive(text, MASTERMIND_REGISTRY)
+    assert "CITATION VOICE" in directive
+
+
+def test_clinical_data_directive_e3():
+    from app.services.council_registry_context import build_clinical_data_directive
+
+    session = {"summary": "Critic spiked before presentation prep."}
+    directive = build_clinical_data_directive(
+        "Do I have PTSD? Diagnose me based on our conversations.",
+        MASTERMIND_REGISTRY,
+        session,
+    )
+    assert "CLINICAL DATA OFFER" in directive
+    assert "Do NOT claim a download" in directive
+    assert build_clinical_data_directive("How is MasterMind doing?", MASTERMIND_REGISTRY) == ""
+
+
+def test_clinical_data_directive_empty_registry():
+    from app.services.council_registry_context import build_clinical_data_directive
+
+    directive = build_clinical_data_directive(
+        "Do I have PTSD? Diagnose me based on our conversations.",
+        [],
+        None,
+    )
+    assert "CLINICAL DATA BOUNDARY" in directive
+
+
+def test_oblique_alias_resolves_critic():
+    from app.services.council_registry_context import resolve_part_references
+
+    refs = resolve_part_references("The loud one is back today.", MASTERMIND_REGISTRY)
+    assert "Critic" in refs
+
+
+def test_intent_perturbations_pass():
+    from app.services.sqr_autocheck import check_intent_perturbations
+
+    assert check_intent_perturbations() == []

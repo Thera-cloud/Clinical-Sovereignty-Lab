@@ -6,6 +6,7 @@ Never infer a part's job from its display name (e.g. MasterMind ≠ strategist).
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -58,12 +59,23 @@ _RECORDS_CLAIM = re.compile(r"\b(?:according to my records|on file|from what we(
 RECALL_DISCIPLINE = """
 COUNCIL RECALL DISCIPLINE (mandatory):
 - Use ONLY part names and purposes listed under COACH-APPROVED COUNCIL below.
-- ANSWER FROM BOTH CHANNELS: when the client asks about a part that IS listed below, lead with its
-  registry purpose ("your registry says…") even if nothing was shared in this conversation — then note
-  what has or hasn't come up in the thread. Never answer "you haven't told me anything about X" when X
-  is on the registry below.
-- When the client raises a registered part, greet it by its stored role in one clause (e.g. name the
-  Critic's risk-flagging function) — do not treat a registered part as a stranger.
+- ANSWER FROM BOTH CHANNELS: when the client asks about a part that IS listed below, use the stored
+  purpose even if nothing was shared in this conversation — then note what has or hasn't come up in the thread.
+  Never answer "you haven't told me anything about X" when X is on the registry below.
+- REGISTRY VOICE (critical): use stored facts in natural clinical language. Do NOT open with or repeat
+  "your registry says…" / "according to my records…" / "on file" unless the client explicitly asked for
+  a reminder or quote (e.g. "remind me what X's job is"). Example — natural: "That's the Critic doing
+  exactly its job — flagging risk before a high-stakes moment." Example — citation (remind-only):
+  "MasterMind's stored purpose is to protect the other parts from outside manipulation."
+- RELEVANCE GATE (allowlist): introduce a registered part's stored purpose only when that part is linked
+  to the live thread — named in this message, named in the prior user turn, obliquely referenced
+  ("the loud one", "that protective part"), asked about explicitly, OR tied to the active session record.
+  "What now?" after work on named parts IS continuity — but do NOT pivot to an unrelated registered part
+  just because it exists on file (e.g. MasterMind after a Critic/Sovereign breathing win).
+- When the client raises a registered part, greet it by its stored role in plain language — do not
+  treat a registered part as a stranger.
+- After registry-informed reflection, ask ONE curious clinical question when appropriate (e.g. what
+  might Sovereign need right now, what is each part trying to protect) — retrieve AND inquire.
 - Never infer a part's job from its name (MasterMind is NOT automatically a strategist).
 - Never invent a council member (e.g. Compass, Explorer, Protector) — if not listed below, it does not exist on file.
 - If a purpose is missing from the registry block AND the client is calm, say you do not have it on file —
@@ -103,9 +115,9 @@ VOICE & IDENTITY (mandatory):
 - Never name an exercise you do not fully describe in the same sentence — no invented labels like
   "three-slide breath". If offering a practice, give the actual steps in plain words, and only when the
   client is engaged and asking for something to do.
-- DISENGAGEMENT ("whatever", "it's fine", "done talking"): honor the exit. One or two short sentences —
-  acknowledge without arguing, leave the door open, and stop. No exercises, no grounding, no questions,
-  no summarizing what they "might really" feel.
+- DISENGAGEMENT ("whatever", "it's fine", "done talking"): honor the exit immediately. One warm sentence —
+  e.g. "Okay. I'm here whenever you want to pick it back up." No "I acknowledge your decision", no exercises,
+  no grounding, no questions, no summarizing what they "might really" feel.
 """.strip()
 
 DEPTH_BOUNDARY = """
@@ -207,56 +219,208 @@ def registry_part_names(parts: Sequence[Dict[str, str]]) -> Set[str]:
     return {p["part_name"] for p in parts if p.get("part_name")}
 
 
+_RECALL_ABOUT_PART = re.compile(
+    r"\b(how is|how(?:'s| are)|tell me about|what do you know about)\b",
+    re.I,
+)
+_CONTINUATION_TURN = re.compile(
+    r"\b(what now|what next|helped a little|breathing practice)\b",
+    re.I,
+)
+_REGISTRY_CITATION_INTENT = re.compile(
+    r"(?:"
+    r"\b(?:remind me|refresh me|tell me again|what(?:'s| is) (?:his|her|their|its) job again)\b"
+    r"|(?:wait,?\s*)?what(?:'s| is) (?:his|her|their) (?:job|role|purpose) again\b"
+    r"|\bwhich one is \w+"
+    r"|\bwhat (?:was|is) \w+(?:'s)? (?:job|role|purpose) on (?:file|record)\b"
+    r"|\bwhat does \w+ do (?:on file|in my registry|again)\b"
+    r")",
+    re.I,
+)
+_CLINICAL_DATA_INTENT = re.compile(
+    r"(?:"
+    r"\b(?:diagnose me|give me a diagnosis|tell me if (?:i )?have|can you tell me if (?:i )?have|"
+    r"do i have|am i)\b.{0,48}\b(?:ptsd|adhd|bipolar|borderline|anxiety disorder|depression|ocd)\b"
+    r"|\b(?:based on|from) (?:our|these|everything we(?:'ve| have)) (?:conversations|sessions|chats|talked about)\b"
+    r".{0,30}\b(?:ptsd|diagnos)\b"
+    r"|\b(?:ptsd|diagnos(?:is|e)?)\b.{0,40}\b(?:from|based on) (?:our|everything we(?:'ve| have))\b"
+    r"|\bclinical (?:data|summary|report)\b.{0,40}\b(?:clinician|therapist|doctor|evaluation)\b"
+    r")",
+    re.I,
+)
+_PART_ALIAS_RULES: Tuple[Tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\b(?:the loud one|inner critic|that critic voice)\b", re.I), "Critic"),
+    (re.compile(r"\b(?:that protective part|protector part|the protector)\b", re.I), "MasterMind"),
+    (re.compile(r"\b(?:core self|the self part|sovereign part)\b", re.I), "Sovereign"),
+)
+_MIN_SESSION_FIELDS_FOR_CLINICAL = 1
+
+_REMIND_PROMPT = re.compile(
+    r"\b(remind me|what(?:'s| is)\s+\w+(?:'s)?\s+job\b|what was .+ job)\b",
+    re.I,
+)
+
+
+def part_named_in_text(user_text: str, part_name: str) -> bool:
+    text = user_text or ""
+    if part_name == "Sovereign":
+        return bool(re.search(r"\bSovereign\b(?!\s+Sanctuary)", text, re.I))
+    return bool(re.search(rf"\b{re.escape(part_name)}\b", text, re.I))
+
+
+def is_registry_citation_intent(user_text: str) -> bool:
+    """User asks to recall a registered part's stored role — citation voice allowed."""
+    text = user_text or ""
+    return bool(_REGISTRY_CITATION_INTENT.search(text) or _REMIND_PROMPT.search(text))
+
+
+def is_registry_citation_turn(user_text: str, *, prompt_id: str = "") -> bool:
+    """Backward-compatible alias — intent only, not slot IDs."""
+    return is_registry_citation_intent(user_text)
+
+
+def is_clinical_data_intent(user_text: str) -> bool:
+    return bool(_CLINICAL_DATA_INTENT.search(user_text or ""))
+
+
+def clinical_summary_export_enabled() -> bool:
+    return os.getenv("LN_CLINICAL_SUMMARY_EXPORT", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def resolve_part_references(
+    text: str,
+    parts: Sequence[Dict[str, str]],
+) -> Set[str]:
+    if not text:
+        return set()
+    found: Set[str] = set()
+    for p in parts:
+        name = p.get("part_name") or ""
+        if name and part_named_in_text(text, name):
+            found.add(name)
+    for pattern, canonical in _PART_ALIAS_RULES:
+        if pattern.search(text):
+            for p in parts:
+                if (p.get("part_name") or "").lower() == canonical.lower():
+                    found.add(p["part_name"])
+                    break
+            else:
+                found.add(canonical)
+    return found
+
+
+def active_thread_parts(
+    parts: Sequence[Dict[str, str]],
+    *,
+    prior_user_texts: Optional[Sequence[str]] = None,
+    session: Optional[Dict[str, str]] = None,
+) -> Set[str]:
+    linked: Set[str] = set()
+    for t in prior_user_texts or ():
+        linked |= resolve_part_references(t, parts)
+    if session:
+        corpus = " ".join(
+            str(session.get(k) or "")
+            for k in ("summary", "what_shifted", "open_thread")
+        )
+        linked |= resolve_part_references(corpus, parts)
+    return linked
+
+
+def registry_part_relevant(
+    user_text: str,
+    part: Dict[str, str],
+    *,
+    prior_user_texts: Optional[Sequence[str]] = None,
+    session: Optional[Dict[str, str]] = None,
+    parts: Optional[Sequence[Dict[str, str]]] = None,
+) -> bool:
+    """Allowlist: part must tie to current turn, prior user thread, or session record."""
+    text = user_text or ""
+    name = (part.get("part_name") or "").strip()
+    if not name:
+        return False
+    all_parts = list(parts or [part])
+    thread = active_thread_parts(
+        all_parts,
+        prior_user_texts=prior_user_texts,
+        session=session,
+    )
+    refs_now = resolve_part_references(text, all_parts)
+    if name in refs_now:
+        return True
+    if _RECALL_ABOUT_PART.search(text) and name.lower() in text.lower():
+        return True
+    if is_registry_citation_intent(text) and name.lower() in text.lower():
+        return True
+    if _CONTINUATION_TURN.search(text) and name in thread:
+        return True
+    if name not in thread:
+        return False
+    desc = (part.get("description") or "").lower()
+    if not desc:
+        return bool(_CONTINUATION_TURN.search(text))
+    hooks = set(re.findall(r"[a-z]{5,}", desc))
+    utter = set(re.findall(r"[a-z]{5,}", text.lower()))
+    return len(hooks & utter) >= 2
+
+
 def build_registry_turn_directive(
     user_text: str,
     parts: Sequence[Dict[str, str]],
+    *,
+    prior_user_texts: Optional[Sequence[str]] = None,
+    session: Optional[Dict[str, str]] = None,
+    prompt_id: str = "",
 ) -> str:
-    """Deterministic per-turn fusion directive.
+    """Deterministic per-turn fusion directive when registered parts are relevant.
 
-    When the client's CURRENT message names one or more registered parts,
-    emit an explicit THIS-TURN instruction carrying each part's stored
-    purpose so registry recall cannot be skipped or contradicted.
-    Returns "" when no registered part is mentioned.
+    Natural voice by default; citation voice only on remind/quote turns (A3-type).
+    Returns "" when no registered part is relevant to this utterance.
     """
     text = user_text or ""
     if not text or not parts:
         return ""
-    mentioned: List[Dict[str, str]] = []
+    cite = is_registry_citation_intent(text)
+    relevant: List[Dict[str, str]] = []
     for p in parts:
         name = (p.get("part_name") or "").strip()
         if not name:
             continue
-        if name == "Sovereign":
-            # Skip product-name collisions ("Sovereign Sanctuary")
-            if not re.search(r"\bSovereign\b(?!\s+Sanctuary)", text, re.I):
-                continue
-        elif not re.search(rf"\b{re.escape(name)}\b", text, re.I):
-            continue
-        mentioned.append(p)
-    if not mentioned:
+        if registry_part_relevant(
+            text,
+            p,
+            prior_user_texts=prior_user_texts,
+            session=session,
+            parts=parts,
+        ):
+            relevant.append(p)
+    if not relevant:
         return ""
+    voice = (
+        "CITATION VOICE: the client asked for a reminder — you may quote the stored purpose verbatim."
+        if cite
+        else "NATURAL VOICE: weave stored purposes into plain clinical language — do NOT say "
+        '"your registry says" or "on file".'
+    )
     lines = [
-        "THIS TURN — REGISTRY FUSION (mandatory): the client just named "
-        "registered council part(s). Answer from BOTH channels:"
+        "THIS TURN — REGISTRY FUSION (mandatory): registered part(s) are relevant now.",
+        voice,
     ]
-    for p in mentioned:
+    for p in relevant:
         name = p["part_name"]
         desc = (p.get("description") or "").strip()
         if desc:
-            lines.append(
-                f'- {name} IS on the registry. Stored purpose: "{desc}". '
-                f"Lead with this registry fact (e.g. \"your registry says…\"), "
-                f"then connect it to what has or hasn't come up in this conversation."
-            )
+            lines.append(f'- {name} stored purpose: "{desc}". Use this fact; connect to the thread.')
         else:
             lines.append(
-                f"- {name} IS on the registry but has no stored purpose. Say the part "
-                f"is on file, invite the client to fill in its role — never treat it "
-                f"as unknown or say it is \"not on file\"."
+                f"- {name} is registered but purpose is blank — invite the client to define it."
             )
-    lines.append(
-        "Do NOT say you have no information about these parts. Do NOT open with a denial."
-    )
+    lines.append("Do NOT deny you have information about these parts. Do NOT open with a denial.")
     return "\n".join(lines)
 
 
@@ -282,6 +446,49 @@ def format_prior_session_block(session: Optional[Dict[str, str]]) -> str:
         if val:
             lines.append(f"- {label}: {val}")
     return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def build_clinical_data_directive(
+    user_text: str,
+    parts: Sequence[Dict[str, str]],
+    session: Optional[Dict[str, str]] = None,
+) -> str:
+    """Clinician-handoff offer gated on data presence, export capability, and privacy."""
+    if not is_clinical_data_intent(user_text):
+        return ""
+    parts_with_desc = [p for p in parts if (p.get("description") or "").strip()]
+    session_fields = sum(
+        1
+        for k in ("summary", "what_shifted", "open_thread")
+        if session and (session.get(k) or "").strip()
+    )
+    if len(parts_with_desc) == 0 and session_fields < _MIN_SESSION_FIELDS_FOR_CLINICAL:
+        return (
+            "THIS TURN — CLINICAL DATA BOUNDARY: The user asked for diagnosis or a "
+            "clinician summary, but no registry or session record is loaded yet. Do not "
+            "invent history. Decline diagnosis; say you need more tracked sessions "
+            "before you can walk through patterns together."
+        )
+    export_ok = clinical_summary_export_enabled()
+    if export_ok:
+        offer = (
+            "You may offer a brief de-identified council pattern summary they could "
+            "bring to a licensed clinician evaluation."
+        )
+    else:
+        offer = (
+            "Offer ONLY what you can walk through in conversation now — themes and "
+            "patterns from loaded registry + session memory. Do NOT claim a download, "
+            "export, PDF, or feature that does not exist."
+        )
+    privacy = (
+        "Use themes and patterns only — no raw session quotes, no real names, no "
+        "verbatim client disclosures; this artifact may leave the platform."
+    )
+    return (
+        "THIS TURN — CLINICAL DATA OFFER (not diagnosis): "
+        f"{offer} {privacy} Never diagnose. Refuse diagnostic labels."
+    )
 
 
 def build_memory_turn_directive(

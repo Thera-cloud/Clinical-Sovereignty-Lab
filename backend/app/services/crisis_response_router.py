@@ -24,6 +24,11 @@ _DONE_TALKING = re.compile(
     r"|\bwhatever\b[\s.,!]*\bit'?s fine\b",
     re.I,
 )
+_STIFF_EXIT = re.compile(
+    r"\b(I acknowledge your (?:decision|choice) to (?:stop|conclude)|"
+    r"The door remains open|I hear that you(?:'re| are) ready to stop)\b",
+    re.I,
+)
 _EXERCISE_OFFER = re.compile(
     r"\b(grounding|breath(?:ing|e)? (?:practice|exercise|cycle)|body scan|"
     r"try (?:this|a) (?:practice|exercise|technique)|micro[- ]practice|"
@@ -109,8 +114,8 @@ def _crisis_stabilization_response(
         "available 24/7. Or text HOME to 741741 (Crisis Text Line) for steady listening."
     )
     close = (
-        f"Those lines exist for exactly this moment — a real person, right now. "
-        f"And when you're ready to come back, I'll be here, {name}."
+        "Those lines exist for exactly this moment — a real person, right now. "
+        "I'll be here whenever you're ready."
     )
     return f"{witness}\n\n{resources}\n\n{close}"
 
@@ -151,13 +156,53 @@ def _strip_post_crisis_coaching(
     return body
 
 
-def _strip_done_talking_push(text: str, user_text: str) -> str:
-    """Disengagement = a real exit: no exercises, no questions, max ~3 short sentences."""
+def recent_crisis_in_conversation(
+    user_text: str,
+    history: Optional[Sequence[Dict[str, str]]] = None,
+    *,
+    lookback_user_turns: int = 6,
+) -> bool:
+    if _CRISIS_USER.search(user_text or ""):
+        return True
+    if not history:
+        return False
+    user_msgs = [
+        m.get("content", "")
+        for m in history
+        if (m.get("role") or "").lower() == "user"
+    ]
+    for t in user_msgs[-lookback_user_turns:]:
+        if _CRISIS_USER.search(t or ""):
+            return True
+    return False
+
+
+def _disengagement_exit(*, recent_crisis: bool) -> str:
+    if recent_crisis:
+        return (
+            "Okay. The line's still there tonight if the Critic gets loud — 988. "
+            "I'm here when you come back."
+        )
+    return "Okay. I'm here whenever you want to pick it back up."
+
+
+def _strip_done_talking_push(
+    text: str,
+    user_text: str,
+    *,
+    recent_crisis: bool = False,
+) -> str:
+    """Disengagement = warm exit; crisis-adjacent exits keep 988 within reach."""
     if not _DONE_TALKING.search(user_text or ""):
         return text
-    sentences = re.split(r"(?<=[.!?])\s+", (text or "").strip())
-    if len(sentences) <= 1 and not _EXERCISE_OFFER.search(text or ""):
-        return text
+    if recent_crisis:
+        return _disengagement_exit(recent_crisis=True)
+    body = (text or "").strip()
+    if _STIFF_EXIT.search(body) or _EXERCISE_OFFER.search(body):
+        return _disengagement_exit(recent_crisis=False)
+    sentences = re.split(r"(?<=[.!?])\s+", body)
+    if len(sentences) <= 1 and "?" not in body:
+        return body
     kept: List[str] = []
     for s in sentences:
         chunk = s.strip()
@@ -168,11 +213,14 @@ def _strip_done_talking_push(text: str, user_text: str) -> str:
         if _EXERCISE_OFFER.search(chunk):
             continue
         kept.append(chunk)
-        if len(kept) >= 3:
+        if len(kept) >= 2:
             break
-    if not kept:
-        return "Okay. I'm here whenever you want to pick it back up — no pressure from me."
-    return " ".join(kept).strip()
+    if not kept or _STIFF_EXIT.search(body):
+        return _disengagement_exit(recent_crisis=False)
+    merged = " ".join(kept).strip()
+    if len(merged.split()) > 18:
+        return _disengagement_exit(recent_crisis=False)
+    return merged
 
 
 def _strip_routine_crisis_resources(text: str, user_text: str) -> str:
@@ -207,15 +255,24 @@ def apply_ln_boundary_post_guard(
     user_text: str,
     *,
     registry_parts: Optional[Sequence[str]] = None,
+    conversation_history: Optional[Sequence[Dict[str, str]]] = None,
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """
     Post-generation deterministic boundary router for LN configs.
     Returns (mutated_text, hits) — hits always non-empty when guard tripped.
     """
     hits: List[Dict[str, Any]] = []
+    recent_crisis = recent_crisis_in_conversation(
+        user_text or "",
+        conversation_history,
+    )
     guard = guard_evaluate(user_text or "")
     if not guard.tripped:
-        out = _strip_done_talking_push(text or "", user_text or "")
+        out = _strip_done_talking_push(
+            text or "",
+            user_text or "",
+            recent_crisis=recent_crisis,
+        )
         return out, hits
 
     hits.append({
@@ -237,5 +294,9 @@ def apply_ln_boundary_post_guard(
         if hypo.lower() not in (out or "").lower():
             out = f"{hypo}\n\n{out}".strip() if out.strip() else hypo
 
-    out = _strip_done_talking_push(out, user_text or "")
+    out = _strip_done_talking_push(
+        out,
+        user_text or "",
+        recent_crisis=recent_crisis,
+    )
     return out.strip(), hits

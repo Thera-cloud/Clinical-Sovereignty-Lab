@@ -268,7 +268,14 @@ def _get_helix():
     return _helix
 
 
-async def _registry_fusion_block(db_pool, user_id: str, user_text: str) -> str:
+async def _registry_fusion_block(
+    db_pool,
+    user_id: str,
+    user_text: str,
+    *,
+    prior_user_texts=None,
+    session=None,
+) -> str:
     """Registry fusion for turns that name a registered part: council block +
     THIS-TURN directive carrying the stored purpose.  Returns "" when the
     turn mentions no registered part or the registry flag is off."""
@@ -281,7 +288,12 @@ async def _registry_fusion_block(db_pool, user_id: str, user_text: str) -> str:
             fetch_registry_parts,
         )
         reg_rows = await fetch_registry_parts(db_pool, user_id)
-        directive = build_registry_turn_directive(user_text, reg_rows)
+        directive = build_registry_turn_directive(
+            user_text,
+            reg_rows,
+            prior_user_texts=prior_user_texts,
+            session=session,
+        )
         if not directive:
             return ""
         council = await build_council_context(db_pool, user_id)
@@ -291,7 +303,14 @@ async def _registry_fusion_block(db_pool, user_id: str, user_text: str) -> str:
         return ""
 
 
-async def build_enrichment_addendum(db_pool, user_id: str, user_text: str) -> str:
+async def build_enrichment_addendum(
+    db_pool,
+    user_id: str,
+    user_text: str,
+    *,
+    prior_user_texts=None,
+    session=None,
+) -> str:
     """Tier 2 + 4: on high-signal turns, run FederatedSearch over the crystal
     field and a Helix think() cycle, and distill both into a compact
     synthesis directive appended to the system prompt.
@@ -307,7 +326,13 @@ async def build_enrichment_addendum(db_pool, user_id: str, user_text: str) -> st
     if not is_high_signal_turn(user_text):
         # A short turn that names a registered council part still needs the
         # registry channel loaded ("Remind me what MasterMind's job is").
-        fusion = await _registry_fusion_block(db_pool, user_id, user_text)
+        fusion = await _registry_fusion_block(
+            db_pool,
+            user_id,
+            user_text,
+            prior_user_texts=prior_user_texts,
+            session=session,
+        )
         combined = "\n\n".join(b for b in (priority_block, fusion) if b)
         return combined[:_T2_MAX_CHARS] if combined else ""
     t0 = time.monotonic()
@@ -371,7 +396,12 @@ async def build_enrichment_addendum(db_pool, user_id: str, user_text: str) -> st
             council = await build_council_context(db_pool, user_id)
             if council:
                 lines.insert(0, council)
-            directive = build_registry_turn_directive(user_text, reg_rows)
+            directive = build_registry_turn_directive(
+                user_text,
+                reg_rows,
+                prior_user_texts=prior_user_texts,
+                session=session,
+            )
             if directive:
                 lines.insert(0, directive)
         except Exception as e:

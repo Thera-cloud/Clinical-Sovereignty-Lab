@@ -8877,7 +8877,17 @@ class AzureCortex:
             if _enrich is None or not _enrich.enrichment_enabled() or _role != "CLIENT":
                 return ""
             try:
-                _add = await _enrich.build_enrichment_addendum(_cpool, _uname or _hw_id, user_text)
+                _prior_user = [
+                    (t.get("user_text") or "").strip()
+                    for t in (_chat_live_turns.get(uid) or [])
+                    if (t.get("user_text") or "").strip()
+                ]
+                _add = await _enrich.build_enrichment_addendum(
+                    _cpool,
+                    _uname or _hw_id,
+                    user_text,
+                    prior_user_texts=_prior_user,
+                )
                 _corr = _enrich.pop_correction_directive(uid)
                 return "\n\n".join(p for p in (_add, _corr) if p)
             except Exception as _en_err:

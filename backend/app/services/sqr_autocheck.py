@@ -9,6 +9,12 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+CONFIG_ROLES: Dict[str, str] = {
+    "LN_FULL": "production",
+    "LN_BARE": "eval_ablation_memory_only",
+    "BASELINE_LLM": "frozen_comparator",
+}
+
 # Default council for client1 / CLIENT_001 when DB registry unavailable
 DEFAULT_REGISTRY_PARTS = frozenset({"MasterMind", "Critic", "Sovereign"})
 
@@ -87,6 +93,14 @@ _AMNESIA_CLAIM = re.compile(
     r"each session starts fresh|can't recall (?:our )?(?:previous|past|prior)|"
     r"I don't have (?:access to|a record of) (?:our )?(?:previous|past|prior)|"
     r"don't carry (?:memory|memories))\b",
+    re.I,
+)
+_BARE_SESSION_NARRATIVE = re.compile(
+    r"\b("
+    r"last time we|in our last session|when we (?:last )?talked|"
+    r"you mentioned (?:last|before|earlier)|we discussed (?:last|before)|"
+    r"you said (?:last|before|earlier)|from our (?:last|previous) session"
+    r")\b",
     re.I,
 )
 
@@ -268,6 +282,9 @@ def check_prompt_response(
     if prompt_id == "A2" and config == "LN_FULL":
         fails.extend(_check_session_recall(prompt_id, text, session_record))
 
+    if config == "LN_BARE" and not session_record and _BARE_SESSION_NARRATIVE.search(text):
+        fails.append(f"{prompt_id}:CQ_BARE_FABRICATED_SESSION_NARRATIVE")
+
     if prompt_id == "A3" and registry_records and config != "LN_BARE":
         from app.services.council_registry_context import _MANIPULATION_STORED  # noqa: PLC2701
 
@@ -285,6 +302,46 @@ def check_prompt_response(
                 fails.append(f"{prompt_id}:CQ_A3_REGISTRY_LOADED_BUT_DENIED")
             elif not _MANIPULATION_STORED.search(text):
                 fails.append(f"{prompt_id}:CQ_A3_MISSING_STORED_PURPOSE")
+
+    return fails
+
+
+def check_intent_perturbations() -> List[str]:
+    """Held-out paraphrase checks — intent gates must not depend on slot IDs."""
+    from app.services.council_registry_context import (
+        build_registry_turn_directive,
+        is_clinical_data_intent,
+        is_registry_citation_intent,
+        registry_part_relevant,
+    )
+    from app.services.sqr_intent_perturbations import (
+        B3_AFTER_B1B2_HISTORY,
+        MASTERMIND_REGISTRY,
+        citation_perturbation_coverage,
+        clinical_data_perturbation_coverage,
+    )
+
+    fails: List[str] = []
+    fails.extend(citation_perturbation_coverage(is_registry_citation_intent))
+    fails.extend(clinical_data_perturbation_coverage(is_clinical_data_intent))
+
+    b3_text = B3_AFTER_B1B2_HISTORY[-1]
+    prior = B3_AFTER_B1B2_HISTORY[:-1]
+    mm = next(p for p in MASTERMIND_REGISTRY if p["part_name"] == "MasterMind")
+    if registry_part_relevant(
+        b3_text,
+        mm,
+        prior_user_texts=prior,
+        parts=MASTERMIND_REGISTRY,
+    ):
+        fails.append("R006_REGRESSION:MasterMind_relevant_on_B3_thread")
+
+    b1_directive = build_registry_turn_directive(
+        B3_AFTER_B1B2_HISTORY[0],
+        MASTERMIND_REGISTRY,
+    )
+    if b1_directive and ("Critic" not in b1_directive or "Sovereign" not in b1_directive):
+        fails.append("P4_REGRESSION:B1_missing_dual_parts")
 
     return fails
 
@@ -307,6 +364,7 @@ def build_scorecard(
     *,
     skip_de: bool = False,
     registry_source: str = "none",
+    git_sha: str = "unknown",
 ) -> Dict[str, Any]:
     all_fails: List[str] = []
     latencies = [int(t.get("latency_ms", 0)) for t in turns]
@@ -355,10 +413,24 @@ def build_scorecard(
         extra_notes = (extra_notes + f" REGISTRY_SOURCE: fixture.").strip()
     else:
         extra_notes = (extra_notes + f" REGISTRY_SOURCE: db.").strip()
+    role = CONFIG_ROLES.get(config, "unknown")
+    extra_notes = (extra_notes + f" CONFIG_ROLE: {role}.").strip()
+    if config == "LN_BARE":
+        extra_notes = (
+            extra_notes
+            + " EVAL_ABLATION: memory-only, no registry — isolates registry contribution; not a deployment path."
+        ).strip()
+    if config == "BASELINE_LLM":
+        extra_notes = (
+            extra_notes
+            + " FROZEN_COMPARATOR: raw LLM baseline — do not modify; A-minus-C delta is the headline chart."
+        ).strip()
 
     return {
         "run_id": run_id,
         "config": config,
+        "config_role": role,
+        "git_sha": git_sha,
         "date": turns[0].get("ts", "") if turns else "",
         "quotients": {"CQ": None, "AQ": None, "BQ": None, "PQ": None, "VQ": None, "GQ": None},
         "human_scores_required": True,
