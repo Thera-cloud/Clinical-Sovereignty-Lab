@@ -164,4 +164,28 @@ async def test_delivery_log_panel_resolves_by_log_id():
     # Resolved via delivery log → full panel block, not the no-row fallback
     assert "SOVEREIGN JOURNEY PANEL — client asked about this image" in ctx
     assert "moving moment from your week" in ctx
+    assert "Core character manifested: Mirror" in ctx
     assert "DEEP REFLECTION PROTOCOL" in ctx
+
+
+@pytest.mark.asyncio
+async def test_daily_panel_infers_serpent_from_narrative():
+    narrative = (
+        "You stand at the river's bend with the Cartographer refining his map when "
+        "the Archivist kneels nearby. The Serpent rises from the crystal waters."
+    )
+    delivery_row = {
+        "log_id": uuid.UUID("ea20896b-7220-499b-9ee9-d40ad1e190a5"),
+        "generation_type": "daily_panel",
+        "r2_url": None,
+        "client_narrative_text": narrative,
+        "storyboard_id": "sb_lisa",
+        "generated_at": datetime(2026, 7, 2, tzinfo=timezone.utc),
+    }
+    db = _FakeDB(row=None, delivery_row=delivery_row)
+    profile = {"hardware_id": "CLIENT_001", "username": "JohnD"}
+    text = f"[SSE Panel:ea20896b-7220-499b-9ee9-d40ad1e190a5] Explain symbols"
+    _new_text, ctx, _img = await build_sse_panel_chat_context(db, profile, text)
+    assert "Core character manifested: Serpent" in ctx
+    assert "Cartographer" in ctx
+    assert "Never claim a figure is absent" in ctx

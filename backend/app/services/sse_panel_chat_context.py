@@ -73,6 +73,54 @@ CHARACTER_THEME_GUIDE: dict[str, dict[str, Any]] = {
 }
 
 
+def _infer_character_from_narrative(narrative: str) -> str:
+    """Delivery-runtime panels store narrative but not character_manifest — infer from text."""
+    text = (narrative or "").strip()
+    if not text:
+        return "Mirror"
+    lower = text.lower()
+    # Longer / multi-word names first to avoid partial matches.
+    ordered = [
+        "Holy Spirit",
+        "Pride/Shame",
+        "Serpent",
+        "Reflection",
+        "Curiosity",
+        "Mirror",
+    ]
+    for name in ordered:
+        if name == "Pride/Shame":
+            if "pride" in lower or "shame" in lower:
+                return name
+        elif name.lower() in lower:
+            return name
+    for name in CHARACTER_THEME_GUIDE:
+        if name.lower() in lower:
+            return name
+    return "Mirror"
+
+
+def _refresh_r2_presigned(url: str | None) -> str | None:
+    """Re-sign expired R2 presigned URLs before backend image fetch (journey feed does this for clients)."""
+    if not url:
+        return url
+    try:
+        from urllib.parse import unquote, urlparse
+
+        from app.sse.infrastructure.r2_storage import _R2_BUCKET, presigned_url as _presign
+
+        parsed = urlparse(url.split("?")[0])
+        path = unquote(parsed.path.lstrip("/"))
+        bucket_prefix = f"{_R2_BUCKET}/"
+        key = path[len(bucket_prefix):] if path.startswith(bucket_prefix) else path
+        if not key:
+            return url
+        return _presign(key) or url
+    except Exception as exc:
+        print(f">>> [SSE PANEL] R2 presign refresh skipped: {type(exc).__name__}: {exc}")
+        return url
+
+
 def _member_ids(profile: dict[str, Any]) -> list[str]:
     ids: list[str] = []
     for key in ("hardware_id", "username", "id", "user_id"):
@@ -231,7 +279,8 @@ def _build_deep_reflection_protocol(char_name: str) -> str:
         "",
         "RULES: Do not invent chat or crystal quotes not in the evidence blocks. "
         "Do not mention panel_sequence, FFT, ODPE, or algorithms. "
-        "NPCs/symbols only from the scene narrative.",
+        "NPCs/symbols only from the scene narrative. "
+        "Never claim a figure is absent if the scene narrative names it.",
     ])
 
 
@@ -261,6 +310,8 @@ def _build_panel_block(
         f"- Crystal domain tags (secondary): {domain_line}",
         f"- Biome: {biome or 'unknown'} | Tone: {tone or 'unknown'}",
         f"- Scene narrative: {narrative[:1200] if narrative else 'n/a'}",
+        "- When the client asks about symbols/characters, describe every figure named in the "
+        "scene narrative (including NPCs such as Cartographer, Archivist, Serpent, etc.).",
         "",
         f"MYTHIC MEANING OF {char_name.upper()}:",
         guide["mythic"],
@@ -398,6 +449,7 @@ async def _gather_therapeutic_evidence(
 async def _r2_url_to_data_url(url: str) -> str | None:
     if not url or not url.startswith("http"):
         return None
+    url = _refresh_r2_presigned(url) or url
     try:
         import asyncio
         import base64
@@ -476,14 +528,15 @@ async def build_sse_panel_chat_context(
                     ids,
                 )
                 if drow:
+                    narrative = (drow.get("client_narrative_text") or "").strip()
                     row = {
                         "panel_id": str(drow.get("log_id")),
                         "panel_type": drow.get("generation_type") or "panel",
                         "source_type": "delivery",
                         "r2_url": drow.get("r2_url"),
-                        "narrative_text": drow.get("client_narrative_text"),
+                        "narrative_text": narrative,
                         "biome": drow.get("storyboard_id") or "",
-                        "character_manifest": "Mirror",
+                        "character_manifest": _infer_character_from_narrative(narrative),
                         "panel_tone": drow.get("generation_type") or "",
                         "crystal_domains_used": None,
                         "generated_at": drow.get("generated_at"),
