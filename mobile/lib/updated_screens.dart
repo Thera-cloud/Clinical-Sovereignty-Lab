@@ -22,6 +22,8 @@ import 'metrics_widgets.dart';
 import 'dojo_iframe_stub.dart' if (dart.library.html) 'dojo_iframe_web.dart';
 import 'dojo_parent_message_stub.dart'
     if (dart.library.html) 'dojo_parent_message_web.dart';
+import 'spline_iframe_stub.dart'
+    if (dart.library.html) 'spline_iframe_web.dart' as spline;
 
 import 'shared_widgets.dart';
 import 'widgets/calendar_views.dart';
@@ -2034,11 +2036,17 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
           _scheduleTtsOncePerTurn(turnId, reply, true);
         }
 
-        // Update avatar expression based on AI response mood/sentiment
+        // Update avatar expression — server avatar_state preferred, sentiment fallback
         if (_avatarModeEnabled && _canUseAvatarMode()) {
-          final sentiment =
-              data['sentiment'] ?? data['mood'] ?? _metrics['mood_current'];
-          _updateAvatarFromSentiment(sentiment, reply);
+          final serverAvatar = data['avatar_state'];
+          if (serverAvatar is Map && serverAvatar['expression'] != null) {
+            _updateAvatarExpression(avatarExpressionFromServer(
+                serverAvatar['expression'].toString()));
+          } else {
+            final sentiment =
+                data['sentiment'] ?? data['mood'] ?? _metrics['mood_current'];
+            _updateAvatarFromSentiment(sentiment, reply);
+          }
         }
       } else if (data['type'] == 'offer_coach_handoff') {
         final coachName = (data['coach_name'] as String?)?.trim().isNotEmpty == true
@@ -4542,6 +4550,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     setState(() {
       _avatarState = _avatarState.copyWith(expression: expression);
     });
+    if (kIsWeb && _avatarModeEnabled) {
+      spline.sendExpressionToSpline(avatarExpressionWireName(expression));
+    }
   }
 
   /// Determine Nate's avatar expression from two inputs:
@@ -5058,11 +5069,14 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                 // BACK LAYER: Visual (GLB 3D avatar or orb)
                 Positioned.fill(
                   child: _avatarModeEnabled && _canUseAvatarMode()
-                      ? GlbAvatarWidget(
-                          expression: _avatarState.expression,
-                          voiceState: _voiceState,
-                          onTap: () => _toggleAvatarMode(false),
-                        )
+                      ? (kIsWeb
+                          ? spline.buildSplineAvatarIframe(
+                              '${AppConfig.splineBaseUrl}/index.html')
+                          : GlbAvatarWidget(
+                              expression: _avatarState.expression,
+                              voiceState: _voiceState,
+                              onTap: () => _toggleAvatarMode(false),
+                            ))
                       : VisualPersona(
                           isTalking: _isTalking,
                           isListening: _audio.isListening),
@@ -5197,6 +5211,16 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                     ),
                   ),
                 ),
+                if (_avatarModeEnabled && _canUseAvatarMode())
+                  Positioned(
+                    top: 12,
+                    right: 12,
+                    child: IconButton(
+                      tooltip: 'Return to Orb',
+                      icon: const Icon(Icons.close, color: Color(0xFFC9A962)),
+                      onPressed: () => _toggleAvatarMode(false),
+                    ),
+                  ),
               ],
             ),
           ),

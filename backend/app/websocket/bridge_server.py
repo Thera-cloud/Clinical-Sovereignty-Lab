@@ -7873,6 +7873,7 @@ class AzureCortex:
         self.analytics = analytics
         self.active_sessions = {}  # user_id -> session_id
         self._client_messages = {}  # QUANTUM-CRYSTAL-ARCH — uid -> list of recent client messages
+        self._last_avatar_user_text: Dict[str, str] = {}  # SOVEREIGN-VOICE — avatar expression context
 
         # EFT marker patterns (parsed from Little Nate output ONLY)
         # QUANTUM-CRYSTAL-ARCH: quote class accepts straight ("), curly (\u201c\u201d) and
@@ -8733,6 +8734,7 @@ class AzureCortex:
 
     async def process_interaction(self, profile: dict, user_text: str, dojo_type: Optional[str] = None, client_context: Optional[str] = None):
         uid = profile.get("hardware_id", "UNKNOWN")
+        self._last_avatar_user_text[uid] = user_text  # SOVEREIGN-VOICE
         # QUANTUM-CRYSTAL-ARCH: scope all _send() emissions to the originating
         # context (e.g. "dojo" iframe). Without this filter, both parent and
         # iframe sockets receive the response and the iframe shows duplicates.
@@ -11650,6 +11652,13 @@ class AzureCortex:
                     _payload: Dict[str, Any] = {"type": "nate_response", "text": text}
                     if turn_id:
                         _payload["turn_id"] = turn_id
+                    # SOVEREIGN-VOICE — avatar expression for Sovereign Circle (never block chat)
+                    if avatar_handler:
+                        try:
+                            _ut = self._last_avatar_user_text.get(uid, "")
+                            _payload["avatar_state"] = avatar_handler._determine_avatar_state(text, _ut)
+                        except Exception:
+                            pass
                     await ws.send(json.dumps(_payload))
                     # #region agent log
                     _sent_ok += 1

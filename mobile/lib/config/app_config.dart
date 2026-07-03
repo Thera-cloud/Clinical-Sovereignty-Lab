@@ -50,6 +50,11 @@ class AppConfig {
   static String get avatarGlbBaseUrl => useProduction
       ? 'https://app.sovereignsanctuary.net/avatar-modes'
       : 'http://$serverHost:8080/avatar-modes';
+
+  /// Spline web avatar export (index.html, scene.splinecode) — app origin, not API.
+  static String get splineBaseUrl => useProduction
+      ? 'https://app.sovereignsanctuary.net/spline'
+      : 'http://$serverHost:8080/spline';
   
   // ===========================================================================
   // API ENDPOINTS

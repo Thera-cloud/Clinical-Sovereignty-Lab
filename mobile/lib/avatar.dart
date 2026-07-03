@@ -1704,6 +1704,41 @@ const String _glbNeutral   = 'mininate%20neutral.glb';
 const String _glbSoft      = 'mininate%20empathetic.glb';
 const String _glbIntense   = 'mininate%20mad.glb';
 
+/// Maps server avatar_state strings (SCREAMING_SNAKE) to client enum.
+AvatarExpression avatarExpressionFromServer(String? raw) {
+  switch ((raw ?? '').trim().toUpperCase()) {
+    case 'ATTENTIVE':
+      return AvatarExpression.attentive;
+    case 'THOUGHTFUL':
+      return AvatarExpression.thoughtful;
+    case 'WARM':
+      return AvatarExpression.warm;
+    case 'EMPATHETIC':
+      return AvatarExpression.empathetic;
+    case 'CALMING':
+      return AvatarExpression.calming;
+    case 'VALIDATING':
+      return AvatarExpression.validating;
+    case 'CURIOUS':
+      return AvatarExpression.curious;
+    case 'ENCOURAGING':
+      return AvatarExpression.encouraging;
+    case 'PROUD':
+      return AvatarExpression.proud;
+    case 'SAD':
+      return AvatarExpression.sad;
+    case 'FRUSTRATED':
+      return AvatarExpression.frustrated;
+    case 'NEUTRAL':
+    default:
+      return AvatarExpression.neutral;
+  }
+}
+
+/// Lowercase wire name shared with Spline postMessage contract.
+String avatarExpressionWireName(AvatarExpression e) =>
+    e.toString().split('.').last.toLowerCase();
+
 const Map<AvatarExpression, String> _expressionToGlb = {
   AvatarExpression.neutral:     _glbNeutral,
   AvatarExpression.attentive:   _glbNeutral,
@@ -1738,15 +1773,21 @@ class GlbAvatarWidget extends StatefulWidget {
   State<GlbAvatarWidget> createState() => _GlbAvatarWidgetState();
 }
 
+enum _GlbLoadPhase { loading, assumedLoaded, failed }
+
 class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
-  bool _loaded = false;
+  _GlbLoadPhase _phase = _GlbLoadPhase.loading;
   String _currentGlb = '';
+  int _loadAttempt = 0;
+
+  static const _assumeLoadedAfter = Duration(seconds: 12);
+  static const _failAfter = Duration(seconds: 30);
 
   @override
   void initState() {
     super.initState();
     _currentGlb = _glbForExpression(widget.expression);
-    _startLoadTimer();
+    _beginLoadCycle();
   }
 
   @override
@@ -1757,17 +1798,30 @@ class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
       if (newGlb != _currentGlb) {
         setState(() {
           _currentGlb = newGlb;
-          _loaded = false;
+          _phase = _GlbLoadPhase.loading;
         });
-        _startLoadTimer();
+        _beginLoadCycle();
       }
     }
   }
 
-  void _startLoadTimer() {
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted && !_loaded) setState(() => _loaded = true);
+  void _beginLoadCycle() {
+    final attempt = ++_loadAttempt;
+    Future.delayed(_assumeLoadedAfter, () {
+      if (mounted && attempt == _loadAttempt && _phase == _GlbLoadPhase.loading) {
+        setState(() => _phase = _GlbLoadPhase.assumedLoaded);
+      }
     });
+    Future.delayed(_failAfter, () {
+      if (mounted && attempt == _loadAttempt && _phase == _GlbLoadPhase.loading) {
+        setState(() => _phase = _GlbLoadPhase.failed);
+      }
+    });
+  }
+
+  void _retry() {
+    setState(() => _phase = _GlbLoadPhase.loading);
+    _beginLoadCycle();
   }
 
   String _glbForExpression(AvatarExpression expr) {
@@ -1787,7 +1841,7 @@ class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
           ),
           Positioned.fill(
             child: ModelViewer(
-              key: ValueKey(src),
+              key: ValueKey('$src#$_loadAttempt'),
               src: src,
               backgroundColor: const Color(0xFF050505),
               autoRotate: false,
@@ -1802,7 +1856,7 @@ class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
               interactionPrompt: InteractionPrompt.none,
             ),
           ),
-          if (!_loaded)
+          if (_phase == _GlbLoadPhase.loading)
             Positioned.fill(
               child: Container(
                 color: const Color(0xFF050505),
@@ -1816,12 +1870,58 @@ class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
                       ),
                       SizedBox(height: 16),
                       Text(
-                        'Loading Avatar...',
+                        'Little Nate is on his way...',
                         style: TextStyle(
                           color: Color(0xFFC9A962),
                           fontSize: 14,
                           fontFamily: 'DM Sans',
                         ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          if (_phase == _GlbLoadPhase.failed)
+            Positioned.fill(
+              child: Container(
+                color: const Color(0xFF050505),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.cloud_off,
+                          color: Color(0xFFC9A962), size: 40),
+                      SizedBox(height: 12),
+                      Text(
+                        "Little Nate couldn't load right now.",
+                        style: TextStyle(
+                          color: Color(0xFFC9A962),
+                          fontSize: 14,
+                          fontFamily: 'DM Sans',
+                        ),
+                      ),
+                      SizedBox(height: 16),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          OutlinedButton(
+                            onPressed: _retry,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Color(0xFFC9A962),
+                              side: BorderSide(color: Color(0xFFC9A962)),
+                            ),
+                            child: Text('Try Again'),
+                          ),
+                          SizedBox(width: 12),
+                          TextButton(
+                            onPressed: widget.onTap,
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.grey,
+                            ),
+                            child: Text('Back to Orb'),
+                          ),
+                        ],
                       ),
                     ],
                   ),
