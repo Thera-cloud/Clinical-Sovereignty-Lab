@@ -4615,37 +4615,75 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   }
 
   /// Map Nevedal mood pill / metrics_update mood to a mirrored avatar expression.
+  /// User text wins over lagging mood_current (e.g. "angry" while pill still Happy).
   AvatarExpression _expressionFromClientMood(String mood) {
     final m = mood.toLowerCase().trim();
     final userLower = _lastUserMessage.toLowerCase();
 
-    // User text can lead Nevedal mood — mirror disclosed affect immediately.
-    if (_distressCues.any(userLower.contains)) {
-      if (userLower.contains('angry') ||
-          userLower.contains('frustrat') ||
-          m.contains('angry') ||
-          m.contains('frustrat')) {
-        return AvatarExpression.frustrated;
-      }
-      return AvatarExpression.sad;
+    if (_userTextSaysCalmOrBright(userLower)) {
+      return AvatarExpression.warm;
+    }
+    if (_userTextSaysNegativeAffect(userLower)) {
+      return AvatarExpression.neutral;
     }
 
     if (m.contains('happy') || m.contains('joy') || m.contains('positive')) {
       return AvatarExpression.warm;
     }
-    if (m.contains('sad') || m.contains('down') || m.contains('grief')) {
-      return AvatarExpression.sad;
-    }
-    if (m.contains('anxious') || m.contains('worried') || m.contains('stress')) {
-      return AvatarExpression.calming;
-    }
-    if (m.contains('angry') || m.contains('frustrat')) {
-      return AvatarExpression.frustrated;
-    }
     if (m.contains('calm') || m.contains('peace')) {
       return AvatarExpression.warm;
     }
+    if (m.contains('sad') ||
+        m.contains('down') ||
+        m.contains('grief') ||
+        m.contains('angry') ||
+        m.contains('frustrat') ||
+        m.contains('anxious') ||
+        m.contains('worried') ||
+        m.contains('stress')) {
+      return AvatarExpression.neutral;
+    }
     return AvatarExpression.neutral;
+  }
+
+  bool _userTextSaysNegativeAffect(String userLower) {
+    if (userLower.isEmpty) return false;
+    if (_distressCues.any(userLower.contains)) return true;
+    const extra = [
+      'angry',
+      'mad',
+      'furious',
+      'rage',
+      'pissed',
+      'livid',
+      'intense',
+      'intensely',
+      'lonely',
+      'loneliness',
+    ];
+    return extra.any(userLower.contains);
+  }
+
+  bool _userTextSaysCalmOrBright(String userLower) {
+    if (userLower.isEmpty) return false;
+    const calmPhrases = [
+      'i am calm',
+      'feel calm',
+      'calm now',
+      'more calm',
+      'getting calm',
+      'at peace',
+      'feel better',
+      'feeling better',
+      'relieved',
+    ];
+    if (calmPhrases.any(userLower.contains)) return true;
+    if (userLower.contains('happy') &&
+        !userLower.contains('not happy') &&
+        !userLower.contains("n't happy")) {
+      return true;
+    }
+    return false;
   }
 
   void _syncAvatarToClientMood() {
@@ -4677,12 +4715,17 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     'scared',
     'hurt',
     'alone',
+    'lonely',
     'grief',
     'cry',
     'overwhelm',
     'hopeless',
     'draining',
     'longing',
+    'angry',
+    'mad',
+    'intense',
+    'furious',
   ];
 
   bool _userShowsDistress({String? clientMood}) {
@@ -4718,7 +4761,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
       case AvatarExpression.encouraging:
       case AvatarExpression.warm:
       case AvatarExpression.curious:
-        return AvatarExpression.empathetic;
+        return AvatarExpression.neutral;
       default:
         return expression;
     }
@@ -4749,10 +4792,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   ///   1. Client mood (from the mood indicator / metrics) — Nate responds therapeutically
   ///   2. Nate's own message content — his words carry their own emotional weight
   ///
-  /// 3 GLB model groups:
-  ///   Neutral  — resting, attentive, thoughtful (baseline)
-  ///   Soft     — warm, empathetic, calming, validating, curious (nurturing)
-  ///   Intense  — proud, encouraging, sad, frustrated (strong emotion)
+  /// GLB groups (interim asset routing):
+  ///   neutral.glb — resting + mirrored negative affect (sad/mad/lonely/intense)
+  ///   empathetic.glb — calm / bright / nurturing Nate tone
   void _updateAvatarFromSentiment(dynamic sentiment, String responseText) {
     final sentimentStr = (sentiment ?? 'neutral').toString().toLowerCase();
     final textLower = responseText.toLowerCase();
@@ -4805,24 +4847,24 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         textLower.contains('loss') ||
         textLower.contains('grief') ||
         textLower.contains('hold space')) {
-      nateExpression = AvatarExpression.sad;
+      nateExpression = AvatarExpression.neutral;
     }
 
     // --- Step 2: If Nate's message didn't signal clearly, respond to client mood ---
     if (nateExpression == null && _userShowsDistress(clientMood: clientMood)) {
-      nateExpression = AvatarExpression.empathetic;
+      nateExpression = AvatarExpression.neutral;
     } else if (nateExpression == null) {
       if (sentimentStr.contains('happy') || sentimentStr.contains('joy')) {
         nateExpression = AvatarExpression.warm;
       } else if (sentimentStr.contains('sad') ||
           sentimentStr.contains('grief')) {
-        nateExpression = AvatarExpression.empathetic;
+        nateExpression = AvatarExpression.neutral;
       } else if (sentimentStr.contains('anxious') ||
           sentimentStr.contains('worried')) {
-        nateExpression = AvatarExpression.calming;
+        nateExpression = AvatarExpression.neutral;
       } else if (sentimentStr.contains('angry') ||
           sentimentStr.contains('frustrat')) {
-        nateExpression = AvatarExpression.calming;
+        nateExpression = AvatarExpression.neutral;
       } else if (sentimentStr.contains('empathy') ||
           sentimentStr.contains('compassion')) {
         nateExpression = AvatarExpression.empathetic;
@@ -4836,15 +4878,15 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
       switch (clientMood) {
         case 'sad':
         case 'down':
-          nateExpression = AvatarExpression.empathetic;
+          nateExpression = AvatarExpression.neutral;
           break;
         case 'anxious':
         case 'worried':
-          nateExpression = AvatarExpression.calming;
+          nateExpression = AvatarExpression.neutral;
           break;
         case 'angry':
         case 'frustrated':
-          nateExpression = AvatarExpression.calming;
+          nateExpression = AvatarExpression.neutral;
           break;
         case 'happy':
         case 'positive':

@@ -1701,9 +1701,7 @@ const String _glbNeutral   = 'mininate%20neutral.glb';
 const String _glbSoft      = 'mininate%20empathetic.glb';
 const String _glbCalming   = 'mininate%20calming.glb';
 const String _glbCurious   = 'mininate%20curious.glb';
-const String _glbSad       = 'mininate%20sad.glb';
-const String _glbProud     = 'mininate%20proud.glb';
-const String _glbIntense   = 'mininate%20mad.glb';
+// sad/mad/proud GLBs exist on CDN but are duplicates — not wired until re-export.
 
 /// Maps server avatar_state strings (SCREAMING_SNAKE) to client enum.
 AvatarExpression avatarExpressionFromServer(String? raw) {
@@ -1740,6 +1738,9 @@ AvatarExpression avatarExpressionFromServer(String? raw) {
 String avatarExpressionWireName(AvatarExpression e) =>
     e.toString().split('.').last.toLowerCase();
 
+// Interim asset routing (2026-07): sad/mad/proud GLBs are byte-duplicates and
+// still smile; neutral.glb is the proper resting face. Keep warm/calm on the
+// soft empathetic mesh until distinct exports land.
 const Map<AvatarExpression, String> _expressionToGlb = {
   AvatarExpression.neutral:     _glbNeutral,
   AvatarExpression.attentive:   _glbNeutral,
@@ -1750,9 +1751,9 @@ const Map<AvatarExpression, String> _expressionToGlb = {
   AvatarExpression.validating:  _glbSoft,
   AvatarExpression.curious:     _glbCurious,
   AvatarExpression.encouraging: _glbSoft,
-  AvatarExpression.proud:       _glbProud,
-  AvatarExpression.sad:         _glbSad,
-  AvatarExpression.frustrated:  _glbIntense,
+  AvatarExpression.proud:       _glbNeutral,
+  AvatarExpression.sad:         _glbNeutral,
+  AvatarExpression.frustrated:  _glbNeutral,
 };
 
 /// 3D GLB avatar that renders the current expression model.
