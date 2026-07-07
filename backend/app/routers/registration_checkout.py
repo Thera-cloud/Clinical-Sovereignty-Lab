@@ -324,6 +324,140 @@ async def trial_billing_status(
     return {"ready": False, "session_id": None}
 
 
+# QUANTUM-CRYSTAL-ARCH — Public Trial Funnel Phase 3.5: TRIAL_FREE token
+# exhaustion -> card-based TRIAL upgrade. Stateless Stripe collection only,
+# mirroring trial_setup_billing/trial_setup_callback above — never touches
+# `users`. The account mutation happens in the bridge WS handler
+# `trial_free_upgrade_confirm` after this Checkout Session's SetupIntent
+# succeeds (bridge-cache-db-sovereignty.mdc: mutations go through the bridge).
+@public_router.post("/trial-free/upgrade-billing")
+async def trial_free_upgrade_billing(
+    request: Request,
+    user: Optional[dict] = Depends(get_current_user) if get_current_user else None,
+):
+    """Stripe Checkout (mode=setup) to collect a card for a TRIAL_FREE -> TRIAL upgrade."""
+    if not user:
+        raise HTTPException(401, "Authentication required")
+
+    client_ip = request.client.host if request.client else "unknown"
+    if _rate_check(client_ip):
+        raise HTTPException(429, "Too many requests. Please try again shortly.")
+
+    if (user.get("registration_type") or "").upper() != "TRIAL_FREE":
+        raise HTTPException(400, "Account is not eligible for this upgrade")
+
+    r = _trial_redis_client(request)
+    if not r:
+        raise HTTPException(503, "Service temporarily unavailable")
+    if not stripe.api_key:
+        raise HTTPException(503, "Billing unavailable")
+
+    hardware_id = user.get("hardware_id", "")
+    email = (user.get("email") or "").strip().lower()
+    name = (user.get("name") or "").strip() or user.get("username", "")
+
+    customer_id = None
+    try:
+        if email:
+            existing = stripe.Customer.list(email=email, limit=1)
+            if existing and existing.data:
+                customer_id = existing.data[0].id
+        if not customer_id:
+            kwargs: Dict[str, Any] = {
+                "name": name,
+                "metadata": {"source": "trial_free_upgrade", "hardware_id": hardware_id},
+            }
+            if email:
+                kwargs["email"] = email
+            cust = stripe.Customer.create(**kwargs)
+            customer_id = cust.id
+    except stripe.StripeError as e:
+        logger.error("trial_free_upgrade_billing customer: %s", e)
+        raise HTTPException(502, "Payment provider error")
+
+    success_url = f"{API_PUBLIC_BASE}/api/registration/trial-free/upgrade-callback?session_id={{CHECKOUT_SESSION_ID}}"
+    try:
+        session = stripe.checkout.Session.create(
+            mode="setup",
+            customer=customer_id,
+            payment_method_types=["card"],
+            success_url=success_url,
+            cancel_url=TRIAL_SETUP_CANCEL_URL,
+            metadata={"type": "trial_free_upgrade_setup", "customer_id": customer_id, "hardware_id": hardware_id},
+        )
+    except stripe.StripeError as e:
+        logger.error("trial_free_upgrade_billing session: %s", e)
+        raise HTTPException(502, "Payment service unavailable")
+
+    from app.services.trial_signup_redis_keys import trial_free_upgrade_session_key
+
+    pending = {"phase": "pending", "hardware_id": hardware_id, "verified": False}
+    try:
+        await r.setex(trial_free_upgrade_session_key(session.id), _TRIAL_SIGNUP_TTL, json.dumps(pending))
+    except Exception as e:
+        logger.warning("trial_free_upgrade_billing redis: %s", e)
+        raise HTTPException(503, "Session storage failed")
+
+    return {"checkout_url": session.url, "session_id": session.id}
+
+
+@public_router.get("/trial-free/upgrade-callback")
+async def trial_free_upgrade_callback(session_id: str, request: Request):
+    """Stripe redirects here after setup-mode Checkout; mirrors trial_setup_callback
+    but writes into the trial_free_upgrade_session_key namespace. No `users` access —
+    the bridge WS handler `trial_free_upgrade_confirm` performs the account flip."""
+    from app.services.trial_signup_redis_keys import trial_free_upgrade_session_key
+
+    r = _trial_redis_client(request)
+    redirect_base = os.getenv(
+        "TRIAL_FREE_UPGRADE_SUCCESS_REDIRECT",
+        "https://app.sovereignsanctuary.net/trial-upgrade-complete",
+    )
+    sep = "&" if "?" in redirect_base else "?"
+
+    if not stripe.api_key:
+        return RedirectResponse(f"{redirect_base}{sep}session_id={session_id}&error=no_stripe", status_code=302)
+
+    try:
+        sess = stripe.checkout.Session.retrieve(session_id, expand=["setup_intent"])
+    except stripe.StripeError as e:
+        logger.warning("trial_free_upgrade_callback retrieve: %s", e)
+        return RedirectResponse(f"{redirect_base}{sep}session_id={session_id}&error=stripe", status_code=302)
+
+    if sess.status != "complete":
+        return RedirectResponse(f"{redirect_base}{sep}session_id={session_id}&error=incomplete", status_code=302)
+
+    setup = sess.setup_intent
+    if isinstance(setup, str):
+        setup = stripe.SetupIntent.retrieve(setup)
+    st = getattr(setup, "status", None) if setup else None
+    if st != "succeeded":
+        return RedirectResponse(f"{redirect_base}{sep}session_id={session_id}&error=setup_failed", status_code=302)
+
+    customer_id = sess.customer
+    if not customer_id:
+        return RedirectResponse(f"{redirect_base}{sep}session_id={session_id}&error=no_customer", status_code=302)
+
+    hardware_id = ""
+    if r:
+        try:
+            raw = await r.get(trial_free_upgrade_session_key(session_id))
+            if raw:
+                prev = json.loads(raw)
+                hardware_id = prev.get("hardware_id") or ""
+        except Exception as e:
+            logger.warning("trial_free_upgrade_callback redis read: %s", e)
+
+    payload = {"verified": True, "stripe_customer_id": customer_id, "hardware_id": hardware_id}
+    if r:
+        try:
+            await r.setex(trial_free_upgrade_session_key(session_id), _TRIAL_SIGNUP_TTL, json.dumps(payload))
+        except Exception as e:
+            logger.warning("trial_free_upgrade_callback redis write: %s", e)
+
+    return RedirectResponse(f"{redirect_base}{sep}session_id={session_id}", status_code=302)
+
+
 class PrepareRequest(BaseModel):
     role: str
     username: str

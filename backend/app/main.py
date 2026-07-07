@@ -142,6 +142,15 @@ async def lifespan(app: FastAPI):
     except Exception as _sg_err:
         print(f"   ⚠️  SendGrid inbound router db_pool injection failed: {_sg_err}")
 
+    # Public trial funnel: bootstrap this process's copy of the module-level
+    # pool so the unsubscribe REST router and db_maintenance_agent's follow-up
+    # cycle can reach it (bridge_server.py bootstraps its own copy separately).
+    try:
+        from app.services.public_trial_gate import bootstrap as _trial_gate_bootstrap
+        _trial_gate_bootstrap(db_pool)
+    except Exception as _trial_gate_err:
+        print(f"   ⚠️  public_trial_gate bootstrap failed: {_trial_gate_err}")
+
     # Register Stripe billing router (needs db_pool at creation time)
     try:
         from app.services.stripe_integration import create_billing_router
@@ -3607,6 +3616,12 @@ try:
     print("   ✅ Registration checkout + upgrade router registered")
 except Exception as _reg_err:
     print(f"   ⚠️  Registration checkout router failed: {_reg_err}")
+try:
+    from app.routers.public_trial_api import router as public_trial_router
+    app.include_router(public_trial_router)
+    print("   ✅ Public trial unsubscribe router registered")
+except Exception as _pt_err:
+    print(f"   ⚠️  Public trial unsubscribe router failed: {_pt_err}")
 try:
     from app.routers.scholarship_api import router as scholarship_router
     app.include_router(scholarship_router)

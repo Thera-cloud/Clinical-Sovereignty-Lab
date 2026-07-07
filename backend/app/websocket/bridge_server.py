@@ -3385,6 +3385,11 @@ def migrate_legacy_dojo_profile(profile: dict) -> bool:
 
 
 def authenticate_user(username: str, password: str, expected_role: str = None) -> Tuple[Optional[str], Any]:
+    # QUANTUM-CRYSTAL-ARCH — Public Trial Funnel: trial_ namespace is reserved
+    # for anonymous in-memory trial profiles (public_trial_gate.py) and must
+    # never resolve against the real user registry (case-insensitive).
+    if (username or "").strip().lower().startswith("trial_"):
+        return None, "USER_NOT_FOUND"
     registry = load_registry()
     target = None
     target_key = None
@@ -3628,7 +3633,53 @@ async def _consume_trial_signup_session_async(session_id: str) -> str:
     return await asyncio.to_thread(_work)
 
 
+async def _consume_trial_free_upgrade_session_async(session_id: str, expected_hardware_id: Optional[str] = None) -> str:
+    """Phase 3.5: pop verified TRIAL_FREE->TRIAL upgrade Stripe setup from Redis.
+
+    Returns stripe_customer_id only if verified == true, else '' — mirrors
+    _consume_trial_signup_session_async. When expected_hardware_id is
+    supplied (the bridge WS handler always passes the connected user's own
+    hardware_id), also requires it to match the hardware_id recorded when
+    the Checkout Session was created, so a session_id cannot be replayed
+    against a different account (bridge-cache-db-sovereignty.mdc: mutations
+    go through the bridge, not raw SQL, so this is the sole gate before the
+    account flip)."""  # QUANTUM-CRYSTAL-ARCH
+
+    def _work() -> str:
+        if not session_id or _token_redis_sync is None:
+            return ""
+        try:
+            from app.services.trial_signup_redis_keys import trial_free_upgrade_session_key
+        except Exception:
+            return ""
+        key = trial_free_upgrade_session_key(session_id)
+        raw = _token_redis_sync.get(key)
+        if not raw:
+            return ""
+        try:
+            payload = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+        except Exception:
+            return ""
+        if not payload.get("verified") or not payload.get("stripe_customer_id"):
+            return ""
+        if expected_hardware_id and str(payload.get("hardware_id") or "") != str(expected_hardware_id):
+            return ""
+        cid = str(payload.get("stripe_customer_id") or "")
+        try:
+            _token_redis_sync.delete(key)
+        except Exception as ex:
+            print(f">>> [REG] trial_free_upgrade redis cleanup warning: {ex}", flush=True)
+        return cid
+
+    return await asyncio.to_thread(_work)
+
+
 async def register_new_user(data: dict) -> Tuple[bool, str]:
+    # QUANTUM-CRYSTAL-ARCH — Public Trial Funnel: trial_ namespace is reserved
+    # for anonymous in-memory trial profiles (public_trial_gate.py) and must
+    # never be claimable as a real registered username (case-insensitive).
+    if (data.get("username") or "").strip().lower().startswith("trial_"):
+        return False, "USERNAME_TAKEN"
     if not data.get("consent_agreed"):
         return False, "CONSENT_REQUIRED"
     
@@ -3812,6 +3863,18 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
             can_access_nate = True
             token_balance = 200000
             trial_end = ""
+        elif registration_type == "TRIAL_FREE":
+            # QUANTUM-CRYSTAL-ARCH — Public Trial Funnel Phase 3: card-free
+            # conversion path. No stripe_session_id, no req_billing gate below.
+            # Smaller grant than the card-based TRIAL (10k) since there's no
+            # billing relationship backing it. Not time-limited (no trial_end)
+            # — it's token-limited; see Phase 3.5 for the exhaustion->TRIAL upgrade.
+            tier = tier_for_db_column("TRIAL")  # SOVEREIGN-VOICE (DB CHECK has no TRIAL_FREE value)
+            plan = "TRIAL_FREE"
+            sub_status = "ACTIVE"
+            can_access_nate = True
+            token_balance = 5000
+            trial_end = ""
         else:  # TRIAL (default)
             tier = tier_for_db_column("TRIAL")  # SOVEREIGN-VOICE
             plan = "TRIAL"
@@ -3852,7 +3915,23 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
             stripe_customer_for_new_user = await _consume_trial_signup_session_async(sid)
             if not stripe_customer_for_new_user:
                 return False, "Invalid or expired billing setup. Please complete card setup again."
-    
+
+    if role == "CLIENT" and registration_type == "TRIAL_FREE" and not _is_family_member:
+        # QUANTUM-CRYSTAL-ARCH — Public Trial Funnel security-registration-abuse:
+        # this is the only zero-payment-friction registration path, so Turnstile +
+        # per-IP cap are load-bearing here, not optional hardening. Unconditional —
+        # never gated on a client-declared platform field (that would be attacker
+        # controlled). Both checks fail CLOSED.
+        from app.services.turnstile import verify_turnstile
+        from app.services.public_trial_gate import check_registration_ip_cap
+
+        _ts_token = (data.get("turnstile_token") or "").strip()
+        _reg_ip = (data.get("_client_ip") or "").strip()
+        if not await verify_turnstile(_ts_token, _reg_ip):
+            return False, "Verification failed. Please refresh and try again."
+        if not await check_registration_ip_cap(_reg_ip):
+            return False, "Too many free accounts created from this network today. Please try again tomorrow."
+
     # SOVEREIGN-VOICE: name fallback to username — `name` column is NOT NULL.
     # If client omits/empties name, fall back rather than crash on INSERT.
     _name_val = str(data.get("name") or "").strip() or username
@@ -8823,7 +8902,27 @@ class AzureCortex:
                 # #region agent log
                 print(f">>> [DBG-H4] TOKEN FAIL - returning early for {uid}")
                 # #endregion
-                await self._send(uid, "Your token balance is low. Please upgrade your subscription to continue.", client_context=_ctx, turn_id=_turn_id)
+                if (profile.get("registration_type") or "").upper() == "TRIAL_FREE":
+                    # QUANTUM-CRYSTAL-ARCH — Public Trial Funnel Phase 3.5: the
+                    # one-time 5k TRIAL_FREE grant hit zero. Distinct typed
+                    # message (not the generic low-balance string) so the
+                    # client renders the card-upgrade CTA instead of a paywall.
+                    _tfe_payload = json.dumps({
+                        "type": "trial_free_tokens_exhausted",
+                        "turn_id": _turn_id,
+                        "message": "You've used your 5,000 free tokens! Add a card (no charge today) "
+                                   "to unlock 10,000 more tokens and Little Nate's full 7-day trial.",
+                        "upgrade_required": True,
+                    })
+                    for _ws in list(self.sockets.get(uid, [])):
+                        if _ctx is not None and getattr(_ws, "_eviction_context", "main") != _ctx:
+                            continue
+                        try:
+                            await _ws.send(_tfe_payload)
+                        except Exception:
+                            self.sockets[uid].discard(_ws)
+                else:
+                    await self._send(uid, "Your token balance is low. Please upgrade your subscription to continue.", client_context=_ctx, turn_id=_turn_id)
                 return
                 
         # Record analytics (skip for Dojo to keep stats clean)
@@ -12126,6 +12225,44 @@ async def _handle_client_initiated_part_ws(
     await websocket.send(json.dumps({"type": out_type, **payload}, default=str))
 
 
+# QUANTUM-CRYSTAL-ARCH — Public Trial Funnel: anonymous 20-turn full-bridge
+# trial dispatch. Entirely self-contained in public_trial_gate.py — never
+# touches process_interaction, memorize/crystallize, billing, or PostgreSQL
+# conversation_history. Feature-flagged (PUBLIC_TRIAL_ENABLED, default false).
+async def _dispatch_public_trial_message(websocket, t: str, d: dict, client_ip: str) -> None:
+    from app.services import public_trial_gate as _ptg
+    _ua = ""
+    try:
+        if hasattr(websocket, "request_headers"):
+            _ua = websocket.request_headers.get("User-Agent", "") or websocket.request_headers.get("user-agent", "")
+    except Exception:
+        _ua = ""
+    try:
+        if t == "public_trial_start":
+            await websocket.send(json.dumps(await _ptg.prepare_public_trial_start(d, client_ip, _ua)))
+        elif t == "public_trial_capture_email":
+            await websocket.send(json.dumps(await _ptg.handle_public_trial_capture_email(d, client_ip, _ua)))
+        else:  # public_trial_chat
+            ctx = await _ptg.prepare_public_trial_turn(d, client_ip, _ua)
+            if not ctx.ok:
+                await websocket.send(json.dumps(ctx.payload))
+                return
+            try:
+                assistant_text = await _ptg.generate_trial_response(ctx)
+                out = await _ptg.finalize_public_trial_turn(ctx, assistant_text)
+            except Exception as _trial_infer_err:
+                print(f">>> [TRIAL] inference failed: {_trial_infer_err}")
+                await _ptg.refund_public_trial_turn(ctx)
+                out = {"type": "error", "message": _ptg.TRIAL_GENERIC_ERROR}
+            await websocket.send(json.dumps(out))
+    except Exception as _trial_dispatch_err:
+        print(f">>> [TRIAL] dispatch failed for type={t}: {_trial_dispatch_err}")
+        try:
+            await websocket.send(json.dumps({"type": "error", "message": "Something went wrong on our end. Please try again in a moment."}))
+        except Exception:
+            pass
+
+
 async def handle_client(websocket, path=None):
     """Handle WebSocket connections"""
     uid = "GUEST"
@@ -12218,6 +12355,13 @@ async def handle_client(websocket, path=None):
                     await websocket.send(json.dumps({"type": "error", "message": "AI_RATE_LIMIT_EXCEEDED"}))
                     continue
 
+            # QUANTUM-CRYSTAL-ARCH — Public Trial Funnel: anonymous pre-auth dispatch
+            # (feature-flagged via PUBLIC_TRIAL_ENABLED; no-op/generic-error when off)
+            if t in ("public_trial_start", "public_trial_chat", "public_trial_capture_email"):
+                await _dispatch_public_trial_message(websocket, t, d, client_ip)
+                auth_deadline = datetime.datetime.now() + datetime.timedelta(seconds=120)
+                continue
+
             # Track last_activity_at for check-in agent (batched to PG every 5 min)
             if current_profile and uid and t not in ("ping", "pong"):
                 _activity_cache[uid] = str(datetime.datetime.now())
@@ -12283,6 +12427,8 @@ async def handle_client(websocket, path=None):
                 "force_password_change",
                 "forgot_password_phone_request", "forgot_password_phone_confirm",
                 "forgot_username_request",
+                # --- Public Trial Funnel (anonymous, pre-auth) ---
+                "public_trial_start", "public_trial_chat", "public_trial_capture_email",
                 # --- WebAuthn / MFA ---
                 "admin_webauthn_register_start", "admin_webauthn_register_complete",
                 "admin_webauthn_verify_start", "admin_webauthn_verify_complete",
@@ -12532,7 +12678,7 @@ async def handle_client(websocket, path=None):
                     _sentinel.update_baseline(uid, client_ip, _ws_user_agent, t)
 
             # Enforce auth timeout (skip for auth-related messages themselves)
-            if not current_profile and t not in ("login_request", "auth", "register_request", "verify_admin_passphrase", "verify_sms_code", "accept_consent_update", "accept_coach_ethics", "forgot_password", "force_password_change") and datetime.datetime.now() > auth_deadline:
+            if not current_profile and t not in ("login_request", "auth", "register_request", "verify_admin_passphrase", "verify_sms_code", "accept_consent_update", "accept_coach_ethics", "forgot_password", "force_password_change", "public_trial_start", "public_trial_chat", "public_trial_capture_email") and datetime.datetime.now() > auth_deadline:
                 await websocket.send(json.dumps({"type": "error", "message": "Authentication timeout — please log in again"}))
                 await websocket.close(1008, "Auth timeout")
                 return
@@ -13037,6 +13183,9 @@ async def handle_client(websocket, path=None):
                         await websocket.send(json.dumps({"type": "error", "message": "Coach registration requires payment. Please use the order review flow."}))
                         continue
                     print(f">>> [REG] Processing register_request for username={d.get('username')}, role={d.get('role')}")
+                    # QUANTUM-CRYSTAL-ARCH — Public Trial Funnel: server-captured IP for
+                    # Turnstile + registration rate-limit; never trust a client-supplied IP.
+                    d["_client_ip"] = client_ip
                     succ, res = await register_new_user(d)
                     print(f">>> [REG] register_new_user returned: success={succ}, result={res}")
                     if succ:
@@ -13047,6 +13196,24 @@ async def handle_client(websocket, path=None):
                         _reg_username = d.get("username", "")
                         _reg_email = d.get("email", "")
                         _reg_specs = ", ".join(d.get("specializations", [])) or "None specified"
+
+                        # QUANTUM-CRYSTAL-ARCH — Public Trial Funnel Phase 3: best-effort
+                        # merge of anonymous trial history into the new TRIAL_FREE account.
+                        # signup-never-fail-guarantee: try_merge_trial_data() never raises —
+                        # any failure/no-match simply skips the merge; registration above
+                        # has already succeeded and is never rolled back for this.
+                        if d.get("registration_type") == "TRIAL_FREE" and _reg_username:
+                            try:
+                                from app.services.public_trial_conversion import try_merge_trial_data
+                                _merge_result = await try_merge_trial_data(
+                                    db_pool,
+                                    device_fingerprint=d.get("device_fingerprint"),
+                                    trial_token=d.get("trial_token"),
+                                    new_username=_reg_username,
+                                )
+                                print(f">>> [REG] Trial merge result for {_reg_username}: {_merge_result}")
+                            except Exception as _merge_err:
+                                print(f">>> [REG] Trial merge exception (non-fatal, registration unaffected): {_merge_err}")
 
                         if _reg_role == "CLIENT":
                             try:
@@ -13729,6 +13896,63 @@ async def handle_client(websocket, path=None):
                         "error": "auth_role_mismatch",
                         "detail": "Expected CLIENT role",
                     }))
+
+            # === TRIAL_FREE: CONFIRM CARD-BASED UPGRADE (Phase 3.5) ===
+            # QUANTUM-CRYSTAL-ARCH — Public Trial Funnel: TRIAL_FREE token
+            # exhaustion -> card-based TRIAL upgrade. Account mutation only
+            # happens here, via save_registry_async, never from the FastAPI
+            # billing-collection endpoints (bridge-cache-db-sovereignty.mdc).
+            elif t == "trial_free_upgrade_confirm":
+                # Guard (plan step 2): no-op unless the CURRENT registration_type is
+                # still TRIAL_FREE. This alone makes the handler idempotent — a
+                # duplicate confirm on an already-upgraded account (double-click,
+                # client retry) cannot re-grant tokens or reset the trial clock.
+                if not current_profile or (current_profile.get("registration_type") or "").upper() != "TRIAL_FREE":
+                    await websocket.send(json.dumps({"type": "trial_free_upgrade_result", "ok": False, "reason": "not_eligible"}))
+                elif not (d.get("session_id") or "").strip():
+                    await websocket.send(json.dumps({"type": "trial_free_upgrade_result", "ok": False, "reason": "missing_session"}))
+                else:
+                    _tfu_session_id = d.get("session_id").strip()
+                    _tfu_hw = current_profile.get("hardware_id") or current_hardware_id or ""
+                    _tfu_customer_id = await _consume_trial_free_upgrade_session_async(_tfu_session_id, _tfu_hw)
+                    if not _tfu_customer_id:
+                        await websocket.send(json.dumps({"type": "trial_free_upgrade_result", "ok": False, "reason": "billing_not_verified"}))
+                    else:
+                        registry = load_registry()
+                        _reg_key = None
+                        for _k, _v in registry.items():
+                            if isinstance(_v, dict) and (_v.get("profile") or {}).get("hardware_id") == _tfu_hw:
+                                _reg_key = _k
+                                break
+                        if not _reg_key:
+                            await websocket.send(json.dumps({"type": "trial_free_upgrade_result", "ok": False, "reason": "account_not_found"}))
+                        else:
+                            # Field values deliberately mirror the exact grant a normal
+                            # card-based TRIAL registration receives in register_new_user()
+                            # (~3815-3821) so the account becomes indistinguishable from
+                            # one that signed up with a card from day one. token_balance is
+                            # SET to 10000 (not additive) and trial_end starts NOW (not
+                            # backdated to the original TRIAL_FREE registration date).
+                            _tfu_profile = registry[_reg_key]["profile"]
+                            _tfu_trial_end = str((datetime.datetime.now() + datetime.timedelta(days=7)).date())
+                            _tfu_profile["registration_type"] = "TRIAL"
+                            _tfu_profile["tier"] = tier_for_db_column("TRIAL")
+                            _tfu_profile["subscription_plan"] = "TRIAL"
+                            _tfu_profile["subscription_status"] = "TRIAL_ACTIVE"
+                            _tfu_profile["token_balance"] = 10000
+                            _tfu_profile["trial_end_date"] = _tfu_trial_end
+                            _tfu_profile["stripe_customer_id"] = _tfu_customer_id
+                            _tfu_profile["trial_free_upgraded_at"] = str(datetime.datetime.now())
+                            _tfu_profile["updated_at"] = str(datetime.datetime.now())
+                            await save_registry_async(registry, changed_keys=[_reg_key])
+                            current_profile = _tfu_profile
+                            await websocket.send(json.dumps({
+                                "type": "trial_free_upgrade_result",
+                                "ok": True,
+                                "token_balance": 10000,
+                                "trial_end": _tfu_trial_end,
+                                "plan": "TRIAL",
+                            }))
 
             # === CLIENT: GET COACH INFO ===
             elif t == "client_get_coach_info":
@@ -31406,6 +31630,12 @@ async def main():
             )
             print(f"[*] Chat context pool created ({chat_db_pool.get_size()} connections)")
             billing_system.db_pool = db_pool  # Founding member eligibility (platform_config)
+            # QUANTUM-CRYSTAL-ARCH — Public Trial Funnel: bootstrap db_pool for gate module
+            try:
+                from app.services import public_trial_gate as _public_trial_gate
+                _public_trial_gate.bootstrap(db_pool)
+            except Exception as _ptg_err:
+                print(f"[!] public_trial_gate bootstrap failed: {_ptg_err}")
             nevedal_handler.db_pool = db_pool  # Enable Nevedal metrics → PostgreSQL
             parietal.db_pool = db_pool  # MetricsEngine → client_metrics PG table
             session_tracker.db_pool = db_pool  # SessionTracker → sessions PG table

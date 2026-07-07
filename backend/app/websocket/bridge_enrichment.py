@@ -310,6 +310,7 @@ async def build_enrichment_addendum(
     *,
     prior_user_texts=None,
     session=None,
+    trial_safe: bool = False,
 ) -> str:
     """Tier 2 + 4: on high-signal turns, run FederatedSearch over the crystal
     field and a Helix think() cycle, and distill both into a compact
@@ -317,6 +318,12 @@ async def build_enrichment_addendum(
 
     Bounded by _T2_TIMEOUT_S; returns "" on any failure or low-signal turn.
     Priority overrides and registry fusion fire even on low-signal turns.
+
+    trial_safe=True (Public Trial Funnel): FederatedSearch and Helix are
+    already global-only by construction (no per-user PII), so they stay on
+    for ln_full parity. The IFS council/registry-fusion channel IS per-user
+    (council_registry_context reads a user's saved parts) and is force-
+    disabled here regardless of BRIDGE_IFS_METADATA.
     """
     if not enrichment_enabled():
         return ""
@@ -326,7 +333,7 @@ async def build_enrichment_addendum(
     if not is_high_signal_turn(user_text):
         # A short turn that names a registered council part still needs the
         # registry channel loaded ("Remind me what MasterMind's job is").
-        fusion = await _registry_fusion_block(
+        fusion = "" if trial_safe else await _registry_fusion_block(
             db_pool,
             user_id,
             user_text,
@@ -382,7 +389,7 @@ async def build_enrichment_addendum(
 
     lines: List[str] = []
     approved_names: set = set()
-    if _flag("BRIDGE_IFS_METADATA"):
+    if _flag("BRIDGE_IFS_METADATA") and not trial_safe:
         try:
             from app.services.council_registry_context import (
                 build_council_context,

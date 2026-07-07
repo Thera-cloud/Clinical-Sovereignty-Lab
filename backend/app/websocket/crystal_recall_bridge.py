@@ -341,6 +341,7 @@ async def recall_crystals_for_context(
     source: str = "bridge_chat",
     affect_weight: float = 0.0,
     query_text: str = "",
+    global_only: bool = False,
 ) -> str:
     if not db_pool or not hardware_id:
         return ""
@@ -351,26 +352,37 @@ async def recall_crystals_for_context(
         except ValueError:
             pass
     try:
-        async with db_pool.acquire() as conn:
-            user_uuid = await conn.fetchval(
-                "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 OR id::text = $1 LIMIT 1",
-                hardware_id,
-            )
+        # global_only (public trial isolation): never look up a user UUID, never
+        # touch the deep-recall/clinical_dna/anticipatory cache — those are all
+        # per-person. Trial callers get globals-only, same as a brand-new user.
+        if global_only:
+            async with db_pool.acquire() as conn:
+                user_uuid = None
+                user_crystals, global_crystals, _seen_ids = await _fast_recall_crystals(
+                    conn, None, query_text, max_user=0, max_global=max_results,
+                )
+            deep_cache = None
+        else:
+            async with db_pool.acquire() as conn:
+                user_uuid = await conn.fetchval(
+                    "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 OR id::text = $1 LIMIT 1",
+                    hardware_id,
+                )
 
-            user_limit = max(max_results // 2, 2)
-            global_limit = max_results - user_limit
+                user_limit = max(max_results // 2, 2)
+                global_limit = max_results - user_limit
 
-            user_crystals, global_crystals, _seen_ids = await _fast_recall_crystals(
-                conn, user_uuid, query_text, max_user=user_limit, max_global=global_limit,
-            )
+                user_crystals, global_crystals, _seen_ids = await _fast_recall_crystals(
+                    conn, user_uuid, query_text, max_user=user_limit, max_global=global_limit,
+                )
 
-        deep_cache = _get_deep_cache(user_uuid, hardware_id)
+            deep_cache = _get_deep_cache(user_uuid, hardware_id)
 
         # QUANTUM-CRYSTAL-ARCH: Tier 1 — on explicit memory turns with a cold
         # deep cache, run deep recall synchronously (bounded) so the answer
         # that references shared history has the deep set available NOW.
         if (
-            _SYNC_DEEP_RECALL and deep_cache is None
+            not global_only and _SYNC_DEEP_RECALL and deep_cache is None
             and _enr_is_memory_turn is not None and _enr_is_memory_turn(query_text)
         ):
             try:
@@ -427,7 +439,8 @@ async def recall_crystals_for_context(
 
         import asyncio as _aio
         _aio.create_task(_reinforce_recalled_crystals(db_pool, hardware_id, crystal_ids, source))
-        _aio.create_task(_deep_recall_crystals(db_pool, hardware_id, user_uuid, query_text, _seen_ids, affect_weight))
+        if not global_only:
+            _aio.create_task(_deep_recall_crystals(db_pool, hardware_id, user_uuid, query_text, _seen_ids, affect_weight))
 
         lines = []
         if user_crystals:

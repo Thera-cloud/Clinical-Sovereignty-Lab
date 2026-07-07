@@ -305,16 +305,50 @@ code {
 
   <div class="try-section">
     <h2>Try It Now</h2>
-    <p style="color:var(--gold-dim);font-size:13px;margin-bottom:12px;">3 free queries — no account needed</p>
-    <div class="try-row">
+    <p style="color:var(--gold-dim);font-size:13px;margin-bottom:12px;" id="tryIntro">20 free queries — no account needed</p>
+    <div class="try-row" id="tryRow">
       <input type="text" id="tryInput" placeholder="Ask Little Nate anything..." />
       <button onclick="tryAsk()">Ask</button>
     </div>
     <div id="nateResponse"></div>
+    <div id="signupGate" style="display:none;margin-top:12px;text-align:center;">
+      <a href="#" id="signupCta" class="btn" style="display:inline-block;">Create your free account</a>
+    </div>
   </div>
 </div>
 
 <script>
+function getTrialDeviceId() {
+  var KEY = 'ss_trial_device_id';
+  try {
+    var existing = localStorage.getItem(KEY);
+    if (existing) return existing;
+    var uuid = (crypto.randomUUID ? crypto.randomUUID() : (
+      [1e7]+-1e3+-4e3+-8e3+-1e11
+    ).replace(/[018]/g, function(c) {
+      return (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16);
+    }));
+    localStorage.setItem(KEY, uuid);
+    return uuid;
+  } catch (e) {
+    // Storage unavailable (private mode) — fall back to a session-only id.
+    return 'nostore-' + Date.now();
+  }
+}
+
+function showSignupGate(signupUrl, message) {
+  var resp = document.getElementById('nateResponse');
+  var row = document.getElementById('tryRow');
+  var gate = document.getElementById('signupGate');
+  var cta = document.getElementById('signupCta');
+  resp.style.display = 'block';
+  resp.style.color = '#E8D5A3';
+  resp.textContent = message || "We've had 20 wonderful conversations together — create a free account and I'll remember everything.";
+  row.style.display = 'none';
+  gate.style.display = 'block';
+  cta.href = signupUrl || 'https://app.sovereignsanctuary.net/?src=trial&utm_source=trybottle&utm_medium=asknate';
+}
+
 async function tryAsk() {
   const input = document.getElementById('tryInput');
   const resp = document.getElementById('nateResponse');
@@ -327,9 +361,18 @@ async function tryAsk() {
     const r = await fetch('https://api.sovereignsanctuary.net/api/summon', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: q, channel: 'web_try' }),
+      body: JSON.stringify({
+        message: q,
+        channel: 'web_try',
+        device_fingerprint: getTrialDeviceId(),
+      }),
     });
     const data = await r.json();
+    if (data.access_level === 'signup_required' || data.queries_remaining === 0) {
+      showSignupGate(data.signup_url, data.message);
+      input.value = '';
+      return;
+    }
     resp.style.color = '#E8D5A3';
     resp.textContent = data.response || 'No response.';
     if (data.queries_remaining != null) {
