@@ -390,7 +390,7 @@ async def db_start_trial(device_uuid_hash: str, fp_hash: str) -> Dict[str, Any]:
             INSERT INTO public_summon_usage
                 (device_fingerprint, device_uuid_hash, trial_started_at, last_seen, turns_used, trial_history, converted)
             VALUES ($1, $2, NOW(), NOW(), 0, '[]'::jsonb, FALSE)
-            ON CONFLICT (device_uuid_hash) DO UPDATE SET
+            ON CONFLICT (device_uuid_hash) WHERE device_uuid_hash IS NOT NULL DO UPDATE SET
                 last_seen = NOW(),
                 device_fingerprint = EXCLUDED.device_fingerprint
             RETURNING turns_used, trial_history, converted, gated_at
