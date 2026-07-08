@@ -324,7 +324,7 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
         logger.warning("crystal_recall_bridge: deep recall: %s", e)
 
 
-def _get_deep_cache(user_uuid, hardware_id: str) -> dict | None:
+def _get_deep_cache(user_uuid, hardware_id: str) -> Optional[dict]:
     """Return deep recall cache if warm and not expired."""
     import time as _t
     cache_key = str(user_uuid or hardware_id)
