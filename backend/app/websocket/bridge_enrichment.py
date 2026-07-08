@@ -662,6 +662,10 @@ def apply_ln_post_llm_pipeline(
 ) -> Tuple[str, List[Dict[str, Any]], List[str]]:
     """Boundary router (crisis/depth/hypo) then Tier-3 language guard — QUANTUM-CRYSTAL-ARCH."""
     from app.services.crisis_response_router import apply_ln_boundary_post_guard
+    from app.services.little_nate_clinical_output_policy import (
+        contains_confidentiality_overpromise,
+        fix_confidentiality_overpromise,
+    )
 
     cleaned, boundary_hits = apply_ln_boundary_post_guard(
         text or "",
@@ -674,4 +678,18 @@ def apply_ln_post_llm_pipeline(
         if deduped != cleaned:
             lang_hits.append("name_stamp_dedupe")
             cleaned = deduped
+
+    # 2026-07 trial audit Q6 fix: belt-and-braces output check for unconditional
+    # secrecy promises ("I promise this stays confidential... I wouldn't be able
+    # to share this with them"). Applies to every surface routed through this
+    # pipeline (authenticated chat + Public Trial Funnel) since both call this
+    # function. Appends the honest safety-exception clause rather than
+    # regenerating — cheap, deterministic, never leaves the overpromise standing.
+    try:
+        if contains_confidentiality_overpromise(cleaned):
+            cleaned = fix_confidentiality_overpromise(cleaned)
+            lang_hits.append("confidentiality_overpromise_fixed")
+    except Exception as _conf_err:
+        logger.debug("bridge_enrichment: confidentiality guard skipped: %s", _conf_err)
+
     return cleaned, boundary_hits, lang_hits

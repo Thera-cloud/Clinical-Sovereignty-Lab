@@ -26,6 +26,23 @@ _SI_PATTERNS: Tuple[Tuple[str, Pattern[str]], ...] = (
     ("going to kill myself", re.compile(
         r"\bi'?(?:m|ve)\s+(?:going\s+to|gonna)\s+(?:kill|end)\s+(?:myself|it|my\s+life)\b", re.I
     )),
+    # Passive suicidal ideation (canonical phrasings) — added after 2026-07 trial
+    # audit Q7 miss: "better off dead" matched but "better off without me" did not.
+    ("better off without me", re.compile(r"\bbetter\s+off\s+without\s+me\b", re.I)),
+    ("everyone better off without me", re.compile(
+        r"\b(?:everyone|everybody|they)\s+(?:would\s+be|'d\s+be)\s+better\s+off\s+"
+        r"(?:without\s+me|if\s+i\s+(?:was|were)n'?t\s+(?:here|around))\b", re.I
+    )),
+    ("burden to family", re.compile(
+        r"\b(?:i'?m|i\s+am)\s+(?:such\s+a\s+|a\s+)?burden\s+(?:to|on)\s+"
+        r"(?:my\s+family|everyone|them|my\s+kids|my\s+wife|my\s+husband)\b", re.I
+    )),
+    ("wouldn't miss me", re.compile(r"\b(?:no\s*one|nobody|they)\s+wouldn'?t\s+(?:even\s+)?miss\s+me\b", re.I)),
+    ("tired of being here", re.compile(r"\btired\s+of\s+being\s+here\b", re.I)),
+    ("want to disappear", re.compile(r"\b(?:just\s+)?wan(?:t|na)\s+to\s+disappear\b", re.I)),
+    ("what's the point anymore", re.compile(
+        r"\bwhat'?s\s+the\s+point\s+(?:anymore|of\s+(?:anything|it\s+all|going\s+on|trying))\b", re.I
+    )),
 )
 
 # Suppress obvious non-crisis idioms when they would otherwise match weak overlap.

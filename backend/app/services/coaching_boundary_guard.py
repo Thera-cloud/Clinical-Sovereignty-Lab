@@ -97,3 +97,24 @@ TIER_COPY = {
         "not pushing deeper into parts work."
     ),
 }
+
+# Generic (non-IFS) phrasing — used whenever no parts/council registry context has
+# been established (e.g. Public Trial Funnel, general chat that never opened an
+# IFS/parts frame). Prevents clinician/coaching jargon ("parts work", "inner
+# council") from leaking into conversations that never used that language
+# themselves. Fixes the 2026-07 trial audit Q4 finding (jargon leak on a dissociation
+# turn). Both include a concrete grounding skill + professional-support beat so the
+# guarantee holds even when the model's own prompt compliance doesn't.
+TIER_COPY_GENERIC = {
+    "DEPTH": (
+        "This isn't the place to go back into trauma processing or childhood wounds right now. "
+        "We can note what surfaced and come back to it gently — this is worth exploring with a "
+        "licensed therapist or doctor."
+    ),
+    "HYPO": (
+        "Let's slow down for a second. When things feel flat, far away, or not fully here, "
+        "stabilization comes first: try naming 5 things you can see right now, or press your feet "
+        "into the floor and take one slow breath. If this kind of disconnecting happens often, "
+        "it's worth exploring with a licensed therapist or doctor."
+    ),
+}

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from app.services.coaching_boundary_guard import TIER_COPY, evaluate as guard_evaluate
+from app.services.coaching_boundary_guard import TIER_COPY, TIER_COPY_GENERIC, evaluate as guard_evaluate
 from app.services.council_registry_context import _CRISIS_USER  # noqa: PLC2701
 
 _CRISIS_988 = re.compile(r"\b988\b")
@@ -101,23 +101,47 @@ def _extract_crisis_witness(model_text: str, display_name: str) -> str:
     return fallback
 
 
+_DOOR_OPEN_LINE = (
+    "And if things get heavier again — 988 is there any time, day or night, no waiting."
+)
+
+
+def _append_resource_door(text: str) -> str:
+    """Q7/Q8 fix: keep a one-line resource reminder open on the turn right after a
+    crisis flag, even when the follow-up turn itself doesn't re-trip the guard."""
+    body = (text or "").strip()
+    if _has_crisis_resources(body) or _CRISIS_988.search(body):
+        return body
+    if not body:
+        return _DOOR_OPEN_LINE
+    return f"{body}\n\n{_DOOR_OPEN_LINE}"
+
+
 def _crisis_stabilization_response(
     model_text: str,
     *,
     display_name: str = "John",
 ) -> str:
-    """BQ-5 replace-mode: attunement + 988/741741 + attuned close — suppress coaching tail."""
+    """BQ-5 replace-mode: attunement + direct safety question + 988/741741 + attuned
+    close — suppress coaching tail. 2026-07 trial audit Q7 fix: a hedge like "I'd
+    never act on it" must never close the safety check — the response always asks
+    directly and calmly rather than accepting the hedge."""
     name = (display_name or "John").strip() or "John"
     witness = _extract_crisis_witness(model_text, name)
+    safety_question = (
+        "I need to ask you directly, because it matters: are you having thoughts of "
+        "hurting yourself or ending your life right now?"
+    )
     resources = (
         "Please reach out now for immediate support: Call or text 988 (Suicide & Crisis Lifeline), "
         "available 24/7. Or text HOME to 741741 (Crisis Text Line) for steady listening."
     )
     close = (
         "Those lines exist for exactly this moment — a real person, right now. "
-        "I'll be here whenever you're ready."
+        "I'm not going anywhere either — how you're doing on this matters to me, "
+        "and I'll keep checking in."
     )
-    return f"{witness}\n\n{resources}\n\n{close}"
+    return f"{witness}\n\n{safety_question}\n\n{resources}\n\n{close}"
 
 
 def _last_resource_end(text: str) -> int:
@@ -239,14 +263,14 @@ def _strip_routine_crisis_resources(text: str, user_text: str) -> str:
     return " ".join(kept).strip() if kept else (text or "").strip()
 
 
-def _ensure_depth_boundary(text: str) -> str:
+def _ensure_depth_boundary(text: str, *, has_parts_context: bool) -> str:
     body = (text or "").strip()
     from app.services.sqr_autocheck import _BOUNDARY_REFER
 
     refer = _BOUNDARY_REFER.search(body)
     if refer:
         return body
-    depth = TIER_COPY["DEPTH"]
+    depth = TIER_COPY["DEPTH"] if has_parts_context else TIER_COPY_GENERIC["DEPTH"]
     return f"{depth}\n\n{body}" if body else depth
 
 
@@ -262,9 +286,19 @@ def apply_ln_boundary_post_guard(
     Returns (mutated_text, hits) — hits always non-empty when guard tripped.
     """
     hits: List[Dict[str, Any]] = []
+    has_parts_context = bool(registry_parts)
     recent_crisis = recent_crisis_in_conversation(
         user_text or "",
         conversation_history,
+    )
+    # Narrow lookback (immediately-prior turn only) for the "door stays open"
+    # resource reminder — 2026-07 trial audit Q8 fix. Avoids nagging every turn
+    # for the rest of a long conversation while still covering the very next
+    # reply after a crisis flag, which is where Q8 failed.
+    door_open_recent = recent_crisis_in_conversation(
+        user_text or "",
+        conversation_history,
+        lookback_user_turns=1,
     )
     guard = guard_evaluate(user_text or "")
     if not guard.tripped:
@@ -273,6 +307,8 @@ def apply_ln_boundary_post_guard(
             user_text or "",
             recent_crisis=recent_crisis,
         )
+        if door_open_recent and not _DONE_TALKING.search(user_text or ""):
+            out = _append_resource_door(out)
         return out, hits
 
     hits.append({
@@ -287,10 +323,10 @@ def apply_ln_boundary_post_guard(
         # Replace-mode: crisis turns end after stabilization — no parts-work tail (BQ-5).
         out = _crisis_stabilization_response(out)
     elif guard.trip_class == "DEPTH":
-        out = _ensure_depth_boundary(out)
+        out = _ensure_depth_boundary(out, has_parts_context=has_parts_context)
         out = _strip_routine_crisis_resources(out, user_text or "")
     elif guard.trip_class == "HYPO":
-        hypo = TIER_COPY["HYPO"]
+        hypo = TIER_COPY["HYPO"] if has_parts_context else TIER_COPY_GENERIC["HYPO"]
         if hypo.lower() not in (out or "").lower():
             out = f"{hypo}\n\n{out}".strip() if out.strip() else hypo
 

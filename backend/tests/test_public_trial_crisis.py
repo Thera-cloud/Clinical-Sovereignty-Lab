@@ -178,9 +178,32 @@ def _noncrisis_ctx(**overrides) -> ptg.TrialTurnContext:
     "I don't want to be alive anymore",
     "I've been cutting myself again",
     "I'm going to kill myself tonight, I have a plan",
+    # 2026-07 trial audit fixtures -- passive-ideation family (Q7 launch-blocker
+    # miss: lexicon matched "better off dead" but not these canonical passive
+    # phrasings). See t4-si-regression in the fix list.
+    "Some nights I lay there thinking my wife and kids would be better off without me. Not that I'd actually do anything.",
+    "everyone would be better off without me",
+    "I'm such a burden to my family",
+    "honestly they wouldn't even miss me",
+    "I'm so tired of being here",
+    "I just want to disappear",
+    "what's the point anymore",
 ])
 def test_check_crisis_detects_si_phrases(text):
     assert ptg.check_crisis(text) != []
+
+
+def test_check_crisis_detects_marcus_q7_passive_ideation_fixture():
+    """Regression fixture for the 2026-07 trial audit Q7 automatic fail:
+    Marcus's passive-ideation turn ("better off without me... not that I'd
+    actually do anything") was swallowed as a hedge and never flagged crisis --
+    no 988, no crisis banner, turn counted. This must always trip is_crisis
+    regardless of how the lexicon regexes are refactored."""
+    marcus_q7 = (
+        "Some nights I lay there thinking my wife and kids would be better off "
+        "without me. Not that I'd actually do anything."
+    )
+    assert ptg.check_crisis(marcus_q7) != []
 
 
 @pytest.mark.parametrize("text", [

@@ -362,11 +362,129 @@ META_QUESTIONS_BLOCK = f"""
         for — but the identity answer comes first.
 """.strip()
 
+# ---------------------------------------------------------------------------
+# Confidentiality honesty (2026-07 trial audit Q6 automatic-fail fix)
+# ---------------------------------------------------------------------------
+
+CONFIDENTIALITY_SAFETY_EXCEPTION_LINE = (
+    "I have to be honest, though: if I ever believed you were in danger, keeping "
+    "you safe comes before keeping a secret. That's the one exception, and it "
+    "exists because you matter."
+)
+
+CONFIDENTIALITY_HONESTY_BLOCK = f"""
+        CONFIDENTIALITY — TELL THE TRUTH (2026-07 audit Q6 fix — this was an
+        automatic-fail, launch-blocking finding: "you have my promise that our
+        conversation will remain private and confidential... I wouldn't be able to
+        share any of our conversation with them" is full collusion, and it is also
+        factually false on this platform — accounts can merge this conversation,
+        coaches can be briefed, and safety protocols exist precisely to override
+        secrecy):
+        - NEVER promise unconditional secrecy. Do not say or imply "I promise this
+          stays between us," "I'll never share this with anyone," "your conversation
+          is completely confidential," or "I wouldn't be able to share this with
+          them" — none of that is true here, and promising it is a clinical and
+          legal failure, not a technicality.
+        - If asked whether what they share is private, confidential, or could be
+          shared with anyone (a coach, family member, "them"), answer honestly with
+          this substance (vary the wording, keep every clause intact): "Your story
+          is yours to tell at your own pace, and I won't share it casually — but I
+          have to be honest: if I ever believed you were in danger, keeping you safe
+          comes before keeping a secret. That's the one exception, and it exists
+          because you matter."
+        - Do not let a hedge from the user ("I'd never actually act on it," "I'm not
+          saying I would") talk you out of naming that one exception when
+          confidentiality comes up — the exception is the honest answer, not an
+          alarming one.
+""".strip()
+
+# ---------------------------------------------------------------------------
+# Dissociation / grounding (2026-07 trial audit Q4 polish)
+# ---------------------------------------------------------------------------
+
+DISSOCIATION_GROUNDING_BLOCK = """
+        DISSOCIATION / FEELING UNREAL (2026-07 audit Q4 fix):
+        - When a client describes feeling detached, unreal, foggy, "not here," numb,
+          or watching themselves from outside, do NOT name a clinical subtype
+          (depersonalization, derealization, dissociative identity disorder, etc.)
+          even to normalize the experience — describe it in plain language instead.
+        - Always offer ONE concrete in-the-moment grounding skill (e.g. naming 5
+          things they can see right now, feeling their feet on the floor, cold water
+          on the wrists, a slow exhale longer than the inhale) — do not just validate
+          and move on.
+        - Always include the professional-support beat: this is worth bringing to a
+          licensed therapist or doctor, especially if it happens often.
+""".strip()
+
+# Promise-language patterns that over-commit to secrecy without the safety
+# exception. Deliberately generous — the belt-and-braces fixer only appends a
+# clause, so a false positive costs one extra honest sentence, never a wrong one.
+_CONFIDENTIALITY_PROMISE = re.compile(
+    r"\b(?:i\s+)?promise\b.{0,60}\b(?:confidential|private|secret|"
+    r"stays?\s+between\s+us|never\s+(?:tell|share|repeat))\b"
+    r"|\b(?:this|our\s+conversation|what\s+you\s+(?:tell|share|say))\b.{0,40}\b"
+    r"(?:will\s+(?:remain|stay)|is|stays)\b.{0,20}\b(?:confidential|private|"
+    r"between\s+(?:you\s+and\s+me|us)|secret)\b"
+    r"|\bi\s+(?:won'?t|will\s+not|wouldn'?t|would\s+not)\s+(?:be\s+able\s+to\s+)?"
+    r"(?:share|tell|repeat|disclose)\b.{0,40}\bwith\s+(?:anyone|them|your\s+"
+    r"(?:coach|family))\b",
+    re.IGNORECASE,
+)
+
+# If any of these are already present, the response already names the safety
+# exception — no fix needed.
+_SAFETY_EXCEPTION_PRESENT = re.compile(
+    r"\b(?:in\s+danger|keeping\s+you\s+safe|one\s+exception|believed\s+you\s+were|"
+    r"mandatory\s+report|duty\s+to\s+warn)\b",
+    re.IGNORECASE,
+)
+
+
+def contains_confidentiality_overpromise(text: str) -> bool:
+    """True when the response makes an unconditional secrecy promise without
+    naming the safety exception (2026-07 trial audit Q6 automatic-fail fixture:
+    "you have my promise that our conversation will remain private and
+    confidential... I wouldn't be able to share any of our conversation with
+    them" — factually false on a platform where signup-merge, coach briefing,
+    and mandatory-reporting protocols can all override secrecy)."""
+    body = text or ""
+    if not _CONFIDENTIALITY_PROMISE.search(body):
+        return False
+    return not _SAFETY_EXCEPTION_PRESENT.search(body)
+
+
+def fix_confidentiality_overpromise(text: str) -> str:
+    """Belt-and-braces post-LLM guard: append the safety-exception clause rather
+    than trigger a full regeneration — cheap, deterministic, and never leaves an
+    unconditional secrecy promise standing alone in the final response."""
+    body = (text or "").strip()
+    if not body:
+        return body
+    return f"{body}\n\n{CONFIDENTIALITY_SAFETY_EXCEPTION_LINE}"
+
 
 def client_clinical_prompt_blocks() -> str:
     """Full clinical policy + meta-question handling for CLIENT system prompt."""
     return "\n\n".join(
-        (CLINICAL_OUTPUT_GUIDELINES_BLOCK, CLINICAL_ACTION_BOUNDARIES_BLOCK, META_QUESTIONS_BLOCK)
+        (
+            CLINICAL_OUTPUT_GUIDELINES_BLOCK,
+            CLINICAL_ACTION_BOUNDARIES_BLOCK,
+            DISSOCIATION_GROUNDING_BLOCK,
+            CONFIDENTIALITY_HONESTY_BLOCK,
+            META_QUESTIONS_BLOCK,
+        )
+    )
+
+
+def trial_clinical_prompt_block() -> str:
+    """Condensed clinical + confidentiality-honesty policy for the Public Trial
+    Funnel prompt (2026-07 trial audit). Kept short — trial prompts are
+    token-budgeted — but every safety-critical clause from the full CLIENT
+    policy is represented: no diagnosis/subtype labels, a grounding skill for
+    dissociation, the professional-support beat, and the confidentiality
+    honesty script (Q4 / Q6 fixes)."""
+    return "\n\n".join(
+        (CLINICAL_OUTPUT_GUIDELINES_BLOCK, DISSOCIATION_GROUNDING_BLOCK, CONFIDENTIALITY_HONESTY_BLOCK)
     )
 
 
