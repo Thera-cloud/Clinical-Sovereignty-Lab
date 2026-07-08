@@ -398,6 +398,13 @@ var wsRetry = 0;
 var wsReconnectTimer = null;
 var gated = false;
 var trialDeviceId = getTrialDeviceId();
+// 2026-07: queued send/capture for the window where the socket is mid-reconnect
+// (server restart, network blip). Without this, sendTrialMessage/captureEmail
+// silently no-op on a closed socket and the user's text is lost with zero
+// feedback -- see production incident where "Send me the link" appeared to do
+// nothing during a deploy-triggered WS reconnect.
+var pendingChatSend = null; // { text, starterKey }
+var pendingEmailCapture = null; // { email }
 
 function getTrialDeviceId() {
   var KEY = 'ss_trial_device_id';
@@ -487,6 +494,26 @@ function connectWS() {
   socket.onopen = function() {
     wsRetry = 0;
     socket.send(JSON.stringify({ type: 'public_trial_start', device_fingerprint: trialDeviceId }));
+    if (pendingChatSend) {
+      var pc = pendingChatSend;
+      pendingChatSend = null;
+      socket.send(JSON.stringify({
+        type: 'public_trial_chat',
+        device_fingerprint: trialDeviceId,
+        text: pc.text,
+        starter_key: pc.starterKey || undefined,
+      }));
+    }
+    if (pendingEmailCapture) {
+      var pe = pendingEmailCapture;
+      pendingEmailCapture = null;
+      socket.send(JSON.stringify({
+        type: 'public_trial_capture_email',
+        device_fingerprint: trialDeviceId,
+        email: pe.email,
+        consent: true,
+      }));
+    }
   };
 
   socket.onmessage = function(evt) {
@@ -500,10 +527,15 @@ function connectWS() {
   };
 
   socket.onclose = function() {
+    // 2026-07 fix: reconnect must run even when gated=true. Previously
+    // wrapped in `if (!gated)`, which meant once the 20-turn gate showed,
+    // any subsequent socket drop (e.g. a server restart) permanently killed
+    // reconnection -- the gate's own "Send me the link" email capture still
+    // needs a live socket and would queue forever with nothing to flush it.
     if (!gated) {
       appendMessage('Connection lost — reconnecting...', 'system');
-      scheduleReconnect();
     }
+    scheduleReconnect();
   };
 
   socket.onerror = function() {
@@ -580,7 +612,19 @@ function handleServerMessage(data) {
 var lastSentText = '';
 
 function sendTrialMessage(text, starterKey) {
-  if (!text || gated || !socket || socket.readyState !== WebSocket.OPEN) return;
+  if (!text || gated) return true;
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    // Don't drop it -- queue for delivery on reconnect and say so. The bubble
+    // renders now (optimistic) so the user sees their words landed somewhere;
+    // scheduleReconnect()/onopen guarantees the actual send follows shortly.
+    pendingChatSend = { text: text, starterKey: starterKey };
+    hideStarters();
+    lastSentText = text;
+    appendMessage(text, 'user');
+    appendMessage('Reconnecting... I\'ll deliver this the moment we\'re back.', 'system');
+    setInputEnabled(false);
+    return true;
+  }
   hideStarters();
   if (starterKey) {
     try { localStorage.setItem('ss_trial_starter_key', starterKey); } catch (e) {}
@@ -595,14 +639,15 @@ function sendTrialMessage(text, starterKey) {
   };
   if (starterKey) payload.starter_key = starterKey;
   socket.send(JSON.stringify(payload));
+  return true;
 }
 
 function sendMessage() {
   var input = document.getElementById('chatInput');
   var text = input.value.trim();
   if (!text) return;
-  sendTrialMessage(text, null);
-  input.value = '';
+  var sent = sendTrialMessage(text, null);
+  if (sent) input.value = '';
 }
 
 function captureEmail() {
@@ -619,6 +664,12 @@ function captureEmail() {
     return;
   }
   if (!socket || socket.readyState !== WebSocket.OPEN) {
+    // Was a silent no-op here -- user clicks, nothing happens, no error, no
+    // retry. Queue it instead: onopen flushes it as soon as the socket
+    // reconnects (retry already runs with exponential backoff).
+    pendingEmailCapture = { email: email };
+    btn.disabled = true;
+    btn.textContent = 'Reconnecting... will send automatically';
     return;
   }
   btn.disabled = true;
