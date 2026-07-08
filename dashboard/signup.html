@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://api.sovereignsanctuary.net https://api.sovereignsanctuary.net; img-src 'self' data:;">
+<link rel="canonical" href="https://app.sovereignsanctuary.net/signup.html">
+<title>Create your free account — Little Nate</title>
+<!-- TURNSTILE_SITE_KEY: public widget key from Cloudflare Turnstile dashboard (pairs with server TURNSTILE_SECRET_KEY). See .env.template -->
+<style>
+:root {
+  --bg: #050505;
+  --surface: #0A0A0A;
+  --elevated: #111111;
+  --gold: #C9A962;
+  --gold-bright: #E8D5A3;
+  --gold-dim: #8B7355;
+  --cyan: #4ECDC4;
+  --white: #FAFAFA;
+  --red: #EF4444;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--gold-bright);
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+.container {
+  max-width: 440px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 28px 16px 16px;
+  flex: 1;
+}
+h1 {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 30px;
+  color: var(--gold);
+  text-align: center;
+  margin-bottom: 6px;
+}
+.subtitle {
+  text-align: center;
+  color: var(--gold-dim);
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 22px;
+}
+.card {
+  background: var(--elevated);
+  border: 1px solid rgba(201,169,98,0.2);
+  border-radius: 12px;
+  padding: 20px;
+}
+label {
+  display: block;
+  font-size: 12px;
+  color: var(--gold-dim);
+  margin-bottom: 6px;
+}
+.field { margin-bottom: 14px; }
+.field input[type="text"],
+.field input[type="email"],
+.field input[type="password"] {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid rgba(201,169,98,0.3);
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-size: 14px;
+  color: var(--gold-bright);
+  outline: none;
+}
+.field input:focus { border-color: var(--gold); }
+.field input::placeholder { color: var(--gold-dim); }
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 72px; }
+.pw-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--cyan);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+.consent-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--gold-dim);
+  margin: 14px 0 16px;
+}
+.consent-row input { margin-top: 3px; flex-shrink: 0; }
+.consent-row a { color: var(--cyan); }
+.turnstile-wrap { margin-bottom: 16px; min-height: 65px; }
+.submit-btn {
+  width: 100%;
+  background: linear-gradient(135deg, var(--gold), var(--gold-dim));
+  border: none;
+  border-radius: 8px;
+  padding: 13px 20px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--bg);
+  cursor: pointer;
+}
+.submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.subtext {
+  text-align: center;
+  font-size: 12px;
+  color: var(--gold-dim);
+  margin-top: 10px;
+}
+.error-box {
+  display: none;
+  background: rgba(239,68,68,0.1);
+  border: 1px solid rgba(239,68,68,0.4);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #FFB4B4;
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+.error-box.show { display: block; }
+.conn-box {
+  display: none;
+  background: rgba(78,205,196,0.08);
+  border: 1px solid rgba(78,205,196,0.3);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--cyan);
+  margin-bottom: 14px;
+}
+.conn-box.show { display: block; }
+.success-panel {
+  display: none;
+  text-align: center;
+  padding: 8px 0;
+}
+.success-panel.show { display: block; }
+.success-panel h2 {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 24px;
+  color: var(--gold);
+  margin-bottom: 10px;
+}
+.success-panel p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--gold-bright);
+  margin-bottom: 18px;
+}
+.success-panel .hint {
+  font-size: 13px;
+  color: var(--gold-dim);
+  margin-bottom: 14px;
+}
+.footer {
+  text-align: center;
+  font-size: 11px;
+  color: var(--gold-dim);
+  padding: 16px;
+  line-height: 1.6;
+}
+.footer a { color: var(--cyan); text-decoration: none; }
+@media (max-width: 480px) {
+  h1 { font-size: 26px; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Create your free account</h1>
+  <p class="subtitle">Little Nate will remember everything you've shared — pick up right where you left off.</p>
+
+  <div class="card" id="formCard">
+    <div class="error-box" id="errorBox" role="alert"></div>
+    <div class="conn-box" id="connBox"></div>
+
+    <form id="signupForm" autocomplete="on" novalidate>
+      <div class="field">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_]+" autocomplete="username" />
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <div class="pw-wrap">
+          <input type="password" id="password" name="password" required minlength="8" autocomplete="new-password" />
+          <button type="button" class="pw-toggle" id="pwToggle" aria-label="Show password">Show</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required autocomplete="email" />
+      </div>
+
+      <div class="consent-row">
+        <input type="checkbox" id="consentCheck" required />
+        <label for="consentCheck">I agree to the <a href="https://app.sovereignsanctuary.net/terms.html" target="_blank" rel="noopener">Terms of Service</a> and <a href="https://app.sovereignsanctuary.net/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</label>
+      </div>
+
+      <div class="turnstile-wrap" id="turnstileWrap"></div>
+
+      <button type="submit" class="submit-btn" id="submitBtn" disabled>Create my account</button>
+      <p class="subtext">No credit card required. Free.</p>
+    </form>
+
+    <div class="success-panel" id="successPanel">
+      <h2 id="successTitle">Your account is ready.</h2>
+      <p id="successBody">You can sign in on the app and continue your conversation with Little Nate.</p>
+      <p class="hint" id="successHint"></p>
+      <a href="#" id="continueBtn" class="submit-btn" style="display:inline-block;text-decoration:none;">Log in and continue</a>
+    </div>
+  </div>
+</div>
+
+<footer class="footer">
+  If you're in crisis, call or text <strong>988</strong> or call <strong>911</strong>.<br>
+  © 2025–2026 Sovereign Sanctuary
+</footer>
+
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad" async defer></script>
+<script>
+(function() {
+  var WS_URL = 'wss://api.sovereignsanctuary.net/ws';
+  // Deploy: replace with your Cloudflare Turnstile site key (public; pairs with TURNSTILE_SECRET_KEY on server).
+  var TURNSTILE_SITE_KEY = '0x4AAAAAADyMnpRrA8SSCcIS';
+
+  var params = new URLSearchParams(window.location.search);
+  var srcParam = params.get('src') || null;
+  var fpParam = params.get('fp') || null;
+  var ttParam = params.get('tt') || null;
+  var KEY = 'ss_trial_device_id';
+
+  if (fpParam) {
+    try { localStorage.setItem(KEY, fpParam); } catch (e) {}
+  } else {
+    try {
+      var stored = localStorage.getItem(KEY);
+      if (stored) fpParam = stored;
+    } catch (e) {}
+  }
+
+  var socket = null;
+  var wsRetry = 0;
+  var wsReconnectTimer = null;
+  var registerTimeout = null;
+  var submitting = false;
+  var turnstileToken = '';
+  var turnstileWidgetId = null;
+  var createdUsername = '';
+
+  var form = document.getElementById('signupForm');
+  var formCard = document.getElementById('formCard');
+  var errorBox = document.getElementById('errorBox');
+  var connBox = document.getElementById('connBox');
+  var submitBtn = document.getElementById('submitBtn');
+  var successPanel = document.getElementById('successPanel');
+  var successTitle = document.getElementById('successTitle');
+  var successBody = document.getElementById('successBody');
+  var successHint = document.getElementById('successHint');
+  var continueBtn = document.getElementById('continueBtn');
+
+  function showError(msg) {
+    errorBox.textContent = msg;
+    errorBox.classList.add('show');
+  }
+  function hideError() {
+    errorBox.classList.remove('show');
+    errorBox.textContent = '';
+  }
+  function showConn(msg) {
+    connBox.textContent = msg;
+    connBox.classList.add('show');
+  }
+  function hideConn() {
+    connBox.classList.remove('show');
+    connBox.textContent = '';
+  }
+
+  function updateSubmitState() {
+    var consent = document.getElementById('consentCheck').checked;
+    var ready = socket && socket.readyState === WebSocket.OPEN;
+    var hasTs = !!turnstileToken;
+    var siteKeyOk = TURNSTILE_SITE_KEY && TURNSTILE_SITE_KEY.indexOf('__TURNSTILE') === -1;
+    submitBtn.disabled = submitting || !ready || !consent || !hasTs || !siteKeyOk;
+  }
+
+  document.getElementById('pwToggle').addEventListener('click', function() {
+    var pw = document.getElementById('password');
+    if (pw.type === 'password') {
+      pw.type = 'text';
+      this.textContent = 'Hide';
+    } else {
+      pw.type = 'password';
+      this.textContent = 'Show';
+    }
+  });
+
+  document.getElementById('consentCheck').addEventListener('change', updateSubmitState);
+
+  window.onTurnstileLoad = function() {
+    if (!TURNSTILE_SITE_KEY || TURNSTILE_SITE_KEY.indexOf('__TURNSTILE') !== -1) {
+      showError('Account verification is not configured yet. Please try again later or contact support.');
+      return;
+    }
+    if (typeof turnstile === 'undefined') return;
+    turnstileWidgetId = turnstile.render('#turnstileWrap', {
+      sitekey: TURNSTILE_SITE_KEY,
+      callback: function(token) {
+        turnstileToken = token;
+        updateSubmitState();
+      },
+      'expired-callback': function() {
+        turnstileToken = '';
+        updateSubmitState();
+      },
+      'error-callback': function() {
+        turnstileToken = '';
+        showError('Verification could not load. Please refresh the page.');
+        updateSubmitState();
+      }
+    });
+  };
+
+  function resetTurnstile() {
+    turnstileToken = '';
+    if (typeof turnstile !== 'undefined' && turnstileWidgetId !== null) {
+      try { turnstile.reset(turnstileWidgetId); } catch (e) {}
+    }
+    updateSubmitState();
+  }
+
+  function mapRegisterError(msg) {
+    if (!msg) return 'Something went wrong. Please try again.';
+    if (msg === 'USERNAME_TAKEN') {
+      return 'That username was just taken — try a small variation (add a number or underscore).';
+    }
+    if (msg === 'EMAIL_TAKEN') {
+      return 'We couldn\'t create an account with those details. Try a different email or sign in if you already have an account.';
+    }
+    if (msg === 'CONSENT_REQUIRED') {
+      return 'Please agree to the Terms and Privacy Policy to continue.';
+    }
+    if (msg.indexOf('Verification failed') !== -1) {
+      return 'Verification failed. Please complete the check and try again.';
+    }
+    if (msg.indexOf('Too many free accounts') !== -1) {
+      return msg;
+    }
+    return msg;
+  }
+
+  function clearRegisterTimeout() {
+    if (registerTimeout) {
+      clearTimeout(registerTimeout);
+      registerTimeout = null;
+    }
+  }
+
+  function showSuccess(merged) {
+    clearRegisterTimeout();
+    submitting = false;
+    form.style.display = 'none';
+    hideError();
+    hideConn();
+    if (merged) {
+      successTitle.textContent = 'Little Nate remembers you.';
+      successBody.textContent = 'Your free account is ready — everything you shared in your trial is waiting for you.';
+    } else {
+      successTitle.textContent = 'Your account is ready.';
+      successBody.textContent = 'You can sign in and start talking with Little Nate.';
+    }
+    successHint.textContent = createdUsername ? ('Sign in as ' + createdUsername) : '';
+    continueBtn.href = 'https://app.sovereignsanctuary.net/?src=signup_complete';
+    successPanel.classList.add('show');
+    try {
+      if (socket && socket.readyState === WebSocket.OPEN) socket.close();
+    } catch (e) {}
+    socket = null;
+  }
+
+  function handleWsMessage(data) {
+    if (data.type === 'login_success') {
+      var merged = data.trial_merged === true;
+      showSuccess(merged);
+      return;
+    }
+    if (data.type === 'registration_failed') {
+      clearRegisterTimeout();
+      submitting = false;
+      showError(mapRegisterError(data.message));
+      resetTurnstile();
+      updateSubmitState();
+    }
+  }
+
+  function connectWS() {
+    hideConn();
+    try {
+      socket = new WebSocket(WS_URL);
+    } catch (e) {
+      showConn('Having trouble connecting. Retrying…');
+      scheduleReconnect();
+      return;
+    }
+    socket.onopen = function() {
+      wsRetry = 0;
+      hideConn();
+      updateSubmitState();
+    };
+    socket.onmessage = function(evt) {
+      var data;
+      try { data = JSON.parse(evt.data); } catch (e) { return; }
+      handleWsMessage(data);
+    };
+    socket.onclose = function() {
+      if (successPanel.classList.contains('show')) return;
+      if (!submitting) {
+        showConn('Connection lost — reconnecting…');
+        scheduleReconnect();
+      }
+      updateSubmitState();
+    };
+    socket.onerror = function() {
+      try { socket.close(); } catch (e) {}
+    };
+  }
+
+  function scheduleReconnect() {
+    if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+    var attempt = Math.min(wsRetry, 10);
+    var baseMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+    var jitter = Math.floor(baseMs * 0.2 * Math.random());
+    wsRetry++;
+    wsReconnectTimer = setTimeout(connectWS, baseMs + jitter);
+  }
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    hideError();
+    if (submitting) return;
+
+    var username = document.getElementById('username').value.trim();
+    var password = document.getElementById('password').value;
+    var email = document.getElementById('email').value.trim();
+    var consent = document.getElementById('consentCheck').checked;
+
+    if (!username || username.length < 3) {
+      showError('Choose a username (at least 3 characters, letters/numbers/underscore only).');
+      return;
+    }
+    if (!/^[A-Za-z0-9_]+$/.test(username)) {
+      showError('Username can only contain letters, numbers, and underscores.');
+      return;
+    }
+    if (!password || password.length < 8) {
+      showError('Password must be at least 8 characters.');
+      return;
+    }
+    if (!email) {
+      showError('Please enter your email address.');
+      return;
+    }
+    if (!consent) {
+      showError('Please agree to the Terms and Privacy Policy.');
+      return;
+    }
+    if (!turnstileToken) {
+      showError('Please complete the verification check.');
+      return;
+    }
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      showConn('Connecting… please wait a moment and try again.');
+      connectWS();
+      return;
+    }
+
+    submitting = true;
+    createdUsername = username;
+    updateSubmitState();
+
+    var payload = {
+      type: 'register_request',
+      username: username,
+      password: password,
+      email: email,
+      role: 'CLIENT',
+      registration_type: 'TRIAL_FREE',
+      device_fingerprint: fpParam || null,
+      trial_token: ttParam || null,
+      turnstile_token: turnstileToken,
+      consent_agreed: true,
+      src: srcParam
+    };
+    socket.send(JSON.stringify(payload));
+
+    registerTimeout = setTimeout(function() {
+      if (!submitting) return;
+      submitting = false;
+      showError('This is taking longer than expected. Check your connection and try again.');
+      resetTurnstile();
+      updateSubmitState();
+    }, 15000);
+  });
+
+  connectWS();
+  updateSubmitState();
+})();
+</script>
+</body>
+</html>

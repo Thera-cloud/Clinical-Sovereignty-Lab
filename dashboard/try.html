@@ -471,12 +471,13 @@ function showStarters() {
 
 function showGate(message, signupUrl) {
   gated = true;
+  dismissNudge();
   hideStarters();
   setInputEnabled(false);
   document.getElementById('inputRow').style.display = 'none';
   document.getElementById('gateMessage').textContent = message ||
     "We've had 20 wonderful conversations together — I'd love to keep remembering you. Create a free account and I'll carry everything we've talked about with us.";
-  var fallback = 'https://app.sovereignsanctuary.net/?src=trial'
+  var fallback = 'https://app.sovereignsanctuary.net/signup.html?src=trial'
     + '&utm_source=trybottle&utm_medium=trybridge'
     + (trialDeviceId ? '&fp=' + encodeURIComponent(trialDeviceId) : '');
   document.getElementById('signupCta').href = signupUrl || fallback;
@@ -484,6 +485,7 @@ function showGate(message, signupUrl) {
 }
 
 function connectWS() {
+  if (gated) return;
   try {
     socket = new WebSocket(WS_URL);
   } catch (e) {
@@ -527,14 +529,8 @@ function connectWS() {
   };
 
   socket.onclose = function() {
-    // 2026-07 fix: reconnect must run even when gated=true. Previously
-    // wrapped in `if (!gated)`, which meant once the 20-turn gate showed,
-    // any subsequent socket drop (e.g. a server restart) permanently killed
-    // reconnection -- the gate's own "Send me the link" email capture still
-    // needs a live socket and would queue forever with nothing to flush it.
-    if (!gated) {
-      appendMessage('Connection lost — reconnecting...', 'system');
-    }
+    if (gated) return;
+    appendMessage('Connection lost — reconnecting...', 'system');
     scheduleReconnect();
   };
 
@@ -544,6 +540,7 @@ function connectWS() {
 }
 
 function scheduleReconnect() {
+  if (gated) return;
   if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
   var attempt = Math.min(wsRetry, 10);
   var baseMs = Math.min(1000 * Math.pow(2, attempt), 30000);
@@ -557,6 +554,7 @@ function handleServerMessage(data) {
     case 'trial_state':
       updateTurnsCounter(data.turns_used || 0, data.turns_limit);
       if ((data.turns_used || 0) >= (data.turns_limit || TURNS_LIMIT)) {
+        dismissNudge();
         showGate();
       } else {
         setInputEnabled(true);
@@ -664,12 +662,16 @@ function captureEmail() {
     return;
   }
   if (!socket || socket.readyState !== WebSocket.OPEN) {
-    // Was a silent no-op here -- user clicks, nothing happens, no error, no
-    // retry. Queue it instead: onopen flushes it as soon as the socket
-    // reconnects (retry already runs with exponential backoff).
+    if (gated) {
+      btn.disabled = false;
+      btn.textContent = 'Send me the link';
+      appendMessage('Connection lost — reload the page to send your email link.', 'system');
+      return;
+    }
     pendingEmailCapture = { email: email };
     btn.disabled = true;
     btn.textContent = 'Reconnecting... will send automatically';
+    scheduleReconnect();
     return;
   }
   btn.disabled = true;

@@ -697,7 +697,7 @@ class TrialTurnContext:
 def _signup_url(client_uuid: str) -> str:
     from urllib.parse import quote
     return (
-        "https://app.sovereignsanctuary.net/?src=trial"
+        "https://app.sovereignsanctuary.net/signup.html?src=trial"
         f"&fp={quote(client_uuid or '')}&utm_source=trybottle&utm_medium=fullbridge"
     )
 
@@ -1045,7 +1045,7 @@ async def _upsert_trial_lead(fp_hash: str, device_uuid_hash: str, email: str, ra
 
     from urllib.parse import quote
     signup_url = (
-        f"https://app.sovereignsanctuary.net/?src=trial_email&fp={quote(raw_uuid)}&tt={quote(raw_token)}"
+        f"https://app.sovereignsanctuary.net/signup.html?src=trial_email&fp={quote(raw_uuid)}&tt={quote(raw_token)}"
     )
     unsubscribe_url = f"https://api.sovereignsanctuary.net/api/public-trial/unsubscribe?token={quote(raw_token)}"
     return raw_token, signup_url, unsubscribe_url
@@ -1064,7 +1064,7 @@ async def _send_trial_signup_email(to_email: str, signup_url: str, unsubscribe_u
       <p>You started a conversation with Little Nate and asked to save it. Create your free
       account and I'll bring everything we talked about with you.</p>
       <p><a href="{signup_url}" style="display:inline-block;padding:12px 24px;background:#C9A962;
-      color:#050505;text-decoration:none;border-radius:6px;">Pick up where we left off</a></p>
+      color:#050505;text-decoration:none;border-radius:6px;">Create your free account — everything you shared is waiting.</a></p>
       <p style="font-size:12px;color:#888;margin-top:32px;">
       <a href="{unsubscribe_url}">Unsubscribe from these emails</a></p>
     </div>
@@ -1163,7 +1163,7 @@ async def _send_trial_followup_email(to_email: str, signup_url: str, unsubscribe
       <p>It's still waiting for you whenever you're ready. Create your free account and
       I'll bring everything we talked about with you.</p>
       <p><a href="{signup_url}" style="display:inline-block;padding:12px 24px;background:#C9A962;
-      color:#050505;text-decoration:none;border-radius:6px;">Pick up where we left off</a></p>
+      color:#050505;text-decoration:none;border-radius:6px;">Create your free account — everything you shared is waiting.</a></p>
       <p style="font-size:12px;color:#888;margin-top:32px;">
       <a href="{unsubscribe_url}">Unsubscribe from these emails</a></p>
     </div>
@@ -1223,7 +1223,7 @@ async def run_trial_followup_cycle() -> int:
         try:
             raw_token = secrets.token_urlsafe(32)
             token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
-            signup_url = f"https://app.sovereignsanctuary.net/?src=trial_email&tt={quote(raw_token)}"
+            signup_url = f"https://app.sovereignsanctuary.net/signup.html?src=trial_email&tt={quote(raw_token)}"
             unsubscribe_url = f"https://api.sovereignsanctuary.net/api/public-trial/unsubscribe?token={quote(raw_token)}"
             if not await _send_trial_followup_email(row["email"], signup_url, unsubscribe_url):
                 continue

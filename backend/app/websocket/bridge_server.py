@@ -13202,6 +13202,7 @@ async def handle_client(websocket, path=None):
                         # signup-never-fail-guarantee: try_merge_trial_data() never raises —
                         # any failure/no-match simply skips the merge; registration above
                         # has already succeeded and is never rolled back for this.
+                        _trial_merged = False
                         if d.get("registration_type") == "TRIAL_FREE" and _reg_username:
                             try:
                                 from app.services.public_trial_conversion import try_merge_trial_data
@@ -13211,6 +13212,7 @@ async def handle_client(websocket, path=None):
                                     trial_token=d.get("trial_token"),
                                     new_username=_reg_username,
                                 )
+                                _trial_merged = bool(_merge_result.get("merged"))
                                 print(f">>> [REG] Trial merge result for {_reg_username}: {_merge_result}")
                             except Exception as _merge_err:
                                 print(f">>> [REG] Trial merge exception (non-fatal, registration unaffected): {_merge_err}")
@@ -13286,6 +13288,8 @@ async def handle_client(websocket, path=None):
                             _consent_needed_reg = prof.pop("_consent_update_needed", False)
                             _ethics_needed_reg = prof.pop("_coach_ethics_needed", False)
                             reg_login_payload = {"type": "login_success", "token": tok, "profile": prof}
+                            if d.get("registration_type") == "TRIAL_FREE":
+                                reg_login_payload["trial_merged"] = _trial_merged
                             if _consent_needed_reg:
                                 reg_login_payload["consent_update_needed"] = True
                                 reg_login_payload["required_consent_version"] = REQUIRED_CONSENT_VERSION
