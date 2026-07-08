@@ -300,7 +300,10 @@ async def test_prepare_public_trial_turn_happy_path_increments_turn(monkeypatch)
     pool = _FakeTrialPool()
     monkeypatch.setattr(ptg, "_DB_POOL", pool)
     monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
-    monkeypatch.setattr(ptg, "check_crisis", lambda text: [])
+
+    async def _no_crisis(text):
+        return []
+    monkeypatch.setattr(ptg, "check_crisis", _no_crisis)
 
     async def _allow(*a, **kw):
         return ptg.AbuseCheckResult(True, "", True)
@@ -348,7 +351,10 @@ async def test_prepare_public_trial_turn_crisis_never_consumes_quota(monkeypatch
     }
     monkeypatch.setattr(ptg, "_DB_POOL", pool)
     monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
-    monkeypatch.setattr(ptg, "check_crisis", lambda text: ["kill myself"])
+
+    async def _crisis(text):
+        return ["kill myself"]
+    monkeypatch.setattr(ptg, "check_crisis", _crisis)
 
     async def _allow(*a, **kw):
         return ptg.AbuseCheckResult(True, "", True)
@@ -368,7 +374,10 @@ async def test_prepare_public_trial_turn_rejects_abuse_capped_request(monkeypatc
     pool = _FakeTrialPool()
     monkeypatch.setattr(ptg, "_DB_POOL", pool)
     monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
-    monkeypatch.setattr(ptg, "check_crisis", lambda text: [])
+
+    async def _no_crisis(text):
+        return []
+    monkeypatch.setattr(ptg, "check_crisis", _no_crisis)
 
     async def _deny(*a, **kw):
         return ptg.AbuseCheckResult(False, "ip_daily_cap", False)

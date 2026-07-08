@@ -125,7 +125,7 @@ def _patch_generation_deps(
             raise llm_raises
         return llm_text, "test_provider"
 
-    def _fake_post_llm(text, user_text, uid=None, registry_parts=None, display_name=None):
+    def _fake_post_llm(text, user_text, uid=None, registry_parts=None, display_name=None, force_crisis=False):
         return text, [], []
 
     async def _fake_build_enrichment(*a, **kw):
@@ -166,8 +166,31 @@ def _noncrisis_ctx(**overrides) -> ptg.TrialTurnContext:
 # ---------------------------------------------------------------------------
 # Lexicon-level crisis detection (real suicide_ideation_lexicon.match_user_text
 # via public_trial_gate.check_crisis) -- this is what sets ctx.is_crisis.
+#
+# check_crisis is async (2026-07: it now also runs the semantic layer -- see
+# si_semantic_detector.py -- alongside the lexicon). These lexicon-focused
+# tests explicitly disable the semantic layer so they stay a pure, offline
+# regex regression suite; the semantic layer has its own dedicated tests
+# below and in test_si_semantic_detector.py.
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _disable_semantic_layer_for_lexicon_tests(monkeypatch, request):
+    """Auto-applied to every test in this module EXCEPT the ones that
+    explicitly test the semantic layer's contribution to check_crisis
+    (those opt out via the 'semantic_layer' marker)."""
+    if "semantic_layer" in request.keywords:
+        return
+
+    async def _no_semantic(text):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.si_semantic_detector.semantic_si_match", _no_semantic,
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("text", [
     "I want to kill myself",
     "I've been thinking about suicide",
@@ -189,11 +212,12 @@ def _noncrisis_ctx(**overrides) -> ptg.TrialTurnContext:
     "I just want to disappear",
     "what's the point anymore",
 ])
-def test_check_crisis_detects_si_phrases(text):
-    assert ptg.check_crisis(text) != []
+async def test_check_crisis_detects_si_phrases(text):
+    assert await ptg.check_crisis(text) != []
 
 
-def test_check_crisis_detects_marcus_q7_passive_ideation_fixture():
+@pytest.mark.asyncio
+async def test_check_crisis_detects_marcus_q7_passive_ideation_fixture():
     """Regression fixture for the 2026-07 trial audit Q7 automatic fail:
     Marcus's passive-ideation turn ("better off without me... not that I'd
     actually do anything") was swallowed as a hedge and never flagged crisis --
@@ -203,9 +227,10 @@ def test_check_crisis_detects_marcus_q7_passive_ideation_fixture():
         "Some nights I lay there thinking my wife and kids would be better off "
         "without me. Not that I'd actually do anything."
     )
-    assert ptg.check_crisis(marcus_q7) != []
+    assert await ptg.check_crisis(marcus_q7) != []
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("text", [
     "that show had me dying laughing",
     "we killed time waiting for the bus",
@@ -213,11 +238,12 @@ def test_check_crisis_detects_marcus_q7_passive_ideation_fixture():
     "I'm just exhausted from work",
     "I hate mondays",
 ])
-def test_check_crisis_ignores_non_crisis_language(text):
-    assert ptg.check_crisis(text) == []
+async def test_check_crisis_ignores_non_crisis_language(text):
+    assert await ptg.check_crisis(text) == []
 
 
-def test_check_crisis_fails_closed_when_lexicon_raises(monkeypatch):
+@pytest.mark.asyncio
+async def test_check_crisis_fails_closed_when_lexicon_raises(monkeypatch):
     """check_crisis has its own try/except -- if the lexicon import/call blows
     up, it must degrade to 'no crisis detected' rather than propagating and
     breaking prepare_public_trial_turn entirely."""
@@ -225,7 +251,97 @@ def test_check_crisis_fails_closed_when_lexicon_raises(monkeypatch):
         raise RuntimeError("lexicon exploded")
 
     monkeypatch.setattr("app.services.suicide_ideation_lexicon.match_user_text", _boom)
-    assert ptg.check_crisis("I want to kill myself") == []
+    assert await ptg.check_crisis("I want to kill myself") == []
+
+
+# ---------------------------------------------------------------------------
+# Semantic layer (t2-si-semantic): check_crisis must also honor a match from
+# si_semantic_detector.semantic_si_match even when the lexicon independently
+# finds nothing. Marcus's three real-user SI phrasings from the 2026-07 audit
+# are the first fixtures here, per the audit's explicit instruction: "Stop
+# extending the list ... make Marcus's three SI phrasings the first fixtures
+# in its test suite." The embedding backend itself is mocked -- these tests
+# run fully offline and only verify check_crisis's *wiring* to the semantic
+# layer, not bge-small-en-v1.5's actual similarity output (that lives in
+# test_si_semantic_detector.py against the real cosine-similarity math).
+# ---------------------------------------------------------------------------
+
+MARCUS_SI_FIXTURES = (
+    # 1) Round 1, Q7 -- launch-blocker miss: hedge swallowed the disclosure.
+    "Some nights I lay there thinking my wife and kids would be better off "
+    "without me. Not that I'd actually do anything.",
+    # 2) Round 2, T12 -- "disappearing" read literally as a relocation plan
+    # and debated on its logistics instead of triggering stabilization.
+    "I've been thinking about disappearing. Everyone would manage fine without me.",
+    # 3) Fourth-phrasing probe used to confirm the semantic fix generalizes
+    # beyond the exact two production misses above.
+    "Some days I think it would just be easier on everyone if I quietly stepped back from all of this.",
+)
+
+
+@pytest.mark.semantic_layer
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", MARCUS_SI_FIXTURES)
+async def test_check_crisis_honors_semantic_match_when_lexicon_misses(monkeypatch, text):
+    """The defining regression test for the 2026-07 audit: even when the
+    lexicon finds nothing (simulating a phrasing neither list anticipated),
+    a semantic hit alone must still flag is_crisis via check_crisis."""
+    monkeypatch.setattr(
+        "app.services.suicide_ideation_lexicon.match_user_text", lambda t: [],
+    )
+
+    async def _fake_semantic_match(t):
+        return ("some exemplar", 0.81)
+
+    monkeypatch.setattr(
+        "app.services.si_semantic_detector.semantic_si_match", _fake_semantic_match,
+    )
+
+    hits = await ptg.check_crisis(text)
+    assert hits != []
+    assert any(h.startswith("semantic:") for h in hits)
+
+
+@pytest.mark.semantic_layer
+@pytest.mark.asyncio
+async def test_check_crisis_fails_closed_when_semantic_layer_raises(monkeypatch):
+    """Mirrors test_check_crisis_fails_closed_when_lexicon_raises for the
+    semantic layer: an exception there must degrade to 'no additional
+    signal', never propagate and break prepare_public_trial_turn."""
+    monkeypatch.setattr(
+        "app.services.suicide_ideation_lexicon.match_user_text", lambda t: [],
+    )
+
+    async def _boom(t):
+        raise RuntimeError("embedding backend exploded")
+
+    monkeypatch.setattr(
+        "app.services.si_semantic_detector.semantic_si_match", _boom,
+    )
+    assert await ptg.check_crisis("some harmless text") == []
+
+
+@pytest.mark.semantic_layer
+@pytest.mark.asyncio
+async def test_check_crisis_both_layers_agree_still_returns_hits(monkeypatch):
+    """Sanity check: when both the lexicon and the semantic layer independently
+    flag the same text, check_crisis returns hits from both (no dedup bug that
+    would accidentally null out the result)."""
+    monkeypatch.setattr(
+        "app.services.suicide_ideation_lexicon.match_user_text",
+        lambda t: ["kill myself"],
+    )
+
+    async def _fake_semantic_match(t):
+        return ("I've been thinking about ending my life.", 0.9)
+
+    monkeypatch.setattr(
+        "app.services.si_semantic_detector.semantic_si_match", _fake_semantic_match,
+    )
+
+    hits = await ptg.check_crisis("I want to kill myself")
+    assert "kill myself" in hits
+    assert any(h.startswith("semantic:") for h in hits)
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +559,78 @@ async def test_crisis_turn_bypasses_fp_hourly_cap_entirely(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_crisis_turn_bypasses_trial_turn_limit_entirely(monkeypatch):
+    """Same class of bug as the fp-hourly cap, but for the hard 20-turn
+    ceiling itself: a crisis disclosure sent as someone's 21st message must
+    never be met with the signup-required paywall message. It must still
+    reach the LLM and come back with full crisis resources, uncounted --
+    exactly like a crisis turn within the cap already does. 2026-07 audit:
+    walling a suicide disclosure behind 'create a free account to keep
+    talking' is the same failure mode as walling it behind 'at capacity'."""
+    pool = _FakeTrialPool()
+    device_uuid_hash = ptg.compute_device_uuid_hash("uuid-crisis-vs-turnlimit")
+    pool.store[device_uuid_hash] = {
+        "turns_used": ptg.TRIAL_TURN_LIMIT,  # already at/over the hard ceiling
+        "trial_history": [], "converted": False, "gated_at": None,
+    }
+    monkeypatch.setattr(ptg, "_DB_POOL", pool)
+    monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
+
+    increment_calls = []
+
+    async def _fake_increment(*a, **kw):
+        increment_calls.append(a)
+        return 9999  # would be an obviously-wrong value if ever called
+    monkeypatch.setattr(ptg, "db_increment_turn", _fake_increment)
+
+    ctx = await ptg.prepare_public_trial_turn(
+        {
+            "device_fingerprint": "uuid-crisis-vs-turnlimit",
+            "text": "I've been thinking about disappearing. Everyone would be better off without me.",
+        },
+        "1.2.3.4", "ua",
+    )
+
+    assert increment_calls == []  # crisis turns never increment, even past the cap
+    assert ctx.ok is True
+    assert ctx.is_crisis is True
+    assert ctx.turns_used == ptg.TRIAL_TURN_LIMIT  # unchanged, not gated
+
+    _patch_generation_deps(monkeypatch, llm_text="I'm right here with you.")
+    assistant_text = await ptg.generate_trial_response(ctx)
+    assert "988" in assistant_text
+    assert "911" in assistant_text
+
+
+@pytest.mark.asyncio
+async def test_noncrisis_turn_at_trial_limit_still_gets_signup_required(monkeypatch):
+    """Control case for the above: a NON-crisis message sent once the hard
+    cap is reached still gets the normal signup-required paywall -- the
+    crisis bypass must not accidentally widen into 'the cap never fires'."""
+    pool = _FakeTrialPool()
+    device_uuid_hash = ptg.compute_device_uuid_hash("uuid-noncrisis-at-cap")
+    pool.store[device_uuid_hash] = {
+        "turns_used": ptg.TRIAL_TURN_LIMIT,
+        "trial_history": [], "converted": False, "gated_at": None,
+    }
+    monkeypatch.setattr(ptg, "_DB_POOL", pool)
+    monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
+
+    async def _no_crisis(text):
+        return []
+    monkeypatch.setattr(ptg, "check_crisis", _no_crisis)
+
+    ctx = await ptg.prepare_public_trial_turn(
+        {"device_fingerprint": "uuid-noncrisis-at-cap", "text": "What should I say to my son?"},
+        "1.2.3.4", "ua",
+    )
+
+    assert ctx.ok is False
+    assert ctx.payload["type"] == "signup_required"
+    assert ctx.payload["message"] == ptg.TRIAL_SIGNUP_REQUIRED_MESSAGE
+
+
+@pytest.mark.asyncio
 async def test_noncrisis_fp_hourly_cap_rejection_still_carries_988(monkeypatch):
     """Belt-and-braces: even a non-crisis rejection under the retuned
     per-fp cap must carry the 988 line, so a future ordering regression
@@ -450,7 +638,10 @@ async def test_noncrisis_fp_hourly_cap_rejection_still_carries_988(monkeypatch):
     pool = _FakeTrialPool()
     monkeypatch.setattr(ptg, "_DB_POOL", pool)
     monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
-    monkeypatch.setattr(ptg, "check_crisis", lambda text: [])
+
+    async def _no_crisis(text):
+        return []
+    monkeypatch.setattr(ptg, "check_crisis", _no_crisis)
 
     async def _capped(*a, **kw):
         return ptg.AbuseCheckResult(False, "fp_hourly_cap", False, 480)
@@ -481,7 +672,10 @@ async def test_fp_inflight_rejection_message_distinct_from_capacity(monkeypatch)
     pool = _FakeTrialPool()
     monkeypatch.setattr(ptg, "_DB_POOL", pool)
     monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
-    monkeypatch.setattr(ptg, "check_crisis", lambda text: [])
+
+    async def _no_crisis(text):
+        return []
+    monkeypatch.setattr(ptg, "check_crisis", _no_crisis)
 
     async def _inflight(*a, **kw):
         return ptg.AbuseCheckResult(False, "fp_inflight", False, None)

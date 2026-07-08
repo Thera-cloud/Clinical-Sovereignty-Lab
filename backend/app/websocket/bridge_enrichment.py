@@ -659,8 +659,16 @@ def apply_ln_post_llm_pipeline(
     uid: Optional[str] = None,
     registry_parts: Optional[List[str]] = None,
     display_name: Optional[str] = None,
+    force_crisis: bool = False,
 ) -> Tuple[str, List[Dict[str, Any]], List[str]]:
-    """Boundary router (crisis/depth/hypo) then Tier-3 language guard — QUANTUM-CRYSTAL-ARCH."""
+    """Boundary router (crisis/depth/hypo) then Tier-3 language guard — QUANTUM-CRYSTAL-ARCH.
+
+    force_crisis: propagated from a caller that already ran a higher-recall
+    crisis check (e.g. Public Trial Funnel semantic SI detector) on this same
+    user_text. Forces `apply_ln_boundary_post_guard` to treat the turn as CRISIS
+    even if its own lexicon-only check disagrees. See that function's docstring
+    for the 2026-07 T12 incident this closes.
+    """
     from app.services.crisis_response_router import apply_ln_boundary_post_guard
     from app.services.little_nate_clinical_output_policy import (
         contains_confidentiality_overpromise,
@@ -671,6 +679,7 @@ def apply_ln_post_llm_pipeline(
         text or "",
         user_text or "",
         registry_parts=registry_parts,
+        force_crisis=force_crisis,
     )
     cleaned, lang_hits = apply_language_guard(cleaned, uid=uid)
     if display_name:

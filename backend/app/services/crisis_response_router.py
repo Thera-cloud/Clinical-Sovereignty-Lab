@@ -10,7 +10,12 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from app.services.coaching_boundary_guard import TIER_COPY, TIER_COPY_GENERIC, evaluate as guard_evaluate
+from app.services.coaching_boundary_guard import (
+    TIER_COPY,
+    TIER_COPY_GENERIC,
+    GuardResult,
+    evaluate as guard_evaluate,
+)
 from app.services.council_registry_context import _CRISIS_USER  # noqa: PLC2701
 
 _CRISIS_988 = re.compile(r"\b988\b")
@@ -280,10 +285,21 @@ def apply_ln_boundary_post_guard(
     *,
     registry_parts: Optional[Sequence[str]] = None,
     conversation_history: Optional[Sequence[Dict[str, str]]] = None,
+    force_crisis: bool = False,
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """
     Post-generation deterministic boundary router for LN configs.
     Returns (mutated_text, hits) — hits always non-empty when guard tripped.
+
+    force_crisis: set True when an upstream, higher-recall detector (e.g. the
+    Public Trial Funnel's semantic SI check) has already flagged this turn as
+    a crisis but the lexicon-only `guard_evaluate()` below did not independently
+    agree. 2026-07 trial audit (T12): three consecutive real-user phrasings of
+    passive suicidal ideation defeated lexicon matching, and the resulting
+    response *engaged the ideation as a topic to debate* instead of triggering
+    stabilization — because this function's own internal `match_user_text()`
+    call also missed the same phrasing the upstream check caught. Without this
+    flag, an upstream semantic catch never reaches the actual response content.
     """
     hits: List[Dict[str, Any]] = []
     has_parts_context = bool(registry_parts)
@@ -301,6 +317,14 @@ def apply_ln_boundary_post_guard(
         lookback_user_turns=1,
     )
     guard = guard_evaluate(user_text or "")
+    if force_crisis and not guard.tripped:
+        guard = GuardResult(
+            tripped=True,
+            trip_class="CRISIS",
+            trigger_class="semantic_si_detector",
+            matched_labels=["semantic_si_match"],
+            priority=1,
+        )
     if not guard.tripped:
         out = _strip_done_talking_push(
             text or "",
