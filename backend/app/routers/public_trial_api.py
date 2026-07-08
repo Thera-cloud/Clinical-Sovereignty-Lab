@@ -19,13 +19,15 @@ import time
 from typing import Dict, List
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.services.public_trial_gate import confirm_unsubscribe, lookup_unsubscribe_token
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/public-trial", tags=["public-trial"])
+
+_SIGNUP_REDIRECT_BASE = "https://app.sovereignsanctuary.net/signup.html"
 
 # Same per-IP rate-limit discipline as registration_checkout.py — this is an
 # unauthenticated, token-guessing-adjacent surface.
@@ -99,6 +101,20 @@ _DONE_PAGE = f"""<!DOCTYPE html>
 <style>{_PAGE_STYLE}</style></head>
 <body><div class="card"><h2>You're unsubscribed</h2>
 <p>No further emails will be sent.</p></div></body></html>"""
+
+
+@router.get("/signup")
+async def signup_redirect(tt: str, request: Request, fp: str = "", src: str = "trial_email"):
+    """302 to signup.html — short email links that skip SendGrid click wrapping."""
+    if _rate_limited(_client_ip(request)):
+        return RedirectResponse(f"{_SIGNUP_REDIRECT_BASE}?src=trial_email", status_code=302)
+    if not tt or len(tt) > 256:
+        return RedirectResponse(f"{_SIGNUP_REDIRECT_BASE}?src=trial_email", status_code=302)
+    from urllib.parse import urlencode
+    params = {"src": src or "trial_email", "tt": tt}
+    if fp:
+        params["fp"] = fp
+    return RedirectResponse(f"{_SIGNUP_REDIRECT_BASE}?{urlencode(params)}", status_code=302)
 
 
 @router.get("/unsubscribe", response_class=HTMLResponse)

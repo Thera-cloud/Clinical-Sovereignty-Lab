@@ -1,4 +1,4 @@
-"""Public Trial Funnel Phase 3 — signup.html URL builders (offline unit tests)."""
+"""Public Trial Funnel Phase 3 — signup URL builders (offline unit tests)."""
 from __future__ import annotations
 
 import asyncio
@@ -20,9 +20,36 @@ def test_signup_url_points_to_signup_html_with_fp_and_src():
     assert qs.get("fp") == ["550e8400-e29b-41d4-a716-446655440000"]
 
 
+def test_email_signup_link_short_api_redirect_with_fp_and_tt():
+    url = ptg._email_signup_link(tt="raw-token-abc", fp="raw-uuid-abc")
+    assert "/api/public-trial/signup" in url
+    assert "api.sovereignsanctuary.net" in url
+    parsed = urlparse(url)
+    qs = parse_qs(parsed.query)
+    assert qs.get("src") == ["trial_email"]
+    assert qs.get("tt") == ["raw-token-abc"]
+    assert qs.get("fp") == ["raw-uuid-abc"]
+
+
+def test_email_signup_link_followup_tt_only_no_fp():
+    url = ptg._email_signup_link(tt="raw-token-abc")
+    assert "/api/public-trial/signup" in url
+    assert "fp=" not in url
+    parsed = urlparse(url)
+    qs = parse_qs(parsed.query)
+    assert qs.get("tt") == ["raw-token-abc"]
+
+
+def test_sendgrid_trial_tracking_disabled():
+    settings = ptg._sendgrid_trial_tracking_settings()
+    assert settings["click_tracking"]["enable"] is False
+    assert settings["click_tracking"]["enable_text"] is False
+    assert settings["open_tracking"]["enable"] is False
+
+
 @pytest.mark.asyncio
-async def test_upsert_trial_lead_email_url_signup_html_fp_tt(monkeypatch):
-    """Email capture link must include signup.html, fp, and tt for same-device merge."""
+async def test_upsert_trial_lead_email_url_api_signup_fp_tt(monkeypatch):
+    """Email capture link uses short API redirect with fp + tt for same-device merge."""
 
     class _Conn:
         async def fetchrow(self, query, *args):
@@ -50,7 +77,7 @@ async def test_upsert_trial_lead_email_url_signup_html_fp_tt(monkeypatch):
     _token, signup_url, _unsub = await ptg._upsert_trial_lead(
         "fp_hash_x", "dev_hash_x", "user@example.com", "raw-uuid-abc"
     )
-    assert "/signup.html" in signup_url
+    assert "/api/public-trial/signup" in signup_url
     assert "src=trial_email" in signup_url
     assert "fp=raw-uuid-abc" in signup_url
     assert "tt=" in signup_url
@@ -58,17 +85,3 @@ async def test_upsert_trial_lead_email_url_signup_html_fp_tt(monkeypatch):
     qs = parse_qs(parsed.query)
     assert "fp" in qs
     assert "tt" in qs
-
-
-def test_followup_email_url_signup_html_tt_only_no_fp():
-    """Follow-up cycle mints tt-only links — lead row stores hash, not raw device UUID."""
-    from urllib.parse import quote
-
-    import secrets
-
-    raw_token = secrets.token_urlsafe(32)
-    signup_url = f"https://app.sovereignsanctuary.net/signup.html?src=trial_email&tt={quote(raw_token)}"
-    assert "/signup.html" in signup_url
-    assert "src=trial_email" in signup_url
-    assert "tt=" in signup_url
-    assert "fp=" not in signup_url

@@ -702,6 +702,23 @@ def _signup_url(client_uuid: str) -> str:
     )
 
 
+def _email_signup_link(*, tt: str, fp: str = "", src: str = "trial_email") -> str:
+    """Short API redirect — avoids SendGrid click-tracking URLs that break iOS Gmail."""
+    from urllib.parse import urlencode
+    params: Dict[str, str] = {"src": src, "tt": tt}
+    if fp:
+        params["fp"] = fp
+    return f"https://api.sovereignsanctuary.net/api/public-trial/signup?{urlencode(params)}"
+
+
+def _sendgrid_trial_tracking_settings() -> Dict[str, Any]:
+    """Direct links only — SendGrid click wraps break iOS in-app mail browsers."""
+    return {
+        "click_tracking": {"enable": False, "enable_text": False},
+        "open_tracking": {"enable": False},
+    }
+
+
 async def prepare_public_trial_start(data: Dict[str, Any], ip: str, ua: str) -> Dict[str, Any]:
     """Handles `public_trial_start`. Returns the WS payload to send back
     (`trial_state` or a generic `error`)."""
@@ -1044,9 +1061,7 @@ async def _upsert_trial_lead(fp_hash: str, device_uuid_hash: str, email: str, ra
             )
 
     from urllib.parse import quote
-    signup_url = (
-        f"https://app.sovereignsanctuary.net/signup.html?src=trial_email&fp={quote(raw_uuid)}&tt={quote(raw_token)}"
-    )
+    signup_url = _email_signup_link(tt=raw_token, fp=raw_uuid)
     unsubscribe_url = f"https://api.sovereignsanctuary.net/api/public-trial/unsubscribe?token={quote(raw_token)}"
     return raw_token, signup_url, unsubscribe_url
 
@@ -1069,11 +1084,19 @@ async def _send_trial_signup_email(to_email: str, signup_url: str, unsubscribe_u
       <a href="{unsubscribe_url}">Unsubscribe from these emails</a></p>
     </div>
     """
+    plain = (
+        f"Create your free account — everything you shared is waiting:\n{signup_url}\n\n"
+        f"Unsubscribe: {unsubscribe_url}"
+    )
     payload = {
         "personalizations": [{"to": [{"email": to_email}]}],
         "from": {"email": "hello@sovereignsanctuary.net", "name": "Little Nate"},
         "subject": "Little Nate still remembers your conversation",
-        "content": [{"type": "text/html", "value": html}],
+        "content": [
+            {"type": "text/plain", "value": plain},
+            {"type": "text/html", "value": html},
+        ],
+        "tracking_settings": _sendgrid_trial_tracking_settings(),
     }
     try:
         import aiohttp
@@ -1168,11 +1191,19 @@ async def _send_trial_followup_email(to_email: str, signup_url: str, unsubscribe
       <a href="{unsubscribe_url}">Unsubscribe from these emails</a></p>
     </div>
     """
+    plain = (
+        f"Create your free account — everything you shared is waiting:\n{signup_url}\n\n"
+        f"Unsubscribe: {unsubscribe_url}"
+    )
     payload = {
         "personalizations": [{"to": [{"email": to_email}]}],
         "from": {"email": "hello@sovereignsanctuary.net", "name": "Little Nate"},
         "subject": "Little Nate still remembers your conversation \u2014 it's waiting for you",
-        "content": [{"type": "text/html", "value": html}],
+        "content": [
+            {"type": "text/plain", "value": plain},
+            {"type": "text/html", "value": html},
+        ],
+        "tracking_settings": _sendgrid_trial_tracking_settings(),
     }
     try:
         import aiohttp
@@ -1223,7 +1254,7 @@ async def run_trial_followup_cycle() -> int:
         try:
             raw_token = secrets.token_urlsafe(32)
             token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
-            signup_url = f"https://app.sovereignsanctuary.net/signup.html?src=trial_email&tt={quote(raw_token)}"
+            signup_url = _email_signup_link(tt=raw_token)
             unsubscribe_url = f"https://api.sovereignsanctuary.net/api/public-trial/unsubscribe?token={quote(raw_token)}"
             if not await _send_trial_followup_email(row["email"], signup_url, unsubscribe_url):
                 continue
