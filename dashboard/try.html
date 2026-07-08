@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="canonical" href="https://app.sovereignsanctuary.net/try.html">
 <title>Talk to Little Nate — Free Trial</title>
 <style>
 :root {
@@ -196,6 +197,31 @@ h1 {
 }
 .input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* Starter prompts — hidden after first user message */
+.starters {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.starters.show { display: flex; }
+.starter {
+  background: var(--elevated);
+  border: 1px solid rgba(201,169,98,0.25);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--gold-bright);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+.starter:hover {
+  border-color: var(--gold);
+  background: rgba(201,169,98,0.08);
+}
+
 /* Gate screen */
 .gate {
   display: none;
@@ -327,6 +353,12 @@ h1 {
 
   <div class="chat-window" id="chatWindow"></div>
 
+  <div class="starters" id="starters">
+    <button type="button" class="starter" data-starter-key="meltdown">My son had a meltdown today and I don't know if I handled it right</button>
+    <button type="button" class="starter" data-starter-key="afford">I can't afford therapy right now but I need someone to talk to</button>
+    <button type="button" class="starter" data-starter-key="autism">How would you help my autistic daughter understand her feelings?</button>
+  </div>
+
   <div class="input-row" id="inputRow">
     <input type="text" id="chatInput" placeholder="Type your message..." disabled />
     <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
@@ -351,9 +383,14 @@ h1 {
   </div>
 </div>
 
-<div id="ss-copyright" style="text-align:center;padding:12px 0 8px;font-size:11px;color:#8B7355;font-family:'DM Sans',sans-serif;letter-spacing:0.3px;opacity:0.7;border-top:1px solid rgba(201,169,98,0.08);margin-top:8px;">© 2025-<script>document.write(new Date().getFullYear())</script> Sovereign Sanctuary. All rights reserved.</div>
+<div id="ss-copyright" style="text-align:center;padding:12px 0 8px;font-size:11px;color:#8B7355;font-family:'DM Sans',sans-serif;letter-spacing:0.3px;opacity:0.7;border-top:1px solid rgba(201,169,98,0.08);margin-top:8px;">© 2025–2026 Sovereign Sanctuary. All rights reserved.</div>
 
 <script>
+// Public trial page — client gateway only (never promote command.* for this URL).
+var PUBLIC_TRY_PAGE_URL = 'https://app.sovereignsanctuary.net/try.html';
+if (location.hostname === 'command.sovereignsanctuary.net') {
+  location.replace(PUBLIC_TRY_PAGE_URL + location.search + location.hash);
+}
 var WS_URL = 'wss://api.sovereignsanctuary.net/ws';
 var TURNS_LIMIT = 20;
 var socket = null;
@@ -413,14 +450,29 @@ function dismissNudge() {
   document.getElementById('nudgeBanner').classList.remove('show');
 }
 
+function hideStarters() {
+  var el = document.getElementById('starters');
+  if (el) el.classList.remove('show');
+}
+
+function showStarters() {
+  if (gated) return;
+  if (document.querySelector('#chatWindow .msg.user')) return;
+  var el = document.getElementById('starters');
+  if (el) el.classList.add('show');
+}
+
 function showGate(message, signupUrl) {
   gated = true;
+  hideStarters();
   setInputEnabled(false);
   document.getElementById('inputRow').style.display = 'none';
   document.getElementById('gateMessage').textContent = message ||
     "We've had 20 wonderful conversations together — I'd love to keep remembering you. Create a free account and I'll carry everything we've talked about with us.";
-  document.getElementById('signupCta').href = signupUrl ||
-    'https://app.sovereignsanctuary.net/?src=trial&utm_source=trybottle&utm_medium=trybridge';
+  var fallback = 'https://app.sovereignsanctuary.net/?src=trial'
+    + '&utm_source=trybottle&utm_medium=trybridge'
+    + (trialDeviceId ? '&fp=' + encodeURIComponent(trialDeviceId) : '');
+  document.getElementById('signupCta').href = signupUrl || fallback;
   document.getElementById('gate').classList.add('show');
 }
 
@@ -479,10 +531,12 @@ function handleServerMessage(data) {
         if ((document.getElementById('chatWindow').children.length) === 0) {
           appendMessage("Hi, I'm Little Nate. What's on your mind today?", 'nate');
         }
+        showStarters();
       }
       break;
 
     case 'trial_response':
+      lastSentText = '';
       appendMessage(data.text || '', 'nate');
       updateTurnsCounter(data.turns_used || 0, data.turns_limit);
       if (data.crisis_resources === true) {
@@ -507,6 +561,15 @@ function handleServerMessage(data) {
     case 'error':
       appendMessage(data.message || 'Something went wrong. Please try again.', 'error');
       setInputEnabled(!gated);
+      // 2026-07 trial audit fix: a personal rate-limit (fp_hourly_cap) or an
+      // in-flight collision must never make the user retype what they just
+      // wrote -- restore it to the input box so a resend is one click away.
+      if (data.rate_limited && lastSentText) {
+        var inputEl = document.getElementById('chatInput');
+        if (inputEl && !inputEl.value) {
+          inputEl.value = lastSentText;
+        }
+      }
       break;
 
     default:
@@ -514,17 +577,31 @@ function handleServerMessage(data) {
   }
 }
 
-function sendMessage() {
-  var input = document.getElementById('chatInput');
-  var text = input.value.trim();
+var lastSentText = '';
+
+function sendTrialMessage(text, starterKey) {
   if (!text || gated || !socket || socket.readyState !== WebSocket.OPEN) return;
+  hideStarters();
+  if (starterKey) {
+    try { localStorage.setItem('ss_trial_starter_key', starterKey); } catch (e) {}
+  }
+  lastSentText = text;
   appendMessage(text, 'user');
   setInputEnabled(false);
-  socket.send(JSON.stringify({
+  var payload = {
     type: 'public_trial_chat',
     device_fingerprint: trialDeviceId,
     text: text,
-  }));
+  };
+  if (starterKey) payload.starter_key = starterKey;
+  socket.send(JSON.stringify(payload));
+}
+
+function sendMessage() {
+  var input = document.getElementById('chatInput');
+  var text = input.value.trim();
+  if (!text) return;
+  sendTrialMessage(text, null);
   input.value = '';
 }
 
@@ -555,6 +632,12 @@ function captureEmail() {
 
 document.getElementById('chatInput').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') sendMessage();
+});
+
+document.querySelectorAll('.starter').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    sendTrialMessage(btn.textContent.trim(), btn.getAttribute('data-starter-key'));
+  });
 });
 
 connectWS();

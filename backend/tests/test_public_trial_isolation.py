@@ -215,7 +215,9 @@ async def test_incr_with_cap_fails_closed_when_redis_unreachable(monkeypatch):
     async def _no_redis():
         return None
     monkeypatch.setattr(ptg, "_get_redis", _no_redis)
-    assert await ptg._incr_with_cap("some:key", 10, 60) is False
+    allowed, retry_after = await ptg._incr_with_cap("some:key", 10, 60)
+    assert allowed is False
+    assert retry_after is None
 
 
 @pytest.mark.asyncio
@@ -376,7 +378,14 @@ async def test_prepare_public_trial_turn_rejects_abuse_capped_request(monkeypatc
         {"device_fingerprint": "uuid-capped", "text": "hello"}, "1.2.3.4", "ua",
     )
     assert ctx.ok is False
-    assert ctx.payload["message"] == ptg.TRIAL_CAPACITY_MESSAGE
+    # 2026-07 trial audit Q11 fix: ip_daily_cap is a genuine shared-capacity
+    # condition, so it keeps the TRIAL_CAPACITY_MESSAGE copy -- but every
+    # rejection message now carries the 988 line as belt-and-braces against a
+    # crisis-vs-cap ordering regression (see test_public_trial_crisis.py).
+    assert ctx.payload["message"] == ptg.TRIAL_CAPACITY_MESSAGE + ptg.CRISIS_RESOURCE_TEXT
+    assert "988" in ctx.payload["message"]
+    assert ctx.payload["reason"] == "ip_daily_cap"
+    assert ctx.payload["rate_limited"] is False
 
 
 @pytest.mark.asyncio

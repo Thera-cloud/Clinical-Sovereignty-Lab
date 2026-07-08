@@ -378,3 +378,120 @@ async def test_full_crisis_turn_end_to_end_matches_spec(monkeypatch):
     assert payload["crisis_resources"] is True
     assert payload["turns_used"] == 7
     assert pool.store[device_uuid_hash]["turns_used"] == 7  # still unchanged after finalize
+
+
+# ---------------------------------------------------------------------------
+# Crisis-vs-cap ordering (2026-07 trial audit follow-up): a real trial run hit
+# _FP_HOURLY_CAP after 10 turns in one hour from a single engaged user. The
+# fix retuned the cap (see _FP_HOURLY_CAP == TRIAL_TURN_LIMIT below) AND
+# fixed the ordering bug this surfaced: if the fp-hourly rejection had run
+# before the crisis pre-check, an SI disclosure sent while a user's personal
+# rate limit was exhausted would get "Little Nate is at capacity right now"
+# instead of crisis resources -- the worst possible response to that message.
+# These tests pin both the ordering (crisis bypasses the cap check entirely,
+# it is never even called) and the belt-and-braces (every rejection message,
+# regardless of reason, carries the 988 line).
+# ---------------------------------------------------------------------------
+
+def test_fp_hourly_cap_equals_trial_turn_limit():
+    """2026-07 trial audit: raised from 10 -> TRIAL_TURN_LIMIT so a personal
+    hourly cap can never interrupt a single legitimate trial session. The
+    in-flight lock + per-IP daily cap + global daily budget do the real
+    anti-abuse work; an attacker who actually wants to defeat a per-fp cap
+    just rotates fingerprints, which this cap can't stop anyway."""
+    assert ptg._FP_HOURLY_CAP == ptg.TRIAL_TURN_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_crisis_turn_bypasses_fp_hourly_cap_entirely(monkeypatch):
+    """The T12-style SI probe ('I've been thinking about disappearing...
+    everyone would be better off without me') sent while the caller's
+    fp-hourly key is already over cap must still reach the LLM --
+    check_turn_abuse_caps must not even be called for a crisis turn,
+    consistent with it already skipping the turn counter."""
+    pool = _FakeTrialPool()
+    device_uuid_hash = ptg.compute_device_uuid_hash("uuid-crisis-vs-cap")
+    pool.store[device_uuid_hash] = {
+        "turns_used": 3, "trial_history": [], "converted": False, "gated_at": None,
+    }
+    monkeypatch.setattr(ptg, "_DB_POOL", pool)
+    monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
+
+    abuse_calls = []
+
+    async def _capped(*a, **kw):
+        abuse_calls.append(a)
+        return ptg.AbuseCheckResult(False, "fp_hourly_cap", False, 480)
+    monkeypatch.setattr(ptg, "check_turn_abuse_caps", _capped)
+
+    ctx = await ptg.prepare_public_trial_turn(
+        {
+            "device_fingerprint": "uuid-crisis-vs-cap",
+            "text": "I've been thinking about disappearing. Everyone would be better off without me.",
+        },
+        "1.2.3.4", "ua",
+    )
+
+    assert abuse_calls == []  # never called -- crisis pre-check short-circuits it
+    assert ctx.ok is True
+    assert ctx.is_crisis is True
+
+    _patch_generation_deps(monkeypatch, llm_text="I'm right here with you.")
+    assistant_text = await ptg.generate_trial_response(ctx)
+    assert "988" in assistant_text
+    assert "911" in assistant_text
+
+
+@pytest.mark.asyncio
+async def test_noncrisis_fp_hourly_cap_rejection_still_carries_988(monkeypatch):
+    """Belt-and-braces: even a non-crisis rejection under the retuned
+    per-fp cap must carry the 988 line, so a future ordering regression
+    can never produce a resource-free wall."""
+    pool = _FakeTrialPool()
+    monkeypatch.setattr(ptg, "_DB_POOL", pool)
+    monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
+    monkeypatch.setattr(ptg, "check_crisis", lambda text: [])
+
+    async def _capped(*a, **kw):
+        return ptg.AbuseCheckResult(False, "fp_hourly_cap", False, 480)
+    monkeypatch.setattr(ptg, "check_turn_abuse_caps", _capped)
+
+    ctx = await ptg.prepare_public_trial_turn(
+        {"device_fingerprint": "uuid-fp-capped", "text": "how are you today"}, "1.2.3.4", "ua",
+    )
+
+    assert ctx.ok is False
+    assert "988" in ctx.payload["message"]
+    assert ctx.payload["reason"] == "fp_hourly_cap"
+    assert ctx.payload["rate_limited"] is True
+    # 2026-07 trial audit Q11 fix: no "at capacity" copy for a personal rate
+    # limit -- it's semantically false (this isn't a shared-capacity event).
+    assert "at capacity" not in ctx.payload["message"].lower()
+    # TTL-derived wait time is surfaced so the client can show/enforce it
+    # instead of a vague "try again in a little while".
+    assert ctx.payload["retry_after_seconds"] == 480
+    assert "8 minutes" in ctx.payload["message"]
+
+
+@pytest.mark.asyncio
+async def test_fp_inflight_rejection_message_distinct_from_capacity(monkeypatch):
+    """The in-flight collision ('still working on your last message') is a
+    third distinct condition -- must not be confused with either the
+    personal-cap copy or the shared-capacity copy, and must still carry 988."""
+    pool = _FakeTrialPool()
+    monkeypatch.setattr(ptg, "_DB_POOL", pool)
+    monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
+    monkeypatch.setattr(ptg, "check_crisis", lambda text: [])
+
+    async def _inflight(*a, **kw):
+        return ptg.AbuseCheckResult(False, "fp_inflight", False, None)
+    monkeypatch.setattr(ptg, "check_turn_abuse_caps", _inflight)
+
+    ctx = await ptg.prepare_public_trial_turn(
+        {"device_fingerprint": "uuid-inflight", "text": "still typing more"}, "1.2.3.4", "ua",
+    )
+
+    assert ctx.ok is False
+    assert "988" in ctx.payload["message"]
+    assert ctx.payload["message"] != ptg.TRIAL_CAPACITY_MESSAGE + ptg.CRISIS_RESOURCE_TEXT
+    assert "still working on your last message" in ctx.payload["message"]

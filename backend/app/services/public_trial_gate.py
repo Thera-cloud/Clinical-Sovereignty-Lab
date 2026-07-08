@@ -57,13 +57,35 @@ TRIAL_UID_PREFIX = "trial_"
 
 # Redis cap tuning (see plan Phase 1 "Abuse caps" row)
 _IP_DAILY_CAP = 40
-_FP_HOURLY_CAP = 10
+# 2026-07 trial audit: the fp-hourly cap was 10, which fired on Marcus -- a
+# deeply engaged trial user ten turns into a trauma disclosure inside one
+# hour -- not on an adversary (a real scripted-abuse attacker rotates
+# fingerprints, which defeats a per-fp cap entirely; the fp-hourly layer
+# mostly punished legitimate high-intent humans). Set equal to
+# TRIAL_TURN_LIMIT so it can never interrupt a single legitimate trial
+# session; the in-flight lock + per-IP daily cap + global daily budget still
+# do the real anti-abuse work.
+_FP_HOURLY_CAP = TRIAL_TURN_LIMIT
 _FP_INFLIGHT_TTL_S = 120
 _EMAIL_IP_DAILY_CAP = 10
 
 TRIAL_CAPACITY_MESSAGE = (
     "Little Nate is at capacity right now — please try again in a little while, "
     "or create a free account and I'll be ready for you the moment you sign up."
+)
+
+# 2026-07 trial audit Q11 fix: a personal (per-fingerprint) rate limit is not
+# "at capacity" -- that phrase is true for the shared global/IP budgets, but
+# false and confusing for a single engaged user pausing mid-conversation.
+# This copy names the real condition, is warm rather than transactional, and
+# `{retry_phrase}` is filled from the Redis TTL so the wait time is honest
+# instead of "try again in a little while" (which the system already knows
+# to the second). See _rate_limit_message() / _rate_limit_retry_phrase().
+TRIAL_FP_HOURLY_MESSAGE_TEMPLATE = (
+    "You've shared a lot with me this hour, and I want to give it the attention "
+    "it deserves. Give me {retry_phrase} and we'll pick up right where you left "
+    "off \u2014 I'll remember everything. You're also welcome to create a free "
+    "account any time and keep going right now."
 )
 
 TRIAL_SIGNUP_REQUIRED_MESSAGE = (
@@ -239,23 +261,34 @@ def _ip_hash(ip: str) -> str:
 # Redis abuse caps — fail CLOSED (never fail open) on any Redis error.
 # ---------------------------------------------------------------------------
 
-async def _incr_with_cap(key: str, cap: int, ttl_seconds: int) -> bool:
+async def _incr_with_cap(key: str, cap: int, ttl_seconds: int) -> "tuple[bool, Optional[int]]":
     """Increment a Redis counter and check it against `cap`.
 
-    Returns True iff the counter is within cap AND Redis is reachable.
-    Any exception (including "Redis unreachable") returns False — fail closed.
+    Returns `(allowed, retry_after_seconds)`. `allowed` is True iff the
+    counter is within cap AND Redis is reachable. `retry_after_seconds` is
+    the key's remaining TTL (seconds) when the cap is exceeded, so callers
+    can give an honest wait time instead of "try again in a little while" —
+    it is None when allowed, or when the TTL itself can't be determined.
+    Any exception (including "Redis unreachable") returns `(False, None)` —
+    fail closed.
     """
     r = await _get_redis()
     if r is None:
-        return False
+        return False, None
     try:
         count = await r.incr(key)
         if count == 1:
             await r.expire(key, ttl_seconds)
-        return count <= cap
+        if count <= cap:
+            return True, None
+        try:
+            ttl = await r.ttl(key)
+        except Exception:
+            ttl = None
+        return False, (ttl if isinstance(ttl, int) and ttl > 0 else None)
     except Exception as e:
         logger.warning("public_trial_gate: Redis incr failed for %s, failing closed: %s", key, e)
-        return False
+        return False, None
 
 
 async def _try_acquire_inflight(fp_hash: str) -> bool:
@@ -293,27 +326,39 @@ async def check_registration_ip_cap(ip: str) -> bool:
     False (fail closed) on any Redis error."""
     from app.services.trial_signup_redis_keys import registration_ip_daily_key
 
-    return await _incr_with_cap(registration_ip_daily_key(_ip_hash(ip)), _REGISTRATION_IP_DAILY_CAP, 86400)
+    allowed, _retry_after = await _incr_with_cap(
+        registration_ip_daily_key(_ip_hash(ip)), _REGISTRATION_IP_DAILY_CAP, 86400
+    )
+    return allowed
 
 
 async def check_turn_abuse_caps(ip: str, fp_hash: str) -> "AbuseCheckResult":
-    """Per-IP daily 40, global daily MAX_TRIAL_TURNS_PER_DAY, per-fp 10/hour +
-    1 in-flight. All fail closed. Returns an AbuseCheckResult; caller must
-    release the in-flight lock (via `release_turn_inflight`) after the turn
-    completes (success, error, or refund) if `inflight_acquired` is True."""
+    """Per-IP daily 40, global daily MAX_TRIAL_TURNS_PER_DAY, per-fp
+    hourly cap (== TRIAL_TURN_LIMIT, see _FP_HOURLY_CAP) + 1 in-flight. All
+    fail closed. Returns an AbuseCheckResult; caller must release the
+    in-flight lock (via `release_turn_inflight`) after the turn completes
+    (success, error, or refund) if `inflight_acquired` is True.
+
+    IMPORTANT (2026-07 trial audit): callers MUST run the crisis pre-check
+    (check_crisis) before calling this function and let a crisis turn bypass
+    it entirely -- a suicide/self-harm disclosure must never be met with a
+    rate-limit wall. See prepare_public_trial_turn for the enforced order."""
     from app.services.trial_signup_redis_keys import (
         public_trial_ip_daily_key, public_trial_global_daily_key, public_trial_fp_hourly_key,
     )
 
-    if not await _incr_with_cap(public_trial_ip_daily_key(_ip_hash(ip)), _IP_DAILY_CAP, 86400):
-        return AbuseCheckResult(False, "ip_daily_cap", False)
-    if not await _incr_with_cap(public_trial_global_daily_key(), MAX_TRIAL_TURNS_PER_DAY, 86400):
-        return AbuseCheckResult(False, "global_daily_cap", False)
-    if not await _incr_with_cap(public_trial_fp_hourly_key(fp_hash), _FP_HOURLY_CAP, 3600):
-        return AbuseCheckResult(False, "fp_hourly_cap", False)
+    allowed, retry_after = await _incr_with_cap(public_trial_ip_daily_key(_ip_hash(ip)), _IP_DAILY_CAP, 86400)
+    if not allowed:
+        return AbuseCheckResult(False, "ip_daily_cap", False, retry_after)
+    allowed, retry_after = await _incr_with_cap(public_trial_global_daily_key(), MAX_TRIAL_TURNS_PER_DAY, 86400)
+    if not allowed:
+        return AbuseCheckResult(False, "global_daily_cap", False, retry_after)
+    allowed, retry_after = await _incr_with_cap(public_trial_fp_hourly_key(fp_hash), _FP_HOURLY_CAP, 3600)
+    if not allowed:
+        return AbuseCheckResult(False, "fp_hourly_cap", False, retry_after)
     if not await _try_acquire_inflight(fp_hash):
-        return AbuseCheckResult(False, "fp_inflight", False)
-    return AbuseCheckResult(True, "", True)
+        return AbuseCheckResult(False, "fp_inflight", False, None)
+    return AbuseCheckResult(True, "", True, None)
 
 
 async def release_turn_inflight(fp_hash: str) -> None:
@@ -325,6 +370,37 @@ class AbuseCheckResult:
     allowed: bool
     reason: str
     inflight_acquired: bool
+    retry_after_seconds: Optional[int] = None
+
+
+def _rate_limit_retry_phrase(retry_after_seconds: Optional[int]) -> str:
+    """Turn a Redis TTL into an honest, human wait phrase. Falls back to a
+    safe generic phrase when the TTL is unknown (Redis didn't return one)."""
+    if not retry_after_seconds or retry_after_seconds <= 0:
+        return "a little while"
+    minutes = max(1, round(retry_after_seconds / 60))
+    if minutes == 1:
+        return "about a minute"
+    return f"about {minutes} minutes"
+
+
+def _rate_limit_message(abuse: "AbuseCheckResult") -> str:
+    """2026-07 trial audit Q11 fix: distinct, semantically-correct copy per
+    rejection reason, each ending in the 988 resource line as belt-and-braces
+    against any future crisis-vs-cap ordering regression (see
+    prepare_public_trial_turn for the enforced primary ordering)."""
+    if abuse.reason == "fp_hourly_cap":
+        phrase = _rate_limit_retry_phrase(abuse.retry_after_seconds)
+        base = TRIAL_FP_HOURLY_MESSAGE_TEMPLATE.format(retry_phrase=phrase)
+    elif abuse.reason == "fp_inflight":
+        base = (
+            "I'm still working on your last message \u2014 give me just a moment "
+            "and send that again."
+        )
+    else:
+        # ip_daily_cap / global_daily_cap: genuinely a shared-capacity condition.
+        base = TRIAL_CAPACITY_MESSAGE
+    return base + CRISIS_RESOURCE_TEXT
 
 
 # ---------------------------------------------------------------------------
@@ -622,13 +698,33 @@ async def prepare_public_trial_turn(data: Dict[str, Any], ip: str, ua: str) -> T
             "signup_url": _signup_url(client_uuid),
         }, device_uuid_hash=device_uuid_hash, fp_hash=fp_hash)
 
+    # Crisis pre-check runs FIRST, before any rate-cap check. A crisis turn
+    # bypasses every abuse cap (IP daily, global daily, fp-hourly, in-flight)
+    # entirely -- consistent with it already skipping the turn counter below.
+    # 2026-07 trial audit: this ordering is safety-critical. If the fp-hourly
+    # rejection ran first, a suicide/self-harm disclosure sent while a user's
+    # personal rate limit was exhausted would receive "at capacity" instead of
+    # crisis resources -- the worst possible response to that message. See
+    # test_public_trial_crisis.py::test_crisis_turn_bypasses_fp_hourly_cap_entirely.
     is_crisis = bool(check_crisis(text))
 
-    abuse = await check_turn_abuse_caps(ip, fp_hash)
-    if not abuse.allowed:
-        logger.info("public_trial_gate: turn rejected (%s) fp=%s", abuse.reason, fp_hash[:12])
-        return TrialTurnContext(False, {"type": "error", "message": TRIAL_CAPACITY_MESSAGE},
-                                 device_uuid_hash=device_uuid_hash, fp_hash=fp_hash)
+    if not is_crisis:
+        abuse = await check_turn_abuse_caps(ip, fp_hash)
+        if not abuse.allowed:
+            logger.info("public_trial_gate: turn rejected (%s) fp=%s", abuse.reason, fp_hash[:12])
+            # Stays `type: "error"` (not a new type) so older/cached trial
+            # clients degrade gracefully -- the extra fields are additive and
+            # let the current try.html preserve the user's unsent text and
+            # (for fp_hourly_cap) offer a resend once the window reopens.
+            rejection_payload: Dict[str, Any] = {
+                "type": "error",
+                "reason": abuse.reason,
+                "rate_limited": abuse.reason in ("fp_hourly_cap", "fp_inflight"),
+                "message": _rate_limit_message(abuse),
+                "retry_after_seconds": abuse.retry_after_seconds,
+            }
+            return TrialTurnContext(False, rejection_payload,
+                                     device_uuid_hash=device_uuid_hash, fp_hash=fp_hash)
 
     turns_used = state["turns_used"]
     if not is_crisis:
@@ -826,7 +922,8 @@ async def handle_public_trial_capture_email(data: Dict[str, Any], ip: str, ua: s
 
     from app.services.trial_signup_redis_keys import public_trial_email_ip_daily_key
     # Fail-closed: Redis unreachable => treat as cap-exceeded => silent ack, no send.
-    if not await _incr_with_cap(public_trial_email_ip_daily_key(_ip_hash(ip)), _EMAIL_IP_DAILY_CAP, 86400):
+    _email_allowed, _ = await _incr_with_cap(public_trial_email_ip_daily_key(_ip_hash(ip)), _EMAIL_IP_DAILY_CAP, 86400)
+    if not _email_allowed:
         logger.info("public_trial_gate: email capture rate-limited or Redis down; silent ack")
         return ack
 
