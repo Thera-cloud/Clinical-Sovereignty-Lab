@@ -984,7 +984,10 @@ def sanitize_ai_response(response: str, role: str) -> str:
 
 # FIX-LEN # SOVEREIGN-VOICE — Phase 1 response-length cap for client text chat
 def _select_max_tokens(user_text: str) -> int:
-    """Phase 1: 2-tier cap. Default 600, lift to 1500 on explicit depth request."""
+    """Phase 1: 2-tier cap. Default 600, lift to 1500 on explicit depth request
+    OR when the user's own message is long/detailed — a lengthy first message
+    (the most detailed message a user sends) deserves a full-length reply
+    instead of a 600-token mid-sentence cutoff. SOVEREIGN-VOICE."""
     if not user_text:
         return 600
     depth_request_phrases = [
@@ -995,7 +998,32 @@ def _select_max_tokens(user_text: str) -> int:
     lower = user_text.lower()
     if any(phrase in lower for phrase in depth_request_phrases):
         return 1500
+    if len(user_text) > 400 or len(user_text.split()) > 80:  # SOVEREIGN-VOICE
+        return 1500
     return 600
+
+
+# SOVEREIGN-VOICE — graceful close for responses truncated mid-sentence by the
+# max_tokens ceiling above. Heuristic-only (no provider finish_reason needed):
+# if the reply lacks terminal punctuation AND its length is close to the cap,
+# trim back to the last complete sentence instead of shipping a fragment like
+# "...decision D." Never removes text that already ends cleanly.
+_SENTENCE_END_RE = re.compile(r"[.!?][\"')\]]*\s*$")
+_SENTENCE_BOUNDARY_RE = re.compile(r"[.!?][\"')\]]*(?=\s|$)")
+
+
+def _close_truncated_response(text: str, max_tokens: int) -> str:
+    if not text or _SENTENCE_END_RE.search(text):
+        return text
+    approx_tokens = len(text.split()) * 1.3
+    if approx_tokens < max(max_tokens, 1) * 0.85:
+        return text  # short reply that just lacks punctuation — leave alone
+    matches = list(_SENTENCE_BOUNDARY_RE.finditer(text))
+    if matches:
+        trimmed = text[:matches[-1].end()].strip()
+        if len(trimmed) >= 40:
+            return trimmed
+    return text.rstrip() + "…"
 
 # Azure OpenAI Helper Function
 async def call_azure_openai(prompt: str, system_message: str = "You are a helpful assistant.", max_tokens: int = 2000, session_id: str = "") -> str:
@@ -10413,6 +10441,11 @@ class AzureCortex:
                 full_response = _re_think_final.sub(r"<think>[\s\S]*?</think>\s*", "", full_response).strip()
                 if len(full_response) != _pre_len:
                     print(f">>> [SOVEREIGN] Post-process stripped <think> block ({_pre_len} → {len(full_response)} chars)")
+            # SOVEREIGN-VOICE — graceful close if max_tokens cut the reply mid-sentence
+            _closed_response = _close_truncated_response(full_response, _len_cap)
+            if _closed_response != full_response:
+                print(f">>> [LENGTH-CAP] Trimmed mid-sentence truncation for {uid} ({len(full_response)} → {len(_closed_response)} chars)")
+                full_response = _closed_response
             _final_response = full_response
             if not full_response.strip():
                 await self._send(uid, "I'm having trouble connecting right now. Please try again in a moment.", client_context=_ctx, turn_id=_turn_id)
