@@ -4,6 +4,11 @@ Runs daily data hygiene: prunes stale rows from skyeye_activity and
 skyeye_content_queue, records row counts and DB size to activity log,
 and tracks backup freshness.
 
+Also runs a weekly (gated) shadow confidence-weighting pass over
+crystal_outcome_view — see _shadow_weighting_pass(). That pass only ever
+INSERTs into crystal_confidence_shadow; it never UPDATEs
+nate_intelligence_crystals.confidence (WIRE_WHAT_EXISTS Commit 4).
+
 Actual pg_dump backups run via host-level cron (not inside Docker).
 This agent focuses on data pruning and size monitoring.
 
@@ -37,6 +42,21 @@ IMMUTABLE_TYPES = (
     # daily prune cannot evict the audit trail before its retention window.
     "sensitive_bridge_log_event",
 )
+
+# QUANTUM-CRYSTAL-ARCH: WIRE_WHAT_EXISTS Commit 4 STEP 4 — shadow confidence
+# weighting. This pass NEVER writes to nate_intelligence_crystals.confidence;
+# it only INSERTs proposed deltas into crystal_confidence_shadow (migration
+# 236) for review. Gated to run at most once per SHADOW_WEIGHTING_INTERVAL_DAYS
+# using the table's own MAX(computed_at) — not in-memory state — so a process
+# restart cannot cause it to run more often than intended.
+SHADOW_WEIGHTING_INTERVAL_DAYS = 7
+SHADOW_MIN_SAMPLE_SIZE = 5           # minimum outcome-linked recalls before proposing anything
+SHADOW_MAX_ABS_DELTA = 0.02          # hard cap per WIRE_WHAT_EXISTS Commit 4 spec
+SHADOW_DELTA_SCALE = 0.04            # avg_c_emo=0.5 -> 0 delta; 0.0/1.0 -> +/-0.02 (still clamped below)
+# clinical/safety crystals are forced to 0 delta regardless of outcome signal.
+# Domain taxonomy is the 7 canonical values from crystal-intelligence-integrity.mdc;
+# 'clinical' and 'defense' are the two that carry clinical/safety weight.
+SHADOW_FORCED_ZERO_DOMAINS = ("clinical", "defense")
 
 
 class DatabaseMaintenanceAgent:
@@ -83,6 +103,7 @@ class DatabaseMaintenanceAgent:
         purged_flagged_text = await self._purge_flagged_turn_text()
         purged_lead_emails = await self._purge_trial_lead_emails()
         sent_followups = await self._send_trial_followups()
+        shadow_proposals = await self._shadow_weighting_pass()
         stats = await self._collect_stats()
 
         summary = (
@@ -92,7 +113,9 @@ class DatabaseMaintenanceAgent:
             f"{purged_trial_history} trial_history rows cleared ({TRIAL_HISTORY_RETENTION_DAYS}d), "
             f"{purged_flagged_text} flagged-turn texts purged ({TRIAL_FLAGGED_TEXT_RETENTION_DAYS}d), "
             f"{purged_lead_emails} trial lead emails purged ({TRIAL_LEAD_EMAIL_RETENTION_DAYS}d), "
-            f"{sent_followups} trial follow-up emails sent. "
+            f"{sent_followups} trial follow-up emails sent, "
+            f"{shadow_proposals} crystal confidence shadow proposals recorded "
+            f"({SHADOW_WEIGHTING_INTERVAL_DAYS}d cadence, never applied). "
             f"DB size: {stats.get('db_size', 'unknown')}. "
             f"Tables: activity={stats.get('activity_rows', '?')}, "
             f"content_queue={stats.get('content_rows', '?')}, "
@@ -212,6 +235,82 @@ class DatabaseMaintenanceAgent:
             return await run_trial_followup_cycle()
         except Exception as e:
             logger.warning("DatabaseMaintenanceAgent: trial follow-up cycle failed: %s", e)
+            return 0
+
+    async def _shadow_weighting_pass(self) -> int:
+        """WIRE_WHAT_EXISTS Commit 4 STEP 4 — restraint-only shadow confidence
+        weighting. Reads crystal_outcome_view (migration 236, STEP 3) and
+        INSERTs proposed deltas into crystal_confidence_shadow. This method
+        NEVER issues an UPDATE against nate_intelligence_crystals — that
+        invariant is what backend/tests/test_shadow_weighting_no_update.py
+        asserts by scanning this file's source.
+
+        Gated to run at most once per SHADOW_WEIGHTING_INTERVAL_DAYS using
+        MAX(computed_at) already stored in crystal_confidence_shadow, so the
+        gate survives process restarts (no in-memory "last run" flag).
+
+        Returns the number of shadow rows inserted this pass (0 if skipped
+        by the weekly gate, if there is no outcome data yet, or on error).
+        """
+        try:
+            async with self.db_pool.acquire() as conn:
+                last_run = await conn.fetchval(
+                    "SELECT MAX(computed_at) FROM crystal_confidence_shadow"
+                )
+                if last_run is not None:
+                    age_days = (
+                        datetime.now(timezone.utc) - last_run.replace(tzinfo=timezone.utc)
+                    ).total_seconds() / 86400
+                    if age_days < SHADOW_WEIGHTING_INTERVAL_DAYS:
+                        return 0
+
+                rows = await conn.fetch(f"""
+                    SELECT
+                        crystal_id,
+                        MAX(crystal_domain) AS domain,
+                        MAX(crystal_confidence) AS current_confidence,
+                        COUNT(*) FILTER (WHERE c_emo IS NOT NULL) AS sample_size,
+                        AVG(c_emo) FILTER (WHERE c_emo IS NOT NULL) AS avg_c_emo
+                    FROM crystal_outcome_view
+                    WHERE crystal_id IS NOT NULL
+                    GROUP BY crystal_id
+                    HAVING COUNT(*) FILTER (WHERE c_emo IS NOT NULL) >= {SHADOW_MIN_SAMPLE_SIZE}
+                """)
+
+                inserted = 0
+                for row in rows:
+                    domain = (row["domain"] or "general").lower()
+                    avg_c_emo = float(row["avg_c_emo"]) if row["avg_c_emo"] is not None else None
+                    sample_size = int(row["sample_size"])
+
+                    if domain in SHADOW_FORCED_ZERO_DOMAINS:
+                        delta = 0.0
+                        reasoning = (
+                            f"forced 0 delta — domain='{domain}' is clinical/safety "
+                            f"(sample_size={sample_size}, avg_c_emo={avg_c_emo})"
+                        )
+                    elif avg_c_emo is None:
+                        continue  # no outcome signal at all — nothing to propose
+                    else:
+                        raw_delta = (avg_c_emo - 0.5) * SHADOW_DELTA_SCALE
+                        delta = max(-SHADOW_MAX_ABS_DELTA, min(SHADOW_MAX_ABS_DELTA, raw_delta))
+                        reasoning = (
+                            f"avg_c_emo={avg_c_emo:.4f} over {sample_size} outcome-linked "
+                            f"recalls -> proposed delta {delta:+.4f} (cap +/-{SHADOW_MAX_ABS_DELTA})"
+                        )
+
+                    await conn.execute("""
+                        INSERT INTO crystal_confidence_shadow
+                            (crystal_id, domain, current_confidence, proposed_delta,
+                             sample_size, avg_c_emo, reasoning, computed_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+                    """, row["crystal_id"], domain, row["current_confidence"], delta,
+                        sample_size, avg_c_emo, reasoning)
+                    inserted += 1
+
+                return inserted
+        except Exception as e:
+            logger.warning("DatabaseMaintenanceAgent: shadow weighting pass failed: %s", e)
             return 0
 
     async def _collect_stats(self) -> dict:
