@@ -74,8 +74,12 @@ class InjectionFlag(str, Enum):
 #: Each tuple: (flag_type, compiled_regex, replacement_or_None).
 _INJECTION_PATTERNS: List[Tuple[InjectionFlag, re.Pattern, Optional[str]]] = [
     # Role override attempts
+    # NOTE: \b required before "act\s+as" — without it this matched inside
+    # ordinary words like "react as", "contact as", "impact as" (common in
+    # therapeutic speech), corrupting stored user_text. See DEVELOPER_MODE
+    # comment below for the same class of bug (queens-guard-word-boundary).
     (InjectionFlag.ROLE_OVERRIDE, re.compile(
-        r"(?i)(you\s+are\s+now|act\s+as|pretend\s+(?:to\s+be|you(?:'re|\s+are))|"
+        r"(?i)(you\s+are\s+now|\bact\s+as|pretend\s+(?:to\s+be|you(?:'re|\s+are))|"
         r"you\s+(?:must|should|will)\s+(?:now\s+)?(?:be|act\s+as|become)|"
         r"your\s+new\s+(?:role|persona|identity)\s+is|"
         r"from\s+now\s+on\s+you\s+are|"
@@ -90,7 +94,7 @@ _INJECTION_PATTERNS: List[Tuple[InjectionFlag, re.Pattern, Optional[str]]] = [
         r"disregard\s+(?:all\s+)?(?:previous|prior|your)\s+(?:instructions|rules)|"
         r"forget\s+(?:all\s+)?(?:previous|prior|your)\s+(?:instructions|rules|training)|"
         r"override\s+(?:your|all)\s+(?:instructions|rules|safety)|"
-        r"(?:new|updated)\s+(?:system\s+)?instructions?\s*:)",
+        r"\b(?:new|updated)\s+(?:system\s+)?instructions?\s*:)",
         re.IGNORECASE,
     ), None),
 
@@ -133,12 +137,16 @@ _INJECTION_PATTERNS: List[Tuple[InjectionFlag, re.Pattern, Optional[str]]] = [
     ), None),
 
     # Context manipulation
+    # NOTE: \b required before Human:/Assistant:/System: — without it this
+    # matched inside ordinary words like "ecosystem:", "subsystem:" (common
+    # in clinical/tech discussion), corrupting stored user_text. Same class
+    # of bug as the DEVELOPER_MODE DAN fix (queens-guard-word-boundary).
     (InjectionFlag.CONTEXT_MANIPULATION, re.compile(
         r"(?i)(\[\s*(?:system|assistant|user|admin)\s*\]|"
         r"<\s*(?:system|assistant|user|admin)\s*>|"
         r"```\s*(?:system|instruction|admin)|"
         r"\{\s*\"?(?:role|system|instruction)\"?\s*:|"
-        r"Human:|Assistant:|System:)",
+        r"\bHuman:|\bAssistant:|\bSystem:)",
         re.IGNORECASE,
     ), None),
 ]

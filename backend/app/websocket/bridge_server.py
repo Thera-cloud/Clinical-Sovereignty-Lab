@@ -9981,6 +9981,10 @@ class AzureCortex:
         print(f">>> [SYSTEM PROMPT] {len(system_prompt)} chars, uid={uid}")
 
         # QUANTUM-CRYSTAL-ARCH — Layer 9 L1: sanitize user input before LLM
+        # SECURITY-DEFENSE: detection flags/routes; storage must stay verbatim.
+        # Only the LLM-facing copy below is filtered — persistence/crystallization
+        # below always use _qg_verbatim_user_text, never the redacted `user_text`.
+        _qg_verbatim_user_text = user_text
         if _queens_guard and _role == "CLIENT":
             try:
                 from uuid import UUID as _UUID
@@ -10615,7 +10619,7 @@ class AzureCortex:
             if not _is_search_synthesis:  # QUANTUM-CRYSTAL-ARCH — skip crystallizing search dumps
                 try:
                     asyncio.create_task(crystallize_from_conversation(
-                        db_pool, uid, user_text, _final_response,
+                        db_pool, uid, _qg_verbatim_user_text, _final_response,
                         user_name=profile.get("name", ""),
                     ))
                 except Exception:
@@ -10635,7 +10639,7 @@ class AzureCortex:
                     if uid not in _chat_session_turns:
                         _chat_session_turns[uid] = []
                     _chat_session_turns[uid].append({
-                        "user_text": user_text,
+                        "user_text": _qg_verbatim_user_text,
                         "ai_text": _final_response,
                     })
                     if len(_chat_session_turns[uid]) >= _CHAT_SESSION_CRYSTAL_INTERVAL:
@@ -10656,7 +10660,7 @@ class AzureCortex:
                     _ch_username = profile.get("username", uid)
                     _ch_session = self._ensure_session_id(uid)
                     asyncio.create_task(_persist_chat_to_conversation_history(
-                        db_pool, _ch_username, user_text, _final_response, _ch_session,
+                        db_pool, _ch_username, _qg_verbatim_user_text, _final_response, _ch_session,
                         turn_id=_turn_id, crystal_ids=_crystal_ids_for_turn,
                     ))
             except Exception:
