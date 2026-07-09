@@ -28071,12 +28071,20 @@ Coach Reflection on Session {session_id}:
                         
                         # Get current members list
                         members_list = sanctuary_engine.get_member_list(sanctuary_id)
-                        
+
+                        # QUANTUM-CRYSTAL-ARCH: members_list is List[dict]; guard with
+                        # m.get('name') or 'Member' to avoid TypeError tearing down the
+                        # WS on every sanctuary_join. Built OUTSIDE the f-string below —
+                        # a trailing "#" inside a triple-quoted f-string is not a Python
+                        # comment, it's literal string content, so this note previously
+                        # leaked verbatim into the onboarding message shown to users.
+                        _members_display = chr(10).join(['• ' + (m.get('name') or 'Member') for m in members_list])
+
                         # Send onboarding message from Little Nate
                         onboarding_message = f"""Welcome to Family Sanctuary, {current_profile['name']}. I'm Little Nate, and I'll be facilitating this conversation to help your family find connection and understanding.
 
                     Currently in the sanctuary:
-                    {chr(10).join(['• ' + (m.get('name') or 'Member') for m in members_list])}  # QUANTUM-CRYSTAL-ARCH: members_list is List[dict]; was raising TypeError and tearing the WS down on every sanctuary_join
+                    {_members_display}
 
                     Before we begin, please share:
                     1. What brought you to this Family Sanctuary today?
