@@ -64,6 +64,28 @@ COACH_OUTREACH_HOURS = 72
 COACH_REQUEST_ESCALATION_HOURS = 72  # 3 days
 SESSION_REMINDER_HOURS = 24
 
+# ── Outcome backoff (WIRE_WHAT_EXISTS Commit 3 — restraint-only) ───────────
+# Reads outcomes already recorded by _record_checkin/_create_nudge (never
+# writes an outcome here) and STRETCHES the 62h/72h thresholds and NARROWS
+# the channel when prior outreach has gone consistently unanswered. The
+# multiplier floor is 1.0 — this can only slow outreach down or quiet it,
+# never speed it up or add channels. See _outcome_backoff().
+BACKOFF_LOOKBACK_CHECKINS = 12            # how many recent outreach checkins to inspect
+BACKOFF_STRETCH_THRESHOLD = 2             # >=2 consecutive ignored -> interval x2
+BACKOFF_INAPP_ONLY_THRESHOLD = 4          # >=4 consecutive ignored -> in-app nudge only
+BACKOFF_STRETCH_MULTIPLIER = 2.0          # 62h->124h, 72h->144h
+BACKOFF_NUDGE_MATCH_WINDOW_MINUTES = 15   # pairing window: checkin -> its nudge
+
+# checkin_type -> the nudge_type _create_nudge tags for that same outreach.
+# Used only to pair a checkin with its nudge for "was it opened" lookups —
+# never to join nate_checkins.user_id (username) to nate_nudges.user_id
+# (UUID) directly. That join is the audited KEY_MISMATCH seam; both ids are
+# resolved through one explicit `users` SELECT first (see _outcome_backoff).
+_CHECKIN_TYPE_TO_NUDGE_TYPE = {
+    "client_72h": "checkin_client_72h",
+    "coach_72h": "checkin_coach_72h",
+}
+
 # ===========================================================================
 # v1.3 Sensitive Clinical Bridge — constants, enums, dataclasses
 # ===========================================================================
@@ -287,15 +309,22 @@ class NateCheckInAgent:
         if self._should_suspend_outreach(profile):
             return
 
-        if hours_inactive >= CLIENT_OUTREACH_HOURS:
+        # QUANTUM-CRYSTAL-ARCH: Commit 3 — restraint-only backoff. Stretches
+        # the 62h/72h thresholds (never shrinks them) based on how many
+        # consecutive prior outreaches this client has ignored.
+        backoff = await self._outcome_backoff(username)
+        outreach_hours = CLIENT_OUTREACH_HOURS * backoff["multiplier"]
+        alert_hours = CLIENT_ALERT_HOURS * backoff["multiplier"]
+
+        if hours_inactive >= outreach_hours:
             if not await self._recent_checkin(conn, username, "client_72h", hours=72):
-                await self._send_client_outreach(conn, username, hw_id, name, profile)
+                await self._send_client_outreach(conn, username, hw_id, name, profile, backoff)
 
-        elif hours_inactive >= CLIENT_ALERT_HOURS:
+        elif hours_inactive >= alert_hours:
             if not await self._recent_checkin(conn, username, "coach_alert_62h", hours=72):
-                await self._send_coach_alert(conn, username, hw_id, name, profile)
+                await self._send_coach_alert(conn, username, hw_id, name, profile, backoff)
 
-    async def _send_coach_alert(self, conn, username, hw_id, name, profile):
+    async def _send_coach_alert(self, conn, username, hw_id, name, profile, backoff=None):
         coach_id = profile.get("coach_id") or profile.get("assigned_coach_id")
         if not coach_id:
             return
@@ -326,32 +355,37 @@ class NateCheckInAgent:
             f"been active for over 62 hours. You may want to reach out and check in."
         )
 
-        channel = None
-        if coach_contact == "sms" and coach_phone and self.notification_system:
-            sent = await self.notification_system.send_sms(coach_phone, msg)
-            if sent:
-                channel = "sms"
-        if not channel and coach_email and self.notification_system:
-            sent = await self.notification_system._send_email(
-                coach_email,
-                f"Client Check-In Alert: {name}",
-                msg,
-                notification_type="checkin_coach_alert",
-                reply_to="checkin@reply.sovereignsanctuary.net",
-            )
-            if sent:
-                channel = "email"
+        # QUANTUM-CRYSTAL-ARCH: Commit 3 — 4+ consecutive ignored outreaches
+        # restricts this touch to the in-app nudge only (no SMS/email).
+        channel_restricted = bool(backoff and backoff.get("channel_restricted"))
 
-        await self._record_checkin(conn, username, "CLIENT", "coach_alert_62h", channel, msg, {
-            "coach_id": coach_id,
-            "coach_username": coach_row["username"],
-        })
+        channel = None
+        if not channel_restricted:
+            if coach_contact == "sms" and coach_phone and self.notification_system:
+                sent = await self.notification_system.send_sms(coach_phone, msg)
+                if sent:
+                    channel = "sms"
+            if not channel and coach_email and self.notification_system:
+                sent = await self.notification_system._send_email(
+                    coach_email,
+                    f"Client Check-In Alert: {name}",
+                    msg,
+                    notification_type="checkin_coach_alert",
+                    reply_to="checkin@reply.sovereignsanctuary.net",
+                )
+                if sent:
+                    channel = "email"
+
+        _checkin_meta = {"coach_id": coach_id, "coach_username": coach_row["username"]}
+        if backoff:
+            _checkin_meta["backoff"] = backoff
+        await self._record_checkin(conn, username, "CLIENT", "coach_alert_62h", channel, msg, _checkin_meta)
         await self._create_nudge(conn, hw_id, "checkin_coach_alert",
                                  "Client Activity Alert",
                                  f"{name} has been inactive for 62+ hours.")
         logger.info("Coach alert sent for client %s to coach %s", username, coach_row["username"])
 
-    async def _send_client_outreach(self, conn, username, hw_id, name, profile):
+    async def _send_client_outreach(self, conn, username, hw_id, name, profile, backoff=None):
         preferred = profile.get("preferred_contact", "email")
         email = profile.get("email")
         phone = profile.get("phone")
@@ -364,22 +398,28 @@ class NateCheckInAgent:
             f"me to check back in (days). Take care."
         )
 
-        channel = None
-        if preferred == "sms" and phone and self.notification_system:
-            sent = await self.notification_system.send_sms(phone, msg)
-            if sent:
-                channel = "sms"
-        if not channel and email and self.notification_system:
-            email_body = self._build_checkin_email_html(name, deep_link)
-            sent = await self.notification_system._send_email(
-                email, "Little Nate is checking in", email_body,
-                notification_type="checkin_client",
-                reply_to="checkin@reply.sovereignsanctuary.net",
-            )
-            if sent:
-                channel = "email"
+        # QUANTUM-CRYSTAL-ARCH: Commit 3 — 4+ consecutive ignored outreaches
+        # restricts this touch to the in-app nudge only (no SMS/email).
+        channel_restricted = bool(backoff and backoff.get("channel_restricted"))
 
-        await self._record_checkin(conn, username, "CLIENT", "client_72h", channel, msg)
+        channel = None
+        if not channel_restricted:
+            if preferred == "sms" and phone and self.notification_system:
+                sent = await self.notification_system.send_sms(phone, msg)
+                if sent:
+                    channel = "sms"
+            if not channel and email and self.notification_system:
+                email_body = self._build_checkin_email_html(name, deep_link)
+                sent = await self.notification_system._send_email(
+                    email, "Little Nate is checking in", email_body,
+                    notification_type="checkin_client",
+                    reply_to="checkin@reply.sovereignsanctuary.net",
+                )
+                if sent:
+                    channel = "email"
+
+        _checkin_meta = {"backoff": backoff} if backoff else None
+        await self._record_checkin(conn, username, "CLIENT", "client_72h", channel, msg, _checkin_meta)
         await self._create_nudge(conn, hw_id, "checkin_client_72h",
                                  "Little Nate is checking in",
                                  f"Hey {name}, it's been a few days. Tap to reconnect.")
@@ -395,7 +435,13 @@ class NateCheckInAgent:
         if self._should_suspend_outreach(profile):
             return
 
-        if hours_inactive < COACH_OUTREACH_HOURS:
+        # QUANTUM-CRYSTAL-ARCH: Commit 3 — restraint-only backoff. Stretches
+        # the 72h threshold (never shrinks it) based on how many consecutive
+        # prior outreaches this coach has ignored.
+        backoff = await self._outcome_backoff(username)
+        outreach_hours = COACH_OUTREACH_HOURS * backoff["multiplier"]
+
+        if hours_inactive < outreach_hours:
             return
         if await self._recent_checkin(conn, username, "coach_72h", hours=72):
             return
@@ -412,21 +458,27 @@ class NateCheckInAgent:
             f"help track this week? Reply anytime."
         )
 
-        channel = None
-        if preferred == "sms" and phone and self.notification_system:
-            sent = await self.notification_system.send_sms(phone, msg)
-            if sent:
-                channel = "sms"
-        if not channel and email and self.notification_system:
-            sent = await self.notification_system._send_email(
-                email, "Little Nate coaching check-in", msg,
-                notification_type="checkin_coach",
-                reply_to="checkin@reply.sovereignsanctuary.net",
-            )
-            if sent:
-                channel = "email"
+        # QUANTUM-CRYSTAL-ARCH: Commit 3 — 4+ consecutive ignored outreaches
+        # restricts this touch to the in-app nudge only (no SMS/email).
+        channel_restricted = bool(backoff and backoff.get("channel_restricted"))
 
-        await self._record_checkin(conn, username, "COACH", "coach_72h", channel, msg)
+        channel = None
+        if not channel_restricted:
+            if preferred == "sms" and phone and self.notification_system:
+                sent = await self.notification_system.send_sms(phone, msg)
+                if sent:
+                    channel = "sms"
+            if not channel and email and self.notification_system:
+                sent = await self.notification_system._send_email(
+                    email, "Little Nate coaching check-in", msg,
+                    notification_type="checkin_coach",
+                    reply_to="checkin@reply.sovereignsanctuary.net",
+                )
+                if sent:
+                    channel = "email"
+
+        _checkin_meta = {"backoff": backoff} if backoff else None
+        await self._record_checkin(conn, username, "COACH", "coach_72h", channel, msg, _checkin_meta)
         await self._create_nudge(conn, hw_id, "checkin_coach_72h",
                                  "Little Nate coaching check-in",
                                  msg[:200])
@@ -809,6 +861,80 @@ class NateCheckInAgent:
         return "\n".join(parts) if parts else ""
 
     # ── Helpers ────────────────────────────────────────────────────────
+
+    async def _outcome_backoff(self, username: str) -> Dict[str, Any]:
+        """Restraint-only outcome backoff (WIRE_WHAT_EXISTS Commit 3, STEP 2).
+
+        Reads outcomes ALREADY WRITTEN by _record_checkin / _create_nudge
+        (never writes an outcome itself) and returns a multiplier that can
+        only stretch the outreach interval and/or narrow the channel —
+        never shrink the interval or add a channel.
+
+        Identity seam: nate_checkins.user_id stores `username` directly
+        (same key as this method's argument — no resolution needed).
+        nate_nudges.user_id is a UUID FK to users.id. These are joined
+        through exactly one explicit `users` SELECT (the same pattern
+        `_create_nudge` already uses for hw_id -> UUID) — never by
+        comparing a username string to a UUID column directly, which is
+        the audited KEY_MISMATCH seam.
+
+        Consecutive-ignored counting walks the most recent outreach
+        check-ins backward and stops at the first one that was answered:
+        status != 'sent' (i.e. 'responded' or 'snoozed' — both are a
+        response) OR its paired nudge was opened.
+        """
+        result: Dict[str, Any] = {
+            "consecutive_ignored": 0,
+            "multiplier": 1.0,
+            "channel_restricted": False,
+        }
+        try:
+            async with self.db_pool.acquire() as conn:
+                user_uuid = await conn.fetchval(
+                    "SELECT id FROM users WHERE username = $1", username)
+
+                checkins = await conn.fetch("""
+                    SELECT checkin_type, status, created_at
+                    FROM nate_checkins
+                    WHERE user_id = $1 AND checkin_type IN ('client_72h', 'coach_72h')
+                    ORDER BY created_at DESC
+                    LIMIT $2
+                """, username, BACKOFF_LOOKBACK_CHECKINS)
+
+                consecutive_ignored = 0
+                for row in checkins:
+                    if row["status"] != "sent":
+                        break  # responded / snoozed — a response; reset
+
+                    nudge_opened = False
+                    nudge_type = _CHECKIN_TYPE_TO_NUDGE_TYPE.get(row["checkin_type"])
+                    if user_uuid and nudge_type:
+                        opened_at = await conn.fetchval("""
+                            SELECT opened_at FROM nate_nudges
+                            WHERE user_id = $1 AND nudge_type = $2
+                              AND scheduled_at >= $3
+                              AND scheduled_at <= $3 + ($4 || ' minutes')::interval
+                            ORDER BY scheduled_at ASC
+                            LIMIT 1
+                        """, user_uuid, nudge_type, row["created_at"],
+                            str(BACKOFF_NUDGE_MATCH_WINDOW_MINUTES))
+                        nudge_opened = opened_at is not None
+
+                    if nudge_opened:
+                        break  # opened counts as a response; reset
+
+                    consecutive_ignored += 1
+        except Exception as e:
+            logger.warning("NateCheckInAgent: _outcome_backoff failed for %s: %s", username, e)
+            return result
+
+        result["consecutive_ignored"] = consecutive_ignored
+        if consecutive_ignored >= BACKOFF_INAPP_ONLY_THRESHOLD:
+            result["multiplier"] = BACKOFF_STRETCH_MULTIPLIER
+            result["channel_restricted"] = True
+        elif consecutive_ignored >= BACKOFF_STRETCH_THRESHOLD:
+            result["multiplier"] = BACKOFF_STRETCH_MULTIPLIER
+        return result
 
     async def _recent_checkin(self, conn, username: str, checkin_type: str, hours: int = 72) -> bool:
         """Check if a check-in of this type was already sent recently."""
