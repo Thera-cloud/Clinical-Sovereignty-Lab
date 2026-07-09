@@ -107,9 +107,14 @@ _INJECTION_PATTERNS: List[Tuple[InjectionFlag, re.Pattern, Optional[str]]] = [
     ), None),
 
     # Developer mode / DAN jailbreaks
+    # NOTE: \b word boundaries around DAN are required — without them this
+    # matched the substring "dan" inside ordinary words like "guidance",
+    # "Sudan", "Jordan", "abandon", corrupting stored user_text via the
+    # "[content filtered]" substitution below (see queens-guard-word-boundary
+    # rule). Never remove the \b here.
     (InjectionFlag.DEVELOPER_MODE, re.compile(
         r"(?i)((?:enable|activate|enter|switch\s+to)\s+(?:developer|debug|admin|root|sudo|god|unrestricted)\s+mode|"
-        r"DAN\s*(?:\d+)?|Do\s+Anything\s+Now|"
+        r"\bDAN\s*(?:\d+)?\b|Do\s+Anything\s+Now|"
         r"(?:you\s+are|this\s+is)\s+a?\s*(?:jailbreak|bypass|hack)|"
         r"(?:remove|disable|turn\s+off)\s+(?:all\s+)?(?:safety|content|ethical)\s+(?:filters?|restrictions?|guidelines?)|"
         r"(?:no\s+)?(?:safety|content)\s+(?:filter|restriction|guideline)\s+(?:mode|off))",
