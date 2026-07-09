@@ -99,6 +99,7 @@ async def try_merge_trial_data(
             history = history or []
 
             session_id = f"trial_{device_uuid_hash[:8]}"
+            valid_pairs: list = []
             if history:
                 # Bug fix: Postgres NOW() is frozen for the whole transaction, so a
                 # bare INSERT loop gives every merged row the SAME created_at. Recall
@@ -136,6 +137,23 @@ async def try_merge_trial_data(
                 """,
                 new_username, device_uuid_hash,
             )
+
+            # QUANTUM-CRYSTAL-ARCH: vault + crystal ingestion (fire-and-forget; never blocks signup)
+            if history and valid_pairs:
+                try:
+                    from app.services.trial_merge_ingestion import schedule_trial_merge_ingestion
+                    schedule_trial_merge_ingestion(
+                        db_pool,
+                        username=new_username,
+                        valid_pairs=valid_pairs,
+                        session_id=session_id,
+                        matched_via=matched_via or "",
+                    )
+                except Exception as sched_err:
+                    logger.warning(
+                        "public_trial_conversion: ingestion schedule failed for %s: %s",
+                        new_username, sched_err,
+                    )
 
             return {"merged": True, "via": matched_via, "reason": None}
     except Exception as e:

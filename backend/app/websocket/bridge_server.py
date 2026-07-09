@@ -7599,38 +7599,11 @@ async def _persist_chat_to_conversation_history(
 
 
 async def _fetch_pg_history_for_chat(db_pool, username: str, hardware_id: str, limit: int = 10) -> str:
-    """Fetch recent voice call + older chat history from PostgreSQL for pre-chat context.
-    Searches by both username and hardware_id to capture all history surfaces."""
-    if not db_pool:
-        return ""
+    """Fetch recent voice call + older chat history from PostgreSQL for pre-chat context."""
+    # QUANTUM-CRYSTAL-ARCH: trial-merge priority fill lives in trial_merge_ingestion
     try:
-        async with db_pool.acquire() as conn:
-            _ids = [username]
-            if hardware_id and hardware_id != username:
-                _ids.append(hardware_id)
-            rows = await conn.fetch(
-                # QUANTUM-CRYSTAL-ARCH: tie-break on id so rows sharing an identical
-                # created_at (e.g. a bulk trial-history merge inserted in one
-                # transaction) still return deterministically, most-recent-first.
-                "SELECT user_text, ai_text, created_at FROM conversation_history "
-                "WHERE user_id = ANY($1) AND LENGTH(user_text) > 15 "
-                "ORDER BY created_at DESC, id DESC LIMIT $2",
-                _ids, limit,
-            )
-            if not rows:
-                return ""
-            parts = []
-            for r in reversed(rows):
-                u = (r["user_text"] or "")[:200]
-                a = (r["ai_text"] or "")[:200]
-                ts = r["created_at"].strftime("%b %d") if r["created_at"] else ""
-                if u:
-                    parts.append(f"[{ts}] Client: {u}")
-                if a:
-                    parts.append(f"[{ts}] Nate: {a}")
-            if parts:
-                return "PRIOR SESSION HISTORY (chat + voice calls):\n" + "\n".join(parts)
-            return ""
+        from app.services.trial_merge_ingestion import fetch_pg_history_for_chat
+        return await fetch_pg_history_for_chat(db_pool, username, hardware_id, limit=limit)
     except Exception as e:
         logger.warning("_fetch_pg_history_for_chat: %s", e)
         return ""
@@ -7804,34 +7777,13 @@ async def _deep_memory_search_chat(
         if not db_pool:
             return
         try:
-            _ids = [username]
-            if hardware_id and hardware_id != username:
-                _ids.append(hardware_id)
-            async with db_pool.acquire() as conn:
-                rows = await conn.fetch(
-                    "SELECT user_text, ai_text, created_at, session_id, "
-                    "ts_rank(to_tsvector('english', COALESCE(user_text,'') || ' ' || COALESCE(ai_text,'')), "
-                    "        plainto_tsquery('english', $2)) AS rank "
-                    "FROM conversation_history WHERE user_id = ANY($1) "
-                    "AND to_tsvector('english', COALESCE(user_text,'') || ' ' || COALESCE(ai_text,'')) "
-                    "    @@ plainto_tsquery('english', $2) "
-                    "ORDER BY rank DESC, created_at DESC LIMIT $3",
-                    _ids, search_terms, max_results,
-                )
-                if rows:
-                    p = []
-                    for r in rows:
-                        ts = r["created_at"].strftime("%b %d %I:%M%p") if r["created_at"] else ""
-                        u = (r["user_text"] or "")[:250]
-                        a = (r["ai_text"] or "")[:250]
-                        entry = f"[{ts}]"
-                        if u:
-                            entry += f" {username}: {u}"
-                        if a:
-                            entry += f" | Nate: {a}"
-                        p.append(entry)
-                    parts.append(f"CONVERSATION HISTORY MATCHES ({len(rows)} found):\n" + "\n".join(p))
-                    print(f"[CHAT-DEEP-SEARCH] conversation_history: {len(rows)} FTS hits")
+            from app.services.trial_merge_ingestion import search_conversation_history_ch
+            block = await search_conversation_history_ch(
+                db_pool, username, hardware_id, query_text, search_terms, max_results,
+            )
+            if block:
+                parts.append(block)
+                print(f"[CHAT-DEEP-SEARCH] conversation_history: ordinal/FTS hits")
         except Exception as e:
             logger.warning("Chat deep search conversation_history failed: %s", e)
 
@@ -9001,7 +8953,18 @@ class AzureCortex:
                 print(f">>> [ENRICH] addendum error (non-fatal): {_en_err}")
                 return ""
 
-        relational_context, checkin_context, crystal_context, pg_history_context, intake_context, fsf_context, reconnect_context, _enrich_addendum = await asyncio.gather(
+        async def _fetch_trial_context():
+            # QUANTUM-CRYSTAL-ARCH — trial digest for first 10 post-signup turns (flag-gated)
+            if not _cpool or _role != "CLIENT":
+                return ""
+            try:
+                from app.services.trial_merge_ingestion import build_trial_context_prompt_block
+                return await build_trial_context_prompt_block(_cpool, _uname, profile)
+            except Exception as _tc_err:
+                print(f">>> [TRIAL-CTX] context error (non-fatal): {_tc_err}")
+                return ""
+
+        relational_context, checkin_context, crystal_context, pg_history_context, intake_context, fsf_context, reconnect_context, _enrich_addendum, trial_context_block = await asyncio.gather(
             _timed("relational", self._get_relational_context(profile)),
             _timed("checkin", self._get_checkin_context(profile)),
             _timed("crystals", recall_crystals_for_context(
@@ -9013,6 +8976,7 @@ class AzureCortex:
             _timed("fsf", _fetch_fsf_context()),
             _timed("reconnect", _fetch_reconnect_context()),
             _timed("enrich", _fetch_enrichment_addendum()),
+            _timed("trial_ctx", _fetch_trial_context()),
         )
         if _enrich_addendum:  # QUANTUM-CRYSTAL-ARCH — Tier 2: fold directive into crystal context
             crystal_context = f"{crystal_context}\n\n{_enrich_addendum}" if crystal_context else _enrich_addendum
@@ -9547,6 +9511,9 @@ class AzureCortex:
 
         {pg_history_context}
         {"Note: The above includes voice call transcripts and older chat history stored in the database. You remember ALL conversations — chat and phone calls alike." if pg_history_context else ""}
+
+        {trial_context_block}
+        {"Note: TRIAL CONTEXT summarizes the anonymous trial chat before this account was created." if trial_context_block else ""}
 
         FAMILY SANCTUARY HISTORY (This is the users OWN conversation history from sessions they participated in. It is appropriate and therapeutic to reference their words back to them. This is NOT confidential information about others - it is their own experience.):
         {sanctuary_context}
