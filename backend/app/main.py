@@ -2840,14 +2840,15 @@ async def lifespan(app: FastAPI):
 
     # QUANTUM-CRYSTAL-ARCH: optional orchestrator wiring (feature-flagged)
     _quantum_orchestrator = None
-    # QUANTUM-CRYSTAL-ARCH: default enabled for co-activation + time crystal tracking
-    if getattr(settings, "ENABLE_QUANTUM_CRYSTAL_ORCHESTRATOR", True):
+    # QUANTUM-CRYSTAL-ARCH: fail-closed fallback — a renamed/missing settings
+    # attribute must never silently activate a dormant system in production.
+    if getattr(settings, "ENABLE_QUANTUM_CRYSTAL_ORCHESTRATOR", False):
         try:
             from app.services.quantum_crystal_orchestrator import QuantumCrystalOrchestrator
             _quantum_orchestrator = QuantumCrystalOrchestrator(db_pool=db_pool)
             app.state.quantum_crystal_orchestrator = _quantum_orchestrator
-            # QUANTUM-CRYSTAL-ARCH: enable time crystal forge by default
-            if getattr(settings, "ENABLE_TIME_CRYSTAL_FORGE", True):
+            # QUANTUM-CRYSTAL-ARCH: fail-closed fallback (see above)
+            if getattr(settings, "ENABLE_TIME_CRYSTAL_FORGE", False):
                 await _quantum_orchestrator.start_forge_scheduler()
             print("   ✅ QuantumCrystalOrchestrator initialized")
         except Exception as _qc_err:

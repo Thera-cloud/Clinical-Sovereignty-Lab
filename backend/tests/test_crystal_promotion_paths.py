@@ -2,7 +2,7 @@
 Crystal Promotion Paths — Exhaustive Confidence Arithmetic Test Suite
 =====================================================================
 
-Four Recall Paths (each bumps confidence by PROMOTION_INCREMENT = 0.03):
+Recall Paths (each bumps confidence by PROMOTION_INCREMENT = 0.03):
 
   Path 1  FederatedSearch
           Entry:  HelixOrchestrator.think() → FederatedSearchCoordinator.search()
@@ -11,13 +11,10 @@ Four Recall Paths (each bumps confidence by PROMOTION_INCREMENT = 0.03):
                   quantum_knowledge_field.py  lines 488-498 (_search_server)
           Store:  PostgreSQL
 
-  Path 2  Therapy Direct
-          Entry:  process_interaction() → cortex → always_on_memory_recall()
-                  → record_recall()
-          SQL:    bridge_server.py            lines 4806-4824 (direct SQL)
-                  nate_memory_crystallizer.py lines 2194-2229 (record_recall)
-          Store:  PostgreSQL (GREEN) / SQLite (BLUE)
-          Notes:  LOCKED doubles increment (×2); NOISE skips entirely.
+  Path 2  REMOVED — NateMemoryCrystallizer.record_recall() had zero
+          production callers (confirmed by the wiring audit) and was
+          deleted as dead code. Confidence-mutation logic must not sit
+          callable-but-uncalled.
 
   Path 3  CLI Crystal Recall
           Entry:  nate_cli_chat handler → LocalCrystalStore.search_crystals()
@@ -522,31 +519,6 @@ class TestPath1_FederatedSearch:
         assert crystal["recall_count"] == 4
 
 
-class TestPath2_TherapyDirect:
-    """Path 2: NateMemoryCrystallizer.record_recall()
-    File: nate_memory_crystallizer.py lines 2175-2238
-    """
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("start,expected,label", _CONFIDENCE_LEVELS, ids=[c[2] for c in _CONFIDENCE_LEVELS])
-    async def test_record_recall_green(
-        self, fake_conn: StatefulFakeConnection, start: float, expected: float, label: str
-    ):
-        crystal = fake_conn.seed(confidence=start, recall_count=5)
-        pool = StatefulFakePool(fake_conn)
-
-        from app.services.nate_memory_crystallizer import NateMemoryCrystallizer
-
-        cryst = NateMemoryCrystallizer(db_pool=pool)
-        await cryst.record_recall(crystal["id"])
-
-        assert fake_conn._matched_updates >= 1, "SQL pattern did not match"
-        assert crystal["confidence"] == pytest.approx(expected, abs=1e-9), (
-            f"Path 2 GREEN ({label}): expected {expected}, got {crystal['confidence']}"
-        )
-        assert crystal["recall_count"] == 6
-
-
 class TestPath3_CLIRecall:
     """Path 3: LocalCrystalStore.search_crystals()
     File: nate_memory_crystallizer.py lines 153-183
@@ -666,43 +638,6 @@ class TestStorageBackend_SQLite:
         assert diff < 2.0, f"last_recalled_at is {diff}s away from test time"
 
 
-class TestStorageBackend_PostgreSQL:
-    """Verify promotion via StatefulFakePool (simulates GREEN PostgreSQL)."""
-
-    @pytest.mark.asyncio
-    async def test_precision_6_decimal(self, fake_conn: StatefulFakeConnection):
-        crystal = fake_conn.seed(confidence=0.60, recall_count=0)
-        pool = StatefulFakePool(fake_conn)
-        from app.services.nate_memory_crystallizer import NateMemoryCrystallizer
-
-        cryst = NateMemoryCrystallizer(db_pool=pool)
-        await cryst.record_recall(crystal["id"])
-        assert round(crystal["confidence"], 6) == round(0.63, 6)
-
-    @pytest.mark.asyncio
-    async def test_recall_count_is_integer(self, fake_conn: StatefulFakeConnection):
-        crystal = fake_conn.seed(confidence=0.60, recall_count=0)
-        pool = StatefulFakePool(fake_conn)
-        from app.services.nate_memory_crystallizer import NateMemoryCrystallizer
-
-        cryst = NateMemoryCrystallizer(db_pool=pool)
-        await cryst.record_recall(crystal["id"])
-        assert isinstance(crystal["recall_count"], int)
-        assert crystal["recall_count"] == 1
-
-    @pytest.mark.asyncio
-    async def test_last_recalled_at_freshness(self, fake_conn: StatefulFakeConnection):
-        crystal = fake_conn.seed(confidence=0.60, recall_count=0)
-        pool = StatefulFakePool(fake_conn)
-        from app.services.nate_memory_crystallizer import NateMemoryCrystallizer
-
-        before = datetime.now(timezone.utc)
-        cryst = NateMemoryCrystallizer(db_pool=pool)
-        await cryst.record_recall(crystal["id"])
-        diff = abs((crystal["last_recalled_at"] - before).total_seconds())
-        assert diff < 2.0
-
-
 class TestStorageBackend_EdgeKV:
     """Verify LOCKED bypass and KV staleness gap."""
 
@@ -720,29 +655,6 @@ class TestStorageBackend_EdgeKV:
             _crystal_only_response = crystal_text
 
         assert _crystal_only_response == crystal_text
-
-    @pytest.mark.xfail(
-        reason=(
-            "KV cache has up to 60min staleness window — known architecture gap. "
-            "Crystal promoted in PG is not propagated to KV until next cron pre-warm cycle."
-        )
-    )
-    @pytest.mark.asyncio
-    async def test_kv_cache_staleness_window(self, fake_conn: StatefulFakeConnection):
-        """Gap 1: After PG promotion, KV retains stale confidence."""
-        crystal = fake_conn.seed(confidence=0.84, recall_count=7)
-        pool = StatefulFakePool(fake_conn)
-        kv_cache = {"crystal_confidence": 0.84}
-
-        from app.services.nate_memory_crystallizer import NateMemoryCrystallizer
-
-        cryst = NateMemoryCrystallizer(db_pool=pool)
-        await cryst.record_recall(crystal["id"])
-
-        assert crystal["confidence"] == pytest.approx(0.87, abs=1e-9)
-        # KV was not updated — this is the architecture gap
-        # The xfail expects this assertion to FAIL (stale value)
-        assert kv_cache["crystal_confidence"] == pytest.approx(0.87, abs=1e-9)
 
 
 # ---------------------------------------------------------------------------
@@ -1032,59 +944,10 @@ class TestEdgeCases:
         assert ws_message["provider"] == "crystal_recall"
         assert ws_message["text"] == crystal_text
 
-    # ── Gap 3: NOISE skip ──
-
-    @pytest.mark.asyncio
-    async def test_noise_signal_skips_promotion(
-        self, fake_conn: StatefulFakeConnection
-    ):
-        """NOISE signal causes record_recall to return immediately with no
-        database write.  Confidence and recall_count must be unchanged."""
-        crystal = fake_conn.seed(confidence=0.70, recall_count=5)
-        pool = StatefulFakePool(fake_conn)
-        from app.services.nate_memory_crystallizer import NateMemoryCrystallizer
-
-        cryst = NateMemoryCrystallizer(db_pool=pool)
-        await cryst.record_recall(crystal["id"], odpe_signal="NOISE")
-
-        assert crystal["confidence"] == pytest.approx(0.70, abs=1e-9)
-        assert crystal["recall_count"] == 5
-        assert crystal["last_recalled_at"] is None
-
-    # ── Gap 4: LOCKED double-increment ──
-
-    @pytest.mark.asyncio
-    async def test_locked_signal_double_increment(
-        self, fake_conn: StatefulFakeConnection
-    ):
-        """LOCKED signal: increment = 2, applied as multiplier to both
-        recall_count (+2) and confidence (+2 × 0.03 = 0.06)."""
-        crystal = fake_conn.seed(confidence=0.85, recall_count=8)
-        pool = StatefulFakePool(fake_conn)
-        from app.services.nate_memory_crystallizer import NateMemoryCrystallizer
-
-        cryst = NateMemoryCrystallizer(db_pool=pool)
-        await cryst.record_recall(crystal["id"], odpe_signal="LOCKED")
-
-        assert crystal["confidence"] == pytest.approx(0.91, abs=1e-9)
-        assert crystal["recall_count"] == 10
-
-    @pytest.mark.asyncio
-    async def test_locked_double_increment_cap(
-        self, fake_conn: StatefulFakeConnection
-    ):
-        """LOCKED double-increment at 0.93 should cap at PROMOTION_CAP."""
-        crystal = fake_conn.seed(confidence=0.93, recall_count=15)
-        pool = StatefulFakePool(fake_conn)
-        from app.services.nate_memory_crystallizer import NateMemoryCrystallizer
-
-        cryst = NateMemoryCrystallizer(db_pool=pool)
-        await cryst.record_recall(crystal["id"], odpe_signal="LOCKED")
-
-        assert crystal["confidence"] <= PROMOTION_CAP + 1e-9, (
-            f"LOCKED double-increment exceeded cap: {crystal['confidence']}"
-        )
-        assert crystal["recall_count"] == 17
+    # NOTE: Gap 3 (NOISE skip) and Gap 4 (LOCKED double-increment) tests
+    # exercised NateMemoryCrystallizer.record_recall, which was deleted as
+    # dead code (zero production callers, per the wiring audit). The ODPE
+    # signal semantics they documented are not reachable from any live path.
 
 
 # ---------------------------------------------------------------------------
@@ -1109,19 +972,6 @@ class TestCapEnforcement:
         ).fetchone()
         assert row[0] <= PROMOTION_CAP + 1e-9, (
             f"Path 3 exceeded cap: start={start}, result={row[0]}"
-        )
-
-    @pytest.mark.asyncio
-    async def test_path2_green_cap(self, fake_conn: StatefulFakeConnection):
-        """Path 2 GREEN caps at PROMOTION_CAP (0.95)."""
-        crystal = fake_conn.seed(confidence=0.94)
-        pool = StatefulFakePool(fake_conn)
-        from app.services.nate_memory_crystallizer import NateMemoryCrystallizer
-
-        cryst = NateMemoryCrystallizer(db_pool=pool)
-        await cryst.record_recall(crystal["id"])
-        assert crystal["confidence"] <= PROMOTION_CAP + 1e-9, (
-            f"Path 2 exceeded cap: {crystal['confidence']}"
         )
 
 

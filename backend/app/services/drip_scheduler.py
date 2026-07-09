@@ -159,7 +159,9 @@ class DripScheduler:
         )
 
         # Nate the Nudge — proactive notifications (gated by ENABLE_NATE_NUDGE)
-        if getattr(settings, "ENABLE_NATE_NUDGE", True):
+        # Fail-closed fallback: a renamed/missing settings attribute must
+        # never silently activate a dormant system in production.
+        if getattr(settings, "ENABLE_NATE_NUDGE", False):
             nudge_interval = getattr(settings, "NUDGE_SCHEDULER_INTERVAL_MINUTES", 30)
             self.scheduler.add_job(
                 self.run_nate_nudge,

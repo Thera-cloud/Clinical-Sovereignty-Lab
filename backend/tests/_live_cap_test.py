@@ -56,33 +56,9 @@ async def test():
     else:
         print(f"FAIL: Cap breached! confidence={row[0]} > 0.95", flush=True)
 
-    # Also test the direct record_recall path
-    from app.services.nate_memory_crystallizer import NateMemoryCrystallizer
-    c = NateMemoryCrystallizer.__new__(NateMemoryCrystallizer)
-    c.db_pool = pool
-    c.mode = "GREEN"
-    c._local_store = None
-
-    # Reset to 0.94 for second test
-    await pool.execute(
-        "UPDATE nate_intelligence_crystals "
-        "SET confidence = 0.94, recall_count = 15 WHERE content_hash = $1",
-        TARGET,
-    )
-    print("\nSET: confidence=0.94 (for record_recall test)", flush=True)
-
-    await c.record_recall(TARGET, signal="LOCKED")
-
-    row2 = await pool.fetchrow(
-        "SELECT confidence, recall_count FROM nate_intelligence_crystals "
-        "WHERE content_hash = $1", TARGET,
-    )
-    print(f"AFTER record_recall(LOCKED): confidence={row2[0]}, recall_count={row2[1]}", flush=True)
-
-    if float(row2[0]) <= 0.951:
-        print(f"PASS: Cap held at {row2[0]} via record_recall path", flush=True)
-    else:
-        print(f"FAIL: Cap breached via record_recall! confidence={row2[0]}", flush=True)
+    # NOTE: NateMemoryCrystallizer.record_recall was removed (dead code —
+    # zero production callers per the wiring audit). Only the
+    # FederatedSearchCoordinator._reinforce_recalls path above is live.
 
     # Restore original state
     await pool.execute(
