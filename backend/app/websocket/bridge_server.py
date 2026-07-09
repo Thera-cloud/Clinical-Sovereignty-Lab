@@ -8476,12 +8476,30 @@ class AzureCortex:
         # Gap 3: clear short-horizon in-session buffer at new session boundary.
         _chat_live_turns.pop(uid, None)
 
+    def _ensure_session_id(self, uid: str) -> str:
+        """SOVEREIGN-VOICE — never persist a chat turn with a bare/missing
+        session_id. Belt-and-suspenders for the unregister() fix above: if
+        active_sessions has no entry for uid at write time, rejoin by
+        lazily opening one instead of writing session_id="" (breaks session
+        summaries, crystallization, and crystal attribution)."""
+        sid = self.active_sessions.get(uid)
+        if not sid:
+            session = self.sessions.create_session(uid, "AI")
+            sid = session["session_id"]
+            self.active_sessions[uid] = sid
+            print(f">>> [SESSION] Lazily opened session {sid} for {uid} (was missing at write time)")
+        return sid
+
     def unregister(self, uid: str, ws):
         if uid in self.sockets:
             self.sockets[uid].discard(ws)
-        
-        # End session
-        if uid in self.active_sessions:
+
+        # QUANTUM-CRYSTAL-ARCH — only end the session when NO sockets remain
+        # for this uid. Ending it on ANY socket close (reconnect flap, a
+        # second context like the DOJO iframe closing) left active_sessions
+        # empty while the user's other socket kept chatting, writing bare
+        # rows with no session_id. See _ensure_session_id() below.
+        if not self.sockets.get(uid) and uid in self.active_sessions:
             session_id = self.active_sessions[uid]
             topics = self.mem.get_topics_discussed({"hardware_id": uid}, days=1)
             self.sessions.end_session(session_id, topics=topics)
@@ -10627,7 +10645,7 @@ class AzureCortex:
                             db_pool, uid, _accumulated,
                             user_name=profile.get("name", ""),
                             origin_surface="bridge_chat",
-                            session_id=self.active_sessions.get(uid, ""),
+                            session_id=self._ensure_session_id(uid),
                         ))
                 except Exception:
                     pass
@@ -10636,7 +10654,7 @@ class AzureCortex:
             try:
                 if db_pool and user_text and _final_response:
                     _ch_username = profile.get("username", uid)
-                    _ch_session = self.active_sessions.get(uid, "")
+                    _ch_session = self._ensure_session_id(uid)
                     asyncio.create_task(_persist_chat_to_conversation_history(
                         db_pool, _ch_username, user_text, _final_response, _ch_session,
                         turn_id=_turn_id, crystal_ids=_crystal_ids_for_turn,
