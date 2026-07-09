@@ -7576,12 +7576,21 @@ async def _cohort_nevedal_first_last_c_emo(conn, user_ids: List, since: Optional
 
 async def _persist_chat_to_conversation_history(
     db_pool, username: str, user_text: str, ai_text: str, session_id: str = "",
-    turn_id: str = "",
+    turn_id: str = "", crystal_ids: Optional[list] = None,
 ):
     """Write text chat turns to conversation_history (PG) so Memory Search and
     deep recall can find them. Fire-and-forget from process_interaction."""
     try:
-        _meta = json.dumps({"turn_id": turn_id}) if turn_id else "{}"
+        _meta_dict = {}
+        if turn_id:
+            _meta_dict["turn_id"] = turn_id
+        # QUANTUM-CRYSTAL-ARCH: Commit 2 (ENABLE_CRYSTAL_ATTRIBUTION, default
+        # True) — record which recalled crystals were present for this turn
+        # so outcome data can later be joined back to them. Inert metadata:
+        # no read path exists yet in this commit.
+        if crystal_ids and os.getenv("ENABLE_CRYSTAL_ATTRIBUTION", "true").strip().lower() not in ("0", "false", "no", "off"):
+            _meta_dict["crystal_ids"] = [int(c) for c in crystal_ids][:50]
+        _meta = json.dumps(_meta_dict) if _meta_dict else "{}"
         async with db_pool.acquire() as conn:
             await conn.execute(
                 "INSERT INTO conversation_history "
@@ -8978,6 +8987,10 @@ class AzureCortex:
             _timed("enrich", _fetch_enrichment_addendum()),
             _timed("trial_ctx", _fetch_trial_context()),
         )
+        # QUANTUM-CRYSTAL-ARCH: Commit 2 — capture recalled crystal ids for
+        # attribution BEFORE crystal_context is re-wrapped as a plain str
+        # below (the enrichment merge loses the .crystal_ids attribute).
+        _crystal_ids_for_turn = list(getattr(crystal_context, "crystal_ids", None) or [])[:50]
         if _enrich_addendum:  # QUANTUM-CRYSTAL-ARCH — Tier 2: fold directive into crystal context
             crystal_context = f"{crystal_context}\n\n{_enrich_addendum}" if crystal_context else _enrich_addendum
         _live_turn_context = _format_live_turn_context(uid)
@@ -10593,7 +10606,7 @@ class AzureCortex:
                     _ch_session = self.active_sessions.get(uid, "")
                     asyncio.create_task(_persist_chat_to_conversation_history(
                         db_pool, _ch_username, user_text, _final_response, _ch_session,
-                        turn_id=_turn_id,
+                        turn_id=_turn_id, crystal_ids=_crystal_ids_for_turn,
                     ))
             except Exception:
                 pass

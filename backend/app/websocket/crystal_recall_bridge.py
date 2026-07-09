@@ -82,6 +82,22 @@ _GLOBAL_SNIPPET = int(_os.getenv("BRIDGE_RECALL_GLOBAL_SNIPPET", "200"))
 _SYNC_DEEP_RECALL = (_os.getenv("BRIDGE_SYNC_DEEP_RECALL", "") or "").strip().lower() in ("1", "true", "yes", "on")
 _SYNC_DEEP_TIMEOUT_S = float(_os.getenv("BRIDGE_SYNC_DEEP_TIMEOUT_S", "1.8"))
 _VALIDATOR_FILTER_RECALL = (_os.getenv("BRIDGE_VALIDATOR_FILTER_RECALL", "") or "").strip().lower() in ("1", "true", "yes", "on")
+
+# QUANTUM-CRYSTAL-ARCH: Commit 2 (crystal attribution) — inert-metadata flag,
+# default True (it only attaches an extra attribute to the returned string;
+# it changes no behavior for callers that don't read it).
+_ENABLE_CRYSTAL_ATTRIBUTION = (_os.getenv("ENABLE_CRYSTAL_ATTRIBUTION", "true") or "").strip().lower() not in ("0", "false", "no", "off")
+
+
+class _AttributedContext(str):
+    """str subclass that carries the recalled crystal ids as `.crystal_ids`.
+
+    Identical to a plain str for every existing caller (equality, `+`,
+    f-string interpolation, `if ctx:` truthiness). Only new code that reads
+    `.crystal_ids` sees the extra data — no caller signature changed.
+    """
+    crystal_ids: list = []
+
 try:
     from .bridge_enrichment import (
         is_memory_turn as _enr_is_memory_turn,
@@ -472,7 +488,14 @@ async def recall_crystals_for_context(
                 lines.append(f"- [{c['domain']}] {text} (confidence: {conf:.2f})")
         if anticipatory_section:
             lines.append(anticipatory_section)
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        # QUANTUM-CRYSTAL-ARCH: Commit 2 — expose which crystals were injected
+        # so the bridge chat persist path can attribute the response to them.
+        if _ENABLE_CRYSTAL_ATTRIBUTION and crystal_ids:
+            attributed = _AttributedContext(result)
+            attributed.crystal_ids = list(crystal_ids)[:50]
+            return attributed
+        return result
     except Exception as e:
         logger.warning("crystal_recall_bridge: %s", e)
         return ""
