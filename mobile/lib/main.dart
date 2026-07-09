@@ -2936,21 +2936,49 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
       return;
     }
 
-    // Standalone fallback: hub not initialized yet (rare; defensive).
-    debugLog('>>> SANCTUARY: Hub unavailable, opening standalone WS');
-    _borrowedFromHub = false;
+    // Self-healing fallback (JULY3-HUB-REVIVAL-FIX): the hub is only ever
+    // revived by _LobbyScreenState._connectToBridge(), but Lobby is disposed
+    // (and its _ClientWsHub.done listener cancelled) the moment the user
+    // navigates into Family Sanctuary. If the shared socket then drops for
+    // any reason (server restart, brief network loss, mobile backgrounding),
+    // nobody is left to reconnect it — _scheduleHubRejoin() would poll
+    // forever for a revival that never comes, leaving chat permanently dead
+    // until the app is killed and relaunched. Instead, become the hub owner
+    // ourselves: open a fresh connection, ATTACH it to _ClientWsHub (so
+    // Lobby/NeuralInterface can reuse it too), and re-authenticate. This
+    // keeps every consumer on the single-hub-owner model (FIX-G') while
+    // guaranteeing someone always revives it.
+    debugLog('>>> SANCTUARY: Hub unavailable, self-healing (open + claim hub)');
+    _borrowedFromHub = true;
     try { _channel?.sink.close(); } catch (_) {}
     _channel = null;
 
-    _channel = WebSocketChannel.connect(Uri.parse(_serverUrl));
-    _listenToWebSocket();
+    final newSocket = WebSocketChannel.connect(Uri.parse(_serverUrl));
+    _ClientWsHub.attach(newSocket);
+    _channel = newSocket;
+    _wsSubscription = _ClientWsHub.inbound.listen(
+      (message) {
+        try {
+          _handleWebSocketMessage(json.decode(message as String));
+        } catch (e) {
+          debugLog('Error parsing hub message: $e');
+        }
+      },
+    );
+    _hubErrSub = _ClientWsHub.errors.listen((e) {
+      debugLog('>>> SANCTUARY: Hub error: $e');
+    });
+    _hubDoneSub = _ClientWsHub.done.listen((_) {
+      debugLog('>>> SANCTUARY: Hub channel closed; awaiting hub revival');
+      if (!_isManuallyDisconnected && mounted) _scheduleHubRejoin();
+    });
 
     final username = widget.username ??
         widget.profile['username'] ??
         widget.profile['email']?.split('@')[0] ??
         'client1';
 
-    debugLog('>>> SANCTUARY: Authenticating (standalone)...');
+    debugLog('>>> SANCTUARY: Authenticating (self-healed hub)...');
     _channel?.sink.add(json.encode({
       "type": "login_request",
       "username": username,
@@ -3557,8 +3585,11 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
   }
 
   /// Hub-borrow rejoin path: chat screen reconnects the hub socket on its own
-  /// schedule. We poll once per second for `_ClientWsHub.channel` revival, then
-  /// re-attach + resend sanctuary_join. Caps at _maxHubRejoinAttempts (~30s).
+  /// schedule. We poll once per second for `_ClientWsHub.channel` revival; if
+  /// no one else revives it within `selfHealAfterAttempts` polls (Lobby is
+  /// normally disposed by this point and can't), this screen self-heals by
+  /// becoming the hub owner itself via `_connectToServer()`. Hard ceiling at
+  /// _maxHubRejoinAttempts (~30s) still applies as a final backstop.
   void _scheduleHubRejoin() {
     if (_isManuallyDisconnected || !mounted) return;
     _hubRejoinTimer?.cancel();
@@ -3570,10 +3601,19 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
     }
     _hubRejoinAttempts++;
 
+    // JULY3-HUB-REVIVAL-FIX: give a brief grace window (3s) in case Lobby or
+    // another screen genuinely revives the hub on its own, then self-heal by
+    // reconnecting ourselves rather than polling the full 30s ceiling for a
+    // reviver (Lobby) that is normally disposed by this point.
+    const selfHealAfterAttempts = 3;
     _hubRejoinTimer = Timer(const Duration(milliseconds: 1000), () {
       if (!mounted || _isManuallyDisconnected) return;
       if (_ClientWsHub.channel != null) {
         debugLog('>>> SANCTUARY: Hub channel revived; re-attaching');
+        _hubRejoinAttempts = 0;
+        _connectToServer();
+      } else if (_hubRejoinAttempts >= selfHealAfterAttempts) {
+        debugLog('>>> SANCTUARY: Hub still down after $_hubRejoinAttempts attempts; self-healing');
         _hubRejoinAttempts = 0;
         _connectToServer();
       } else {
