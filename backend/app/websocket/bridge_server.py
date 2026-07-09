@@ -1010,6 +1010,11 @@ def _select_max_tokens(user_text: str) -> int:
 # "...decision D." Never removes text that already ends cleanly.
 _SENTENCE_END_RE = re.compile(r"[.!?][\"')\]]*\s*$")
 _SENTENCE_BOUNDARY_RE = re.compile(r"[.!?][\"')\]]*(?=\s|$)")
+# SAFETY: a crisis resource line (988, Crisis Text Line, a named lifeline/
+# hotline) must never be silently cut by the sentence-boundary trim below —
+# if it only appears in the incomplete tail, skip trimming entirely and ship
+# the fragment as-is rather than deleting the resource block.
+_CRISIS_MARKER_RE = re.compile(r"\b(?:988|741741|crisis\s*line|lifeline|hotline)\b", re.IGNORECASE)
 
 
 def _close_truncated_response(text: str, max_tokens: int) -> str:
@@ -1022,6 +1027,9 @@ def _close_truncated_response(text: str, max_tokens: int) -> str:
     if matches:
         trimmed = text[:matches[-1].end()].strip()
         if len(trimmed) >= 40:
+            if _CRISIS_MARKER_RE.search(text) and not _CRISIS_MARKER_RE.search(trimmed):
+                print(">>> [LENGTH-CAP] SAFETY: skipped trim — would drop a crisis resource line (988/lifeline/hotline)")
+                return text
             return trimmed
     return text.rstrip() + "…"
 

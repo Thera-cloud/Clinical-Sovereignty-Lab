@@ -34,7 +34,7 @@ def _extract_function(source: str, name: str) -> str:
 def _load_bridge_helpers():
     source = _bridge_source()
     ns = {"re": re}
-    for const in ("_SENTENCE_END_RE", "_SENTENCE_BOUNDARY_RE"):
+    for const in ("_SENTENCE_END_RE", "_SENTENCE_BOUNDARY_RE", "_CRISIS_MARKER_RE"):
         m = re.search(rf"^{const}\s*=\s*re\.compile\(.+\)", source, re.MULTILINE)
         assert m, f"{const} not found in bridge_server.py"
         exec(m.group(0), ns)
@@ -135,6 +135,38 @@ def test_crisis_trim_never_drops_988_line():
     )
     trimmed = _close_truncated_response(crisis_tail, 600)
     assert "988" in trimmed
+
+
+def test_crisis_trim_skips_when_988_only_in_incomplete_tail():
+    """988 appearing ONLY in the dangling fragment must not be deleted.
+
+    This is the actual dangerous case: the resource line sits inside the
+    incomplete trailing sentence, not an earlier complete one. The naive
+    trim (cut back to the last complete sentence) would silently remove
+    the entire crisis line. The trimmer must detect this and skip trimming
+    rather than ship a "safe-looking" reply with the lifeline stripped out.
+    """
+    lead = "This matters deeply and I hear you, and I am here with you fully. " * 26
+    text = (
+        "I hear how much pain you're in right now. " + lead +
+        "Please reach out for support immediately, call or text 988 for the Suicide "
+        "and Crisis Lifeline, available 24/7, and know you don't have to carry this al"
+    )
+    assert not text.rstrip().endswith((".", "!", "?"))
+    trimmed = _close_truncated_response(text, 600)
+    assert "988" in trimmed
+    # Safety takes priority over trimming: the fragment ships untouched.
+    assert trimmed == text
+
+
+def test_ordinary_trim_still_fires_without_crisis_marker():
+    """The crisis-marker guard must not disable trimming for normal replies."""
+    sentences = "Here is some general guidance about managing daily stress. " * 60
+    fragment = sentences + "And another incomplete thought that trails of"
+    assert not fragment.rstrip().endswith((".", "!", "?"))
+    trimmed = _close_truncated_response(fragment, 600)
+    assert trimmed != fragment
+    assert trimmed.endswith(".")
 
 
 # --- two-socket session lifecycle ---
