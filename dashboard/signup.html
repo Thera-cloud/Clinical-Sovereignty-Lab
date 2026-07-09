@@ -423,6 +423,9 @@ window.onTurnstileLoad = function() {
     if (msg.indexOf('Too many free accounts') !== -1) {
       return msg;
     }
+    if (msg === 'TIMEZONE_REQUIRED') {
+      return 'Could not detect your timezone. Please refresh the page and try again.';
+    }
     return msg;
   }
 
@@ -557,6 +560,9 @@ window.onTurnstileLoad = function() {
     createdUsername = username;
     updateSubmitState();
 
+    var browserTz = '';
+    try { browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
+
     var payload = {
       type: 'register_request',
       username: username,
@@ -568,7 +574,8 @@ window.onTurnstileLoad = function() {
       trial_token: ttParam || null,
       turnstile_token: turnstileToken,
       consent_agreed: true,
-      src: srcParam
+      src: srcParam,
+      browser_timezone: browserTz || null
     };
     socket.send(JSON.stringify(payload));
 
