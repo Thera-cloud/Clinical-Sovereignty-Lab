@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -100,22 +100,31 @@ async def try_merge_trial_data(
 
             session_id = f"trial_{device_uuid_hash[:8]}"
             if history:
+                # Bug fix: Postgres NOW() is frozen for the whole transaction, so a
+                # bare INSERT loop gives every merged row the SAME created_at. Recall
+                # queries elsewhere (`ORDER BY created_at DESC LIMIT n`) then return an
+                # arbitrary subset of tied rows — Nate "forgets" part of the trial
+                # chat non-deterministically. Space rows 1s apart, oldest→newest, so
+                # chronological order and recency-based LIMITs behave correctly.
+                valid_pairs = [
+                    ((p.get("user") or "").strip(), (p.get("assistant") or "").strip())
+                    for p in history if isinstance(p, dict)
+                ]
+                valid_pairs = [(u, a) for u, a in valid_pairs if u or a]
+                n = len(valid_pairs)
+                merge_now = datetime.now(timezone.utc)
                 async with conn.transaction():
-                    for pair in history:
-                        if not isinstance(pair, dict):
-                            continue
-                        user_text = (pair.get("user") or "").strip()
-                        ai_text = (pair.get("assistant") or "").strip()
-                        if not user_text and not ai_text:
-                            continue
+                    for idx, (user_text, ai_text) in enumerate(valid_pairs):
+                        row_ts = merge_now - timedelta(seconds=(n - 1 - idx))
                         await conn.execute(
                             """
                             INSERT INTO conversation_history
-                                (user_id, session_id, user_text, ai_text, metadata)
-                            VALUES ($1, $2, $3, $4, $5::jsonb)
+                                (user_id, session_id, user_text, ai_text, metadata, created_at)
+                            VALUES ($1, $2, $3, $4, $5::jsonb, $6)
                             """,
                             new_username, session_id, user_text, ai_text,
                             json.dumps({"source": "public_trial_merge", "via": matched_via}),
+                            row_ts,
                         )
 
             await conn.execute(

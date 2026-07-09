@@ -4006,8 +4006,11 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
         # Check-in preferences
         "preferred_contact": "email",
         
-        # Onboarding tutorial
-        "onboarding_completed": False,
+        # Onboarding tutorial — QUANTUM-CRYSTAL-ARCH: trial-conversion signups (Phase 3
+        # signup.html) already engaged during the anonymous trial chat, so skip the
+        # intro walkthrough slides and land them straight in the account.
+        "onboarding_completed": registration_type == "TRIAL_FREE",
+        "has_seen_onboarding": registration_type == "TRIAL_FREE",
         
         # Social media handle (SkyEye social-to-platform funnel)
         # If provided, matched against skyeye_social_memory on signup
@@ -7606,9 +7609,12 @@ async def _fetch_pg_history_for_chat(db_pool, username: str, hardware_id: str, l
             if hardware_id and hardware_id != username:
                 _ids.append(hardware_id)
             rows = await conn.fetch(
+                # QUANTUM-CRYSTAL-ARCH: tie-break on id so rows sharing an identical
+                # created_at (e.g. a bulk trial-history merge inserted in one
+                # transaction) still return deterministically, most-recent-first.
                 "SELECT user_text, ai_text, created_at FROM conversation_history "
                 "WHERE user_id = ANY($1) AND LENGTH(user_text) > 15 "
-                "ORDER BY created_at DESC LIMIT $2",
+                "ORDER BY created_at DESC, id DESC LIMIT $2",
                 _ids, limit,
             )
             if not rows:

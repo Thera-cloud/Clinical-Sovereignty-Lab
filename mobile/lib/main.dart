@@ -27,6 +27,7 @@ import 'avatar.dart';
 import 'screens/onboarding_threshold_screen.dart';
 import 'screens/onboarding_paid_screen.dart';
 import 'screens/ai_consent_screen.dart';
+import 'screens/settings_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'shared_widgets.dart';
@@ -2059,6 +2060,22 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
               tooltip: _avatarModeEnabled ? 'Avatar Mode ON' : 'Avatar Mode OFF',
               onPressed: () => _toggleAvatarMode(!_avatarModeEnabled),
             ),
+          IconButton(
+            icon: const Icon(Icons.settings, color: Color(0xFFC9A962)),
+            tooltip: 'Settings',
+            onPressed: () {
+              Navigator.push<dynamic>(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ClientSettingsScreen(
+                    profile: widget.currentUserProfile ?? {},
+                    socket: _wsCh,
+                    onLogout: () => _wsCh?.sink.close(),
+                  ),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.red),
             onPressed: () {
