@@ -8513,6 +8513,21 @@ class AzureCortex:
             self.sessions.end_session(session_id, topics=topics)
             del self.active_sessions[uid]
 
+            # QUANTUM-CRYSTAL-ARCH — crystallize_session_summary was purely
+            # turn-count-gated (every 5 turns), never lifecycle-gated. A
+            # session ending on turn 1-4 lost those turns from memory
+            # forever. Flush whatever's pending exactly once, here, on the
+            # actual last-socket-drop — never on an interim socket close.
+            _pending_turns = _chat_session_turns.pop(uid, None)
+            if _pending_turns and db_pool:
+                try:
+                    asyncio.create_task(crystallize_session_summary(
+                        db_pool, uid, _pending_turns,
+                        origin_surface="bridge_chat", session_id=session_id,
+                    ))
+                except Exception:
+                    pass
+
         # QUANTUM-CRYSTAL-ARCH — drop adaptive mode state on unregister
         try:
             _adaptive_clear(uid)

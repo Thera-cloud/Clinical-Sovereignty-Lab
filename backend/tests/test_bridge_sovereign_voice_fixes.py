@@ -63,11 +63,20 @@ class _FakeSessionTracker:
 
 
 class _MinimalCortexSessionLifecycle:
-    """Mirrors AzureCortex.unregister + _ensure_session_id (SOVEREIGN-VOICE)."""
+    """Mirrors AzureCortex.unregister + _ensure_session_id (SOVEREIGN-VOICE).
+
+    Also mirrors the crystallize_session_summary flush-on-last-drop added to
+    unregister(): crystallize_session_summary was purely turn-count-gated
+    (every 5 turns via _chat_session_turns), never lifecycle-gated, so a
+    session ending on turn 1-4 lost those turns. unregister() now flushes
+    whatever's pending exactly once, on the actual last-socket-drop only.
+    """
 
     def __init__(self):
         self.sockets: dict = {}
         self.active_sessions: dict = {}
+        self.chat_session_turns: dict = {}
+        self.crystallize_calls: list = []
         self.sessions = _FakeSessionTracker()
 
     def _ensure_session_id(self, uid: str) -> str:
@@ -85,6 +94,10 @@ class _MinimalCortexSessionLifecycle:
             session_id = self.active_sessions[uid]
             self.sessions.end_session(session_id, topics=[])
             del self.active_sessions[uid]
+
+            pending = self.chat_session_turns.pop(uid, None)
+            if pending:
+                self.crystallize_calls.append((uid, pending, session_id))
 
 
 class _FakeWebSocket:
@@ -208,3 +221,52 @@ def test_ensure_session_id_reopens_when_missing():
     sid = cortex._ensure_session_id(uid)
     assert sid.startswith("SES_TEST_")
     assert cortex.active_sessions[uid] == sid
+
+
+def test_seam_two_sockets_flush_summary_exactly_once_on_last_drop():
+    """Full seam: session survives the first close and carries session_id,
+    then ends + summarizes exactly once on the last close — not zero times,
+    not once per socket."""
+    cortex = _MinimalCortexSessionLifecycle()
+    uid = "CLIENT_SEAM"
+    ws_main = _FakeWebSocket()
+    ws_dojo = _FakeWebSocket()
+    cortex.sockets[uid] = {ws_main, ws_dojo}
+    cortex.active_sessions[uid] = "SES_SEAM"
+    cortex.chat_session_turns[uid] = [
+        {"user_text": "turn one", "ai_text": "reply one"},
+        {"user_text": "turn two", "ai_text": "reply two"},
+    ]
+
+    # Close one socket (e.g. a DOJO iframe) — session must survive, and the
+    # next turn on the remaining socket still carries the same session_id.
+    cortex.unregister(uid, ws_dojo)
+    assert cortex._ensure_session_id(uid) == "SES_SEAM"
+    assert cortex.sessions.end_calls == []
+    assert cortex.crystallize_calls == []
+    assert uid in cortex.chat_session_turns
+
+    # Close the last socket — session ends, summary fires exactly once.
+    cortex.unregister(uid, ws_main)
+    assert uid not in cortex.active_sessions
+    assert cortex.sessions.end_calls == ["SES_SEAM"]
+    assert len(cortex.crystallize_calls) == 1
+    flushed_uid, flushed_turns, flushed_sid = cortex.crystallize_calls[0]
+    assert flushed_uid == uid
+    assert flushed_sid == "SES_SEAM"
+    assert len(flushed_turns) == 2
+
+
+def test_session_end_with_no_pending_turns_does_not_crystallize():
+    """No leftover turns at session end must not produce a spurious call."""
+    cortex = _MinimalCortexSessionLifecycle()
+    uid = "CLIENT_NO_PENDING"
+    ws = _FakeWebSocket()
+    cortex.sockets[uid] = {ws}
+    cortex.active_sessions[uid] = "SES_EMPTY"
+
+    cortex.unregister(uid, ws)
+
+    assert uid not in cortex.active_sessions
+    assert cortex.sessions.end_calls == ["SES_EMPTY"]
+    assert cortex.crystallize_calls == []
