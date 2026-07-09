@@ -80,18 +80,23 @@ label {
 .field input:focus { border-color: var(--gold); }
 .field input::placeholder { color: var(--gold-dim); }
 .pw-wrap { position: relative; }
-.pw-wrap input { padding-right: 72px; }
+.pw-wrap input { padding-right: 88px; }
 .pw-toggle {
   position: absolute;
-  right: 8px;
+  right: 4px;
   top: 50%;
   transform: translateY(-50%);
+  z-index: 3;
   background: transparent;
   border: none;
   color: var(--cyan);
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
-  padding: 4px 6px;
+  min-width: 48px;
+  min-height: 44px;
+  padding: 10px 8px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 .consent-row {
   display: flex;
@@ -117,6 +122,15 @@ label {
   cursor: pointer;
 }
 .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.submit-btn.pending { opacity: 0.85; }
+.submit-hint {
+  text-align: center;
+  font-size: 12px;
+  color: var(--gold-dim);
+  margin-top: 8px;
+  min-height: 18px;
+  line-height: 1.4;
+}
 .subtext {
   text-align: center;
   font-size: 12px;
@@ -179,6 +193,11 @@ label {
 .footer a { color: var(--cyan); text-decoration: none; }
 @media (max-width: 480px) {
   h1 { font-size: 26px; }
+  .field input[type="text"],
+  .field input[type="email"],
+  .field input[type="password"] {
+    font-size: 16px;
+  }
 }
 </style>
 </head>
@@ -215,7 +234,8 @@ label {
 
       <div class="turnstile-wrap" id="turnstileWrap"></div>
 
-      <button type="submit" class="submit-btn" id="submitBtn" disabled>Create my account</button>
+      <button type="submit" class="submit-btn" id="submitBtn">Create my account</button>
+      <p class="submit-hint" id="submitHint" aria-live="polite"></p>
       <p class="subtext">No credit card required. Free.</p>
     </form>
 
@@ -233,6 +253,11 @@ label {
   © 2025–2026 Sovereign Sanctuary
 </footer>
 
+<script>
+window.onTurnstileLoad = function() {
+  if (typeof window.__signupInitTurnstile === 'function') window.__signupInitTurnstile();
+};
+</script>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad" async defer></script>
 <script>
 (function() {
@@ -269,6 +294,7 @@ label {
   var errorBox = document.getElementById('errorBox');
   var connBox = document.getElementById('connBox');
   var submitBtn = document.getElementById('submitBtn');
+  var submitHint = document.getElementById('submitHint');
   var successPanel = document.getElementById('successPanel');
   var successTitle = document.getElementById('successTitle');
   var successBody = document.getElementById('successBody');
@@ -292,37 +318,71 @@ label {
     connBox.textContent = '';
   }
 
-  function updateSubmitState() {
-    var consent = document.getElementById('consentCheck').checked;
-    var ready = socket && socket.readyState === WebSocket.OPEN;
-    var hasTs = !!turnstileToken;
-    var siteKeyOk = TURNSTILE_SITE_KEY && TURNSTILE_SITE_KEY.indexOf('__TURNSTILE') === -1;
-    submitBtn.disabled = submitting || !ready || !consent || !hasTs || !siteKeyOk;
+  function getSubmitBlockers() {
+    var blockers = [];
+    if (!document.getElementById('consentCheck').checked) {
+      blockers.push('Check the Terms & Privacy box');
+    }
+    if (!TURNSTILE_SITE_KEY || TURNSTILE_SITE_KEY.indexOf('__TURNSTILE') !== -1) {
+      blockers.push('Verification not configured');
+    } else if (!turnstileToken) {
+      blockers.push('Complete the verification check above');
+    }
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      blockers.push('Connecting to Little Nate…');
+    }
+    return blockers;
   }
 
-  document.getElementById('pwToggle').addEventListener('click', function() {
+  function updateSubmitState() {
+    var blockers = getSubmitBlockers();
+    submitBtn.disabled = submitting;
+    submitBtn.classList.toggle('pending', !submitting && blockers.length > 0);
+    submitHint.textContent = submitting ? 'Creating your account…' : (blockers.length ? blockers.join(' · ') : '');
+  }
+
+  function togglePassword(btn) {
     var pw = document.getElementById('password');
     if (pw.type === 'password') {
       pw.type = 'text';
-      this.textContent = 'Hide';
+      btn.textContent = 'Hide';
+      btn.setAttribute('aria-label', 'Hide password');
     } else {
       pw.type = 'password';
-      this.textContent = 'Show';
+      btn.textContent = 'Show';
+      btn.setAttribute('aria-label', 'Show password');
     }
-  });
+  }
+
+  var pwBtn = document.getElementById('pwToggle');
+  var lastPwToggle = 0;
+  function onPwToggle(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    var now = Date.now();
+    if (now - lastPwToggle < 350) return;
+    lastPwToggle = now;
+    togglePassword(pwBtn);
+  }
+  pwBtn.addEventListener('click', onPwToggle);
+  pwBtn.addEventListener('pointerup', onPwToggle);
 
   document.getElementById('consentCheck').addEventListener('change', updateSubmitState);
 
-  window.onTurnstileLoad = function() {
+  window.__signupInitTurnstile = function() {
     if (!TURNSTILE_SITE_KEY || TURNSTILE_SITE_KEY.indexOf('__TURNSTILE') !== -1) {
       showError('Account verification is not configured yet. Please try again later or contact support.');
       return;
     }
     if (typeof turnstile === 'undefined') return;
+    if (turnstileWidgetId !== null) return;
     turnstileWidgetId = turnstile.render('#turnstileWrap', {
       sitekey: TURNSTILE_SITE_KEY,
+      theme: 'dark',
+      size: 'normal',
       callback: function(token) {
         turnstileToken = token;
+        hideError();
         updateSubmitState();
       },
       'expired-callback': function() {
@@ -336,6 +396,7 @@ label {
       }
     });
   };
+  if (typeof turnstile !== 'undefined') window.__signupInitTurnstile();
 
   function resetTurnstile() {
     turnstileToken = '';
@@ -480,8 +541,10 @@ label {
       showError('Please agree to the Terms and Privacy Policy.');
       return;
     }
-    if (!turnstileToken) {
-      showError('Please complete the verification check.');
+    var blockers = getSubmitBlockers();
+    if (blockers.length) {
+      showError(blockers[0] + (blockers.length > 1 ? ' (see notes below the button).' : '.'));
+      updateSubmitState();
       return;
     }
     if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -520,6 +583,12 @@ label {
 
   connectWS();
   updateSubmitState();
+  setTimeout(function() {
+    if (turnstileWidgetId === null && !turnstileToken) {
+      showError('Verification is still loading. If nothing appears above the button, refresh or try Safari.');
+      updateSubmitState();
+    }
+  }, 12000);
 })();
 </script>
 </body>
