@@ -9,7 +9,8 @@ Covers EVERY agent and background worker in the system (17 sections):
     Billing / Accounts (3), Trust Auditors (29), Trust Enforcer (1),
     Coaching Subsystem (5), Liminal Presence (3), Data Integrity (2),
     Hive Defense Workers (16), Application Workers (23),
-    Database Maintenance (1), Infrastructure (3), Hive Defense Services (27)
+    Database Maintenance (2 — incl. crystal_confidence_shadow proposals,
+    WIRE_WHAT_EXISTS Commit 5), Infrastructure (3), Hive Defense Services (27)
 
 Each agent gets a trust status: TRUSTED, WARNING, or FAILED with explanation.
 
@@ -380,7 +381,45 @@ class AgentStatusDigest:
         last_cycle = await self._last_activity_ago("db_maintenance_cycle")
         if last_cycle:
             detail += f" | Last cycle: {last_cycle}"
-        return {"title": "Database Maintenance", "rows": [(status, "DatabaseMaintenanceAgent", detail)]}
+        rows = [(status, "DatabaseMaintenanceAgent", detail)]
+        rows.append(await self._row_crystal_confidence_shadow())
+        return {"title": "Database Maintenance", "rows": rows}
+
+    async def _row_crystal_confidence_shadow(self) -> tuple:
+        """WIRE_WHAT_EXISTS Commit 5 — surface (never act on) the weekly
+        crystal_confidence_shadow proposals from Commit 4 STEP 4. This is
+        informational only: nothing here reads back into
+        nate_intelligence_crystals.confidence.
+        """
+        try:
+            async with self.db_pool.acquire() as conn:
+                summary = await conn.fetchrow("""
+                    SELECT
+                        COUNT(*) AS proposal_count,
+                        MAX(computed_at) AS last_computed_at,
+                        COUNT(*) FILTER (WHERE proposed_delta != 0) AS nonzero_count,
+                        MAX(ABS(proposed_delta)) AS max_abs_delta
+                    FROM crystal_confidence_shadow
+                    WHERE computed_at > NOW() - INTERVAL '8 days'
+                """)
+        except Exception as e:
+            return ("WARNING", "Crystal Confidence Shadow (proposals only)",
+                    f"Query failed: {e}")
+
+        if not summary or not summary["proposal_count"]:
+            return ("INFO", "Crystal Confidence Shadow (proposals only)",
+                    "No proposals in the last 8 days (weekly gate not yet due, "
+                    "or no outcome-linked crystal recalls met the minimum sample size)")
+
+        last_ts = summary["last_computed_at"]
+        last_str = last_ts.strftime("%b %d %H:%M UTC") if last_ts else "unknown"
+        detail = (
+            f"{summary['proposal_count']} crystal(s) evaluated in latest pass "
+            f"({summary['nonzero_count']} with nonzero delta, max |delta|="
+            f"{float(summary['max_abs_delta'] or 0):.4f}) at {last_str}. "
+            f"Proposals are never applied — review crystal_confidence_shadow directly."
+        )
+        return ("INFO", "Crystal Confidence Shadow (proposals only)", detail)
 
     async def _section_infrastructure(self) -> dict:
         rows = []
