@@ -2013,6 +2013,29 @@ async def lifespan(app: FastAPI):
     except Exception as dbm_err:
         print(f"   ⚠️  DatabaseMaintenanceAgent init failed: {dbm_err}")
 
+    # ── Crystal PHI Auditor — standing sweep of ownerless crystals against
+    # the live client-name roster; auto-quarantines matches. See
+    # docs/INCIDENT_MEMO_CRYSTAL_SCOPE_PHI_EXPOSURE_2026-07-09.md for the
+    # incident this agent exists to prevent from recurring. Closes the
+    # failure class at the READ side on a schedule, independent of
+    # crystal_phi_guard.py's write-time gate. ──
+    _crystal_phi_auditor = None
+    try:
+        from app.services.crystal_phi_auditor import CrystalPhiAuditor
+        _cpa_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _cpa_email = _audit_email if '_audit_email' in dir() else os.environ.get("ADMIN_ALERT_EMAILS", "").split(",")[0].strip()
+        _crystal_phi_auditor = CrystalPhiAuditor(
+            db_pool,
+            interval_seconds=21600,
+            notification_system=_cpa_notify,
+            admin_email=_cpa_email,
+        )
+        await _crystal_phi_auditor.start()
+        app.state.crystal_phi_auditor = _crystal_phi_auditor
+        print("   ✅ CrystalPhiAuditor started (6h sweep, stagger 150s)")
+    except Exception as cpa_err:
+        print(f"   ⚠️  CrystalPhiAuditor init failed: {cpa_err}")
+
     # ── Session Recovery Agent — retries failed AI session summaries ──
     _session_recovery = None
     try:
@@ -3054,6 +3077,7 @@ async def lifespan(app: FastAPI):
         ("content_queue_janitor", _content_janitor is not None),
         ("token_lifecycle_predictor", _token_predictor is not None),
         ("db_maintenance_agent", _db_maintenance is not None),
+        ("crystal_phi_auditor", _crystal_phi_auditor is not None),
         ("session_recovery_agent", _session_recovery is not None),
         ("agent_status_digest", _agent_digest is not None),
         ("skyeye_tab_auditor", _tab_auditor is not None),
@@ -3318,6 +3342,15 @@ async def lifespan(app: FastAPI):
     if _dbm:
         await _dbm.stop()
         print("   ✅ DatabaseMaintenanceAgent stopped")
+
+    # Stop Crystal PHI Auditor
+    _cpa_shutdown = getattr(app.state, "crystal_phi_auditor", None)
+    if _cpa_shutdown:
+        try:
+            await _cpa_shutdown.stop()
+            print("   ✅ CrystalPhiAuditor stopped")
+        except Exception as _cpa_stop_err:
+            print(f"   ⚠️  CrystalPhiAuditor shutdown: {_cpa_stop_err}")
 
     # Stop Session Recovery Agent
     _sra = getattr(app.state, "session_recovery_agent", None)

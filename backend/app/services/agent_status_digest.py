@@ -210,6 +210,13 @@ class AgentStatusDigest:
         if last_cycle:
             detail += f" | Last cycle: {last_cycle}"
         rows.append((status, "Session Recovery Agent", detail))
+
+        cpa = getattr(self.app, "crystal_phi_auditor", None)
+        status, detail = self._check_agent(cpa, "Crystal PHI Auditor")
+        last_cycle = await self._last_activity_ago("crystal_phi_audit_cycle")
+        if last_cycle:
+            detail += f" | Last cycle: {last_cycle}"
+        rows.append((status, "Crystal PHI Auditor", detail))
         return {"title": "Clinical Safety", "rows": rows}
 
     async def _section_billing_accounts(self) -> dict:

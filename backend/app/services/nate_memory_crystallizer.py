@@ -1527,6 +1527,15 @@ class NateMemoryCrystallizer:
                                         _domain, _h[:12], conf)
                     elif self._db_pool:
                         try:
+                            # QUANTUM-CRYSTAL-ARCH: write-time PHI/name guard.
+                            # See docs/INCIDENT_MEMO_CRYSTAL_SCOPE_PHI_EXPOSURE_2026-07-09.md.
+                            # Blocks scope='global' writes whose text contains a
+                            # live client/coach name — fail closed, not silent.
+                            from app.services.crystal_phi_guard import guard_global_crystal_write
+                            if not await guard_global_crystal_write(
+                                self._db_pool, crystal_text, _scope, context="solo_forge",
+                            ):
+                                continue
                             async with self._db_pool.acquire() as _sf_conn:
                                 await _sf_conn.execute("""
                                     INSERT INTO nate_intelligence_crystals
@@ -1760,6 +1769,22 @@ class NateMemoryCrystallizer:
                                 if _uid_row:
                                     _crystal_user_id = _uid_row["id"]
 
+                    # QUANTUM-CRYSTAL-ARCH: write-time PHI/name guard.
+                    # See docs/INCIDENT_MEMO_CRYSTAL_SCOPE_PHI_EXPOSURE_2026-07-09.md.
+                    # Cluster synthesis concatenates fragments from multiple
+                    # sources (including per-client [Session Insight] text)
+                    # into one crystal — this is exactly how the 2026-07-09
+                    # incident's two PHI-bearing crystals were produced.
+                    # Check BEFORE the connection-holding INSERT block below
+                    # (never hold a DB conn open across the roster refresh —
+                    # see load-test-performance-baseline.mdc H2).
+                    from app.services.crystal_phi_guard import guard_global_crystal_write
+                    if not await guard_global_crystal_write(
+                        self._db_pool, crystal_text, scope, context="cluster_synthesis",
+                    ):
+                        continue
+
+                    async with self._db_pool.acquire() as conn:
                         await conn.execute("""
                             INSERT INTO nate_intelligence_crystals
                             (crystal_text, domain, scope, topics, source_count,

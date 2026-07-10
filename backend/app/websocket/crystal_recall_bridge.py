@@ -975,6 +975,24 @@ async def crystallize_from_conversation(
                 hardware_id,
             )
 
+            # QUANTUM-CRYSTAL-ARCH: fail CLOSED on unresolved user. This
+            # function always writes scope='user' — if hardware_id doesn't
+            # resolve, user_id would be NULL while scope stays 'user',
+            # producing an orphaned user-scoped crystal with no owner.
+            # The 2026-07-09 incident found exactly this pattern (a
+            # scope='user:<id>' crystal with user_id IS NULL). Recall now
+            # allowlists scope='global' only, so an orphan like this can
+            # no longer leak into the global pool — but it also can never
+            # be recalled by its rightful owner, so it's just a personal
+            # disclosure sitting unscoped in the DB. Refuse the write.
+            if not user_uuid:
+                logger.warning(
+                    "crystal_bridge: conversation crystal SKIPPED — hardware_id %r "
+                    "unresolved; refusing to write orphaned user-scoped crystal",
+                    (hardware_id or "")[:40],
+                )
+                return None
+
             ins_row = await conn.fetchrow(
                 """
                 INSERT INTO nate_intelligence_crystals

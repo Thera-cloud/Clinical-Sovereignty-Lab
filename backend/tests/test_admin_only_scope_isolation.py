@@ -46,6 +46,20 @@ _PROTECTED_FILES = {
     "services/quantum_crystal_orchestrator.py": 2,
 }
 
+# 2026-07-09 audit, part 4: these files also query `user_id IS NULL`, but are
+# NOT recall/serving sites and must NOT be forced onto the scope='global'
+# allowlist pattern above -- they are the standing auditor that deliberately
+# scans the ENTIRE ownerless pool across every scope value (including
+# 'admin_only', 'archived', or a future orphaned scope) to catch exactly the
+# kind of drift _PROTECTED_FILES exists to prevent from ever going unnoticed
+# again. Applying the allowlist here would make the auditor blind to the
+# scope values it exists to police. Reviewed and explicitly exempted --
+# see crystal_phi_auditor.py's module docstring and
+# docs/INCIDENT_MEMO_CRYSTAL_SCOPE_PHI_EXPOSURE_2026-07-09.md.
+_REVIEWED_AUDIT_SCAN_FILES = {
+    "services/crystal_phi_auditor.py",
+}
+
 # Exact pre-fix snippets, pinned per file, that must never reappear. Each is
 # the literal blocklist text this file used to have on its `user_id IS NULL`
 # global-pool branch -- either the original bug (excluded only 'archived')
@@ -164,7 +178,7 @@ def test_no_new_global_pool_site_escapes_the_protected_file_list():
     offenders = []
     for path in _BACKEND_APP.rglob("*.py"):
         relpath = str(path.relative_to(_BACKEND_APP))
-        if relpath in _PROTECTED_FILES:
+        if relpath in _PROTECTED_FILES or relpath in _REVIEWED_AUDIT_SCAN_FILES:
             continue
         text = path.read_text(encoding="utf-8")
         if "user_id IS NULL" in text:
@@ -172,5 +186,26 @@ def test_no_new_global_pool_site_escapes_the_protected_file_list():
     assert offenders == [], (
         f"unreviewed global-pool (user_id IS NULL) query site(s) found -- "
         f"add to _PROTECTED_FILES with the scope='global' allowlist pattern "
+        f"(or, if it is a deliberate cross-scope audit sweep rather than a "
+        f"recall/serving site, to _REVIEWED_AUDIT_SCAN_FILES with rationale) "
         f"and a min_sites count: {offenders}"
     )
+
+
+def test_reviewed_audit_scan_files_do_not_use_the_serving_allowlist():
+    """crystal_phi_auditor.py's whole purpose is to catch crystals under ANY
+    ownerless scope value the recall-side allowlist wasn't told about yet.
+    If it filtered its scan query to `scope = 'global'` it would silently
+    stop scanning 'admin_only'/orphaned/future scope values -- exactly the
+    blind spot _PROTECTED_FILES exists to prevent. Pin that its scan query
+    does NOT narrow by scope (only excludes already-archived rows, which are
+    already quarantined)."""
+    for relpath in _REVIEWED_AUDIT_SCAN_FILES:
+        src = _read(relpath)
+        assert "scope = 'global'" not in src, (
+            f"{relpath}: this file is exempted from the allowlist pattern "
+            f"specifically because it must scan across all ownerless scope "
+            f"values, not just 'global' -- if it now filters to scope='global' "
+            f"it should be moved into _PROTECTED_FILES instead, and its "
+            f"cross-scope-audit design note removed"
+        )
