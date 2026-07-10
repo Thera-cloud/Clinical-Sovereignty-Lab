@@ -328,16 +328,7 @@ h1 {
   .chat-window { max-height: 46vh; }
 }
 
-/* Cloudflare Turnstile — appearance:'interaction-only' keeps this invisible
-   for the overwhelming majority of real visitors; it only renders a small
-   challenge box here on the rare occasion Cloudflare's risk engine wants
-   interaction. */
-#turnstileWrap {
-  position: fixed;
-  bottom: 12px;
-  right: 12px;
-  z-index: 9999;
-}
+.turnstile-wrap { margin-top: 10px; min-height: 65px; display: flex; justify-content: center; }
 </style>
 </head>
 <body>
@@ -353,6 +344,7 @@ h1 {
       <input type="checkbox" id="startConsent" />
       <label for="startConsent">I've read and understand the above</label>
     </div>
+    <div class="turnstile-wrap" id="turnstileWrap"></div>
   </div>
 
   <div class="crisis-banner" id="crisisBanner">
@@ -399,12 +391,11 @@ h1 {
   </div>
 </div>
 
-<div id="turnstileWrap"></div>
-
 <div id="ss-copyright" style="text-align:center;padding:12px 0 8px;font-size:11px;color:#8B7355;font-family:'DM Sans',sans-serif;letter-spacing:0.3px;opacity:0.7;border-top:1px solid rgba(201,169,98,0.08);margin-top:8px;">© 2025–2026 Sovereign Sanctuary. All rights reserved.</div>
 
 <script>
 window.onTurnstileLoad = function() {
+  if (!startConsentGiven) return;
   if (typeof window.__tryInitTurnstile === 'function') window.__tryInitTurnstile();
 };
 </script>
@@ -444,71 +435,59 @@ if (startConsentEl) {
     if (startConsentEl.checked) {
       startConsentGiven = true;
       startConsentEl.disabled = true; // one-shot -- no un-checking mid-session
+      if (!socket || socket.readyState === WebSocket.CLOSED) connectWS();
+      if (typeof window.__tryInitTurnstile === 'function') window.__tryInitTurnstile();
       trySendStartAndPending();
     }
   });
 }
 
 // --- Cloudflare Turnstile (2026-07 bot-abuse hardening) ---
-// Same site key as signup.html (public; pairs with server TURNSTILE_SECRET_KEY,
-// reusable across pages on this domain). appearance:'interaction-only' +
-// execution:'execute' means the widget renders nothing for the overwhelming
-// majority of real visitors and only becomes visible if Cloudflare's risk
-// engine genuinely wants interactive proof -- a bot rotating IPs can't cheaply
-// solve that at scale, but a real human on try.html almost never notices it.
+// Identical render mode to signup.html. Widget + WebSocket only start AFTER the
+// consent checkbox (human gesture) — loading Turnstile on page load correlated
+// with client error 600010 on this domain.
 var TURNSTILE_SITE_KEY = '0x4AAAAAADyMnpRrA8SSCcIS';
 var turnstileWidgetId = null;
 var turnstileToken = '';
-var turnstileExecuting = false;
-var turnstileRetryTimer = null;
 var turnstileRequiredNoticeShown = false;
 
-// Ad-blockers/privacy extensions occasionally block challenges.cloudflare.com
-// outright. Without this, a blocked script means the widget never renders, no
-// token is ever produced, and the trial silently never starts. Give the user
-// an actionable message instead of an indefinite blank hang.
-var turnstileLoadTimeout = setTimeout(function() {
-  if (turnstileWidgetId === null) {
-    appendMessage("We couldn't load our security check — if you're using an ad-blocker or privacy extension, please allow challenges.cloudflare.com, or try a different browser.", 'system');
+var turnstileLoadTimeout = null;
+
+function resetTurnstile() {
+  turnstileToken = '';
+  if (typeof turnstile !== 'undefined' && turnstileWidgetId !== null) {
+    try { turnstile.reset(turnstileWidgetId); } catch (e) {}
   }
-}, 8000);
+}
 
 window.__tryInitTurnstile = function() {
+  if (!startConsentGiven) return;
   if (typeof turnstile === 'undefined') return;
   if (turnstileWidgetId !== null) return;
-  clearTimeout(turnstileLoadTimeout);
+  if (turnstileLoadTimeout) clearTimeout(turnstileLoadTimeout);
+  turnstileLoadTimeout = setTimeout(function() {
+    if (turnstileWidgetId === null) {
+      appendMessage("We couldn't load our security check — if you're using an ad-blocker or privacy extension, please allow challenges.cloudflare.com, or try a different browser.", 'system');
+    }
+  }, 8000);
   turnstileWidgetId = turnstile.render('#turnstileWrap', {
     sitekey: TURNSTILE_SITE_KEY,
     theme: 'dark',
-    appearance: 'interaction-only',
-    execution: 'execute',
+    size: 'normal',
+    retry: 'auto',
     callback: function(token) {
       turnstileToken = token;
-      turnstileExecuting = false;
       trySendStartAndPending();
     },
     'expired-callback': function() {
       turnstileToken = '';
     },
     'error-callback': function() {
-      turnstileExecuting = false;
-      if (turnstileRetryTimer) clearTimeout(turnstileRetryTimer);
-      turnstileRetryTimer = setTimeout(requestTurnstileToken, 3000);
+      turnstileToken = '';
+      appendMessage('Verification could not complete — refresh the page. If this keeps happening, confirm app.sovereignsanctuary.net is listed under your Turnstile widget hostnames in the Cloudflare dashboard.', 'system');
     }
   });
-  requestTurnstileToken();
 };
-if (typeof turnstile !== 'undefined') window.__tryInitTurnstile();
-
-function requestTurnstileToken() {
-  if (turnstileWidgetId === null || turnstileExecuting || turnstileToken) return;
-  turnstileExecuting = true;
-  try {
-    turnstile.execute('#turnstileWrap');
-  } catch (e) {
-    turnstileExecuting = false;
-  }
-}
 
 // public_trial_start requires a Turnstile token (bot-abuse hardening). Sends
 // immediately if a token is already cached; otherwise kicks off
@@ -518,10 +497,7 @@ function trySendStartAndPending() {
   if (!socket || socket.readyState !== WebSocket.OPEN) return;
   if (startHandshakeSent) return;
   if (!startConsentGiven) return; // waiting on the disclaimer checkbox
-  if (!turnstileToken) {
-    requestTurnstileToken();
-    return;
-  }
+  if (!turnstileToken) return; // widget auto-runs on render; wait for callback
   var tok = turnstileToken;
   turnstileToken = ''; // one-shot -- server marks the device verified from here
   startHandshakeSent = true;
@@ -722,7 +698,7 @@ function handleServerMessage(data) {
       // click away (same pattern as the fp_hourly_cap rate-limit case below).
       turnstileToken = '';
       startHandshakeSent = false;
-      requestTurnstileToken();
+      resetTurnstile();
       if (lastSentText) {
         var inputElTs = document.getElementById('chatInput');
         if (inputElTs && !inputElTs.value) {
@@ -846,8 +822,6 @@ document.querySelectorAll('.starter').forEach(function(btn) {
     sendTrialMessage(btn.textContent.trim(), btn.getAttribute('data-starter-key'));
   });
 });
-
-connectWS();
 </script>
 </body>
 </html>
