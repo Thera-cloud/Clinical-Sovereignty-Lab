@@ -2894,7 +2894,7 @@ async def _load_lexicon_crystals(
                 SELECT crystal_text FROM nate_intelligence_crystals
                 WHERE (user_id = (SELECT id FROM users WHERE username = $1 LIMIT 1)
                        OR user_id IS NULL)
-                  AND scope != 'archived'
+                  AND scope NOT IN ('archived', 'admin_only')
                   AND confidence >= 0.40
                   AND (domain = 'clinical' OR domain = 'coaching')
                   AND (crystal_text ILIKE $2 OR crystal_text ILIKE $3

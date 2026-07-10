@@ -27,7 +27,7 @@ async def enrich_crystals_from_voice(
                 "WHERE (user_id = (SELECT id FROM users WHERE username=$1 LIMIT 1) "
                 "       OR user_id IS NULL) "
                 "AND created_at > NOW() - make_interval(mins => $2) "
-                "AND (scope != 'archived' OR scope IS NULL) "
+                "AND (scope IS NULL OR scope NOT IN ('archived', 'admin_only')) "
                 "ORDER BY created_at DESC LIMIT 50",
                 username, window_min)
 

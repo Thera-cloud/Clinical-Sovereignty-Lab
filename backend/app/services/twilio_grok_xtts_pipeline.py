@@ -747,10 +747,13 @@ async def _deep_memory_search(
             user_uuid = await _resolve_user_uuid(username, db_pool)
             async with db_pool.acquire() as conn:
                 rows = await conn.fetch(
+                    # SOVEREIGN-VOICE: admin_only crystals must never surface in a caller's
+                    # deep-memory search — global pool (user_id IS NULL) previously had no
+                    # scope filter for this, allowing admin-restricted content to leak.
                     "SELECT crystal_text, domain, confidence, created_at "
                     "FROM nate_intelligence_crystals "
                     "WHERE (user_id = $1 OR user_id IS NULL) "
-                    "AND superseded_by IS NULL AND scope != 'archived' "
+                    "AND superseded_by IS NULL AND scope NOT IN ('archived', 'admin_only') "
                     "AND crystal_text ILIKE '%' || $2 || '%' "
                     "ORDER BY confidence DESC LIMIT $3",
                     user_uuid, search_terms, max_results,

@@ -380,7 +380,7 @@ async def _gather_therapeutic_evidence(
                     FROM nate_intelligence_crystals
                     WHERE (user_id = $1::uuid OR user_id IS NULL)
                       AND superseded_by IS NULL
-                      AND scope != 'archived'
+                      AND scope NOT IN ('archived', 'admin_only')
                       AND crystal_text ILIKE ANY($2::text[])
                     ORDER BY confidence DESC, created_at DESC
                     LIMIT 6
@@ -395,7 +395,7 @@ async def _gather_therapeutic_evidence(
                     FROM nate_intelligence_crystals
                     WHERE (user_id = $1::uuid OR user_id IS NULL)
                       AND superseded_by IS NULL
-                      AND scope != 'archived'
+                      AND scope NOT IN ('archived', 'admin_only')
                     ORDER BY created_at DESC
                     LIMIT 6
                     """,
