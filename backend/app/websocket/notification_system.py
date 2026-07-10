@@ -290,19 +290,32 @@ class NotificationSystem:
     
     async def _send_email(self, to_email: str, subject: str, content: str,
                           notification_type: str = "general",
-                          reply_to: str = None) -> bool:
-        """Send email via SendGrid."""
+                          reply_to: str = None,
+                          already_html: bool = False) -> bool:
+        """Send email via SendGrid.
+
+        already_html=True: caller has already built a complete, self-contained
+        HTML block (its own colors/branding/layout). Skip the "Little Nate /
+        AI Therapy Companion" purple wrapper + the plain-text `\\n` -> `<br>`
+        rewrite entirely — that rewrite mangles multi-line style="..." attrs
+        in pre-built HTML (breaks the attribute mid-string) and double-wraps
+        the design. Use for digests/reports that ship their own template.
+        """
         if not self.sendgrid_enabled:
             print(f">>> [NOTIFY] Email skipped (SendGrid disabled): {to_email}")
             self._log_email(to_email, subject, "skipped_disabled")
             return False
         
         try:
+            html_content = (
+                self._minimal_html_wrap(content) if already_html
+                else self._format_email_html(content, notification_type)
+            )
             message = Mail(
                 from_email=Email(self.from_email, self.from_name),
                 to_emails=To(to_email),
                 subject=subject,
-                html_content=self._format_email_html(content, notification_type)
+                html_content=html_content
             )
             if reply_to:
                 message.reply_to = Email(reply_to)
@@ -325,6 +338,20 @@ class NotificationSystem:
             self._log_email(to_email, subject, "error", str(e))
             return False
     
+    def _minimal_html_wrap(self, content: str) -> str:
+        """Bare doctype/head/body shell for callers that ship pre-built HTML.
+
+        No branding, no color template, no `\\n`-rewrite — the caller's HTML
+        is trusted to already be complete and self-styled.
+        """
+        return (
+            '<!DOCTYPE html><html><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1.0"></head>'
+            '<body style="margin:0;padding:20px;background-color:#0A0A0A;">'
+            f"{content}"
+            "</body></html>"
+        )
+
     def _format_email_html(self, content: str, notification_type: str) -> str:
         """Format email content as HTML."""
         # Color based on type

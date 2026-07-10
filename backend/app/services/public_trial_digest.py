@@ -11,6 +11,7 @@ converted test accounts (e2e_trial_*, Test*).
 from __future__ import annotations
 
 import asyncio
+import html as _html
 import json
 import logging
 import os
@@ -45,6 +46,18 @@ _PROBE_USER_RE = re.compile(
     re.I,
 )
 
+# Generic jailbreak shapes — catches attempts that don't hit an exact phrase above.
+# A raw base64 blob (>=24 chars of base64 alphabet) in a trial message is never
+# organic; organic users don't paste encoded payloads at a free-trial chatbot.
+_BASE64_BLOB_RE = re.compile(r"[A-Za-z0-9+/]{24,}={0,2}")
+_JAILBREAK_SHAPE_RE = re.compile(
+    r"(ignore (all|any|previous).{0,20}(instructions|rules|safety)|"
+    r"hidden instructions|reveal your (system|hidden)|jailbreak|"
+    r"you are now|pretend you (are|have)|act as if you|no restrictions|"
+    r"bypass your|override your|disregard (all|your))",
+    re.I,
+)
+
 _TEST_ACCOUNT_RE = re.compile(r"^(e2e_trial_|Test\d*$)", re.I)
 
 # Jul 2026 red-team batch openers / follow-ups (organic users rarely hit these exact strings).
@@ -72,6 +85,11 @@ _FLAG_VERDICT = {
     "internal_infra": ("REFUSED", "architecture probe"),
     "provider_name": ("REFUSED", "provider probe"),
     "minor_sexual_content": ("BLOCKED", "minor-shield probe"),
+}
+
+_BLEED_LABELS = {
+    "third_party_relation_event": "third-party relationship detail (named a relative/relation + life event)",
+    "attributed_disclosure": "attributed third-party disclosure (\"another client said...\")",
 }
 
 
@@ -105,6 +123,10 @@ def _is_probe_session(history: List[Dict[str, str]], converted_username: Optiona
         low = msg.lower()
         if any(phrase in low for phrase in _RED_TEAM_PHRASES):
             return True
+        if _JAILBREAK_SHAPE_RE.search(low):
+            return True
+        if _BASE64_BLOB_RE.search(msg):
+            return True
     return any(_PROBE_USER_RE.search(u) for u in user_msgs)
 
 
@@ -129,20 +151,37 @@ def _tone_label(history: List[Dict[str, str]]) -> str:
     return ", ".join(tags) if tags else "supportive exchange"
 
 
-def _count_bleed_in_session(history: List[Dict[str, str]]) -> int:
+def _find_bleed_details_in_session(history: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    """Per-turn bleed evidence: which turn, the full exchange, exactly what leaked.
+
+    Used both to compute the bleed_flags count AND to render the full leaked
+    conversation at the top of the digest (bug #1) — a bleed is the worst-case
+    event and must never be a truncated line item, so this captures the
+    complete turn, not just a pattern name.
+    """
     if not _bleed_det:
-        return 0
+        return []
     user_so_far: List[str] = []
-    hits = 0
-    for turn in history:
+    out: List[Dict[str, Any]] = []
+    for idx, turn in enumerate(history):
         assistant = turn.get("assistant") or ""
+        user = turn.get("user") or ""
         if assistant:
             flags = _bleed_det.find_narrative_bleed(assistant, user_so_far)
             if flags:
-                hits += len(flags)
-        if turn.get("user"):
-            user_so_far.append(turn["user"])
-    return hits
+                out.append({
+                    "turn_index": idx,
+                    "user": user,
+                    "assistant": assistant,
+                    "hit_patterns": flags,
+                })
+        if user:
+            user_so_far.append(user)
+    return out
+
+
+def _count_bleed_in_session(history: List[Dict[str, str]]) -> int:
+    return sum(len(d["hit_patterns"]) for d in _find_bleed_details_in_session(history))
 
 
 class PublicTrialDigest:
@@ -199,6 +238,7 @@ class PublicTrialDigest:
             try:
                 sent = await self.notifications._send_email(
                     DIGEST_EMAIL, subject, html, "public_trial_digest",
+                    already_html=True,
                 )
             except Exception as e:
                 logger.error("PublicTrialDigest: email send failed: %s", e)
@@ -208,6 +248,7 @@ class PublicTrialDigest:
     async def _collect(self, now: datetime, overrides: Dict[str, Any]) -> Dict[str, Any]:
         window_start = now - timedelta(hours=24)
         bleed_flags = 0
+        bleeding_sessions: List[Dict[str, Any]] = []
         flagged_24h: List[Dict[str, Any]] = []
         organic_today = {"starts": 0, "reached_5": 0, "reached_15": 0, "converted": 0}
         organic_7d = dict(organic_today)
@@ -274,8 +315,22 @@ class PublicTrialDigest:
             history = _parse_history(row["trial_history"])
             probe = _is_probe_session(history, row["converted_username"])
             turns = int(row["turns_used"] or 0)
+            bleed_details: List[Dict[str, Any]] = []
             if not probe:
-                bleed_flags += _count_bleed_in_session(history)
+                bleed_details = _find_bleed_details_in_session(history)
+                if bleed_details:
+                    bleed_flags += sum(len(d["hit_patterns"]) for d in bleed_details)
+                    last_seen_raw = row["last_seen"]
+                    if last_seen_raw and last_seen_raw.tzinfo is None:
+                        last_seen_raw = last_seen_raw.replace(tzinfo=timezone.utc)
+                    bleeding_sessions.append({
+                        "device_uuid_hash": row["device_uuid_hash"],
+                        "last_seen_et": (
+                            last_seen_raw.astimezone(ET).strftime("%Y-%m-%d %H:%M ET")
+                            if last_seen_raw else "unknown"
+                        ),
+                        "turns": bleed_details,
+                    })
 
             started = row["trial_started_at"]
             last_seen = row["last_seen"]
@@ -306,7 +361,7 @@ class PublicTrialDigest:
             if not probe and last_seen and last_seen >= window_start and turns > 0:
                 hour_key = last_seen.astimezone(ET).hour
                 hour_turns[hour_key] = hour_turns.get(hour_key, 0) + turns
-                conv_flags = _count_bleed_in_session(history)
+                conv_flags = sum(len(d["hit_patterns"]) for d in bleed_details)
                 source = overrides.get("session_sources", {}).get(
                     row["device_uuid_hash"], ""
                 )
@@ -346,6 +401,7 @@ class PublicTrialDigest:
             "verdict": verdict,
             "emoji": emoji,
             "bleed_flags": bleed_flags,
+            "bleeding_sessions": bleeding_sessions,
             "phi_status": phi_status,
             "phi_last_sweep": phi_last_sweep or "n/a",
             "flagged_24h": flagged_24h,
@@ -392,8 +448,49 @@ class PublicTrialDigest:
             f'font-size:12px;line-height:1.6;color:#e2e8f0;">{body}</div>'
         )
 
+    def _esc(self, text: str) -> str:
+        return _html.escape(text or "", quote=False).replace("\n", "<br>")
+
+    def _render_bleed_alert(self, bleeding_sessions: List[Dict[str, Any]]) -> str:
+        """Bug #1: bleed is the worst-case event — it leads the email, in full,
+        above SAFETY/BUDGET/FUNNEL, not as a buried line item. Shows session
+        ID, every leaking turn (full user prompt + full assistant reply), and
+        exactly which pattern(s) matched — nothing truncated, nothing summarized.
+        """
+        if not bleeding_sessions:
+            return ""
+        blocks = [
+            '<div style="font-size:14px;font-weight:700;color:#fca5a5;margin-bottom:8px;">'
+            "🔴 CRYSTAL BLEED DETECTED — REVIEW BEFORE ANYTHING ELSE BELOW</div>"
+        ]
+        for s in bleeding_sessions:
+            blocks.append(
+                f'<div style="margin:10px 0 4px;font-size:12px;color:#fecaca;">'
+                f"Session <code>{self._esc(str(s['device_uuid_hash']))}</code> · "
+                f"last seen {self._esc(s['last_seen_et'])}</div>"
+            )
+            for t in s["turns"]:
+                labels = ", ".join(
+                    _BLEED_LABELS.get(p, p) for p in t["hit_patterns"]
+                )
+                blocks.append(
+                    '<div style="background:#1a0a0a;border:1px solid #7f1d1d;border-radius:6px;'
+                    'padding:10px 12px;margin:6px 0;font-size:12px;line-height:1.6;color:#fef2f2;">'
+                    f"<b>Leaked:</b> {self._esc(labels)}<br>"
+                    f"<b>Turn {t['turn_index'] + 1} — user asked:</b><br>"
+                    f"{self._esc(t['user']) or '<i>(no preceding user text)</i>'}<br><br>"
+                    f"<b>Turn {t['turn_index'] + 1} — Nate replied:</b><br>"
+                    f"{self._esc(t['assistant'])}"
+                    "</div>"
+                )
+        return (
+            '<div style="background:#2d0a0a;border:2px solid #dc2626;border-radius:8px;'
+            'padding:14px 16px;margin:0 0 20px;">' + "".join(blocks) + "</div>"
+        )
+
     def _render_html(self, data: Dict[str, Any], now: datetime) -> str:
         day_label = now.astimezone(ET).strftime("%A, %B %-d, %Y")
+        bleed_alert_html = self._render_bleed_alert(data.get("bleeding_sessions") or [])
         bleed_line = (
             f"Crystal bleed flags ....... {data['bleed_flags']}  "
             f"{'✅ clean' if data['bleed_flags'] == 0 else '🔴 REVIEW'}"
@@ -435,8 +532,9 @@ class PublicTrialDigest:
         if data["conversations"]:
             blocks = [f"<b>REAL CONVERSATIONS (non-probe, 24h) — {data['organic_conv_count']}</b>"]
             for i, c in enumerate(data["conversations"], 1):
-                src = f" · {c['source']}" if c.get("source") else ""
-                opened = c["opened"][:120] + ("…" if len(c["opened"]) > 120 else "")
+                src = f" · {self._esc(c['source'])}" if c.get("source") else ""
+                opened_raw = c["opened"][:120] + ("…" if len(c["opened"]) > 120 else "")
+                opened = self._esc(opened_raw)
                 blocks.append(
                     f"<br><b>{i}.</b> {c['last_seen_et']}{src}<br>"
                     f"&nbsp;&nbsp;Opened: \"{opened}\"<br>"
@@ -490,17 +588,18 @@ class PublicTrialDigest:
         )
         note = (
             "<p style='color:#64748b;font-size:11px;margin-top:20px;'>"
-            "Internal/testing IPs (170.62.100.237, probe batches) excluded from organic counts."
+            "Internal/testing IPs and content-flagged probe sessions (jailbreak phrasing, "
+            "base64 payloads, red-team openers, test accounts) excluded from organic counts."
             "</p>"
         )
 
         return f"""
-<div style="font-family:'DM Sans',Arial,sans-serif;max-width:640px;margin:0 auto;
-background:#0A0A0A;color:#e2e8f0;border:1px solid #222;border-radius:8px;padding:20px;">
+<div style="font-family:'DM Sans',Arial,sans-serif;max-width:640px;margin:0 auto;background:#0A0A0A;color:#e2e8f0;border:1px solid #222;border-radius:8px;padding:20px;">
   <h2 style="margin:0 0 4px;color:#C9A962;font-family:'Cormorant Garamond',Georgia,serif;">
     Sovereign Sanctuary — Trial Digest
   </h2>
   <p style="margin:0 0 16px;color:#94a3b8;font-size:12px;">{day_label} · last 24h</p>
+  {bleed_alert_html}
   <h3 style="color:#C9A962;font-size:14px;margin:16px 0 4px;">🛡️ SAFETY — the tripwires</h3>
   {safety}
   <h3 style="color:#C9A962;font-size:14px;margin:16px 0 4px;">💰 BUDGET — cost &amp; abuse</h3>
