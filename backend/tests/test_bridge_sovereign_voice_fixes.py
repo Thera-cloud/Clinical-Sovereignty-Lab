@@ -104,6 +104,23 @@ class _FakeWebSocket:
     pass
 
 
+async def _minimal_graceful_shutdown_flush(chat_session_turns: dict, active_sessions: dict,
+                                            crystallize_calls: list, db_pool_present: bool = True):
+    """Mirrors the SIGTERM/SIGINT shutdown-flush added to _graceful_shutdown()
+    in bridge_server.py: on process exit, any uid with turns still pending in
+    _chat_session_turns (hasn't hit the 5-turn crystallization interval) must
+    be flushed exactly once before db_pool closes — otherwise a deploy
+    restart silently drops 1-4 turns with zero flush, the same class of loss
+    unregister()'s last-socket-drop fix closed for graceful disconnects."""
+    if not db_pool_present or not chat_session_turns:
+        return
+    for uid in list(chat_session_turns.keys()):
+        turns = chat_session_turns.pop(uid, None)
+        if not turns:
+            continue
+        crystallize_calls.append((uid, turns, active_sessions.get(uid, "")))
+
+
 # --- token tier ---
 
 
@@ -270,3 +287,97 @@ def test_session_end_with_no_pending_turns_does_not_crystallize():
     assert uid not in cortex.active_sessions
     assert cortex.sessions.end_calls == ["SES_EMPTY"]
     assert cortex.crystallize_calls == []
+
+
+# --- SIGTERM/SIGINT shutdown flush (deploy-restart memory loss) ---
+
+
+@pytest.mark.asyncio
+async def test_shutdown_flushes_all_pending_uids_exactly_once():
+    """Two different uids each have pending turns at the moment SIGTERM
+    fires (a deploy restart mid-conversation, before either hit the 5-turn
+    interval). Both must be flushed, each exactly once, with their correct
+    session_id — never silently dropped by the module dict being wiped on
+    process exit."""
+    chat_session_turns = {
+        "CLIENT_A": [{"user_text": "hi", "ai_text": "hello"}],
+        "CLIENT_B": [
+            {"user_text": "one", "ai_text": "r1"},
+            {"user_text": "two", "ai_text": "r2"},
+        ],
+    }
+    active_sessions = {"CLIENT_A": "SES_A", "CLIENT_B": "SES_B"}
+    crystallize_calls: list = []
+
+    await _minimal_graceful_shutdown_flush(chat_session_turns, active_sessions, crystallize_calls)
+
+    assert chat_session_turns == {}
+    assert len(crystallize_calls) == 2
+    by_uid = {uid: (turns, sid) for uid, turns, sid in crystallize_calls}
+    assert by_uid["CLIENT_A"] == ([{"user_text": "hi", "ai_text": "hello"}], "SES_A")
+    assert len(by_uid["CLIENT_B"][0]) == 2
+    assert by_uid["CLIENT_B"][1] == "SES_B"
+
+
+@pytest.mark.asyncio
+async def test_shutdown_flush_tolerates_missing_session_id():
+    """A uid with pending turns but no active_sessions entry (e.g. the
+    session lazily reopened via _ensure_session_id and that dict wasn't
+    threaded into this fake) must still flush — with an empty session_id
+    rather than raising or being skipped."""
+    chat_session_turns = {"CLIENT_ORPHAN_SID": [{"user_text": "x", "ai_text": "y"}]}
+    crystallize_calls: list = []
+
+    await _minimal_graceful_shutdown_flush(chat_session_turns, {}, crystallize_calls)
+
+    assert len(crystallize_calls) == 1
+    _, _, sid = crystallize_calls[0]
+    assert sid == ""
+
+
+@pytest.mark.asyncio
+async def test_shutdown_flush_is_noop_with_no_pending_turns():
+    """Clean shutdown with nothing pending must not produce a spurious
+    flush call."""
+    crystallize_calls: list = []
+    await _minimal_graceful_shutdown_flush({}, {}, crystallize_calls)
+    assert crystallize_calls == []
+
+
+@pytest.mark.asyncio
+async def test_shutdown_flush_skipped_without_db_pool():
+    """If db_pool never came up (degraded startup), the flush must not
+    attempt to write — mirrors the `if db_pool and _chat_session_turns`
+    guard in bridge_server.py so a missing pool can't raise mid-shutdown."""
+    chat_session_turns = {"CLIENT_C": [{"user_text": "x", "ai_text": "y"}]}
+    crystallize_calls: list = []
+
+    await _minimal_graceful_shutdown_flush(
+        chat_session_turns, {}, crystallize_calls, db_pool_present=False,
+    )
+
+    assert crystallize_calls == []
+    # Turns are left in place (not popped) when the pool guard short-circuits —
+    # matches bridge_server.py, which checks `if db_pool and ...` before the
+    # loop even begins, so nothing is destructively popped on a skipped flush.
+    assert chat_session_turns == {"CLIENT_C": [{"user_text": "x", "ai_text": "y"}]}
+
+
+def test_graceful_shutdown_source_actually_flushes_pending_turns():
+    """Static pin on the real _graceful_shutdown() in bridge_server.py — the
+    fakes above mirror intended behavior, but this asserts the deployed
+    function itself pops _chat_session_turns and calls
+    crystallize_session_summary before db_pool.close(), not just in a test
+    double. Prevents the fake and the real function drifting apart."""
+    source = _bridge_source()
+    m = re.search(
+        r"async def _graceful_shutdown\(sig_name\):.*?(?=\n    loop = asyncio\.get_running_loop)",
+        source, re.DOTALL,
+    )
+    assert m, "_graceful_shutdown not found in bridge_server.py"
+    body = m.group(0)
+    assert "_chat_session_turns.pop(" in body
+    assert "crystallize_session_summary(" in body
+    assert "db_pool.close()" in body
+    # Flush must happen before the pool closes, not after.
+    assert body.index("_chat_session_turns.pop(") < body.index("db_pool.close()")

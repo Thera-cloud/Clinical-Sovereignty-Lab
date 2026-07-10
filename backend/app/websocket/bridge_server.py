@@ -31946,6 +31946,26 @@ async def main():
     import signal
     async def _graceful_shutdown(sig_name):
         print(f"[*] Received {sig_name}, shutting down gracefully...")
+        # QUANTUM-CRYSTAL-ARCH — flush in-flight session turns before the
+        # pool closes. _chat_session_turns is a module-level in-memory dict;
+        # a deploy/restart with turns pending (a session hasn't yet hit the
+        # 5-turn crystallization interval) wiped them with zero flush —
+        # the same class of loss unregister()'s last-socket-drop flush
+        # closed for graceful client disconnects, but not for process exit.
+        if db_pool and _chat_session_turns:
+            _flush_uids = list(_chat_session_turns.keys())
+            for _uid in _flush_uids:
+                _turns = _chat_session_turns.pop(_uid, None)
+                if not _turns:
+                    continue
+                try:
+                    await crystallize_session_summary(
+                        db_pool, _uid, _turns, origin_surface="bridge_chat",
+                        session_id=cortex.active_sessions.get(_uid, ""),
+                    )
+                except Exception as _flush_err:
+                    print(f"[*] Shutdown flush failed for {_uid}: {_flush_err}")
+            print(f"[*] Flushed {len(_flush_uids)} pending session(s) before shutdown")
         if db_pool:
             await db_pool.close()
             print("[*] Database pool closed")
