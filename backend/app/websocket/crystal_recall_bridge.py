@@ -816,6 +816,22 @@ async def crystallize_wisdom_absorption(
                     ur,
                 )
 
+            # QUANTUM-CRYSTAL-ARCH: fail CLOSED on unresolved user. Wisdom
+            # extractions come from user conversations; if user_ref is empty
+            # or doesn't resolve, writing scope='global' leaks that client's
+            # disclosure into the global recall pool (2026-07 public-trial
+            # F4c confidentiality breach — crystals 630869/630952/637972/
+            # 637973). Skip crystal creation entirely rather than default
+            # to global. Deliberately-global absorption must go through a
+            # separate, explicit path — never this fallback.
+            if not user_uuid:
+                logger.warning(
+                    "crystal_bridge: wisdom absorption SKIPPED — user_ref %r "
+                    "unresolved (extraction_id=%s); refusing global fallback",
+                    ur[:40], ext[:16] if ext else "",
+                )
+                return None
+
             if user_uuid:
                 content_hash = hashlib.sha256(
                     f"{user_uuid}|wisdom_absorption|{ext}|{text}".encode()

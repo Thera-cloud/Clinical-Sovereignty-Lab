@@ -319,11 +319,16 @@ async def build_enrichment_addendum(
     Bounded by _T2_TIMEOUT_S; returns "" on any failure or low-signal turn.
     Priority overrides and registry fusion fire even on low-signal turns.
 
-    trial_safe=True (Public Trial Funnel): FederatedSearch and Helix are
-    already global-only by construction (no per-user PII), so they stay on
-    for ln_full parity. The IFS council/registry-fusion channel IS per-user
-    (council_registry_context reads a user's saved parts) and is force-
-    disabled here regardless of BRIDGE_IFS_METADATA.
+    trial_safe=True (Public Trial Funnel): ALL crystal-field content is
+    disabled — FederatedSearch, ranked recall, and the Helix synthesis line
+    that references it. 2026-07 red-team F4c: "global-only" crystal content
+    is NOT safe for anonymous strangers — the global pool contains
+    first-person narrative crystals (dataset ingests + previously
+    mislabeled client wisdom), and surfacing any stored-memory text in a
+    trial session reads as another person's disclosure. The per-user IFS
+    council/registry-fusion channel is likewise force-disabled. Only
+    priority safety overrides and turn-local IFS part hints (derived from
+    the current user's own text) remain.
     """
     if not enrichment_enabled():
         return ""
@@ -344,24 +349,25 @@ async def build_enrichment_addendum(
         return combined[:_T2_MAX_CHARS] if combined else ""
     t0 = time.monotonic()
     crystals: List[Dict[str, Any]] = []
-    try:
-        fed = _get_fed_search(db_pool)
-        result = await asyncio.wait_for(
-            fed.search(
-                query=user_text[:400],
-                user_id=user_id,
-                include_devices=False,
-                timeout_seconds=_T2_TIMEOUT_S,
-                domain="clinical",
-            ),
-            timeout=_T2_TIMEOUT_S + 0.5,
-        )
-        crystals = (result or {}).get("results", [])[:6]
-    except Exception as e:
-        logger.info("bridge_enrichment: federated search skipped: %s", e)
+    if not trial_safe:
+        try:
+            fed = _get_fed_search(db_pool)
+            result = await asyncio.wait_for(
+                fed.search(
+                    query=user_text[:400],
+                    user_id=user_id,
+                    include_devices=False,
+                    timeout_seconds=_T2_TIMEOUT_S,
+                    domain="clinical",
+                ),
+                timeout=_T2_TIMEOUT_S + 0.5,
+            )
+            crystals = (result or {}).get("results", [])[:6]
+        except Exception as e:
+            logger.info("bridge_enrichment: federated search skipped: %s", e)
 
     synthesis_line = ""
-    if tier_enabled(2):
+    if tier_enabled(2) and not trial_safe:
         try:
             helix = _get_helix()
             cycle = await asyncio.wait_for(

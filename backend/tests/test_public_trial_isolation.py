@@ -687,10 +687,13 @@ async def test_priority_overrides_still_fire_for_trial_safe_low_signal_turn(monk
 
 
 @pytest.mark.asyncio
-async def test_federated_search_and_helix_still_fire_for_trial_safe_high_signal_turn(monkeypatch):
-    """FederatedSearch and Helix are already global-only by construction (no
-    per-user PII) so they stay ON in trial_safe mode -- this is what gives the
-    trial ln_full parity instead of a stripped-down experience."""
+async def test_federated_search_and_helix_disabled_for_trial_safe_high_signal_turn(monkeypatch):
+    """2026-07 red-team F4c: crystal-field content is NOT safe for anonymous
+    strangers -- the global pool contains first-person narrative crystals
+    (dataset ingests + previously mislabeled client wisdom). trial_safe=True
+    must skip FederatedSearch, ranked recall, and the Helix synthesis line
+    entirely. The same high-signal turn with trial_safe=False must still fire
+    both, proving the gate is real and not a permanent short-circuit."""
     import app.websocket.bridge_enrichment as enr
 
     monkeypatch.setenv("LN_ENRICHMENT", "1")
@@ -702,7 +705,10 @@ async def test_federated_search_and_helix_still_fire_for_trial_safe_high_signal_
     class _FakeFedSearch:
         async def search(self, **kwargs):
             fed_calls["n"] += 1
-            return {"results": []}
+            return {"results": [{
+                "crystal_text": "Client disclosed her grandmother's loss and the secret her husband kept.",
+                "relevance_score": 0.95,
+            }]}
 
     class _FakeCycle:
         synthesis = {"fused_coherence": 0.8}
@@ -722,12 +728,21 @@ async def test_federated_search_and_helix_still_fire_for_trial_safe_high_signal_
         "out loud, but I feel like everything I built is falling apart and "
         "I am so afraid of what happens next for me and my family."
     )
-    out = await enr.build_enrichment_addendum(
+    out_trial = await enr.build_enrichment_addendum(
         None, "trial_abc", long_text, trial_safe=True,
+    )
+    assert fed_calls["n"] == 0, "trial_safe must never run FederatedSearch"
+    assert helix_calls["n"] == 0, "trial_safe must never run Helix over crystals"
+    assert "Helix read on this turn" not in out_trial
+    assert "RANKED RECALL" not in out_trial
+    assert "grandmother" not in out_trial
+
+    out_full = await enr.build_enrichment_addendum(
+        None, "real_user_123", long_text, trial_safe=False,
     )
     assert fed_calls["n"] == 1
     assert helix_calls["n"] == 1
-    assert "Helix read on this turn" in out
+    assert "RANKED RECALL" in out_full
 
 
 # ---------------------------------------------------------------------------
@@ -788,6 +803,154 @@ async def test_global_only_recall_returns_empty_string_without_pool_or_id():
 
     assert await crb.recall_crystals_for_context(None, "trial_abc", global_only=True) == ""
     assert await crb.recall_crystals_for_context(_FakeCrystalPool(), "", global_only=True) == ""
+
+
+# ---------------------------------------------------------------------------
+# F4c isolation-bleed guards (2026-07 red-team blocker).
+#
+# The mechanism-level tests above proved global_only=True never resolves a
+# user UUID -- and production still leaked, because the GLOBAL pool itself
+# contained narrative content (dataset ingests + client wisdom mislabeled
+# global by a fail-open path). The lesson: the trial guarantee must be
+# asserted at the CONTENT level of the final prompt, not at the mechanism
+# level of one recall function. These tests pin the new invariant: an
+# anonymous trial turn gets ZERO stored-memory content of any kind.
+# ---------------------------------------------------------------------------
+
+def test_trial_gate_source_has_no_crystal_recall_call():
+    """Static guard: public_trial_gate must not reference the crystal recall
+    entry point at all. If someone re-adds it (even global_only), this fails."""
+    import inspect
+    source = inspect.getsource(ptg)
+    assert "recall_crystals_for_context" not in source, (
+        "public_trial_gate must never call crystal recall for anonymous sessions"
+    )
+
+
+@pytest.mark.asyncio
+async def test_generate_trial_response_never_recalls_and_prompt_is_memory_free(monkeypatch):
+    """End-to-end (offline): the system prompt actually sent to the LLM for a
+    trial turn contains no stored-memory blocks, and no recall call fires."""
+    import app.services.sovereign_chat_client as scc
+    import app.websocket.crystal_recall_bridge as crb
+
+    monkeypatch.setenv("LN_ENRICHMENT", "0")
+    monkeypatch.setattr(ptg, "get_db_pool", lambda: None)
+
+    async def _forbidden_recall(*a, **kw):
+        raise AssertionError("public trial must NEVER call crystal recall")
+
+    monkeypatch.setattr(crb, "recall_crystals_for_context", _forbidden_recall)
+
+    captured = {}
+
+    async def _fake_generate(system_prompt, user_text, **kw):
+        captured["system_prompt"] = system_prompt
+        return "I hear you. That sounds heavy, and I'm right here with you.", "workers_ai"
+
+    monkeypatch.setattr(scc, "generate_complete", _fake_generate)
+
+    ctx = ptg.TrialTurnContext(
+        ok=True, hardware_id="trial_abc123", fp_hash="fp1", device_uuid_hash="dev1",
+        text="I've been feeling really anxious lately and it is getting worse",
+        history=[{"user": "hello", "assistant": "hi, I'm here"}],
+    )
+    out = await ptg.generate_trial_response(ctx)
+
+    assert "system_prompt" in captured, "generation was never reached"
+    prompt = captured["system_prompt"]
+    for marker in (
+        "GENERAL KNOWLEDGE",        # recall global block header
+        "YOUR PERSONAL MEMORIES",   # recall user block header
+        "CLINICAL DNA",             # deep-recall clinical seed header
+        "RANKED RECALL",            # enrichment federated-search block
+        "Helix read on this turn",  # enrichment synthesis line
+    ):
+        assert marker not in prompt, f"stored-memory marker leaked into trial prompt: {marker}"
+    assert out
+
+
+def test_trial_boundary_has_fiction_frame_hard_stop():
+    """F2/F5 fix: fiction/hypothetical clinical framing must be refused at the
+    frame -- the boundary text instructing that must stay in the prompt."""
+    b = ptg.PUBLIC_TRIAL_BOUNDARY
+    assert "DIAGNOSIS HARD-STOP" in b
+    assert "even as a story" in b
+    assert "Refuse AT THE FRAME" in b
+
+
+class _FakeAbsorptionConn:
+    """Fake conn for crystallize_wisdom_absorption: user resolution result is
+    injectable; any INSERT is recorded so tests can assert it never ran."""
+
+    def __init__(self, resolved_uuid):
+        self.resolved_uuid = resolved_uuid
+        self.inserts: list = []
+
+    async def fetchval(self, query, *args):
+        assert "FROM users" in query
+        return self.resolved_uuid
+
+    async def fetchrow(self, query, *args):
+        assert "INSERT INTO nate_intelligence_crystals" in query
+        self.inserts.append(args)
+        return {"content_hash": args[3]}
+
+
+class _FakeAbsorptionPool:
+    def __init__(self, resolved_uuid):
+        self.conn = _FakeAbsorptionConn(resolved_uuid)
+
+    def acquire(self):
+        return _FakeAcquireCtx(self.conn)
+
+
+@pytest.mark.asyncio
+async def test_wisdom_absorption_fails_closed_when_user_ref_empty():
+    """Root cause (b) of the F4c breach: wisdom absorption used to default to
+    scope='global' when the user couldn't be resolved, publishing real client
+    disclosures into the global recall pool. It must now skip entirely."""
+    import app.websocket.crystal_recall_bridge as crb
+
+    pool = _FakeAbsorptionPool(resolved_uuid=None)
+    result = await crb.crystallize_wisdom_absorption(
+        pool, "", "Client expressed grief about a family loss.",
+        extraction_id="ext-1",
+    )
+    assert result is None
+    assert pool.conn.inserts == [], "no crystal row may be written on unresolved user"
+
+
+@pytest.mark.asyncio
+async def test_wisdom_absorption_fails_closed_when_user_ref_unresolvable():
+    import app.websocket.crystal_recall_bridge as crb
+
+    pool = _FakeAbsorptionPool(resolved_uuid=None)  # ref given, no users row
+    result = await crb.crystallize_wisdom_absorption(
+        pool, "ghost_user_404", "Client expressed grief about a family loss.",
+        extraction_id="ext-2",
+    )
+    assert result is None
+    assert pool.conn.inserts == []
+
+
+@pytest.mark.asyncio
+async def test_wisdom_absorption_writes_user_scoped_crystal_when_resolved():
+    """Counter-case: with a resolvable user the crystal IS written, and it is
+    scope='user' with the user's UUID attached -- never global."""
+    import app.websocket.crystal_recall_bridge as crb
+
+    pool = _FakeAbsorptionPool(resolved_uuid="11111111-2222-3333-4444-555555555555")
+    result = await crb.crystallize_wisdom_absorption(
+        pool, "real_client", "Client expressed grief about a family loss.",
+        extraction_id="ext-3",
+    )
+    assert result is not None
+    assert len(pool.conn.inserts) == 1
+    args = pool.conn.inserts[0]
+    # INSERT arg order: text, domain, scope, content_hash, user_uuid, origin_surface, meta
+    assert args[2] == "user"
+    assert args[4] == "11111111-2222-3333-4444-555555555555"
 
 
 # ---------------------------------------------------------------------------
