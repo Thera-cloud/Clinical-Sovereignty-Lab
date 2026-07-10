@@ -889,6 +889,9 @@ def test_trial_boundary_forbids_third_party_disclosure_real_or_invented():
     assert "do NOT narrate a composite" in b
     assert "confabulated third-party content" in b
     assert "I don't carry other people's conversations" in b
+    # Normalize the feeling, never source it in others' disclosures.
+    assert "NORMALIZING WITHOUT ATTRIBUTION" in b
+    assert "people have shared this with me\" is a confidentiality-shaped" in b
 
 
 class _FakeAbsorptionConn:
