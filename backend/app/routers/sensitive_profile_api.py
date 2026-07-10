@@ -2000,6 +2000,53 @@ async def add_polyvictim_layer(
     return {"ok": True, "id": new_id}
 
 
+@coach_router.post("/{user_id}/polyvictim-layer/{layer_id}/activate")
+async def activate_polyvictim_layer(
+    user_id: str,
+    layer_id: int,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    """Approve a pending (inactive) polyvictim layer suggestion — used to
+    confirm rows inserted by the system auto-detector
+    (`sensitive_clinical_bridge._suggest_polyvictim_layer`) after a coach
+    reviews the disclosure. Re-stamps `set_by_clinician_id` with the
+    approving clinician so the audit trail reflects human confirmation,
+    not the system sentinel value.
+    """
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+    actor_id = principal.get("username", "") or principal.get("user_id", "")
+    async with db_pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE user_polyvictimization_layers
+               SET active = TRUE, set_by_clinician_id = $3
+             WHERE id = $1 AND user_id = $2 AND active = FALSE
+            """,
+            layer_id,
+            user_id,
+            actor_id,
+        )
+    changed = 0
+    try:
+        changed = int(result.split()[-1])
+    except (ValueError, IndexError):
+        changed = 0
+    if not changed:
+        raise HTTPException(404, detail={"reason": "polyvictim_layer_not_found"})
+    await _emit_profile_mutation_audit(
+        db_pool,
+        target_user_id=user_id,
+        actor_id=actor_id,
+        actor_role=principal.get("role", "COACH"),
+        mutation_kind="polyvictim_layer_activated",
+        additional_fields_redacted={"id": layer_id},
+    )
+    return {"ok": True, "id": layer_id}
+
+
 @coach_router.delete("/{user_id}/polyvictim-layer/{layer_id}")
 async def deactivate_polyvictim_layer(
     user_id: str,
@@ -2033,6 +2080,50 @@ async def deactivate_polyvictim_layer(
         actor_id=principal.get("username", ""),
         actor_role=principal.get("role", "COACH"),
         mutation_kind="polyvictim_layer_deactivated",
+        additional_fields_redacted={"id": layer_id},
+    )
+    return {"ok": True, "id": layer_id}
+
+
+@coach_router.delete("/{user_id}/polyvictim-layer/{layer_id}/dismiss-suggestion")
+async def dismiss_polyvictim_layer_suggestion(
+    user_id: str,
+    layer_id: int,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    """Hard-delete a pending system-suggested row the clinician determined
+    is not clinically applicable. Scoped to rows that are still `active=FALSE`
+    AND still carry the system sentinel `set_by_clinician_id` — this can
+    never remove a clinician-entered or clinician-activated layer, only an
+    un-reviewed suggestion.
+    """
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+    async with db_pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            DELETE FROM user_polyvictimization_layers
+             WHERE id = $1 AND user_id = $2 AND active = FALSE
+               AND set_by_clinician_id = 'system_auto_suggested_pending_review'
+            """,
+            layer_id,
+            user_id,
+        )
+    changed = 0
+    try:
+        changed = int(result.split()[-1])
+    except (ValueError, IndexError):
+        changed = 0
+    if not changed:
+        raise HTTPException(404, detail={"reason": "polyvictim_layer_suggestion_not_found"})
+    await _emit_profile_mutation_audit(
+        db_pool,
+        target_user_id=user_id,
+        actor_id=principal.get("username", ""),
+        actor_role=principal.get("role", "COACH"),
+        mutation_kind="polyvictim_layer_suggestion_dismissed",
         additional_fields_redacted={"id": layer_id},
     )
     return {"ok": True, "id": layer_id}

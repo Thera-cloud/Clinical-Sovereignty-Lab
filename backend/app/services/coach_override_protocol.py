@@ -405,6 +405,19 @@ ACUITY_TIERS: Dict[str, Dict[str, Any]] = {
         "plan_gap": "Gap 15 / mandatory_reporting_screen",
         "description": "Mandatory reporting screen fired (jurisdiction-specific) — immediate coach alert",
     },
+    # Historical family-of-origin / childhood abuse disclosure that the
+    # trafficking classifier's `past_tense` label matched on generic
+    # temporal language, but `polyvictimization_disclosure_detector` found
+    # no trafficking/exploitation markers — only family-relation + abuse
+    # language. Routed here instead of `mandatory_reporting` so the coach
+    # alert accurately reflects a historical disclosure to integrate into
+    # treatment, not an active trafficking/mandatory-reporting emergency.
+    "polyvictimization_disclosure": {
+        "severity": "high",
+        "bypasses_62h_cadence": True,
+        "plan_gap": "polyvictimization_disclosure_detector",
+        "description": "Historical polyvictimization/childhood abuse disclosure — coach review, not mandatory reporting",
+    },
     # Generic crisis tier — used by `_build_handoff_if_needed` as the safe
     # fallback when an unknown tier is requested. Distinct from
     # `trafficking_disclosure` so a fallback never silently labels a generic

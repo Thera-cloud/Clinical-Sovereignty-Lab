@@ -798,6 +798,33 @@ class _SensitiveProfileApi {
     }
   }
 
+  /// Approve a pending system-suggested polyvictim layer.
+  Future<void> activatePolyvictimLayer(String userId, int layerId) async {
+    final uri = Uri.parse(
+      '$_base/api/coach/sensitive-profile/$userId/polyvictim-layer/$layerId/activate',
+    );
+    final resp = await http
+        .post(uri, headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw _ApiError.fromResponse(resp);
+    }
+  }
+
+  /// Reject/remove a pending system-suggested polyvictim layer.
+  Future<void> dismissPolyvictimLayerSuggestion(
+      String userId, int layerId) async {
+    final uri = Uri.parse(
+      '$_base/api/coach/sensitive-profile/$userId/polyvictim-layer/$layerId/dismiss-suggestion',
+    );
+    final resp = await http
+        .delete(uri, headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw _ApiError.fromResponse(resp);
+    }
+  }
+
   Future<void> postLegalStatus(
     String userId, {
     required String caseType,
@@ -2621,6 +2648,7 @@ class _SensitiveClinicalProfileScreenState
       rows.add(const _Empty('No polyvictim layers recorded.'));
     } else {
       for (final l in p.polyvictimLayers) {
+        final pending = _isPendingPolySuggestion(l);
         rows.add(
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 6),
@@ -2631,9 +2659,35 @@ class _SensitiveClinicalProfileScreenState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        l.layerType,
-                        style: const TextStyle(color: _D.text, fontSize: 13),
+                      Row(
+                        children: [
+                          Text(
+                            l.layerType,
+                            style:
+                                const TextStyle(color: _D.text, fontSize: 13),
+                          ),
+                          if (pending) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: _D.gold.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                    color: _D.gold.withOpacity(0.5)),
+                              ),
+                              child: const Text(
+                                'SYSTEM SUGGESTED · PENDING REVIEW',
+                                style: TextStyle(
+                                  color: _D.gold,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       const SizedBox(height: 2),
                       Text(
@@ -2641,10 +2695,33 @@ class _SensitiveClinicalProfileScreenState
                         '${l.active ? '' : ' · inactive'}',
                         style: const TextStyle(color: _D.textDim, fontSize: 11),
                       ),
+                      if (l.notesRedacted != null &&
+                          l.notesRedacted!.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          l.notesRedacted!,
+                          style: const TextStyle(
+                              color: _D.textDim,
+                              fontSize: 11,
+                              fontStyle: FontStyle.italic),
+                        ),
+                      ],
                     ],
                   ),
                 ),
-                if (can)
+                if (can && pending) ...[
+                  IconButton(
+                    icon: const Icon(Icons.check_circle_outline,
+                        color: _D.gold, size: 20),
+                    tooltip: 'Confirm & activate',
+                    onPressed: () => _confirmActivatePolyLayer(l),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: _D.red, size: 20),
+                    tooltip: 'Dismiss suggestion',
+                    onPressed: () => _confirmDismissPolySuggestion(l),
+                  ),
+                ] else if (can)
                   IconButton(
                     icon: const Icon(Icons.delete_outline,
                         color: _D.red, size: 20),
@@ -2692,6 +2769,50 @@ class _SensitiveClinicalProfileScreenState
     if (_harnessMutationBarrier()) return;
     try {
       await _api.deletePolyvictimLayer(widget.targetUserId, l.id);
+      await _loadProfile();
+    } catch (e) {
+      _showError(e);
+    }
+  }
+
+  /// True when this row was inserted automatically from a disclosure
+  /// (see `sensitive_clinical_bridge._suggest_polyvictim_layer`) and has not
+  /// yet been reviewed by a clinician.
+  bool _isPendingPolySuggestion(PolyvictimLayer l) =>
+      !l.active && l.setByClinicianId == 'system_auto_suggested_pending_review';
+
+  Future<void> _confirmActivatePolyLayer(PolyvictimLayer l) async {
+    final prof = _profile;
+    if (prof == null || !_canEditSensitiveFields(prof)) return;
+    final ok = await _confirmDialog(
+      title: 'Confirm this layer?',
+      message: 'This will activate the layer as clinically applicable and '
+          'attribute it to you for the record.',
+      confirmLabel: 'Confirm & Activate',
+    );
+    if (!ok) return;
+    if (_harnessMutationBarrier()) return;
+    try {
+      await _api.activatePolyvictimLayer(widget.targetUserId, l.id);
+      await _loadProfile();
+    } catch (e) {
+      _showError(e);
+    }
+  }
+
+  Future<void> _confirmDismissPolySuggestion(PolyvictimLayer l) async {
+    final prof = _profile;
+    if (prof == null || !_canEditSensitiveFields(prof)) return;
+    final ok = await _confirmDialog(
+      title: 'Dismiss suggestion?',
+      message: 'This system-suggested layer will be removed. Use this if '
+          'it does not reflect this client\'s clinical picture.',
+      confirmLabel: 'Dismiss',
+    );
+    if (!ok) return;
+    if (_harnessMutationBarrier()) return;
+    try {
+      await _api.dismissPolyvictimLayerSuggestion(widget.targetUserId, l.id);
       await _loadProfile();
     } catch (e) {
       _showError(e);

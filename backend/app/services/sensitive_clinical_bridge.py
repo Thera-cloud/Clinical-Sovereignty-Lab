@@ -1576,6 +1576,7 @@ def _build_handoff_if_needed(
     novelty_gate: NoveltyGateState,
     trigger_date: TriggerDateMatch,
     polyvictim_load: PolyvictimLoad,
+    message: Optional[str] = None,
 ) -> Tuple[Optional[Any], Optional[str], Optional[str]]:
     """Step 16 — coach handoff payload build (conditional).
 
@@ -1623,6 +1624,31 @@ def _build_handoff_if_needed(
             tier = "trafficking_disclosure"
         elif reporting_trigger == "trafficking" and trafficking_label == "survivor_as_recruiter":
             tier = "recruiter_holding"
+        elif reporting_trigger == "trafficking" and trafficking_label == "past_tense":
+            # Ambiguous case — the classifier's broad temporal patterns can
+            # over-fire on historical family-of-origin abuse narratives that
+            # share no actual trafficking/exploitation language (see
+            # polyvictimization_disclosure_detector.py docstring). Only
+            # downgrade when the detector finds a clean family-abuse
+            # pattern with zero exploitation markers; any ambiguity keeps
+            # the safe default of `mandatory_reporting`.
+            _poly_suggestion = None
+            try:
+                from app.services.polyvictimization_disclosure_detector import (
+                    detect_historical_family_pattern,
+                )
+
+                _poly_suggestion = detect_historical_family_pattern(message or "")
+            except Exception as _poly_exc:
+                logger.warning(
+                    "sensitive_clinical_bridge: polyvictimization disclosure "
+                    "detector skipped: %s", _poly_exc,
+                )
+            tier = (
+                "polyvictimization_disclosure"
+                if _poly_suggestion is not None
+                else "mandatory_reporting"
+            )
         else:
             tier = "mandatory_reporting"
     elif tmc_result.get("moment_class") == "CRISIS":
@@ -1736,6 +1762,76 @@ async def _resolve_assigned_coach_username(
     except Exception:
         pass
     return None
+
+
+_POLYVICTIM_AUTO_SUGGESTED_BY = "system_auto_suggested_pending_review"
+
+
+async def _suggest_polyvictim_layer(
+    *,
+    db_pool: Any,
+    user_id: str,
+    message: Optional[str],
+) -> None:
+    """Insert a pending (INACTIVE) polyvictim-layer suggestion row so the
+    coach sees it in the Sensitive Profile UI (`sensitive_profile_api.py`
+    `/full` already returns inactive rows) and can activate it with one
+    tap after reviewing.
+
+    Never sets `active=TRUE` itself — clinician judgment is required to
+    confirm. Never stores raw disclosure text in `notes_redacted`, only a
+    generic descriptor. Deduplicates against an existing pending
+    suggestion of the same `layer_type` for this user so repeated turns
+    with similar language don't spam the queue.
+
+    Trigger dates (`user_trigger_dates`) and IFS parts (`user_parts_registry`)
+    both require clinician judgment to set correctly — a specific calendar
+    date and its `date_type`/`recurring_annually` classification, or a part's
+    name/role — and are deliberately NOT auto-inferred from free text here.
+    Instead this note prompts the reviewing clinician to add a trigger date
+    if the disclosure referenced one; parts registry entries are handled
+    separately by `parts_auto_extractor.py` (auto-extraction wired into
+    `therapeutic_controller.py` on every turn, independent of this path).
+    """
+    from app.services.polyvictimization_disclosure_detector import (
+        detect_historical_family_pattern,
+    )
+
+    suggestion = detect_historical_family_pattern(message or "")
+    if suggestion is None:
+        return
+
+    async with db_pool.acquire() as conn:
+        existing = await conn.fetchrow(
+            """
+            SELECT id FROM user_polyvictimization_layers
+             WHERE user_id = $1 AND layer_type = $2
+               AND set_by_clinician_id = $3 AND active = FALSE
+             LIMIT 1
+            """,
+            user_id, suggestion.layer_type, _POLYVICTIM_AUTO_SUGGESTED_BY,
+        )
+        if existing is not None:
+            return
+        await conn.execute(
+            """
+            INSERT INTO user_polyvictimization_layers (
+                user_id, layer_type, severity, active,
+                set_by_clinician_id, notes_redacted
+            ) VALUES ($1, $2, $3, FALSE, $4, $5)
+            """,
+            user_id,
+            suggestion.layer_type,
+            suggestion.suggested_severity,
+            _POLYVICTIM_AUTO_SUGGESTED_BY,
+            "System-suggested from a historical disclosure pattern "
+            "(family relation + abuse language; no trafficking/exploitation "
+            "markers detected). Pending clinician review — activate to "
+            "confirm, or dismiss if not clinically applicable. If the "
+            "disclosure referenced a specific date/period, consider adding "
+            "a Trigger Date entry as well (Sensitive Profile > Trigger "
+            "Dates) so future sessions near that date are flagged.",
+        )
 
 
 async def _emit_escalation(
@@ -2207,7 +2303,21 @@ async def evaluate_disclosure(
         novelty_gate=novelty_gate,
         trigger_date=trigger_date,
         polyvictim_load=polyvictim_load,
+        message=message,
     )
+
+    # Auto-suggest a polyvictim layer for coach review when this turn was
+    # routed via the historical-disclosure downgrade path. Inserted
+    # INACTIVE (pending review) — never auto-activates. Fire-and-forget,
+    # never blocks or fails the orchestrator.
+    if handoff_tier == "polyvictimization_disclosure" and db_pool is not None:
+        try:
+            await _suggest_polyvictim_layer(db_pool=db_pool, user_id=user_id, message=message)
+        except Exception as _suggest_exc:
+            logger.warning(
+                "sensitive_clinical_bridge: polyvictim layer suggestion "
+                "insert skipped: %s", _suggest_exc,
+            )
 
     # Persist the handoff payload at clinician_only classification and
     # capture the audit row id as the partner-seam payload_ref (Note 3c).

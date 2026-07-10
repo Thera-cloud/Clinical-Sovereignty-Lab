@@ -19230,7 +19230,7 @@ async def handle_client(websocket, path=None):
                         metrics = parietal.load_metrics(client_profile)
                         topics = hippocampus.get_topics_discussed(client_profile)
                         breakthroughs = hippocampus.get_breakthroughs(client_profile)
-                        recent_memory = hippocampus.recall_full(client_profile, limit=10)
+                        recent_memory = hippocampus.recall_full(client_profile, limit=25)
                         
                         # Zoom session insights (Patent 2 Section 16)
                         zoom_sessions = metrics.get("zoom_sessions", [])
@@ -19487,7 +19487,7 @@ async def handle_client(websocket, path=None):
                             "recent_topics": topics,
                             "recent_breakthroughs": breakthroughs[-5:],
                             "mood_history": metrics.get("nevedal_state", {}).get("mood_history", []),
-                            "recent_conversations": recent_memory[-5:],
+                            "recent_conversations": recent_memory[-20:],
                             "recent_conversation_topics": recent_conversation_topics,
                             "crystal_memory": crystal_memory,
                             "recent_panel_insights": recent_panel_insights,
