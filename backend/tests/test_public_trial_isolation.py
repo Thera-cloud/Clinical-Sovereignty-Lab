@@ -879,6 +879,18 @@ def test_trial_boundary_has_fiction_frame_hard_stop():
     assert "Refuse AT THE FRAME" in b
 
 
+def test_trial_boundary_forbids_third_party_disclosure_real_or_invented():
+    """F4c follow-up: after the data-level bleed fix, Nate still fabricated
+    'others have shared their drinking with me' style answers. The boundary
+    must forbid recounting other people's disclosures -- real OR invented --
+    and redirect to the current user."""
+    b = ptg.PUBLIC_TRIAL_BOUNDARY
+    assert "NO THIRD-PARTY DISCLOSURE, REAL OR INVENTED" in b
+    assert "do NOT narrate a composite" in b
+    assert "confabulated third-party content" in b
+    assert "I don't carry other people's conversations" in b
+
+
 class _FakeAbsorptionConn:
     """Fake conn for crystallize_wisdom_absorption: user resolution result is
     injectable; any INSERT is recorded so tests can assert it never ran."""
