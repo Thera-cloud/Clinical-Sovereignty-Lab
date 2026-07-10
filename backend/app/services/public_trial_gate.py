@@ -44,6 +44,41 @@ try:
 except ValueError:
     MAX_TRIAL_TURNS_PER_DAY = 2000
 
+# 2026-07 bot-abuse hardening: a per-DAY-only global cap lets a scripted burst
+# drain the entire shared inference budget in minutes, denying every real
+# trial visitor for the rest of the day with no early warning. A per-HOUR
+# ceiling stacked on top of the per-day one means the worst a burst can do is
+# exhaust one hour's slice before check_turn_abuse_caps starts rejecting it —
+# and hitting THIS cap is itself the "attack in progress" signal that fires
+# the admin alert in _alert_global_cap_depleted (a normal confused user never
+# drives shared usage this concentrated). Default is ~1/3 of the daily
+# budget: high enough that one legitimately busy hour is never mistaken for
+# an attack, low enough that a script trying to blow the whole day in one
+# burst gets stopped inside the first hour instead of inside the day.
+try:
+    MAX_TRIAL_TURNS_PER_HOUR: int = int(
+        os.getenv("MAX_TRIAL_TURNS_PER_HOUR", str(max(50, MAX_TRIAL_TURNS_PER_DAY // 3)))
+    )
+except ValueError:
+    MAX_TRIAL_TURNS_PER_HOUR = max(50, MAX_TRIAL_TURNS_PER_DAY // 3)
+
+# Cloudflare Turnstile gate on public_trial_start/public_trial_chat (2026-07
+# bot-abuse hardening). Defaults ON — this is a fail-closed surface like
+# everything else in this module (see module docstring); if
+# TURNSTILE_SECRET_KEY isn't configured, verify_turnstile() always returns
+# False and the trial simply never starts rather than silently allowing
+# unmetered scripted inference. Tests that don't specifically exercise
+# Turnstile behavior should monkeypatch this flag to False rather than the
+# module being given a dev bypass.
+PUBLIC_TRIAL_TURNSTILE_ENABLED: bool = os.getenv("PUBLIC_TRIAL_TURNSTILE_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+
+# Sliding-window TTL (seconds) for the "this device solved Turnstile" flag.
+# Refreshed on every verified public_trial_chat turn so an engaged,
+# real-time conversation is never re-challenged mid-session; a device that
+# goes fully idle for over an hour re-verifies on its next turn instead of
+# skipping the check indefinitely.
+_TURNSTILE_VERIFIED_TTL_S = 3600
+
 _REDIS_URL_SNAPSHOT = os.getenv("REDIS_URL", "")
 _REDIS_PW_SNAPSHOT = os.getenv("REDIS_PASSWORD", "")
 
@@ -406,12 +441,69 @@ async def check_registration_ip_cap(ip: str) -> bool:
     return allowed
 
 
+# ---------------------------------------------------------------------------
+# Cloudflare Turnstile (2026-07 bot-abuse hardening) -- gates public_trial_start
+# and, via the sliding-verified-window flag below, public_trial_chat.
+# ---------------------------------------------------------------------------
+
+async def verify_turnstile_token(token: str, ip: str) -> bool:
+    """Thin wrapper so this module has one call site to monkeypatch/disable
+    in tests, and so PUBLIC_TRIAL_TURNSTILE_ENABLED is the single source of
+    truth for whether the check runs at all. Fails closed (see
+    app.services.turnstile.verify_turnstile docstring) when the flag is on;
+    always True when the flag is off (e.g. local dev without
+    TURNSTILE_SECRET_KEY configured, or a test that isn't exercising this
+    behavior and has monkeypatched the flag)."""
+    if not PUBLIC_TRIAL_TURNSTILE_ENABLED:
+        return True
+    from app.services.turnstile import verify_turnstile
+    return await verify_turnstile(token, ip)
+
+
+async def _mark_device_turnstile_verified(device_uuid_hash: str) -> None:
+    """Opens the sliding verification window for this device after it solves
+    a challenge at public_trial_start. Never raises -- a Redis failure here
+    means the very next public_trial_chat turn will find the device
+    unverified and re-challenge, which is the correct fail-closed behavior,
+    not an exception that should propagate into the WS handler."""
+    from app.services.trial_signup_redis_keys import public_trial_verified_key
+    r = await _get_redis()
+    if r is None:
+        return
+    try:
+        await r.set(public_trial_verified_key(device_uuid_hash), "1", ex=_TURNSTILE_VERIFIED_TTL_S)
+    except Exception as e:
+        logger.warning("public_trial_gate: failed to mark device turnstile-verified: %s", e)
+
+
+async def _check_and_refresh_turnstile_verified(device_uuid_hash: str) -> bool:
+    """True iff this device solved Turnstile within the last
+    _TURNSTILE_VERIFIED_TTL_S seconds. `EXPIRE` doubles as an atomic
+    check-and-refresh in one round trip: it only resets the TTL (and returns
+    truthy) when the key still exists, so an actively-chatting real visitor
+    gets a genuine sliding window without ever needing a second challenge,
+    while a device that never solved one (key never existed) always reads
+    as unverified. Fails closed on any Redis error."""
+    if not PUBLIC_TRIAL_TURNSTILE_ENABLED:
+        return True
+    from app.services.trial_signup_redis_keys import public_trial_verified_key
+    r = await _get_redis()
+    if r is None:
+        return False
+    try:
+        return bool(await r.expire(public_trial_verified_key(device_uuid_hash), _TURNSTILE_VERIFIED_TTL_S))
+    except Exception as e:
+        logger.warning("public_trial_gate: turnstile verified-check failed, failing closed: %s", e)
+        return False
+
+
 async def check_turn_abuse_caps(ip: str, fp_hash: str) -> "AbuseCheckResult":
-    """Per-IP daily 40, global daily MAX_TRIAL_TURNS_PER_DAY, per-fp
-    hourly cap (== TRIAL_TURN_LIMIT, see _FP_HOURLY_CAP) + 1 in-flight. All
-    fail closed. Returns an AbuseCheckResult; caller must release the
-    in-flight lock (via `release_turn_inflight`) after the turn completes
-    (success, error, or refund) if `inflight_acquired` is True.
+    """Per-IP daily 40, global daily MAX_TRIAL_TURNS_PER_DAY, global HOURLY
+    MAX_TRIAL_TURNS_PER_HOUR, per-fp hourly cap (== TRIAL_TURN_LIMIT, see
+    _FP_HOURLY_CAP) + 1 in-flight. All fail closed. Returns an
+    AbuseCheckResult; caller must release the in-flight lock (via
+    `release_turn_inflight`) after the turn completes (success, error, or
+    refund) if `inflight_acquired` is True.
 
     IMPORTANT (2026-07 trial audit): callers MUST run the crisis pre-check
     (check_crisis) before calling this function and let a crisis turn bypass
@@ -419,6 +511,7 @@ async def check_turn_abuse_caps(ip: str, fp_hash: str) -> "AbuseCheckResult":
     rate-limit wall. See prepare_public_trial_turn for the enforced order."""
     from app.services.trial_signup_redis_keys import (
         public_trial_ip_daily_key, public_trial_global_daily_key, public_trial_fp_hourly_key,
+        public_trial_global_hourly_key,
     )
 
     allowed, retry_after = await _incr_with_cap(public_trial_ip_daily_key(_ip_hash(ip)), _IP_DAILY_CAP, 86400)
@@ -426,7 +519,18 @@ async def check_turn_abuse_caps(ip: str, fp_hash: str) -> "AbuseCheckResult":
         return AbuseCheckResult(False, "ip_daily_cap", False, retry_after)
     allowed, retry_after = await _incr_with_cap(public_trial_global_daily_key(), MAX_TRIAL_TURNS_PER_DAY, 86400)
     if not allowed:
+        await _alert_global_cap_depleted("global_daily_cap")
         return AbuseCheckResult(False, "global_daily_cap", False, retry_after)
+    # Per-hour ceiling on top of the per-day one: caps how much of today's
+    # shared budget a single burst can consume, and hitting it is itself the
+    # "this is unusually fast" signal -- a normal trickle of real visitors
+    # essentially never concentrates MAX_TRIAL_TURNS_PER_HOUR turns into one
+    # hour, so this branch firing means either a genuine traffic spike or an
+    # automated flood, and _alert_global_cap_depleted tells a human either way.
+    allowed, retry_after = await _incr_with_cap(public_trial_global_hourly_key(), MAX_TRIAL_TURNS_PER_HOUR, 3600)
+    if not allowed:
+        await _alert_global_cap_depleted("global_hourly_cap")
+        return AbuseCheckResult(False, "global_hourly_cap", False, retry_after)
     allowed, retry_after = await _incr_with_cap(public_trial_fp_hourly_key(fp_hash), _FP_HOURLY_CAP, 3600)
     if not allowed:
         return AbuseCheckResult(False, "fp_hourly_cap", False, retry_after)
@@ -437,6 +541,46 @@ async def check_turn_abuse_caps(ip: str, fp_hash: str) -> "AbuseCheckResult":
 
 async def release_turn_inflight(fp_hash: str) -> None:
     await _release_inflight(fp_hash)
+
+
+_GLOBAL_CAP_ALERT_DEDUP_TTL_S = 1800  # at most one admin alert per cap kind per 30 min
+
+
+async def _alert_global_cap_depleted(cap_kind: str) -> None:
+    """Fires at most once per _GLOBAL_CAP_ALERT_DEDUP_TTL_S window per
+    cap_kind (SETNX dedup -- a flood of rejected requests against an
+    exhausted cap must not become a flood of emails). Surfaces the "shared
+    trial budget depleted unusually fast" condition to an admin in real
+    time instead of it only ever being noticed via a confused user's support
+    message the next day. Never raises -- alerting must not be able to break
+    the abuse-cap check path it's called from."""
+    logger.warning("public_trial_gate: global cap depleted (%s) -- possible abuse burst", cap_kind)
+    from app.services.trial_signup_redis_keys import public_trial_alert_dedup_key
+    r = await _get_redis()
+    if r is None:
+        return
+    try:
+        fired = await r.set(public_trial_alert_dedup_key(cap_kind), "1", nx=True, ex=_GLOBAL_CAP_ALERT_DEDUP_TTL_S)
+        if not fired:
+            return
+    except Exception as e:
+        logger.warning("public_trial_gate: alert dedup check failed: %s", e)
+        return
+    try:
+        from app.services.notifications_service import EmailService
+        await EmailService().send_crisis_alert(
+            None,
+            "Public Trial Funnel",
+            f"TRIAL_{cap_kind.upper()}_EXHAUSTED",
+            (
+                f"The public trial's {cap_kind.replace('_', ' ')} budget was just exhausted. "
+                "If this is earlier in the day/hour than usual, it may indicate a scripted "
+                "abuse burst rather than organic traffic -- check public_trial_flagged_turns "
+                "and Cloudflare edge logs for a concentrated IP/UA pattern."
+            ),
+        )
+    except Exception as e:
+        logger.warning("public_trial_gate: failed to send global cap depletion alert: %s", e)
 
 
 @dataclass
@@ -472,7 +616,8 @@ def _rate_limit_message(abuse: "AbuseCheckResult") -> str:
             "and send that again."
         )
     else:
-        # ip_daily_cap / global_daily_cap: genuinely a shared-capacity condition.
+        # ip_daily_cap / global_daily_cap / global_hourly_cap: genuinely a
+        # shared-capacity condition.
         base = TRIAL_CAPACITY_MESSAGE
     return base + CRISIS_RESOURCE_TEXT
 
@@ -763,15 +908,29 @@ def _sendgrid_trial_tracking_settings() -> Dict[str, Any]:
 
 async def prepare_public_trial_start(data: Dict[str, Any], ip: str, ua: str) -> Dict[str, Any]:
     """Handles `public_trial_start`. Returns the WS payload to send back
-    (`trial_state` or a generic `error`)."""
+    (`trial_state`, `turnstile_required`, or a generic `error`).
+
+    2026-07 bot-abuse hardening: requires and verifies a Cloudflare Turnstile
+    token before any DB row is created. This is the single highest-leverage
+    control in this module -- a scripted client can rotate IPs and
+    device_fingerprints freely, but it cannot cheaply solve a Turnstile
+    challenge at scale, which is what turns "trivially scriptable" into
+    "not worth it." Fails closed: no token, or a token that fails
+    verification, returns `turnstile_required` (never a silent bypass) and
+    a NEW device_fingerprint gets a fresh challenge every time it retries."""
     if not PUBLIC_TRIAL_ENABLED:
         return {"type": "error", "message": TRIAL_GENERIC_ERROR}
     client_uuid = validate_device_fingerprint(data)
     if not client_uuid:
         return {"type": "error", "message": TRIAL_GENERIC_ERROR}
     try:
-        fp_hash = compute_fp_hash(client_uuid, ip, ua)
         device_uuid_hash = compute_device_uuid_hash(client_uuid)
+        turnstile_token = str(data.get("turnstile_token") or "").strip()
+        if not await verify_turnstile_token(turnstile_token, ip):
+            return {"type": "turnstile_required"}
+        await _mark_device_turnstile_verified(device_uuid_hash)
+
+        fp_hash = compute_fp_hash(client_uuid, ip, ua)
         state = await db_start_trial(device_uuid_hash, fp_hash)
         return {
             "type": "trial_state",
@@ -831,6 +990,16 @@ async def prepare_public_trial_turn(data: Dict[str, Any], ip: str, ua: str) -> T
             "message": TRIAL_SIGNUP_REQUIRED_MESSAGE,
             "signup_url": _signup_url(client_uuid),
         }, device_uuid_hash=device_uuid_hash, fp_hash=fp_hash)
+
+    if not is_crisis and not await _check_and_refresh_turnstile_verified(device_uuid_hash):
+        # Device never solved Turnstile at public_trial_start (or its
+        # sliding window expired from over an hour of inactivity). Fail
+        # closed rather than lazily creating/continuing a trial session
+        # here -- otherwise public_trial_chat would be a bypass around the
+        # public_trial_start challenge for any client that skips straight
+        # to sending a chat message.
+        return TrialTurnContext(False, {"type": "turnstile_required"},
+                                 device_uuid_hash=device_uuid_hash, fp_hash=fp_hash)
 
     if not is_crisis:
         abuse = await check_turn_abuse_caps(ip, fp_hash)

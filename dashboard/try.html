@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://api.sovereignsanctuary.net https://api.sovereignsanctuary.net https://challenges.cloudflare.com; img-src 'self' data: https://challenges.cloudflare.com;">
 <link rel="canonical" href="https://app.sovereignsanctuary.net/try.html">
 <title>Talk to Little Nate — Free Trial</title>
 <style>
@@ -326,6 +327,17 @@ h1 {
   h1 { font-size: 24px; }
   .chat-window { max-height: 46vh; }
 }
+
+/* Cloudflare Turnstile — appearance:'interaction-only' keeps this invisible
+   for the overwhelming majority of real visitors; it only renders a small
+   challenge box here on the rare occasion Cloudflare's risk engine wants
+   interaction. */
+#turnstileWrap {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  z-index: 9999;
+}
 </style>
 </head>
 <body>
@@ -337,6 +349,10 @@ h1 {
     <strong>Little Nate is an AI companion</strong> — not a crisis service or medical provider.
     If you're in crisis, call or text <strong>988</strong> (Suicide &amp; Crisis Lifeline) or call <strong>911</strong>.
     For ages 13 and up.
+    <div class="consent-row" id="startConsentRow" style="margin-top:10px;margin-bottom:0;justify-content:center;">
+      <input type="checkbox" id="startConsent" />
+      <label for="startConsent">I've read and understand the above</label>
+    </div>
   </div>
 
   <div class="crisis-banner" id="crisisBanner">
@@ -383,8 +399,16 @@ h1 {
   </div>
 </div>
 
+<div id="turnstileWrap"></div>
+
 <div id="ss-copyright" style="text-align:center;padding:12px 0 8px;font-size:11px;color:#8B7355;font-family:'DM Sans',sans-serif;letter-spacing:0.3px;opacity:0.7;border-top:1px solid rgba(201,169,98,0.08);margin-top:8px;">© 2025–2026 Sovereign Sanctuary. All rights reserved.</div>
 
+<script>
+window.onTurnstileLoad = function() {
+  if (typeof window.__tryInitTurnstile === 'function') window.__tryInitTurnstile();
+};
+</script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad" async defer></script>
 <script>
 // Public trial page — client gateway only (never promote command.* for this URL).
 var PUBLIC_TRY_PAGE_URL = 'https://app.sovereignsanctuary.net/try.html';
@@ -405,6 +429,124 @@ var trialDeviceId = getTrialDeviceId();
 // nothing during a deploy-triggered WS reconnect.
 var pendingChatSend = null; // { text, starterKey }
 var pendingEmailCapture = null; // { email }
+var startHandshakeSent = false; // true once public_trial_start has been sent on the current socket
+
+// 2026-07 bot-abuse hardening: required checkbox speed bump. Doesn't touch the
+// disclaimer's legal copy (age/crisis-service language) at all -- it just
+// requires an explicit tick acknowledging it before public_trial_start is
+// ever sent. Stacks with Turnstile: a scripted client now has to both solve
+// an invisible challenge AND simulate a checkbox interaction before it can
+// draw a single trial turn.
+var startConsentGiven = false;
+var startConsentEl = document.getElementById('startConsent');
+if (startConsentEl) {
+  startConsentEl.addEventListener('change', function() {
+    if (startConsentEl.checked) {
+      startConsentGiven = true;
+      startConsentEl.disabled = true; // one-shot -- no un-checking mid-session
+      trySendStartAndPending();
+    }
+  });
+}
+
+// --- Cloudflare Turnstile (2026-07 bot-abuse hardening) ---
+// Same site key as signup.html (public; pairs with server TURNSTILE_SECRET_KEY,
+// reusable across pages on this domain). appearance:'interaction-only' +
+// execution:'execute' means the widget renders nothing for the overwhelming
+// majority of real visitors and only becomes visible if Cloudflare's risk
+// engine genuinely wants interactive proof -- a bot rotating IPs can't cheaply
+// solve that at scale, but a real human on try.html almost never notices it.
+var TURNSTILE_SITE_KEY = '0x4AAAAAADyMnpRrA8SSCcIS';
+var turnstileWidgetId = null;
+var turnstileToken = '';
+var turnstileExecuting = false;
+var turnstileRetryTimer = null;
+var turnstileRequiredNoticeShown = false;
+
+// Ad-blockers/privacy extensions occasionally block challenges.cloudflare.com
+// outright. Without this, a blocked script means the widget never renders, no
+// token is ever produced, and the trial silently never starts. Give the user
+// an actionable message instead of an indefinite blank hang.
+var turnstileLoadTimeout = setTimeout(function() {
+  if (turnstileWidgetId === null) {
+    appendMessage("We couldn't load our security check — if you're using an ad-blocker or privacy extension, please allow challenges.cloudflare.com, or try a different browser.", 'system');
+  }
+}, 8000);
+
+window.__tryInitTurnstile = function() {
+  if (typeof turnstile === 'undefined') return;
+  if (turnstileWidgetId !== null) return;
+  clearTimeout(turnstileLoadTimeout);
+  turnstileWidgetId = turnstile.render('#turnstileWrap', {
+    sitekey: TURNSTILE_SITE_KEY,
+    theme: 'dark',
+    appearance: 'interaction-only',
+    execution: 'execute',
+    callback: function(token) {
+      turnstileToken = token;
+      turnstileExecuting = false;
+      trySendStartAndPending();
+    },
+    'expired-callback': function() {
+      turnstileToken = '';
+    },
+    'error-callback': function() {
+      turnstileExecuting = false;
+      if (turnstileRetryTimer) clearTimeout(turnstileRetryTimer);
+      turnstileRetryTimer = setTimeout(requestTurnstileToken, 3000);
+    }
+  });
+  requestTurnstileToken();
+};
+if (typeof turnstile !== 'undefined') window.__tryInitTurnstile();
+
+function requestTurnstileToken() {
+  if (turnstileWidgetId === null || turnstileExecuting || turnstileToken) return;
+  turnstileExecuting = true;
+  try {
+    turnstile.execute('#turnstileWrap');
+  } catch (e) {
+    turnstileExecuting = false;
+  }
+}
+
+// public_trial_start requires a Turnstile token (bot-abuse hardening). Sends
+// immediately if a token is already cached; otherwise kicks off
+// requestTurnstileToken() and the widget's callback re-invokes this once a
+// token lands. Also flushes anything queued while we were waiting.
+function trySendStartAndPending() {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  if (startHandshakeSent) return;
+  if (!startConsentGiven) return; // waiting on the disclaimer checkbox
+  if (!turnstileToken) {
+    requestTurnstileToken();
+    return;
+  }
+  var tok = turnstileToken;
+  turnstileToken = ''; // one-shot -- server marks the device verified from here
+  startHandshakeSent = true;
+  socket.send(JSON.stringify({ type: 'public_trial_start', device_fingerprint: trialDeviceId, turnstile_token: tok }));
+  if (pendingChatSend) {
+    var pc = pendingChatSend;
+    pendingChatSend = null;
+    socket.send(JSON.stringify({
+      type: 'public_trial_chat',
+      device_fingerprint: trialDeviceId,
+      text: pc.text,
+      starter_key: pc.starterKey || undefined,
+    }));
+  }
+  if (pendingEmailCapture) {
+    var pe = pendingEmailCapture;
+    pendingEmailCapture = null;
+    socket.send(JSON.stringify({
+      type: 'public_trial_capture_email',
+      device_fingerprint: trialDeviceId,
+      email: pe.email,
+      consent: true,
+    }));
+  }
+}
 
 function getTrialDeviceId() {
   var KEY = 'ss_trial_device_id';
@@ -495,27 +637,8 @@ function connectWS() {
 
   socket.onopen = function() {
     wsRetry = 0;
-    socket.send(JSON.stringify({ type: 'public_trial_start', device_fingerprint: trialDeviceId }));
-    if (pendingChatSend) {
-      var pc = pendingChatSend;
-      pendingChatSend = null;
-      socket.send(JSON.stringify({
-        type: 'public_trial_chat',
-        device_fingerprint: trialDeviceId,
-        text: pc.text,
-        starter_key: pc.starterKey || undefined,
-      }));
-    }
-    if (pendingEmailCapture) {
-      var pe = pendingEmailCapture;
-      pendingEmailCapture = null;
-      socket.send(JSON.stringify({
-        type: 'public_trial_capture_email',
-        device_fingerprint: trialDeviceId,
-        email: pe.email,
-        consent: true,
-      }));
-    }
+    startHandshakeSent = false;
+    trySendStartAndPending();
   };
 
   socket.onmessage = function(evt) {
@@ -552,6 +675,7 @@ function scheduleReconnect() {
 function handleServerMessage(data) {
   switch (data.type) {
     case 'trial_state':
+      turnstileRequiredNoticeShown = false;
       updateTurnsCounter(data.turns_used || 0, data.turns_limit);
       if ((data.turns_used || 0) >= (data.turns_limit || TURNS_LIMIT)) {
         dismissNudge();
@@ -588,6 +712,30 @@ function handleServerMessage(data) {
       document.getElementById('checkedState').classList.add('show');
       break;
 
+    case 'turnstile_required':
+      // Rare: Cloudflare's risk engine wanted interactive proof, the one-shot
+      // token expired before the server processed it, or (for an in-progress
+      // chat) the device's verified window lapsed after a long idle gap.
+      // Fetch a fresh token and re-run the start handshake automatically --
+      // invisible to the user unless Turnstile itself renders a challenge. If
+      // this was a rejected chat turn, restore the text so a resend is one
+      // click away (same pattern as the fp_hourly_cap rate-limit case below).
+      turnstileToken = '';
+      startHandshakeSent = false;
+      requestTurnstileToken();
+      if (lastSentText) {
+        var inputElTs = document.getElementById('chatInput');
+        if (inputElTs && !inputElTs.value) {
+          inputElTs.value = lastSentText;
+        }
+        setInputEnabled(!gated);
+      }
+      if (!turnstileRequiredNoticeShown) {
+        turnstileRequiredNoticeShown = true;
+        appendMessage('One moment — verifying your connection...', 'system');
+      }
+      break;
+
     case 'error':
       appendMessage(data.message || 'Something went wrong. Please try again.', 'error');
       setInputEnabled(!gated);
@@ -611,10 +759,12 @@ var lastSentText = '';
 
 function sendTrialMessage(text, starterKey) {
   if (!text || gated) return true;
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    // Don't drop it -- queue for delivery on reconnect and say so. The bubble
-    // renders now (optimistic) so the user sees their words landed somewhere;
-    // scheduleReconnect()/onopen guarantees the actual send follows shortly.
+  if (!socket || socket.readyState !== WebSocket.OPEN || !startHandshakeSent) {
+    // Don't drop it -- queue for delivery once the socket (and the Turnstile
+    // start handshake) is ready, and say so. The bubble renders now
+    // (optimistic) so the user sees their words landed somewhere;
+    // trySendStartAndPending()/scheduleReconnect() guarantees the actual send
+    // follows shortly.
     pendingChatSend = { text: text, starterKey: starterKey };
     hideStarters();
     lastSentText = text;
@@ -661,7 +811,7 @@ function captureEmail() {
     consent.focus();
     return;
   }
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
+  if (!socket || socket.readyState !== WebSocket.OPEN || !startHandshakeSent) {
     if (gated) {
       btn.disabled = false;
       btn.textContent = 'Send me the link';
@@ -671,7 +821,11 @@ function captureEmail() {
     pendingEmailCapture = { email: email };
     btn.disabled = true;
     btn.textContent = 'Reconnecting... will send automatically';
-    scheduleReconnect();
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      trySendStartAndPending();
+    } else {
+      scheduleReconnect();
+    }
     return;
   }
   btn.disabled = true;

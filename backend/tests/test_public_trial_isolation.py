@@ -36,7 +36,13 @@ class _FakeRedis:
         return self.counters[key]
 
     async def expire(self, key, ttl):
-        return True
+        # Real Redis: EXPIRE returns 0/False on a key that doesn't exist.
+        # _check_and_refresh_turnstile_verified relies on exactly this to
+        # distinguish "never solved Turnstile" from "solved it, sliding
+        # window still open" -- so this fake must not unconditionally
+        # return True the way it used to before Turnstile verification
+        # existed.
+        return key in self.locks
 
     async def set(self, key, value, nx=False, ex=None):
         if nx and key in self.locks:
@@ -46,6 +52,9 @@ class _FakeRedis:
 
     async def delete(self, key):
         self.locks.discard(key)
+
+    async def exists(self, key):
+        return 1 if key in self.locks else 0
 
 
 class _FakeAcquireCtx:
@@ -300,6 +309,9 @@ async def test_prepare_public_trial_turn_happy_path_increments_turn(monkeypatch)
     pool = _FakeTrialPool()
     monkeypatch.setattr(ptg, "_DB_POOL", pool)
     monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
+    # This test exercises the turn-increment path, not Turnstile -- disable
+    # per module docstring guidance (public_trial_gate.py PUBLIC_TRIAL_TURNSTILE_ENABLED).
+    monkeypatch.setattr(ptg, "PUBLIC_TRIAL_TURNSTILE_ENABLED", False)
 
     async def _no_crisis(text):
         return []
@@ -374,6 +386,8 @@ async def test_prepare_public_trial_turn_rejects_abuse_capped_request(monkeypatc
     pool = _FakeTrialPool()
     monkeypatch.setattr(ptg, "_DB_POOL", pool)
     monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
+    # This test exercises the abuse-cap rejection path, not Turnstile.
+    monkeypatch.setattr(ptg, "PUBLIC_TRIAL_TURNSTILE_ENABLED", False)
 
     async def _no_crisis(text):
         return []
@@ -402,6 +416,9 @@ async def test_prepare_public_trial_start_creates_row_and_reports_state(monkeypa
     pool = _FakeTrialPool()
     monkeypatch.setattr(ptg, "_DB_POOL", pool)
     monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
+    # This test exercises DB row creation, not Turnstile verification --
+    # see test_public_trial_turnstile.py for dedicated Turnstile coverage.
+    monkeypatch.setattr(ptg, "PUBLIC_TRIAL_TURNSTILE_ENABLED", False)
 
     out = await ptg.prepare_public_trial_start({"device_fingerprint": "uuid-start"}, "1.2.3.4", "ua")
     assert out["type"] == "trial_state"

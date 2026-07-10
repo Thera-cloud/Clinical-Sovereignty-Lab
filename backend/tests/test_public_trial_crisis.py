@@ -638,6 +638,11 @@ async def test_noncrisis_fp_hourly_cap_rejection_still_carries_988(monkeypatch):
     pool = _FakeTrialPool()
     monkeypatch.setattr(ptg, "_DB_POOL", pool)
     monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
+    # Non-crisis path reaches the Turnstile verification check (see ordering
+    # in prepare_public_trial_turn) before the abuse-cap check this test is
+    # actually exercising -- disable it so the test doesn't depend on a live
+    # Redis instance for the device-verified lookup.
+    monkeypatch.setattr(ptg, "PUBLIC_TRIAL_TURNSTILE_ENABLED", False)
 
     async def _no_crisis(text):
         return []
@@ -672,6 +677,8 @@ async def test_fp_inflight_rejection_message_distinct_from_capacity(monkeypatch)
     pool = _FakeTrialPool()
     monkeypatch.setattr(ptg, "_DB_POOL", pool)
     monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
+    # Same Turnstile-ordering reason as test_noncrisis_fp_hourly_cap_rejection_still_carries_988.
+    monkeypatch.setattr(ptg, "PUBLIC_TRIAL_TURNSTILE_ENABLED", False)
 
     async def _no_crisis(text):
         return []
