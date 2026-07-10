@@ -2070,6 +2070,25 @@ async def lifespan(app: FastAPI):
         except Exception as asd_err:
             print(f"   ⚠️  AgentStatusDigest init failed: {asd_err}")
 
+    # ── Public Trial Daily Digest — try.html funnel (08:00 ET) ──
+    _public_trial_digest = None
+    if _is_clone:
+        print("   ⏭️  PublicTrialDigest skipped (clone mode)")
+    else:
+        try:
+            from app.services.public_trial_digest import PublicTrialDigest
+            _ptd_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+            _public_trial_digest = PublicTrialDigest(
+                db_pool=db_pool,
+                notification_system=_ptd_notify,
+                redis_url=_REDIS_URL_EARLY,
+            )
+            await _public_trial_digest.start()
+            app.state.public_trial_digest = _public_trial_digest
+            print("   ✅ PublicTrialDigest started (daily 12:00 UTC / 08:00 ET)")
+        except Exception as ptd_err:
+            print(f"   ⚠️  PublicTrialDigest init failed: {ptd_err}")
+
     # ── SkyEye Tab Auditor — 3x daily endpoint trust scorecard ──
     _tab_auditor = None
     try:
@@ -3080,6 +3099,7 @@ async def lifespan(app: FastAPI):
         ("crystal_phi_auditor", _crystal_phi_auditor is not None),
         ("session_recovery_agent", _session_recovery is not None),
         ("agent_status_digest", _agent_digest is not None),
+        ("public_trial_digest", _public_trial_digest is not None),
         ("skyeye_tab_auditor", _tab_auditor is not None),
         ("command_tab_auditor", _cmd_auditor is not None),
         ("the_eye_auditor", _eye_auditor is not None),
@@ -3375,6 +3395,11 @@ async def lifespan(app: FastAPI):
     if _asd:
         await _asd.stop()
         print("   ✅ AgentStatusDigest stopped")
+
+    _ptd = getattr(app.state, "public_trial_digest", None)
+    if _ptd:
+        await _ptd.stop()
+        print("   ✅ PublicTrialDigest stopped")
 
     # Stop SkyEye Tab Auditor
     _sta = getattr(app.state, "skyeye_tab_auditor", None)

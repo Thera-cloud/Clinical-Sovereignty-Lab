@@ -4240,6 +4240,21 @@ async def trigger_agent_digest(request: Request):
     return {"status": "sent", "timestamp": now.isoformat()}
 
 
+@router.post("/public-trial-digest/send")
+async def trigger_public_trial_digest(request: Request):
+    """Trigger an immediate Public Trial Daily Digest email (try.html funnel)."""
+    digest = getattr(request.app.state, "public_trial_digest", None)
+    if not digest:
+        raise HTTPException(503, "PublicTrialDigest not running")
+    now = datetime.now(timezone.utc)
+    result = await digest.build_and_send(now)
+    return {
+        "status": "sent" if result.get("sent") else "failed",
+        "subject": result.get("subject"),
+        "timestamp": now.isoformat(),
+    }
+
+
 @router.post("/skyeye-audit/send")
 async def trigger_skyeye_audit(request: Request):
     """Trigger an immediate SkyEye Tab Trust Scorecard email."""
