@@ -31954,18 +31954,35 @@ async def main():
         # closed for graceful client disconnects, but not for process exit.
         if db_pool and _chat_session_turns:
             _flush_uids = list(_chat_session_turns.keys())
+            # LOAD-TEST-BASELINE — bounded best-effort: a hung DB call here
+            # must never turn the safety net into its own failure mode (SIGKILL
+            # after Docker's default 10s grace window loses the turns anyway
+            # AND delays the deploy). 6s total budget, <=2s per uid, leaves
+            # >=4s of the 10s window for db_pool.close() + handler overhead.
+            _flush_deadline = asyncio.get_running_loop().time() + 6.0
+            _flushed = 0
             for _uid in _flush_uids:
                 _turns = _chat_session_turns.pop(_uid, None)
                 if not _turns:
                     continue
+                _remaining = _flush_deadline - asyncio.get_running_loop().time()
+                if _remaining <= 0:
+                    print(f"[*] Shutdown flush budget exhausted, {len(_flush_uids) - _flushed} session(s) unflushed")
+                    break
                 try:
-                    await crystallize_session_summary(
-                        db_pool, _uid, _turns, origin_surface="bridge_chat",
-                        session_id=cortex.active_sessions.get(_uid, ""),
+                    await asyncio.wait_for(
+                        crystallize_session_summary(
+                            db_pool, _uid, _turns, origin_surface="bridge_chat",
+                            session_id=cortex.active_sessions.get(_uid, ""),
+                        ),
+                        timeout=min(_remaining, 2.0),
                     )
+                    _flushed += 1
+                except asyncio.TimeoutError:
+                    print(f"[*] Shutdown flush timed out for {_uid}, skipping")
                 except Exception as _flush_err:
                     print(f"[*] Shutdown flush failed for {_uid}: {_flush_err}")
-            print(f"[*] Flushed {len(_flush_uids)} pending session(s) before shutdown")
+            print(f"[*] Flushed {_flushed}/{len(_flush_uids)} pending session(s) before shutdown")
         if db_pool:
             await db_pool.close()
             print("[*] Database pool closed")

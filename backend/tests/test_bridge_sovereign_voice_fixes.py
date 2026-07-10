@@ -21,6 +21,16 @@ def _bridge_source() -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _crystal_bridge_source() -> str:
+    path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "app"
+        / "websocket"
+        / "crystal_recall_bridge.py"
+    )
+    return path.read_text(encoding="utf-8")
+
+
 def _extract_function(source: str, name: str) -> str:
     m = re.search(
         rf"^def {re.escape(name)}\(.*?(?=^(?:def |async def )|\Z)",
@@ -105,20 +115,43 @@ class _FakeWebSocket:
 
 
 async def _minimal_graceful_shutdown_flush(chat_session_turns: dict, active_sessions: dict,
-                                            crystallize_calls: list, db_pool_present: bool = True):
+                                            crystallize_calls: list, db_pool_present: bool = True,
+                                            crystallize_fn=None, total_budget: float = 6.0,
+                                            per_uid_timeout: float = 2.0):
     """Mirrors the SIGTERM/SIGINT shutdown-flush added to _graceful_shutdown()
     in bridge_server.py: on process exit, any uid with turns still pending in
     _chat_session_turns (hasn't hit the 5-turn crystallization interval) must
     be flushed exactly once before db_pool closes — otherwise a deploy
     restart silently drops 1-4 turns with zero flush, the same class of loss
-    unregister()'s last-socket-drop fix closed for graceful disconnects."""
+    unregister()'s last-socket-drop fix closed for graceful disconnects.
+
+    Bounded best-effort: crystallize_fn (default: instant append, standing
+    in for crystallize_session_summary's DB call) is awaited under a
+    per-uid timeout AND an overall total_budget. A hang must not turn the
+    safety net into its own failure mode — Docker SIGKILLs after its
+    default 10s grace window regardless, losing the turns anyway and
+    delaying the deploy on top of it."""
     if not db_pool_present or not chat_session_turns:
         return
+    if crystallize_fn is None:
+        async def crystallize_fn(uid, turns, sid):
+            crystallize_calls.append((uid, turns, sid))
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + total_budget
     for uid in list(chat_session_turns.keys()):
         turns = chat_session_turns.pop(uid, None)
         if not turns:
             continue
-        crystallize_calls.append((uid, turns, active_sessions.get(uid, "")))
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            break
+        try:
+            await asyncio.wait_for(
+                crystallize_fn(uid, turns, active_sessions.get(uid, "")),
+                timeout=min(remaining, per_uid_timeout),
+            )
+        except asyncio.TimeoutError:
+            pass
 
 
 # --- token tier ---
@@ -378,6 +411,126 @@ def test_graceful_shutdown_source_actually_flushes_pending_turns():
     body = m.group(0)
     assert "_chat_session_turns.pop(" in body
     assert "crystallize_session_summary(" in body
-    assert "db_pool.close()" in body
+    # The literal "db_pool.close()" also appears inside an explanatory
+    # comment above the flush loop (budget rationale) — match the actual
+    # awaited call, not the comment, or the ordering check below is
+    # comparing against the wrong occurrence.
+    assert "await db_pool.close()" in body
     # Flush must happen before the pool closes, not after.
-    assert body.index("_chat_session_turns.pop(") < body.index("db_pool.close()")
+    assert body.index("_chat_session_turns.pop(") < body.index("await db_pool.close()")
+    # Bounded best-effort: the flush must not be able to hang the shutdown.
+    # A per-call timeout AND an overall deadline are both required — per-call
+    # alone doesn't bound N pending sessions each taking their full timeout.
+    assert "asyncio.wait_for(" in body
+    assert "except asyncio.TimeoutError:" in body
+    assert re.search(r"_flush_deadline\s*=\s*asyncio\.get_running_loop\(\)\.time\(\)\s*\+", body), (
+        "shutdown flush must compute an overall deadline, not just a "
+        "per-call timeout, or a large pending-session count can still "
+        "blow past Docker's SIGTERM->SIGKILL grace window"
+    )
+
+
+@pytest.mark.asyncio
+async def test_shutdown_flush_bounded_timeout_skips_hung_uid_and_continues():
+    """One uid's crystallize call hangs (a stalled DB call during shutdown,
+    e.g. a saturated pgbouncer). The per-uid timeout must cut it off well
+    short of the simulated hang, and the OTHER pending uid must still get
+    flushed — the safety net must not become its own failure mode by
+    blocking shutdown until Docker's SIGKILL."""
+    chat_session_turns = {
+        "CLIENT_HUNG": [{"user_text": "stuck", "ai_text": "..."}],
+        "CLIENT_OK": [{"user_text": "fine", "ai_text": "good"}],
+    }
+    active_sessions = {"CLIENT_HUNG": "SES_HUNG", "CLIENT_OK": "SES_OK"}
+    crystallize_calls: list = []
+
+    async def _crystallize_fn(uid, turns, sid):
+        if uid == "CLIENT_HUNG":
+            await asyncio.sleep(30)  # far longer than any reasonable timeout
+        crystallize_calls.append((uid, turns, sid))
+
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    await _minimal_graceful_shutdown_flush(
+        chat_session_turns, active_sessions, crystallize_calls,
+        crystallize_fn=_crystallize_fn, total_budget=1.0, per_uid_timeout=0.2,
+    )
+    elapsed = loop.time() - start
+
+    assert elapsed < 2.0  # nowhere near the simulated 30s hang
+    assert chat_session_turns == {}  # both popped regardless of outcome — never re-attempted
+    assert [c[0] for c in crystallize_calls] == ["CLIENT_OK"]  # hung uid skipped, other still flushed
+
+
+@pytest.mark.asyncio
+async def test_shutdown_flush_stops_taking_new_uids_once_total_budget_exhausted():
+    """Three pending uids, each individually well under its own per-uid
+    timeout, but slow enough in aggregate to exhaust the overall budget.
+    The loop must stop rather than let N pending sessions each consume
+    their full allowance and blow past the shutdown grace window."""
+    chat_session_turns = {
+        "C1": [{"user_text": "a", "ai_text": "b"}],
+        "C2": [{"user_text": "c", "ai_text": "d"}],
+        "C3": [{"user_text": "e", "ai_text": "f"}],
+    }
+    crystallize_calls: list = []
+
+    async def _crystallize_fn(uid, turns, sid):
+        await asyncio.sleep(0.2)
+        crystallize_calls.append((uid, turns, sid))
+
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    await _minimal_graceful_shutdown_flush(
+        chat_session_turns, {}, crystallize_calls,
+        crystallize_fn=_crystallize_fn, total_budget=0.3, per_uid_timeout=1.0,
+    )
+    elapsed = loop.time() - start
+
+    assert len(crystallize_calls) == 1  # only C1 completes before the budget runs out
+    assert elapsed < 1.0  # bounded well short of 3 x 0.2s + any retry
+
+
+# --- crystal_ids/session_id completeness is independent of shutdown-flush timing ---
+
+
+def test_crystal_id_attribution_is_unconditional_per_turn_not_gated_by_session_flush():
+    """crystal_ids/session_id attribution (ENABLE_CRYSTAL_ATTRIBUTION) lands
+    in conversation_history via _persist_chat_to_conversation_history, fired
+    unconditionally on every turn at message-processing time — it does NOT
+    live inside the 5-turn _chat_session_turns accumulator that unregister()
+    and _graceful_shutdown() flush. This pins that independence: a turn's
+    crystal_ids/session_id are already durably written to conversation_history
+    by the time any shutdown-flush could run, so the flush's completeness
+    does not depend on threading those fields through
+    crystallize_session_summary — which has no crystal_ids parameter at all
+    and re-synthesizes from turns that were already attributed upstream."""
+    source = _bridge_source()
+
+    persist_call = re.search(
+        r"asyncio\.create_task\(_persist_chat_to_conversation_history\(.*?\)\)",
+        source, re.DOTALL,
+    )
+    assert persist_call, "_persist_chat_to_conversation_history call site not found"
+    assert "crystal_ids=_crystal_ids_for_turn" in persist_call.group(0)
+
+    accumulator_block = re.search(
+        r"if uid not in _chat_session_turns:.*?except Exception:\n\s+pass\n",
+        source, re.DOTALL,
+    )
+    assert accumulator_block, "_chat_session_turns accumulator block not found"
+    assert "_persist_chat_to_conversation_history" not in accumulator_block.group(0), (
+        "crystal_ids attribution write must stay outside the 5-turn "
+        "accumulator so it is unaffected by shutdown-flush timing/loss"
+    )
+
+    summary_sig = re.search(
+        r"async def crystallize_session_summary\(.*?\) -> int:",
+        _crystal_bridge_source(), re.DOTALL,
+    )
+    assert summary_sig, "crystallize_session_summary signature not found"
+    assert "crystal_ids" not in summary_sig.group(0), (
+        "crystallize_session_summary re-synthesizes from already-attributed "
+        "turns; it must not need a crystal_ids parameter of its own for the "
+        "shutdown flush to be considered complete"
+    )
