@@ -203,7 +203,8 @@ class NevedalWaveEngine:
                 """
                 WITH user_crystals AS (
                     SELECT content_hash FROM nate_intelligence_crystals
-                    WHERE user_id IS NULL OR user_id::text = $1
+                    WHERE (user_id IS NULL AND scope = 'global')
+                       OR (user_id::text = $1 AND scope != 'archived')
                 )
                 SELECT
                     COUNT(*) FILTER (WHERE (source = 'co_activation')) AS co_edges,
@@ -230,8 +231,8 @@ class NevedalWaveEngine:
                     COUNT(*) FILTER (WHERE signal IN ('TENSION','DEEP_TENSION')) AS tension_cnt,
                     COUNT(*) AS total_cnt
                 FROM nate_intelligence_crystals
-                WHERE scope != 'archived'
-                  AND (user_id IS NULL OR user_id::text = $1)
+                WHERE (user_id IS NULL AND scope = 'global')
+                   OR (user_id::text = $1 AND scope != 'archived')
                 """,
                 user_id,
             )

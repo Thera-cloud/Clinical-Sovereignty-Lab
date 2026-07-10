@@ -7844,8 +7844,9 @@ async def _deep_memory_search_chat(
                 rows = await conn.fetch(
                     "SELECT crystal_text, domain, confidence, created_at "
                     "FROM nate_intelligence_crystals "
-                    "WHERE (user_id = $1 OR user_id IS NULL) "
-                    "AND superseded_by IS NULL AND scope NOT IN ('archived', 'admin_only') "
+                    "WHERE ((user_id = $1 AND scope != 'archived') "
+                    "OR (user_id IS NULL AND scope = 'global')) "
+                    "AND superseded_by IS NULL "
                     "AND crystal_text ILIKE '%' || $2 || '%' "
                     "ORDER BY confidence DESC LIMIT $3",
                     user_uuid, search_terms, max_results,

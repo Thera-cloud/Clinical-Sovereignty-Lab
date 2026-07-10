@@ -24,10 +24,10 @@ async def enrich_crystals_from_voice(
             window_min = int(duration_min) + 2
             rows = await conn.fetch(
                 "SELECT id, confidence FROM nate_intelligence_crystals "
-                "WHERE (user_id = (SELECT id FROM users WHERE username=$1 LIMIT 1) "
-                "       OR user_id IS NULL) "
+                "WHERE ((user_id = (SELECT id FROM users WHERE username=$1 LIMIT 1) "
+                "        AND (scope IS NULL OR scope != 'archived')) "
+                "       OR (user_id IS NULL AND scope = 'global')) "
                 "AND created_at > NOW() - make_interval(mins => $2) "
-                "AND (scope IS NULL OR scope NOT IN ('archived', 'admin_only')) "
                 "ORDER BY created_at DESC LIMIT 50",
                 username, window_min)
 

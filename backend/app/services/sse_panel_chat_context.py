@@ -378,9 +378,9 @@ async def _gather_therapeutic_evidence(
                     """
                     SELECT crystal_text, domain, confidence, created_at
                     FROM nate_intelligence_crystals
-                    WHERE (user_id = $1::uuid OR user_id IS NULL)
+                    WHERE ((user_id = $1::uuid AND scope != 'archived')
+                        OR (user_id IS NULL AND scope = 'global'))
                       AND superseded_by IS NULL
-                      AND scope NOT IN ('archived', 'admin_only')
                       AND crystal_text ILIKE ANY($2::text[])
                     ORDER BY confidence DESC, created_at DESC
                     LIMIT 6
@@ -393,9 +393,9 @@ async def _gather_therapeutic_evidence(
                     """
                     SELECT crystal_text, domain, confidence, created_at
                     FROM nate_intelligence_crystals
-                    WHERE (user_id = $1::uuid OR user_id IS NULL)
+                    WHERE ((user_id = $1::uuid AND scope != 'archived')
+                        OR (user_id IS NULL AND scope = 'global'))
                       AND superseded_by IS NULL
-                      AND scope NOT IN ('archived', 'admin_only')
                     ORDER BY created_at DESC
                     LIMIT 6
                     """,

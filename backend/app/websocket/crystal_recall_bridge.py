@@ -184,7 +184,7 @@ async def _fast_recall_crystals(conn, user_uuid, query_text: str, max_user: int 
             "SELECT id, crystal_text, confidence, domain, metadata "
             "FROM nate_intelligence_crystals "
             "WHERE user_id IS NULL AND confidence >= 0.55 "
-            "AND scope NOT IN ('archived', 'admin_only') AND superseded_by IS NULL "
+            "AND scope = 'global' AND superseded_by IS NULL "
             "AND (crystal_status IS NULL OR crystal_status = 'production') "
             "ORDER BY confidence DESC, last_recalled_at DESC NULLS LAST LIMIT 50",
         )
@@ -252,7 +252,7 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
             if _has_query:
                 _g_cold_cnt = await conn.fetchval(
                     "SELECT count(*) FROM nate_intelligence_crystals "
-                    "WHERE user_id IS NULL AND confidence >= 0.55 AND scope NOT IN ('archived', 'admin_only') "
+                    "WHERE user_id IS NULL AND confidence >= 0.55 AND scope = 'global' "
                     "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
                     "AND (crystal_status IS NULL OR crystal_status = 'production')",
                 )
@@ -260,7 +260,7 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
                     _g_cold = await conn.fetch(
                         "SELECT id, crystal_text, confidence, domain, metadata "
                         "FROM nate_intelligence_crystals "
-                        "WHERE user_id IS NULL AND confidence >= 0.55 AND scope NOT IN ('archived', 'admin_only') "
+                        "WHERE user_id IS NULL AND confidence >= 0.55 AND scope = 'global' "
                         "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
                         "AND (crystal_status IS NULL OR crystal_status = 'production') "
                         "ORDER BY id OFFSET $1 LIMIT 1",
@@ -276,7 +276,7 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
                     FROM nate_intelligence_crystals
                     WHERE user_id IS NULL
                       AND confidence >= 0.55
-                      AND scope NOT IN ('archived', 'admin_only')
+                      AND scope = 'global'
                       AND superseded_by IS NULL
                       AND (crystal_status IS NULL OR crystal_status = 'production')
                       AND to_tsvector('english', crystal_text) @@ plainto_tsquery('english', $1)
@@ -293,7 +293,7 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
             _t_dna = _t.monotonic()
             _dna_cnt = await conn.fetchval(
                 "SELECT count(*) FROM nate_intelligence_crystals "
-                "WHERE user_id IS NULL AND confidence >= 0.85 AND scope NOT IN ('archived', 'admin_only') "
+                "WHERE user_id IS NULL AND confidence >= 0.85 AND scope = 'global' "
                 "AND superseded_by IS NULL AND origin_surface IN ('growth_engine', 'clinical_edge_seed') "
                 "AND (crystal_status IS NULL OR crystal_status = 'production')",
             )
@@ -301,7 +301,7 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
                 _dna_rows = await conn.fetch(
                     "SELECT id, crystal_text, confidence, domain, metadata "
                     "FROM nate_intelligence_crystals "
-                    "WHERE user_id IS NULL AND confidence >= 0.85 AND scope NOT IN ('archived', 'admin_only') "
+                    "WHERE user_id IS NULL AND confidence >= 0.85 AND scope = 'global' "
                     "AND superseded_by IS NULL AND origin_surface IN ('growth_engine', 'clinical_edge_seed') "
                     "AND (crystal_status IS NULL OR crystal_status = 'production') "
                     "ORDER BY id OFFSET $1 LIMIT 2",
