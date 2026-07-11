@@ -2743,6 +2743,32 @@ async def lifespan(app: FastAPI):
     except Exception as nca_err:
         print(f"   ⚠️  NateCheckInAgent init failed: {nca_err}")
 
+    # QUANTUM-CRYSTAL-ARCH: Nate Commitment Agent — proactive commitment touches (Phase 1)
+    _nate_commitment_agent = None
+    try:
+        from app.services.nate_commitment_agent import NateCommitmentAgent
+        _nate_commitment_agent = NateCommitmentAgent(
+            db_pool=db_pool,
+            notification_system=getattr(app.state, "notification_system", None),
+            app_state=app.state,
+        )
+        await _nate_commitment_agent.start()
+        app.state.nate_commitment_agent = _nate_commitment_agent
+        print("   ✅ NateCommitmentAgent registered (30min cycle, stagger 320s)")
+    except Exception as ncm_err:
+        print(f"   ⚠️  NateCommitmentAgent init failed: {ncm_err}")
+
+    # QUANTUM-CRYSTAL-ARCH: Nate Self-Monitor Agent — daily engagement trends (Phase 4)
+    _nate_self_monitor_agent = None
+    try:
+        from app.services.nate_self_monitor_agent import NateSelfMonitorAgent
+        _nate_self_monitor_agent = NateSelfMonitorAgent(db_pool=db_pool, app_state=app.state)
+        await _nate_self_monitor_agent.start()
+        app.state.nate_self_monitor_agent = _nate_self_monitor_agent
+        print("   ✅ NateSelfMonitorAgent registered (daily cycle, stagger 330s)")
+    except Exception as nsm_err:
+        print(f"   ⚠️  NateSelfMonitorAgent init failed: {nsm_err}")
+
     # ── F-Code Engine — ICD-10-CM suggestion service (request-response, no background loop) ──
     _fcode_engine = None
     try:
@@ -3149,6 +3175,8 @@ async def lifespan(app: FastAPI):
         ("token_usage_agent", _token_usage_agent is not None),
         ("account_event_reconciler", _account_event_reconciler is not None),
         ("nate_checkin_agent", _nate_checkin_agent is not None),
+        ("nate_commitment_agent", _nate_commitment_agent is not None),
+        ("nate_self_monitor_agent", _nate_self_monitor_agent is not None),
         ("nate_checkin_auditor", _nate_checkin_auditor is not None),
         ("sensitive_bridge_auditor", _sensitive_bridge_auditor is not None),
         ("sensitive_bridge_telemetry_agent",
@@ -3464,6 +3492,8 @@ async def lifespan(app: FastAPI):
         ("gkm_auditor", "GkmAuditor"),
         ("token_usage_agent", "TokenUsageAgent"),
         ("nate_checkin_agent", "NateCheckInAgent"),
+        ("nate_commitment_agent", "NateCommitmentAgent"),
+        ("nate_self_monitor_agent", "NateSelfMonitorAgent"),
         ("nate_checkin_auditor", "NateCheckInAuditor"),
         ("sensitive_bridge_auditor", "SensitiveBridgeAuditor"),
         ("sensitive_bridge_telemetry_agent", "SensitiveBridgeTelemetryAgent"),
@@ -4092,6 +4122,15 @@ try:
     print("   ✅ intake_form_api router mounted")
 except Exception as _intake_err:
     print(f"   ⚠️  intake_form_api router failed: {_intake_err}")
+
+
+try:
+    from app.routers.therapeutic_plan_api import router as therapeutic_plan_router
+
+    app.include_router(therapeutic_plan_router)
+    print("   ✅ therapeutic_plan_api router mounted")
+except Exception as _tp_err:
+    print(f"   ⚠️  therapeutic_plan_api router failed: {_tp_err}")
 
 
 # QUANTUM-CRYSTAL-ARCH: conditional routers — mount if dependencies are satisfied

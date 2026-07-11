@@ -7613,6 +7613,7 @@ async def _cohort_nevedal_first_last_c_emo(conn, user_ids: List, since: Optional
 async def _persist_chat_to_conversation_history(
     db_pool, username: str, user_text: str, ai_text: str, session_id: str = "",
     turn_id: str = "", crystal_ids: Optional[list] = None,
+    symbols: Optional[dict] = None,
 ):
     """Write text chat turns to conversation_history (PG) so Memory Search and
     deep recall can find them. Fire-and-forget from process_interaction."""
@@ -7626,6 +7627,9 @@ async def _persist_chat_to_conversation_history(
         # no read path exists yet in this commit.
         if crystal_ids and os.getenv("ENABLE_CRYSTAL_ATTRIBUTION", "true").strip().lower() not in ("0", "false", "no", "off"):
             _meta_dict["crystal_ids"] = [int(c) for c in crystal_ids][:50]
+        # QUANTUM-CRYSTAL-ARCH: Phase 5a — symbolic metadata alongside crystal attribution
+        if symbols and os.getenv("ENABLE_SYMBOLIC_EXTRACTION", "false").strip().lower() in ("1", "true", "yes"):
+            _meta_dict["symbols"] = symbols
         _meta = json.dumps(_meta_dict) if _meta_dict else "{}"
         async with db_pool.acquire() as conn:
             await conn.execute(
@@ -9043,7 +9047,18 @@ class AzureCortex:
                 print(f">>> [TRIAL-CTX] context error (non-fatal): {_tc_err}")
                 return ""
 
-        relational_context, checkin_context, crystal_context, pg_history_context, intake_context, fsf_context, reconnect_context, _enrich_addendum, trial_context_block = await asyncio.gather(
+        async def _fetch_plan_context():
+            if not _cpool or _role != "CLIENT":
+                return ""
+            if os.environ.get("ENABLE_THERAPEUTIC_PLANS", "").lower() not in ("true", "1", "yes"):
+                return ""
+            try:
+                from app.services.nate_therapeutic_plan_service import get_active_plan_context
+                return await get_active_plan_context(_cpool, _hw_id)
+            except Exception:
+                return ""
+
+        relational_context, checkin_context, crystal_context, pg_history_context, intake_context, fsf_context, reconnect_context, _enrich_addendum, trial_context_block, plan_context_block = await asyncio.gather(
             _timed("relational", self._get_relational_context(profile)),
             _timed("checkin", self._get_checkin_context(profile)),
             _timed("crystals", recall_crystals_for_context(
@@ -9056,6 +9071,7 @@ class AzureCortex:
             _timed("reconnect", _fetch_reconnect_context()),
             _timed("enrich", _fetch_enrichment_addendum()),
             _timed("trial_ctx", _fetch_trial_context()),
+            _timed("plan_ctx", _fetch_plan_context()),
         )
         # QUANTUM-CRYSTAL-ARCH: Commit 2 — capture recalled crystal ids for
         # attribution BEFORE crystal_context is re-wrapped as a plain str
@@ -9597,6 +9613,9 @@ class AzureCortex:
 
         {trial_context_block}
         {"Note: TRIAL CONTEXT summarizes the anonymous trial chat before this account was created." if trial_context_block else ""}
+
+        {plan_context_block}
+        {"Note: THERAPEUTIC PLAN context reflects coach-assigned step progress — reference naturally when relevant." if plan_context_block else ""}
 
         FAMILY SANCTUARY HISTORY (This is the users OWN conversation history from sessions they participated in. It is appropriate and therapeutic to reference their words back to them. This is NOT confidential information about others - it is their own experience.):
         {sanctuary_context}
@@ -10383,6 +10402,13 @@ class AzureCortex:
             # FIX-THERAPEUTIC-CONTROLLER — post-flight: audit + optional regenerate
             if _ttc_audit_meta and full_response.strip():
                 try:
+                    if os.environ.get("ENABLE_SYMBOLIC_VERIFIER", "").lower() in ("true", "1", "yes"):
+                        from dataclasses import asdict
+                        from app.services.nate_commitment_extractor import build_state_symbol
+                        _ttc_audit_meta["state_symbol"] = asdict(
+                            build_state_symbol(_qg_verbatim_user_text, audit_metadata=_ttc_audit_meta)
+                        )
+                        _ttc_audit_meta["crystal_ids"] = _crystal_ids_for_turn
                     from app.services.therapeutic_controller import audit_therapeutic_response as _ttc_post
                     _ttc_audited = await _ttc_post(
                         response_text=full_response, audit_metadata=_ttc_audit_meta,
@@ -10648,6 +10674,18 @@ class AzureCortex:
                     ))
                 except Exception:
                     pass
+                # QUANTUM-CRYSTAL-ARCH: Agentic Phase 1 — post-turn commitment extraction
+                if os.environ.get("ENABLE_PROACTIVE_COMMITMENTS", "").lower() in ("true", "1", "yes"):
+                    try:
+                        from app.services.nate_commitment_extractor import run_post_turn_extraction
+                        _uname_commit = profile.get("username") or uid
+                        asyncio.create_task(run_post_turn_extraction(
+                            db_pool, username=_uname_commit, hardware_id=uid,
+                            user_text=_qg_verbatim_user_text,
+                            audit_metadata=_ttc_audit_meta if _ttc_audit_meta else None,
+                        ))
+                    except Exception:
+                        pass
 
                 # QUANTUM-CRYSTAL-ARCH: accumulate turns, create session summary every N turns
                 try:
@@ -10683,9 +10721,13 @@ class AzureCortex:
                 if db_pool and user_text and _final_response:
                     _ch_username = profile.get("username", uid)
                     _ch_session = self._ensure_session_id(uid)
+                    _sym_persist = None
+                    if _ttc_audit_meta and _ttc_audit_meta.get("state_symbol"):
+                        _sym_persist = _ttc_audit_meta.get("state_symbol")
                     asyncio.create_task(_persist_chat_to_conversation_history(
                         db_pool, _ch_username, _qg_verbatim_user_text, _final_response, _ch_session,
                         turn_id=_turn_id, crystal_ids=_crystal_ids_for_turn,
+                        symbols=_sym_persist,
                     ))
             except Exception:
                 pass
@@ -12537,6 +12579,7 @@ async def handle_client(websocket, path=None):
                 "client_get_coach_month_overview",
                 "search_consent_approved", "search_request",
                 "client_get_upcoming_sessions",
+                "client_get_commitments",
                 # --- Coach data-fetch ---
                 "coach_get_clients", "fetch_coach_calendar", "fetch_coach_sessions",
                 "coach_request_briefing", "coach_get_briefing",
@@ -13832,6 +13875,20 @@ async def handle_client(websocket, path=None):
                             except Exception as _sched_err:
                                 print(f">>> [CHAT-SCHED] hook error uid={uid}: {_sched_err}")
 
+                        # --- Nate tool confirmation (Agentic Phase 2) ---
+                        if os.environ.get("ENABLE_NATE_TOOL_EXECUTOR", "").lower() in ("true", "1", "yes"):
+                            try:
+                                from app.services.nate_tool_executor import check_and_execute_confirmation
+                                _tool = await check_and_execute_confirmation(uid, text, db_pool=db_pool)
+                                if _tool and _tool.get("handled"):
+                                    await websocket.send(json.dumps({
+                                        "type": "nate_response",
+                                        "text": _tool.get("text", "Done."),
+                                    }))
+                                    continue
+                            except Exception as _tool_err:
+                                print(f">>> [NATE-TOOL] hook error uid={uid}: {_tool_err}")
+
                         # --- Conversation Export Detection ---
                         # 1) Check if this is a follow-up to a pending export
                         export_intent = export_intent_detector.check_pending(uid, text)
@@ -14960,6 +15017,64 @@ async def handle_client(websocket, path=None):
                     except Exception as e:
                         print(f">>> [ERROR] Booking operation failed: {e}")
                         await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
+
+            # === CLIENT: PROACTIVE PRESENCE CONSENT (Agentic Phase 1) === # QUANTUM-CRYSTAL-ARCH
+            elif t == "client_update_proactive_consent":
+                if current_profile and current_profile.get("role") == "CLIENT":
+                    hw = (current_profile.get("hardware_id") or "").strip()
+                    enabled = bool(d.get("enabled"))
+                    try:
+                        from app.services.nate_commitment_service import update_proactive_consent
+                        result = await update_proactive_consent(
+                            db_pool,
+                            hardware_id=hw,
+                            enabled=enabled,
+                            save_registry_fn=save_registry,
+                            registry_cache=load_registry(),
+                        )
+                        if result.get("ok"):
+                            pd = current_profile.setdefault("profile_data", {})
+                            if isinstance(pd, dict):
+                                pd["proactive_presence_consent"] = enabled
+                        await websocket.send(json.dumps({"type": "proactive_consent_updated", **result}))
+                    except Exception:
+                        await websocket.send(json.dumps({"type": "error", "message": "CONSENT_UPDATE_FAILED"}))
+
+            elif t == "client_get_commitments":
+                if current_profile and current_profile.get("role") == "CLIENT":
+                    hw = (current_profile.get("hardware_id") or "").strip()
+                    try:
+                        from app.services.nate_commitment_service import list_commitments
+                        items = await list_commitments(db_pool, hw)
+                        await websocket.send(json.dumps({"type": "client_commitments_list", "commitments": items}))
+                    except Exception:
+                        await websocket.send(json.dumps({"type": "client_commitments_list", "commitments": []}))
+
+            elif t == "client_dismiss_commitment":
+                if current_profile and current_profile.get("role") == "CLIENT":
+                    hw = (current_profile.get("hardware_id") or "").strip()
+                    cid = (d.get("commitment_id") or "").strip()
+                    try:
+                        from app.services.nate_commitment_service import dismiss_commitment
+                        ok = await dismiss_commitment(db_pool, hw, cid) if cid else False
+                        await websocket.send(json.dumps({"type": "commitment_dismissed", "ok": ok, "commitment_id": cid}))
+                    except Exception:
+                        await websocket.send(json.dumps({"type": "commitment_dismissed", "ok": False}))
+
+            elif t == "client_edit_commitment":
+                if current_profile and current_profile.get("role") == "CLIENT":
+                    hw = (current_profile.get("hardware_id") or "").strip()
+                    cid = (d.get("commitment_id") or "").strip()
+                    try:
+                        from app.services.nate_commitment_service import edit_commitment
+                        ok = await edit_commitment(
+                            db_pool, hw, cid,
+                            text=d.get("text"),
+                            target_date_iso=d.get("target_date"),
+                        ) if cid else False
+                        await websocket.send(json.dumps({"type": "commitment_edited", "ok": ok, "commitment_id": cid}))
+                    except Exception:
+                        await websocket.send(json.dumps({"type": "commitment_edited", "ok": False}))
 
             # === COACH: APPROVE BOOKING ===
             elif t == "coach_approve_booking":
