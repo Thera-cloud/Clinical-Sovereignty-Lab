@@ -4,6 +4,7 @@
 
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
+import 'nate_commitments_screen.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -270,6 +271,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   bool _notifPush = true;
   bool _notifSessionReminders = true;
   bool _notifCrisisAlerts = true;
+  bool _proactivePresenceConsent = false;
+  bool _savingProactiveConsent = false;
   bool _voiceModeDefault = false;
   String _preferredContact = 'email';
 
@@ -317,6 +320,12 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     _notifPush = _profile['notif_push'] ?? true;
     _notifSessionReminders = _profile['notif_session_reminders'] ?? true;
     _notifCrisisAlerts = _profile['notif_crisis_alerts'] ?? true;
+    final pd = _profile['profile_data'];
+    if (pd is Map) {
+      _proactivePresenceConsent = pd['proactive_presence_consent'] == true;
+    } else {
+      _proactivePresenceConsent = _profile['proactive_presence_consent'] == true;
+    }
     _voiceModeDefault = _profile['voice_mode_default'] ??
         (_profile['notification_prefs'] is Map ? _profile['notification_prefs']['voice_mode_default'] : null) ?? false;
     _preferredContact = _profile['preferred_contact'] ?? 'email';
@@ -1484,6 +1493,45 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
       );
     } finally {
       if (mounted) setState(() => _savingNotifPrefs = false);
+    }
+  }
+
+  Future<void> _saveProactiveConsent(bool enabled) async {
+    if (_savingProactiveConsent) return;
+    setState(() => _savingProactiveConsent = true);
+    final token = (_profile['token'] ?? widget.profile['token'] ?? '').toString();
+    final hwId = (_profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '').toString();
+    try {
+      final resp = await _ephemeralWsRequest(
+        token: token,
+        hardwareId: hwId,
+        request: {'type': 'client_update_proactive_consent', 'enabled': enabled},
+        expectedTypes: {'proactive_consent_updated', 'error'},
+      );
+      if (!mounted) return;
+      if (resp['ok'] == true) {
+        setState(() => _proactivePresenceConsent = enabled);
+        final pd = _profile['profile_data'];
+        if (pd is Map) {
+          pd['proactive_presence_consent'] = enabled;
+        } else {
+          _profile['proactive_presence_consent'] = enabled;
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not update proactive presence setting'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Save failed: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _savingProactiveConsent = false);
     }
   }
 
@@ -2904,6 +2952,14 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             _toggleRow('Crisis Alerts', _notifCrisisAlerts, (v) {
               setState(() => _notifCrisisAlerts = v);
               _saveNotificationPrefs();
+            }),
+            _toggleRow('Proactive Presence', _proactivePresenceConsent, (v) {
+              _saveProactiveConsent(v);
+            }),
+            _actionRow(Icons.event_note, "What Nate's Holding Onto", 'View or dismiss tracked commitments', () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => NateCommitmentsScreen(profile: _profile),
+              ));
             }),
             const Divider(color: _Design.border, height: 24),
             _toggleRow('Voice Mode by Default', _voiceModeDefault, (v) {
