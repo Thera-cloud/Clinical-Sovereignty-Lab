@@ -195,6 +195,17 @@ class Settings(BaseSettings):
     ENABLE_TIME_CRYSTAL_FORGE: bool = False
     # QUANTUM-CRYSTAL-ARCH: 4h Vectorize rebuild (~209k queries/cycle). Paused — recall uses crystal_recall_bridge.
     ENABLE_CRYSTAL_GRAPH: bool = False
+    # Agentic Roadmap Phases 0–5 — all default OFF until adversarial walk + staging flip
+    ENABLE_PROACTIVE_TOUCH_POLICY: bool = False
+    ENABLE_PROACTIVE_COMMITMENTS: bool = False
+    ENABLE_NATE_TOOL_EXECUTOR: bool = False
+    ENABLE_THERAPEUTIC_PLANS: bool = False
+    ENABLE_SELF_MONITOR_AGENT: bool = False
+    ENABLE_SELF_MONITOR_COACH_ALERT: bool = False
+    ENABLE_SELF_MONITOR_TOUCH: bool = False
+    ENABLE_SYMBOLIC_EXTRACTION: bool = False
+    ENABLE_SYMBOLIC_VERIFIER: bool = False
+    ENABLE_FORWARD_REASONING: bool = False
 
     # User Registry backend
     USE_POSTGRES_REGISTRY: bool = True    # When True, bridge stores users in PostgreSQL (recommended)
