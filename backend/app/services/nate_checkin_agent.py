@@ -324,6 +324,45 @@ class NateCheckInAgent:
             if not await self._recent_checkin(conn, username, "coach_alert_62h", hours=72):
                 await self._send_coach_alert(conn, username, hw_id, name, profile, backoff)
 
+    async def _apply_touch_policy(
+        self,
+        hw_id: str,
+        username: str,
+        source: str,
+        channel_pref: str = "email",
+        sensitivity: str = "routine",
+    ):
+        """QUANTUM-CRYSTAL-ARCH: Phase 0 shared proactive touch gate."""
+        try:
+            from app.services.proactive_touch_policy import (
+                can_send_proactive_touch,
+                policy_enabled,
+                record_skipped_touch,
+            )
+
+            if not policy_enabled():
+                return True, channel_pref, False
+            decision = await can_send_proactive_touch(
+                self.db_pool,
+                hw_id or username,
+                source=source,
+                channel_pref=channel_pref,
+                sensitivity=sensitivity,
+            )
+            if not decision.allowed:
+                await record_skipped_touch(
+                    self.db_pool,
+                    hw_id or username,
+                    source_agent=source,
+                    reason=decision.reason or "skipped_gate_error",
+                )
+                return False, channel_pref, False
+            in_app_only = decision.channel_override == "in_app"
+            return True, decision.channel_override or channel_pref, in_app_only
+        except Exception as e:
+            logger.warning("checkin: touch policy gate error: %s", e)
+            return False, channel_pref, False
+
     async def _send_coach_alert(self, conn, username, hw_id, name, profile, backoff=None):
         coach_id = profile.get("coach_id") or profile.get("assigned_coach_id")
         if not coach_id:
@@ -355,9 +394,15 @@ class NateCheckInAgent:
             f"been active for over 62 hours. You may want to reach out and check in."
         )
 
+        _allowed, _ch_pref, _in_app_only = await self._apply_touch_policy(
+            coach_id, coach_row["username"], "checkin_coach_alert", "email", "routine",
+        )
+        if not _allowed:
+            return
+
         # QUANTUM-CRYSTAL-ARCH: Commit 3 — 4+ consecutive ignored outreaches
         # restricts this touch to the in-app nudge only (no SMS/email).
-        channel_restricted = bool(backoff and backoff.get("channel_restricted"))
+        channel_restricted = _in_app_only or bool(backoff and backoff.get("channel_restricted"))
 
         channel = None
         if not channel_restricted:
@@ -398,9 +443,17 @@ class NateCheckInAgent:
             f"me to check back in (days). Take care."
         )
 
+        _allowed, _ch_pref, _in_app_only = await self._apply_touch_policy(
+            hw_id, username, "checkin", preferred, "routine",
+        )
+        if not _allowed:
+            return
+
         # QUANTUM-CRYSTAL-ARCH: Commit 3 — 4+ consecutive ignored outreaches
         # restricts this touch to the in-app nudge only (no SMS/email).
-        channel_restricted = bool(backoff and backoff.get("channel_restricted"))
+        channel_restricted = _in_app_only or bool(backoff and backoff.get("channel_restricted"))
+        if _ch_pref == "in_app":
+            preferred = "in_app"
 
         channel = None
         if not channel_restricted:
@@ -458,9 +511,15 @@ class NateCheckInAgent:
             f"help track this week? Reply anytime."
         )
 
+        _allowed, _ch_pref, _in_app_only = await self._apply_touch_policy(
+            hw_id, username, "checkin_coach", preferred, "routine",
+        )
+        if not _allowed:
+            return
+
         # QUANTUM-CRYSTAL-ARCH: Commit 3 — 4+ consecutive ignored outreaches
         # restricts this touch to the in-app nudge only (no SMS/email).
-        channel_restricted = bool(backoff and backoff.get("channel_restricted"))
+        channel_restricted = _in_app_only or bool(backoff and backoff.get("channel_restricted"))
 
         channel = None
         if not channel_restricted:

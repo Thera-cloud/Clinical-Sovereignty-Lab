@@ -58,6 +58,13 @@ SHADOW_DELTA_SCALE = 0.04            # avg_c_emo=0.5 -> 0 delta; 0.0/1.0 -> +/-0
 # 'clinical' and 'defense' are the two that carry clinical/safety weight.
 SHADOW_FORCED_ZERO_DOMAINS = ("clinical", "defense")
 
+# QUANTUM-CRYSTAL-ARCH: Agentic Phase 0 — proactive touch adaptation (restraint direct,
+# assertiveness shadow-only). Gated by ENABLE_PROACTIVE_TOUCH_POLICY.
+TOUCH_ADAPTATION_INTERVAL_DAYS = 1
+TOUCH_IGNORE_STRETCH_THRESHOLD = 2
+TOUCH_IGNORE_PAUSE_THRESHOLD = 3
+TOUCH_INTERVAL_MULTIPLIER_CAP = 4.0
+
 
 class DatabaseMaintenanceAgent:
 
@@ -104,6 +111,7 @@ class DatabaseMaintenanceAgent:
         purged_lead_emails = await self._purge_trial_lead_emails()
         sent_followups = await self._send_trial_followups()
         shadow_proposals = await self._shadow_weighting_pass()
+        touch_adaptations = await self._touch_adaptation_pass()
         stats = await self._collect_stats()
 
         summary = (
@@ -116,6 +124,7 @@ class DatabaseMaintenanceAgent:
             f"{sent_followups} trial follow-up emails sent, "
             f"{shadow_proposals} crystal confidence shadow proposals recorded "
             f"({SHADOW_WEIGHTING_INTERVAL_DAYS}d cadence, never applied). "
+            f"{touch_adaptations} proactive touch adaptation proposals/shadow rows. "
             f"DB size: {stats.get('db_size', 'unknown')}. "
             f"Tables: activity={stats.get('activity_rows', '?')}, "
             f"content_queue={stats.get('content_rows', '?')}, "
@@ -311,6 +320,108 @@ class DatabaseMaintenanceAgent:
                 return inserted
         except Exception as e:
             logger.warning("DatabaseMaintenanceAgent: shadow weighting pass failed: %s", e)
+            return 0
+
+    async def _touch_adaptation_pass(self) -> int:
+        """Agentic Phase 0 — restraint applies to profile_data; assertiveness shadow-only."""
+        import os
+
+        if os.getenv("ENABLE_PROACTIVE_TOUCH_POLICY", "false").strip().lower() not in (
+            "1",
+            "true",
+            "yes",
+        ):
+            return 0
+        try:
+            import json
+
+            async with self.db_pool.acquire() as conn:
+                last_run = await conn.fetchval(
+                    "SELECT MAX(computed_at) FROM proactive_touch_adaptation_shadow"
+                )
+                if last_run is not None:
+                    age_days = (
+                        datetime.now(timezone.utc) - last_run.replace(tzinfo=timezone.utc)
+                    ).total_seconds() / 86400
+                    if age_days < TOUCH_ADAPTATION_INTERVAL_DAYS:
+                        return 0
+
+                rows = await conn.fetch("""
+                    SELECT username, source_agent, outcome_class, COUNT(*) AS cnt
+                    FROM proactive_touch_outcome_view
+                    WHERE outcome_class IN ('responded', 'ignored', 'snoozed')
+                    GROUP BY username, source_agent, outcome_class
+                """)
+
+                user_outcomes: dict = {}
+                for row in rows:
+                    uname = row["username"]
+                    if not uname:
+                        continue
+                    key = (uname, row["source_agent"])
+                    user_outcomes.setdefault(key, {"ignored": 0, "responded": 0})
+                    user_outcomes[key][row["outcome_class"]] = int(row["cnt"])
+
+                applied = 0
+                for (uname, source), counts in user_outcomes.items():
+                    ignored = counts.get("ignored", 0)
+                    responded = counts.get("responded", 0)
+                    urow = await conn.fetchrow(
+                        "SELECT profile_data FROM users WHERE username = $1",
+                        uname,
+                    )
+                    if not urow:
+                        continue
+                    pd = urow["profile_data"] or {}
+                    if isinstance(pd, str):
+                        try:
+                            pd = json.loads(pd)
+                        except Exception:
+                            pd = {}
+                    adaptation = dict(pd.get("proactive_touch_adaptation") or {})
+                    changed = False
+
+                    if ignored >= TOUCH_IGNORE_PAUSE_THRESHOLD:
+                        from datetime import timedelta
+
+                        adaptation["paused_until"] = (
+                            datetime.now(timezone.utc) + timedelta(days=7)
+                        ).isoformat()
+                        changed = True
+                    elif ignored >= TOUCH_IGNORE_STRETCH_THRESHOLD:
+                        mult = float(adaptation.get("interval_multiplier") or 1.0)
+                        mult = min(TOUCH_INTERVAL_MULTIPLIER_CAP, mult * 2.0)
+                        adaptation["interval_multiplier"] = mult
+                        adaptation["channel_ceiling"] = "in_app"
+                        changed = True
+                    elif responded > 0 and ignored == 0:
+                        await conn.execute(
+                            """
+                            INSERT INTO proactive_touch_adaptation_shadow
+                                (user_id, source, signal_type, proposed_change,
+                                 sample_size, reasoning, computed_at)
+                            VALUES ($1, $2, 'fast_response', $3::jsonb, $4, $5, NOW())
+                            """,
+                            uname,
+                            source,
+                            json.dumps({"suggest": "increase_cadence"}),
+                            responded,
+                            "Positive engagement — proposal only, never auto-applied",
+                        )
+                        applied += 1
+
+                    if changed:
+                        pd["proactive_touch_adaptation"] = adaptation
+                        await conn.execute(
+                            "UPDATE users SET profile_data = $2::jsonb WHERE username = $1",
+                            uname,
+                            json.dumps(pd),
+                        )
+                        applied += 1
+
+                return applied
+        except Exception as e:
+            logger.warning("DatabaseMaintenanceAgent: touch adaptation pass failed: %s", e)
             return 0
 
     async def _collect_stats(self) -> dict:
