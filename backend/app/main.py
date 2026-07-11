@@ -245,6 +245,15 @@ async def lifespan(app: FastAPI):
             linkedin_campaign_scheduler.start()
             app.state.linkedin_campaign_scheduler = linkedin_campaign_scheduler
             print(f"   ✅ LinkedIn campaign scheduler started")
+            try:
+                from app.services.linkedin_campaign_coach_portal import (
+                    bootstrap_coach_portal_campaign_if_enabled,
+                )
+                boot_msg = await bootstrap_coach_portal_campaign_if_enabled(db_pool)
+                if boot_msg:
+                    print(f"   ✅ Coach Portal LinkedIn campaign: {boot_msg[:120]}")
+            except Exception as boot_e:
+                print(f"   ⚠️  Coach Portal campaign bootstrap: {boot_e}")
         except Exception as e:
             print(f"   ⚠️  LinkedIn campaign scheduler failed to start: {e}")
     

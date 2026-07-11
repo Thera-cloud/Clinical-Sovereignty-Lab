@@ -28,8 +28,16 @@ def linkedin_images_enabled() -> bool:
     )
 
 
-def should_attach_image_for_lane(lane: Optional[str]) -> bool:
-    return linkedin_images_enabled() and (lane or "").upper() in ("ORIG", "PERS")
+def should_attach_image_for_lane(
+    lane: Optional[str],
+    *,
+    force_image: bool = False,
+) -> bool:
+    if not linkedin_images_enabled():
+        return False
+    if force_image:
+        return True
+    return (lane or "").upper() in ("ORIG", "PERS")
 
 
 def build_image_prompt(
@@ -37,8 +45,11 @@ def build_image_prompt(
     *,
     lane: str = "",
     slot_key: str = "",
+    image_prompt: Optional[str] = None,
 ) -> str:
     """Visual prompt from post body — branded infographic or legacy painterly fallback."""
+    if image_prompt and image_prompt.strip():
+        return image_prompt.strip()
     if _use_brand_system():
         from app.services.skyeye_linkedin_brand import build_branded_image_prompt
 
@@ -67,9 +78,11 @@ async def try_generate_linkedin_image(
     *,
     lane: str = "",
     slot_key: str = "",
+    force_image: bool = False,
+    image_prompt: Optional[str] = None,
 ) -> Optional[bytes]:
     """Return JPEG bytes or None on any failure (caller posts text-only)."""
-    if not should_attach_image_for_lane(lane):
+    if not should_attach_image_for_lane(lane, force_image=force_image):
         return None
     if not os.getenv("GEMINI_API_KEY", "").strip():
         logger.warning("SkyEye LinkedIn image: GEMINI_API_KEY missing — text-only post")
@@ -77,7 +90,12 @@ async def try_generate_linkedin_image(
     try:
         from app.services.skyeye_gemini_image import generate_image
 
-        prompt = build_image_prompt(post_text, lane=lane, slot_key=slot_key)
+        prompt = build_image_prompt(
+            post_text,
+            lane=lane,
+            slot_key=slot_key,
+            image_prompt=image_prompt,
+        )
         refs = None
         if _use_brand_system():
             from app.services.skyeye_linkedin_brand import load_brand_reference_images

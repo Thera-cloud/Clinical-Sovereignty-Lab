@@ -2759,6 +2759,7 @@ RULES:
         campaign = (
             "campaign", "restart", "resume", "unpause", "50/30/20",
             "50-30-20", "curated", "5-3-2", "5/3/2",
+            "coach portal acquisition", "campaign brief", "verbatim",
         )
         has_cadence = any(s in msg_lower for s in cadence)
         has_campaign = any(s in msg_lower for s in campaign)

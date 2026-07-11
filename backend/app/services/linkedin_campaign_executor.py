@@ -729,6 +729,8 @@ class LinkedInCampaignExecutor:
                 item.get("content_text", ""),
                 lane=lane,
                 slot_key=slot_key,
+                force_image=bool(meta.get("generate_image")),
+                image_prompt=meta.get("image_prompt") or None,
             )
 
         result = await adapter.post_content(
@@ -927,7 +929,19 @@ class LinkedInCampaignExecutor:
         config: Optional[CampaignConfig] = None,
         force_new: bool = False,
     ) -> QueueBatchResult:
+        from app.services.linkedin_campaign_coach_portal import (
+            is_coach_portal_campaign_message,
+            queue_coach_portal_campaign,
+        )
         from app.services.skyeye_content_generator import SkyEyeContentGenerator
+
+        if is_coach_portal_campaign_message(message):
+            return await queue_coach_portal_campaign(
+                self,
+                message,
+                start=start,
+                force_new=force_new or message_looks_like_restart(message),
+            )
 
         config = config or parse_campaign_config(message)
         start = start or parse_start_date(message)
