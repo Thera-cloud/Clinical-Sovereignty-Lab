@@ -50,6 +50,7 @@ email -- only crystal id, prior scope, origin_surface, and domain.
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -173,6 +174,47 @@ class CrystalPhiAuditor:
 
         if matches:
             await self._alert(matches, summary)
+
+        # QUANTUM-CRYSTAL-ARCH: graph-surfaced crystals — ownerless + live-name PHI (Phase 5d)
+        if os.getenv("ENABLE_CRYSTAL_GRAPH", "false").lower() not in ("1", "true", "yes"):
+            return
+        try:
+            from app.services.crystal_graph_isolation import fetch_graph_surfaced_crystal_ids
+
+            graph_ids = await fetch_graph_surfaced_crystal_ids(self.db_pool, limit=100)
+            graph_matches = 0
+            for gid in graph_ids:
+                row = await self._fetch_crystal_by_id(gid)
+                if not row:
+                    continue
+                if row["user_id"] is not None:
+                    continue
+                if text_contains_client_name(row["crystal_text"] or ""):
+                    graph_matches += 1
+                    if await self._quarantine(gid):
+                        await self._write_audit_log_entry({
+                            "id": gid,
+                            "prior_scope": row["scope"],
+                            "origin_surface": row.get("origin_surface"),
+                            "domain": row.get("domain"),
+                        })
+            summary["graph_surfaced_scanned"] = len(graph_ids)
+            summary["graph_surfaced_quarantined"] = graph_matches
+        except Exception as e:
+            logger.warning("CrystalPhiAuditor: graph-surfaced scan skipped: %s", e)
+
+    async def _fetch_crystal_by_id(self, crystal_id: int):
+        try:
+            async with self.db_pool.acquire() as conn:
+                return await conn.fetchrow(
+                    """
+                    SELECT id, crystal_text, scope, origin_surface, domain, user_id
+                    FROM nate_intelligence_crystals WHERE id = $1
+                    """,
+                    crystal_id,
+                )
+        except Exception:
+            return None
 
     async def _fetch_ownerless_crystals(self):
         try:

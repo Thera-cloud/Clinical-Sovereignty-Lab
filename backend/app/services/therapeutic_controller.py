@@ -894,6 +894,41 @@ async def prepare_therapeutic_context(
     except Exception as _dad_exc:
         logger.warning("therapeutic_controller: direct-action block skipped: %s", _dad_exc)
 
+    forward_reasoning_block = ""
+    try:
+        from dataclasses import asdict
+
+        from app.services.nate_commitment_extractor import build_state_symbol
+        from app.services.nate_forward_reasoning import (
+            build_forward_constraints,
+            format_constraints_for_prompt,
+        )
+
+        _state_sym = asdict(
+            build_state_symbol(
+                user_text or "",
+                audit_metadata={
+                    "autonomic_state": autonomic_state,
+                    "tmc_class": tmc_class,
+                    "register_directive": effective_register_directive,
+                },
+            )
+        )
+        _emo_trend = "declining" if ec_slope < -0.05 else ("rising" if ec_slope > 0.05 else "stable")
+        _constraints = await build_forward_constraints(
+            db_pool,
+            username=canonical_user_id,
+            hardware_id=user_id,
+            state_symbol=_state_sym,
+            nevedal_snapshot={"c_emo": ec_current, "c_emo_trend": _emo_trend},
+            profile=None,
+        )
+        _fr_text = format_constraints_for_prompt(_constraints)
+        if _fr_text:
+            forward_reasoning_block = "\n" + _fr_text + "\n"
+    except Exception as _fr_exc:
+        logger.warning("therapeutic_controller: forward reasoning skipped: %s", _fr_exc)
+
     enriched = (
         f"## DNA — NEUROSCIENCE BEDROCK\n{_DNA_PREFIX}\n\n"
         f"## CURRENT THERAPEUTIC STATE\n"
@@ -904,6 +939,7 @@ async def prepare_therapeutic_context(
         f"{direct_action_block}\n"
         f"{lens_bridge_block}\n"
         f"{mismatch_block}\n"
+        f"{forward_reasoning_block}\n"
         f"{book_context_block}\n"
         f"{neuroscience_ctx}\n"
         f"{_anti_repeat_block(recent_narratives)}\n\n"
@@ -950,6 +986,35 @@ async def prepare_therapeutic_context(
 
 
 # ─────────────────────────── Post-flight ───────────────────────────
+
+def _symbolic_verifier_enabled() -> bool:
+    import os
+
+    return os.getenv("ENABLE_SYMBOLIC_VERIFIER", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def _symbolic_audit_violations(response_text: str, audit_metadata: dict) -> list:
+    """QUANTUM-CRYSTAL-ARCH: Phase 5b symbolic constraint checks."""
+    if not _symbolic_verifier_enabled():
+        return []
+    violations: list = []
+    if not response_text or not response_text.strip():
+        return violations
+    rl = response_text.lower()
+    state_sym = audit_metadata.get("state_symbol") or {}
+    if isinstance(state_sym, dict) and state_sym.get("distress_present"):
+        celebratory = ("proud of", "celebrat", "smiling through", "so glad you", "amazing progress")
+        if any(m in rl for m in celebratory):
+            violations.append("symbolic_emotion_mirror")
+    tmc = (audit_metadata.get("tmc_class") or "").lower()
+    if tmc in ("crisis", "suicide_ideation") and "988" not in response_text:
+        violations.append("symbolic_crisis_resource_missing")
+    return violations
+
 
 def _audit_violations(response_text: str, audit_metadata: dict, recent_narratives: list) -> list:
     violations = []
@@ -1018,6 +1083,8 @@ def _audit_violations(response_text: str, audit_metadata: dict, recent_narrative
         )
     except Exception as _da_exc:
         logger.warning("therapeutic_controller: direct-action audit skipped: %s", _da_exc)
+
+    violations.extend(_symbolic_audit_violations(response_text, audit_metadata))
 
     return violations
 
@@ -1093,6 +1160,46 @@ async def audit_therapeutic_response(
     audit_passed = len(violations) == 0
     final_text = response_text
     mismatch_delivered = audit_passed and bool(audit_metadata.get("mismatch_available"))
+    crisis_exempt = bool(audit_metadata.get("crisis_exempt"))
+
+    if not audit_passed and _symbolic_verifier_enabled() and not crisis_exempt:
+        sym_violations = [v for v in violations if v.startswith("symbolic_")]
+        if sym_violations and not audit_metadata.get("symbolic_regen_used"):
+            if "symbolic_crisis_resource_missing" in sym_violations:
+                final_text = (
+                    final_text.rstrip()
+                    + " If you're in crisis, call or text 988 for support."
+                )
+                violations = _audit_violations(final_text, audit_metadata, recent_narratives)
+                audit_passed = len(violations) == 0
+            elif sym_violations:
+                try:
+                    from app.sse.llm_fallback import chat_completion_with_fallback
+
+                    audit_metadata["symbolic_regen_used"] = True
+                    retry_sys = (
+                        "Symbolic verifier failed. Fix these violations only: "
+                        + ", ".join(sym_violations)
+                        + ". Keep warm therapeutic tone."
+                    )
+                    retry = await chat_completion_with_fallback(
+                        [
+                            {"role": "system", "content": retry_sys},
+                            {"role": "user", "content": f"Draft: {response_text[:500]}"},
+                        ],
+                        max_tokens=audit_metadata.get("max_tokens", 600),
+                        temperature=0.5,
+                    )
+                    if retry and retry.strip():
+                        retry_violations = _audit_violations(
+                            retry.strip(), audit_metadata, recent_narratives,
+                        )
+                        if len(retry_violations) < len(violations):
+                            final_text = retry.strip()
+                            violations = retry_violations
+                            audit_passed = len(retry_violations) == 0
+                except Exception as e:
+                    logger.warning("therapeutic_controller: symbolic regen failed: %s", e)
 
     if not audit_passed and _direct_action_violations(violations):
         final_text, violations, audit_passed = await _repair_direct_action_response(
@@ -1181,6 +1288,7 @@ async def audit_therapeutic_response(
         "audit_passed": audit_passed,
         "violations": violations,
         "mismatch_delivered": mismatch_delivered,
+        "crisis_exempt": crisis_exempt,
     }
 
 
@@ -1216,6 +1324,22 @@ async def _log_audit(
                 response_token_count,
                 json.dumps(audit_metadata.get("encoded_patterns") or []),
             )
+            # QUANTUM-CRYSTAL-ARCH: Phase 5b dual-write for Layer-8 inspection
+            sym_violations = [v for v in violations if str(v).startswith("symbolic_")]
+            if sym_violations and _symbolic_verifier_enabled():
+                await conn.execute(
+                    """
+                    INSERT INTO skyeye_activity (platform, type, content, severity, created_at)
+                    VALUES ('clinical', 'symbolic_verifier_action', $1, $2, NOW())
+                    """,
+                    json.dumps({
+                        "user_id": user_id,
+                        "violations": sym_violations,
+                        "audit_passed": audit_passed,
+                        "symbolic_regen_used": bool(audit_metadata.get("symbolic_regen_used")),
+                    }),
+                    "info" if audit_passed else "warning",
+                )
     except Exception as e:
         logger.warning("therapeutic_controller: audit log write failed: %s", e)
 
