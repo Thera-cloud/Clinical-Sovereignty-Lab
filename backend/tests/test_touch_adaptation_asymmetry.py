@@ -6,13 +6,16 @@ from pathlib import Path
 import pytest
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+def _backend_root() -> Path:
+    """Directory containing app/ — 'backend/' locally, '/app' inside the container
+    (backend/tests is bind-mounted straight to /app/tests, so parents[1] lands on
+    the right root in both layouts; never hardcode a 'backend/' prefix here)."""
+    return Path(__file__).resolve().parents[1]
 
 
 def test_no_auto_clear_paused_until_in_db_maintenance():
     """paused_until must not be cleared outside explicit human paths."""
-    path = _repo_root() / "backend/app/services/db_maintenance_agent.py"
+    path = _backend_root() / "app/services/db_maintenance_agent.py"
     if not path.exists():
         pytest.skip("db_maintenance_agent not present")
     source = path.read_text(encoding="utf-8")
@@ -33,7 +36,7 @@ def test_no_auto_clear_paused_until_in_db_maintenance():
 
 def test_touch_adaptation_shadow_append_only():
     """Shadow table writes should be INSERT-only in maintenance pass."""
-    path = _repo_root() / "backend/app/services/db_maintenance_agent.py"
+    path = _backend_root() / "app/services/db_maintenance_agent.py"
     if not path.exists():
         pytest.skip("db_maintenance_agent not present")
     text = path.read_text(encoding="utf-8")
@@ -47,11 +50,11 @@ def test_touch_adaptation_shadow_append_only():
 
 def test_channel_ceiling_never_auto_restored():
     """Restraint downgrade to in_app must not be reversed automatically."""
-    path = _repo_root() / "backend/app/services/proactive_touch_policy.py"
+    path = _backend_root() / "app/services/proactive_touch_policy.py"
     text = path.read_text(encoding="utf-8")
     assert "channel_ceiling" not in text or "channel_override" in text
     # Policy may set override; maintenance must not strip ceiling without human action
-    maint = _repo_root() / "backend/app/services/db_maintenance_agent.py"
+    maint = _backend_root() / "app/services/db_maintenance_agent.py"
     if maint.exists() and "_touch_adaptation_pass" in maint.read_text(encoding="utf-8"):
         mtext = maint.read_text(encoding="utf-8")
         assert "channel_ceiling" not in mtext or "in_app" in mtext
