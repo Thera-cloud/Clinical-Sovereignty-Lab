@@ -16,4 +16,4 @@
 
 **Reviewer 1:** Nathan Nevedal **Date:** 2026-07-14
 
-**Reviewer 2 (required for prod flip):** _______________ **Date:** _______________
+**Reviewer 2 (required for prod flip):** Kristy Moore **Date:** 2026-07-14

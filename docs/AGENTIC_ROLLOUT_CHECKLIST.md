@@ -1,6 +1,6 @@
 # Agentic Roadmap Rollout Checklist (Phases 0–5)
 
-**Status:** TRACK A IN PROGRESS — staging bake scripts on `main`; production agentic flags **false**. Run `staging_bake_setup.sh` on GREEN to apply migrations **237–239** and bring up `little_nate_staging`.
+**Status:** TRACK A + B BAKED ON STAGING, DUAL-REVIEWER SIGNED (2026-07-14) — migrations applied, Phase 0 + Phase 1 flipped/tested on `nate_staging_backend`, Flutter deployed, reviewed by Nathan Nevedal + Kristy Moore; production agentic flags **false**. Prod flips (0.5/0.6/1.5) blocked only on ≥72h staging soak (not started — soak clock begins at first prod Phase 0 flip). Track C (Phase 5 neuro-symbolic) untouched.
 
 **Infrastructure:** `docker-compose.staging.yml` + `scripts/staging_bake_setup.sh` → `nate_staging_backend` on `127.0.0.1:8011`, DB `little_nate_staging`. (Port 8001 is already bound by host nginx on GREEN for an unrelated vhost — do not reuse it.)
 
@@ -33,8 +33,8 @@ Production `:8000` / `nate_backend` agentic flags remain **false** until per-pha
 
 | Step | Action | Done |
 |------|--------|------|
-| P0 | CI green: `bash backend/scripts/run_ci_tests.sh` | [ ] |
-| P1 | Human sign-off: operator + second reviewer | [ ] |
+| P0 | CI green: `bash backend/scripts/run_ci_tests.sh` | [x] |
+| P1 | Human sign-off: operator + second reviewer | [x] |
 | P2 | `SKYEYE_AUDIT_TOKEN` + audit accounts on GREEN | [ ] |
 | P3 | Backup / vault heartbeat < 48h (see `vault-backup-heartbeat.mdc`) | [ ] |
 
@@ -46,9 +46,9 @@ Run in order on `little_nate` (via `docker exec nate_postgres psql ...`):
 
 | Migration | File | Done |
 |-----------|------|------|
-| 237 | `backend/migrations/237_proactive_touch_policy.sql` | [ ] |
-| 238 | `backend/migrations/238_nate_commitments.sql` | [ ] |
-| 239 | `backend/migrations/239_nate_therapeutic_plans.sql` | [ ] |
+| 237 | `backend/migrations/237_proactive_touch_policy.sql` | [x] |
+| 238 | `backend/migrations/238_nate_commitments.sql` | [x] |
+| 239 | `backend/migrations/239_nate_therapeutic_plans.sql` | [x] |
 
 Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic_plans` (and related views/tables).
 
@@ -60,10 +60,10 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 
 | Step | Action | Done |
 |------|--------|------|
-| 0.1 | Adversarial walk: `docs/AGENTIC_PHASE_0_REVIEW.md` (key / lifecycle / surface / seam / time) | [ ] |
-| 0.2 | Seam tests: `test_proactive_touch_seams.py`, `test_touch_adaptation_asymmetry.py` | [ ] |
-| 0.3 | Staging: set flag `true`, restart backend | [ ] |
-| 0.4 | Verify: checkin touches route through `can_send_proactive_touch`; shadow table receives assertiveness proposals only | [ ] |
+| 0.1 | Adversarial walk: `docs/AGENTIC_PHASE_0_REVIEW.md` (key / lifecycle / surface / seam / time) | [x] |
+| 0.2 | Seam tests: `test_proactive_touch_seams.py`, `test_touch_adaptation_asymmetry.py` | [x] |
+| 0.3 | Staging: set flag `true`, restart backend | [x] |
+| 0.4 | Verify: checkin touches route through `can_send_proactive_touch`; shadow table receives assertiveness proposals only | [x] |
 | 0.5 | Production flag flip (after 0.4 stable ≥ 72h) | [ ] |
 | 0.6 | `safe_deploy.sh backend` + 117/117 health + trust window | [ ] |
 
@@ -77,12 +77,12 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 
 | Step | Action | Done |
 |------|--------|------|
-| 1.1 | Confirm Phase 0 flag on and stable in prod | [ ] |
-| 1.2 | Adversarial walk: `docs/AGENTIC_PHASE_1_REVIEW.md` | [ ] |
-| 1.3 | Staging: flag `true`; test consent toggle, list/dismiss/edit commitments (WS + Flutter) | [ ] |
-| 1.4 | Verify: `NateCommitmentAgent` touches pass Phase 0 gate; `nate_nudges` delivery | [ ] |
+| 1.1 | Confirm Phase 0 flag on and stable in prod | [ ] *(intentionally skipped — Track B ran on staging only, per two-track plan; prod Phase 0 not yet flipped)* |
+| 1.2 | Adversarial walk: `docs/AGENTIC_PHASE_1_REVIEW.md` | [x] |
+| 1.3 | Staging: flag `true`; test consent toggle, list/dismiss/edit commitments (WS + Flutter) | [x] |
+| 1.4 | Verify: `NateCommitmentAgent` touches pass Phase 0 gate; `nate_nudges` delivery | [x] |
 | 1.5 | Production flag flip | [ ] |
-| 1.6 | Flutter web deploy if UI changed (`scripts/deploy_flutter_web.sh`) | [ ] |
+| 1.6 | Flutter web deploy if UI changed (`scripts/deploy_flutter_web.sh`) | [x] |
 
 ---
 
