@@ -24,7 +24,10 @@ STAGING_EXISTS=$(docker exec nate_postgres psql -U "${POSTGRES_USER:-nate_admin}
   "SELECT 1 FROM pg_database WHERE datname='little_nate_staging'" | tr -d '[:space:]')
 
 if [ "$STAGING_EXISTS" != "1" ] || [ "$REFRESH_DB" = "1" ]; then
-  echo "[staging_bake] (Re)create little_nate_staging from production template"
+  echo "[staging_bake] (Re)create little_nate_staging via pg_dump (no lock on live little_nate)"
+  # NOTE: CREATE DATABASE ... TEMPLATE requires zero connections to the SOURCE db.
+  # little_nate is live prod (backend + bridge pools) — never terminate its backends here.
+  # Terminate only staging's own connections (safe: staging has no traffic).
   docker exec nate_postgres psql -U "${POSTGRES_USER:-nate_admin}" -d postgres -v ON_ERROR_STOP=1 <<'SQL'
 SELECT pg_terminate_backend(pid)
 FROM pg_stat_activity
@@ -33,7 +36,12 @@ SQL
   docker exec nate_postgres psql -U "${POSTGRES_USER:-nate_admin}" -d postgres -v ON_ERROR_STOP=1 \
     -c "DROP DATABASE IF EXISTS little_nate_staging;"
   docker exec nate_postgres psql -U "${POSTGRES_USER:-nate_admin}" -d postgres -v ON_ERROR_STOP=1 \
-    -c "CREATE DATABASE little_nate_staging WITH TEMPLATE little_nate OWNER nate_admin;"
+    -c "CREATE DATABASE little_nate_staging OWNER nate_admin;"
+  echo "[staging_bake] pg_dump little_nate | psql little_nate_staging (MVCC snapshot, no exclusive lock)"
+  docker exec nate_postgres bash -c \
+    "pg_dump -U ${POSTGRES_USER:-nate_admin} -d little_nate --no-owner --no-privileges | psql -U ${POSTGRES_USER:-nate_admin} -d little_nate_staging -v ON_ERROR_STOP=1 -q" \
+    > /tmp/staging_clone.log 2>&1 || { echo "[staging_bake] ERROR: clone failed, see /tmp/staging_clone.log"; tail -40 /tmp/staging_clone.log; exit 1; }
+  echo "[staging_bake] Clone complete"
 else
   echo "[staging_bake] little_nate_staging exists — applying migrations only"
   bash scripts/staging_apply_agentic_migrations.sh little_nate_staging
