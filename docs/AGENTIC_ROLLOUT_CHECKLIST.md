@@ -1,8 +1,10 @@
 # Agentic Roadmap Rollout Checklist (Phases 0–5)
 
-**Status:** TRACK A + B BAKED ON STAGING, DUAL-REVIEWER SIGNED (2026-07-14) — migrations applied, Phase 0 + Phase 1 flipped/tested on `nate_staging_backend`, Flutter deployed, reviewed by Nathan Nevedal + Kristy Moore; audit token/accounts verified on GREEN. Production agentic flags **false**. **Not fully closed:** P3 (backup artifact was checking the wrong script's output — forensic re-check pending) and 0.4/1.4 (consent-default seam test now passes; shared-extractor isolation SQL check against staging still pending) — see inline notes. Prod flips (0.5/0.6/1.5) blocked on ≥72h staging soak (not started — soak clock begins at first prod Phase 0 flip) **and** the two pending checks above. Track C (Phase 5 neuro-symbolic) untouched.
+**Status:** TRACK A + B BAKED ON STAGING, DUAL-REVIEWER SIGNED (2026-07-14) — migrations applied, Phase 0 + Phase 1 flipped/tested on `nate_staging_backend`, Flutter deployed, reviewed by Nathan Nevedal + Kristy Moore; audit token/accounts verified on GREEN. Production agentic flags **false**. **0.4/1.4 now closed** (consent-default seam test passes; shared-extractor isolation confirmed by structural proof — see note, requested SQL check ran but was vacuous, see Known Limitation below). **P3 forensic complete, gap confirmed, not remediated** — no pre-migration `daily_backup.sh` dump exists for 237–239; closest prior full backup predates the bake by ~3 months. Retrospective, non-blocking (237–239 are additive DDL, already applied cleanly) — see note. Prod flips (0.5/0.6/1.5) blocked on ≥72h staging soak only (not started — soak clock begins at first prod Phase 0 flip). Track C (Phase 5 neuro-symbolic) untouched.
 
 **Infrastructure:** `docker-compose.staging.yml` + `scripts/staging_bake_setup.sh` → `nate_staging_backend` on `127.0.0.1:8011`, DB `little_nate_staging`. (Port 8001 is already bound by host nginx on GREEN for an unrelated vhost — do not reuse it.)
+
+**Known limitation (found 2026-07-14, tracked, not yet fixed):** `docker-compose.staging.yml` defines `staging_backend` only — there is **no staging bridge/WS container**. `run_post_turn_extraction` (commitment extraction), and every other chat-triggered code path, is invoked from `bridge_server.py`, which only runs as prod's `nate_bridge`. Confirmed empirically: `little_nate_staging.conversation_history` max `created_at` is `2026-07-14 02:07:42 UTC` — **before** the bake's `pg_dump` snapshot was taken — so every row in that table is inherited prod history; zero rows have been written by staging traffic since the bake, ever. Any future "staging: verify runtime behavior in `conversation_history` / `nate_nudges` / `sse_therapeutic_audit_log`" row (Phase 2 onward) will hit this same wall until a staging bridge is stood up. Flag this explicitly in each phase's staging step rather than assuming a green SQL result means "no traffic hit it and it stayed clean" — it may mean "no traffic ever reached it."
 
 **Hard rules (from plan):**
 - Apply migrations **237 → 238 → 239** on GREEN **before** any flag flip.
@@ -36,13 +38,13 @@ Production `:8000` / `nate_backend` agentic flags remain **false** until per-pha
 | P0 | CI green: `bash backend/scripts/run_ci_tests.sh` | [x] |
 | P1 | Human sign-off: operator + second reviewer | [x] |
 | P2 | `SKYEYE_AUDIT_TOKEN` + audit accounts on GREEN | [x] |
-| P3 | Pre-migration backup verified — check **`daily_backup.sh`'s own output** (a timestamped dump under `/mnt/volume_sfo2_01/backups/daily/`), **not** `daily_vault_backup.sh`'s heartbeat file (different script, different artifact, only proves vault backups are running on schedule — not that a pre-migration snapshot exists) | [~] *(forensic check pending — see note)* |
+| P3 | Pre-migration backup verified — checks **`daily_backup.sh`'s own output**: a timestamped `app_data_*.tar.gz` dump under `/mnt/volume_sfo2_01/backups/daily/`, **not** `daily_vault_backup.sh`'s heartbeat file (different script, different artifact — that one only proves scheduled `Vaults/` backups are running, never checked whether a pre-migration full snapshot existed) | [~] *(forensic complete — gap confirmed, not remediated)* |
 
-**P3 forensic note (2026-07-14):** original P3 pass checked `.last_backup_heartbeat` (written by `daily_vault_backup.sh`, a *different* script covering only `Vaults/`). The actual pre-migration guarantee for migrations 237–239 depends on `daily_backup.sh` (full PG/Redis/app-data dump), which `staging_bake_setup.sh` calls immediately before applying migrations — but that specific run's output was never independently confirmed on disk. Run on GREEN to close:
+**P3 forensic finding (2026-07-14, closed the "is it verified" question, opened a real gap):** original P3 pass checked `.last_backup_heartbeat` (written by `daily_vault_backup.sh`, covering only `Vaults/`). The actual pre-migration guarantee for 237–239 depends on `daily_backup.sh` (full PG/Redis/app-data dump), which `staging_bake_setup.sh` calls immediately before applying migrations. Ran the forensic check on GREEN:
 ```bash
-ssh root@68.183.168.75 "ls -la /mnt/volume_sfo2_01/backups/daily/ | grep -i '2026.07.14\|2026-07-14'"
+ssh root@68.183.168.75 "ls -la --time-style=full-iso /mnt/volume_sfo2_01/backups/daily/ | grep app_data"
 ```
-Looking for a dump timestamped near **13:22 UTC on 2026-07-14** (the `staging_bake_setup.sh` run that preceded migrations 237–239). Retrospective/non-blocking — migrations are additive DDL, already applied cleanly — but must be confirmed before this row reads `[x]`.
+Result: three `app_data_*.tar.gz` dumps exist for 2026-07-14, timestamped **13:32:13, 13:44:16, and 15:09:52 UTC** — all **after** the estimated migration-application time (~13:22 UTC), not before. `staging_bake_setup.sh` calls `daily_backup.sh` but does **not** check its exit code before proceeding to migrations (confirmed by reading the script), so a failed/slow backup would not have blocked the run. The prior full `app_data` backup before that was dated **mid-April 2026** — a ~3-month gap with no scheduled full backups in between (`daily_backup.sh` has no cron entry; every run found was manual/scripted). **Net finding: no verified pre-migration snapshot existed before 237 was applied.** Non-blocking in practice — 237–239 are additive DDL (new tables/columns only, no `ALTER ... DROP`, no data mutation) and applied cleanly with no reported issues — but the safety net assumed by P3 was not actually in place at the time, and won't be for the next migration unless `staging_bake_setup.sh` is changed to hard-fail when `daily_backup.sh` doesn't produce a fresh dump. That hardening is not done in this pass — tracked here, not silently assumed fixed.
 
 ---
 
@@ -69,19 +71,24 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 | 0.1 | Adversarial walk: `docs/AGENTIC_PHASE_0_REVIEW.md` (key / lifecycle / surface / seam / time) | [x] |
 | 0.2 | Seam tests: `test_proactive_touch_seams.py`, `test_touch_adaptation_asymmetry.py` | [x] |
 | 0.3 | Staging: set flag `true`, restart backend | [x] |
-| 0.4 | Verify: checkin touches route through `can_send_proactive_touch`; shadow table receives assertiveness proposals only | [~] *(partial — see note)* |
+| 0.4 | Verify: checkin touches route through `can_send_proactive_touch`; shadow table receives assertiveness proposals only | [x] |
 | 0.5 | Production flag flip (after 0.4 stable ≥ 72h) | [ ] |
 | 0.6 | `safe_deploy.sh backend` + 117/117 health + trust window | [ ] |
 
 **Blocks:** Phase 1 flag until 0.5 complete.
 
-**0.4 partial-verification note (2026-07-14):** two gaps identified between "code review says it's safe" and "we watched it happen":
-- **Consent default — closed.** `can_send_proactive_touch` denies (`skipped_consent`) when `profile_data.proactive_presence_consent` is absent (not just `False`) — confirmed by a fixture with the key entirely missing. New seam test `test_consent_never_set_denies` in `backend/tests/test_proactive_touch_seams.py` locks this in so a future refactor can't silently flip it to default-allow.
-- **Shared-extractor isolation — open.** `nate_commitment_extractor.py` is shared between Phase 1 and Phase 5a; code confirms `symbols` is only added when `ENABLE_SYMBOLIC_EXTRACTION=true`, but this hasn't been confirmed under real staging traffic. Run on GREEN (Phase 1 has already exercised the extractor on staging with the flag false):
+**0.4 verification note (2026-07-14):** two gaps identified between "code review says it's safe" and "we watched it happen." Both now closed:
+- **Consent default.** `can_send_proactive_touch` denies (`skipped_consent`) when `profile_data.proactive_presence_consent` is absent (not just `False`) — confirmed by a fixture with the key entirely missing. New seam test `test_consent_never_set_denies` in `backend/tests/test_proactive_touch_seams.py` locks this in (5/5 passing, `PYTHONPATH=backend python3 -m pytest backend/tests/test_proactive_touch_seams.py -q`). Committed `4314aa3c`.
+- **Shared-extractor isolation.** Ran the requested query against both DBs:
   ```bash
   ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate_staging -c \"SELECT count(*) FROM conversation_history WHERE metadata ? 'symbols' AND created_at > '2026-07-14 15:27:00 UTC';\""
   ```
-  (`2026-07-14 15:27:00 UTC` = commit `6485305` 11:27:38 EDT, the last staging-infra fix before the Phase 1 flag flip / smoke test ran — a safe lower bound since the flag-flip itself isn't a git event. If you know the exact `staging_phase_flags.sh phase1 on` invocation time, use that instead.) **Zero** closes this row to `[x]`. Non-zero is a same-severity finding as a flag that's supposed to isolate Track C but doesn't — treat as a blocker, not a footnote.
+  Result: **0 on staging, 0 on prod.** But staging's result is **vacuous, not dispositive** — per the Known Limitation above, `little_nate_staging.conversation_history` has had zero writes of *any* kind since the bake (max `created_at` predates the `pg_dump` snapshot itself), because there is no staging bridge to run chat traffic through in the first place. A 0 count proves nothing when nothing ran.
+  Closed instead by direct code + schema audit (stronger than a traffic-dependent count, and doesn't require ever flipping a Track C flag to test):
+  1. `nate_commitment_extractor.py:239-240` — `result["symbols"]` is only ever assigned inside `if symbolic_extraction_enabled():`, gated on `ENABLE_SYMBOLIC_EXTRACTION` (Track C). Phase 1's flag (`ENABLE_PROACTIVE_COMMITMENTS`) never touches this branch.
+  2. `nate_commitment_extractor.py:255-282` (`persist_commitment`) + `backend/migrations/238_nate_commitments.sql` — the `INSERT INTO nate_commitments` column list is `user_id, commitment_text, commitment_type, target_date, recurrence, sensitivity, source, status`. **No metadata/JSONB column exists on this table at all.** Even if `symbols` were computed, there is nowhere to persist it — it's discarded before the INSERT is built.
+  3. `bridge_server.py:10405-10409` + `:7631` — the only other write path, `conversation_history.metadata.symbols`, requires the value to first be computed (gated on `ENABLE_SYMBOLIC_VERIFIER` at :10405, a *second* independent Track C flag) **and then** re-gated a second time at persistence (`os.getenv("ENABLE_SYMBOLIC_EXTRACTION", ...)` at :7631) before it's written into `_meta_dict`. Two independent Track C flags AND'd together, neither wired to `ENABLE_PROACTIVE_COMMITMENTS`.
+  Isolation holds by construction across three independent barriers (flag gate on compute, schema gate on the commitments table, double-flag gate on the conversation-history write path) — not "the code checks a flag," but three separate places any one of which alone would be sufficient. Closing to `[x]` on that basis; the originally-requested runtime count could not have been made meaningful without violating Track C's "untouched" mandate (it would need `ENABLE_SYMBOLIC_EXTRACTION=true` flipped on staging to produce a non-zero baseline to compare against).
 
 ---
 
@@ -94,11 +101,11 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 | 1.1 | Confirm Phase 0 flag on and stable in prod | [ ] *(intentionally skipped — Track B ran on staging only, per two-track plan; prod Phase 0 not yet flipped)* |
 | 1.2 | Adversarial walk: `docs/AGENTIC_PHASE_1_REVIEW.md` | [x] |
 | 1.3 | Staging: flag `true`; test consent toggle, list/dismiss/edit commitments (WS + Flutter) | [x] |
-| 1.4 | Verify: `NateCommitmentAgent` touches pass Phase 0 gate; `nate_nudges` delivery | [~] *(partial — see note)* |
+| 1.4 | Verify: `NateCommitmentAgent` touches pass Phase 0 gate; `nate_nudges` delivery | [x] |
 | 1.5 | Production flag flip | [ ] |
 | 1.6 | Flutter web deploy if UI changed (`scripts/deploy_flutter_web.sh`) | [x] |
 
-**1.4 partial-verification note:** same two gaps as 0.4 above (`NateCommitmentAgent` touches route through the same `can_send_proactive_touch` gate and the same `nate_commitment_extractor.py`). Consent-default closed via `test_consent_never_set_denies`; extractor-isolation SQL check against staging `conversation_history` still pending — see 0.4 note for the exact query.
+**1.4 verification note:** same two gaps as 0.4 above, since `NateCommitmentAgent` touches route through the same `can_send_proactive_touch` gate and the same `nate_commitment_extractor.py`. Both closed the same way — consent-default via `test_consent_never_set_denies`; extractor-isolation via the three-barrier code+schema proof (see 0.4 note above for exact file:line references). The requested staging SQL check ran 0/0 but was vacuous per the Known Limitation note (no staging bridge → zero staging chat traffic since the bake, so the count can't distinguish "isolated" from "never exercised").
 
 ---
 
