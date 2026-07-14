@@ -7,7 +7,13 @@ set -euo pipefail
 cd /opt/clinical-sovereignty-lab
 PHASE="${1:-phase0}"
 
-echo "[staging_smoke] health"
+echo "[staging_smoke] health (retry up to 60s)"
+for i in $(seq 1 20); do
+  if curl -sf http://127.0.0.1:8011/health >/dev/null 2>&1; then
+    break
+  fi
+  sleep 3
+done
 curl -sf http://127.0.0.1:8011/health
 
 echo "[staging_smoke] seam tests (offline, in staging container)"

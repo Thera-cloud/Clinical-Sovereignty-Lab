@@ -49,7 +49,13 @@ esac
 echo "[staging_flags] ${PHASE} ${STATE} — recreating staging_backend"
 docker compose -f docker-compose.prod.yml -f docker-compose.staging.yml up -d staging_backend
 
-sleep 12
+echo "[staging_flags] Waiting for staging_backend health (up to 90s)"
+for i in $(seq 1 30); do
+  if curl -sf http://127.0.0.1:8011/health >/dev/null 2>&1; then
+    break
+  fi
+  sleep 3
+done
 docker exec nate_staging_backend printenv ENABLE_PROACTIVE_TOUCH_POLICY ENABLE_PROACTIVE_COMMITMENTS 2>/dev/null || true
 curl -sf http://127.0.0.1:8011/health
 echo ""
