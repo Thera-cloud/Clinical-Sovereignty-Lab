@@ -1,6 +1,8 @@
 # Agentic Roadmap Rollout Checklist (Phases 0–5)
 
-**Status:** PRE-ROLLOUT — code on `main`, all feature flags **false**, migrations **not** applied on GREEN.
+**Status:** TRACK A IN PROGRESS — staging bake scripts on `main`; production agentic flags **false**. Run `staging_bake_setup.sh` on GREEN to apply migrations **237–239** and bring up `little_nate_staging`.
+
+**Infrastructure:** `docker-compose.staging.yml` + `scripts/staging_bake_setup.sh` → `nate_staging_backend` on `127.0.0.1:8001`, DB `little_nate_staging`.
 
 **Hard rules (from plan):**
 - Apply migrations **237 → 238 → 239** on GREEN **before** any flag flip.
@@ -10,6 +12,20 @@
 - **Phase 5d** (`ENABLE_CRYSTAL_GRAPH`) requires a **dedicated isolation audit** before its flag is ever flipped — separate from “going neuro-symbolic” as a whole.
 
 **Deploy command (when ready):** `ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && git pull origin main && bash scripts/safe_deploy.sh <service>"`
+
+---
+
+## BLOCKER — Bake environment
+
+**Resolved (2026-07-14):** Option **(a) Minimal bake on GREEN** — `docker-compose.staging.yml`, `little_nate_staging`, port **8001**.
+
+```bash
+ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && bash scripts/staging_bake_setup.sh"
+bash scripts/staging_phase_flags.sh phase0 on   # staging only
+bash scripts/staging_smoke_agentic.sh phase0
+```
+
+Production `:8000` / `nate_backend` agentic flags remain **false** until per-phase prod flip rows below.
 
 ---
 

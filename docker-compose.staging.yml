@@ -1,0 +1,67 @@
+# QUANTUM-CRYSTAL-ARCH: Agentic bake — second backend on :8001, little_nate_staging DB.
+# Use with prod compose: docker compose -f docker-compose.prod.yml -f docker-compose.staging.yml up -d staging_backend
+# Production bridge/API traffic unchanged; flags here affect staging_backend only.
+
+services:
+  staging_backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nate_staging_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-nate_admin}:${POSTGRES_PASSWORD}@postgres:5432/little_nate_staging
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-nate_admin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=little_nate_staging
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DATA_DIR=/app/data
+      - PYTHONUNBUFFERED=1
+      - ENVIRONMENT=staging
+      - DEBUG=false
+      - WEB_CONCURRENCY=1
+      - NODE_COLOR=green
+      - VOICE_EMOTION_FORCE_LIBROSA=${VOICE_EMOTION_FORCE_LIBROSA:-1}
+      - ENABLE_CRYSTAL_GRAPH=false
+      - ENABLE_PROACTIVE_TOUCH_POLICY=${STAGING_ENABLE_PROACTIVE_TOUCH_POLICY:-false}
+      - ENABLE_PROACTIVE_COMMITMENTS=${STAGING_ENABLE_PROACTIVE_COMMITMENTS:-false}
+      - ENABLE_NATE_TOOL_EXECUTOR=${STAGING_ENABLE_NATE_TOOL_EXECUTOR:-false}
+      - ENABLE_THERAPEUTIC_PLANS=${STAGING_ENABLE_THERAPEUTIC_PLANS:-false}
+      - ENABLE_SELF_MONITOR_AGENT=${STAGING_ENABLE_SELF_MONITOR_AGENT:-false}
+      - ENABLE_SELF_MONITOR_COACH_ALERT=${STAGING_ENABLE_SELF_MONITOR_COACH_ALERT:-false}
+      - ENABLE_SELF_MONITOR_TOUCH=${STAGING_ENABLE_SELF_MONITOR_TOUCH:-false}
+      - ENABLE_SYMBOLIC_EXTRACTION=${STAGING_ENABLE_SYMBOLIC_EXTRACTION:-false}
+      - ENABLE_SYMBOLIC_VERIFIER=${STAGING_ENABLE_SYMBOLIC_VERIFIER:-false}
+      - ENABLE_FORWARD_REASONING=${STAGING_ENABLE_FORWARD_REASONING:-false}
+    ports:
+      - "127.0.0.1:8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./backend/scripts:/app/scripts:ro
+      - ./backend/tests:/app/tests:ro
+      - ./data/backend_staging:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 4G
+        reservations:
+          memory: 512M
+    networks:
+      - nate_network
