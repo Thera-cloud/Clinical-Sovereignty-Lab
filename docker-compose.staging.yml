@@ -1,4 +1,5 @@
-# QUANTUM-CRYSTAL-ARCH: Agentic bake — second backend on :8001, little_nate_staging DB.
+# QUANTUM-CRYSTAL-ARCH: Agentic bake — second backend on :8011, little_nate_staging DB.
+# NOTE: 8001 is already bound by host nginx on GREEN (unrelated vhost) — do not reuse it.
 # Use with prod compose: docker compose -f docker-compose.prod.yml -f docker-compose.staging.yml up -d staging_backend
 # Production bridge/API traffic unchanged; flags here affect staging_backend only.
 
@@ -40,7 +41,7 @@ services:
       - ENABLE_SYMBOLIC_VERIFIER=${STAGING_ENABLE_SYMBOLIC_VERIFIER:-false}
       - ENABLE_FORWARD_REASONING=${STAGING_ENABLE_FORWARD_REASONING:-false}
     ports:
-      - "127.0.0.1:8001:8000"
+      - "127.0.0.1:8011:8000"
     depends_on:
       postgres:
         condition: service_healthy

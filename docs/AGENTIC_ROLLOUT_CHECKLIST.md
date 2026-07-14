@@ -2,7 +2,7 @@
 
 **Status:** TRACK A IN PROGRESS — staging bake scripts on `main`; production agentic flags **false**. Run `staging_bake_setup.sh` on GREEN to apply migrations **237–239** and bring up `little_nate_staging`.
 
-**Infrastructure:** `docker-compose.staging.yml` + `scripts/staging_bake_setup.sh` → `nate_staging_backend` on `127.0.0.1:8001`, DB `little_nate_staging`.
+**Infrastructure:** `docker-compose.staging.yml` + `scripts/staging_bake_setup.sh` → `nate_staging_backend` on `127.0.0.1:8011`, DB `little_nate_staging`. (Port 8001 is already bound by host nginx on GREEN for an unrelated vhost — do not reuse it.)
 
 **Hard rules (from plan):**
 - Apply migrations **237 → 238 → 239** on GREEN **before** any flag flip.
@@ -17,7 +17,7 @@
 
 ## BLOCKER — Bake environment
 
-**Resolved (2026-07-14):** Option **(a) Minimal bake on GREEN** — `docker-compose.staging.yml`, `little_nate_staging`, port **8001**.
+**Resolved (2026-07-14):** Option **(a) Minimal bake on GREEN** — `docker-compose.staging.yml`, `little_nate_staging`, port **8011** (8001 was already in use by host nginx on GREEN).
 
 ```bash
 ssh root@68.183.168.75 "cd /opt/clinical-sovereignty-lab && bash scripts/staging_bake_setup.sh"

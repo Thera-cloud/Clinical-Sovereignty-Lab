@@ -8,7 +8,7 @@ cd /opt/clinical-sovereignty-lab
 PHASE="${1:-phase0}"
 
 echo "[staging_smoke] health"
-curl -sf http://127.0.0.1:8001/health
+curl -sf http://127.0.0.1:8011/health
 
 echo "[staging_smoke] seam tests (offline, in staging container)"
 docker compose -f docker-compose.prod.yml -f docker-compose.staging.yml exec -T staging_backend \

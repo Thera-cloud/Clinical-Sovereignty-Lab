@@ -51,6 +51,6 @@ docker compose -f docker-compose.prod.yml -f docker-compose.staging.yml up -d st
 
 sleep 12
 docker exec nate_staging_backend printenv ENABLE_PROACTIVE_TOUCH_POLICY ENABLE_PROACTIVE_COMMITMENTS 2>/dev/null || true
-curl -sf http://127.0.0.1:8001/health
+curl -sf http://127.0.0.1:8011/health
 echo ""
 echo "[staging_flags] OK"

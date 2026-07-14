@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time / refresh: little_nate_staging DB + staging_backend container (:8001).
+# One-time / refresh: little_nate_staging DB + staging_backend container (:8011).
 # Run on GREEN after git pull. Does not touch production backend flags or :8000 traffic.
 # Usage: bash scripts/staging_bake_setup.sh [--refresh-db]
 
@@ -54,7 +54,7 @@ echo "[staging_bake] Start staging_backend (flags default off — use staging_ph
 docker compose -f docker-compose.prod.yml -f docker-compose.staging.yml up -d staging_backend
 
 sleep 15
-curl -sf http://127.0.0.1:8001/health | head -c 200
+curl -sf http://127.0.0.1:8011/health | head -c 200
 echo ""
 docker logs nate_staging_backend --since 30s 2>&1 | grep -E 'STARTUP COMPLETE|staging' | tail -3 || true
-echo "[staging_bake] OK — health http://127.0.0.1:8001/health"
+echo "[staging_bake] OK — health http://127.0.0.1:8011/health"
