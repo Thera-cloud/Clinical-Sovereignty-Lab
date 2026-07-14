@@ -16152,7 +16152,6 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     final clientId = _sessionAssistantClientId.isNotEmpty
         ? _sessionAssistantClientId
         : (d['client_id'] ??
-                _pendingLiveBoot?['client_id'] ??
                 _activeLiveSession?['client_id'] ??
                 '')
             .toString();
