@@ -76,6 +76,32 @@ async def test_trial_user_denied(mock_pool):
 
 
 @pytest.mark.asyncio
+async def test_consent_never_set_denies(mock_pool):
+    """Account that never wrote proactive_presence_consent at all (key absent,
+    not False) must be denied — default-deny, not default-allow, on missing consent."""
+    pool, conn = mock_pool
+    user_row = {
+        "username": "never_touched_consent",
+        "hardware_id": "HW_NEVER_TOUCHED",
+        "role": "CLIENT",
+        "tier": "STANDARD",
+        "profile_data": {"timezone": "UTC"},  # no "proactive_presence_consent" key at all
+    }
+    conn.fetchrow = AsyncMock(side_effect=[user_row, None])
+    with patch.dict("os.environ", {"ENABLE_PROACTIVE_TOUCH_POLICY": "true"}):
+        with patch(
+            "app.services._identity_resolver.resolve_username",
+            AsyncMock(return_value="never_touched_consent"),
+        ):
+            d = await can_send_proactive_touch(
+                pool, "HW_NEVER_TOUCHED", source="commitment"
+            )
+    assert d.allowed is False
+    assert d.reason == "skipped_consent"
+    assert "proactive_presence_consent" not in user_row["profile_data"]
+
+
+@pytest.mark.asyncio
 async def test_sensitive_in_app_only(mock_pool):
     pool, conn = mock_pool
     user_row = {

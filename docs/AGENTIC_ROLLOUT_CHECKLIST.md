@@ -1,6 +1,6 @@
 # Agentic Roadmap Rollout Checklist (Phases 0–5)
 
-**Status:** TRACK A + B BAKED ON STAGING, DUAL-REVIEWER SIGNED, PRE-FLIGHT P0–P3 COMPLETE (2026-07-14) — migrations applied, Phase 0 + Phase 1 flipped/tested on `nate_staging_backend`, Flutter deployed, reviewed by Nathan Nevedal + Kristy Moore; audit token/accounts verified on GREEN; vault heartbeat fresh (~14h). Production agentic flags **false**. Prod flips (0.5/0.6/1.5) blocked only on ≥72h staging soak (not started — soak clock begins at first prod Phase 0 flip). Track C (Phase 5 neuro-symbolic) untouched.
+**Status:** TRACK A + B BAKED ON STAGING, DUAL-REVIEWER SIGNED (2026-07-14) — migrations applied, Phase 0 + Phase 1 flipped/tested on `nate_staging_backend`, Flutter deployed, reviewed by Nathan Nevedal + Kristy Moore; audit token/accounts verified on GREEN. Production agentic flags **false**. **Not fully closed:** P3 (backup artifact was checking the wrong script's output — forensic re-check pending) and 0.4/1.4 (consent-default seam test now passes; shared-extractor isolation SQL check against staging still pending) — see inline notes. Prod flips (0.5/0.6/1.5) blocked on ≥72h staging soak (not started — soak clock begins at first prod Phase 0 flip) **and** the two pending checks above. Track C (Phase 5 neuro-symbolic) untouched.
 
 **Infrastructure:** `docker-compose.staging.yml` + `scripts/staging_bake_setup.sh` → `nate_staging_backend` on `127.0.0.1:8011`, DB `little_nate_staging`. (Port 8001 is already bound by host nginx on GREEN for an unrelated vhost — do not reuse it.)
 
@@ -36,7 +36,13 @@ Production `:8000` / `nate_backend` agentic flags remain **false** until per-pha
 | P0 | CI green: `bash backend/scripts/run_ci_tests.sh` | [x] |
 | P1 | Human sign-off: operator + second reviewer | [x] |
 | P2 | `SKYEYE_AUDIT_TOKEN` + audit accounts on GREEN | [x] |
-| P3 | Backup / vault heartbeat < 48h (see `vault-backup-heartbeat.mdc`) | [x] |
+| P3 | Pre-migration backup verified — check **`daily_backup.sh`'s own output** (a timestamped dump under `/mnt/volume_sfo2_01/backups/daily/`), **not** `daily_vault_backup.sh`'s heartbeat file (different script, different artifact, only proves vault backups are running on schedule — not that a pre-migration snapshot exists) | [~] *(forensic check pending — see note)* |
+
+**P3 forensic note (2026-07-14):** original P3 pass checked `.last_backup_heartbeat` (written by `daily_vault_backup.sh`, a *different* script covering only `Vaults/`). The actual pre-migration guarantee for migrations 237–239 depends on `daily_backup.sh` (full PG/Redis/app-data dump), which `staging_bake_setup.sh` calls immediately before applying migrations — but that specific run's output was never independently confirmed on disk. Run on GREEN to close:
+```bash
+ssh root@68.183.168.75 "ls -la /mnt/volume_sfo2_01/backups/daily/ | grep -i '2026.07.14\|2026-07-14'"
+```
+Looking for a dump timestamped near **13:22 UTC on 2026-07-14** (the `staging_bake_setup.sh` run that preceded migrations 237–239). Retrospective/non-blocking — migrations are additive DDL, already applied cleanly — but must be confirmed before this row reads `[x]`.
 
 ---
 
@@ -63,11 +69,19 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 | 0.1 | Adversarial walk: `docs/AGENTIC_PHASE_0_REVIEW.md` (key / lifecycle / surface / seam / time) | [x] |
 | 0.2 | Seam tests: `test_proactive_touch_seams.py`, `test_touch_adaptation_asymmetry.py` | [x] |
 | 0.3 | Staging: set flag `true`, restart backend | [x] |
-| 0.4 | Verify: checkin touches route through `can_send_proactive_touch`; shadow table receives assertiveness proposals only | [x] |
+| 0.4 | Verify: checkin touches route through `can_send_proactive_touch`; shadow table receives assertiveness proposals only | [~] *(partial — see note)* |
 | 0.5 | Production flag flip (after 0.4 stable ≥ 72h) | [ ] |
 | 0.6 | `safe_deploy.sh backend` + 117/117 health + trust window | [ ] |
 
 **Blocks:** Phase 1 flag until 0.5 complete.
+
+**0.4 partial-verification note (2026-07-14):** two gaps identified between "code review says it's safe" and "we watched it happen":
+- **Consent default — closed.** `can_send_proactive_touch` denies (`skipped_consent`) when `profile_data.proactive_presence_consent` is absent (not just `False`) — confirmed by a fixture with the key entirely missing. New seam test `test_consent_never_set_denies` in `backend/tests/test_proactive_touch_seams.py` locks this in so a future refactor can't silently flip it to default-allow.
+- **Shared-extractor isolation — open.** `nate_commitment_extractor.py` is shared between Phase 1 and Phase 5a; code confirms `symbols` is only added when `ENABLE_SYMBOLIC_EXTRACTION=true`, but this hasn't been confirmed under real staging traffic. Run on GREEN (Phase 1 has already exercised the extractor on staging with the flag false):
+  ```bash
+  ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate_staging -c \"SELECT count(*) FROM conversation_history WHERE metadata ? 'symbols' AND created_at > '2026-07-14 15:27:00 UTC';\""
+  ```
+  (`2026-07-14 15:27:00 UTC` = commit `6485305` 11:27:38 EDT, the last staging-infra fix before the Phase 1 flag flip / smoke test ran — a safe lower bound since the flag-flip itself isn't a git event. If you know the exact `staging_phase_flags.sh phase1 on` invocation time, use that instead.) **Zero** closes this row to `[x]`. Non-zero is a same-severity finding as a flag that's supposed to isolate Track C but doesn't — treat as a blocker, not a footnote.
 
 ---
 
@@ -80,9 +94,11 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 | 1.1 | Confirm Phase 0 flag on and stable in prod | [ ] *(intentionally skipped — Track B ran on staging only, per two-track plan; prod Phase 0 not yet flipped)* |
 | 1.2 | Adversarial walk: `docs/AGENTIC_PHASE_1_REVIEW.md` | [x] |
 | 1.3 | Staging: flag `true`; test consent toggle, list/dismiss/edit commitments (WS + Flutter) | [x] |
-| 1.4 | Verify: `NateCommitmentAgent` touches pass Phase 0 gate; `nate_nudges` delivery | [x] |
+| 1.4 | Verify: `NateCommitmentAgent` touches pass Phase 0 gate; `nate_nudges` delivery | [~] *(partial — see note)* |
 | 1.5 | Production flag flip | [ ] |
 | 1.6 | Flutter web deploy if UI changed (`scripts/deploy_flutter_web.sh`) | [x] |
+
+**1.4 partial-verification note:** same two gaps as 0.4 above (`NateCommitmentAgent` touches route through the same `can_send_proactive_touch` gate and the same `nate_commitment_extractor.py`). Consent-default closed via `test_consent_never_set_denies`; extractor-isolation SQL check against staging `conversation_history` still pending — see 0.4 note for the exact query.
 
 ---
 
