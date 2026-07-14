@@ -8277,6 +8277,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       } else if (data['type'] == 'session_assistant_data') {
         if (mounted)
           _handleSessionAssistantData(Map<String, dynamic>.from(data));
+      } else if (data['type'] == 'session_assistant_chat_response') {
+        if (mounted) {
+          _handleSessionAssistantChatResponse(Map<String, dynamic>.from(data));
+        }
       } else if (data['type'] == 'session_assistant_response') {
         if (mounted && data['nate_response'] != null) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -10136,6 +10140,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     } catch (_) {}
     _assistantChatController.dispose();
     _assistantChatScrollController.dispose();
+    _sessionAssistantChatCtrl.dispose();
+    _sessionAssistantChatScroll.dispose();
     _dojoBackUnregister?.call();
     if (kIsWeb) disposeDojoIframe();
     _tabController.dispose();
@@ -16109,6 +16115,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   Map<String, dynamic>? _sessionAssistantData;
   bool _sessionAssistantOpen = false;
   String _sessionAssistantMode = 'observe'; // observe, suggest, challenge
+  String _sessionAssistantClientId = '';
+  final List<Map<String, dynamic>> _sessionAssistantChat = [];
+  final TextEditingController _sessionAssistantChatCtrl =
+      TextEditingController();
+  bool _sessionAssistantChatBusy = false;
+  final ScrollController _sessionAssistantChatScroll = ScrollController();
 
   void _openSessionAssistant(String clientId, String sessionId) {
     final msg = json.encode({
@@ -16117,12 +16129,107 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       "session_id": sessionId,
     });
     _sendMessage(msg);
-    setState(() => _sessionAssistantOpen = true);
+    setState(() {
+      _sessionAssistantOpen = true;
+      _sessionAssistantClientId = clientId;
+      _sessionAssistantChat.clear();
+      _sessionAssistantChatBusy = false;
+    });
   }
 
   void _handleSessionAssistantData(Map<String, dynamic> data) {
     setState(() {
       _sessionAssistantData = data;
+    });
+  }
+
+  void _sendSessionAssistantChat() {
+    final text = _sessionAssistantChatCtrl.text.trim();
+    if (text.isEmpty || _sessionAssistantChatBusy) return;
+    final d = _sessionAssistantData;
+    if (d == null) return;
+    final sessionId = (d['session_id'] ?? '').toString();
+    final clientId = _sessionAssistantClientId.isNotEmpty
+        ? _sessionAssistantClientId
+        : (d['client_id'] ??
+                _pendingLiveBoot?['client_id'] ??
+                _activeLiveSession?['client_id'] ??
+                '')
+            .toString();
+    if (clientId.isEmpty || sessionId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Session Assistant needs a linked client'),
+        backgroundColor: Color(0xFF8B7355),
+      ));
+      return;
+    }
+    final history = _sessionAssistantChat
+        .map((m) => {
+              'role': (m['role'] ?? '').toString(),
+              'content': (m['content'] ?? '').toString(),
+            })
+        .toList();
+    final notes = _liveNotes.value
+        .map((n) => (n['text'] ?? '').toString())
+        .where((t) => t.isNotEmpty)
+        .toList();
+    setState(() {
+      _sessionAssistantChat.add({
+        'role': 'coach',
+        'content': text,
+        'ts': DateTime.now().toIso8601String(),
+      });
+      _sessionAssistantChatBusy = true;
+    });
+    _sessionAssistantChatCtrl.clear();
+    _socket?.sink.add(jsonEncode({
+      'type': 'session_assistant_chat',
+      'client_id': clientId,
+      'session_id': sessionId,
+      'client_name': (d['client_name'] ?? '').toString(),
+      'text': text,
+      'nate_mode': _sessionAssistantMode,
+      'recent_notes': notes.take(8).toList(),
+      'chat_history': history,
+    }));
+    _scrollSessionAssistantChat();
+  }
+
+  void _handleSessionAssistantChatResponse(Map<String, dynamic> data) {
+    final reply = (data['nate_response'] ?? data['error'] ?? '').toString();
+    if (reply.isEmpty) return;
+    setState(() {
+      _sessionAssistantChat.add({
+        'role': 'nate',
+        'content': reply,
+        'memory_used': data['memory_used'] == true,
+        'ts': DateTime.now().toIso8601String(),
+      });
+      _sessionAssistantChatBusy = false;
+    });
+    // Also surface in Observation Window so coach sees it beside notes.
+    final next = List<Map<String, dynamic>>.from(_liveObservations.value);
+    next.add({
+      'timestamp': DateTime.now().toIso8601String(),
+      'type': 'SESSION_ASSISTANT_CHAT',
+      'message': reply,
+      'evidence': data['memory_used'] == true
+          ? 'Drawn from main chat / crystals'
+          : 'Live assist reply',
+      'source': 'session_assistant_chat',
+    });
+    _liveObservations.value = next;
+    _scrollSessionAssistantChat();
+  }
+
+  void _scrollSessionAssistantChat() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_sessionAssistantChatScroll.hasClients) return;
+      _sessionAssistantChatScroll.animateTo(
+        _sessionAssistantChatScroll.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
     });
   }
 
@@ -16338,7 +16445,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         borderRadius: BorderRadius.circular(16),
         color: const Color(0xFF0A0A0F),
         child: Container(
-          constraints: const BoxConstraints(maxHeight: 480),
+          constraints: const BoxConstraints(maxHeight: 620),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.4)),
@@ -16478,6 +16585,147 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                         ]),
                       )),
                 ],
+                const SizedBox(height: 10),
+                const Text("ASK LITTLE NATE",
+                    style: TextStyle(
+                        color: Color(0xFF9D4EDD),
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1)),
+                const SizedBox(height: 6),
+                Container(
+                  height: 160,
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF12121A),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                        color: const Color(0xFF9D4EDD).withOpacity(0.25)),
+                  ),
+                  child: _sessionAssistantChat.isEmpty &&
+                          !_sessionAssistantChatBusy
+                      ? const Center(
+                          child: Text(
+                            "Ask Nate about this client — he pulls main chat + crystals.",
+                            textAlign: TextAlign.center,
+                            style:
+                                TextStyle(color: Colors.white38, fontSize: 11),
+                          ),
+                        )
+                      : ListView.builder(
+                          controller: _sessionAssistantChatScroll,
+                          itemCount: _sessionAssistantChat.length +
+                              (_sessionAssistantChatBusy ? 1 : 0),
+                          itemBuilder: (context, i) {
+                            if (_sessionAssistantChatBusy &&
+                                i == _sessionAssistantChat.length) {
+                              return const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 6),
+                                child: Text("Nate is thinking…",
+                                    style: TextStyle(
+                                        color: Color(0xFF4ECDC4),
+                                        fontSize: 11,
+                                        fontStyle: FontStyle.italic)),
+                              );
+                            }
+                            final m = _sessionAssistantChat[i];
+                            final isNate = (m['role'] ?? '') == 'nate';
+                            return Align(
+                              alignment: isNate
+                                  ? Alignment.centerLeft
+                                  : Alignment.centerRight,
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 6),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 6),
+                                constraints:
+                                    const BoxConstraints(maxWidth: 260),
+                                decoration: BoxDecoration(
+                                  color: isNate
+                                      ? const Color(0xFF9D4EDD)
+                                          .withOpacity(0.15)
+                                      : Colors.white.withOpacity(0.06),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                      color: isNate
+                                          ? const Color(0xFF9D4EDD)
+                                              .withOpacity(0.35)
+                                          : Colors.white12),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      isNate
+                                          ? (m['memory_used'] == true
+                                              ? 'Nate · memory'
+                                              : 'Nate')
+                                          : 'You',
+                                      style: TextStyle(
+                                          color: isNate
+                                              ? const Color(0xFF9D4EDD)
+                                              : Colors.white54,
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text((m['content'] ?? '').toString(),
+                                        style: const TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 11)),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _sessionAssistantChatCtrl,
+                        enabled: !_sessionAssistantChatBusy,
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 12),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          hintText: "Ask Nate…",
+                          hintStyle: const TextStyle(
+                              color: Colors.white30, fontSize: 12),
+                          filled: true,
+                          fillColor: Colors.white.withOpacity(0.04),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 10),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide(
+                                color: Colors.white.withOpacity(0.08)),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide(
+                                color: Colors.white.withOpacity(0.08)),
+                          ),
+                        ),
+                        onSubmitted: (_) => _sendSessionAssistantChat(),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    IconButton(
+                      onPressed: _sessionAssistantChatBusy
+                          ? null
+                          : _sendSessionAssistantChat,
+                      icon: Icon(Icons.send,
+                          color: _sessionAssistantChatBusy
+                              ? Colors.white24
+                              : const Color(0xFF9D4EDD),
+                          size: 20),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),

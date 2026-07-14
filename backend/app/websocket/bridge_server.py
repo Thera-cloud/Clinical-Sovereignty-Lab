@@ -20378,7 +20378,12 @@ async def handle_client(websocket, path=None):
                     }))
 
             # === COACH: SESSION ASSISTANT AI POP-UP (Phase 4) ===
-            elif t in ("session_assistant_open", "session_assistant_checkin", "session_assistant_nate_toggle"):
+            elif t in (
+                "session_assistant_open",
+                "session_assistant_checkin",
+                "session_assistant_nate_toggle",
+                "session_assistant_chat",  # QUANTUM-CRYSTAL-ARCH: live coach↔Nate chat + memory
+            ):
                 if not current_profile or current_profile.get("role") not in ("COACH", "ADMIN"):
                     await websocket.send(json.dumps({"type": "error", "message": "COACH_ONLY"}))
                     continue
@@ -20502,6 +20507,42 @@ If 'challenge', respectfully push the coach's thinking."""
                         "session_id": session_id,
                         "nate_enabled": enabled,
                     }))
+
+                elif t == "session_assistant_chat":
+                    # QUANTUM-CRYSTAL-ARCH: coach asks Nate mid-session; pull main-chat + crystals
+                    _sa_text = (d.get("text") or d.get("message") or "").strip()
+                    _sa_mode = (d.get("nate_mode") or "suggest").strip()
+                    if not client_id or not _sa_text:
+                        await websocket.send(json.dumps({
+                            "type": "session_assistant_chat_response",
+                            "session_id": session_id, "error": "missing_client_or_text",
+                        }))
+                        continue
+                    try:
+                        from app.services.session_assistant_chat import generate_coach_assist_reply
+                        _hist = d.get("chat_history") if isinstance(d.get("chat_history"), list) else []
+                        _notes = d.get("recent_notes") if isinstance(d.get("recent_notes"), list) else []
+                        _sa_out = await generate_coach_assist_reply(
+                            db_pool, client_id=client_id, coach_message=_sa_text,
+                            nate_mode=_sa_mode, client_name=(d.get("client_name") or "").strip(),
+                            recent_notes=[str(n) for n in _notes[:8]],
+                            chat_history=[{"role": str(h.get("role", "")), "content": str(h.get("content", ""))}
+                                          for h in _hist[-10:] if isinstance(h, dict)],
+                        )
+                        await websocket.send(json.dumps({
+                            "type": "session_assistant_chat_response", "session_id": session_id,
+                            "coach_message": _sa_text[:2000],
+                            "nate_response": (_sa_out.get("reply") or "")[:4000],
+                            "memory_used": bool(_sa_out.get("memory_used")),
+                            "nate_mode": _sa_out.get("mode") or _sa_mode,
+                        }))
+                    except Exception as _sa_chat_err:
+                        logger.warning("session_assistant_chat failed: %s", _sa_chat_err)
+                        await websocket.send(json.dumps({
+                            "type": "session_assistant_chat_response", "session_id": session_id,
+                            "error": "chat_failed",
+                            "nate_response": "I hit a snag pulling memory — try again.",
+                        }))
 
             # === COACH: SESSION SERVICE MODE + RECORDING CONSENT ===
             elif t in ("session_service_mode_change", "save_recording_consent", "session_camera_frame"):
