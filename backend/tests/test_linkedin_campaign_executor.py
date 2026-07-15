@@ -129,3 +129,9 @@ def test_in_post_window_first_fifteen_minutes_eastern():
     assert in_post_window(outside_hour, 15) is False
     assert in_post_window(outside_minute, 15) is False
     assert in_post_window(datetime(2026, 6, 30, 20, 0, tzinfo=TZ), 20) is True
+
+
+def test_publish_scheduled_slots_catchup_outside_window():
+    """Overdue slots publish on scheduler ticks outside the 15-minute ET window."""
+    assert in_post_window(datetime(2026, 6, 30, 20, 16, tzinfo=TZ), 20) is False
+    assert in_post_window(datetime(2026, 6, 30, 15, 16, tzinfo=TZ), 15) is False

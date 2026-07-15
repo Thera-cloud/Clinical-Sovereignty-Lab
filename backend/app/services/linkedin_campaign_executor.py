@@ -670,8 +670,30 @@ class LinkedInCampaignExecutor:
             logger.warning("get_due_queue_item failed: %s", e)
             return None
 
+    def _publish_slot_message(
+        self,
+        item: Dict[str, Any],
+        batch_id: str,
+        *,
+        hour: Optional[int] = None,
+        catchup: bool = False,
+    ) -> str:
+        sk = item.get("emotion_context") or {}
+        if isinstance(sk, str):
+            try:
+                sk = json.loads(sk)
+            except Exception:
+                sk = {}
+        slot_key = sk.get("slot_key", hour if hour is not None else "overdue")
+        if catchup:
+            return f"catch-up queue #{item['id']} batch {batch_id} slot {slot_key}"
+        return (
+            f"queue #{item['id']} batch {batch_id} "
+            f"slot {slot_key} ET hour {hour}"
+        )
+
     async def publish_scheduled_slots(self) -> Optional[str]:
-        """Publish at most one slot per Eastern post_time window (campaign scheduler tick)."""
+        """Publish at most one slot per tick (windowed slot, else overdue catch-up)."""
         settings = await self._load_settings()
         batch_id = settings.get("batch_id")
         if not batch_id:
@@ -687,16 +709,12 @@ class LinkedInCampaignExecutor:
             if not item:
                 continue
             if await self._publish_item(item):
-                sk = (item.get("emotion_context") or {})
-                if isinstance(sk, str):
-                    try:
-                        sk = json.loads(sk)
-                    except Exception:
-                        sk = {}
-                return (
-                    f"queue #{item['id']} batch {batch_id} "
-                    f"slot {sk.get('slot_key', hour)} ET hour {hour}"
-                )
+                return self._publish_slot_message(item, batch_id, hour=int(hour))
+
+        overdue = await self.get_due_queue_item(slot_hour=None)
+        if overdue and await self._publish_item(overdue):
+            return self._publish_slot_message(overdue, batch_id, catchup=True)
+
         return None
 
     async def _publish_item(self, item: Dict[str, Any]) -> bool:
@@ -716,6 +734,13 @@ class LinkedInCampaignExecutor:
             meta = {}
 
         post_as = meta.get("post_as", "person")
+        if post_as == "both":
+            await adapter._load_company_token()
+            if not getattr(adapter, "_company_access_token", None):
+                logger.info(
+                    "LinkedIn campaign: post_as=both downgraded to person (no company token)"
+                )
+                post_as = "person"
         ct = item.get("content_type", "post")
         post_ct = ContentType.ARTICLE if ct == "article" else ContentType.POST
         lane = (meta.get("lane") or "").upper()

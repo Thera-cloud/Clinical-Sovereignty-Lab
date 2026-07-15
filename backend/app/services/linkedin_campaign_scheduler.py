@@ -1,9 +1,9 @@
 """
 LinkedIn campaign publish scheduler — Eastern-time slot windows (3pm / 8pm ET).
 
-Runs every 5 minutes; publishes at most one approved slot per configured hour
-within the first 15 minutes of that hour. Session engine no longer owns LinkedIn
-publish when an active campaign batch exists.
+Runs every 5 minutes; publishes at most one approved slot per tick.
+Windowed slots (first 15 minutes of 3pm / 8pm ET) take priority; overdue
+missed slots catch up on later ticks. Session engine never owns LinkedIn publish.
 """
 from __future__ import annotations
 

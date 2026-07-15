@@ -1268,12 +1268,17 @@ class SkyEyeSessionEngine:
             logger.warning(f"Outreach phase error on {platform}: {e}")
 
     async def _linkedin_campaign_active(self) -> bool:
+        """True when campaign scheduler owns LinkedIn publish (fail-closed on errors)."""
         try:
             from app.services.linkedin_campaign_executor import LinkedInCampaignExecutor
 
             return await LinkedInCampaignExecutor(self.db_pool).campaign_is_active()
-        except Exception:
-            return False
+        except Exception as e:
+            logger.warning(
+                "LinkedIn campaign active check failed — blocking session publish: %s",
+                e,
+            )
+            return True
 
     async def _create_phase(self, platform: str, adapter, generator):
         """Generate new content for this platform."""
@@ -1293,7 +1298,7 @@ class SkyEyeSessionEngine:
                 return
 
             if platform == "linkedin" and await self._linkedin_campaign_active():
-                logger.debug("LinkedIn create phase skipped — active campaign batch")
+                logger.info("LinkedIn create phase skipped — active campaign batch")
                 return
 
             # Check if there are approved expressions waiting to be posted
@@ -1410,18 +1415,12 @@ class SkyEyeSessionEngine:
 
             queue_items: list = []
             if platform == "linkedin":
+                # Campaign rows are published only by LinkedInCampaignScheduler.
                 if await self._linkedin_campaign_active():
-                    logger.debug(
+                    logger.info(
                         "LinkedIn post phase skipped — campaign scheduler owns publish"
                     )
-                    return
-                try:
-                    from app.services.linkedin_campaign_executor import LinkedInCampaignExecutor
-                    due = await LinkedInCampaignExecutor(self.db_pool).get_due_queue_item()
-                    if due:
-                        queue_items = [due]
-                except Exception as _lc_due:
-                    logger.warning("LinkedIn campaign due-item lookup: %s", _lc_due)
+                return
 
             if not queue_items and platform != "linkedin":
                 queue_items = await generator.get_queue(
