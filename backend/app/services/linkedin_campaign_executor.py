@@ -17,7 +17,9 @@ from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
-CAMPAIGN_SIGNATURE = "Nathaniel reviewed + approved — Little Nate, your AI companion"
+CAMPAIGN_SIGNATURE = (
+    "Nathaniel Nevedal reviewed + approved | by Little Nate, your AI companion"
+)
 GENERATED_BY = "linkedin_campaign_v1"
 SETTINGS_KEY = "linkedin_campaign_active"
 TZ = ZoneInfo("America/New_York")
@@ -356,11 +358,16 @@ def slot_key(day: int, hour: int, minute: int) -> str:
     return f"d{day}_{hour:02d}{minute:02d}"
 
 
+def _has_campaign_signature(body: str) -> bool:
+    low = (body or "").lower()
+    return "reviewed + approved" in low and "little nate" in low
+
+
 def ensure_signature(text: str) -> str:
     body = (text or "").strip()
     if not body:
         return CAMPAIGN_SIGNATURE
-    if CAMPAIGN_SIGNATURE in body:
+    if CAMPAIGN_SIGNATURE in body or _has_campaign_signature(body):
         return body
     return f"{body}\n\n{CAMPAIGN_SIGNATURE}"
 
@@ -746,12 +753,15 @@ class LinkedInCampaignExecutor:
         lane = (meta.get("lane") or "").upper()
         slot_key = meta.get("slot_key", "")
 
+        raw_text = item.get("content_text", "") or ""
+        publish_text = ensure_signature(raw_text)
+
         image_bytes = None
         if ct != "article":
             from app.services.skyeye_linkedin_image import try_generate_linkedin_image
 
             image_bytes = await try_generate_linkedin_image(
-                item.get("content_text", ""),
+                raw_text,
                 lane=lane,
                 slot_key=slot_key,
                 force_image=bool(meta.get("generate_image")),
@@ -759,7 +769,7 @@ class LinkedInCampaignExecutor:
             )
 
         result = await adapter.post_content(
-            text=item.get("content_text", ""),
+            text=publish_text,
             media_url=item.get("media_url") if not image_bytes else None,
             content_type=post_ct,
             post_as=post_as,

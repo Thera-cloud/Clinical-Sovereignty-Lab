@@ -15,7 +15,9 @@ _DEFAULT_BRAND_DIR = (
     Path(__file__).resolve().parents[1] / "resources" / "skyeye" / "linkedin_brand"
 )
 
-_SIGNATURE_LINE = "Nathaniel reviewed + approved — Little Nate, your AI companion"
+_SIGNATURE_LINE = (
+    "Nathaniel Nevedal reviewed + approved | by Little Nate, your AI companion"
+)
 
 
 def brand_dir() -> Path:
@@ -61,7 +63,7 @@ def _takeaway_line(text: str) -> str:
         return re.sub(r"\s+", " ", m.group(1).strip())[:220]
     paras = [p.strip() for p in text.split("\n\n") if p.strip()]
     for p in reversed(paras):
-        if "Nathaniel reviewed" in p:
+        if "reviewed + approved" in p.lower():
             continue
         if len(p) > 40:
             return p[:220]
@@ -90,7 +92,10 @@ def _sidebar_title(text: str) -> str:
 def extract_infographic_copy(post_text: str) -> dict:
     body = (post_text or "").strip()
     body_no_sig = re.sub(
-        r"\n*Nathaniel reviewed.*$", "", body, flags=re.IGNORECASE | re.DOTALL
+        r"\n*Nathaniel[^\n]*reviewed \+ approved[^\n]*$",
+        "",
+        body,
+        flags=re.IGNORECASE | re.DOTALL,
     ).strip()
     headline = _first_sentence(body_no_sig).upper()
     takeaway = _takeaway_line(body)

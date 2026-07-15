@@ -36,7 +36,7 @@ def test_build_branded_prompt_uses_infographic_system(monkeypatch):
     monkeypatch.setenv("SKYEYE_LINKEDIN_BRAND_STYLE", "true")
     prompt = build_image_prompt(
         "Leadership in uncertain times.\n\nTakeaway: Show up honestly.\n\n"
-        "Nathaniel reviewed + approved — Little Nate, your AI companion",
+        "Nathaniel Nevedal reviewed + approved | by Little Nate, your AI companion",
         lane="ORIG",
     )
     assert "Sovereign Sanctuary" in prompt

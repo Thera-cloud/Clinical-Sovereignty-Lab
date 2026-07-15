@@ -54,6 +54,14 @@ def test_ensure_signature_appends_once():
     out = ensure_signature(text)
     assert CAMPAIGN_SIGNATURE in out
     assert out.count(CAMPAIGN_SIGNATURE) == 1
+    assert "Nathaniel Nevedal" in out
+
+
+def test_ensure_signature_legacy_not_duplicated():
+    legacy = "Post body.\n\nNathaniel reviewed + approved — Little Nate, your AI companion"
+    out = ensure_signature(legacy)
+    assert out == legacy
+    assert out.count("reviewed + approved") == 1
 
 
 def test_parse_cur_sources_url_and_search():

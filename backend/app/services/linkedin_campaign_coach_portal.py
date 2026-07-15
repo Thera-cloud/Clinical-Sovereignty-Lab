@@ -394,7 +394,6 @@ async def queue_coach_portal_campaign(
             "week": slot["week"],
             "theme": post.theme,
             "verbatim": True,
-            "skip_signature": True,
             "generate_image": post.needs_image,
             "image_prompt": post.image_prompt if post.needs_image else "",
             "extra_compliance": post.extra_compliance,
