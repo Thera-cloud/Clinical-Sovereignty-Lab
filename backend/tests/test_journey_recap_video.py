@@ -104,16 +104,62 @@ def test_build_motion_prompt_uses_panel_visual_lock():
     assert "journey panel" in prompt.lower() or "panel art direction" in prompt.lower()
 
 
-def test_plan_segments_for_duration_matches_video_length():
+def test_plan_trailer_segment_durations_short_video():
+    target, segs = recap.plan_trailer_segment_durations(45.0)
+    assert target == 45
+    assert segs == [10, 10, 10, 10, 5]
+
+
+def test_plan_trailer_segment_durations_rounds_1_to_4_seconds():
+    target, segs = recap.plan_trailer_segment_durations(54.0)
+    assert target == 50
+    assert segs == [10, 10, 10, 10, 10]
+    target91, segs91 = recap.plan_trailer_segment_durations(91.0)
+    assert target91 == 90
+    assert segs91 == [30, 30, 30]
+
+
+def test_plan_trailer_segment_durations_tail_clip():
+    target, segs = recap.plan_trailer_segment_durations(95.0)
+    assert target == 95
+    assert segs == [30, 30, 30, 5]
+
+
+def test_plan_trailer_segment_durations_caps_at_two_minutes():
+    target, segs = recap.plan_trailer_segment_durations(1800.0)
+    assert target == 120
+    assert segs == [30, 30, 30, 30]
+
+
+def test_estimate_duration_from_transcript_scales():
+    short = recap.estimate_duration_from_transcript("hello world " * 10)
+    long = recap.estimate_duration_from_transcript("word " * 1500)
+    assert short >= recap.DEFAULT_TARGET_DURATION
+    assert long > short
+    assert long <= 7200.0
+
+
+def test_split_text_chunks_respects_max():
+    text = ". ".join([f"Sentence number {i} is here" for i in range(80)])
+    chunks = recap._split_text_chunks(text, 200)
+    assert len(chunks) >= 2
+    assert all(len(c) <= 280 for c in chunks)  # soft bound with leftover sentence
+
+
+def test_compress_transcript_passthrough_short():
+    import asyncio
+
+    short = "I was anxious. Nate mirrored me. I chose courage."
+    out = asyncio.run(
+        recap.compress_transcript_for_trailer(short, source_duration_seconds=90.0),
+    )
+    assert out == short
+
+
+def test_plan_segments_for_duration_delegates_to_trailer():
     target, count = recap.plan_segments_for_duration(92.0)
-    assert target == 92
-    assert count == 12  # 92 / 7.5 ≈ 12
-
-
-def test_plan_segments_for_duration_caps():
-    target, count = recap.plan_segments_for_duration(900.0)
-    assert target == recap.MAX_RECAP_DURATION
-    assert count == recap.MAX_SEGMENT_COUNT
+    assert target == 90
+    assert count == 3
 
 
 def test_heuristic_story_beat_alignments_no_panels():

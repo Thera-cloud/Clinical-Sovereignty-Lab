@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS sse_journey_recap_jobs (
     job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'aligning', 'rendering', 'stitching', 'complete', 'failed')),
+        CHECK (status IN ('pending', 'aligning', 'rendering', 'clips_ready', 'stitching', 'complete', 'failed')),
     transcript_text TEXT NOT NULL,
     audio_r2_key TEXT,
     audio_r2_url TEXT,

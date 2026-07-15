@@ -1,4 +1,4 @@
-"""30-second Journey Recap: transcript + panel alignments + Ask Nate context → stitched Thera-World video."""
+"""Journey Recap / Thera-World trailer: transcript → scene summaries → render → stitch (≤2 min)."""
 from __future__ import annotations
 
 import asyncio
@@ -23,9 +23,21 @@ DEFAULT_TARGET_DURATION = 30
 DEFAULT_SEGMENT_COUNT = 4
 MIN_RECAP_DURATION = 15
 MAX_RECAP_DURATION = 600
+MAX_TRAILER_DURATION = 120
+TRAILER_CLIP_ROUND_DROP_MAX = 4
 TARGET_SEGMENT_SECONDS = 7.5
 MIN_SEGMENT_COUNT = 3
 MAX_SEGMENT_COUNT = 16
+# Long-source reliability: Whisper ffmpeg slices + hierarchical LLM compress.
+WHISPER_CHUNK_SECONDS = 60
+WHISPER_SINGLE_SHOT_MAX_SECONDS = 45
+TRAILER_TRANSCRIPT_DIRECT_MAX_CHARS = 7000
+TRAILER_TRANSCRIPT_MAP_CHUNK_CHARS = 4500
+TRAILER_MAP_SUMMARY_CHARS = 500
+STUDIO_READY_STATUSES = frozenset(
+    {"aligning", "rendering", "clips_ready", "stitching", "complete"},
+)
+STUDIO_PIPELINE_DONE_STATUSES = frozenset({"complete", "failed"})
 FEATURE_FLAG = "ENABLE_JOURNEY_RECAP_VIDEO"
 INGEST_MODE_AUDIO = "audio_driven"
 INGEST_MODE_PANEL = "panel_aligned"
@@ -156,14 +168,63 @@ def ffprobe_media_duration_seconds(path: str) -> float | None:
 
 
 def plan_segments_for_duration(duration_seconds: float) -> tuple[int, int]:
-    """Map uploaded video length to recap target duration + segment count."""
-    raw = duration_seconds if duration_seconds and duration_seconds > 0 else float(DEFAULT_TARGET_DURATION)
-    target = int(min(MAX_RECAP_DURATION, max(MIN_RECAP_DURATION, round(raw))))
-    segment_count = max(
-        MIN_SEGMENT_COUNT,
-        min(MAX_SEGMENT_COUNT, round(target / TARGET_SEGMENT_SECONDS)),
-    )
-    return target, segment_count
+    """Legacy helper — prefer plan_trailer_segment_durations for audio-driven ingest."""
+    target, durations = plan_trailer_segment_durations(duration_seconds)
+    return target, len(durations)
+
+
+def plan_trailer_segment_durations(source_duration_seconds: float) -> tuple[int, list[int]]:
+    """
+    Plan ordered trailer clip lengths (10s or 30s grid, max 2 minutes).
+
+    Source > 60s uses 30s blocks; otherwise 10s blocks. Trailing 1–4s are dropped;
+    5–9s tail becomes a short final clip (e.g. 95s → 30+30+30+5).
+    """
+    src = float(source_duration_seconds or DEFAULT_TARGET_DURATION)
+    if src < 1:
+        src = float(DEFAULT_TARGET_DURATION)
+    block = 30 if src > 60 else 10
+    raw_target = min(MAX_TRAILER_DURATION, max(MIN_RECAP_DURATION, int(round(src))))
+    segments: list[int] = []
+    remaining = raw_target
+    while remaining >= block:
+        segments.append(block)
+        remaining -= block
+    if remaining == 0:
+        pass
+    elif 1 <= remaining <= TRAILER_CLIP_ROUND_DROP_MAX:
+        pass
+    elif remaining >= 5:
+        if block == 30:
+            if remaining < 10:
+                segments.append(remaining)
+            else:
+                segments.append(10)
+                tail = remaining - 10
+                if tail == 0:
+                    pass
+                elif 1 <= tail <= TRAILER_CLIP_ROUND_DROP_MAX:
+                    pass
+                elif tail >= 5:
+                    segments.append(tail)
+        else:
+            segments.append(remaining)
+    if not segments:
+        segments = [min(block, raw_target) if raw_target > 0 else block]
+    return sum(segments), segments
+
+
+def _apply_segment_durations_to_alignments(
+    alignments: list[dict[str, Any]],
+    segment_durations: list[int],
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for idx, seg in enumerate(alignments):
+        row = dict(seg)
+        if idx < len(segment_durations):
+            row["duration_seconds"] = segment_durations[idx]
+        out.append(row)
+    return out
 
 
 def build_story_beat_narrative(
@@ -196,28 +257,111 @@ def heuristic_story_beat_alignments(
     *,
     segment_count: int,
     archetype_hint: str = "",
+    segment_durations: Optional[list[int]] = None,
 ) -> list[dict[str, Any]]:
     """Split transcript into story beats with visual prompts (no journey panels)."""
+    if segment_durations:
+        segment_count = len(segment_durations)
     excerpts = split_transcript_segments(transcript, segment_count)
     alignments: list[dict[str, Any]] = []
     for idx, excerpt in enumerate(excerpts):
         narrative = build_story_beat_narrative(excerpt, archetype_hint, idx, segment_count)
-        alignments.append(
-            {
-                "segment_index": idx,
-                "transcript_excerpt": excerpt,
-                "panel_id": None,
-                "panel_type": "story_beat",
-                "r2_key": None,
-                "r2_url": None,
-                "narrative_text": narrative,
-                "biome": "whisperwood",
-                "panel_tone": "reflective",
-                "ingest_mode": "audio_driven",
-                "panel_visual_theme": build_story_visual_theme(archetype_hint, narrative),
-            }
-        )
+        row: dict[str, Any] = {
+            "segment_index": idx,
+            "transcript_excerpt": excerpt,
+            "panel_id": None,
+            "panel_type": "story_beat",
+            "r2_key": None,
+            "r2_url": None,
+            "narrative_text": narrative,
+            "biome": "whisperwood",
+            "panel_tone": "reflective",
+            "ingest_mode": "audio_driven",
+            "panel_visual_theme": build_story_visual_theme(archetype_hint, narrative),
+        }
+        if segment_durations and idx < len(segment_durations):
+            row["duration_seconds"] = segment_durations[idx]
+        alignments.append(row)
     return alignments
+
+
+async def align_transcript_to_trailer_beats(
+    transcript: str,
+    *,
+    segment_durations: list[int],
+    source_duration_seconds: float,
+    archetype_hint: str = "",
+) -> list[dict[str, Any]]:
+    """Summarize full transcript into ordered trailer scenes (movie-trailer pacing, ≤2 min)."""
+    transcript = (transcript or "").strip()
+    segment_count = len(segment_durations)
+    if not transcript or segment_count < 1:
+        return heuristic_story_beat_alignments(
+            transcript,
+            segment_count=max(segment_count, 1),
+            archetype_hint=archetype_hint,
+            segment_durations=segment_durations or None,
+        )
+    # Length-independent: compress before Workers AI so 30+ min sources still trailerize.
+    working = await compress_transcript_for_trailer(
+        transcript,
+        source_duration_seconds=source_duration_seconds,
+        archetype_hint=archetype_hint,
+    )
+    total_trailer = sum(segment_durations)
+    dur_desc = ", ".join(f"{d}s" for d in segment_durations)
+    try:
+        from app.sse import studio_service
+
+        prompt = (
+            f"Client conversation ({source_duration_seconds:.0f}s source, compressed for trailer). "
+            f"Create a Thera-World anime-style MOVIE TRAILER summary for archetype "
+            f"{archetype_hint or 'traveler'}.\n"
+            f"Output exactly {segment_count} scenes in story order with clip durations: {dur_desc} "
+            f"(total {total_trailer}s max). Capture the ENTIRE conversation arc — key emotional "
+            f"turns, insights, and resolution — not a literal slice per timecode.\n"
+            f"Each scene needs a vivid visual description and the spoken essence in dialogue.\n\n"
+            f"{working}"
+        )
+        result = await studio_service.break_into_scenes(prompt)
+        scenes = result.get("scenes") or []
+        # Prefer full transcript for dialogue fallbacks so compression does not wipe client words.
+        excerpts = split_transcript_segments(transcript, segment_count)
+        alignments: list[dict[str, Any]] = []
+        for idx in range(segment_count):
+            scene = scenes[idx] if idx < len(scenes) else {}
+            excerpt = (scene.get("dialogue") or "").strip() or (
+                excerpts[idx] if idx < len(excerpts) else ""
+            )
+            narrative = (scene.get("description") or "").strip() or build_story_beat_narrative(
+                excerpt, archetype_hint, idx, segment_count,
+            )
+            mood = (scene.get("mood") or "reflective").strip()
+            alignments.append(
+                {
+                    "segment_index": idx,
+                    "transcript_excerpt": excerpt,
+                    "panel_id": None,
+                    "panel_type": "story_beat",
+                    "r2_key": None,
+                    "r2_url": None,
+                    "narrative_text": narrative,
+                    "biome": "whisperwood",
+                    "panel_tone": mood,
+                    "ingest_mode": "audio_driven",
+                    "panel_visual_theme": build_story_visual_theme(archetype_hint, narrative),
+                    "duration_seconds": segment_durations[idx],
+                }
+            )
+        return alignments
+    except Exception as exc:
+        logger.warning("align_transcript_to_trailer_beats LLM fallback: %s", exc)
+        return heuristic_story_beat_alignments(
+            transcript,
+            segment_count=segment_count,
+            archetype_hint=archetype_hint,
+            segment_durations=segment_durations,
+        )
 
 
 async def align_transcript_to_story_beats(
@@ -275,6 +419,50 @@ async def align_transcript_to_story_beats(
         return heuristic_story_beat_alignments(
             transcript, segment_count=segment_count, archetype_hint=archetype_hint,
         )
+
+
+async def ensure_segment_still_image(
+    segment: dict[str, Any],
+    *,
+    user_id: str,
+    job_id: str,
+    archetype_hint: str,
+    archetype_image_url: Optional[str] = None,
+) -> dict[str, Any]:
+    """Generate one Grok still at render time when ingest skipped images."""
+    row = dict(segment)
+    if row.get("r2_url"):
+        return row
+    narrative = (row.get("narrative_text") or row.get("transcript_excerpt") or "").strip()
+    if not narrative:
+        return row
+    from app.sse.adapters.world_story_bible import get_visual_style_suffix
+    from app.sse.infrastructure.grok_imagine_client import GROK_IMAGINE_LOCK, generate_image
+
+    idx = int(row.get("segment_index", 0))
+    style = get_visual_style_suffix(archetype_hint)
+    prompt = (
+        f"Thera-World therapeutic fantasy illustration. {style} "
+        f"Cinematic scene illustrating: {narrative[:400]}. "
+        "Painterly gouache, muted warm sovereign sanctuary palette, emotionally grounded, "
+        "no text, no logos, no watermarks."
+    )
+    try:
+        async with GROK_IMAGINE_LOCK:
+            image_bytes = await generate_image(
+                prompt,
+                source_image_url=(archetype_image_url or "").strip() or None,
+            )
+        key = f"sse/journey-recap/{user_id}/{job_id}/beat_{idx:02d}.png"
+        url = await r2_storage.store_image(image_bytes, key)
+        row["r2_key"] = key
+        row["r2_url"] = url
+        row["generated_image"] = True
+    except Exception as exc:
+        logger.warning(
+            "render-time still failed job=%s seg=%s: %s", job_id, idx, exc,
+        )
+    return row
 
 
 async def generate_story_beat_images(
@@ -647,6 +835,7 @@ async def _render_segment_clip(
         "status": "failed",
         "local_path": out_path,
         "motion_prompt": motion_prompt,
+        "duration_seconds": duration,
     }
     image_url = segment.get("r2_url") or archetype_url
     if not image_url:
@@ -769,15 +958,23 @@ async def stitch_recap_video(
     audio_local_path: Optional[str],
     target_duration: int = DEFAULT_TARGET_DURATION,
     segment_count: int = DEFAULT_SEGMENT_COUNT,
+    segment_durations: Optional[list[int]] = None,
+    mux_client_audio: bool = True,
 ) -> tuple[Optional[bytes], list[str]]:
     """Trim segments, concat, optionally mux client audio. Returns (mp4_bytes, errors)."""
-    seg_dur = segment_duration(target_duration, segment_count)
+    default_seg_dur = segment_duration(target_duration, segment_count)
     work_dir = tempfile.mkdtemp(prefix="journey_recap_stitch_")
     errors: list[str] = []
     trimmed: list[str] = []
     try:
         for meta in sorted(clip_metas, key=lambda m: m.get("segment_index", 0)):
             idx = meta.get("segment_index", 0)
+            dur = meta.get("duration_seconds")
+            if dur is None and segment_durations and idx < len(segment_durations):
+                dur = segment_durations[idx]
+            if dur is None:
+                dur = default_seg_dur
+            dur = float(dur)
             src = meta.get("local_path")
             if not src or not os.path.exists(src):
                 src = await _resolve_clip_to_local(meta, work_dir, idx)
@@ -786,7 +983,7 @@ async def stitch_recap_video(
                 continue
             meta["local_path"] = src
             dst = os.path.join(work_dir, f"trim_{meta['segment_index']:02d}.mp4")
-            if not _ffmpeg_trim_clip(src, dst, seg_dur):
+            if not _ffmpeg_trim_clip(src, dst, dur):
                 errors.append(f"segment {meta.get('segment_index')}: trim failed")
                 continue
             trimmed.append(dst)
@@ -799,7 +996,7 @@ async def stitch_recap_video(
             return None, errors + ["concat_failed"]
 
         final_path = concat_out
-        if audio_local_path and os.path.exists(audio_local_path):
+        if mux_client_audio and audio_local_path and os.path.exists(audio_local_path):
             mux_out = os.path.join(work_dir, "final_mux.mp4")
             if _ffmpeg_mux_audio(concat_out, audio_local_path, mux_out, target_duration):
                 final_path = mux_out
@@ -986,15 +1183,170 @@ async def _extract_audio_from_video(video_path: str, out_wav: str) -> bool:
         out_wav,
     ]
     try:
-        r = subprocess.run(cmd, capture_output=True, timeout=300)
+        # Long sources can take several minutes to demux; length must not fail extract.
+        r = subprocess.run(cmd, capture_output=True, timeout=1800)
         return r.returncode == 0 and os.path.exists(out_wav)
     except Exception as e:
         logger.warning("[JOURNEY-RECAP] audio extract failed: %s", e)
         return False
 
 
-async def _transcribe_audio_wav(wav_path: str) -> str:
+def estimate_duration_from_transcript(transcript: str) -> float:
+    """Estimate spoken duration (~150 wpm) so pasted transcripts get trailer length planning."""
+    words = len((transcript or "").split())
+    seconds = words / 2.5
+    return max(float(DEFAULT_TARGET_DURATION), min(seconds, 7200.0))
+
+
+def _split_text_chunks(text: str, max_chars: int) -> list[str]:
+    """Split long text on sentence boundaries for map-reduce summarization."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= max_chars:
+        return [text]
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    sentences = [s.strip() for s in sentences if s.strip()] or [text]
+    chunks: list[str] = []
+    cur: list[str] = []
+    cur_len = 0
+    for sent in sentences:
+        add = len(sent) + (1 if cur else 0)
+        if cur and cur_len + add > max_chars:
+            chunks.append(" ".join(cur))
+            cur = [sent]
+            cur_len = len(sent)
+        else:
+            cur.append(sent)
+            cur_len += add
+    if cur:
+        chunks.append(" ".join(cur))
+    return chunks
+
+
+async def compress_transcript_for_trailer(
+    transcript: str,
+    *,
+    source_duration_seconds: float,
+    archetype_hint: str = "",
+) -> str:
+    """
+    Map-reduce compress long transcripts so length does not break Workers AI context.
+    Short transcripts pass through unchanged.
+    """
+    text = (transcript or "").strip()
+    if not text:
+        return ""
+    if len(text) <= TRAILER_TRANSCRIPT_DIRECT_MAX_CHARS:
+        return text
+
+    from app.sse import studio_service
+
+    parts = _split_text_chunks(text, TRAILER_TRANSCRIPT_MAP_CHUNK_CHARS)
+    summaries: list[str] = []
+    for i, part in enumerate(parts):
+        system = (
+            "You compress therapy/client conversation excerpts into tight arc notes. "
+            f"Return plain text under {TRAILER_MAP_SUMMARY_CHARS} characters. "
+            "Preserve emotional turns, decisions, and resolution cues. No preamble."
+        )
+        user = (
+            f"Part {i + 1}/{len(parts)} of a {source_duration_seconds:.0f}s conversation "
+            f"(archetype {archetype_hint or 'traveler'}):\n\n{part}"
+        )
+        try:
+            raw = await studio_service._call_workers_ai(system, user)
+            summary = (raw or "").strip()
+            if summary:
+                summaries.append(summary[: TRAILER_MAP_SUMMARY_CHARS + 80])
+            else:
+                summaries.append(part[:TRAILER_MAP_SUMMARY_CHARS])
+        except Exception as exc:
+            logger.warning("compress_transcript_for_trailer part %d failed: %s", i, exc)
+            summaries.append(part[:TRAILER_MAP_SUMMARY_CHARS])
+
+    compressed = "\n\n".join(
+        f"[Arc beat {i + 1}]\n{s}" for i, s in enumerate(summaries) if s
+    )
+    if len(compressed) <= TRAILER_TRANSCRIPT_DIRECT_MAX_CHARS:
+        return compressed
+
+    # Second pass if still huge (very long sessions).
+    system2 = (
+        "Merge these arc-beat notes into one ordered conversation summary under 3500 "
+        "characters for a movie-trailer rewrite. Keep emotional peaks and ending."
+    )
+    try:
+        raw2 = await studio_service._call_workers_ai(system2, compressed[:12000])
+        merged = (raw2 or "").strip()
+        if merged:
+            return merged[:4000]
+    except Exception as exc:
+        logger.warning("compress_transcript_for_trailer reduce failed: %s", exc)
+    return compressed[:4000]
+
+
+async def _transcribe_wav_time_slices(wav_path: str, duration: float) -> str:
+    """ffmpeg time-slice long WAV (byte-splitting breaks WAV headers)."""
     from app.services.whisper_stt import transcribe
+
+    chunk_s = float(WHISPER_CHUNK_SECONDS)
+    total = max(float(duration), 1.0)
+    texts: list[str] = []
+    offset = 0.0
+    slice_idx = 0
+    work = tempfile.mkdtemp(prefix="whisper_slices_")
+    try:
+        while offset < total - 0.25:
+            slice_path = os.path.join(work, f"slice_{slice_idx:04d}.wav")
+            remaining = total - offset
+            length = min(chunk_s, remaining)
+            cmd = [
+                "ffmpeg", "-y", "-ss", f"{offset:.3f}", "-t", f"{length:.3f}",
+                "-i", wav_path,
+                "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                slice_path,
+            ]
+            try:
+                r = subprocess.run(cmd, capture_output=True, timeout=120)
+                if r.returncode != 0 or not os.path.isfile(slice_path):
+                    logger.warning(
+                        "[JOURNEY-RECAP] whisper slice %d ffmpeg failed offset=%.1f",
+                        slice_idx, offset,
+                    )
+                    offset += chunk_s
+                    slice_idx += 1
+                    continue
+                with open(slice_path, "rb") as f:
+                    data = f.read()
+                piece = await transcribe(data, content_type="audio/wav")
+                if piece and piece.strip():
+                    texts.append(piece.strip())
+            except Exception as exc:
+                logger.warning(
+                    "[JOURNEY-RECAP] whisper slice %d failed: %s", slice_idx, exc,
+                )
+            offset += chunk_s
+            slice_idx += 1
+            # Avoid hammering Azure Whisper on very long sources.
+            if offset < total:
+                await asyncio.sleep(0.35)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return " ".join(texts).strip()
+
+
+async def _transcribe_audio_wav(wav_path: str) -> str:
+    """Transcribe any-length WAV; long files use ffmpeg time slices."""
+    from app.services.whisper_stt import transcribe
+
+    duration = ffprobe_media_duration_seconds(wav_path) or 0.0
+    if duration > WHISPER_SINGLE_SHOT_MAX_SECONDS:
+        logger.info(
+            "[JOURNEY-RECAP] chunked STT duration=%.1fs path=%s",
+            duration, wav_path,
+        )
+        return await _transcribe_wav_time_slices(wav_path, duration)
 
     with open(wav_path, "rb") as f:
         data = f.read()
@@ -1014,10 +1366,10 @@ def _build_studio_script_text(
         or str(seg.get("panel_type") or "").lower() == "story_beat"
         for seg in alignments
     )
-    mode = "audio-driven story beats" if audio_driven else "journey panels"
+    mode = "audio-driven trailer beats" if audio_driven else "journey panels"
     lines = [
-        f"Journey Recap — client archetype: {archetype_hint or 'unknown'}",
-        f"Target length: {target_duration}s ({segment_count} scenes, {mode})",
+        f"Thera-World Trailer — client archetype: {archetype_hint or 'unknown'}",
+        f"Target length: {target_duration}s max ({segment_count} scenes, {mode})",
         "",
     ]
     for seg in alignments:
@@ -1056,12 +1408,13 @@ def _alignments_to_studio_scenes(
         )
         scene_num = idx + 1
         is_story = str(seg.get("panel_type") or "").lower() == "story_beat"
+        dur = float(seg.get("duration_seconds") or seg_dur)
         scenes.append({
             "scene": scene_num,
             "title": f"Story Beat {scene_num}" if is_story else (seg.get("panel_type") or f"Journey Panel {scene_num}"),
             "description": (seg.get("narrative_text") or "")[:400],
             "dialogue": seg.get("transcript_excerpt") or "",
-            "duration": seg_dur,
+            "duration": dur,
             "mood": seg.get("panel_tone") or "reflective",
             "image_url": seg.get("r2_url"),
             "source_image_url": seg.get("r2_url"),
@@ -1106,16 +1459,22 @@ def _infer_ingest_mode_from_alignments(alignments: list[dict[str, Any]]) -> str:
 
 
 def build_studio_result_from_job(row: dict[str, Any]) -> Optional[dict[str, Any]]:
-    """Build Studio ingest payload from a completed recap job row."""
+    """Build Studio ingest payload from a recap job row."""
     status = (row.get("status") or "").strip()
     alignments = _parse_json_field(row.get("panel_alignments"), [])
-    if status != "aligning" or not alignments:
+    if status not in STUDIO_READY_STATUSES or not alignments:
         return None
     transcript = (row.get("transcript_text") or "").strip()
     if not transcript or transcript.startswith("(processing"):
         return None
 
     chat_captures = _parse_json_field(row.get("chat_captures"), [])
+    clips = _parse_json_field(row.get("segment_clips"), [])
+    clip_by_idx = {
+        int(c.get("segment_index", -1)): c
+        for c in clips
+        if isinstance(c, dict) and c.get("segment_index") is not None
+    }
     job_id = str(row.get("job_id"))
     archetype_hint = (row.get("archetype_hint") or "").strip()
     target_duration = int(row.get("target_duration_seconds") or DEFAULT_TARGET_DURATION)
@@ -1127,6 +1486,15 @@ def build_studio_result_from_job(row: dict[str, Any]) -> Optional[dict[str, Any]
         alignments, chat_captures,
         job_id=job_id, archetype_hint=archetype_hint, seg_dur=seg_dur,
     )
+    for scene in scenes:
+        idx = int(scene.get("recap_segment_index", scene.get("scene", 1) - 1))
+        clip = clip_by_idx.get(idx)
+        if clip:
+            if clip.get("video_url"):
+                scene["video_url"] = clip.get("video_url")
+                scene["video_status"] = clip.get("status", "complete")
+            elif clip.get("status") == "failed":
+                scene["video_status"] = "failed"
     script_text = _build_studio_script_text(
         alignments,
         archetype_hint=archetype_hint,
@@ -1149,7 +1517,10 @@ def build_studio_result_from_job(row: dict[str, Any]) -> Optional[dict[str, Any]
         "target_duration_seconds": target_duration,
         "segment_count": segment_count,
         "ingest_mode": ingest_mode,
+        "job_status": status,
     }
+    if row.get("output_r2_url"):
+        result["output_url"] = row.get("output_r2_url")
     return result
 
 
@@ -1289,7 +1660,8 @@ async def _complete_studio_ingest_audio_driven(
     if len(transcript) < 20:
         raise RuntimeError("Transcript too short (minimum 20 characters)")
 
-    target_duration, segment_count = plan_segments_for_duration(video_duration_seconds)
+    target_duration, segment_durations = plan_trailer_segment_durations(video_duration_seconds)
+    segment_count = len(segment_durations)
     seg_dur = segment_duration(target_duration, segment_count)
 
     if existing_job_id:
@@ -1331,17 +1703,11 @@ async def _complete_studio_ingest_audio_driven(
         archetype_row = await fetch_archetype(conn, user_id)
         archetype_hint = (archetype_row.get("archetype_hint") or "").strip()
         archetype_url = archetype_row.get("archetype_image_url")
-        alignments = await align_transcript_to_story_beats(
+        alignments = await align_transcript_to_trailer_beats(
             transcript,
-            segment_count=segment_count,
+            segment_durations=segment_durations,
+            source_duration_seconds=video_duration_seconds,
             archetype_hint=archetype_hint,
-        )
-        alignments = await generate_story_beat_images(
-            alignments,
-            user_id=user_id,
-            job_id=job_id,
-            archetype_hint=archetype_hint,
-            archetype_image_url=archetype_url,
         )
         chat_captures: list[dict[str, Any]] = [
             {"segment_index": seg["segment_index"], "panel_id": None, "messages": []}
@@ -1392,7 +1758,10 @@ async def _complete_studio_ingest_audio_driven(
         "target_duration_seconds": target_duration,
         "segment_count": segment_count,
         "ingest_mode": "audio_driven",
+        "job_status": "aligning",
         "video_duration_seconds": round(video_duration_seconds, 2),
+        "segment_durations": segment_durations,
+        "trailer_mode": True,
     }
 
 
@@ -1401,13 +1770,33 @@ async def ingest_studio_transcript(
     *,
     user_id: str,
     transcript: str,
+    ingest_mode: str = INGEST_MODE_AUDIO,
+    source_duration_seconds: Optional[float] = None,
 ) -> dict[str, Any]:
-    """Paste transcript → aligned recap scenes (no video upload required)."""
+    """Paste transcript → trailer beats (audio_driven) or panel-aligned 30s recap.
+
+    Audio-driven returns alignments immediately; caller should queue
+    ``run_trailer_auto_pipeline`` as a BackgroundTask so Studio can poll to complete.
+    """
     if not feature_enabled():
         raise RuntimeError("Journey recap video is disabled (ENABLE_JOURNEY_RECAP_VIDEO)")
-    return await _complete_studio_ingest_from_transcript(
-        db_pool, user_id=user_id, transcript=transcript,
+    mode = normalize_ingest_mode(ingest_mode)
+    if mode == INGEST_MODE_PANEL:
+        return await _complete_studio_ingest_from_transcript(
+            db_pool, user_id=user_id, transcript=transcript,
+        )
+    duration = float(source_duration_seconds or 0) or estimate_duration_from_transcript(transcript)
+    result = await _complete_studio_ingest_audio_driven(
+        db_pool,
+        user_id=user_id,
+        transcript=transcript,
+        video_duration_seconds=duration,
     )
+    result["async_pipeline"] = True
+    result["message"] = (
+        "Transcript aligned into ≤2 min trailer scenes — render + stitch queued."
+    )
+    return result
 
 
 async def enqueue_studio_video_ingest(
@@ -1438,7 +1827,8 @@ async def enqueue_studio_video_ingest(
         target_duration = DEFAULT_TARGET_DURATION
         segment_count = DEFAULT_SEGMENT_COUNT
     else:
-        target_duration, segment_count = plan_segments_for_duration(duration)
+        target_duration, segment_durations = plan_trailer_segment_durations(duration)
+        segment_count = len(segment_durations)
 
     async with db_pool.acquire() as conn:
         resolved_uid = await resolve_recap_user_id(conn, user_id.strip())
@@ -1464,7 +1854,10 @@ async def enqueue_studio_video_ingest(
         "target_duration_seconds": target_duration,
         "segment_count": segment_count,
         "video_duration_seconds": round(duration, 2),
-        "message": "Video queued — transcribing audio and generating scenes in the background.",
+        "message": (
+            "Video queued — transcribing and building up to 2 min Thera-World trailer scenes "
+            "(render + stitch run automatically)."
+        ),
     }
 
 
@@ -1558,6 +1951,8 @@ async def run_studio_video_ingest_task(
                 audio_url,
             )
         logger.info("[JOURNEY-RECAP] Studio video ingest complete job_id=%s mode=%s", job_id, mode)
+        if mode == INGEST_MODE_AUDIO:
+            await run_trailer_auto_pipeline(db_pool, job_id)
     except Exception as exc:
         logger.exception("[JOURNEY-RECAP] Studio video ingest failed job_id=%s", job_id)
         await _mark_studio_ingest_failed(db_pool, job_id, str(exc))
@@ -1665,14 +2060,16 @@ async def render_recap_segment(
     if not isinstance(alignments, list) or not alignments:
         raise RuntimeError("Job has no panel alignments — run ingest first")
 
-    target_duration = int(row.get("target_duration_seconds") or DEFAULT_TARGET_DURATION)
-    segment_count = int(row.get("segment_count") or DEFAULT_SEGMENT_COUNT)
-    seg_dur = segment_duration(target_duration, segment_count)
-
     if segment_index < 0 or segment_index >= len(alignments):
         raise ValueError(f"Invalid segment index {segment_index}")
 
+    target_duration = int(row.get("target_duration_seconds") or DEFAULT_TARGET_DURATION)
+    segment_count = int(row.get("segment_count") or DEFAULT_SEGMENT_COUNT)
+
     seg = dict(alignments[segment_index])
+    seg_dur = float(
+        seg.get("duration_seconds") or segment_duration(target_duration, segment_count),
+    )
     seg["r2_url"] = refresh_panel_r2_url(seg.get("r2_url"), r2_key=seg.get("r2_key"))
     chat_by_idx = {c["segment_index"]: c.get("messages") or [] for c in (chat_captures or [])}
     snippets = [m.get("text", "") for m in chat_by_idx.get(segment_index, []) if m.get("text")]
@@ -1687,6 +2084,15 @@ async def render_recap_segment(
         visual_theme=seg.get("panel_visual_theme") or "",
     )
     archetype_url = row.get("archetype_image_url")
+
+    if str(seg.get("panel_type") or "").lower() == "story_beat" and not seg.get("r2_url"):
+        seg = await ensure_segment_still_image(
+            seg,
+            user_id=user_id,
+            job_id=job_id,
+            archetype_hint=archetype_hint,
+            archetype_image_url=archetype_url,
+        )
 
     work_dir = tempfile.mkdtemp(prefix="sse_recap_seg_")
     try:
@@ -1769,8 +2175,36 @@ async def render_all_recap_segments(db_pool, job_id: str) -> list[dict[str, Any]
     return results
 
 
-async def stitch_recap_job_only(db_pool, job_id: str) -> dict[str, Any]:
-    """Stitch existing segment clips + source audio into final 30s recap."""
+async def run_trailer_auto_pipeline(db_pool, job_id: str) -> None:
+    """After audio-driven ingest: render all scenes then stitch (no client audio mux)."""
+    if os.getenv("JOURNEY_RECAP_AUTO_RENDER_STITCH", "true").strip().lower() not in (
+        "1", "true", "yes",
+    ):
+        return
+    try:
+        async with db_pool.acquire() as conn:
+            await _set_job_status(conn, job_id, "rendering")
+        await render_all_recap_segments(db_pool, job_id)
+        await stitch_recap_job_only(db_pool, job_id, mux_client_audio=False)
+        logger.info("[JOURNEY-RECAP] Auto trailer pipeline complete job_id=%s", job_id)
+    except Exception as exc:
+        logger.exception("[JOURNEY-RECAP] Auto trailer pipeline failed job_id=%s", job_id)
+        async with db_pool.acquire() as conn:
+            await _set_job_status(
+                conn,
+                job_id,
+                "failed",
+                error_message=f"auto_pipeline: {str(exc)[:1800]}",
+            )
+
+
+async def stitch_recap_job_only(
+    db_pool,
+    job_id: str,
+    *,
+    mux_client_audio: Optional[bool] = None,
+) -> dict[str, Any]:
+    """Stitch existing segment clips into final recap (trailer: silent, no client audio)."""
     if not feature_enabled():
         raise RuntimeError("Journey recap video is disabled")
 
@@ -1778,13 +2212,22 @@ async def stitch_recap_job_only(db_pool, job_id: str) -> dict[str, Any]:
         row = await conn.fetchrow(
             """
             SELECT user_id, audio_r2_key, audio_r2_url, segment_clips,
-                   target_duration_seconds, segment_count
+                   target_duration_seconds, segment_count, panel_alignments
             FROM sse_journey_recap_jobs WHERE job_id = $1::uuid
             """,
             uuid.UUID(job_id),
         )
     if not row:
         raise ValueError("Job not found")
+
+    alignments = row["panel_alignments"]
+    if isinstance(alignments, str):
+        alignments = json.loads(alignments)
+    ingest_mode = _infer_ingest_mode_from_alignments(
+        alignments if isinstance(alignments, list) else [],
+    )
+    if mux_client_audio is None:
+        mux_client_audio = ingest_mode == INGEST_MODE_PANEL
 
     user_id = row["user_id"]
     clips = row["segment_clips"]
@@ -1802,22 +2245,34 @@ async def stitch_recap_job_only(db_pool, job_id: str) -> dict[str, Any]:
     work_dir = tempfile.mkdtemp(prefix="sse_recap_stitch_")
     try:
         audio_path = None
-        audio_key = row["audio_r2_key"]
-        if audio_key:
-            data = await r2_storage.download_bytes(audio_key)
-            if data:
-                audio_path = os.path.join(work_dir, "full_audio.wav")
-                with open(audio_path, "wb") as f:
-                    f.write(data)
+        if mux_client_audio:
+            audio_key = row["audio_r2_key"]
+            if audio_key:
+                data = await r2_storage.download_bytes(audio_key)
+                if data:
+                    audio_path = os.path.join(work_dir, "full_audio.wav")
+                    with open(audio_path, "wb") as f:
+                        f.write(data)
 
         target_duration = int(row.get("target_duration_seconds") or DEFAULT_TARGET_DURATION)
         segment_count = int(row.get("segment_count") or DEFAULT_SEGMENT_COUNT)
+        segment_durations: Optional[list[int]] = None
+        if isinstance(alignments, list) and alignments:
+            durs = [
+                int(a.get("duration_seconds"))
+                for a in alignments
+                if a.get("duration_seconds") is not None
+            ]
+            if len(durs) == len(alignments):
+                segment_durations = durs
 
         mp4_bytes, stitch_errors = await stitch_recap_video(
             clips,
             audio_local_path=audio_path,
             target_duration=target_duration,
             segment_count=segment_count,
+            segment_durations=segment_durations,
+            mux_client_audio=mux_client_audio,
         )
         if not mp4_bytes:
             raise RuntimeError("; ".join(stitch_errors) or "Stitch failed")

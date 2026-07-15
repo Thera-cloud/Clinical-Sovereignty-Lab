@@ -248,11 +248,13 @@ async def generate_scene_image(
     redis=None,
     characters: list[str] | None = None,
     preset_id: str | None = None,
+    source_image_url: str | None = None,
+    panel_visual_theme: str | None = None,
 ) -> str:
     """Generate image via LoRA (if trained) or Grok Imagine, upload to R2. Returns R2 URL."""
     await _check_cost_budget(COST_PER_IMAGE_CENTS, redis)
 
-    from app.sse.infrastructure.grok_imagine_client import GROK_IMAGINE_LOCK
+    from app.sse.infrastructure.grok_imagine_client import GROK_IMAGINE_LOCK, generate_image
     from app.sse.infrastructure.r2_storage import store_image
     from app.sse.trailer_generator import (
         _get_style_prefix,
@@ -263,21 +265,39 @@ async def generate_scene_image(
         _manifest_preset_id,
     )
 
-    chars = characters or []
-    proj = await _load_manifest_from_r2(project_id) or {}
-    pid = preset_id or _manifest_preset_id(proj)
-    trained_loras = await _load_trained_loras(project_id)
-    prefix = _get_style_prefix(scene_num, pid)
-    styled_description = (
-        _build_consistent_prompt(description, chars, scene_num=scene_num, preset_id=pid)
-        if chars else prefix + description
-    )
+    theme = (panel_visual_theme or "").strip()
+    source = (source_image_url or "").strip()
 
-    async with GROK_IMAGINE_LOCK:
-        image_bytes = await _generate_image_with_lora_or_grok(
-            styled_description, chars, trained_loras,
-            scene_num=scene_num, preset_id=pid,
+    if source:
+        prompt_parts = []
+        if theme:
+            prompt_parts.append(
+                f"Preserve exact palette, line weight, and composition of the source panel. {theme}"
+            )
+        if description:
+            prompt_parts.append(description[:400])
+        prompt_parts.append("No text overlays, no logos. Match Thera-World daily panel art style.")
+        gen_prompt = " ".join(prompt_parts)
+        async with GROK_IMAGINE_LOCK:
+            image_bytes = await generate_image(gen_prompt, source_image_url=source)
+    else:
+        chars = characters or []
+        proj = await _load_manifest_from_r2(project_id) or {}
+        pid = preset_id or _manifest_preset_id(proj)
+        trained_loras = await _load_trained_loras(project_id)
+        prefix = _get_style_prefix(scene_num, pid)
+        base_desc = description
+        if theme:
+            base_desc = f"{theme}. {description}"
+        styled_description = (
+            _build_consistent_prompt(base_desc, chars, scene_num=scene_num, preset_id=pid)
+            if chars else prefix + base_desc
         )
+        async with GROK_IMAGINE_LOCK:
+            image_bytes = await _generate_image_with_lora_or_grok(
+                styled_description, chars, trained_loras,
+                scene_num=scene_num, preset_id=pid,
+            )
     r2_key = f"sse/studio/projects/{project_id}/{scene_num}.png"
     r2_url = await store_image(image_bytes, r2_key)
     await _track_cost(COST_PER_IMAGE_CENTS, redis)

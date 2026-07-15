@@ -59,6 +59,8 @@ class BreakScenesRequest(BaseModel):
 class JourneyRecapTranscriptRequest(BaseModel):
     user_id: str
     transcript_text: str
+    ingest_mode: str = "audio_driven"
+    source_duration_seconds: float | None = None
 
 class GenerateImageRequest(BaseModel):
     project_id: str
@@ -619,6 +621,7 @@ async def studio_journey_recap_ingest(
 async def studio_journey_recap_ingest_transcript(
     body: JourneyRecapTranscriptRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
 ):
     from app.sse import journey_recap_video as recap
 
@@ -636,14 +639,22 @@ async def studio_journey_recap_ingest_transcript(
     if len(text) < 20:
         raise HTTPException(400, "transcript_text must be at least 20 characters")
 
+    mode = recap.normalize_ingest_mode(body.ingest_mode)
     try:
         result = await recap.ingest_studio_transcript(
-            db, user_id=body.user_id.strip(), transcript=text,
+            db,
+            user_id=body.user_id.strip(),
+            transcript=text,
+            ingest_mode=mode,
+            source_duration_seconds=body.source_duration_seconds,
         )
     except RuntimeError as e:
         raise HTTPException(400, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(404, detail=str(e)) from e
+
+    if mode == recap.INGEST_MODE_AUDIO and result.get("job_id") and result.get("async_pipeline"):
+        background_tasks.add_task(recap.run_trailer_auto_pipeline, db, str(result["job_id"]))
     return result
 
 

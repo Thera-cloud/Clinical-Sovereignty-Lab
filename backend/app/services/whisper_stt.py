@@ -85,7 +85,8 @@ async def transcribe(
     headers = {"api-key": _AZURE_KEY}
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # Chunked long-form STT may send 30–90s of audio; allow up to 2 minutes.
+        async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(
                 _transcription_url(),
                 headers=headers,
