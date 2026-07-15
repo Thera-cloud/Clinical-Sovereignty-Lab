@@ -176,3 +176,42 @@ def test_score_panel_for_excerpt():
     panel = {"narrative_text": "The forest path and morning light"}
     assert recap.score_panel_for_excerpt(panel, "I walked the forest at morning") > 0.2
     assert recap.score_panel_for_excerpt(panel, "xyz qqq") == 0.0
+
+
+def test_build_studio_result_from_job_pending_returns_none():
+    row = {
+        "job_id": "00000000-0000-0000-0000-000000000001",
+        "status": "pending",
+        "transcript_text": "(processing upload…)",
+        "panel_alignments": [],
+    }
+    assert recap.build_studio_result_from_job(row) is None
+
+
+def test_build_studio_result_from_job_aligning_returns_scenes():
+    row = {
+        "job_id": "00000000-0000-0000-0000-000000000002",
+        "user_id": "CLIENT_TEST",
+        "status": "aligning",
+        "transcript_text": "I felt lost in the dark forest but found my courage.",
+        "target_duration_seconds": 45,
+        "segment_count": 3,
+        "archetype_hint": "explorer",
+        "audio_r2_url": "https://example.com/audio.wav",
+        "panel_alignments": [
+            {
+                "segment_index": 0,
+                "panel_type": "story_beat",
+                "narrative_text": "Lost in the forest",
+                "transcript_excerpt": "felt lost",
+                "ingest_mode": "audio_driven",
+                "r2_url": "https://example.com/beat0.png",
+            }
+        ],
+        "chat_captures": [{"segment_index": 0, "panel_id": None, "messages": []}],
+    }
+    result = recap.build_studio_result_from_job(row)
+    assert result is not None
+    assert result["ingest_mode"] == "audio_driven"
+    assert len(result["scenes"]) == 1
+    assert result["scenes"][0]["image_url"]

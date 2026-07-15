@@ -568,6 +568,7 @@ async def get_chain_state(project_id: str):
 @studio_router.post("/journey-recap/ingest")
 async def studio_journey_recap_ingest(
     request: Request,
+    background_tasks: BackgroundTasks,
     user_id: str = Form(...),
     file: UploadFile = File(...),
     ingest_mode: str = Form("audio_driven"),
@@ -589,16 +590,28 @@ async def studio_journey_recap_ingest(
     if len(data) < 5000:
         raise HTTPException(400, "Video file too small")
 
+    mode = recap.normalize_ingest_mode(ingest_mode)
     try:
-        result = await recap.ingest_studio_video(
-            db, user_id=user_id.strip(), video_bytes=data,
+        result = await recap.enqueue_studio_video_ingest(
+            db,
+            user_id=user_id.strip(),
+            video_bytes=data,
             filename=file.filename or "upload.mp4",
-            ingest_mode=recap.normalize_ingest_mode(ingest_mode),
+            ingest_mode=mode,
         )
     except RuntimeError as e:
         raise HTTPException(400, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(404, detail=str(e)) from e
+
+    job_id = result["job_id"]
+    background_tasks.add_task(
+        recap.run_studio_video_ingest_task,
+        db,
+        job_id=job_id,
+        ingest_mode=mode,
+        filename=file.filename or "upload.mp4",
+    )
     return result
 
 
@@ -708,4 +721,9 @@ async def studio_journey_recap_status(job_id: str, request: Request):
         )
     if not row:
         raise HTTPException(404, "Job not found")
-    return {"job": _serialize_recap_job_row(dict(row)), "enabled": recap.feature_enabled()}
+    job = _serialize_recap_job_row(dict(row))
+    payload: dict[str, Any] = {"job": job, "enabled": recap.feature_enabled()}
+    studio = recap.build_studio_result_from_job(dict(row))
+    if studio:
+        payload["studio"] = studio
+    return payload

@@ -1077,6 +1077,82 @@ def _alignments_to_studio_scenes(
     return scenes
 
 
+def _studio_ingest_work_dir(job_id: str) -> str:
+    """Persistent dir for async video ingest (survives until worker finishes)."""
+    base = os.getenv("JOURNEY_RECAP_INGEST_DIR", "/app/data/sse_studio_ingest")
+    path = os.path.join(base, str(job_id))
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _parse_json_field(val: Any, default: Any) -> Any:
+    if val is None:
+        return default
+    if isinstance(val, str):
+        try:
+            return json.loads(val)
+        except (json.JSONDecodeError, TypeError):
+            return default
+    return val
+
+
+def _infer_ingest_mode_from_alignments(alignments: list[dict[str, Any]]) -> str:
+    for seg in alignments or []:
+        if str(seg.get("panel_type") or "").lower() == "story_beat":
+            return INGEST_MODE_AUDIO
+        if str(seg.get("ingest_mode") or "") == INGEST_MODE_AUDIO:
+            return INGEST_MODE_AUDIO
+    return INGEST_MODE_PANEL
+
+
+def build_studio_result_from_job(row: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Build Studio ingest payload from a completed recap job row."""
+    status = (row.get("status") or "").strip()
+    alignments = _parse_json_field(row.get("panel_alignments"), [])
+    if status != "aligning" or not alignments:
+        return None
+    transcript = (row.get("transcript_text") or "").strip()
+    if not transcript or transcript.startswith("(processing"):
+        return None
+
+    chat_captures = _parse_json_field(row.get("chat_captures"), [])
+    job_id = str(row.get("job_id"))
+    archetype_hint = (row.get("archetype_hint") or "").strip()
+    target_duration = int(row.get("target_duration_seconds") or DEFAULT_TARGET_DURATION)
+    segment_count = int(row.get("segment_count") or DEFAULT_SEGMENT_COUNT)
+    seg_dur = segment_duration(target_duration, segment_count)
+    ingest_mode = _infer_ingest_mode_from_alignments(alignments)
+
+    scenes = _alignments_to_studio_scenes(
+        alignments, chat_captures,
+        job_id=job_id, archetype_hint=archetype_hint, seg_dur=seg_dur,
+    )
+    script_text = _build_studio_script_text(
+        alignments,
+        archetype_hint=archetype_hint,
+        segment_count=segment_count,
+        target_duration=target_duration,
+    )
+    panel_count = 0
+    if ingest_mode == INGEST_MODE_PANEL:
+        panel_count = len({seg.get("panel_id") for seg in alignments if seg.get("panel_id")})
+
+    result: dict[str, Any] = {
+        "job_id": job_id,
+        "user_id": row.get("user_id"),
+        "transcript": transcript,
+        "audio_url": row.get("audio_r2_url"),
+        "archetype": archetype_hint,
+        "script": script_text,
+        "scenes": scenes,
+        "panel_count": panel_count,
+        "target_duration_seconds": target_duration,
+        "segment_count": segment_count,
+        "ingest_mode": ingest_mode,
+    }
+    return result
+
+
 async def _complete_studio_ingest_from_transcript(
     db_pool,
     *,
@@ -1084,6 +1160,7 @@ async def _complete_studio_ingest_from_transcript(
     transcript: str,
     audio_r2_key: Optional[str] = None,
     audio_r2_url: Optional[str] = None,
+    existing_job_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Create recap job, align panels, and return Studio script + scenes."""
     user_id = user_id.strip()
@@ -1095,21 +1172,40 @@ async def _complete_studio_ingest_from_transcript(
     target_duration = DEFAULT_TARGET_DURATION
     seg_dur = segment_duration(target_duration, segment_count)
 
-    async with db_pool.acquire() as conn:
-        user_id = await resolve_recap_user_id(conn, user_id)
-        row = await conn.fetchrow(
-            """
-            INSERT INTO sse_journey_recap_jobs (
-                user_id, transcript_text, target_duration_seconds, segment_count, status
-            ) VALUES ($1, $2, $3, $4, 'pending')
-            RETURNING job_id::text
-            """,
-            user_id,
-            transcript,
-            target_duration,
-            segment_count,
-        )
-    job_id = row["job_id"]
+    if existing_job_id:
+        job_id = existing_job_id
+        async with db_pool.acquire() as conn:
+            user_id = await resolve_recap_user_id(conn, user_id)
+            await conn.execute(
+                """
+                UPDATE sse_journey_recap_jobs SET
+                    transcript_text = $2,
+                    target_duration_seconds = $3,
+                    segment_count = $4,
+                    updated_at = NOW()
+                WHERE job_id = $1::uuid
+                """,
+                uuid.UUID(job_id),
+                transcript,
+                target_duration,
+                segment_count,
+            )
+    else:
+        async with db_pool.acquire() as conn:
+            user_id = await resolve_recap_user_id(conn, user_id)
+            row = await conn.fetchrow(
+                """
+                INSERT INTO sse_journey_recap_jobs (
+                    user_id, transcript_text, target_duration_seconds, segment_count, status
+                ) VALUES ($1, $2, $3, $4, 'pending')
+                RETURNING job_id::text
+                """,
+                user_id,
+                transcript,
+                target_duration,
+                segment_count,
+            )
+        job_id = row["job_id"]
 
     async with db_pool.acquire() as conn:
         panels = await fetch_user_panels(conn, user_id)
@@ -1185,6 +1281,7 @@ async def _complete_studio_ingest_audio_driven(
     video_duration_seconds: float,
     audio_r2_key: Optional[str] = None,
     audio_r2_url: Optional[str] = None,
+    existing_job_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Video upload path: story beats from transcript/audio, no journey panel grab."""
     user_id = user_id.strip()
@@ -1195,21 +1292,40 @@ async def _complete_studio_ingest_audio_driven(
     target_duration, segment_count = plan_segments_for_duration(video_duration_seconds)
     seg_dur = segment_duration(target_duration, segment_count)
 
-    async with db_pool.acquire() as conn:
-        user_id = await resolve_recap_user_id(conn, user_id)
-        row = await conn.fetchrow(
-            """
-            INSERT INTO sse_journey_recap_jobs (
-                user_id, transcript_text, target_duration_seconds, segment_count, status
-            ) VALUES ($1, $2, $3, $4, 'pending')
-            RETURNING job_id::text
-            """,
-            user_id,
-            transcript,
-            target_duration,
-            segment_count,
-        )
-    job_id = row["job_id"]
+    if existing_job_id:
+        job_id = existing_job_id
+        async with db_pool.acquire() as conn:
+            user_id = await resolve_recap_user_id(conn, user_id)
+            await conn.execute(
+                """
+                UPDATE sse_journey_recap_jobs SET
+                    transcript_text = $2,
+                    target_duration_seconds = $3,
+                    segment_count = $4,
+                    updated_at = NOW()
+                WHERE job_id = $1::uuid
+                """,
+                uuid.UUID(job_id),
+                transcript,
+                target_duration,
+                segment_count,
+            )
+    else:
+        async with db_pool.acquire() as conn:
+            user_id = await resolve_recap_user_id(conn, user_id)
+            row = await conn.fetchrow(
+                """
+                INSERT INTO sse_journey_recap_jobs (
+                    user_id, transcript_text, target_duration_seconds, segment_count, status
+                ) VALUES ($1, $2, $3, $4, 'pending')
+                RETURNING job_id::text
+                """,
+                user_id,
+                transcript,
+                target_duration,
+                segment_count,
+            )
+        job_id = row["job_id"]
 
     async with db_pool.acquire() as conn:
         archetype_row = await fetch_archetype(conn, user_id)
@@ -1294,7 +1410,7 @@ async def ingest_studio_transcript(
     )
 
 
-async def ingest_studio_video(
+async def enqueue_studio_video_ingest(
     db_pool,
     *,
     user_id: str,
@@ -1302,18 +1418,86 @@ async def ingest_studio_video(
     filename: str = "upload.mp4",
     ingest_mode: str = INGEST_MODE_AUDIO,
 ) -> dict[str, Any]:
-    """Upload video → audio → transcript → aligned scenes for Thera-World Studio."""
+    """Accept upload quickly; processing continues in run_studio_video_ingest_task."""
     if not feature_enabled():
         raise RuntimeError("Journey recap video is disabled (ENABLE_JOURNEY_RECAP_VIDEO)")
 
     mode = normalize_ingest_mode(ingest_mode)
-    user_id = user_id.strip()
-    work_dir = tempfile.mkdtemp(prefix="sse_studio_ingest_")
+    job_id = str(uuid.uuid4())
+    work_dir = _studio_ingest_work_dir(job_id)
+    ext = os.path.splitext(filename or "upload.mp4")[1] or ".mp4"
+    video_path = os.path.join(work_dir, f"source{ext}")
+    with open(video_path, "wb") as f:
+        f.write(video_bytes)
+
+    duration = ffprobe_media_duration_seconds(video_path)
+    if not duration or duration < 1:
+        duration = float(DEFAULT_TARGET_DURATION)
+
+    if mode == INGEST_MODE_PANEL:
+        target_duration = DEFAULT_TARGET_DURATION
+        segment_count = DEFAULT_SEGMENT_COUNT
+    else:
+        target_duration, segment_count = plan_segments_for_duration(duration)
+
+    async with db_pool.acquire() as conn:
+        resolved_uid = await resolve_recap_user_id(conn, user_id.strip())
+        await conn.execute(
+            """
+            INSERT INTO sse_journey_recap_jobs (
+                job_id, user_id, transcript_text, target_duration_seconds, segment_count, status
+            ) VALUES ($1::uuid, $2, $3, $4, $5, 'pending')
+            """,
+            uuid.UUID(job_id),
+            resolved_uid,
+            "(processing upload…)",
+            target_duration,
+            segment_count,
+        )
+
+    return {
+        "job_id": job_id,
+        "user_id": resolved_uid,
+        "status": "pending",
+        "async": True,
+        "ingest_mode": mode,
+        "target_duration_seconds": target_duration,
+        "segment_count": segment_count,
+        "video_duration_seconds": round(duration, 2),
+        "message": "Video queued — transcribing audio and generating scenes in the background.",
+    }
+
+
+async def _mark_studio_ingest_failed(db_pool, job_id: str, message: str) -> None:
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE sse_journey_recap_jobs SET
+                status = 'failed',
+                error_message = $2,
+                updated_at = NOW()
+            WHERE job_id = $1::uuid
+            """,
+            uuid.UUID(job_id),
+            (message or "Ingest failed")[:2000],
+        )
+
+
+async def run_studio_video_ingest_task(
+    db_pool,
+    *,
+    job_id: str,
+    ingest_mode: str,
+    filename: str = "upload.mp4",
+) -> None:
+    """Background worker: extract audio, transcribe, align, generate beat images."""
+    mode = normalize_ingest_mode(ingest_mode)
+    work_dir = _studio_ingest_work_dir(job_id)
     try:
         ext = os.path.splitext(filename or "upload.mp4")[1] or ".mp4"
         video_path = os.path.join(work_dir, f"source{ext}")
-        with open(video_path, "wb") as f:
-            f.write(video_bytes)
+        if not os.path.isfile(video_path):
+            raise RuntimeError("Uploaded video file missing on server")
 
         wav_path = os.path.join(work_dir, "audio.wav")
         if not await _extract_audio_from_video(video_path, wav_path):
@@ -1330,21 +1514,33 @@ async def ingest_studio_video(
         if not duration or duration < 1:
             duration = float(DEFAULT_TARGET_DURATION)
 
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT user_id FROM sse_journey_recap_jobs WHERE job_id = $1::uuid",
+                uuid.UUID(job_id),
+            )
+        if not row:
+            raise RuntimeError("Recap job not found")
+        resolved_uid = str(row["user_id"])
+
         if mode == INGEST_MODE_PANEL:
             job_payload = await _complete_studio_ingest_from_transcript(
-                db_pool, user_id=user_id, transcript=transcript,
+                db_pool,
+                user_id=resolved_uid,
+                transcript=transcript,
+                existing_job_id=job_id,
             )
             job_payload["ingest_mode"] = INGEST_MODE_PANEL
             job_payload["video_duration_seconds"] = round(duration, 2)
         else:
             job_payload = await _complete_studio_ingest_audio_driven(
                 db_pool,
-                user_id=user_id,
+                user_id=resolved_uid,
                 transcript=transcript,
                 video_duration_seconds=duration,
+                existing_job_id=job_id,
             )
-        job_id = job_payload["job_id"]
-        resolved_uid = job_payload["user_id"]
+
         audio_key = f"sse/journey-recap/{resolved_uid}/{job_id}/source_audio.wav"
         audio_url = await r2_storage.store_bytes(audio_bytes, audio_key, "audio/wav")
 
@@ -1361,9 +1557,10 @@ async def ingest_studio_video(
                 audio_key,
                 audio_url,
             )
-
-        job_payload["audio_url"] = audio_url
-        return job_payload
+        logger.info("[JOURNEY-RECAP] Studio video ingest complete job_id=%s mode=%s", job_id, mode)
+    except Exception as exc:
+        logger.exception("[JOURNEY-RECAP] Studio video ingest failed job_id=%s", job_id)
+        await _mark_studio_ingest_failed(db_pool, job_id, str(exc))
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 

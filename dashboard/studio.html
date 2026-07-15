@@ -277,6 +277,20 @@ function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype
 
   const insertContent = (text) => setScript(s => s + '\n' + text);
 
+  const pollRecapIngestUntilReady = async (jobId) => {
+    const maxAttempts = 180;
+    for (let i = 0; i < maxAttempts; i++) {
+      const d = await apiFetch('/api/sse/admin/studio/journey-recap/' + jobId);
+      const job = d.job || {};
+      if (job.status === 'failed') {
+        throw new Error(job.error_message || 'Video ingest failed');
+      }
+      if (d.studio) return d.studio;
+      await new Promise(r => setTimeout(r, 4000));
+    }
+    throw new Error('Ingest still running — check Pipeline tab or retry in a few minutes.');
+  };
+
   const ingestClientVideo = async (file) => {
     if (!file) return;
     const uid = clientUser.trim();
@@ -292,7 +306,13 @@ function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.detail || r.statusText || 'Ingest failed');
-      applyRecapIngest(d);
+      if (d.async && d.job_id) {
+        setRecapJobId(d.job_id);
+        const studio = await pollRecapIngestUntilReady(d.job_id);
+        applyRecapIngest({ ...studio, video_duration_seconds: d.video_duration_seconds });
+      } else {
+        applyRecapIngest(d);
+      }
     } catch (e) { alert('Journey recap ingest failed: ' + e.message); }
     setLoading('');
   };
@@ -441,7 +461,7 @@ function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype
               }}>
                 {videoIngestMode === 'panel_aligned'
                   ? 'Transcribing video and aligning existing journey panels (30s recap)…'
-                  : 'Transcribing audio, building story beats from what the client said, and generating scene art to match video length…'}
+                  : 'Upload received — transcribing audio, building story beats, and generating scene art (may take several minutes)…'}
               </div>
             )}
             <textarea
