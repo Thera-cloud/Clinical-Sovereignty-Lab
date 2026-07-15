@@ -1,10 +1,13 @@
 """Thera-World Studio — admin-only REST endpoints for script/scene/library/project management."""
 from __future__ import annotations
 
+import json
 import logging
-from typing import Optional
+import uuid
+from datetime import date, datetime
+from typing import Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from app.services.api_server import require_admin
@@ -18,6 +21,32 @@ studio_router = APIRouter(
 )
 
 
+def _coerce_json_list(val: Any) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, str):
+        try:
+            parsed = json.loads(val)
+            return parsed if isinstance(parsed, list) else val
+        except (json.JSONDecodeError, TypeError):
+            return val
+    return val
+
+
+def _serialize_recap_job_row(row: dict[str, Any]) -> dict[str, Any]:
+    d = dict(row)
+    d["job_id"] = str(d["job_id"])
+    for key in ("panel_alignments", "chat_captures", "segment_clips"):
+        if key in d:
+            d[key] = _coerce_json_list(d[key])
+    for key, val in list(d.items()):
+        if isinstance(val, (datetime, date)):
+            d[key] = val.isoformat()
+        elif isinstance(val, uuid.UUID):
+            d[key] = str(val)
+    return d
+
+
 # ── Request models ────────────────────────────────────────────────────────
 
 class GenerateScriptRequest(BaseModel):
@@ -27,11 +56,17 @@ class GenerateScriptRequest(BaseModel):
 class BreakScenesRequest(BaseModel):
     script: str
 
+class JourneyRecapTranscriptRequest(BaseModel):
+    user_id: str
+    transcript_text: str
+
 class GenerateImageRequest(BaseModel):
     project_id: str
     scene_num: int
     description: str
     characters: list[str] | None = None
+    source_image_url: str | None = None
+    panel_visual_theme: str | None = None
 
 class GenerateVideoRequest(BaseModel):
     project_id: str
@@ -104,7 +139,15 @@ async def generate_image(body: GenerateImageRequest, request: Request):
     from app.sse.studio_service import generate_scene_image, _patch_project_manifest_image
     redis = _get_redis(request)
     try:
-        url = await generate_scene_image(body.description, body.project_id, body.scene_num, redis=redis, characters=body.characters)
+        url = await generate_scene_image(
+            body.description,
+            body.project_id,
+            body.scene_num,
+            redis=redis,
+            characters=body.characters,
+            source_image_url=body.source_image_url,
+            panel_visual_theme=body.panel_visual_theme,
+        )
     except RuntimeError as e:
         raise HTTPException(status_code=422, detail=str(e))
     db_pool = getattr(request.app.state, "db_pool", None)
@@ -518,3 +561,151 @@ async def get_chain_state(project_id: str):
     if not manifest:
         raise HTTPException(404, "Project not found")
     return manifest.get("chain_state", {})
+
+
+# ── Journey Recap (client video → 30s Thera-World stitch) ─────────────────
+
+@studio_router.post("/journey-recap/ingest")
+async def studio_journey_recap_ingest(
+    request: Request,
+    user_id: str = Form(...),
+    file: UploadFile = File(...),
+    ingest_mode: str = Form("audio_driven"),
+):
+    from app.sse import journey_recap_video as recap
+
+    if not recap.feature_enabled():
+        raise HTTPException(
+            503,
+            detail=f"Journey recap disabled — set {recap.FEATURE_FLAG}=true",
+        )
+    db = _get_db(request)
+    if not db:
+        raise HTTPException(503, "Database unavailable")
+    if not user_id.strip():
+        raise HTTPException(400, "user_id required")
+
+    data = await file.read()
+    if len(data) < 5000:
+        raise HTTPException(400, "Video file too small")
+
+    try:
+        result = await recap.ingest_studio_video(
+            db, user_id=user_id.strip(), video_bytes=data,
+            filename=file.filename or "upload.mp4",
+            ingest_mode=recap.normalize_ingest_mode(ingest_mode),
+        )
+    except RuntimeError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(404, detail=str(e)) from e
+    return result
+
+
+@studio_router.post("/journey-recap/ingest-transcript")
+async def studio_journey_recap_ingest_transcript(
+    body: JourneyRecapTranscriptRequest,
+    request: Request,
+):
+    from app.sse import journey_recap_video as recap
+
+    if not recap.feature_enabled():
+        raise HTTPException(
+            503,
+            detail=f"Journey recap disabled — set {recap.FEATURE_FLAG}=true",
+        )
+    db = _get_db(request)
+    if not db:
+        raise HTTPException(503, "Database unavailable")
+    if not body.user_id.strip():
+        raise HTTPException(400, "user_id required")
+    text = (body.transcript_text or "").strip()
+    if len(text) < 20:
+        raise HTTPException(400, "transcript_text must be at least 20 characters")
+
+    try:
+        result = await recap.ingest_studio_transcript(
+            db, user_id=body.user_id.strip(), transcript=text,
+        )
+    except RuntimeError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(404, detail=str(e)) from e
+    return result
+
+
+@studio_router.post("/journey-recap/{job_id}/render-segment/{segment_index}")
+async def studio_journey_recap_render_segment(
+    job_id: str, segment_index: int, request: Request,
+):
+    from app.sse import journey_recap_video as recap
+
+    if not recap.feature_enabled():
+        raise HTTPException(503, detail="Journey recap disabled")
+    db = _get_db(request)
+    if not db:
+        raise HTTPException(503, "Database unavailable")
+    try:
+        meta = await recap.render_recap_segment(db, job_id, segment_index)
+    except ValueError as e:
+        raise HTTPException(404, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    return {"segment": meta}
+
+
+@studio_router.post("/journey-recap/{job_id}/render-all")
+async def studio_journey_recap_render_all(
+    job_id: str, request: Request, background_tasks: BackgroundTasks,
+):
+    from app.sse import journey_recap_video as recap
+
+    if not recap.feature_enabled():
+        raise HTTPException(503, detail="Journey recap disabled")
+    db = _get_db(request)
+    if not db:
+        raise HTTPException(503, "Database unavailable")
+
+    async def _run():
+        try:
+            await recap.render_all_recap_segments(db, job_id)
+        except Exception as e:
+            logger.warning("[STUDIO-RECAP] render-all failed job=%s: %s", job_id, e)
+
+    background_tasks.add_task(_run)
+    return {"job_id": job_id, "status": "rendering"}
+
+
+@studio_router.post("/journey-recap/{job_id}/stitch")
+async def studio_journey_recap_stitch(job_id: str, request: Request):
+    from app.sse import journey_recap_video as recap
+
+    if not recap.feature_enabled():
+        raise HTTPException(503, detail="Journey recap disabled")
+    db = _get_db(request)
+    if not db:
+        raise HTTPException(503, "Database unavailable")
+    try:
+        result = await recap.stitch_recap_job_only(db, job_id)
+    except ValueError as e:
+        raise HTTPException(404, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    return result
+
+
+@studio_router.get("/journey-recap/{job_id}")
+async def studio_journey_recap_status(job_id: str, request: Request):
+    from app.sse import journey_recap_video as recap
+
+    db = _get_db(request)
+    if not db:
+        raise HTTPException(503, "Database unavailable")
+    async with db.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM sse_journey_recap_jobs WHERE job_id = $1::uuid",
+            uuid.UUID(job_id),
+        )
+    if not row:
+        raise HTTPException(404, "Job not found")
+    return {"job": _serialize_recap_job_row(dict(row)), "enabled": recap.feature_enabled()}

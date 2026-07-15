@@ -156,6 +156,42 @@ async function apiFetch(path, opts = {}) {
   } catch (e) { console.warn('apiFetch', path, e); throw e; }
 }
 
+function asJsonArray(v) {
+  if (Array.isArray(v)) return v;
+  if (v == null || v === '') return [];
+  if (typeof v === 'string') {
+    try {
+      const p = JSON.parse(v);
+      return Array.isArray(p) ? p : [];
+    } catch (e) { return []; }
+  }
+  return [];
+}
+
+function normalizeRecapJob(job) {
+  if (!job) return null;
+  return {
+    ...job,
+    segment_clips: asJsonArray(job.segment_clips),
+    panel_alignments: asJsonArray(job.panel_alignments),
+    chat_captures: asJsonArray(job.chat_captures),
+  };
+}
+
+function recapClipSummary(job) {
+  const clips = asJsonArray(job?.segment_clips);
+  const need = job?.segment_count || 4;
+  let grok = 0, kb = 0, failed = 0, pending = 0;
+  for (let i = 0; i < need; i++) {
+    const c = clips[i];
+    if (!c || !(c.video_url || c.r2_key)) { pending++; continue; }
+    if (c.status === 'grok') grok++;
+    else if (c.status === 'ken_burns') kb++;
+    else failed++;
+  }
+  return { clips, need, grok, kb, failed, pending, ready: grok + kb + failed };
+}
+
 function dText(d) {
   if (!d) return '';
   if (typeof d === 'string') return d;
@@ -175,14 +211,25 @@ function dVoice(d) {
 // ═══════════════════════════════════════════════════════════════════
 //  SCRIPT TAB
 // ═══════════════════════════════════════════════════════════════════
-function ScriptTab({ scenes, setScenes, setTab }) {
+function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype, recapJobId }) {
   const [script, setScript] = useState('');
   const [prompt, setPrompt] = useState('');
+  const [clientUser, setClientUser] = useState('');
+  const [dragOver, setDragOver] = useState(false);
   const [sources, setSources] = useState(null);
   const [selectedSources, setSelectedSources] = useState(['plots','characters','biomes','workbooks','npcs']);
   const [loading, setLoading] = useState('');
   const [presets, setPresets] = useState([]);
   const [collapsed, setCollapsed] = useState({});
+  const [videoIngestMode, setVideoIngestMode] = useState(() => {
+    try { return sessionStorage.getItem('studio_video_ingest_mode') || 'audio_driven'; }
+    catch (e) { return 'audio_driven'; }
+  });
+
+  const setVideoIngestModePersist = (mode) => {
+    setVideoIngestMode(mode);
+    try { sessionStorage.setItem('studio_video_ingest_mode', mode); } catch (e) {}
+  };
 
   useEffect(() => {
     apiFetch('/api/sse/admin/studio/content-sources').then(setSources).catch(() => {});
@@ -230,6 +277,92 @@ function ScriptTab({ scenes, setScenes, setTab }) {
 
   const insertContent = (text) => setScript(s => s + '\n' + text);
 
+  const ingestClientVideo = async (file) => {
+    if (!file) return;
+    const uid = clientUser.trim();
+    if (!uid) return alert('Enter the client username before uploading video.');
+    setLoading('recap');
+    const fd = new FormData();
+    fd.append('user_id', uid);
+    fd.append('file', file);
+    fd.append('ingest_mode', videoIngestMode);
+    try {
+      const r = await fetch(API + '/api/sse/admin/studio/journey-recap/ingest', {
+        method: 'POST', headers: _authHeaders(), body: fd
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || r.statusText || 'Ingest failed');
+      applyRecapIngest(d);
+    } catch (e) { alert('Journey recap ingest failed: ' + e.message); }
+    setLoading('');
+  };
+
+  const applyRecapIngest = (d) => {
+    setScript(d.script || '');
+    setScenes(d.scenes || []);
+    setRecapJobId(d.job_id || null);
+    setRecapArchetype(d.archetype || '');
+    if (d.scenes?.length) setTab('scenes');
+    if (d.ingest_mode === 'audio_driven' && d.target_duration_seconds) {
+      console.info('[Studio] Audio-driven recap:', d.segment_count, 'scenes,', d.target_duration_seconds, 's');
+    }
+  };
+
+  const buildRecapFromTranscript = async (autoRender = false) => {
+    const uid = clientUser.trim();
+    const text = script.trim();
+    if (!uid) return alert('Enter the client username above.');
+    if (text.length < 20) return alert('Paste at least a few sentences of transcript in the Script Editor.');
+    setLoading(autoRender ? 'recap-render' : 'recap-txt');
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/journey-recap/ingest-transcript', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ user_id: uid, transcript_text: text })
+      });
+      applyRecapIngest(d);
+      if (autoRender && d.job_id) {
+        await apiFetch('/api/sse/admin/studio/journey-recap/' + d.job_id + '/render-all', { method: 'POST' });
+        setTab('pipeline');
+      }
+    } catch (e) { alert('Journey recap from transcript failed: ' + e.message); }
+    setLoading('');
+  };
+
+  const attachRecapAudio = async (file) => {
+    if (!file || !recapJobId) return;
+    setLoading('recap-audio');
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const r = await fetch(API + '/api/sse/admin/journey-recap/jobs/' + recapJobId + '/audio', {
+        method: 'POST', headers: _authHeaders(), body: fd
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || r.statusText || 'Audio upload failed');
+      alert('Client audio attached — stitch will mux this track into the final 30s video.');
+    } catch (e) { alert('Audio attach failed: ' + e.message); }
+    setLoading('');
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    const f = e.dataTransfer?.files?.[0];
+    if (!f) return;
+    if (f.type.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(f.name || '')) {
+      ingestClientVideo(f);
+    } else {
+      alert('Drop a video file (MP4, MOV, WebM) or paste a transcript in the box below.');
+    }
+  };
+
+  const onDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  };
+
   const renderSource = (key, label, items, renderItem) => (
     <div key={key}>
       <div className="collapse-header" onClick={() => toggleCollapse(key)}>
@@ -248,6 +381,28 @@ function ScriptTab({ scenes, setScenes, setTab }) {
       <div className="left">
         <div className="panel">
           <h2>Script Editor</h2>
+          <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
+            <input type="text" placeholder="Client username (required for recap)" value={clientUser}
+              onChange={e => setClientUser(e.target.value)} style={{flex:1,minWidth:160}} />
+            <label className="btn" style={{cursor:'pointer',margin:0}}>
+              {loading==='recap' ? <span className="spinner"/> : 'Upload Video'}
+              <input type="file" accept="video/*,.mp4,.mov,.webm" style={{display:'none'}} disabled={!!loading}
+                onChange={e => ingestClientVideo(e.target.files?.[0])} />
+            </label>
+          </div>
+          <div style={{display:'flex',gap:16,marginBottom:12,flexWrap:'wrap',alignItems:'center',fontSize:12}}>
+            <span style={{color:'var(--t3)'}}>Video ingest:</span>
+            <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',color: videoIngestMode==='audio_driven' ? 'var(--cyan)' : 'var(--t2)'}}>
+              <input type="radio" name="videoIngestMode" checked={videoIngestMode==='audio_driven'}
+                onChange={() => setVideoIngestModePersist('audio_driven')} />
+              Generate from audio (match video length)
+            </label>
+            <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',color: videoIngestMode==='panel_aligned' ? 'var(--gold-b)' : 'var(--t2)'}}>
+              <input type="radio" name="videoIngestMode" checked={videoIngestMode==='panel_aligned'}
+                onChange={() => setVideoIngestModePersist('panel_aligned')} />
+              Use journey panels (30s, 4 scenes)
+            </label>
+          </div>
           <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap'}}>
             <input type="text" placeholder="Describe what to create..." value={prompt} onChange={e => setPrompt(e.target.value)} style={{flex:1,minWidth:200}} />
             <button className="btn" onClick={generateScript} disabled={!!loading}>{loading==='script' ? <span className="spinner"/> : 'Generate Script'}</button>
@@ -258,12 +413,68 @@ function ScriptTab({ scenes, setScenes, setTab }) {
               </select>
             )}
           </div>
-          <textarea rows={16} value={script} onChange={e => setScript(e.target.value)} placeholder="Write or paste your script here..." />
-          <div style={{display:'flex',gap:12,marginTop:12,alignItems:'center'}}>
-            <button className="btn" onClick={breakScenes} disabled={!!loading}>{loading==='break' ? <span className="spinner"/> : 'Break into Scenes'}</button>
+          <div
+            onDragOver={onDragOver}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+            style={{
+              position:'relative',
+              border:'2px dashed ' + (dragOver ? 'var(--gold)' : 'var(--border)'),
+              borderRadius:8,
+              background: dragOver ? 'var(--raised)' : 'transparent',
+            }}
+          >
+            {dragOver && (
+              <div style={{
+                position:'absolute', inset:0, zIndex:2, display:'flex', alignItems:'center', justifyContent:'center',
+                background:'rgba(201,169,98,0.12)', borderRadius:6, pointerEvents:'none',
+                color:'var(--gold)', fontSize:13, fontWeight:600
+              }}>
+                Drop video to transcribe &amp; build scenes
+              </div>
+            )}
+            {loading==='recap' && (
+              <div style={{
+                position:'absolute', inset:0, zIndex:2, display:'flex', alignItems:'center', justifyContent:'center',
+                background:'rgba(0,0,0,0.55)', borderRadius:6, pointerEvents:'none',
+                color:'var(--gold)', fontSize:12, padding:16, textAlign:'center'
+              }}>
+                {videoIngestMode === 'panel_aligned'
+                  ? 'Transcribing video and aligning existing journey panels (30s recap)…'
+                  : 'Transcribing audio, building story beats from what the client said, and generating scene art to match video length…'}
+              </div>
+            )}
+            <textarea
+              rows={16}
+              value={script}
+              onChange={e => setScript(e.target.value)}
+              placeholder="Paste client transcript here — or drop / upload a client video (MP4/MOV). Video upload transcribes audio, creates story-matched scenes for the full video length, and generates new imagery (no journey panel grab)."
+              style={{border:'none', background:'var(--bg)', width:'100%', boxSizing:'border-box', minHeight:280}}
+            />
+          </div>
+          <div style={{display:'flex',gap:12,marginTop:12,alignItems:'center',flexWrap:'wrap'}}>
+            <button className="btn" onClick={() => buildRecapFromTranscript(false)} disabled={!!loading}>
+              {loading==='recap-txt' ? <span className="spinner"/> : 'Build 30s Recap from Transcript'}
+            </button>
+            <button className="btn" onClick={() => buildRecapFromTranscript(true)} disabled={!!loading} title="Align panels, then queue Grok/Ken Burns render for all 4 scenes">
+              {loading==='recap-render' ? <span className="spinner"/> : 'Build & Render All Scenes'}
+            </button>
+            <button className="btn" onClick={breakScenes} disabled={!!loading}>{loading==='break' ? <span className="spinner"/> : 'Break into Scenes (generic)'}</button>
+            {recapJobId && (
+              <label className="btn btn-sm" style={{cursor:'pointer',margin:0}}>
+                {loading==='recap-audio' ? <span className="spinner"/> : 'Attach client audio'}
+                <input type="file" accept="audio/*,video/*" style={{display:'none'}} disabled={!!loading}
+                  onChange={e => attachRecapAudio(e.target.files?.[0])} />
+              </label>
+            )}
             {scenes.length > 0 && <span style={{fontSize:12,color:'var(--t2)'}}>{scenes.length} scenes &middot; ~{scenes.reduce((a,s) => a + (s.duration||5), 0)}s total</span>}
             {scenes.length > 0 && <button className="btn btn-sm" onClick={() => setTab('scenes')} style={{marginLeft:'auto'}}>Go to Scenes &rarr;</button>}
           </div>
+          <p style={{fontSize:11,color:'var(--t3)',marginTop:8}}>
+            Video upload uses the option above. &ldquo;Generate from audio&rdquo; creates new story-beat imagery matched to video length.
+            &ldquo;Use journey panels&rdquo; pulls the client&rsquo;s existing Sovereign Journey / daily panel art (30s, 4 scenes).
+            Transcript buttons below always use journey panels. Archetype from the client profile is baked into each scene.
+          </p>
         </div>
         {scenes.length > 0 && (
           <div className="panel">
@@ -312,7 +523,7 @@ function ScriptTab({ scenes, setScenes, setTab }) {
 // ═══════════════════════════════════════════════════════════════════
 //  SCENES TAB
 // ═══════════════════════════════════════════════════════════════════
-function ScenesTab({ scenes, setScenes, projectId, ensureProject, costInfo, refreshCost }) {
+function ScenesTab({ scenes, setScenes, projectId, ensureProject, costInfo, refreshCost, recapJobId }) {
   const [loading, setLoading] = useState({});
   const [saving, setSaving] = useState(false);
 
@@ -324,7 +535,14 @@ function ScenesTab({ scenes, setScenes, projectId, ensureProject, costInfo, refr
       const s = scenes[idx];
       const d = await apiFetch('/api/sse/admin/studio/generate-image', {
         method: 'POST', ct: 'application/json',
-        body: JSON.stringify({ project_id: pid, scene_num: s.scene || idx+1, description: s.description || s.prompt, characters: s.characters || [] })
+        body: JSON.stringify({
+          project_id: pid,
+          scene_num: s.scene || idx+1,
+          description: s.description || s.prompt,
+          characters: s.characters || [],
+          source_image_url: s.source_image_url || s.image_url || null,
+          panel_visual_theme: s.panel_visual_theme || null,
+        })
       });
       const updated = [...scenes];
       updated[idx] = { ...updated[idx], image_url: d.r2_url };
@@ -335,18 +553,36 @@ function ScenesTab({ scenes, setScenes, projectId, ensureProject, costInfo, refr
   };
 
   const genVideo = async (idx) => {
-    const pid = await ensureProject(scenes);
-    if (!pid) return;
     const s = scenes[idx];
-    if (!s.image_url) return alert('Generate an image first');
     const sceneNum = s.scene || idx+1;
     setLoading(l => ({...l, [`vid_${idx}`]: true}));
     try {
+      if (s.recap_job_id != null) {
+        const segIdx = s.recap_segment_index ?? idx;
+        const d = await apiFetch(
+          `/api/sse/admin/studio/journey-recap/${s.recap_job_id}/render-segment/${segIdx}`,
+          { method: 'POST' }
+        );
+        const updated = [...scenes];
+        updated[idx] = {
+          ...updated[idx],
+          video_url: d.segment?.video_url || updated[idx].video_url,
+          video_status: d.segment?.status || 'complete',
+        };
+        setScenes(updated);
+        refreshCost();
+        return;
+      }
+      const pid = await ensureProject(scenes);
+      if (!pid) return;
+      if (!s.image_url) return alert('Generate an image first');
       await apiFetch('/api/sse/admin/studio/generate-video', {
         method: 'POST', ct: 'application/json',
-        body: JSON.stringify({ project_id: pid, scene_num: sceneNum, image_url: s.image_url, motion_prompt: (s.description || s.prompt).slice(0, 200) })
+        body: JSON.stringify({
+          project_id: pid, scene_num: sceneNum, image_url: s.image_url,
+          motion_prompt: (s.motion_prompt || s.description || s.prompt || '').slice(0, 400)
+        })
       });
-      // Poll for completion (video generates in background)
       for (let attempt = 0; attempt < 40; attempt++) {
         await new Promise(r => setTimeout(r, 5000));
         try {
@@ -438,7 +674,7 @@ function ScenesTab({ scenes, setScenes, projectId, ensureProject, costInfo, refr
                 <button className="btn btn-sm" onClick={() => genImage(i)} disabled={loading[`img_${i}`]}>
                   {loading[`img_${i}`] ? <span className="spinner"/> : (s.image_url ? 'Regen Image' : 'Gen Image')}
                 </button>
-                <button className="btn btn-sm" onClick={() => genVideo(i)} disabled={loading[`vid_${i}`] || !s.image_url}>
+                <button className="btn btn-sm" onClick={() => genVideo(i)} disabled={loading[`vid_${i}`] || (!s.recap_job_id && !s.image_url)}>
                   {loading[`vid_${i}`] ? <span className="spinner"/> : (s.video_url ? 'Regen Video' : 'Gen Video')}
                 </button>
                 {dHas(s.dialogue) && (
@@ -598,12 +834,17 @@ function LibraryTab({ onLoadProject }) {
 // ═══════════════════════════════════════════════════════════════════
 //  PIPELINE TAB (Phase 2 — character refs, batch video, stitching)
 // ═══════════════════════════════════════════════════════════════════
-function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost }) {
+function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost, recapJobId, recapArchetype }) {
   const [charRefs, setCharRefs] = useState(null);
   const [refsLoading, setRefsLoading] = useState(false);
   const [videoStatus, setVideoStatus] = useState(null);
   const [videoLoading, setVideoLoading] = useState(false);
   const [stitchLoading, setStitchLoading] = useState(false);
+  const [recapStitchLoading, setRecapStitchLoading] = useState(false);
+  const [recapOutputUrl, setRecapOutputUrl] = useState(null);
+  const [recapRenderLoading, setRecapRenderLoading] = useState(false);
+  const [recapRenderMsg, setRecapRenderMsg] = useState('');
+  const [recapJobStatus, setRecapJobStatus] = useState(null);
   const [trailerStatus, setTrailerStatus] = useState(null);
   const [stitchOpts, setStitchOpts] = useState({ include_color_grade: true, include_narration: true, color_preset: 'ghibli_warm', format: '16:9' });
   const [genMode, setGenMode] = useState('interpolated');
@@ -627,6 +868,71 @@ function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost }
       if (s.trailer) { setStitchLoading(false); }
     } catch (e) { /* ignore */ }
   }, [projectId]);
+
+  const pollRecapJob = useCallback(async () => {
+    if (!recapJobId) return;
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/journey-recap/' + recapJobId);
+      const job = normalizeRecapJob(d.job);
+      setRecapJobStatus(job);
+      if (job?.output_r2_url) setRecapOutputUrl(job.output_r2_url);
+    } catch (e) { /* ignore */ }
+  }, [recapJobId]);
+
+  useEffect(() => {
+    if (!recapJobId) return;
+    pollRecapJob();
+    const ms = recapRenderLoading ? 3000 : 8000;
+    const iv = setInterval(pollRecapJob, ms);
+    return () => clearInterval(iv);
+  }, [recapJobId, pollRecapJob, recapRenderLoading]);
+
+  useEffect(() => {
+    if (!recapRenderLoading || !recapJobStatus) return;
+    const s = recapClipSummary(recapJobStatus);
+    if (s.ready >= s.need || recapJobStatus.status === 'clips_ready' || recapJobStatus.status === 'complete') {
+      setRecapRenderLoading(false);
+      setRecapRenderMsg(
+        `Render complete: ${s.grok} Grok · ${s.kb} Ken Burns` +
+        (s.failed ? ` · ${s.failed} failed` : '') + '. Stitch when ready.'
+      );
+    }
+  }, [recapRenderLoading, recapJobStatus]);
+
+  const renderAllRecapSegments = async () => {
+    if (!recapJobId) return;
+    if (!confirm('Render all journey recap scene clips (~$16 if all Grok)? Takes 2–5 minutes.')) return;
+    setRecapRenderLoading(true);
+    setRecapRenderMsg('Rendering 4 segments (Grok video, ~2–5 min). Page polls every 3s…');
+    try {
+      await apiFetch('/api/sse/admin/studio/journey-recap/' + recapJobId + '/render-all', { method: 'POST' });
+      pollRecapJob();
+    } catch (e) {
+      setRecapRenderLoading(false);
+      setRecapRenderMsg('');
+      alert('Render all failed: ' + e.message);
+    }
+  };
+
+  const recapSummary = recapJobStatus ? recapClipSummary(recapJobStatus) : null;
+  const recapClipCount = recapSummary ? recapSummary.ready : 0;
+
+  const stitchJourneyRecap = async () => {
+    if (!recapJobId) return;
+    const clipN = recapClipCount;
+    const need = recapJobStatus?.segment_count || 4;
+    const msg = clipN < need
+      ? `No Grok clips yet (${clipN}/${need}). Stitch will auto-build Ken Burns motion from panel stills + client audio. Continue?`
+      : 'Stitch 4 segments + client audio into final 30s Journey Recap?';
+    if (!confirm(msg)) return;
+    setRecapStitchLoading(true);
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/journey-recap/' + recapJobId + '/stitch', { method: 'POST' });
+      setRecapOutputUrl(d.output_url || null);
+      pollRecapJob();
+    } catch (e) { alert('Recap stitch failed: ' + e.message); }
+    setRecapStitchLoading(false);
+  };
 
   useEffect(() => {
     if (!projectId) return;
@@ -726,6 +1032,55 @@ function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost }
 
   return (
     <div>
+      {recapJobId && (
+        <div className="panel" style={{borderColor:'var(--gold)',borderWidth:1,borderStyle:'solid'}}>
+          <h2>30s Journey Recap</h2>
+          <p style={{fontSize:12,color:'var(--t2)',marginBottom:12}}>
+            Job <span style={{fontFamily:'var(--mono)',fontSize:11}}>{recapJobId.slice(0,8)}…</span>
+            {recapArchetype ? <> · Archetype: <strong style={{color:'var(--gold-b)'}}>{recapArchetype}</strong></> : null}
+            {recapSummary ? <> · Clips: <strong>{recapSummary.ready}/{recapSummary.need}</strong>
+              {recapSummary.grok > 0 ? <> · <span style={{color:'var(--green)'}}>{recapSummary.grok} Grok</span></> : null}
+              {recapSummary.kb > 0 ? <> · <span style={{color:'var(--gold-d)'}}>{recapSummary.kb} Ken Burns</span></> : null}
+            </> : null}
+            {recapJobStatus?.status ? <> · <span style={{color:'var(--t3)'}}>{recapJobStatus.status}</span></> : null}
+            {recapJobStatus?.audio_r2_key ? <> · <span style={{color:'var(--cyan)'}}>client audio attached</span></> : null}
+          </p>
+          {recapRenderMsg && (
+            <p style={{fontSize:12,color: recapRenderLoading ? 'var(--cyan)' : 'var(--t2)',marginBottom:10}}>
+              {recapRenderLoading ? <><span className="spinner" style={{marginRight:6}}/>{recapRenderMsg}</> : recapRenderMsg}
+            </p>
+          )}
+          {recapSummary && (
+            <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:12}}>
+              {Array.from({length: recapSummary.need}, (_, i) => {
+                const c = recapSummary.clips[i];
+                const st = c?.status || (c?.video_url || c?.r2_key ? 'ready' : 'pending');
+                const color = st === 'grok' ? 'var(--green)' : st === 'ken_burns' ? 'var(--gold-d)' : st === 'failed' ? 'var(--red)' : 'var(--t3)';
+                return <span key={i} style={{fontSize:10,padding:'3px 8px',borderRadius:4,border:'1px solid var(--border)',color}}>Seg {i}: {st}</span>;
+              })}
+            </div>
+          )}
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:12}}>
+            <button className="btn" onClick={renderAllRecapSegments} disabled={recapRenderLoading}>
+              {recapRenderLoading ? <><span className="spinner"/> Rendering…</> : 'Render All Scene Clips (Grok)'}
+            </button>
+            <button className="btn" onClick={stitchJourneyRecap} disabled={recapStitchLoading}>
+              {recapStitchLoading ? <><span className="spinner"/> Stitching…</> : 'Stitch Recap + Client Audio'}
+            </button>
+          </div>
+          {recapJobStatus && recapClipCount < (recapJobStatus.segment_count || 4) && (
+            <p style={{fontSize:11,color:'var(--t3)',marginBottom:8}}>
+              Stitch without Grok clips will use Ken Burns pan on panel stills (~30s, no extra Grok cost).
+            </p>
+          )}
+          {recapOutputUrl && (
+            <div>
+              <video controls src={recapOutputUrl} style={{width:'100%',maxWidth:640,borderRadius:8,marginBottom:8}} />
+              <a className="btn btn-sm" href={recapOutputUrl} target="_blank" rel="noopener">Download Recap</a>
+            </div>
+          )}
+        </div>
+      )}
       {/* Character References */}
       <div className="panel">
         <h2>Character References</h2>
@@ -1156,6 +1511,8 @@ function App() {
   const projectIdRef = useRef(null);
   const projectPromiseRef = useRef(null);
   const [costInfo, setCostInfo] = useState(null);
+  const [recapJobId, setRecapJobId] = useState(null);
+  const [recapArchetype, setRecapArchetype] = useState('');
 
   const setProjectIdSync = useCallback((id) => {
     projectIdRef.current = id;
@@ -1217,9 +1574,9 @@ function App() {
         ))}
       </div>
       <div className="main">
-        {tab === 'script' && <ScriptTab scenes={scenes} setScenes={setScenes} setTab={setTab} />}
-        {tab === 'scenes' && <ScenesTab scenes={scenes} setScenes={setScenes} projectId={projectId} ensureProject={ensureProjectGlobal} costInfo={costInfo} refreshCost={refreshCost} />}
-        {tab === 'pipeline' && <PipelineTab projectId={projectId} ensureProject={ensureProjectGlobal} scenes={scenes} costInfo={costInfo} refreshCost={refreshCost} />}
+        {tab === 'script' && <ScriptTab scenes={scenes} setScenes={setScenes} setTab={setTab} setRecapJobId={setRecapJobId} setRecapArchetype={setRecapArchetype} recapJobId={recapJobId} />}
+        {tab === 'scenes' && <ScenesTab scenes={scenes} setScenes={setScenes} projectId={projectId} ensureProject={ensureProjectGlobal} costInfo={costInfo} refreshCost={refreshCost} recapJobId={recapJobId} />}
+        {tab === 'pipeline' && <PipelineTab projectId={projectId} ensureProject={ensureProjectGlobal} scenes={scenes} costInfo={costInfo} refreshCost={refreshCost} recapJobId={recapJobId} recapArchetype={recapArchetype} />}
         {tab === 'charlab' && <CharacterLabTab projectId={projectId} ensureProject={ensureProjectGlobal} scenes={scenes} refreshCost={refreshCost} />}
         {tab === 'library' && <LibraryTab onLoadProject={loadProject} />}
       </div>

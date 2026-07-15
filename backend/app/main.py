@@ -3888,6 +3888,13 @@ try:
 except Exception as _studio_err:
     print(f"   ⚠️  Studio router failed: {_studio_err}")
 
+# QUANTUM-CRYSTAL-ARCH: 30s journey recap (transcript + panels + Ask Nate → stitched video)
+try:
+    from app.routers.journey_recap_api import journey_recap_router
+    app.include_router(journey_recap_router)
+except Exception as _jr_err:
+    print(f"   ⚠️  Journey Recap router failed: {_jr_err}")
+
 try:
     from app.routers.sendgrid_inbound import router as sendgrid_inbound_router
     app.include_router(sendgrid_inbound_router)
