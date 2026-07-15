@@ -1,6 +1,6 @@
 # Agentic Roadmap Rollout Checklist (Phases 0–5)
 
-**Status:** TRACK A + B BAKED ON STAGING, DUAL-REVIEWER SIGNED (2026-07-14) — migrations applied, Phase 0 + Phase 1 flipped/tested on `nate_staging_backend`, Flutter deployed, reviewed by Nathan Nevedal + Kristy Moore; audit token/accounts verified on GREEN. Production agentic flags **false**. **0.4/1.4 now closed** (consent-default seam test passes; shared-extractor isolation confirmed by structural proof — see note, requested SQL check ran but was vacuous, see Known Limitation below). **P3 forensic complete and closed** — log-verified: `daily_backup.sh`'s pre-migration dump completed at 13:33:40.952 UTC, ~50ms before the first 237–239 `CREATE TABLE` statement at 13:33:41 UTC (sequential, as designed). An earlier version of this note incorrectly claimed no snapshot existed, based on an unverified time estimate; retracted and corrected in the P3 note below once the actual postgres statement log was checked. Remaining real (non-blocking) gap: the script doesn't check `daily_backup.sh`'s exit code, so this run's correct ordering wasn't guaranteed by the script itself. Prod flips (0.5/0.6/1.5) blocked on ≥72h staging soak only (not started — soak clock begins at first prod Phase 0 flip). Track C (Phase 5 neuro-symbolic) untouched.
+**Status:** TRACK A + B BAKED ON STAGING, DUAL-REVIEWER SIGNED (2026-07-14) — migrations applied, Phase 0 + Phase 1 flipped/tested on `nate_staging_backend`, Flutter deployed, reviewed by Nathan Nevedal + Kristy Moore; audit token/accounts verified on GREEN. Production agentic flags **false**. **0.4/1.4 now closed, code-verified not data-verified** (consent-default seam test passes — that one *is* a real, executed test; shared-extractor isolation is closed on code+schema audit only — the requested staging query did run and returned 0/0, but that result is vacuous/non-dispositive since no staging traffic has ever exercised the path, see Known Limitation below — no live observation of isolation exists). **P3 forensic complete and closed** — log-verified: `daily_backup.sh`'s pre-migration dump completed at 13:33:40.952 UTC, ~50ms before the first 237–239 `CREATE TABLE` statement at 13:33:41 UTC (sequential, as designed). An earlier version of this note incorrectly claimed no snapshot existed, based on an unverified time estimate; retracted and corrected in the P3 note below once the actual postgres statement log was checked. Remaining real (non-blocking) gap: the script doesn't check `daily_backup.sh`'s exit code, so this run's correct ordering wasn't guaranteed by the script itself. Prod flips (0.5/0.6/1.5) blocked on ≥72h staging soak only (not started — soak clock begins at first prod Phase 0 flip). Track C (Phase 5 neuro-symbolic) untouched.
 
 **Infrastructure:** `docker-compose.staging.yml` + `scripts/staging_bake_setup.sh` → `nate_staging_backend` on `127.0.0.1:8011`, DB `little_nate_staging`. (Port 8001 is already bound by host nginx on GREEN for an unrelated vhost — do not reuse it.)
 
@@ -87,7 +87,7 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 | 0.1 | Adversarial walk: `docs/AGENTIC_PHASE_0_REVIEW.md` (key / lifecycle / surface / seam / time) | [x] |
 | 0.2 | Seam tests: `test_proactive_touch_seams.py`, `test_touch_adaptation_asymmetry.py` | [x] |
 | 0.3 | Staging: set flag `true`, restart backend | [x] |
-| 0.4 | Verify: checkin touches route through `can_send_proactive_touch`; shadow table receives assertiveness proposals only | [x] |
+| 0.4 | Verify: checkin touches route through `can_send_proactive_touch`; shadow table receives assertiveness proposals only | [x] *(code-verified, not data-verified — see note: staging query returned 0/0 but was vacuous, no staging traffic ever exercised the path; closed on code+schema audit instead)* |
 | 0.5 | Production flag flip (after 0.4 stable ≥ 72h) | [ ] |
 | 0.6 | `safe_deploy.sh backend` + 117/117 health + trust window | [ ] |
 
@@ -117,7 +117,7 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 | 1.1 | Confirm Phase 0 flag on and stable in prod | [ ] *(intentionally skipped — Track B ran on staging only, per two-track plan; prod Phase 0 not yet flipped)* |
 | 1.2 | Adversarial walk: `docs/AGENTIC_PHASE_1_REVIEW.md` | [x] |
 | 1.3 | Staging: flag `true`; test consent toggle, list/dismiss/edit commitments (WS + Flutter) | [x] |
-| 1.4 | Verify: `NateCommitmentAgent` touches pass Phase 0 gate; `nate_nudges` delivery | [x] |
+| 1.4 | Verify: `NateCommitmentAgent` touches pass Phase 0 gate; `nate_nudges` delivery | [x] *(code-verified, not data-verified — same basis as 0.4, see note)* |
 | 1.5 | Production flag flip | [ ] |
 | 1.6 | Flutter web deploy if UI changed (`scripts/deploy_flutter_web.sh`) | [x] |
 
