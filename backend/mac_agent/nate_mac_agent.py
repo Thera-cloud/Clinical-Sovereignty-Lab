@@ -406,6 +406,10 @@ class ProcessManageRequest(BaseModel):
     process: str
 
 
+class LintRequest(BaseModel):
+    paths: list[str] = []
+
+
 # ── Endpoints ──
 
 @app.get("/health")
@@ -585,6 +589,70 @@ async def file_delete(req: FileDeleteRequest, request: Request):
             return {"status": "error", "error": f"File not found: {path}", "error_code": "FILE_NOT_FOUND"}
         os.remove(path)
         return {"status": "ok", "action": "deleted", "path": path}
+
+
+@app.post("/lint", dependencies=[Depends(verify_token)])
+async def lint_paths(req: LintRequest, request: Request):
+    """Run lightweight syntax/lint checks on workspace paths (read_lints mapping)."""
+    await _audit_log("lint", {"paths": (req.paths or [])[:20]}, request.client.host if request.client else "unknown")
+    diagnostics = []
+    for raw in (req.paths or [])[:20]:
+        path = os.path.expanduser(raw)
+        if not os.path.isabs(path):
+            path = os.path.join(MAC_AGENT_WORKSPACE, path)
+        try:
+            _check_red_zone(path)
+        except HTTPException as he:
+            diagnostics.append({"path": raw, "errors": [{"message": str(he.detail), "severity": "error"}], "clean": False})
+            continue
+        if not os.path.isfile(path):
+            diagnostics.append({"path": raw, "errors": [{"message": "File not found", "severity": "error"}], "clean": False})
+            continue
+        errors = []
+        ext = Path(path).suffix.lower()
+        if ext == ".py":
+            proc = await asyncio.create_subprocess_exec(
+                "python3", "-m", "py_compile", path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+            except asyncio.TimeoutError:
+                errors.append({"message": "py_compile timed out", "severity": "error"})
+                proc.kill()
+            else:
+                if proc.returncode != 0:
+                    for line in (stderr.decode(errors="replace") or "").strip().splitlines()[:20]:
+                        errors.append({"message": line.strip(), "severity": "error"})
+        elif ext == ".dart":
+            proc = await asyncio.create_subprocess_exec(
+                "dart", "analyze", path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=MAC_AGENT_WORKSPACE,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            except asyncio.TimeoutError:
+                errors.append({"message": "dart analyze timed out", "severity": "error"})
+                proc.kill()
+            else:
+                if proc.returncode != 0:
+                    for line in (stdout.decode(errors="replace") or "").strip().splitlines()[:20]:
+                        if line.strip():
+                            errors.append({"message": line.strip(), "severity": "error"})
+        else:
+            errors.append({"message": f"No lint runner for extension {ext or '(none)'}", "severity": "info"})
+        diagnostics.append({"path": raw, "errors": errors, "clean": len(errors) == 0})
+
+    return {
+        "status": "ok",
+        "diagnostics": diagnostics,
+        "result": diagnostics,
+        "total_files": len(diagnostics),
+        "files_with_errors": sum(1 for d in diagnostics if d.get("errors")),
+    }
 
 
 @app.post("/git", dependencies=[Depends(verify_token)])

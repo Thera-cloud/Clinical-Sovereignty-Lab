@@ -4144,6 +4144,7 @@ except Exception as _tp_err:
 for _rmod, _ralias in [
     ("app.routers.patient_sovereignty", "patient_sovereignty_router"),
     ("app.routers.sovereign_completions_api", "sovereign_completions_router"),
+    ("app.routers.agents_api", "agents_router"),  # SOVEREIGN-VOICE — partner agentic plug-in
     ("app.routers.cli_analytics_api", "cli_analytics_router"),
     ("app.routers.oauth_api", "oauth_router"),
     ("app.routers.nightly_audit_api", "nightly_audit_router"),

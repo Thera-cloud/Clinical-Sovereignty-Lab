@@ -14,15 +14,15 @@ logger = logging.getLogger(__name__)
 
 # Provider ceilings (chars). Applied before each provider attempt in generate_streaming.
 PROVIDER_PROMPT_CEILINGS = {
-    "grok": 48_000,
-    "sovereign": 24_000,
-    "workers_ai": 48_000,
-    "azure": 48_000,
-    "home_gpu": 48_000,
-    "digitalocean": 24_000,
+    "grok": 96_000,
+    "sovereign": 32_000,
+    "workers_ai": 64_000,
+    "azure": 64_000,
+    "home_gpu": 64_000,
+    "digitalocean": 32_000,
 }
 
-CLI_MAX_HISTORY_CHARS = 8_000
+CLI_MAX_HISTORY_CHARS = 24_000
 
 _TRAIL_NOTICE = (
     "\n\n[CONTEXT TRIMMED: System prompt exceeded {provider} ceiling ({ceiling:,} chars). "

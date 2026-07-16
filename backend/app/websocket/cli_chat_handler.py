@@ -22,20 +22,56 @@ import json
 import logging
 import os
 import time
-import traceback
 import uuid
-from typing import Any, Dict, List, Optional
+from collections import OrderedDict
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("nate.cli_chat")
 
-_MAX_TOOL_TURNS = 15
+# Mode-aware turn budgets (was hard-coded 15)
+_MAX_TOOL_TURNS = {
+    "ask": 25,
+    "plan": 25,
+    "debug": 40,
+    "ln_fab": 45,
+}
+_MAX_COMPLETION_TOKENS = {
+    "ask": 6144,
+    "plan": 6144,
+    "debug": 8192,
+    "ln_fab": 12288,
+}
+_WRITE_TOOLS = frozenset({"write_file", "str_replace", "delete_file", "inject_log"})
+_REASONING_MODES = frozenset({"ln_fab", "debug"})
+_CONV_COMPACT_CHARS = 72_000
+_SESSION_HISTORY: "OrderedDict[str, List[Dict[str, Any]]]" = OrderedDict()
+_SESSION_HISTORY_MAX = 40  # messages retained per session key
+_SESSION_HISTORY_KEYS_MAX = 50  # LRU cap on distinct session keys
+_SESSION_REDIS_TTL = int(os.getenv("CLI_SESSION_REDIS_TTL", "86400"))  # 24h
+_CLI_MAX_FIX_ATTEMPTS = int(os.getenv("CLI_MAX_FIX_ATTEMPTS", "3"))
+_CLI_MAX_SUBAGENT_TURNS = int(os.getenv("CLI_MAX_SUBAGENT_TURNS", "8"))
+_PATH_WRITE_LOCKS: Dict[str, asyncio.Lock] = {}
+_PATH_WRITE_LOCKS_GUARD: Optional[asyncio.Lock] = None
+_SUBAGENT_PROFILES: Dict[str, Optional[frozenset]] = {
+    "explore": frozenset({
+        "read_file", "list_directory", "grep", "glob", "repo_map",
+        "read_lints", "web_search", "web_fetch", "web_search_local", "todo_write",
+    }),
+    "test_fix": frozenset({
+        "read_file", "grep", "glob", "write_file", "str_replace",
+        "shell", "read_lints", "todo_write", "repo_map",
+    }),
+    "full": None,  # inherit parent tool set
+}
+
 _GROK_KEY: Optional[str] = None
 _GROK_URL: Optional[str] = None
 _GROK_MODEL: Optional[str] = None
+_GROK_REASONING_MODEL: Optional[str] = None
 
 
 def _ensure_grok_config():
-    global _GROK_KEY, _GROK_URL, _GROK_MODEL
+    global _GROK_KEY, _GROK_URL, _GROK_MODEL, _GROK_REASONING_MODEL
     if _GROK_KEY is not None:
         return
     try:
@@ -47,6 +83,95 @@ def _ensure_grok_config():
         _GROK_KEY = os.getenv("NATE_CHAT_KEY", os.getenv("AZURE_API_KEY", ""))
         _GROK_URL = os.getenv("NATE_CHAT_URL", "")
         _GROK_MODEL = os.getenv("NATE_CHAT_MODEL", "grok-4-1-fast-non-reasoning")
+    _GROK_REASONING_MODEL = (
+        os.getenv("NATE_CLI_REASONING_MODEL")
+        or os.getenv("NATE_CHAT_REASONING_MODEL")
+        or ""
+    )
+
+
+_CLI_REDIS = None
+_CLI_REDIS_TRIED = False
+
+
+def _cli_redis_client():
+    """Best-effort sync Redis for session persistence (env-built; no bridge import)."""
+    global _CLI_REDIS, _CLI_REDIS_TRIED
+    if _CLI_REDIS_TRIED:
+        return _CLI_REDIS
+    _CLI_REDIS_TRIED = True
+    # Offline/unit tests: empty REDIS_URL means skip Redis entirely
+    if os.getenv("REDIS_URL", "__unset__") == "":
+        _CLI_REDIS = None
+        return None
+    try:
+        import redis as sync_redis
+        url = os.getenv("REDIS_URL", "")
+        if url:
+            _CLI_REDIS = sync_redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=0.5)
+            return _CLI_REDIS
+        host = os.getenv("REDIS_HOST")
+        if not host:
+            _CLI_REDIS = None
+            return None
+        port = int(os.getenv("REDIS_PORT", "6379"))
+        password = os.getenv("REDIS_PASSWORD") or None
+        _CLI_REDIS = sync_redis.Redis(
+            host=host, port=port, password=password,
+            decode_responses=True, socket_connect_timeout=0.5,
+        )
+        return _CLI_REDIS
+    except Exception:
+        _CLI_REDIS = None
+        return None
+
+
+def _session_redis_key(sk: str) -> str:
+    prefix = os.getenv("REDIS_KEY_PREFIX", "nate")
+    env = os.getenv("ENVIRONMENT", "production")
+    return f"{prefix}:{env}:cli_session:{sk}"
+
+
+def _load_session_from_redis(sk: str) -> Optional[List[Dict[str, Any]]]:
+    client = _cli_redis_client()
+    if not client:
+        return None
+    try:
+        raw = client.get(_session_redis_key(sk))
+        if not raw:
+            return None
+        data = json.loads(raw)
+        return data if isinstance(data, list) else None
+    except Exception as e:
+        logger.debug("CLI session redis load failed: %s", e)
+        return None
+
+
+def _save_session_to_redis(sk: str, hist: List[Dict[str, Any]]) -> None:
+    client = _cli_redis_client()
+    if not client:
+        return
+    try:
+        client.setex(
+            _session_redis_key(sk),
+            _SESSION_REDIS_TTL,
+            json.dumps(hist[-_SESSION_HISTORY_MAX:]),
+        )
+    except Exception as e:
+        logger.debug("CLI session redis save failed: %s", e)
+
+
+async def _path_lock(path: str) -> asyncio.Lock:
+    global _PATH_WRITE_LOCKS_GUARD
+    if _PATH_WRITE_LOCKS_GUARD is None:
+        _PATH_WRITE_LOCKS_GUARD = asyncio.Lock()
+    key = os.path.normpath(str(path or "")).lower()
+    async with _PATH_WRITE_LOCKS_GUARD:
+        lock = _PATH_WRITE_LOCKS.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            _PATH_WRITE_LOCKS[key] = lock
+        return lock
 
 
 def _build_system_prompt(mode: str, cli_type: str) -> str:
@@ -69,7 +194,12 @@ def _build_system_prompt(mode: str, cli_type: str) -> str:
         f"{rules}\n\n"
         "TOOL USE: Call tools by using the function calling interface. "
         "After each tool result you will see the output and can decide to call more tools or respond.\n"
-        "Always be concise. When reading files, cite paths. When making changes, explain why."
+        "Always be concise. When reading files, cite paths. When making changes, explain why.\n"
+        "VERIFICATION: After writing files, check lint/test feedback in tool results and fix errors before finishing.\n"
+        "Use repo_map for orientation before deep file reads on large tasks.\n"
+        "AGENTIC: For complex multi-step work, use todo_write to track tasks. "
+        "Use spawn_subagent for scoped explore/test_fix child loops. "
+        "When AUTO-PYTEST FAILED appears, fix and continue until tests pass or autonomy budget is exhausted."
     )
 
 
@@ -92,91 +222,423 @@ _MODE_INSTRUCTIONS = {
     ),
     "ln_fab": (
         "LN-FAB MODE — Full fabrication capability. You can read, write, delete files, "
-        "run shell commands, execute git operations, and deploy (CLI-Mac only). "
+        "run shell commands, execute git operations, and deploy (CLI-Mac only for live deploy). "
+        "On CLI-Cloud, writes go to a sandboxed worktree — verify with lints/tests, call "
+        "sandbox_diff, then sandbox_promote (admin) when ready. "
         "Follow the LN-FAB protocol: verify before writing, test after changes, "
         "never modify protected files without explicit approval."
     ),
 }
 
 
-async def handle_nate_cli_chat(
-    websocket,
-    data: Dict[str, Any],
-    current_profile: Dict[str, Any],
+def _session_key(admin: str, cli_type: str, mode: str, session_id: str) -> str:
+    return f"{admin}:{cli_type}:{mode}:{session_id}"
+
+
+def _align_keep_tail(body: List[Dict[str, Any]], min_keep: int = 8) -> List[Dict[str, Any]]:
+    """Slice a keep-tail that never starts with an orphan role=tool message."""
+    if len(body) <= min_keep:
+        return body
+    start = len(body) - min_keep
+    while start > 0 and body[start].get("role") == "tool":
+        start -= 1
+    # If we landed inside a tool-call turn, include the owning assistant
+    if body[start].get("role") == "assistant" and body[start].get("tool_calls"):
+        pass
+    elif start > 0 and body[start].get("role") == "tool":
+        i = start
+        while i > 0 and not (body[i].get("role") == "assistant" and body[i].get("tool_calls")):
+            i -= 1
+        if body[i].get("role") == "assistant" and body[i].get("tool_calls"):
+            start = i
+    return body[start:]
+
+
+def _sanitize_tool_sequence(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Drop orphan tool messages whose parent assistant tool_calls were compacted away."""
+    out: List[Dict[str, Any]] = []
+    open_ids: set = set()
+    for m in messages:
+        role = m.get("role")
+        if role == "assistant" and m.get("tool_calls"):
+            open_ids = {tc.get("id") for tc in m["tool_calls"] if tc.get("id")}
+            out.append(m)
+        elif role == "tool":
+            tid = m.get("tool_call_id")
+            if tid and tid in open_ids:
+                out.append(m)
+            # else drop orphan
+        else:
+            open_ids = set()
+            out.append(m)
+    return out
+
+
+def _compact_conversation(conversation: List[Dict[str, Any]], max_chars: int = _CONV_COMPACT_CHARS) -> List[Dict[str, Any]]:
+    """Summarize old tool outputs when context exceeds budget; keep system + recent turns."""
+    total = sum(len(str(m.get("content") or "")) for m in conversation)
+    if total <= max_chars or len(conversation) <= 6:
+        return conversation
+
+    system = conversation[0] if conversation and conversation[0].get("role") == "system" else None
+    body = conversation[1:] if system else list(conversation)
+    keep_tail = _align_keep_tail(body, min_keep=8)
+    head = body[:2] if len(body) > 10 else []
+    dropped = body[len(head): len(body) - len(keep_tail)]
+    if not dropped:
+        return conversation
+
+    tool_names = []
+    for m in dropped:
+        if m.get("role") == "tool":
+            tool_names.append("tool")
+        elif m.get("role") == "assistant" and m.get("tool_calls"):
+            for tc in m["tool_calls"]:
+                tool_names.append(tc.get("function", {}).get("name", "tool"))
+
+    summary = {
+        "role": "user",
+        "content": (
+            f"[CONTEXT COMPACTED: {len(dropped)} earlier messages summarized. "
+            f"Prior tools used: {', '.join(tool_names[:40]) or 'n/a'}. "
+            "Re-read files if you need exact prior content.]"
+        ),
+    }
+    out: List[Dict[str, Any]] = []
+    if system:
+        out.append(system)
+    out.extend(head)
+    out.append(summary)
+    out.extend(keep_tail)
+    return _sanitize_tool_sequence(out)
+
+
+def _truncate_tool_result(text: str, limit: int) -> str:
+    if limit <= 0 or len(text) <= limit:
+        return text
+    half = max(500, limit // 2)
+    omitted = len(text) - (half * 2)
+    return text[:half] + f"\n...[{omitted} chars truncated]...\n" + text[-half:]
+
+
+async def _check_mac_agent_ready() -> Tuple[bool, str]:
+    """Health-gate Mac write modes before the agentic loop starts."""
+    try:
+        from app.websocket.cli_tools import mac_agent_health
+        return await mac_agent_health()
+    except Exception as e:
+        return False, f"Mac agent health check failed: {e}"
+
+
+async def _emit(emit, msg: Dict[str, Any]) -> None:
+    if emit is not None:
+        await emit(msg)
+
+
+def _pytest_failed(result: Dict[str, Any]) -> bool:
+    ap = result.get("auto_pytest") if isinstance(result, dict) else None
+    if not isinstance(ap, dict):
+        return False
+    if ap.get("exit_code", 0) not in (0, None) and ap.get("exit_code") != 0:
+        return True
+    return ap.get("status") not in (None, "ok")
+
+
+def _filter_tools_by_profile(tools: List[Dict[str, Any]], profile: str) -> List[Dict[str, Any]]:
+    allowed = _SUBAGENT_PROFILES.get(profile)
+    if allowed is None:
+        # full — drop spawn_subagent to prevent recursion
+        return [
+            t for t in tools
+            if (t.get("function") or {}).get("name") != "spawn_subagent"
+        ]
+    out = []
+    for t in tools:
+        name = (t.get("function") or {}).get("name")
+        if name and name in allowed:
+            out.append(t)
+    return out
+
+
+async def run_agentic_loop(
+    *,
+    user_message: str,
+    mode: str = "ln_fab",
+    cli_type: str = "cloud",
+    plan_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    admin_username: str = "api-agent",
+    user_role: str = "ADMIN",
     db_pool=None,
-):
+    emit=None,
+    max_turns_override: Optional[int] = None,
+    allow_subagents: bool = True,
+    is_subagent: bool = False,
+    tools_override: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """
-    Main entry point for nate_cli_chat WebSocket messages.
+    Full agentic coding loop — WebSocket CLI and partner Agents API share this.
 
-    Runs an agentic loop: LLM generates text + tool calls, tools are executed,
-    results fed back, until the LLM produces a final text response.
+    Features: tool loop, parallel tools, path locks, auto-lint, auto-pytest,
+    retry-until-green, todo task state, spawn_subagent, autonomy budget.
     """
-    mode = data.get("mode", "ask")
-    cli_type = data.get("cli", "cloud")
-    user_message = (data.get("message") or "").strip()
-    plan_id = str(uuid.uuid4())[:12]
-    turn = 0
-
+    user_message = (user_message or "").strip()
     if not user_message:
-        await _send(websocket, {"type": "nate_cli_chat_error", "error": "Empty message"})
-        return
+        err = {"type": "nate_cli_chat_error", "error": "Empty message", "status": "error"}
+        await _emit(emit, err)
+        return err
 
     if mode not in ("ask", "plan", "debug", "ln_fab"):
         mode = "ask"
     if cli_type not in ("mac", "cloud"):
         cli_type = "cloud"
+    if not session_id:
+        session_id = str(uuid.uuid4())[:12]
+    if not plan_id:
+        plan_id = str(uuid.uuid4())[:12]
 
-    admin_username = current_profile.get("username", "unknown")
-    user_role = current_profile.get("role", "ADMIN")
+    max_turns = max_turns_override or _MAX_TOOL_TURNS.get(mode, 25)
 
     try:
-        from app.websocket.cli_tools import execute_tool, get_tool_definitions
-        from app.websocket.cli_prompt_budget import trim_prompt_to_ceiling
+        from app.websocket.cli_tools import (
+            execute_tool,
+            format_open_todos_prompt,
+            get_tool_definitions,
+            get_truncation_limit,
+        )
+        from app.websocket.cli_prompt_budget import (
+            trim_prompt_to_ceiling,
+            window_cli_conversation_history,
+            CLI_MAX_HISTORY_CHARS,
+        )
     except ImportError as e:
-        logger.error("CLI imports failed: %s", e)
-        await _send(websocket, {"type": "nate_cli_chat_error", "error": f"CLI module import error: {e}"})
-        return
+        err = {"type": "nate_cli_chat_error", "error": f"CLI module import error: {e}", "status": "error"}
+        await _emit(emit, err)
+        return err
 
     _ensure_grok_config()
     if not _GROK_URL or not _GROK_KEY:
-        await _send(websocket, {"type": "nate_cli_chat_error", "error": "No LLM provider configured (NATE_CHAT_URL/KEY missing)"})
-        return
+        err = {
+            "type": "nate_cli_chat_error",
+            "error": "No LLM provider configured (NATE_CHAT_URL/KEY missing)",
+            "status": "error",
+        }
+        await _emit(emit, err)
+        return err
+
+    if cli_type == "mac" and mode in ("ln_fab", "debug") and not is_subagent:
+        ok, detail = await _check_mac_agent_ready()
+        if not ok:
+            err = {
+                "type": "nate_cli_chat_error",
+                "error": f"CLI-Mac {mode.upper()} requires Mac agent online. {detail}",
+                "error_code": "MAC_AGENT_OFFLINE",
+                "status": "error",
+            }
+            await _emit(emit, err)
+            return err
 
     system_prompt = _build_system_prompt(mode, cli_type)
     system_prompt, _ = trim_prompt_to_ceiling(system_prompt, user_message, "grok")
+    if tools_override is not None:
+        tools = list(tools_override)
+    else:
+        tools = get_tool_definitions(mode, cli_type)
+    if is_subagent or not allow_subagents:
+        tools = [t for t in tools if (t.get("function") or {}).get("name") != "spawn_subagent"]
 
-    tools = get_tool_definitions(mode, cli_type)
+    sk = _session_key(admin_username, cli_type, mode, session_id)
+    prior = list(_SESSION_HISTORY.get(sk, []))
+    if not prior and not is_subagent:
+        redis_hist = await asyncio.to_thread(_load_session_from_redis, sk)
+        if redis_hist:
+            _SESSION_HISTORY[sk] = redis_hist
+            _SESSION_HISTORY.move_to_end(sk)
+            prior = list(redis_hist)
+    if prior:
+        hist_budget = CLI_MAX_HISTORY_CHARS * 3 if mode == "ln_fab" else CLI_MAX_HISTORY_CHARS * 2
+        prior = window_cli_conversation_history(prior, max_chars=hist_budget)
 
     conversation: List[Dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_message},
+        *prior,
     ]
+    todos_block = format_open_todos_prompt(plan_id)
+    if todos_block:
+        conversation.append({"role": "user", "content": todos_block})
+    conversation.append({"role": "user", "content": user_message})
 
-    await _send(websocket, {"type": "nate_cli_chat_status", "status": "thinking", "detail": f"{mode.upper()} mode — {cli_type}"})
+    async def send_to_extension(msg: Dict[str, Any]) -> None:
+        await _emit(emit, msg)
+
+    await _emit(emit, {
+        "type": "nate_cli_chat_status",
+        "status": "thinking",
+        "detail": f"{mode.upper()} mode — {cli_type}" + (" [subagent]" if is_subagent else ""),
+        "session_id": session_id,
+        "plan_id": plan_id,
+    })
 
     tool_call_log: List[Dict[str, Any]] = []
     files_touched: List[Dict[str, str]] = []
     provider_used = "grok"
     t0 = time.monotonic()
+    max_tokens = _MAX_COMPLETION_TOKENS.get(mode, 6144)
+    trunc_limit = get_truncation_limit(mode, cli_type)
+    fix_attempts = 0
+    pending_test_failures = 0
+    subagents_spawned = 0
+    turn = 0
+    final_text = ""
 
-    for turn_idx in range(_MAX_TOOL_TURNS):
+    for turn_idx in range(max_turns):
         turn = turn_idx + 1
+        conversation = _compact_conversation(conversation)
 
         try:
             response_text, response_tool_calls, provider_used = await _stream_with_tools(
-                websocket, conversation, tools, turn, provider_used
+                emit, conversation, tools, turn, provider_used,
+                max_tokens=max_tokens, mode=mode,
             )
         except Exception as e:
             logger.error("CLI stream error (turn %d): %s", turn, e)
-            await _send(websocket, {"type": "nate_cli_chat_error", "error": f"LLM error: {e}"})
-            return
+            if not is_subagent:
+                _persist_session(sk, conversation, user_message, f"[LLM error: {e}]")
+            err = {"type": "nate_cli_chat_error", "error": f"LLM error: {e}", "status": "error"}
+            await _emit(emit, err)
+            return err
 
         if response_tool_calls:
             assistant_msg: Dict[str, Any] = {"role": "assistant", "content": response_text or ""}
             assistant_msg["tool_calls"] = response_tool_calls
             conversation.append(assistant_msg)
 
-            for tc in response_tool_calls:
+            async def _run_one(tc: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any], int, str]:
+                nonlocal subagents_spawned
+                fn = tc.get("function", {})
+                tool_name = fn.get("name", "unknown")
+                try:
+                    tool_args = json.loads(fn.get("arguments", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    tool_args = {}
+                tc_id = tc.get("id", f"call_{uuid.uuid4().hex[:8]}")
+
+                await _emit(emit, {
+                    "type": "nate_cli_chat_status",
+                    "status": "tool_executing",
+                    "detail": tool_name,
+                })
+
+                t_start = time.monotonic()
+
+                if tool_name == "spawn_subagent":
+                    if is_subagent or not allow_subagents:
+                        result = {
+                            "status": "error",
+                            "error": "Nested spawn_subagent is not allowed.",
+                        }
+                    else:
+                        subagents_spawned += 1
+                        result = await _run_spawn_subagent(
+                            task=str(tool_args.get("task") or ""),
+                            profile=str(tool_args.get("tool_profile") or "explore"),
+                            parent_mode=mode,
+                            cli_type=cli_type,
+                            plan_id=plan_id,
+                            admin_username=admin_username,
+                            user_role=user_role,
+                            db_pool=db_pool,
+                            parent_tools=tools,
+                            emit=emit,
+                        )
+                    t_elapsed = int((time.monotonic() - t_start) * 1000)
+                    return tc, result, t_elapsed, tc_id
+
+                write_path = (
+                    tool_args.get("path")
+                    or tool_args.get("file_path")
+                    or ""
+                )
+                lock = await _path_lock(write_path) if tool_name in _WRITE_TOOLS and write_path else None
+
+                async def _execute_and_verify() -> Dict[str, Any]:
+                    try:
+                        res = await execute_tool(
+                            tool_name, tool_args,
+                            cli_type=cli_type,
+                            user_role=user_role,
+                            mode=mode,
+                            db_pool=db_pool,
+                            plan_id=plan_id,
+                            admin_username=admin_username,
+                            send_to_extension=send_to_extension,
+                        )
+                    except Exception as te:
+                        return {"status": "error", "error": str(te)}
+
+                    if (
+                        tool_name not in _WRITE_TOOLS
+                        or not isinstance(res, dict)
+                        or res.get("status") != "ok"
+                        or mode not in ("ln_fab", "debug")
+                    ):
+                        return res
+
+                    lint_path = (
+                        res.get("path")
+                        or tool_args.get("path")
+                        or tool_args.get("file_path")
+                        or ""
+                    )
+                    if not lint_path:
+                        return res
+
+                    try:
+                        lint = await execute_tool(
+                            "read_lints",
+                            {"paths": [lint_path]},
+                            cli_type=cli_type,
+                            user_role=user_role,
+                            mode=mode,
+                            db_pool=db_pool,
+                            plan_id=plan_id,
+                            admin_username=admin_username,
+                        )
+                        if isinstance(lint, dict) and lint.get("status") == "ok":
+                            diags = lint.get("diagnostics") or lint.get("result") or []
+                            res = dict(res)
+                            res["auto_lint"] = diags
+                            if diags:
+                                res["result"] = (
+                                    str(res.get("result") or res.get("content") or "ok")
+                                    + f"\n\n[AUTO-LINT on {lint_path}]: {json.dumps(diags, default=str)[:3000]}"
+                                )
+                            elif isinstance(diags, list) and len(diags) == 0:
+                                res = await _maybe_auto_pytest(
+                                    res, lint_path, cli_type, user_role, mode,
+                                    db_pool, plan_id, admin_username,
+                                )
+                    except Exception as le:
+                        logger.debug("auto-lint skipped: %s", le)
+                    return res
+
+                if lock is not None:
+                    async with lock:
+                        result = await _execute_and_verify()
+                else:
+                    result = await _execute_and_verify()
+
+                t_elapsed = int((time.monotonic() - t_start) * 1000)
+                return tc, result, t_elapsed, tc_id
+
+            gathered = await asyncio.gather(
+                *[_run_one(tc) for tc in response_tool_calls],
+                return_exceptions=False,
+            )
+
+            # Do NOT zero pending_test_failures here — a later read-only tool
+            # must not erase a prior auto_pytest failure (retry-until-green).
+            for tc, result, t_elapsed, tc_id in gathered:
                 fn = tc.get("function", {})
                 tool_name = fn.get("name", "unknown")
                 try:
@@ -184,34 +646,23 @@ async def handle_nate_cli_chat(
                 except (json.JSONDecodeError, TypeError):
                     tool_args = {}
 
-                tc_id = tc.get("id", f"call_{uuid.uuid4().hex[:8]}")
-
-                await _send(websocket, {
-                    "type": "nate_cli_chat_status",
-                    "status": "tool_executing",
-                    "detail": tool_name,
-                })
-
-                t_start = time.monotonic()
-                try:
-                    result = await execute_tool(
-                        tool_name, tool_args,
-                        cli_type=cli_type,
-                        user_role=user_role,
-                        mode=mode,
-                        db_pool=db_pool,
-                        plan_id=plan_id,
-                        admin_username=admin_username,
-                    )
-                except Exception as te:
-                    result = {"status": "error", "error": str(te)}
-                t_elapsed = int((time.monotonic() - t_start) * 1000)
-
                 status = result.get("status", "ok") if isinstance(result, dict) else "ok"
-                result_text = _format_tool_result(result)
-
+                result_text = _truncate_tool_result(_format_tool_result(result), trunc_limit)
                 preview = result_text[:500] + ("..." if len(result_text) > 500 else "")
-                await _send(websocket, {
+
+                if isinstance(result, dict):
+                    if _pytest_failed(result):
+                        pending_test_failures += 1
+                    else:
+                        ap = result.get("auto_pytest")
+                        if (
+                            isinstance(ap, dict)
+                            and ap.get("status") == "ok"
+                            and int(ap.get("exit_code") or 0) == 0
+                        ):
+                            pending_test_failures = 0
+
+                await _emit(emit, {
                     "type": "nate_cli_chat_tool",
                     "tool_name": tool_name,
                     "tool_input": tool_args,
@@ -223,13 +674,18 @@ async def handle_nate_cli_chat(
 
                 tool_call_log.append({
                     "name": tool_name,
-                    "args": tool_args,
+                    "args": {k: v for k, v in tool_args.items() if not str(k).startswith("_")},
                     "status": status,
                     "duration_ms": t_elapsed,
                 })
 
                 if tool_name in ("write_file", "str_replace", "delete_file"):
-                    path = tool_args.get("path", tool_args.get("file_path", ""))
+                    path = (
+                        (result.get("_sandbox_rel") if isinstance(result, dict) else None)
+                        or tool_args.get("path")
+                        or tool_args.get("file_path")
+                        or ""
+                    )
                     action = "write" if tool_name != "delete_file" else "delete"
                     if path:
                         files_touched.append({"path": path, "action": action})
@@ -240,45 +696,323 @@ async def handle_nate_cli_chat(
                     "content": result_text,
                 })
 
-            await _send(websocket, {"type": "nate_cli_chat_status", "status": "thinking", "detail": "Processing tool results..."})
+            await _emit(emit, {
+                "type": "nate_cli_chat_status",
+                "status": "thinking",
+                "detail": "Processing tool results...",
+            })
             continue
 
+        # Final text — retry-until-green if tests still failing and budget remains
+        if (
+            pending_test_failures > 0
+            and fix_attempts < _CLI_MAX_FIX_ATTEMPTS
+            and mode in ("ln_fab", "debug")
+            and not is_subagent
+        ):
+            fix_attempts += 1
+            conversation.append({"role": "assistant", "content": response_text or ""})
+            conversation.append({
+                "role": "user",
+                "content": (
+                    f"[AUTONOMY BUDGET] Auto-pytest still failing "
+                    f"(fix attempt {fix_attempts}/{_CLI_MAX_FIX_ATTEMPTS}). "
+                    "Read the failure output in prior tool results, fix the code, "
+                    "and continue until tests pass or the budget is exhausted. "
+                    "Do not conclude yet."
+                ),
+            })
+            pending_test_failures = 0
+            await _emit(emit, {
+                "type": "nate_cli_chat_status",
+                "status": "thinking",
+                "detail": f"Retry-until-green {fix_attempts}/{_CLI_MAX_FIX_ATTEMPTS}",
+            })
+            continue
+
+        final_text = response_text or ""
         elapsed_ms = int((time.monotonic() - t0) * 1000)
-        await _send(websocket, {
+        if not is_subagent:
+            _persist_session(sk, conversation, user_message, final_text)
+        done_msg: Dict[str, Any] = {
             "type": "nate_cli_chat_done",
+            "status": "ok",
             "plan_id": plan_id,
+            "session_id": session_id,
             "mode": mode,
+            "cli": cli_type,
             "provider": provider_used,
             "files": files_touched,
             "tool_calls": tool_call_log,
             "turn_count": turn,
             "elapsed_ms": elapsed_ms,
-        })
-        return
+            "response_text": final_text[:12000],
+            "autonomy": {
+                "fix_attempts": fix_attempts,
+                "max_fix_attempts": _CLI_MAX_FIX_ATTEMPTS,
+                "max_turns": max_turns,
+                "subagents_spawned": subagents_spawned,
+                "is_subagent": is_subagent,
+            },
+        }
+        if cli_type == "cloud" and mode == "ln_fab" and files_touched:
+            try:
+                from app.websocket.cli_tools import _sandbox_diff_sync
+                diff = await asyncio.to_thread(_sandbox_diff_sync, plan_id, 20)
+                done_msg["sandbox"] = {
+                    "plan_id": plan_id,
+                    "files": (diff or {}).get("files") or [],
+                    "preview": str((diff or {}).get("result") or "")[:4000],
+                }
+            except Exception as se:
+                logger.debug("sandbox summary skipped: %s", se)
+        await _emit(emit, done_msg)
+        return done_msg
 
-    await _send(websocket, {
+    if not is_subagent:
+        _persist_session(sk, conversation, user_message, final_text)
+    done_msg = {
         "type": "nate_cli_chat_done",
+        "status": "ok",
         "plan_id": plan_id,
+        "session_id": session_id,
         "mode": mode,
+        "cli": cli_type,
         "provider": provider_used,
         "files": files_touched,
         "tool_calls": tool_call_log,
         "turn_count": turn,
         "elapsed_ms": int((time.monotonic() - t0) * 1000),
-        "warning": f"Reached max tool turns ({_MAX_TOOL_TURNS})",
-    })
+        "response_text": final_text[:12000],
+        "warning": f"Reached max tool turns ({max_turns})",
+        "autonomy": {
+            "fix_attempts": fix_attempts,
+            "max_fix_attempts": _CLI_MAX_FIX_ATTEMPTS,
+            "max_turns": max_turns,
+            "subagents_spawned": subagents_spawned,
+            "budget_exhausted": True,
+            "is_subagent": is_subagent,
+        },
+    }
+    await _emit(emit, done_msg)
+    return done_msg
+
+
+async def _run_spawn_subagent(
+    *,
+    task: str,
+    profile: str,
+    parent_mode: str,
+    cli_type: str,
+    plan_id: str,
+    admin_username: str,
+    user_role: str,
+    db_pool,
+    parent_tools: List[Dict[str, Any]],
+    emit,
+) -> Dict[str, Any]:
+    """Scoped child agentic loop — explore / test_fix / full (no nested spawn)."""
+    if not task.strip():
+        return {"status": "error", "error": "spawn_subagent requires a non-empty task"}
+    if profile not in _SUBAGENT_PROFILES:
+        profile = "explore"
+    child_mode = parent_mode if profile != "explore" else ("ask" if parent_mode in ("ask", "plan") else parent_mode)
+    if profile == "explore" and parent_mode in ("ln_fab", "debug"):
+        child_mode = "ask"
+    if profile == "test_fix":
+        child_mode = "ln_fab" if parent_mode == "ln_fab" else parent_mode
+
+    child_tools = _filter_tools_by_profile(parent_tools, profile)
+    events: List[Dict[str, Any]] = []
+
+    async def child_emit(msg: Dict[str, Any]) -> None:
+        events.append({"type": msg.get("type"), "detail": msg.get("detail") or msg.get("tool_name")})
+        wrapped = dict(msg)
+        wrapped["subagent"] = True
+        wrapped["subagent_profile"] = profile
+        await _emit(emit, wrapped)
+
+    result = await run_agentic_loop(
+        user_message=task,
+        mode=child_mode,
+        cli_type=cli_type,
+        plan_id=plan_id,
+        session_id=f"sub-{uuid.uuid4().hex[:8]}",
+        admin_username=admin_username,
+        user_role=user_role,
+        db_pool=db_pool,
+        emit=child_emit,
+        max_turns_override=_CLI_MAX_SUBAGENT_TURNS,
+        allow_subagents=False,
+        is_subagent=True,
+        tools_override=child_tools,
+    )
+    summary = (result.get("response_text") or "")[:4000]
+    return {
+        "status": "ok" if result.get("status") != "error" else "error",
+        "result": (
+            f"[SUBAGENT {profile}] turns={result.get('turn_count', 0)} "
+            f"tools={len(result.get('tool_calls') or [])}\n{summary}"
+        ),
+        "profile": profile,
+        "turn_count": result.get("turn_count"),
+        "tool_calls": result.get("tool_calls"),
+        "files": result.get("files"),
+        "events": events[-20:],
+    }
+
+
+async def handle_nate_cli_chat(
+    websocket,
+    data: Dict[str, Any],
+    current_profile: Dict[str, Any],
+    db_pool=None,
+):
+    """WebSocket entry — delegates to shared run_agentic_loop."""
+    mode = data.get("mode", "ask")
+    cli_type = data.get("cli", "cloud")
+    user_message = (data.get("message") or "").strip()
+    session_id = (data.get("session_id") or data.get("context", {}).get("session_id") or "").strip()
+    plan_id = (
+        data.get("plan_id")
+        or (data.get("context") or {}).get("plan_id")
+        or str(uuid.uuid4())[:12]
+    )
+    admin_username = current_profile.get("username", "unknown")
+    user_role = current_profile.get("role", "ADMIN")
+
+    async def emit(msg: Dict[str, Any]) -> None:
+        await _send(websocket, msg)
+
+    await run_agentic_loop(
+        user_message=user_message,
+        mode=mode,
+        cli_type=cli_type,
+        plan_id=plan_id,
+        session_id=session_id or None,
+        admin_username=admin_username,
+        user_role=user_role,
+        db_pool=db_pool,
+        emit=emit,
+        allow_subagents=True,
+        is_subagent=False,
+    )
+
+
+def _persist_session(
+    sk: str,
+    conversation: List[Dict[str, Any]],
+    user_message: str,
+    assistant_text: str,
+) -> None:
+    """Keep a sliding window of user/assistant turns; LRU-evict; mirror to Redis."""
+    if sk in _SESSION_HISTORY:
+        _SESSION_HISTORY.move_to_end(sk)
+    hist = _SESSION_HISTORY.setdefault(sk, [])
+    hist.append({"role": "user", "content": user_message})
+    if assistant_text:
+        hist.append({"role": "assistant", "content": assistant_text[:8000]})
+    if len(hist) > _SESSION_HISTORY_MAX:
+        _SESSION_HISTORY[sk] = hist[-_SESSION_HISTORY_MAX:]
+        hist = _SESSION_HISTORY[sk]
+    while len(_SESSION_HISTORY) > _SESSION_HISTORY_KEYS_MAX:
+        _SESSION_HISTORY.popitem(last=False)
+    _save_session_to_redis(sk, hist)
+
+
+async def _maybe_auto_pytest(
+    result: Dict[str, Any],
+    lint_path: str,
+    cli_type: str,
+    user_role: str,
+    mode: str,
+    db_pool,
+    plan_id: Optional[str],
+    admin_username: str,
+) -> Dict[str, Any]:
+    """Sol 3: after lint-clean write, run targeted pytest if a test file exists."""
+    if os.getenv("CLI_AUTO_PYTEST", "1") not in ("1", "true", "TRUE", "yes"):
+        return result
+    try:
+        from app.websocket.cli_tools import execute_tool, infer_test_path_for_source
+    except ImportError:
+        return result
+    test_target = infer_test_path_for_source(lint_path)
+    if not test_target:
+        return result
+    cmd = f"python3 -m pytest {test_target} -q --tb=line -x"
+    try:
+        test_res = await execute_tool(
+            "shell",
+            {"command": cmd, "block_until_ms": 90000, "description": f"auto-pytest {test_target}"},
+            cli_type=cli_type,
+            user_role=user_role,
+            mode=mode,
+            db_pool=db_pool,
+            plan_id=plan_id,
+            admin_username=admin_username,
+        )
+    except Exception as te:
+        logger.debug("auto-pytest skipped: %s", te)
+        return result
+    result = dict(result)
+    result["auto_pytest"] = {
+        "target": test_target,
+        "status": (test_res or {}).get("status"),
+        "exit_code": (test_res or {}).get("exit_code"),
+    }
+    out = str((test_res or {}).get("result") or "")
+    err = str((test_res or {}).get("stderr") or "")
+    combined = (out + ("\n" + err if err else ""))[:4000]
+    if (test_res or {}).get("status") != "ok" or (test_res or {}).get("exit_code", 0) != 0:
+        result["result"] = (
+            str(result.get("result") or result.get("content") or "ok")
+            + f"\n\n[AUTO-PYTEST FAILED on {test_target}]:\n{combined}"
+        )
+    else:
+        result["result"] = (
+            str(result.get("result") or result.get("content") or "ok")
+            + f"\n\n[AUTO-PYTEST PASSED on {test_target}]"
+        )
+    return result
+
+
+def _azure_chat_url_and_headers() -> Tuple[str, Dict[str, str]]:
+    endpoint = (os.getenv("AZURE_OPENAI_ENDPOINT") or "").strip().rstrip("/")
+    key = os.getenv("AZURE_API_KEY") or ""
+    deploy = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT") or "gpt-4o"
+    if not endpoint or not key:
+        raise RuntimeError("Azure fallback not configured (AZURE_OPENAI_ENDPOINT / AZURE_API_KEY)")
+    if not endpoint.startswith("http"):
+        endpoint = f"https://{endpoint}"
+    api_ver = os.getenv("AZURE_OPENAI_API_VERSION", "2024-06-01")
+    url = f"{endpoint}/openai/deployments/{deploy}/chat/completions?api-version={api_ver}"
+    return url, {"api-key": key, "Content-Type": "application/json"}
+
+
+def _token_limit_fields(prov: str, model: str, max_tokens: int) -> Dict[str, Any]:
+    """Sol 2: Azure gpt-4o needs max_tokens; gpt-5/o-series use max_completion_tokens."""
+    m = (model or "").lower()
+    if prov == "azure":
+        if any(x in m for x in ("gpt-5", "o1", "o3", "o4", "reasoning")):
+            return {"max_completion_tokens": max_tokens}
+        return {"max_tokens": max_tokens}
+    return {"max_completion_tokens": max_tokens}
 
 
 async def _stream_with_tools(
-    websocket,
+    emit,
     conversation: List[Dict[str, Any]],
     tools: List[Dict[str, Any]],
     turn: int,
     provider: str,
+    max_tokens: int = 4096,
+    mode: str = "ask",
 ) -> tuple:
     """
-    Call Grok with tools, stream text deltas back to the client.
+    Mode-aware provider routing + Azure param adaptation.
     Returns (accumulated_text, tool_calls_list, provider_name).
+    `emit` is an async callback (WebSocket or Agents API event sink).
     """
     import aiohttp
 
@@ -286,88 +1020,125 @@ async def _stream_with_tools(
 
     openai_tools = []
     for t_def in tools:
-        if t_def.get("type") == "web_search":
-            continue
+        if t_def.get("type") == "web_search" and "function" not in t_def:
+            continue  # legacy bare type — never send
         if "function" in t_def:
             openai_tools.append(t_def)
         elif "name" in t_def:
             openai_tools.append({"type": "function", "function": t_def})
 
-    headers = {
+    messages_for_api = _convert_conversation(conversation)
+
+    async def _do_stream(url: str, headers: Dict[str, str], model: str, prov: str) -> tuple:
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": messages_for_api,
+            "stream": True,
+        }
+        # Reasoning-class Azure models often reject temperature
+        if not (prov == "azure" and any(x in (model or "").lower() for x in ("o1", "o3", "o4"))):
+            payload["temperature"] = 0.3
+        payload.update(_token_limit_fields(prov, model, max_tokens))
+        if openai_tools:
+            payload["tools"] = openai_tools
+            payload["tool_choice"] = "auto"
+
+        accumulated_text = ""
+        tool_calls_accum: Dict[int, Dict[str, Any]] = {}
+
+        timeout = aiohttp.ClientTimeout(total=300, sock_read=180)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload, headers=headers) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    raise RuntimeError(f"{prov} {resp.status}: {body[:400]}")
+
+                async for line in resp.content:
+                    decoded = line.decode("utf-8", errors="ignore").strip()
+                    if not decoded.startswith("data: "):
+                        continue
+                    data_str = decoded[6:]
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+
+                    choices = chunk.get("choices", [])
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta", {})
+
+                    content = delta.get("content") or ""
+                    if content:
+                        accumulated_text += content
+                        await _emit(emit, {
+                            "type": "nate_cli_chat_chunk",
+                            "delta": content,
+                            "provider": prov,
+                            "turn": turn,
+                        })
+
+                    for tc in delta.get("tool_calls", []):
+                        idx = tc.get("index", 0)
+                        if idx not in tool_calls_accum:
+                            tool_calls_accum[idx] = {
+                                "id": tc.get("id", f"call_{uuid.uuid4().hex[:8]}"),
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            }
+                        fn = tc.get("function", {})
+                        if fn.get("name"):
+                            tool_calls_accum[idx]["function"]["name"] = fn["name"]
+                        if fn.get("arguments"):
+                            tool_calls_accum[idx]["function"]["arguments"] += fn["arguments"]
+                        if tc.get("id"):
+                            tool_calls_accum[idx]["id"] = tc["id"]
+
+        tool_calls_list = [tool_calls_accum[k] for k in sorted(tool_calls_accum.keys())] if tool_calls_accum else []
+        return accumulated_text, tool_calls_list, prov
+
+    grok_headers = {
         "api-key": _GROK_KEY,
         "Content-Type": "application/json",
     }
+    grok_model = _GROK_MODEL or "grok"
+    # Sol 1: LN-FAB/DEBUG → reasoning model (or Azure primary); ASK/PLAN → fast Grok
+    prefer_azure_primary = False
+    if mode in _REASONING_MODES:
+        if _GROK_REASONING_MODEL:
+            grok_model = _GROK_REASONING_MODEL
+        else:
+            prefer_azure_primary = os.getenv("CLI_REASONING_PREFER_AZURE", "1") in (
+                "1", "true", "TRUE", "yes",
+            )
 
-    messages_for_api = _convert_conversation(conversation)
+    async def _try_azure() -> tuple:
+        azure_url, azure_headers = _azure_chat_url_and_headers()
+        deploy = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT") or "gpt-4o"
+        return await _do_stream(azure_url, azure_headers, deploy, "azure")
 
-    payload: Dict[str, Any] = {
-        "model": _GROK_MODEL,
-        "messages": messages_for_api,
-        "temperature": 0.3,
-        "max_completion_tokens": 4096,
-        "stream": True,
-    }
-    if openai_tools:
-        payload["tools"] = openai_tools
-        payload["tool_choice"] = "auto"
+    if prefer_azure_primary:
+        try:
+            return await _try_azure()
+        except Exception as azure_err:
+            logger.warning("Azure primary (reasoning mode) failed, trying Grok: %s", azure_err)
+            try:
+                return await _do_stream(_GROK_URL, grok_headers, grok_model, "grok")
+            except Exception as grok_err:
+                raise RuntimeError(
+                    f"Azure primary failed ({azure_err}); Grok fallback failed ({grok_err})"
+                ) from grok_err
 
-    accumulated_text = ""
-    tool_calls_accum: Dict[int, Dict[str, Any]] = {}
-
-    timeout = aiohttp.ClientTimeout(total=180, sock_read=120)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(_GROK_URL, json=payload, headers=headers) as resp:
-            if resp.status != 200:
-                body = await resp.text()
-                raise RuntimeError(f"Grok {resp.status}: {body[:400]}")
-
-            async for line in resp.content:
-                decoded = line.decode("utf-8", errors="ignore").strip()
-                if not decoded.startswith("data: "):
-                    continue
-                data_str = decoded[6:]
-                if data_str == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
-
-                choices = chunk.get("choices", [])
-                if not choices:
-                    continue
-                delta = choices[0].get("delta", {})
-                finish = choices[0].get("finish_reason")
-
-                content = delta.get("content") or ""
-                if content:
-                    accumulated_text += content
-                    await _send(websocket, {
-                        "type": "nate_cli_chat_chunk",
-                        "delta": content,
-                        "provider": provider,
-                        "turn": turn,
-                    })
-
-                for tc in delta.get("tool_calls", []):
-                    idx = tc.get("index", 0)
-                    if idx not in tool_calls_accum:
-                        tool_calls_accum[idx] = {
-                            "id": tc.get("id", f"call_{uuid.uuid4().hex[:8]}"),
-                            "type": "function",
-                            "function": {"name": "", "arguments": ""},
-                        }
-                    fn = tc.get("function", {})
-                    if fn.get("name"):
-                        tool_calls_accum[idx]["function"]["name"] = fn["name"]
-                    if fn.get("arguments"):
-                        tool_calls_accum[idx]["function"]["arguments"] += fn["arguments"]
-                    if tc.get("id"):
-                        tool_calls_accum[idx]["id"] = tc["id"]
-
-    tool_calls_list = [tool_calls_accum[k] for k in sorted(tool_calls_accum.keys())] if tool_calls_accum else []
-
-    return accumulated_text, tool_calls_list, provider
+    try:
+        return await _do_stream(_GROK_URL, grok_headers, grok_model, "grok")
+    except Exception as grok_err:
+        logger.warning("Grok stream failed, trying Azure fallback: %s", grok_err)
+        try:
+            return await _try_azure()
+        except Exception as azure_err:
+            raise RuntimeError(f"Grok failed ({grok_err}); Azure fallback failed ({azure_err})") from azure_err
 
 
 def _convert_conversation(conversation: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
