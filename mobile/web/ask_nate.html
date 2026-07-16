@@ -12,10 +12,10 @@
             --bg-card: #111111;
             --bg-elevated: #1A1A1A;
             --border: #252525;
-            --gold: #FFD700;
-            --gold-dim: rgba(255, 215, 0, 0.2);
-            --cyan: #00D4FF;
-            --cyan-dim: rgba(0, 212, 255, 0.15);
+            --gold: #C9A962;
+            --gold-dim: rgba(201, 169, 98, 0.2);
+            --cyan: #4ECDC4;
+            --cyan-dim: rgba(78, 205, 196, 0.15);
             --text-primary: #FFFFFF;
             --text-secondary: #888888;
             --text-muted: #555555;
@@ -66,6 +66,29 @@
             font-size: 12px;
         }
 
+        .intel-strip {
+            background: var(--cyan-dim);
+            border-bottom: 1px solid rgba(78, 205, 196, 0.25);
+            padding: 8px 24px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .intel-pill {
+            border: 1px solid rgba(78, 205, 196, 0.35);
+            border-radius: 999px;
+            padding: 3px 10px;
+            color: var(--cyan);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            letter-spacing: 0.02em;
+        }
+        .intel-pill.reserved { color: var(--text-muted); border-color: var(--border); }
+        .intel-pill.live { color: var(--cyan); }
+
         .nate-avatar {
             width: 48px;
             height: 48px;
@@ -82,7 +105,7 @@
             gap: 10px;
         }
 
-        .eye {
+        .nate-eye {
             width: 8px;
             height: 8px;
             background: rgba(0, 255, 255, 0.6);
@@ -217,20 +240,20 @@
             background: linear-gradient(135deg, var(--gold), #FF8C00);
         }
 
-        .bubble {
+        .message-bubble {
             padding: 14px 18px;
             border-radius: 16px;
             font-size: 14px;
             line-height: 1.6;
         }
 
-        .bubble.nate {
+        .message.nate .message-bubble {
             background: var(--cyan-dim);
-            border: 1px solid rgba(0, 212, 255, 0.3);
+            border: 1px solid rgba(78, 205, 196, 0.3);
             border-bottom-left-radius: 4px;
         }
 
-        .bubble.user {
+        .message.user .message-bubble {
             background: linear-gradient(135deg, var(--gold), #FF8C00);
             color: #000;
             border-bottom-right-radius: 4px;
@@ -334,15 +357,43 @@
         .send-btn:hover {
             transform: scale(1.05);
         }
+
+        /* ── Connection Status Indicator ── */
+        .ws-status { position: fixed; top: 8px; right: 8px; padding: 4px 10px; border-radius: 12px; font-size: 10px; z-index: 999; display: none; }
+        .ws-status.disconnected { display: block; background: rgba(255, 59, 59, 0.2); color: #FF3B3B; }
+        .ws-status.reconnecting { display: block; background: rgba(255, 149, 0, 0.2); color: #FF9500; }
+
+        /* ── Loading Spinner ── */
+        .loading-overlay { display: none; position: absolute; inset: 0; background: rgba(5,5,5,0.7); z-index: 10; align-items: center; justify-content: center; }
+        .loading-overlay.active { display: flex; }
+        .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--gold); border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Mobile Responsive ── */
+        @media (max-width: 768px) {
+            .header { padding: 10px 12px; flex-wrap: wrap; gap: 8px; }
+            .nav a { font-size: 11px; padding: 6px 10px; }
+            .chat-container { max-width: 100%; margin: 0; padding: 12px; }
+            .input-row { flex-direction: column; gap: 8px; }
+            .input-row input { font-size: 14px; }
+            .send-btn { width: 100%; justify-content: center; padding: 12px; }
+            .quick-btns { justify-content: center; }
+        }
+        @media (max-width: 480px) {
+            .header { padding: 8px; }
+            .logo-text { font-size: 14px; }
+            .nav { gap: 4px; }
+            .nav a { font-size: 10px; padding: 4px 8px; }
+        }
     </style>
 </head>
 <body>
     <header class="header">
         <button class="back-btn" onclick="window.location.href='command.html'">←</button>
-        <div class="header-content">
-            <div class="header-title">Ask Little Nate</div>
-            <div class="header-subtitle">AI-Powered Client Intelligence</div>
-        </div>
+            <div class="header-content">
+                <div class="header-title">Ask Little Nate</div>
+                <div class="header-subtitle">Full Clinical Intelligence · Crystal · Lived Wisdom · Agentic-ready</div>
+            </div>
         <div class="nate-avatar">
             <div class="nate-eyes">
                 <div class="eye"></div>
@@ -350,6 +401,17 @@
             </div>
         </div>
     </header>
+
+    <div class="intel-strip" id="intelStrip" title="Clinical intelligence layers wired for this surface">
+        <span style="color:var(--text-muted); margin-right:4px;">WIRED</span>
+        <span class="intel-pill live">crystals</span>
+        <span class="intel-pill live">main chat</span>
+        <span class="intel-pill live">lived wisdom</span>
+        <span class="intel-pill live">nevedal metrics</span>
+        <span class="intel-pill reserved">neuro-symbolic</span>
+        <span class="intel-pill reserved">agentic tools</span>
+        <span id="intelLiveSources" style="margin-left:auto; font-family:var(--font-mono); font-size:10px; color:var(--gold);"></span>
+    </div>
 
     <div class="client-context">
         <div class="context-avatar">👤</div>
@@ -377,7 +439,11 @@
             </div>
 
             <div class="messages" id="messages">
-                <!-- Messages will appear here -->
+                <div class="empty-chat-state" id="emptyChatState" style="text-align:center; padding:40px 20px; color:var(--text-muted);">
+                    <div style="font-size:40px; margin-bottom:12px; opacity:0.4;">💬</div>
+                    <div style="font-size:14px; margin-bottom:4px;">No messages yet</div>
+                    <div style="font-size:12px;">Select a client — Nate loads crystals, main chat, lived wisdom &amp; metrics</div>
+                </div>
             </div>
         </div>
 
@@ -390,26 +456,55 @@
     </div>
 
     <script>
-        const SERVER_URL = 'wss://api.sovereignsanctuary.net/ws';
+
+function _recoverAuth() {
+  function _ck(n) { var m = document.cookie.match(new RegExp('(^| )' + n + '=([^;]+)')); return m ? decodeURIComponent(m[2]) : ''; }
+  var hp = new URLSearchParams(location.hash.slice(1));
+  var ht = hp.get('t'), hu = hp.get('u'), hpf = hp.get('p');
+  if (ht) { try { sessionStorage.setItem('token', decodeURIComponent(ht)); } catch(e){} try { localStorage.setItem('sc_token', decodeURIComponent(ht)); } catch(e){} }
+  if (hu) { try { sessionStorage.setItem('username', decodeURIComponent(hu)); } catch(e){} try { localStorage.setItem('sc_username', decodeURIComponent(hu)); } catch(e){} }
+  if (hpf) { try { sessionStorage.setItem('profile', decodeURIComponent(hpf)); } catch(e){} try { localStorage.setItem('sc_profile', decodeURIComponent(hpf)); } catch(e){} }
+  if (location.hash) try { history.replaceState(null, '', location.pathname + location.search); } catch(e){}
+  if (!sessionStorage.getItem('token')) { var ct = _ck('sc_token') || localStorage.getItem('sc_token'); if (ct) { try { sessionStorage.setItem('token', ct); } catch(e){} } }
+  if (!sessionStorage.getItem('username')) { var cu = _ck('sc_username') || localStorage.getItem('sc_username'); if (cu) { try { sessionStorage.setItem('username', cu); } catch(e){} } }
+  if (!sessionStorage.getItem('profile')) { var cp = _ck('sc_profile') || localStorage.getItem('sc_profile'); if (cp) { try { sessionStorage.setItem('profile', cp); } catch(e){} } }
+}
+_recoverAuth();
+        function getWsUrl() {
+            const h = location.hostname, proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            if (h.includes('sovereignsanctuary')) return `wss://${h}/ws`;
+            return `${proto}://${h}/ws`;
+        }
+        const SERVER_URL = getWsUrl();
         let socket = null;
         let selectedClientId = null;
+        let lastIntelSources = [];
 
         function init() {
             connect();
             loadClients();
         }
 
+        var _nateReconnectAttempts = 0;
         function connect() {
             socket = new WebSocket(SERVER_URL);
             socket.onopen = () => {
-                const profile = JSON.parse(sessionStorage.getItem('profile') || '{}');
+                _nateReconnectAttempts = 0;
+                const profile = JSON.parse((sessionStorage.getItem('profile') || localStorage.getItem('sc_profile')) || '{}');
                 socket.send(JSON.stringify({
-                    type: 'login_request',
-                    username: sessionStorage.getItem("username") || profile.name,
-                    password: sessionStorage.getItem('password'),
-                    expected_role: profile.role
+                    type: 'auth',
+                    token: (sessionStorage.getItem('token') || localStorage.getItem('sc_token')),
+                    hardware_id: profile.hardware_id || 'WEB_ADMIN'
                 }));
             };
+            socket.onclose = () => {
+                var attempt = Math.min(_nateReconnectAttempts, 10);
+                var baseMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+                var jitter = Math.floor(baseMs * 0.2 * Math.random());
+                _nateReconnectAttempts++;
+                setTimeout(connect, baseMs + jitter);
+            };
+            socket.onerror = (e) => { console.warn('Ask Nate WS error:', e); };
             socket.onmessage = handleMessage;
         }
         let streamingMessageEl = null;
@@ -419,6 +514,26 @@
             
             if (data.type === "coach_clients") {
                 populateClientSelect(data.clients);
+            } else if (data.type === "ask_nate_intel_meta") {
+                lastIntelSources = data.sources || [];
+                const el = document.getElementById('intelLiveSources');
+                if (el) {
+                    const flagS = (data.flags && data.flags.symbolic) ? ' · symbolic ON' : '';
+                    const flagA = (data.flags && data.flags.agentic) ? ' · agentic ON' : '';
+                    el.textContent = lastIntelSources.length
+                        ? ('this turn: ' + lastIntelSources.join(', ') + flagS + flagA)
+                        : ('no memory layers' + flagS + flagA);
+                }
+                if (data.flags) {
+                    document.querySelectorAll('.intel-pill.reserved').forEach(function(p) {
+                        if (p.textContent.indexOf('neuro') >= 0 && data.flags.symbolic) {
+                            p.classList.remove('reserved'); p.classList.add('live');
+                        }
+                        if (p.textContent.indexOf('agentic') >= 0 && data.flags.agentic) {
+                            p.classList.remove('reserved'); p.classList.add('live');
+                        }
+                    });
+                }
             } else if (data.type === "nate_coaching_response" || data.type === "nate_response") {
                 removeTypingIndicator();
                 const text = data.text || data.response || "";
@@ -426,14 +541,17 @@
                 if (!streamingMessageEl) {
                     const div = document.createElement("div");
                     div.className = "message nate";
-                    div.innerHTML = `<div class="message-avatar nate"><div class="nate-eyes"><div class="nate-eye"></div><div class="nate-eye"></div></div></div><div class="message-bubble">${text}</div>`;
+                    const srcHtml = lastIntelSources.length
+                        ? `<div class="data-sources">${lastIntelSources.map(s => `<span class="source-badge">${s}</span>`).join('')}</div>`
+                        : '';
+                    div.innerHTML = `<div class="message-avatar nate"><div class="nate-eyes"><div class="nate-eye"></div><div class="nate-eye"></div></div></div><div class="message-bubble">${text}</div>${srcHtml}`;
                     document.getElementById("messages").appendChild(div);
                     streamingMessageEl = div;
                 } else {
                     const bubble = streamingMessageEl.querySelector(".message-bubble");
                     if (bubble) bubble.textContent = text;
                 }
-                document.getElementById("messages").scrollTop = document.getElementById("messages").scrollHeight;
+                document.getElementById("chatArea").scrollTop = document.getElementById("chatArea").scrollHeight;
             } else if (data.type === "nate_done" || data.type === "stream_end") {
                 streamingMessageEl = null;
             }
@@ -484,12 +602,19 @@
                 type: 'ask_nate_coaching',
                 query: text,
                 client_id: selectedClientId,
-                context: 'coaching_advice'
+                context: 'coaching_advice',
+                intelligence_mode: 'clinical_full',
+                agentic_ready: true,
+                neuro_symbolic_ready: true
             }));
         }
 
         function addMessage(text, sender, sources = []) {
             const messages = document.getElementById('messages');
+            // Hide empty state on first message
+            const emptyState = document.getElementById('emptyChatState');
+            if (emptyState) emptyState.style.display = 'none';
+
             const message = document.createElement('div');
             message.className = `message ${sender}`;
 
@@ -497,7 +622,7 @@
             avatar.className = `message-avatar ${sender}`;
 
             const bubble = document.createElement('div');
-            bubble.className = `bubble ${sender}`;
+            bubble.className = `message-bubble`;
             bubble.innerHTML = text.replace(/\n/g, '<br>');
 
             message.appendChild(avatar);

@@ -204,3 +204,18 @@ Pre-build verification for Neuro-Symbolic Layer — merged into [`.cursor/plans/
 | `mismatch_delivered` as fallback | **Wrong for 5b** | Existing mismatch path unchanged; symbolic second-failure uses transparent audit fallback, not mismatch semantics |
 
 **Correction to gap matrix:** commitment extract row will be satisfied by **shared** Phase 1/5a `nate_commitment_extractor.py` — one module, not two extraction paths.
+
+## 6. Sovereign Command Ask Nate surface (2026-07-16)
+
+| Item | Status |
+|------|--------|
+| UI | `dashboard/ask_nate.html` → WS `ask_nate_coaching` |
+| Clinical pack | `backend/app/services/ask_nate_clinical_intelligence.py` |
+| Bridge hook | `bridge_server.py` `ask_nate_coaching` — additive pack inject + `ask_nate_intel_meta` |
+| Live layers | crystals (`source=ask_nate_command`), main chat, lived wisdom, classroom, Nevedal metrics |
+| Flag (default on) | `ENABLE_ASK_NATE_CLINICAL_INTEL=true` |
+| Neuro-symbolic seam | `ENABLE_ASK_NATE_SYMBOLIC` → reads `conversation_history.metadata.symbols` |
+| Agentic seam | `ENABLE_ASK_NATE_AGENTIC` → capability envelope only (no tool dispatch yet) |
+| Tests | `backend/tests/test_ask_nate_clinical_intelligence_seams.py` |
+
+This is the Command-side clinical intelligence seat. Phase 5b/5c and Phase 2 tool-use should attach here via the reserved capability IDs (`symbolic_verify`, `forward_reason`, `agent_tools`), not via a second Ask Nate path.

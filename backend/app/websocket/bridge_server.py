@@ -26812,7 +26812,7 @@ Coach Reflection on Session {session_id}:
             elif t == "ask_nate_coaching":
                 if current_profile:
                     query = d.get("query", "")
-                    client_id = d.get("client_id", "")
+                    client_id = d.get("client_id", "") or ""
                     
                     # Don't wrap Dojo simulation messages - pass through directly
                     # process_interaction handles workbook guidance injection for all messages
@@ -26827,10 +26827,25 @@ Coach Reflection on Session {session_id}:
                                 }))
                                 continue
                         coaching_prompt = query
-                    elif client_id:
-                        coaching_prompt = f"[Coach asking about client {client_id}]: {query}"
                     else:
-                        coaching_prompt = f"[Coach question]: {query}"
+                        # QUANTUM-CRYSTAL-ARCH: Sovereign Command Ask Nate — full clinical intel pack
+                        _intel_prefix = ""
+                        try:
+                            if os.getenv("ENABLE_ASK_NATE_CLINICAL_INTEL", "true").lower() in ("1", "true", "yes"):
+                                from app.services.ask_nate_clinical_intelligence import build_ask_nate_prompt_pack
+                                _pack = await build_ask_nate_prompt_pack(
+                                    db_pool, coach_profile=current_profile, client_id=client_id, query=query,
+                                )
+                                _intel_prefix = (_pack or {}).get("prompt_prefix") or ""
+                                _meta = (_pack or {}).get("meta") or {}
+                                if _meta:
+                                    await websocket.send(json.dumps(_meta))
+                        except Exception as _an_intel_err:
+                            print(f">>> [ASK NATE INTEL] {_an_intel_err}")
+                        if client_id:
+                            coaching_prompt = f"{_intel_prefix}[Coach asking about client {client_id}]: {query}"
+                        else:
+                            coaching_prompt = f"{_intel_prefix}[Coach question]: {query}"
                     # QUANTUM-CRYSTAL-ARCH: forward dojo_type for routing AND
                     # client_context so the response only goes back to the
                     # originating socket (parent vs DOJO iframe). Without ctx,

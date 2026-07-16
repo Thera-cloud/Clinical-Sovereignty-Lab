@@ -66,6 +66,29 @@
             font-size: 12px;
         }
 
+        .intel-strip {
+            background: var(--cyan-dim);
+            border-bottom: 1px solid rgba(78, 205, 196, 0.25);
+            padding: 8px 24px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .intel-pill {
+            border: 1px solid rgba(78, 205, 196, 0.35);
+            border-radius: 999px;
+            padding: 3px 10px;
+            color: var(--cyan);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            letter-spacing: 0.02em;
+        }
+        .intel-pill.reserved { color: var(--text-muted); border-color: var(--border); }
+        .intel-pill.live { color: var(--cyan); }
+
         .nate-avatar {
             width: 48px;
             height: 48px;
@@ -367,10 +390,10 @@
 <body>
     <header class="header">
         <button class="back-btn" onclick="window.location.href='command.html'">←</button>
-        <div class="header-content">
-            <div class="header-title">Ask Little Nate</div>
-            <div class="header-subtitle">AI-Powered Client Intelligence</div>
-        </div>
+            <div class="header-content">
+                <div class="header-title">Ask Little Nate</div>
+                <div class="header-subtitle">Full Clinical Intelligence · Crystal · Lived Wisdom · Agentic-ready</div>
+            </div>
         <div class="nate-avatar">
             <div class="nate-eyes">
                 <div class="eye"></div>
@@ -378,6 +401,17 @@
             </div>
         </div>
     </header>
+
+    <div class="intel-strip" id="intelStrip" title="Clinical intelligence layers wired for this surface">
+        <span style="color:var(--text-muted); margin-right:4px;">WIRED</span>
+        <span class="intel-pill live">crystals</span>
+        <span class="intel-pill live">main chat</span>
+        <span class="intel-pill live">lived wisdom</span>
+        <span class="intel-pill live">nevedal metrics</span>
+        <span class="intel-pill reserved">neuro-symbolic</span>
+        <span class="intel-pill reserved">agentic tools</span>
+        <span id="intelLiveSources" style="margin-left:auto; font-family:var(--font-mono); font-size:10px; color:var(--gold);"></span>
+    </div>
 
     <div class="client-context">
         <div class="context-avatar">👤</div>
@@ -408,7 +442,7 @@
                 <div class="empty-chat-state" id="emptyChatState" style="text-align:center; padding:40px 20px; color:var(--text-muted);">
                     <div style="font-size:40px; margin-bottom:12px; opacity:0.4;">💬</div>
                     <div style="font-size:14px; margin-bottom:4px;">No messages yet</div>
-                    <div style="font-size:12px;">Select a client and ask a question to begin</div>
+                    <div style="font-size:12px;">Select a client — Nate loads crystals, main chat, lived wisdom &amp; metrics</div>
                 </div>
             </div>
         </div>
@@ -444,6 +478,7 @@ _recoverAuth();
         const SERVER_URL = getWsUrl();
         let socket = null;
         let selectedClientId = null;
+        let lastIntelSources = [];
 
         function init() {
             connect();
@@ -479,6 +514,26 @@ _recoverAuth();
             
             if (data.type === "coach_clients") {
                 populateClientSelect(data.clients);
+            } else if (data.type === "ask_nate_intel_meta") {
+                lastIntelSources = data.sources || [];
+                const el = document.getElementById('intelLiveSources');
+                if (el) {
+                    const flagS = (data.flags && data.flags.symbolic) ? ' · symbolic ON' : '';
+                    const flagA = (data.flags && data.flags.agentic) ? ' · agentic ON' : '';
+                    el.textContent = lastIntelSources.length
+                        ? ('this turn: ' + lastIntelSources.join(', ') + flagS + flagA)
+                        : ('no memory layers' + flagS + flagA);
+                }
+                if (data.flags) {
+                    document.querySelectorAll('.intel-pill.reserved').forEach(function(p) {
+                        if (p.textContent.indexOf('neuro') >= 0 && data.flags.symbolic) {
+                            p.classList.remove('reserved'); p.classList.add('live');
+                        }
+                        if (p.textContent.indexOf('agentic') >= 0 && data.flags.agentic) {
+                            p.classList.remove('reserved'); p.classList.add('live');
+                        }
+                    });
+                }
             } else if (data.type === "nate_coaching_response" || data.type === "nate_response") {
                 removeTypingIndicator();
                 const text = data.text || data.response || "";
@@ -486,7 +541,10 @@ _recoverAuth();
                 if (!streamingMessageEl) {
                     const div = document.createElement("div");
                     div.className = "message nate";
-                    div.innerHTML = `<div class="message-avatar nate"><div class="nate-eyes"><div class="nate-eye"></div><div class="nate-eye"></div></div></div><div class="message-bubble">${text}</div>`;
+                    const srcHtml = lastIntelSources.length
+                        ? `<div class="data-sources">${lastIntelSources.map(s => `<span class="source-badge">${s}</span>`).join('')}</div>`
+                        : '';
+                    div.innerHTML = `<div class="message-avatar nate"><div class="nate-eyes"><div class="nate-eye"></div><div class="nate-eye"></div></div></div><div class="message-bubble">${text}</div>${srcHtml}`;
                     document.getElementById("messages").appendChild(div);
                     streamingMessageEl = div;
                 } else {
@@ -544,7 +602,10 @@ _recoverAuth();
                 type: 'ask_nate_coaching',
                 query: text,
                 client_id: selectedClientId,
-                context: 'coaching_advice'
+                context: 'coaching_advice',
+                intelligence_mode: 'clinical_full',
+                agentic_ready: true,
+                neuro_symbolic_ready: true
             }));
         }
 
