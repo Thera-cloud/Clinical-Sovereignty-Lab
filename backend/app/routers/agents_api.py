@@ -9,14 +9,16 @@ never mutate the live tree without an explicit promote.
 
 Security (production-true):
 - Proxy-key callers get role PARTNER (no DATA_TOOLS / no sandbox_promote tool).
-- Promote requires bridge ADMIN (not proxy key alone).
-- Concurrent runs capped; run state mirrored to Redis when available.
+- Promote defaults to patch/diff; live write requires apply_live + bridge ADMIN.
+- Concurrent runs capped; run state mirrored to Redis (write-through).
+- Run ownership enforced on GET/DELETE; create role floor excludes CLIENT.
 """
 # SOVEREIGN-VOICE — Partner Agents API plug-in
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import logging
@@ -34,11 +36,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["Sovereign Agents"])
 _security = HTTPBearer(auto_error=False)
 _PROXY_KEY = os.getenv("SOVEREIGN_PROXY_KEY", "")
+_PROXY_KEYS_EXTRA = [
+    k.strip() for k in (os.getenv("SOVEREIGN_PROXY_KEYS") or "").split(",") if k.strip()
+]
 _MAX_CONCURRENT_RUNS = int(os.getenv("CLI_AGENT_MAX_CONCURRENT", "3"))
 _RUN_TTL_S = int(os.getenv("CLI_AGENT_RUN_TTL_S", "86400"))
+_MIRROR_MIN_INTERVAL_S = float(os.getenv("CLI_AGENT_MIRROR_MIN_INTERVAL_S", "1.5"))
 _RUN_SEMAPHORE = asyncio.Semaphore(_MAX_CONCURRENT_RUNS)
 _ACTIVE_RUNS = 0
 _ACTIVE_GUARD = asyncio.Lock()
+_CREATE_ROLES = frozenset({"ADMIN", "COACH", "PARTNER"})
+_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
+def _all_proxy_secrets() -> List[str]:
+    keys: List[str] = []
+    if _PROXY_KEY:
+        keys.append(_PROXY_KEY)
+    for k in _PROXY_KEYS_EXTRA:
+        if k not in keys:
+            keys.append(k)
+    return keys
 
 
 async def _verify_proxy_auth(
@@ -50,16 +68,20 @@ async def _verify_proxy_auth(
         raise HTTPException(status_code=401, detail="Authorization header required")
     token = credentials.credentials
     if token.startswith("sk-sovereign-"):
-        if not _PROXY_KEY:
+        secrets = _all_proxy_secrets()
+        if not secrets:
             raise HTTPException(status_code=500, detail="SOVEREIGN_PROXY_KEY not configured on server")
         provided_secret = token[len("sk-sovereign-"):]
-        if hmac.compare_digest(provided_secret, _PROXY_KEY):
-            # PARTNER — not ADMIN: blocks DATA_TOOLS + sandbox_promote tool path
-            return {
-                "role": "PARTNER",
-                "username": "cursor-proxy",
-                "source": "sovereign_proxy_key",
-            }
+        for idx, secret in enumerate(secrets):
+            if hmac.compare_digest(provided_secret, secret):
+                # PARTNER — not ADMIN: blocks DATA_TOOLS + sandbox_promote tool path
+                partner_id = hashlib.sha256(secret.encode()).hexdigest()[:10]
+                return {
+                    "role": "PARTNER",
+                    "username": f"partner-{partner_id}",
+                    "source": "sovereign_proxy_key",
+                    "partner_key_index": idx,
+                }
         raise HTTPException(status_code=401, detail="Invalid proxy key")
     from app.services.api_server import get_current_user as _bridge_auth
     try:
@@ -70,6 +92,7 @@ async def _verify_proxy_auth(
 _AGENT_RUNS: Dict[str, Dict[str, Any]] = {}
 _AGENT_RUNS_GUARD = asyncio.Lock()
 _AGENT_RUNS_MAX = 200
+_LAST_MIRROR_TS: Dict[str, float] = {}
 
 AGENTIC_CAPABILITIES = {
     "agentic_tool_loop": True,
@@ -91,6 +114,12 @@ AGENTIC_CAPABILITIES = {
     "promote_protected_denylist": True,
     "agent_run_concurrency_cap": True,
     "agent_run_redis_mirror": True,
+    "run_ownership": True,
+    "create_role_floor": True,
+    "mid_loop_cancel": True,
+    "promote_patch_default": True,
+    "per_path_retry_until_green": True,
+    "multi_proxy_keys": True,
 }
 
 
@@ -105,6 +134,10 @@ class AgentRunBody(BaseModel):
 
 class AgentPromoteBody(BaseModel):
     paths: Optional[List[str]] = None
+    apply_live: bool = Field(
+        False,
+        description="False (default)=patch/diff only; True=copy into live tree (ADMIN + three-node risk)",
+    )
 
 
 def _tier_from_user(user: Dict[str, Any]) -> str:
@@ -121,6 +154,28 @@ def _role_for_loop(user: Dict[str, Any]) -> str:
     if user.get("source") == "sovereign_proxy_key":
         return "PARTNER"
     return (user.get("role") or "PARTNER").upper()
+
+
+def _owner_key(user: Dict[str, Any]) -> str:
+    if user.get("source") == "sovereign_proxy_key":
+        return f"proxy:{user.get('username') or 'partner'}"
+    uname = user.get("username") or user.get("user_id") or "unknown"
+    return f"bridge:{uname}"
+
+
+def _is_bridge_admin(user: Dict[str, Any]) -> bool:
+    return (
+        user.get("source") != "sovereign_proxy_key"
+        and (user.get("role") or "").upper() == "ADMIN"
+    )
+
+
+def _assert_run_access(run: Dict[str, Any], user: Dict[str, Any]) -> None:
+    if _is_bridge_admin(user):
+        return
+    if run.get("owner") == _owner_key(user):
+        return
+    raise HTTPException(403, "Not your agent run")
 
 
 def _redis_client():
@@ -187,24 +242,68 @@ def _load_run_from_redis(run_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-async def _store_run(run_id: str, payload: Dict[str, Any]) -> None:
-    async with _AGENT_RUNS_GUARD:
-        _AGENT_RUNS[run_id] = payload
-        while len(_AGENT_RUNS) > _AGENT_RUNS_MAX:
-            oldest = next(iter(_AGENT_RUNS))
-            _AGENT_RUNS.pop(oldest, None)
+async def _mirror_debounced(run_id: str, payload: Dict[str, Any], *, force: bool = False) -> None:
+    now = time.time()
+    status = payload.get("status") or ""
+    if status in _TERMINAL_STATUSES or status == "cancelling":
+        force = True
+    last = _LAST_MIRROR_TS.get(run_id, 0.0)
+    if not force and (now - last) < _MIRROR_MIN_INTERVAL_S:
+        return
+    _LAST_MIRROR_TS[run_id] = now
     await asyncio.to_thread(_mirror_run_to_redis, run_id, payload)
 
 
+def _evict_terminal_runs_locked() -> None:
+    """Evict oldest terminal runs only — never drop active/queued/running."""
+    while len(_AGENT_RUNS) > _AGENT_RUNS_MAX:
+        victim = None
+        for rid, run in _AGENT_RUNS.items():
+            if (run.get("status") or "") in _TERMINAL_STATUSES:
+                victim = rid
+                break
+        if victim is None:
+            break
+        _AGENT_RUNS.pop(victim, None)
+        _LAST_MIRROR_TS.pop(victim, None)
+
+
+async def _store_run(run_id: str, payload: Dict[str, Any]) -> None:
+    async with _AGENT_RUNS_GUARD:
+        _AGENT_RUNS[run_id] = payload
+        _evict_terminal_runs_locked()
+    await _mirror_debounced(run_id, payload, force=True)
+
+
 async def _update_run(run_id: str, **fields: Any) -> None:
+    """Write-through: update local if present, else load Redis → merge → store."""
     payload = None
+    force = False
     async with _AGENT_RUNS_GUARD:
         run = _AGENT_RUNS.get(run_id)
         if run is not None:
             run.update(fields)
             payload = dict(run)
+    if payload is None:
+        existing = await asyncio.to_thread(_load_run_from_redis, run_id)
+        if existing is None:
+            return
+        existing.update(fields)
+        payload = existing
+        async with _AGENT_RUNS_GUARD:
+            local = _AGENT_RUNS.get(run_id)
+            if local is not None:
+                local.update(fields)
+                payload = dict(local)
+            else:
+                _AGENT_RUNS[run_id] = dict(payload)
+                _evict_terminal_runs_locked()
+        force = True
+    status = (payload or {}).get("status") or ""
+    if status in _TERMINAL_STATUSES or status == "cancelling":
+        force = True
     if payload is not None:
-        await asyncio.to_thread(_mirror_run_to_redis, run_id, payload)
+        await _mirror_debounced(run_id, payload, force=force)
 
 
 async def _get_run(run_id: str) -> Optional[Dict[str, Any]]:
@@ -249,6 +348,12 @@ async def create_agent_run(
 ):
     """Queue a sandboxed agentic coding run (partner plug-in)."""
     global _ACTIVE_RUNS
+    loop_role = _role_for_loop(user)
+    if loop_role not in _CREATE_ROLES:
+        raise HTTPException(
+            403,
+            f"Agent runs require role in {sorted(_CREATE_ROLES)} (got {loop_role})",
+        )
     mode = body.mode if body.mode in ("ask", "plan", "debug", "ln_fab") else "ln_fab"
     cli = body.cli if body.cli in ("mac", "cloud") else "cloud"
     # Partners default to cloud sandbox — mac only for ADMIN bridge sessions
@@ -270,7 +375,7 @@ async def create_agent_run(
     plan_id = body.plan_id or f"partner-{run_id}"
     session_id = body.session_id or run_id
     username = user.get("username") or "partner-agent"
-    loop_role = _role_for_loop(user)
+    owner = _owner_key(user)
 
     await _store_run(run_id, {
         "run_id": run_id,
@@ -281,6 +386,7 @@ async def create_agent_run(
         "cli": cli,
         "prompt": body.prompt[:2000],
         "username": username,
+        "owner": owner,
         "role": loop_role,
         "tier": _tier_from_user(user),
         "created_at": time.time(),
@@ -312,6 +418,7 @@ async def create_agent_run(
         "mode": mode,
         "cli": cli,
         "role": loop_role,
+        "owner": owner,
     }
 
 
@@ -343,6 +450,10 @@ async def _execute_agent_run(
             del events[:50]
         await _update_run(run_id, events=list(events[-100:]))
 
+    async def cancel_check() -> bool:
+        run = await _get_run(run_id)
+        return bool(run and run.get("cancel_requested"))
+
     try:
         async with _RUN_SEMAPHORE:
             run = await _get_run(run_id)
@@ -368,9 +479,10 @@ async def _execute_agent_run(
                 max_turns_override=max_turns,
                 allow_subagents=True,
                 is_subagent=False,
+                cancel_check=cancel_check,
             )
             run = await _get_run(run_id)
-            if run and run.get("cancel_requested"):
+            if (run and run.get("cancel_requested")) or result.get("status") == "cancelled":
                 status = "cancelled"
             else:
                 status = "failed" if result.get("status") == "error" else "completed"
@@ -400,6 +512,7 @@ async def get_agent_run(run_id: str, user: Dict = Depends(_verify_proxy_auth)):
     run = await _get_run(run_id)
     if not run:
         raise HTTPException(404, "Agent run not found")
+    _assert_run_access(run, user)
     out = dict(run)
     # Trim large nested payloads for list-style GET
     result = out.get("result")
@@ -421,10 +534,11 @@ async def get_agent_run(run_id: str, user: Dict = Depends(_verify_proxy_auth)):
 
 @router.delete("/agents/{run_id}")
 async def cancel_agent_run(run_id: str, user: Dict = Depends(_verify_proxy_auth)):
-    """Request cancellation of a queued/running agent (soft cancel flag)."""
+    """Request cancellation of a queued/running agent (checked between loop turns)."""
     run = await _get_run(run_id)
     if not run:
         raise HTTPException(404, "Agent run not found")
+    _assert_run_access(run, user)
     if run.get("status") in ("completed", "failed", "cancelled"):
         return {"object": "agent.run", "run_id": run_id, "status": run.get("status")}
     await _update_run(run_id, cancel_requested=True, status="cancelling")
@@ -437,28 +551,70 @@ async def promote_agent_run(
     body: AgentPromoteBody,
     user: Dict = Depends(_verify_proxy_auth),
 ):
-    """Promote CLI-Cloud sandbox changes — bridge ADMIN only (not proxy key)."""
-    # Proxy keys must not promote into the live tree
-    if user.get("source") == "sovereign_proxy_key":
+    """
+    Promote CLI-Cloud sandbox changes.
+
+    Default apply_live=false → return unified diff/patch only (git-safe).
+    apply_live=true → copy into live tree; bridge ADMIN only (not proxy key).
+    Live writes on GREEN create three-node drift until committed on BLUE.
+    """
+    # Proxy keys must not write into the live tree
+    if user.get("source") == "sovereign_proxy_key" and body.apply_live:
         raise HTTPException(
             403,
             "Promote requires bridge ADMIN auth (proxy key cannot promote)",
         )
-    role = (user.get("role") or "").upper()
-    if role != "ADMIN":
-        raise HTTPException(403, "sandbox promote requires ADMIN role")
+    if body.apply_live:
+        role = (user.get("role") or "").upper()
+        if role != "ADMIN" or user.get("source") == "sovereign_proxy_key":
+            raise HTTPException(403, "sandbox promote requires ADMIN role")
     run = await _get_run(run_id)
     if not run:
         raise HTTPException(404, "Agent run not found")
+    if not body.apply_live:
+        # Patch review: owner or bridge ADMIN
+        _assert_run_access(run, user)
     if run.get("cli") != "cloud":
         raise HTTPException(400, "Only CLI-Cloud sandboxed runs can be promoted")
     plan_id = run.get("plan_id")
     if not plan_id:
         raise HTTPException(400, "Run has no plan_id")
+
+    if not body.apply_live:
+        try:
+            from app.websocket.cli_tools import _sandbox_diff_sync
+            diff = await asyncio.to_thread(_sandbox_diff_sync, plan_id, 40)
+        except Exception as e:
+            raise HTTPException(500, f"Patch preview failed: {e}") from e
+        await _update_run(run_id, promote_preview=True, promote_result=diff)
+        return {
+            "object": "agent.promote",
+            "run_id": run_id,
+            "plan_id": plan_id,
+            "mode": "patch",
+            "apply_live": False,
+            "git_warning": (
+                "Review this diff on BLUE and commit; do not apply_live on GREEN "
+                "unless you accept three-node drift until git pull."
+            ),
+            **(diff or {}),
+        }
+
     try:
         from app.websocket.cli_tools import _sandbox_promote_sync
         result = await asyncio.to_thread(_sandbox_promote_sync, plan_id, body.paths)
     except Exception as e:
         raise HTTPException(500, f"Promote failed: {e}") from e
     await _update_run(run_id, promoted=True, promote_result=result)
-    return {"object": "agent.promote", "run_id": run_id, "plan_id": plan_id, **(result or {})}
+    return {
+        "object": "agent.promote",
+        "run_id": run_id,
+        "plan_id": plan_id,
+        "mode": "live",
+        "apply_live": True,
+        "git_warning": (
+            "Live tree mutated on this node — commit/push from BLUE and sync "
+            "before the next deploy or git pull will overwrite."
+        ),
+        **(result or {}),
+    }

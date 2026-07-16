@@ -205,7 +205,7 @@ def test_protected_promote_denylist():
 
 
 def test_retry_until_green_preserves_pending_failures():
-    """Regression: read-only tools must not wipe pending_test_failures."""
+    """Regression: read-only tools must not wipe pending failures; clear per-path only."""
     src = (
         Path(__file__).resolve().parents[1]
         / "app"
@@ -214,17 +214,49 @@ def test_retry_until_green_preserves_pending_failures():
     ).read_text()
     # Old bug zeroed pending at every tool batch
     assert "pending_test_failures = 0\n            for tc, result" not in src
-    assert "Do NOT zero pending_test_failures" in src
+    assert "pending_failed_paths" in src
+    assert "pending_failed_paths.discard" in src
+    assert "cancel_check" in src
 
 
 def test_proxy_cannot_promote_contract():
     mod = _load_agents_api_module()
     src = open(mod.__file__).read()
     assert "proxy key cannot promote" in src
+    assert "apply_live" in src
     assert "PARTNER" in src
     assert mod.AGENTIC_CAPABILITIES.get("partner_role_isolation") is True
     assert mod.AGENTIC_CAPABILITIES.get("promote_protected_denylist") is True
+    assert mod.AGENTIC_CAPABILITIES.get("promote_patch_default") is True
     assert mod._MAX_CONCURRENT_RUNS >= 1
+
+
+def test_run_ownership_and_role_floor():
+    mod = _load_agents_api_module()
+    assert mod.AGENTIC_CAPABILITIES.get("run_ownership") is True
+    assert mod.AGENTIC_CAPABILITIES.get("create_role_floor") is True
+    assert "CLIENT" not in mod._CREATE_ROLES
+    assert "PARTNER" in mod._CREATE_ROLES
+    owner = mod._owner_key({
+        "source": "sovereign_proxy_key",
+        "username": "partner-abc",
+        "role": "PARTNER",
+    })
+    assert owner.startswith("proxy:")
+    other = {
+        "run_id": "x",
+        "owner": "proxy:partner-other",
+        "status": "queued",
+    }
+    try:
+        mod._assert_run_access(other, {
+            "source": "sovereign_proxy_key",
+            "username": "partner-abc",
+            "role": "PARTNER",
+        })
+        assert False, "expected 403"
+    except Exception as e:
+        assert getattr(e, "status_code", None) == 403
 
 
 def test_feature_scorecard_pass_criteria():
@@ -255,6 +287,10 @@ def test_feature_scorecard_pass_criteria():
         "partner_role_isolation": mod.AGENTIC_CAPABILITIES.get("partner_role_isolation"),
         "promote_denylist": mod.AGENTIC_CAPABILITIES.get("promote_protected_denylist"),
         "concurrency_cap": mod.AGENTIC_CAPABILITIES.get("agent_run_concurrency_cap"),
+        "run_ownership": mod.AGENTIC_CAPABILITIES.get("run_ownership"),
+        "mid_loop_cancel": mod.AGENTIC_CAPABILITIES.get("mid_loop_cancel"),
+        "promote_patch_default": mod.AGENTIC_CAPABILITIES.get("promote_patch_default"),
+        "per_path_retry": mod.AGENTIC_CAPABILITIES.get("per_path_retry_until_green"),
     }
     failed = [k for k, v in checks.items() if not v]
     assert not failed, f"FAIL features: {failed}"

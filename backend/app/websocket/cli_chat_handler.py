@@ -375,12 +375,14 @@ async def run_agentic_loop(
     allow_subagents: bool = True,
     is_subagent: bool = False,
     tools_override: Optional[List[Dict[str, Any]]] = None,
+    cancel_check=None,
 ) -> Dict[str, Any]:
     """
     Full agentic coding loop — WebSocket CLI and partner Agents API share this.
 
     Features: tool loop, parallel tools, path locks, auto-lint, auto-pytest,
     retry-until-green, todo task state, spawn_subagent, autonomy budget.
+    cancel_check: optional async callable() -> bool; True aborts between turns.
     """
     user_message = (user_message or "").strip()
     if not user_message:
@@ -486,13 +488,48 @@ async def run_agentic_loop(
     max_tokens = _MAX_COMPLETION_TOKENS.get(mode, 6144)
     trunc_limit = get_truncation_limit(mode, cli_type)
     fix_attempts = 0
-    pending_test_failures = 0
+    # Per-path set so a pass on file B cannot clear an unresolved fail on file A
+    pending_failed_paths: set = set()
     subagents_spawned = 0
     turn = 0
     final_text = ""
 
+    async def _cancelled() -> bool:
+        if not cancel_check:
+            return False
+        try:
+            return bool(await cancel_check())
+        except Exception:
+            return False
+
     for turn_idx in range(max_turns):
         turn = turn_idx + 1
+        if await _cancelled():
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            done = {
+                "type": "nate_cli_chat_done",
+                "status": "cancelled",
+                "plan_id": plan_id,
+                "session_id": session_id,
+                "mode": mode,
+                "cli": cli_type,
+                "provider": provider_used,
+                "files": files_touched,
+                "tool_calls": tool_call_log,
+                "turn_count": turn,
+                "elapsed_ms": elapsed_ms,
+                "response_text": "",
+                "autonomy": {
+                    "fix_attempts": fix_attempts,
+                    "max_fix_attempts": _CLI_MAX_FIX_ATTEMPTS,
+                    "max_turns": max_turns,
+                    "subagents_spawned": subagents_spawned,
+                    "is_subagent": is_subagent,
+                    "cancelled": True,
+                },
+            }
+            await _emit(emit, done)
+            return done
         conversation = _compact_conversation(conversation)
 
         try:
@@ -636,8 +673,9 @@ async def run_agentic_loop(
                 return_exceptions=False,
             )
 
-            # Do NOT zero pending_test_failures here — a later read-only tool
+            # Do NOT clear pending_failed_paths here — a later read-only tool
             # must not erase a prior auto_pytest failure (retry-until-green).
+            # Clear only the path that just passed.
             for tc, result, t_elapsed, tc_id in gathered:
                 fn = tc.get("function", {})
                 tool_name = fn.get("name", "unknown")
@@ -651,16 +689,24 @@ async def run_agentic_loop(
                 preview = result_text[:500] + ("..." if len(result_text) > 500 else "")
 
                 if isinstance(result, dict):
+                    ap = result.get("auto_pytest")
+                    path_key = ""
+                    if isinstance(ap, dict):
+                        path_key = (
+                            ap.get("target")
+                            or ap.get("source")
+                            or result.get("path")
+                            or ""
+                        )
                     if _pytest_failed(result):
-                        pending_test_failures += 1
-                    else:
-                        ap = result.get("auto_pytest")
-                        if (
-                            isinstance(ap, dict)
-                            and ap.get("status") == "ok"
-                            and int(ap.get("exit_code") or 0) == 0
-                        ):
-                            pending_test_failures = 0
+                        pending_failed_paths.add(path_key or f"unknown:{tool_name}")
+                    elif (
+                        isinstance(ap, dict)
+                        and ap.get("status") == "ok"
+                        and int(ap.get("exit_code") or 0) == 0
+                        and path_key
+                    ):
+                        pending_failed_paths.discard(path_key)
 
                 await _emit(emit, {
                     "type": "nate_cli_chat_tool",
@@ -701,28 +747,54 @@ async def run_agentic_loop(
                 "status": "thinking",
                 "detail": "Processing tool results...",
             })
+            if await _cancelled():
+                elapsed_ms = int((time.monotonic() - t0) * 1000)
+                done = {
+                    "type": "nate_cli_chat_done",
+                    "status": "cancelled",
+                    "plan_id": plan_id,
+                    "session_id": session_id,
+                    "mode": mode,
+                    "cli": cli_type,
+                    "provider": provider_used,
+                    "files": files_touched,
+                    "tool_calls": tool_call_log,
+                    "turn_count": turn,
+                    "elapsed_ms": elapsed_ms,
+                    "response_text": "",
+                    "autonomy": {
+                        "fix_attempts": fix_attempts,
+                        "max_fix_attempts": _CLI_MAX_FIX_ATTEMPTS,
+                        "max_turns": max_turns,
+                        "subagents_spawned": subagents_spawned,
+                        "is_subagent": is_subagent,
+                        "cancelled": True,
+                    },
+                }
+                await _emit(emit, done)
+                return done
             continue
 
         # Final text — retry-until-green if tests still failing and budget remains
         if (
-            pending_test_failures > 0
+            pending_failed_paths
             and fix_attempts < _CLI_MAX_FIX_ATTEMPTS
             and mode in ("ln_fab", "debug")
             and not is_subagent
         ):
             fix_attempts += 1
+            failed_list = ", ".join(sorted(pending_failed_paths)[:8])
             conversation.append({"role": "assistant", "content": response_text or ""})
             conversation.append({
                 "role": "user",
                 "content": (
-                    f"[AUTONOMY BUDGET] Auto-pytest still failing "
+                    f"[AUTONOMY BUDGET] Auto-pytest still failing on: {failed_list} "
                     f"(fix attempt {fix_attempts}/{_CLI_MAX_FIX_ATTEMPTS}). "
                     "Read the failure output in prior tool results, fix the code, "
                     "and continue until tests pass or the budget is exhausted. "
                     "Do not conclude yet."
                 ),
             })
-            pending_test_failures = 0
             await _emit(emit, {
                 "type": "nate_cli_chat_status",
                 "status": "thinking",
@@ -958,6 +1030,7 @@ async def _maybe_auto_pytest(
     result = dict(result)
     result["auto_pytest"] = {
         "target": test_target,
+        "source": lint_path,
         "status": (test_res or {}).get("status"),
         "exit_code": (test_res or {}).get("exit_code"),
     }
