@@ -218,4 +218,4 @@ Pre-build verification for Neuro-Symbolic Layer — merged into [`.cursor/plans/
 | Agentic seam | `ENABLE_ASK_NATE_AGENTIC` → capability envelope only (no tool dispatch yet) |
 | Tests | `backend/tests/test_ask_nate_clinical_intelligence_seams.py` |
 
-This is the Command-side clinical intelligence seat. Phase 5b/5c and Phase 2 tool-use should attach here via the reserved capability IDs (`symbolic_verify`, `forward_reason`, `agent_tools`), not via a second Ask Nate path.
+This is the Command-side **admin advisory** seat (Coach Command–class, not therapist-to-admin). Phase 5b/5c and Phase 2 tool-use should attach here via the reserved capability IDs (`symbolic_verify`, `forward_reason`, `agent_tools`), not via a second Ask Nate path.

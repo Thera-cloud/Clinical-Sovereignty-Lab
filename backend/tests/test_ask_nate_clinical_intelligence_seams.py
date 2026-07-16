@@ -90,7 +90,9 @@ async def test_build_pack_client_mode_assembles_sources(monkeypatch):
     )
     prefix = pack["prompt_prefix"]
     meta = pack["meta"]
-    assert "ASK NATE CLINICAL INTELLIGENCE" in prefix
+    assert "SOVEREIGN COMMAND" in prefix
+    assert "ADMIN ADVISORY" in prefix
+    assert "Never run therapy on the admin" in prefix or "do NOT therapy" in prefix.lower() or "NOT doing therapy" in prefix
     assert "abandonment" in prefix.lower()
     assert "MAIN CHAT MEMORY" in prefix
     assert "LIVED WISDOM" in prefix
@@ -117,5 +119,6 @@ async def test_build_pack_roster_mode_no_cross_phi(monkeypatch):
         query="Any risk indicators?",
     )
     assert pack["meta"]["mode"] == "roster"
-    assert "All clients" in pack["prompt_prefix"]
+    assert "Roster / population" in pack["prompt_prefix"] or "roster" in pack["prompt_prefix"].lower()
     assert "lived_wisdom_roster" in pack["meta"]["sources"]
+    assert "NOT doing therapy" in pack["prompt_prefix"]

@@ -26843,9 +26843,17 @@ Coach Reflection on Session {session_id}:
                         except Exception as _an_intel_err:
                             print(f">>> [ASK NATE INTEL] {_an_intel_err}")
                         if client_id:
-                            coaching_prompt = f"{_intel_prefix}[Coach asking about client {client_id}]: {query}"
+                            coaching_prompt = (
+                                f"{_intel_prefix}"
+                                f"[SOVEREIGN COMMAND ASK NATE — Admin advisory about client {client_id}. "
+                                f"Answer the admin directly with coaching guidance; do NOT therapy the admin.]: {query}"
+                            )
                         else:
-                            coaching_prompt = f"{_intel_prefix}[Coach question]: {query}"
+                            coaching_prompt = (
+                                f"{_intel_prefix}"
+                                f"[SOVEREIGN COMMAND ASK NATE — Admin advisory (roster/group/topic). "
+                                f"Answer the admin directly; do NOT therapy the admin.]: {query}"
+                            )
                     # QUANTUM-CRYSTAL-ARCH: forward dojo_type for routing AND
                     # client_context so the response only goes back to the
                     # originating socket (parent vs DOJO iframe). Without ctx,
