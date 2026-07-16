@@ -331,7 +331,8 @@ services:
       - NATE_CHAT_URL=${NATE_CHAT_URL:-}
       - NATE_CHAT_KEY=${NATE_CHAT_KEY:-}
       - NATE_CHAT_MODEL=${NATE_CHAT_MODEL:-grok-4-1-fast-non-reasoning}
-      - ENABLE_UNIVERSAL_SI_COACH_ALERT=${ENABLE_UNIVERSAL_SI_COACH_ALERT:-false}
+      # QUANTUM-CRYSTAL-ARCH — SI/violence coach alert default on (opt-out with =false)
+      - ENABLE_UNIVERSAL_SI_COACH_ALERT=${ENABLE_UNIVERSAL_SI_COACH_ALERT:-true}
       - SI_COACH_ALERT_DEDUP_HOURS=${SI_COACH_ALERT_DEDUP_HOURS:-24}
       # QUANTUM-CRYSTAL-ARCH — Public Trial Funnel: dark-launch default false
       - PUBLIC_TRIAL_ENABLED=${PUBLIC_TRIAL_ENABLED:-false}

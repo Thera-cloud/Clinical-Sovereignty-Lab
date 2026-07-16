@@ -1,4 +1,4 @@
-"""High-confidence suicidal/self-harm phrase detection for universal coach alerts."""
+"""High-confidence suicidal/self-harm + violence phrase detection for coach alerts."""
 
 from __future__ import annotations
 
@@ -45,25 +45,76 @@ _SI_PATTERNS: Tuple[Tuple[str, Pattern[str]], ...] = (
     )),
 )
 
+# High-confidence other-directed harm / homicide intent (not fantasy/idiom alone).
+_VIOLENCE_PATTERNS: Tuple[Tuple[str, Pattern[str]], ...] = (
+    ("homicidal", re.compile(r"\bhomicid(e|al)\b", re.I)),
+    ("kill someone", re.compile(
+        r"\b(?:want\s+to|gonna|going\s+to|will|plan\s+to)\s+kill\s+someone\b", re.I
+    )),
+    ("kill them", re.compile(
+        r"\b(?:want\s+to|gonna|going\s+to|will|plan\s+to)\s+kill\s+"
+        r"(?:him|her|them|my\s+(?:wife|husband|partner|ex|kids?|son|daughter|boss))\b",
+        re.I,
+    )),
+    ("murder someone", re.compile(
+        r"\b(?:want\s+to|gonna|going\s+to|will|plan\s+to)\s+murder\b", re.I
+    )),
+    ("hurt someone", re.compile(
+        r"\b(?:want\s+to|gonna|going\s+to|will|plan\s+to)\s+(?:hurt|harm)\s+"
+        r"(?:him|her|them|someone)\b",
+        re.I,
+    )),
+    ("shoot them", re.compile(
+        r"\b(?:going\s+to|gonna|will|want\s+to)\s+(?:shoot|stab)\s+"
+        r"(?:him|her|them|someone)\b",
+        re.I,
+    )),
+    ("beat to death", re.compile(r"\bbeat\s+(?:him|her|them)\s+to\s+death\b", re.I)),
+)
+
 # Suppress obvious non-crisis idioms when they would otherwise match weak overlap.
 _FALSE_POSITIVE_PATTERNS: Tuple[Pattern[str], ...] = (
     re.compile(r"\bdie\s+laughing\b", re.I),
     re.compile(r"\bkill(?:ed|ing)?\s+time\b", re.I),
     re.compile(r"\bkill(?:ed|ing)?\s+the\s+(?:mood|vibe|lights)\b", re.I),
+    re.compile(r"\bkill\s+for\s+(?:a|some)\b", re.I),
 )
 
 
-def match_user_text(text: str) -> List[str]:
-    """Return canonical matched phrase labels for high-confidence SI/self-harm language."""
+def _blocked_by_false_positive(sample: str) -> bool:
+    lower = sample.lower()
+    return any(neg.search(lower) for neg in _FALSE_POSITIVE_PATTERNS)
+
+
+def _match_patterns(text: str, patterns: Tuple[Tuple[str, Pattern[str]], ...]) -> List[str]:
     if not text or not str(text).strip():
         return []
     sample = str(text)
-    lower = sample.lower()
-    for neg in _FALSE_POSITIVE_PATTERNS:
-        if neg.search(lower):
-            return []
+    if _blocked_by_false_positive(sample):
+        return []
     hits: List[str] = []
-    for label, pattern in _SI_PATTERNS:
+    for label, pattern in patterns:
         if pattern.search(sample) and label not in hits:
             hits.append(label)
     return hits
+
+
+def match_si_user_text(text: str) -> List[str]:
+    """Return canonical matched phrase labels for high-confidence SI/self-harm language."""
+    return _match_patterns(text, _SI_PATTERNS)
+
+
+def match_violence_user_text(text: str) -> List[str]:
+    """Return labels for high-confidence other-directed harm / homicide language."""
+    return _match_patterns(text, _VIOLENCE_PATTERNS)
+
+
+def match_user_text(text: str) -> List[str]:
+    """SI + violence labels (union) for boundary/crisis detection surfaces."""
+    si = match_si_user_text(text)
+    vi = match_violence_user_text(text)
+    out = list(si)
+    for label in vi:
+        if label not in out:
+            out.append(label)
+    return out

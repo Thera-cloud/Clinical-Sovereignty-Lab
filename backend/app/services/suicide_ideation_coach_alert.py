@@ -1,26 +1,30 @@
-"""Universal suicidal/self-harm language → assigned coach alert (feature-flagged)."""
+"""Universal SI / other-harm language → assigned coach alert (default on; opt-out via env)."""
 
 from __future__ import annotations
 
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.services.coach_handoff import _resolve_assigned_coach_username
-from app.services.suicide_ideation_lexicon import match_user_text
+from app.services.suicide_ideation_lexicon import match_si_user_text, match_violence_user_text
 
 logger = logging.getLogger(__name__)
 
 _EVENT_TYPE = "coach_alert_dispatched"
-_ALERT_TYPE = "suicidal_ideation_escalation"
+_ALERT_TYPE_SI = "suicidal_ideation_escalation"
+_ALERT_TYPE_VIOLENCE = "violence_ideation_escalation"
 
 
 def _flag_enabled() -> bool:
-    return os.getenv("ENABLE_UNIVERSAL_SI_COACH_ALERT", "false").strip().lower() in (
-        "1",
-        "true",
-        "yes",
+    """Always-on by default. Set ENABLE_UNIVERSAL_SI_COACH_ALERT=false to disable."""
+    # QUANTUM-CRYSTAL-ARCH — opt-out only; missing/empty env means enabled
+    return os.getenv("ENABLE_UNIVERSAL_SI_COACH_ALERT", "true").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
     )
 
 
@@ -60,6 +64,29 @@ def _dedup_hours() -> int:
         return max(1, int(raw))
     except ValueError:
         return 24
+
+
+def _classify_alert(user_text: str) -> Tuple[Optional[str], List[str], str]:
+    """Return (alert_type, matched_labels, reason). SI wins if both fire."""
+    si = match_si_user_text(user_text)
+    vi = match_violence_user_text(user_text)
+    matched: List[str] = list(si)
+    for label in vi:
+        if label not in matched:
+            matched.append(label)
+    if not matched:
+        return None, [], ""
+    if si:
+        return (
+            _ALERT_TYPE_SI,
+            matched,
+            "Suicidal/self-harm language detected in client message.",
+        )
+    return (
+        _ALERT_TYPE_VIOLENCE,
+        matched,
+        "Other-directed harm / violence ideation detected in client message.",
+    )
 
 
 async def _resolve_client_username(db_pool, profile: Dict[str, Any]) -> Optional[str]:
@@ -147,9 +174,10 @@ async def _emit_audit(
     turn_id: str,
     matched: List[str],
     notification_id: int,
+    alert_type: str,
 ) -> None:
     payload = {
-        "alert_type": _ALERT_TYPE,
+        "alert_type": alert_type,
         "turn_id": turn_id,
         "coach_username": coach_username,
         "notification_id": notification_id,
@@ -184,7 +212,7 @@ async def maybe_dispatch_si_coach_alert(
     *,
     turn_id: str = "",
 ) -> Dict[str, Any]:
-    """Detect SI language in client chat and notify assigned coach when enabled."""
+    """Detect SI or other-harm language and notify assigned coach (default on)."""
     if not _flag_enabled():
         return {"status": "disabled"}
     if not db_pool:
@@ -195,13 +223,13 @@ async def maybe_dispatch_si_coach_alert(
     if text.startswith("[DOJO SIMULATION") or text.startswith("[SEARCH SYNTHESIS]"):
         return {"status": "skipped", "reason": "simulation_or_synthesis"}
 
-    matched = match_user_text(text)
-    if not matched:
+    alert_type, matched, reason = _classify_alert(text)
+    if not matched or not alert_type:
         return {"status": "no_match"}
 
     if _crisis_alerts_suppressed(profile, client_username=None):
         logger.info("[SI_COACH_ALERT] suppressed for test/sandbox profile")
-        return {"status": "suppressed", "matched": matched}
+        return {"status": "suppressed", "matched": matched, "alert_type": alert_type}
 
     client_username = await _resolve_client_username(db_pool, profile)
     if not client_username:
@@ -210,12 +238,17 @@ async def maybe_dispatch_si_coach_alert(
 
     if await _recent_escalation_in_window(db_pool, client_username):
         logger.info("[SI_COACH_ALERT] dedup skip user=%s", client_username)
-        return {"status": "duplicate", "matched": matched}
+        return {"status": "duplicate", "matched": matched, "alert_type": alert_type}
 
     coach_username = await _resolve_assigned_coach_username(db_pool, profile)
     if not coach_username:
         logger.warning("[SI_COACH_ALERT] no assigned coach for user=%s", client_username)
-        return {"status": "error", "reason": "no_assigned_coach", "matched": matched}
+        return {
+            "status": "error",
+            "reason": "no_assigned_coach",
+            "matched": matched,
+            "alert_type": alert_type,
+        }
 
     hardware_id = (profile.get("hardware_id") or "").strip() or None
     raw_context = await _build_recent_context(
@@ -224,7 +257,6 @@ async def maybe_dispatch_si_coach_alert(
         hardware_id=hardware_id,
         user_text=text,
     )
-    reason = "Suicidal/self-harm language detected in client message."
 
     receipt: Dict[str, Any] = {}
     try:
@@ -240,11 +272,16 @@ async def maybe_dispatch_si_coach_alert(
             session_id=None,
             family_id=None,
             raw_context=raw_context,
-            alert_type=_ALERT_TYPE,
+            alert_type=alert_type,
         )
     except Exception as e:
         logger.error("[SI_COACH_ALERT] dispatch failed user=%s: %s", client_username, e)
-        return {"status": "error", "reason": "dispatch_failed", "matched": matched}
+        return {
+            "status": "error",
+            "reason": "dispatch_failed",
+            "matched": matched,
+            "alert_type": alert_type,
+        }
 
     notification_id = int(receipt.get("notification_id") or 0)
     await _emit_audit(
@@ -254,17 +291,20 @@ async def maybe_dispatch_si_coach_alert(
         turn_id=turn_id or "",
         matched=matched,
         notification_id=notification_id,
+        alert_type=alert_type,
     )
     logger.info(
-        "[SI_COACH_ALERT] dispatched user=%s coach=%s phrases=%s nid=%s",
+        "[SI_COACH_ALERT] dispatched user=%s coach=%s type=%s phrases=%s nid=%s",
         client_username,
         coach_username,
+        alert_type,
         matched,
         notification_id,
     )
     return {
         "status": "dispatched",
         "matched": matched,
+        "alert_type": alert_type,
         "coach_username": coach_username,
         "notification_id": notification_id,
         "coach_notified": bool(receipt.get("coach_notified")),
