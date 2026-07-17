@@ -250,6 +250,8 @@ def build_capabilities_manifest(
             "cloud sandbox writes + promote (admin/patch rules)",
             "self_capabilities evidence tool",
             "response claim grounding validator",
+            "auto-inject self_capabilities on capability questions (server-side)",
+            "post-response citation audit vs tool evidence (server-side)",
         ],
         "not_implemented": [
             "CLI neuro-symbolic formal logic / knowledge graph",
@@ -522,6 +524,12 @@ def audit_verified_citations(
         )
 
         tool_m = re.match(r"tool\s*=\s*([a-zA-Z0-9_]+)", inner, re.I)
+        if not tool_m:
+            # Bare / dotted tool citation: [VERIFIED self_capabilities] or
+            # [VERIFIED self_capabilities.section_name]
+            first_seg = re.split(r"[.\s:]", inner, 1)[0].strip()
+            if first_seg in tools_by_name:
+                tool_m = re.match(r"(\w+)", first_seg)
         if tool_m:
             tool_name = tool_m.group(1)
             entries = tools_by_name.get(tool_name) or []
