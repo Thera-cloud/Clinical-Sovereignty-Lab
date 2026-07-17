@@ -32,10 +32,14 @@ h1 {
 .stat.cyan b { color: var(--cyan); }
 button {
   background: transparent; border: 1px solid var(--gold-dim); color: var(--gold);
-  padding: 8px 14px; cursor: pointer; font-family: inherit;
+  padding: 8px 14px; cursor: pointer; font-family: inherit; font-size: 0.85rem;
 }
 button:hover { border-color: var(--gold); color: var(--gold-bright); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
 button.danger { border-color: var(--red); color: var(--red); }
+button.approve { border-color: var(--cyan); color: var(--cyan); }
+button.hold { border-color: var(--gold-dim); color: var(--muted); }
+button.all-btn { font-weight: 600; letter-spacing: 0.02em; }
 .grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; }
 @media (max-width: 960px) { .grid { grid-template-columns: 1fr; } }
 .panel {
@@ -57,9 +61,14 @@ button.danger { border-color: var(--red); color: var(--red); }
 .badge.YELLOW { color: var(--orange); border-color: var(--orange); }
 .badge.GREEN { color: var(--cyan); border-color: var(--cyan); }
 .title { font-weight: 600; margin: 6px 0; }
+.ask {
+  color: var(--gold-bright); font-size: 0.92rem; margin: 8px 0;
+  white-space: pre-wrap; line-height: 1.45;
+}
 .detail { color: var(--muted); font-size: 0.9rem; white-space: pre-wrap; }
 .meta { color: #666; font-size: 0.78rem; margin-top: 6px; }
-.row-actions { margin-top: 8px; display: flex; gap: 8px; }
+.row-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+.bulk-label { color: var(--muted); font-size: 0.85rem; margin-right: 4px; }
 a.back { color: var(--gold-dim); text-decoration: none; }
 a.back:hover { color: var(--gold); }
 #msg { margin: 10px 0; color: var(--cyan); min-height: 1.2em; }
@@ -72,7 +81,11 @@ a.back:hover { color: var(--gold); }
   <div class="bar" id="stats"></div>
   <div class="bar">
     <button onclick="loadAll()">Refresh</button>
-    <button class="danger" onclick="ackAll()">Ack all inbox</button>
+    <span class="bulk-label">[ALL]</span>
+    <button class="all-btn" onclick="decideAll('ACK')">ALL ACK</button>
+    <button class="all-btn approve" onclick="decideAll('APPROVE')">ALL APPROVE</button>
+    <button class="all-btn danger" onclick="decideAll('REJECT')">ALL REJECT</button>
+    <button class="all-btn hold" onclick="decideAll('HOLD')">ALL HOLD</button>
   </div>
   <div id="msg"></div>
   <div class="grid">
@@ -154,11 +167,33 @@ async function api(path, opts) {
     msg('Session expired — log in again at command.sovereignsanctuary.net');
     return null;
   }
-  return resp.json();
+  let data = null;
+  try { data = await resp.json(); } catch (e) { data = { status: 'error', error: 'bad_json' }; }
+  if (!resp.ok) {
+    msg((data && (data.detail || data.error)) || ('HTTP ' + resp.status));
+    return null;
+  }
+  return data;
 }
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function itemAsk(it) {
+  const p = it.payload || {};
+  return p.ask_of_ceo || p.ceo_summary || p.what_happened || '';
+}
+
+function decisionButtons(id) {
+  const safe = esc(id).replace(/'/g, '');
+  return `
+    <div class="row-actions">
+      <button onclick="decideOne('${safe}','ACK')">ACK</button>
+      <button class="approve" onclick="decideOne('${safe}','APPROVE')">APPROVE</button>
+      <button class="danger" onclick="decideOne('${safe}','REJECT')">REJECT</button>
+      <button class="hold" onclick="decideOne('${safe}','HOLD')">HOLD</button>
+    </div>`;
 }
 
 async function loadInbox() {
@@ -171,14 +206,18 @@ async function loadInbox() {
     <div class="stat red"><b>${s.red||0}</b>red</div>
     <div class="stat cyan"><b>${s.failover ? 'SOLE' : 'DUAL'}</b>COO mode</div>`;
   const items = data.items || [];
-  document.getElementById('inbox').innerHTML = items.length ? items.map(it => `
+  document.getElementById('inbox').innerHTML = items.length ? items.map(it => {
+    const ask = itemAsk(it);
+    return `
     <div class="item">
       <span class="badge ${esc(it.risk)}">${esc(it.risk)}</span>
       <div class="title">${esc(it.title)}</div>
+      ${ask ? `<div class="ask">${esc(ask)}</div>` : ''}
       <div class="detail">${esc(it.detail)}</div>
       <div class="meta">${esc(it.origin)} · ${esc(it.task_id||'')} · ${new Date((it.created_at||0)*1000).toLocaleString()}</div>
-      <div class="row-actions"><button onclick="ackOne('${esc(it.id)}')">Ack</button></div>
-    </div>`).join('') : '<div class="detail">Inbox clear.</div>';
+      ${decisionButtons(it.id)}
+    </div>`;
+  }).join('') : '<div class="detail">Inbox clear.</div>';
 }
 
 async function loadLoop() {
@@ -218,17 +257,35 @@ async function loadClinical() {
     </div>`).join('') : '<div class="detail">No clinical/defense shadow proposals.</div>';
 }
 
-async function ackOne(id) {
-  const r = await api('/api/ceo/inbox/ack', { method: 'POST', body: JSON.stringify({ item_id: id }) });
-  msg(r ? `Acked ${r.acked||0}` : 'Ack failed');
+async function decideOne(id, decision) {
+  msg(decision + '…');
+  const r = await api('/api/ceo/inbox/decide', {
+    method: 'POST',
+    body: JSON.stringify({ item_id: id, decision: decision, decide_all: false }),
+  });
+  if (!r) return;
+  msg(decision + ' applied to ' + (r.processed || 0) + ' item(s)');
   loadInbox();
 }
-async function ackAll() {
-  if (!confirm('Clear entire CEO inbox?')) return;
-  const r = await api('/api/ceo/inbox/ack', { method: 'POST', body: JSON.stringify({ ack_all: true }) });
-  msg(r ? `Acked ${r.acked||0}` : 'Ack failed');
+
+async function decideAll(decision) {
+  const label = {
+    ACK: 'ACK (dismiss) all inbox items?',
+    APPROVE: 'APPROVE all inbox items? (runs linked apply when present)',
+    REJECT: 'REJECT all inbox items?',
+    HOLD: 'HOLD all inbox items?',
+  }[decision] || ('Apply ' + decision + ' to all?');
+  if (!confirm(label)) return;
+  msg('ALL ' + decision + '…');
+  const r = await api('/api/ceo/inbox/decide', {
+    method: 'POST',
+    body: JSON.stringify({ decision: decision, decide_all: true }),
+  });
+  if (!r) return;
+  msg('ALL ' + decision + ': ' + (r.processed || 0) + ' item(s)');
   loadInbox();
 }
+
 async function approvePatent(id) {
   const r = await api('/api/ceo/patent-tags/approve', { method: 'POST', body: JSON.stringify({ ids: [id] }) });
   msg(r ? `Approved ${r.approved||0}` : 'Approve failed');

@@ -28,6 +28,13 @@ class AckBody(BaseModel):
     ack_all: bool = False
 
 
+class DecideBody(BaseModel):
+    """CEO dashboard decisions — same verbs as email/SMS (ACK/APPROVE/REJECT/HOLD)."""
+    decision: str = "ACK"
+    item_id: str = ""
+    decide_all: bool = False
+
+
 class PatentApproveBody(BaseModel):
     ids: List[int] = Field(default_factory=list)
 
@@ -82,9 +89,47 @@ async def ceo_inbox_ack(
     body: AckBody,
     _: Dict[str, Any] = Depends(require_admin),
 ):
+    """Legacy dismiss — prefer POST /inbox/decide with decision=ACK."""
     from app.websocket.cli_dual_coo import ack_ceo_inbox
 
     return ack_ceo_inbox(item_id=body.item_id, ack_all=body.ack_all)
+
+
+@router.post("/inbox/decide")
+async def ceo_inbox_decide(
+    body: DecideBody,
+    request: Request,
+    user: Dict[str, Any] = Depends(require_admin),
+):
+    """Apply ACK / APPROVE / REJECT / HOLD to one inbox item or all pending.
+
+    Matches email button semantics: updates strategy_proposals when present,
+    clears Redis CEO inbox, and runs APPROVE apply side-effects.
+    # QUANTUM-CRYSTAL-ARCH
+    """
+    from app.services.ceo_inbox_notify import decide_ceo_inbox_items
+
+    decision = (body.decision or "").strip().upper()
+    if decision not in ("ACK", "APPROVE", "REJECT", "HOLD"):
+        raise HTTPException(
+            400,
+            "decision must be ACK, APPROVE, REJECT, or HOLD",
+        )
+    if not body.decide_all and not (body.item_id or "").strip():
+        raise HTTPException(400, "item_id required unless decide_all=true")
+
+    db = getattr(request.app.state, "db_pool", None)
+    who = str(user.get("username") or user.get("name") or "DrNevedal1")
+    result = await decide_ceo_inbox_items(
+        db_pool=db,
+        decision=decision,
+        item_id=(body.item_id or "").strip(),
+        decide_all=bool(body.decide_all),
+        approver=who,
+    )
+    if result.get("status") == "error":
+        raise HTTPException(400, result.get("error") or "decide_failed")
+    return result
 
 
 @router.get("/patent-tags/pending")

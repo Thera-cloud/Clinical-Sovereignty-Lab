@@ -352,6 +352,123 @@ async def notify_ceo_inbox_item(item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+async def decide_ceo_inbox_items(
+    *,
+    db_pool,
+    decision: str,
+    item_id: str = "",
+    decide_all: bool = False,
+    approver: str = "",
+) -> Dict[str, Any]:
+    """Dashboard path: ACK/APPROVE/REJECT/HOLD one Redis item or all.
+
+    When a matching strategy_proposals row exists, routes through
+    ApprovalProtocol.handle_inbound_reply (same as email buttons) so proposal
+    status, audit trail, and APPROVE apply stay consistent.
+    """
+    from app.services.approval_protocol import ApprovalProtocolService
+    from app.websocket.cli_dual_coo import ack_ceo_inbox, peek_ceo_inbox
+
+    decision_u = (decision or "").strip().upper()
+    if decision_u not in ("ACK", "APPROVE", "REJECT", "HOLD"):
+        return {"status": "error", "error": "invalid_decision"}
+
+    items = peek_ceo_inbox(100)
+    if decide_all:
+        targets = list(items)
+    else:
+        targets = [i for i in items if str(i.get("id") or "") == str(item_id)]
+        if not targets:
+            return {"status": "error", "error": "item_not_found", "processed": 0}
+
+    results: list = []
+    processed = 0
+    if db_pool:
+        protocol = ApprovalProtocolService(db_pool)
+        for it in targets:
+            iid = str(it.get("id") or "")
+            if not iid:
+                continue
+            proposal_id = None
+            try:
+                async with db_pool.acquire() as conn:
+                    row = await conn.fetchrow(
+                        """
+                        SELECT proposal_id FROM strategy_proposals
+                        WHERE status IN ('proposed', 'pending_approval')
+                          AND (
+                            metadata->>'ceo_inbox_item_id' = $1
+                            OR execution_payload->>'ceo_inbox_item_id' = $1
+                          )
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """,
+                        iid,
+                    )
+                    if row:
+                        proposal_id = row["proposal_id"]
+            except Exception as e:
+                logger.warning("decide_ceo_inbox lookup %s: %s", iid, e)
+
+            if proposal_id is not None:
+                try:
+                    reply = await protocol.handle_inbound_reply(
+                        decision_u,
+                        channel="dashboard",
+                        proposal_id=proposal_id,
+                        approver_identity=approver or "dashboard_ceo",
+                    )
+                    results.append({
+                        "item_id": iid,
+                        "proposal_id": str(proposal_id),
+                        "decision": decision_u,
+                        "reply": {
+                            "decision": reply.get("decision"),
+                            "error": reply.get("error"),
+                        },
+                    })
+                    processed += 1
+                    continue
+                except Exception as e:
+                    logger.warning("decide_ceo_inbox reply %s: %s", iid, e)
+
+            # No pending proposal (or reply failed) — clear Redis only
+            ack = ack_ceo_inbox(item_id=iid)
+            results.append({
+                "item_id": iid,
+                "proposal_id": None,
+                "decision": decision_u,
+                "inbox_only": True,
+                "ack": ack,
+            })
+            processed += 1
+    else:
+        if decide_all:
+            ack = ack_ceo_inbox(ack_all=True)
+            return {
+                "status": "ok",
+                "decision": decision_u,
+                "processed": int(ack.get("acked") or 0),
+                "results": [{"decide_all": True, "ack": ack}],
+                "note": "no_db_pool — redis clear only",
+            }
+        ack = ack_ceo_inbox(item_id=item_id)
+        return {
+            "status": "ok",
+            "decision": decision_u,
+            "processed": int(ack.get("acked") or 0),
+            "results": [{"item_id": item_id, "ack": ack}],
+            "note": "no_db_pool — redis clear only",
+        }
+
+    return {
+        "status": "ok",
+        "decision": decision_u,
+        "processed": processed,
+        "results": results,
+    }
+
+
 async def handle_ceo_decision(
     *,
     db_pool,

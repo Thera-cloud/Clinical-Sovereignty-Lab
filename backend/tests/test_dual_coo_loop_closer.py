@@ -194,12 +194,24 @@ class TestCeoApiRouterSource(unittest.TestCase):
         ).read_text(encoding="utf-8")
         for marker in (
             "/inbox",
+            "/inbox/decide",
             "/patent-tags/approve",
             "/clinical-apply",
             "/loop-status",
             "require_admin",
+            "DecideBody",
         ):
             self.assertIn(marker, src)
+
+    def test_decide_ceo_inbox_helper_present(self):
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "app"
+            / "services"
+            / "ceo_inbox_notify.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("async def decide_ceo_inbox_items", src)
+        self.assertIn('channel="dashboard"', src)
 
 
 class TestLoopCloserSource(unittest.TestCase):
