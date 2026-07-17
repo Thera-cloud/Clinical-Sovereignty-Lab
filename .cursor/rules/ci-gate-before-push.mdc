@@ -11,9 +11,9 @@ GitHub workflow `.github/workflows/deploy.yml` runs **`bash backend/scripts/run_
 
 | Auto-synced field | Marker |
 |-------------------|--------|
-| Offline pass count | <!-- ci-gate:offline-test-count -->1523<!-- /ci-gate:offline-test-count --> |
+| Offline pass count | <!-- ci-gate:offline-test-count -->1532<!-- /ci-gate:offline-test-count --> |
 | `--ignore` entries in `run_ci_tests.sh` | <!-- ci-gate:ignore-count -->15<!-- /ci-gate:ignore-count --> |
-| Hook stamp (sha256) | <!-- ci-gate:hooks-stamp -->3a8ba2c14888232567f3a2102b8dab57e6658429f6e720bbdd838d4573d0a818<!-- /ci-gate:hooks-stamp --> |
+| Hook stamp (sha256) | <!-- ci-gate:hooks-stamp -->9256a2e6ef880694fc7792c4a380028bfa1a153c0b07ab1083c888e6f8e63275<!-- /ci-gate:hooks-stamp --> |
 
 After a green pre-push, counts/stamp in this rule file update automatically — **commit the rule if it changed**.
 
@@ -31,7 +31,7 @@ From repo root:
 bash backend/scripts/run_ci_tests.sh
 ```
 
-Must exit **0** (<!-- ci-gate:offline-test-count -->1523<!-- /ci-gate:offline-test-count --> offline unit/smoke tests). Do not push if it fails.
+Must exit **0** (<!-- ci-gate:offline-test-count -->1532<!-- /ci-gate:offline-test-count --> offline unit/smoke tests). Do not push if it fails.
 
 Equivalent env (matches workflow):
 
