@@ -317,6 +317,86 @@ class ApprovalProtocolService:
             f"({hours_remaining:.1f}h from now)"
         )
 
+    @classmethod
+    def _mailto_action_url(cls, decision: str, subject: str) -> str:
+        """Build a mailto: link that pre-fills reply-to + decision body.
+
+        Subject uses ``Re: <original>`` so inbound parse still recovers
+        ``[#…]`` / ``[#ceo…]`` tokens from the quoted subject line.
+        """
+        from urllib.parse import quote
+
+        decision = (decision or "").strip().upper()
+        subj = (subject or "").strip()
+        if subj and not subj.lower().startswith("re:"):
+            subj = f"Re: {subj}"
+        return (
+            f"mailto:{cls.PROPOSAL_REPLY_TO}"
+            f"?subject={quote(subj)}"
+            f"&body={quote(decision)}"
+        )
+
+    def _decision_buttons(self, proposal: Dict[str, Any]) -> "list[tuple[str, str, str]]":
+        """Return ``(label, decision, hex_color)`` for mailto action buttons."""
+        meta = self._coerce_metadata(proposal.get("metadata"))
+        if meta.get("ceo_inbox"):
+            return [
+                ("ACK", "ACK", "#C9A962"),
+                ("APPROVE", "APPROVE", "#4ECDC4"),
+                ("REJECT", "REJECT", "#EF4444"),
+                ("HOLD", "HOLD", "#8B7355"),
+            ]
+        return [
+            ("APPROVE", "APPROVE", "#4ECDC4"),
+            ("HOLD", "HOLD", "#8B7355"),
+            ("REJECT", "REJECT", "#EF4444"),
+        ]
+
+    def _build_proposal_email_html(
+        self,
+        proposal: Dict[str, Any],
+        subject: str,
+        plain_body: str,
+    ) -> str:
+        """HTML multipart with tappable mailto decision buttons."""
+        import html as _html
+
+        buttons = self._decision_buttons(proposal)
+        cells: list[str] = []
+        for label, decision, color in buttons:
+            href = _html.escape(self._mailto_action_url(decision, subject), quote=True)
+            cells.append(
+                "<td style='padding:6px 8px;'>"
+                f"<a href='{href}' "
+                f"style='background:{color};color:#050505;padding:12px 18px;"
+                "text-decoration:none;border-radius:4px;font-family:Arial,Helvetica,sans-serif;"
+                "font-size:14px;font-weight:bold;display:inline-block;'>"
+                f"{_html.escape(label)}</a></td>"
+            )
+        button_row = (
+            "<table role='presentation' cellspacing='0' cellpadding='0' border='0'>"
+            f"<tr>{''.join(cells)}</tr></table>"
+        )
+        # Plain body as preformatted fallback under the buttons
+        escaped = _html.escape(plain_body).replace("\n", "<br>\n")
+        return (
+            "<!DOCTYPE html><html><body style='background:#0A0A0A;color:#E8D5A3;"
+            "font-family:Arial,Helvetica,sans-serif;padding:20px;'>"
+            "<div style='max-width:640px;margin:0 auto;'>"
+            "<p style='color:#C9A962;font-size:12px;letter-spacing:0.08em;"
+            "text-transform:uppercase;margin:0 0 12px;'>Sovereign decision</p>"
+            "<p style='color:#E8D5A3;font-size:15px;margin:0 0 16px;'>"
+            "Tap a button — it opens a pre-filled reply. Send that email to apply "
+            "the decision. No typing required.</p>"
+            f"{button_row}"
+            "<p style='color:#8B7355;font-size:12px;margin:16px 0 24px;'>"
+            "MODIFY still requires a typed reply: "
+            "<code style='color:#E8D5A3;'>MODIFY: your changes</code></p>"
+            "<hr style='border:none;border-top:1px solid #333;margin:24px 0;'>"
+            f"<div style='color:#C9B896;font-size:13px;line-height:1.45;'>{escaped}</div>"
+            "</div></body></html>"
+        )
+
     def _build_proposal_email(
         self,
         proposal: Dict[str, Any],
@@ -381,9 +461,17 @@ class ApprovalProtocolService:
                 f"{'─' * 50}\n"
             )
 
+        # Mailto action lines (plain-text clients / accessibility)
+        mailto_lines = []
+        for label, decision, _color in self._decision_buttons(proposal):
+            mailto_lines.append(
+                f"  {label}: {self._mailto_action_url(decision, subject)}"
+            )
+        mailto_block = "ONE-TAP REPLY (opens draft — just Send):\n" + "\n".join(mailto_lines) + "\n\n"
+
         if meta.get("ceo_inbox"):
             reply_block = (
-                "REPLY WITH:\n"
+                "REPLY WITH (or use one-tap links above):\n"
                 "  ACK      — Dismiss from CEO inbox (no clinical apply)\n"
                 "  APPROVE  — Dismiss + apply linked actions (if any)\n"
                 "  REJECT   — Dismiss without apply\n"
@@ -391,7 +479,7 @@ class ApprovalProtocolService:
             )
         else:
             reply_block = (
-                "REPLY WITH:\n"
+                "REPLY WITH (or use one-tap links above):\n"
                 "  APPROVE  — Execute this proposal\n"
                 "  HOLD     — Defer for later review\n"
                 "  REJECT   — Cancel this proposal\n"
@@ -425,6 +513,7 @@ class ApprovalProtocolService:
             "DEPLOYMENT WINDOW:\n"
             f"{deploy_line}\n\n"
             f"{'─' * 50}\n"
+            f"{mailto_block}"
             f"{reply_block}"
             f"Auto-execute: {self._format_auto_execute_line(proposal)}\n"
             f"{'═' * 50}\n"
@@ -439,6 +528,7 @@ class ApprovalProtocolService:
         Renders objective, reasoning, action steps, expected impact,
         rollback, escalation context, and the exact auto-execute fire
         time so the operator never has to open another tool to decide.
+        HTML multipart includes mailto decision buttons (ACK/APPROVE/…).
         """
         sg = self._get_sendgrid_client()
         if not sg:
@@ -449,6 +539,7 @@ class ApprovalProtocolService:
             from sendgrid.helpers.mail import Mail, Email, To, Content
 
             subject, body = self._build_proposal_email(proposal)
+            html_body = self._build_proposal_email_html(proposal, subject, body)
             dest = (to_email or "").strip() or settings.FROM_EMAIL
 
             message = Mail(
@@ -456,6 +547,7 @@ class ApprovalProtocolService:
                 to_emails=To(dest),
                 subject=subject,
                 plain_text_content=Content("text/plain", body),
+                html_content=Content("text/html", html_body),
             )
             # FIX 2: route replies to SendGrid Inbound Parse so APPROVE /
             # REJECT / HOLD / MODIFY actually reach the swarm instead of

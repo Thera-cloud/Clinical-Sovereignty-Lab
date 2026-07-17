@@ -223,7 +223,8 @@ class TestProposalEmailRendering:
             "DATA INVOLVED:",
             "ESTIMATED COST:",
             "DEPLOYMENT WINDOW:",
-            "REPLY WITH:",
+            "REPLY WITH",
+            "ONE-TAP REPLY",
             "Auto-execute:",
         ):
             assert section in body, f"Email missing required section: {section}"
@@ -264,6 +265,38 @@ class TestProposalEmailRendering:
         assert "Auto-execute: Yes, at" in body
         assert "UTC" in body
         assert "from now" in body
+
+    def test_plain_body_includes_mailto_action_links(self, fake_pool):
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        subject, body = svc._build_proposal_email(_enriched_proposal())
+        assert "ONE-TAP REPLY" in body
+        assert "mailto:approve@reply.sovereignsanctuary.net" in body
+        assert "body=APPROVE" in body
+        assert "body=REJECT" in body
+        assert "body=HOLD" in body
+        assert "Re%3A" in body or "Re:" in subject
+
+    def test_html_includes_mailto_buttons(self, fake_pool):
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        proposal = _enriched_proposal()
+        subject, body = svc._build_proposal_email(proposal)
+        html = svc._build_proposal_email_html(proposal, subject, body)
+        assert "mailto:approve@reply.sovereignsanctuary.net" in html
+        assert ">APPROVE<" in html
+        assert ">REJECT<" in html
+        assert ">HOLD<" in html
+        assert ">ACK<" not in html  # ACK is CEO-inbox only
+
+    def test_ceo_html_includes_ack_mailto_button(self, fake_pool):
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        proposal = _enriched_proposal()
+        proposal["metadata"]["ceo_inbox"] = True
+        subject, body = svc._build_proposal_email(proposal)
+        html = svc._build_proposal_email_html(proposal, subject, body)
+        assert ">ACK<" in html
+        assert "body=ACK" in html
+        labels = [c[0] for c in svc._decision_buttons(proposal)]
+        assert labels == ["ACK", "APPROVE", "REJECT", "HOLD"]
 
 
 class TestProposalSmsRendering:
