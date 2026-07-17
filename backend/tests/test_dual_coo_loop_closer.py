@@ -109,6 +109,26 @@ class TestCeoInboxNotify(unittest.TestCase):
             "43849983",
         )
 
+    def test_ceo_review_brief_trust_english(self):
+        from app.services.ceo_inbox_notify import build_ceo_review_brief
+
+        brief = build_ceo_review_brief(
+            {
+                "risk": "YELLOW",
+                "title": "Trust YELLOW: Token Lab (ENDPOINT_DOWN)",
+                "detail": "14/15 TRUSTED — 1 endpoint(s) need attention",
+                "payload": {
+                    "category": "ENDPOINT_DOWN",
+                    "auditor": "Token Lab",
+                },
+            }
+        )
+        self.assertIn("WHAT HAPPENED", brief["summary_block"])
+        self.assertIn("WHAT I NEED FROM YOU", brief["summary_block"])
+        self.assertIn("healthy response", brief["reasoning"].lower())
+        self.assertNotEqual(brief["objective"], "Trust YELLOW: Token Lab (ENDPOINT_DOWN)")
+        self.assertTrue(any("APPROVE" in s for s in brief["action_steps"]))
+
 
 class TestFailover(unittest.TestCase):
     @patch("app.websocket.cli_dual_coo._redis")

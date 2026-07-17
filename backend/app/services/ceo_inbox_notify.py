@@ -34,6 +34,231 @@ CEO_NOTIFY_SMS = os.getenv(
 
 _SUBJECT_CEO_RE = re.compile(r"\[#ceo([0-9a-fA-F]{6,12})\]", re.IGNORECASE)
 
+# Plain-English maps so CEO emails never rely on opaque codes alone.
+_TRUST_CATEGORY_EN = {
+    "ENDPOINT_DOWN": (
+        "One or more audited API checks did not return a healthy response "
+        "(timeout, 5xx, or empty payload the auditor treats as failed)."
+    ),
+    "DATA_PIPELINE": (
+        "A trust baseline count or data-shape check does not match what the "
+        "auditor expected (often after adding/removing endpoints)."
+    ),
+    "AUTH_FAILURE": (
+        "The auditor could not authenticate (missing/expired token or role gate)."
+    ),
+    "GATE_BYPASS": (
+        "A tier or feature gate did not enforce access the way the auditor expects."
+    ),
+    "WS_TIMEOUT": (
+        "A WebSocket handshake or flow the auditor probes timed out or failed."
+    ),
+    "L2_ISSUE": (
+        "A response payload failed structural (L2) validation even if HTTP looked OK."
+    ),
+    "AI_UNREACHABLE": (
+        "Azure/OpenAI or another AI dependency the auditor checks is unreachable."
+    ),
+    "PREFLIGHT_FAIL": (
+        "A Trust Enforcer pre-flight check failed (audit token, test accounts, "
+        "admin MFA, Azure env, or Redis)."
+    ),
+    "DEFENSE_DEGRADED": (
+        "A Hive Defense / security subsystem check reported degraded or offline."
+    ),
+}
+
+
+def build_ceo_review_brief(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Build English objective/reasoning/action_steps for CEO email + SMS.
+
+    Call sites may pass terse titles (codes, task ids). This expands them into
+    what happened, why it matters, and what Nathan should do.
+    """
+    risk = str(item.get("risk") or "YELLOW").upper()
+    title = (item.get("title") or "CEO inbox item").strip()
+    detail = (item.get("detail") or "").strip()
+    payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+    origin = str(item.get("origin") or "cloud")
+    task_id = str(item.get("task_id") or "")
+
+    # Prefer caller-supplied brief fields when present
+    if payload.get("ceo_summary") or payload.get("what_happened"):
+        objective = str(
+            payload.get("ceo_summary") or payload.get("what_happened") or title
+        )[:600]
+        reasoning = str(
+            payload.get("why_it_matters")
+            or payload.get("reasoning")
+            or detail
+            or "Escalated by Dual-COO for CEO review."
+        )[:1200]
+        ask = str(
+            payload.get("ask_of_ceo")
+            or payload.get("what_i_need")
+            or ""
+        ).strip()
+        steps = [s for s in (payload.get("action_steps") or []) if s]
+        if ask:
+            steps = [ask] + steps
+        if not steps:
+            steps = _default_reply_steps(risk)
+        return {
+            "objective": objective,
+            "reasoning": reasoning,
+            "action_steps": steps[:8],
+            "expected_impact": str(
+                payload.get("expected_impact")
+                or "Clears CEO inbox after your reply; linked apply runs only on APPROVE."
+            )[:400],
+            "rollback": "No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
+            "summary_block": _format_summary_block(objective, reasoning, steps, risk),
+        }
+
+    title_l = title.lower()
+    cat = str(payload.get("category") or "").upper()
+    auditor = str(payload.get("auditor") or "").strip()
+
+    # Trust Enforcer escalations
+    m = re.match(
+        r"Trust\s+(YELLOW|RED):\s*(.+?)\s*\(([A-Z_]+)\)\s*$",
+        title,
+        re.IGNORECASE,
+    )
+    if m or "trust yellow" in title_l or "trust red" in title_l:
+        if m:
+            risk_word, auditor_name, cat = m.group(1).upper(), m.group(2).strip(), m.group(3).upper()
+        else:
+            risk_word, auditor_name = risk, auditor or "an auditor"
+        cat_en = _TRUST_CATEGORY_EN.get(
+            cat,
+            f"Trust category code {cat or 'UNKNOWN'} — see detail below for the auditor message.",
+        )
+        who = auditor or auditor_name or "Trust auditor"
+        objective = (
+            f"{who} reported a {risk_word} trust problem"
+            + (f" ({cat})" if cat else "")
+            + ". This is not a Dual-COO learning task — it means a production "
+            "trust check failed and needs your attention or acknowledgment."
+        )
+        reasoning = (
+            f"What the code means: {cat_en}\n\n"
+            f"Auditor message: {detail or '(no further detail provided)'}"
+        )
+        steps = [
+            f"Open Sovereign Command → Trust / {who} and identify the failing check(s).",
+            "If the failure is already fixed or expected (deploy in progress), reply APPROVE to acknowledge and clear this item.",
+            "If still broken, have Dual-COO / ops remediate, then reply APPROVE when green.",
+            "Reply REJECT only if this alert is wrong and should be discarded without acknowledging.",
+        ]
+        ask = str(payload.get("ask_of_ceo") or "").strip()
+        if ask:
+            steps = [ask] + steps
+        return {
+            "objective": objective[:600],
+            "reasoning": reasoning[:1200],
+            "action_steps": steps[:8],
+            "expected_impact": (
+                "APPROVE records that you reviewed the trust alert and clears the CEO inbox item. "
+                "It does not auto-fix the endpoint."
+            ),
+            "rollback": "No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
+            "summary_block": _format_summary_block(objective, reasoning, steps, risk_word),
+        }
+
+    # Six-Quotient battery
+    if "six-quotient" in title_l or payload.get("kind", "").startswith("six_quotient"):
+        q = payload.get("quotient") or "?"
+        objective = (
+            f"Six-Quotient Battery flagged quotient {q} for CEO review "
+            f"({'regression — urgent' if risk == 'RED' else 'dip — candidate fix'})."
+        )
+        reasoning = (
+            "External scores (or gap analysis vs baseline) show this quotient needs "
+            "attention. Dual-COO will not change clinical prompts without your call.\n\n"
+            f"Technical detail: {detail[:800] or '(see payload)'}"
+        )
+        steps = [
+            "Review the Six-Quotient run / scorecard for this quotient.",
+            "Reply APPROVE if you accept the finding and want growth crystals / Dual-COO follow-up to proceed as queued.",
+            "Reply HOLD if you want the item parked without apply.",
+        ]
+        return {
+            "objective": objective[:600],
+            "reasoning": reasoning[:1200],
+            "action_steps": steps,
+            "expected_impact": "Clears inbox; APPROVE may allow linked growth/enqueue paths already prepared.",
+            "rollback": "No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
+            "summary_block": _format_summary_block(objective, reasoning, steps, risk),
+        }
+
+    # Clinical / coach hold
+    if "clinical" in title_l or "clinical_hold" in title_l or risk == "RED" and "coach" in title_l:
+        objective = (
+            f"{title} — clinical or defense material requires CEO (Nathan) sign-off "
+            "before apply; Dual-COO will not auto-ship."
+        )
+        reasoning = detail or "Sensitive clinical path escalated to RED."
+        steps = [
+            "Read the clinical/defense detail carefully.",
+            "Reply APPROVE only if you authorize applying the linked shadow/actions.",
+            "Reply REJECT or HOLD to dismiss without applying.",
+        ]
+        return {
+            "objective": objective[:600],
+            "reasoning": reasoning[:1200],
+            "action_steps": steps,
+            "expected_impact": "APPROVE may apply linked clinical shadow / crystal actions.",
+            "rollback": "No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
+            "summary_block": _format_summary_block(objective, reasoning, steps, risk),
+        }
+
+    # Generic fallback — still English-first
+    objective = (
+        f"CEO review requested ({risk}): {title}. "
+        "Please decide whether to acknowledge, authorize apply, or reject."
+    )
+    reasoning = (
+        f"{detail or 'No additional detail was attached.'}\n\n"
+        f"Origin: {origin}"
+        + (f" · task reference: {task_id}" if task_id else "")
+        + ". Reference IDs are for tracing only — the ask is the decision above."
+    )
+    steps = _default_reply_steps(risk)
+    return {
+        "objective": objective[:600],
+        "reasoning": reasoning[:1200],
+        "action_steps": steps,
+        "expected_impact": "Clears CEO inbox after your reply; linked apply runs only on APPROVE.",
+        "rollback": "No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
+        "summary_block": _format_summary_block(objective, reasoning, steps, risk),
+    }
+
+
+def _default_reply_steps(risk: str) -> list:
+    return [
+        "Reply ACK to dismiss from inbox (no apply).",
+        "Reply APPROVE to dismiss and apply linked actions if any are attached.",
+        "Reply REJECT or HOLD to dismiss without apply.",
+        f"This is a {risk} item — "
+        + (
+            "RED also sends SMS; treat as synchronous CEO-only."
+            if risk == "RED"
+            else "YELLOW is morning-batch CEO review."
+        ),
+    ]
+
+
+def _format_summary_block(
+    objective: str, reasoning: str, steps: list, risk: str
+) -> str:
+    step_lines = "\n".join(f"  {i}. {s}" for i, s in enumerate(steps[:6], 1))
+    return (
+        f"=== WHAT HAPPENED ({risk}) ===\n{objective.strip()}\n\n"
+        f"=== WHY IT MATTERS ===\n{reasoning.strip()}\n\n"
+        f"=== WHAT I NEED FROM YOU ===\n{step_lines}\n"
+    )
+
 
 def ceo_short_id(item_id: str) -> str:
     """Last hex-ish segment of inbox id for subject token."""
@@ -213,6 +438,7 @@ async def _insert_ceo_proposal(db_pool, item: Dict[str, Any]) -> Optional[Dict[s
     # Subject token uses [#ceoSHORT] — also embed in title for recovery
     title_with_token = f"{title} [#ceo{short}]"[:300]
 
+    brief = build_ceo_review_brief(item)
     meta = {
         "ceo_inbox": True,
         "ceo_inbox_item_id": item.get("id"),
@@ -222,19 +448,18 @@ async def _insert_ceo_proposal(db_pool, item: Dict[str, Any]) -> Optional[Dict[s
         "ceo_task_id": item.get("task_id"),
         "ceo_risk": risk,
         "details": {
-            "objective": f"CEO Dual-COO inbox item ({risk}): {title}",
-            "reasoning": detail or "Surfaced by Dual-COO for CEO review.",
-            "action_steps": [
-                "Reply ACK to dismiss from inbox",
-                "Reply APPROVE to dismiss and apply linked actions (if any)",
-                "Reply REJECT or HOLD to dismiss without apply",
-            ],
-            "expected_impact": "Clears CEO inbox and optionally applies RED clinical/patent actions.",
-            "rollback": "No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
+            "objective": brief["objective"],
+            "reasoning": brief["reasoning"],
+            "action_steps": brief["action_steps"],
+            "expected_impact": brief["expected_impact"],
+            "rollback": brief["rollback"],
         },
     }
+    # Lead with English summary; technical refs last
     description = (
-        f"{detail}\n\n"
+        f"{brief['summary_block']}\n"
+        f"--- Technical / trace (optional) ---\n"
+        f"Raw detail: {detail or '(none)'}\n"
         f"Inbox ID: {item.get('id')}\n"
         f"Origin: {item.get('origin')} · task: {item.get('task_id')}\n"
         f"Reply ACK / APPROVE / REJECT / HOLD to {ApprovalProtocolService_REPLY_TO()}\n"

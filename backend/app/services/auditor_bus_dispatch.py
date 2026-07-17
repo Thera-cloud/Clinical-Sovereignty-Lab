@@ -81,24 +81,34 @@ def dispatch_enforcement_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any
             if pub.get("status") == "ok":
                 published += 1
             task_id = str((pub.get("task") or {}).get("task_id") or "")
+            # QUANTUM-CRYSTAL-ARCH — English ask for CEO (ceo_inbox_notify expands further)
+            ask = (
+                f"Review {auditor} in Sovereign Command Trust: category {cat}. "
+                f"Auditor said: {detail or 'no detail'}. "
+                "Reply APPROVE to acknowledge/clear, or fix then APPROVE."
+            )
+            enriched = dict(action) if isinstance(action, dict) else {"raw": action}
+            enriched.setdefault("category", cat)
+            enriched.setdefault("auditor", auditor)
+            enriched["ask_of_ceo"] = ask
             if cat in _RED_CATEGORIES:
                 enqueue_ceo(
                     risk=RISK_RED,
                     title=f"Trust RED: {auditor} ({cat})",
-                    detail=detail,
+                    detail=detail or ask,
                     origin="cloud",
                     task_id=task_id,
-                    payload=action,
+                    payload=enriched,
                     dedup_ttl_s=6 * 3600,
                 )
             elif cat in _YELLOW_CATEGORIES:
                 enqueue_ceo(
                     risk=RISK_YELLOW,
                     title=f"Trust YELLOW: {auditor} ({cat})",
-                    detail=detail,
+                    detail=detail or ask,
                     origin="cloud",
                     task_id=task_id,
-                    payload=action,
+                    payload=enriched,
                     dedup_ttl_s=6 * 3600,
                 )
         except Exception as e:
