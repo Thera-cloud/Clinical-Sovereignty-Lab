@@ -19,6 +19,35 @@ class TestApprovalProtocolInit:
         assert svc._sendgrid_client is None
         assert svc._twilio_client is None
 
+    def test_twilio_client_falls_back_to_env(self, fake_pool, monkeypatch):
+        """settings may omit Twilio fields — env is canonical on GREEN."""
+        monkeypatch.setenv("TWILIO_ACCOUNT_SID", "ACtestsid123")
+        monkeypatch.setenv("TWILIO_AUTH_TOKEN", "testtoken123")
+
+        class _FakeClient:
+            def __init__(self, sid, token):
+                self.sid = sid
+                self.token = token
+
+        import app.services.approval_protocol as ap_mod
+
+        monkeypatch.setattr(ap_mod, "Client", _FakeClient, raising=False)
+        # Client is imported inside the method — patch twilio.rest.Client
+        import sys
+        from types import ModuleType
+
+        fake_rest = ModuleType("twilio.rest")
+        fake_rest.Client = _FakeClient
+        fake_twilio = ModuleType("twilio")
+        fake_twilio.rest = fake_rest
+        monkeypatch.setitem(sys.modules, "twilio", fake_twilio)
+        monkeypatch.setitem(sys.modules, "twilio.rest", fake_rest)
+
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        client = svc._get_twilio_client()
+        assert client is not None
+        assert client.sid == "ACtestsid123"
+
 
 class TestParseReply:
     def test_parse_approve(self):

@@ -659,8 +659,17 @@ class ApprovalProtocolService:
         """Lazy-load Twilio client."""
         if not self._twilio_client:
             try:
-                twilio_sid = getattr(settings, "TWILIO_ACCOUNT_SID", "")
-                twilio_token = getattr(settings, "TWILIO_AUTH_TOKEN", "")
+                import os
+
+                # settings may omit Twilio fields — env is canonical on GREEN
+                twilio_sid = (
+                    getattr(settings, "TWILIO_ACCOUNT_SID", None)
+                    or os.getenv("TWILIO_ACCOUNT_SID", "")
+                )
+                twilio_token = (
+                    getattr(settings, "TWILIO_AUTH_TOKEN", None)
+                    or os.getenv("TWILIO_AUTH_TOKEN", "")
+                )
                 if twilio_sid and twilio_token:
                     from twilio.rest import Client
                     self._twilio_client = Client(twilio_sid, twilio_token)
