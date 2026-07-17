@@ -43,6 +43,7 @@ try:
             "todo_write": 2,
             "switch_mode": 1,
             "provider_stats": 5,
+            "self_capabilities": 2,
             "query_sessions": 10,
             "query_coherence_data": 10,
             "query_user_profile": 5,
@@ -79,6 +80,7 @@ except (ImportError, AttributeError) as _ln_imp_err:
         "todo_write": 2,
         "switch_mode": 1,
         "provider_stats": 5,
+        "self_capabilities": 2,
         "query_sessions": 10,
         "query_coherence_data": 10,
         "query_user_profile": 5,
@@ -117,7 +119,7 @@ _WRITE_TOOLS = {"write_file", "str_replace", "delete_file", "inject_log", "debug
 _SHELL_TOOLS = {"shell"}
 _LINT_TOOLS = {"read_lints"}
 _NET_TOOLS = {"web_fetch", "web_search_local"}
-_SESSION_TOOLS = {"todo_write", "switch_mode", "spawn_subagent"}
+_SESSION_TOOLS = {"todo_write", "switch_mode", "spawn_subagent", "self_capabilities"}
 _CLOUD_SANDBOX_WRITES = os.getenv("CLI_CLOUD_SANDBOX_WRITES", "1") != "0"
 _CLOUD_SANDBOX_ROOT = os.getenv("CLI_CLOUD_SANDBOX_ROOT", "/tmp/nate_cli_cloud_sandbox")
 _CLOUD_SHELL_ALLOW_PREFIXES = (
@@ -987,6 +989,23 @@ _PHASE6_TOOL_DEFS = [
         "function": {
             "name": "provider_stats",
             "description": "Show inference provider utilization stats: calls by provider (count, %), total estimated cost, cost savings vs all-Grok/all-Azure baselines. Returns both current session and all-time stats from the JSONL log.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "self_capabilities",
+            "description": (
+                "REQUIRED before answering what this CLI can do, neuro-symbolic/Phase status, "
+                "Mac vs Cloud differences, partner Agents API flags, or provider wiring. "
+                "Returns machine-readable facts from code/flags — answer ONLY from this output. "
+                "Never invent features not listed here."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -2588,6 +2607,28 @@ def _switch_mode_sync(target_mode: str, explanation: str = "") -> Dict[str, Any]
     }
 
 
+def _self_capabilities_sync(
+    mode: str = "ask",
+    cli_type: str = "cloud",
+) -> Dict[str, Any]:
+    try:
+        from app.websocket.cli_grounding import (
+            build_capabilities_manifest,
+            format_manifest_for_tool,
+        )
+
+        manifest = build_capabilities_manifest(mode, cli_type)
+        return {
+            "status": "ok",
+            "content": format_manifest_for_tool(manifest),
+            "result": format_manifest_for_tool(manifest),
+            "manifest": manifest,
+        }
+    except Exception as e:
+        logger.warning("self_capabilities failed: %s", e)
+        return {"status": "error", "error": str(e), "error_code": _ERROR_OTHER}
+
+
 def _provider_stats_sync() -> Dict[str, Any]:
     try:
         from app.services.provider_tracker import get_session_stats, _parse_jsonl_logs
@@ -2837,6 +2878,10 @@ _PHASE6_TOOL_DISPATCH = {
         args.get("explanation", ""),
     ),
     "provider_stats": lambda args, **kw: _provider_stats_sync(),
+    "self_capabilities": lambda args, **kw: _self_capabilities_sync(
+        mode=kw.get("mode") or args.get("mode") or "ask",
+        cli_type=kw.get("cli_type") or args.get("cli_type") or "cloud",
+    ),
     # repo_map registered after _repo_map_sync definition (see below)
 }
 
@@ -3263,6 +3308,13 @@ async def execute_tool(
             sk,
         )
 
+    if name == "self_capabilities":
+        return await asyncio.to_thread(
+            _self_capabilities_sync,
+            mode or "ask",
+            cli_type or "cloud",
+        )
+
     handler = _TOOL_DISPATCH.get(name)
     if handler is None:
         return {"status": "error", "error": f"Unknown tool: {name}", "error_code": _ERROR_OTHER}
@@ -3441,6 +3493,7 @@ _TOOL_DISPATCH["sandbox_promote"] = lambda args, **kw: _sandbox_promote_sync(
 TOOL_TIMEOUTS.setdefault("sandbox_diff", 30)
 TOOL_TIMEOUTS.setdefault("sandbox_promote", 60)
 TOOL_TIMEOUTS.setdefault("web_search", 15)
+TOOL_TIMEOUTS.setdefault("self_capabilities", 2)
 
 
 def get_tool_definitions(mode: str, cli_type: str) -> list:
@@ -3460,7 +3513,9 @@ def get_tool_definitions(mode: str, cli_type: str) -> list:
 
     _session_tools = [
         t for t in _PHASE6_TOOL_DEFS
-        if t["function"]["name"] in ("todo_write", "switch_mode", "provider_stats", "spawn_subagent")
+        if t["function"]["name"] in (
+            "todo_write", "switch_mode", "provider_stats", "spawn_subagent", "self_capabilities",
+        )
     ]
     tools.extend(_session_tools)
     # spawn_subagent only in agentic write/debug modes

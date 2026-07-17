@@ -120,6 +120,7 @@ AGENTIC_CAPABILITIES = {
     "promote_patch_default": True,
     "per_path_retry_until_green": True,
     "multi_proxy_keys": True,
+    "cli_truth_grounding": True,
 }
 
 

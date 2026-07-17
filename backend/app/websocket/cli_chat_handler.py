@@ -55,11 +55,12 @@ _PATH_WRITE_LOCKS_GUARD: Optional[asyncio.Lock] = None
 _SUBAGENT_PROFILES: Dict[str, Optional[frozenset]] = {
     "explore": frozenset({
         "read_file", "list_directory", "grep", "glob", "repo_map",
-        "read_lints", "web_search", "web_fetch", "web_search_local", "todo_write",
+        "read_lints", "web_search", "web_fetch", "web_search_local",
+        "todo_write", "self_capabilities",
     }),
     "test_fix": frozenset({
         "read_file", "grep", "glob", "write_file", "str_replace",
-        "shell", "read_lints", "todo_write", "repo_map",
+        "shell", "read_lints", "todo_write", "repo_map", "self_capabilities",
     }),
     "full": None,  # inherit parent tool set
 }
@@ -187,9 +188,25 @@ def _build_system_prompt(mode: str, cli_type: str) -> str:
     mode_instructions = _MODE_INSTRUCTIONS.get(mode, "")
     cli_label = "CLI-Cloud (server-side)" if cli_type == "cloud" else "CLI-Mac (local workstation)"
 
+    try:
+        from app.websocket.cli_grounding import (
+            ACCURACY_CONTRACT,
+            DESIGN_DISCIPLINE,
+            VERIFICATION_BEFORE_CLAIM,
+        )
+        grounding_block = (
+            f"{ACCURACY_CONTRACT}\n\n{VERIFICATION_BEFORE_CLAIM}\n\n{DESIGN_DISCIPLINE}"
+        )
+    except ImportError:
+        grounding_block = (
+            "ACCURACY: Verify codebase claims with tools. "
+            "Do not invent capabilities. Label design ideas as [DESIGN PROPOSAL]."
+        )
+
     return (
         f"You are Little Nate, operating as {cli_label} in {mode.upper()} mode.\n\n"
         f"{mode_instructions}\n\n"
+        f"{grounding_block}\n\n"
         f"CODEBASE CONTEXT:\n{manifest}\n\n"
         f"{rules}\n\n"
         "TOOL USE: Call tools by using the function calling interface. "
@@ -197,6 +214,7 @@ def _build_system_prompt(mode: str, cli_type: str) -> str:
         "Always be concise. When reading files, cite paths. When making changes, explain why.\n"
         "VERIFICATION: After writing files, check lint/test feedback in tool results and fix errors before finishing.\n"
         "Use repo_map for orientation before deep file reads on large tasks.\n"
+        "Use self_capabilities before answering what you can do / Phase / neuro-symbolic / Mac vs Cloud.\n"
         "AGENTIC: For complex multi-step work, use todo_write to track tasks. "
         "Use spawn_subagent for scoped explore/test_fix child loops. "
         "When AUTO-PYTEST FAILED appears, fix and continue until tests pass or autonomy budget is exhausted."
@@ -470,6 +488,48 @@ async def run_agentic_loop(
         conversation.append({"role": "user", "content": todos_block})
     conversation.append({"role": "user", "content": user_message})
 
+    # Sol 1–5 + extra: force capability/speculative grounding before first model turn
+    grounding_temp: Optional[float] = None
+    try:
+        from app.websocket.cli_grounding import (
+            capability_nudge_message,
+            is_capability_question,
+            is_speculative_question,
+            speculative_nudge_message,
+        )
+        from app.websocket.cli_tools import execute_tool as _exec_ground_tool
+
+        if not is_subagent and is_capability_question(user_message):
+            caps = await _exec_ground_tool(
+                "self_capabilities", {}, mode=mode, cli_type=cli_type, plan_id=plan_id,
+            )
+            caps_body = ""
+            if isinstance(caps, dict):
+                caps_body = caps.get("content") or caps.get("result") or json.dumps(caps, default=str)
+            conversation.append({
+                "role": "user",
+                "content": (
+                    f"{capability_nudge_message(cli_type, mode)}\n\n"
+                    f"[INJECTED self_capabilities OUTPUT — answer from this only]\n{caps_body}"
+                ),
+            })
+            tool_call_log_seed = [{
+                "name": "self_capabilities",
+                "args": {},
+                "status": (caps or {}).get("status", "ok") if isinstance(caps, dict) else "ok",
+                "duration_ms": 0,
+                "injected": True,
+            }]
+            grounding_temp = 0.15
+        else:
+            tool_call_log_seed = []
+            if not is_subagent and is_speculative_question(user_message):
+                conversation.append({"role": "user", "content": speculative_nudge_message()})
+                grounding_temp = 0.2 if mode in ("ask", "plan") else None
+    except Exception as _g_err:
+        logger.debug("CLI grounding inject skipped: %s", _g_err)
+        tool_call_log_seed = []
+
     async def send_to_extension(msg: Dict[str, Any]) -> None:
         await _emit(emit, msg)
 
@@ -481,7 +541,7 @@ async def run_agentic_loop(
         "plan_id": plan_id,
     })
 
-    tool_call_log: List[Dict[str, Any]] = []
+    tool_call_log: List[Dict[str, Any]] = list(tool_call_log_seed)
     files_touched: List[Dict[str, str]] = []
     provider_used = "grok"
     t0 = time.monotonic()
@@ -536,6 +596,7 @@ async def run_agentic_loop(
             response_text, response_tool_calls, provider_used = await _stream_with_tools(
                 emit, conversation, tools, turn, provider_used,
                 max_tokens=max_tokens, mode=mode,
+                temperature=grounding_temp,
             )
         except Exception as e:
             logger.error("CLI stream error (turn %d): %s", turn, e)
@@ -803,6 +864,15 @@ async def run_agentic_loop(
             continue
 
         final_text = response_text or ""
+        grounding_meta: Dict[str, Any] = {"ok": True, "violation_count": 0, "violations": []}
+        if not is_subagent:
+            try:
+                from app.websocket.cli_grounding import apply_grounding_to_done
+                final_text, grounding_meta = apply_grounding_to_done(
+                    final_text, tool_call_log, user_message,
+                )
+            except Exception as ge:
+                logger.debug("CLI grounding validate skipped: %s", ge)
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         if not is_subagent:
             _persist_session(sk, conversation, user_message, final_text)
@@ -819,6 +889,7 @@ async def run_agentic_loop(
             "turn_count": turn,
             "elapsed_ms": elapsed_ms,
             "response_text": final_text[:12000],
+            "grounding": grounding_meta,
             "autonomy": {
                 "fix_attempts": fix_attempts,
                 "max_fix_attempts": _CLI_MAX_FIX_ATTEMPTS,
@@ -841,7 +912,15 @@ async def run_agentic_loop(
         await _emit(emit, done_msg)
         return done_msg
 
+    grounding_meta = {"ok": True, "violation_count": 0, "violations": []}
     if not is_subagent:
+        try:
+            from app.websocket.cli_grounding import apply_grounding_to_done
+            final_text, grounding_meta = apply_grounding_to_done(
+                final_text, tool_call_log, user_message,
+            )
+        except Exception as ge:
+            logger.debug("CLI grounding validate skipped: %s", ge)
         _persist_session(sk, conversation, user_message, final_text)
     done_msg = {
         "type": "nate_cli_chat_done",
@@ -856,6 +935,7 @@ async def run_agentic_loop(
         "turn_count": turn,
         "elapsed_ms": int((time.monotonic() - t0) * 1000),
         "response_text": final_text[:12000],
+        "grounding": grounding_meta,
         "warning": f"Reached max tool turns ({max_turns})",
         "autonomy": {
             "fix_attempts": fix_attempts,
@@ -1081,6 +1161,7 @@ async def _stream_with_tools(
     provider: str,
     max_tokens: int = 4096,
     mode: str = "ask",
+    temperature: Optional[float] = None,
 ) -> tuple:
     """
     Mode-aware provider routing + Azure param adaptation.
@@ -1101,6 +1182,8 @@ async def _stream_with_tools(
             openai_tools.append({"type": "function", "function": t_def})
 
     messages_for_api = _convert_conversation(conversation)
+    # Sol 5: lower temp for capability/speculative grounding; default 0.3
+    stream_temp = 0.3 if temperature is None else float(temperature)
 
     async def _do_stream(url: str, headers: Dict[str, str], model: str, prov: str) -> tuple:
         payload: Dict[str, Any] = {
@@ -1110,7 +1193,7 @@ async def _stream_with_tools(
         }
         # Reasoning-class Azure models often reject temperature
         if not (prov == "azure" and any(x in (model or "").lower() for x in ("o1", "o3", "o4"))):
-            payload["temperature"] = 0.3
+            payload["temperature"] = stream_temp
         payload.update(_token_limit_fields(prov, model, max_tokens))
         if openai_tools:
             payload["tools"] = openai_tools

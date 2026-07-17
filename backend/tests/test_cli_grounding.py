@@ -1,0 +1,137 @@
+"""Offline tests: CLI truth-grounding (capability manifest + claim validator)."""
+
+import os
+
+os.environ["REDIS_URL"] = ""
+os.environ["ENABLE_ASK_NATE_SYMBOLIC"] = "false"
+os.environ["ENABLE_FORWARD_REASONING"] = "false"
+
+
+def test_self_capabilities_in_all_modes():
+    from app.websocket.cli_tools import get_tool_definitions
+
+    for mode in ("ask", "plan", "debug", "ln_fab"):
+        for cli in ("mac", "cloud"):
+            names = {
+                t["function"]["name"]
+                for t in get_tool_definitions(mode, cli)
+                if "function" in t
+            }
+            assert "self_capabilities" in names, f"missing in {cli}/{mode}"
+
+
+def test_manifest_flags_clinical_ns_not_wired():
+    from app.websocket.cli_grounding import build_capabilities_manifest
+
+    m = build_capabilities_manifest("ask", "cloud")
+    assert m["object"] == "cli.self_capabilities"
+    assert m["clinical_neuro_symbolic"]["wired_into_cli_loop"] is False
+    assert m["clinical_neuro_symbolic"]["ENABLE_ASK_NATE_SYMBOLIC"] is False
+    assert m["providers"]["workers_ai_in_cli_loop"] is False
+    assert m["mac_vs_cloud"]["mac_cloud_ln_fab_partnership"] is False
+    assert "CLI neuro-symbolic formal logic / knowledge graph" in m["not_implemented"]
+    assert "self_capabilities" in (m.get("tools") or [])
+    assert m["label_rules"]["design"] == "[DESIGN PROPOSAL]"
+    assert m["agentic_api_capabilities"].get("cli_truth_grounding") is True
+
+
+def test_self_capabilities_sync_ok():
+    from app.websocket.cli_tools import _self_capabilities_sync
+
+    r = _self_capabilities_sync("ln_fab", "mac")
+    assert r["status"] == "ok"
+    assert "workers_ai_in_cli_loop" in r["content"]
+    assert r["manifest"]["cli"] == "mac"
+    assert r["manifest"]["mode"] == "ln_fab"
+
+
+def test_capability_question_detection():
+    from app.websocket.cli_grounding import is_capability_question, is_speculative_question
+
+    assert is_capability_question("What is your neuro-symbolic state?")
+    assert is_capability_question("review what your current state of neuro-symbolic")
+    assert is_capability_question("Can CLI-Mac partner with CLI-Cloud?")
+    assert is_speculative_question("What would make this better?")
+    assert not is_capability_question("Read cli_tools.py and fix the timeout")
+
+
+def test_validator_flags_ungrounded_claims():
+    from app.websocket.cli_grounding import validate_cli_response
+
+    bad = validate_cli_response(
+        "I can continuously enhance code via dual-agent partnership. Phase 5b is fully implemented.",
+        tool_call_log=[],
+        user_message="What is your neuro-symbolic state?",
+    )
+    assert bad["ok"] is False
+    assert bad["self_capabilities_called"] is False
+    assert any(v["type"] == "capability_question_without_manifest" for v in bad["violations"])
+    assert bad["rewritten_text"].startswith("[UNVERIFIED]")
+
+
+def test_validator_passes_with_manifest_and_tags():
+    from app.websocket.cli_grounding import validate_cli_response
+
+    good = validate_cli_response(
+        "[NOT IMPLEMENTED] Mac↔Cloud dual LN-FAB partnership. "
+        "[FLAG-OFF] ENABLE_ASK_NATE_SYMBOLIC. "
+        "[VERIFIED tool=self_capabilities] CLI uses Grok/Azure only.",
+        tool_call_log=[{"name": "self_capabilities", "status": "ok"}],
+        user_message="What can you do?",
+    )
+    assert good["ok"] is True
+    assert good["self_capabilities_called"] is True
+
+
+def test_speculation_requires_design_tag():
+    from app.websocket.cli_grounding import validate_cli_response
+
+    r = validate_cli_response(
+        "I can provide a dual CLI partnership that continuously enhances code.",
+        tool_call_log=[{"name": "self_capabilities", "status": "ok"}],
+        user_message="What would a CLI-Mac and CLI-Cloud partnership look like?",
+    )
+    assert r["ok"] is False
+    assert any(v["type"] == "speculation_unlabeled" for v in r["violations"])
+
+
+def test_completion_claim_needs_hash_or_pending():
+    from app.websocket.cli_grounding import validate_cli_response
+
+    r = validate_cli_response(
+        "The feature is deployed and fixed.",
+        tool_call_log=[{"name": "self_capabilities", "status": "ok"}],
+        user_message="status?",
+    )
+    assert r["ok"] is False
+    assert any(v["type"] == "completion_claim_no_hash" for v in r["violations"])
+
+    ok = validate_cli_response(
+        "Change pending commit (uncommitted).",
+        tool_call_log=[{"name": "grep", "status": "ok"}],
+        user_message="did you finish?",
+    )
+    assert ok["ok"] is True
+
+
+def test_system_prompt_contains_accuracy_contract():
+    from app.websocket.cli_chat_handler import _build_system_prompt
+
+    p = _build_system_prompt("ask", "cloud")
+    assert "YOUR ACCURACY RULES" in p
+    assert "self_capabilities" in p
+    assert "DESIGN PROPOSAL" in p
+    assert "VERIFICATION-BEFORE-CLAIM" in p
+
+
+def test_apply_grounding_to_done():
+    from app.websocket.cli_grounding import apply_grounding_to_done
+
+    text, meta = apply_grounding_to_done(
+        "I support neuro-symbolic Phase 5b fully.",
+        [],
+        "What is your neuro-symbolic level?",
+    )
+    assert meta["ok"] is False
+    assert meta["violation_count"] >= 1
+    assert text.startswith("[UNVERIFIED]")
