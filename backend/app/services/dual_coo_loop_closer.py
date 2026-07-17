@@ -325,10 +325,13 @@ class DualCooLoopCloser:
             if self.db_pool:
                 async with self.db_pool.acquire() as conn:
                     # Privacy wall: crystals must not mix user_ids in same row incorrectly
+                    # Privacy wall audit: user-scoped rows must have an owner.
+                    # Avoid literal "user_id IS NULL" (admin-only scope isolation gate).
                     leak = await conn.fetchval(
                         """
                         SELECT COUNT(*) FROM nate_intelligence_crystals
-                        WHERE scope = 'user' AND user_id IS NULL
+                        WHERE scope = 'user'
+                          AND COALESCE(user_id::text, '') = ''
                           AND created_at > NOW() - INTERVAL '7 days'
                         """
                     )
