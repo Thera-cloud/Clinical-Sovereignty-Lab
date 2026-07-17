@@ -250,9 +250,9 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 
 | Step | Action | Done |
 |------|--------|------|
-| D.1 | Migration `246_six_quotient_living_battery.sql` applied (prod + staging DBs) | [ ] |
-| D.2 | `POST /api/admin/six-quotient/bank/seed` — v4 anchors approved | [ ] |
-| D.3 | Dry-run multi-turn: `POST .../trigger` `{dry_run:true, multi_turn:true}` | [ ] |
+| D.1 | Migration `246_six_quotient_living_battery.sql` applied (prod + staging DBs) | [x] *(2026-07-17 @ 5f8954d0)* |
+| D.2 | `POST /api/admin/six-quotient/bank/seed` — v4 anchors approved | [x] *(24 anchors)* |
+| D.3 | Dry-run multi-turn: `POST .../trigger` `{dry_run:true, multi_turn:true}` | [x] *(staging: living_adaptive v5)* |
 | D.4 | Standards sync (staging): `POST .../standards/sync` → review → approve | [ ] |
 | D.5 | Scenario gen (flag on): `POST .../generate` → human approve drafts | [ ] |
 | D.6 | Judge calibrate: `POST .../judge/calibrate` before AI evaluators | [ ] |
