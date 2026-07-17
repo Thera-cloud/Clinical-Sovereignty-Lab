@@ -539,6 +539,67 @@ class SixQuotientGrowthEngine:
             pass
 
     # ------------------------------------------------------------------
+    # Battery feed — only after external scores confirm weaknesses
+    # ------------------------------------------------------------------
+    async def ingest_battery_findings(
+        self, run_id: str, analysis: Dict
+    ) -> Dict:
+        """
+        Crystallize lessons from a scored battery run.
+        Confidence capped at 0.50; tagged source=six_quotient_battery.
+        """
+        if not self.db_pool or not analysis or not analysis.get("ok"):
+            return {"forged": 0}
+        quotients = analysis.get("quotients") or {}
+        forged = 0
+        for q, data in quotients.items():
+            if data.get("risk") not in ("RED", "YELLOW"):
+                continue
+            if data.get("delta_pct", 0) >= 0 and data.get("risk") != "RED":
+                continue
+            crystal_text = (
+                f"BATTERY-VALIDATED WEAKNESS — {q} QUOTIENT (run {run_id}): "
+                f"External score {data.get('score')}/{data.get('max')} "
+                f"({data.get('pct')}%) vs baseline {data.get('baseline_pct')}% "
+                f"(delta {data.get('delta_pct')} pts%). "
+                f"Prioritize clinical reinforcement for {q} scenarios. "
+                f"Do not self-score; this lesson is externally confirmed."
+            )
+            content_hash = hashlib.sha256(
+                f"battery_{q}_{run_id}".encode()
+            ).hexdigest()
+            try:
+                import json as _json
+                meta = _json.dumps({
+                    "growth_crystal": True,
+                    "source": "six_quotient_battery",
+                    "run_id": str(run_id),
+                    "quotient": q,
+                    "risk": data.get("risk"),
+                })
+                async with self.db_pool.acquire() as conn:
+                    await conn.execute(
+                        """INSERT INTO nate_intelligence_crystals
+                           (crystal_text, domain, scope, topics, source_count,
+                            generation, confidence, content_hash, origin_surface,
+                            metadata)
+                         VALUES ($1, 'clinical', 'global', $2, 2, 0, 0.45, $3,
+                                 'six_quotient_battery', $4::jsonb)
+                         ON CONFLICT (content_hash) DO UPDATE
+                           SET confidence = LEAST(
+                                 nate_intelligence_crystals.confidence + 0.02, 0.50),
+                               updated_at = NOW()""",
+                        crystal_text,
+                        [q],
+                        content_hash,
+                        meta,
+                    )
+                forged += 1
+            except Exception as e:
+                logger.warning("Battery crystal forge failed for %s: %s", q, e)
+        return {"forged": forged, "run_id": str(run_id)}
+
+    # ------------------------------------------------------------------
     # Public: get current growth status (for admin/API)
     # ------------------------------------------------------------------
     async def get_growth_status(self) -> Dict:

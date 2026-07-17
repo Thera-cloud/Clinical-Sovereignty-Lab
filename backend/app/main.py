@@ -2752,6 +2752,17 @@ async def lifespan(app: FastAPI):
     except Exception as _dcl_err:
         print(f"   ⚠️  DualCooLoopCloser init failed: {_dcl_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — Six-Quotient Battery (weekly / admin trigger; flag-gated)
+    _six_q_battery_agent = None
+    try:
+        from app.services.six_quotient_battery_agent import SixQuotientBatteryAgent
+        _six_q_battery_agent = SixQuotientBatteryAgent(db_pool, app_state=app.state)
+        await _six_q_battery_agent.start()
+        app.state.six_quotient_battery_agent = _six_q_battery_agent
+        print("   ✅ SixQuotientBatteryAgent started (ENABLE_SIX_QUOTIENT_BATTERY)")
+    except Exception as _sqb_err:
+        print(f"   ⚠️  SixQuotientBatteryAgent init failed: {_sqb_err}")
+
     # ── Nate Check-In Agent — 72h inactivity outreach for clients + coaches ──
     _nate_checkin_agent = None
     try:
@@ -3221,6 +3232,7 @@ async def lifespan(app: FastAPI):
         ("cli_task_bus_consumer", _cli_task_bus_consumer is not None),  # QUANTUM-CRYSTAL-ARCH
         ("crystal_outcome_apply", _crystal_outcome_apply is not None),  # QUANTUM-CRYSTAL-ARCH
         ("dual_coo_loop_closer", _dual_coo_loop_closer is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("six_quotient_battery_agent", _six_q_battery_agent is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", _nate_checkin_agent is not None),
         ("nate_commitment_agent", _nate_commitment_agent is not None),
         ("nate_self_monitor_agent", _nate_self_monitor_agent is not None),
@@ -3352,6 +3364,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ DualCooLoopCloser stopped")
         except Exception as _dcl_stop:
             print(f"   ⚠️  DualCooLoopCloser shutdown: {_dcl_stop}")
+    _six_q_battery_h = getattr(app.state, "six_quotient_battery_agent", None)  # QUANTUM-CRYSTAL-ARCH
+    if _six_q_battery_h:
+        try:
+            await _six_q_battery_h.stop()
+            print("   ✅ SixQuotientBatteryAgent stopped")
+        except Exception as _sqb_stop:
+            print(f"   ⚠️  SixQuotientBatteryAgent shutdown: {_sqb_stop}")
     if _sse_orchestrator:
         try:
             await _sse_orchestrator.stop()
@@ -4223,6 +4242,7 @@ for _rmod, _ralias in [
     ("app.routers.agents_api", "agents_router"),  # SOVEREIGN-VOICE — partner agentic plug-in
     ("app.routers.cli_analytics_api", "cli_analytics_router"),
     ("app.routers.ceo_dual_coo_api", "ceo_dual_coo_router"),  # QUANTUM-CRYSTAL-ARCH
+    ("app.routers.six_quotient_api", "six_quotient_router"),  # QUANTUM-CRYSTAL-ARCH
     ("app.routers.oauth_api", "oauth_router"),
     ("app.routers.nightly_audit_api", "nightly_audit_router"),
     ("app.routers.cloudflare_realtime_api", "cf_realtime_router"),

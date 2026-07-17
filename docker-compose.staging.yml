@@ -40,6 +40,7 @@ services:
       - ENABLE_SYMBOLIC_EXTRACTION=${STAGING_ENABLE_SYMBOLIC_EXTRACTION:-false}
       - ENABLE_SYMBOLIC_VERIFIER=${STAGING_ENABLE_SYMBOLIC_VERIFIER:-false}
       - ENABLE_FORWARD_REASONING=${STAGING_ENABLE_FORWARD_REASONING:-false}
+      - ENABLE_SIX_QUOTIENT_BATTERY=${STAGING_ENABLE_SIX_QUOTIENT_BATTERY:-true}
     ports:
       - "127.0.0.1:8011:8000"
     depends_on:
@@ -64,5 +65,53 @@ services:
           memory: 4G
         reservations:
           memory: 512M
+    networks:
+      - nate_network
+
+  # QUANTUM-CRYSTAL-ARCH — staging bridge for six-quotient battery / chat-path bake
+  # Port 8766 host → 8765 container. DB = little_nate_staging (not production).
+  staging_bridge:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.bridge
+    container_name: nate_staging_bridge
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-nate_admin}:${POSTGRES_PASSWORD}@postgres:5432/little_nate_staging
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-nate_admin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=little_nate_staging
+      - DATA_DIR=/app/data
+      - PYTHONUNBUFFERED=1
+      - ENVIRONMENT=staging
+      - ENABLE_SIX_QUOTIENT_BATTERY=${STAGING_ENABLE_SIX_QUOTIENT_BATTERY:-true}
+      - ENABLE_ASK_NATE_SYMBOLIC=${STAGING_ENABLE_ASK_NATE_SYMBOLIC:-false}
+      - ENABLE_FORWARD_REASONING=${STAGING_ENABLE_FORWARD_REASONING:-false}
+      - CLI_TASK_BUS_ENABLED=false
+      - PUBLIC_TRIAL_ENABLED=false
+    ports:
+      - "127.0.0.1:8766:8765"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./data/bridge_staging:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2G
+        reservations:
+          memory: 256M
     networks:
       - nate_network

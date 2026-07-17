@@ -226,6 +226,24 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 
 ---
 
+## Phase 6 — Six-Quotient Battery flywheel (external scoring)
+
+**Flag:** `ENABLE_SIX_QUOTIENT_BATTERY=false` (prod default; staging compose defaults true)
+
+| Step | Action | Done |
+|------|--------|------|
+| 6.1 | Migration `245_six_quotient_battery.sql` applied | [ ] |
+| 6.2 | Staging bridge up (`staging_bridge` :8766) via `staging_bake_setup.sh` | [ ] |
+| 6.3 | Dry-run: `POST /api/admin/six-quotient/trigger` `{dry_run:true}` | [ ] |
+| 6.4 | External scores: `POST /api/admin/six-quotient/scores` (evaluator_id required) | [ ] |
+| 6.5 | Gap → Dual-COO CEO inbox + growth crystal feed verified | [ ] |
+| 6.6 | Live WS battery (`SIX_QUOTIENT_BATTERY_LIVE_WS`) only after staging bridge smoke | [ ] |
+| 6.7 | Production flag flip | [ ] |
+
+*Scores are external-only. Runner/pregrader never assign quotient points.*
+
+---
+
 ## Post-deploy verification (every phase)
 
 - [ ] `docker logs nate_backend --since 2m | grep 'STARTUP COMPLETE'` → 117/117 (or current denominator)
