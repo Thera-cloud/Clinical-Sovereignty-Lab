@@ -1715,10 +1715,21 @@ def _format_tool_result(result: Any) -> str:
         status = result.get("status", "ok")
         if status == "error":
             return f"Error: {result.get('error', 'unknown error')}"
+        # QUANTUM-CRYSTAL-ARCH — surface truncation so models do not treat samples as exhaustive
+        warning = result.get("warning")
+        prefix = ""
+        if warning:
+            prefix = f"[DISCOVERY WARNING] {warning}\n"
+        elif result.get("truncated"):
+            prefix = (
+                "[DISCOVERY WARNING] Results truncated — not exhaustive; "
+                "narrow path/glob before concluding absence.\n"
+            )
         output = result.get("output") or result.get("content") or result.get("result", "")
         if isinstance(output, str):
-            return output
-        return json.dumps(result, indent=2, default=str)
+            return prefix + output if prefix else output
+        body = json.dumps(result, indent=2, default=str)
+        return prefix + body if prefix else body
     return str(result)
 
 

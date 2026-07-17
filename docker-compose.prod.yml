@@ -263,6 +263,9 @@ services:
       - ./backend/tests:/app/tests:ro  # QUANTUM-CRYSTAL-ARCH: parity fixtures track git, not image
       - ./backend/scripts:/app/scripts:ro  # QUANTUM-CRYSTAL-ARCH backfill / audit scripts (docker exec)
       - ./backend/assets:/app/assets:ro  # Backchannel clips + static assets
+      - ./dashboard:/app/dashboard:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (Nevedal Lab UI)
+      - ./mobile/lib:/app/mobile/lib:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (Flutter)
+      - ./backend/migrations:/app/migrations:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (schema)
       - ./data/backend:/app/data
       - ./data/bridge:/app/bridge_data:ro  # Bridge metrics (PMB, Nevedal state) for dashboard read
       - backend_logs:/app/logs
@@ -363,6 +366,9 @@ services:
     volumes:
       - ./backend/app:/app/app:ro    # Mount source code so scp+restart picks up changes
       - ./backend/assets:/app/assets:ro  # Backchannel clips + static assets
+      - ./dashboard:/app/dashboard:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (Nevedal Lab UI)
+      - ./mobile/lib:/app/mobile/lib:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (Flutter)
+      - ./backend/migrations:/app/migrations:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (schema)
       - ./data/bridge:/app/data
       # Read backend scheduling + Zoom join_url without duplicating stores
       - ./data/backend:/app/backend_data:ro

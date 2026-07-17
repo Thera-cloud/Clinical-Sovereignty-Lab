@@ -663,6 +663,19 @@ _SKIP_DIRS = {
     "node_modules", "__pycache__", ".git", ".venv", "venv",
     ".mypy_cache", ".pytest_cache", "build", ".dart_tool",
     "CSL - Cursor",
+    # QUANTUM-CRYSTAL-ARCH — vault/data noise must not swamp CLI-Cloud discovery
+    "data", "bridge_data", "backend_data", "Vaults", "session_memories",
+    "logs", ".venv311", "site-packages",
+}
+
+# Prefer these trees when ranking search / repo_map (code before residual noise).
+_CODE_PRIORITY_DIRS = (
+    "app", "dashboard", "mobile", "migrations", "tests", "scripts",
+    "backend", "cloudflare",
+)
+_CODE_FILE_SUFFIXES = {
+    ".py", ".dart", ".html", ".js", ".jsx", ".ts", ".tsx",
+    ".sql", ".md", ".yml", ".yaml", ".toml",
 }
 
 # Error codes for LLM self-correction (Gap Audit 3B)
@@ -705,14 +718,18 @@ _READ_TOOL_DEFS = [
         "type": "function",
         "function": {
             "name": "search_code",
-            "description": "Search for a regex pattern across project files. Returns matching lines with file paths and line numbers.",
+            "description": (
+                "Search for a regex pattern across project source files (code-ranked; "
+                "data/Vaults excluded). If truncated=true, matches are NOT exhaustive — "
+                "narrow path/glob or raise max_results before concluding 'not found'."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "pattern": {"type": "string", "description": "Regex pattern to search for"},
                     "path": {"type": "string", "description": "Subdirectory to limit search (optional)"},
                     "glob": {"type": "string", "description": "File glob filter e.g. '*.py' (optional)"},
-                    "max_results": {"type": "integer", "description": "Max matches to return (default 20)"},
+                    "max_results": {"type": "integer", "description": "Max matches to return (default 40)"},
                 },
                 "required": ["pattern"],
             },
@@ -1251,78 +1268,120 @@ async def _query_coherence_data_async(args: Dict[str, Any], db_pool) -> Dict[str
     date_end = args.get("date_end")
     limit = min(args.get("limit", 50), 200)
 
-    conditions = []
-    params: list = []
-    idx = 1
-
-    if client_id:
-        conditions.append(f"nm.user_id = ${idx}")
-        params.append(client_id)
-        idx += 1
-    if date_start:
-        conditions.append(f"nm.recorded_at >= ${idx}::timestamptz")
-        params.append(date_start)
-        idx += 1
-    if date_end:
-        conditions.append(f"nm.recorded_at <= ${idx}::timestamptz")
-        params.append(date_end)
-        idx += 1
-
-    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-    params.append(limit)
-
-    query = f"""
-        SELECT nm.user_id, nm.session_id, nm.recorded_at,
-               nm.c_emo, nm.p_ent, nm.t_tunnel, nm.gamma_env,
-               nm.pitch_mean, nm.pitch_variance, nm.energy,
-               nm.speech_rate, nm.pause_ratio
-        FROM nevedal_metrics nm
-        {where}
-        ORDER BY nm.recorded_at DESC
-        LIMIT ${idx}
-    """
-
-    cm_conditions = []
-    cm_params: list = []
-    cm_idx = 1
-    if client_id:
-        cm_conditions.append(f"cm.hardware_id = ${cm_idx}")
-        cm_params.append(client_id)
-        cm_idx += 1
-    if date_start:
-        cm_conditions.append(f"cm.created_at >= ${cm_idx}::timestamptz")
-        cm_params.append(date_start)
-        cm_idx += 1
-    if date_end:
-        cm_conditions.append(f"cm.created_at <= ${cm_idx}::timestamptz")
-        cm_params.append(date_end)
-        cm_idx += 1
-    cm_where = ("WHERE " + " AND ".join(cm_conditions)) if cm_conditions else ""
-    cm_params.append(limit)
-
-    cm_query = f"""
-        SELECT cm.hardware_id AS user_id, cm.session_id, cm.created_at AS recorded_at,
-               cm.coherence_score, cm.engagement_level, cm.sentiment_score,
-               cm.topic_depth, cm.emotional_range
-        FROM client_metrics cm
-        {cm_where}
-        ORDER BY cm.created_at DESC
-        LIMIT ${cm_idx}
-    """
-
     try:
         async with db_pool.acquire() as conn:
+            # QUANTUM-CRYSTAL-ARCH — nevedal_metrics.user_id is UUID FK to users.id;
+            # CLI passes username/hardware_id — resolve before bind to avoid uuid=text.
+            nm_user_id = None
+            cm_hardware_id = None
+            identity_resolved = None
+            if client_id:
+                uref = await conn.fetchrow(
+                    """
+                    SELECT id, hardware_id, username
+                    FROM users
+                    WHERE username = $1
+                       OR hardware_id = $1
+                       OR id::text = $1
+                    LIMIT 1
+                    """,
+                    client_id,
+                )
+                if uref:
+                    nm_user_id = uref["id"]
+                    cm_hardware_id = uref["hardware_id"] or client_id
+                    identity_resolved = {
+                        "username": uref["username"],
+                        "hardware_id": uref["hardware_id"],
+                        "user_uuid": str(uref["id"]),
+                    }
+                else:
+                    try:
+                        import uuid as _uuid
+                        nm_user_id = _uuid.UUID(str(client_id))
+                        cm_hardware_id = client_id
+                        identity_resolved = {"user_uuid": str(nm_user_id), "literal": True}
+                    except (ValueError, AttributeError, TypeError):
+                        return {
+                            "status": "error",
+                            "error": (
+                                f"client_id '{client_id}' not found as username, "
+                                "hardware_id, or UUID. nevedal_metrics.user_id is UUID."
+                            ),
+                            "error_code": _ERROR_OTHER,
+                        }
+
+            conditions = []
+            params: list = []
+            idx = 1
+            if nm_user_id is not None:
+                conditions.append(f"nm.user_id = ${idx}::uuid")
+                params.append(str(nm_user_id))
+                idx += 1
+            if date_start:
+                conditions.append(f"nm.recorded_at >= ${idx}::timestamptz")
+                params.append(date_start)
+                idx += 1
+            if date_end:
+                conditions.append(f"nm.recorded_at <= ${idx}::timestamptz")
+                params.append(date_end)
+                idx += 1
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+            params.append(limit)
+
+            query = f"""
+                SELECT nm.user_id, nm.session_id, nm.recorded_at,
+                       nm.c_emo, nm.p_ent, nm.t_tunnel, nm.gamma_env,
+                       nm.pitch_mean, nm.pitch_variance, nm.energy,
+                       nm.speech_rate, nm.pause_ratio
+                FROM nevedal_metrics nm
+                {where}
+                ORDER BY nm.recorded_at DESC
+                LIMIT ${idx}
+            """
+
+            cm_conditions = []
+            cm_params: list = []
+            cm_idx = 1
+            if cm_hardware_id:
+                cm_conditions.append(f"cm.hardware_id = ${cm_idx}")
+                cm_params.append(cm_hardware_id)
+                cm_idx += 1
+            if date_start:
+                cm_conditions.append(f"cm.created_at >= ${cm_idx}::timestamptz")
+                cm_params.append(date_start)
+                cm_idx += 1
+            if date_end:
+                cm_conditions.append(f"cm.created_at <= ${cm_idx}::timestamptz")
+                cm_params.append(date_end)
+                cm_idx += 1
+            cm_where = ("WHERE " + " AND ".join(cm_conditions)) if cm_conditions else ""
+            cm_params.append(limit)
+
+            cm_query = f"""
+                SELECT cm.hardware_id AS user_id, cm.session_id, cm.created_at AS recorded_at,
+                       cm.coherence_score, cm.engagement_level, cm.sentiment_score,
+                       cm.topic_depth, cm.emotional_range
+                FROM client_metrics cm
+                {cm_where}
+                ORDER BY cm.created_at DESC
+                LIMIT ${cm_idx}
+            """
+
             rows = await conn.fetch(query, *params)
             try:
                 cm_rows = await conn.fetch(cm_query, *cm_params)
-            except Exception:
+            except Exception as cm_exc:
+                logger.warning(
+                    "query_coherence_data client_metrics fallback failed: %s", cm_exc,
+                )
                 cm_rows = []
 
         results = []
         for r in rows:
             row_data: Dict[str, Any] = {
                 "source": "nevedal_metrics",
-                "user_id": r.get("user_id"),
+                "user_id": str(r["user_id"]) if r.get("user_id") else None,
                 "session_id": str(r["session_id"]) if r.get("session_id") else None,
                 "recorded_at": r["recorded_at"].isoformat() if r.get("recorded_at") else None,
             }
@@ -1354,7 +1413,17 @@ async def _query_coherence_data_async(args: Dict[str, Any], db_pool) -> Dict[str
                     row_data[mf] = float(val) if val is not None else None
             results.append(row_data)
 
-        return {"status": "ok", "result": results, "row_count": len(results), "query_scope": {"client_id": client_id, "metric": metric, "sources": ["nevedal_metrics", "client_metrics"]}}
+        return {
+            "status": "ok",
+            "result": results,
+            "row_count": len(results),
+            "query_scope": {
+                "client_id": client_id,
+                "metric": metric,
+                "identity_resolved": identity_resolved,
+                "sources": ["nevedal_metrics", "client_metrics"],
+            },
+        }
     except Exception as e:
         logger.warning("query_coherence_data failed: %s", e)
         return {"status": "error", "error": f"Coherence query failed: {e}"}
@@ -1496,6 +1565,39 @@ def _should_skip_path(path: str) -> bool:
     return any(p in _SKIP_DIRS for p in parts)
 
 
+def _path_discovery_priority(rel_path: str) -> int:
+    """Lower = higher priority. Source code before residual / non-code paths."""
+    parts = Path(rel_path).parts
+    if any(p in _SKIP_DIRS for p in parts):
+        return 99
+    suffix = Path(rel_path).suffix.lower()
+    top = parts[0] if parts else ""
+    in_priority = top in _CODE_PRIORITY_DIRS or (
+        len(parts) > 1 and parts[0] == "backend" and parts[1] in (
+            "app", "migrations", "tests", "scripts",
+        )
+    )
+    if in_priority:
+        if suffix in {".py", ".dart", ".html", ".sql"}:
+            return 0
+        if suffix in _CODE_FILE_SUFFIXES:
+            return 1
+        return 2
+    if suffix in {".py", ".dart", ".html", ".sql"}:
+        return 3
+    if suffix in _CODE_FILE_SUFFIXES:
+        return 4
+    return 6
+
+
+def _order_walk_dirnames(dirnames: List[str]) -> List[str]:
+    """os.walk mutation helper — priority dirs first, skip noise dirs."""
+    kept = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
+    pri = [d for d in _CODE_PRIORITY_DIRS if d in kept]
+    rest = sorted(d for d in kept if d not in pri)
+    return pri + rest
+
+
 def _is_binary(path: str) -> bool:
     return Path(path).suffix.lower() in _BINARY_EXTENSIONS
 
@@ -1604,47 +1706,61 @@ def _search_code_sync(
 
     import fnmatch
 
-    matches: List[Dict[str, Any]] = []
-    files_scanned = 0
-
+    max_results = max(1, min(int(max_results or 40), 100))
+    # QUANTUM-CRYSTAL-ARCH — collect candidates then scan code-first so data noise
+    # cannot fill the match budget before app/dashboard/mobile hits appear.
+    candidates: List[tuple] = []
     for dirpath, dirnames, filenames in os.walk(scan_root):
-        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+        dirnames[:] = _order_walk_dirnames(dirnames)
         for fname in filenames:
             if _is_binary(fname):
                 continue
             if glob_filter and not fnmatch.fnmatch(fname, glob_filter):
                 continue
-
             fpath = os.path.join(dirpath, fname)
             rel = os.path.relpath(fpath, root)
-            files_scanned += 1
-
-            try:
-                with open(fpath, "r", encoding="utf-8", errors="replace") as f:
-                    for line_num, line in enumerate(f, 1):
-                        if regex.search(line):
-                            matches.append({
-                                "file": rel,
-                                "line_num": line_num,
-                                "line_text": line.rstrip()[:300],
-                            })
-                            if len(matches) >= max_results:
-                                return {
-                                    "status": "ok",
-                                    "result": matches,
-                                    "total_matches": len(matches),
-                                    "files_scanned": files_scanned,
-                                    "truncated": True,
-                                }
-            except (OSError, UnicodeDecodeError):
+            if _should_skip_path(rel):
                 continue
+            candidates.append((_path_discovery_priority(rel), fpath, rel))
+    candidates.sort(key=lambda x: (x[0], x[2]))
 
+    matches: List[Dict[str, Any]] = []
+    files_scanned = 0
+    truncated = False
+    for _, fpath, rel in candidates:
+        files_scanned += 1
+        try:
+            with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                for line_num, line in enumerate(f, 1):
+                    if regex.search(line):
+                        matches.append({
+                            "file": rel,
+                            "line_num": line_num,
+                            "line_text": line.rstrip()[:300],
+                        })
+                        if len(matches) >= max_results:
+                            truncated = True
+                            break
+        except (OSError, UnicodeDecodeError):
+            continue
+        if truncated:
+            break
+
+    warning = None
+    if truncated:
+        warning = (
+            f"TRUNCATED at {max_results} matches (code-ranked; data/Vaults excluded). "
+            "Results are NOT exhaustive — narrow path/glob or raise max_results "
+            "before concluding a symbol is absent."
+        )
     return {
         "status": "ok",
         "result": matches,
         "total_matches": len(matches),
         "files_scanned": files_scanned,
-        "truncated": False,
+        "truncated": truncated,
+        "warning": warning,
+        "ranked": "code_first",
     }
 
 
@@ -2036,27 +2152,42 @@ def _grep_sync(
 
     if scan_targets:
         for fpath, rel in scan_targets:
-            _scan_file(fpath, rel)
+            if not _should_skip_path(rel):
+                _scan_file(fpath, rel)
     else:
+        # QUANTUM-CRYSTAL-ARCH — code-first walk so grep budget is not consumed by data/
+        candidates: List[tuple] = []
         for dirpath, dirnames, filenames in os.walk(scan_root):
-            dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+            dirnames[:] = _order_walk_dirnames(dirnames)
             for fname in filenames:
                 if not _matches_filters(fname):
                     continue
                 fpath = os.path.join(dirpath, fname)
                 rel = os.path.relpath(fpath, root)
-                _scan_file(fpath, rel)
-                if len(results) >= effective_limit:
-                    break
+                if _should_skip_path(rel):
+                    continue
+                candidates.append((_path_discovery_priority(rel), fpath, rel))
+        candidates.sort(key=lambda x: (x[0], x[2]))
+        for _, fpath, rel in candidates:
+            _scan_file(fpath, rel)
             if len(results) >= effective_limit:
                 break
 
+    truncated = len(results) >= effective_limit
+    warning = None
+    if truncated:
+        warning = (
+            f"TRUNCATED at {effective_limit} matches (code-ranked; data/Vaults excluded). "
+            "Not exhaustive — narrow path/glob before concluding absence."
+        )
     return {
         "status": "ok",
         "result": results,
         "total_matches": len(results),
         "files_scanned": files_scanned,
-        "truncated": len(results) >= effective_limit,
+        "truncated": truncated,
+        "warning": warning,
+        "ranked": "code_first",
     }
 
 
@@ -2086,14 +2217,19 @@ def _grep_files_mode(regex, root, scan_targets, scan_root, glob_filter, type_glo
 
     if scan_targets:
         for fpath, rel in scan_targets:
-            _check_file(fpath, rel)
+            if not _should_skip_path(rel):
+                _check_file(fpath, rel)
     else:
         for dirpath, dirnames, filenames in os.walk(scan_root):
-            dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+            dirnames[:] = _order_walk_dirnames(dirnames)
             for fname in filenames:
                 if not _matches(fname):
                     continue
-                _check_file(os.path.join(dirpath, fname), os.path.relpath(os.path.join(dirpath, fname), root))
+                fpath = os.path.join(dirpath, fname)
+                rel = os.path.relpath(fpath, root)
+                if _should_skip_path(rel):
+                    continue
+                _check_file(fpath, rel)
                 if len(matching_files) >= offset + limit + 50:
                     break
             if len(matching_files) >= offset + limit + 50:
@@ -2130,14 +2266,19 @@ def _grep_count_mode(regex, root, scan_targets, scan_root, glob_filter, type_glo
 
     if scan_targets:
         for fpath, rel in scan_targets:
-            _count_file(fpath, rel)
+            if not _should_skip_path(rel):
+                _count_file(fpath, rel)
     else:
         for dirpath, dirnames, filenames in os.walk(scan_root):
-            dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+            dirnames[:] = _order_walk_dirnames(dirnames)
             for fname in filenames:
                 if not _matches(fname):
                     continue
-                _count_file(os.path.join(dirpath, fname), os.path.relpath(os.path.join(dirpath, fname), root))
+                fpath = os.path.join(dirpath, fname)
+                rel = os.path.relpath(fpath, root)
+                if _should_skip_path(rel):
+                    continue
+                _count_file(fpath, rel)
 
     sliced = counts[offset:offset + limit]
     return {"status": "ok", "result": sliced, "total_files_with_matches": len(counts), "files_scanned": files_scanned}
@@ -2808,7 +2949,7 @@ _READ_TOOL_DISPATCH = {
         args.get("pattern", ""),
         args.get("path"),
         args.get("glob"),
-        args.get("max_results", 20),
+        args.get("max_results", 40),
     ),
     "list_directory": lambda args, **_: _list_directory_sync(
         args.get("path"),
@@ -3416,7 +3557,7 @@ def get_truncation_limit(mode: str, cli_type: str) -> int:
     return TRUNCATION_LIMITS.get((cli_type, mode), 6000)
 
 
-def _repo_map_sync(target_directory: str = "", max_entries: int = 200) -> Dict[str, Any]:
+def _repo_map_sync(target_directory: str = "", max_entries: int = 300) -> Dict[str, Any]:
     """Lightweight repo orientation map: tree + symbol hints (def/class)."""
     root = _get_project_root()
     start = _resolve_safe_path(target_directory) if target_directory else root
@@ -3425,20 +3566,29 @@ def _repo_map_sync(target_directory: str = "", max_entries: int = 200) -> Dict[s
 
     entries: List[str] = []
     symbols: List[str] = []
-    max_entries = max(20, min(int(max_entries or 200), 400))
-    symbol_budget = 80
+    max_entries = max(20, min(int(max_entries or 300), 500))
+    symbol_budget = 120
+    # QUANTUM-CRYSTAL-ARCH — walk code trees first so lab/services appear in budget
+    truncated = False
 
     for dirpath, dirnames, filenames in os.walk(start):
-        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
+        dirnames[:] = _order_walk_dirnames(dirnames)
         rel_dir = os.path.relpath(dirpath, root)
         if rel_dir == ".":
             rel_dir = ""
+        if rel_dir and _should_skip_path(rel_dir):
+            dirnames[:] = []
+            continue
         for fn in sorted(filenames):
             if Path(fn).suffix.lower() in _BINARY_EXTENSIONS:
                 continue
             rel = os.path.join(rel_dir, fn) if rel_dir else fn
+            if _should_skip_path(rel):
+                continue
             entries.append(rel)
-            if len(symbols) < symbol_budget and Path(fn).suffix.lower() in {".py", ".dart", ".ts", ".js"}:
+            if len(symbols) < symbol_budget and Path(fn).suffix.lower() in {
+                ".py", ".dart", ".ts", ".js", ".html",
+            }:
                 try:
                     fpath = os.path.join(dirpath, fn)
                     with open(fpath, "r", encoding="utf-8", errors="replace") as f:
@@ -3446,26 +3596,43 @@ def _repo_map_sync(target_directory: str = "", max_entries: int = 200) -> Dict[s
                             if i > 120:
                                 break
                             s = line.strip()
-                            if s.startswith("def ") or s.startswith("class ") or s.startswith("async def "):
+                            if (
+                                s.startswith("def ")
+                                or s.startswith("class ")
+                                or s.startswith("async def ")
+                                or (s.startswith("function ") and Path(fn).suffix == ".js")
+                            ):
                                 symbols.append(f"{rel}:{i+1}: {s[:100]}")
                                 if len(symbols) >= symbol_budget:
                                     break
                 except Exception:
                     pass
             if len(entries) >= max_entries:
+                truncated = True
                 break
         if len(entries) >= max_entries:
+            truncated = True
             break
 
     body = "REPO MAP\n" + "\n".join(entries)
     if symbols:
         body += "\n\nSYMBOLS\n" + "\n".join(symbols)
+    warning = None
+    if truncated:
+        warning = (
+            f"TRUNCATED at {max_entries} files (code-first walk). "
+            "Pass target_directory to deepen (e.g. app/services, dashboard)."
+        )
+        body = f"[DISCOVERY WARNING] {warning}\n\n" + body
     return {
         "status": "ok",
         "result": body,
         "file_count": len(entries),
         "symbol_count": len(symbols),
         "root": start,
+        "truncated": truncated,
+        "warning": warning,
+        "ranked": "code_first",
     }
 
 
