@@ -179,11 +179,25 @@ class AgentStatusDigest:
         for name, attr in [
             ("Insight Accumulator", "insight_accumulator"),
             ("Web Content Reader", "web_content_reader"),
-            ("CLI Task Bus Consumer", "cli_task_bus_consumer"),  # QUANTUM-CRYSTAL-ARCH
+            ("CLI Dual-COO Chief", "cli_task_bus_consumer"),  # QUANTUM-CRYSTAL-ARCH
+            ("Crystal Outcome Apply", "crystal_outcome_apply"),  # QUANTUM-CRYSTAL-ARCH
         ]:
             agent = getattr(self.app, attr, None)
             status, detail = self._check_agent(agent, name)
             rows.append((status, name, detail))
+
+        # QUANTUM-CRYSTAL-ARCH — CEO-Nathan morning inbox summary
+        try:
+            from app.websocket.cli_dual_coo import ceo_inbox_summary
+
+            inbox = ceo_inbox_summary()
+            rows.append((
+                "INFO",
+                "CEO Inbox (Nathan)",
+                f"pending={inbox.get('pending')} yellow={inbox.get('yellow')} red={inbox.get('red')}",
+            ))
+        except Exception:
+            pass
 
         ns = None
         for w in getattr(self.app, "_workers_list", []):

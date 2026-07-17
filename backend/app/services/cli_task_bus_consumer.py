@@ -1,8 +1,15 @@
 """
-CLI Task Bus Consumer — autonomous Mac↔Cloud review loop.
+CLI Dual-COO Chief of Staff — Mac↔Cloud peer review + risk-tiered dispatch.
 
-Polls Redis task bus, claims peer review tasks (consumer=agent), runs
-read-only lint/pytest checks, posts findings. Feature-flagged.
+Queens = CLI-Mac / CLI-Cloud (one mind, mutual backup).
+CEO = Nathan (YELLOW morning inbox, RED synchronous).
+
+Polls Redis task bus, claims peer review tasks, classifies risk:
+  GREEN  — auto findings + digest
+  YELLOW — CEO inbox
+  RED    — CEO inbox, never auto-ship clinical
+
+Also: peer heartbeat, crystal outcome apply kick, patent pending surface.
 """
 
 from __future__ import annotations
@@ -26,7 +33,7 @@ def consumer_enabled() -> bool:
 
 
 class CliTaskBusConsumer:
-    """Background agent: claim review → deterministic checks → post_findings."""
+    """Chief of Staff loop for Dual-COO Queens."""
 
     def __init__(self, app_state=None):
         self._app_state = app_state
@@ -34,12 +41,14 @@ class CliTaskBusConsumer:
         self._task: Optional[asyncio.Task] = None
         self._cycles = 0
         self._reviews = 0
+        self._ceo_routed = 0
+        self._green_auto = 0
 
     async def start(self):
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
         logger.info(
-            "CliTaskBusConsumer started (poll=%ss, enabled=%s)",
+            "CliTaskBusConsumer (Dual-COO Chief) started (poll=%ss, enabled=%s)",
             POLL_INTERVAL_S,
             consumer_enabled(),
         )
@@ -52,7 +61,13 @@ class CliTaskBusConsumer:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        logger.info("CliTaskBusConsumer stopped (cycles=%s reviews=%s)", self._cycles, self._reviews)
+        logger.info(
+            "CliTaskBusConsumer stopped (cycles=%s reviews=%s ceo=%s green=%s)",
+            self._cycles,
+            self._reviews,
+            self._ceo_routed,
+            self._green_auto,
+        )
 
     async def _run_loop(self):
         await asyncio.sleep(STAGGER_S)
@@ -75,35 +90,134 @@ class CliTaskBusConsumer:
                 post_findings,
                 task_bus_enabled,
             )
+            from app.websocket.cli_dual_coo import (
+                RISK_GREEN,
+                RISK_RED,
+                RISK_YELLOW,
+                beat_queen,
+                classify_risk,
+                dual_coo_enabled,
+                enqueue_ceo,
+                peer_queen_alive,
+            )
         except ImportError as e:
-            logger.warning("CliTaskBusConsumer: bus import failed: %s", e)
+            logger.warning("CliTaskBusConsumer: import failed: %s", e)
             return
         if not task_bus_enabled():
             return
         ensure_bus_meta(consumer_active=True)
         beat_consumer()
+        # QUANTUM-CRYSTAL-ARCH — Dual-COO cloud Queen heartbeat + peer check
+        if dual_coo_enabled():
+            beat_queen("cloud", meta={"chief": True, "cycle": self._cycles})
+            peer = peer_queen_alive("cloud")
+            if not peer.get("alive") and self._cycles % 10 == 0:
+                enqueue_ceo(
+                    risk=RISK_YELLOW,
+                    title="Peer Queen (CLI-Mac) heartbeat stale",
+                    detail=str(peer)[:500],
+                    origin="cloud",
+                )
+                self._ceo_routed += 1
+
         claimed = await asyncio.to_thread(
             claim_task, consumer="agent", prefer_kind="review",
         )
         if claimed.get("status") != "ok" or not claimed.get("task"):
+            if self._cycles % 20 == 0:
+                await self._surface_ceo_queues()
             return
+
         task = claimed["task"]
+        risk = classify_risk(
+            kind=str(task.get("kind") or "review"),
+            files=list(task.get("files") or []),
+            notes=str(task.get("notes") or ""),
+        )
+        task["risk_tier"] = risk
+
+        if risk == RISK_RED:
+            enqueue_ceo(
+                risk=RISK_RED,
+                title=f"RED bus task {task.get('task_id')}",
+                detail=(task.get("notes") or "")[:500],
+                origin=str(task.get("origin") or "cloud"),
+                task_id=str(task.get("task_id") or ""),
+                payload={"files": task.get("files") or []},
+            )
+            await asyncio.to_thread(
+                post_findings,
+                task["task_id"],
+                reviewer="cloud_agent",
+                findings=[{
+                    "detail": "RED risk — routed to CEO-Nathan; no auto-ship",
+                    "severity": "info",
+                    "risk": RISK_RED,
+                }],
+                pass_review=False,
+            )
+            self._ceo_routed += 1
+            self._reviews += 1
+            return
+
         findings, passed = await self._review_task(task)
+        if risk == RISK_YELLOW:
+            enqueue_ceo(
+                risk=RISK_YELLOW,
+                title=f"YELLOW review {task.get('task_id')} pass={passed}",
+                detail=f"findings={len(findings)} files={task.get('files')}",
+                origin=str(task.get("origin") or "cloud"),
+                task_id=str(task.get("task_id") or ""),
+                payload={"pass": passed, "findings": findings[:10]},
+            )
+            self._ceo_routed += 1
+        else:
+            self._green_auto += 1
+
         result = await asyncio.to_thread(
             post_findings,
             task["task_id"],
             reviewer="cloud_agent",
-            findings=findings,
-            pass_review=passed,
+            findings=findings + [{"detail": f"risk_tier={risk}", "severity": "info"}],
+            pass_review=passed if risk == RISK_GREEN else passed,
         )
         self._reviews += 1
         logger.info(
-            "CliTaskBusConsumer reviewed task=%s pass=%s findings=%s status=%s",
+            "Dual-COO reviewed task=%s risk=%s pass=%s findings=%s status=%s",
             task.get("task_id"),
+            risk,
             passed,
             len(findings),
             (result.get("task") or {}).get("status"),
         )
+
+        if self._cycles % 20 == 0:
+            await self._surface_ceo_queues()
+
+    async def _surface_ceo_queues(self):
+        """YELLOW patent tags + RED clinical shadow → CEO inbox."""
+        db = getattr(self._app_state, "db_pool", None) if self._app_state else None
+        try:
+            from app.services.crystal_outcome_apply import propose_red_clinical_to_ceo
+            from app.services.patent_claim_guardian import list_pending_for_ceo
+            from app.websocket.cli_dual_coo import RISK_YELLOW, enqueue_ceo
+
+            if db:
+                await propose_red_clinical_to_ceo(db)
+                pending = await list_pending_for_ceo(db, limit=20)
+                if pending:
+                    enqueue_ceo(
+                        risk=RISK_YELLOW,
+                        title=f"{len(pending)} patent claim tags awaiting CEO",
+                        detail="; ".join(
+                            f"{p.get('family_id')}/{p.get('claim_ref')}" for p in pending[:5]
+                        ),
+                        origin="cloud",
+                        payload={"count": len(pending)},
+                    )
+                    self._ceo_routed += 1
+        except Exception as e:
+            logger.debug("CEO queue surface: %s", e)
 
     async def _review_task(self, task: Dict[str, Any]) -> tuple:
         """Deterministic read-only review: lints (+ optional pytest for .py)."""
@@ -158,7 +272,6 @@ class CliTaskBusConsumer:
                         "path": path,
                     })
             elif isinstance(diags, str) and diags.strip():
-                # Some handlers return a text blob
                 if "error" in diags.lower() or "fail" in diags.lower():
                     findings.append({
                         "detail": diags[:400],
@@ -170,7 +283,7 @@ class CliTaskBusConsumer:
         passed = len(errors) == 0
         if passed and not findings:
             findings.append({
-                "detail": f"autonomous review ok for {len(files)} file(s) at {int(time.time())}",
+                "detail": f"autonomous Dual-COO review ok for {len(files)} file(s) at {int(time.time())}",
                 "severity": "info",
             })
         return findings, passed

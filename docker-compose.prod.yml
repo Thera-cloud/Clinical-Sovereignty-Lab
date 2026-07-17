@@ -209,6 +209,9 @@ services:
       - ENABLE_FORWARD_REASONING=${ENABLE_FORWARD_REASONING:-true}
       - CLI_TASK_BUS_ENABLED=${CLI_TASK_BUS_ENABLED:-true}
       - CLI_TASK_BUS_CONSUMER_ENABLED=${CLI_TASK_BUS_CONSUMER_ENABLED:-true}
+      - CLI_DUAL_COO_ENABLED=${CLI_DUAL_COO_ENABLED:-true}
+      - CRYSTAL_OUTCOME_APPLY_ENABLED=${CRYSTAL_OUTCOME_APPLY_ENABLED:-true}
+      - CRYSTAL_OUTCOME_APPLY_INTERVAL_H=${CRYSTAL_OUTCOME_APPLY_INTERVAL_H:-24}
       # QUANTUM-CRYSTAL-ARCH: must stay 1 — each uvicorn worker runs the full lifespan,
       # so >1 duplicates every background agent/auditor (duplicate audits, login collisions)
       - WEB_CONCURRENCY=1

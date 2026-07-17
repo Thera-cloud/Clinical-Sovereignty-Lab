@@ -286,6 +286,12 @@ def tag_summary_for_queen(summary: str, cite_meta: Dict[str, Any]) -> str:
 
 
 def queen_system_addon() -> str:
+    try:
+        from app.websocket.cli_dual_coo import dual_coo_system_addon
+
+        coo = dual_coo_system_addon()
+    except Exception:
+        coo = ""
     return (
         "\nHIVE (Workers AI worker ants): spawn_subagent explore/test_fix runs on "
         "Workers AI ($0) by default; full stays on Grok. Workers cannot nest spawn. "
@@ -293,4 +299,5 @@ def queen_system_addon() -> str:
         "Treat worker structured.claims tagged [INFERRED] as unverified until you "
         "re-check with tools. Budget: max "
         f"{CLI_MAX_SUBAGENTS_PER_TURN}/turn, {CLI_MAX_SUBAGENTS_PER_RUN}/run.\n"
+        + coo
     )

@@ -458,6 +458,16 @@ async def run_agentic_loop(
     if not plan_id:
         plan_id = str(uuid.uuid4())[:12]
 
+    # QUANTUM-CRYSTAL-ARCH — Dual-COO Queen heartbeat (peer monitors liveness)
+    if not is_subagent:
+        try:
+            from app.websocket.cli_dual_coo import beat_queen, dual_coo_enabled
+
+            if dual_coo_enabled():
+                beat_queen(cli_type, meta={"mode": mode, "session": session_id})
+        except Exception:
+            pass
+
     max_turns = max_turns_override or _MAX_TOOL_TURNS.get(mode, 25)
     force_provider = (llm_provider or "").strip().lower() or None
     if force_provider and force_provider not in ("workers_ai", "grok", "azure"):

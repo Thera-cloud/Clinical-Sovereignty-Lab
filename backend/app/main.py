@@ -2720,16 +2720,26 @@ async def lifespan(app: FastAPI):
     except Exception as aer_err:
         print(f"   ⚠️  AccountEventReconciler init failed: {aer_err}")
 
-    # QUANTUM-CRYSTAL-ARCH — CLI Mac↔Cloud task bus autonomous consumer
+    # QUANTUM-CRYSTAL-ARCH — CLI Dual-COO Chief + gated crystal outcome apply
     _cli_task_bus_consumer = None
     try:
         from app.services.cli_task_bus_consumer import CliTaskBusConsumer
         _cli_task_bus_consumer = CliTaskBusConsumer(app_state=app.state)
         await _cli_task_bus_consumer.start()
         app.state.cli_task_bus_consumer = _cli_task_bus_consumer
-        print("   ✅ CliTaskBusConsumer started (task bus review loop)")
+        print("   ✅ CliTaskBusConsumer started (Dual-COO Chief of Staff)")
     except Exception as _ctbc_err:
         print(f"   ⚠️  CliTaskBusConsumer init failed: {_ctbc_err}")
+
+    _crystal_outcome_apply = None
+    try:
+        from app.services.crystal_outcome_apply import CrystalOutcomeApplyAgent
+        _crystal_outcome_apply = CrystalOutcomeApplyAgent(db_pool, app_state=app.state)
+        await _crystal_outcome_apply.start()
+        app.state.crystal_outcome_apply = _crystal_outcome_apply
+        print("   ✅ CrystalOutcomeApplyAgent started (GREEN domains only)")
+    except Exception as _coa_err:
+        print(f"   ⚠️  CrystalOutcomeApplyAgent init failed: {_coa_err}")
 
     # ── Nate Check-In Agent — 72h inactivity outreach for clients + coaches ──
     _nate_checkin_agent = None
@@ -3186,6 +3196,7 @@ async def lifespan(app: FastAPI):
         ("token_usage_agent", _token_usage_agent is not None),
         ("account_event_reconciler", _account_event_reconciler is not None),
         ("cli_task_bus_consumer", _cli_task_bus_consumer is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("crystal_outcome_apply", _crystal_outcome_apply is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", _nate_checkin_agent is not None),
         ("nate_commitment_agent", _nate_commitment_agent is not None),
         ("nate_self_monitor_agent", _nate_self_monitor_agent is not None),
@@ -3295,6 +3306,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ CliTaskBusConsumer stopped")
         except Exception as _ctbc_stop:
             print(f"   ⚠️  CliTaskBusConsumer shutdown: {_ctbc_stop}")
+    _crystal_outcome_apply_h = getattr(app.state, "crystal_outcome_apply", None)  # QUANTUM-CRYSTAL-ARCH
+    if _crystal_outcome_apply_h:
+        try:
+            await _crystal_outcome_apply_h.stop()
+            print("   ✅ CrystalOutcomeApplyAgent stopped")
+        except Exception as _coa_stop:
+            print(f"   ⚠️  CrystalOutcomeApplyAgent shutdown: {_coa_stop}")
     if _sse_orchestrator:
         try:
             await _sse_orchestrator.stop()

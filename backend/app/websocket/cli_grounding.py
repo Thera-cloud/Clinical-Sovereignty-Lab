@@ -262,10 +262,16 @@ def build_capabilities_manifest(
                 or os.getenv("WORKERS_AI_API_TOKEN", "").strip()
             )
         ),
+        "dual_coo": bool(
+            os.getenv("CLI_DUAL_COO_ENABLED", "true").strip().lower()
+            in ("1", "true", "yes", "on")
+            and _partnership
+        ),
+        "governance": "Nathan=CEO; CLI-Mac+CLI-Cloud=Dual-COO; Workers AI=worker ants",
         "note": (
-            "CLI-Mac and CLI-Cloud are Queen ants (Grok); Workers AI explore/test_fix "
-            "subagents are worker ants (sandbox writes + Queen cite review). Partnership "
-            "live when Redis bus + cross_cli_review + autonomous consumer probe true."
+            "CLI-Mac and CLI-Cloud are Dual-COO Queens (one mind, mutual backup); "
+            "Nathan is CEO for YELLOW/RED. Workers AI ants are sandbox-reviewed. "
+            "Partnership live when Redis bus + cross_cli_review + consumer probe true."
             if _partnership
             else (
                 "CLI-Mac and CLI-Cloud are the same run_agentic_loop with different tool "
@@ -284,10 +290,14 @@ def build_capabilities_manifest(
         "auto-inject self_capabilities on capability questions (server-side)",
         "post-response citation audit vs tool evidence (server-side)",
         "Workers AI worker-ant subagents (explore/test_fix) with Queen Grok review",
+        "Dual-COO risk tiers GREEN/YELLOW/RED + CEO inbox",
+        "Gated non-clinical crystal outcome→confidence apply",
+        "Patent claim_map propose→CEO batch approve",
     ]
     not_implemented = [
         "Workers AI as CLI Queen / primary provider",
         "SSE/webhook stream for partner agent runs",
+        "Auto-apply clinical/defense crystal confidence (CEO-RED only)",
     ]
     if _wired:
         implemented.append("CLI neuro-symbolic fact store + symbolic_verify/forward_reason")

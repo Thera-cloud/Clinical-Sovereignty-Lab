@@ -90,10 +90,17 @@ def ensure_bus_meta(client=None, *, consumer_active: bool = False) -> bool:
         features = ["shared_task_bus", "cross_cli_review"]
         if consumer_active or _consumer_flag_on():
             features.append("autonomous_consumer")
+        # QUANTUM-CRYSTAL-ARCH — Dual-COO / CEO-Nathan
+        if os.getenv("CLI_DUAL_COO_ENABLED", "true").strip().lower() in (
+            "1", "true", "yes", "on",
+        ):
+            features.append("dual_coo")
+            features.append("ceo_inbox")
         meta = {
             "features": features,
             "max_review_rounds": MAX_REVIEW_ROUNDS,
             "updated_at": time.time(),
+            "governance": "Nathan=CEO; CLI-Mac+CLI-Cloud=Dual-COO",
         }
         c.setex(bus_meta_key(), TASK_TTL_S, json.dumps(meta))
         if not c.exists(bus_list_key()):
@@ -247,6 +254,12 @@ def publish_task(
             "blocked": lock.get("blocked"),
         }
     task_id = uuid.uuid4().hex[:16]
+    try:
+        from app.websocket.cli_dual_coo import classify_risk
+
+        risk_tier = classify_risk(kind=kind, files=files, notes=notes or "")
+    except Exception:
+        risk_tier = "GREEN"
     record = {
         "task_id": task_id,
         "origin": origin,
@@ -257,6 +270,7 @@ def publish_task(
         "run_id": run_id or "",
         "plan_id": plan_id or "",
         "notes": (notes or "")[:2000],
+        "risk_tier": risk_tier,
         "review_round": 0,
         "max_review_rounds": MAX_REVIEW_ROUNDS,
         "findings": [],
