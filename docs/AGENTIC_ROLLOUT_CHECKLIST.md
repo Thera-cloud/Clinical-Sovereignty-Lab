@@ -233,7 +233,7 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 | Step | Action | Done |
 |------|--------|------|
 | 6.1 | Migration `245_six_quotient_battery.sql` applied | [ ] |
-| 6.2 | Staging bridge up (`staging_bridge` :8766) via `staging_bake_setup.sh` | [ ] |
+| 6.2 | Staging bridge up (`staging_bridge` host :8767 → container :8765; nginx owns :8766) via `staging_bake_setup.sh` | [ ] |
 | 6.3 | Dry-run: `POST /api/admin/six-quotient/trigger` `{dry_run:true}` | [ ] |
 | 6.4 | External scores: `POST /api/admin/six-quotient/scores` (evaluator_id required) | [ ] |
 | 6.5 | Gap → Dual-COO CEO inbox + growth crystal feed verified | [ ] |
