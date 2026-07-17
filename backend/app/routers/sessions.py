@@ -1732,12 +1732,13 @@ def _action_page(title: str, body: str, ok: bool = True) -> "HTMLResponse":
 @public_router.get("/negotiation-action")
 async def negotiation_action_from_email(token: str, request: Request):
     """
-    QUANTUM-CRYSTAL-ARCH: Coach one-click Approve / Busy / Alt from negotiation email/SMS.
+    QUANTUM-CRYSTAL-ARCH: Coach Approve/Busy/Alt or client Accept/Reject alt from email/SMS.
     Busy/Alt pull open times from coach_slot_engine (same as client Schedule portal).
     """
     from app.services.session_negotiation_notify import (
         verify_neg_token,
         apply_coach_channel_decision,
+        apply_client_channel_decision,
     )
 
     parsed = verify_neg_token(token or "")
@@ -1747,8 +1748,31 @@ async def negotiation_action_from_email(token: str, request: Request):
             "This negotiation link is no longer valid. Reply in Coach Command or use a fresh email.",
             ok=False,
         )
-    neg_id, action = parsed
+    neg_id, action, slot = parsed
     db = _get_db(request)
+
+    if action in ("accept_alt", "reject_alt"):
+        result = await apply_client_channel_decision(
+            db, decision=action, negotiation_id=neg_id, chosen_start=slot or ""
+        )
+        if not result.get("ok"):
+            return _action_page(
+                "Could not apply",
+                f"Decision <strong>{action}</strong> failed: {result.get('error', 'unknown')}.",
+                ok=False,
+            )
+        if action == "accept_alt":
+            when = (result.get("negotiation") or {}).get("proposed_start") or slot or ""
+            return _action_page(
+                "Session confirmed",
+                f"You're booked for <strong>{when}</strong>. Your coach has been notified.",
+            )
+        return _action_page(
+            "Times declined",
+            "We told your coach those times don't work. They can offer new ones.",
+            ok=False,
+        )
+
     result = await apply_coach_channel_decision(
         db, decision=action, negotiation_id=neg_id
     )

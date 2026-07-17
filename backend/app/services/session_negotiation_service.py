@@ -628,6 +628,52 @@ async def handle_coach_chat_turn(
     return result
 
 
+async def expire_stale_negotiations(
+    db_pool: Any,
+    *,
+    max_age_hours: int = 24,
+) -> int:
+    """
+    QUANTUM-CRYSTAL-ARCH: Mark negotiations older than max_age_hours as expired
+    and align coaching_sessions still pending_approval → cancelled.
+    """
+    if not db_pool or not negotiation_enabled():
+        return 0
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                UPDATE session_negotiations
+                SET status = 'expired', updated_at = NOW()
+                WHERE status = ANY($1::text[])
+                  AND created_at < NOW() - make_interval(hours => $2::int)
+                RETURNING id, session_id
+                """,
+                list(ACTIVE_STATUSES),
+                int(max_age_hours),
+            )
+            n = 0
+            for row in rows:
+                sid = row["session_id"]
+                if sid:
+                    await conn.execute(
+                        """
+                        UPDATE coaching_sessions
+                        SET status = 'cancelled'
+                        WHERE session_id = $1
+                          AND LOWER(status) = 'pending_approval'
+                        """,
+                        sid,
+                    )
+                n += 1
+            if n:
+                logger.info("session_negotiation: expired %d stale negotiations", n)
+            return n
+    except Exception as e:
+        logger.warning("session_negotiation: expire_stale failed: %s", e)
+        return 0
+
+
 async def handle_client_chat_turn(
     db_pool: Any, client_id: str, text: str
 ) -> Dict[str, Any]:

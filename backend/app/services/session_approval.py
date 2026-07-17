@@ -131,6 +131,13 @@ async def lookup_user_contact(db_pool, hw_or_username: str) -> Dict[str, str]:
 async def send_pending_booking_email(db_pool, session: Dict) -> bool:
     """Email the coach an approve/decline request for a pending booking."""
     try:
+        # QUANTUM-CRYSTAL-ARCH: negotiation email replaces legacy approve/decline when flag on
+        try:
+            from app.services.session_negotiation_service import negotiation_enabled
+            if negotiation_enabled():
+                return False
+        except Exception:
+            pass
         coach = await lookup_user_contact(db_pool, session.get("coach_id", ""))
         if not coach.get("email"):
             logger.warning("session_approval: no coach email for %s — pending email skipped",

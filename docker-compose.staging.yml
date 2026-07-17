@@ -23,6 +23,8 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - DATA_DIR=/app/data
+      - BRIDGE_DATA_DIR=/app/bridge_data
+      - STAGING_PUBLIC_API_BASE=${STAGING_PUBLIC_API_BASE:-http://127.0.0.1:8011}
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=staging
       - DEBUG=false
@@ -61,6 +63,7 @@ services:
       - ./backend/scripts:/app/scripts:ro
       - ./backend/tests:/app/tests:ro
       - ./data/backend_staging:/app/data
+      - ./data/bridge_staging:/app/bridge_data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

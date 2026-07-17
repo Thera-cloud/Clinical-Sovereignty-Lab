@@ -590,9 +590,23 @@ TEMPLATES = {
   <p>{{ nate_message }}</p>
   {% if alt_slots_text %}
   <pre style="white-space:pre-wrap;background:#0a0a0a;padding:12px;border-radius:6px;color:#cbd5e1;font-family:sans-serif;">{{ alt_slots_text }}</pre>
-  <p style="color:#94a3b8;font-size:13px;">These times are open on your coach's Schedule. Reply in the app or chat with Nate to pick one.</p>
+  <p style="color:#94a3b8;font-size:13px;">These times are open on your coach's Schedule. Tap an option below, reply ACCEPT/REJECT by email, or choose in the app.</p>
+  {% if accept_links_html %}
+  <p style="margin-top:16px;text-align:center;">{{ accept_links_html|safe }}</p>
   {% endif %}
-  <p style="color:#64748b;font-size:12px;">Status: {{ status }} · Sovereign Sanctuary</p>
+  {% if reject_url %}
+  <p style="text-align:center;margin-top:12px;">
+    <a href="{{ reject_url }}" style="color:#F59E0B;">None of these work</a>
+  </p>
+  {% endif %}
+  {% if mailto_accept %}
+  <p style="text-align:center;font-size:13px;margin-top:12px;">
+    <a href="{{ mailto_accept }}" style="color:#4ECDC4;margin:0 8px;">mailto: ACCEPT</a>
+    <a href="{{ mailto_reject }}" style="color:#F59E0B;margin:0 8px;">mailto: REJECT</a>
+  </p>
+  {% endif %}
+  {% endif %}
+  <p style="color:#64748b;font-size:12px;">Status: {{ status }} · {{ neg_token }} · Sovereign Sanctuary</p>
 </div></body></html>
 """,
     },

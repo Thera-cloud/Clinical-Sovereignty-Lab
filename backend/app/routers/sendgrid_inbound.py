@@ -43,13 +43,13 @@ SENDGRID_INBOUND_SECRET = os.getenv("SENDGRID_INBOUND_SECRET", "")
 
 # Mirror of ``twilio_webhook.APPROVAL_PREFIXES`` / ``APPROVAL_SYNONYMS`` so
 # the email path recognizes the exact same vocabulary as SMS.
-_APPROVAL_PREFIXES: Tuple[str, ...] = ("APPROVE", "REJECT", "HOLD", "MODIFY", "ACK", "DISMISS", "BUSY", "ALT")
+# BUSY/ALT are negotiation-only — do not share with strategy ApprovalProtocol.
+_APPROVAL_PREFIXES: Tuple[str, ...] = ("APPROVE", "REJECT", "HOLD", "MODIFY", "ACK", "DISMISS")
 _APPROVAL_SYNONYMS = {
     "YES", "GO", "DO IT", "SHIP IT", "APPROVED",
     "WAIT", "DEFER", "LATER", "PAUSE",
     "NO", "NOPE", "DENIED", "CANCEL",
     "ACKED", "GOT IT", "SEEN",
-    "UNAVAILABLE", "RESCHEDULE",
 }
 
 # "approve", "approve+anything", "approval" all route to the approval pipeline.
@@ -271,32 +271,63 @@ async def handle_sendgrid_inbound(request: Request):
 
     db_pool = getattr(router, "_db_pool", None)
 
-    # ─── Session negotiation (mailto APPROVE/BUSY/ALT) before strategy proposals ──
+    # ─── Session negotiation (mailto APPROVE/BUSY/ALT/ACCEPT/REJECT) before proposals ──
+    # QUANTUM-CRYSTAL-ARCH: never fall through BUSY/ALT or [#neg:] to ApprovalProtocol.
     try:
         from app.services.session_negotiation_notify import (
             extract_neg_id_from_text,
             parse_neg_decision,
             apply_coach_channel_decision,
+            apply_client_channel_decision,
         )
 
         neg_decision = parse_neg_decision(cleaned_text)
         neg_id = extract_neg_id_from_text(subject, cleaned_text)
-        # Prefer [#neg:uuid]; else match coach's open negotiation by sender email.
-        if neg_decision and (neg_id or neg_decision in ("busy", "alt", "approve")):
-            neg_result = await apply_coach_channel_decision(
-                db_pool,
-                decision=neg_decision,
-                negotiation_id=neg_id,
-                coach_email=sender_email,
-            )
-            if neg_result.get("ok"):
+        if neg_decision:
+            if neg_decision in ("accept_alt", "reject_alt") and neg_id:
+                neg_result = await apply_client_channel_decision(
+                    db_pool,
+                    decision=neg_decision,
+                    negotiation_id=neg_id,
+                )
                 logger.info(
-                    "SendGrid inbound: negotiation %s → %s from %s",
+                    "SendGrid inbound: client negotiation %s ok=%s from %s",
                     neg_decision,
-                    neg_result.get("negotiation", {}).get("id"),
+                    neg_result.get("ok"),
                     sender_email,
                 )
                 return Response(status_code=200)
+            if neg_decision in ("busy", "alt") or neg_id:
+                neg_result = await apply_coach_channel_decision(
+                    db_pool,
+                    decision=neg_decision if neg_decision in ("approve", "busy", "alt") else "approve",
+                    negotiation_id=neg_id,
+                    coach_email=sender_email,
+                )
+                logger.info(
+                    "SendGrid inbound: negotiation %s ok=%s from %s err=%s",
+                    neg_decision,
+                    neg_result.get("ok"),
+                    sender_email,
+                    neg_result.get("error"),
+                )
+                # Stop here even on failure — avoid approving an unrelated strategy proposal.
+                return Response(status_code=200)
+            if neg_decision == "approve":
+                neg_result = await apply_coach_channel_decision(
+                    db_pool,
+                    decision="approve",
+                    negotiation_id=neg_id,
+                    coach_email=sender_email,
+                )
+                if neg_result.get("ok"):
+                    logger.info(
+                        "SendGrid inbound: negotiation approve → %s from %s",
+                        neg_result.get("negotiation", {}).get("id"),
+                        sender_email,
+                    )
+                    return Response(status_code=200)
+                # No open negotiation — fall through to ApprovalProtocol for strategy APPROVE.
     except Exception as e:
         logger.warning("SendGrid inbound: negotiation route error: %s", e)
 

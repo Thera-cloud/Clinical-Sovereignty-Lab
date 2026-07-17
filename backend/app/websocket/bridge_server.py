@@ -2015,6 +2015,7 @@ BALANCE_SYNC_CHANNEL = "nate:balance_sync"
 USER_RELOAD_CHANNEL = "nate:user_reload"
 REGISTRY_RELOAD_CHANNEL = "nate:registry_reload"
 PAYMENT_CONFIRMED_CHANNEL = "nate:payment_confirmed"  # QUANTUM-CRYSTAL-ARCH
+SESSION_NEGOTIATION_CHANNEL = "nate:session_negotiation"  # QUANTUM-CRYSTAL-ARCH
 
 
 def _cache_sync_blocking_listener():
@@ -2047,9 +2048,12 @@ def _cache_sync_blocking_listener():
             )
             client.ping()
             pubsub = client.pubsub()
-            pubsub.subscribe(BALANCE_SYNC_CHANNEL, USER_RELOAD_CHANNEL, REGISTRY_RELOAD_CHANNEL, PAYMENT_CONFIRMED_CHANNEL)
+            pubsub.subscribe(
+                BALANCE_SYNC_CHANNEL, USER_RELOAD_CHANNEL, REGISTRY_RELOAD_CHANNEL,
+                PAYMENT_CONFIRMED_CHANNEL, SESSION_NEGOTIATION_CHANNEL,
+            )
             _cache_sync_blocking_listener._retry = 0
-            print(f"[*] Cache sync listener subscribed to balance_sync + user_reload + registry_reload + payment_confirmed", flush=True)
+            print(f"[*] Cache sync listener subscribed to balance_sync + user_reload + registry_reload + payment_confirmed + session_negotiation", flush=True)
 
             for message in pubsub.listen():
                 if message["type"] != "message":
@@ -2064,6 +2068,8 @@ def _cache_sync_blocking_listener():
                         _handle_registry_reload()
                     elif channel == PAYMENT_CONFIRMED_CHANNEL:
                         _handle_payment_confirmed(message["data"])
+                    elif channel == SESSION_NEGOTIATION_CHANNEL:
+                        _handle_session_negotiation_fanout(message["data"])  # QUANTUM-CRYSTAL-ARCH
                 except Exception as e:
                     print(f"[!] Cache sync message error on {channel}: {e}", flush=True)
 
@@ -2191,6 +2197,22 @@ def _handle_payment_confirmed(raw_data: str):  # QUANTUM-CRYSTAL-ARCH
     except RuntimeError:
         pass
     print(f"[PAYMENT CONFIRMED] Pushed to {username} ({hw_id[:8]}...)", flush=True)
+
+
+def _handle_session_negotiation_fanout(raw_data: str):  # QUANTUM-CRYSTAL-ARCH
+    """Thin Redis fanout hook — body in session_negotiation_bridge."""
+    try:
+        from app.services.session_negotiation_bridge import handle_redis_fanout
+
+        handle_redis_fanout(
+            raw_data,
+            connected_clients=connected_clients,
+            connected_coaches=connected_coaches,
+            load_sessions=lambda: load_json(SESSIONS_FILE, []) or [],
+            save_sessions=lambda s: save_json(SESSIONS_FILE, s),
+        )
+    except Exception as e:
+        print(f"[NEGOTIATION FANOUT] {e}", flush=True)
 
 
 async def _balance_sync_listener():

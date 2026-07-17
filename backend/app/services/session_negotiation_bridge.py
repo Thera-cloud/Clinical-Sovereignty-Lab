@@ -262,6 +262,74 @@ async def handle_ws(
     return False
 
 
+def handle_redis_fanout(
+    raw_data: str,
+    *,
+    connected_clients: Dict[str, Any],
+    connected_coaches: Dict[str, Any],
+    load_sessions: Callable[[], List[Dict[str, Any]]],
+    save_sessions: Callable[[List[Dict[str, Any]]], None],
+) -> None:
+    """
+    QUANTUM-CRYSTAL-ARCH: Sync path for Redis nate:session_negotiation.
+    Mutates bridge sessions.json and pushes WS (thread-safe via call_soon_threadsafe).
+    """
+    import asyncio
+
+    try:
+        data = json.loads(raw_data)
+    except Exception as e:
+        logger.warning("session_negotiation_bridge: fanout JSON bad: %s", e)
+        return
+
+    sess = data.get("session")
+    if isinstance(sess, dict) and sess.get("session_id"):
+        try:
+            sessions = load_sessions() or []
+            sid = sess["session_id"]
+            replaced = False
+            for i, s in enumerate(sessions):
+                if s.get("session_id") == sid:
+                    sessions[i] = {**s, **sess}
+                    replaced = True
+                    break
+            if not replaced:
+                sessions.append(sess)
+            save_sessions(sessions)
+        except Exception as e:
+            logger.warning("session_negotiation_bridge: fanout sessions write failed: %s", e)
+
+    def _push(hw: str, payload: dict) -> None:
+        if not hw or not payload:
+            return
+        ws = connected_clients.get(hw) or connected_coaches.get(hw)
+        if not ws:
+            return
+        msg = json.dumps(payload)
+        try:
+            loop = asyncio.get_running_loop()
+            loop.call_soon_threadsafe(lambda: loop.create_task(ws.send(msg)))
+        except RuntimeError:
+            pass
+
+    client_id = data.get("client_id") or ""
+    coach_id = data.get("coach_id") or ""
+    if data.get("booking_status_update"):
+        _push(client_id, data["booking_status_update"])
+    if data.get("client_notify"):
+        _push(client_id, data["client_notify"])
+    if data.get("coach_notify"):
+        _push(coach_id, data["coach_notify"])
+    if data.get("session_negotiation_update"):
+        _push(client_id, data["session_negotiation_update"])
+        _push(coach_id, data["session_negotiation_update"])
+    logger.info(
+        "session_negotiation_bridge: fanout client=%s coach=%s",
+        (client_id[:8] if client_id else "-"),
+        (coach_id[:8] if coach_id else "-"),
+    )
+
+
 async def try_chat_hooks(
     profile: Dict[str, Any],
     text: str,

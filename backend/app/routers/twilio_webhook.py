@@ -194,32 +194,63 @@ async def handle_incoming_sms(request: Request):
         except Exception as e:
             print(f">>> [TWILIO_WEBHOOK] Snooze handling error: {e}")
 
-    # QUANTUM-CRYSTAL-ARCH: session negotiation SMS (APPROVE/BUSY/ALT) before strategy proposals
+    # QUANTUM-CRYSTAL-ARCH: session negotiation SMS before strategy proposals.
+    # BUSY/ALT / [#neg:] never fall through to ApprovalProtocol.
     try:
         from app.services.session_negotiation_notify import (
             parse_neg_decision,
             extract_neg_id_from_text,
             apply_coach_channel_decision,
+            apply_client_channel_decision,
         )
 
         neg_decision = parse_neg_decision(Body.strip())
+        neg_id = extract_neg_id_from_text(Body)
         if neg_decision:
             db_pool = getattr(router, "_db_pool", None)
             if db_pool:
-                neg_result = await apply_coach_channel_decision(
-                    db_pool,
-                    decision=neg_decision,
-                    negotiation_id=extract_neg_id_from_text(Body),
-                    coach_phone=phone,
-                )
-                if neg_result.get("ok"):
-                    print(f">>> [TWILIO_WEBHOOK] Negotiation reply: {neg_decision}")
+                if neg_decision in ("accept_alt", "reject_alt") and neg_id:
+                    neg_result = await apply_client_channel_decision(
+                        db_pool, decision=neg_decision, negotiation_id=neg_id
+                    )
                     twiml = (
                         '<?xml version="1.0" encoding="UTF-8"?>'
                         f'<Response><Message>Got it — {neg_decision}. '
-                        f'Your client will be updated (alts from your Schedule).</Message></Response>'
+                        f'Session update applied.</Message></Response>'
                     )
+                    print(f">>> [TWILIO_WEBHOOK] Client negotiation: {neg_decision} ok={neg_result.get('ok')}")
                     return Response(content=twiml, media_type="application/xml")
+                if neg_decision in ("busy", "alt") or neg_id:
+                    neg_result = await apply_coach_channel_decision(
+                        db_pool,
+                        decision=neg_decision if neg_decision in ("approve", "busy", "alt") else "approve",
+                        negotiation_id=neg_id,
+                        coach_phone=phone,
+                    )
+                    twiml = (
+                        '<?xml version="1.0" encoding="UTF-8"?>'
+                        f'<Response><Message>Got it — {neg_decision}. '
+                        f'{"Your client will be updated (alts from your Schedule)." if neg_result.get("ok") else "Could not find an open request — reply in Coach Command."}'
+                        f'</Message></Response>'
+                    )
+                    print(f">>> [TWILIO_WEBHOOK] Negotiation reply: {neg_decision} ok={neg_result.get('ok')}")
+                    return Response(content=twiml, media_type="application/xml")
+                if neg_decision == "approve":
+                    neg_result = await apply_coach_channel_decision(
+                        db_pool,
+                        decision="approve",
+                        negotiation_id=neg_id,
+                        coach_phone=phone,
+                    )
+                    if neg_result.get("ok"):
+                        twiml = (
+                            '<?xml version="1.0" encoding="UTF-8"?>'
+                            '<Response><Message>Got it — approve. '
+                            'Your client will be updated.</Message></Response>'
+                        )
+                        print(f">>> [TWILIO_WEBHOOK] Negotiation reply: approve")
+                        return Response(content=twiml, media_type="application/xml")
+                    # No open negotiation — fall through to ApprovalProtocol.
     except Exception as e:
         print(f">>> [TWILIO_WEBHOOK] Negotiation SMS error: {e}")
 

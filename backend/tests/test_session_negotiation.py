@@ -204,7 +204,12 @@ def test_neg_token_roundtrip(monkeypatch):
     nid = "22222222-2222-2222-2222-222222222222"
     tok = snn.make_neg_token(nid, "busy")
     parsed = snn.verify_neg_token(tok)
-    assert parsed == (nid, "busy")
+    assert parsed == (nid, "busy", "")
+    tok2 = snn.make_neg_token(nid, "accept_alt", slot="2026-07-20T16:00:00+00:00")
+    parsed2 = snn.verify_neg_token(tok2)
+    assert parsed2[0] == nid
+    assert parsed2[1] == "accept_alt"
+    assert "2026-07-20" in parsed2[2]
 
 
 def test_mailto_and_parse_decision():
@@ -215,3 +220,12 @@ def test_mailto_and_parse_decision():
     assert snn.extract_neg_id_from_text(f"Re: x [#neg:{nid}]") == nid
     assert snn.parse_neg_decision("BUSY\n\n[#neg:x]") == "busy"
     assert snn.parse_neg_decision("ALT") == "alt"
+    assert snn.parse_neg_decision("ACCEPT") == "accept_alt"
+    assert snn.parse_neg_decision("REJECT") == "reject_alt"
+
+
+def test_staging_public_api_base(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv("STAGING_PUBLIC_API_BASE", "http://127.0.0.1:8011")
+    url = snn.negotiation_action_url("44444444-4444-4444-4444-444444444444", "approve")
+    assert url.startswith("http://127.0.0.1:8011/")

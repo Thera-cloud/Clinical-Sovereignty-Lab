@@ -76,6 +76,18 @@ class SessionPaymentAgent:
         if not self.db_pool:
             return
 
+        # QUANTUM-CRYSTAL-ARCH: expire stale Nate negotiations (24h) alongside payment sweep
+        try:
+            from app.services.session_negotiation_service import (
+                expire_stale_negotiations,
+                negotiation_enabled,
+            )
+
+            if negotiation_enabled():
+                await expire_stale_negotiations(self.db_pool, max_age_hours=24)
+        except Exception as e:
+            logger.warning("SessionPaymentAgent: negotiation expire skipped: %s", e)
+
         now = datetime.now(timezone.utc)
         window_start = now
         window_end = now + timedelta(hours=PAYMENT_WINDOW_HOURS)
