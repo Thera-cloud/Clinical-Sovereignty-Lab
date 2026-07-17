@@ -242,6 +242,23 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 
 *Scores are external-only. Runner/pregrader never assign quotient points.*
 
+### Track D — Living Battery v5 (migration 246)
+
+**Flags (staging defaults on living/standards; gen off until approved):**
+`ENABLE_SIX_QUOTIENT_LIVING_BATTERY`, `ENABLE_SIX_QUOTIENT_MULTI_TURN`,
+`ENABLE_SIX_QUOTIENT_STANDARDS_INDEX`, `ENABLE_SIX_QUOTIENT_SCENARIO_GEN`
+
+| Step | Action | Done |
+|------|--------|------|
+| D.1 | Migration `246_six_quotient_living_battery.sql` applied (prod + staging DBs) | [ ] |
+| D.2 | `POST /api/admin/six-quotient/bank/seed` — v4 anchors approved | [ ] |
+| D.3 | Dry-run multi-turn: `POST .../trigger` `{dry_run:true, multi_turn:true}` | [ ] |
+| D.4 | Standards sync (staging): `POST .../standards/sync` → review → approve | [ ] |
+| D.5 | Scenario gen (flag on): `POST .../generate` → human approve drafts | [ ] |
+| D.6 | Judge calibrate: `POST .../judge/calibrate` before AI evaluators | [ ] |
+| D.7 | Ability/IRT: `GET .../ability` after first scored run | [ ] |
+| D.8 | Prod living/standards/gen flags remain **false** until soak | [ ] |
+
 ---
 
 ## Post-deploy verification (every phase)

@@ -1,0 +1,124 @@
+{
+  "version": "2026.1",
+  "note": "Allowlisted sources only. Tier 1=gov/professional body, 2=peer-reviewed journal feed, 3=secondary curated.",
+  "quotients": {
+    "AQ": {
+      "label": "Adversity / Crisis Safety",
+      "sources": [
+        {
+          "key": "samhsa_news",
+          "name": "SAMHSA Newsroom",
+          "url": "https://www.samhsa.gov/newsroom/rss.xml",
+          "type": "rss",
+          "authority_tier": 1,
+          "topics": ["crisis", "suicide", "safety planning", "988"]
+        },
+        {
+          "key": "apa_press",
+          "name": "APA Press Releases",
+          "url": "https://www.apa.org/news/press/releases/rss",
+          "type": "rss",
+          "authority_tier": 1,
+          "topics": ["ethics", "practice guidelines", "suicide"]
+        },
+        {
+          "key": "cssrs_manual",
+          "name": "Columbia Protocol (C-SSRS) reference",
+          "url": "https://cssrs.columbia.edu/",
+          "type": "page",
+          "authority_tier": 1,
+          "topics": ["lethality assessment", "Columbia Protocol"]
+        }
+      ]
+    },
+    "EQ": {
+      "label": "Emotional / Affective",
+      "sources": [
+        {
+          "key": "psych_today",
+          "name": "Psychology Today",
+          "url": "https://www.psychologytoday.com/us/blog/feed",
+          "type": "rss",
+          "authority_tier": 3,
+          "topics": ["emotion", "attachment", "empathy"]
+        },
+        {
+          "key": "greater_good",
+          "name": "Greater Good Science Center",
+          "url": "https://greatergood.berkeley.edu/feed",
+          "type": "rss",
+          "authority_tier": 2,
+          "topics": ["emotion science", "compassion"]
+        }
+      ]
+    },
+    "MQ": {
+      "label": "Moral / Ethics",
+      "sources": [
+        {
+          "key": "apa_ethics",
+          "name": "APA Press (ethics track)",
+          "url": "https://www.apa.org/news/press/releases/rss",
+          "type": "rss",
+          "authority_tier": 1,
+          "topics": ["ethics", "moral injury", "professional conduct"]
+        }
+      ]
+    },
+    "SQ": {
+      "label": "Social / Relational Process",
+      "sources": [
+        {
+          "key": "psych_today_sq",
+          "name": "Psychology Today",
+          "url": "https://www.psychologytoday.com/us/blog/feed",
+          "type": "rss",
+          "authority_tier": 3,
+          "topics": ["supervision", "parallel process", "alliance"]
+        }
+      ]
+    },
+    "CQ": {
+      "label": "Cultural / Creative Formulation",
+      "sources": [
+        {
+          "key": "apa_press_cq",
+          "name": "APA Press Releases",
+          "url": "https://www.apa.org/news/press/releases/rss",
+          "type": "rss",
+          "authority_tier": 1,
+          "topics": ["cultural competence", "equity", "diversity"]
+        },
+        {
+          "key": "nami",
+          "name": "NAMI",
+          "url": "https://www.nami.org/RSS",
+          "type": "rss",
+          "authority_tier": 2,
+          "topics": ["advocacy", "community", "stigma"]
+        }
+      ]
+    },
+    "IQ": {
+      "label": "Clinical Reasoning / Formulation",
+      "sources": [
+        {
+          "key": "apa_press_iq",
+          "name": "APA Press Releases",
+          "url": "https://www.apa.org/news/press/releases/rss",
+          "type": "rss",
+          "authority_tier": 1,
+          "topics": ["diagnosis", "evidence-based practice", "guidelines"]
+        },
+        {
+          "key": "psych_central",
+          "name": "Psych Central",
+          "url": "https://feeds.feedburner.com/PsychCentral",
+          "type": "rss",
+          "authority_tier": 3,
+          "topics": ["clinical", "assessment"]
+        }
+      ]
+    }
+  }
+}

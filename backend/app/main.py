@@ -2763,6 +2763,17 @@ async def lifespan(app: FastAPI):
     except Exception as _sqb_err:
         print(f"   ⚠️  SixQuotientBatteryAgent init failed: {_sqb_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — Six-Quotient Standards Index (allowlisted professional feeds)
+    _six_q_standards = None
+    try:
+        from app.services.six_quotient_standards_index import SixQuotientStandardsIndex
+        _six_q_standards = SixQuotientStandardsIndex(db_pool, app_state=app.state)
+        await _six_q_standards.start()
+        app.state.six_quotient_standards_index = _six_q_standards
+        print("   ✅ SixQuotientStandardsIndex started (ENABLE_SIX_QUOTIENT_STANDARDS_INDEX)")
+    except Exception as _sqs_err:
+        print(f"   ⚠️  SixQuotientStandardsIndex init failed: {_sqs_err}")
+
     # ── Nate Check-In Agent — 72h inactivity outreach for clients + coaches ──
     _nate_checkin_agent = None
     try:
@@ -3233,6 +3244,7 @@ async def lifespan(app: FastAPI):
         ("crystal_outcome_apply", _crystal_outcome_apply is not None),  # QUANTUM-CRYSTAL-ARCH
         ("dual_coo_loop_closer", _dual_coo_loop_closer is not None),  # QUANTUM-CRYSTAL-ARCH
         ("six_quotient_battery_agent", _six_q_battery_agent is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("six_quotient_standards_index", _six_q_standards is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", _nate_checkin_agent is not None),
         ("nate_commitment_agent", _nate_commitment_agent is not None),
         ("nate_self_monitor_agent", _nate_self_monitor_agent is not None),
@@ -3371,6 +3383,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ SixQuotientBatteryAgent stopped")
         except Exception as _sqb_stop:
             print(f"   ⚠️  SixQuotientBatteryAgent shutdown: {_sqb_stop}")
+    _six_q_standards_h = getattr(app.state, "six_quotient_standards_index", None)  # QUANTUM-CRYSTAL-ARCH
+    if _six_q_standards_h:
+        try:
+            await _six_q_standards_h.stop()
+            print("   ✅ SixQuotientStandardsIndex stopped")
+        except Exception as _sqs_stop:
+            print(f"   ⚠️  SixQuotientStandardsIndex shutdown: {_sqs_stop}")
     if _sse_orchestrator:
         try:
             await _sse_orchestrator.stop()

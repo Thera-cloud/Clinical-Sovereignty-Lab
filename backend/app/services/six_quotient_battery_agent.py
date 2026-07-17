@@ -2,6 +2,7 @@
 Six-Quotient Battery Agent — weekly cycle + on-demand dry-run/live trigger.
 
 Flag: ENABLE_SIX_QUOTIENT_BATTERY (default false).
+Living v5 (adaptive bank + multi-turn): ENABLE_SIX_QUOTIENT_LIVING_BATTERY.
 Weekly fire: Sunday 06:00–07:00 UTC (outside audit windows).
 """
 
@@ -20,8 +21,9 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("sovereign.six_quotient_battery_agent")
 
 CYCLE_SECONDS = 3600  # check hourly; act once on Sunday window
+
+
 def _scenarios_path() -> Path:
-    # Prefer image path (COPY app/ → /app/app/data); fall back to tests mount.
     candidates = [
         Path(__file__).resolve().parents[1] / "data" / "six_quotient_scenarios_v4.json",
         Path("/app/app/data/six_quotient_scenarios_v4.json"),
@@ -39,6 +41,12 @@ SCENARIOS_PATH = _scenarios_path()
 
 def _flag_on() -> bool:
     return os.getenv("ENABLE_SIX_QUOTIENT_BATTERY", "false").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _living_on() -> bool:
+    return os.getenv("ENABLE_SIX_QUOTIENT_LIVING_BATTERY", "false").strip().lower() in (
         "1", "true", "yes", "on",
     )
 
@@ -70,9 +78,18 @@ class SixQuotientBatteryAgent:
         self._running = True
         self._task = asyncio.create_task(self._loop())
         logger.info(
-            "SixQuotientBatteryAgent started (enabled=%s)",
+            "SixQuotientBatteryAgent started (enabled=%s living=%s)",
             _flag_on(),
+            _living_on(),
         )
+        # Seed anchors when living flag on
+        if _living_on() and self.db_pool:
+            try:
+                from app.services.six_quotient_scenario_bank import seed_v4_anchors
+
+                await seed_v4_anchors(self.db_pool)
+            except Exception as e:
+                logger.warning("seed_v4_anchors: %s", e)
 
     async def stop(self):
         self._running = False
@@ -81,24 +98,52 @@ class SixQuotientBatteryAgent:
         logger.info("SixQuotientBatteryAgent stopped")
 
     async def _loop(self):
-        await asyncio.sleep(180)  # stagger after boot
+        await asyncio.sleep(180)
         while self._running:
             try:
                 if _flag_on():
                     await self._maybe_weekly()
+                    if _living_on() and self._sunday_gen_window():
+                        await self._maybe_generate()
             except Exception as e:
                 logger.error("SixQuotientBatteryAgent cycle error: %s", e)
             await asyncio.sleep(CYCLE_SECONDS)
 
+    def _sunday_gen_window(self) -> bool:
+        now = datetime.now(timezone.utc)
+        return now.weekday() == 6 and 7 <= now.hour < 8
+
+    async def _maybe_generate(self):
+        if os.getenv("ENABLE_SIX_QUOTIENT_SCENARIO_GEN", "false").strip().lower() not in (
+            "1", "true", "yes", "on",
+        ):
+            return
+        day_key = datetime.now(timezone.utc).strftime("%Y-%m-%d") + ":gen"
+        if getattr(self, "_last_gen_date", None) == day_key:
+            return
+        try:
+            from app.services.six_quotient_scenario_generator import generate_drafts
+
+            result = await generate_drafts(
+                self.db_pool,
+                self.app_state,
+                sections=["AQ", "SQ", "CQ", "MQ"],
+                n_per_section=1,
+                boundary=True,
+                environment=os.getenv("SIX_QUOTIENT_BATTERY_ENV", "staging"),
+            )
+            self._last_gen_date = day_key
+            logger.info("Weekly scenario gen: %s", result)
+        except Exception as e:
+            logger.warning("weekly gen: %s", e)
+
     async def _maybe_weekly(self):
         now = datetime.now(timezone.utc)
-        # Sunday = 6
         if now.weekday() != 6 or not (6 <= now.hour < 7):
             return
         day_key = now.strftime("%Y-%m-%d")
         if self._last_run_date == day_key:
             return
-        # Prefer dry_run unless LIVE flag set
         live = os.getenv("SIX_QUOTIENT_BATTERY_LIVE_WS", "false").strip().lower() in (
             "1", "true", "yes", "on",
         )
@@ -119,40 +164,63 @@ class SixQuotientBatteryAgent:
         limit: int = 0,
         environment: str = "staging",
         persist: bool = True,
+        multi_turn: Optional[bool] = None,
     ) -> Dict[str, Any]:
         from app.services.six_quotient_pregrader import pregrade_battery
 
-        scenarios_path = _scenarios_path()
-        if not scenarios_path.exists():
-            return {"ok": False, "error": f"scenarios missing: {scenarios_path}"}
+        selection = await self._select_scenarios(environment=environment, limit=limit)
+        scenarios = selection.get("scenarios") or []
+        if not scenarios:
+            return {"ok": False, "error": "no scenarios selected"}
 
-        with open(scenarios_path, encoding="utf-8") as f:
-            pack = json.load(f)
+        use_mt = multi_turn if multi_turn is not None else True
+        try:
+            from app.services.six_quotient_multi_turn import multi_turn_enabled
 
-        scenarios = pack.get("scenarios") or []
+            if not multi_turn_enabled():
+                use_mt = False
+        except Exception:
+            pass
+
         if dry_run:
-            selected = scenarios[: limit or len(scenarios)]
-            raw = [
-                {
-                    "scenario_id": sc["id"],
-                    "section": sc["section"],
-                    "title": sc["title"],
-                    "rubric_focus": sc["rubric_focus"],
-                    "client_says": sc["client_says"],
-                    "response": (
-                        f"[DRY-RUN] Placeholder for {sc['id']} — external scoring required."
-                    ),
-                    "duration_seconds": 0.01,
-                    "provider": "dry_run",
-                    "odpe_signal": "",
-                    "error": "",
-                }
-                for sc in selected
-            ]
+            if use_mt:
+                from app.services.six_quotient_multi_turn import run_multi_turn_dry
+
+                raw = [await run_multi_turn_dry(sc) for sc in scenarios]
+            else:
+                raw = [
+                    {
+                        "scenario_id": sc.get("id") or sc.get("scenario_key"),
+                        "section": sc["section"],
+                        "title": sc.get("title"),
+                        "rubric_focus": sc.get("rubric_focus"),
+                        "client_says": sc.get("client_says"),
+                        "response": (
+                            f"[DRY-RUN] Placeholder for "
+                            f"{sc.get('id') or sc.get('scenario_key')} — "
+                            "external scoring required."
+                        ),
+                        "duration_seconds": 0.01,
+                        "provider": "dry_run",
+                        "odpe_signal": "",
+                        "error": "",
+                    }
+                    for sc in scenarios
+                ]
         else:
-            raw = await self._live_ws(scenarios, limit=limit)
+            if use_mt:
+                raw = await self._live_ws_multi(scenarios)
+            else:
+                raw = await self._live_ws(scenarios, limit=0)
 
         graded = pregrade_battery(raw)
+        # Attach process metrics if present
+        for g, r in zip(graded, raw):
+            if r.get("process_metrics"):
+                g["process_metrics"] = r["process_metrics"]
+            if r.get("turns"):
+                g["turns"] = r["turns"]
+
         git_hash = _git_hash()
         run_id = None
         status = "awaiting_scores"
@@ -161,23 +229,68 @@ class SixQuotientBatteryAgent:
         ):
             status = "failed"
 
+        pack = {
+            "battery_version": selection.get("battery_version", "v4"),
+            "selection_mode": selection.get("mode"),
+            "theta": selection.get("theta"),
+            "weak_sections": selection.get("weak_sections"),
+            "rubric": {
+                "primary": "0-3 core clinical skill",
+                "accuracy": "0-3 clinically sound, current standards",
+                "naturalness": "0-3 real therapist, not chatbot",
+                "note": "EXTERNAL scoring only — runner never assigns scores",
+            },
+        }
+
         if persist and self.db_pool:
             run_id = await self._persist(pack, graded, environment, git_hash, status)
+            if run_id and use_mt:
+                await self._persist_transcripts(run_id, graded)
 
         result = {
             "ok": True,
-            "mode": "dry_run" if dry_run else "live_ws",
+            "mode": ("dry_run" if dry_run else "live_ws")
+            + ("_multi_turn" if use_mt else ""),
+            "selection_mode": selection.get("mode"),
+            "battery_version": pack["battery_version"],
+            "theta": selection.get("theta"),
             "scenarios": len(graded),
             "run_id": run_id,
             "status": status,
             "enabled": _flag_on(),
+            "living": _living_on(),
             "git_hash": git_hash,
         }
         self.last_result = result
         return result
 
+    async def _select_scenarios(
+        self, *, environment: str, limit: int
+    ) -> Dict[str, Any]:
+        try:
+            from app.services.six_quotient_adaptive_selector import select_battery
+
+            return await select_battery(
+                self.db_pool,
+                environment=environment,
+                limit=limit,
+            )
+        except Exception as e:
+            logger.warning("selector failed: %s", e)
+            path = _scenarios_path()
+            with open(path, encoding="utf-8") as f:
+                pack = json.load(f)
+            sc = pack.get("scenarios") or []
+            if limit:
+                sc = sc[:limit]
+            return {
+                "scenarios": sc,
+                "mode": "v4_static_error_fallback",
+                "theta": 0.0,
+                "battery_version": "v4",
+            }
+
     async def _live_ws(self, scenarios: List[Dict[str, Any]], limit: int = 0) -> List[Dict[str, Any]]:
-        """Delegate to runner script helpers for WS capture."""
         import importlib.util
 
         runner_path = Path(__file__).resolve().parents[2] / "scripts" / "six_quotient_battery_runner.py"
@@ -204,6 +317,48 @@ class SixQuotientBatteryAgent:
             limit=limit,
         )
 
+    async def _live_ws_multi(self, scenarios: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        from app.services.six_quotient_multi_turn import run_multi_turn_ws
+
+        ws_url = os.getenv(
+            "SIX_QUOTIENT_BRIDGE_WS_URL",
+            os.getenv("BRIDGE_WS_URL", "ws://127.0.0.1:8766/ws"),
+        )
+        out = []
+        for sc in scenarios:
+            out.append(
+                await run_multi_turn_ws(
+                    sc,
+                    ws_url=ws_url,
+                    username=os.getenv("TEST_USERNAME", "audit_client"),
+                    password=os.getenv(
+                        "TEST_PASSWORD", os.getenv("AUDIT_CLIENT_PASSWORD", "")
+                    ),
+                    role=os.getenv("TEST_ROLE", "CLIENT"),
+                )
+            )
+            await asyncio.sleep(float(os.getenv("INTER_SESSION_DELAY", "6")))
+        return out
+
+    async def _persist_transcripts(self, run_id: str, results: List[Dict[str, Any]]) -> None:
+        try:
+            async with self.db_pool.acquire() as conn:
+                for r in results:
+                    if not r.get("turns"):
+                        continue
+                    await conn.execute(
+                        """INSERT INTO six_quotient_multi_turn_transcripts
+                           (run_id, scenario_key, section, turns_json, process_metrics)
+                           VALUES ($1::uuid, $2, $3, $4::jsonb, $5::jsonb)""",
+                        run_id,
+                        str(r.get("scenario_id") or ""),
+                        str(r.get("section") or ""),
+                        json.dumps(r.get("turns") or []),
+                        json.dumps(r.get("process_metrics") or {}),
+                    )
+        except Exception as e:
+            logger.warning("persist transcripts: %s", e)
+
     async def _persist(
         self,
         pack: Dict[str, Any],
@@ -213,10 +368,18 @@ class SixQuotientBatteryAgent:
         status: str,
     ) -> Optional[str]:
         run_id = str(uuid.uuid4())
+        # Strip bulky turns from results_json summary (kept in transcripts table)
+        slim = []
+        for r in results:
+            s = {k: v for k, v in r.items() if k != "turns"}
+            slim.append(s)
         payload = {
             "battery_version": pack.get("battery_version", "v4"),
+            "selection_mode": pack.get("selection_mode"),
+            "theta": pack.get("theta"),
+            "weak_sections": pack.get("weak_sections"),
             "rubric": pack.get("rubric"),
-            "results": results,
+            "results": slim,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
         try:

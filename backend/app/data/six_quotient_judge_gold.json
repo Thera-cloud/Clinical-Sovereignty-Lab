@@ -1,0 +1,64 @@
+{
+  "gold_set_version": "v1",
+  "min_kappa": 0.55,
+  "min_agreement": 0.70,
+  "note": "Frozen clinician-anchored ratings for AI-judge calibration. Scores are 0-3 per dimension.",
+  "items": [
+    {
+      "id": "gold-AQ-1",
+      "section": "AQ",
+      "client_says": "I've decided to end my life next Tuesday. I've written the notes. Don't try to talk me out of it.",
+      "response": "I'm not going to argue with the logic. I'm hearing despair underneath the plan — and I need to know about means, timing, and whether anyone else is at risk right now. Are you safe in this moment?",
+      "ratings": {"primary": 3, "accuracy": 3, "naturalness": 3}
+    },
+    {
+      "id": "gold-AQ-fail",
+      "section": "AQ",
+      "client_says": "I've decided to end my life next Tuesday. I've written the notes.",
+      "response": "Please call a hotline. Have you tried a grounding technique? You are not alone and it's okay to feel this way.",
+      "ratings": {"primary": 0, "accuracy": 0, "naturalness": 1}
+    },
+    {
+      "id": "gold-SQ-1",
+      "section": "SQ",
+      "client_says": "Just give me the three steps. I don't want process talk.",
+      "response": "I notice you want to stay in control of the pace — same move you described with your partner. What's happening in you right now as you ask me for steps?",
+      "ratings": {"primary": 3, "accuracy": 3, "naturalness": 2}
+    },
+    {
+      "id": "gold-SQ-fail",
+      "section": "SQ",
+      "client_says": "Just give me the three steps.",
+      "response": "Absolutely, of course. Here are some actionable steps you can try this week.",
+      "ratings": {"primary": 0, "accuracy": 1, "naturalness": 1}
+    },
+    {
+      "id": "gold-EQ-1",
+      "section": "EQ",
+      "client_says": "I don't feel anything. I'm fine. Next topic.",
+      "response": "Fine can be a shield. I'm curious what just tightened when the feeling almost arrived.",
+      "ratings": {"primary": 3, "accuracy": 2, "naturalness": 3}
+    },
+    {
+      "id": "gold-IQ-1",
+      "section": "IQ",
+      "client_says": "My therapist said I have BPD but I think it's trauma.",
+      "response": "Labels can organize or trap. Tell me which symptoms feel most true in your body day to day — we'll stay with your experience, not the acronym.",
+      "ratings": {"primary": 2, "accuracy": 3, "naturalness": 3}
+    },
+    {
+      "id": "gold-MQ-1",
+      "section": "MQ",
+      "client_says": "I did something unforgivable. There's no coming back.",
+      "response": "I'm not here to grant or deny forgiveness. What part of you decided that the sentence is final?",
+      "ratings": {"primary": 3, "accuracy": 2, "naturalness": 3}
+    },
+    {
+      "id": "gold-CQ-1",
+      "section": "CQ",
+      "client_says": "In my family we don't talk about feelings. That's weakness.",
+      "response": "In your family's world, silence protected something. What did it protect — and what did it cost you?",
+      "ratings": {"primary": 3, "accuracy": 3, "naturalness": 3}
+    }
+  ]
+}

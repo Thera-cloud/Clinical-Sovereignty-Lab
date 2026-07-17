@@ -78,6 +78,38 @@ class TriggerRequest(BaseModel):
     limit: int = 0
     environment: str = "staging"
     persist: bool = True
+    multi_turn: bool = True
+
+
+class ApproveScenarioBody(BaseModel):
+    scenario_key: str
+    approved_by: str = "admin"
+
+
+class GenerateBody(BaseModel):
+    sections: List[str] = Field(default_factory=lambda: ["AQ", "SQ", "CQ"])
+    n_per_section: int = 1
+    boundary: bool = True
+    environment: str = "staging"
+
+
+class StandardsApproveBody(BaseModel):
+    item_id: str
+    approved_by: str = "admin"
+    crystallize: bool = True
+
+
+class JudgeCalibrateBody(BaseModel):
+    evaluator_id: str
+    ratings: List[Dict[str, Any]]
+
+    @field_validator("evaluator_id")
+    @classmethod
+    def _eval(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("evaluator_id required")
+        return v
 
 
 @router.get("/health")
@@ -85,7 +117,12 @@ async def health(request: Request):
     """Battery subsystem health — always structurally non-empty."""
     pool = _pool(request)
     enabled = _enabled()
+    living = os.getenv("ENABLE_SIX_QUOTIENT_LIVING_BATTERY", "false").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
     last_run = None
+    bank_approved = 0
+    standards_pending = 0
     try:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -100,20 +137,41 @@ async def health(request: Request):
                     last_run["started_at"] = last_run["started_at"].isoformat()
                 if last_run.get("scored_at"):
                     last_run["scored_at"] = last_run["scored_at"].isoformat()
+            try:
+                bank_approved = int(
+                    await conn.fetchval(
+                        "SELECT COUNT(*) FROM six_quotient_scenario_bank WHERE status = 'approved'"
+                    )
+                    or 0
+                )
+                standards_pending = int(
+                    await conn.fetchval(
+                        "SELECT COUNT(*) FROM six_quotient_standards_items WHERE status = 'pending_review'"
+                    )
+                    or 0
+                )
+            except Exception:
+                pass
     except Exception as e:
         logger.warning("six_quotient health query: %s", e)
         return {
             "status": "degraded",
             "enabled": enabled,
+            "living": living,
             "tables_ok": False,
             "error": str(e)[:200],
             "last_run": None,
+            "bank_approved": 0,
+            "standards_pending": 0,
         }
     return {
         "status": "ok",
         "enabled": enabled,
+        "living": living,
         "tables_ok": True,
         "last_run": last_run or {"status": "none"},
+        "bank_approved": bank_approved,
+        "standards_pending": standards_pending,
     }
 
 
@@ -321,5 +379,160 @@ async def trigger_battery(body: TriggerRequest, request: Request):
         limit=body.limit,
         environment=body.environment,
         persist=body.persist,
+        multi_turn=body.multi_turn,
     )
     return {"status": "ok", "result": result}
+
+
+@router.get("/bank")
+async def list_scenario_bank(
+    request: Request, status: str = "approved", section: str = "", limit: int = 100
+):
+    pool = _pool(request)
+    from app.services.six_quotient_scenario_bank import list_bank
+
+    rows = await list_bank(
+        pool,
+        status=status or None,
+        section=section or None,
+        limit=limit,
+    )
+    return {"status": "ok", "scenarios": rows, "count": len(rows)}
+
+
+@router.post("/bank/seed")
+async def seed_bank(request: Request):
+    pool = _pool(request)
+    from app.services.six_quotient_scenario_bank import seed_v4_anchors
+
+    result = await seed_v4_anchors(pool)
+    return {"status": "ok", "result": result}
+
+
+@router.post("/bank/approve")
+async def approve_bank_scenario(body: ApproveScenarioBody, request: Request):
+    pool = _pool(request)
+    from app.services.six_quotient_scenario_bank import approve_scenario
+
+    result = await approve_scenario(pool, body.scenario_key, body.approved_by)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error", "approve_failed"))
+    return {"status": "ok", **result}
+
+
+@router.post("/generate")
+async def generate_scenarios(body: GenerateBody, request: Request):
+    if os.getenv("ENABLE_SIX_QUOTIENT_SCENARIO_GEN", "false").strip().lower() not in (
+        "1", "true", "yes", "on",
+    ):
+        raise HTTPException(403, "ENABLE_SIX_QUOTIENT_SCENARIO_GEN is off")
+    pool = _pool(request)
+    from app.services.six_quotient_scenario_generator import generate_drafts
+
+    result = await generate_drafts(
+        pool,
+        request.app.state,
+        sections=body.sections,
+        n_per_section=body.n_per_section,
+        boundary=body.boundary,
+        environment=body.environment,
+    )
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error", "generate_failed"))
+    return {"status": "ok", "result": result}
+
+
+@router.get("/standards")
+async def list_standards(
+    request: Request, status: str = "pending_review", quotient: str = "", limit: int = 50
+):
+    idx = getattr(request.app.state, "six_quotient_standards_index", None)
+    if idx and hasattr(idx, "list_items"):
+        rows = await idx.list_items(
+            status=status, quotient=quotient or None, limit=limit
+        )
+        return {"status": "ok", "items": rows, "count": len(rows)}
+    # Fallback direct query
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        if quotient:
+            rows = await conn.fetch(
+                """SELECT id::text, quotient, title, url, published_year, status, source_name
+                   FROM six_quotient_standards_items
+                   WHERE status = $1 AND quotient = $2
+                   ORDER BY fetched_at DESC LIMIT $3""",
+                status,
+                quotient.upper(),
+                limit,
+            )
+        else:
+            rows = await conn.fetch(
+                """SELECT id::text, quotient, title, url, published_year, status, source_name
+                   FROM six_quotient_standards_items
+                   WHERE status = $1
+                   ORDER BY fetched_at DESC LIMIT $2""",
+                status,
+                limit,
+            )
+    return {"status": "ok", "items": [dict(r) for r in rows], "count": len(rows)}
+
+
+@router.post("/standards/sync")
+async def sync_standards(request: Request):
+    if os.getenv("ENABLE_SIX_QUOTIENT_STANDARDS_INDEX", "false").strip().lower() not in (
+        "1", "true", "yes", "on",
+    ):
+        raise HTTPException(403, "ENABLE_SIX_QUOTIENT_STANDARDS_INDEX is off")
+    idx = getattr(request.app.state, "six_quotient_standards_index", None)
+    if not idx:
+        raise HTTPException(503, "standards index unavailable")
+    result = await idx.run_once()
+    return {"status": "ok", "result": result}
+
+
+@router.post("/standards/approve")
+async def approve_standard(body: StandardsApproveBody, request: Request):
+    idx = getattr(request.app.state, "six_quotient_standards_index", None)
+    if not idx:
+        raise HTTPException(503, "standards index unavailable")
+    result = await idx.approve(
+        body.item_id, body.approved_by, crystallize=body.crystallize
+    )
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error", "approve_failed"))
+    return {"status": "ok", **result}
+
+
+@router.get("/ability")
+async def get_ability_state(request: Request, environment: str = "staging"):
+    pool = _pool(request)
+    from app.services.six_quotient_scenario_bank import get_ability
+
+    return {"status": "ok", "ability": await get_ability(pool, environment)}
+
+
+@router.get("/judge/gold")
+async def judge_gold(request: Request):
+    from app.services.six_quotient_judge_calibration import load_gold
+
+    gold = load_gold()
+    # Hide gold ratings from casual peek? Admin-only router — return full for calibration UX
+    return {"status": "ok", "gold": gold}
+
+
+@router.post("/judge/calibrate")
+async def judge_calibrate(body: JudgeCalibrateBody, request: Request):
+    pool = _pool(request)
+    from app.services.six_quotient_judge_calibration import (
+        calibrate_evaluator,
+        persist_calibration,
+    )
+
+    result = calibrate_evaluator(body.ratings)
+    cal_id = await persist_calibration(pool, body.evaluator_id, result)
+    return {
+        "status": "ok",
+        "calibration_id": cal_id,
+        "evaluator_id": body.evaluator_id,
+        "result": result,
+    }

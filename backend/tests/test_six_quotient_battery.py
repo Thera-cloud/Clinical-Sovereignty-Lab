@@ -180,10 +180,101 @@ class TestScoresIntakeValidation(unittest.TestCase):
 class TestBatteryAgentDryRun(unittest.IsolatedAsyncioTestCase):
     async def test_dry_run_no_db(self):
         agent = _agent.SixQuotientBatteryAgent(db_pool=None)
-        result = await agent.run_once(dry_run=True, limit=2, persist=False)
+        result = await agent.run_once(
+            dry_run=True, limit=2, persist=False, multi_turn=False
+        )
         self.assertTrue(result.get("ok"))
         self.assertEqual(result.get("scenarios"), 2)
         self.assertEqual(result.get("mode"), "dry_run")
+
+    async def test_dry_run_multi_turn(self):
+        agent = _agent.SixQuotientBatteryAgent(db_pool=None)
+        result = await agent.run_once(
+            dry_run=True, limit=1, persist=False, multi_turn=True
+        )
+        self.assertTrue(result.get("ok"))
+        self.assertIn("multi_turn", result.get("mode", ""))
+
+
+_irt = _load(
+    "app.services.six_quotient_irt",
+    APP / "services" / "six_quotient_irt.py",
+)
+_judge = _load(
+    "app.services.six_quotient_judge_calibration",
+    APP / "services" / "six_quotient_judge_calibration.py",
+)
+_mt = _load(
+    "app.services.six_quotient_multi_turn",
+    APP / "services" / "six_quotient_multi_turn.py",
+)
+_gen = _load(
+    "app.services.six_quotient_scenario_generator",
+    APP / "services" / "six_quotient_scenario_generator.py",
+)
+
+
+class TestIRT(unittest.TestCase):
+    def test_fisher_peaks_near_b(self):
+        # At θ=b, information should be high
+        i_at = _irt.fisher_information(0.0, 1.5, 0.0)
+        i_far = _irt.fisher_information(3.0, 1.5, 0.0)
+        self.assertGreater(i_at, i_far)
+
+    def test_select_max_info(self):
+        items = [
+            {"scenario_key": "a", "irt_a": 1.0, "irt_b": 0.0},
+            {"scenario_key": "b", "irt_a": 2.0, "irt_b": 0.1},
+            {"scenario_key": "c", "irt_a": 0.5, "irt_b": 2.0},
+        ]
+        picked = _irt.select_max_info(items, theta=0.0, k=2)
+        keys = {p["scenario_key"] for p in picked}
+        self.assertIn("b", keys)
+
+
+class TestJudgeCalibration(unittest.TestCase):
+    def test_perfect_match_passes(self):
+        gold = _judge.load_gold()
+        ratings = []
+        for it in gold["items"]:
+            ratings.append({"id": it["id"], **it["ratings"]})
+        result = _judge.calibrate_evaluator(ratings)
+        self.assertTrue(result["passed"])
+        self.assertGreaterEqual(result["kappa"], 0.9)
+
+    def test_bad_match_fails(self):
+        gold = _judge.load_gold()
+        ratings = [
+            {"id": it["id"], "primary": 0, "accuracy": 0, "naturalness": 0}
+            for it in gold["items"]
+        ]
+        # Invert from gold AQ-fail which is already low — force mismatch on good items
+        result = _judge.calibrate_evaluator(ratings)
+        self.assertFalse(result["passed"])
+
+
+class TestSafetyScan(unittest.TestCase):
+    def test_pii_flagged(self):
+        flags = _gen.safety_scan("My SSN is 123-45-6789 and email a@b.com")
+        self.assertIn("pii_pattern", flags)
+
+    def test_bleed_flagged(self):
+        flags = _gen.safety_scan("Welcome to Sovereign Sanctuary with Little Nate")
+        self.assertIn("platform_bleed", flags)
+
+
+class TestMultiTurnProcess(unittest.TestCase):
+    def test_process_metrics(self):
+        turns = [
+            {"role": "client", "text": "I have a plan"},
+            {"role": "nate", "text": "Tell me about means and whether you are safe"},
+            {"role": "client", "text": "pills"},
+            {"role": "nate", "text": "I hear the hurt underneath"},
+        ]
+        m = _mt.process_metrics(turns, "AQ")
+        self.assertEqual(m["turns_to_lethality_language"], 1)
+        self.assertEqual(m["turns_to_affect_language"], 2)
+        self.assertEqual(m["scoring_authority"], "external_only")
 
 
 class TestRunnerDryRun(unittest.IsolatedAsyncioTestCase):

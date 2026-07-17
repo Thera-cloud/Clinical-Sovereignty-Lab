@@ -187,4 +187,61 @@ async def analyze_and_enqueue(
 
     summary["enqueued"] = enqueued
     summary["ok"] = True
+
+    # Living Battery: update IRT ability + item params (non-fatal)
+    try:
+        await _calibrate_living(db_pool, run_id, score_dicts, by_section, run["environment"])
+    except Exception as e:
+        logger.warning("living IRT calibrate (non-fatal): %s", e)
+
     return summary
+
+
+async def _calibrate_living(
+    db_pool,
+    run_id: str,
+    score_dicts: List[Dict[str, Any]],
+    by_section: Dict[str, Dict[str, Any]],
+    environment: str,
+) -> None:
+    from app.services.six_quotient_irt import (
+        calibrate_item,
+        score_to_theta,
+        update_theta,
+    )
+    from app.services.six_quotient_scenario_bank import (
+        get_ability,
+        record_administration,
+        set_ability,
+        update_irt,
+    )
+
+    ability = await get_ability(db_pool, environment or "staging")
+    theta = float(ability.get("theta") or 0.0)
+    tbs = dict(ability.get("theta_by_section") or {})
+    responses = []
+
+    async with db_pool.acquire() as conn:
+        for sd in score_dicts:
+            total = int(sd["primary"]) + int(sd["accuracy"]) + int(sd["naturalness"])
+            key = str(sd["scenario_id"])
+            await record_administration(db_pool, key, float(total))
+            row = await conn.fetchrow(
+                """SELECT irt_a, irt_b, discrimination_n
+                   FROM six_quotient_scenario_bank WHERE scenario_key = $1""",
+                key,
+            )
+            if not row:
+                continue
+            a, b, n = float(row["irt_a"]), float(row["irt_b"]), int(row["discrimination_n"] or 0)
+            new_a, new_b, new_n = calibrate_item(a, b, n, [float(total)], theta)
+            await update_irt(db_pool, key, new_a, new_b, new_n)
+            responses.append((new_a, new_b, total >= 6))
+
+    if responses:
+        theta = update_theta(theta, responses)
+    for q, meta in by_section.items():
+        tbs[q] = score_to_theta(
+            float(meta.get("pct") or 0) / 100.0 * 9.0, max_total=9.0
+        )
+    await set_ability(db_pool, environment or "staging", theta, tbs, last_run_id=str(run_id))
