@@ -292,6 +292,10 @@ def build_capabilities_manifest(
         "Workers AI worker-ant subagents (explore/test_fix) with Queen Grok review",
         "Dual-COO risk tiers GREEN/YELLOW/RED + CEO inbox",
         "Gated non-clinical crystal outcome→confidence apply",
+        "Loop closer: coach-label, insight briefs, compliance red-team, prior-art, failover",
+        "Trust Enforcer → bus ops_fix (Chief of Staff)",
+        "CEO inbox UI + clinical apply + patent approve API",
+        "Sovereign Standard therapeutic docstring gate",
         "Patent claim_map propose→CEO batch approve",
     ]
     not_implemented = [

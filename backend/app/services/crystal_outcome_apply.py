@@ -203,3 +203,83 @@ async def propose_red_clinical_to_ceo(db_pool) -> Dict[str, Any]:
     except Exception as e:
         logger.warning("propose_red_clinical_to_ceo: %s", e)
         return {"status": "error", "error": str(e)[:200]}
+
+
+async def ceo_apply_clinical_shadows(
+    db_pool,
+    shadow_ids: list,
+    *,
+    approved_by: str = "DrNevedal1",
+) -> Dict[str, Any]:
+    """CEO-RED explicit apply of clinical/defense shadow deltas (forensic log)."""
+    if not db_pool or not shadow_ids:
+        return {"status": "error", "error": "missing_args"}
+    applied = 0
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT s.id AS shadow_id, s.crystal_id, s.domain,
+                       s.current_confidence, s.proposed_delta, s.sample_size, s.reasoning
+                FROM crystal_confidence_shadow s
+                WHERE s.id = ANY($1::bigint[])
+                  AND LOWER(COALESCE(s.domain, '')) = ANY($2::text[])
+                  AND s.sample_size >= $3
+                """,
+                list(shadow_ids),
+                list(RED_DOMAINS),
+                APPLY_MIN_SAMPLE,
+            )
+            for row in rows:
+                delta = float(row["proposed_delta"])
+                delta = max(-APPLY_MAX_ABS_DELTA, min(APPLY_MAX_ABS_DELTA, delta))
+                cur = float(row["current_confidence"] or 0.5)
+                new_c = max(0.15, min(0.95, cur + delta))
+                domain = (row["domain"] or "clinical").lower()
+                await conn.execute(
+                    """
+                    UPDATE nate_intelligence_crystals
+                    SET confidence = $1
+                    WHERE id = $2
+                      AND LOWER(COALESCE(domain, '')) = ANY($3::text[])
+                    """,
+                    new_c,
+                    row["crystal_id"],
+                    list(RED_DOMAINS),
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO crystal_confidence_apply_log
+                        (shadow_id, crystal_id, domain, old_confidence, new_confidence,
+                         delta, sample_size, risk_class, applied_at, reasoning)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, 'RED', NOW(), $8)
+                    """,
+                    row["shadow_id"],
+                    row["crystal_id"],
+                    domain,
+                    cur,
+                    new_c,
+                    delta,
+                    int(row["sample_size"] or 0),
+                    f"CEO:{approved_by} {(row['reasoning'] or '')}"[:500],
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO ceo_clinical_apply_approvals
+                        (shadow_id, crystal_id, domain, old_confidence, new_confidence,
+                         delta, approved_by)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    """,
+                    row["shadow_id"],
+                    row["crystal_id"],
+                    domain,
+                    cur,
+                    new_c,
+                    delta,
+                    approved_by[:80],
+                )
+                applied += 1
+        return {"status": "ok", "applied": applied}
+    except Exception as e:
+        logger.warning("ceo_apply_clinical_shadows: %s", e)
+        return {"status": "error", "error": str(e)[:300]}

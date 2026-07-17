@@ -212,6 +212,9 @@ services:
       - CLI_DUAL_COO_ENABLED=${CLI_DUAL_COO_ENABLED:-true}
       - CRYSTAL_OUTCOME_APPLY_ENABLED=${CRYSTAL_OUTCOME_APPLY_ENABLED:-true}
       - CRYSTAL_OUTCOME_APPLY_INTERVAL_H=${CRYSTAL_OUTCOME_APPLY_INTERVAL_H:-24}
+      - DUAL_COO_LOOP_CLOSER_ENABLED=${DUAL_COO_LOOP_CLOSER_ENABLED:-true}
+      - ENABLE_CRYSTAL_ATTRIBUTION=${ENABLE_CRYSTAL_ATTRIBUTION:-true}
+      - SOVEREIGN_STANDARD_GATE_ENABLED=${SOVEREIGN_STANDARD_GATE_ENABLED:-true}
       # QUANTUM-CRYSTAL-ARCH: must stay 1 — each uvicorn worker runs the full lifespan,
       # so >1 duplicates every background agent/auditor (duplicate audits, login collisions)
       - WEB_CONCURRENCY=1

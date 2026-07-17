@@ -25,6 +25,18 @@ logger = logging.getLogger("cli_task_bus_consumer")
 POLL_INTERVAL_S = int(os.getenv("CLI_TASK_BUS_CONSUMER_POLL_S", "30"))
 STAGGER_S = int(os.getenv("CLI_TASK_BUS_CONSUMER_STAGGER_S", "45"))
 
+# Rotate claim preference so ops/compliance/insight tasks are not starved by reviews
+_CLAIM_KINDS = (
+    "review",
+    "ops_fix",
+    "compliance_redteam",
+    "insight_route",
+    "prior_art_flag",
+    "brief_refine",
+    "matching_weight",
+    "coach_label",
+)
+
 
 def consumer_enabled() -> bool:
     return os.getenv("CLI_TASK_BUS_CONSUMER_ENABLED", "true").strip().lower() in (
@@ -120,17 +132,24 @@ class CliTaskBusConsumer:
                 )
                 self._ceo_routed += 1
 
+        prefer = _CLAIM_KINDS[self._cycles % len(_CLAIM_KINDS)]
         claimed = await asyncio.to_thread(
-            claim_task, consumer="agent", prefer_kind="review",
+            claim_task, consumer="agent", prefer_kind=prefer,
         )
+        if claimed.get("status") != "ok" or not claimed.get("task"):
+            # Fallback: any review
+            claimed = await asyncio.to_thread(
+                claim_task, consumer="agent", prefer_kind="review",
+            )
         if claimed.get("status") != "ok" or not claimed.get("task"):
             if self._cycles % 20 == 0:
                 await self._surface_ceo_queues()
             return
 
         task = claimed["task"]
+        kind = str(task.get("kind") or "review")
         risk = classify_risk(
-            kind=str(task.get("kind") or "review"),
+            kind=kind,
             files=list(task.get("files") or []),
             notes=str(task.get("notes") or ""),
         )
@@ -139,11 +158,11 @@ class CliTaskBusConsumer:
         if risk == RISK_RED:
             enqueue_ceo(
                 risk=RISK_RED,
-                title=f"RED bus task {task.get('task_id')}",
+                title=f"RED bus task {task.get('task_id')} kind={kind}",
                 detail=(task.get("notes") or "")[:500],
                 origin=str(task.get("origin") or "cloud"),
                 task_id=str(task.get("task_id") or ""),
-                payload={"files": task.get("files") or []},
+                payload={"files": task.get("files") or [], "kind": kind},
             )
             await asyncio.to_thread(
                 post_findings,
@@ -160,19 +179,39 @@ class CliTaskBusConsumer:
             self._reviews += 1
             return
 
-        findings, passed = await self._review_task(task)
-        if risk == RISK_YELLOW:
+        # QUANTUM-CRYSTAL-ARCH — kind-aware Chief of Staff dispatch
+        if kind in ("ops_fix", "compliance_redteam", "auditor_ops_fix"):
+            findings, passed = await self._dispatch_ops_task(task)
+        elif kind in ("insight_route", "brief_refine", "matching_weight",
+                      "prior_art_flag", "coach_label"):
+            findings = [{
+                "detail": f"YELLOW kind={kind} surfaced to CEO inbox",
+                "severity": "info",
+            }]
+            passed = True
             enqueue_ceo(
                 risk=RISK_YELLOW,
-                title=f"YELLOW review {task.get('task_id')} pass={passed}",
-                detail=f"findings={len(findings)} files={task.get('files')}",
+                title=f"{kind} {task.get('task_id')}",
+                detail=(task.get("notes") or "")[:500],
                 origin=str(task.get("origin") or "cloud"),
                 task_id=str(task.get("task_id") or ""),
-                payload={"pass": passed, "findings": findings[:10]},
+                payload={"kind": kind},
             )
             self._ceo_routed += 1
         else:
-            self._green_auto += 1
+            findings, passed = await self._review_task(task)
+            if risk == RISK_YELLOW:
+                enqueue_ceo(
+                    risk=RISK_YELLOW,
+                    title=f"YELLOW review {task.get('task_id')} pass={passed}",
+                    detail=f"findings={len(findings)} files={task.get('files')}",
+                    origin=str(task.get("origin") or "cloud"),
+                    task_id=str(task.get("task_id") or ""),
+                    payload={"pass": passed, "findings": findings[:10]},
+                )
+                self._ceo_routed += 1
+            else:
+                self._green_auto += 1
 
         result = await asyncio.to_thread(
             post_findings,
@@ -183,8 +222,9 @@ class CliTaskBusConsumer:
         )
         self._reviews += 1
         logger.info(
-            "Dual-COO reviewed task=%s risk=%s pass=%s findings=%s status=%s",
+            "Dual-COO reviewed task=%s kind=%s risk=%s pass=%s findings=%s status=%s",
             task.get("task_id"),
+            kind,
             risk,
             passed,
             len(findings),
@@ -218,6 +258,31 @@ class CliTaskBusConsumer:
                     self._ceo_routed += 1
         except Exception as e:
             logger.debug("CEO queue surface: %s", e)
+
+    async def _dispatch_ops_task(self, task: Dict[str, Any]) -> tuple:
+        """GREEN ops/compliance: structured findings; no therapeutic code changes."""
+        notes = str(task.get("notes") or "")
+        findings: List[Dict[str, Any]] = [{
+            "detail": f"ops_dispatch: {notes[:400]}",
+            "severity": "info",
+        }]
+        # Soft auto-ack for known remediable categories
+        passed = "ok_no_leaks" in notes.lower() or "baseline" not in notes.lower()
+        if "ENDPOINT_DOWN" in notes or "PREFLIGHT" in notes:
+            passed = False
+            findings.append({
+                "detail": "requires human/ops follow-up — not auto-remediated",
+                "severity": "warn",
+            })
+        else:
+            self._green_auto += 1
+        # Optional lint pass when files present
+        files = list(task.get("files") or [])
+        if files:
+            lint_findings, lint_ok = await self._review_task(task)
+            findings.extend(lint_findings)
+            passed = passed and lint_ok
+        return findings, passed
 
     async def _review_task(self, task: Dict[str, Any]) -> tuple:
         """Deterministic read-only review: lints (+ optional pytest for .py)."""

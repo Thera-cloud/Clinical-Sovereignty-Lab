@@ -45,6 +45,8 @@ _YELLOW_KINDS = frozenset({
     "brief_refine",
     "prior_art_flag",
     "insight_route",
+    "coach_label",
+    "second_order",
 })
 
 _GREEN_KINDS = frozenset({
@@ -54,6 +56,8 @@ _GREEN_KINDS = frozenset({
     "crystal_apply_nonclinical",
     "token_anomaly_fix",
     "bus_review",
+    "compliance_redteam",
+    "auditor_ops_fix",
 })
 
 
@@ -230,7 +234,72 @@ def ceo_inbox_summary() -> Dict[str, Any]:
         "yellow": yellow,
         "red": red,
         "top": items[:8],
+        "failover": cloud_sole_failover_active(),
     }
+
+
+def ack_ceo_inbox(*, item_id: str = "", ack_all: bool = False) -> Dict[str, Any]:
+    """Remove one item (by id) or clear inbox after CEO review."""
+    c = _redis()
+    if not c:
+        return {"status": "error", "error": "redis_unavailable"}
+    try:
+        key = ceo_inbox_key()
+        if ack_all:
+            n = int(c.llen(key) or 0)
+            c.delete(key)
+            return {"status": "ok", "acked": n}
+        if not item_id:
+            return {"status": "error", "error": "missing_item_id"}
+        raws = c.lrange(key, 0, 199) or []
+        kept: List[str] = []
+        removed = 0
+        for r in raws:
+            try:
+                data = json.loads(r)
+            except Exception:
+                kept.append(r)
+                continue
+            if str(data.get("id") or "") == str(item_id):
+                removed += 1
+                continue
+            kept.append(r)
+        c.delete(key)
+        if kept:
+            c.rpush(key, *kept)
+            c.expire(key, 7 * 86400)
+        return {"status": "ok", "acked": removed}
+    except Exception as e:
+        return {"status": "error", "error": str(e)[:300]}
+
+
+def failover_key() -> str:
+    return f"{_prefix()}:{_env()}:cli:coo_failover:cloud_sole"
+
+
+def set_cloud_sole_failover(active: bool) -> bool:
+    """When Mac Queen heartbeat is stale, Cloud runs sole-COO (no Mac execution)."""
+    c = _redis()
+    if not c:
+        return False
+    try:
+        if active:
+            c.setex(failover_key(), 600, json.dumps({"active": True, "ts": time.time()}))
+        else:
+            c.delete(failover_key())
+        return True
+    except Exception:
+        return False
+
+
+def cloud_sole_failover_active() -> bool:
+    c = _redis()
+    if not c:
+        return False
+    try:
+        return bool(c.get(failover_key()))
+    except Exception:
+        return False
 
 
 def dual_coo_system_addon() -> str:

@@ -2741,6 +2741,17 @@ async def lifespan(app: FastAPI):
     except Exception as _coa_err:
         print(f"   ⚠️  CrystalOutcomeApplyAgent init failed: {_coa_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — Dual-COO loop closer (briefs/prior-art/compliance/failover)
+    _dual_coo_loop_closer = None
+    try:
+        from app.services.dual_coo_loop_closer import DualCooLoopCloser
+        _dual_coo_loop_closer = DualCooLoopCloser(db_pool, app_state=app.state)
+        await _dual_coo_loop_closer.start()
+        app.state.dual_coo_loop_closer = _dual_coo_loop_closer
+        print("   ✅ DualCooLoopCloser started (close-the-loop cycles)")
+    except Exception as _dcl_err:
+        print(f"   ⚠️  DualCooLoopCloser init failed: {_dcl_err}")
+
     # ── Nate Check-In Agent — 72h inactivity outreach for clients + coaches ──
     _nate_checkin_agent = None
     try:
@@ -3197,6 +3208,7 @@ async def lifespan(app: FastAPI):
         ("account_event_reconciler", _account_event_reconciler is not None),
         ("cli_task_bus_consumer", _cli_task_bus_consumer is not None),  # QUANTUM-CRYSTAL-ARCH
         ("crystal_outcome_apply", _crystal_outcome_apply is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("dual_coo_loop_closer", _dual_coo_loop_closer is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", _nate_checkin_agent is not None),
         ("nate_commitment_agent", _nate_commitment_agent is not None),
         ("nate_self_monitor_agent", _nate_self_monitor_agent is not None),
@@ -3313,6 +3325,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ CrystalOutcomeApplyAgent stopped")
         except Exception as _coa_stop:
             print(f"   ⚠️  CrystalOutcomeApplyAgent shutdown: {_coa_stop}")
+    _dual_coo_loop_closer_h = getattr(app.state, "dual_coo_loop_closer", None)  # QUANTUM-CRYSTAL-ARCH
+    if _dual_coo_loop_closer_h:
+        try:
+            await _dual_coo_loop_closer_h.stop()
+            print("   ✅ DualCooLoopCloser stopped")
+        except Exception as _dcl_stop:
+            print(f"   ⚠️  DualCooLoopCloser shutdown: {_dcl_stop}")
     if _sse_orchestrator:
         try:
             await _sse_orchestrator.stop()
@@ -4183,6 +4202,7 @@ for _rmod, _ralias in [
     ("app.routers.sovereign_completions_api", "sovereign_completions_router"),
     ("app.routers.agents_api", "agents_router"),  # SOVEREIGN-VOICE — partner agentic plug-in
     ("app.routers.cli_analytics_api", "cli_analytics_router"),
+    ("app.routers.ceo_dual_coo_api", "ceo_dual_coo_router"),  # QUANTUM-CRYSTAL-ARCH
     ("app.routers.oauth_api", "oauth_router"),
     ("app.routers.nightly_audit_api", "nightly_audit_router"),
     ("app.routers.cloudflare_realtime_api", "cf_realtime_router"),

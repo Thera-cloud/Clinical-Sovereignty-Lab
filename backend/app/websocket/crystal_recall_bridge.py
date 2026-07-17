@@ -782,6 +782,42 @@ async def crystallize_coach_observation(
                     _wl_err,
                 )
 
+        # QUANTUM-CRYSTAL-ARCH — Dual-COO coach-label feedback (YELLOW/RED)
+        try:
+            from app.websocket.cli_dual_coo import (
+                RISK_RED,
+                RISK_YELLOW,
+                enqueue_ceo,
+                classify_risk,
+            )
+
+            _corr = (
+                "incorrect" in text.lower()
+                or "do not" in text.lower()
+                or "nate was" in text.lower()
+                or observation_type in ("coach_override", "correction")
+            )
+            if _corr:
+                _risk = classify_risk(
+                    kind="coach_label", domain=domain, notes=text[:200],
+                )
+                if _risk not in (RISK_YELLOW, RISK_RED):
+                    _risk = RISK_YELLOW if domain != "clinical" else RISK_RED
+                enqueue_ceo(
+                    risk=_risk,
+                    title=f"Coach label ({observation_type})",
+                    detail=text[:500],
+                    origin="cloud",
+                    payload={
+                        "client": (client_hardware_id or "")[:80],
+                        "coach": coach_hw[:80],
+                        "domain": domain,
+                        "content_hash": (ch or "")[:64] if ch else "",
+                    },
+                )
+        except Exception as _ceo_err:
+            logger.debug("coach_label ceo route: %s", _ceo_err)
+
         return row["content_hash"]
     except Exception as e:
         logger.warning("crystallize_coach_observation: %s", e)

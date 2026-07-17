@@ -110,3 +110,54 @@ async def ceo_approve_tags(
         return {"status": "ok", "approved": int(n or 0)}
     except Exception as e:
         return {"status": "error", "error": str(e)[:300]}
+
+
+async def sweep_patent_crystals(db_pool, *, limit: int = 25) -> int:
+    """Propose claim↔code tags from high-confidence patent-domain crystals."""
+    if not db_pool:
+        return 0
+    proposed = 0
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, LEFT(crystal_text, 400) AS snippet, confidence
+                FROM nate_intelligence_crystals
+                WHERE LOWER(COALESCE(domain, '')) = 'patent'
+                  AND superseded_by IS NULL
+                  AND confidence >= 0.55
+                ORDER BY confidence DESC, created_at DESC
+                LIMIT $1
+                """,
+                limit,
+            )
+        for row in rows:
+            snippet = (row["snippet"] or "").strip()
+            if len(snippet) < 20:
+                continue
+            # Heuristic code path from crystal text
+            code_path = "patent/QUANTUM_EMOTIONAL_COHERENCE_PATENT.md"
+            for marker, path in (
+                ("odpe", "backend/app/services/odpe_engine.py"),
+                ("crystal", "backend/app/websocket/crystal_recall_bridge.py"),
+                ("nevedal", "backend/app/services/nevedal_engine.py"),
+                ("voice", "backend/app/services/twilio_grok_xtts_pipeline.py"),
+                ("liminal", "backend/app/services/language_drift_monitor.py"),
+            ):
+                if marker in snippet.lower():
+                    code_path = path
+                    break
+            r = await propose_claim_tag(
+                db_pool,
+                family_id="crystal_patent_field",
+                claim_ref=f"crystal_{row['id']}",
+                code_path=code_path,
+                function_name="crystal_text",
+                claim_text=snippet[:2000],
+                proposed_by="patent_crystal_sweep",
+            )
+            if r.get("status") == "ok":
+                proposed += 1
+    except Exception as e:
+        logger.warning("sweep_patent_crystals: %s", e)
+    return proposed

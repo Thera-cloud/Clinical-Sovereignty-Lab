@@ -389,6 +389,45 @@ async def get_presession_brief(client_id: str, request: Request, user=Depends(ge
             )
         except Exception as _zle:
             _logger.debug("presession zoom learning enrich: %s", _zle)
+        # QUANTUM-CRYSTAL-ARCH — Dual-COO insight_route → coach pre-session
+        try:
+            from app.services.rls_context import set_rls_admin
+
+            set_rls_admin()
+            async with db_pool.acquire() as conn:
+                _ibriefs = await conn.fetch(
+                    """
+                    SELECT id, source, title, body, created_at
+                    FROM coach_insight_briefs
+                    WHERE status = 'queued'
+                      AND (client_user_id = $1 OR client_user_id = 'broadcast')
+                    ORDER BY created_at DESC
+                    LIMIT 8
+                    """,
+                    client_id,
+                )
+                if _ibriefs:
+                    brief_payload["dual_coo_insights"] = [
+                        {
+                            "id": r["id"],
+                            "source": r["source"],
+                            "title": r["title"],
+                            "body": (r["body"] or "")[:800],
+                            "created_at": r["created_at"].isoformat()
+                            if r["created_at"] else None,
+                        }
+                        for r in _ibriefs
+                    ]
+                    await conn.execute(
+                        """
+                        UPDATE coach_insight_briefs
+                        SET status = 'delivered', delivered_at = NOW()
+                        WHERE id = ANY($1::bigint[])
+                        """,
+                        [r["id"] for r in _ibriefs],
+                    )
+        except Exception as _ib_err:
+            _logger.debug("presession dual_coo insights: %s", _ib_err)
     return brief_payload
 
 

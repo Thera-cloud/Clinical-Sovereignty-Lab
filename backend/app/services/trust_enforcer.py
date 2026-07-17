@@ -293,6 +293,16 @@ class TrustEnforcer:
                 json.dumps(action, default=str), "warning"
             )
 
+        # QUANTUM-CRYSTAL-ARCH — Dual-COO Chief: auditor flags → bus ops_fix
+        if enforcement_actions:
+            try:
+                from app.services.auditor_bus_dispatch import dispatch_enforcement_actions
+
+                _bus = dispatch_enforcement_actions(enforcement_actions)
+                logger.info("TrustEnforcer: Dual-COO bus dispatch %s", _bus)
+            except Exception as _bus_err:
+                logger.warning("TrustEnforcer: bus dispatch failed: %s", _bus_err)
+
         await self._log_activity(
             "system", "trust_enforcer_sent",
             f"Enforcement report sent: {total_trusted}/{total_tests} TRUSTED "

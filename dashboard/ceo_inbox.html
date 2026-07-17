@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CEO Inbox — Dual-COO</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --void: #050505; --chamber: #0A0A0A; --elevated: #111111;
+  --gold: #C9A962; --gold-bright: #E8D5A3; --gold-dim: #8B7355;
+  --cyan: #4ECDC4; --red: #EF4444; --orange: #F59E0B; --text: #E8E4DC; --muted: #8A8578;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: radial-gradient(ellipse at top, #12100c 0%, var(--void) 55%);
+  color: var(--text); min-height: 100vh; padding: 24px;
+}
+h1 {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 2.2rem; color: var(--gold-bright); font-weight: 600;
+}
+.sub { color: var(--muted); margin: 6px 0 22px; font-size: 0.95rem; }
+.bar { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; align-items: center; }
+.stat {
+  background: var(--elevated); border: 1px solid #222; padding: 12px 16px; min-width: 110px;
+}
+.stat b { display: block; font-size: 1.4rem; color: var(--gold); }
+.stat.red b { color: var(--red); }
+.stat.yellow b { color: var(--orange); }
+.stat.cyan b { color: var(--cyan); }
+button {
+  background: transparent; border: 1px solid var(--gold-dim); color: var(--gold);
+  padding: 8px 14px; cursor: pointer; font-family: inherit;
+}
+button:hover { border-color: var(--gold); color: var(--gold-bright); }
+button.danger { border-color: var(--red); color: var(--red); }
+.grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; }
+@media (max-width: 960px) { .grid { grid-template-columns: 1fr; } }
+.panel {
+  background: linear-gradient(180deg, #121212, var(--chamber));
+  border: 1px solid #1e1e1e; padding: 16px;
+}
+.panel h2 {
+  font-family: 'Cormorant Garamond', serif; color: var(--gold);
+  font-size: 1.35rem; margin-bottom: 12px;
+}
+.item {
+  border-top: 1px solid #222; padding: 12px 0;
+}
+.badge {
+  display: inline-block; font-size: 0.72rem; letter-spacing: 0.04em;
+  padding: 2px 8px; border: 1px solid; margin-right: 8px;
+}
+.badge.RED { color: var(--red); border-color: var(--red); }
+.badge.YELLOW { color: var(--orange); border-color: var(--orange); }
+.badge.GREEN { color: var(--cyan); border-color: var(--cyan); }
+.title { font-weight: 600; margin: 6px 0; }
+.detail { color: var(--muted); font-size: 0.9rem; white-space: pre-wrap; }
+.meta { color: #666; font-size: 0.78rem; margin-top: 6px; }
+.row-actions { margin-top: 8px; display: flex; gap: 8px; }
+a.back { color: var(--gold-dim); text-decoration: none; }
+a.back:hover { color: var(--gold); }
+#msg { margin: 10px 0; color: var(--cyan); min-height: 1.2em; }
+</style>
+</head>
+<body>
+  <a class="back" href="#" onclick="navBack(); return false;">← Sovereign Command</a>
+  <h1>CEO Inbox</h1>
+  <p class="sub">Nathan = CEO · Dual-COO Queens (Mac + Cloud) · RED clinical never auto-ships</p>
+  <div class="bar" id="stats"></div>
+  <div class="bar">
+    <button onclick="loadAll()">Refresh</button>
+    <button class="danger" onclick="ackAll()">Ack all inbox</button>
+  </div>
+  <div id="msg"></div>
+  <div class="grid">
+    <div class="panel">
+      <h2>Inbox</h2>
+      <div id="inbox"></div>
+    </div>
+    <div>
+      <div class="panel" style="margin-bottom:18px;">
+        <h2>Loop status</h2>
+        <div id="loop"></div>
+      </div>
+      <div class="panel" style="margin-bottom:18px;">
+        <h2>Patent tags pending</h2>
+        <div id="patents"></div>
+      </div>
+      <div class="panel">
+        <h2>Clinical shadows (CEO-RED apply)</h2>
+        <div id="clinical"></div>
+      </div>
+    </div>
+  </div>
+<script>
+const API = (location.hostname.includes('sovereign') || location.hostname.includes('command'))
+  ? 'https://api.sovereignsanctuary.net' : (localStorage.getItem('sc_api') || 'https://api.sovereignsanctuary.net');
+
+function _token() {
+  return sessionStorage.getItem('token')
+    || localStorage.getItem('sc_token')
+    || (document.cookie.match(/(?:^|; )sc_token=([^;]+)/) || [])[1]
+    || '';
+}
+function _authHeaders(ct) {
+  const h = { 'Authorization': 'Bearer ' + _token() };
+  if (ct) h['Content-Type'] = ct;
+  return h;
+}
+function navBack() {
+  if (typeof navTo === 'function') navTo('command.html');
+  else location.href = 'command.html';
+}
+function msg(t) { document.getElementById('msg').textContent = t || ''; }
+
+async function api(path, opts) {
+  const resp = await fetch(API + path, Object.assign({ headers: _authHeaders(opts && opts.body ? 'application/json' : null) }, opts || {}));
+  if (resp.status === 401) { console.warn('Auth issue on', path); return null; }
+  return resp.json();
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function loadInbox() {
+  const data = await api('/api/ceo/inbox?limit=40');
+  if (!data) return;
+  const s = data.summary || {};
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><b>${s.pending||0}</b>pending</div>
+    <div class="stat yellow"><b>${s.yellow||0}</b>yellow</div>
+    <div class="stat red"><b>${s.red||0}</b>red</div>
+    <div class="stat cyan"><b>${s.failover ? 'SOLE' : 'DUAL'}</b>COO mode</div>`;
+  const items = data.items || [];
+  document.getElementById('inbox').innerHTML = items.length ? items.map(it => `
+    <div class="item">
+      <span class="badge ${esc(it.risk)}">${esc(it.risk)}</span>
+      <div class="title">${esc(it.title)}</div>
+      <div class="detail">${esc(it.detail)}</div>
+      <div class="meta">${esc(it.origin)} · ${esc(it.task_id||'')} · ${new Date((it.created_at||0)*1000).toLocaleString()}</div>
+      <div class="row-actions"><button onclick="ackOne('${esc(it.id)}')">Ack</button></div>
+    </div>`).join('') : '<div class="detail">Inbox clear.</div>';
+}
+
+async function loadLoop() {
+  const data = await api('/api/ceo/loop-status');
+  if (!data) return;
+  const c = data.closer || {};
+  const peer = data.peer_mac || {};
+  document.getElementById('loop').innerHTML = `
+    <div class="detail">Closer cycles: <b style="color:var(--gold)">${esc(c.cycles)}</b></div>
+    <div class="detail">Stats: ${esc(JSON.stringify(c.stats||{}))}</div>
+    <div class="detail">Mac peer alive: <b>${peer.alive ? 'yes' : 'no'}</b> ${esc(peer.age_s||'')}s</div>
+    <div class="detail">Cloud sole failover: <b>${data.failover_cloud_sole ? 'ACTIVE' : 'off'}</b></div>`;
+}
+
+async function loadPatents() {
+  const data = await api('/api/ceo/patent-tags/pending');
+  if (!data) return;
+  const rows = data.pending || [];
+  document.getElementById('patents').innerHTML = rows.length ? rows.slice(0, 20).map(r => `
+    <div class="item">
+      <div class="title">${esc(r.family_id)} / ${esc(r.claim_ref)}</div>
+      <div class="detail">${esc(r.code_path)}::${esc(r.function_name)}</div>
+      <div class="row-actions"><button onclick="approvePatent(${r.id})">Approve</button></div>
+    </div>`).join('') : '<div class="detail">No pending tags.</div>';
+}
+
+async function loadClinical() {
+  const data = await api('/api/ceo/clinical-shadows');
+  if (!data) return;
+  const rows = data.rows || [];
+  document.getElementById('clinical').innerHTML = rows.length ? rows.slice(0, 15).map(r => `
+    <div class="item">
+      <span class="badge RED">RED</span>
+      <div class="title">shadow ${esc(r.id)} · crystal ${esc(r.crystal_id)} · ${esc(r.domain)}</div>
+      <div class="detail">Δ ${esc(r.proposed_delta)} · n=${esc(r.sample_size)} · ${esc(r.reasoning||'')}</div>
+      <div class="row-actions"><button class="danger" onclick="applyClinical(${r.id})">CEO apply</button></div>
+    </div>`).join('') : '<div class="detail">No clinical/defense shadow proposals.</div>';
+}
+
+async function ackOne(id) {
+  const r = await api('/api/ceo/inbox/ack', { method: 'POST', body: JSON.stringify({ item_id: id }) });
+  msg(r ? `Acked ${r.acked||0}` : 'Ack failed');
+  loadInbox();
+}
+async function ackAll() {
+  if (!confirm('Clear entire CEO inbox?')) return;
+  const r = await api('/api/ceo/inbox/ack', { method: 'POST', body: JSON.stringify({ ack_all: true }) });
+  msg(r ? `Acked ${r.acked||0}` : 'Ack failed');
+  loadInbox();
+}
+async function approvePatent(id) {
+  const r = await api('/api/ceo/patent-tags/approve', { method: 'POST', body: JSON.stringify({ ids: [id] }) });
+  msg(r ? `Approved ${r.approved||0}` : 'Approve failed');
+  loadPatents();
+}
+async function applyClinical(id) {
+  if (!confirm('CEO-RED: apply clinical/defense confidence delta for shadow ' + id + '?')) return;
+  const r = await api('/api/ceo/clinical-apply', { method: 'POST', body: JSON.stringify({ shadow_ids: [id] }) });
+  msg(r ? `Applied ${r.applied||0}` : 'Apply failed');
+  loadClinical();
+}
+async function loadAll() {
+  msg('Loading…');
+  await Promise.all([loadInbox(), loadLoop(), loadPatents(), loadClinical()]);
+  msg('');
+}
+loadAll();
+setInterval(loadAll, 60000);
+</script>
+</body>
+</html>
