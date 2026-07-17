@@ -277,6 +277,7 @@ async def handle_sendgrid_inbound(request: Request):
         from app.services.session_negotiation_notify import (
             extract_neg_id_from_text,
             parse_neg_decision,
+            parse_accept_slot_index,
             apply_coach_channel_decision,
             apply_client_channel_decision,
         )
@@ -289,6 +290,7 @@ async def handle_sendgrid_inbound(request: Request):
                     db_pool,
                     decision=neg_decision,
                     negotiation_id=neg_id,
+                    slot_index=parse_accept_slot_index(cleaned_text),
                 )
                 logger.info(
                     "SendGrid inbound: client negotiation %s ok=%s from %s",

@@ -200,6 +200,7 @@ async def handle_incoming_sms(request: Request):
         from app.services.session_negotiation_notify import (
             parse_neg_decision,
             extract_neg_id_from_text,
+            parse_accept_slot_index,
             apply_coach_channel_decision,
             apply_client_channel_decision,
         )
@@ -211,7 +212,10 @@ async def handle_incoming_sms(request: Request):
             if db_pool:
                 if neg_decision in ("accept_alt", "reject_alt") and neg_id:
                     neg_result = await apply_client_channel_decision(
-                        db_pool, decision=neg_decision, negotiation_id=neg_id
+                        db_pool,
+                        decision=neg_decision,
+                        negotiation_id=neg_id,
+                        slot_index=parse_accept_slot_index(Body),
                     )
                     twiml = (
                         '<?xml version="1.0" encoding="UTF-8"?>'

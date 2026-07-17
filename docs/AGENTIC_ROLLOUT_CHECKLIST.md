@@ -131,7 +131,7 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 **Code:** `session_negotiation_service.py`, `session_negotiation_bridge.py`, `session_negotiation_notify.py`, migration `247_session_negotiations.sql`  
 **Flow:** client books → `pending_approval` → Nate opens negotiation → coach email+SMS (HTTPS + mailto APPROVE/BUSY/ALT) → coach decide (WS / chat / email / SMS) → Redis fanout WS + client email (accept/reject links) → `accept_alt` / `reject_alt`. Alts from `coach_slot_engine` (same as client Schedule). Channel approve mirrors booking-action (Zoom + ledger + GCal).  
 **Not:** unsupervised auto-book without coach authority.  
-**Gaps closed:** no BUSY/ALT→ApprovalProtocol fallthrough; dual `BRIDGE_DATA_DIR` write; Redis `nate:session_negotiation` WS; 24h expire via SessionPaymentAgent; legacy pending email suppressed when flag on. Staging HTTPS uses `STAGING_PUBLIC_API_BASE`; SendGrid/Twilio inbound still hit prod DB until prod flag/migration.
+**Gaps closed:** no BUSY/ALT→ApprovalProtocol fallthrough; dual `BRIDGE_DATA_DIR` write; Redis `nate:session_negotiation` WS; 24h expire + fanout; legacy pending email suppressed when flag on; WS/chat approve shares Zoom/ledger/GCal via `enrich_approved_session`; staging emails use phone-reachable `PUBLIC_API_BASE` (loopback ignored); prod optional `ENABLE_STAGING_NEGOTIATION_INBOUND_FALLBACK` + `STAGING_NEGOTIATION_DATABASE_URL` applies `[#neg:]` to `little_nate_staging` with `force=True` + env-tagged fanout; client mailto `ACCEPT N` + inbound slot index.
 
 | Step | Action | Done |
 |------|--------|------|

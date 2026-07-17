@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
@@ -113,6 +114,17 @@ async def apply_bridge_action(
                 new_end=result.get("new_end"),
             )
         if found:
+            if db_pool and action in (
+                "approve_session",
+                "reschedule_and_approve",
+                "decline_session",
+            ):
+                try:
+                    from app.services.session_negotiation_notify import enrich_approved_session
+
+                    await enrich_approved_session(db_pool, found, action=action)
+                except Exception as e:
+                    logger.warning("session_negotiation_bridge: enrich failed: %s", e)
             save_sessions(sessions)
             if db_pool:
                 try:
@@ -280,6 +292,17 @@ def handle_redis_fanout(
         data = json.loads(raw_data)
     except Exception as e:
         logger.warning("session_negotiation_bridge: fanout JSON bad: %s", e)
+        return
+
+    # QUANTUM-CRYSTAL-ARCH: staging fallback fanouts must not mutate prod bridge JSON
+    payload_env = (data.get("environment") or "").strip().lower()
+    local_env = (os.getenv("ENVIRONMENT") or "production").strip().lower()
+    if payload_env and payload_env != local_env:
+        logger.info(
+            "session_negotiation_bridge: fanout skipped env mismatch payload=%s local=%s",
+            payload_env,
+            local_env,
+        )
         return
 
     sess = data.get("session")

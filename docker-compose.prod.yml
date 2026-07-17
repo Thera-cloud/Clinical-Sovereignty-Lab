@@ -220,6 +220,9 @@ services:
       - DUAL_COO_LOOP_CLOSER_ENABLED=${DUAL_COO_LOOP_CLOSER_ENABLED:-true}
       - ENABLE_CRYSTAL_ATTRIBUTION=${ENABLE_CRYSTAL_ATTRIBUTION:-true}
       - SOVEREIGN_STANDARD_GATE_ENABLED=${SOVEREIGN_STANDARD_GATE_ENABLED:-true}
+      # QUANTUM-CRYSTAL-ARCH: mailto/SMS/HTTPS on prod API can apply staging negotiations
+      - ENABLE_STAGING_NEGOTIATION_INBOUND_FALLBACK=${ENABLE_STAGING_NEGOTIATION_INBOUND_FALLBACK:-false}
+      - STAGING_NEGOTIATION_DATABASE_URL=${STAGING_NEGOTIATION_DATABASE_URL:-}
       # QUANTUM-CRYSTAL-ARCH: must stay 1 — each uvicorn worker runs the full lifespan,
       # so >1 duplicates every background agent/auditor (duplicate audits, login collisions)
       - WEB_CONCURRENCY=1

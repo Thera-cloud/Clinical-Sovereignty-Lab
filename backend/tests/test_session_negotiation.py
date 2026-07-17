@@ -226,6 +226,22 @@ def test_mailto_and_parse_decision():
 
 def test_staging_public_api_base(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv("PUBLIC_API_BASE", "https://api.sovereignsanctuary.net")
+    # Loopback staging base is ignored — phone-reachable prod API used instead
     monkeypatch.setenv("STAGING_PUBLIC_API_BASE", "http://127.0.0.1:8011")
     url = snn.negotiation_action_url("44444444-4444-4444-4444-444444444444", "approve")
-    assert url.startswith("http://127.0.0.1:8011/")
+    assert url.startswith("https://api.sovereignsanctuary.net/")
+
+
+def test_parse_accept_slot_index():
+    assert snn.parse_accept_slot_index("ACCEPT 2\n[#neg:x]") == 1
+    assert snn.parse_accept_slot_index("accept #1") == 0
+    assert snn.parse_accept_slot_index("ACCEPT") is None
+    assert snn.parse_accept_slot_index("REJECT") is None
+
+
+def test_staging_inbound_fallback_flag(monkeypatch):
+    monkeypatch.delenv("ENABLE_STAGING_NEGOTIATION_INBOUND_FALLBACK", raising=False)
+    assert snn.staging_inbound_fallback_enabled() is False
+    monkeypatch.setenv("ENABLE_STAGING_NEGOTIATION_INBOUND_FALLBACK", "true")
+    assert snn.staging_inbound_fallback_enabled() is True

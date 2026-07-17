@@ -56,16 +56,56 @@ NEG_SYNONYMS = {
 }
 
 
+def _runtime_env() -> str:
+    return (os.getenv("ENVIRONMENT") or "production").strip().lower() or "production"
+
+
 def _public_api_base() -> str:
-    env = (os.getenv("ENVIRONMENT") or "").strip().lower()
-    if env == "staging":
-        return (
+    """
+    Staging emails must use a phone-reachable host. Loopback STAGING_PUBLIC_API_BASE
+    is ignored in favor of PUBLIC_API_BASE so prod negotiation-action can fall back
+    to the staging DB when ENABLE_STAGING_NEGOTIATION_INBOUND_FALLBACK is on.
+    """
+    prod_default = (os.getenv("PUBLIC_API_BASE") or "https://api.sovereignsanctuary.net").rstrip("/")
+    if _runtime_env() == "staging":
+        staged = (
             os.getenv("STAGING_PUBLIC_API_BASE")
             or os.getenv("PUBLIC_API_BASE_STAGING")
-            or os.getenv("PUBLIC_API_BASE")
-            or "http://127.0.0.1:8011"
-        ).rstrip("/")
-    return (os.getenv("PUBLIC_API_BASE") or "https://api.sovereignsanctuary.net").rstrip("/")
+            or ""
+        ).strip().rstrip("/")
+        if staged and "127.0.0.1" not in staged and "localhost" not in staged:
+            return staged
+        return prod_default
+    return prod_default
+
+
+def staging_inbound_fallback_enabled() -> bool:
+    return os.getenv("ENABLE_STAGING_NEGOTIATION_INBOUND_FALLBACK", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+_staging_pool: Any = None
+
+
+async def _get_staging_pool() -> Any:
+    """Lazy pool to little_nate_staging for prod inbound/HTTPS fallback."""
+    global _staging_pool
+    url = (os.getenv("STAGING_NEGOTIATION_DATABASE_URL") or "").strip()
+    if not url:
+        return None
+    if _staging_pool is not None:
+        return _staging_pool
+    try:
+        import asyncpg
+
+        _staging_pool = await asyncpg.create_pool(url, min_size=1, max_size=2, command_timeout=30)
+        return _staging_pool
+    except Exception as e:
+        logger.warning("session_negotiation_notify: staging pool failed: %s", e)
+        return None
 
 
 def make_neg_token(negotiation_id: str, action: str, slot: str = "") -> str:
@@ -143,6 +183,20 @@ def parse_neg_decision(raw: str) -> Optional[str]:
                 return "reject_alt"
             return prefix.lower()
     return None
+
+
+def parse_accept_slot_index(raw: str) -> Optional[int]:
+    """0-based index from 'ACCEPT 2' / 'ACCEPT #1' (1-based in text)."""
+    if not raw:
+        return None
+    line = raw.strip().splitlines()[0].strip().upper()
+    m = re.match(r"ACCEPT\s*[#:]?\s*(\d+)", line)
+    if not m:
+        return None
+    n = int(m.group(1))
+    if n < 1:
+        return None
+    return n - 1
 
 
 async def lookup_contact(db_pool: Any, hw_or_username: str) -> Dict[str, str]:
@@ -287,8 +341,9 @@ async def send_client_negotiation_update_email(
                 f"Accept option {i}</a>"
             )
     reject_url = negotiation_action_url(neg_id, "reject_alt") if neg_id else ""
+    # Prefer ACCEPT 1 in mailto body when multiple alts (slot picker via index).
     mailto_accept = (
-        mailto_action_url(neg_id, "accept", f"Session alts [#neg:{neg_id}]") if neg_id else ""
+        mailto_action_url(neg_id, "accept 1", f"Session alts [#neg:{neg_id}]") if neg_id else ""
     )
     mailto_reject = (
         mailto_action_url(neg_id, "reject", f"Session alts [#neg:{neg_id}]") if neg_id else ""
@@ -425,6 +480,19 @@ def _write_sessions_list(sessions: List[Dict[str, Any]]) -> None:
             logger.warning("session_negotiation_notify: write %s failed: %s", path, e)
 
 
+def _iso_to_zoom_start(iso_str: str) -> str:
+    s = (iso_str or "").strip()
+    if not s:
+        return ""
+    try:
+        dtv = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dtv.tzinfo is None:
+            dtv = dtv.replace(tzinfo=timezone.utc)
+        return dtv.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    except Exception:
+        return s
+
+
 async def _attach_zoom_if_needed(session: Dict[str, Any]) -> None:
     from app.config import settings as _settings
 
@@ -433,16 +501,25 @@ async def _attach_zoom_if_needed(session: Dict[str, Any]) -> None:
     if (session.get("zoom_link") or "").strip():
         return
     try:
-        from app.routers.sessions import _iso_to_zoom_start, _make_zoom_client, _parse_iso_dt
+        from app.services.zoom_client import ZoomClient
 
         dur_min = 50
-        st = _parse_iso_dt(session.get("scheduled_start", ""))
-        en = _parse_iso_dt(session.get("scheduled_end", ""))
-        if st and en and en > st:
-            dur_min = max(5, int((en - st).total_seconds() / 60))
-        zoom_resp = await _make_zoom_client().create_meeting(
+        st_s = session.get("scheduled_start", "")
+        en_s = session.get("scheduled_end", "")
+        try:
+            st = datetime.fromisoformat(str(st_s).replace("Z", "+00:00"))
+            en = datetime.fromisoformat(str(en_s).replace("Z", "+00:00"))
+            if st.tzinfo is None:
+                st = st.replace(tzinfo=timezone.utc)
+            if en.tzinfo is None:
+                en = en.replace(tzinfo=timezone.utc)
+            if en > st:
+                dur_min = max(5, int((en - st).total_seconds() / 60))
+        except Exception:
+            pass
+        zoom_resp = await ZoomClient.from_env().create_meeting(
             topic=f"Session: {session.get('client_name', 'Client')}",
-            start_time_iso=_iso_to_zoom_start(session.get("scheduled_start", "")) or "",
+            start_time_iso=_iso_to_zoom_start(str(st_s)) or "",
             duration_minutes=dur_min,
         )
         if zoom_resp.get("join_url"):
@@ -491,11 +568,17 @@ async def _gcal_sync_session(db_pool: Any, session: Dict[str, Any], *, action: s
         logger.warning("session_negotiation_notify: gcal sync skipped: %s", e)
 
 
-async def _publish_ws_fanout(payload: Dict[str, Any]) -> None:
-    """Bridge listens on nate:session_negotiation and pushes WS + mutates its sessions.json."""
+async def publish_negotiation_fanout(
+    payload: Dict[str, Any],
+    *,
+    environment: Optional[str] = None,
+) -> None:
+    """Bridge listens on nate:session_negotiation; filters by payload environment."""
     try:
         import redis.asyncio as aioredis
 
+        body = dict(payload)
+        body["environment"] = (environment or _runtime_env()).strip().lower()
         url = os.getenv("REDIS_URL") or ""
         if not url:
             host = os.getenv("REDIS_HOST", "redis")
@@ -504,68 +587,111 @@ async def _publish_ws_fanout(payload: Dict[str, Any]) -> None:
             url = f"redis://:{pw}@{host}:{port}" if pw else f"redis://{host}:{port}"
         client = aioredis.from_url(url, decode_responses=True)
         try:
-            await client.publish(SESSION_NEGOTIATION_CHANNEL, json.dumps(payload, default=str))
+            await client.publish(SESSION_NEGOTIATION_CHANNEL, json.dumps(body, default=str))
         finally:
             await client.aclose()
     except Exception as e:
         logger.warning("session_negotiation_notify: Redis fanout failed: %s", e)
 
 
+async def enrich_approved_session(
+    db_pool: Any,
+    session: Dict[str, Any],
+    *,
+    action: str = "approve_session",
+) -> Dict[str, Any]:
+    """Zoom + ledger + GCal for WS/chat approve path (shared with channel finalize)."""
+    if action in ("approve_session", "reschedule_and_approve"):
+        await _attach_zoom_if_needed(session)
+        await _apply_coach_ledger(db_pool, session)
+        await _gcal_sync_session(
+            db_pool, session, action="update" if session.get("google_event_id") else "create"
+        )
+        try:
+            from app.services.session_approval import send_booking_decision_email
+
+            asyncio.create_task(send_booking_decision_email(db_pool, session, "approved"))
+        except Exception:
+            pass
+    elif action == "decline_session":
+        await _gcal_sync_session(db_pool, session, action="delete")
+        try:
+            from app.services.session_approval import send_booking_decision_email
+
+            asyncio.create_task(send_booking_decision_email(db_pool, session, "declined"))
+        except Exception:
+            pass
+    return session
+
+
 async def _finalize_session_from_result(
     db_pool: Any,
     result: Dict[str, Any],
     neg: Dict[str, Any],
+    *,
+    skip_local_json: bool = False,
+    fanout_environment: Optional[str] = None,
+    session_hint: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Mutate sessions (JSON+PG), Zoom/ledger/GCal on approve, Redis WS fanout."""
     from app.services.pg_data_helpers import upsert_session_pg
 
     action = result.get("bridge_action") or "none"
     sid = result.get("session_id") or neg.get("session_id")
-    sessions = _load_sessions_list()
     found = None
-    for s in sessions:
-        if s.get("session_id") != sid:
-            continue
-        found = s
-        if action == "approve_session":
-            s["status"] = "scheduled"
-            s["approved_at"] = str(datetime.now())
-            s["approved_via"] = "negotiation_channel"
-        elif action == "decline_session":
-            s["status"] = "declined"
-            s["declined_at"] = str(datetime.now())
-            s["declined_via"] = "negotiation_channel"
-        elif action == "reschedule_and_approve":
-            s["status"] = "scheduled"
-            s["approved_at"] = str(datetime.now())
-            s["approved_via"] = "negotiation_channel"
-            if result.get("new_start"):
-                s["scheduled_start"] = result["new_start"]
-            if result.get("new_end"):
-                s["scheduled_end"] = result["new_end"]
-        break
+    sessions: List[Dict[str, Any]] = []
 
-    if found and action in ("approve_session", "reschedule_and_approve"):
-        await _attach_zoom_if_needed(found)
-        await _apply_coach_ledger(db_pool, found)
-        await _gcal_sync_session(db_pool, found, action="update" if found.get("google_event_id") else "create")
-        try:
-            from app.services.session_approval import send_booking_decision_email
+    if not skip_local_json:
+        sessions = _load_sessions_list()
+        for s in sessions:
+            if s.get("session_id") != sid:
+                continue
+            found = s
+            break
 
-            asyncio.create_task(send_booking_decision_email(db_pool, found, "approved"))
-        except Exception:
-            pass
-    elif found and action == "decline_session":
-        await _gcal_sync_session(db_pool, found, action="delete")
-        try:
-            from app.services.session_approval import send_booking_decision_email
-
-            asyncio.create_task(send_booking_decision_email(db_pool, found, "declined"))
-        except Exception:
-            pass
+    if found is None and session_hint and session_hint.get("session_id") == sid:
+        found = dict(session_hint)
+    if found is None and sid:
+        found = {
+            "session_id": sid,
+            "client_id": neg.get("client_id"),
+            "coach_id": neg.get("coach_id"),
+            "client_name": (neg.get("metadata") or {}).get("client_name"),
+            "scheduled_start": neg.get("proposed_start"),
+            "scheduled_end": neg.get("proposed_end"),
+            "status": "pending_approval",
+        }
 
     if found:
-        _write_sessions_list(sessions)
+        if action == "approve_session":
+            found["status"] = "scheduled"
+            found["approved_at"] = str(datetime.now())
+            found["approved_via"] = "negotiation_channel"
+        elif action == "decline_session":
+            found["status"] = "declined"
+            found["declined_at"] = str(datetime.now())
+            found["declined_via"] = "negotiation_channel"
+        elif action == "reschedule_and_approve":
+            found["status"] = "scheduled"
+            found["approved_at"] = str(datetime.now())
+            found["approved_via"] = "negotiation_channel"
+            if result.get("new_start"):
+                found["scheduled_start"] = result["new_start"]
+            if result.get("new_end"):
+                found["scheduled_end"] = result["new_end"]
+
+        await enrich_approved_session(db_pool, found, action=action)
+
+        if not skip_local_json:
+            replaced = False
+            for i, s in enumerate(sessions):
+                if s.get("session_id") == sid:
+                    sessions[i] = found
+                    replaced = True
+                    break
+            if not replaced:
+                sessions.append(found)
+            _write_sessions_list(sessions)
         try:
             await upsert_session_pg(db_pool, found)
         except Exception as e:
@@ -592,27 +718,24 @@ async def _finalize_session_from_result(
             "ok": True,
         },
     }
-    await _publish_ws_fanout(fanout)
+    await publish_negotiation_fanout(fanout, environment=fanout_environment)
     return found
 
 
-async def apply_coach_channel_decision(
+async def _apply_coach_on_pool(
     db_pool: Any,
     *,
     decision: str,
-    negotiation_id: Optional[str] = None,
-    coach_email: str = "",
-    coach_phone: str = "",
+    negotiation_id: Optional[str],
+    coach_email: str,
+    coach_phone: str,
+    force: bool,
+    staging_fallback: bool,
 ) -> Dict[str, Any]:
-    """
-    Apply approve|busy|alt from email click, mailto inbound, or SMS.
-    Mutates negotiation + coaching session JSON/PG; Zoom/ledger/GCal on approve.
-    """
     from app.services.session_negotiation_service import coach_decide, negotiation_enabled
 
-    if not negotiation_enabled():
+    if not force and not negotiation_enabled():
         return {"ok": False, "error": "flag_off"}
-
     decision = (decision or "").strip().lower()
     if decision not in _COACH_ACTIONS:
         return {"ok": False, "error": "invalid_decision"}
@@ -631,12 +754,19 @@ async def apply_coach_channel_decision(
         coach_id=neg["coach_id"],
         negotiation_id=neg["id"],
         decision=decision,
+        force=force,
     )
     if not result.get("ok"):
         return result
 
     try:
-        await _finalize_session_from_result(db_pool, result, neg)
+        await _finalize_session_from_result(
+            db_pool,
+            result,
+            neg,
+            skip_local_json=staging_fallback,
+            fanout_environment="staging" if staging_fallback else None,
+        )
         client_msg = result.get("client_nate_text") or ""
         await send_client_negotiation_update_email(
             db_pool,
@@ -646,21 +776,65 @@ async def apply_coach_channel_decision(
     except Exception as e:
         logger.warning("session_negotiation_notify: finalize side effects failed: %s", e)
 
-    result["via"] = "channel"
+    result["via"] = "channel_staging_fallback" if staging_fallback else "channel"
     return result
 
 
-async def apply_client_channel_decision(
+async def apply_coach_channel_decision(
+    db_pool: Any,
+    *,
+    decision: str,
+    negotiation_id: Optional[str] = None,
+    coach_email: str = "",
+    coach_phone: str = "",
+) -> Dict[str, Any]:
+    """
+    Apply approve|busy|alt from email click, mailto inbound, or SMS.
+    When prod flag is off / row missing, optional staging DB fallback (bake).
+    """
+    result = await _apply_coach_on_pool(
+        db_pool,
+        decision=decision,
+        negotiation_id=negotiation_id,
+        coach_email=coach_email,
+        coach_phone=coach_phone,
+        force=False,
+        staging_fallback=False,
+    )
+    if result.get("ok"):
+        return result
+    if (
+        result.get("error") in ("flag_off", "negotiation_not_found")
+        and negotiation_id
+        and staging_inbound_fallback_enabled()
+    ):
+        staging = await _get_staging_pool()
+        if staging:
+            return await _apply_coach_on_pool(
+                staging,
+                decision=decision,
+                negotiation_id=negotiation_id,
+                coach_email=coach_email,
+                coach_phone=coach_phone,
+                force=True,
+                staging_fallback=True,
+            )
+    return result
+
+
+async def _apply_client_on_pool(
     db_pool: Any,
     *,
     decision: str,
     negotiation_id: str,
-    chosen_start: str = "",
+    chosen_start: str,
+    slot_index: Optional[int],
+    force: bool,
+    staging_fallback: bool,
 ) -> Dict[str, Any]:
-    """Apply accept_alt|reject_alt from client email/SMS/HTTPS links."""
-    from app.services.session_negotiation_service import client_respond, negotiation_enabled
+    from app.services.session_negotiation_service import client_respond, negotiation_enabled, _row_to_dict
 
-    if not negotiation_enabled():
+    if not force and not negotiation_enabled():
         return {"ok": False, "error": "flag_off"}
     decision = (decision or "").strip().lower()
     if decision not in _CLIENT_ACTIONS:
@@ -669,8 +843,6 @@ async def apply_client_channel_decision(
         return {"ok": False, "error": "missing_negotiation_id"}
 
     try:
-        from app.services.session_negotiation_service import _row_to_dict
-
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM session_negotiations WHERE id = $1::uuid",
@@ -685,25 +857,35 @@ async def apply_client_channel_decision(
     except Exception as e:
         return {"ok": False, "error": "db_error", "detail": str(e)[:200]}
 
+    start = chosen_start
+    if decision == "accept_alt" and not start and slot_index is not None:
+        alts = neg.get("alt_slots") or []
+        if 0 <= slot_index < len(alts):
+            slot = alts[slot_index]
+            start = slot.get("start") if isinstance(slot, dict) else str(slot)
+
     result = await client_respond(
         db_pool,
         client_id=client_id,
         negotiation_id=negotiation_id,
         decision=decision,
-        chosen_start=chosen_start or None,
+        chosen_start=start or None,
+        force=force,
     )
     if not result.get("ok"):
         return result
 
     try:
-        await _finalize_session_from_result(db_pool, result, neg)
+        await _finalize_session_from_result(
+            db_pool,
+            result,
+            neg,
+            skip_local_json=staging_fallback,
+            fanout_environment="staging" if staging_fallback else None,
+        )
         if decision == "reject_alt":
-            # Re-notify coach so they can act again
-            await send_coach_negotiation_notify(
-                db_pool, result.get("negotiation") or neg
-            )
+            await send_coach_negotiation_notify(db_pool, result.get("negotiation") or neg)
         elif decision == "accept_alt":
-            # Client already got booking_decision via finalize; still push update email
             await send_client_negotiation_update_email(
                 db_pool,
                 result.get("negotiation") or neg,
@@ -712,5 +894,44 @@ async def apply_client_channel_decision(
     except Exception as e:
         logger.warning("session_negotiation_notify: client finalize failed: %s", e)
 
-    result["via"] = "channel"
+    result["via"] = "channel_staging_fallback" if staging_fallback else "channel"
+    return result
+
+
+async def apply_client_channel_decision(
+    db_pool: Any,
+    *,
+    decision: str,
+    negotiation_id: str,
+    chosen_start: str = "",
+    slot_index: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Apply accept_alt|reject_alt from client email/SMS/HTTPS links."""
+    result = await _apply_client_on_pool(
+        db_pool,
+        decision=decision,
+        negotiation_id=negotiation_id,
+        chosen_start=chosen_start,
+        slot_index=slot_index,
+        force=False,
+        staging_fallback=False,
+    )
+    if result.get("ok"):
+        return result
+    if (
+        result.get("error") in ("flag_off", "negotiation_not_found")
+        and negotiation_id
+        and staging_inbound_fallback_enabled()
+    ):
+        staging = await _get_staging_pool()
+        if staging:
+            return await _apply_client_on_pool(
+                staging,
+                decision=decision,
+                negotiation_id=negotiation_id,
+                chosen_start=chosen_start,
+                slot_index=slot_index,
+                force=True,
+                staging_fallback=True,
+            )
     return result

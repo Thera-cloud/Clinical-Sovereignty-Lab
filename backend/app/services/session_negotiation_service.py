@@ -254,12 +254,14 @@ async def coach_decide(
     decision: str,
     alt_slots: Optional[List[Dict[str, Any]]] = None,
     note: str = "",
+    force: bool = False,
 ) -> Dict[str, Any]:
     """
     decision: approve | busy | alt
     Returns bridge_action hints: approve_session | decline_session | none
+    force=True: allow staging inbound fallback when prod flag is off.
     """
-    if not negotiation_enabled():
+    if not force and not negotiation_enabled():
         return {"ok": False, "error": "flag_off"}
     if not db_pool or not coach_id:
         return {"ok": False, "error": "missing_args"}
@@ -428,12 +430,14 @@ async def client_respond(
     decision: str,
     chosen_start: Optional[str] = None,
     note: str = "",
+    force: bool = False,
 ) -> Dict[str, Any]:
     """
     decision: accept_alt | reject_alt
     On accept_alt with chosen_start → bridge_action reschedule_and_approve
+    force=True: allow staging inbound fallback when prod flag is off.
     """
-    if not negotiation_enabled():
+    if not force and not negotiation_enabled():
         return {"ok": False, "error": "flag_off"}
     if not db_pool or not client_id:
         return {"ok": False, "error": "missing_args"}
@@ -636,6 +640,7 @@ async def expire_stale_negotiations(
     """
     QUANTUM-CRYSTAL-ARCH: Mark negotiations older than max_age_hours as expired
     and align coaching_sessions still pending_approval → cancelled.
+    Fanouts Redis so bridge JSON/WS catch up.
     """
     if not db_pool or not negotiation_enabled():
         return 0
@@ -647,14 +652,16 @@ async def expire_stale_negotiations(
                 SET status = 'expired', updated_at = NOW()
                 WHERE status = ANY($1::text[])
                   AND created_at < NOW() - make_interval(hours => $2::int)
-                RETURNING id, session_id
+                RETURNING id, session_id, client_id, coach_id
                 """,
                 list(ACTIVE_STATUSES),
                 int(max_age_hours),
             )
             n = 0
+            expired_payloads = []
             for row in rows:
                 sid = row["session_id"]
+                sess = None
                 if sid:
                     await conn.execute(
                         """
@@ -665,10 +672,51 @@ async def expire_stale_negotiations(
                         """,
                         sid,
                     )
+                    sess = {
+                        "session_id": sid,
+                        "status": "cancelled",
+                        "client_id": row["client_id"],
+                        "coach_id": row["coach_id"],
+                        "cancelled_via": "negotiation_expired",
+                    }
+                expired_payloads.append(
+                    {
+                        "client_id": row["client_id"] or "",
+                        "coach_id": row["coach_id"] or "",
+                        "session": sess,
+                        "session_negotiation_update": {
+                            "type": "session_negotiation_update",
+                            "negotiation": {
+                                "id": str(row["id"]),
+                                "session_id": sid,
+                                "status": "expired",
+                                "client_id": row["client_id"],
+                                "coach_id": row["coach_id"],
+                            },
+                            "ok": True,
+                        },
+                        "booking_status_update": (
+                            {
+                                "type": "booking_status_update",
+                                "session": sess,
+                                "status": "cancelled",
+                            }
+                            if sess
+                            else None
+                        ),
+                    }
+                )
                 n += 1
             if n:
                 logger.info("session_negotiation: expired %d stale negotiations", n)
-            return n
+        try:
+            from app.services.session_negotiation_notify import publish_negotiation_fanout
+
+            for payload in expired_payloads:
+                await publish_negotiation_fanout(payload)
+        except Exception as fe:
+            logger.warning("session_negotiation: expire fanout failed: %s", fe)
+        return n
     except Exception as e:
         logger.warning("session_negotiation: expire_stale failed: %s", e)
         return 0
