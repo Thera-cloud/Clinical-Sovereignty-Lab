@@ -131,8 +131,8 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 
 | Step | Action | Done |
 |------|--------|------|
-| 2.1 | Confirm Phase 1 stable | [ ] |
-| 2.2 | Adversarial walk: `docs/AGENTIC_PHASE_2_REVIEW.md` | [ ] |
+| 2.1 | Confirm Phase 1 stable | [ ] *(prod 1.5 still open — staging Track B only)* |
+| 2.2 | Adversarial walk: `docs/AGENTIC_PHASE_2_REVIEW.md` | [x] *(Nathan Nevedal 2026-07-17)* |
 | 2.3 | Staging: propose/confirm book_session + set_reminder; no execution without explicit confirm | [ ] |
 | 2.4 | Production flag flip | [ ] |
 | 2.5 | `safe_deploy.sh bridge` if bridge hooks changed | [ ] |
@@ -145,7 +145,7 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 
 | Step | Action | Done |
 |------|--------|------|
-| 3.1 | Adversarial walk: `docs/AGENTIC_PHASE_3_REVIEW.md` | [ ] |
+| 3.1 | Adversarial walk: `docs/AGENTIC_PHASE_3_REVIEW.md` | [x] *(Nathan Nevedal 2026-07-17)* |
 | 3.2 | Staging: coach REST assign/advance; client chat receives plan context block only | [ ] |
 | 3.3 | Production flag flip | [ ] |
 
@@ -159,8 +159,8 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 
 | Step | Action | Done |
 |------|--------|------|
-| 4.1 | Discovery doc reviewed: `docs/AGENTIC_PHASE4_DISCOVERY.md` | [ ] |
-| 4.2 | Adversarial walk: `docs/AGENTIC_PHASE_4_REVIEW.md` | [ ] |
+| 4.1 | Discovery doc reviewed: `docs/AGENTIC_PHASE4_DISCOVERY.md` | [x] |
+| 4.2 | Adversarial walk: `docs/AGENTIC_PHASE_4_REVIEW.md` | [x] *(Nathan Nevedal 2026-07-17)* |
 | 4.3 | Staging: enable **coach alert only** first (`ENABLE_SELF_MONITOR_COACH_ALERT`) | [ ] |
 | 4.4 | Optional client touch (`ENABLE_SELF_MONITOR_TOUCH`) only after Phase 0+1 proven | [ ] |
 | 4.5 | Production flip per flag, separately | [ ] |
