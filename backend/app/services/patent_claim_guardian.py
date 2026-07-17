@@ -1,7 +1,7 @@
 """
-Patent claim↔code guardian — worker ants propose; CEO (YELLOW) for Foundation maps.
+Patent claim↔code guardian — worker ants propose; all tags auto-approve GREEN.
 
-Heuristic crystal_patent_field tags auto-approve GREEN (digest only, no CEO email).
+No CEO email for patent claim maps (Nathan policy 2026-07-17). Digest / DB only.
 
 # QUANTUM-CRYSTAL-ARCH — Dual-COO patent perimeter
 """
@@ -29,9 +29,9 @@ async def propose_claim_tag(
 ) -> Dict[str, Any]:
     if not db_pool:
         return {"status": "error", "error": "no_db"}
-    is_crystal_heuristic = (family_id or "") == CRYSTAL_PATENT_FAMILY
-    initial_status = "approved" if is_crystal_heuristic else "proposed"
-    risk_class = "GREEN" if is_crystal_heuristic else "YELLOW"
+    # QUANTUM-CRYSTAL-ARCH — all patent tags GREEN (no CEO email)
+    initial_status = "approved"
+    risk_class = "GREEN"
     try:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -39,38 +39,15 @@ async def propose_claim_tag(
                 INSERT INTO patent_claim_map
                     (family_id, claim_ref, claim_text, code_path, function_name,
                      status, proposed_by, risk_class, reviewed_at, reviewed_by)
-                VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8,
-                    CASE WHEN $6 = 'approved' THEN NOW() ELSE NULL END,
-                    CASE WHEN $6 = 'approved' THEN 'auto_green' ELSE NULL END
-                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), 'auto_green')
                 ON CONFLICT (family_id, claim_ref, code_path, function_name)
                 DO UPDATE SET
                     claim_text = COALESCE(EXCLUDED.claim_text, patent_claim_map.claim_text),
                     proposed_by = EXCLUDED.proposed_by,
-                    risk_class = CASE
-                        WHEN patent_claim_map.family_id = 'crystal_patent_field'
-                        THEN 'GREEN'
-                        ELSE patent_claim_map.risk_class
-                    END,
-                    status = CASE
-                        WHEN patent_claim_map.family_id = 'crystal_patent_field'
-                             AND patent_claim_map.status = 'proposed'
-                        THEN 'approved'
-                        ELSE patent_claim_map.status
-                    END,
-                    reviewed_at = CASE
-                        WHEN patent_claim_map.family_id = 'crystal_patent_field'
-                             AND patent_claim_map.status = 'proposed'
-                        THEN NOW()
-                        ELSE patent_claim_map.reviewed_at
-                    END,
-                    reviewed_by = CASE
-                        WHEN patent_claim_map.family_id = 'crystal_patent_field'
-                             AND patent_claim_map.status = 'proposed'
-                        THEN 'auto_green'
-                        ELSE patent_claim_map.reviewed_by
-                    END
+                    risk_class = 'GREEN',
+                    status = 'approved',
+                    reviewed_at = COALESCE(patent_claim_map.reviewed_at, NOW()),
+                    reviewed_by = COALESCE(NULLIF(patent_claim_map.reviewed_by, ''), 'auto_green')
                 RETURNING id, status, family_id
                 """,
                 family_id[:120],
@@ -82,32 +59,11 @@ async def propose_claim_tag(
                 proposed_by[:80],
                 risk_class,
             )
-        status = (row["status"] if row else "") or ""
-        # QUANTUM-CRYSTAL-ARCH — no CEO email for heuristic / already-approved tags
-        if is_crystal_heuristic or status == "approved":
-            return {
-                "status": "ok",
-                "id": row["id"] if row else None,
-                "risk": "GREEN",
-                "ceo_notified": False,
-            }
-        try:
-            from app.websocket.cli_dual_coo import RISK_YELLOW, enqueue_ceo
-
-            enqueue_ceo(
-                risk=RISK_YELLOW,
-                title=f"Patent tag propose: {family_id}/{claim_ref}",
-                detail=f"{code_path}::{function_name}",
-                origin="cloud",
-                payload={"family_id": family_id, "claim_ref": claim_ref},
-            )
-        except Exception:
-            pass
         return {
             "status": "ok",
             "id": row["id"] if row else None,
-            "risk": "YELLOW",
-            "ceo_notified": True,
+            "risk": "GREEN",
+            "ceo_notified": False,
         }
     except Exception as e:
         logger.warning("propose_claim_tag: %s", e)

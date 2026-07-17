@@ -3,8 +3,8 @@ Dual-COO neuro-symbolic layer — CLI-Mac + CLI-Cloud as COOs; Nathan = CEO.
 
 Risk classes (Nathan-approved policy):
   GREEN  — auto-act + digest note (ops, lint-pass reviews, non-clinical crystal apply,
-           sandbox brief/matching, heuristic crystal↔patent-doc tags)
-  YELLOW — morning CEO inbox batch (Foundation claim maps, insight/coach labels, prior art)
+           sandbox brief/matching, all patent claim tags + prior-art sweeps)
+  YELLOW — morning CEO inbox batch (insight/coach labels, attribution/failover ops)
   RED    — synchronous CEO only (clinical/defense/therapeutic/sensitive)
 
 # QUANTUM-CRYSTAL-ARCH — Dual-COO / Chief-of-Staff ceiling
@@ -43,8 +43,6 @@ _RED_PATH_MARKERS = (
 _RED_DOMAINS = frozenset({"clinical", "defense"})
 
 _YELLOW_KINDS = frozenset({
-    "patent_tag_propose",  # Foundation / provisional claim↔code only
-    "prior_art_flag",
     "insight_route",
     "coach_label",
     "second_order",
@@ -63,6 +61,8 @@ _GREEN_KINDS = frozenset({
     "matching_weight",
     "brief_refine",
     "patent_crystal_tag",
+    "patent_tag_propose",  # all claim↔code maps auto-green (Nathan 2026-07-17)
+    "prior_art_flag",
 })
 
 
@@ -168,13 +168,13 @@ def classify_risk(
     if any(m in notes_l for m in ("therapeutic", "crisis", "r-floor", "sensitive bridge")):
         return RISK_RED
 
-    # GREEN before patent substring — patent_crystal_tag / brief / matching stay digest-only
+    # GREEN before patent substring — patent / prior-art / brief / matching stay digest-only
     if kind_l in _GREEN_KINDS or kind_l in ("", "work", "review"):
         return RISK_GREEN
+    if "patent" in kind_l or "prior.art" in notes_l or "prior_art" in kind_l:
+        return RISK_GREEN
 
-    if kind_l in _YELLOW_KINDS or "prior.art" in notes_l:
-        return RISK_YELLOW
-    if "patent" in kind_l:
+    if kind_l in _YELLOW_KINDS:
         return RISK_YELLOW
 
     return RISK_YELLOW

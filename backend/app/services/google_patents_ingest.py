@@ -106,24 +106,7 @@ async def ingest_patent_crystal_sweep(
                 "proposed" if hits else "empty",
                 risk_class[:16],
             )
-        if hits:
-            from app.websocket.cli_dual_coo import RISK_YELLOW, enqueue_ceo
-
-            enqueue_ceo(
-                risk=RISK_YELLOW,
-                title=f"Prior-art hits for crystal {crystal_id}",
-                detail=query[:300],
-                origin="cloud",
-                task_id=f"prior_art:{crystal_id}",
-                payload={
-                    "crystal_id": int(crystal_id),
-                    "hits": len(hits),
-                    "patent_numbers": [
-                        n for h in hits for n in (h.get("patent_numbers") or [])
-                    ][:10],
-                },
-                dedup_ttl_s=12 * 3600,
-            )
+        # QUANTUM-CRYSTAL-ARCH — prior-art sweeps are GREEN (digest/DB only; no CEO email)
         return {
             "status": "ok",
             "crystal_id": int(crystal_id),

@@ -524,7 +524,7 @@ class DualCooLoopCloser:
 
             self._stats["prior_art"] += proposed + swept
             await self._log_event(
-                "prior_art_flag", "YELLOW",
+                "prior_art_flag", "GREEN",
                 f"proposed={proposed} swept={swept}",
             )
             return {"status": "ok", "proposed": proposed, "swept": swept}

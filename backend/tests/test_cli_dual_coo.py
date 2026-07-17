@@ -36,13 +36,12 @@ class TestClassifyRisk(unittest.TestCase):
             RISK_GREEN,
         )
 
-    def test_patent_foundation_yellow(self):
+    def test_patent_and_prior_art_green(self):
         self.assertEqual(
             classify_risk(kind="patent_tag_propose", files=["foo.py"]),
-            RISK_YELLOW,
+            RISK_GREEN,
         )
-
-    def test_patent_crystal_and_sandbox_green(self):
+        self.assertEqual(classify_risk(kind="prior_art_flag"), RISK_GREEN)
         self.assertEqual(classify_risk(kind="patent_crystal_tag"), RISK_GREEN)
         self.assertEqual(classify_risk(kind="matching_weight"), RISK_GREEN)
         self.assertEqual(classify_risk(kind="brief_refine"), RISK_GREEN)

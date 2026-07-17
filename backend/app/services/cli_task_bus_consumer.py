@@ -189,8 +189,14 @@ class CliTaskBusConsumer:
         # QUANTUM-CRYSTAL-ARCH — kind-aware Chief of Staff dispatch
         if kind in ("ops_fix", "compliance_redteam", "auditor_ops_fix"):
             findings, passed = await self._dispatch_ops_task(task)
-        elif kind in ("brief_refine", "matching_weight", "patent_crystal_tag"):
-            # QUANTUM-CRYSTAL-ARCH — GREEN digest; sandbox / heuristic, no CEO email
+        elif kind in (
+            "brief_refine",
+            "matching_weight",
+            "patent_crystal_tag",
+            "patent_tag_propose",
+            "prior_art_flag",
+        ):
+            # QUANTUM-CRYSTAL-ARCH — GREEN digest; patent/sandbox, no CEO email
             findings = [{
                 "detail": f"GREEN kind={kind} — digest only (no CEO inbox)",
                 "severity": "info",
@@ -198,7 +204,7 @@ class CliTaskBusConsumer:
             }]
             passed = True
             self._green_auto += 1
-        elif kind in ("insight_route", "prior_art_flag", "coach_label"):
+        elif kind in ("insight_route", "coach_label"):
             findings = [{
                 "detail": f"YELLOW kind={kind} surfaced to CEO inbox",
                 "severity": "info",
@@ -250,30 +256,13 @@ class CliTaskBusConsumer:
             await self._surface_ceo_queues()
 
     async def _surface_ceo_queues(self):
-        """YELLOW patent tags + RED clinical shadow → CEO inbox."""
+        """RED clinical shadow → CEO inbox (patent tags are GREEN — no surface)."""
         db = getattr(self._app_state, "db_pool", None) if self._app_state else None
         try:
             from app.services.crystal_outcome_apply import propose_red_clinical_to_ceo
-            from app.services.patent_claim_guardian import list_pending_for_ceo
-            from app.websocket.cli_dual_coo import RISK_YELLOW, enqueue_ceo
 
             if db:
                 await propose_red_clinical_to_ceo(db)
-                pending = await list_pending_for_ceo(db, limit=20)
-                if pending:
-                    r = enqueue_ceo(
-                        risk=RISK_YELLOW,
-                        title=f"{len(pending)} patent claim tags awaiting CEO",
-                        detail="; ".join(
-                            f"{p.get('family_id')}/{p.get('claim_ref')}" for p in pending[:5]
-                        ),
-                        origin="cloud",
-                        task_id="patent_tags_pending",
-                        payload={"count": len(pending)},
-                        dedup_ttl_s=6 * 3600,
-                    )
-                    if r.get("status") == "ok":
-                        self._ceo_routed += 1
         except Exception as e:
             logger.debug("CEO queue surface: %s", e)
 
