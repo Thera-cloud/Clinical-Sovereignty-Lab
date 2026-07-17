@@ -107,8 +107,9 @@ services:
       - ENABLE_FORWARD_REASONING=${STAGING_ENABLE_FORWARD_REASONING:-false}
       - CLI_TASK_BUS_ENABLED=false
       - PUBLIC_TRIAL_ENABLED=false
+    # Host 8766 is owned by nginx lb-health-monitors → prod bridge; use 8767 for staging.
     ports:
-      - "127.0.0.1:8766:8765"
+      - "127.0.0.1:8767:8765"
     depends_on:
       postgres:
         condition: service_healthy
