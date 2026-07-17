@@ -535,7 +535,6 @@ class DualCooLoopCloser:
     # ── 5) Second-order learning (YELLOW proposals) ─────────────────────
     async def _cycle_second_order(self) -> Dict[str, Any]:
         try:
-            from app.websocket.cli_dual_coo import RISK_YELLOW, enqueue_ceo
             from app.websocket.cli_task_bus import publish_task, task_bus_enabled
 
             detail = (
@@ -558,15 +557,8 @@ class DualCooLoopCloser:
                     notes="Propose coach-client matching weight tweak (sandbox only)",
                     plan_id="second_order_learning",
                 )
-            enqueue_ceo(
-                risk=RISK_YELLOW,
-                title="Second-order learning: matching/brief refine proposals",
-                detail=detail,
-                origin="cloud",
-                payload={"sandbox_only": True},
-                dedup_ttl_s=12 * 3600,
-            )
-            await self._log_event("brief_refine", "YELLOW", detail[:500])
+            # QUANTUM-CRYSTAL-ARCH — GREEN only (bus + digest); no CEO email flood
+            await self._log_event("brief_refine", "GREEN", detail[:500])
             self._stats["second_order"] += 1
             return {"status": "ok"}
         except Exception as e:

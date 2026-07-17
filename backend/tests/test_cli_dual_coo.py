@@ -36,11 +36,16 @@ class TestClassifyRisk(unittest.TestCase):
             RISK_GREEN,
         )
 
-    def test_patent_yellow(self):
+    def test_patent_foundation_yellow(self):
         self.assertEqual(
             classify_risk(kind="patent_tag_propose", files=["foo.py"]),
             RISK_YELLOW,
         )
+
+    def test_patent_crystal_and_sandbox_green(self):
+        self.assertEqual(classify_risk(kind="patent_crystal_tag"), RISK_GREEN)
+        self.assertEqual(classify_risk(kind="matching_weight"), RISK_GREEN)
+        self.assertEqual(classify_risk(kind="brief_refine"), RISK_GREEN)
 
     def test_coo_addon_mentions_ceo(self):
         text = dual_coo_system_addon()

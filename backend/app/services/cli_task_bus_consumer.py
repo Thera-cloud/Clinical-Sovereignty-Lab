@@ -189,8 +189,16 @@ class CliTaskBusConsumer:
         # QUANTUM-CRYSTAL-ARCH — kind-aware Chief of Staff dispatch
         if kind in ("ops_fix", "compliance_redteam", "auditor_ops_fix"):
             findings, passed = await self._dispatch_ops_task(task)
-        elif kind in ("insight_route", "brief_refine", "matching_weight",
-                      "prior_art_flag", "coach_label"):
+        elif kind in ("brief_refine", "matching_weight", "patent_crystal_tag"):
+            # QUANTUM-CRYSTAL-ARCH — GREEN digest; sandbox / heuristic, no CEO email
+            findings = [{
+                "detail": f"GREEN kind={kind} — digest only (no CEO inbox)",
+                "severity": "info",
+                "risk": RISK_GREEN,
+            }]
+            passed = True
+            self._green_auto += 1
+        elif kind in ("insight_route", "prior_art_flag", "coach_label"):
             findings = [{
                 "detail": f"YELLOW kind={kind} surfaced to CEO inbox",
                 "severity": "info",
