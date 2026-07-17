@@ -490,6 +490,7 @@ async def run_agentic_loop(
 
     # Sol 1–5 + extra: force capability/speculative grounding before first model turn
     grounding_temp: Optional[float] = None
+    sess_key = _session_key(admin_username or "admin", cli_type, mode, session_id or plan_id or "default")
     try:
         from app.websocket.cli_grounding import (
             capability_nudge_message,
@@ -502,6 +503,7 @@ async def run_agentic_loop(
         if not is_subagent and is_capability_question(user_message):
             caps = await _exec_ground_tool(
                 "self_capabilities", {}, mode=mode, cli_type=cli_type, plan_id=plan_id,
+                session_key=sess_key,
             )
             caps_body = ""
             if isinstance(caps, dict):
@@ -530,6 +532,30 @@ async def run_agentic_loop(
     except Exception as _g_err:
         logger.debug("CLI grounding inject skipped: %s", _g_err)
         tool_call_log_seed = []
+
+    # QUANTUM-CRYSTAL-ARCH — CLI neuro-symbolic: inject typed facts before turn 1
+    try:
+        from app.websocket.cli_symbol_store import (
+            cli_symbolic_enabled,
+            format_symbols_block,
+        )
+
+        if not is_subagent and cli_symbolic_enabled():
+            clinical_extra = []
+            if db_pool and admin_username:
+                try:
+                    from app.services.ask_nate_clinical_intelligence import _load_symbols
+
+                    _sym_txt = await _load_symbols(db_pool, admin_username)
+                    if _sym_txt:
+                        clinical_extra.append(_sym_txt)
+                except Exception:
+                    pass
+            sym_block = format_symbols_block(sess_key, extra=clinical_extra or None)
+            if sym_block:
+                conversation.append({"role": "user", "content": sym_block})
+    except Exception as _ns_err:
+        logger.debug("CLI symbolic inject skipped: %s", _ns_err)
 
     async def send_to_extension(msg: Dict[str, Any]) -> None:
         await _emit(emit, msg)
@@ -671,6 +697,8 @@ async def run_agentic_loop(
                             plan_id=plan_id,
                             admin_username=admin_username,
                             send_to_extension=send_to_extension,
+                            session_key=sess_key,
+                            tool_call_log=tool_call_log,
                         )
                     except Exception as te:
                         return {"status": "error", "error": str(te)}
@@ -798,6 +826,13 @@ async def run_agentic_loop(
                     "duration_ms": t_elapsed,
                     "evidence_excerpt": (_ev or result_text or "")[:6000],
                 })
+                # QUANTUM-CRYSTAL-ARCH — auto-assert typed facts from tool results
+                try:
+                    from app.websocket.cli_symbol_store import auto_assert_from_tool
+
+                    auto_assert_from_tool(sess_key, tool_name, tool_args, result)
+                except Exception:
+                    pass
 
                 if tool_name in ("write_file", "str_replace", "delete_file"):
                     path = (

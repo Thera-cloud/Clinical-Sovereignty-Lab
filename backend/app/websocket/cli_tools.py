@@ -3068,6 +3068,8 @@ async def execute_tool(
     admin_username: Optional[str] = None,
     workspace_router=None,
     send_to_extension: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    session_key: Optional[str] = None,
+    tool_call_log: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Dispatch a tool call with auth scoping and per-tool timeouts.
@@ -3320,10 +3322,19 @@ async def execute_tool(
         return {"status": "error", "error": f"Unknown tool: {name}", "error_code": _ERROR_OTHER}
 
     timeout = TOOL_TIMEOUTS.get(name, 5)
+    _sk = session_key or plan_id or "_default"
+    _dispatch_kw = {
+        "tracker": tracker,
+        "cli_type": cli_type,
+        "plan_id": plan_id,
+        "session_key": _sk,
+        "mode": mode,
+        "tool_call_log": tool_call_log or [],
+    }
 
     try:
         result = await asyncio.wait_for(
-            asyncio.to_thread(handler, args, tracker=tracker),
+            asyncio.to_thread(handler, args, **_dispatch_kw),
             timeout=timeout,
         )
         if isinstance(result, dict) and args.get("_sandbox"):
@@ -3496,6 +3507,183 @@ TOOL_TIMEOUTS.setdefault("web_search", 15)
 TOOL_TIMEOUTS.setdefault("self_capabilities", 2)
 
 
+# --- CLI neuro-symbolic + Mac↔Cloud task bus tools ---
+
+def _symbolic_verify_sync(args: dict, **kw) -> dict:
+    from app.websocket.cli_symbol_store import symbolic_verify
+
+    draft = (args or {}).get("draft") or (args or {}).get("text") or ""
+    session_key = kw.get("session_key") or (args or {}).get("session_key") or ""
+    log = kw.get("tool_call_log") or []
+    out = symbolic_verify(draft, session_key, tool_call_log=log)
+    return {
+        "status": "ok" if out.get("ok") else "error",
+        "result": json.dumps(out, default=str)[:6000],
+        **out,
+    }
+
+
+def _forward_reason_sync(args: dict, **kw) -> dict:
+    from app.websocket.cli_symbol_store import forward_reason
+
+    session_key = kw.get("session_key") or (args or {}).get("session_key") or ""
+    out = forward_reason(
+        session_key,
+        goal=(args or {}).get("goal") or "",
+        tool_call_log=kw.get("tool_call_log") or [],
+    )
+    return out if isinstance(out, dict) else {"status": "error", "error": "bad_result"}
+
+
+def _task_bus_publish_sync(args: dict, **kw) -> dict:
+    from app.websocket.cli_task_bus import publish_task
+
+    cli_type = kw.get("cli_type") or (args or {}).get("origin") or "cloud"
+    return publish_task(
+        origin=cli_type if cli_type in ("mac", "cloud") else "cloud",
+        files=(args or {}).get("files") or [],
+        status=(args or {}).get("status") or "queued",
+        branch=(args or {}).get("branch") or "",
+        kind=(args or {}).get("kind") or "work",
+        run_id=(args or {}).get("run_id") or "",
+        plan_id=kw.get("plan_id") or (args or {}).get("plan_id") or "",
+        notes=(args or {}).get("notes") or "",
+    )
+
+
+def _task_bus_claim_sync(args: dict, **kw) -> dict:
+    from app.websocket.cli_task_bus import claim_task
+
+    cli_type = kw.get("cli_type") or (args or {}).get("consumer") or "cloud"
+    return claim_task(
+        consumer=cli_type if cli_type in ("mac", "cloud") else "cloud",
+        prefer_kind=(args or {}).get("prefer_kind") or "",
+    )
+
+
+def _task_bus_review_sync(args: dict, **kw) -> dict:
+    from app.websocket.cli_task_bus import post_findings
+
+    findings = (args or {}).get("findings") or []
+    if isinstance(findings, str):
+        try:
+            findings = json.loads(findings)
+        except Exception:
+            findings = [{"detail": findings}]
+    cli_type = kw.get("cli_type") or "cloud"
+    return post_findings(
+        (args or {}).get("task_id") or "",
+        reviewer=cli_type if cli_type in ("mac", "cloud") else "cloud",
+        findings=list(findings) if isinstance(findings, list) else [],
+        pass_review=bool((args or {}).get("pass_review")),
+    )
+
+
+_SYMBOLIC_VERIFY_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "symbolic_verify",
+        "description": (
+            "Neuro-symbolic check: verify draft text against the session fact store "
+            "and tool evidence. Rejects claims that contradict stored flags/tests."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "draft": {"type": "string", "description": "Draft response or claim to verify"},
+            },
+            "required": ["draft"],
+        },
+    },
+}
+
+_FORWARD_REASON_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "forward_reason",
+        "description": (
+            "Constraint chain from tool premises → derived assertions only. "
+            "Does not invent facts outside the premise set."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string", "description": "Optional goal to scope derivations"},
+            },
+            "required": [],
+        },
+    },
+}
+
+_TASK_BUS_PUBLISH_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "task_bus_publish",
+        "description": "Publish a Mac↔Cloud shared task (files, status, branch) onto the Redis bus.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "files": {"type": "array", "items": {"type": "string"}},
+                "kind": {"type": "string", "description": "work | review"},
+                "notes": {"type": "string"},
+                "branch": {"type": "string"},
+            },
+            "required": [],
+        },
+    },
+}
+
+_TASK_BUS_CLAIM_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "task_bus_claim",
+        "description": "Claim the next cross-CLI task from the shared bus (skips own origin).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prefer_kind": {"type": "string", "description": "Optional: review | work"},
+            },
+            "required": [],
+        },
+    },
+}
+
+_TASK_BUS_REVIEW_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "task_bus_review",
+        "description": (
+            "Post read-only review findings for a claimed bus task. "
+            "Max 2 review rounds; then budget exhausted."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string"},
+                "findings": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "List of {detail, severity?} findings",
+                },
+                "pass_review": {"type": "boolean"},
+            },
+            "required": ["task_id"],
+        },
+    },
+}
+
+_TOOL_DISPATCH["symbolic_verify"] = lambda args, **kw: _symbolic_verify_sync(args, **kw)
+_TOOL_DISPATCH["forward_reason"] = lambda args, **kw: _forward_reason_sync(args, **kw)
+_TOOL_DISPATCH["task_bus_publish"] = lambda args, **kw: _task_bus_publish_sync(args, **kw)
+_TOOL_DISPATCH["task_bus_claim"] = lambda args, **kw: _task_bus_claim_sync(args, **kw)
+_TOOL_DISPATCH["task_bus_review"] = lambda args, **kw: _task_bus_review_sync(args, **kw)
+TOOL_TIMEOUTS.setdefault("symbolic_verify", 5)
+TOOL_TIMEOUTS.setdefault("forward_reason", 5)
+TOOL_TIMEOUTS.setdefault("task_bus_publish", 5)
+TOOL_TIMEOUTS.setdefault("task_bus_claim", 5)
+TOOL_TIMEOUTS.setdefault("task_bus_review", 5)
+
+
 def get_tool_definitions(mode: str, cli_type: str) -> list:
     """Build the tools array for native function calling (Grok or Ollama).
 
@@ -3518,6 +3706,25 @@ def get_tool_definitions(mode: str, cli_type: str) -> list:
         )
     ]
     tools.extend(_session_tools)
+
+    # CLI neuro-symbolic (ENABLE_ASK_NATE_SYMBOLIC) + task bus (CLI_TASK_BUS_ENABLED)
+    _sym_on = os.getenv("ENABLE_ASK_NATE_SYMBOLIC", "false").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    _fr_on = os.getenv("ENABLE_FORWARD_REASONING", "false").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    _bus_on = os.getenv("CLI_TASK_BUS_ENABLED", "false").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    if _sym_on:
+        tools.append(_SYMBOLIC_VERIFY_TOOL_DEF)
+        if _fr_on:
+            tools.append(_FORWARD_REASON_TOOL_DEF)
+    if _bus_on and mode in ("ln_fab", "debug", "plan"):
+        tools.append(_TASK_BUS_PUBLISH_TOOL_DEF)
+        tools.append(_TASK_BUS_CLAIM_TOOL_DEF)
+        tools.append(_TASK_BUS_REVIEW_TOOL_DEF)
     # spawn_subagent only in agentic write/debug modes
     if mode not in ("ln_fab", "debug"):
         tools = [

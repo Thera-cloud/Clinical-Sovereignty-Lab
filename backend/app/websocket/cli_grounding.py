@@ -186,14 +186,26 @@ def build_capabilities_manifest(
     # Prefer lightweight source parse — importing agents_api can pull heavy deps.
     agentic_caps: Dict[str, Any] = _load_agentic_capabilities_safe()
 
+    # Live probe: wired only when flag on AND symbolic_verify is in this mode's tools
+    try:
+        from app.websocket.cli_symbol_store import probe_wired_into_cli_loop
+
+        _wired = probe_wired_into_cli_loop(tool_names)
+    except Exception:
+        _wired = False
     clinical_symbolic = {
         "ENABLE_ASK_NATE_SYMBOLIC": _env_on("ENABLE_ASK_NATE_SYMBOLIC"),
         "ENABLE_FORWARD_REASONING": _env_on("ENABLE_FORWARD_REASONING"),
         "ENABLE_ASK_NATE_CLINICAL_INTEL": _env_on("ENABLE_ASK_NATE_CLINICAL_INTEL", "true"),
-        "wired_into_cli_loop": False,
+        "wired_into_cli_loop": _wired,
         "note": (
-            "Clinical Ask Nate Phase 5a–d seams are separate from CLI. "
-            "CLI does not call ask_nate_clinical_intelligence or nate_forward_reasoning."
+            "CLI neuro-symbolic uses Redis fact store + symbolic_verify/forward_reason tools "
+            "when ENABLE_ASK_NATE_SYMBOLIC is on. Clinical Ask Nate seams remain separate."
+            if _wired
+            else (
+                "CLI neuro-symbolic not wired (flag off or tools missing). "
+                "Clinical Ask Nate Phase 5a–d seams are separate from CLI."
+            )
         ),
     }
 
@@ -217,20 +229,61 @@ def build_capabilities_manifest(
         "note": "CLI uses direct Grok/Azure streaming; Workers AI is not on this path.",
     }
 
+    # Live Redis probes — never claim partnership from constants alone
+    try:
+        from app.websocket.cli_task_bus import (
+            probe_cross_cli_review_loop,
+            probe_shared_task_bus,
+        )
+
+        _bus = probe_shared_task_bus()
+        _review = probe_cross_cli_review_loop()
+    except Exception:
+        _bus = False
+        _review = False
+    _partnership = bool(_bus and _review)
     mac_cloud = {
         "same_agentic_loop": True,
         "cli_type": cli_type,
         "mode": mode,
         "mac_writes": "live workspace via Mac agent when online",
         "cloud_writes": "sandbox worktree when CLI_CLOUD_SANDBOX_WRITES=1 and mode=ln_fab",
-        "mac_cloud_ln_fab_partnership": False,
-        "shared_task_bus": False,
-        "cross_cli_review_loop": False,
+        "mac_cloud_ln_fab_partnership": _partnership,
+        "shared_task_bus": _bus,
+        "cross_cli_review_loop": _review,
         "note": (
-            "CLI-Mac and CLI-Cloud are the same run_agentic_loop with different tool "
-            "surfaces. Dual LN-FAB partnership is NOT IMPLEMENTED."
+            "CLI-Mac and CLI-Cloud share run_agentic_loop; partnership is live when "
+            "Redis task bus meta + cross_cli_review features probe true."
+            if _partnership
+            else (
+                "CLI-Mac and CLI-Cloud are the same run_agentic_loop with different tool "
+                "surfaces. Dual LN-FAB partnership probes false (bus/review not ready)."
+            )
         ),
     }
+
+    implemented = [
+        "agentic tool loop (LLM + tools)",
+        "todo_write / spawn_subagent (mode-gated)",
+        "retry-until-green auto-pytest (ln_fab/debug)",
+        "cloud sandbox writes + promote (admin/patch rules)",
+        "self_capabilities evidence tool",
+        "response claim grounding validator",
+        "auto-inject self_capabilities on capability questions (server-side)",
+        "post-response citation audit vs tool evidence (server-side)",
+    ]
+    not_implemented = [
+        "Workers AI as CLI primary provider",
+        "SSE/webhook stream for partner agent runs",
+    ]
+    if _wired:
+        implemented.append("CLI neuro-symbolic fact store + symbolic_verify/forward_reason")
+    else:
+        not_implemented.insert(0, "CLI neuro-symbolic formal logic / knowledge graph")
+    if _partnership:
+        implemented.append("Mac↔Cloud dual LN-FAB partnership / shared task bus")
+    else:
+        not_implemented.insert(0, "Mac↔Cloud dual LN-FAB partnership / shared backlog")
 
     return {
         "object": "cli.self_capabilities",
@@ -243,22 +296,8 @@ def build_capabilities_manifest(
         "cli_phase5_tools": cli_phase5_tools,
         "providers": providers,
         "mac_vs_cloud": mac_cloud,
-        "implemented": [
-            "agentic tool loop (LLM + tools)",
-            "todo_write / spawn_subagent (mode-gated)",
-            "retry-until-green auto-pytest (ln_fab/debug)",
-            "cloud sandbox writes + promote (admin/patch rules)",
-            "self_capabilities evidence tool",
-            "response claim grounding validator",
-            "auto-inject self_capabilities on capability questions (server-side)",
-            "post-response citation audit vs tool evidence (server-side)",
-        ],
-        "not_implemented": [
-            "CLI neuro-symbolic formal logic / knowledge graph",
-            "Mac↔Cloud dual LN-FAB partnership / shared backlog",
-            "Workers AI as CLI primary provider",
-            "SSE/webhook stream for partner agent runs",
-        ],
+        "implemented": implemented,
+        "not_implemented": not_implemented,
         "label_rules": {
             "active_feature": "state as fact only if listed under implemented or tools",
             "flag_off": FLAG_OFF_TAG,

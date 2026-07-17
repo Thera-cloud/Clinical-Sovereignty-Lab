@@ -122,6 +122,10 @@ AGENTIC_CAPABILITIES = {
     "multi_proxy_keys": True,
     "cli_truth_grounding": True,
     "cli_citation_audit": True,
+    "shared_task_bus": True,
+    "cross_cli_review_loop": True,
+    "agent_run_handoff": True,
+    "origin_cli_field": True,
 }
 
 
@@ -129,9 +133,23 @@ class AgentRunBody(BaseModel):
     prompt: str = Field(..., min_length=1, description="Coding / complex request")
     mode: str = Field("ln_fab", description="ask | plan | debug | ln_fab")
     cli: str = Field("cloud", description="cloud (sandboxed) or mac")
+    origin_cli: Optional[str] = Field(
+        None,
+        description="Originating CLI surface: mac | cloud (defaults to cli)",
+    )
     session_id: Optional[str] = None
     plan_id: Optional[str] = None
     max_turns: Optional[int] = Field(None, ge=1, le=60)
+
+
+class AgentHandoffBody(BaseModel):
+    target_cli: str = Field(..., description="mac | cloud — peer CLI to continue the run")
+    notes: str = Field("", description="Handoff context for the peer CLI")
+    files: Optional[List[str]] = None
+    enqueue_review: bool = Field(
+        True,
+        description="Also enqueue a cross-CLI review task on the shared bus",
+    )
 
 
 class AgentPromoteBody(BaseModel):
@@ -337,6 +355,7 @@ async def agent_capabilities(user: Dict = Depends(_verify_proxy_auth)):
             "get": "GET /api/v1/agents/{run_id}",
             "cancel": "DELETE /api/v1/agents/{run_id}",
             "promote": "POST /api/v1/agents/{run_id}/promote",
+            "handoff": "POST /api/v1/agents/{run_id}/handoff",
             "completions": "POST /api/v1/chat/completions",
         },
     }
@@ -378,6 +397,9 @@ async def create_agent_run(
     session_id = body.session_id or run_id
     username = user.get("username") or "partner-agent"
     owner = _owner_key(user)
+    origin_cli = (body.origin_cli or cli or "cloud").lower()
+    if origin_cli not in ("mac", "cloud"):
+        origin_cli = cli
 
     await _store_run(run_id, {
         "run_id": run_id,
@@ -386,6 +408,7 @@ async def create_agent_run(
         "session_id": session_id,
         "mode": mode,
         "cli": cli,
+        "origin_cli": origin_cli,
         "prompt": body.prompt[:2000],
         "username": username,
         "owner": owner,
@@ -395,6 +418,7 @@ async def create_agent_run(
         "events": [],
         "result": None,
         "cancel_requested": False,
+        "handoff_count": 0,
     })
 
     asyncio.create_task(
@@ -419,6 +443,7 @@ async def create_agent_run(
         "status": "queued",
         "mode": mode,
         "cli": cli,
+        "origin_cli": origin_cli,
         "role": loop_role,
         "owner": owner,
     }
@@ -547,6 +572,67 @@ async def cancel_agent_run(run_id: str, user: Dict = Depends(_verify_proxy_auth)
     return {"object": "agent.run", "run_id": run_id, "status": "cancelling"}
 
 
+@router.post("/agents/{run_id}/handoff")
+async def handoff_agent_run(
+    run_id: str,
+    body: AgentHandoffBody,
+    user: Dict = Depends(_verify_proxy_auth),
+):
+    """
+    Hand a partner run envelope to the peer CLI via the shared Redis task bus.
+    Reuses run ownership; max 2 handoff/review round-trips (bus loop guard).
+    """
+    run = await _get_run(run_id)
+    if not run:
+        raise HTTPException(404, "Agent run not found")
+    _assert_run_access(run, user)
+    target = (body.target_cli or "").lower()
+    if target not in ("mac", "cloud"):
+        raise HTTPException(400, "target_cli must be mac or cloud")
+    origin = (run.get("origin_cli") or run.get("cli") or "cloud").lower()
+    if target == origin:
+        raise HTTPException(400, "target_cli must differ from origin_cli")
+    handoffs = int(run.get("handoff_count") or 0)
+    if handoffs >= 2:
+        raise HTTPException(429, "Handoff budget exhausted (max 2 round-trips)")
+
+    bus_result: Dict[str, Any] = {"status": "skipped"}
+    if body.enqueue_review:
+        try:
+            from app.websocket.cli_task_bus import enqueue_review
+
+            bus_result = await asyncio.to_thread(
+                enqueue_review,
+                origin=origin,
+                files=body.files or [],
+                run_id=run_id,
+                plan_id=run.get("plan_id") or "",
+                notes=body.notes or f"handoff {origin}→{target}",
+            )
+        except Exception as e:
+            raise HTTPException(500, f"Task bus handoff failed: {e}") from e
+
+    await _update_run(
+        run_id,
+        handoff_count=handoffs + 1,
+        last_handoff={
+            "target_cli": target,
+            "notes": (body.notes or "")[:1000],
+            "bus": bus_result,
+            "at": time.time(),
+        },
+    )
+    return {
+        "object": "agent.handoff",
+        "run_id": run_id,
+        "origin_cli": origin,
+        "target_cli": target,
+        "handoff_count": handoffs + 1,
+        "max_handoffs": 2,
+        "bus": bus_result,
+    }
+
+
 @router.post("/agents/{run_id}/promote")
 async def promote_agent_run(
     run_id: str,
@@ -607,13 +693,33 @@ async def promote_agent_run(
         result = await asyncio.to_thread(_sandbox_promote_sync, plan_id, body.paths)
     except Exception as e:
         raise HTTPException(500, f"Promote failed: {e}") from e
-    await _update_run(run_id, promoted=True, promote_result=result)
+    # Cross-CLI review: enqueue after successful promote
+    review_bus: Dict[str, Any] = {}
+    try:
+        from app.websocket.cli_task_bus import enqueue_review
+
+        origin = (run.get("origin_cli") or run.get("cli") or "cloud").lower()
+        paths = body.paths or (result or {}).get("promoted_paths") or []
+        review_bus = await asyncio.to_thread(
+            enqueue_review,
+            origin=origin if origin in ("mac", "cloud") else "cloud",
+            files=list(paths) if isinstance(paths, list) else [],
+            run_id=run_id,
+            plan_id=plan_id,
+            notes="auto review after sandbox_promote",
+        )
+    except Exception as e:
+        review_bus = {"status": "error", "error": str(e)[:200]}
+    await _update_run(
+        run_id, promoted=True, promote_result=result, review_enqueued=review_bus,
+    )
     return {
         "object": "agent.promote",
         "run_id": run_id,
         "plan_id": plan_id,
         "mode": "live",
         "apply_live": True,
+        "review_bus": review_bus,
         "git_warning": (
             "Live tree mutated on this node — commit/push from BLUE and sync "
             "before the next deploy or git pull will overwrite."

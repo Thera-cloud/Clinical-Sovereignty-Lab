@@ -204,6 +204,10 @@ services:
       - DEBUG=false
       - MAC_AGENT_URL=https://twin-agent.sovereignsanctuary.net
       - MAC_AGENT_TOKEN=${MAC_AGENT_TOKEN:-}
+      # QUANTUM-CRYSTAL-ARCH — CLI neuro-symbolic + Mac↔Cloud task bus (Agents API / partner runs)
+      - ENABLE_ASK_NATE_SYMBOLIC=${ENABLE_ASK_NATE_SYMBOLIC:-true}
+      - ENABLE_FORWARD_REASONING=${ENABLE_FORWARD_REASONING:-true}
+      - CLI_TASK_BUS_ENABLED=${CLI_TASK_BUS_ENABLED:-true}
       # QUANTUM-CRYSTAL-ARCH: must stay 1 — each uvicorn worker runs the full lifespan,
       # so >1 duplicates every background agent/auditor (duplicate audits, login collisions)
       - WEB_CONCURRENCY=1
@@ -331,6 +335,10 @@ services:
       - NATE_CHAT_URL=${NATE_CHAT_URL:-}
       - NATE_CHAT_KEY=${NATE_CHAT_KEY:-}
       - NATE_CHAT_MODEL=${NATE_CHAT_MODEL:-grok-4-1-fast-non-reasoning}
+      # QUANTUM-CRYSTAL-ARCH — CLI neuro-symbolic + Mac↔Cloud shared task bus (bridge CLI path)
+      - ENABLE_ASK_NATE_SYMBOLIC=${ENABLE_ASK_NATE_SYMBOLIC:-true}
+      - ENABLE_FORWARD_REASONING=${ENABLE_FORWARD_REASONING:-true}
+      - CLI_TASK_BUS_ENABLED=${CLI_TASK_BUS_ENABLED:-true}
       # QUANTUM-CRYSTAL-ARCH — SI/violence coach alert default on (opt-out with =false)
       - ENABLE_UNIVERSAL_SI_COACH_ALERT=${ENABLE_UNIVERSAL_SI_COACH_ALERT:-true}
       - SI_COACH_ALERT_DEDUP_HOURS=${SI_COACH_ALERT_DEDUP_HOURS:-24}
