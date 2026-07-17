@@ -2720,6 +2720,17 @@ async def lifespan(app: FastAPI):
     except Exception as aer_err:
         print(f"   ⚠️  AccountEventReconciler init failed: {aer_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — CLI Mac↔Cloud task bus autonomous consumer
+    _cli_task_bus_consumer = None
+    try:
+        from app.services.cli_task_bus_consumer import CliTaskBusConsumer
+        _cli_task_bus_consumer = CliTaskBusConsumer(app_state=app.state)
+        await _cli_task_bus_consumer.start()
+        app.state.cli_task_bus_consumer = _cli_task_bus_consumer
+        print("   ✅ CliTaskBusConsumer started (task bus review loop)")
+    except Exception as _ctbc_err:
+        print(f"   ⚠️  CliTaskBusConsumer init failed: {_ctbc_err}")
+
     # ── Nate Check-In Agent — 72h inactivity outreach for clients + coaches ──
     _nate_checkin_agent = None
     try:
@@ -3174,6 +3185,7 @@ async def lifespan(app: FastAPI):
         ("gkm_auditor", _gkm_auditor is not None),
         ("token_usage_agent", _token_usage_agent is not None),
         ("account_event_reconciler", _account_event_reconciler is not None),
+        ("cli_task_bus_consumer", _cli_task_bus_consumer is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", _nate_checkin_agent is not None),
         ("nate_commitment_agent", _nate_commitment_agent is not None),
         ("nate_self_monitor_agent", _nate_self_monitor_agent is not None),
@@ -3276,6 +3288,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ AccountEventReconciler stopped")
         except Exception as _aer_stop:
             print(f"   ⚠️  AccountEventReconciler shutdown: {_aer_stop}")
+    _cli_task_bus_consumer_h = getattr(app.state, "cli_task_bus_consumer", None)  # QUANTUM-CRYSTAL-ARCH
+    if _cli_task_bus_consumer_h:
+        try:
+            await _cli_task_bus_consumer_h.stop()
+            print("   ✅ CliTaskBusConsumer stopped")
+        except Exception as _ctbc_stop:
+            print(f"   ⚠️  CliTaskBusConsumer shutdown: {_ctbc_stop}")
     if _sse_orchestrator:
         try:
             await _sse_orchestrator.stop()

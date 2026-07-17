@@ -18,6 +18,8 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 FACT_TTL_S = int(os.getenv("CLI_SYMBOL_TTL", "86400"))
+GLOBAL_SYMBOL_KEY = "global"
+_SHARE_KINDS = frozenset({"path_hash", "test_status", "flag_value", "premise"})
 
 
 def cli_symbolic_enabled() -> bool:
@@ -60,7 +62,7 @@ def _redis():
         return None
 
 
-def load_facts(session_key: str) -> List[Dict[str, Any]]:
+def _load_raw(session_key: str) -> List[Dict[str, Any]]:
     c = _redis()
     if not c or not session_key:
         return []
@@ -75,32 +77,36 @@ def load_facts(session_key: str) -> List[Dict[str, Any]]:
         return []
 
 
+def _merge_facts(base: List[Dict[str, Any]], overlay: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Overlay wins on (kind, key)."""
+    by_id: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for f in base + overlay:
+        k = (str(f.get("kind") or ""), str(f.get("key") or ""))
+        by_id[k] = f
+    return list(by_id.values())
+
+
+def load_facts(session_key: str) -> List[Dict[str, Any]]:
+    """Session facts merged with shared global namespace (Mac↔Cloud)."""
+    if not session_key:
+        return _load_raw(GLOBAL_SYMBOL_KEY)
+    if session_key == GLOBAL_SYMBOL_KEY:
+        return _load_raw(GLOBAL_SYMBOL_KEY)
+    return _merge_facts(_load_raw(GLOBAL_SYMBOL_KEY), _load_raw(session_key))
+
+
 def save_facts(session_key: str, facts: List[Dict[str, Any]]) -> None:
     c = _redis()
     if not c or not session_key:
         return
     try:
-        # Cap store size
         trimmed = facts[-200:]
         c.setex(symbols_key(session_key), FACT_TTL_S, json.dumps(trimmed, default=str))
     except Exception as e:
         logger.debug("cli_symbol_store save: %s", e)
 
 
-def assert_fact(
-    session_key: str,
-    *,
-    kind: str,
-    key: str,
-    value: Any,
-    source: str = "",
-) -> Dict[str, Any]:
-    """Upsert a typed fact. kind ∈ {path_hash, test_status, flag_value, tool_result, premise}."""
-    if not cli_symbolic_enabled():
-        return {"status": "skipped", "reason": "ENABLE_ASK_NATE_SYMBOLIC off"}
-    facts = load_facts(session_key)
-    key_n = (key or "").strip()
-    kind_n = (kind or "premise").strip()
+def _upsert_into(facts: List[Dict[str, Any]], kind_n: str, key_n: str, value: Any, source: str) -> List[Dict[str, Any]]:
     replaced = False
     for f in facts:
         if f.get("kind") == kind_n and f.get("key") == key_n:
@@ -118,7 +124,33 @@ def assert_fact(
             "created_at": time.time(),
             "updated_at": time.time(),
         })
-    save_facts(session_key, facts)
+    return facts
+
+
+def assert_fact(
+    session_key: str,
+    *,
+    kind: str,
+    key: str,
+    value: Any,
+    source: str = "",
+    share_global: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Upsert a typed fact. kind ∈ {path_hash, test_status, flag_value, tool_result, premise}."""
+    if not cli_symbolic_enabled():
+        return {"status": "skipped", "reason": "ENABLE_ASK_NATE_SYMBOLIC off"}
+    key_n = (key or "").strip()
+    kind_n = (kind or "premise").strip()
+    # Persist session-local (tool_result stays session-only to avoid noise)
+    if session_key and session_key != GLOBAL_SYMBOL_KEY:
+        sess = _load_raw(session_key)
+        sess = _upsert_into(sess, kind_n, key_n, value, source)
+        save_facts(session_key, sess)
+    do_share = share_global if share_global is not None else (kind_n in _SHARE_KINDS)
+    if do_share:
+        glob = _load_raw(GLOBAL_SYMBOL_KEY)
+        glob = _upsert_into(glob, kind_n, key_n, value, source)
+        save_facts(GLOBAL_SYMBOL_KEY, glob)
     return {"status": "ok", "kind": kind_n, "key": key_n, "value": value}
 
 
@@ -135,6 +167,56 @@ def format_symbols_block(session_key: str, extra: Optional[List[Any]] = None) ->
         "[CLI SYMBOLIC LAYER — typed facts; do not contradict these]\n"
         + json.dumps(facts[:40], default=str)[:3000]
     )
+
+
+def _hash_file_bytes(path: str) -> Optional[str]:
+    """SHA-256 of on-disk file bytes (not truncated tool excerpt)."""
+    if not path or ".." in path.replace("\\", "/").split("/"):
+        return None
+    candidates: List[str] = []
+    try:
+        from app.websocket.cli_tools import _get_project_root
+
+        root = _get_project_root()
+        candidates.append(os.path.join(root, path.lstrip("/")))
+    except Exception:
+        pass
+    candidates.append(path)
+    for full in candidates:
+        try:
+            if os.path.isfile(full):
+                with open(full, "rb") as fh:
+                    return hashlib.sha256(fh.read()).hexdigest()[:16]
+        except Exception:
+            continue
+    return None
+
+
+def _parse_pytest_status(content: str, status: str) -> str:
+    """Parse pytest summary lines; prefer exit/summary over naive substring."""
+    low = (content or "").lower()
+    # Explicit summary: "N failed" / "N passed"
+    failed_m = re.search(r"(\d+)\s+failed", low)
+    passed_m = re.search(r"(\d+)\s+passed", low)
+    error_m = re.search(r"(\d+)\s+error", low)
+    if failed_m and int(failed_m.group(1)) > 0:
+        return "fail"
+    if error_m and int(error_m.group(1)) > 0:
+        return "fail"
+    if "=== " in low and "failed" in low and "passed" not in low[: low.find("failed") + 20]:
+        # "=== FAILURES ===" section
+        if "failures" in low or "failed" in low:
+            if passed_m and not failed_m:
+                return "pass" if status == "ok" else "fail"
+            if failed_m or "failed" in low:
+                return "fail"
+    if passed_m and (not failed_m or int(failed_m.group(1)) == 0):
+        return "pass" if status == "ok" else "fail"
+    if status != "ok":
+        return "fail"
+    if "passed" in low and "failed" not in low[:800]:
+        return "pass"
+    return "fail" if "failed" in low[:800] else "pass"
 
 
 def auto_assert_from_tool(
@@ -166,17 +248,22 @@ def auto_assert_from_tool(
         or ""
     )
     if path and tool_name in ("read_file", "write_file", "str_replace", "delete_file"):
-        h = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:16]
+        h = _hash_file_bytes(str(path))
+        if not h:
+            h = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:16]
         assert_fact(
             session_key, kind="path_hash", key=str(path), value=h, source=tool_name,
         )
-    if tool_name in ("shell",) and ("pytest" in content.lower() or "passed" in content.lower()):
-        passed = "failed" not in content.lower()[:500] or "passed" in content.lower()
+    if tool_name in ("shell",) and (
+        "pytest" in content.lower()
+        or "passed" in content.lower()
+        or "failed" in content.lower()
+    ):
         assert_fact(
             session_key,
             kind="test_status",
             key="last_pytest",
-            value="pass" if passed and status == "ok" else "fail",
+            value=_parse_pytest_status(content, status),
             source="shell",
         )
     if tool_name == "self_capabilities" and content:
@@ -187,6 +274,8 @@ def auto_assert_from_tool(
             "mac_cloud_ln_fab_partnership",
             "wired_into_cli_loop",
             "shared_task_bus",
+            "cross_cli_review_loop",
+            "autonomous_consumer",
         ):
             m = re.search(rf'"{flag}"\s*:\s*(true|false)', content, re.I)
             if m:
@@ -352,27 +441,41 @@ def forward_reason(
             })
 
     derived: List[Dict[str, Any]] = []
-    # Deterministic derivations only
+    # Deterministic Horn-style implications over typed premises only
     flag_vals = {
         p["key"]: p["value"]
         for p in premises
         if p.get("type") == "stored_fact" and p.get("kind") == "flag_value"
     }
-    if flag_vals.get("shared_task_bus") and flag_vals.get("cross_cli_review_loop"):
+    path_hashes = {
+        p["key"]: p["value"]
+        for p in premises
+        if p.get("type") == "stored_fact" and p.get("kind") == "path_hash"
+    }
+    bus = flag_vals.get("shared_task_bus")
+    review = flag_vals.get("cross_cli_review_loop")
+    consumer = flag_vals.get("autonomous_consumer")
+    if bus is True and review is True and consumer is True:
+        derived.append({
+            "assertion": "mac_cloud_ln_fab_partnership_active",
+            "from": ["shared_task_bus", "cross_cli_review_loop", "autonomous_consumer"],
+            "rule": "bus ∧ review ∧ consumer → partnership",
+            "instruction": "Partnership may be stated as active [VERIFIED self_capabilities].",
+        })
+    elif bus is True and review is True:
         derived.append({
             "assertion": "mac_cloud_ln_fab_partnership_eligible",
             "from": ["shared_task_bus", "cross_cli_review_loop"],
-            "instruction": "Partnership may be stated as active only if both bus probes are true.",
+            "rule": "bus ∧ review → eligible (consumer still required for active)",
+            "instruction": "Eligible but not fully active until autonomous_consumer probes true.",
         })
-    elif "shared_task_bus" in flag_vals or any(
-        p.get("key") == "shared_task_bus" for p in premises if p.get("type") == "stored_fact"
-    ):
-        if flag_vals.get("shared_task_bus") is False:
-            derived.append({
-                "assertion": "no_partnership",
-                "from": ["shared_task_bus=false"],
-                "instruction": "Label Mac↔Cloud partnership [NOT IMPLEMENTED].",
-            })
+    elif bus is False:
+        derived.append({
+            "assertion": "no_partnership",
+            "from": ["shared_task_bus=false"],
+            "rule": "¬bus → ¬partnership",
+            "instruction": "Label Mac↔Cloud partnership [NOT IMPLEMENTED].",
+        })
 
     test_fail = any(
         p.get("kind") == "test_status" and p.get("value") == "fail"
@@ -382,13 +485,26 @@ def forward_reason(
         derived.append({
             "assertion": "tests_not_green",
             "from": ["last_pytest=fail"],
+            "rule": "last_pytest=fail → ¬completion",
             "instruction": "Do not claim completion; keep retry-until-green.",
+        })
+
+    if path_hashes:
+        derived.append({
+            "assertion": "path_hash_premises",
+            "from": list(path_hashes.keys())[:8],
+            "rule": "∀path∈store: claim(path content) requires matching path_hash premise",
+            "instruction": (
+                f"File identity locked for {len(path_hashes)} path(s); "
+                "re-read before claiming content changed."
+            ),
         })
 
     if goal:
         derived.append({
             "assertion": "goal_scoped",
             "from": ["user_goal"],
+            "rule": "goal ⊨ derived claims",
             "instruction": f"Only derive claims that support: {goal[:200]}",
         })
 

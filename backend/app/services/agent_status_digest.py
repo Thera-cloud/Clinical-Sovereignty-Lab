@@ -179,6 +179,7 @@ class AgentStatusDigest:
         for name, attr in [
             ("Insight Accumulator", "insight_accumulator"),
             ("Web Content Reader", "web_content_reader"),
+            ("CLI Task Bus Consumer", "cli_task_bus_consumer"),  # QUANTUM-CRYSTAL-ARCH
         ]:
             agent = getattr(self.app, attr, None)
             status, detail = self._check_agent(agent, name)

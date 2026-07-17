@@ -3043,7 +3043,31 @@ async def _execute_ln_tool(
             ask_user_fn=_ask_user_bridge if send_to_extension else None,
             build_manager=build_manager,
         )
-        return _normalize_ln_tool_result(raw)
+        normalized = _normalize_ln_tool_result(raw)
+        # QUANTUM-CRYSTAL-ARCH — Mac git_commit enqueues peer review on task bus
+        if (
+            name == "git_commit"
+            and isinstance(normalized, dict)
+            and normalized.get("status") == "ok"
+        ):
+            try:
+                from app.websocket.cli_task_bus import enqueue_review, task_bus_enabled
+
+                if task_bus_enabled():
+                    files = args.get("files") or args.get("paths") or []
+                    if isinstance(files, str):
+                        files = [files]
+                    review = await asyncio.to_thread(
+                        enqueue_review,
+                        origin="mac",
+                        files=list(files)[:40],
+                        notes="auto review after Mac git_commit",
+                    )
+                    normalized = dict(normalized)
+                    normalized["task_bus_review"] = review
+            except Exception as _git_enq:
+                logger.debug("git_commit enqueue_review skipped: %s", _git_enq)
+        return normalized
 
     if name == "ssh_deploy":
         raw = await handle_ssh_deploy(
@@ -3231,7 +3255,25 @@ async def execute_tool(
         pid = args.get("plan_id") or plan_id
         if name == "sandbox_diff":
             return await asyncio.to_thread(_sandbox_diff_sync, pid, args.get("max_files", 40))
-        return await asyncio.to_thread(_sandbox_promote_sync, pid, args.get("paths"))
+        promo = await asyncio.to_thread(_sandbox_promote_sync, pid, args.get("paths"))
+        # QUANTUM-CRYSTAL-ARCH — WS sandbox_promote enqueues cross-CLI review
+        if isinstance(promo, dict) and promo.get("status") == "ok":
+            try:
+                from app.websocket.cli_task_bus import enqueue_review, task_bus_enabled
+
+                if task_bus_enabled():
+                    review = await asyncio.to_thread(
+                        enqueue_review,
+                        origin="cloud",
+                        files=list(promo.get("promoted") or [])[:40],
+                        plan_id=str(pid or ""),
+                        notes="auto review after WS sandbox_promote",
+                    )
+                    promo = dict(promo)
+                    promo["task_bus_review"] = review
+            except Exception as _enq_err:
+                logger.debug("sandbox_promote enqueue_review skipped: %s", _enq_err)
+        return promo
 
     if name in _WRITE_TOOLS:
         if cli_type != "mac" and not _cloud_sandbox_active(cli_type, mode):

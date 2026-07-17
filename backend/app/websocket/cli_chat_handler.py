@@ -203,10 +203,26 @@ def _build_system_prompt(mode: str, cli_type: str) -> str:
             "Do not invent capabilities. Label design ideas as [DESIGN PROPOSAL]."
         )
 
+    bus_block = ""
+    if mode in ("ln_fab", "debug"):
+        try:
+            from app.websocket.cli_task_bus import task_bus_enabled
+
+            if task_bus_enabled():
+                bus_block = (
+                    "\nMAC↔CLOUD TASK BUS (CLI_TASK_BUS_ENABLED): "
+                    "Use task_bus_publish after significant work; task_bus_claim to pick peer reviews; "
+                    "task_bus_review to post findings. sandbox_promote / git_commit auto-enqueue a "
+                    "cross-CLI review when the bus is on. An autonomous consumer reviews peer tasks.\n"
+                )
+        except Exception:
+            bus_block = ""
+
     return (
         f"You are Little Nate, operating as {cli_label} in {mode.upper()} mode.\n\n"
         f"{mode_instructions}\n\n"
-        f"{grounding_block}\n\n"
+        f"{grounding_block}\n"
+        f"{bus_block}\n"
         f"CODEBASE CONTEXT:\n{manifest}\n\n"
         f"{rules}\n\n"
         "TOOL USE: Call tools by using the function calling interface. "
@@ -575,11 +591,14 @@ async def run_agentic_loop(
     max_tokens = _MAX_COMPLETION_TOKENS.get(mode, 6144)
     trunc_limit = get_truncation_limit(mode, cli_type)
     fix_attempts = 0
+    grounding_regen = 0
+    _CLI_MAX_GROUNDING_REGEN = int(os.getenv("CLI_MAX_GROUNDING_REGEN", "1"))
     # Per-path set so a pass on file B cannot clear an unresolved fail on file A
     pending_failed_paths: set = set()
     subagents_spawned = 0
     turn = 0
     final_text = ""
+    redis_lock_owner = f"{cli_type}:{sess_key[:48]}"
 
     async def _cancelled() -> bool:
         if not cancel_check:
@@ -687,6 +706,31 @@ async def run_agentic_loop(
                 lock = await _path_lock(write_path) if tool_name in _WRITE_TOOLS and write_path else None
 
                 async def _execute_and_verify() -> Dict[str, Any]:
+                    redis_paths: List[str] = []
+                    # QUANTUM-CRYSTAL-ARCH — unify asyncio + Redis SETNX path locks
+                    if tool_name in _WRITE_TOOLS and write_path:
+                        try:
+                            from app.websocket.cli_task_bus import (
+                                claim_paths,
+                                release_paths,
+                                task_bus_enabled,
+                            )
+
+                            if task_bus_enabled():
+                                redis_paths = [write_path]
+                                lock_res = await asyncio.to_thread(
+                                    claim_paths, redis_paths, redis_lock_owner,
+                                )
+                                if not lock_res.get("ok"):
+                                    return {
+                                        "status": "error",
+                                        "error": "path_lock_conflict",
+                                        "error_code": "path_lock_conflict",
+                                        "blocked": lock_res.get("blocked") or redis_paths,
+                                    }
+                        except Exception as _pl_err:
+                            logger.debug("redis path lock skipped: %s", _pl_err)
+                            redis_paths = []
                     try:
                         res = await execute_tool(
                             tool_name, tool_args,
@@ -701,7 +745,17 @@ async def run_agentic_loop(
                             tool_call_log=tool_call_log,
                         )
                     except Exception as te:
-                        return {"status": "error", "error": str(te)}
+                        res = {"status": "error", "error": str(te)}
+                    finally:
+                        if redis_paths:
+                            try:
+                                from app.websocket.cli_task_bus import release_paths
+
+                                await asyncio.to_thread(
+                                    release_paths, redis_paths, redis_lock_owner,
+                                )
+                            except Exception:
+                                pass
 
                     if (
                         tool_name not in _WRITE_TOOLS
@@ -917,10 +971,37 @@ async def run_agentic_loop(
             try:
                 from app.websocket.cli_grounding import apply_grounding_to_done
                 final_text, grounding_meta = apply_grounding_to_done(
-                    final_text, tool_call_log, user_message,
+                    final_text, tool_call_log, user_message, session_key=sess_key,
                 )
             except Exception as ge:
                 logger.debug("CLI grounding validate skipped: %s", ge)
+            # QUANTUM-CRYSTAL-ARCH — enforce symbolic_verify via one regen turn
+            if (
+                grounding_meta.get("needs_regen")
+                and grounding_regen < _CLI_MAX_GROUNDING_REGEN
+                and mode in ("ln_fab", "debug", "ask")
+            ):
+                grounding_regen += 1
+                viol_txt = "; ".join(
+                    str(v.get("detail") or v.get("type") or v)
+                    for v in (grounding_meta.get("violations") or [])[:6]
+                )
+                conversation.append({"role": "assistant", "content": final_text or ""})
+                conversation.append({
+                    "role": "user",
+                    "content": (
+                        f"[GROUNDING REGEN {grounding_regen}/{_CLI_MAX_GROUNDING_REGEN}] "
+                        f"Server symbolic/grounding check failed: {viol_txt}. "
+                        "Call self_capabilities and/or symbolic_verify, correct contradictions, "
+                        "and reply again without false capability claims."
+                    ),
+                })
+                await _emit(emit, {
+                    "type": "nate_cli_chat_status",
+                    "status": "thinking",
+                    "detail": f"Grounding regen {grounding_regen}/{_CLI_MAX_GROUNDING_REGEN}",
+                })
+                continue
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         if not is_subagent:
             _persist_session(sk, conversation, user_message, final_text)
@@ -965,7 +1046,7 @@ async def run_agentic_loop(
         try:
             from app.websocket.cli_grounding import apply_grounding_to_done
             final_text, grounding_meta = apply_grounding_to_done(
-                final_text, tool_call_log, user_message,
+                final_text, tool_call_log, user_message, session_key=sess_key,
             )
         except Exception as ge:
             logger.debug("CLI grounding validate skipped: %s", ge)

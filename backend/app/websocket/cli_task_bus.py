@@ -73,47 +73,62 @@ def _redis():
         return None
 
 
-def ensure_bus_meta(client=None) -> bool:
-    """Create meta marker so live probes can see the bus. Returns True if ready."""
+def _consumer_flag_on() -> bool:
+    return os.getenv("CLI_TASK_BUS_CONSUMER_ENABLED", "true").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def ensure_bus_meta(client=None, *, consumer_active: bool = False) -> bool:
+    """Create meta marker after real bus activity. Returns True if ready."""
     if not task_bus_enabled():
         return False
     c = client or _redis()
     if not c:
         return False
     try:
+        features = ["shared_task_bus", "cross_cli_review"]
+        if consumer_active or _consumer_flag_on():
+            features.append("autonomous_consumer")
         meta = {
-            "features": ["shared_task_bus", "cross_cli_review"],
+            "features": features,
             "max_review_rounds": MAX_REVIEW_ROUNDS,
             "updated_at": time.time(),
         }
         c.setex(bus_meta_key(), TASK_TTL_S, json.dumps(meta))
-        # Ensure list key exists (empty list still "exists" after LPUSH+LPOP of sentinel — use SET marker too)
         if not c.exists(bus_list_key()):
             c.rpush(bus_list_key(), "__init__")
             c.lrem(bus_list_key(), 1, "__init__")
-            # Redis list may not exist after LREM emptied it — keep a dedicated exists key
-            c.setex(f"{bus_list_key()}:ready", TASK_TTL_S, "1")
-        else:
-            c.setex(f"{bus_list_key()}:ready", TASK_TTL_S, "1")
+        c.setex(f"{bus_list_key()}:ready", TASK_TTL_S, "1")
         return True
     except Exception as e:
         logger.debug("cli_task_bus ensure_meta: %s", e)
         return False
 
 
+def beat_consumer(client=None) -> bool:
+    """Heartbeat proving the autonomous consumer process is alive."""
+    c = client or _redis()
+    if not c:
+        return False
+    try:
+        c.setex(f"{bus_list_key()}:consumer_beat", 120, str(time.time()))
+        return True
+    except Exception:
+        return False
+
+
 def probe_shared_task_bus() -> bool:
-    """Live probe: meta/ready key present (never claim partnership without Redis proof)."""
+    """Live probe: meta/ready already present — never create keys just to pass."""
     if not task_bus_enabled():
         return False
     c = _redis()
     if not c:
         return False
     try:
-        ensure_bus_meta(c)
         return bool(
             c.exists(bus_meta_key())
             or c.exists(f"{bus_list_key()}:ready")
-            or c.exists(bus_list_key())
         )
     except Exception:
         return False
@@ -132,6 +147,25 @@ def probe_cross_cli_review_loop() -> bool:
         meta = json.loads(raw)
         feats = meta.get("features") or []
         return "cross_cli_review" in feats
+    except Exception:
+        return False
+
+
+def probe_autonomous_consumer() -> bool:
+    """True when consumer heartbeat is fresh OR meta advertises autonomous_consumer."""
+    if not task_bus_enabled() or not _consumer_flag_on():
+        return False
+    c = _redis()
+    if not c:
+        return False
+    try:
+        if c.exists(f"{bus_list_key()}:consumer_beat"):
+            return True
+        raw = c.get(bus_meta_key())
+        if not raw:
+            return False
+        meta = json.loads(raw)
+        return "autonomous_consumer" in (meta.get("features") or [])
     except Exception:
         return False
 
@@ -259,16 +293,20 @@ def _save_task(c, record: Dict[str, Any]) -> None:
 
 
 def claim_task(*, consumer: str, prefer_kind: str = "") -> Dict[str, Any]:
-    """Claim next task not originated by consumer (cross-CLI)."""
+    """Claim next task not originated by consumer (cross-CLI).
+
+    consumer='agent' may claim any review_pending/queued review (autonomous loop).
+    """
     if not task_bus_enabled():
         return {"status": "error", "error": "CLI_TASK_BUS_ENABLED is off"}
     c = _redis()
     if not c:
         return {"status": "error", "error": "redis_unavailable"}
     ensure_bus_meta(c)
-    consumer = consumer if consumer in ("mac", "cloud") else "cloud"
+    is_agent = consumer == "agent"
+    if not is_agent:
+        consumer = consumer if consumer in ("mac", "cloud") else "cloud"
     try:
-        # Scan up to N items without starving the queue
         n = int(c.llen(bus_list_key()) or 0)
         scanned = 0
         while scanned < min(n, 50):
@@ -279,8 +317,7 @@ def claim_task(*, consumer: str, prefer_kind: str = "") -> Dict[str, Any]:
             rec = _load_task(c, task_id)
             if not rec:
                 continue
-            if rec.get("origin") == consumer:
-                # Own task — put back for the other CLI
+            if not is_agent and rec.get("origin") == consumer:
                 c.rpush(bus_list_key(), task_id)
                 continue
             if prefer_kind and rec.get("kind") != prefer_kind:
@@ -288,8 +325,12 @@ def claim_task(*, consumer: str, prefer_kind: str = "") -> Dict[str, Any]:
                 continue
             if rec.get("status") not in ("queued", "review_pending"):
                 continue
+            # Agent prefers review_pending; still allows queued review kinds
+            if is_agent and prefer_kind == "review" and rec.get("kind") != "review":
+                c.rpush(bus_list_key(), task_id)
+                continue
             rec["status"] = "claimed"
-            rec["claimed_by"] = consumer
+            rec["claimed_by"] = "agent" if is_agent else consumer
             _save_task(c, rec)
             return {"status": "ok", "task": rec}
         return {"status": "ok", "task": None, "detail": "queue_empty"}

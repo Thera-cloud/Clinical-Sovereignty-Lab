@@ -1,4 +1,4 @@
-"""Offline tests: CLI task bus, symbolic_verify, live capability probes."""
+"""Offline tests: CLI task bus, symbolic_verify, live capability probes, consumer."""
 
 import json
 import os
@@ -8,6 +8,7 @@ import pytest
 # Force offline / feature-off defaults for isolation
 os.environ["REDIS_URL"] = ""
 os.environ["CLI_TASK_BUS_ENABLED"] = "false"
+os.environ["CLI_TASK_BUS_CONSUMER_ENABLED"] = "false"
 os.environ["ENABLE_ASK_NATE_SYMBOLIC"] = "false"
 os.environ["ENABLE_FORWARD_REASONING"] = "false"
 
@@ -78,6 +79,7 @@ class _FakeRedis:
 def fake_redis(monkeypatch):
     fr = _FakeRedis()
     os.environ["CLI_TASK_BUS_ENABLED"] = "true"
+    os.environ["CLI_TASK_BUS_CONSUMER_ENABLED"] = "true"
     os.environ["REDIS_URL"] = "redis://fake"
     monkeypatch.setattr(
         "app.websocket.cli_task_bus._redis",
@@ -85,7 +87,18 @@ def fake_redis(monkeypatch):
     )
     yield fr
     os.environ["CLI_TASK_BUS_ENABLED"] = "false"
+    os.environ["CLI_TASK_BUS_CONSUMER_ENABLED"] = "false"
     os.environ["REDIS_URL"] = ""
+
+
+def test_probe_honest_without_ensure(fake_redis):
+    """Probe must not create meta just to pass (gap 8)."""
+    from app.websocket.cli_task_bus import probe_shared_task_bus, publish_task
+
+    assert probe_shared_task_bus() is False
+    pub = publish_task(origin="cloud", files=["a.py"], kind="work")
+    assert pub["status"] == "ok"
+    assert probe_shared_task_bus() is True
 
 
 def test_bus_round_trip_publish_claim_review(fake_redis):
@@ -98,9 +111,6 @@ def test_bus_round_trip_publish_claim_review(fake_redis):
         publish_task,
     )
 
-    assert probe_shared_task_bus() is True
-    assert probe_cross_cli_review_loop() is True
-
     pub = publish_task(
         origin="cloud",
         files=["backend/app/websocket/cli_task_bus.py"],
@@ -108,12 +118,12 @@ def test_bus_round_trip_publish_claim_review(fake_redis):
         notes="unit test",
     )
     assert pub["status"] == "ok", pub
+    assert probe_shared_task_bus() is True
+    assert probe_cross_cli_review_loop() is True
     task_id = pub["task"]["task_id"]
 
-    # Same origin should not claim own work (re-queued)
     own = claim_task(consumer="cloud")
     assert own["status"] == "ok"
-    # Peer claims
     claimed = claim_task(consumer="mac")
     assert claimed["status"] == "ok"
     assert claimed["task"] is not None
@@ -133,6 +143,36 @@ def test_bus_round_trip_publish_claim_review(fake_redis):
     assert findings["status"] == "ok"
     assert findings["task"]["review_round"] == 1
     assert findings["task"]["status"] == "fix_pending"
+
+
+def test_agent_consumer_claims_any_review(fake_redis):
+    from app.websocket.cli_task_bus import claim_task, enqueue_review, post_findings
+
+    enq = enqueue_review(origin="mac", files=["x.py"], notes="peer review")
+    assert enq["status"] == "ok"
+    claimed = claim_task(consumer="agent", prefer_kind="review")
+    assert claimed["task"] is not None
+    assert claimed["task"]["claimed_by"] == "agent"
+    done = post_findings(
+        claimed["task"]["task_id"],
+        reviewer="cloud_agent",
+        findings=[{"detail": "lint clean", "severity": "info"}],
+        pass_review=True,
+    )
+    assert done["task"]["status"] == "review_done"
+
+
+def test_path_lock_setnx(fake_redis):
+    from app.websocket.cli_task_bus import claim_paths, release_paths
+
+    a = claim_paths(["foo.py"], "cloud:sess1")
+    assert a["ok"] is True
+    b = claim_paths(["foo.py"], "mac:sess2")
+    assert b["ok"] is False
+    assert "foo.py" in b["blocked"]
+    release_paths(["foo.py"], "cloud:sess1")
+    c = claim_paths(["foo.py"], "mac:sess2")
+    assert c["ok"] is True
 
 
 def test_symbolic_verify_rejects_fabricated_claim(monkeypatch):
@@ -156,6 +196,55 @@ def test_symbolic_verify_rejects_fabricated_claim(monkeypatch):
     assert out["ok"] is False
     assert any(v["type"] == "symbol_contradiction" for v in out["violations"])
     os.environ["ENABLE_ASK_NATE_SYMBOLIC"] = "false"
+
+
+def test_apply_grounding_enforces_symbolic(monkeypatch):
+    os.environ["ENABLE_ASK_NATE_SYMBOLIC"] = "true"
+    from app.websocket import cli_grounding as g
+    from app.websocket import cli_symbol_store as store
+
+    monkeypatch.setattr(
+        store,
+        "symbolic_verify",
+        lambda draft, sk, tool_call_log=None: {
+            "ok": False,
+            "violations": [{"type": "symbol_contradiction", "detail": "flag false"}],
+            "fact_count": 1,
+        },
+    )
+    text, meta = g.apply_grounding_to_done(
+        "mac_cloud_ln_fab_partnership true and active",
+        [],
+        "what can you do?",
+        session_key="sess-x",
+    )
+    assert meta["ok"] is False
+    assert meta["symbolic_checked"] is True
+    assert meta["needs_regen"] is True
+    assert text.startswith(g.UNVERIFIED_TAG)
+    os.environ["ENABLE_ASK_NATE_SYMBOLIC"] = "false"
+
+
+def test_shared_global_facts(fake_redis, monkeypatch):
+    os.environ["ENABLE_ASK_NATE_SYMBOLIC"] = "true"
+    monkeypatch.setattr(
+        "app.websocket.cli_symbol_store._redis",
+        lambda: fake_redis,
+    )
+    from app.websocket.cli_symbol_store import assert_fact, load_facts
+
+    assert_fact("mac:sess", kind="path_hash", key="a.py", value="abc123", source="test")
+    facts = load_facts("cloud:other")
+    assert any(f.get("kind") == "path_hash" and f.get("key") == "a.py" for f in facts)
+    os.environ["ENABLE_ASK_NATE_SYMBOLIC"] = "false"
+
+
+def test_pytest_status_parser():
+    from app.websocket.cli_symbol_store import _parse_pytest_status
+
+    assert _parse_pytest_status("===== 12 passed in 1.2s =====", "ok") == "pass"
+    assert _parse_pytest_status("===== 2 failed, 10 passed =====", "ok") == "fail"
+    assert _parse_pytest_status("1 error in 0.1s", "ok") == "fail"
 
 
 def test_cross_review_produces_finding(fake_redis):
@@ -191,10 +280,10 @@ def test_manifest_probes_true_with_bus_and_flag(fake_redis, monkeypatch):
     os.environ["ENABLE_ASK_NATE_SYMBOLIC"] = "true"
     os.environ["ENABLE_FORWARD_REASONING"] = "true"
     from app.websocket.cli_grounding import build_capabilities_manifest
-    from app.websocket.cli_task_bus import ensure_bus_meta
+    from app.websocket.cli_task_bus import beat_consumer, ensure_bus_meta
 
-    ensure_bus_meta(fake_redis)
-    # Force tool list to include symbolic_verify
+    ensure_bus_meta(fake_redis, consumer_active=True)
+    beat_consumer(fake_redis)
     m = build_capabilities_manifest(
         "ln_fab",
         "cloud",
@@ -203,6 +292,7 @@ def test_manifest_probes_true_with_bus_and_flag(fake_redis, monkeypatch):
     assert m["clinical_neuro_symbolic"]["wired_into_cli_loop"] is True
     assert m["mac_vs_cloud"]["shared_task_bus"] is True
     assert m["mac_vs_cloud"]["cross_cli_review_loop"] is True
+    assert m["mac_vs_cloud"]["autonomous_consumer"] is True
     assert m["mac_vs_cloud"]["mac_cloud_ln_fab_partnership"] is True
     assert "CLI neuro-symbolic fact store" in " ".join(m["implemented"])
     assert "Mac↔Cloud dual LN-FAB partnership / shared backlog" not in m["not_implemented"]
@@ -223,6 +313,25 @@ def test_symbolic_verify_tool_registered_when_flag_on():
     os.environ["ENABLE_ASK_NATE_SYMBOLIC"] = "false"
 
 
+def test_consumer_module_declared_in_source():
+    """Avoid importing app.services (heavy numpy path); assert consumer surface in source."""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "app"
+        / "services"
+        / "cli_task_bus_consumer.py"
+    ).read_text()
+    assert "class CliTaskBusConsumer" in src
+    assert "claim_task" in src
+    assert "post_findings" in src
+    assert "consumer=\"agent\"" in src or "consumer='agent'" in src
+    main_src = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text()
+    assert "cli_task_bus_consumer" in main_src
+    assert "CliTaskBusConsumer" in main_src
+
+
 def test_handoff_endpoint_declared_in_agents_api_source():
     """Avoid importing agents_api (heavy deps); assert handoff surface in source."""
     from pathlib import Path
@@ -232,3 +341,25 @@ def test_handoff_endpoint_declared_in_agents_api_source():
     assert '/agents/{run_id}/handoff' in src
     assert "class AgentHandoffBody" in src
     assert '"agent_run_handoff": True' in src
+
+
+def test_forward_reason_horn_rules(monkeypatch):
+    os.environ["ENABLE_ASK_NATE_SYMBOLIC"] = "true"
+    os.environ["ENABLE_FORWARD_REASONING"] = "true"
+    from app.websocket import cli_symbol_store as store
+
+    facts = [
+        {"kind": "flag_value", "key": "shared_task_bus", "value": True},
+        {"kind": "flag_value", "key": "cross_cli_review_loop", "value": True},
+        {"kind": "flag_value", "key": "autonomous_consumer", "value": True},
+        {"kind": "path_hash", "key": "a.py", "value": "deadbeef"},
+    ]
+    monkeypatch.setattr(store, "load_facts", lambda sk: facts)
+    monkeypatch.setattr(store, "assert_fact", lambda *a, **k: {"status": "ok"})
+    out = store.forward_reason("sess", goal="verify partnership")
+    assert out["status"] == "ok"
+    assertions = {d["assertion"] for d in out["derived"]}
+    assert "mac_cloud_ln_fab_partnership_active" in assertions
+    assert "path_hash_premises" in assertions
+    os.environ["ENABLE_ASK_NATE_SYMBOLIC"] = "false"
+    os.environ["ENABLE_FORWARD_REASONING"] = "false"

@@ -232,16 +232,19 @@ def build_capabilities_manifest(
     # Live Redis probes — never claim partnership from constants alone
     try:
         from app.websocket.cli_task_bus import (
+            probe_autonomous_consumer,
             probe_cross_cli_review_loop,
             probe_shared_task_bus,
         )
 
         _bus = probe_shared_task_bus()
         _review = probe_cross_cli_review_loop()
+        _consumer = probe_autonomous_consumer()
     except Exception:
         _bus = False
         _review = False
-    _partnership = bool(_bus and _review)
+        _consumer = False
+    _partnership = bool(_bus and _review and _consumer)
     mac_cloud = {
         "same_agentic_loop": True,
         "cli_type": cli_type,
@@ -251,13 +254,14 @@ def build_capabilities_manifest(
         "mac_cloud_ln_fab_partnership": _partnership,
         "shared_task_bus": _bus,
         "cross_cli_review_loop": _review,
+        "autonomous_consumer": _consumer,
         "note": (
             "CLI-Mac and CLI-Cloud share run_agentic_loop; partnership is live when "
-            "Redis task bus meta + cross_cli_review features probe true."
+            "Redis bus meta + cross_cli_review + autonomous consumer probe true."
             if _partnership
             else (
                 "CLI-Mac and CLI-Cloud are the same run_agentic_loop with different tool "
-                "surfaces. Dual LN-FAB partnership probes false (bus/review not ready)."
+                "surfaces. Dual LN-FAB partnership probes false (bus/review/consumer)."
             )
         ),
     }
@@ -671,6 +675,7 @@ def apply_grounding_to_done(
     final_text: str,
     tool_call_log: List[Dict[str, Any]],
     user_message: str,
+    session_key: str = "",
 ) -> Tuple[str, Dict[str, Any]]:
     report = validate_cli_response(
         final_text,
@@ -679,18 +684,37 @@ def apply_grounding_to_done(
     )
     cite = audit_verified_citations(final_text, tool_call_log)
     all_violations = list(report["violations"]) + list(cite["violations"])
+    symbolic_meta: Dict[str, Any] = {"ok": True, "violations": [], "checked": False}
+    try:
+        from app.websocket.cli_symbol_store import cli_symbolic_enabled, symbolic_verify
+
+        if cli_symbolic_enabled() and session_key:
+            sym = symbolic_verify(
+                final_text or "",
+                session_key,
+                tool_call_log=tool_call_log,
+            )
+            symbolic_meta = {
+                "ok": bool(sym.get("ok")),
+                "violations": list(sym.get("violations") or [])[:12],
+                "checked": True,
+                "fact_count": sym.get("fact_count"),
+            }
+            all_violations.extend(symbolic_meta["violations"])
+    except Exception:
+        pass
     out_text = final_text or ""
     if all_violations:
         banner = (
             f"{UNVERIFIED_TAG} Grounding check found {len(all_violations)} issue(s). "
             "Treat unmarked or mismatched capability claims below as unverified; "
-            "call self_capabilities / grep / read_file before restating as fact.\n\n"
+            "call self_capabilities / symbolic_verify / grep before restating as fact.\n\n"
         )
         # Prefer validate_cli_response rewrite when it already bannered; else wrap original.
         base = report["rewritten_text"] if not report["ok"] else final_text
         if base.startswith(UNVERIFIED_TAG):
-            # Refresh count in banner if citation audit added more issues
-            if cite["violations"]:
+            # Refresh count in banner if citation/symbolic audit added more issues
+            if cite["violations"] or symbolic_meta.get("violations"):
                 rest = re.sub(
                     r"^\[UNVERIFIED\][^\n]*\n\n?",
                     "",
@@ -710,5 +734,14 @@ def apply_grounding_to_done(
         "used_evidence_tools": report["used_evidence_tools"],
         "citations_checked": cite["checked"],
         "citation_audit": True,
+        "symbolic_ok": symbolic_meta.get("ok", True),
+        "symbolic_checked": symbolic_meta.get("checked", False),
+        "needs_regen": (
+            len(all_violations) > 0
+            and (
+                any(v.get("type", "").startswith("symbol_") for v in all_violations)
+                or any(v.get("type") == "manifest_contradiction" for v in all_violations)
+            )
+        ),
     }
     return out_text, grounding
