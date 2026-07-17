@@ -57,15 +57,17 @@ _gap = _load(
     inject={"app.services.six_quotient_growth_engine": _growth},
 )
 
-# Stub api_server.require_admin for router import
+# Stub api_server.require_admin only while loading the router, then remove it.
+# Leaving the stub in sys.modules poisons later CI suites (ImportError / 401).
 _api_server = types.ModuleType("app.services.api_server")
 _api_server.require_admin = MagicMock()  # type: ignore[attr-defined]
-sys.modules["app.services.api_server"] = _api_server
 
 _api = _load(
     "app.routers.six_quotient_api",
     APP / "routers" / "six_quotient_api.py",
+    inject={"app.services.api_server": _api_server},
 )
+sys.modules.pop("app.services.api_server", None)
 
 _agent = _load(
     "app.services.six_quotient_battery_agent",
