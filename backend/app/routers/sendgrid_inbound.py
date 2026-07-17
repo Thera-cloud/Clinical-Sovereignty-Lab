@@ -43,11 +43,12 @@ SENDGRID_INBOUND_SECRET = os.getenv("SENDGRID_INBOUND_SECRET", "")
 
 # Mirror of ``twilio_webhook.APPROVAL_PREFIXES`` / ``APPROVAL_SYNONYMS`` so
 # the email path recognizes the exact same vocabulary as SMS.
-_APPROVAL_PREFIXES: Tuple[str, ...] = ("APPROVE", "REJECT", "HOLD", "MODIFY")
+_APPROVAL_PREFIXES: Tuple[str, ...] = ("APPROVE", "REJECT", "HOLD", "MODIFY", "ACK", "DISMISS")
 _APPROVAL_SYNONYMS = {
     "YES", "GO", "DO IT", "SHIP IT", "APPROVED",
     "WAIT", "DEFER", "LATER", "PAUSE",
     "NO", "NOPE", "DENIED", "CANCEL",
+    "ACKED", "GOT IT", "SEEN",
 }
 
 # "approve", "approve+anything", "approval" all route to the approval pipeline.
@@ -137,6 +138,20 @@ async def _route_proposal_reply(
             full_uuid = await service._resolve_short_proposal_id(short_id)
         except Exception as e:
             logger.warning("SendGrid inbound: short-id lookup failed for %s: %s", short_id, e)
+
+    # Dual-COO CEO inbox tokens: [#ceoXXXXXXXX] in subject/body
+    if full_uuid is None:
+        try:
+            from app.services.ceo_inbox_notify import (
+                extract_ceo_short_from_text,
+                resolve_ceo_proposal_by_short,
+            )
+
+            ceo_short = extract_ceo_short_from_text(subject, cleaned_body)
+            if ceo_short:
+                full_uuid = await resolve_ceo_proposal_by_short(db_pool, ceo_short)
+        except Exception as e:
+            logger.warning("SendGrid inbound: CEO short-id lookup failed: %s", e)
 
     # Final fallback: if no id was recoverable, the service still resolves
     # to the most-recent pending proposal — the same behavior SMS gets.

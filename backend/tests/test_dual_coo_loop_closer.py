@@ -73,6 +73,43 @@ class TestCeoInboxAck(unittest.TestCase):
         client.delete.assert_called()
 
 
+class TestCeoInboxNotify(unittest.TestCase):
+    def test_notify_module_contract(self):
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "app"
+            / "services"
+            / "ceo_inbox_notify.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("admin_nevedalnj@sovereignsanctuary.net", src)
+        self.assertIn("+15865243969", src)
+        self.assertIn("schedule_ceo_inbox_notify", src)
+        self.assertIn("handle_ceo_decision", src)
+        self.assertIn("YELLOW", src)
+        self.assertIn("RED", src)
+
+    def test_enqueue_schedules_notify(self):
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "app"
+            / "websocket"
+            / "cli_dual_coo.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("schedule_ceo_inbox_notify", src)
+
+    def test_ceo_short_extract(self):
+        from app.services.ceo_inbox_notify import (
+            ceo_short_id,
+            extract_ceo_short_from_text,
+        )
+
+        self.assertEqual(ceo_short_id("1784257660-clou-43849983"), "43849983")
+        self.assertEqual(
+            extract_ceo_short_from_text("Re: CEO [#ceo43849983]", ""),
+            "43849983",
+        )
+
+
 class TestFailover(unittest.TestCase):
     @patch("app.websocket.cli_dual_coo._redis")
     def test_set_failover(self, mock_redis):

@@ -381,6 +381,23 @@ class ApprovalProtocolService:
                 f"{'─' * 50}\n"
             )
 
+        if meta.get("ceo_inbox"):
+            reply_block = (
+                "REPLY WITH:\n"
+                "  ACK      — Dismiss from CEO inbox (no clinical apply)\n"
+                "  APPROVE  — Dismiss + apply linked actions (if any)\n"
+                "  REJECT   — Dismiss without apply\n"
+                "  HOLD     — Note + dismiss from inbox\n\n"
+            )
+        else:
+            reply_block = (
+                "REPLY WITH:\n"
+                "  APPROVE  — Execute this proposal\n"
+                "  HOLD     — Defer for later review\n"
+                "  REJECT   — Cancel this proposal\n"
+                "  MODIFY: [your changes] — Request modifications\n\n"
+            )
+
         body = (
             "SOVEREIGN STRATEGY PROPOSAL\n"
             f"{'═' * 50}\n\n"
@@ -408,17 +425,15 @@ class ApprovalProtocolService:
             "DEPLOYMENT WINDOW:\n"
             f"{deploy_line}\n\n"
             f"{'─' * 50}\n"
-            "REPLY WITH:\n"
-            "  APPROVE  — Execute this proposal\n"
-            "  HOLD     — Defer for later review\n"
-            "  REJECT   — Cancel this proposal\n"
-            "  MODIFY: [your changes] — Request modifications\n\n"
+            f"{reply_block}"
             f"Auto-execute: {self._format_auto_execute_line(proposal)}\n"
             f"{'═' * 50}\n"
         )
         return subject, body
 
-    async def send_email_notification(self, proposal: Dict[str, Any]) -> Optional[str]:
+    async def send_email_notification(
+        self, proposal: Dict[str, Any], to_email: Optional[str] = None
+    ) -> Optional[str]:
         """Send a self-contained approval email via SendGrid.
 
         Renders objective, reasoning, action steps, expected impact,
@@ -434,10 +449,11 @@ class ApprovalProtocolService:
             from sendgrid.helpers.mail import Mail, Email, To, Content
 
             subject, body = self._build_proposal_email(proposal)
+            dest = (to_email or "").strip() or settings.FROM_EMAIL
 
             message = Mail(
                 from_email=Email(settings.FROM_EMAIL, settings.FROM_NAME),
-                to_emails=To(settings.FROM_EMAIL),  # Admin email
+                to_emails=To(dest),
                 subject=subject,
                 plain_text_content=Content("text/plain", body),
             )
@@ -548,6 +564,7 @@ class ApprovalProtocolService:
 
     _DECISION_NEXT_STEP = {
         "APPROVE": "Execution will begin within the deployment window specified in the proposal.",
+        "ACK":     "CEO inbox item dismissed. No clinical apply was performed.",
         "HOLD":    "Proposal deferred. Reply APPROVE when ready to proceed.",
         "REJECT":  "Proposal cancelled. No action will be taken.",
         "MODIFY":  "Your modifications have been logged. Little Nate will revise and resubmit.",
@@ -703,10 +720,15 @@ class ApprovalProtocolService:
         else:
             auto_line = "Requires explicit approval."
 
+        meta = self._coerce_metadata(proposal.get("metadata"))
+        if meta.get("ceo_inbox"):
+            reply_hint = "Reply ACK, APPROVE, or REJECT. Details in email."
+        else:
+            reply_hint = "Reply APPROVE, HOLD, or REJECT. Full details in email."
         body = (
             f"LN Proposal #{pid_short}: {summary} "
             f"Risk: {risk}. {auto_line} "
-            f"Reply APPROVE, HOLD, or REJECT. Full details in email."
+            f"{reply_hint}"
         )
 
         # Final safety: hard-cap at the SMS budget to never exceed two segments.
@@ -714,11 +736,26 @@ class ApprovalProtocolService:
             body = body[: self._SMS_MAX_LEN - 3].rstrip() + "..."
         return body
 
-    async def send_sms_notification(self, proposal: Dict[str, Any]) -> Optional[str]:
+    async def send_sms_notification(
+        self, proposal: Dict[str, Any], to_number: Optional[str] = None
+    ) -> Optional[str]:
         """Send a self-contained approval SMS (≤2 segments / 320 chars) via Twilio."""
+        import os
+
         client = self._get_twilio_client()
-        twilio_from = getattr(settings, "TWILIO_FROM_NUMBER", "")
-        twilio_to = getattr(settings, "TWILIO_ADMIN_NUMBER", "")
+        twilio_from = (
+            getattr(settings, "TWILIO_FROM_NUMBER", "")
+            or os.getenv("TWILIO_FROM_NUMBER", "")
+            or os.getenv("TWILIO_PHONE_NUMBER", "")
+        )
+        twilio_to = (
+            (to_number or "").strip()
+            or getattr(settings, "TWILIO_ADMIN_NUMBER", "")
+            or getattr(settings, "ADMIN_ALERT_PHONE", "")
+            or os.getenv("TWILIO_ADMIN_NUMBER", "")
+            or os.getenv("ADMIN_ALERT_PHONE", "")
+            or os.getenv("CEO_NOTIFY_SMS", "")
+        )
 
         if not client or not twilio_from or not twilio_to:
             print(">>> [APPROVAL] Twilio not configured — skipping SMS")
@@ -785,18 +822,28 @@ class ApprovalProtocolService:
             APPROVE
             HOLD
             REJECT
+            ACK / DISMISS  (CEO inbox dismiss)
             MODIFY: <changes>
         """
-        msg = raw_message.strip().upper()
+        # Use first meaningful line (email clients quote below)
+        first = ""
+        for line in (raw_message or "").splitlines():
+            s = line.strip()
+            if s and not s.startswith(">"):
+                first = s
+                break
+        msg = (first or raw_message).strip().upper()
 
         if msg.startswith("APPROVE") or msg in ("YES", "GO", "DO IT", "SHIP IT"):
             return {"decision": "APPROVE", "modifier_text": None}
+        elif msg.startswith("ACK") or msg.startswith("DISMISS") or msg in ("ACKED", "GOT IT", "SEEN"):
+            return {"decision": "ACK", "modifier_text": None}
         elif msg.startswith("HOLD") or msg in ("WAIT", "DEFER", "LATER"):
             return {"decision": "HOLD", "modifier_text": None}
         elif msg.startswith("REJECT") or msg in ("NO", "CANCEL", "NOPE"):
             return {"decision": "REJECT", "modifier_text": None}
         elif msg.startswith("MODIFY"):
-            changes = raw_message.strip()[len("MODIFY"):].lstrip(": ").strip()
+            changes = (first or raw_message).strip()[len("MODIFY"):].lstrip(": ").strip()
             return {"decision": "MODIFY", "modifier_text": changes or None}
         else:
             return {"decision": "UNKNOWN", "modifier_text": raw_message.strip()}
@@ -894,6 +941,17 @@ class ApprovalProtocolService:
                     """, pid, approver)
                     print(f">>> [APPROVAL] Proposal {pid} APPROVED via {channel}")
 
+            elif decision == "ACK":
+                # CEO inbox dismiss — close proposal without clinical apply
+                await conn.execute("""
+                    UPDATE strategy_proposals
+                    SET status = 'rejected', rejection_reason = $2, updated_at = NOW(),
+                        metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb
+                    WHERE proposal_id = $1
+                """, pid, f"ACK via {channel}",
+                    json.dumps({"ceo_acked_at": datetime.utcnow().isoformat(), "ceo_acked_via": channel}))
+                print(f">>> [APPROVAL] Proposal {pid} ACK (CEO dismiss) via {channel}")
+
             elif decision == "REJECT":
                 rejection_reason = f"Rejected via {channel}: {raw_message}"
                 await conn.execute("""
@@ -927,11 +985,22 @@ class ApprovalProtocolService:
                         print(f">>> [APPROVAL] Veto feedback via Mesh failed: {veto_err}")
 
             elif decision == "HOLD":
-                await conn.execute("""
-                    UPDATE strategy_proposals
-                    SET metadata = metadata || $2, updated_at = NOW()
-                    WHERE proposal_id = $1
-                """, pid, json.dumps({"held_at": datetime.utcnow().isoformat(), "held_via": channel}))
+                hold_meta = {"held_at": datetime.utcnow().isoformat(), "held_via": channel}
+                if meta.get("ceo_inbox"):
+                    # CEO HOLD = note + dismiss inbox (close proposal to stop escalation)
+                    await conn.execute("""
+                        UPDATE strategy_proposals
+                        SET status = 'rejected', rejection_reason = $2,
+                            metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb,
+                            updated_at = NOW()
+                        WHERE proposal_id = $1
+                    """, pid, f"HOLD via {channel}", json.dumps(hold_meta))
+                else:
+                    await conn.execute("""
+                        UPDATE strategy_proposals
+                        SET metadata = metadata || $2, updated_at = NOW()
+                        WHERE proposal_id = $1
+                    """, pid, json.dumps(hold_meta))
                 print(f">>> [APPROVAL] Proposal {pid} on HOLD via {channel}")
 
             elif decision == "MODIFY":
@@ -965,7 +1034,7 @@ class ApprovalProtocolService:
             # next scheduler tick won't re-fire an escalation email for a
             # proposal the operator already responded to (especially HOLD,
             # which keeps status='pending_approval').
-            if decision in ("APPROVE", "REJECT", "HOLD", "MODIFY"):
+            if decision in ("APPROVE", "REJECT", "HOLD", "MODIFY", "ACK"):
                 await conn.execute("""
                     UPDATE strategy_proposals
                     SET metadata = metadata || $2, updated_at = NOW()
@@ -976,9 +1045,26 @@ class ApprovalProtocolService:
                     "escalation_cleared_by_decision": decision,
                 }))
 
+        # Dual-COO CEO inbox: ACK/APPROVE/REJECT/HOLD also clear Redis inbox
+        ceo_side: Dict[str, Any] = {}
+        if decision in ("ACK", "APPROVE", "REJECT", "HOLD") and meta.get("ceo_inbox"):
+            try:
+                from app.services.ceo_inbox_notify import handle_ceo_decision
+
+                ceo_side = await handle_ceo_decision(
+                    db_pool=self.db_pool,
+                    proposal=proposal,
+                    decision=decision,
+                    channel=channel,
+                    approver=approver,
+                )
+            except Exception as e:
+                print(f">>> [APPROVAL] CEO inbox side-effect failed: {e}")
+                ceo_side = {"status": "error", "error": str(e)[:200]}
+
         # FIX 3: send post-decision confirmation back to the operator who
         # replied. Only for email channel — SMS already gets inline TwiML.
-        if decision in ("APPROVE", "REJECT", "HOLD", "MODIFY") and channel == "email":
+        if decision in ("APPROVE", "REJECT", "HOLD", "MODIFY", "ACK") and channel == "email":
             try:
                 await self.send_decision_confirmation(
                     proposal=proposal,
@@ -997,6 +1083,7 @@ class ApprovalProtocolService:
             "approver_count": len(approver_list),
             "required_approvers": required_approvers,
             "modifier_text": parsed.get("modifier_text"),
+            "ceo_inbox": ceo_side,
         }
 
     # ─── Auto-Execute Check (called by scheduler) ───

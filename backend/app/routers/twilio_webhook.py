@@ -55,9 +55,12 @@ OPT_OUT_FILE = DATA_DIR / "sms_opt_out.json"
 STOP_KEYWORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"}
 START_KEYWORDS = {"START", "UNSTOP", "YES"}
 
-# Approval protocol keywords (Sovereign Swarm strategy proposals)
-APPROVAL_PREFIXES = ("APPROVE", "REJECT", "HOLD", "MODIFY")
-APPROVAL_SYNONYMS = {"YES", "GO", "DO IT", "SHIP IT", "WAIT", "DEFER", "LATER", "NO", "NOPE"}
+# Approval protocol keywords (Sovereign Swarm + CEO inbox)
+APPROVAL_PREFIXES = ("APPROVE", "REJECT", "HOLD", "MODIFY", "ACK", "DISMISS")
+APPROVAL_SYNONYMS = {
+    "YES", "GO", "DO IT", "SHIP IT", "WAIT", "DEFER", "LATER",
+    "NO", "NOPE", "ACKED", "GOT IT", "SEEN",
+}
 
 
 def _normalize_phone(phone: str) -> str:

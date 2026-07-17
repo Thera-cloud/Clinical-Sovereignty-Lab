@@ -39,6 +39,16 @@ class TestParseReply:
         result = ApprovalProtocolService.parse_reply("HOLD")
         assert result["decision"] == "HOLD"
 
+    def test_parse_ack(self):
+        for word in ("ACK", "DISMISS", "ACKED", "GOT IT"):
+            result = ApprovalProtocolService.parse_reply(word)
+            assert result["decision"] == "ACK", f"'{word}' should map to ACK"
+
+    def test_parse_ack_first_line_of_email(self):
+        body = "ACK\n\nOn Tue, someone wrote:\n> prior"
+        result = ApprovalProtocolService.parse_reply(body)
+        assert result["decision"] == "ACK"
+
     def test_parse_modify(self):
         result = ApprovalProtocolService.parse_reply("MODIFY: change the audience to teens")
         assert result["decision"] == "MODIFY"

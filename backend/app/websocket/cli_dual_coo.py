@@ -223,6 +223,13 @@ def enqueue_ceo(
         c.lpush(ceo_inbox_key(), json.dumps(item, default=str))
         c.ltrim(ceo_inbox_key(), 0, 199)
         c.expire(ceo_inbox_key(), 7 * 86400)
+        # Email (YELLOW+RED) + SMS (RED) via ApprovalProtocol / SendGrid inbound
+        try:
+            from app.services.ceo_inbox_notify import schedule_ceo_inbox_notify
+
+            schedule_ceo_inbox_notify(item)
+        except Exception as notify_err:
+            logger.debug("ceo inbox notify schedule: %s", notify_err)
         return {"status": "ok", "item": item}
     except Exception as e:
         return {"status": "error", "error": str(e)[:300]}
