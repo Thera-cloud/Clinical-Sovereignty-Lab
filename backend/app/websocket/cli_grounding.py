@@ -102,6 +102,7 @@ YOUR ACCURACY RULES (MANDATORY — violation = falsehood):
 5. Speculative / design answers: Prefix with [DESIGN PROPOSAL]. Never describe proposals as current behavior.
 6. Completion claims (done/fixed/deployed/implemented): Require a commit hash in the same answer OR say "pending commit (uncommitted)". Tool test exit codes count as evidence for "tests pass" only.
 7. Untagged capability assertions are forbidden. If unsure, say "I don't have verified evidence" and call a tool.
+8. Honest citations only: [VERIFIED tool=name] / [VERIFIED path:line] must match a tool you actually called and content present in that tool's output. Dishonest citations are rejected by a post-response auditor.
 """.strip()
 
 VERIFICATION_BEFORE_CLAIM = """
@@ -400,6 +401,225 @@ def format_manifest_for_tool(manifest: Dict[str, Any]) -> str:
     return json.dumps(manifest, indent=2, default=str)
 
 
+# [VERIFIED path:line] or [VERIFIED tool=name] or [VERIFIED path]
+_VERIFIED_CITATION_RE = re.compile(
+    r"\[VERIFIED\s+([^\]]+)\]",
+    re.I,
+)
+
+_STOPWORDS = frozenset({
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of",
+    "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "will", "would", "could", "should", "may", "might",
+    "this", "that", "these", "those", "it", "its", "as", "with", "from", "by",
+    "not", "no", "only", "also", "via", "per", "than", "then", "when", "where",
+    "which", "who", "what", "how", "can", "we", "i", "you", "our", "their",
+    "true", "false", "null", "none", "ok", "status",
+})
+
+# Claims that contradict known-false facts in self_capabilities evidence
+_MANIFEST_CONTRADICTIONS = (
+    (
+        re.compile(r"(?i)\b(workers[\s_-]?ai).{0,40}(cli|command terminal|coding loop)|"
+                   r"(cli|command terminal).{0,40}workers[\s_-]?ai",
+                   re.I),
+        re.compile(r'"workers_ai_in_cli_loop"\s*:\s*false', re.I),
+        "claims Workers AI on CLI path but self_capabilities says workers_ai_in_cli_loop=false",
+    ),
+    (
+        re.compile(r"(?i)(mac.{0,20}cloud|cloud.{0,20}mac).{0,60}"
+                   r"(partner|partnership|collaborat|enhance each)|"
+                   r"dual[- ]agent.{0,40}(ln[- ]?fab|cli)",
+                   re.I),
+        re.compile(r'"mac_cloud_ln_fab_partnership"\s*:\s*false', re.I),
+        "claims Mac↔Cloud LN-FAB partnership but self_capabilities says false",
+    ),
+    (
+        re.compile(r"(?i)neuro[- ]?symbolic.{0,40}(wired|active|enabled|in (the )?cli)|"
+                   r"(cli|command terminal).{0,40}neuro[- ]?symbolic.{0,20}"
+                   r"(layer|engine|active)",
+                   re.I),
+        re.compile(r'"wired_into_cli_loop"\s*:\s*false', re.I),
+        "claims clinical neuro-symbolic wired into CLI but self_capabilities says false",
+    ),
+    (
+        re.compile(r"(?i)ENABLE_ASK_NATE_SYMBOLIC.{0,30}(true|on|enabled|active)|"
+                   r"symbolic (layer|seam).{0,30}(enabled|active|on)",
+                   re.I),
+        re.compile(r'"ENABLE_ASK_NATE_SYMBOLIC"\s*:\s*false', re.I),
+        "claims ENABLE_ASK_NATE_SYMBOLIC on but self_capabilities says false",
+    ),
+)
+
+
+def _evidence_corpus(tool_call_log: List[Dict[str, Any]]) -> str:
+    parts: List[str] = []
+    for t in tool_call_log or []:
+        parts.append(str(t.get("name") or ""))
+        args = t.get("args") or {}
+        if isinstance(args, dict):
+            parts.append(json_dumps_safe(args))
+        parts.append(str(t.get("evidence_excerpt") or ""))
+    return "\n".join(parts).lower()
+
+
+def json_dumps_safe(obj: Any) -> str:
+    import json
+    try:
+        return json.dumps(obj, default=str)
+    except Exception:
+        return str(obj)
+
+
+def _significant_tokens(text: str) -> Set[str]:
+    toks = re.findall(r"[a-zA-Z_][a-zA-Z0-9_./:-]{2,}", text or "")
+    out: Set[str] = set()
+    for t in toks:
+        tl = t.lower().strip(".:/,")
+        if tl in _STOPWORDS or len(tl) < 3:
+            continue
+        if tl.startswith("verified") or tl in ("flag-off", "implemented", "planned"):
+            continue
+        out.add(tl)
+    return out
+
+
+def _sentence_for_span(text: str, start: int, end: int) -> str:
+    left = text.rfind(".", 0, start)
+    left2 = text.rfind("\n", 0, start)
+    cut_l = max(left, left2) + 1
+    right = text.find(".", end)
+    right2 = text.find("\n", end)
+    candidates = [i for i in (right, right2) if i != -1]
+    cut_r = min(candidates) if candidates else len(text)
+    return text[cut_l:cut_r].strip()
+
+
+def audit_verified_citations(
+    text: str,
+    tool_call_log: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Second-pass auditor: every [VERIFIED ...] tag must resolve to real tool evidence,
+    and the surrounding claim must overlap that evidence (no dishonest citations).
+    """
+    text = text or ""
+    log = tool_call_log or []
+    violations: List[Dict[str, str]] = []
+    checked = 0
+    tools_by_name: Dict[str, List[Dict[str, Any]]] = {}
+    for t in log:
+        tools_by_name.setdefault(str(t.get("name") or ""), []).append(t)
+
+    corpus = _evidence_corpus(log)
+
+    for m in _VERIFIED_CITATION_RE.finditer(text):
+        checked += 1
+        inner = (m.group(1) or "").strip()
+        sentence = _sentence_for_span(text, m.start(), m.end())
+        claim_tokens = _significant_tokens(
+            re.sub(r"\[VERIFIED[^\]]*\]", " ", sentence, flags=re.I)
+        )
+
+        tool_m = re.match(r"tool\s*=\s*([a-zA-Z0-9_]+)", inner, re.I)
+        if tool_m:
+            tool_name = tool_m.group(1)
+            entries = tools_by_name.get(tool_name) or []
+            if not entries:
+                violations.append({
+                    "type": "citation_tool_missing",
+                    "detail": f"[VERIFIED tool={tool_name}] but tool was not called",
+                })
+                continue
+            if not any(e.get("status") in ("ok", "success", None) for e in entries):
+                violations.append({
+                    "type": "citation_tool_failed",
+                    "detail": f"[VERIFIED tool={tool_name}] but tool status was not ok",
+                })
+                continue
+            evidence = "\n".join(
+                str(e.get("evidence_excerpt") or "") for e in entries
+            ).lower()
+            if claim_tokens and evidence:
+                hits = sum(1 for tok in claim_tokens if tok in evidence or tok in corpus)
+                # Require modest overlap for non-trivial claims
+                if len(claim_tokens) >= 4 and hits < max(2, len(claim_tokens) // 4):
+                    violations.append({
+                        "type": "citation_claim_mismatch",
+                        "detail": (
+                            f"[VERIFIED tool={tool_name}] claim poorly supported by tool output "
+                            f"(token overlap {hits}/{len(claim_tokens)})"
+                        ),
+                    })
+            continue
+
+        # Path / path:line form
+        path_part = inner.split(":")[0].strip()
+        line_part = None
+        if ":" in inner and not inner.lower().startswith("tool"):
+            bits = inner.split(":")
+            path_part = bits[0].strip()
+            if len(bits) > 1 and bits[1].strip().isdigit():
+                line_part = bits[1].strip()
+
+        if not path_part:
+            violations.append({
+                "type": "citation_malformed",
+                "detail": f"[VERIFIED {inner}] could not parse path or tool",
+            })
+            continue
+
+        path_norm = path_part.lstrip("./").lower()
+        path_found = path_norm in corpus or any(
+            path_norm in str((t.get("args") or {}).get("path") or "").lower()
+            or path_norm in str((t.get("args") or {}).get("file_path") or "").lower()
+            or path_norm in str((t.get("args") or {}).get("pattern") or "").lower()
+            or path_norm in str(t.get("evidence_excerpt") or "").lower()
+            for t in log
+        )
+        if not path_found:
+            violations.append({
+                "type": "citation_path_missing",
+                "detail": f"[VERIFIED {inner}] path not present in tool evidence",
+            })
+            continue
+
+        if claim_tokens and corpus:
+            hits = sum(1 for tok in claim_tokens if tok in corpus)
+            if len(claim_tokens) >= 4 and hits < max(2, len(claim_tokens) // 4):
+                violations.append({
+                    "type": "citation_claim_mismatch",
+                    "detail": (
+                        f"[VERIFIED {inner}] claim poorly supported by tool evidence "
+                        f"(token overlap {hits}/{len(claim_tokens)})"
+                    ),
+                })
+
+        if line_part and line_part not in corpus and f":{line_part}" not in corpus:
+            # Soft warning — line may be paraphrased; only flag if no path content either
+            pass
+
+    # Known-false contradictions vs self_capabilities evidence
+    caps_evidence = "\n".join(
+        str(t.get("evidence_excerpt") or "")
+        for t in log
+        if t.get("name") == "self_capabilities"
+    )
+    if caps_evidence:
+        for claim_re, evidence_re, detail in _MANIFEST_CONTRADICTIONS:
+            if claim_re.search(text) and evidence_re.search(caps_evidence):
+                violations.append({
+                    "type": "manifest_contradiction",
+                    "detail": detail,
+                })
+
+    return {
+        "ok": len(violations) == 0,
+        "checked": checked,
+        "violations": violations,
+    }
+
+
 def apply_grounding_to_done(
     final_text: str,
     tool_call_log: List[Dict[str, Any]],
@@ -410,12 +630,38 @@ def apply_grounding_to_done(
         tool_call_log,
         user_message=user_message,
     )
-    out_text = report["rewritten_text"] if not report["ok"] else final_text
+    cite = audit_verified_citations(final_text, tool_call_log)
+    all_violations = list(report["violations"]) + list(cite["violations"])
+    out_text = final_text or ""
+    if all_violations:
+        banner = (
+            f"{UNVERIFIED_TAG} Grounding check found {len(all_violations)} issue(s). "
+            "Treat unmarked or mismatched capability claims below as unverified; "
+            "call self_capabilities / grep / read_file before restating as fact.\n\n"
+        )
+        # Prefer validate_cli_response rewrite when it already bannered; else wrap original.
+        base = report["rewritten_text"] if not report["ok"] else final_text
+        if base.startswith(UNVERIFIED_TAG):
+            # Refresh count in banner if citation audit added more issues
+            if cite["violations"]:
+                rest = re.sub(
+                    r"^\[UNVERIFIED\][^\n]*\n\n?",
+                    "",
+                    base,
+                    count=1,
+                )
+                out_text = banner + rest
+            else:
+                out_text = base
+        else:
+            out_text = banner + (base or "")
     grounding = {
-        "ok": report["ok"],
-        "violation_count": len(report["violations"]),
-        "violations": report["violations"][:12],
+        "ok": len(all_violations) == 0,
+        "violation_count": len(all_violations),
+        "violations": all_violations[:16],
         "self_capabilities_called": report["self_capabilities_called"],
         "used_evidence_tools": report["used_evidence_tools"],
+        "citations_checked": cite["checked"],
+        "citation_audit": True,
     }
     return out_text, grounding

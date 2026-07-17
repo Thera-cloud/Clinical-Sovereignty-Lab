@@ -135,3 +135,70 @@ def test_apply_grounding_to_done():
     assert meta["ok"] is False
     assert meta["violation_count"] >= 1
     assert text.startswith("[UNVERIFIED]")
+    assert meta.get("citation_audit") is True
+
+
+def test_citation_tool_missing():
+    from app.websocket.cli_grounding import audit_verified_citations
+
+    r = audit_verified_citations(
+        "[VERIFIED tool=self_capabilities] CLI uses Grok only.",
+        tool_call_log=[],
+    )
+    assert r["ok"] is False
+    assert any(v["type"] == "citation_tool_missing" for v in r["violations"])
+
+
+def test_citation_path_missing():
+    from app.websocket.cli_grounding import audit_verified_citations
+
+    r = audit_verified_citations(
+        "[VERIFIED backend/app/websocket/cli_tools.py:12] writes are always live.",
+        tool_call_log=[{"name": "grep", "status": "ok", "args": {"pattern": "foo"}, "evidence_excerpt": "no match"}],
+    )
+    assert r["ok"] is False
+    assert any(v["type"] == "citation_path_missing" for v in r["violations"])
+
+
+def test_citation_path_ok_when_in_evidence():
+    from app.websocket.cli_grounding import audit_verified_citations
+
+    r = audit_verified_citations(
+        "[VERIFIED backend/app/websocket/cli_tools.py:100] sandbox writes gated.",
+        tool_call_log=[{
+            "name": "read_file",
+            "status": "ok",
+            "args": {"path": "backend/app/websocket/cli_tools.py"},
+            "evidence_excerpt": "def _cloud_sandbox_active: sandbox writes gated at line 100",
+        }],
+    )
+    assert r["ok"] is True
+    assert r["checked"] == 1
+
+
+def test_manifest_contradiction_caught():
+    from app.websocket.cli_grounding import audit_verified_citations, apply_grounding_to_done
+
+    evidence = (
+        '{"workers_ai_in_cli_loop": false, '
+        '"mac_cloud_ln_fab_partnership": false, '
+        '"wired_into_cli_loop": false, '
+        '"ENABLE_ASK_NATE_SYMBOLIC": false}'
+    )
+    log = [{"name": "self_capabilities", "status": "ok", "evidence_excerpt": evidence}]
+    r = audit_verified_citations(
+        "[VERIFIED tool=self_capabilities] CLI-Cloud partners with CLI-Mac in LN-FAB "
+        "to continuously enhance each others code via dual-agent collaboration.",
+        tool_call_log=log,
+    )
+    assert r["ok"] is False
+    assert any(v["type"] == "manifest_contradiction" for v in r["violations"])
+
+    text, meta = apply_grounding_to_done(
+        "[VERIFIED tool=self_capabilities] Workers AI powers the CLI coding loop.",
+        log,
+        "What providers do you use?",
+    )
+    assert meta["ok"] is False
+    assert text.startswith("[UNVERIFIED]")
+    assert meta["citations_checked"] >= 1

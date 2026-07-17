@@ -121,6 +121,7 @@ AGENTIC_CAPABILITIES = {
     "per_path_retry_until_green": True,
     "multi_proxy_keys": True,
     "cli_truth_grounding": True,
+    "cli_citation_audit": True,
 }
 
 

@@ -519,6 +519,7 @@ async def run_agentic_loop(
                 "status": (caps or {}).get("status", "ok") if isinstance(caps, dict) else "ok",
                 "duration_ms": 0,
                 "injected": True,
+                "evidence_excerpt": (caps_body or "")[:6000],
             }]
             grounding_temp = 0.15
         else:
@@ -779,11 +780,23 @@ async def run_agentic_loop(
                     "turn": turn,
                 })
 
+                # Keep truncated evidence for post-response citation audit
+                _ev = ""
+                if isinstance(result, dict):
+                    _ev = str(
+                        result.get("content")
+                        or result.get("result")
+                        or result.get("output")
+                        or ""
+                    )
+                else:
+                    _ev = str(result or "")
                 tool_call_log.append({
                     "name": tool_name,
                     "args": {k: v for k, v in tool_args.items() if not str(k).startswith("_")},
                     "status": status,
                     "duration_ms": t_elapsed,
+                    "evidence_excerpt": (_ev or result_text or "")[:6000],
                 })
 
                 if tool_name in ("write_file", "str_replace", "delete_file"):
