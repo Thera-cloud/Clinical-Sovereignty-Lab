@@ -6,7 +6,9 @@ CEO Dual-COO API — Nathan morning inbox, patent approve, clinical apply.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import os
+import secrets
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -14,6 +16,11 @@ from pydantic import BaseModel, Field
 from app.services.api_server import require_admin
 
 router = APIRouter(prefix="/api/ceo", tags=["ceo-dual-coo"])
+
+
+class QueenBeatBody(BaseModel):
+    role: str = "mac"
+    meta: Optional[Dict[str, Any]] = None
 
 
 class AckBody(BaseModel):
@@ -32,6 +39,30 @@ class ClinicalApplyBody(BaseModel):
 @router.get("/health")
 async def ceo_health():
     return {"status": "ok", "service": "ceo_dual_coo"}
+
+
+@router.post("/queen-beat")
+async def ceo_queen_beat(request: Request, body: Optional[QueenBeatBody] = None):
+    """Mac Queen heartbeat when Mac cannot reach VPC Redis (residential Twin).
+
+    Auth: Bearer MAC_AGENT_TOKEN (same secret as MAC_AGENT_URL probes).
+    Writes Redis coo_beat so cloud_sole failover sees a live Mac peer.
+    """
+    expected = (os.getenv("MAC_AGENT_TOKEN") or "").strip()
+    auth = request.headers.get("Authorization") or ""
+    token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    if not expected or not token or not secrets.compare_digest(token, expected):
+        raise HTTPException(401, "unauthorized")
+    payload = body or QueenBeatBody()
+    role = (payload.role or "mac").strip().lower()
+    if role not in ("mac", "cloud"):
+        raise HTTPException(400, "role must be mac or cloud")
+    from app.websocket.cli_dual_coo import beat_queen
+
+    meta = dict(payload.meta or {})
+    meta.setdefault("via", "mac_http_beat")
+    ok = beat_queen(role, meta=meta)
+    return {"status": "ok" if ok else "redis_fail", "beat": bool(ok), "role": role}
 
 
 @router.get("/inbox")

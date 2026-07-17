@@ -220,6 +220,19 @@ class TestMacQueenBeatSource(unittest.TestCase):
         self.assertIn("beat_queen(", src)
         self.assertIn('"mac"', src)
         self.assertIn("mac_agent_loop", src)
+        self.assertIn("_http_queen_beat", src)
+        self.assertIn("/api/ceo/queen-beat", src)
+
+    def test_ceo_queen_beat_route(self):
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "app"
+            / "routers"
+            / "ceo_dual_coo_api.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("/queen-beat", src)
+        self.assertIn("mac_http_beat", src)
+        self.assertIn("MAC_AGENT_TOKEN", src)
 
     def test_loop_closer_probe(self):
         src = (

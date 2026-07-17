@@ -6,8 +6,8 @@
     <string>net.sovereignsanctuary.nate-mac-agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/mac_agent/run_agent.sh</string>
+        <string>/usr/bin/python3</string>
+        <string>/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/mac_agent/nate_mac_agent.py</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2</string>
@@ -19,6 +19,10 @@
         <string>9900</string>
         <key>MAC_AGENT_WORKSPACE</key>
         <string>/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2</string>
+        <key>DUAL_COO_API_URL</key>
+        <string>https://api.sovereignsanctuary.net</string>
+        <key>CLI_DUAL_COO_ENABLED</key>
+        <string>true</string>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>

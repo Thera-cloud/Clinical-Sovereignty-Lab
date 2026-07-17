@@ -802,33 +802,77 @@ async def process_manage(req: ProcessManageRequest, request: Request):
 QUEEN_BEAT_INTERVAL_S = int(os.getenv("MAC_QUEEN_BEAT_INTERVAL_S", "60"))
 
 
-async def _dual_coo_queen_beat_loop():
-    """Background Mac Queen Redis heartbeat (independent of CLI chat sessions).
+async def _http_queen_beat(meta: dict) -> bool:
+    """POST /api/ceo/queen-beat — Mac cannot reach VPC-only Redis from Twin.
 
-    Writes beat_queen('mac') when REDIS_URL is reachable. Cloud also probes
-    MAC_AGENT_URL /health and can write the same beat — dual path.
+    Uses curl (not urllib): system python under launchd often lacks a working
+    CA bundle and fails TLS to api.sovereignsanctuary.net silently.
+    """
+    api = (
+        os.getenv("DUAL_COO_API_URL")
+        or os.getenv("SOVEREIGN_API_URL")
+        or "https://api.sovereignsanctuary.net"
+    ).rstrip("/")
+    token = (os.getenv("MAC_AGENT_TOKEN") or "").strip()
+    if not token:
+        logger.warning("Dual-COO Mac Queen HTTP beat: MAC_AGENT_TOKEN empty")
+        return False
+    url = f"{api}/api/ceo/queen-beat"
+    payload = json.dumps({"role": "mac", "meta": meta})
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "curl", "-sS", "-m", "8",
+            "-X", "POST",
+            "-H", f"Authorization: Bearer {token}",
+            "-H", "Content-Type: application/json",
+            "-d", payload,
+            url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=12)
+        if proc.returncode != 0:
+            logger.warning(
+                "Dual-COO Mac Queen HTTP beat curl rc=%s err=%s",
+                proc.returncode, (err or b"")[:200].decode("utf-8", "replace"),
+            )
+            return False
+        body = json.loads((out or b"{}").decode("utf-8") or "{}")
+        return bool(body.get("beat"))
+    except Exception as e:
+        logger.warning("Dual-COO Mac Queen HTTP beat failed: %s", e)
+        return False
+
+
+async def _dual_coo_queen_beat_loop():
+    """Background Mac Queen heartbeat (independent of CLI chat sessions).
+
+    Prefer Redis beat_queen when REDIS_URL reaches GREEN; else HTTP
+    POST /api/ceo/queen-beat (VPC Redis is not reachable from residential Mac).
+    Cloud also probes MAC_AGENT_URL /health — triple path.
     """
     await asyncio.sleep(5)
     while True:
+        meta = {
+            "via": "mac_agent_loop",
+            "uptime_s": round(time.time() - _start_time, 1),
+        }
+        ok = False
         try:
-            # Prefer importing from workspace backend package when available
             sys.path.insert(0, os.path.join(MAC_AGENT_WORKSPACE, "backend"))
             from app.websocket.cli_dual_coo import beat_queen, dual_coo_enabled
 
             if dual_coo_enabled():
-                ok = beat_queen(
-                    "mac",
-                    meta={
-                        "via": "mac_agent_loop",
-                        "uptime_s": round(time.time() - _start_time, 1),
-                    },
-                )
-                if ok:
-                    logger.debug("Dual-COO Mac Queen beat ok")
-                else:
-                    logger.debug("Dual-COO Mac Queen beat skipped (redis?)")
+                ok = beat_queen("mac", meta=meta)
         except Exception as e:
-            logger.debug("Dual-COO Mac Queen beat: %s", e)
+            logger.debug("Dual-COO Mac Queen Redis beat: %s", e)
+        if not ok:
+            meta["via"] = "mac_http_beat"
+            ok = await _http_queen_beat(meta)
+        if ok:
+            logger.info("Dual-COO Mac Queen beat ok via=%s", meta.get("via"))
+        else:
+            logger.warning("Dual-COO Mac Queen beat failed (redis+http)")
         await asyncio.sleep(max(30, QUEEN_BEAT_INTERVAL_S))
 
 
