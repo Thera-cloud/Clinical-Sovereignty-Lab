@@ -1,3 +1,4 @@
+# QUANTUM-CRYSTAL-ARCH — Sovereign Standard clinical RED gate.
 """# FIX-THERAPEUTIC-CONTROLLER
 State-dependent therapeutic controller — pre-flight + post-flight wrappers.
 
@@ -66,6 +67,8 @@ Dual insertion sites (BOTH must remain present per Note 1, Phase 3):
    In `audit_therapeutic_response`, immediately before the regenerate-on-
    violation branch. Re-evaluates from `audit_metadata` to defensively catch
    any future code path that might re-enable mismatch downstream.
+
+QUANTUM-CRYSTAL-ARCH — Sovereign Standard clinical RED gate.
 """
 
 import asyncio
@@ -671,6 +674,10 @@ def _apply_sensitive_bridge_decision(bridge_decision, fallback_register: Optiona
 
 # ─────────────────────────── Pre-flight ───────────────────────────
 
+from app.services.sovereign_standard_gate import therapeutic_module
+
+
+@therapeutic_module
 async def prepare_therapeutic_context(
     user_text: str,
     user_id: str,

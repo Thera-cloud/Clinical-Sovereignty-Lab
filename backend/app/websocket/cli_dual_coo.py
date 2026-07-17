@@ -11,10 +11,12 @@ Risk classes (Nathan-approved policy):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("nate.cli_dual_coo")
@@ -173,6 +175,13 @@ def classify_risk(
     return RISK_YELLOW
 
 
+def _ceo_dedup_key(title: str, origin: str, task_id: str = "") -> str:
+    """Fingerprint for inbox dedup (title+origin+task_id)."""
+    raw = f"{(origin or '')}|{(task_id or '')}|{(title or '')[:200]}"
+    digest = hashlib.sha256(raw.encode()).hexdigest()[:24]
+    return f"{_prefix()}:{_env()}:cli:ceo_dedup:{digest}"
+
+
 def enqueue_ceo(
     *,
     risk: str,
@@ -181,15 +190,26 @@ def enqueue_ceo(
     origin: str = "cloud",
     task_id: str = "",
     payload: Optional[Dict[str, Any]] = None,
+    dedup_ttl_s: int = 3600,
 ) -> Dict[str, Any]:
-    """Push YELLOW/RED item to CEO-Nathan morning inbox (Redis list)."""
+    """Push YELLOW/RED item to CEO-Nathan morning inbox (Redis list).
+
+    Dedup: same title+origin+task_id within dedup_ttl_s is skipped (default 1h).
+    Item ids are UUID-suffixed to avoid same-second ack collisions.
+    """
     if risk not in (RISK_YELLOW, RISK_RED):
         return {"status": "skipped", "reason": "not_ceo_tier"}
     c = _redis()
     if not c:
         return {"status": "error", "error": "redis_unavailable"}
+    dkey = _ceo_dedup_key(title or "", origin or "", task_id or "")
+    try:
+        if int(dedup_ttl_s or 0) > 0 and c.set(dkey, "1", nx=True, ex=int(dedup_ttl_s)) is None:
+            return {"status": "skipped", "reason": "dedup"}
+    except Exception as e:
+        logger.debug("ceo dedup check: %s", e)
     item = {
-        "id": f"{int(time.time())}-{origin[:4]}",
+        "id": f"{int(time.time())}-{origin[:4]}-{uuid.uuid4().hex[:8]}",
         "risk": risk,
         "title": (title or "")[:300],
         "detail": (detail or "")[:2000],

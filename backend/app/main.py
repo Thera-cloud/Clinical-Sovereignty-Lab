@@ -3113,6 +3113,18 @@ async def lifespan(app: FastAPI):
     except Exception as _via_err:
         print(f"   ⚠️  VoiceInfrastructureAuditor init failed: {_via_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — CEO Dual-COO auditor (6 checks, stagger 288s)
+    _ceo_dual_coo_auditor = None
+    try:
+        from app.services.ceo_dual_coo_auditor import CeoDualCooAuditor
+        _ceo_dual_coo_auditor = CeoDualCooAuditor(db_pool=db_pool, app_state=app.state)
+        if not _is_clone:
+            await _ceo_dual_coo_auditor.start()
+        app.state.ceo_dual_coo_auditor = _ceo_dual_coo_auditor
+        print("   ✅ CeoDualCooAuditor started (stagger 288s)")
+    except Exception as _cda_err:
+        print(f"   ⚠️  CeoDualCooAuditor init failed: {_cda_err}")
+
     # SSE: Sovereign Story Engine Orchestrator
     _sse_orchestrator = None
     try:
@@ -3235,6 +3247,7 @@ async def lifespan(app: FastAPI):
         ("voice_pipeline_optimizer", _voice_optimizer is not None),  # SOVEREIGN-VOICE
         ("voice_call_center_agent", _voice_call_center is not None),  # SOVEREIGN-VOICE
         ("voice_infra_auditor", _voice_infra_auditor is not None),  # SOVEREIGN-VOICE
+        ("ceo_dual_coo_auditor", _ceo_dual_coo_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("identity_engine", _identity_engine_ok),  # QUANTUM-CRYSTAL-ARCH
         ("littlenate_inference", getattr(app.state, "littlenate_inference", None) is not None),
         ("nate_memory_crystallizer", getattr(app.state, "nate_memory_crystallizer", None) is not None),
@@ -3290,6 +3303,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ VoiceInfrastructureAuditor stopped")
         except Exception as _via_stop:
             print(f"   ⚠️  VoiceInfrastructureAuditor shutdown: {_via_stop}")
+    _ceo_dual_coo_auditor_h = getattr(app.state, "ceo_dual_coo_auditor", None)
+    if _ceo_dual_coo_auditor_h:
+        try:
+            await _ceo_dual_coo_auditor_h.stop()
+            print("   ✅ CeoDualCooAuditor stopped")
+        except Exception as _cda_stop:
+            print(f"   ⚠️  CeoDualCooAuditor shutdown: {_cda_stop}")
     _classroom_learning_auditor = getattr(app.state, "classroom_learning_auditor", None)
     if _classroom_learning_auditor:
         try:

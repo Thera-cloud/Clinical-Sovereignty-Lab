@@ -47,6 +47,8 @@ OUTPUTS
 - sensitive_bridge_log audit row per lifecycle transition.
 - coach_alert_high notifications to all admins on arming.
 - app_settings.sensitive_bridge_global_gap_flags JSONB patch on commit.
+
+QUANTUM-CRYSTAL-ARCH — Sovereign Standard clinical RED gate.
 """
 from __future__ import annotations
 

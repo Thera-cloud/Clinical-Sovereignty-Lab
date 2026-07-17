@@ -80,6 +80,7 @@ AUDITOR_ACTIVITY_TYPES = [
     "classroom_learning_audit_sent",
     "sensitive_bridge_audit_sent",
     "stance_loop_audit_sent",
+    "ceo_dual_coo_audit_sent",
 ]
 
 AUDITOR_LABELS = {
@@ -113,6 +114,7 @@ AUDITOR_LABELS = {
     "classroom_learning_audit_sent": "Classroom Learning",
     "sensitive_bridge_audit_sent": "Sensitive Clinical Bridge",
     "stance_loop_audit_sent": "Stance Loop",
+    "ceo_dual_coo_audit_sent": "CEO Dual-COO",
 }
 
 REMEDIATION_CATEGORIES = {
@@ -571,6 +573,7 @@ class TrustEnforcer:
             "classroom_learning_audit_sent": "classroom_learning_check_count",
             "sensitive_bridge_audit_sent": "sensitive_bridge_check_count",
             "stance_loop_audit_sent": "stance_loop_check_count",
+            "ceo_dual_coo_audit_sent": "ceo_dual_coo_check_count",
         }
         return mapping.get(activity_type, "")
 

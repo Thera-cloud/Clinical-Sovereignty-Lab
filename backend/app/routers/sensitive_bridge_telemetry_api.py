@@ -29,6 +29,8 @@ Design notes
   not advance silently.
 - Router import is wrapped in main.py's try/except so a missing dependency
   never crashes the backend.
+
+QUANTUM-CRYSTAL-ARCH — Sovereign Standard clinical RED gate.
 """
 from __future__ import annotations
 

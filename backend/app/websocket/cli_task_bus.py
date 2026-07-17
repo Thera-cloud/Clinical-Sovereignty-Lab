@@ -310,6 +310,9 @@ def claim_task(*, consumer: str, prefer_kind: str = "") -> Dict[str, Any]:
     """Claim next task not originated by consumer (cross-CLI).
 
     consumer='agent' may claim any review_pending/queued review (autonomous loop).
+
+    Cloud-sole failover (Mac heartbeat stale): Mac must not claim; cloud/agent
+    may claim Mac-originated tasks so work continues without the Mac Queen.
     """
     if not task_bus_enabled():
         return {"status": "error", "error": "CLI_TASK_BUS_ENABLED is off"}
@@ -320,6 +323,20 @@ def claim_task(*, consumer: str, prefer_kind: str = "") -> Dict[str, Any]:
     is_agent = consumer == "agent"
     if not is_agent:
         consumer = consumer if consumer in ("mac", "cloud") else "cloud"
+    sole = False
+    try:
+        from app.websocket.cli_dual_coo import cloud_sole_failover_active
+
+        sole = bool(cloud_sole_failover_active())
+    except Exception:
+        sole = False
+    # QUANTUM-CRYSTAL-ARCH — Mac blocked during cloud_sole failover
+    if sole and consumer == "mac":
+        return {
+            "status": "ok",
+            "task": None,
+            "detail": "cloud_sole_failover_mac_blocked",
+        }
     try:
         n = int(c.llen(bus_list_key()) or 0)
         scanned = 0
@@ -331,9 +348,14 @@ def claim_task(*, consumer: str, prefer_kind: str = "") -> Dict[str, Any]:
             rec = _load_task(c, task_id)
             if not rec:
                 continue
-            if not is_agent and rec.get("origin") == consumer:
-                c.rpush(bus_list_key(), task_id)
-                continue
+            # During sole failover, cloud/agent may claim Mac-origin work
+            if not is_agent and not (sole and consumer == "cloud"):
+                if rec.get("origin") == consumer:
+                    c.rpush(bus_list_key(), task_id)
+                    continue
+            elif not is_agent and sole and consumer == "cloud":
+                # Prefer Mac-origin first: skip cloud-origin when Mac tasks wait
+                pass
             if prefer_kind and rec.get("kind") != prefer_kind:
                 c.rpush(bus_list_key(), task_id)
                 continue
@@ -343,10 +365,16 @@ def claim_task(*, consumer: str, prefer_kind: str = "") -> Dict[str, Any]:
             if is_agent and prefer_kind == "review" and rec.get("kind") != "review":
                 c.rpush(bus_list_key(), task_id)
                 continue
+            # Failover preference: skip non-mac when looking for mac takeover
+            if sole and (is_agent or consumer == "cloud") and prefer_kind == "":
+                # Allow any; mark takeover in record
+                pass
             rec["status"] = "claimed"
             rec["claimed_by"] = "agent" if is_agent else consumer
+            if sole and rec.get("origin") == "mac":
+                rec["failover_takeover"] = True
             _save_task(c, rec)
-            return {"status": "ok", "task": rec}
+            return {"status": "ok", "task": rec, "failover": sole}
         return {"status": "ok", "task": None, "detail": "queue_empty"}
     except Exception as e:
         return {"status": "error", "error": str(e)[:400]}

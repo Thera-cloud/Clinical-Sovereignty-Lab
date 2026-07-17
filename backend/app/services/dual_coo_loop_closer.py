@@ -98,6 +98,8 @@ class DualCooLoopCloser:
             out["prior_art"] = await self._cycle_prior_art()
         if self._cycles % 4 == 0:
             out["second_order"] = await self._cycle_second_order()
+        if self._cycles % 3 == 0:
+            out["attribution"] = await self._cycle_attribution_density()
         out["failover"] = await self._cycle_peer_failover()
         return out
 
@@ -119,6 +121,33 @@ class DualCooLoopCloser:
         except Exception as e:
             logger.debug("dual_coo_loop_events insert: %s", e)
 
+    def _watermark_get(self, name: str) -> float:
+        """Redis watermark (unix ts) for incremental cycles."""
+        try:
+            from app.websocket.cli_dual_coo import _env, _prefix, _redis
+
+            c = _redis()
+            if not c:
+                return 0.0
+            raw = c.get(f"{_prefix()}:{_env()}:cli:loop_wm:{name}")
+            return float(raw) if raw else 0.0
+        except Exception:
+            return 0.0
+
+    def _watermark_set(self, name: str, ts: float) -> None:
+        try:
+            from app.websocket.cli_dual_coo import _env, _prefix, _redis
+
+            c = _redis()
+            if c:
+                c.setex(
+                    f"{_prefix()}:{_env()}:cli:loop_wm:{name}",
+                    14 * 86400,
+                    str(ts),
+                )
+        except Exception:
+            pass
+
     # ── 1) Coach-label → crystal feedback ───────────────────────────────
     async def _cycle_coach_labels(self) -> Dict[str, Any]:
         if not self.db_pool:
@@ -126,24 +155,34 @@ class DualCooLoopCloser:
         n = 0
         try:
             from app.websocket.crystal_recall_bridge import crystallize_coach_observation
-            from app.websocket.cli_dual_coo import RISK_RED, RISK_YELLOW, enqueue_ceo
+            from app.websocket.cli_dual_coo import RISK_RED, enqueue_ceo
 
+            # Incremental: only rows newer than watermark (fallback: 2× poll window)
+            wm = self._watermark_get("coach_labels")
+            since = time.strftime(
+                "%Y-%m-%d %H:%M:%S+00",
+                time.gmtime(wm if wm > 0 else time.time() - max(600, POLL_S * 2)),
+            )
             async with self.db_pool.acquire() as conn:
                 rows = await conn.fetch(
                     """
                     SELECT coach_user_id, client_user_id, notes, clinical_hold,
                            focus_domain, pacing, updated_at
                     FROM coach_client_overrides
-                    WHERE updated_at > NOW() - INTERVAL '7 days'
+                    WHERE updated_at > $1::timestamptz
                       AND notes IS NOT NULL AND LENGTH(TRIM(notes)) > 8
-                    ORDER BY updated_at DESC
+                    ORDER BY updated_at ASC
                     LIMIT 40
-                    """
+                    """,
+                    since,
                 )
+            max_ts = wm
             for row in rows:
                 notes = (row["notes"] or "").strip()
                 if not notes:
                     continue
+                # Crystal path enqueues CEO for corrections once (new crystal only).
+                # Loop closer only surfaces clinical_hold here (avoid double-enqueue).
                 await crystallize_coach_observation(
                     self.db_pool,
                     str(row["coach_user_id"] or ""),
@@ -152,26 +191,30 @@ class DualCooLoopCloser:
                     domain="clinical",
                     observation_type="coach_override",
                 )
-                is_hold = bool(row["clinical_hold"])
-                is_corr = bool(_CORRECTION_RE.search(notes))
-                if is_hold or is_corr:
+                if bool(row["clinical_hold"]):
                     enqueue_ceo(
-                        risk=RISK_RED if is_hold else RISK_YELLOW,
-                        title=(
-                            "Coach clinical_hold override"
-                            if is_hold
-                            else "Coach correction label"
-                        ),
+                        risk=RISK_RED,
+                        title="Coach clinical_hold override",
                         detail=notes[:500],
                         origin="cloud",
+                        task_id=f"hold:{row['coach_user_id']}:{row['client_user_id']}",
                         payload={
                             "client": str(row["client_user_id"])[:80],
                             "coach": str(row["coach_user_id"])[:80],
                             "focus_domain": row["focus_domain"],
                             "pacing": row["pacing"],
                         },
+                        dedup_ttl_s=86400,
                     )
                 n += 1
+                try:
+                    ut = row["updated_at"]
+                    if ut is not None:
+                        max_ts = max(max_ts, float(ut.timestamp()))
+                except Exception:
+                    pass
+            if max_ts > wm:
+                self._watermark_set("coach_labels", max_ts)
             self._stats["coach_labels"] += n
             if n:
                 await self._log_event("coach_label", "YELLOW", f"processed={n}")
@@ -191,20 +234,43 @@ class DualCooLoopCloser:
 
             insights: List[Dict[str, Any]] = []
             async with self.db_pool.acquire() as conn:
-                # SkyEye / marketing signals
+                # Liminal presence (language_drift / field_response) — not skyeye_activity
+                try:
+                    lim = await conn.fetch(
+                        """
+                        SELECT id, agent, signal, score, detail, created_at
+                        FROM liminal_presence_analysis
+                        WHERE created_at > NOW() - INTERVAL '48 hours'
+                          AND agent IN ('language_drift', 'field_response')
+                          AND UPPER(signal) IN ('YELLOW', 'RED')
+                        ORDER BY created_at DESC
+                        LIMIT 15
+                        """
+                    )
+                    for r in lim:
+                        insights.append({
+                            "source": "skyeye",
+                            "client_user_id": "broadcast",
+                            "title": f"Liminal {r['agent']}: {r['signal']}",
+                            "body": (
+                                f"score={r['score']} at {r['created_at']}. "
+                                f"{str(r['detail'] or '')[:1200]}"
+                            ),
+                            "dedupe_key": f"liminal:{r['id']}",
+                        })
+                except Exception as e:
+                    logger.debug("liminal insight pull: %s", e)
+
+                # Voice correction events (real skyeye_activity type)
                 try:
                     sky = await conn.fetch(
                         """
-                        SELECT type, content, created_at
+                        SELECT id, type, content, created_at
                         FROM skyeye_activity
                         WHERE created_at > NOW() - INTERVAL '48 hours'
-                          AND type IN (
-                              'voice_correction_applied', 'language_drift',
-                              'field_response', 'marketing_insight',
-                              'insight_accumulator'
-                          )
+                          AND type = 'voice_correction_applied'
                         ORDER BY created_at DESC
-                        LIMIT 15
+                        LIMIT 10
                         """
                     )
                     for r in sky:
@@ -213,68 +279,109 @@ class DualCooLoopCloser:
                             "client_user_id": "broadcast",
                             "title": f"SkyEye: {r['type']}",
                             "body": str(r["content"] or "")[:1500],
+                            "dedupe_key": f"skyeye:{r['id']}",
                         })
                 except Exception as e:
                     logger.debug("skyeye insight pull: %s", e)
 
-                # Nevedal / C_emo weather
+                # Nevedal family weather (actual schema: family-level snapshots)
                 try:
                     nev = await conn.fetch(
                         """
-                        SELECT user_id::text AS uid, weather_type, intensity, recorded_at
+                        SELECT id, family_id, sanctuary_id, system_coherence,
+                               system_volatility, cee_window_open, isolated_member,
+                               created_at
                         FROM emotional_weather_snapshots
-                        WHERE recorded_at > NOW() - INTERVAL '48 hours'
-                        ORDER BY recorded_at DESC
-                        LIMIT 20
+                        WHERE created_at > NOW() - INTERVAL '48 hours'
+                        ORDER BY created_at DESC
+                        LIMIT 15
                         """
                     )
                     for r in nev:
                         insights.append({
                             "source": "nevedal",
-                            "client_user_id": str(r["uid"] or "unknown"),
-                            "title": f"Emotional weather: {r['weather_type']}",
-                            "body": (
-                                f"intensity={r['intensity']} at {r['recorded_at']}. "
-                                "Use as pre-session orientation; do not diagnose from this alone."
+                            "client_user_id": "broadcast",
+                            "title": (
+                                f"Family weather fam={str(r['family_id'] or '')[:12]} "
+                                f"C={float(r['system_coherence'] or 0):.2f}"
                             ),
+                            "body": (
+                                f"sanctuary={r['sanctuary_id']} volatility="
+                                f"{r['system_volatility']} cee_open={r['cee_window_open']} "
+                                f"isolated={r['isolated_member']} at {r['created_at']}. "
+                                "Pre-session orientation only; do not diagnose from this alone."
+                            ),
+                            "dedupe_key": f"weather:{r['id']}",
                         })
                 except Exception as e:
                     logger.debug("nevedal insight pull: %s", e)
 
-                # PMB shame/crisis signals (table may vary)
+                # PMB report requests — never scan skyeye for '%shame%' / '%pmb%' audits
                 try:
                     pmb = await conn.fetch(
                         """
-                        SELECT id::text AS rid, content, created_at
-                        FROM skyeye_activity
-                        WHERE created_at > NOW() - INTERVAL '72 hours'
-                          AND (type ILIKE '%pmb%' OR content ILIKE '%shame%' OR type = 'pmb_report')
-                        ORDER BY created_at DESC
+                        SELECT id, client_username, client_hardware_id, urgency,
+                               urgency_reason, status, requested_at
+                        FROM pmb_report_requests
+                        WHERE requested_at > NOW() - INTERVAL '72 hours'
+                          AND (
+                              UPPER(COALESCE(urgency, '')) IN ('HIGH', 'CRITICAL', 'URGENT')
+                              OR status IN ('pending', 'requested', 'in_review')
+                          )
+                        ORDER BY requested_at DESC
                         LIMIT 10
                         """
                     )
                     for r in pmb:
+                        client_ref = (
+                            str(r["client_hardware_id"] or "")
+                            or str(r["client_username"] or "")
+                            or "broadcast"
+                        )
                         insights.append({
                             "source": "pmb",
-                            "client_user_id": "broadcast",
-                            "title": "PMB / shame-risk signal",
-                            "body": str(r["content"] or "")[:1500],
+                            "client_user_id": client_ref[:200],
+                            "title": (
+                                f"PMB report {r['status']}: "
+                                f"{r['client_username'] or 'client'}"
+                            ),
+                            "body": (
+                                f"urgency={r['urgency']} reason="
+                                f"{str(r['urgency_reason'] or '')[:400]} "
+                                f"requested_at={r['requested_at']}"
+                            ),
+                            "dedupe_key": f"pmb:{r['id']}",
                         })
                 except Exception as e:
                     logger.debug("pmb insight pull: %s", e)
 
                 for item in insights[:25]:
+                    dkey = str(item.get("dedupe_key") or item["title"])[:120]
                     exists = await conn.fetchval(
                         """
                         SELECT 1 FROM coach_insight_briefs
+                        WHERE metadata->>'dedupe_key' = $1
+                          AND created_at > NOW() - INTERVAL '36 hours'
+                        LIMIT 1
+                        """,
+                        dkey,
+                    )
+                    if exists:
+                        continue
+                    # Fallback title+source+body prefix for older rows without dedupe_key
+                    exists2 = await conn.fetchval(
+                        """
+                        SELECT 1 FROM coach_insight_briefs
                         WHERE source = $1 AND title = $2
+                          AND LEFT(COALESCE(body, ''), 80) = LEFT($3::text, 80)
                           AND created_at > NOW() - INTERVAL '36 hours'
                         LIMIT 1
                         """,
                         item["source"],
                         item["title"][:300],
+                        item["body"][:80],
                     )
-                    if exists:
+                    if exists2:
                         continue
                     task_id = ""
                     if task_bus_enabled():
@@ -297,7 +404,10 @@ class DualCooLoopCloser:
                         item["title"][:300],
                         item["body"][:4000],
                         task_id,
-                        json.dumps({"cycle": self._cycles}, default=str),
+                        json.dumps(
+                            {"cycle": self._cycles, "dedupe_key": dkey},
+                            default=str,
+                        ),
                     )
                     created += 1
 
@@ -305,9 +415,10 @@ class DualCooLoopCloser:
                 enqueue_ceo(
                     risk=RISK_YELLOW,
                     title=f"{created} coach insight briefs queued",
-                    detail="PMB/Nevedal/SkyEye → coach_insight_briefs",
+                    detail="PMB/Nevedal/Liminal → coach_insight_briefs",
                     origin="cloud",
                     payload={"count": created},
+                    dedup_ttl_s=1800,
                 )
                 await self._log_event("insight_route", "YELLOW", f"created={created}")
             self._stats["briefs"] += created
@@ -383,13 +494,13 @@ class DualCooLoopCloser:
         proposed = 0
         swept = 0
         try:
-            from app.services.patent_claim_guardian import (
-                propose_claim_tag,
-                sweep_patent_crystals,
+            from app.services.google_patents_ingest import (
+                ingest_patent_crystal_sweep,
+                portfolio_coverage_seed,
             )
+            from app.services.patent_claim_guardian import sweep_patent_crystals
 
             proposed = await sweep_patent_crystals(self.db_pool, limit=25)
-            # Google Patents-style search via SecureSearchProxy (best-effort)
             async with self.db_pool.acquire() as conn:
                 crystals = await conn.fetch(
                     """
@@ -402,77 +513,14 @@ class DualCooLoopCloser:
                     """
                 )
             for row in crystals:
-                q = f"site:patents.google.com {(row['snippet'] or '')[:80]}"
-                hits: List[Dict[str, Any]] = []
-                try:
-                    from app.services.search_proxy import SecureSearchProxy
-
-                    _data = os.getenv("DATA_DIR", "/tmp/nate_prior_art")
-                    os.makedirs(_data, exist_ok=True)
-                    proxy = SecureSearchProxy(data_dir=_data)
-                    result = await proxy.execute_search(
-                        q, coach_id="dual_coo_prior_art", num_results=3,
-                    )
-                    if isinstance(result, dict):
-                        hits = list(result.get("results") or [])[:3]
-                except Exception as se:
-                    logger.debug("prior_art search: %s", se)
-                async with self.db_pool.acquire() as conn:
-                    await conn.execute(
-                        """
-                        INSERT INTO prior_art_sweep_log
-                            (query_text, crystal_id, hits_json, status, risk_class)
-                        VALUES ($1, $2, $3::jsonb, 'proposed', 'YELLOW')
-                        """,
-                        q[:500],
-                        int(row["id"]),
-                        json.dumps(hits, default=str)[:8000],
-                    )
-                swept += 1
-                if hits:
-                    from app.websocket.cli_dual_coo import RISK_YELLOW, enqueue_ceo
-
-                    enqueue_ceo(
-                        risk=RISK_YELLOW,
-                        title=f"Prior-art hits for crystal {row['id']}",
-                        detail=q[:300],
-                        origin="cloud",
-                        payload={"crystal_id": int(row["id"]), "hits": len(hits)},
-                    )
-
-            # Seed additional claim tags from known patent files if map thin
-            async with self.db_pool.acquire() as conn:
-                nmap = await conn.fetchval("SELECT COUNT(*) FROM patent_claim_map")
-            if int(nmap or 0) < 12:
-                extras = [
-                    ("provisional_6_odpe", "claim_resonance",
-                     "backend/app/services/odpe_engine.py", "ODPEEngine"),
-                    ("provisional_7_liminal", "claim_liminal_resolve",
-                     "backend/app/services/language_drift_monitor.py", "LanguageDriftMonitor"),
-                    ("provisional_8_voice", "claim_voice_pipeline",
-                     "backend/app/services/twilio_grok_xtts_pipeline.py", "handle_media_stream"),
-                    ("provisional_9_neuro", "claim_neural_mirror",
-                     "backend/app/services/neural_mirror.py", "NeuralMirrorSession"),
-                    ("provisional_11_mirror", "claim_eeg_fingerprint",
-                     "backend/app/services/neural_mirror.py", "NeuralMirrorSession"),
-                    ("provisional_5_crystal", "claim_decay",
-                     "backend/app/services/nate_memory_crystallizer.py", "_decay_cycle"),
-                    ("provisional_3_visual", "claim_visual_biometrics",
-                     "backend/app/services/nevedal_engine.py", "VoiceBiometricExtractor"),
-                    ("foundation_qec", "claim_c_emo",
-                     "backend/app/services/nevedal_engine.py", "compute_emotional_coherence"),
-                ]
-                for fam, cref, path, fn in extras:
-                    await propose_claim_tag(
-                        self.db_pool,
-                        family_id=fam,
-                        claim_ref=cref,
-                        code_path=path,
-                        function_name=fn,
-                        claim_text=f"Auto-proposed from portfolio coverage: {fam}",
-                        proposed_by="prior_art_sweep",
-                    )
-                    proposed += 1
+                r = await ingest_patent_crystal_sweep(
+                    self.db_pool,
+                    crystal_id=int(row["id"]),
+                    snippet=str(row["snippet"] or ""),
+                )
+                if r.get("status") == "ok":
+                    swept += 1
+            proposed += await portfolio_coverage_seed(self.db_pool)
 
             self._stats["prior_art"] += proposed + swept
             await self._log_event(
@@ -516,10 +564,82 @@ class DualCooLoopCloser:
                 detail=detail,
                 origin="cloud",
                 payload={"sandbox_only": True},
+                dedup_ttl_s=12 * 3600,
             )
             await self._log_event("brief_refine", "YELLOW", detail[:500])
             self._stats["second_order"] += 1
             return {"status": "ok"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)[:200]}
+
+    async def _probe_mac_agent_and_beat(self) -> Dict[str, Any]:
+        """If Mac agent HTTP health is up, write Redis Queen beat for Mac."""
+        url = (os.getenv("MAC_AGENT_URL") or "").strip()
+        token = (os.getenv("MAC_AGENT_TOKEN") or "").strip()
+        if not url:
+            return {"probed": False, "reason": "MAC_AGENT_URL empty"}
+        try:
+            import aiohttp
+            from app.websocket.cli_dual_coo import beat_queen
+
+            headers = {"Authorization": f"Bearer {token}"} if token else {}
+            timeout = aiohttp.ClientTimeout(total=5)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(
+                    f"{url.rstrip('/')}/health", headers=headers,
+                ) as resp:
+                    if resp.status != 200:
+                        return {"probed": True, "alive": False, "code": resp.status}
+            beat_queen("mac", meta={"via": "cloud_probe", "cycle": self._cycles})
+            return {"probed": True, "alive": True, "beat": True}
+        except Exception as e:
+            return {"probed": True, "alive": False, "error": str(e)[:200]}
+
+    async def _cycle_attribution_density(self) -> Dict[str, Any]:
+        """Report crystal attribution coverage (ENABLE_CRYSTAL_ATTRIBUTION path)."""
+        if not self.db_pool:
+            return {"status": "skipped"}
+        try:
+            async with self.db_pool.acquire() as conn:
+                total = await conn.fetchval(
+                    """
+                    SELECT COUNT(*) FROM conversation_history
+                    WHERE created_at > NOW() - INTERVAL '7 days'
+                    """
+                )
+                attributed = await conn.fetchval(
+                    """
+                    SELECT COUNT(*) FROM conversation_history
+                    WHERE created_at > NOW() - INTERVAL '7 days'
+                      AND metadata ? 'crystal_ids'
+                      AND jsonb_typeof(metadata->'crystal_ids') = 'array'
+                      AND jsonb_array_length(metadata->'crystal_ids') > 0
+                    """
+                )
+            t = int(total or 0)
+            a = int(attributed or 0)
+            pct = round(100.0 * a / t, 1) if t else 0.0
+            await self._log_event(
+                "attribution_density", "GREEN",
+                f"attributed={a}/{t} ({pct}%)",
+                {"attributed": a, "total": t, "pct": pct},
+            )
+            if t >= 20 and pct < 5.0 and self._cycles % 12 == 0:
+                from app.websocket.cli_dual_coo import RISK_YELLOW, enqueue_ceo
+
+                enqueue_ceo(
+                    risk=RISK_YELLOW,
+                    title="Crystal attribution density low",
+                    detail=(
+                        f"Only {pct}% of last-7d conversation_history rows carry "
+                        "metadata.crystal_ids — confirm ENABLE_CRYSTAL_ATTRIBUTION "
+                        "on bridge+backend and recall wiring."
+                    ),
+                    origin="cloud",
+                    payload={"attributed": a, "total": t, "pct": pct},
+                    dedup_ttl_s=24 * 3600,
+                )
+            return {"status": "ok", "attributed": a, "total": t, "pct": pct}
         except Exception as e:
             return {"status": "error", "error": str(e)[:200]}
 
@@ -533,21 +653,45 @@ class DualCooLoopCloser:
                 set_cloud_sole_failover,
             )
 
+            # Cloud probes Mac agent and writes Mac Queen beat when reachable
+            probe = await self._probe_mac_agent_and_beat()
             peer = peer_queen_alive("cloud", max_age_s=300.0)
             if peer.get("alive"):
                 set_cloud_sole_failover(False)
-                return {"status": "ok", "mode": "dual", "peer": peer}
+                return {
+                    "status": "ok", "mode": "dual", "peer": peer, "probe": probe,
+                }
+            # no_beat = Mac never online this window (optional Queen) — soft sole
+            detail = str(peer.get("detail") or peer.get("error") or "")
+            if detail == "no_beat" and not probe.get("alive"):
+                set_cloud_sole_failover(True)
+                await self._log_event(
+                    "peer_failover", "YELLOW",
+                    "mac_optional_no_beat", {"peer": peer, "probe": probe},
+                )
+                return {
+                    "status": "ok",
+                    "mode": "cloud_sole_optional",
+                    "peer": peer,
+                    "probe": probe,
+                }
             set_cloud_sole_failover(True)
-            if self._cycles % 3 == 0:
+            if self._cycles % 6 == 0:
                 enqueue_ceo(
                     risk=RISK_YELLOW,
                     title="Cloud sole-COO failover active (Mac heartbeat stale)",
-                    detail=str(peer)[:500],
+                    detail=str({"peer": peer, "probe": probe})[:500],
                     origin="cloud",
-                    payload=peer,
+                    payload={"peer": peer, "probe": probe},
+                    dedup_ttl_s=6 * 3600,
                 )
                 self._stats["failover"] += 1
-            await self._log_event("peer_failover", "YELLOW", str(peer)[:500], peer)
-            return {"status": "ok", "mode": "cloud_sole", "peer": peer}
+            await self._log_event(
+                "peer_failover", "YELLOW", str(peer)[:500],
+                {"peer": peer, "probe": probe},
+            )
+            return {
+                "status": "ok", "mode": "cloud_sole", "peer": peer, "probe": probe,
+            }
         except Exception as e:
             return {"status": "error", "error": str(e)[:200]}

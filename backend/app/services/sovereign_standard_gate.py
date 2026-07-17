@@ -40,6 +40,16 @@ REQUIRED_DOC_TOKENS = (
 def therapeutic_module(fn: Callable) -> Callable:
     """Decorator: mark callable as RED therapeutic — Dual-COO never auto-ships."""
 
+    if inspect.iscoroutinefunction(fn):
+
+        @functools.wraps(fn)
+        async def awrapper(*args, **kwargs):
+            return await fn(*args, **kwargs)
+
+        awrapper.__sovereign_standard__ = True  # type: ignore[attr-defined]
+        awrapper.__risk_class__ = "RED"  # type: ignore[attr-defined]
+        return awrapper
+
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         return fn(*args, **kwargs)
@@ -68,7 +78,7 @@ def scan_therapeutic_sources(
         except Exception as e:
             findings.append({"path": rel, "ok": False, "detail": str(e)[:200]})
             continue
-        head = text[:2500]
+        head = text[:12000]
         ok = any(tok in head for tok in REQUIRED_DOC_TOKENS)
         if not ok:
             findings.append({

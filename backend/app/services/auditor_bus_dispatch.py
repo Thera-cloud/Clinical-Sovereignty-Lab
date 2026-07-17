@@ -12,12 +12,39 @@ from typing import Any, Dict, List
 
 logger = logging.getLogger("auditor_bus_dispatch")
 
-_RED_CATEGORIES = frozenset({"AI_UNREACHABLE", "PREFLIGHT_FAIL", "DEFENSE_DEGRADED"})
-_YELLOW_CATEGORIES = frozenset({"AUTH_FAILURE", "GATE_BYPASS", "WS_TIMEOUT"})
+# All Trust Enforcer remediation categories must map — full Chief of Staff coverage
+_RED_CATEGORIES = frozenset({
+    "AI_UNREACHABLE",
+    "PREFLIGHT_FAIL",
+    "DEFENSE_DEGRADED",
+})
+_YELLOW_CATEGORIES = frozenset({
+    "AUTH_FAILURE",
+    "GATE_BYPASS",
+    "WS_TIMEOUT",
+    "ENDPOINT_DOWN",
+    "DATA_PIPELINE",
+    "L2_ISSUE",
+})
+_ALL_BUS_CATEGORIES = _RED_CATEGORIES | _YELLOW_CATEGORIES | frozenset({
+    "ENDPOINT_DOWN",
+    "DATA_PIPELINE",
+    "L2_ISSUE",
+    "AUTH_FAILURE",
+    "GATE_BYPASS",
+    "WS_TIMEOUT",
+    "AI_UNREACHABLE",
+    "PREFLIGHT_FAIL",
+    "DEFENSE_DEGRADED",
+})
 
 
 def dispatch_enforcement_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Publish ops_fix bus tasks for each enforcement action (best-effort)."""
+    """Publish ops_fix bus tasks for each enforcement action (best-effort).
+
+    Covers all REMEDIATION_CATEGORIES from trust_enforcer — every auditor
+    failure that becomes an enforcement_action is bus-dispatched.
+    """
     if not actions:
         return {"status": "ok", "published": 0}
     try:
@@ -35,7 +62,9 @@ def dispatch_enforcement_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any
 
     published = 0
     for action in actions[:40]:
-        cat = str(action.get("category") or "ENDPOINT_DOWN")
+        cat = str(action.get("category") or "ENDPOINT_DOWN").upper()
+        if cat not in _ALL_BUS_CATEGORIES:
+            cat = "ENDPOINT_DOWN"
         auditor = str(action.get("auditor") or "unknown")
         detail = str(action.get("detail") or "")[:800]
         notes = f"auditor_ops_fix category={cat} auditor={auditor} {detail}"
@@ -51,14 +80,16 @@ def dispatch_enforcement_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any
             )
             if pub.get("status") == "ok":
                 published += 1
+            task_id = str((pub.get("task") or {}).get("task_id") or "")
             if cat in _RED_CATEGORIES:
                 enqueue_ceo(
                     risk=RISK_RED,
                     title=f"Trust RED: {auditor} ({cat})",
                     detail=detail,
                     origin="cloud",
-                    task_id=str((pub.get("task") or {}).get("task_id") or ""),
+                    task_id=task_id,
                     payload=action,
+                    dedup_ttl_s=6 * 3600,
                 )
             elif cat in _YELLOW_CATEGORIES:
                 enqueue_ceo(
@@ -66,10 +97,11 @@ def dispatch_enforcement_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any
                     title=f"Trust YELLOW: {auditor} ({cat})",
                     detail=detail,
                     origin="cloud",
-                    task_id=str((pub.get("task") or {}).get("task_id") or ""),
+                    task_id=task_id,
                     payload=action,
+                    dedup_ttl_s=6 * 3600,
                 )
         except Exception as e:
             logger.warning("auditor_bus_dispatch: %s", e)
 
-    return {"status": "ok", "published": published}
+    return {"status": "ok", "published": published, "categories_covered": sorted(_ALL_BUS_CATEGORIES)}

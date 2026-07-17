@@ -9,6 +9,18 @@ export DATABASE_URL="${DATABASE_URL:-}"
 export REDIS_URL="${REDIS_URL:-}"
 export PYTHONPATH="${PYTHONPATH:-${ROOT}/backend}"
 
+# QUANTUM-CRYSTAL-ARCH — Sovereign Standard CI decorator / docstring gate
+python3 -c "
+from pathlib import Path
+from app.services.sovereign_standard_gate import ci_gate_pass
+import sys
+root = Path(r'''${ROOT}/backend''')
+if not ci_gate_pass(root):
+    print('SOVEREIGN STANDARD GATE FAILED — therapeutic modules missing governance markers')
+    sys.exit(1)
+print('Sovereign Standard gate: PASS')
+"
+
 exec python3 -m pytest "${ROOT}/backend/tests/" -v --tb=short \
   --ignore="${ROOT}/backend/tests/test_integration.py" \
   --ignore="${ROOT}/backend/tests/test_stripe_billing_flows.py" \

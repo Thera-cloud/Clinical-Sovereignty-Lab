@@ -395,16 +395,35 @@ async def get_presession_brief(client_id: str, request: Request, user=Depends(ge
 
             set_rls_admin()
             async with db_pool.acquire() as conn:
+                # Match hardware_id OR username OR users.id — briefs store any of these
+                _id_row = await conn.fetchrow(
+                    """
+                    SELECT id::text AS uid, username, hardware_id
+                    FROM users
+                    WHERE hardware_id = $1 OR username = $1 OR id::text = $1
+                    LIMIT 1
+                    """,
+                    client_id,
+                )
+                _match_ids = [client_id]
+                if _id_row:
+                    for _k in ("uid", "username", "hardware_id"):
+                        _v = _id_row.get(_k)
+                        if _v and str(_v) not in _match_ids:
+                            _match_ids.append(str(_v))
                 _ibriefs = await conn.fetch(
                     """
-                    SELECT id, source, title, body, created_at
+                    SELECT id, source, title, body, created_at, client_user_id
                     FROM coach_insight_briefs
                     WHERE status = 'queued'
-                      AND (client_user_id = $1 OR client_user_id = 'broadcast')
+                      AND (
+                          client_user_id = 'broadcast'
+                          OR client_user_id = ANY($1::text[])
+                      )
                     ORDER BY created_at DESC
                     LIMIT 8
                     """,
-                    client_id,
+                    _match_ids,
                 )
                 if _ibriefs:
                     brief_payload["dual_coo_insights"] = [
@@ -418,14 +437,22 @@ async def get_presession_brief(client_id: str, request: Request, user=Depends(ge
                         }
                         for r in _ibriefs
                     ]
-                    await conn.execute(
-                        """
-                        UPDATE coach_insight_briefs
-                        SET status = 'delivered', delivered_at = NOW()
-                        WHERE id = ANY($1::bigint[])
-                        """,
-                        [r["id"] for r in _ibriefs],
-                    )
+                    # Client-targeted briefs: mark delivered. Broadcast stays queued
+                    # so other coaches still see them (first-viewer must not consume).
+                    _targeted = [
+                        r["id"]
+                        for r in _ibriefs
+                        if str(r["client_user_id"] or "") != "broadcast"
+                    ]
+                    if _targeted:
+                        await conn.execute(
+                            """
+                            UPDATE coach_insight_briefs
+                            SET status = 'delivered', delivered_at = NOW()
+                            WHERE id = ANY($1::bigint[])
+                            """,
+                            _targeted,
+                        )
         except Exception as _ib_err:
             _logger.debug("presession dual_coo insights: %s", _ib_err)
     return brief_payload
@@ -938,3 +965,83 @@ async def coach_nate_chat(
         context=ctx,
         mode_override=mode,
     )
+
+
+class ClientOverrideBody(BaseModel):
+    client_user_id: str
+    notes: Optional[str] = None
+    focus_domain: Optional[str] = None
+    pacing: Optional[str] = None
+    clinical_hold: Optional[bool] = None
+    override_reason: Optional[str] = None
+
+
+@router.post("/client-override")
+async def set_client_override_rest(
+    body: ClientOverrideBody,
+    request: Request,
+    user=Depends(get_current_user_id),
+):
+    """REST write path for coach_client_overrides → Dual-COO coach-label loop.
+
+    Complements WebSocket coach_set_client_override so labels can land without
+    a live bridge session. Crystallizes notes into coach observation crystals.
+    """
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        raise HTTPException(503, "DATABASE_UNAVAILABLE")
+    coach_ref = user if isinstance(user, str) else str(
+        (user or {}).get("hardware_id")
+        or (user or {}).get("username")
+        or (user or {}).get("user_id")
+        or ""
+    )
+    client_ref = (body.client_user_id or "").strip()
+    if not coach_ref or not client_ref:
+        raise HTTPException(400, "coach and client_user_id required")
+    notes = (body.notes or "").strip() or None
+    if notes:
+        notes = notes[:8000]
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO coach_client_overrides (
+                coach_user_id, client_user_id, focus_domain, pacing,
+                clinical_hold, notes, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            ON CONFLICT (coach_user_id, client_user_id) DO UPDATE SET
+                focus_domain = COALESCE(EXCLUDED.focus_domain, coach_client_overrides.focus_domain),
+                pacing = COALESCE(EXCLUDED.pacing, coach_client_overrides.pacing),
+                clinical_hold = COALESCE(EXCLUDED.clinical_hold, coach_client_overrides.clinical_hold),
+                notes = COALESCE(EXCLUDED.notes, coach_client_overrides.notes),
+                updated_at = NOW()
+            """,
+            coach_ref,
+            client_ref,
+            body.focus_domain,
+            body.pacing,
+            body.clinical_hold,
+            notes,
+        )
+    crystal_hash = None
+    if notes and len(notes) > 8:
+        try:
+            from app.websocket.crystal_recall_bridge import crystallize_coach_observation
+
+            crystal_hash = await crystallize_coach_observation(
+                db_pool,
+                coach_ref,
+                client_ref,
+                notes,
+                domain="clinical",
+                observation_type="coach_override",
+            )
+        except Exception as e:
+            _logger.warning("client-override crystallize: %s", e)
+    return {
+        "status": "ok",
+        "coach_user_id": coach_ref,
+        "client_user_id": client_ref,
+        "crystal_hash": crystal_hash,
+        "reason": (body.override_reason or "")[:200],
+    }

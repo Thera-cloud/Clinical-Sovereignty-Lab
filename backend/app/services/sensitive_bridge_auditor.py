@@ -1,3 +1,4 @@
+# QUANTUM-CRYSTAL-ARCH — Sovereign Standard clinical RED gate.
 """LITTLE NATE — Sensitive Clinical Bridge Auditor (auditor #29)
 
 Verifies the v1.3 Sensitive Clinical Bridge contract surface (orchestrator,
@@ -61,6 +62,8 @@ Each entry returned by audit() conforms to:
 
 The aggregator at the end of audit() rolls up to a single boolean health
 verdict consumed by the trust enforcer.
+
+QUANTUM-CRYSTAL-ARCH — Sovereign Standard clinical RED gate.
 """
 
 from __future__ import annotations

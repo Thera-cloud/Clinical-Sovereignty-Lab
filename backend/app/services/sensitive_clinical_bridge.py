@@ -1,3 +1,4 @@
+# QUANTUM-CRYSTAL-ARCH — Sovereign Standard clinical RED gate.
 """Sensitive Clinical Bridge Orchestrator (Phase 4a, plan v1.3).
 
 This module is the ONLY new module in Phase 4's wiring step. The five sealed
@@ -116,6 +117,8 @@ clean and lets us collect telemetry under shadow without ever modifying
 this module to add mode-conditional logic.
 
 ═══════════════════════════════════════════════════════════════════════════
+
+QUANTUM-CRYSTAL-ARCH — Sovereign Standard clinical RED gate.
 """
 from __future__ import annotations
 

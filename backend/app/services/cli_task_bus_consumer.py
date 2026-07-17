@@ -123,14 +123,21 @@ class CliTaskBusConsumer:
         if dual_coo_enabled():
             beat_queen("cloud", meta={"chief": True, "cycle": self._cycles})
             peer = peer_queen_alive("cloud")
-            if not peer.get("alive") and self._cycles % 10 == 0:
-                enqueue_ceo(
+            # Alert only when Mac had a beat that went stale — not perpetual no_beat
+            if (
+                not peer.get("alive")
+                and peer.get("detail") != "no_beat"
+                and self._cycles % 20 == 0
+            ):
+                r = enqueue_ceo(
                     risk=RISK_YELLOW,
                     title="Peer Queen (CLI-Mac) heartbeat stale",
                     detail=str(peer)[:500],
                     origin="cloud",
+                    dedup_ttl_s=6 * 3600,
                 )
-                self._ceo_routed += 1
+                if r.get("status") == "ok":
+                    self._ceo_routed += 1
 
         prefer = _CLAIM_KINDS[self._cycles % len(_CLAIM_KINDS)]
         claimed = await asyncio.to_thread(
@@ -246,16 +253,19 @@ class CliTaskBusConsumer:
                 await propose_red_clinical_to_ceo(db)
                 pending = await list_pending_for_ceo(db, limit=20)
                 if pending:
-                    enqueue_ceo(
+                    r = enqueue_ceo(
                         risk=RISK_YELLOW,
                         title=f"{len(pending)} patent claim tags awaiting CEO",
                         detail="; ".join(
                             f"{p.get('family_id')}/{p.get('claim_ref')}" for p in pending[:5]
                         ),
                         origin="cloud",
+                        task_id="patent_tags_pending",
                         payload={"count": len(pending)},
+                        dedup_ttl_s=6 * 3600,
                     )
-                    self._ceo_routed += 1
+                    if r.get("status") == "ok":
+                        self._ceo_routed += 1
         except Exception as e:
             logger.debug("CEO queue surface: %s", e)
 
@@ -266,9 +276,33 @@ class CliTaskBusConsumer:
             "detail": f"ops_dispatch: {notes[:400]}",
             "severity": "info",
         }]
-        # Soft auto-ack for known remediable categories
-        passed = "ok_no_leaks" in notes.lower() or "baseline" not in notes.lower()
-        if "ENDPOINT_DOWN" in notes or "PREFLIGHT" in notes:
+        # Soft auto-ack only for explicit clean outcomes — never treat
+        # "baseline absent from notes" as a pass (that auto-passed AUTH/DATA failures).
+        notes_l = notes.lower()
+        clean_markers = (
+            "ok_no_leaks",
+            "ok:",
+            "trusted",
+            "all clear",
+            "no findings",
+        )
+        fail_markers = (
+            "endpoint_down",
+            "preflight",
+            "auth_failure",
+            "data_pipeline",
+            "ai_unreachable",
+            "defense_degraded",
+            "gate_bypass",
+            "ws_timeout",
+            "failed",
+            "error",
+            "mismatch",
+        )
+        passed = any(m in notes_l for m in clean_markers) and not any(
+            m in notes_l for m in fail_markers
+        )
+        if "ENDPOINT_DOWN" in notes or "PREFLIGHT" in notes or not passed:
             passed = False
             findings.append({
                 "detail": "requires human/ops follow-up — not auto-remediated",

@@ -797,6 +797,41 @@ async def process_manage(req: ProcessManageRequest, request: Request):
         raise HTTPException(400, f"Unknown action: {req.action}. Use start, stop, restart, or status.")
 
 
+# ── Dual-COO Mac Queen heartbeat ──
+
+QUEEN_BEAT_INTERVAL_S = int(os.getenv("MAC_QUEEN_BEAT_INTERVAL_S", "60"))
+
+
+async def _dual_coo_queen_beat_loop():
+    """Background Mac Queen Redis heartbeat (independent of CLI chat sessions).
+
+    Writes beat_queen('mac') when REDIS_URL is reachable. Cloud also probes
+    MAC_AGENT_URL /health and can write the same beat — dual path.
+    """
+    await asyncio.sleep(5)
+    while True:
+        try:
+            # Prefer importing from workspace backend package when available
+            sys.path.insert(0, os.path.join(MAC_AGENT_WORKSPACE, "backend"))
+            from app.websocket.cli_dual_coo import beat_queen, dual_coo_enabled
+
+            if dual_coo_enabled():
+                ok = beat_queen(
+                    "mac",
+                    meta={
+                        "via": "mac_agent_loop",
+                        "uptime_s": round(time.time() - _start_time, 1),
+                    },
+                )
+                if ok:
+                    logger.debug("Dual-COO Mac Queen beat ok")
+                else:
+                    logger.debug("Dual-COO Mac Queen beat skipped (redis?)")
+        except Exception as e:
+            logger.debug("Dual-COO Mac Queen beat: %s", e)
+        await asyncio.sleep(max(30, QUEEN_BEAT_INTERVAL_S))
+
+
 # ── Lifecycle ──
 
 @app.on_event("startup")
@@ -804,8 +839,10 @@ async def startup():
     os.makedirs(DATA_DIR, exist_ok=True)
     asyncio.create_task(_watchdog_loop())
     asyncio.create_task(_write_alive_file())
+    asyncio.create_task(_dual_coo_queen_beat_loop())
     logger.info("nate-mac-agent started on 127.0.0.1:%d", MAC_AGENT_PORT)
     logger.info("Workspace: %s", MAC_AGENT_WORKSPACE)
+    logger.info("Dual-COO Mac Queen beat loop interval=%ss", QUEEN_BEAT_INTERVAL_S)
 
 
 if __name__ == "__main__":

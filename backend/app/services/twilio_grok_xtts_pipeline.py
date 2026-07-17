@@ -17,6 +17,8 @@ Env:
   AZURE_OPENAI_ENDPOINT    — Azure Foundry endpoint
   AZURE_OPENAI_DEPLOYMENT  — Grok model deployment (default gpt-realtime)
   TWILIO_VOICE_PIPELINE    — set to azure_realtime or grok_xtts
+
+QUANTUM-CRYSTAL-ARCH — Sovereign Standard clinical RED gate.
 """
 
 from __future__ import annotations

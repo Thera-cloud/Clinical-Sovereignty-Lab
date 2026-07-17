@@ -11,6 +11,8 @@ Implements the full Nevedal Theory formula with:
 
 Master Formula:
 C_emo(t) = [β · p_ent · T₀ · e^(-d/λ)] / [γ_env + E_G^(joint)/ℏ] × exp[-(γ_env + E_G^(joint)/ℏ)t]
+
+QUANTUM-CRYSTAL-ARCH — Sovereign Standard clinical RED gate.
 """
 
 import asyncio

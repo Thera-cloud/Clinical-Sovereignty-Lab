@@ -808,12 +808,14 @@ async def crystallize_coach_observation(
                     title=f"Coach label ({observation_type})",
                     detail=text[:500],
                     origin="cloud",
+                    task_id=f"coach_label:{(ch or content_hash)[:24]}",
                     payload={
                         "client": (client_hardware_id or "")[:80],
                         "coach": coach_hw[:80],
                         "domain": domain,
                         "content_hash": (ch or "")[:64] if ch else "",
                     },
+                    dedup_ttl_s=86400,
                 )
         except Exception as _ceo_err:
             logger.debug("coach_label ceo route: %s", _ceo_err)

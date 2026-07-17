@@ -14,6 +14,8 @@ Dual-mode architecture (BLUE/GREEN):
   Crystals forged on BLUE sync to GREEN via _sync_to_production().
 
 Cycle: 30-min harvest, 6h cluster/synthesize, 6h decay scan.
+
+QUANTUM-CRYSTAL-ARCH — Sovereign Standard clinical RED gate.
 """
 
 import asyncio
