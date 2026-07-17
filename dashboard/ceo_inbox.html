@@ -99,10 +99,36 @@ a.back:hover { color: var(--gold); }
 const API = (location.hostname.includes('sovereign') || location.hostname.includes('command'))
   ? 'https://api.sovereignsanctuary.net' : (localStorage.getItem('sc_api') || 'https://api.sovereignsanctuary.net');
 
+function _ck(name) {
+  const m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]+)'));
+  return m ? decodeURIComponent(m[1]) : '';
+}
+function _recoverAuth() {
+  try {
+    const h = (location.hash || '').replace(/^#/, '');
+    const ps = new URLSearchParams(h);
+    const ht = ps.get('t');
+    if (ht) {
+      try { sessionStorage.setItem('token', decodeURIComponent(ht)); } catch (e) {}
+      try { localStorage.setItem('sc_token', decodeURIComponent(ht)); } catch (e) {}
+    }
+    const hu = ps.get('u');
+    if (hu) {
+      try { sessionStorage.setItem('username', decodeURIComponent(hu)); } catch (e) {}
+      try { localStorage.setItem('sc_username', decodeURIComponent(hu)); } catch (e) {}
+    }
+  } catch (e) {}
+  if (!sessionStorage.getItem('token')) {
+    const ct = _ck('sc_token') || localStorage.getItem('sc_token') || '';
+    if (ct) { try { sessionStorage.setItem('token', ct); } catch (e) {} }
+  }
+}
+_recoverAuth();
+
 function _token() {
   return sessionStorage.getItem('token')
     || localStorage.getItem('sc_token')
-    || (document.cookie.match(/(?:^|; )sc_token=([^;]+)/) || [])[1]
+    || _ck('sc_token')
     || '';
 }
 function _authHeaders(ct) {
@@ -111,14 +137,23 @@ function _authHeaders(ct) {
   return h;
 }
 function navBack() {
-  if (typeof navTo === 'function') navTo('command.html');
+  const t = _token();
+  const u = sessionStorage.getItem('username') || localStorage.getItem('sc_username') || '';
+  if (t) location.href = 'command.html#t=' + encodeURIComponent(t) + '&u=' + encodeURIComponent(u);
   else location.href = 'command.html';
 }
 function msg(t) { document.getElementById('msg').textContent = t || ''; }
 
 async function api(path, opts) {
+  if (!_token()) {
+    msg('Not signed in — open Sovereign Command first, then CEO Inbox.');
+    return null;
+  }
   const resp = await fetch(API + path, Object.assign({ headers: _authHeaders(opts && opts.body ? 'application/json' : null) }, opts || {}));
-  if (resp.status === 401) { console.warn('Auth issue on', path); return null; }
+  if (resp.status === 401) {
+    msg('Session expired — log in again at command.sovereignsanctuary.net');
+    return null;
+  }
   return resp.json();
 }
 
