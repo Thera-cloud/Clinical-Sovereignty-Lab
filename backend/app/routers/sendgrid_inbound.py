@@ -43,12 +43,13 @@ SENDGRID_INBOUND_SECRET = os.getenv("SENDGRID_INBOUND_SECRET", "")
 
 # Mirror of ``twilio_webhook.APPROVAL_PREFIXES`` / ``APPROVAL_SYNONYMS`` so
 # the email path recognizes the exact same vocabulary as SMS.
-_APPROVAL_PREFIXES: Tuple[str, ...] = ("APPROVE", "REJECT", "HOLD", "MODIFY", "ACK", "DISMISS")
+_APPROVAL_PREFIXES: Tuple[str, ...] = ("APPROVE", "REJECT", "HOLD", "MODIFY", "ACK", "DISMISS", "BUSY", "ALT")
 _APPROVAL_SYNONYMS = {
     "YES", "GO", "DO IT", "SHIP IT", "APPROVED",
     "WAIT", "DEFER", "LATER", "PAUSE",
     "NO", "NOPE", "DENIED", "CANCEL",
     "ACKED", "GOT IT", "SEEN",
+    "UNAVAILABLE", "RESCHEDULE",
 }
 
 # "approve", "approve+anything", "approval" all route to the approval pipeline.
@@ -269,6 +270,35 @@ async def handle_sendgrid_inbound(request: Request):
         return Response(status_code=200)
 
     db_pool = getattr(router, "_db_pool", None)
+
+    # ─── Session negotiation (mailto APPROVE/BUSY/ALT) before strategy proposals ──
+    try:
+        from app.services.session_negotiation_notify import (
+            extract_neg_id_from_text,
+            parse_neg_decision,
+            apply_coach_channel_decision,
+        )
+
+        neg_decision = parse_neg_decision(cleaned_text)
+        neg_id = extract_neg_id_from_text(subject, cleaned_text)
+        # Prefer [#neg:uuid]; else match coach's open negotiation by sender email.
+        if neg_decision and (neg_id or neg_decision in ("busy", "alt", "approve")):
+            neg_result = await apply_coach_channel_decision(
+                db_pool,
+                decision=neg_decision,
+                negotiation_id=neg_id,
+                coach_email=sender_email,
+            )
+            if neg_result.get("ok"):
+                logger.info(
+                    "SendGrid inbound: negotiation %s → %s from %s",
+                    neg_decision,
+                    neg_result.get("negotiation", {}).get("id"),
+                    sender_email,
+                )
+                return Response(status_code=200)
+    except Exception as e:
+        logger.warning("SendGrid inbound: negotiation route error: %s", e)
 
     # ─── FIX 1: dispatch on recipient + keyword ──────────────────────────
     recipient_local = _extract_local_part(recipient_raw)

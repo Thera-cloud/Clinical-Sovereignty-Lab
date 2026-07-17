@@ -125,6 +125,21 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 
 ---
 
+## Session negotiation (option 1 — Nate-mediated; coach still decides)
+
+**Flag:** `ENABLE_NATE_SESSION_NEGOTIATION=false` (default)  
+**Code:** `session_negotiation_service.py`, `session_negotiation_bridge.py`, `session_negotiation_notify.py`, migration `247_session_negotiations.sql`  
+**Flow:** client books → `pending_approval` → Nate opens negotiation → coach email+SMS (HTTPS + mailto APPROVE/BUSY/ALT) → coach decide (WS / chat / email / SMS) → client real-time + email → `accept_alt` / `reject_alt`. Alts from `coach_slot_engine` (same as client Schedule).  
+**Not:** unsupervised auto-book without coach authority.
+
+| Step | Action | Done |
+|------|--------|------|
+| N.1 | Migration 247 applied (staging then prod) | [ ] |
+| N.2 | Staging flag on + book → coach email/SMS/mailto → client update smoke | [ ] |
+| N.3 | Prod flag flip (after soak + Phase 0/1 prod) | [ ] |
+
+---
+
 ## Phase 2 — Tool executor
 
 **Flag:** `ENABLE_NATE_TOOL_EXECUTOR=false` (default)

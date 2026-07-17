@@ -194,6 +194,35 @@ async def handle_incoming_sms(request: Request):
         except Exception as e:
             print(f">>> [TWILIO_WEBHOOK] Snooze handling error: {e}")
 
+    # QUANTUM-CRYSTAL-ARCH: session negotiation SMS (APPROVE/BUSY/ALT) before strategy proposals
+    try:
+        from app.services.session_negotiation_notify import (
+            parse_neg_decision,
+            extract_neg_id_from_text,
+            apply_coach_channel_decision,
+        )
+
+        neg_decision = parse_neg_decision(Body.strip())
+        if neg_decision:
+            db_pool = getattr(router, "_db_pool", None)
+            if db_pool:
+                neg_result = await apply_coach_channel_decision(
+                    db_pool,
+                    decision=neg_decision,
+                    negotiation_id=extract_neg_id_from_text(Body),
+                    coach_phone=phone,
+                )
+                if neg_result.get("ok"):
+                    print(f">>> [TWILIO_WEBHOOK] Negotiation reply: {neg_decision}")
+                    twiml = (
+                        '<?xml version="1.0" encoding="UTF-8"?>'
+                        f'<Response><Message>Got it — {neg_decision}. '
+                        f'Your client will be updated (alts from your Schedule).</Message></Response>'
+                    )
+                    return Response(content=twiml, media_type="application/xml")
+    except Exception as e:
+        print(f">>> [TWILIO_WEBHOOK] Negotiation SMS error: {e}")
+
     # Check for approval protocol keywords (Sovereign Swarm strategy proposals)
     if keyword.startswith(APPROVAL_PREFIXES) or keyword in APPROVAL_SYNONYMS:
         try:

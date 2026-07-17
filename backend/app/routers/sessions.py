@@ -1729,6 +1729,59 @@ def _action_page(title: str, body: str, ok: bool = True) -> "HTMLResponse":
 </div></body></html>""")
 
 
+@public_router.get("/negotiation-action")
+async def negotiation_action_from_email(token: str, request: Request):
+    """
+    QUANTUM-CRYSTAL-ARCH: Coach one-click Approve / Busy / Alt from negotiation email/SMS.
+    Busy/Alt pull open times from coach_slot_engine (same as client Schedule portal).
+    """
+    from app.services.session_negotiation_notify import (
+        verify_neg_token,
+        apply_coach_channel_decision,
+    )
+
+    parsed = verify_neg_token(token or "")
+    if not parsed:
+        return _action_page(
+            "Link invalid or expired",
+            "This negotiation link is no longer valid. Reply in Coach Command or use a fresh email.",
+            ok=False,
+        )
+    neg_id, action = parsed
+    db = _get_db(request)
+    result = await apply_coach_channel_decision(
+        db, decision=action, negotiation_id=neg_id
+    )
+    if not result.get("ok"):
+        return _action_page(
+            "Could not apply",
+            f"Decision <strong>{action}</strong> failed: {result.get('error', 'unknown')}.",
+            ok=False,
+        )
+    neg = result.get("negotiation") or {}
+    alts = neg.get("alt_slots") or []
+    if action == "approve":
+        return _action_page(
+            "Session approved",
+            "Your client has been notified. The session is confirmed on the schedule.",
+        )
+    if action in ("busy", "alt") and alts:
+        preview = "<br>".join(
+            f"• {(s.get('start') if isinstance(s, dict) else s)}" for s in alts[:5]
+        )
+        return _action_page(
+            "Alternate times offered",
+            "Nate offered your client open slots from your Schedule:<br><br>" + preview,
+        )
+    if action == "busy":
+        return _action_page(
+            "Marked unavailable",
+            "No open slots were found in your Schedule window. Your client was notified.",
+            ok=False,
+        )
+    return _action_page("Updated", f"Negotiation status: <strong>{neg.get('status', '')}</strong>.")
+
+
 @public_router.get("/booking-action")
 async def booking_action_from_email(token: str, request: Request):
     """

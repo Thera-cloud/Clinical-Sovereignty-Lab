@@ -556,6 +556,46 @@ TEMPLATES = {
 </div></body></html>
 """,
     },
+    "session_negotiation_coach": {
+        "subject": "Session request from {{ client_name }} — {{ session_time }}",
+        "html": """
+<!DOCTYPE html>
+<html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
+<div style="max-width:640px;margin:auto;background:#111;border:1px solid #C9A962;border-radius:8px;padding:24px;">
+  <h2 style="color:#C9A962;margin-top:0;">Session request — Nate is mediating</h2>
+  <p><strong>{{ client_name }}</strong> requested a session for <strong>{{ session_time }}</strong>.</p>
+  <p style="color:#94a3b8;font-size:13px;">Approve, mark busy (Nate offers times from your Schedule), or propose alternate open slots.</p>
+  <p style="margin-top:24px;text-align:center;">
+    <a href="{{ approve_url }}" style="display:inline-block;background:#22C55E;color:#050505;font-weight:bold;padding:12px 20px;border-radius:6px;text-decoration:none;margin:4px;">Approve</a>
+    <a href="{{ busy_url }}" style="display:inline-block;background:#F59E0B;color:#050505;font-weight:bold;padding:12px 20px;border-radius:6px;text-decoration:none;margin:4px;">Busy — suggest open times</a>
+    <a href="{{ alt_url }}" style="display:inline-block;background:#4ECDC4;color:#050505;font-weight:bold;padding:12px 20px;border-radius:6px;text-decoration:none;margin:4px;">Propose alts</a>
+  </p>
+  <p style="margin-top:20px;color:#cbd5e1;font-size:13px;">Or reply by email (mailto):</p>
+  <p style="text-align:center;">
+    <a href="{{ mailto_approve }}" style="color:#22C55E;margin:0 8px;">mailto: APPROVE</a>
+    <a href="{{ mailto_busy }}" style="color:#F59E0B;margin:0 8px;">mailto: BUSY</a>
+    <a href="{{ mailto_alt }}" style="color:#4ECDC4;margin:0 8px;">mailto: ALT</a>
+  </p>
+  <p style="color:#64748b;font-size:12px;">Include {{ neg_token }} in the subject/body. Alternate times come from your coach availability (same as the client Schedule portal).</p>
+</div></body></html>
+""",
+    },
+    "session_negotiation_client": {
+        "subject": "Update on your session with {{ coach_name }}",
+        "html": """
+<!DOCTYPE html>
+<html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
+<div style="max-width:640px;margin:auto;background:#111;border:1px solid #4ECDC4;border-radius:8px;padding:24px;">
+  <h2 style="color:#4ECDC4;margin-top:0;">Session update</h2>
+  <p>{{ nate_message }}</p>
+  {% if alt_slots_text %}
+  <pre style="white-space:pre-wrap;background:#0a0a0a;padding:12px;border-radius:6px;color:#cbd5e1;font-family:sans-serif;">{{ alt_slots_text }}</pre>
+  <p style="color:#94a3b8;font-size:13px;">These times are open on your coach's Schedule. Reply in the app or chat with Nate to pick one.</p>
+  {% endif %}
+  <p style="color:#64748b;font-size:12px;">Status: {{ status }} · Sovereign Sanctuary</p>
+</div></body></html>
+""",
+    },
 }
 
 

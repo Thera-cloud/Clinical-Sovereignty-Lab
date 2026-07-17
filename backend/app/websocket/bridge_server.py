@@ -13875,6 +13875,22 @@ async def handle_client(websocket, path=None):
                             except Exception as _sched_err:
                                 print(f">>> [CHAT-SCHED] hook error uid={uid}: {_sched_err}")
 
+                        # QUANTUM-CRYSTAL-ARCH: open negotiation chat (approve/busy/alt / accept alt)
+                        try:
+                            from app.services.session_negotiation_bridge import try_chat_hooks
+                            if await try_chat_hooks(
+                                current_profile, text, websocket,
+                                db_pool=db_pool,
+                                connected_clients=connected_clients,
+                                connected_coaches=connected_coaches,
+                                load_sessions=lambda: load_json_file(SESSIONS_FILE, []),
+                                save_sessions=lambda s: save_json_file(SESSIONS_FILE, s),
+                            ):
+                                print(f">>> [NEGOTIATION] chat handled uid={uid}")
+                                continue
+                        except Exception as _neg_chat_err:
+                            print(f">>> [NEGOTIATION] chat hook error uid={uid}: {_neg_chat_err}")
+
                         # --- Nate tool confirmation (Agentic Phase 2) ---
                         if os.environ.get("ENABLE_NATE_TOOL_EXECUTOR", "").lower() in ("true", "1", "yes"):
                             try:
@@ -14342,6 +14358,17 @@ async def handle_client(websocket, path=None):
                                         asyncio.create_task(send_booking_decision_email(db_pool, new_session, "approved"))
                                 except Exception as _em_e:
                                     print(f">>> [BOOKING] email dispatch failed: {_em_e}")
+                                # QUANTUM-CRYSTAL-ARCH: Nate-mediated negotiation loop (flagged)
+                                try:
+                                    if db_pool and new_session.get("status") == "pending_approval":
+                                        from app.services.session_negotiation_bridge import after_pending_booking
+                                        await after_pending_booking(
+                                            db_pool, new_session,
+                                            connected_clients=connected_clients,
+                                            connected_coaches=connected_coaches,
+                                        )
+                                except Exception as _neg_e:
+                                    print(f">>> [NEGOTIATION] open failed: {_neg_e}")
                         except Exception as e:
                             print(f">>> [ERROR] Booking failed: {e}")
                             await websocket.send(json.dumps({"type": "error", "message": "BOOKING_FAILED"}))
@@ -15077,6 +15104,24 @@ async def handle_client(websocket, path=None):
                         await websocket.send(json.dumps({"type": "commitment_edited", "ok": False}))
 
             # === COACH: APPROVE BOOKING ===
+            # QUANTUM-CRYSTAL-ARCH: structured negotiation decisions (flagged inside handler)
+            elif t in ("coach_negotiation_decide", "client_negotiation_respond"):
+                try:
+                    from app.services.session_negotiation_bridge import handle_ws as _neg_ws
+                    _neg_done = await _neg_ws(
+                        t, d, current_profile or {}, websocket,
+                        db_pool=db_pool,
+                        connected_clients=connected_clients,
+                        connected_coaches=connected_coaches,
+                        load_sessions=lambda: load_json_file(SESSIONS_FILE, []),
+                        save_sessions=lambda s: save_json_file(SESSIONS_FILE, s),
+                    )
+                    if not _neg_done:
+                        await websocket.send(json.dumps({"type": "error", "message": "NEGOTIATION_UNAVAILABLE"}))
+                except Exception as _neg_ws_err:
+                    print(f">>> [NEGOTIATION] ws handler error: {_neg_ws_err}")
+                    await websocket.send(json.dumps({"type": "error", "message": "NEGOTIATION_FAILED"}))
+
             elif t == "coach_approve_booking":
                 if current_profile and current_profile.get("role") == "COACH":
                     session_id = (d.get("session_id") or "").strip()
