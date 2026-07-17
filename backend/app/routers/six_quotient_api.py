@@ -39,6 +39,18 @@ def _enabled() -> bool:
     )
 
 
+# AI judge ids must pass /judge/calibrate; human clinician ids are exempt.
+_AI_EVAL_MARKERS = (
+    "gpt", "claude", "gemini", "grok", "judge", "llm", "model",
+    "openai", "anthropic", "azure",
+)
+
+
+def _is_ai_evaluator(evaluator_id: str) -> bool:
+    low = (evaluator_id or "").lower()
+    return any(m in low for m in _AI_EVAL_MARKERS)
+
+
 class ScoreItem(BaseModel):
     scenario_id: str
     section: str = ""
@@ -249,6 +261,16 @@ async def submit_scores(body: ScoresIntake, request: Request):
     pool = _pool(request)
     if not body.scores:
         raise HTTPException(400, "scores required")
+
+    # QUANTUM-CRYSTAL-ARCH — AI judges must pass gold-set calibration (D.6)
+    if _is_ai_evaluator(body.evaluator_id):
+        from app.services.six_quotient_judge_calibration import evaluator_is_calibrated
+
+        if not await evaluator_is_calibrated(pool, body.evaluator_id):
+            raise HTTPException(
+                403,
+                "AI evaluator not calibrated — POST /api/admin/six-quotient/judge/calibrate first",
+            )
 
     async with pool.acquire() as conn:
         run = await conn.fetchrow(

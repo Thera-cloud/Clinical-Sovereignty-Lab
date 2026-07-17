@@ -263,6 +263,42 @@ class TestSafetyScan(unittest.TestCase):
         self.assertIn("platform_bleed", flags)
 
 
+class TestGenerateTextExtract(unittest.TestCase):
+    def test_inference_result_dataclass(self):
+        class FakeResult:
+            text = '{"title":"x"}'
+            provider = "grok"
+
+        text, provider = _gen._extract_generate_text(FakeResult())
+        self.assertEqual(text, '{"title":"x"}')
+        self.assertEqual(provider, "grok")
+
+    def test_dict_and_str(self):
+        t, p = _gen._extract_generate_text({"text": "hi", "provider": "workers_ai"})
+        self.assertEqual(t, "hi")
+        self.assertEqual(p, "workers_ai")
+        t2, _ = _gen._extract_generate_text("plain")
+        self.assertEqual(t2, "plain")
+
+
+class TestAiEvaluatorGate(unittest.TestCase):
+    def test_ai_vs_human(self):
+        self.assertTrue(_api._is_ai_evaluator("gpt-4o-judge"))
+        self.assertTrue(_api._is_ai_evaluator("claude-sonnet-judge"))
+        self.assertFalse(_api._is_ai_evaluator("DrNevedal1"))
+        self.assertFalse(_api._is_ai_evaluator("clinician_hope"))
+
+
+class TestAuditorEndpointCount(unittest.TestCase):
+    def test_twelve_checks(self):
+        aud = _load(
+            "app.services.six_quotient_battery_auditor",
+            APP / "services" / "six_quotient_battery_auditor.py",
+        )
+        total = sum(len(t["endpoints"]) for t in aud.TAB_ENDPOINTS)
+        self.assertEqual(total, 12)
+
+
 class TestMultiTurnProcess(unittest.TestCase):
     def test_process_metrics(self):
         turns = [

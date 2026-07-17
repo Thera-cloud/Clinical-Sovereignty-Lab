@@ -2774,6 +2774,22 @@ async def lifespan(app: FastAPI):
     except Exception as _sqs_err:
         print(f"   ⚠️  SixQuotientStandardsIndex init failed: {_sqs_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — Six-Quotient Battery Auditor (12 checks, stagger 298s)
+    _six_q_battery_auditor = None
+    try:
+        from app.services.six_quotient_battery_auditor import SixQuotientBatteryAuditor
+        _six_q_battery_auditor = SixQuotientBatteryAuditor(
+            db_pool,
+            notification_system=getattr(app.state, "notification_system", None),
+            app_state=app.state,
+        )
+        if not _is_clone:
+            await _six_q_battery_auditor.start()
+        app.state.six_quotient_battery_auditor = _six_q_battery_auditor
+        print("   ✅ SixQuotientBatteryAuditor started")
+    except Exception as _sqba_err:
+        print(f"   ⚠️  SixQuotientBatteryAuditor init failed: {_sqba_err}")
+
     # ── Nate Check-In Agent — 72h inactivity outreach for clients + coaches ──
     _nate_checkin_agent = None
     try:
@@ -3245,6 +3261,7 @@ async def lifespan(app: FastAPI):
         ("dual_coo_loop_closer", _dual_coo_loop_closer is not None),  # QUANTUM-CRYSTAL-ARCH
         ("six_quotient_battery_agent", _six_q_battery_agent is not None),  # QUANTUM-CRYSTAL-ARCH
         ("six_quotient_standards_index", _six_q_standards is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("six_quotient_battery_auditor", _six_q_battery_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", _nate_checkin_agent is not None),
         ("nate_commitment_agent", _nate_commitment_agent is not None),
         ("nate_self_monitor_agent", _nate_self_monitor_agent is not None),
@@ -3390,6 +3407,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ SixQuotientStandardsIndex stopped")
         except Exception as _sqs_stop:
             print(f"   ⚠️  SixQuotientStandardsIndex shutdown: {_sqs_stop}")
+    _six_q_auditor_h = getattr(app.state, "six_quotient_battery_auditor", None)  # QUANTUM-CRYSTAL-ARCH
+    if _six_q_auditor_h:
+        try:
+            await _six_q_auditor_h.stop()
+            print("   ✅ SixQuotientBatteryAuditor stopped")
+        except Exception as _sqba_stop:
+            print(f"   ⚠️  SixQuotientBatteryAuditor shutdown: {_sqba_stop}")
     if _sse_orchestrator:
         try:
             await _sse_orchestrator.stop()

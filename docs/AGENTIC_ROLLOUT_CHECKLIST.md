@@ -255,7 +255,7 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 | D.3 | Dry-run multi-turn: `POST .../trigger` `{dry_run:true, multi_turn:true}` | [x] *(staging: living_adaptive v5)* |
 | D.4 | Standards sync (staging): `POST .../standards/sync` → review → approve | [ ] |
 | D.5 | Scenario gen (flag on): `POST .../generate` → human approve drafts | [ ] |
-| D.6 | Judge calibrate: `POST .../judge/calibrate` before AI evaluators | [ ] |
+| D.6 | Judge calibrate: `POST .../judge/calibrate` before AI evaluators *(API gate enforces for AI ids)* | [ ] |
 | D.7 | Ability/IRT: `GET .../ability` after first scored run | [ ] |
 | D.8 | Prod living/standards/gen flags remain **false** until soak | [ ] |
 

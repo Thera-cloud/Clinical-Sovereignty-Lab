@@ -44,6 +44,24 @@ def _gen_on() -> bool:
     )
 
 
+def _extract_generate_text(resp: Any) -> tuple[str, str]:
+    """Normalize littlenate InferenceResult / router dict / plain str → (text, provider)."""
+    if resp is None:
+        return "", "inference"
+    if isinstance(resp, dict):
+        return (
+            (resp.get("text") or resp.get("content") or "") or "",
+            resp.get("provider") or "inference",
+        )
+    text = getattr(resp, "text", None)
+    if isinstance(text, str):
+        return text, getattr(resp, "provider", None) or "inference"
+    # Avoid dataclass repr — not parseable JSON
+    if isinstance(resp, str):
+        return resp, "inference"
+    return "", "inference"
+
+
 def safety_scan(text: str) -> List[str]:
     flags = []
     if _PII.search(text or ""):
@@ -188,10 +206,11 @@ async def _one_draft(
 
     text = ""
     provider = "template"
+    # Prefer littlenate_inference (registered on app.state); router is optional.
     router = None
     if app_state:
-        router = getattr(app_state, "nate_inference_router", None) or getattr(
-            app_state, "littlenate_inference", None
+        router = getattr(app_state, "littlenate_inference", None) or getattr(
+            app_state, "nate_inference_router", None
         )
     if router and hasattr(router, "generate"):
         try:
@@ -202,12 +221,7 @@ async def _one_draft(
                 max_tokens=900,
                 temperature=0.7,
             )
-            if isinstance(resp, dict):
-                text = resp.get("text") or resp.get("content") or ""
-                provider = resp.get("provider") or "inference"
-            else:
-                text = str(resp or "")
-                provider = "inference"
+            text, provider = _extract_generate_text(resp)
         except Exception as e:
             logger.warning("generator LLM: %s", e)
 

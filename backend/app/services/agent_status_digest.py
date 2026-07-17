@@ -183,6 +183,7 @@ class AgentStatusDigest:
             ("Crystal Outcome Apply", "crystal_outcome_apply"),  # QUANTUM-CRYSTAL-ARCH
             ("Dual-COO Loop Closer", "dual_coo_loop_closer"),  # QUANTUM-CRYSTAL-ARCH
             ("Six-Quotient Battery", "six_quotient_battery_agent"),  # QUANTUM-CRYSTAL-ARCH
+            ("Six-Quotient Battery Auditor", "six_quotient_battery_auditor"),  # QUANTUM-CRYSTAL-ARCH
         ]:
             agent = getattr(self.app, attr, None)
             status, detail = self._check_agent(agent, name)
