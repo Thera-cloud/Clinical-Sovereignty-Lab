@@ -255,9 +255,17 @@ def build_capabilities_manifest(
         "shared_task_bus": _bus,
         "cross_cli_review_loop": _review,
         "autonomous_consumer": _consumer,
+        "workers_ai_subagents": bool(
+            os.getenv("WORKERS_AI_URL", "").strip()
+            and (
+                os.getenv("WORKERS_AI_TOKEN", "").strip()
+                or os.getenv("WORKERS_AI_API_TOKEN", "").strip()
+            )
+        ),
         "note": (
-            "CLI-Mac and CLI-Cloud share run_agentic_loop; partnership is live when "
-            "Redis bus meta + cross_cli_review + autonomous consumer probe true."
+            "CLI-Mac and CLI-Cloud are Queen ants (Grok); Workers AI explore/test_fix "
+            "subagents are worker ants (sandbox writes + Queen cite review). Partnership "
+            "live when Redis bus + cross_cli_review + autonomous consumer probe true."
             if _partnership
             else (
                 "CLI-Mac and CLI-Cloud are the same run_agentic_loop with different tool "
@@ -275,9 +283,10 @@ def build_capabilities_manifest(
         "response claim grounding validator",
         "auto-inject self_capabilities on capability questions (server-side)",
         "post-response citation audit vs tool evidence (server-side)",
+        "Workers AI worker-ant subagents (explore/test_fix) with Queen Grok review",
     ]
     not_implemented = [
-        "Workers AI as CLI primary provider",
+        "Workers AI as CLI Queen / primary provider",
         "SSE/webhook stream for partner agent runs",
     ]
     if _wired:

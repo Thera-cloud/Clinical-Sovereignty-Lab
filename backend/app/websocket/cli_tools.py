@@ -171,7 +171,10 @@ async def mac_agent_health() -> tuple:
         return False, f"Mac agent unreachable: {e}"
 
 
-def _cloud_sandbox_active(cli_type: str, mode: str) -> bool:
+def _cloud_sandbox_active(cli_type: str, mode: str, force_sandbox: bool = False) -> bool:
+    # QUANTUM-CRYSTAL-ARCH — worker-ant writes force sandbox even on CLI-Mac
+    if force_sandbox and _CLOUD_SANDBOX_WRITES:
+        return True
     return cli_type == "cloud" and mode == "ln_fab" and _CLOUD_SANDBOX_WRITES
 
 
@@ -950,19 +953,25 @@ _PHASE6_TOOL_DEFS = [
         "function": {
             "name": "spawn_subagent",
             "description": (
-                "Spawn a scoped child agentic loop for a subtask. "
-                "Use explore for read-only codebase investigation, test_fix for "
-                "write+pytest loops, full for a bounded general child. "
-                "Returns a summary — parent continues with the result."
+                "Spawn a scoped worker-ant child loop. "
+                "explore/test_fix default to Workers AI ($0); full stays on Grok (Queen). "
+                "Workers cannot nest spawn. Worker writes are sandbox-only + bus-reviewed. "
+                "Returns a structured summary (files, line_refs, claims, confidence) — "
+                "Queen must re-verify [INFERRED] claims before trusting them."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "task": {"type": "string", "description": "Clear task for the child agent"},
+                    "task": {"type": "string", "description": "Clear self-contained task for the child"},
                     "tool_profile": {
                         "type": "string",
-                        "description": "explore | test_fix | full",
+                        "description": "explore (Workers AI RO) | test_fix (Workers AI sandbox write) | full (Grok)",
                         "enum": ["explore", "test_fix", "full"],
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Optional override: workers_ai | grok (default from profile)",
+                        "enum": ["workers_ai", "grok"],
                     },
                 },
                 "required": ["task"],
@@ -3094,6 +3103,7 @@ async def execute_tool(
     send_to_extension: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     session_key: Optional[str] = None,
     tool_call_log: Optional[List[Dict[str, Any]]] = None,
+    force_sandbox: bool = False,
 ) -> Dict[str, Any]:
     """
     Dispatch a tool call with auth scoping and per-tool timeouts.
@@ -3107,7 +3117,13 @@ async def execute_tool(
     admin_username: admin username for audit logging
     workspace_router: optional callable for routing to VS Code workspace provider
     send_to_extension: async callable to push JSON to the Sovereign IDE client (ask_user, git, deploy).
+    force_sandbox: worker-ant writes must use cloud sandbox (never live Mac/prod tree).
     """
+    # QUANTUM-CRYSTAL-ARCH — worker ants: entire tool surface uses sandbox (never live)
+    if force_sandbox:
+        cli_type = "cloud"
+        if mode not in ("ln_fab", "debug"):
+            mode = "ln_fab"
     _WORKSPACE_ROUTABLE = {
         "read_file", "search_code", "list_directory",
         "read_diagnostics", "read_git_status", "proposed_edit",
@@ -3248,7 +3264,7 @@ async def execute_tool(
         return await _web_search_cloud_async(args.get("query", ""))
 
     if name in ("sandbox_diff", "sandbox_promote"):
-        if not _cloud_sandbox_active(cli_type, mode):
+        if not _cloud_sandbox_active(cli_type, mode, force_sandbox=force_sandbox):
             return {"status": "error", "error": f"{name} is only available on CLI-Cloud LN-FAB.", "error_code": _ERROR_PERMISSION_DENIED}
         if name == "sandbox_promote" and user_role != "ADMIN":
             return {"status": "error", "error": "sandbox_promote requires ADMIN.", "error_code": _ERROR_PERMISSION_DENIED}
@@ -3276,14 +3292,14 @@ async def execute_tool(
         return promo
 
     if name in _WRITE_TOOLS:
-        if cli_type != "mac" and not _cloud_sandbox_active(cli_type, mode):
+        if cli_type != "mac" and not _cloud_sandbox_active(cli_type, mode, force_sandbox=force_sandbox):
             return {"status": "error", "error": f"Write tool '{name}' is disabled on CLI-Cloud (production). Use LN-FAB for sandboxed writes, or CLI-Mac.", "error_code": _ERROR_PERMISSION_DENIED}
         if name == "inject_log" and mode != "debug":
             return {"status": "error", "error": "inject_log is only available in DEBUG mode.", "error_code": _ERROR_PERMISSION_DENIED}
         if name == "inject_log" and cli_type != "mac":
             return {"status": "error", "error": "inject_log is CLI-Mac DEBUG only.", "error_code": _ERROR_PERMISSION_DENIED}
-        # Cloud LN-FAB: remap writes into per-plan sandbox (never mutate live prod tree)
-        if _cloud_sandbox_active(cli_type, mode) and name in ("write_file", "str_replace", "delete_file"):
+        # Cloud LN-FAB / worker-ant: remap writes into per-plan sandbox (never mutate live)
+        if _cloud_sandbox_active(cli_type, mode, force_sandbox=force_sandbox) and name in ("write_file", "str_replace", "delete_file"):
             rel = args.get("path") or args.get("file_path") or ""
             seed = name in ("str_replace", "delete_file")
             dest = _prepare_cloud_sandbox_path(plan_id, rel, copy_from_project=seed)
@@ -3291,8 +3307,8 @@ async def execute_tool(
                 return {"status": "error", "error": f"Invalid sandbox path: {rel}", "error_code": _ERROR_PATH_TRAVERSAL}
             args = {**args, "path": dest, "file_path": dest, "_sandbox_rel": rel, "_sandbox": True}
 
-    # Cloud LN-FAB: overlay reads/lints/shell onto sandbox copies
-    if _cloud_sandbox_active(cli_type, mode) and name in (
+    # Cloud LN-FAB / worker-ant: overlay reads/lints/shell onto sandbox copies
+    if _cloud_sandbox_active(cli_type, mode, force_sandbox=force_sandbox) and name in (
         "read_file", "read_lints", "grep", "glob", "list_directory", "search_code", "shell", "repo_map",
     ):
         args = _apply_sandbox_overlay_args(name, args, plan_id)

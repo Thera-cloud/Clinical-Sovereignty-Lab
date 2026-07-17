@@ -64,6 +64,15 @@ _SUBAGENT_PROFILES: Dict[str, Optional[frozenset]] = {
     }),
     "full": None,  # inherit parent tool set
 }
+# QUANTUM-CRYSTAL-ARCH — Queen budgets (Q2); defaults also in cli_subagent_hive
+try:
+    from app.websocket.cli_subagent_hive import (
+        CLI_MAX_SUBAGENTS_PER_RUN as _CLI_MAX_SUBAGENTS_PER_RUN,
+        CLI_MAX_SUBAGENTS_PER_TURN as _CLI_MAX_SUBAGENTS_PER_TURN,
+    )
+except ImportError:
+    _CLI_MAX_SUBAGENTS_PER_TURN = int(os.getenv("CLI_MAX_SUBAGENTS_PER_TURN", "4"))
+    _CLI_MAX_SUBAGENTS_PER_RUN = int(os.getenv("CLI_MAX_SUBAGENTS_PER_RUN", "8"))
 
 _GROK_KEY: Optional[str] = None
 _GROK_URL: Optional[str] = None
@@ -234,7 +243,17 @@ def _build_system_prompt(mode: str, cli_type: str) -> str:
         "AGENTIC: For complex multi-step work, use todo_write to track tasks. "
         "Use spawn_subagent for scoped explore/test_fix child loops. "
         "When AUTO-PYTEST FAILED appears, fix and continue until tests pass or autonomy budget is exhausted."
+        + ("" if mode not in ("ln_fab", "debug") else _queen_hive_prompt())
     )
+
+
+def _queen_hive_prompt() -> str:
+    try:
+        from app.websocket.cli_subagent_hive import queen_system_addon
+        return queen_system_addon()
+    except Exception:
+        return ""
+
 
 
 _MODE_INSTRUCTIONS = {
@@ -410,6 +429,10 @@ async def run_agentic_loop(
     is_subagent: bool = False,
     tools_override: Optional[List[Dict[str, Any]]] = None,
     cancel_check=None,
+    llm_provider: Optional[str] = None,
+    force_sandbox: bool = False,
+    parent_files: Optional[List[Any]] = None,
+    parent_session_key: str = "",
 ) -> Dict[str, Any]:
     """
     Full agentic coding loop — WebSocket CLI and partner Agents API share this.
@@ -417,6 +440,8 @@ async def run_agentic_loop(
     Features: tool loop, parallel tools, path locks, auto-lint, auto-pytest,
     retry-until-green, todo task state, spawn_subagent, autonomy budget.
     cancel_check: optional async callable() -> bool; True aborts between turns.
+    llm_provider: force stream provider (workers_ai / grok) for worker ants.
+    force_sandbox: worker-ant writes never touch live trees.
     """
     user_message = (user_message or "").strip()
     if not user_message:
@@ -434,6 +459,9 @@ async def run_agentic_loop(
         plan_id = str(uuid.uuid4())[:12]
 
     max_turns = max_turns_override or _MAX_TOOL_TURNS.get(mode, 25)
+    force_provider = (llm_provider or "").strip().lower() or None
+    if force_provider and force_provider not in ("workers_ai", "grok", "azure"):
+        force_provider = None
 
     try:
         from app.websocket.cli_tools import (
@@ -579,14 +607,18 @@ async def run_agentic_loop(
     await _emit(emit, {
         "type": "nate_cli_chat_status",
         "status": "thinking",
-        "detail": f"{mode.upper()} mode — {cli_type}" + (" [subagent]" if is_subagent else ""),
+        "detail": (
+            f"{mode.upper()} mode — {cli_type}"
+            + (" [subagent]" if is_subagent else "")
+            + (f" [{force_provider}]" if force_provider else "")
+        ),
         "session_id": session_id,
         "plan_id": plan_id,
     })
 
     tool_call_log: List[Dict[str, Any]] = list(tool_call_log_seed)
     files_touched: List[Dict[str, str]] = []
-    provider_used = "grok"
+    provider_used = force_provider or "grok"
     t0 = time.monotonic()
     max_tokens = _MAX_COMPLETION_TOKENS.get(mode, 6144)
     trunc_limit = get_truncation_limit(mode, cli_type)
@@ -596,6 +628,9 @@ async def run_agentic_loop(
     # Per-path set so a pass on file B cannot clear an unresolved fail on file A
     pending_failed_paths: set = set()
     subagents_spawned = 0
+    subagents_this_turn = 0
+    subagents_by_provider: Dict[str, int] = {}
+    subagent_budget_lock = asyncio.Lock()
     turn = 0
     final_text = ""
     redis_lock_owner = f"{cli_type}:{sess_key[:48]}"
@@ -630,6 +665,7 @@ async def run_agentic_loop(
                     "max_fix_attempts": _CLI_MAX_FIX_ATTEMPTS,
                     "max_turns": max_turns,
                     "subagents_spawned": subagents_spawned,
+                    "subagents_by_provider": dict(subagents_by_provider),
                     "is_subagent": is_subagent,
                     "cancelled": True,
                 },
@@ -638,11 +674,15 @@ async def run_agentic_loop(
             return done
         conversation = _compact_conversation(conversation)
 
+        # Q2 — reset per-turn worker budget at the start of each LLM turn
+        subagents_this_turn = 0
+
         try:
             response_text, response_tool_calls, provider_used = await _stream_with_tools(
                 emit, conversation, tools, turn, provider_used,
                 max_tokens=max_tokens, mode=mode,
                 temperature=grounding_temp,
+                force_provider=force_provider,
             )
         except Exception as e:
             logger.error("CLI stream error (turn %d): %s", turn, e)
@@ -658,13 +698,20 @@ async def run_agentic_loop(
             conversation.append(assistant_msg)
 
             async def _run_one(tc: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any], int, str]:
-                nonlocal subagents_spawned
+                nonlocal subagents_spawned, subagents_this_turn
                 fn = tc.get("function", {})
                 tool_name = fn.get("name", "unknown")
+                # Gap 6 — malformed tool-call repair (Workers AI)
                 try:
-                    tool_args = json.loads(fn.get("arguments", "{}"))
-                except (json.JSONDecodeError, TypeError):
-                    tool_args = {}
+                    from app.websocket.cli_subagent_hive import parse_tool_arguments
+                    tool_args, _repaired, parse_err = parse_tool_arguments(fn.get("arguments", "{}"))
+                except Exception:
+                    try:
+                        tool_args = json.loads(fn.get("arguments", "{}"))
+                        parse_err = None
+                    except (json.JSONDecodeError, TypeError):
+                        tool_args = {}
+                        parse_err = "malformed tool arguments"
                 tc_id = tc.get("id", f"call_{uuid.uuid4().hex[:8]}")
 
                 await _emit(emit, {
@@ -675,14 +722,51 @@ async def run_agentic_loop(
 
                 t_start = time.monotonic()
 
+                if parse_err and tool_name != "spawn_subagent":
+                    result = {
+                        "status": "error",
+                        "error": (
+                            f"{parse_err}. Re-call {tool_name} with valid JSON arguments."
+                        ),
+                        "error_code": "malformed_tool_args",
+                        "retry": True,
+                    }
+                    t_elapsed = int((time.monotonic() - t_start) * 1000)
+                    return tc, result, t_elapsed, tc_id
+
                 if tool_name == "spawn_subagent":
+                    # Q1 — workers cannot nest; Q2 — Queen budgets
                     if is_subagent or not allow_subagents:
                         result = {
                             "status": "error",
-                            "error": "Nested spawn_subagent is not allowed.",
+                            "error": "Nested spawn_subagent is not allowed (worker ants cannot spawn).",
                         }
                     else:
-                        subagents_spawned += 1
+                        async with subagent_budget_lock:
+                            if subagents_spawned >= _CLI_MAX_SUBAGENTS_PER_RUN:
+                                result = {
+                                    "status": "error",
+                                    "error": (
+                                        f"Subagent run budget exhausted "
+                                        f"({_CLI_MAX_SUBAGENTS_PER_RUN}/run)."
+                                    ),
+                                    "error_code": "subagent_budget",
+                                }
+                                t_elapsed = int((time.monotonic() - t_start) * 1000)
+                                return tc, result, t_elapsed, tc_id
+                            if subagents_this_turn >= _CLI_MAX_SUBAGENTS_PER_TURN:
+                                result = {
+                                    "status": "error",
+                                    "error": (
+                                        f"Subagent turn budget exhausted "
+                                        f"({_CLI_MAX_SUBAGENTS_PER_TURN}/turn)."
+                                    ),
+                                    "error_code": "subagent_budget",
+                                }
+                                t_elapsed = int((time.monotonic() - t_start) * 1000)
+                                return tc, result, t_elapsed, tc_id
+                            subagents_spawned += 1
+                            subagents_this_turn += 1
                         result = await _run_spawn_subagent(
                             task=str(tool_args.get("task") or ""),
                             profile=str(tool_args.get("tool_profile") or "explore"),
@@ -694,7 +778,12 @@ async def run_agentic_loop(
                             db_pool=db_pool,
                             parent_tools=tools,
                             emit=emit,
+                            provider_override=str(tool_args.get("provider") or ""),
+                            parent_session_key=sess_key,
+                            parent_files=files_touched + list(parent_files or []),
                         )
+                        prov = (result.get("provider") if isinstance(result, dict) else None) or "?"
+                        subagents_by_provider[prov] = subagents_by_provider.get(prov, 0) + 1
                     t_elapsed = int((time.monotonic() - t_start) * 1000)
                     return tc, result, t_elapsed, tc_id
 
@@ -743,6 +832,7 @@ async def run_agentic_loop(
                             send_to_extension=send_to_extension,
                             session_key=sess_key,
                             tool_call_log=tool_call_log,
+                            force_sandbox=force_sandbox,
                         )
                     except Exception as te:
                         res = {"status": "error", "error": str(te)}
@@ -756,6 +846,38 @@ async def run_agentic_loop(
                                 )
                             except Exception:
                                 pass
+                    # Gap 7 — worker writes auto-enqueue bus review
+                    if (
+                        force_sandbox
+                        and tool_name in _WRITE_TOOLS
+                        and isinstance(res, dict)
+                        and res.get("status") == "ok"
+                    ):
+                        try:
+                            from app.websocket.cli_task_bus import (
+                                enqueue_review,
+                                task_bus_enabled,
+                            )
+
+                            if task_bus_enabled():
+                                rel = (
+                                    res.get("_sandbox_rel")
+                                    or tool_args.get("path")
+                                    or write_path
+                                    or ""
+                                )
+                                if rel:
+                                    review = await asyncio.to_thread(
+                                        enqueue_review,
+                                        origin="cloud" if cli_type == "cloud" else "mac",
+                                        files=[str(rel)],
+                                        plan_id=str(plan_id or ""),
+                                        notes="auto review after worker-ant sandbox write",
+                                    )
+                                    res = dict(res)
+                                    res["task_bus_review"] = review
+                        except Exception as _wr_enq:
+                            logger.debug("worker write enqueue_review skipped: %s", _wr_enq)
 
                     if (
                         tool_name not in _WRITE_TOOLS
@@ -930,6 +1052,7 @@ async def run_agentic_loop(
                         "max_fix_attempts": _CLI_MAX_FIX_ATTEMPTS,
                         "max_turns": max_turns,
                         "subagents_spawned": subagents_spawned,
+                        "subagents_by_provider": dict(subagents_by_provider),
                         "is_subagent": is_subagent,
                         "cancelled": True,
                     },
@@ -1024,6 +1147,7 @@ async def run_agentic_loop(
                 "max_fix_attempts": _CLI_MAX_FIX_ATTEMPTS,
                 "max_turns": max_turns,
                 "subagents_spawned": subagents_spawned,
+                "subagents_by_provider": dict(subagents_by_provider),
                 "is_subagent": is_subagent,
             },
         }
@@ -1071,6 +1195,7 @@ async def run_agentic_loop(
             "max_fix_attempts": _CLI_MAX_FIX_ATTEMPTS,
             "max_turns": max_turns,
             "subagents_spawned": subagents_spawned,
+            "subagents_by_provider": dict(subagents_by_provider),
             "budget_exhausted": True,
             "is_subagent": is_subagent,
         },
@@ -1091,8 +1216,24 @@ async def _run_spawn_subagent(
     db_pool,
     parent_tools: List[Dict[str, Any]],
     emit,
+    provider_override: str = "",
+    parent_session_key: str = "",
+    parent_files: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
-    """Scoped child agentic loop — explore / test_fix / full (no nested spawn)."""
+    """
+    Scoped worker-ant loop — Queen (parent) reviews output.
+    Gaps 1–8 + Q1–Q4: provider tiering, escalate, cite audit, structured contract,
+    brief injection, sandbox writes, attribution. Nesting forbidden (allow_subagents=False).
+    """
+    from app.websocket.cli_subagent_hive import (
+        build_worker_brief,
+        child_needs_escalation,
+        resolve_subagent_provider,
+        structure_subagent_result,
+        tag_summary_for_queen,
+        worker_must_sandbox,
+    )
+
     if not task.strip():
         return {"status": "error", "error": "spawn_subagent requires a non-empty task"}
     if profile not in _SUBAGENT_PROFILES:
@@ -1101,9 +1242,23 @@ async def _run_spawn_subagent(
     if profile == "explore" and parent_mode in ("ln_fab", "debug"):
         child_mode = "ask"
     if profile == "test_fix":
-        child_mode = "ln_fab" if parent_mode == "ln_fab" else parent_mode
+        child_mode = "ln_fab" if parent_mode in ("ln_fab", "debug") else parent_mode
+
+    provider = resolve_subagent_provider(profile, provider_override)
+    force_sb = worker_must_sandbox(provider, profile)
+    # Gap 7: write workers always run cloud+ln_fab surface for sandbox remap
+    child_cli = "cloud" if force_sb else cli_type
+    if force_sb and child_mode not in ("ln_fab", "debug"):
+        child_mode = "ln_fab"
 
     child_tools = _filter_tools_by_profile(parent_tools, profile)
+    brief = build_worker_brief(
+        task,
+        profile=profile,
+        plan_id=plan_id,
+        session_key=parent_session_key,
+        parent_files=parent_files,
+    )
     events: List[Dict[str, Any]] = []
 
     async def child_emit(msg: Dict[str, Any]) -> None:
@@ -1111,36 +1266,65 @@ async def _run_spawn_subagent(
         wrapped = dict(msg)
         wrapped["subagent"] = True
         wrapped["subagent_profile"] = profile
+        wrapped["subagent_provider"] = provider
         await _emit(emit, wrapped)
 
-    result = await run_agentic_loop(
-        user_message=task,
-        mode=child_mode,
-        cli_type=cli_type,
-        plan_id=plan_id,
-        session_id=f"sub-{uuid.uuid4().hex[:8]}",
-        admin_username=admin_username,
-        user_role=user_role,
-        db_pool=db_pool,
-        emit=child_emit,
-        max_turns_override=_CLI_MAX_SUBAGENT_TURNS,
-        allow_subagents=False,
-        is_subagent=True,
-        tools_override=child_tools,
-    )
+    async def _run_child(prov: str) -> Dict[str, Any]:
+        return await run_agentic_loop(
+            user_message=brief,
+            mode=child_mode,
+            cli_type=child_cli,
+            plan_id=plan_id,
+            session_id=f"sub-{uuid.uuid4().hex[:8]}",
+            admin_username=admin_username,
+            user_role=user_role,
+            db_pool=db_pool,
+            emit=child_emit,
+            max_turns_override=_CLI_MAX_SUBAGENT_TURNS,
+            allow_subagents=False,  # Q1 — no nested spawn
+            is_subagent=True,
+            tools_override=child_tools,
+            llm_provider=prov,
+            force_sandbox=force_sb or (prov == "workers_ai" and profile in ("test_fix", "full")),
+            parent_files=parent_files,
+            parent_session_key=parent_session_key,
+        )
+
+    result = await _run_child(provider)
+    escalated = False
+    # Gap 2 / Q4 — one Grok escalation if Workers AI flails
+    if provider == "workers_ai" and child_needs_escalation(result):
+        await _emit(emit, {
+            "type": "nate_cli_chat_status",
+            "status": "thinking",
+            "detail": f"Worker escalate → grok ({profile})",
+        })
+        result = await _run_child("grok")
+        escalated = True
+        provider = "grok"
+
     summary = (result.get("response_text") or "")[:4000]
-    return {
-        "status": "ok" if result.get("status") != "error" else "error",
-        "result": (
-            f"[SUBAGENT {profile}] turns={result.get('turn_count', 0)} "
-            f"tools={len(result.get('tool_calls') or [])}\n{summary}"
-        ),
-        "profile": profile,
-        "turn_count": result.get("turn_count"),
-        "tool_calls": result.get("tool_calls"),
-        "files": result.get("files"),
-        "events": events[-20:],
-    }
+    tool_log = result.get("tool_calls") or []
+    # Gap 3 — Queen citation audit on child output
+    cite_meta: Dict[str, Any] = {"ok": True, "violations": []}
+    try:
+        from app.websocket.cli_grounding import audit_verified_citations
+
+        cite_meta = audit_verified_citations(summary, tool_log)
+        summary = tag_summary_for_queen(summary, cite_meta)
+        result = dict(result)
+        result["response_text"] = summary
+    except Exception as _cite_err:
+        logger.debug("subagent cite audit skipped: %s", _cite_err)
+
+    return structure_subagent_result(
+        profile=profile,
+        provider=provider,
+        escalated=escalated,
+        result=result,
+        events=events,
+        cite_meta=cite_meta,
+    )
 
 
 async def handle_nate_cli_chat(
@@ -1291,11 +1475,13 @@ async def _stream_with_tools(
     max_tokens: int = 4096,
     mode: str = "ask",
     temperature: Optional[float] = None,
+    force_provider: Optional[str] = None,
 ) -> tuple:
     """
     Mode-aware provider routing + Azure param adaptation.
     Returns (accumulated_text, tool_calls_list, provider_name).
     `emit` is an async callback (WebSocket or Agents API event sink).
+    force_provider: workers_ai | grok | azure — used by worker-ant subagents.
     """
     import aiohttp
 
@@ -1403,6 +1589,67 @@ async def _stream_with_tools(
         azure_url, azure_headers = _azure_chat_url_and_headers()
         deploy = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT") or "gpt-4o"
         return await _do_stream(azure_url, azure_headers, deploy, "azure")
+
+    async def _try_workers_ai() -> tuple:
+        # QUANTUM-CRYSTAL-ARCH — Gap 1: Workers AI worker-ant stream (+ non-stream fallback)
+        w_url = os.getenv("WORKERS_AI_URL", "").strip()
+        w_tok = (
+            os.getenv("WORKERS_AI_TOKEN", "").strip()
+            or os.getenv("WORKERS_AI_API_TOKEN", "").strip()
+        )
+        w_model = os.getenv(
+            "WORKERS_AI_MODEL", "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+        )
+        if not w_url or not w_tok:
+            raise RuntimeError("WORKERS_AI_URL/TOKEN not configured")
+        headers = {
+            "Authorization": f"Bearer {w_tok}",
+            "Content-Type": "application/json",
+        }
+        try:
+            return await _do_stream(w_url, headers, w_model, "workers_ai")
+        except Exception as stream_err:
+            logger.warning("Workers AI stream failed, non-stream fallback: %s", stream_err)
+            payload: Dict[str, Any] = {
+                "model": w_model,
+                "messages": messages_for_api,
+                "temperature": stream_temp,
+                "max_tokens": max_tokens,
+            }
+            if openai_tools:
+                payload["tools"] = openai_tools
+                payload["tool_choice"] = "auto"
+            timeout = aiohttp.ClientTimeout(total=180)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(w_url, json=payload, headers=headers) as resp:
+                    body = await resp.json(content_type=None)
+                    if resp.status != 200:
+                        raise RuntimeError(
+                            f"workers_ai {resp.status}: {str(body)[:400]}"
+                        )
+                    msg = ((body.get("choices") or [{}])[0].get("message")) or {}
+                    text = msg.get("content") or ""
+                    raw_tcs = msg.get("tool_calls") or []
+                    if text:
+                        await _emit(emit, {
+                            "type": "nate_cli_chat_chunk",
+                            "delta": text,
+                            "provider": "workers_ai",
+                            "turn": turn,
+                        })
+                    return text, raw_tcs, "workers_ai"
+
+    # Gap 1 — forced provider for worker ants (escalate path uses force_provider=grok)
+    if force_provider == "workers_ai":
+        try:
+            return await _try_workers_ai()
+        except Exception as w_err:
+            logger.warning("Workers AI failed, falling back to Grok: %s", w_err)
+            return await _do_stream(_GROK_URL, grok_headers, grok_model, "grok")
+    if force_provider == "azure":
+        return await _try_azure()
+    if force_provider == "grok":
+        return await _do_stream(_GROK_URL, grok_headers, grok_model, "grok")
 
     if prefer_azure_primary:
         try:
