@@ -5,13 +5,15 @@ profile_data keys (JSONB, no migration):
   population_shielded: bool — when true, corp/employer roster queries must exclude
   family_concern_consent: bool — veteran consented that family may flag concern
   lethal_means_guidance_ok: bool — opt-in for secure-storage framing
+  population_type: Sensitive Bridge clinical taxonomy (adult_survivor, …) — SEPARATE
+                   from occupational `population`. Never auto-map survivor→veteran.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 POPULATION_GENERAL = "general"
 POPULATION_VETERAN = "veteran"
@@ -57,16 +59,26 @@ def profile_data(profile: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         return {}
     pd = profile.get("profile_data")
     if pd is None and any(k in profile for k in ("population", "timezone", "name")):
-        # Already a flat profile_data-like dict
         return _as_dict(profile)
     return _as_dict(pd)
 
 
 def get_population(profile: Optional[Dict[str, Any]]) -> str:
+    """Occupational routing key only — never reads Sensitive Bridge population_type."""
     pd = profile_data(profile)
-    raw = (pd.get("population") or profile.get("population") if profile else None) or POPULATION_GENERAL
+    raw = (pd.get("population") or (profile or {}).get("population") or POPULATION_GENERAL)
     pop = str(raw).strip().lower()
     return pop if pop in VALID_POPULATIONS else POPULATION_GENERAL
+
+
+def get_clinical_population_type(profile: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Sensitive Bridge survivor taxonomy (orthogonal to occupational population)."""
+    pd = profile_data(profile)
+    raw = pd.get("population_type")
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    return s or None
 
 
 def is_high_risk_population(profile: Optional[Dict[str, Any]]) -> bool:
@@ -79,7 +91,6 @@ def is_population_shielded(profile: Optional[Dict[str, Any]]) -> bool:
         return True
     if str(pd.get("population_shielded", "")).lower() in ("1", "true", "yes"):
         return True
-    # Auto-shield high-risk populations unless explicitly opted out
     if is_high_risk_population(profile) and pd.get("population_shielded") is not False:
         return True
     return False
@@ -89,6 +100,27 @@ def family_concern_consent(profile: Optional[Dict[str, Any]]) -> bool:
     pd = profile_data(profile)
     flag = pd.get("family_concern_consent")
     return flag is True or str(flag).lower() in ("1", "true", "yes")
+
+
+def resolve_family_id(row: Any) -> Optional[str]:
+    """Column family_id OR profile_data.family_id (either is enough)."""
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        col = row.get("family_id")
+        pd = _as_dict(row.get("profile_data"))
+    else:
+        col = row["family_id"] if "family_id" in row.keys() else None
+        pd = _as_dict(row.get("profile_data"))
+    if col:
+        return str(col)
+    j = pd.get("family_id")
+    return str(j) if j else None
+
+
+def same_family(a: Any, b: Any) -> bool:
+    fa, fb = resolve_family_id(a), resolve_family_id(b)
+    return bool(fa and fb and fa == fb)
 
 
 def env_flag(name: str, default: str = "false") -> bool:
@@ -119,3 +151,13 @@ def get_timezone(profile: Optional[Dict[str, Any]], default: str = "America/New_
     pd = profile_data(profile)
     tz = (pd.get("timezone") or (profile or {}).get("timezone") or default)
     return str(tz).strip() or default
+
+
+def normalize_population(raw: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """Return (population, error)."""
+    if raw is None:
+        return None, "population required"
+    pop = str(raw).strip().lower()
+    if pop not in VALID_POPULATIONS:
+        return None, f"Invalid population. Allowed: {sorted(VALID_POPULATIONS)}"
+    return pop, None

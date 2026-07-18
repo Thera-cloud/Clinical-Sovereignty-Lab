@@ -45,6 +45,7 @@ import 'screens/coaching_mesh_screen.dart';
 import 'screens/onboarding_paid_screen.dart';
 import 'screens/community_mesh_screen.dart';
 import 'screens/sensitive_clinical_profile_screen.dart';
+import 'screens/high_risk_crisis_screens.dart';
 import 'screens/intake_form_coach_panel.dart';
 import 'screens/daily_reconnect_screen.dart';
 import 'screens/training_ground_screen.dart';
@@ -10514,7 +10515,27 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: _buildClientSearchAndFilter(),
+          child: Row(
+            children: [
+              Expanded(child: _buildClientSearchAndFilter()),
+              const SizedBox(width: 8),
+              // QUANTUM-CRYSTAL-ARCH: coach risk-window ops surface
+              IconButton(
+                tooltip: 'Risk windows',
+                icon: const Icon(Icons.shield_outlined, color: Color(0xFFEF4444)),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => CoachRiskWindowsScreen(
+                        profile: widget.currentUserProfile,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
         ),
         Expanded(
           child: ListView.builder(

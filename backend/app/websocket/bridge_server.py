@@ -10048,16 +10048,20 @@ class AzureCortex:
             except Exception as _ad_err:
                 print(f">>> [ADAPTIVE] error (non-fatal): {type(_ad_err).__name__}: {_ad_err}")
 
-        # QUANTUM-CRYSTAL-ARCH: high-risk occupational prompt modifiers
+        # QUANTUM-CRYSTAL-ARCH: high-risk occupational prompt modifiers (reserved headroom)
+        _pop_sfx = ""
         try:
             from app.services.population_prompt_modifiers import build_population_prompt_suffix
-            _pop_sfx = build_population_prompt_suffix(profile, user_text)
-            if _pop_sfx:
-                system_prompt = system_prompt + _pop_sfx
+            _pop_sfx = build_population_prompt_suffix(profile, user_text) or ""
         except Exception as _pop_err:
             print(f">>> [POPULATION PROMPT] non-fatal: {_pop_err!r}")
-
-        if len(system_prompt) > _SP_CAP:
+        if _pop_sfx:
+            _max_base = max(0, _SP_CAP - len(_pop_sfx) - 80)
+            if len(system_prompt) > _max_base:
+                print(f">>> [POPULATION PROMPT] trim base {len(system_prompt)} → {_max_base} to preserve suffix")
+                system_prompt = system_prompt[:_max_base] + "\n\n[Context truncated to preserve population safety guidance.]"
+            system_prompt = system_prompt + _pop_sfx
+        elif len(system_prompt) > _SP_CAP:
             print(f">>> [PROMPT CAP] Trimming system prompt from {len(system_prompt)} to {_SP_CAP} chars")
             system_prompt = system_prompt[:_SP_CAP] + "\n\n[Context truncated for performance. Focus on the user's current message.]"
         print(f">>> [SYSTEM PROMPT] {len(system_prompt)} chars, uid={uid}")

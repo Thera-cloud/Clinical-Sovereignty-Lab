@@ -458,3 +458,244 @@ class _FamilyConcernFlagScreenState extends State<FamilyConcernFlagScreen> {
     );
   }
 }
+
+/// Coach portal — active risk windows + critical incident + set occupational population.
+class CoachRiskWindowsScreen extends StatefulWidget {
+  final Map profile;
+  const CoachRiskWindowsScreen({super.key, required this.profile});
+
+  @override
+  State<CoachRiskWindowsScreen> createState() => _CoachRiskWindowsScreenState();
+}
+
+class _CoachRiskWindowsScreenState extends State<CoachRiskWindowsScreen> {
+  List<dynamic> _windows = [];
+  List<dynamic> _clients = [];
+  List<String> _pops = const ['general'];
+  String? _error;
+  bool _loading = true;
+  String? _busyClient;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/high-risk-crisis/coach/risk-windows');
+      final resp = await http.get(uri, headers: _authHeaders(widget.profile));
+      if (resp.statusCode != 200) {
+        setState(() {
+          _error = 'Could not load risk windows (${resp.statusCode})';
+          _loading = false;
+        });
+        return;
+      }
+      final d = jsonDecode(resp.body) as Map<String, dynamic>;
+      setState(() {
+        _windows = (d['windows'] is List) ? List.from(d['windows'] as List) : [];
+        _clients = (d['clients'] is List) ? List.from(d['clients'] as List) : [];
+        final pops = d['populations'];
+        if (pops is List && pops.isNotEmpty) {
+          _pops = pops.map((e) => e.toString()).toList();
+        }
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _openCritical(String username) async {
+    setState(() => _busyClient = username);
+    try {
+      final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/high-risk-crisis/coach/critical-incident');
+      final resp = await http.post(
+        uri,
+        headers: _authHeaders(widget.profile),
+        body: jsonEncode({'client_username': username}),
+      );
+      if (!mounted) return;
+      final ok = resp.statusCode == 200;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(ok ? 'Critical-incident window opened for $username' : 'Failed (${resp.statusCode})'),
+        backgroundColor: ok ? _HR.cyan : Colors.redAccent,
+      ));
+      if (ok) await _load();
+    } finally {
+      if (mounted) setState(() => _busyClient = null);
+    }
+  }
+
+  Future<void> _setPopulation(String username, String pop) async {
+    setState(() => _busyClient = username);
+    try {
+      final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/high-risk-crisis/coach/population');
+      final resp = await http.put(
+        uri,
+        headers: _authHeaders(widget.profile),
+        body: jsonEncode({
+          'client_username': username,
+          'population': pop,
+          'population_shielded': pop != 'general',
+        }),
+      );
+      if (!mounted) return;
+      final ok = resp.statusCode == 200;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(ok ? 'Population set to $pop for $username' : 'Failed (${resp.statusCode})'),
+        backgroundColor: ok ? _HR.gold : Colors.redAccent,
+      ));
+      if (ok) await _load();
+    } finally {
+      if (mounted) setState(() => _busyClient = null);
+    }
+  }
+
+  void _pickPopulation(String username, String current) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _HR.card,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Occupational population (crisis lines)',
+                  style: TextStyle(color: _HR.gold, fontWeight: FontWeight.bold)),
+            ),
+            for (final p in _pops)
+              ListTile(
+                title: Text(p, style: TextStyle(color: p == current ? _HR.cyan : _HR.text)),
+                trailing: p == current ? const Icon(Icons.check, color: _HR.cyan) : null,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _setPopulation(username, p);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _HR.bg,
+      appBar: AppBar(
+        backgroundColor: _HR.bg,
+        title: const Text('Risk windows', style: TextStyle(color: _HR.gold, fontFamily: 'CormorantGaramond')),
+        iconTheme: const IconThemeData(color: _HR.gold),
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loading ? null : _load),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: _HR.gold))
+          : _error != null
+              ? Center(child: Text(_error!, style: const TextStyle(color: Colors.redAccent)))
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  color: _HR.gold,
+                  child: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      Text(
+                        '${_windows.length} active window${_windows.length == 1 ? '' : 's'}',
+                        style: const TextStyle(color: _HR.muted, fontSize: 13),
+                      ),
+                      const SizedBox(height: 12),
+                      if (_windows.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 16),
+                          child: Text('No active risk windows. Open one after P0/P1 or a critical incident.',
+                              style: TextStyle(color: _HR.text, height: 1.4)),
+                        ),
+                      for (final w in _windows)
+                        if (w is Map)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: _HR.card,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.redAccent.withOpacity(0.35)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  (w['client_name'] ?? w['username'] ?? '').toString(),
+                                  style: const TextStyle(color: _HR.gold, fontWeight: FontWeight.bold, fontSize: 15),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Reason: ${w['reason'] ?? '—'} · Cadence: ${w['cadence_hours'] ?? '—'}h',
+                                  style: const TextStyle(color: _HR.text, fontSize: 13),
+                                ),
+                                Text(
+                                  'Expires: ${w['expires_at'] ?? '—'} · Pop: ${w['population'] ?? 'general'}',
+                                  style: const TextStyle(color: _HR.muted, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                      const SizedBox(height: 8),
+                      const Text('Assigned clients', style: TextStyle(color: _HR.gold, fontSize: 14, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+                      for (final c in _clients)
+                        if (c is Map)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            child: ListTile(
+                              tileColor: _HR.card,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              title: Text(
+                                (c['name'] ?? c['username'] ?? '').toString(),
+                                style: const TextStyle(color: _HR.text, fontSize: 14),
+                              ),
+                              subtitle: Text(
+                                'population: ${c['population'] ?? 'general'}',
+                                style: const TextStyle(color: _HR.muted, fontSize: 12),
+                              ),
+                              trailing: _busyClient == c['username']
+                                  ? const SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: _HR.gold),
+                                    )
+                                  : PopupMenuButton<String>(
+                                      color: _HR.card,
+                                      icon: const Icon(Icons.more_vert, color: _HR.gold),
+                                      onSelected: (v) {
+                                        final u = (c['username'] ?? '').toString();
+                                        if (u.isEmpty) return;
+                                        if (v == 'critical') _openCritical(u);
+                                        if (v == 'population') {
+                                          _pickPopulation(u, (c['population'] ?? 'general').toString());
+                                        }
+                                      },
+                                      itemBuilder: (_) => const [
+                                        PopupMenuItem(value: 'critical', child: Text('Open critical-incident window', style: TextStyle(color: Colors.white))),
+                                        PopupMenuItem(value: 'population', child: Text('Set occupational population', style: TextStyle(color: Colors.white))),
+                                      ],
+                                    ),
+                            ),
+                          ),
+                    ],
+                  ),
+                ),
+    );
+  }
+}

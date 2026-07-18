@@ -1,7 +1,8 @@
 """High-risk occupational crisis engine auditor — QUANTUM-CRYSTAL-ARCH.
 
-8 checks: health, resources, confidentiality, population GET,
+10 checks: health, resources, confidentiality, population GET,
 family education, coach risk-windows, concern-flag validation,
+critical-incident validation, coach population validation,
 risk_windows table exists.
 """
 
@@ -41,6 +42,8 @@ TAB_ENDPOINTS = [
         "endpoints": [
             ("GET", "/api/high-risk-crisis/coach/risk-windows"),
             ("POST", "/api/high-risk-crisis/family/concern-flag"),
+            ("POST", "/api/high-risk-crisis/coach/critical-incident"),
+            ("PUT", "/api/high-risk-crisis/coach/population"),
             ("DB", "risk_windows_table"),
         ],
     },
@@ -85,6 +88,12 @@ class HighRiskCrisisAuditor:
         try:
             if method == "GET":
                 async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    code = resp.status
+            elif method == "PUT":
+                async with session.put(
+                    url, headers={**headers, "Content-Type": "application/json"},
+                    json={}, timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
                     code = resp.status
             else:
                 async with session.post(

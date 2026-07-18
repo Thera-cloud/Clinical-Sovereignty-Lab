@@ -72,6 +72,35 @@ def test_population_shield_defaults_for_veteran():
     assert _pop.is_population_shielded(profile) is True
 
 
+def test_clinical_population_type_does_not_route_crisis_lines():
+    """Sensitive Bridge population_type must not become occupational routing."""
+    profile = {
+        "profile_data": {
+            "population_type": "adult_survivor",
+            "population": "general",
+        }
+    }
+    assert _pop.get_population(profile) == "general"
+    assert _pop.get_clinical_population_type(profile) == "adult_survivor"
+    values = " ".join(r["value"] for r in _reg.get_crisis_resources(profile))
+    assert "838255" not in values  # not forced to VCL
+
+
+def test_same_family_column_or_jsonb():
+    a = {"family_id": None, "profile_data": {"family_id": "fam-1"}}
+    b = {"family_id": "fam-1", "profile_data": {}}
+    c = {"family_id": None, "profile_data": {"family_id": "fam-2"}}
+    assert _pop.same_family(a, b) is True
+    assert _pop.same_family(a, c) is False
+
+
+def test_normalize_population():
+    ok, err = _pop.normalize_population("Veteran")
+    assert ok == "veteran" and err is None
+    bad, err2 = _pop.normalize_population("adult_survivor")
+    assert bad is None and err2
+
+
 def test_ws_payload_shape():
     profile = {"profile_data": {"population": "veteran"}}
     payload = _reg.ws_crisis_resources_payload(profile, turn_id="t1")
@@ -96,3 +125,13 @@ def test_peer_voice_block_for_veteran():
 
 def test_checkin_risk_window_constants():
     assert _win.DEFAULT_CADENCE_HOURS[_win.REASON_POST_P0] == 24
+
+
+def test_auditor_endpoint_count_is_10():
+    import re
+
+    text = (APP / "services" / "high_risk_crisis_auditor.py").read_text()
+    pairs = re.findall(r'\("(GET|POST|PUT|DB)",\s*"[^"]+"\)', text)
+    assert len(pairs) == 10, pairs
+    assert any("critical-incident" in p[1] for p in pairs if len(p) > 1) or \
+        "/api/high-risk-crisis/coach/critical-incident" in text

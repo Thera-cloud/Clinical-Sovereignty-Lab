@@ -34,6 +34,8 @@
 
 Flag: `ENABLE_POPULATION_CRISIS_RESOURCES` (default on).
 
+**Do not confuse with Sensitive Bridge `population_type`** (adult_survivor / minor_survivor / …). That clinical taxonomy is orthogonal; crisis-line routing uses `profile_data.population` only. Coaches can set occupational population from Risk windows or optional `occupational_population` on Sensitive Bridge enroll.
+
 ---
 
 ## What happens, in order (chat turn)
@@ -72,7 +74,7 @@ Clock starts when the client message hits the bridge (`chat_message` / `nate_que
 | Role | Trigger | Channel |
 |---|---|---|
 | **Client** | SI/violence dispatch | In-app `crisis_resources` banner |
-| **Assigned coach** | SI/violence; risk windows; 62h inactivity | Coach notifications + `/coach/risk-windows` |
+| **Assigned coach** | SI/violence; risk windows; 62h inactivity | Coach notifications + Clients → Risk windows UI + `/coach/risk-windows` |
 | **Admin** | Watchlist / Crisis Center | WebSocket `admin_get_crisis_watchlist` |
 | **Guardian** | Minor P0/P1 (policy) | SMS/email/call per analytics protocol |
 | **Employer / corp** | — | **Never** if `population_shielded` |

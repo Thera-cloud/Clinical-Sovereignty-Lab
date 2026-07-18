@@ -1,15 +1,14 @@
 """High-risk occupational crisis engine API — QUANTUM-CRYSTAL-ARCH.
 
-Endpoints:
-  Client: set population, confidentiality disclosure, family concern flag, family education
-  Coach: list active risk windows for assigned clients
+Client: population, confidentiality, family concern flag, family education
+Coach: risk windows, critical incident, set client occupational population
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -22,12 +21,17 @@ from app.services.crisis_resource_registry import (
 from app.services.population_profile import (
     VALID_POPULATIONS,
     family_concern_consent,
+    get_clinical_population_type,
     get_population,
     is_population_shielded,
+    normalize_population,
     profile_data,
+    same_family,
 )
 
 logger = logging.getLogger(__name__)
+
+USER_RELOAD_CHANNEL = "nate:user_reload"
 
 router = APIRouter(prefix="/api/high-risk-crisis", tags=["high_risk_crisis"])
 
@@ -41,7 +45,6 @@ class PopulationUpdate(BaseModel):
 class FamilyConcernBody(BaseModel):
     target_username: str
     relationship: str = "family"
-    # Optional free text is accepted but NEVER persisted as content — only presence flag
     note: Optional[str] = Field(None, max_length=500)
 
 
@@ -50,8 +53,92 @@ class CriticalIncidentBody(BaseModel):
     note: Optional[str] = Field(None, max_length=200)
 
 
+class CoachPopulationBody(BaseModel):
+    client_username: str
+    population: str
+    population_shielded: Optional[bool] = True
+
+
 def _pd(user: Dict) -> Dict[str, Any]:
     return profile_data(user)
+
+
+async def _publish_user_reload(username: str) -> None:
+    """Bridge cache sync — QUANTUM-CRYSTAL-ARCH."""
+    if not username:
+        return
+    try:
+        from app.services.api_server import _get_auth_redis
+
+        r = await _get_auth_redis()
+        if r:
+            await r.publish(USER_RELOAD_CHANNEL, json.dumps({"username": username}))
+    except Exception as e:
+        logger.warning("user_reload publish failed for %s: %s", username, e)
+
+
+async def _write_population(
+    pool,
+    username: str,
+    pop: str,
+    shielded: bool,
+    family_consent: Optional[bool] = None,
+) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE users SET profile_data = jsonb_set(
+                jsonb_set(
+                    COALESCE(profile_data, '{}'::jsonb),
+                    '{population}',
+                    to_jsonb($1::text)
+                ),
+                '{population_shielded}',
+                to_jsonb($2::boolean)
+            )
+            WHERE username = $3
+            """,
+            pop,
+            shielded,
+            username,
+        )
+        if family_consent is not None:
+            await conn.execute(
+                """
+                UPDATE users SET profile_data = jsonb_set(
+                    COALESCE(profile_data, '{}'::jsonb),
+                    '{family_concern_consent}',
+                    to_jsonb($1::boolean)
+                )
+                WHERE username = $2
+                """,
+                bool(family_consent),
+                username,
+            )
+
+
+async def _coach_owns_client(pool, coach: Dict, client_username: str) -> bool:
+    coach_hw = coach.get("hardware_id") or ""
+    coach_user = coach.get("username") or ""
+    role = (coach.get("role") or "").upper()
+    if role == "ADMIN":
+        return True
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT 1 FROM users
+             WHERE username = $1 AND role = 'CLIENT' AND deleted_at IS NULL
+               AND (
+                 profile_data->>'coach_id' = $2
+                 OR profile_data->>'assigned_coach_id' = $2
+                 OR profile_data->>'assigned_coach' = $3
+               )
+            """,
+            client_username,
+            coach_hw,
+            coach_user,
+        )
+    return row is not None
 
 
 @router.get("/health")
@@ -80,6 +167,12 @@ async def get_my_population(user: Dict = Depends(get_current_user)):
         "population_shielded": is_population_shielded(user),
         "family_concern_consent": family_concern_consent(user),
         "lethal_means_guidance_ok": bool(pd.get("lethal_means_guidance_ok")),
+        # Orthogonal Sensitive Bridge key — never used for VCL/Copline routing
+        "clinical_population_type": get_clinical_population_type(user),
+        "domains": {
+            "occupational": "profile_data.population → crisis line routing",
+            "clinical": "profile_data.population_type → Sensitive Bridge (survivor taxonomy)",
+        },
     }
 
 
@@ -89,9 +182,9 @@ async def set_population(
     request: Request,
     user: Dict = Depends(get_current_user),
 ):
-    pop = (body.population or "").strip().lower()
-    if pop not in VALID_POPULATIONS:
-        raise HTTPException(400, f"Invalid population. Allowed: {sorted(VALID_POPULATIONS)}")
+    pop, err = normalize_population(body.population)
+    if err:
+        raise HTTPException(400, err)
     pool = request.app.state.db_pool
     if not pool:
         raise HTTPException(503, "Database unavailable")
@@ -102,42 +195,16 @@ async def set_population(
     if pop == "general":
         shielded = bool(body.population_shielded) if body.population_shielded is not None else False
 
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            UPDATE users SET profile_data = jsonb_set(
-                jsonb_set(
-                    COALESCE(profile_data, '{}'::jsonb),
-                    '{population}',
-                    to_jsonb($1::text)
-                ),
-                '{population_shielded}',
-                to_jsonb($2::boolean)
-            )
-            WHERE username = $3
-            """,
-            pop,
-            shielded,
-            username,
-        )
-        if body.family_concern_consent is not None:
-            await conn.execute(
-                """
-                UPDATE users SET profile_data = jsonb_set(
-                    COALESCE(profile_data, '{}'::jsonb),
-                    '{family_concern_consent}',
-                    to_jsonb($1::boolean)
-                )
-                WHERE username = $2
-                """,
-                bool(body.family_concern_consent),
-                username,
-            )
+    await _write_population(
+        pool, username, pop, shielded, body.family_concern_consent
+    )
+    await _publish_user_reload(username)
     return {
         "status": "ok",
         "population": pop,
         "population_shielded": shielded,
         "family_concern_consent": body.family_concern_consent,
+        "bridge_cache_reload": True,
     }
 
 
@@ -159,7 +226,6 @@ async def family_concern_flag(
         raise HTTPException(400, "Cannot flag yourself")
 
     async with pool.acquire() as conn:
-        # Same family_id required
         rows = await conn.fetch(
             """
             SELECT username, family_id, profile_data, role
@@ -172,9 +238,7 @@ async def family_concern_flag(
         by_u = {r["username"]: r for r in rows}
         if flagger not in by_u or target not in by_u:
             raise HTTPException(404, "User not found")
-        f_fam = by_u[flagger]["family_id"]
-        t_fam = by_u[target]["family_id"]
-        if not f_fam or not t_fam or str(f_fam) != str(t_fam):
+        if not same_family(by_u[flagger], by_u[target]):
             raise HTTPException(403, "Must be in the same family")
 
         t_pd = by_u[target]["profile_data"] or {}
@@ -249,6 +313,15 @@ async def family_education(user: Dict = Depends(get_current_user)):
                     "one must have agreed to this option first."
                 ),
             },
+            {
+                "id": "two_population_keys",
+                "title": "Service background vs clinical enrollment",
+                "body": (
+                    "Occupational population (veteran, first responder) chooses which crisis line "
+                    "Nate surfaces. Sensitive Bridge population_type (survivor taxonomy) is a "
+                    "separate clinical enrollment field and does not change crisis-line routing."
+                ),
+            },
         ],
         "crisis_resources": get_crisis_resources(user),
     }
@@ -268,7 +341,9 @@ async def coach_risk_windows(
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT username, profile_data->>'name' AS name
+            SELECT username,
+                   profile_data->>'name' AS name,
+                   profile_data->>'population' AS population
               FROM users
              WHERE role = 'CLIENT'
                AND deleted_at IS NULL
@@ -286,13 +361,23 @@ async def coach_risk_windows(
 
     windows = await list_active_windows_for_coach(pool, client_usernames=usernames)
     name_by = {r["username"]: r["name"] for r in rows}
+    pop_by = {r["username"]: r["population"] for r in rows}
     for w in windows:
         w["client_name"] = name_by.get(w["username"])
+        w["population"] = pop_by.get(w["username"]) or "general"
         if w.get("opened_at"):
             w["opened_at"] = w["opened_at"].isoformat()
         if w.get("expires_at"):
             w["expires_at"] = w["expires_at"].isoformat()
-    return {"windows": windows, "count": len(windows)}
+    return {
+        "windows": windows,
+        "count": len(windows),
+        "clients": [
+            {"username": r["username"], "name": r["name"], "population": r["population"] or "general"}
+            for r in rows
+        ],
+        "populations": sorted(VALID_POPULATIONS),
+    }
 
 
 @router.post("/coach/critical-incident")
@@ -301,10 +386,16 @@ async def coach_critical_incident(
     request: Request,
     user: Dict = Depends(require_coach),
 ):
-    """Coach opens a critical-incident risk window (e.g. after a bad call / LODD)."""
+    """Coach opens a critical-incident risk window (assigned clients only)."""
     pool = request.app.state.db_pool
     if not pool:
         raise HTTPException(503, "Database unavailable")
+    client = (body.client_username or "").strip()
+    if not client:
+        raise HTTPException(400, "client_username required")
+    if not await _coach_owns_client(pool, user, client):
+        raise HTTPException(403, "Client not assigned to this coach")
+
     from app.services.checkin_risk_windows import (
         REASON_CRITICAL_INCIDENT,
         open_risk_window,
@@ -312,11 +403,45 @@ async def coach_critical_incident(
 
     wid = await open_risk_window(
         pool,
-        username=body.client_username,
+        username=client,
         reason=REASON_CRITICAL_INCIDENT,
         opened_by=f"coach:{user.get('username')}",
         metadata={"note_present": bool(body.note)},
     )
     if not wid:
         raise HTTPException(500, "Could not open window")
-    return {"status": "ok", "window_id": wid}
+    return {"status": "ok", "window_id": wid, "client_username": client}
+
+
+@router.put("/coach/population")
+async def coach_set_population(
+    body: CoachPopulationBody,
+    request: Request,
+    user: Dict = Depends(require_coach),
+):
+    """Coach sets occupational population for an assigned client (crisis-line routing)."""
+    pool = request.app.state.db_pool
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+    client = (body.client_username or "").strip()
+    pop, err = normalize_population(body.population)
+    if err:
+        raise HTTPException(400, err)
+    if not client:
+        raise HTTPException(400, "client_username required")
+    if not await _coach_owns_client(pool, user, client):
+        raise HTTPException(403, "Client not assigned to this coach")
+
+    shielded = True if body.population_shielded is None else bool(body.population_shielded)
+    if pop == "general":
+        shielded = bool(body.population_shielded) if body.population_shielded is not None else False
+
+    await _write_population(pool, client, pop, shielded, None)
+    await _publish_user_reload(client)
+    return {
+        "status": "ok",
+        "client_username": client,
+        "population": pop,
+        "population_shielded": shielded,
+        "bridge_cache_reload": True,
+    }

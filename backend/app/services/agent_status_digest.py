@@ -296,13 +296,14 @@ class AgentStatusDigest:
             ("QuickBooks Auditor", "quickbooks_auditor"),
             ("Corporate Command Auditor", "corporate_command_auditor"),
             ("Voice Infrastructure Auditor", "voice_infra_auditor"),
+            ("High-Risk Crisis Auditor", "high_risk_crisis_auditor"),  # QUANTUM-CRYSTAL-ARCH
         ]
         rows = []
         for name, attr in auditors:
             agent = getattr(self.app, attr, None)
             status, detail = self._check_agent(agent, name)
             rows.append((status, name, detail))
-        return {"title": "Trust Auditors (29)", "rows": rows}
+        return {"title": "Trust Auditors (30)", "rows": rows}
 
     async def _section_trust_enforcer(self) -> dict:
         agent = getattr(self.app, "trust_enforcer", None)

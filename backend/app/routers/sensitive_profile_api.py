@@ -982,6 +982,12 @@ class CoachInitiatedEnrollment(BaseModel):
         ...,
         description="One of: adult_survivor, minor_survivor, transitioning_youth_16_to_21",
     )
+    # QUANTUM-CRYSTAL-ARCH: occupational crisis routing (orthogonal to population_type)
+    occupational_population: Optional[str] = Field(
+        default=None,
+        description="Optional: veteran|first_responder_le|first_responder_fire_ems|"
+        "military_family|general — writes profile_data.population for crisis lines",
+    )
     informed_consent_confirmed: bool = Field(
         ...,
         description="Coach confirms the client has provided HIPAA-grade informed "
@@ -3259,6 +3265,31 @@ async def coach_initiated_enroll(
             user_id,
             body.population_type,
         )
+        # QUANTUM-CRYSTAL-ARCH: optional occupational population (crisis-line routing)
+        _occ = (body.occupational_population or "").strip().lower()
+        if _occ:
+            from app.services.population_profile import VALID_POPULATIONS as _OCC_POPS
+            if _occ in _OCC_POPS:
+                _shield = _occ != "general"
+                await conn.execute(
+                    """
+                    UPDATE users SET profile_data = jsonb_set(
+                        jsonb_set(
+                            COALESCE(profile_data, '{}'::jsonb),
+                            '{population}',
+                            to_jsonb($2::text),
+                            true
+                        ),
+                        '{population_shielded}',
+                        to_jsonb($3::boolean),
+                        true
+                    )
+                    WHERE username = $1
+                    """,
+                    user_id,
+                    _occ,
+                    _shield,
+                )
 
     # ---- Side effect (c): emit enrollment_created audit event --------------
     await _emit_profile_mutation_audit(
@@ -3278,11 +3309,21 @@ async def coach_initiated_enroll(
         access_classification=ACCESS_CLINICIAN_AND_ADMIN,
     )
 
+    # QUANTUM-CRYSTAL-ARCH: refresh bridge cache after profile_data population writes
+    try:
+        from app.services.api_server import _get_auth_redis
+        _rr = await _get_auth_redis()
+        if _rr:
+            await _rr.publish("nate:user_reload", json.dumps({"username": user_id}))
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "user_id": user_id,
         "cohort_label": body.cohort_label,
         "population_type": body.population_type,
+        "occupational_population": (body.occupational_population or "").strip().lower() or None,
         "enrolled_by": coach_username,
         "enrolled_at": consent_ts.isoformat(),
         "informed_consent_timestamp": consent_ts.isoformat(),
