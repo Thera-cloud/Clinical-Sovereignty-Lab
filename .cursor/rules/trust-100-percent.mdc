@@ -1,11 +1,11 @@
 ---
-description: Rules for sustaining 580/580 TRUSTED (100%) GREEN across all 29 auditors and 5 pre-flight checks.
+description: Rules for sustaining TRUSTED (100%) GREEN across all auditors and 5 pre-flight checks (see baseline table; includes High-Risk Occupational Crisis).
 alwaysApply: true
 ---
 
 # Trust 100% Sustainment Protocol
 
-The Trust Enforcer reports `580/580 TRUSTED (100%) — Pre-flight 5/5 — GREEN — 0 actions` three times daily (5:10 AM, 5:10 PM, 11:10 PM UTC). Any change that drops this below 100% is a regression.
+The Trust Enforcer reports `N/N TRUSTED (100%) — Pre-flight 5/5 — GREEN — 0 actions` three times daily (5:10 AM, 5:10 PM, 11:10 PM UTC), where N is the sum of `trust_baseline` expected counts for all registered auditors. Any change that drops this below 100% is a regression.
 
 ## Trust Architecture
 
@@ -18,36 +18,40 @@ Trust Enforcer (meta-agent)
 │   ├── Azure Env — 5 Azure vars set (ENDPOINT, API_KEY, CHAT_DEPLOYMENT, DEPLOYMENT, MINI_TTS_DEPLOYMENT)
 │   └── Redis — responds to PING
 │
-└── 29 Auditors (580 total checks)
-    ├── SkyEye Dashboard ........... 61 endpoints
-    ├── Sovereign Command .......... 25 endpoints
-    ├── The Eye ..................... 21 endpoints
-    ├── Nevedal Research Lab ........ 30 checks (24 REST + 6 DB pipeline)
-    ├── Billing Pipeline ........... 35 endpoints
-    ├── Coach & DOJO ............... 55 endpoints
-    ├── Client App ................. 23 endpoints
-    ├── System Integrity ........... 18 checks
-    ├── Tier Gating ................ 12 tests
-    ├── WebSocket Flows ............ 10 tests
-    ├── Defense Health .............. 8 checks
-    ├── Hardware Security ........... 11 checks
-    ├── AI Pipeline ................. 6 checks
-    ├── Login Tests ................. 2 tests
-    ├── DOJO & Zoom Sessions ....... 29 endpoints
-    ├── Wisdom Pipeline ............ 12 checks
-    ├── Settings Tab ............... 15 checks
-    ├── Coach Hierarchy & Mesh ..... 20 checks
-    ├── Liminal Presence ........... 3 checks
-    ├── PMB Command Center ........ 13 checks
-    ├── Data Uniformity ........... 21 checks
-    ├── Token Lab ................. 15 checks
-    ├── GKM Ministry .............. 11 checks
-    ├── Nate Check-In ............. 8 checks
-    ├── QuickBooks Sync ........... 10 checks
-    ├── Corporate Command ........ 25 checks
-    ├── Voice Infrastructure ...... 10 checks
-    ├── Classroom Learning ....... 15 checks (DB)
-    └── Sensitive Clinical Bridge 56 checks
+└── 33 Auditors (see trust_baseline sum; includes High-Risk Crisis)
+├── SkyEye Dashboard ........... 61 endpoints
+├── Sovereign Command .......... 25 endpoints
+├── The Eye ..................... 21 endpoints
+├── Nevedal Research Lab ........ 30 checks (24 REST + 6 DB pipeline)
+├── Billing Pipeline ........... 35 endpoints
+├── Coach & DOJO ............... 55 endpoints
+├── Client App ................. 23 endpoints
+├── System Integrity ........... 18 checks
+├── Tier Gating ................ 12 tests
+├── WebSocket Flows ............ 10 tests
+├── Defense Health .............. 8 checks
+├── Hardware Security ........... 11 checks
+├── AI Pipeline ................. 6 checks
+├── Login Tests ................. 2 tests
+├── DOJO & Zoom Sessions ....... 29 endpoints
+├── Wisdom Pipeline ............ 12 checks
+├── Settings Tab ............... 15 checks
+├── Coach Hierarchy & Mesh ..... 20 checks
+├── Liminal Presence ........... 3 checks
+├── PMB Command Center ........ 13 checks
+├── Data Uniformity ........... 21 checks
+├── Token Lab ................. 15 checks
+├── GKM Ministry .............. 11 checks
+├── Nate Check-In ............. 8 checks
+├── QuickBooks Sync ........... 10 checks
+├── Corporate Command ........ 25 checks
+├── Voice Infrastructure ...... 10 checks
+├── Classroom Learning ....... 15 checks (DB)
+├── Sensitive Clinical Bridge 56 checks
+├── Stance Loop ............... (baseline key: stance_loop_check_count)
+├── CEO Dual-COO .............. (baseline key: ceo_dual_coo_check_count)
+├── Six-Quotient Battery ...... (baseline key: six_quotient_battery_check_count)
+└── High-Risk Occupational Crisis 13 checks
 ```
 
 ## Timing Discipline
@@ -163,9 +167,9 @@ After deploying any backend, database, or infrastructure change:
    # Wait 60s for auditors to finish
    curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/trust-enforcer/trigger
    ```
-5. **Verify 100%**: Check `skyeye_activity` for the latest `trust_enforcer_sent` entry — must show `580/580 TRUSTED (100%) — GREEN — 0 actions`
+5. **Verify 100%**: Check `skyeye_activity` for the latest `trust_enforcer_sent` entry — must show `N/N TRUSTED (100%) — GREEN — 0 actions` matching `SUM(trust_baseline.expected)`.
 
-## Current Trust Baseline (580 Total — 29 Active Auditors)
+## Current Trust Baseline (33 Active Auditors — sum via trust_baseline)
 
 | Auditor | Expected | Baseline Key |
 |---------|----------|-------------|
@@ -198,5 +202,6 @@ After deploying any backend, database, or infrastructure change:
 | Voice Infrastructure | 10 | `voice_infra_check_count` |
 | Classroom Learning | 15 | `classroom_learning_check_count` |
 | Sensitive Clinical Bridge | 56 | `sensitive_bridge_check_count` |
+| High-Risk Occupational Crisis | 13 | `high_risk_crisis_check_count` |
 
 Sensitive Bridge v1.4 adds 22 checks: 9 status PUT endpoints, 4 parts registry endpoints, 2 framework menu endpoints, 4 migration 217 schema checks, 1 crisis_events writer smoke, 1 PII redaction smoke, and 1 part-aware codeword listener smoke.

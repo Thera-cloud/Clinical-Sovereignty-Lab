@@ -46,14 +46,14 @@ Clock starts when the client message hits the bridge (`chat_message` / `nate_que
 |---|---|---|---|
 | **1** | T+0 | **0.1** | Message accepted; `turn_id` assigned. |
 | **2** | T+0 | **0.5** | **SI/violence lexicon scan** (CLIENT only). If match → coach notification + `crisis_events` + open **post_p0 risk window** (7d / ~24h cadence). |
-| **3** | T+0–3 | **3** | If coach alert **dispatched** → client WebSocket **`crisis_resources`** (population-aware) + “Your coach has been alerted.” |
+| **3** | T+0–3 | **3** | On **any SI/violence match** → client WebSocket **`crisis_resources`** (population-aware) + banner, even if coach alert is deduped/missing/failed. |
 | **4** | T+0–2 | **2** | **Sensitive Bridge pre-flight** (if enrolled). |
-| **5** | T+1–5 | **5** | First Nate tokens. Prompt may include peer-culture voice, night register, confidentiality, OVERRIDE 5 lethal-means (flagged off by default). |
+| **5** | T+1–5 | **5** | First Nate tokens. Prompt may include peer-culture voice, night register, confidentiality, OVERRIDE 5 lethal-means (flagged off by default; client opt-in). |
 | **6** | T+5–30 | **30** | Full reply. Post-guard injects population-correct resources if missing. |
 | **7** | T+after reply | **35** | Metrics / watchlist feed. |
-| **8** | Human | **5 min (P0 doc target)** | Assigned coach reviews alert + risk-window status (`GET /api/high-risk-crisis/coach/risk-windows`). |
+| **8** | Human | **5 min (P0 SLA)** | Assigned coach reviews Risk windows. Opening the coach Risk-windows list stamps review. If no review within **5 min**, automated SLA re-alert (`p0_sla_breach`). |
 
-**Voice calls:** Same registry + population voice suffix; Polly greeting separate from Grok.
+**Voice calls:** Same SI hook + population voice suffix; on match, Nate **speaks** population-aware crisis lines (chat-banner equivalent). Polly greeting separate from Grok.
 
 ---
 
@@ -87,4 +87,4 @@ Clock starts when the client message hits the bridge (`chat_message` / `nate_que
 - Crisis lines are the immediate safety layer; platform alerts are **parallel**.  
 - Test accounts can suppress alerts (`CRISIS_ALERT_SUPPRESS_USERNAMES`).
 
-*Code: `crisis_resource_registry.py`, `checkin_risk_windows.py`, `population_prompt_modifiers.py`, `high_risk_crisis_api.py`, `bridge_server.py` `process_interaction`, `nate_checkin_agent.py`.*
+*Code: `crisis_resource_registry.py`, `checkin_risk_windows.py` (incl. P0 SLA sweep), `population_prompt_modifiers.py`, `high_risk_crisis_api.py`, `voice_si_crisis_hook.py`, `bridge_server.py` `process_interaction`, `nate_checkin_agent.py`.*

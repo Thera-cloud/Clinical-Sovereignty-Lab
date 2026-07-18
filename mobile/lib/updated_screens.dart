@@ -10522,21 +10522,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             children: [
               Expanded(child: _buildClientSearchAndFilter()),
               const SizedBox(width: 8),
-              // QUANTUM-CRYSTAL-ARCH: coach risk-window ops surface
-              IconButton(
-                tooltip: 'Risk windows',
-                icon: const Icon(Icons.shield_outlined, color: Color(0xFFEF4444)),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => CoachRiskWindowsScreen(
-                        profile: widget.currentUserProfile,
-                      ),
-                    ),
-                  );
-                },
-              ),
+              // QUANTUM-CRYSTAL-ARCH: coach risk-window ops surface + active badge
+              CoachRiskWindowsEntryButton(profile: widget.currentUserProfile),
             ],
           ),
         ),

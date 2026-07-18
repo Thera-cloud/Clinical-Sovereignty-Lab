@@ -173,6 +173,8 @@ class PopulationSetupScreen extends StatefulWidget {
 class _PopulationSetupScreenState extends State<PopulationSetupScreen> {
   String _pop = 'general';
   bool _consent = false;
+  bool _lethalMeans = false;
+  bool _lethalFlagOn = false;
   bool _saving = false;
   String? _msg;
 
@@ -199,6 +201,8 @@ class _PopulationSetupScreenState extends State<PopulationSetupScreen> {
         setState(() {
           _pop = (d['population'] ?? 'general').toString();
           _consent = d['family_concern_consent'] == true;
+          _lethalMeans = d['lethal_means_guidance_ok'] == true;
+          _lethalFlagOn = d['lethal_means_flag_enabled'] == true;
         });
       }
     } catch (_) {}
@@ -211,14 +215,18 @@ class _PopulationSetupScreenState extends State<PopulationSetupScreen> {
     });
     try {
       final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/high-risk-crisis/population');
+      final body = <String, dynamic>{
+        'population': _pop,
+        'population_shielded': _pop != 'general',
+        'family_concern_consent': _consent,
+      };
+      if (_lethalFlagOn) {
+        body['lethal_means_guidance_ok'] = _lethalMeans;
+      }
       final resp = await http.put(
         uri,
         headers: _authHeaders(widget.profile),
-        body: jsonEncode({
-          'population': _pop,
-          'population_shielded': _pop != 'general',
-          'family_concern_consent': _consent,
-        }),
+        body: jsonEncode(body),
       );
       setState(() {
         _msg = resp.statusCode == 200 ? 'Saved.' : 'Save failed (${resp.statusCode})';
@@ -263,6 +271,20 @@ class _PopulationSetupScreenState extends State<PopulationSetupScreen> {
             ),
             onChanged: (v) => setState(() => _consent = v),
           ),
+          if (_lethalFlagOn)
+            SwitchListTile(
+              value: _lethalMeans,
+              activeColor: _HR.gold,
+              title: const Text(
+                'Allow voluntary secure-storage framing (never confiscation)',
+                style: TextStyle(color: _HR.text, fontSize: 13),
+              ),
+              subtitle: const Text(
+                'Only when you opt in. Nate may discuss temporary secure storage of lethal means.',
+                style: TextStyle(color: _HR.muted, fontSize: 11),
+              ),
+              onChanged: (v) => setState(() => _lethalMeans = v),
+            ),
           const SizedBox(height: 12),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: _HR.gold),
@@ -360,15 +382,59 @@ class FamilyConcernFlagScreen extends StatefulWidget {
 }
 
 class _FamilyConcernFlagScreenState extends State<FamilyConcernFlagScreen> {
-  final _targetCtrl = TextEditingController();
   final _relCtrl = TextEditingController(text: 'spouse');
+  List<Map<String, dynamic>> _members = [];
+  String? _selectedUsername;
+  bool _loading = true;
   bool _sending = false;
   String? _msg;
 
+  @override
+  void initState() {
+    super.initState();
+    _loadMembers();
+  }
+
+  Future<void> _loadMembers() async {
+    setState(() {
+      _loading = true;
+      _msg = null;
+    });
+    try {
+      final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/high-risk-crisis/family/members');
+      final resp = await http.get(uri, headers: _authHeaders(widget.profile));
+      if (resp.statusCode == 200) {
+        final d = jsonDecode(resp.body) as Map<String, dynamic>;
+        final list = (d['members'] is List) ? List.from(d['members'] as List) : [];
+        setState(() {
+          _members = list
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+          final flaggable = _members.where((m) => m['can_flag'] == true).toList();
+          if (flaggable.length == 1) {
+            _selectedUsername = flaggable.first['username']?.toString();
+          }
+          _loading = false;
+        });
+      } else {
+        setState(() {
+          _msg = 'Could not load family members (${resp.statusCode})';
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _msg = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
   Future<void> _submit() async {
-    final target = _targetCtrl.text.trim();
+    final target = (_selectedUsername ?? '').trim();
     if (target.isEmpty) {
-      setState(() => _msg = 'Enter the family member username');
+      setState(() => _msg = 'Select a family member');
       return;
     }
     setState(() {
@@ -400,13 +466,13 @@ class _FamilyConcernFlagScreenState extends State<FamilyConcernFlagScreen> {
 
   @override
   void dispose() {
-    _targetCtrl.dispose();
     _relCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final flaggable = _members.where((m) => m['can_flag'] == true).toList();
     return Scaffold(
       backgroundColor: _HR.bg,
       appBar: AppBar(
@@ -424,15 +490,40 @@ class _FamilyConcernFlagScreenState extends State<FamilyConcernFlagScreen> {
               style: TextStyle(color: _HR.muted, fontSize: 13, height: 1.4),
             ),
             const SizedBox(height: 16),
-            TextField(
-              controller: _targetCtrl,
-              style: const TextStyle(color: _HR.text),
-              decoration: const InputDecoration(
-                labelText: 'Their username',
-                labelStyle: TextStyle(color: _HR.muted),
-                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: _HR.muted)),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Center(child: CircularProgressIndicator(color: _HR.gold)),
+              )
+            else if (flaggable.isEmpty)
+              Text(
+                _members.isEmpty
+                    ? 'No family members on your account yet.'
+                    : 'No family members have opted in to concern flags. Ask them to enable it under Safety & population.',
+                style: const TextStyle(color: _HR.text, height: 1.4),
+              )
+            else
+              DropdownButtonFormField<String>(
+                value: _selectedUsername,
+                dropdownColor: _HR.card,
+                style: const TextStyle(color: _HR.text),
+                decoration: const InputDecoration(
+                  labelText: 'Family member',
+                  labelStyle: TextStyle(color: _HR.muted),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: _HR.muted)),
+                ),
+                items: [
+                  for (final m in flaggable)
+                    DropdownMenuItem(
+                      value: m['username']?.toString(),
+                      child: Text(
+                        '${m['name'] ?? m['username']} (${m['username']})',
+                        style: const TextStyle(color: _HR.text),
+                      ),
+                    ),
+                ],
+                onChanged: (v) => setState(() => _selectedUsername = v),
               ),
-            ),
             TextField(
               controller: _relCtrl,
               style: const TextStyle(color: _HR.text),
@@ -445,7 +536,7 @@ class _FamilyConcernFlagScreenState extends State<FamilyConcernFlagScreen> {
             const SizedBox(height: 20),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: _HR.gold),
-              onPressed: _sending ? null : _submit,
+              onPressed: (_sending || flaggable.isEmpty) ? null : _submit,
               child: Text(_sending ? 'Sending…' : 'Flag concern', style: const TextStyle(color: Colors.black)),
             ),
             if (_msg != null) ...[
@@ -455,6 +546,58 @@ class _FamilyConcernFlagScreenState extends State<FamilyConcernFlagScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Coach clients-tab entry with active-window badge — QUANTUM-CRYSTAL-ARCH.
+class CoachRiskWindowsEntryButton extends StatefulWidget {
+  final Map profile;
+  const CoachRiskWindowsEntryButton({super.key, required this.profile});
+
+  @override
+  State<CoachRiskWindowsEntryButton> createState() => _CoachRiskWindowsEntryButtonState();
+}
+
+class _CoachRiskWindowsEntryButtonState extends State<CoachRiskWindowsEntryButton> {
+  int _count = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    try {
+      final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/high-risk-crisis/coach/risk-windows');
+      final resp = await http.get(uri, headers: _authHeaders(widget.profile));
+      if (resp.statusCode == 200 && mounted) {
+        final d = jsonDecode(resp.body) as Map<String, dynamic>;
+        setState(() => _count = (d['count'] is int) ? d['count'] as int : 0);
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: _count > 0 ? 'Risk windows ($_count active)' : 'Risk windows',
+      icon: Badge(
+        isLabelVisible: _count > 0,
+        label: Text('$_count', style: const TextStyle(fontSize: 10)),
+        backgroundColor: const Color(0xFFEF4444),
+        child: const Icon(Icons.shield_outlined, color: Color(0xFFEF4444)),
+      ),
+      onPressed: () async {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CoachRiskWindowsScreen(profile: widget.profile),
+          ),
+        );
+        if (mounted) _refresh();
+      },
     );
   }
 }
@@ -488,7 +631,9 @@ class _CoachRiskWindowsScreenState extends State<CoachRiskWindowsScreen> {
       _error = null;
     });
     try {
-      final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/high-risk-crisis/coach/risk-windows');
+      // ack=1 stamps coach review for P0 SLA (auditor GET omits ack)
+      final uri = Uri.parse(
+          '${AppConfig.apiBaseUrl}/api/high-risk-crisis/coach/risk-windows?ack=1');
       final resp = await http.get(uri, headers: _authHeaders(widget.profile));
       if (resp.statusCode != 200) {
         setState(() {

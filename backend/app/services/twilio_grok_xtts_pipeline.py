@@ -1369,12 +1369,20 @@ async def run_twilio_grok_xtts_bridge(
                             )
                         except Exception as _sb_v_e:
                             print(f"[SB-SWEEP] voice sweep skipped (non-fatal): {_sb_v_e}")
-                    # SOVEREIGN-VOICE — SI/violence coach alert + risk window on transcript
+                    # SOVEREIGN-VOICE — SI/violence coach alert + risk window + spoken resources
                     if session_username and ctx.get("db_pool"):
                         try:
                             from app.services.voice_si_crisis_hook import schedule_voice_si_crisis
+
+                            async def _speak_crisis_line(text: str) -> None:
+                                await _on_grok_text(text)
+
                             schedule_voice_si_crisis(
-                                ctx["db_pool"], session_username, user_txt, ctx.get("profile"),
+                                ctx["db_pool"],
+                                session_username,
+                                user_txt,
+                                ctx.get("profile"),
+                                speak_fn=_speak_crisis_line,
                             )
                         except Exception as _si_v_e:
                             print(f"[VOICE-SI] skipped (non-fatal): {_si_v_e}")

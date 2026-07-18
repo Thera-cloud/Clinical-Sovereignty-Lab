@@ -24,6 +24,7 @@ from app.services.population_profile import (
     get_clinical_population_type,
     get_population,
     is_population_shielded,
+    lethal_means_enabled,
     normalize_population,
     profile_data,
     same_family,
@@ -40,6 +41,7 @@ class PopulationUpdate(BaseModel):
     population: str
     population_shielded: Optional[bool] = True
     family_concern_consent: Optional[bool] = None
+    lethal_means_guidance_ok: Optional[bool] = None
 
 
 class FamilyConcernBody(BaseModel):
@@ -83,6 +85,7 @@ async def _write_population(
     pop: str,
     shielded: bool,
     family_consent: Optional[bool] = None,
+    lethal_means_ok: Optional[bool] = None,
 ) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
@@ -113,6 +116,19 @@ async def _write_population(
                 WHERE username = $2
                 """,
                 bool(family_consent),
+                username,
+            )
+        if lethal_means_ok is not None:
+            await conn.execute(
+                """
+                UPDATE users SET profile_data = jsonb_set(
+                    COALESCE(profile_data, '{}'::jsonb),
+                    '{lethal_means_guidance_ok}',
+                    to_jsonb($1::boolean)
+                )
+                WHERE username = $2
+                """,
+                bool(lethal_means_ok),
                 username,
             )
 
@@ -193,6 +209,7 @@ async def get_my_population(user: Dict = Depends(get_current_user)):
         "population_shielded": is_population_shielded(user),
         "family_concern_consent": family_concern_consent(user),
         "lethal_means_guidance_ok": bool(pd.get("lethal_means_guidance_ok")),
+        "lethal_means_flag_enabled": lethal_means_enabled(),
         # Orthogonal Sensitive Bridge key — never used for VCL/Copline routing
         "clinical_population_type": get_clinical_population_type(user),
         "domains": {
@@ -222,7 +239,12 @@ async def set_population(
         shielded = bool(body.population_shielded) if body.population_shielded is not None else False
 
     await _write_population(
-        pool, username, pop, shielded, body.family_concern_consent
+        pool,
+        username,
+        pop,
+        shielded,
+        body.family_concern_consent,
+        body.lethal_means_guidance_ok,
     )
     await _publish_user_reload(username)
     return {
@@ -230,8 +252,62 @@ async def set_population(
         "population": pop,
         "population_shielded": shielded,
         "family_concern_consent": body.family_concern_consent,
+        "lethal_means_guidance_ok": body.lethal_means_guidance_ok,
         "bridge_cache_reload": True,
     }
+
+
+@router.get("/family/members")
+async def family_members(
+    request: Request,
+    user: Dict = Depends(get_current_user),
+):
+    """Same-family CLIENT roster for concern-flag picker — QUANTUM-CRYSTAL-ARCH."""
+    pool = request.app.state.db_pool
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+    me = user.get("username") or ""
+    if not me:
+        raise HTTPException(400, "Username required")
+    pd = _pd(user)
+    fam = user.get("family_id") or pd.get("family_id")
+    if not fam:
+        return {"members": [], "count": 0, "family_id": None}
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT username,
+                   role,
+                   profile_data->>'name' AS name,
+                   profile_data->>'family_concern_consent' AS consent,
+                   family_id,
+                   profile_data->>'family_id' AS json_family_id
+              FROM users
+             WHERE deleted_at IS NULL
+               AND username <> $1
+               AND role = 'CLIENT'
+               AND (
+                 family_id::text = $2::text
+                 OR profile_data->>'family_id' = $2::text
+               )
+             ORDER BY profile_data->>'name' NULLS LAST, username
+            """,
+            me,
+            str(fam),
+        )
+    members = []
+    for r in rows:
+        consent_raw = r["consent"]
+        consented = consent_raw is True or str(consent_raw).lower() in ("1", "true", "yes")
+        members.append(
+            {
+                "username": r["username"],
+                "name": r["name"] or r["username"],
+                "family_concern_consent": consented,
+                "can_flag": consented,
+            }
+        )
+    return {"members": members, "count": len(members), "family_id": str(fam)}
 
 
 @router.post("/family/concern-flag")
@@ -363,12 +439,17 @@ async def coach_risk_windows(
     request: Request,
     user: Dict = Depends(require_coach),
 ):
-    """Active risk windows for clients assigned to this coach."""
+    """Active risk windows for clients assigned to this coach.
+
+    Pass ``?ack=1`` to stamp coach review (clears P0 SLA). Auditors must omit
+    ack so automated probes do not silence SLA escalations.
+    """
     pool = request.app.state.db_pool
     if not pool:
         raise HTTPException(503, "Database unavailable")
     coach_hw = user.get("hardware_id") or ""
     coach_user = user.get("username") or ""
+    ack = str(request.query_params.get("ack") or "").lower() in ("1", "true", "yes")
     async with pool.acquire() as conn:
         master_ids = await conn.fetch(
             """
@@ -398,9 +479,19 @@ async def coach_risk_windows(
             owner_refs,
         )
     usernames = [r["username"] for r in rows]
-    from app.services.checkin_risk_windows import list_active_windows_for_coach
+    from app.services.checkin_risk_windows import (
+        list_active_windows_for_coach,
+        mark_windows_coach_reviewed,
+    )
 
     windows = await list_active_windows_for_coach(pool, client_usernames=usernames)
+    # QUANTUM-CRYSTAL-ARCH — explicit ack only (Flutter Risk windows screen)
+    if ack:
+        await mark_windows_coach_reviewed(
+            pool,
+            [int(w["id"]) for w in windows if w.get("id") is not None],
+            coach_username=coach_user,
+        )
     name_by = {r["username"]: r["name"] for r in rows}
     pop_by = {r["username"]: r["population"] for r in rows}
     for w in windows:
@@ -410,6 +501,14 @@ async def coach_risk_windows(
             w["opened_at"] = w["opened_at"].isoformat()
         if w.get("expires_at"):
             w["expires_at"] = w["expires_at"].isoformat()
+        meta = w.get("metadata")
+        if hasattr(meta, "items"):
+            w["metadata"] = dict(meta)
+        elif isinstance(meta, str):
+            try:
+                w["metadata"] = json.loads(meta)
+            except Exception:
+                w["metadata"] = {}
     return {
         "windows": windows,
         "count": len(windows),
@@ -418,6 +517,7 @@ async def coach_risk_windows(
             for r in rows
         ],
         "populations": sorted(VALID_POPULATIONS),
+        "active_usernames": sorted({w["username"] for w in windows if w.get("username")}),
     }
 
 

@@ -226,6 +226,33 @@ def client_banner_message(profile: Optional[Dict[str, Any]] = None) -> str:
     )
 
 
+def spoken_crisis_resources_line(profile: Optional[Dict[str, Any]] = None) -> str:
+    """Short TTS-safe line for voice calls — QUANTUM-CRYSTAL-ARCH / SOVEREIGN-VOICE."""
+    pop = get_population(profile)
+    if pop == POPULATION_VETERAN:
+        return (
+            "I hear you. Your coach has been alerted. If you are in immediate danger, "
+            "call or text the Veterans Crisis Line — nine eight eight, then press one, "
+            "or text eight three eight two five five."
+        )
+    if pop == POPULATION_FR_LE:
+        return (
+            "I hear you. Your coach has been alerted. If you are in immediate danger, "
+            "call Copline at one eight hundred two six seven five four six three, "
+            "or call or text nine eight eight."
+        )
+    if pop == POPULATION_FR_FIRE_EMS:
+        return (
+            "I hear you. Your coach has been alerted. If you are in immediate danger, "
+            "call or text nine eight eight, or text HOME to seven four one seven four one."
+        )
+    return (
+        "I hear you. Your coach has been alerted. If you are in immediate danger, "
+        "call or text nine eight eight, or text HOME to seven four one seven four one. "
+        "Or call nine one one."
+    )
+
+
 def ws_crisis_resources_payload(
     profile: Optional[Dict[str, Any]] = None,
     *,

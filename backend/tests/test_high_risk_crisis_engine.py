@@ -127,14 +127,16 @@ def test_checkin_risk_window_constants():
     assert _win.DEFAULT_CADENCE_HOURS[_win.REASON_POST_P0] == 24
 
 
-def test_auditor_endpoint_count_is_12():
+def test_auditor_endpoint_count_is_13():
     import re
 
     text = (APP / "services" / "high_risk_crisis_auditor.py").read_text()
     pairs = re.findall(r'\("(GET|POST|PUT|DB)",\s*"[^"]+"\)', text)
-    assert len(pairs) == 12, pairs
+    assert len(pairs) == 13, pairs
     assert "/api/high-risk-crisis/coach/critical-incident" in text
+    assert "/api/high-risk-crisis/family/members" in text
     assert "family_concern_flags" in text
+    assert "sweep_p0_coach_sla" in text
 
 
 def test_has_resources_detects_741741_generic():
@@ -152,3 +154,15 @@ def test_family_nondisclosure_in_suffix():
 def test_post_p1_reason_for_violence():
     assert _win.REASON_POST_P1 == "post_p1"
     assert _win.DEFAULT_TTL_DAYS[_win.REASON_POST_P1] == 5
+
+
+def test_spoken_crisis_line_veteran():
+    profile = {"profile_data": {"population": "veteran"}}
+    line = _reg.spoken_crisis_resources_line(profile)
+    assert "Veterans Crisis Line" in line or "nine eight eight" in line
+
+
+def test_p0_sla_helper_defaults():
+    assert _win._p0_sla_minutes() == 5
+    assert hasattr(_win, "sweep_p0_coach_sla")
+    assert hasattr(_win, "mark_windows_coach_reviewed")

@@ -1,9 +1,11 @@
 """High-risk occupational crisis engine auditor — QUANTUM-CRYSTAL-ARCH.
 
-12 checks: health, resources, confidentiality, population GET/PUT,
-family education, coach risk-windows, concern-flag validation,
+13 checks: health, resources, confidentiality, population GET/PUT,
+family education, family members, coach risk-windows, concern-flag validation,
 critical-incident validation, coach population validation,
 risk_windows table, family_concern_flags table.
+
+Also runs P0 coach SLA sweep on the 60s loop (not counted in trust score).
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ TAB_ENDPOINTS = [
             ("GET", "/api/high-risk-crisis/population"),
             ("PUT", "/api/high-risk-crisis/population"),
             ("GET", "/api/high-risk-crisis/family/education"),
+            ("GET", "/api/high-risk-crisis/family/members"),
         ],
     },
     {
@@ -214,6 +217,13 @@ class HighRiskCrisisAuditor:
         await asyncio.sleep(STAGGER_DELAY)
         while self._running:
             try:
+                # QUANTUM-CRYSTAL-ARCH — P0 5-min coach SLA (every minute)
+                try:
+                    from app.services.checkin_risk_windows import sweep_p0_coach_sla
+
+                    await sweep_p0_coach_sla(self.db_pool)
+                except Exception as sla_e:
+                    logger.warning("HighRiskCrisisAuditor: p0 sla sweep: %s", sla_e)
                 now = datetime.now(timezone.utc)
                 window_key = f"{now.date().isoformat()}_{now.hour}"
                 if now.hour in AUDIT_HOURS and window_key not in self._sent_windows:

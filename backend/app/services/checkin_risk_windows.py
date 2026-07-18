@@ -167,7 +167,7 @@ async def list_active_windows_for_coach(
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, username, reason, cadence_hours, opened_at, expires_at, opened_by
+                SELECT id, username, reason, cadence_hours, opened_at, expires_at, opened_by, metadata
                   FROM checkin_risk_windows
                  WHERE username = ANY($1::text[])
                    AND expires_at > NOW()
@@ -180,6 +180,160 @@ async def list_active_windows_for_coach(
     except Exception as e:
         logger.warning("checkin_risk_windows: coach list failed: %s", e)
         return []
+
+
+def _p0_sla_minutes() -> int:
+    raw = os.getenv("P0_COACH_SLA_MINUTES", "5").strip()
+    if raw.isdigit():
+        return max(1, min(60, int(raw)))
+    return 5
+
+
+async def mark_windows_coach_reviewed(
+    db_pool,
+    window_ids: List[int],
+    *,
+    coach_username: str = "",
+) -> None:
+    """Stamp coach review on active windows (clears P0 SLA clock). QUANTUM-CRYSTAL-ARCH."""
+    if not db_pool or not window_ids:
+        return
+    import json
+
+    ids = [int(i) for i in window_ids if i is not None]
+    if not ids:
+        return
+    patch = json.dumps(
+        {
+            "coach_reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "coach_reviewed_by": (coach_username or "")[:64],
+        }
+    )
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE checkin_risk_windows
+                   SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb
+                 WHERE id = ANY($2::bigint[])
+                   AND closed_at IS NULL
+                """,
+                patch,
+                ids,
+            )
+    except Exception as e:
+        logger.warning("checkin_risk_windows: mark reviewed failed: %s", e)
+
+
+async def sweep_p0_coach_sla(db_pool) -> int:
+    """Re-alert coach (+ admin activity) when post_p0 window exceeds SLA without review.
+
+    Returns number of windows escalated. QUANTUM-CRYSTAL-ARCH.
+    """
+    if not risk_windows_enabled() or not db_pool:
+        return 0
+    minutes = _p0_sla_minutes()
+    escalated = 0
+    import json
+
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, username, reason, opened_at, metadata, opened_by
+                  FROM checkin_risk_windows
+                 WHERE reason = $1
+                   AND expires_at > NOW()
+                   AND closed_at IS NULL
+                   AND opened_at <= NOW() - ($2::int * INTERVAL '1 minute')
+                   AND COALESCE(metadata->>'sla_escalated', 'false') NOT IN ('true', '1')
+                   AND COALESCE(metadata->>'coach_reviewed_at', '') = ''
+                 LIMIT 25
+                """,
+                REASON_POST_P0,
+                minutes,
+            )
+        for row in rows:
+            username = row["username"]
+            wid = int(row["id"])
+            try:
+                async with db_pool.acquire() as conn:
+                    tprof = await conn.fetchrow(
+                        """
+                        SELECT username, profile_data, role, hardware_id
+                          FROM users WHERE username = $1 AND deleted_at IS NULL
+                        """,
+                        username,
+                    )
+                if not tprof:
+                    continue
+                from app.services.coach_handoff import _resolve_assigned_coach_username
+                from app.services.sensitive_alert_dispatcher import dispatch_sensitive_alert
+
+                coach_uname = await _resolve_assigned_coach_username(
+                    db_pool,
+                    {
+                        "username": tprof["username"],
+                        "role": tprof["role"],
+                        "profile_data": tprof["profile_data"],
+                        "hardware_id": tprof.get("hardware_id"),
+                    },
+                )
+                if coach_uname:
+                    await dispatch_sensitive_alert(
+                        db_pool=db_pool,
+                        client_username=username,
+                        coach_username=coach_uname,
+                        risk_level="critical",
+                        reason=(
+                            f"P0 coach SLA breach ({minutes}m) — "
+                            "active post-crisis risk window needs review."
+                        ),
+                        keywords=["p0_sla", "risk_window"],
+                        session_id=None,
+                        family_id=None,
+                        raw_context=(
+                            "Automated SLA escalation. No new client content. "
+                            "Open Risk windows in Coach portal."
+                        ),
+                        alert_type="p0_sla_breach",
+                    )
+                patch = json.dumps(
+                    {
+                        "sla_escalated": True,
+                        "sla_escalated_at": datetime.now(timezone.utc).isoformat(),
+                        "sla_minutes": minutes,
+                    }
+                )
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE checkin_risk_windows
+                           SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb
+                         WHERE id = $2
+                        """,
+                        patch,
+                        wid,
+                    )
+                    await conn.execute(
+                        """
+                        INSERT INTO skyeye_activity (type, content, platform, created_at)
+                        VALUES (
+                            'p0_sla_breach',
+                            $1, 'system', NOW()
+                        )
+                        """,
+                        f"username={username} window_id={wid} minutes={minutes} "
+                        f"coach={coach_uname or 'none'}",
+                    )
+                escalated += 1
+            except Exception as one_e:
+                logger.warning("p0_sla escalate failed user=%s: %s", username, one_e)
+    except Exception as e:
+        logger.warning("checkin_risk_windows: p0 sla sweep failed: %s", e)
+    if escalated:
+        logger.info("checkin_risk_windows: p0 sla escalated=%s", escalated)
+    return escalated
 
 
 async def apply_risk_window_thresholds(
