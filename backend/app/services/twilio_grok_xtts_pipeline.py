@@ -214,9 +214,27 @@ async def _build_grounded_voice_prompt(username: str, db_pool) -> str:
     except Exception:
         pass
 
+    # QUANTUM-CRYSTAL-ARCH / SOVEREIGN-VOICE: population crisis + night register
+    pop_block = ""
+    try:
+        _pop_profile = {"username": username, "profile_data": {}}
+        if db_pool and username:
+            async with db_pool.acquire() as _pc:
+                _prow = await _pc.fetchrow(
+                    "SELECT profile_data FROM users WHERE username = $1 LIMIT 1",
+                    username,
+                )
+                if _prow:
+                    _pop_profile["profile_data"] = _prow["profile_data"] or {}
+        from app.services.population_prompt_modifiers import voice_population_suffix
+        pop_block = voice_population_suffix(_pop_profile) or ""
+    except Exception:
+        pass
+
     return (
         memory_block
         + story_block
+        + pop_block
         + f"You are Little Nate, a warm, concise therapeutic coach on a live phone call with {who}.\n"
         "Respond in 1–2 short sentences (under 25 words). One question OR one reflection, not both.\n"
         "Sound human and grounded. Never say you are an AI.\n\n"

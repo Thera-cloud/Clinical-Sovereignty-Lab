@@ -32,6 +32,7 @@ import '../widgets/google_calendar_section.dart';
 import 'distress_beacon_screen.dart';
 import 'secure_search_screen.dart';
 import 'intake_form_screen.dart';
+import 'high_risk_crisis_screens.dart';
 import 'coaching_mesh_screen.dart';
 import 'community_mesh_screen.dart';
 import 'night_school_screen.dart';
@@ -3250,6 +3251,12 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           _settingsCard([
             _actionRow(Icons.description, 'Terms, Privacy & Waivers', 'Full legal agreement', _showLegalAgreement),
             _actionRow(Icons.download, 'Download My Data', 'Export your personal data', _requestDataExport),
+            _actionRow(Icons.shield_outlined, 'Safety & population',
+                'Confidentiality, veterans/first responders, family concern', () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => HighRiskCrisisHubScreen(profile: _profile),
+              ));
+            }),
             _infoRow('Consent Version', consentVersion),
           ]),
           const SizedBox(height: 20),

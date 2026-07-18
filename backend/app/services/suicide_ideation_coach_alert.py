@@ -293,6 +293,16 @@ async def maybe_dispatch_si_coach_alert(
         notification_id=notification_id,
         alert_type=alert_type,
     )
+    # QUANTUM-CRYSTAL-ARCH: open shortened check-in risk window (post-P0)
+    try:
+        from app.services.checkin_risk_windows import open_post_crisis_window
+
+        await open_post_crisis_window(
+            db_pool, client_username, alert_type=alert_type
+        )
+    except Exception as _rw_e:
+        logger.warning("[SI_COACH_ALERT] risk window open failed: %s", _rw_e)
+
     logger.info(
         "[SI_COACH_ALERT] dispatched user=%s coach=%s type=%s phrases=%s nid=%s",
         client_username,

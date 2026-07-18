@@ -233,6 +233,16 @@ class NateCheckInAgent:
                 _exp_err,
             )
 
+        # QUANTUM-CRYSTAL-ARCH: open trigger-date risk windows (±7d)
+        try:
+            from app.services.checkin_risk_windows import sweep_trigger_date_windows
+
+            _opened = await sweep_trigger_date_windows(self.db_pool)
+            if _opened:
+                logger.info("nate_checkin: opened %s trigger_date risk windows", _opened)
+        except Exception as _td_err:
+            logger.warning("nate_checkin: trigger_date sweep failed: %s", _td_err)
+
         try:
             from app.services.wisdom_lifecycle_manager import WisdomLifecycleManager
 
@@ -316,12 +326,46 @@ class NateCheckInAgent:
         outreach_hours = CLIENT_OUTREACH_HOURS * backoff["multiplier"]
         alert_hours = CLIENT_ALERT_HOURS * backoff["multiplier"]
 
+        # QUANTUM-CRYSTAL-ARCH: parallel risk-window path may SHORTEN thresholds
+        # (post-P0 / trigger date / family concern). Does not alter backoff floor.
+        # Dedup for risk-window check-ins uses shorter hours so SI 24h dedup
+        # does not suppress post-crisis outreach.
+        _risk_active = False
+        _risk_dedup_h = 72
+        try:
+            from app.services.checkin_risk_windows import apply_risk_window_thresholds
+
+            _rw = await apply_risk_window_thresholds(
+                self.db_pool,
+                username,
+                default_alert_hours=alert_hours,
+                default_outreach_hours=outreach_hours,
+            )
+            if _rw.get("active"):
+                _risk_active = True
+                alert_hours = float(_rw["alert_hours"])
+                outreach_hours = float(_rw["outreach_hours"])
+                _risk_dedup_h = max(8, int(outreach_hours))
+                logger.info(
+                    "checkin_risk_window_applied user=%s reason=%s alert_h=%.1f outreach_h=%.1f",
+                    username,
+                    _rw.get("reason"),
+                    alert_hours,
+                    outreach_hours,
+                )
+        except Exception as _rw_err:
+            logger.warning("nate_checkin: risk window check failed: %s", _rw_err)
+
         if hours_inactive >= outreach_hours:
-            if not await self._recent_checkin(conn, username, "client_72h", hours=72):
+            if not await self._recent_checkin(
+                conn, username, "client_72h", hours=_risk_dedup_h if _risk_active else 72
+            ):
                 await self._send_client_outreach(conn, username, hw_id, name, profile, backoff)
 
         elif hours_inactive >= alert_hours:
-            if not await self._recent_checkin(conn, username, "coach_alert_62h", hours=72):
+            if not await self._recent_checkin(
+                conn, username, "coach_alert_62h", hours=_risk_dedup_h if _risk_active else 72
+            ):
                 await self._send_coach_alert(conn, username, hw_id, name, profile, backoff)
 
     async def _apply_touch_policy(

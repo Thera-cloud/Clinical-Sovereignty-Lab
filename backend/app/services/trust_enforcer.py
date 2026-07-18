@@ -82,6 +82,7 @@ AUDITOR_ACTIVITY_TYPES = [
     "stance_loop_audit_sent",
     "ceo_dual_coo_audit_sent",
     "six_quotient_battery_audit_sent",
+    "high_risk_crisis_audit_sent",
 ]
 
 AUDITOR_LABELS = {
@@ -117,6 +118,7 @@ AUDITOR_LABELS = {
     "stance_loop_audit_sent": "Stance Loop",
     "ceo_dual_coo_audit_sent": "CEO Dual-COO",
     "six_quotient_battery_audit_sent": "Six-Quotient Battery",
+    "high_risk_crisis_audit_sent": "High-Risk Occupational Crisis",
 }
 
 REMEDIATION_CATEGORIES = {
@@ -577,6 +579,7 @@ class TrustEnforcer:
             "stance_loop_audit_sent": "stance_loop_check_count",
             "ceo_dual_coo_audit_sent": "ceo_dual_coo_check_count",
             "six_quotient_battery_audit_sent": "six_quotient_battery_check_count",
+            "high_risk_crisis_audit_sent": "high_risk_crisis_check_count",
         }
         return mapping.get(activity_type, "")
 

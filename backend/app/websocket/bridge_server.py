@@ -8929,16 +8929,24 @@ class AzureCortex:
                             db_pool, profile, user_text, turn_id=_turn_id,
                         )
                         if (_si_res or {}).get("status") == "dispatched" and uid in self.sockets:
-                            _cr_payload = json.dumps({
-                                "type": "crisis_resources",
-                                "turn_id": _turn_id,
-                                "resources": [
-                                    {"label": "988 Suicide & Crisis Lifeline", "action": "call_or_text", "value": "988"},
-                                    {"label": "Crisis Text Line", "action": "text", "value": "Text HOME to 741741"},
-                                    {"label": "Emergency", "action": "call", "value": "911"},
-                                ],
-                                "message": "Your coach has been alerted. If you are in immediate danger, please reach out now.",
-                            })
+                            # QUANTUM-CRYSTAL-ARCH: population-aware crisis resources
+                            try:
+                                from app.services.crisis_resource_registry import (
+                                    ws_crisis_resources_payload as _ws_cr,
+                                )
+                                _cr_body = _ws_cr(profile, turn_id=_turn_id)
+                            except Exception:
+                                _cr_body = {
+                                    "type": "crisis_resources",
+                                    "turn_id": _turn_id,
+                                    "resources": [
+                                        {"label": "988 Suicide & Crisis Lifeline", "action": "call_or_text", "value": "988"},
+                                        {"label": "Crisis Text Line", "action": "text", "value": "Text HOME to 741741"},
+                                        {"label": "Emergency", "action": "call", "value": "911"},
+                                    ],
+                                    "message": "Your coach has been alerted. If you are in immediate danger, please reach out now.",
+                                }
+                            _cr_payload = json.dumps(_cr_body)
                             for _ws in list(self.sockets[uid]):
                                 try:
                                     await _ws.send(_cr_payload)
@@ -10040,6 +10048,15 @@ class AzureCortex:
             except Exception as _ad_err:
                 print(f">>> [ADAPTIVE] error (non-fatal): {type(_ad_err).__name__}: {_ad_err}")
 
+        # QUANTUM-CRYSTAL-ARCH: high-risk occupational prompt modifiers
+        try:
+            from app.services.population_prompt_modifiers import build_population_prompt_suffix
+            _pop_sfx = build_population_prompt_suffix(profile, user_text)
+            if _pop_sfx:
+                system_prompt = system_prompt + _pop_sfx
+        except Exception as _pop_err:
+            print(f">>> [POPULATION PROMPT] non-fatal: {_pop_err!r}")
+
         if len(system_prompt) > _SP_CAP:
             print(f">>> [PROMPT CAP] Trimming system prompt from {len(system_prompt)} to {_SP_CAP} chars")
             system_prompt = system_prompt[:_SP_CAP] + "\n\n[Context truncated for performance. Focus on the user's current message.]"
@@ -10560,6 +10577,7 @@ class AzureCortex:
                         _sanitized, _bg_hits, _guard_hits = _enrich.apply_ln_post_llm_pipeline(
                             _sanitized, user_text, uid=uid,
                             display_name=_first_name or None,
+                            profile=profile,
                         )  # QUANTUM-CRYSTAL-ARCH
                         if _bg_hits:
                             print(f">>> [BOUNDARY GUARD] {len(_bg_hits)} coaching_boundary hits for {uid}")

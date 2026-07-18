@@ -50,12 +50,22 @@ router = APIRouter(
 
 
 def _company_filter_sql(company_id: Optional[str], param_idx: int = 1, alias: str = "users") -> tuple[str, list]:
-    """Build WHERE clause for company scope. Returns (clause, params)."""
+    """Build WHERE clause for company scope. Returns (clause, params).
+
+    QUANTUM-CRYSTAL-ARCH: population_shielded accounts are never visible to corp.
+    """
+    shield = (
+        f" AND COALESCE(({alias}.profile_data->>'population_shielded')::boolean, false) = false"
+    )
     if company_id is None:
-        return f" ({alias}.company_id IS NOT NULL OR ({alias}.profile_data->>'company_id') IS NOT NULL AND ({alias}.profile_data->>'company_id') != '')", []
+        return (
+            f" ({alias}.company_id IS NOT NULL OR ({alias}.profile_data->>'company_id') IS NOT NULL "
+            f"AND ({alias}.profile_data->>'company_id') != ''){shield}",
+            [],
+        )
     return (
         f" ({alias}.company_id = ${param_idx}::uuid OR {alias}.profile_data->>'company_id' = ${param_idx + 1})"
-        ,
+        f"{shield}",
         [company_id, company_id],
     )
 

@@ -14,6 +14,7 @@ from app.services.coaching_boundary_guard import (
     TIER_COPY,
     TIER_COPY_GENERIC,
     GuardResult,
+    crisis_tier_copy_for_profile,
     evaluate as guard_evaluate,
 )
 from app.services.council_registry_context import _CRISIS_USER  # noqa: PLC2701
@@ -21,7 +22,8 @@ from app.services.council_registry_context import _CRISIS_USER  # noqa: PLC2701
 _CRISIS_988 = re.compile(r"\b988\b")
 _CRISIS_741741 = re.compile(r"\b741741\b|text HOME to 741741", re.I)
 _RESOURCE_SENTENCE = re.compile(
-    r"(?:988|741741|Crisis Text Line|suicide prevention|crisis (?:line|text))[^.!?]*[.!?]",
+    r"(?:988|741741|838255|Copline|Veterans Crisis Line|press\s*1|"
+    r"Crisis Text Line|suicide prevention|crisis (?:line|text))[^.!?]*[.!?]",
     re.I,
 )
 _DONE_TALKING = re.compile(
@@ -54,15 +56,21 @@ _COACHING_AFTER_CRISIS = re.compile(
 )
 
 
-def _has_crisis_resources(text: str) -> bool:
-    return bool(_CRISIS_988.search(text or "")) and bool(_CRISIS_741741.search(text or ""))
+def _has_crisis_resources(text: str, profile: Optional[Dict[str, Any]] = None) -> bool:
+    # QUANTUM-CRYSTAL-ARCH: population-aware resource detection
+    try:
+        from app.services.crisis_resource_registry import has_crisis_resources_in_text
+
+        return has_crisis_resources_in_text(text, profile)
+    except Exception:
+        return bool(_CRISIS_988.search(text or "")) and bool(_CRISIS_741741.search(text or ""))
 
 
-def _ensure_crisis_resources(text: str) -> str:
+def _ensure_crisis_resources(text: str, profile: Optional[Dict[str, Any]] = None) -> str:
     body = (text or "").strip()
-    if _has_crisis_resources(body):
+    if _has_crisis_resources(body, profile):
         return body
-    block = TIER_COPY["CRISIS"]
+    block = crisis_tier_copy_for_profile(profile)
     if not body:
         return block
     return f"{block}\n\n{body}"
@@ -111,36 +119,45 @@ _DOOR_OPEN_LINE = (
 )
 
 
-def _append_resource_door(text: str) -> str:
+def _append_resource_door(text: str, profile: Optional[Dict[str, Any]] = None) -> str:
     """Q7/Q8 fix: keep a one-line resource reminder open on the turn right after a
     crisis flag, even when the follow-up turn itself doesn't re-trip the guard."""
     body = (text or "").strip()
-    if _has_crisis_resources(body) or _CRISIS_988.search(body):
+    try:
+        from app.services.crisis_resource_registry import door_open_copy
+
+        door = door_open_copy(profile)
+    except Exception:
+        door = _DOOR_OPEN_LINE
+    if _has_crisis_resources(body, profile) or _CRISIS_988.search(body):
         return body
     if not body:
-        return _DOOR_OPEN_LINE
-    return f"{body}\n\n{_DOOR_OPEN_LINE}"
+        return door
+    return f"{body}\n\n{door}"
 
 
 def _crisis_stabilization_response(
     model_text: str,
     *,
     display_name: str = "John",
+    profile: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """BQ-5 replace-mode: attunement + direct safety question + 988/741741 + attuned
-    close — suppress coaching tail. 2026-07 trial audit Q7 fix: a hedge like "I'd
-    never act on it" must never close the safety check — the response always asks
-    directly and calmly rather than accepting the hedge."""
+    """BQ-5 replace-mode: attunement + direct safety question + population resources."""
     name = (display_name or "John").strip() or "John"
     witness = _extract_crisis_witness(model_text, name)
     safety_question = (
         "I need to ask you directly, because it matters: are you having thoughts of "
         "hurting yourself or ending your life right now?"
     )
-    resources = (
-        "Please reach out now for immediate support: Call or text 988 (Suicide & Crisis Lifeline), "
-        "available 24/7. Or text HOME to 741741 (Crisis Text Line) for steady listening."
-    )
+    try:
+        from app.services.crisis_resource_registry import stabilization_resources_copy
+
+        resources = stabilization_resources_copy(profile)
+    except Exception:
+        resources = (
+            "Please reach out now for immediate support: Call or text 988 (Suicide & Crisis Lifeline), "
+            "available 24/7. Or text HOME to 741741 (Crisis Text Line) for steady listening."
+        )
     close = (
         "Those lines exist for exactly this moment — a real person, right now. "
         "I'm not going anywhere either — how you're doing on this matters to me, "
@@ -286,6 +303,7 @@ def apply_ln_boundary_post_guard(
     registry_parts: Optional[Sequence[str]] = None,
     conversation_history: Optional[Sequence[Dict[str, str]]] = None,
     force_crisis: bool = False,
+    profile: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """
     Post-generation deterministic boundary router for LN configs.
@@ -332,7 +350,7 @@ def apply_ln_boundary_post_guard(
             recent_crisis=recent_crisis,
         )
         if door_open_recent and not _DONE_TALKING.search(user_text or ""):
-            out = _append_resource_door(out)
+            out = _append_resource_door(out, profile)
         return out, hits
 
     hits.append({
@@ -345,7 +363,7 @@ def apply_ln_boundary_post_guard(
     out = text or ""
     if guard.trip_class == "CRISIS":
         # Replace-mode: crisis turns end after stabilization — no parts-work tail (BQ-5).
-        out = _crisis_stabilization_response(out)
+        out = _crisis_stabilization_response(out, profile=profile)
     elif guard.trip_class == "DEPTH":
         out = _ensure_depth_boundary(out, has_parts_context=has_parts_context)
         out = _strip_routine_crisis_resources(out, user_text or "")

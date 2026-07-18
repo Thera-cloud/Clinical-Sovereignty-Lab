@@ -46,6 +46,7 @@ import app.routers.skyeye_api as skyeye_api
 import app.routers.marketing_api as marketing_api
 import app.routers.coherence_api as coherence_api
 import app.routers.client_data_api as client_data_api
+import app.routers.high_risk_crisis_api as high_risk_crisis_api  # QUANTUM-CRYSTAL-ARCH
 import app.routers.fibre_api as fibre_api
 import app.routers.approval_api as approval_api
 import app.routers.strategic_memory_api as strategic_memory_api
@@ -2649,6 +2650,20 @@ async def lifespan(app: FastAPI):
     except Exception as nca_err:
         print(f"   ⚠️  NateCheckInAuditor init failed: {nca_err}")
 
+    # QUANTUM-CRYSTAL-ARCH: High-risk occupational crisis auditor (8 checks)
+    _high_risk_crisis_auditor = None
+    try:
+        from app.services.high_risk_crisis_auditor import HighRiskCrisisAuditor
+        _high_risk_crisis_auditor = HighRiskCrisisAuditor(
+            db_pool=db_pool, redis_url=_REDIS_URL_EARLY, app_state=app.state,
+        )
+        if not _is_clone:
+            await _high_risk_crisis_auditor.start()
+        app.state.high_risk_crisis_auditor = _high_risk_crisis_auditor
+        print("   ✅ HighRiskCrisisAuditor started (stagger 298s)")
+    except Exception as _hrc_err:
+        print(f"   ⚠️  HighRiskCrisisAuditor init failed: {_hrc_err}")
+
     # ── Sensitive Bridge Auditor — 3x daily v1.3 contract surface scorecard ──
     _sensitive_bridge_auditor = None
     try:
@@ -3266,6 +3281,7 @@ async def lifespan(app: FastAPI):
         ("nate_commitment_agent", _nate_commitment_agent is not None),
         ("nate_self_monitor_agent", _nate_self_monitor_agent is not None),
         ("nate_checkin_auditor", _nate_checkin_auditor is not None),
+        ("high_risk_crisis_auditor", _high_risk_crisis_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("sensitive_bridge_auditor", _sensitive_bridge_auditor is not None),
         ("sensitive_bridge_telemetry_agent",
          _sensitive_bridge_telemetry_agent is not None),
@@ -3892,6 +3908,7 @@ if settings.ENABLE_SKYEYE:
 # Coherence Engine (Sovereign Swarm)
 app.include_router(coherence_api.router)
 app.include_router(client_data_api.router)
+app.include_router(high_risk_crisis_api.router)  # QUANTUM-CRYSTAL-ARCH
 
 # Fibre & Mesh API (Sovereign Swarm)
 app.include_router(fibre_api.router)

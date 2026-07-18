@@ -98,6 +98,16 @@ TIER_COPY = {
     ),
 }
 
+
+def crisis_tier_copy_for_profile(profile=None) -> str:
+    """QUANTUM-CRYSTAL-ARCH: population-aware CRISIS tier copy."""
+    try:
+        from app.services.crisis_resource_registry import crisis_tier_copy
+
+        return crisis_tier_copy(profile)
+    except Exception:
+        return TIER_COPY["CRISIS"]
+
 # Generic (non-IFS) phrasing — used whenever no parts/council registry context has
 # been established (e.g. Public Trial Funnel, general chat that never opened an
 # IFS/parts frame). Prevents clinician/coaching jargon ("parts work", "inner

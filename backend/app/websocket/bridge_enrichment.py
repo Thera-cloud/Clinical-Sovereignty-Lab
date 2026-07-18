@@ -666,6 +666,7 @@ def apply_ln_post_llm_pipeline(
     registry_parts: Optional[List[str]] = None,
     display_name: Optional[str] = None,
     force_crisis: bool = False,
+    profile: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, List[Dict[str, Any]], List[str]]:
     """Boundary router (crisis/depth/hypo) then Tier-3 language guard — QUANTUM-CRYSTAL-ARCH.
 
@@ -686,6 +687,7 @@ def apply_ln_post_llm_pipeline(
         user_text or "",
         registry_parts=registry_parts,
         force_crisis=force_crisis,
+        profile=profile,
     )
     cleaned, lang_hits = apply_language_guard(cleaned, uid=uid)
     if display_name:
