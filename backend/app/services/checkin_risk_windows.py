@@ -220,9 +220,10 @@ async def open_post_crisis_window(
     *,
     alert_type: str = "",
 ) -> Optional[int]:
+    # QUANTUM-CRYSTAL-ARCH — SI → post_p0; other-harm → post_p1
     reason = REASON_POST_P0
     if "violence" in (alert_type or "").lower():
-        reason = REASON_POST_P0
+        reason = REASON_POST_P1
     return await open_risk_window(
         db_pool,
         username=username,
@@ -246,15 +247,15 @@ async def sweep_trigger_date_windows(db_pool) -> int:
                  WHERE active = TRUE
                    AND (
                      (recurring_annually = FALSE
-                      AND trigger_date BETWEEN (CURRENT_DATE - 3)
-                                           AND (CURRENT_DATE + 7))
+                      AND trigger_date BETWEEN (CURRENT_DATE - 1)
+                                           AND (CURRENT_DATE + 1))
                      OR
                      (recurring_annually = TRUE
                       AND make_date(
                             EXTRACT(YEAR FROM CURRENT_DATE)::int,
                             EXTRACT(MONTH FROM trigger_date)::int,
                             LEAST(EXTRACT(DAY FROM trigger_date)::int, 28)
-                          ) BETWEEN (CURRENT_DATE - 3) AND (CURRENT_DATE + 7))
+                          ) BETWEEN (CURRENT_DATE - 1) AND (CURRENT_DATE + 1))
                    )
                 """
             )
@@ -292,9 +293,32 @@ async def flag_family_concern(
     if not db_pool:
         return {"status": "error", "reason": "no_db"}
     import json
+    import os
+
+    cooldown_h = 12
+    raw_cd = os.getenv("FAMILY_CONCERN_FLAG_COOLDOWN_HOURS", "12").strip()
+    if raw_cd.isdigit():
+        cooldown_h = max(1, int(raw_cd))
 
     try:
         async with db_pool.acquire() as conn:
+            recent = await conn.fetchrow(
+                """
+                SELECT id FROM family_concern_flags
+                 WHERE target_username = $1 AND flagger_username = $2
+                   AND created_at >= NOW() - ($3::int * INTERVAL '1 hour')
+                 LIMIT 1
+                """,
+                target_username,
+                flagger_username,
+                cooldown_h,
+            )
+            if recent:
+                return {
+                    "status": "error",
+                    "reason": "cooldown",
+                    "cooldown_hours": cooldown_h,
+                }
             row = await conn.fetchrow(
                 """
                 INSERT INTO family_concern_flags
@@ -314,6 +338,40 @@ async def flag_family_concern(
             opened_by=f"family:{flagger_username}",
             metadata={"flag_id": int(row["id"]) if row else None},
         )
+        # QUANTUM-CRYSTAL-ARCH — notify assigned coach (no message content)
+        try:
+            async with db_pool.acquire() as conn:
+                tprof = await conn.fetchrow(
+                    "SELECT username, profile_data, role FROM users WHERE username = $1",
+                    target_username,
+                )
+            if tprof:
+                from app.services.coach_handoff import _resolve_assigned_coach_username
+                from app.services.sensitive_alert_dispatcher import dispatch_sensitive_alert
+
+                coach_uname = await _resolve_assigned_coach_username(
+                    db_pool,
+                    {
+                        "username": tprof["username"],
+                        "role": tprof["role"],
+                        "profile_data": tprof["profile_data"],
+                    },
+                )
+                if coach_uname:
+                    await dispatch_sensitive_alert(
+                        db_pool=db_pool,
+                        client_username=target_username,
+                        coach_username=coach_uname,
+                        risk_level="elevated",
+                        reason="Family concern flag raised (no content shared).",
+                        keywords=["family_concern"],
+                        session_id=None,
+                        family_id=None,
+                        raw_context="Family member flagged concern. Content withheld by design.",
+                        alert_type="family_concern_flag",
+                    )
+        except Exception as _cn_e:
+            logger.warning("family_concern coach notify failed: %s", _cn_e)
         return {
             "status": "ok",
             "flag_id": int(row["id"]) if row else None,

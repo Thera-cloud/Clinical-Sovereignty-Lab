@@ -8903,39 +8903,25 @@ class AzureCortex:
             await self._send(uid, _ip_deflection, client_context=_ctx, turn_id=_turn_id)
             return
 
-        # QUANTUM-CRYSTAL-ARCH: Clinical runtime gate (CLIENT only, pre-inference)
-        # Detects soft clinical phrasing (pharma/sleep/diagnosis/instrument) and returns
-        # a deterministic decline+redirect template, bypassing LLM generation.
-        if _role == "CLIENT" and not user_text.startswith("[SEARCH SYNTHESIS]") and not user_text.startswith("[DOJO SIMULATION"):
-            try:
-                from app.services.little_nate_clinical_runtime_gate import evaluate as _clin_gate_eval
-                _gate_result = _clin_gate_eval(uid, user_text)
-                if _gate_result:
-                    print(f">>> [CLINICAL GATE] class={_gate_result['class']} fired_new={_gate_result['fired_new']} active={_gate_result['active_topics']} user={profile.get('name')}")
-                    await self._send(uid, _gate_result["response"], client_context=_ctx, turn_id=_turn_id)
-                    return
-            except Exception as _gate_e:
-                print(f">>> [CLINICAL GATE ERROR] {_gate_e!r} — falling through to normal pipeline")
-
-        # QUANTUM-CRYSTAL-ARCH: Universal SI coach alert (CLIENT only, feature-flagged)
+        # QUANTUM-CRYSTAL-ARCH: SI coach alert BEFORE clinical gate (banner must not be skipped)
         if _role == "CLIENT" and not user_text.startswith("[SEARCH SYNTHESIS]") and not user_text.startswith("[DOJO SIMULATION"):
             try:
                 if db_pool:
                     from app.services.suicide_ideation_coach_alert import maybe_dispatch_si_coach_alert
 
-                    # QUANTUM-CRYSTAL-ARCH — push crisis resources to client when SI alert dispatches
                     async def _si_alert_and_resources():
                         _si_res = await maybe_dispatch_si_coach_alert(
                             db_pool, profile, user_text, turn_id=_turn_id,
                         )
-                        if (_si_res or {}).get("status") == "dispatched" and uid in self.sockets:
-                            # QUANTUM-CRYSTAL-ARCH: population-aware crisis resources
+                        # QUANTUM-CRYSTAL-ARCH — banner on match even if coach deduped/failed
+                        if (_si_res or {}).get("push_client_resources") and uid in self.sockets:
                             try:
                                 from app.services.crisis_resource_registry import (
                                     ws_crisis_resources_payload as _ws_cr,
                                 )
                                 _cr_body = _ws_cr(profile, turn_id=_turn_id)
-                            except Exception:
+                            except Exception as _cr_e:
+                                print(f">>> [SI_CRISIS_RESOURCES FALLBACK] {_cr_e!r}")
                                 _cr_body = {
                                     "type": "crisis_resources",
                                     "turn_id": _turn_id,
@@ -8956,6 +8942,18 @@ class AzureCortex:
                     asyncio.create_task(_si_alert_and_resources())
             except Exception as _si_alert_e:
                 print(f">>> [SI_COACH_ALERT ERROR] {_si_alert_e!r}")
+
+        # QUANTUM-CRYSTAL-ARCH: Clinical runtime gate (CLIENT only, pre-inference)
+        if _role == "CLIENT" and not user_text.startswith("[SEARCH SYNTHESIS]") and not user_text.startswith("[DOJO SIMULATION"):
+            try:
+                from app.services.little_nate_clinical_runtime_gate import evaluate as _clin_gate_eval
+                _gate_result = _clin_gate_eval(uid, user_text)
+                if _gate_result:
+                    print(f">>> [CLINICAL GATE] class={_gate_result['class']} fired_new={_gate_result['fired_new']} active={_gate_result['active_topics']} user={profile.get('name')}")
+                    await self._send(uid, _gate_result["response"], client_context=_ctx, turn_id=_turn_id)
+                    return
+            except Exception as _gate_e:
+                print(f">>> [CLINICAL GATE ERROR] {_gate_e!r} — falling through to normal pipeline")
 
         # Check if this is a Dojo simulation - skip token deduction for training
         is_dojo_simulation = user_text.startswith("[DOJO SIMULATION")

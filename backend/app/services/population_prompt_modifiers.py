@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
 
 from app.services.population_profile import (
+    family_concern_consent,
     get_population,
     get_timezone,
     is_high_risk_population,
@@ -152,6 +153,20 @@ def family_education_block(profile: Optional[Dict[str, Any]] = None) -> str:
     )
 
 
+def family_concern_nondisclosure_block(
+    profile: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Never disclose that a family member flagged concern."""
+    if not is_high_risk_population(profile) and not family_concern_consent(profile):
+        return ""
+    return (
+        "\n[FAMILY-CONCERN BOUNDARY]\n"
+        "- NEVER mention, imply, or hint that a family member flagged concern.\n"
+        "- NEVER say someone 'asked you to check in' or that family contacted the system.\n"
+        "- If check-in cadence is elevated, treat it as ordinary presence — no attribution.\n"
+    )
+
+
 def build_population_prompt_suffix(
     profile: Optional[Dict[str, Any]] = None,
     user_text: str = "",
@@ -162,6 +177,7 @@ def build_population_prompt_suffix(
         night_register_block(profile),
         confidentiality_prompt_block(profile),
         family_education_block(profile),
+        family_concern_nondisclosure_block(profile),
         lethal_means_block(profile, user_text),
     ]
     return "".join(p for p in parts if p)

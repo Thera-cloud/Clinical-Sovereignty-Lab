@@ -47,10 +47,10 @@ COMMENT ON TABLE family_concern_flags IS
 -- Optional date_type extensions for occupational risk (additive CHECK via new allowed values
 -- requires drop/recreate — skip; use 'other' + notes_redacted for deployment/alive-day etc.)
 
+-- Seed only if missing — never clobber baseline 10 from migration 249
 INSERT INTO trust_baseline (parameter_key, parameter_value)
 VALUES (
     'high_risk_crisis_check_count',
     '{"expected": 8, "description": "High-risk occupational crisis API checks"}'::jsonb
 )
-ON CONFLICT (parameter_key) DO UPDATE
-SET parameter_value = EXCLUDED.parameter_value;
+ON CONFLICT (parameter_key) DO NOTHING;

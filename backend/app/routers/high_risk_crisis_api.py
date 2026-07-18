@@ -138,7 +138,33 @@ async def _coach_owns_client(pool, coach: Dict, client_username: str) -> bool:
             coach_hw,
             coach_user,
         )
-    return row is not None
+        if row is not None:
+            return True
+        # QUANTUM-CRYSTAL-ARCH — assistant may act for master's assigned clients
+        masters = await conn.fetch(
+            """
+            SELECT master_coach_id FROM coach_hierarchy
+             WHERE assistant_id = ANY($1::text[]) AND status = 'active'
+            """,
+            [x for x in (coach_hw, coach_user) if x],
+        )
+        master_ids = [r["master_coach_id"] for r in masters if r["master_coach_id"]]
+        if not master_ids:
+            return False
+        row2 = await conn.fetchrow(
+            """
+            SELECT 1 FROM users
+             WHERE username = $1 AND role = 'CLIENT' AND deleted_at IS NULL
+               AND (
+                 profile_data->>'coach_id' = ANY($2::text[])
+                 OR profile_data->>'assigned_coach_id' = ANY($2::text[])
+                 OR profile_data->>'assigned_coach' = ANY($2::text[])
+               )
+            """,
+            client_username,
+            master_ids,
+        )
+        return row2 is not None
 
 
 @router.get("/health")
@@ -238,6 +264,8 @@ async def family_concern_flag(
         by_u = {r["username"]: r for r in rows}
         if flagger not in by_u or target not in by_u:
             raise HTTPException(404, "User not found")
+        if (by_u[target].get("role") or "").upper() != "CLIENT":
+            raise HTTPException(400, "Target must be a CLIENT account")
         if not same_family(by_u[flagger], by_u[target]):
             raise HTTPException(403, "Must be in the same family")
 
@@ -264,7 +292,10 @@ async def family_concern_flag(
         note_redacted=body.note or "",
     )
     if result.get("status") != "ok":
-        raise HTTPException(500, result.get("reason") or "flag failed")
+        reason = result.get("reason") or "flag failed"
+        if reason == "cooldown":
+            raise HTTPException(429, f"Concern flag cooldown ({result.get('cooldown_hours', 12)}h)")
+        raise HTTPException(500, reason)
     return result
 
 
@@ -339,6 +370,17 @@ async def coach_risk_windows(
     coach_hw = user.get("hardware_id") or ""
     coach_user = user.get("username") or ""
     async with pool.acquire() as conn:
+        master_ids = await conn.fetch(
+            """
+            SELECT master_coach_id FROM coach_hierarchy
+             WHERE assistant_id = ANY($1::text[]) AND status = 'active'
+            """,
+            [x for x in (coach_hw, coach_user) if x],
+        )
+        owner_refs = [coach_hw, coach_user] + [
+            r["master_coach_id"] for r in master_ids if r["master_coach_id"]
+        ]
+        owner_refs = [x for x in owner_refs if x]
         rows = await conn.fetch(
             """
             SELECT username,
@@ -348,13 +390,12 @@ async def coach_risk_windows(
              WHERE role = 'CLIENT'
                AND deleted_at IS NULL
                AND (
-                 profile_data->>'coach_id' = $1
-                 OR profile_data->>'assigned_coach_id' = $1
-                 OR profile_data->>'assigned_coach' = $2
+                 profile_data->>'coach_id' = ANY($1::text[])
+                 OR profile_data->>'assigned_coach_id' = ANY($1::text[])
+                 OR profile_data->>'assigned_coach' = ANY($1::text[])
                )
             """,
-            coach_hw,
-            coach_user,
+            owner_refs,
         )
     usernames = [r["username"] for r in rows]
     from app.services.checkin_risk_windows import list_active_windows_for_coach

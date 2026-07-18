@@ -1761,6 +1761,68 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
           // FIX-G': hub already owns _socket from _connectToCortex; no re-attach needed.
         }
       }
+      else if (data['type'] == 'crisis_resources') {
+        final resources = (data['resources'] is List)
+            ? List<dynamic>.from(data['resources'] as List)
+            : <dynamic>[];
+        final bannerMsg = (data['message'] is String &&
+                (data['message'] as String).trim().isNotEmpty)
+            ? (data['message'] as String).trim()
+            : 'Your coach has been alerted. If you are in immediate danger, please reach out now.';
+        if (mounted) {
+          setState(() {
+            _chatHistory.add('System: [CRISIS SUPPORT] $bannerMsg');
+            for (final r in resources) {
+              if (r is Map) {
+                _chatHistory.add(
+                    'System: [CRISIS SUPPORT] ${r['label'] ?? ''}: ${r['value'] ?? ''}');
+              }
+            }
+            _scrollToBottom();
+          });
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: const Color(0xFF1A1A2E),
+              title: const Text('You Are Not Alone',
+                  style: TextStyle(
+                      color: Color(0xFFEF4444),
+                      fontFamily: 'Cormorant Garamond',
+                      fontWeight: FontWeight.bold)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(bannerMsg,
+                      style: const TextStyle(
+                          color: Colors.white70, fontFamily: 'DM Sans')),
+                  const SizedBox(height: 12),
+                  for (final r in resources)
+                    if (r is Map)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          '• ${r['label'] ?? ''}: ${r['value'] ?? ''}',
+                          style: const TextStyle(
+                              color: Color(0xFFC9A962),
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'DM Sans'),
+                        ),
+                      ),
+                ],
+              ),
+              actions: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFEF4444)),
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('OK', style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            ),
+          );
+        }
+      }
       else if (data['type'] == 'nate_thinking') {
         final thinking = data['text'] ?? 'Little Nate is thinking...';
         setState(() {

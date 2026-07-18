@@ -1019,8 +1019,18 @@ def _symbolic_audit_violations(response_text: str, audit_metadata: dict) -> list
             violations.append("symbolic_emotion_mirror")
     tmc = (audit_metadata.get("tmc_class") or "").lower()
     if tmc in ("crisis", "suicide_ideation"):
-        # QUANTUM-CRYSTAL-ARCH: accept population-specific lines (VCL / Copline)
-        _has_res = "988" in response_text or "838255" in response_text or "267-5463" in response_text
+        # QUANTUM-CRYSTAL-ARCH — population-aware (741741 / VCL / Copline)
+        try:
+            from app.services.crisis_resource_registry import has_crisis_resources_in_text as _has_cr
+            _prof = audit_metadata.get("profile") if isinstance(audit_metadata, dict) else None
+            _has_res = _has_cr(response_text, _prof if isinstance(_prof, dict) else None)
+        except Exception:
+            _has_res = (
+                "988" in response_text
+                or "838255" in response_text
+                or "267-5463" in response_text
+                or "741741" in response_text
+            )
         if not _has_res:
             violations.append("symbolic_crisis_resource_missing")
     return violations

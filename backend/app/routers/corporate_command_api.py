@@ -55,7 +55,16 @@ def _company_filter_sql(company_id: Optional[str], param_idx: int = 1, alias: st
     QUANTUM-CRYSTAL-ARCH: population_shielded accounts are never visible to corp.
     """
     shield = (
-        f" AND COALESCE(({alias}.profile_data->>'population_shielded')::boolean, false) = false"
+        # QUANTUM-CRYSTAL-ARCH — match is_population_shielded(): high-risk default-on
+        f" AND NOT ("
+        f" LOWER(COALESCE({alias}.profile_data->>'population_shielded','')) IN ('1','true','yes')"
+        f" OR ("
+        f" COALESCE({alias}.profile_data->>'population','general') IN "
+        f" ('veteran','first_responder_le','first_responder_fire_ems','military_family')"
+        f" AND LOWER(COALESCE({alias}.profile_data->>'population_shielded',''))"
+        f" NOT IN ('0','false','no')"
+        f" )"
+        f" )"
     )
     if company_id is None:
         return (

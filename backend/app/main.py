@@ -3381,6 +3381,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ StanceLoopAuditor stopped")
         except Exception as _sla_stop:
             print(f"   ⚠️  StanceLoopAuditor shutdown: {_sla_stop}")
+    _hrc_auditor = getattr(app.state, "high_risk_crisis_auditor", None)  # QUANTUM-CRYSTAL-ARCH
+    if _hrc_auditor and hasattr(_hrc_auditor, "stop"):
+        try:
+            await _hrc_auditor.stop()
+            print("   ✅ HighRiskCrisisAuditor stopped")
+        except Exception as _hrc_stop:
+            print(f"   ⚠️  HighRiskCrisisAuditor shutdown: {_hrc_stop}")
     _account_event_reconciler_h = getattr(app.state, "account_event_reconciler", None)
     if _account_event_reconciler_h:
         try:

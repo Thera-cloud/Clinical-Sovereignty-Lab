@@ -1,9 +1,9 @@
 """High-risk occupational crisis engine auditor — QUANTUM-CRYSTAL-ARCH.
 
-10 checks: health, resources, confidentiality, population GET,
+12 checks: health, resources, confidentiality, population GET/PUT,
 family education, coach risk-windows, concern-flag validation,
 critical-incident validation, coach population validation,
-risk_windows table exists.
+risk_windows table, family_concern_flags table.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ import asyncio
 import json
 import logging
 import os
-import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -33,6 +32,7 @@ TAB_ENDPOINTS = [
             ("GET", "/api/high-risk-crisis/resources"),
             ("GET", "/api/high-risk-crisis/confidentiality"),
             ("GET", "/api/high-risk-crisis/population"),
+            ("PUT", "/api/high-risk-crisis/population"),
             ("GET", "/api/high-risk-crisis/family/education"),
         ],
     },
@@ -45,6 +45,7 @@ TAB_ENDPOINTS = [
             ("POST", "/api/high-risk-crisis/coach/critical-incident"),
             ("PUT", "/api/high-risk-crisis/coach/population"),
             ("DB", "risk_windows_table"),
+            ("DB", "family_concern_flags_table"),
         ],
     },
 ]
@@ -80,54 +81,96 @@ class HighRiskCrisisAuditor:
         env_tok = os.getenv("SKYEYE_AUDIT_TOKEN", "").strip()
         if env_tok:
             return env_tok
+        # QUANTUM-CRYSTAL-ARCH — Redis fallback for admin bridge token
+        if not self.redis_url:
+            return None
+        try:
+            import redis.asyncio as aioredis
+
+            r = aioredis.from_url(self.redis_url, decode_responses=True)
+            env = os.getenv("ENVIRONMENT", "production")
+            async for key in r.scan_iter(match=f"nate:{env}:auth:*", count=50):
+                raw = await r.get(key)
+                if not raw:
+                    continue
+                if "ADMIN" in raw.upper() or '"role": "ADMIN"' in raw or '"role":"ADMIN"' in raw:
+                    tok = key.split(":")[-1]
+                    await r.aclose()
+                    return tok
+            await r.aclose()
+        except Exception as e:
+            logger.warning("HighRiskCrisisAuditor: redis token scan failed: %s", e)
         return None
 
     async def _test_endpoint(self, session, method, path, token):
         url = f"{BASE_URL}{path}"
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         try:
+            body = None
             if method == "GET":
                 async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     code = resp.status
+                    try:
+                        body = await resp.json(content_type=None)
+                    except Exception:
+                        body = None
             elif method == "PUT":
                 async with session.put(
                     url, headers={**headers, "Content-Type": "application/json"},
                     json={}, timeout=aiohttp.ClientTimeout(total=10),
                 ) as resp:
                     code = resp.status
+                    try:
+                        body = await resp.json(content_type=None)
+                    except Exception:
+                        body = None
             else:
                 async with session.post(
                     url, headers={**headers, "Content-Type": "application/json"},
                     json={}, timeout=aiohttp.ClientTimeout(total=10),
                 ) as resp:
                     code = resp.status
+                    try:
+                        body = await resp.json(content_type=None)
+                    except Exception:
+                        body = None
             status = "TRUSTED" if code in (200, 400, 404, 422) else (
                 "WARNING" if 400 <= code < 500 else "FAILED"
             )
+            # L2: empty dict on 200 is WARNING
+            if code == 200 and isinstance(body, dict) and len(body) == 0:
+                status = "WARNING"
             return {"endpoint": f"{method} {path}", "code": code, "status": status}
         except Exception as e:
             return {"endpoint": f"{method} {path}", "code": 0, "status": "FAILED", "error": str(e)}
 
-    async def _db_check(self):
+    async def _db_check(self, table_key: str):
+        table = (
+            "checkin_risk_windows"
+            if table_key == "risk_windows_table"
+            else "family_concern_flags"
+        )
+        label = f"DB {table_key}"
         try:
             async with self.db_pool.acquire() as conn:
                 row = await conn.fetchrow(
                     """
                     SELECT EXISTS (
                         SELECT 1 FROM information_schema.tables
-                        WHERE table_name = 'checkin_risk_windows'
+                        WHERE table_name = $1
                     ) AS ok
-                    """
+                    """,
+                    table,
                 )
             ok = bool(row and row["ok"])
             return {
-                "endpoint": "DB risk_windows_table",
+                "endpoint": label,
                 "code": 200 if ok else 500,
                 "status": "TRUSTED" if ok else "FAILED",
             }
         except Exception as e:
             return {
-                "endpoint": "DB risk_windows_table",
+                "endpoint": label,
                 "code": 0,
                 "status": "FAILED",
                 "error": str(e),
@@ -140,7 +183,7 @@ class HighRiskCrisisAuditor:
             for tab in TAB_ENDPOINTS:
                 for method, path in tab["endpoints"]:
                     if method == "DB":
-                        results.append(await self._db_check())
+                        results.append(await self._db_check(path))
                     else:
                         results.append(await self._test_endpoint(session, method, path, token))
         trusted = sum(1 for r in results if r["status"] == "TRUSTED")

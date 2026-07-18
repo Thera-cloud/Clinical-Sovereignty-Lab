@@ -127,11 +127,28 @@ def test_checkin_risk_window_constants():
     assert _win.DEFAULT_CADENCE_HOURS[_win.REASON_POST_P0] == 24
 
 
-def test_auditor_endpoint_count_is_10():
+def test_auditor_endpoint_count_is_12():
     import re
 
     text = (APP / "services" / "high_risk_crisis_auditor.py").read_text()
     pairs = re.findall(r'\("(GET|POST|PUT|DB)",\s*"[^"]+"\)', text)
-    assert len(pairs) == 10, pairs
-    assert any("critical-incident" in p[1] for p in pairs if len(p) > 1) or \
-        "/api/high-risk-crisis/coach/critical-incident" in text
+    assert len(pairs) == 12, pairs
+    assert "/api/high-risk-crisis/coach/critical-incident" in text
+    assert "family_concern_flags" in text
+
+
+def test_has_resources_detects_741741_generic():
+    profile = {"profile_data": {"population": "general"}}
+    text = "If you're in crisis, call or text 988 or text HOME to 741741."
+    assert _reg.has_crisis_resources_in_text(text, profile)
+
+
+def test_family_nondisclosure_in_suffix():
+    profile = {"profile_data": {"population": "veteran", "family_concern_consent": True}}
+    suffix = _mod.build_population_prompt_suffix(profile, "")
+    assert "FAMILY-CONCERN BOUNDARY" in suffix
+
+
+def test_post_p1_reason_for_violence():
+    assert _win.REASON_POST_P1 == "post_p1"
+    assert _win.DEFAULT_TTL_DAYS[_win.REASON_POST_P1] == 5

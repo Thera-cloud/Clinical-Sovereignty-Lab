@@ -205,6 +205,23 @@ async def _emit_audit(
         logger.error("[SI_COACH_ALERT] audit insert failed: %s", e)
 
 
+async def _open_client_safety_surfaces(
+    db_pool,
+    client_username: str,
+    *,
+    alert_type: str,
+) -> None:
+    """QUANTUM-CRYSTAL-ARCH — risk window always; independent of coach dispatch."""
+    try:
+        from app.services.checkin_risk_windows import open_post_crisis_window
+
+        await open_post_crisis_window(
+            db_pool, client_username, alert_type=alert_type
+        )
+    except Exception as _rw_e:
+        logger.warning("[SI_COACH_ALERT] risk window open failed: %s", _rw_e)
+
+
 async def maybe_dispatch_si_coach_alert(
     db_pool,
     profile: Dict[str, Any],
@@ -212,7 +229,11 @@ async def maybe_dispatch_si_coach_alert(
     *,
     turn_id: str = "",
 ) -> Dict[str, Any]:
-    """Detect SI or other-harm language and notify assigned coach (default on)."""
+    """Detect SI or other-harm language and notify assigned coach (default on).
+
+    Client crisis banner + risk window fire on match even when coach alert is
+    deduped, missing coach, or dispatch fails (`push_client_resources`).
+    """
     if not _flag_enabled():
         return {"status": "disabled"}
     if not db_pool:
@@ -236,9 +257,20 @@ async def maybe_dispatch_si_coach_alert(
         logger.warning("[SI_COACH_ALERT] no canonical username for profile")
         return {"status": "error", "reason": "identity_unresolved"}
 
+    # QUANTUM-CRYSTAL-ARCH — client safety surfaces before coach-path branching
+    await _open_client_safety_surfaces(
+        db_pool, client_username, alert_type=alert_type
+    )
+    _client_ok = {
+        "matched": matched,
+        "alert_type": alert_type,
+        "client_username": client_username,
+        "push_client_resources": True,
+    }
+
     if await _recent_escalation_in_window(db_pool, client_username):
-        logger.info("[SI_COACH_ALERT] dedup skip user=%s", client_username)
-        return {"status": "duplicate", "matched": matched, "alert_type": alert_type}
+        logger.info("[SI_COACH_ALERT] dedup skip user=%s (client banner still on)", client_username)
+        return {"status": "duplicate", **_client_ok}
 
     coach_username = await _resolve_assigned_coach_username(db_pool, profile)
     if not coach_username:
@@ -246,8 +278,7 @@ async def maybe_dispatch_si_coach_alert(
         return {
             "status": "error",
             "reason": "no_assigned_coach",
-            "matched": matched,
-            "alert_type": alert_type,
+            **_client_ok,
         }
 
     hardware_id = (profile.get("hardware_id") or "").strip() or None
@@ -279,8 +310,7 @@ async def maybe_dispatch_si_coach_alert(
         return {
             "status": "error",
             "reason": "dispatch_failed",
-            "matched": matched,
-            "alert_type": alert_type,
+            **_client_ok,
         }
 
     notification_id = int(receipt.get("notification_id") or 0)
@@ -293,15 +323,6 @@ async def maybe_dispatch_si_coach_alert(
         notification_id=notification_id,
         alert_type=alert_type,
     )
-    # QUANTUM-CRYSTAL-ARCH: open shortened check-in risk window (post-P0)
-    try:
-        from app.services.checkin_risk_windows import open_post_crisis_window
-
-        await open_post_crisis_window(
-            db_pool, client_username, alert_type=alert_type
-        )
-    except Exception as _rw_e:
-        logger.warning("[SI_COACH_ALERT] risk window open failed: %s", _rw_e)
 
     logger.info(
         "[SI_COACH_ALERT] dispatched user=%s coach=%s type=%s phrases=%s nid=%s",
@@ -313,9 +334,8 @@ async def maybe_dispatch_si_coach_alert(
     )
     return {
         "status": "dispatched",
-        "matched": matched,
-        "alert_type": alert_type,
         "coach_username": coach_username,
         "notification_id": notification_id,
         "coach_notified": bool(receipt.get("coach_notified")),
+        **_client_ok,
     }

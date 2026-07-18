@@ -2139,10 +2139,13 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         final resources = (data['resources'] is List)
             ? List<dynamic>.from(data['resources'])
             : <dynamic>[];
+        final bannerMsg = (data['message'] is String &&
+                (data['message'] as String).trim().isNotEmpty)
+            ? (data['message'] as String).trim()
+            : 'Your coach has been alerted. If you are in immediate danger, please reach out now.';
         if (mounted) {
           setState(() {
-            _chatHistory.add(
-                'System: [CRISIS SUPPORT] Your coach has been alerted. If you are in immediate danger, please reach out now:');
+            _chatHistory.add('System: [CRISIS SUPPORT] $bannerMsg');
             for (final r in resources) {
               if (r is Map) {
                 _chatHistory.add('System: [CRISIS SUPPORT] ${r['label'] ?? ''}: ${r['value'] ?? ''}');
@@ -2163,9 +2166,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Your coach has been alerted and will reach out. If you are in immediate danger, please contact:',
-                    style: TextStyle(color: Colors.white70, fontFamily: 'DM Sans'),
+                  Text(
+                    bannerMsg,
+                    style: const TextStyle(color: Colors.white70, fontFamily: 'DM Sans'),
                   ),
                   const SizedBox(height: 12),
                   for (final r in resources)

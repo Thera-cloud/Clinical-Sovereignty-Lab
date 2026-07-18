@@ -18,7 +18,7 @@
 | 62h no activity (client, no risk window) | **P2** | `NateCheckInAgent` → coach alert |
 | 72h no activity | **P2** | Client + coach outreach nudges |
 
-**Coach alert dedup:** same client suppressed **24h** after a dispatched SI/violence alert (`SI_COACH_ALERT_DEDUP_HOURS`). Risk-window check-ins use a shorter dedup so post-crisis silence is not treated as neutral.
+**Coach alert dedup:** same client suppressed **24h** after a dispatched SI/violence alert (`SI_COACH_ALERT_DEDUP_HOURS`). **Client crisis banner + risk window still fire** on match even when coach alert is deduped, missing coach, or dispatch fails. Violence ideation opens `post_p1` window; SI opens `post_p0`. Voice calls run the same SI hook via `voice_si_crisis_hook`.
 
 ---
 
