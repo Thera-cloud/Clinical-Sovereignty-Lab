@@ -44,6 +44,12 @@ class TestAuditorBusDispatch(unittest.TestCase):
         self.assertIn("_ALL_BUS_CATEGORIES", src)
         self.assertIn("ENDPOINT_DOWN", src)
         self.assertIn("DATA_PIPELINE", src)
+        self.assertIn("_GREEN_CATEGORIES", src)
+        # ENDPOINT_DOWN lives in _GREEN_CATEGORIES only (Nathan 2026-07-18)
+        green_block = src.split("_GREEN_CATEGORIES")[1].split(")")[0]
+        yellow_block = src.split("_YELLOW_CATEGORIES")[1].split(")")[0]
+        self.assertIn("ENDPOINT_DOWN", green_block)
+        self.assertNotIn("ENDPOINT_DOWN", yellow_block)
 
 
 class TestSovereignStandardGate(unittest.TestCase):

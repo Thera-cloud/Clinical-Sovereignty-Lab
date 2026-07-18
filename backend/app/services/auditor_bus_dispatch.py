@@ -1,7 +1,8 @@
 """
 Trust Enforcer → Dual-COO bus: auditor flags become ops_fix tasks.
 
-GREEN for remediable ops; YELLOW/RED escalate via classify_risk.
+GREEN for remediable ops (incl. ENDPOINT_DOWN — COO bus only, no CEO inbox);
+YELLOW/RED escalate via enqueue_ceo.
 # QUANTUM-CRYSTAL-ARCH — Chief of Staff over trust auditors
 """
 
@@ -18,16 +19,20 @@ _RED_CATEGORIES = frozenset({
     "PREFLIGHT_FAIL",
     "DEFENSE_DEGRADED",
 })
+# QUANTUM-CRYSTAL-ARCH — Nathan 2026-07-18: ENDPOINT_DOWN → GREEN (bus repair only).
+# Repeated CEO APPROVE on Trust YELLOW ENDPOINT_DOWN (Token Lab, SkyEye, QB, etc.)
+# confirmed these are COO remediable, not morning-inbox work.
+_GREEN_CATEGORIES = frozenset({
+    "ENDPOINT_DOWN",
+})
 _YELLOW_CATEGORIES = frozenset({
     "AUTH_FAILURE",
     "GATE_BYPASS",
     "WS_TIMEOUT",
-    "ENDPOINT_DOWN",
     "DATA_PIPELINE",
     "L2_ISSUE",
 })
-_ALL_BUS_CATEGORIES = _RED_CATEGORIES | _YELLOW_CATEGORIES | frozenset({
-    "ENDPOINT_DOWN",
+_ALL_BUS_CATEGORIES = _RED_CATEGORIES | _YELLOW_CATEGORIES | _GREEN_CATEGORIES | frozenset({
     "DATA_PIPELINE",
     "L2_ISSUE",
     "AUTH_FAILURE",
@@ -44,6 +49,7 @@ def dispatch_enforcement_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any
 
     Covers all REMEDIATION_CATEGORIES from trust_enforcer — every auditor
     failure that becomes an enforcement_action is bus-dispatched.
+    ENDPOINT_DOWN is GREEN: bus only (no CEO email/SMS).
     """
     if not actions:
         return {"status": "ok", "published": 0}
@@ -61,6 +67,8 @@ def dispatch_enforcement_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any
         return {"status": "skipped", "reason": "bus_off"}
 
     published = 0
+    ceo_escalated = 0
+    green_only = 0
     for action in actions[:40]:
         cat = str(action.get("category") or "ENDPOINT_DOWN").upper()
         if cat not in _ALL_BUS_CATEGORIES:
@@ -91,7 +99,14 @@ def dispatch_enforcement_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any
             enriched.setdefault("category", cat)
             enriched.setdefault("auditor", auditor)
             enriched["ask_of_ceo"] = ask
-            if cat in _RED_CATEGORIES:
+            if cat in _GREEN_CATEGORIES:
+                # Bus task only — digest via ops_fix GREEN path; no CEO inbox
+                green_only += 1
+                logger.info(
+                    "auditor_bus_dispatch GREEN (no CEO): %s %s — %s",
+                    auditor, cat, (detail or "")[:120],
+                )
+            elif cat in _RED_CATEGORIES:
                 enqueue_ceo(
                     risk=RISK_RED,
                     title=f"Trust RED: {auditor} ({cat})",
@@ -101,6 +116,7 @@ def dispatch_enforcement_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any
                     payload=enriched,
                     dedup_ttl_s=6 * 3600,
                 )
+                ceo_escalated += 1
             elif cat in _YELLOW_CATEGORIES:
                 enqueue_ceo(
                     risk=RISK_YELLOW,
@@ -111,7 +127,14 @@ def dispatch_enforcement_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any
                     payload=enriched,
                     dedup_ttl_s=6 * 3600,
                 )
+                ceo_escalated += 1
         except Exception as e:
             logger.warning("auditor_bus_dispatch: %s", e)
 
-    return {"status": "ok", "published": published, "categories_covered": sorted(_ALL_BUS_CATEGORIES)}
+    return {
+        "status": "ok",
+        "published": published,
+        "green_only": green_only,
+        "ceo_escalated": ceo_escalated,
+        "categories_covered": sorted(_ALL_BUS_CATEGORIES),
+    }
