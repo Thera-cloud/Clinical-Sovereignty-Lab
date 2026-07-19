@@ -11,6 +11,7 @@ Weekly staged newsletter: topic → research (year ≥ 2024) → draft → criti
 | `ENABLE_NEWSLETTER_HIVE` | false | Queen/Worker patrol on CLI task kinds |
 | `ENABLE_NEWSLETTER_LLM_DRAFT` | false | Optional inference-router compose (template fallback) |
 | `ENABLE_NEWSLETTER_SMS` | true | SMS link to active subscribers with `phone_e164` |
+| `ENABLE_NEWSLETTER_HERO_IMAGE` | true | Grok Imagine topic still (needs `XAI_API_KEY` / `XAI_SSE_KEY`) |
 | `ENABLE_TRIAL_LIBRARY_EDITORIAL` | false | Editorial-only Library recall on 20Q (never generic global) |
 | `NEWSLETTER_ALLOW_OPEN_SUBSCRIBE` | false | Dev: skip Turnstile on subscribe |
 | `NEWSLETTER_TOKEN_SALT` | nate-dispatch | Confirm / rate / unsub token hashing |
@@ -42,6 +43,7 @@ Weekly staged newsletter: topic → research (year ≥ 2024) → draft → criti
 
 - `252_little_nate_dispatch.sql` — core tables + baseline 10
 - `253_newsletter_gap_fixes.sql` — `learned_at`, library paths, baseline → 12
+- `254_newsletter_hero_image.sql` — `hero_image_*` columns for Grok Imagine stills
 
 ## Deploy
 

@@ -30,23 +30,52 @@ def library_page_url(slug: str) -> str:
     return f"{API_BASE}/api/newsletter/library/{slug}/page"
 
 
+def _hero_stable_url(slug: str) -> str:
+    return f"{API_BASE}/api/newsletter/library/{slug}/hero"
+
+
+def _hero_img_tag(issue: Dict[str, Any], *, max_width: str = "100%") -> str:
+    url = (issue.get("hero_image_url") or "").strip()
+    slug = issue.get("slug") or ""
+    if not url and slug and (
+        issue.get("hero_image_r2_key") or issue.get("hero_image_generated_at")
+    ):
+        url = _hero_stable_url(slug)
+    if not url:
+        return ""
+    alt = (issue.get("topic") or issue.get("subject_line") or "Little Nate Dispatch").replace(
+        '"', "'"
+    )[:120]
+    return (
+        f'<img src="{url}" alt="{alt}" width="600" '
+        f'style="max-width:{max_width};height:auto;border-radius:4px;margin:16px 0;display:block;" />'
+    )
+
+
 def render_library_html(issue: Dict[str, Any]) -> str:
     slug = issue.get("slug") or "issue"
     body = (issue.get("final_body") or issue.get("body_md") or "").replace("\n", "<br>\n")
+    hero = _hero_img_tag(issue)
+    og_image = ""
+    if issue.get("hero_image_url") or issue.get("hero_image_r2_key"):
+        og_url = issue.get("hero_image_url") or _hero_stable_url(slug)
+        og_image = f'<meta property="og:image" content="{og_url}">'
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"><title>{issue.get('subject_line') or 'Little Nate Dispatch'}</title>
 <meta property="og:title" content="{issue.get('subject_line') or 'Little Nate Dispatch'}">
 <meta property="og:description" content="Little Nate's Story Library">
+{og_image}
 <link rel="canonical" href="{library_page_url(slug)}">
 <script type="application/ld+json">
 {{"@context":"https://schema.org","@type":"Article","headline":{json_escape(issue.get('subject_line') or '')},"author":{{"@type":"Organization","name":"Little Nate Dispatch"}}}}
 </script>
 <style>body{{background:#050505;color:#E8D5A3;font-family:Georgia,serif;max-width:720px;margin:40px auto;padding:0 16px;line-height:1.6}}
-a{{color:#4ECDC4}} h1{{color:#C9A962}}</style>
+a{{color:#4ECDC4}} h1{{color:#C9A962}} img{{max-width:100%}}</style>
 </head><body>
 <h1>Little Nate Dispatch</h1>
 <p>{issue.get('topic') or ''}</p>
+{hero}
 <article>{body}</article>
 <footer style="margin-top:48px;font-size:13px;color:#8B7355;">
 Little Nate is an AI companion — education, not therapy or medical advice.
@@ -61,9 +90,11 @@ def _html_email(issue: Dict[str, Any], rate_base: str, unsub_url: str) -> str:
     slug = issue.get("slug") or ""
     library_url = library_page_url(slug)
     share_track = f"{API_BASE}/api/newsletter/share?slug={slug}&channel=email"
+    hero = _hero_img_tag(issue, max_width="560px")
     return f"""<!DOCTYPE html><html><body style="font-family:Georgia,serif;background:#050505;color:#E8D5A3;padding:24px;">
 <h1 style="color:#C9A962;">Little Nate Dispatch</h1>
 <p style="color:#8B7355;">{issue.get('subject_line') or ''}</p>
+{hero}
 <div style="color:#ddd;line-height:1.55;">{body}</div>
 <hr style="border-color:#333;">
 <p><a href="{library_url}" style="color:#4ECDC4;">Read in Story Library</a></p>
@@ -123,6 +154,29 @@ async def send_issue_to_subscribers(db_pool, issue_id: str, redis=None) -> Dict[
         if not issue:
             return {"sent": 0, "error": "not_approved"}
         issue_d = dict(issue)
+
+    # Ensure topic hero exists before HTML email (best-effort; send continues if Imagine fails)
+    if not issue_d.get("hero_image_url"):
+        try:
+            from app.services.newsletter_imagery import generate_hero_for_issue, hero_enabled
+
+            if hero_enabled():
+                gen = await generate_hero_for_issue(db_pool, issue_id)
+                if gen.get("ok") and gen.get("hero_image_url"):
+                    issue_d["hero_image_url"] = gen["hero_image_url"]
+                    issue_d["hero_image_r2_key"] = (
+                        f"newsletter_library/{issue_d.get('slug')}-hero.png"
+                    )
+        except Exception as e:
+            logger.warning("pre-send hero generate: %s", e)
+
+    async with db_pool.acquire() as conn:
+        # refresh row in case hero was written
+        fresh = await conn.fetchrow(
+            "SELECT * FROM newsletter_issues WHERE id = $1", issue_id
+        )
+        if fresh:
+            issue_d = dict(fresh)
         subs = await conn.fetch(
             """
             SELECT * FROM newsletter_subscribers

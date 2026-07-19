@@ -14,7 +14,9 @@ header{padding:48px 24px 24px;max-width:800px;margin:0 auto}
 h1{font-family:'Cormorant Garamond',Georgia,serif;font-size:clamp(2.2rem,5vw,3.4rem);color:var(--gold);margin:0 0 8px;font-weight:600}
 .sub{color:var(--gold-dim);max-width:36rem;line-height:1.5}
 main{max-width:800px;margin:0 auto;padding:0 24px 64px}
-.issue{border-top:1px solid #222;padding:20px 0}
+.issue{border-top:1px solid #222;padding:20px 0;display:flex;gap:16px;align-items:flex-start}
+.issue img{width:96px;height:96px;object-fit:cover;border-radius:4px;background:#111;flex-shrink:0}
+.issue .copy{min-width:0}
 .issue a{color:var(--cyan);text-decoration:none;font-family:'Cormorant Garamond',serif;font-size:1.35rem}
 .issue a:hover{text-decoration:underline}
 .meta{font-size:.85rem;color:var(--gold-dim);margin-top:6px}
@@ -50,8 +52,11 @@ footer a{color:var(--gold-dim)}
       var title=i.subject_line||i.topic||slug;
       var when=i.sent_at||i.created_at||'';
       var href=api+'/api/newsletter/library/'+encodeURIComponent(slug)+'/page';
-      return '<article class="issue"><a href="'+href+'">'+title.replace(/</g,'&lt;')+'</a>'
-        +'<div class="meta">'+(when?String(when).slice(0,10):'')+(i.topic?' · '+String(i.topic).replace(/</g,'&lt;'):'')+'</div></article>';
+      var thumb=i.hero_image_url
+        ? '<img src="'+i.hero_image_url+'" alt="" loading="lazy">'
+        : '';
+      return '<article class="issue">'+thumb+'<div class="copy"><a href="'+href+'">'+title.replace(/</g,'&lt;')+'</a>'
+        +'<div class="meta">'+(when?String(when).slice(0,10):'')+(i.topic?' · '+String(i.topic).replace(/</g,'&lt;'):'')+'</div></div></article>';
     }).join('');
   }catch(e){
     el.innerHTML='<p class="err">Library unavailable right now.</p>';

@@ -70,6 +70,7 @@ iframe.preview{width:100%;min-height:70vh;border:1px solid var(--line);backgroun
         <div class="tab active" data-tab="preview" onclick="switchTab('preview')">Preview</div>
         <div class="tab" data-tab="edit" onclick="switchTab('edit')">Edit</div>
         <div class="tab" data-tab="rewrite" onclick="switchTab('rewrite')">Rewrite</div>
+        <div class="tab" data-tab="image" onclick="switchTab('image')">Image</div>
       </div>
       <div class="pane active" id="pane-preview">
         <div class="meta" id="previewMeta"></div>
@@ -97,6 +98,16 @@ iframe.preview{width:100%;min-height:70vh;border:1px solid var(--line);backgroun
         <div class="actions">
           <button type="button" id="btnRewrite" onclick="requestRewrite()">Request rewrite</button>
         </div>
+      </div>
+      <div class="pane" id="pane-image">
+        <p class="meta">Topic image via Grok Imagine — appears in email (if generated before send) and Story Library.</p>
+        <img id="heroImg" alt="Topic hero" style="max-width:420px;width:100%;border:1px solid #333;border-radius:4px;display:none;margin:12px 0;">
+        <p id="heroMissing" class="hint">No image yet.</p>
+        <div class="actions">
+          <button type="button" id="btnHero" onclick="generateHero()">Generate topic image</button>
+          <button type="button" class="secondary" onclick="refreshHero()">Refresh</button>
+        </div>
+        <p class="hint">Safe editorial still (symbolic, no clinical gore). Takes ~10–30s under the Imagine lock.</p>
       </div>
       <div class="actions" style="padding:0 20px 20px;border:0;margin:0">
         <button type="button" id="btnApprove" onclick="approveIssue()">Approve</button>
@@ -126,6 +137,7 @@ function switchTab(name){
   document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active', t.getAttribute('data-tab')===name);});
   document.querySelectorAll('.pane').forEach(function(p){p.classList.toggle('active', p.id==='pane-'+name);});
   if(name==='preview' && current) loadPreview();
+  if(name==='image' && current) refreshHero();
 }
 
 function renderList(){
@@ -184,9 +196,44 @@ async function selectIssue(id){
   document.getElementById('btnApprove').disabled = current.status!=='in_review';
   document.getElementById('btnSend').style.display = current.status==='approved' ? '' : 'none';
   document.getElementById('btnSend').disabled = current.status!=='approved';
+  document.getElementById('btnHero').disabled = false;
   renderList();
   switchTab('preview');
   loadPreview();
+  refreshHero();
+}
+
+function refreshHero(){
+  if(!current)return;
+  var img = document.getElementById('heroImg');
+  var miss = document.getElementById('heroMissing');
+  var url = current.hero_image_url || (apiBase()+'/api/newsletter/library/'+encodeURIComponent(current.slug)+'/hero');
+  if(current.hero_image_url || current.hero_image_r2_key || current.hero_image_generated_at){
+    img.style.display='block';
+    miss.style.display='none';
+    img.src = url + (url.indexOf('?')>=0?'&':'?') + 't=' + Date.now();
+  }else{
+    img.style.display='none';
+    img.removeAttribute('src');
+    miss.style.display='block';
+  }
+}
+
+async function generateHero(){
+  if(!current)return;
+  document.getElementById('btnHero').disabled = true;
+  setMsg('Generating topic image with Grok Imagine…');
+  var r = await api('/api/newsletter/admin/issues/'+current.id+'/generate-image', {method:'POST', body:'{}'});
+  document.getElementById('btnHero').disabled = false;
+  if(!r)return;
+  var d = await r.json();
+  if(!r.ok){setMsg(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail||d), true);return;}
+  current = d.issue || current;
+  if(d.hero_image_url) current.hero_image_url = d.hero_image_url;
+  setMsg('Topic image ready');
+  refreshHero();
+  loadPreview();
+  loadIssues(current.id);
 }
 
 async function loadPreview(){

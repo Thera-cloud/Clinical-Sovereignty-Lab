@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
 from app.services.api_server import require_admin
@@ -411,7 +411,7 @@ async def library_list(request: Request, limit: int = Query(20, ge=1, le=100)):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT slug, topic, subject_line, sent_at, external_link
+            SELECT slug, topic, subject_line, sent_at, external_link, hero_image_url
             FROM newsletter_issues
             WHERE status = 'sent'
             ORDER BY sent_at DESC NULLS LAST
@@ -421,7 +421,7 @@ async def library_list(request: Request, limit: int = Query(20, ge=1, le=100)):
         )
     return {
         "status": "ok",
-        "issues": [dict(r) for r in rows],
+        "issues": [_row_json(r) for r in rows],
     }
 
 
@@ -470,7 +470,8 @@ async def library_issue_html(slug: str, request: Request):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT slug, topic, subject_line, opener, body_md, final_body, sent_at
+            SELECT slug, topic, subject_line, opener, body_md, final_body, sent_at,
+                   hero_image_url, hero_image_r2_key, hero_image_generated_at
             FROM newsletter_issues
             WHERE slug = $1 AND status = 'sent'
             """,
@@ -488,7 +489,22 @@ async def library_issue_html(slug: str, request: Request):
             """,
             slug,
         )
-    return HTMLResponse(render_library_html(dict(row)))
+    return HTMLResponse(render_library_html(_row_json(row)))
+
+
+@router.get("/library/{slug}/hero")
+async def library_hero_image(slug: str, request: Request):
+    """Stable public hero PNG for email + library (survives R2 presign expiry)."""
+    from app.services.newsletter_imagery import load_hero_bytes
+
+    data = await load_hero_bytes(_pool(request), slug)
+    if not data:
+        raise HTTPException(404, "No hero image")
+    return Response(
+        content=data,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.get("/share")
@@ -577,7 +593,7 @@ async def admin_list_issues(request: Request, admin: Dict = Depends(require_admi
             """
             SELECT id, slug, status, topic, subject_line, opener,
                    LEFT(COALESCE(body_md, ''), 160) AS body_preview,
-                   created_at, sent_at, approved_at, updated_at
+                   hero_image_url, created_at, sent_at, approved_at, updated_at
             FROM newsletter_issues
             ORDER BY created_at DESC LIMIT 50
             """
@@ -702,8 +718,34 @@ async def admin_rewrite_issue(
     }
 
 
+@admin_router.post("/issues/{issue_id}/generate-image")
+async def admin_generate_hero(
+    issue_id: str, request: Request, admin: Dict = Depends(require_admin)
+):
+    """Generate (or regenerate) Grok Imagine topic hero for this issue."""
+    from app.services.newsletter_imagery import generate_hero_for_issue
+
+    result = await generate_hero_for_issue(_pool(request), issue_id)
+    if not result.get("ok"):
+        raise HTTPException(400, detail=result)
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM newsletter_issues WHERE id = $1::uuid", issue_id
+        )
+    return {
+        "status": "ok",
+        "generated": True,
+        "issue": _row_json(row) if row else None,
+        "hero_image_url": result.get("hero_image_url"),
+        "editor": admin.get("username") or "admin",
+    }
+
+
 @admin_router.post("/issues/{issue_id}/approve")
 async def admin_approve(issue_id: str, request: Request, admin: Dict = Depends(require_admin)):
+    import asyncio
+
     pool = _pool(request)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -713,18 +755,28 @@ async def admin_approve(issue_id: str, request: Request, admin: Dict = Depends(r
                 approved_by = $2, final_body = body_md,
                 updated_at = NOW()
             WHERE id = $1::uuid AND status = 'in_review'
-            RETURNING id, slug, subject_line
+            RETURNING id, slug, subject_line, hero_image_url
             """,
             issue_id,
             admin.get("username") or "admin",
         )
     if not row:
         raise HTTPException(400, "Issue not in_review or not found")
+    # Auto-generate topic image if missing (non-blocking)
+    if not row["hero_image_url"]:
+        try:
+            from app.services.newsletter_imagery import generate_hero_for_issue, hero_enabled
+
+            if hero_enabled():
+                asyncio.create_task(generate_hero_for_issue(pool, issue_id))
+        except Exception:
+            pass
     return {
         "status": "ok",
         "issue_id": issue_id,
         "approved": True,
         "slug": row["slug"],
+        "hero_pending": not bool(row["hero_image_url"]),
     }
 
 

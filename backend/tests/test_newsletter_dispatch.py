@@ -120,6 +120,33 @@ def test_admin_dispatch_shell_exists():
     assert "Preview" in text
     assert "Request rewrite" in text
     assert "/preview" in text
+    assert "Generate topic image" in text
+
+
+def test_hero_prompt_is_safe_editorial():
+    img = _load("nl_img_ut", "app/services/newsletter_imagery.py")
+    prompt = img.build_hero_prompt("When anxiety asks you to shrink", "Dispatch")
+    assert "Little Nate Dispatch" in prompt
+    assert "no blood" in prompt.lower() or "no medical" in prompt.lower()
+    assert "When anxiety asks you to shrink" in prompt
+    assert img.hero_public_url("demo-slug").endswith("/api/newsletter/library/demo-slug/hero")
+
+
+def test_email_html_embeds_hero_when_present():
+    delivery = _load("nl_delivery_hero_ut", "app/services/newsletter_delivery.py")
+    html = delivery._html_email(
+        {
+            "subject_line": "Test",
+            "final_body": "Hello",
+            "slug": "demo-slug",
+            "hero_image_url": "https://api.example/api/newsletter/library/demo-slug/hero",
+            "topic": "steadiness",
+        },
+        rate_base="https://api.example/rate?t=abc",
+        unsub_url="https://api.example/unsubscribe?sid=1&t=tok",
+    )
+    assert "<img " in html
+    assert "demo-slug/hero" in html
 
 
 def test_template_draft_applies_rewrite_notes_without_dumping_instructions():
