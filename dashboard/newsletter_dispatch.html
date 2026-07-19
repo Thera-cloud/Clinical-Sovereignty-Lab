@@ -3,95 +3,304 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Little Nate Dispatch — Admin</title>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<title>Little Nate Dispatch — Editor</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-:root{--void:#050505;--gold:#C9A962;--dim:#8B7355;--cyan:#4ECDC4;--ok:#22C55E;--bad:#EF4444}
-*{box-sizing:border-box}body{margin:0;background:#050505;color:#E8D5A3;font-family:'DM Sans',sans-serif;padding:24px}
-h1{font-family:'Cormorant Garamond',serif;color:var(--gold);margin:0 0 8px}
-.sub{color:var(--dim);margin-bottom:24px}
-.row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
-button{background:var(--gold);color:#111;border:0;padding:10px 16px;font-weight:600;cursor:pointer}
-button.secondary{background:#222;color:var(--gold);border:1px solid #333}
+:root{--void:#050505;--elev:#111;--gold:#C9A962;--bright:#E8D5A3;--dim:#8B7355;--cyan:#4ECDC4;--ok:#22C55E;--bad:#EF4444;--line:#222}
+*{box-sizing:border-box}body{margin:0;background:var(--void);color:var(--bright);font-family:'DM Sans',sans-serif;min-height:100vh}
+a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
+header{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+h1{font-family:'Cormorant Garamond',serif;color:var(--gold);margin:0;font-size:1.6rem;font-weight:600}
+.sub{color:var(--dim);font-size:.85rem;margin:4px 0 0}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button,.btn{background:var(--gold);color:#111;border:0;padding:9px 14px;font-weight:600;cursor:pointer;font-family:inherit;font-size:.85rem;border-radius:2px}
+button.secondary,.btn.secondary{background:#1a1a1a;color:var(--gold);border:1px solid #333}
+button.danger{background:transparent;color:var(--bad);border:1px solid var(--bad)}
 button:disabled{opacity:.4;cursor:not-allowed}
-table{width:100%;border-collapse:collapse;margin-top:16px}
-th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #222;font-size:.9rem}
-.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.75rem;background:#222}
-.badge.in_review{color:#E8D5A3}.badge.approved{color:var(--cyan)}.badge.sent{color:var(--ok)}.badge.rejected{color:var(--bad)}
-.msg{margin:12px 0;color:var(--cyan)}.err{color:var(--bad)}
-a{color:var(--cyan)}
+.layout{display:grid;grid-template-columns:300px 1fr;min-height:calc(100vh - 88px)}
+@media(max-width:900px){.layout{grid-template-columns:1fr}}
+.list{border-right:1px solid var(--line);overflow:auto;max-height:calc(100vh - 88px);background:#0a0a0a}
+.list-item{padding:12px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.list-item:hover{background:#141414}
+.list-item.active{background:#1a1810;border-left:3px solid var(--gold)}
+.list-item .slug{font-size:.72rem;color:var(--dim);word-break:break-all}
+.list-item .topic{font-size:.9rem;margin:4px 0}
+.badge{display:inline-block;padding:2px 8px;border-radius:3px;font-size:.7rem;background:#222;text-transform:uppercase;letter-spacing:.04em}
+.badge.in_review{color:var(--bright)}.badge.approved{color:var(--cyan)}.badge.sent{color:var(--ok)}.badge.rejected{color:var(--bad)}.badge.draft{color:var(--dim)}
+.editor{display:flex;flex-direction:column;min-height:calc(100vh - 88px)}
+.empty{padding:48px 24px;color:var(--dim);text-align:center}
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--line);padding:0 16px}
+.tab{padding:12px 16px;cursor:pointer;color:var(--dim);border-bottom:2px solid transparent;font-size:.85rem;font-weight:500}
+.tab.active{color:var(--gold);border-bottom-color:var(--gold)}
+.pane{display:none;flex:1;padding:16px 20px;overflow:auto}
+.pane.active{display:block}
+.msg{margin:0 20px 8px;font-size:.9rem;color:var(--cyan)}.msg.err{color:var(--bad)}
+label{display:block;color:var(--dim);font-size:.75rem;margin:12px 0 4px;text-transform:uppercase;letter-spacing:.06em}
+input,textarea{width:100%;background:#0a0a0a;border:1px solid #333;color:var(--bright);padding:10px 12px;font-family:inherit;font-size:.95rem;border-radius:2px}
+textarea.body{min-height:380px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem;line-height:1.5}
+textarea.notes{min-height:80px}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
+.meta{font-size:.8rem;color:var(--dim);margin-bottom:8px}
+iframe.preview{width:100%;min-height:70vh;border:1px solid var(--line);background:#050505;border-radius:2px}
+.stats{font-size:.8rem;color:var(--dim)}
+.hint{font-size:.8rem;color:var(--dim);margin-top:6px}
 </style>
 </head>
 <body>
-<h1>Little Nate Dispatch</h1>
-<p class="sub">Human approval required before every send. Pipeline composes to <code>in_review</code> only.</p>
-<div class="row">
-  <button id="btnPipe" onclick="runPipeline()">Run pipeline → in_review</button>
-  <button class="secondary" onclick="loadIssues()">Refresh</button>
-  <a href="nate_story_library.html">Story Library</a>
-</div>
+<header>
+  <div>
+    <h1>Little Nate Dispatch</h1>
+    <p class="sub">Review → edit or rewrite → approve → send. Human gate before every publish.</p>
+  </div>
+  <div class="toolbar">
+    <span class="stats" id="stats">—</span>
+    <button type="button" id="btnPipe" onclick="runPipeline()">Run pipeline → in_review</button>
+    <button type="button" class="secondary" onclick="loadIssues()">Refresh</button>
+    <a class="btn secondary" href="nate_story_library.html">Story Library</a>
+    <a class="btn secondary" href="command.html">Command</a>
+  </div>
+</header>
 <p id="msg" class="msg"></p>
-<table>
-  <thead><tr><th>Slug</th><th>Status</th><th>Topic</th><th>Created</th><th>Actions</th></tr></thead>
-  <tbody id="tbody"><tr><td colspan="5">Loading…</td></tr></tbody>
-</table>
+<div class="layout">
+  <aside class="list" id="list"><div class="empty">Loading…</div></aside>
+  <section class="editor" id="editor">
+    <div class="empty" id="emptyState">Select an issue to preview, edit, request a rewrite, or approve.</div>
+    <div id="work" style="display:none;flex-direction:column;flex:1">
+      <div class="tabs">
+        <div class="tab active" data-tab="preview" onclick="switchTab('preview')">Preview</div>
+        <div class="tab" data-tab="edit" onclick="switchTab('edit')">Edit</div>
+        <div class="tab" data-tab="rewrite" onclick="switchTab('rewrite')">Rewrite</div>
+      </div>
+      <div class="pane active" id="pane-preview">
+        <div class="meta" id="previewMeta"></div>
+        <iframe class="preview" id="previewFrame" title="Issue preview"></iframe>
+      </div>
+      <div class="pane" id="pane-edit">
+        <label for="fSubject">Subject line</label>
+        <input id="fSubject" maxlength="300">
+        <label for="fTopic">Topic</label>
+        <input id="fTopic" maxlength="300">
+        <label for="fOpener">Opener</label>
+        <textarea id="fOpener" rows="3" maxlength="2000"></textarea>
+        <label for="fBody">Body (markdown)</label>
+        <textarea id="fBody" class="body" maxlength="50000"></textarea>
+        <p class="hint">Save keeps status <code>in_review</code>. Approve copies this body to the publish payload.</p>
+        <div class="actions">
+          <button type="button" onclick="saveIssue()">Save edits</button>
+          <button type="button" class="secondary" onclick="switchTab('preview'); loadPreview()">Refresh preview</button>
+        </div>
+      </div>
+      <div class="pane" id="pane-rewrite">
+        <label for="fNotes">Rewrite direction (optional)</label>
+        <textarea id="fNotes" class="notes" maxlength="2000" placeholder="e.g. Softer opener, lead with grounding before the research cites, shorten techniques to two steps…"></textarea>
+        <p class="hint">Regenerates from the research bundle. LLM is used when available; otherwise a template pass applies your direction. Raw notes are not pasted into the article.</p>
+        <div class="actions">
+          <button type="button" id="btnRewrite" onclick="requestRewrite()">Request rewrite</button>
+        </div>
+      </div>
+      <div class="actions" style="padding:0 20px 20px;border:0;margin:0">
+        <button type="button" id="btnApprove" onclick="approveIssue()">Approve</button>
+        <button type="button" id="btnSend" class="secondary" onclick="sendIssue()" style="display:none">Send to subscribers</button>
+        <button type="button" class="danger" onclick="rejectIssue()">Reject</button>
+      </div>
+    </div>
+  </section>
+</div>
 <script>
+var issues = [];
+var current = null;
+var dirty = false;
+
 function token(){return sessionStorage.getItem('token')||localStorage.getItem('sc_token')||'';}
 function apiBase(){return (location.hostname.indexOf('sovereignsanctuary')>=0)?'https://api.sovereignsanctuary.net':'';}
 function headers(){return {'Authorization':'Bearer '+token(),'Content-Type':'application/json'};}
-async function api(path,opts){
-  var r=await fetch(apiBase()+path,Object.assign({headers:headers()},opts||{}));
-  if(r.status===401){document.getElementById('msg').textContent='Auth issue — token may still be propagating';return null;}
+function setMsg(t, err){var el=document.getElementById('msg');el.textContent=t||'';el.className=err?'msg err':'msg';}
+
+async function api(path, opts){
+  var r = await fetch(apiBase()+path, Object.assign({headers:headers()}, opts||{}));
+  if(r.status===401){setMsg('Auth issue — open Command, then return (token may still be propagating)', true);return null;}
   return r;
 }
-async function loadIssues(){
-  var r=await api('/api/newsletter/admin/issues');
-  if(!r)return;
-  var d=await r.json();
-  var rows=d.issues||[];
-  var el=document.getElementById('tbody');
-  if(!rows.length){el.innerHTML='<tr><td colspan="5">No issues yet.</td></tr>';return;}
-  el.innerHTML=rows.map(function(i){
-    var st=i.status||'';
-    var acts='';
-    if(st==='in_review'){
-      acts='<button onclick="approve(\''+i.id+'\')">Approve</button> '
-        +'<button class="secondary" onclick="reject(\''+i.id+'\')">Reject</button>';
-    }else if(st==='approved'){
-      acts='<button onclick="sendIssue(\''+i.id+'\')">Send</button>';
-    }else if(st==='sent'){
-      acts='<a href="'+apiBase()+'/api/newsletter/library/'+encodeURIComponent(i.slug)+'/page" target="_blank">Open</a>';
-    }
-    return '<tr><td>'+(i.slug||'')+'</td><td><span class="badge '+st+'">'+st+'</span></td><td>'
-      +(i.topic||'').replace(/</g,'&lt;')+'</td><td>'+String(i.created_at||'').slice(0,16)+'</td><td>'+acts+'</td></tr>';
+
+function switchTab(name){
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active', t.getAttribute('data-tab')===name);});
+  document.querySelectorAll('.pane').forEach(function(p){p.classList.toggle('active', p.id==='pane-'+name);});
+  if(name==='preview' && current) loadPreview();
+}
+
+function renderList(){
+  var el = document.getElementById('list');
+  if(!issues.length){el.innerHTML='<div class="empty">No issues yet. Run the pipeline.</div>';return;}
+  el.innerHTML = issues.map(function(i){
+    var active = current && current.id===i.id ? ' active' : '';
+    return '<div class="list-item'+active+'" onclick="selectIssue(\''+i.id+'\')">'
+      +'<span class="badge '+(i.status||'')+'">'+(i.status||'')+'</span>'
+      +'<div class="topic">'+(i.topic||i.subject_line||'Untitled').replace(/</g,'&lt;')+'</div>'
+      +'<div class="slug">'+(i.slug||'')+'</div></div>';
   }).join('');
 }
+
+async function loadStats(){
+  var r = await api('/api/newsletter/admin/subscribers/stats');
+  if(!r||!r.ok)return;
+  var d = await r.json();
+  var a = (d.by_status&&d.by_status.active)||0;
+  var p = (d.by_status&&d.by_status.pending)||0;
+  document.getElementById('stats').textContent = a+' active · '+p+' pending · '+(d.warm_leads||0)+' warm leads';
+}
+
+async function loadIssues(selectId){
+  setMsg('');
+  var r = await api('/api/newsletter/admin/issues');
+  if(!r)return;
+  var d = await r.json();
+  issues = d.issues||[];
+  renderList();
+  loadStats();
+  var pick = selectId || (current && current.id) || (issues[0]&&issues[0].id);
+  if(pick) selectIssue(pick);
+}
+
+async function selectIssue(id){
+  if(dirty && !confirm('Discard unsaved edits?'))return;
+  dirty = false;
+  var r = await api('/api/newsletter/admin/issues/'+id);
+  if(!r)return;
+  if(!r.ok){setMsg('Could not load issue', true);return;}
+  var d = await r.json();
+  current = d.issue;
+  document.getElementById('emptyState').style.display='none';
+  var work = document.getElementById('work');
+  work.style.display='flex';
+  document.getElementById('fSubject').value = current.subject_line||'';
+  document.getElementById('fTopic').value = current.topic||'';
+  document.getElementById('fOpener').value = current.opener||'';
+  document.getElementById('fBody').value = current.body_md||'';
+  document.getElementById('fNotes').value = '';
+  var canEdit = ['in_review','draft','rejected'].indexOf(current.status)>=0;
+  ['fSubject','fTopic','fOpener','fBody','fNotes','btnRewrite'].forEach(function(id){
+    var el=document.getElementById(id); if(el) el.disabled = !canEdit;
+  });
+  document.getElementById('btnApprove').disabled = current.status!=='in_review';
+  document.getElementById('btnSend').style.display = current.status==='approved' ? '' : 'none';
+  document.getElementById('btnSend').disabled = current.status!=='approved';
+  renderList();
+  switchTab('preview');
+  loadPreview();
+}
+
+async function loadPreview(){
+  if(!current)return;
+  var meta = document.getElementById('previewMeta');
+  meta.textContent = (current.status||'')+' · '+(current.slug||'')+' · updated '+(String(current.updated_at||current.created_at||'').slice(0,19));
+  var r = await api('/api/newsletter/admin/issues/'+current.id+'/preview');
+  var frame = document.getElementById('previewFrame');
+  if(!r||!r.ok){frame.srcdoc='<p style="color:#EF4444;padding:24px;font-family:sans-serif">Preview failed</p>';return;}
+  var html = await r.text();
+  frame.srcdoc = html;
+}
+
+function markDirty(){dirty=true;}
+['fSubject','fTopic','fOpener','fBody'].forEach(function(id){
+  document.addEventListener('DOMContentLoaded', function(){});
+});
+window.addEventListener('load', function(){
+  ['fSubject','fTopic','fOpener','fBody'].forEach(function(id){
+    document.getElementById(id).addEventListener('input', markDirty);
+  });
+});
+
+async function saveIssue(){
+  if(!current)return;
+  var r = await api('/api/newsletter/admin/issues/'+current.id, {
+    method:'PUT',
+    body: JSON.stringify({
+      subject_line: document.getElementById('fSubject').value,
+      topic: document.getElementById('fTopic').value,
+      opener: document.getElementById('fOpener').value,
+      body_md: document.getElementById('fBody').value
+    })
+  });
+  if(!r)return;
+  var d = await r.json();
+  if(!r.ok){setMsg(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail||d), true);return;}
+  dirty = false;
+  current = d.issue;
+  setMsg('Saved');
+  loadIssues(current.id);
+}
+
+async function requestRewrite(){
+  if(!current)return;
+  if(!confirm('Regenerate this draft? Your current body will be replaced.'))return;
+  document.getElementById('btnRewrite').disabled = true;
+  setMsg('Rewriting…');
+  var r = await api('/api/newsletter/admin/issues/'+current.id+'/rewrite', {
+    method:'POST',
+    body: JSON.stringify({notes: document.getElementById('fNotes').value})
+  });
+  document.getElementById('btnRewrite').disabled = false;
+  if(!r)return;
+  var d = await r.json();
+  if(!r.ok){setMsg(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail||d), true);return;}
+  dirty = false;
+  current = d.issue;
+  setMsg('Rewrite ready — review in Preview, then edit or approve');
+  document.getElementById('fSubject').value = current.subject_line||'';
+  document.getElementById('fTopic').value = current.topic||'';
+  document.getElementById('fOpener').value = current.opener||'';
+  document.getElementById('fBody').value = current.body_md||'';
+  switchTab('preview');
+  loadPreview();
+  loadIssues(current.id);
+}
+
+async function approveIssue(){
+  if(!current)return;
+  if(dirty){await saveIssue(); if(dirty)return;}
+  if(!confirm('Approve this issue for send?'))return;
+  var r = await api('/api/newsletter/admin/issues/'+current.id+'/approve', {method:'POST', body:'{}'});
+  if(!r)return;
+  if(!r.ok){var d=await r.json();setMsg(JSON.stringify(d.detail||d), true);return;}
+  setMsg('Approved — click Send when ready');
+  loadIssues(current.id);
+}
+
+async function sendIssue(){
+  if(!current)return;
+  if(!confirm('Send to all ACTIVE subscribers now?'))return;
+  setMsg('Sending…');
+  var r = await api('/api/newsletter/admin/issues/'+current.id+'/send', {method:'POST', body:'{}'});
+  if(!r)return;
+  var d = await r.json();
+  if(!r.ok){setMsg(JSON.stringify(d.detail||d), true);return;}
+  setMsg('Sent '+(d.sent||0)+' · '+(d.library_url||''));
+  loadIssues(current.id);
+}
+
+async function rejectIssue(){
+  if(!current)return;
+  var reason = prompt('Reject reason (optional):','editor_reject')||'editor_reject';
+  var r = await api('/api/newsletter/admin/issues/'+current.id+'/reject?reason='+encodeURIComponent(reason), {
+    method:'POST', body: JSON.stringify({reason:reason})
+  });
+  if(!r)return;
+  setMsg('Rejected');
+  dirty = false;
+  loadIssues(current.id);
+}
+
 async function runPipeline(){
-  document.getElementById('btnPipe').disabled=true;
-  document.getElementById('msg').textContent='Running…';
-  var r=await api('/api/newsletter/admin/pipeline/run',{method:'POST',body:'{}'});
-  document.getElementById('btnPipe').disabled=false;
+  document.getElementById('btnPipe').disabled = true;
+  setMsg('Running pipeline…');
+  var r = await api('/api/newsletter/admin/pipeline/run', {method:'POST', body:'{}'});
+  document.getElementById('btnPipe').disabled = false;
   if(!r)return;
-  var d=await r.json();
-  document.getElementById('msg').textContent=d.ok?'Draft ready: '+(d.slug||d.issue_id):('Failed: '+(d.error||JSON.stringify(d.errors||d)));
-  loadIssues();
+  var d = await r.json();
+  if(d.ok){setMsg('Draft ready: '+(d.slug||d.issue_id)); loadIssues(d.issue_id);}
+  else setMsg('Failed: '+(d.error||JSON.stringify(d.errors||d)), true);
 }
-async function approve(id){
-  var r=await api('/api/newsletter/admin/issues/'+id+'/approve',{method:'POST',body:'{}'});
-  if(r){document.getElementById('msg').textContent='Approved';loadIssues();}
-}
-async function reject(id){
-  var r=await api('/api/newsletter/admin/issues/'+id+'/reject?reason=editor_reject',{method:'POST',body:'{}'});
-  if(r){document.getElementById('msg').textContent='Rejected';loadIssues();}
-}
-async function sendIssue(id){
-  if(!confirm('Send approved issue to all active subscribers?'))return;
-  var r=await api('/api/newsletter/admin/issues/'+id+'/send',{method:'POST',body:'{}'});
-  if(!r)return;
-  var d=await r.json();
-  document.getElementById('msg').textContent='Sent '+(d.sent||0)+' · '+(d.library_url||'');
-  loadIssues();
-}
+
 loadIssues();
 </script>
 </body>

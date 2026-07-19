@@ -115,7 +115,38 @@ def test_story_library_shell_exists():
 def test_admin_dispatch_shell_exists():
     p = ROOT / "dashboard" / "newsletter_dispatch.html"
     assert p.exists()
-    assert "Approve" in p.read_text(encoding="utf-8")
+    text = p.read_text(encoding="utf-8")
+    assert "Approve" in text
+    assert "Preview" in text
+    assert "Request rewrite" in text
+    assert "/preview" in text
+
+
+def test_template_draft_applies_rewrite_notes_without_dumping_instructions():
+    pipe = _load("nl_pipe_ut", "app/services/newsletter_pipeline.py")
+    topic = {"title": "Asking for help", "topic_key": "ask"}
+    bundle = {
+        "citations": [
+            {
+                "source_name": "NIMH",
+                "year": 2025,
+                "url": "https://www.nimh.nih.gov/health/topics/anxiety-disorders",
+                "verified": True,
+                "modality": "psychoeducation",
+            }
+        ],
+        "external_reading": {
+            "source_name": "NIMH",
+            "year": 2025,
+            "url": "https://www.nimh.nih.gov/health/topics/anxiety-disorders",
+        },
+        "editor_rewrite_notes": "Lead with grounding before research",
+    }
+    draft = pipe.draft_issue_from_bundle(topic, bundle)
+    body = draft["body_md"]
+    assert "Lead with grounding" in body
+    assert "EDITOR REWRITE" not in body
+    assert "988" in body
 
 
 def test_summon_cache_key_scopes_by_user():

@@ -217,24 +217,35 @@ def draft_issue_from_bundle(topic: Dict[str, Any], bundle: Dict[str, Any]) -> Di
     ]
 
     hints = topic.get("symbolic_hints") or []
-    hint_block = ""
-    if hints:
-        hint_block = "\n\n_Editor notes (from prior Dispatch outcomes):_\n" + "\n".join(
-            f"- {h}" for h in hints[:3]
-        )
+    # Symbolic memory may shape tone; never dump raw editor instructions into the body.
+    rewrite = (bundle.get("editor_rewrite_notes") or "").strip()
+    rewrite = re.sub(r"\s+", " ", rewrite)[:400]
 
     opener = (
         "You do not have to earn rest or connection. Strength includes asking — "
         "and I am here when you are ready to take the next small step."
     )
+    if rewrite:
+        feature_lead = (
+            f"This week we explore {topic.get('title') or 'steadiness'} with a sharper focus "
+            f"on what your editor asked for: {rewrite}. "
+            "Small, structured steps restore agency without forcing a perfect plan.\n\n"
+        )
+    else:
+        feature_lead = (
+            "This week we explore how overwhelm can make reaching out feel risky — "
+            "and how small, structured steps restore agency without forcing a perfect plan.\n\n"
+        )
     feature = (
         f"## {topic.get('title')}\n\n"
-        "This week we explore how overwhelm can make reaching out feel risky — "
-        "and how small, structured steps restore agency without forcing a perfect plan.\n\n"
-        "Clinical context (education only, not diagnosis):\n"
+        + feature_lead
+        + "Clinical context (education only, not diagnosis):\n"
         + "\n".join(cite_lines)
-        + hint_block
     )
+    if hints and not rewrite:
+        feature += "\n\n_Voice notes (from prior Dispatch outcomes):_\n" + "\n".join(
+            f"- {h}" for h in hints[:3]
+        )
     go_deeper = (
         "Try opening with Little Nate:\n"
         "1. \"I keep putting off asking for help — sit with me in that.\"\n"
@@ -273,11 +284,19 @@ def draft_issue_from_bundle(topic: Dict[str, Any], bundle: Dict[str, Any]) -> Di
     }
 
 
-async def draft_issue_llm(topic: Dict[str, Any], bundle: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Optional inference-router compose; cites must stay within research_bundle."""
+async def draft_issue_llm(
+    topic: Dict[str, Any],
+    bundle: Dict[str, Any],
+    *,
+    force: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """Optional inference-router compose; cites must stay within research_bundle.
+
+    force=True bypasses ENABLE_NEWSLETTER_LLM_DRAFT (editor rewrite path).
+    """
     import os
 
-    if os.getenv("ENABLE_NEWSLETTER_LLM_DRAFT", "false").strip().lower() not in (
+    if not force and os.getenv("ENABLE_NEWSLETTER_LLM_DRAFT", "false").strip().lower() not in (
         "1",
         "true",
         "yes",
@@ -291,16 +310,19 @@ async def draft_issue_llm(topic: Dict[str, Any], bundle: Dict[str, Any]) -> Opti
         f"- {c['source_name']} ({c['year']}): {c['url']}" for c in cites[:5]
     )
     hints = "\n".join(topic.get("symbolic_hints") or [])
+    rewrite = (bundle.get("editor_rewrite_notes") or "").strip()
     system = (
         "You write Little Nate Dispatch — warm, educational mental-health newsletter. "
         "NOT therapy or diagnosis. Cite ONLY URLs from the research list. "
         "Include crisis footer with 988 and findahelpline.com. "
+        "Never paste editor instructions verbatim into the article. "
         "Output markdown with sections: opener, feature, techniques (3), go deeper, further reading."
     )
     user = (
         f"Topic: {topic.get('title')}\n\nAllowed citations:\n{cite_blob}\n\n"
         f"Style hints:\n{hints or '(none)'}\n\n"
-        f"Must end with: {SAFETY_FOOTER}"
+        + (f"EDITOR REWRITE DIRECTION (apply, do not quote):\n{rewrite}\n\n" if rewrite else "")
+        + f"Must end with: {SAFETY_FOOTER}"
     )
     try:
         from app.services.nate_inference_router import NateInferenceRouter
@@ -372,6 +394,98 @@ def critique_issue(draft: Dict[str, Any], bundle: Dict[str, Any]) -> Tuple[bool,
         errors.append("techniques_count")
 
     return len(errors) == 0, errors
+
+
+async def rewrite_existing_issue(
+    db_pool, issue_id: str, notes: str = ""
+) -> Dict[str, Any]:
+    """Regenerate body for an in-review/draft/rejected issue; keep slug."""
+    if not db_pool:
+        return {"ok": False, "error": "no_db"}
+    notes = (notes or "").strip()[:2000]
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM newsletter_issues WHERE id = $1::uuid", issue_id
+        )
+    if not row:
+        return {"ok": False, "error": "not_found"}
+    if row["status"] not in ("in_review", "draft", "rejected"):
+        return {"ok": False, "error": "wrong_status", "status": row["status"]}
+
+    bundle = row["research_bundle"] or {}
+    if isinstance(bundle, str):
+        try:
+            bundle = json.loads(bundle)
+        except Exception:
+            bundle = {}
+    if not isinstance(bundle, dict):
+        bundle = {}
+    cites = bundle.get("citations") or []
+    if isinstance(row["citations"], list) and row["citations"]:
+        cites = cites or row["citations"]
+    if isinstance(cites, str):
+        try:
+            cites = json.loads(cites)
+        except Exception:
+            cites = []
+    bundle = {**bundle, "citations": cites}
+    if notes:
+        bundle["editor_rewrite_notes"] = notes
+        hist = list(bundle.get("rewrite_history") or [])
+        hist.append(
+            {
+                "at": datetime.now(timezone.utc).isoformat(),
+                "notes": notes[:500],
+            }
+        )
+        bundle["rewrite_history"] = hist[-10:]
+
+    if not cites:
+        return {"ok": False, "error": "no_citations_on_issue"}
+
+    topic = {
+        "title": row["topic"] or row["slug"],
+        "topic_key": row["slug"],
+        "symbolic_hints": [],
+    }
+    draft = await draft_issue_llm(topic, bundle, force=bool(notes))
+    if not draft:
+        draft = draft_issue_from_bundle(topic, bundle)
+    draft["slug"] = row["slug"]
+    draft["topic"] = row["topic"] or draft.get("topic")
+    ok, errors = critique_issue(draft, bundle)
+    if not ok:
+        return {"ok": False, "errors": errors}
+
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE newsletter_issues SET
+                status = 'in_review',
+                subject_line = $2,
+                opener = $3,
+                body_md = $4,
+                draft_body = $5,
+                final_body = NULL,
+                techniques = $6::jsonb,
+                citations = $7::jsonb,
+                research_bundle = $8::jsonb,
+                content_hash = $9,
+                rejected_reason = NULL,
+                updated_at = NOW()
+            WHERE id = $1::uuid
+            """,
+            issue_id,
+            draft.get("subject_line"),
+            draft.get("opener"),
+            draft.get("body_md"),
+            draft.get("draft_body") or draft.get("body_md"),
+            json.dumps(draft.get("techniques") or []),
+            json.dumps(draft.get("citations") or cites),
+            json.dumps(bundle),
+            draft.get("content_hash"),
+        )
+    return {"ok": True, "issue_id": issue_id, "slug": row["slug"]}
 
 
 async def persist_issue(db_pool, draft: Dict[str, Any], status: str = "in_review") -> Optional[str]:

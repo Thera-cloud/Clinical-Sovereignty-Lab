@@ -241,7 +241,7 @@ class NewsletterAuditor:
                         WHERE parameter_key = 'newsletter_check_count'
                         """
                     )
-                    ok = val == "10"
+                    ok = val == "12"
                 else:
                     ok = False
             elapsed = int((time.monotonic() - t0) * 1000)

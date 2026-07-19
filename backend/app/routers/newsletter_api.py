@@ -62,6 +62,29 @@ class FeedbackBody(BaseModel):
     liked: Optional[bool] = None
 
 
+class UpdateIssueBody(BaseModel):
+    subject_line: Optional[str] = Field(None, max_length=300)
+    topic: Optional[str] = Field(None, max_length=300)
+    opener: Optional[str] = Field(None, max_length=2000)
+    body_md: Optional[str] = Field(None, max_length=50000)
+
+
+class RewriteIssueBody(BaseModel):
+    notes: Optional[str] = Field(None, max_length=2000)
+
+
+def _row_json(row) -> Dict[str, Any]:
+    from uuid import UUID
+
+    d = dict(row)
+    for k, v in list(d.items()):
+        if isinstance(v, UUID):
+            d[k] = str(v)
+        elif hasattr(v, "isoformat"):
+            d[k] = v.isoformat()
+    return d
+
+
 # ── Public ───────────────────────────────────────────────────────────
 
 
@@ -552,40 +575,157 @@ async def admin_list_issues(request: Request, admin: Dict = Depends(require_admi
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, slug, status, topic, subject_line, created_at, sent_at, approved_at
+            SELECT id, slug, status, topic, subject_line, opener,
+                   LEFT(COALESCE(body_md, ''), 160) AS body_preview,
+                   created_at, sent_at, approved_at, updated_at
             FROM newsletter_issues
             ORDER BY created_at DESC LIMIT 50
             """
         )
-    return {"status": "ok", "issues": [dict(r) for r in rows]}
+    return {"status": "ok", "issues": [_row_json(r) for r in rows]}
 
 
 @admin_router.get("/issues/{issue_id}")
 async def admin_get_issue(issue_id: str, request: Request, admin: Dict = Depends(require_admin)):
     pool = _pool(request)
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM newsletter_issues WHERE id = $1", issue_id)
+        row = await conn.fetchrow(
+            "SELECT * FROM newsletter_issues WHERE id = $1::uuid", issue_id
+        )
     if not row:
-        raise HTTPException(404)
-    return {"status": "ok", "issue": dict(row)}
+        raise HTTPException(404, "Issue not found")
+    return {"status": "ok", "issue": _row_json(row)}
+
+
+@admin_router.get("/issues/{issue_id}/preview")
+async def admin_preview_issue(
+    issue_id: str, request: Request, admin: Dict = Depends(require_admin)
+):
+    """HTML preview as subscribers / Story Library will see it (draft body)."""
+    from app.services.newsletter_delivery import render_library_html
+
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM newsletter_issues WHERE id = $1::uuid", issue_id
+        )
+    if not row:
+        raise HTTPException(404, "Issue not found")
+    issue = _row_json(row)
+    # Preview uses current editor body, not only final_body
+    issue["final_body"] = issue.get("body_md") or issue.get("final_body") or ""
+    return HTMLResponse(render_library_html(issue))
+
+
+@admin_router.put("/issues/{issue_id}")
+async def admin_update_issue(
+    issue_id: str,
+    body: UpdateIssueBody,
+    request: Request,
+    admin: Dict = Depends(require_admin),
+):
+    """Editor save — subject / topic / opener / body while in_review or draft."""
+    pool = _pool(request)
+    fields = body.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(400, "No fields to update")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, status, body_md FROM newsletter_issues WHERE id = $1::uuid",
+            issue_id,
+        )
+        if not row:
+            raise HTTPException(404, "Issue not found")
+        if row["status"] not in ("in_review", "draft", "rejected"):
+            raise HTTPException(400, f"Cannot edit status={row['status']}")
+        new_body = fields.get("body_md", row["body_md"])
+        content_hash = (
+            hashlib.sha256((new_body or "").encode()).hexdigest() if new_body else None
+        )
+        await conn.execute(
+            """
+            UPDATE newsletter_issues SET
+                subject_line = COALESCE($2, subject_line),
+                topic = COALESCE($3, topic),
+                opener = COALESCE($4, opener),
+                body_md = COALESCE($5, body_md),
+                draft_body = COALESCE($5, draft_body),
+                final_body = NULL,
+                content_hash = COALESCE($6, content_hash),
+                status = CASE WHEN status = 'rejected' THEN 'in_review' ELSE status END,
+                updated_at = NOW()
+            WHERE id = $1::uuid
+            """,
+            issue_id,
+            fields.get("subject_line"),
+            fields.get("topic"),
+            fields.get("opener"),
+            fields.get("body_md"),
+            content_hash,
+        )
+        updated = await conn.fetchrow(
+            "SELECT * FROM newsletter_issues WHERE id = $1::uuid", issue_id
+        )
+    return {
+        "status": "ok",
+        "saved": True,
+        "issue": _row_json(updated),
+        "editor": admin.get("username") or "admin",
+    }
+
+
+@admin_router.post("/issues/{issue_id}/rewrite")
+async def admin_rewrite_issue(
+    issue_id: str,
+    body: RewriteIssueBody,
+    request: Request,
+    admin: Dict = Depends(require_admin),
+):
+    """Regenerate draft from research bundle + optional editor direction."""
+    from app.services.newsletter_pipeline import rewrite_existing_issue
+
+    result = await rewrite_existing_issue(
+        _pool(request), issue_id, notes=body.notes or ""
+    )
+    if not result.get("ok"):
+        raise HTTPException(400, detail=result)
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM newsletter_issues WHERE id = $1::uuid", issue_id
+        )
+    return {
+        "status": "ok",
+        "rewritten": True,
+        "issue": _row_json(row) if row else None,
+        "editor": admin.get("username") or "admin",
+    }
 
 
 @admin_router.post("/issues/{issue_id}/approve")
 async def admin_approve(issue_id: str, request: Request, admin: Dict = Depends(require_admin)):
     pool = _pool(request)
     async with pool.acquire() as conn:
-        await conn.execute(
+        row = await conn.fetchrow(
             """
             UPDATE newsletter_issues
             SET status = 'approved', approved_at = NOW(),
-                approved_by = $2, final_body = COALESCE(final_body, body_md),
+                approved_by = $2, final_body = body_md,
                 updated_at = NOW()
-            WHERE id = $1 AND status = 'in_review'
+            WHERE id = $1::uuid AND status = 'in_review'
+            RETURNING id, slug, subject_line
             """,
             issue_id,
             admin.get("username") or "admin",
         )
-    return {"status": "ok", "issue_id": issue_id, "approved": True}
+    if not row:
+        raise HTTPException(400, "Issue not in_review or not found")
+    return {
+        "status": "ok",
+        "issue_id": issue_id,
+        "approved": True,
+        "slug": row["slug"],
+    }
 
 
 @admin_router.post("/issues/{issue_id}/reject")
@@ -596,15 +736,21 @@ async def admin_reject(
     reason: str = Query("editor_reject"),
 ):
     pool = _pool(request)
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    why = (body.get("reason") if isinstance(body, dict) else None) or reason
     async with pool.acquire() as conn:
         await conn.execute(
             """
             UPDATE newsletter_issues
             SET status = 'rejected', rejected_reason = $2, updated_at = NOW()
-            WHERE id = $1 AND status IN ('in_review', 'draft')
+            WHERE id = $1::uuid AND status IN ('in_review', 'draft', 'approved')
             """,
             issue_id,
-            reason[:500],
+            str(why)[:500],
         )
     return {"status": "ok", "rejected": True}
 
