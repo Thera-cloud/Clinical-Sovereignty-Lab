@@ -493,21 +493,20 @@ class FederatedSearchCoordinator:
             return []
         try:
             async with self._db_pool.acquire() as conn:
-                # QUANTUM-CRYSTAL-ARCH — requester scope: own crystals OR global only
+                # QUANTUM-CRYSTAL-ARCH — own crystals OR allowlisted global pool only
                 sql = """
                     SELECT id, crystal_text, domain, confidence, scope,
                            context_start, context_end, recall_count,
                            last_recalled_at, content_hash, created_at
                     FROM nate_intelligence_crystals
                     WHERE superseded_by IS NULL
-                      AND scope NOT IN ('archived', 'admin_only')
                       AND crystal_text ILIKE '%' || $1 || '%'
                       AND (
                         ($2::text IS NULL AND user_id IS NULL AND scope = 'global')
                         OR (
                           $2::text IS NOT NULL
                           AND (
-                            user_id::text = $2
+                            (user_id::text = $2 AND scope != 'archived')
                             OR (user_id IS NULL AND scope = 'global')
                           )
                         )

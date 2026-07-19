@@ -44,6 +44,8 @@ _PROTECTED_FILES = {
     "services/sensitive_clinical_bridge.py": 1,
     "sse/voice_crystal_enricher.py": 1,
     "services/quantum_crystal_orchestrator.py": 2,
+    "services/newsletter_library_recall.py": 2,
+    "services/quantum_knowledge_field.py": 2,
 }
 
 # 2026-07-09 audit, part 4: these files also query `user_id IS NULL`, but are
@@ -93,6 +95,12 @@ _FORBIDDEN_OLD_SNIPPETS: dict[str, list[str]] = {
     "services/quantum_crystal_orchestrator.py": [
         "WHERE user_id IS NULL OR user_id::text = $1",
         "WHERE scope != 'archived'\n                  AND (user_id IS NULL OR user_id::text = $1)",
+    ],
+    "services/newsletter_library_recall.py": [
+        "scope NOT IN ('archived', 'admin_only')",
+    ],
+    "services/quantum_knowledge_field.py": [
+        "scope NOT IN ('archived', 'admin_only')",
     ],
 }
 
