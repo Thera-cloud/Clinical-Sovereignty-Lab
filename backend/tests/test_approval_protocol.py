@@ -574,3 +574,52 @@ class TestEscalationGuards:
         assert len(result) == 1
         assert result[0]["proposal_id"] == str(pid)
         assert result[0]["escalation_count"] == 1
+
+
+class TestSendSmsNotification:
+    @pytest.mark.asyncio
+    async def test_uses_messaging_service_when_configured(
+        self, fake_pool, monkeypatch,
+    ):
+        """CEO RED SMS must use A2P messaging service, not raw from_ number."""
+        captured = {}
+
+        class _FakeMessage:
+            sid = "SMtest123"
+            status = "delivered"
+            error_code = None
+
+        class _FakeMessages:
+            def create(self, **kwargs):
+                captured.update(kwargs)
+                return _FakeMessage()
+
+            def __call__(self, sid):
+                return self
+
+            def fetch(self):
+                return _FakeMessage()
+
+        class _FakeClient:
+            messages = _FakeMessages()
+
+        monkeypatch.setenv("TWILIO_MESSAGING_SERVICE_SID", "MGtestservice")
+        monkeypatch.setenv("CEO_NOTIFY_SMS", "+15865243969")
+
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        monkeypatch.setattr(svc, "_get_twilio_client", lambda: _FakeClient())
+
+        sid = await svc.send_sms_notification(
+            {
+                "proposal_id": uuid4(),
+                "title": "Trust RED: test",
+                "risk": "high",
+                "metadata": {"ceo_inbox": True},
+            },
+            to_number="+15865243969",
+        )
+
+        assert sid == "SMtest123"
+        assert captured.get("messaging_service_sid") == "MGtestservice"
+        assert "from_" not in captured
+        assert captured.get("to") == "+15865243969"

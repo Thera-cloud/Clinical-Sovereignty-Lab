@@ -858,19 +858,48 @@ class ApprovalProtocolService:
             or os.getenv("CEO_NOTIFY_SMS", "")
         )
 
-        if not client or not twilio_from or not twilio_to:
+        messaging_sid = os.getenv("TWILIO_MESSAGING_SERVICE_SID", "")
+        if not client or not twilio_to:
             print(">>> [APPROVAL] Twilio not configured — skipping SMS")
+            return None
+        if not messaging_sid and not twilio_from:
+            print(">>> [APPROVAL] Twilio SMS: no messaging service or from number")
             return None
 
         try:
             body = self._build_proposal_sms(proposal)
 
-            message = client.messages.create(
-                body=body,
-                from_=twilio_from,
-                to=twilio_to,
+            create_kwargs = {"body": body, "to": twilio_to}
+            if messaging_sid:
+                create_kwargs["messaging_service_sid"] = messaging_sid
+            else:
+                create_kwargs["from_"] = twilio_from
+
+            message = client.messages.create(**create_kwargs)
+            print(
+                f">>> [APPROVAL] SMS queued ({len(body)} chars): {message.sid} "
+                f"via={'messaging_service' if messaging_sid else 'from_number'}"
             )
-            print(f">>> [APPROVAL] SMS sent ({len(body)} chars): {message.sid}")
+
+            # A2P 30034: API accept ≠ carrier delivery — surface undelivered in logs.
+            try:
+                import time
+
+                for _ in range(3):
+                    time.sleep(1.0)
+                    fetched = client.messages(message.sid).fetch()
+                    status = (fetched.status or "").lower()
+                    if status in ("delivered", "undelivered", "failed", "canceled"):
+                        if status != "delivered":
+                            print(
+                                f">>> [APPROVAL] SMS {status} for {twilio_to}: "
+                                f"error={fetched.error_code} "
+                                "(A2P 10DLC — fix campaign in Twilio console)"
+                            )
+                        break
+            except Exception as poll_err:
+                print(f">>> [APPROVAL] SMS delivery poll skipped: {poll_err}")
+
             return message.sid
 
         except Exception as e:
