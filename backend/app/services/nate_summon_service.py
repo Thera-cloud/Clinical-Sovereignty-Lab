@@ -118,14 +118,21 @@ class NateSummonService:
             message = f"[BRIEF RESPONSE ONLY] {message}"
 
         sources_tag = ["nate_ai"]
-        cached = await self._get_cached_response(message)
+        cached = await self._get_cached_response(
+            message, user=user, access_level=bottle.access_level
+        )
         if cached:
             ai_response = cached
             sources_tag = ["nate_ai_cached"]
         else:
             ai_response = await self._generate_response(message, max_tokens, context)
             if bottle.access_level in ("full", "registered", "sovereign_circle"):
-                await self._set_cached_response(message, ai_response)
+                await self._set_cached_response(
+                    message,
+                    ai_response,
+                    user=user,
+                    access_level=bottle.access_level,
+                )
 
         if self.privacy_shield:
             ai_response = await self.privacy_shield.filter_response(
@@ -289,13 +296,23 @@ class NateSummonService:
                 "temporarily unavailable. Please try again in a moment."
             )
 
-    async def _get_cached_response(self, message: str) -> Optional[str]:
+    def _summon_cache_key(self, message: str, user: Optional[Dict] = None, access_level: str = "public") -> str:
+        # QUANTUM-CRYSTAL-ARCH — include identity so identical prompts cannot cross users
+        ident = "anon"
+        if user:
+            ident = str(user.get("username") or user.get("user_id") or user.get("id") or "user")
+        raw = f"{access_level}:{ident}:{message.lower().strip()}"
+        return f"summon:cache:{hashlib.sha256(raw.encode()).hexdigest()}"
+
+    async def _get_cached_response(
+        self, message: str, user: Optional[Dict] = None, access_level: str = "public"
+    ) -> Optional[str]:
         """Check Redis for a cached summon response."""
         cache_redis = getattr(self._app_state, "cache_redis", None) if self._app_state else None
         if not cache_redis:
             return None
         try:
-            cache_key = f"summon:cache:{hashlib.sha256(message.lower().strip().encode()).hexdigest()}"
+            cache_key = self._summon_cache_key(message, user=user, access_level=access_level)
             cached = await cache_redis.get(cache_key)
             if cached:
                 logger.debug("Summon cache HIT for %s", cache_key[:30])
@@ -304,13 +321,20 @@ class NateSummonService:
             logger.warning("Summon cache get failed: %s", e)
         return None
 
-    async def _set_cached_response(self, message: str, response: str, ttl: int = 3600) -> None:
+    async def _set_cached_response(
+        self,
+        message: str,
+        response: str,
+        ttl: int = 3600,
+        user: Optional[Dict] = None,
+        access_level: str = "public",
+    ) -> None:
         """Store a summon response in Redis cache."""
         cache_redis = getattr(self._app_state, "cache_redis", None) if self._app_state else None
         if not cache_redis:
             return
         try:
-            cache_key = f"summon:cache:{hashlib.sha256(message.lower().strip().encode()).hexdigest()}"
+            cache_key = self._summon_cache_key(message, user=user, access_level=access_level)
             await cache_redis.setex(cache_key, ttl, response)
         except Exception as e:
             logger.warning("Summon cache set failed: %s", e)

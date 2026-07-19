@@ -347,9 +347,12 @@ class FederatedSearchCoordinator:
         tasks.append(self._search_server(query, user_id, domain=domain))
         labels.append("server")
 
-        # Hot tier: Vectorize semantic search (domain-narrowed)
+        # Hot tier: Vectorize semantic search (domain-narrowed; requester-scoped)
         tasks.append(self._search_vectorize(
-            query, context_budget=context_budget, index_subset=index_subset
+            query,
+            user_id=user_id,
+            context_budget=context_budget,
+            index_subset=index_subset,
         ))
         labels.append("vectorize")
 
@@ -490,18 +493,29 @@ class FederatedSearchCoordinator:
             return []
         try:
             async with self._db_pool.acquire() as conn:
+                # QUANTUM-CRYSTAL-ARCH — requester scope: own crystals OR global only
                 sql = """
                     SELECT id, crystal_text, domain, confidence, scope,
                            context_start, context_end, recall_count,
                            last_recalled_at, content_hash, created_at
                     FROM nate_intelligence_crystals
                     WHERE superseded_by IS NULL
-                      AND scope != 'archived'
+                      AND scope NOT IN ('archived', 'admin_only')
                       AND crystal_text ILIKE '%' || $1 || '%'
+                      AND (
+                        ($2::text IS NULL AND user_id IS NULL AND scope = 'global')
+                        OR (
+                          $2::text IS NOT NULL
+                          AND (
+                            user_id::text = $2
+                            OR (user_id IS NULL AND scope = 'global')
+                          )
+                        )
+                      )
                 """
-                params: List[Any] = [query[:100]]
+                params: List[Any] = [query[:100], user_id]
                 if domain:
-                    sql += " AND domain = $2"
+                    sql += " AND domain = $3"
                     params.append(domain)
                 sql += " ORDER BY confidence DESC, recall_count DESC LIMIT 20"
                 rows = await conn.fetch(sql, *params)
@@ -686,6 +700,7 @@ class FederatedSearchCoordinator:
     async def _search_vectorize(
         self,
         query: str,
+        user_id: Optional[str] = None,
         context_budget: Optional[int] = None,
         index_subset: Optional[List[str]] = None,
     ) -> List[Dict]:
@@ -695,7 +710,7 @@ class FederatedSearchCoordinator:
                 return []
             top_k = max(5, context_budget // 50) if context_budget else 10
             results = await semantic_search_all(
-                query, user_id="", top_k=top_k, index_subset=index_subset
+                query, user_id=user_id or "", top_k=top_k, index_subset=index_subset
             )
             if isinstance(results, dict):
                 flat = []
@@ -707,6 +722,15 @@ class FederatedSearchCoordinator:
                 if r.get("score", 0) < 0.5:
                     continue
                 meta = r.get("metadata") or {}
+                # QUANTUM-CRYSTAL-ARCH — drop foreign user-scoped hits from Vectorize
+                owner = meta.get("user_id") or meta.get("username") or ""
+                scope = (meta.get("scope") or "global").lower()
+                if scope in ("archived", "admin_only"):
+                    continue
+                if owner and user_id and str(owner) != str(user_id):
+                    continue
+                if owner and not user_id and scope != "global":
+                    continue
                 text = r.get("text") or meta.get("preview", "")[:500]
                 score = r.get("score", 0)
                 wid = meta.get("wisdom_id", "")

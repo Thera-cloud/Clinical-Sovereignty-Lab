@@ -25,6 +25,15 @@ MAX_REVIEW_ROUNDS = 2
 TASK_TTL_S = int(os.getenv("CLI_TASK_BUS_TTL", "86400"))
 PATH_LOCK_TTL_S = int(os.getenv("CLI_PATH_LOCK_TTL", "600"))
 
+# QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch hive task kinds (patrol / promote)
+NEWSLETTER_TASK_KINDS = frozenset({
+    "newsletter_topic_patrol",
+    "newsletter_research_verify",
+    "newsletter_draft_critique",
+    "newsletter_growth_signal",
+    "newsletter_symbolic_promote",
+})
+
 
 def _env() -> str:
     return os.getenv("ENVIRONMENT", "production")
@@ -96,6 +105,12 @@ def ensure_bus_meta(client=None, *, consumer_active: bool = False) -> bool:
         ):
             features.append("dual_coo")
             features.append("ceo_inbox")
+        # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch
+        if os.getenv("ENABLE_NEWSLETTER_HIVE", "false").strip().lower() in (
+            "1", "true", "yes", "on",
+        ):
+            features.append("newsletter_hive")
+            features.extend(sorted(NEWSLETTER_TASK_KINDS))
         meta = {
             "features": features,
             "max_review_rounds": MAX_REVIEW_ROUNDS,

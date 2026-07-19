@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Little Nate's Story Library</title>
+<meta name="description" content="Editorial stories from Little Nate Dispatch — education, not therapy.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--void:#050505;--gold:#C9A962;--gold-dim:#8B7355;--cyan:#4ECDC4;--text:#E8D5A3}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 20% 0%,#111 0%,var(--void) 55%);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh}
+header{padding:48px 24px 24px;max-width:800px;margin:0 auto}
+h1{font-family:'Cormorant Garamond',Georgia,serif;font-size:clamp(2.2rem,5vw,3.4rem);color:var(--gold);margin:0 0 8px;font-weight:600}
+.sub{color:var(--gold-dim);max-width:36rem;line-height:1.5}
+main{max-width:800px;margin:0 auto;padding:0 24px 64px}
+.issue{border-top:1px solid #222;padding:20px 0}
+.issue a{color:var(--cyan);text-decoration:none;font-family:'Cormorant Garamond',serif;font-size:1.35rem}
+.issue a:hover{text-decoration:underline}
+.meta{font-size:.85rem;color:var(--gold-dim);margin-top:6px}
+footer{max-width:800px;margin:0 auto;padding:24px;font-size:.8rem;color:#666;border-top:1px solid #1a1a1a}
+footer a{color:var(--gold-dim)}
+.err{color:#EF4444}
+</style>
+</head>
+<body>
+<header>
+  <h1>Little Nate's Story Library</h1>
+  <p class="sub">Weekly Dispatch issues Nate has already sent — open to read, share, or ask him about in chat. Education and reflection, not medical advice.</p>
+</header>
+<main id="list"><p class="meta">Loading…</p></main>
+<footer>
+  Little Nate is an AI companion. Crisis support: <a href="https://988lifeline.org">988 Lifeline</a> ·
+  <a href="https://findahelpline.com">findahelpline.com</a> ·
+  <a href="/api/newsletter/rss">RSS</a>
+</footer>
+<script>
+(async function(){
+  var el=document.getElementById('list');
+  try{
+    var api=(location.hostname.indexOf('sovereignsanctuary')>=0)
+      ? 'https://api.sovereignsanctuary.net' : '';
+    var r=await fetch(api+'/api/newsletter/library?limit=40');
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    var d=await r.json();
+    var issues=d.issues||d||[];
+    if(!issues.length){el.innerHTML='<p class="meta">No published issues yet.</p>';return;}
+    el.innerHTML=issues.map(function(i){
+      var slug=i.slug||'';
+      var title=i.subject_line||i.topic||slug;
+      var when=i.sent_at||i.created_at||'';
+      var href='/library/'+encodeURIComponent(slug)+'.html';
+      return '<article class="issue"><a href="'+href+'">'+title.replace(/</g,'&lt;')+'</a>'
+        +'<div class="meta">'+(when?String(when).slice(0,10):'')+(i.topic?' · '+String(i.topic).replace(/</g,'&lt;'):'')+'</div></article>';
+    }).join('');
+  }catch(e){
+    el.innerHTML='<p class="err">Library unavailable right now.</p>';
+  }
+})();
+</script>
+</body>
+</html>

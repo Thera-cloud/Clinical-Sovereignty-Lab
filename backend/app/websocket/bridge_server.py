@@ -9107,6 +9107,16 @@ class AzureCortex:
         _crystal_ids_for_turn = list(getattr(crystal_context, "crystal_ids", None) or [])[:50]
         if _enrich_addendum:  # QUANTUM-CRYSTAL-ARCH — Tier 2: fold directive into crystal context
             crystal_context = f"{crystal_context}\n\n{_enrich_addendum}" if crystal_context else _enrich_addendum
+        # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch Story Library (explicit cite only)
+        try:
+            from app.services.newsletter_library_recall import recall_newsletter_library_context
+            _lib_ctx = await recall_newsletter_library_context(
+                _cpool, user_text or "", max_issues=2, surface="bridge_chat",
+            )
+            if _lib_ctx:
+                crystal_context = f"{crystal_context}\n\n{_lib_ctx}" if crystal_context else _lib_ctx
+        except Exception:
+            pass
         _live_turn_context = _format_live_turn_context(uid)
         _critical_recall_context = _format_critical_recall_facts(uid)
         _pre_ms = int((_time_ctx.monotonic() - _t_pre) * 1000)

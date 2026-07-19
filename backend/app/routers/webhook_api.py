@@ -145,6 +145,18 @@ async def sendgrid_event_webhook(request: Request):
             if "." in sg_message_id:
                 sg_message_id = sg_message_id.split(".")[0]
 
+            # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch channel (custom_args)
+            channel = (
+                event.get("channel")
+                or (event.get("custom_args") or {}).get("channel")
+                or ""
+            )
+            if str(channel).lower() == "newsletter":
+                await _handle_newsletter_sendgrid_event(
+                    conn, event, event_type, sg_message_id, email, timestamp
+                )
+                continue
+
             if not sg_message_id:
                 continue
 
@@ -213,6 +225,76 @@ async def sendgrid_event_webhook(request: Request):
                 )
 
     return {"status": "ok", "processed": len(events)}
+
+
+async def _handle_newsletter_sendgrid_event(
+    conn, event, event_type, sg_message_id, email, timestamp
+):
+    """Fail-closed newsletter ledger updates — never write to prospects."""
+    try:
+        status_map = {
+            "delivered": "delivered",
+            "open": "opened",
+            "click": "clicked",
+            "bounce": "bounced",
+            "dropped": "failed",
+            "spamreport": "failed",
+        }
+        new_status = status_map.get(event_type)
+        issue_id = None
+        subscriber_id = None
+        if sg_message_id:
+            row = await conn.fetchrow(
+                """
+                SELECT issue_id, subscriber_id FROM newsletter_sends
+                WHERE provider_message_id = $1 LIMIT 1
+                """,
+                sg_message_id,
+            )
+            if row:
+                issue_id = row["issue_id"]
+                subscriber_id = row["subscriber_id"]
+                if new_status:
+                    await conn.execute(
+                        """
+                        UPDATE newsletter_sends SET status = $1
+                        WHERE provider_message_id = $2
+                        """,
+                        new_status,
+                        sg_message_id,
+                    )
+        await conn.execute(
+            """
+            INSERT INTO newsletter_send_events
+                (issue_id, subscriber_id, provider_message_id, event_type, payload)
+            VALUES ($1, $2, $3, $4, $5::jsonb)
+            """,
+            issue_id,
+            subscriber_id,
+            sg_message_id or None,
+            event_type,
+            json.dumps({"email": email, "sg_message_id": sg_message_id})[:2000],
+        )
+        if event_type in ("bounce", "spamreport", "unsubscribe") and email:
+            await conn.execute(
+                """
+                UPDATE newsletter_subscribers
+                SET status = CASE
+                      WHEN $2 = 'unsubscribe' THEN 'unsubscribed'
+                      ELSE 'suppressed'
+                    END,
+                    suppressed_reason = CASE
+                      WHEN $2 = 'unsubscribe' THEN NULL
+                      ELSE $2
+                    END,
+                    updated_at = NOW()
+                WHERE LOWER(email) = LOWER($1)
+                """,
+                email,
+                event_type,
+            )
+    except Exception as e:
+        _logger.warning("newsletter sendgrid event failed: %s", e)
 
 
 # =============================================================================
