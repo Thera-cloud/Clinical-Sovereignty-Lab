@@ -1,4 +1,4 @@
-"""SendGrid delivery for Little Nate Dispatch.
+"""SendGrid + SMS delivery for Little Nate Dispatch.
 
 # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch
 """
@@ -8,6 +8,7 @@ import hashlib
 import logging
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger("nate.newsletter_delivery")
@@ -15,16 +16,51 @@ logger = logging.getLogger("nate.newsletter_delivery")
 PUBLIC_BASE = os.getenv(
     "NEWSLETTER_PUBLIC_BASE", "https://app.sovereignsanctuary.net"
 ).rstrip("/")
+API_BASE = os.getenv(
+    "API_PUBLIC_BASE", "https://api.sovereignsanctuary.net"
+).rstrip("/")
 PHYSICAL_ADDRESS = os.getenv(
     "NEWSLETTER_PHYSICAL_ADDRESS",
     "Sovereign Sanctuary, Stafford, TX 77477",
 )
 
 
+def library_page_url(slug: str) -> str:
+    """Canonical readable URL — API HTML (works without static nginx)."""
+    return f"{API_BASE}/api/newsletter/library/{slug}/page"
+
+
+def render_library_html(issue: Dict[str, Any]) -> str:
+    slug = issue.get("slug") or "issue"
+    body = (issue.get("final_body") or issue.get("body_md") or "").replace("\n", "<br>\n")
+    return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><title>{issue.get('subject_line') or 'Little Nate Dispatch'}</title>
+<meta property="og:title" content="{issue.get('subject_line') or 'Little Nate Dispatch'}">
+<meta property="og:description" content="Little Nate's Story Library">
+<link rel="canonical" href="{library_page_url(slug)}">
+<script type="application/ld+json">
+{{"@context":"https://schema.org","@type":"Article","headline":{json_escape(issue.get('subject_line') or '')},"author":{{"@type":"Organization","name":"Little Nate Dispatch"}}}}
+</script>
+<style>body{{background:#050505;color:#E8D5A3;font-family:Georgia,serif;max-width:720px;margin:40px auto;padding:0 16px;line-height:1.6}}
+a{{color:#4ECDC4}} h1{{color:#C9A962}}</style>
+</head><body>
+<h1>Little Nate Dispatch</h1>
+<p>{issue.get('topic') or ''}</p>
+<article>{body}</article>
+<footer style="margin-top:48px;font-size:13px;color:#8B7355;">
+Little Nate is an AI companion — education, not therapy or medical advice.
+Crisis: <a href="https://988lifeline.org">988</a> · <a href="https://findahelpline.com">findahelpline.com</a>
+ · <a href="{PUBLIC_BASE}/nate_story_library.html">Story Library</a>
+</footer>
+</body></html>"""
+
+
 def _html_email(issue: Dict[str, Any], rate_base: str, unsub_url: str) -> str:
     body = (issue.get("final_body") or issue.get("body_md") or "").replace("\n", "<br>\n")
     slug = issue.get("slug") or ""
-    library_url = f"{PUBLIC_BASE}/library/{slug}.html"
+    library_url = library_page_url(slug)
+    share_track = f"{API_BASE}/api/newsletter/share?slug={slug}&channel=email"
     return f"""<!DOCTYPE html><html><body style="font-family:Georgia,serif;background:#050505;color:#E8D5A3;padding:24px;">
 <h1 style="color:#C9A962;">Little Nate Dispatch</h1>
 <p style="color:#8B7355;">{issue.get('subject_line') or ''}</p>
@@ -38,8 +74,9 @@ def _html_email(issue: Dict[str, Any], rate_base: str, unsub_url: str) -> str:
  <a href="{rate_base}&score=2" style="color:#C9A962;">2</a>
  <a href="{rate_base}&score=1" style="color:#C9A962;">1</a>
 </p>
-<p><a href="mailto:?subject=Little%20Nate%20Dispatch&body={library_url}">Share by email</a>
- · <a href="sms:?&body={library_url}">Share by text</a></p>
+<p><a href="mailto:?subject=Little%20Nate%20Dispatch&body={library_url}" style="color:#C9A962;">Share by email</a>
+ · <a href="sms:?&body={library_url}" style="color:#C9A962;">Share by text</a>
+ · <a href="{share_track}" style="color:#8B7355;">Track share</a></p>
 <p style="font-size:12px;color:#888;">{PHYSICAL_ADDRESS}<br>
 <a href="{unsub_url}" style="color:#888;">Unsubscribe</a></p>
 </body></html>"""
@@ -77,6 +114,7 @@ async def send_issue_to_subscribers(db_pool, issue_id: str, redis=None) -> Dict[
     except ImportError:
         return {"sent": 0, "error": "sendgrid_missing"}
 
+    sms_sent = 0
     async with db_pool.acquire() as conn:
         issue = await conn.fetchrow(
             "SELECT * FROM newsletter_issues WHERE id = $1 AND status = 'approved'",
@@ -116,21 +154,16 @@ async def send_issue_to_subscribers(db_pool, issue_id: str, redis=None) -> Dict[
             rate_token = hashlib.sha256(
                 f"{issue_id}:{sub['id']}:rate:{os.getenv('NEWSLETTER_TOKEN_SALT', 'nate')}".encode()
             ).hexdigest()[:32]
-            # Prefer API host for rate/unsub endpoints
-            api_base = os.getenv(
-                "API_PUBLIC_BASE", "https://api.sovereignsanctuary.net"
-            ).rstrip("/")
             rate_base = (
-                f"{api_base}/api/newsletter/rate"
+                f"{API_BASE}/api/newsletter/rate"
                 f"?issue={issue_d['slug']}&sid={sub['id']}&t={rate_token}"
             )
-            # Deterministic raw unsub token (never put hash in URL)
             salt = os.getenv("NEWSLETTER_TOKEN_SALT", "nate-dispatch")
             unsub_raw = hashlib.sha256(
                 f"{salt}:unsub:{sub['id']}".encode()
             ).hexdigest()[:40]
             unsub_url = (
-                f"{api_base}/api/newsletter/unsubscribe"
+                f"{API_BASE}/api/newsletter/unsubscribe"
                 f"?sid={sub['id']}&t={unsub_raw}"
             )
             html = _html_email(issue_d, rate_base, unsub_url)
@@ -162,6 +195,12 @@ async def send_issue_to_subscribers(db_pool, issue_id: str, redis=None) -> Dict[
                     sub["id"],
                 )
                 sent += 1
+                if sub.get("phone_e164"):
+                    ok_sms = await _send_dispatch_sms(
+                        sub["phone_e164"], issue_d.get("slug") or ""
+                    )
+                    if ok_sms:
+                        sms_sent += 1
             except Exception as e:
                 logger.warning("newsletter send failed for %s: %s", sub["email"], e)
                 await conn.execute(
@@ -182,7 +221,6 @@ async def send_issue_to_subscribers(db_pool, issue_id: str, redis=None) -> Dict[
             """,
             issue_id,
         )
-        # Static library page marker + stats
         await conn.execute(
             """
             INSERT INTO newsletter_library_stats (slug)
@@ -191,54 +229,148 @@ async def send_issue_to_subscribers(db_pool, issue_id: str, redis=None) -> Dict[
             issue_d["slug"],
         )
 
-    # Crystallize after send
     try:
         from app.services.newsletter_library_recall import crystallize_sent_issue
 
         async with db_pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT * FROM newsletter_issues WHERE id = $1", issue_id)
+            row = await conn.fetchrow(
+                "SELECT * FROM newsletter_issues WHERE id = $1", issue_id
+            )
         if row:
             await crystallize_sent_issue(db_pool, dict(row))
     except Exception as e:
         logger.warning("post-send crystallize failed: %s", e)
 
-    # Write static HTML locally for deploy
+    archive_meta = {}
     try:
-        await _write_library_html(issue_d)
+        archive_meta = await _write_library_html(issue_d, db_pool=db_pool)
     except Exception as e:
         logger.warning("library html write failed: %s", e)
 
-    return {"sent": sent, "issue_id": str(issue_id), "slug": issue_d.get("slug")}
+    if issue_d.get("topic"):
+        try:
+            from app.services.newsletter_signals import record_theme_signal
+
+            await record_theme_signal(db_pool, issue_d["topic"], source="send")
+        except Exception:
+            pass
+
+    return {
+        "sent": sent,
+        "sms_sent": sms_sent,
+        "issue_id": str(issue_id),
+        "slug": issue_d.get("slug"),
+        "library_url": library_page_url(issue_d.get("slug") or ""),
+        **archive_meta,
+    }
 
 
-async def _write_library_html(issue: Dict[str, Any]) -> None:
-    from pathlib import Path
+async def _send_dispatch_sms(phone: str, slug: str) -> bool:
+    if os.getenv("ENABLE_NEWSLETTER_SMS", "true").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return False
+    body = (
+        f"Little Nate Dispatch is ready: {library_page_url(slug)} "
+        f"Reply STOP to opt out of SMS."
+    )
+    try:
+        from twilio.rest import Client
 
-    root = Path(__file__).resolve().parents[3] / "dashboard" / "library"
-    root.mkdir(parents=True, exist_ok=True)
+        sid = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
+        token = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
+        from_num = os.getenv("TWILIO_FROM_NUMBER") or os.getenv("TWILIO_PHONE_NUMBER")
+        if not (sid and token and from_num and phone):
+            return False
+        client = Client(sid, token)
+        client.messages.create(to=phone, from_=from_num, body=body[:320])
+        return True
+    except Exception as e:
+        logger.warning("dispatch SMS failed: %s", e)
+        return False
+
+
+async def _write_library_html(issue: Dict[str, Any], db_pool=None) -> Dict[str, Any]:
+    """Write to DATA_DIR (rw) + R2/Azure via blob_storage; never dashboard/:ro."""
     slug = issue.get("slug") or "issue"
-    body = (issue.get("final_body") or issue.get("body_md") or "").replace("\n", "<br>\n")
-    html = f"""<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8"><title>{issue.get('subject_line') or 'Little Nate Dispatch'}</title>
-<meta property="og:title" content="{issue.get('subject_line') or 'Little Nate Dispatch'}">
-<meta property="og:description" content="Little Nate's Story Library">
-<link rel="canonical" href="{PUBLIC_BASE}/library/{slug}.html">
-<script type="application/ld+json">
-{{"@context":"https://schema.org","@type":"Article","headline":{json_escape(issue.get('subject_line') or '')},"author":{{"@type":"Organization","name":"Little Nate Dispatch"}}}}
-</script>
-<style>body{{background:#050505;color:#E8D5A3;font-family:Georgia,serif;max-width:720px;margin:40px auto;padding:0 16px;line-height:1.6}}
-a{{color:#4ECDC4}} h1{{color:#C9A962}}</style>
-</head><body>
-<h1>Little Nate Dispatch</h1>
-<p>{issue.get('topic') or ''}</p>
-<article>{body}</article>
-<footer style="margin-top:48px;font-size:13px;color:#8B7355;">
-Little Nate is an AI companion — education, not therapy or medical advice.
-Crisis: <a href="https://988lifeline.org">988</a> · <a href="https://findahelpline.com">findahelpline.com</a>
-</footer>
-</body></html>"""
-    (root / f"{slug}.html").write_text(html, encoding="utf-8")
+    html = render_library_html(issue)
+    data_dir = Path(os.getenv("DATA_DIR", "/app/data"))
+    root = data_dir / "newsletter_library"
+    root.mkdir(parents=True, exist_ok=True)
+    local_path = root / f"{slug}.html"
+    local_path.write_text(html, encoding="utf-8")
+    try:
+        os.chmod(local_path, 0o644)
+    except Exception:
+        pass
+
+    r2_key = f"newsletter_library/{slug}.html"
+    storage_kind = "local"
+    if os.getenv("NEWSLETTER_SKIP_CLOUD_ARCHIVE", "").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        try:
+            from app.services.blob_storage import upload_bytes
+
+            kind, loc = upload_bytes(
+                rel_path=f"newsletter_library/{slug}.html",
+                content=html.encode("utf-8"),
+                content_type="text/html; charset=utf-8",
+            )
+            storage_kind = kind
+            r2_key = loc if kind != "local" else r2_key
+        except Exception as e:
+            logger.warning("blob archive failed: %s", e)
+        try:
+            from app.services import r2_storage
+
+            key = f"newsletter_library/{slug}.html"
+            await r2_storage.upload_bytes_async(
+                key=key,
+                content=html.encode("utf-8"),
+                content_type="text/html; charset=utf-8",
+            )
+            r2_key = key
+            storage_kind = "r2"
+        except Exception as e:
+            logger.debug("R2 library archive skip: %s", e)
+
+    if db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE newsletter_issues
+                    SET library_html_path = $1, library_r2_key = $2, updated_at = NOW()
+                    WHERE slug = $3
+                    """,
+                    str(local_path),
+                    r2_key,
+                    slug,
+                )
+        except Exception as e:
+            logger.warning("persist library paths: %s", e)
+
+    # Best-effort host www sync marker (for scripts/sync_newsletter_library.sh)
+    sync_flag = data_dir / "newsletter_library" / ".pending_sync"
+    try:
+        sync_flag.write_text(
+            f"{slug}\n{datetime.now(timezone.utc).isoformat()}\n", encoding="utf-8"
+        )
+    except Exception:
+        pass
+
+    return {
+        "library_html_path": str(local_path),
+        "library_storage": storage_kind,
+        "library_r2_key": r2_key,
+    }
 
 
 def json_escape(s: str) -> str:

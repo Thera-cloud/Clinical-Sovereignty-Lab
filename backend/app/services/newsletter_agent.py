@@ -90,11 +90,26 @@ class NewsletterAgent:
             except Exception as e:
                 logger.warning("warm leads: %s", e)
 
+        # Queen/Worker hive patrol (optional)
+        if os.getenv("ENABLE_NEWSLETTER_HIVE", "false").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        ):
+            try:
+                from app.services.newsletter_hive import run_hive_patrol
+
+                await run_hive_patrol(self._db_pool)
+            except Exception as e:
+                logger.warning("newsletter hive: %s", e)
+
     async def run_pipeline_to_review(self) -> Dict[str, Any]:
         from app.services.newsletter_pipeline import (
             build_research_bundle,
             critique_issue,
             draft_issue_from_bundle,
+            draft_issue_llm,
             persist_issue,
             select_topic,
         )
@@ -103,7 +118,9 @@ class NewsletterAgent:
         bundle = await build_research_bundle(topic)
         if not bundle.get("citations"):
             return {"ok": False, "error": "no_verified_citations"}
-        draft = draft_issue_from_bundle(topic, bundle)
+        draft = await draft_issue_llm(topic, bundle)
+        if not draft:
+            draft = draft_issue_from_bundle(topic, bundle)
         ok, errors = critique_issue(draft, bundle)
         if not ok:
             return {"ok": False, "errors": errors}

@@ -160,12 +160,18 @@ class AgentStatusDigest:
         return {"title": "SkyEye / Social Media", "rows": rows}
 
     async def _section_content_ops(self) -> dict:
+        rows = []
         agent = getattr(self.app, "content_queue_janitor", None)
         status, detail = self._check_agent(agent, "ContentQueueJanitor")
         last_cycle = await self._last_activity_ago("janitor_cycle")
         if last_cycle:
             detail += f" | Last cycle: {last_cycle}"
-        return {"title": "Content Operations", "rows": [(status, "ContentQueueJanitor", detail)]}
+        rows.append((status, "ContentQueueJanitor", detail))
+        # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch
+        nl = getattr(self.app, "newsletter_agent", None)
+        status, detail = self._check_agent(nl, "NewsletterAgent")
+        rows.append((status, "NewsletterAgent", detail))
+        return {"title": "Content Operations", "rows": rows}
 
     async def _section_token_lifecycle(self) -> dict:
         agent = getattr(self.app, "token_lifecycle_predictor", None)
@@ -297,6 +303,7 @@ class AgentStatusDigest:
             ("Corporate Command Auditor", "corporate_command_auditor"),
             ("Voice Infrastructure Auditor", "voice_infra_auditor"),
             ("High-Risk Crisis Auditor", "high_risk_crisis_auditor"),  # QUANTUM-CRYSTAL-ARCH
+            ("Newsletter Auditor", "newsletter_auditor"),  # QUANTUM-CRYSTAL-ARCH
         ]
         rows = []
         for name, attr in auditors:

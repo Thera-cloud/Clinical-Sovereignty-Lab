@@ -212,6 +212,9 @@ async def confirm(request: Request, t: str = Query(...)):
                 "<html><body><p>Link expired. Please subscribe again.</p></body></html>",
                 status_code=400,
             )
+        email = await conn.fetchval(
+            "SELECT email FROM newsletter_subscribers WHERE id = $1", row["id"]
+        )
         await conn.execute(
             """
             UPDATE newsletter_subscribers
@@ -222,13 +225,29 @@ async def confirm(request: Request, t: str = Query(...)):
             """,
             row["id"],
         )
+        channel = "direct"
+        if email:
+            wl = await conn.fetchval(
+                """
+                UPDATE newsletter_warm_leads
+                SET status = 'converted', updated_at = NOW()
+                WHERE LOWER(email) = LOWER($1) AND status IN ('pending', 'invited')
+                RETURNING id
+                """,
+                email,
+            )
+            if wl:
+                channel = "warm_lead"
         await conn.execute(
             """
-            INSERT INTO newsletter_growth_ledger (day, channel, subscribers_gained)
-            VALUES (CURRENT_DATE, 'direct', 1)
+            INSERT INTO newsletter_growth_ledger (day, channel, subscribers_gained, conversions)
+            VALUES (CURRENT_DATE, $1, 1, $2)
             ON CONFLICT (day, channel) DO UPDATE
-            SET subscribers_gained = newsletter_growth_ledger.subscribers_gained + 1
-            """
+            SET subscribers_gained = newsletter_growth_ledger.subscribers_gained + 1,
+                conversions = newsletter_growth_ledger.conversions + EXCLUDED.conversions
+            """,
+            channel,
+            1 if channel == "warm_lead" else 0,
         )
     return HTMLResponse(
         "<html><body style='background:#050505;color:#C9A962;font-family:Georgia,serif;padding:40px;'>"
@@ -335,6 +354,9 @@ async def rate(
                 sub_id = _uuid.UUID(sid)
             except Exception:
                 sub_id = None
+        topic = await conn.fetchval(
+            "SELECT topic FROM newsletter_issues WHERE id = $1", issue_row["id"]
+        )
         await conn.execute(
             """
             INSERT INTO newsletter_feedback (issue_id, subscriber_id, helpful_score, rating_token_hash)
@@ -345,6 +367,13 @@ async def rate(
             score,
             _hash_token(t),
         )
+    if topic:
+        try:
+            from app.services.newsletter_signals import record_theme_signal
+
+            await record_theme_signal(pool, topic, source="feedback")
+        except Exception:
+            pass
     return HTMLResponse(
         "<html><body style='background:#050505;color:#C9A962;padding:40px;'>"
         "<p>Thank you — Nate is learning from your rating.</p>"
@@ -399,11 +428,85 @@ async def library_issue(slug: str, request: Request):
             slug,
         )
     d = dict(row)
+    if d.get("topic"):
+        try:
+            from app.services.newsletter_signals import record_theme_signal
+
+            await record_theme_signal(pool, d["topic"], source="library")
+        except Exception:
+            pass
     return {"status": "ok", "issue": d}
+
+
+@router.get("/library/{slug}/page")
+async def library_issue_html(slug: str, request: Request):
+    """HTML Story Library page — works without static nginx /library/."""
+    from app.services.newsletter_delivery import render_library_html
+
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT slug, topic, subject_line, opener, body_md, final_body, sent_at
+            FROM newsletter_issues
+            WHERE slug = $1 AND status = 'sent'
+            """,
+            slug,
+        )
+        if not row:
+            raise HTTPException(404, "Not found")
+        await conn.execute(
+            """
+            INSERT INTO newsletter_library_stats (slug, view_count)
+            VALUES ($1, 1)
+            ON CONFLICT (slug) DO UPDATE
+            SET view_count = newsletter_library_stats.view_count + 1,
+                updated_at = NOW()
+            """,
+            slug,
+        )
+    return HTMLResponse(render_library_html(dict(row)))
+
+
+@router.get("/share")
+async def share_track(
+    request: Request,
+    slug: str = Query(...),
+    channel: str = Query("link"),
+):
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        exists = await conn.fetchval(
+            "SELECT 1 FROM newsletter_issues WHERE slug = $1 AND status = 'sent'", slug
+        )
+        if not exists:
+            raise HTTPException(404)
+        await conn.execute(
+            """
+            INSERT INTO newsletter_library_stats (slug, share_count)
+            VALUES ($1, 1)
+            ON CONFLICT (slug) DO UPDATE
+            SET share_count = newsletter_library_stats.share_count + 1,
+                updated_at = NOW()
+            """,
+            slug,
+        )
+    try:
+        from app.services.newsletter_signals import bump_growth_ledger
+
+        await bump_growth_ledger(pool, f"share_{channel[:32]}", conversions=0)
+    except Exception:
+        pass
+    from app.services.newsletter_delivery import library_page_url
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(library_page_url(slug), status_code=302)
 
 
 @router.get("/rss")
 async def rss(request: Request):
+    from app.services.newsletter_delivery import library_page_url
+
     pool = _pool(request)
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -418,7 +521,7 @@ async def rss(request: Request):
     for r in rows:
         items.append(
             f"<item><title>{_xml(r['subject_line'] or r['topic'])}</title>"
-            f"<link>{base}/library/{r['slug']}.html</link>"
+            f"<link>{library_page_url(r['slug'])}</link>"
             f"<guid>{r['slug']}</guid></item>"
         )
     xml = (

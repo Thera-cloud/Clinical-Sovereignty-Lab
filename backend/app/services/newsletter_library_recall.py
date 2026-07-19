@@ -231,6 +231,20 @@ async def crystallize_sent_issue(db_pool, issue: Dict[str, Any]) -> Optional[str
                 """,
                 slug,
             )
+        # Vectorize index (outside DB connection) — QUANTUM-CRYSTAL-ARCH
+        try:
+            from app.services.vectorize_service import index_wisdom
+
+            await index_wisdom(
+                user_id="",
+                wisdom_id=str(crystal_id),
+                insight_type="newsletter_library",
+                content=text[:2000],
+                source="newsletter_library",
+                domain="research",
+            )
+        except Exception as ve:
+            logger.warning("newsletter vectorize index failed: %s", ve)
         return str(crystal_id)
     except Exception as e:
         logger.warning("crystallize_sent_issue failed: %s", e)

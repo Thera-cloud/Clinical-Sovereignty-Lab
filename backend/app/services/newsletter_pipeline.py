@@ -37,22 +37,46 @@ SAFETY_FOOTER = (
 )
 
 
+async def _load_symbolic_hints(db_pool) -> List[str]:
+    """Marketing symbolic memory only — never inject into therapy prompts."""
+    if not db_pool:
+        return []
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT content FROM newsletter_symbolic_memory
+                WHERE scope = 'active' AND kind IN ('rule', 'style_note', 'outcome')
+                  AND confidence >= 0.55
+                ORDER BY confidence DESC, created_at DESC
+                LIMIT 5
+                """
+            )
+        return [r["content"][:300] for r in rows if r.get("content")]
+    except Exception as e:
+        logger.warning("symbolic hints: %s", e)
+        return []
+
+
 async def select_topic(db_pool) -> Dict[str, Any]:
-    """Score topics from signals, gaps, seasonal calendar, symbolic rules."""
+    """Score topics from signals, forecast, seasonal calendar, symbolic rules."""
     topic = {
         "topic_key": "anxiety_reach_out",
         "title": "When anxiety asks you to shrink — reaching out anyway",
         "seasonal_window": None,
         "rationale": "default_bootstrap",
+        "symbolic_hints": [],
     }
     if not db_pool:
         return topic
     try:
+        hints = await _load_symbolic_hints(db_pool)
+        topic["symbolic_hints"] = hints
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 SELECT theme, count_bucket FROM newsletter_chat_signals
-                WHERE count_bucket >= 5
+                WHERE count_bucket >= 3
                 ORDER BY count_bucket DESC, week_bucket DESC
                 LIMIT 1
                 """
@@ -64,8 +88,27 @@ async def select_topic(db_pool) -> Dict[str, Any]:
                     "title": theme[:120],
                     "seasonal_window": None,
                     "rationale": f"chat_signal_n={row['count_bucket']}",
+                    "symbolic_hints": hints,
                 }
-            # Avoid recent repeats
+            else:
+                forecast = await conn.fetchrow(
+                    """
+                    SELECT topic_key, seasonal_label, foresight_score
+                    FROM newsletter_topic_forecast
+                    WHERE target_week >= CURRENT_DATE - INTERVAL '14 days'
+                    ORDER BY foresight_score DESC, created_at DESC
+                    LIMIT 1
+                    """
+                )
+                if forecast and forecast["topic_key"]:
+                    key = forecast["topic_key"]
+                    topic = {
+                        "topic_key": key[:64],
+                        "title": key.replace("_", " ")[:120],
+                        "seasonal_window": forecast.get("seasonal_label"),
+                        "rationale": f"forecast_score={forecast['foresight_score']}",
+                        "symbolic_hints": hints,
+                    }
             recent = await conn.fetchval(
                 """
                 SELECT topic FROM newsletter_issues
@@ -173,6 +216,13 @@ def draft_issue_from_bundle(topic: Dict[str, Any], bundle: Dict[str, Any]) -> Di
         },
     ]
 
+    hints = topic.get("symbolic_hints") or []
+    hint_block = ""
+    if hints:
+        hint_block = "\n\n_Editor notes (from prior Dispatch outcomes):_\n" + "\n".join(
+            f"- {h}" for h in hints[:3]
+        )
+
     opener = (
         "You do not have to earn rest or connection. Strength includes asking — "
         "and I am here when you are ready to take the next small step."
@@ -183,6 +233,7 @@ def draft_issue_from_bundle(topic: Dict[str, Any], bundle: Dict[str, Any]) -> Di
         "and how small, structured steps restore agency without forcing a perfect plan.\n\n"
         "Clinical context (education only, not diagnosis):\n"
         + "\n".join(cite_lines)
+        + hint_block
     )
     go_deeper = (
         "Try opening with Little Nate:\n"
@@ -220,6 +271,64 @@ def draft_issue_from_bundle(topic: Dict[str, Any], bundle: Dict[str, Any]) -> Di
         "research_bundle": bundle,
         "content_hash": hashlib.sha256(body.encode()).hexdigest(),
     }
+
+
+async def draft_issue_llm(topic: Dict[str, Any], bundle: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Optional inference-router compose; cites must stay within research_bundle."""
+    import os
+
+    if os.getenv("ENABLE_NEWSLETTER_LLM_DRAFT", "false").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return None
+    cites = bundle.get("citations") or []
+    if not cites:
+        return None
+    cite_blob = "\n".join(
+        f"- {c['source_name']} ({c['year']}): {c['url']}" for c in cites[:5]
+    )
+    hints = "\n".join(topic.get("symbolic_hints") or [])
+    system = (
+        "You write Little Nate Dispatch — warm, educational mental-health newsletter. "
+        "NOT therapy or diagnosis. Cite ONLY URLs from the research list. "
+        "Include crisis footer with 988 and findahelpline.com. "
+        "Output markdown with sections: opener, feature, techniques (3), go deeper, further reading."
+    )
+    user = (
+        f"Topic: {topic.get('title')}\n\nAllowed citations:\n{cite_blob}\n\n"
+        f"Style hints:\n{hints or '(none)'}\n\n"
+        f"Must end with: {SAFETY_FOOTER}"
+    )
+    try:
+        from app.services.nate_inference_router import NateInferenceRouter
+
+        router = NateInferenceRouter()
+        result = await router.generate(
+            prompt=user,
+            system=system,
+            domain="marketing",
+            max_tokens=1200,
+        )
+        text = ""
+        if isinstance(result, dict):
+            text = (result.get("text") or result.get("content") or "").strip()
+        elif isinstance(result, str):
+            text = result.strip()
+        if len(text) < 200:
+            return None
+        base = draft_issue_from_bundle(topic, bundle)
+        base["body_md"] = text
+        base["draft_body"] = text
+        base["opener"] = text.split("\n", 1)[0][:400]
+        base["content_hash"] = hashlib.sha256(text.encode()).hexdigest()
+        base["research_bundle"] = {**bundle, "llm_draft": True}
+        return base
+    except Exception as e:
+        logger.warning("LLM draft failed, using template: %s", e)
+        return None
 
 
 def critique_issue(draft: Dict[str, Any], bundle: Dict[str, Any]) -> Tuple[bool, List[str]]:

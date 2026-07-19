@@ -7,36 +7,54 @@ Weekly staged newsletter: topic → research (year ≥ 2024) → draft → criti
 | Env | Default | Purpose |
 |---|---|---|
 | `ENABLE_NEWSLETTER_AGENT` | false | Start 30-min orchestrator (GREEN only; skipped when `IS_CLONE`) |
-| `ENABLE_NEWSLETTER_WARM_LEADS` | false | Mine trial/users/social for invite → double opt-in |
-| `ENABLE_NEWSLETTER_HIVE` | false | Register Queen/Worker task kinds on CLI bus |
-| `ENABLE_TRIAL_LIBRARY_EDITORIAL` | false | Allow editorial-only Library recall on 20Q (never generic global) |
+| `ENABLE_NEWSLETTER_WARM_LEADS` | false | Mine trial/users + send double-opt-in invites |
+| `ENABLE_NEWSLETTER_HIVE` | false | Queen/Worker patrol on CLI task kinds |
+| `ENABLE_NEWSLETTER_LLM_DRAFT` | false | Optional inference-router compose (template fallback) |
+| `ENABLE_NEWSLETTER_SMS` | true | SMS link to active subscribers with `phone_e164` |
+| `ENABLE_TRIAL_LIBRARY_EDITORIAL` | false | Editorial-only Library recall on 20Q (never generic global) |
 | `NEWSLETTER_ALLOW_OPEN_SUBSCRIBE` | false | Dev: skip Turnstile on subscribe |
 | `NEWSLETTER_TOKEN_SALT` | nate-dispatch | Confirm / rate / unsub token hashing |
-| `NEWSLETTER_PUBLIC_BASE` | app.sovereignsanctuary.net | Library links |
-| `API_PUBLIC_BASE` | api.sovereignsanctuary.net | Rate / unsub / confirm links |
+| `NEWSLETTER_PUBLIC_BASE` | app.sovereignsanctuary.net | Story Library shell host |
+| `API_PUBLIC_BASE` | api.sovereignsanctuary.net | Rate / unsub / confirm / **HTML library pages** |
 | `NEWSLETTER_PHYSICAL_ADDRESS` | Stafford TX | CAN-SPAM footer |
 
 ## Hard locks
 
 - No cold email without double opt-in confirm
 - Sends only after human approve (`status=approved`)
-- Clinical transcripts never feed topic engine raw
+- Clinical transcripts never feed topic engine raw (signals from feedback/library/hive only)
 - Symbolic marketing rules never inject into therapy prompts
 - Library cite only when recall hits; never invent a Dispatch issue
-- SendGrid events with `custom_args.channel=newsletter` update newsletter ledger only (not prospects)
+- SendGrid events with `custom_args.channel=newsletter` update newsletter ledger only
 
 ## Surfaces
 
 - Public API: `/api/newsletter/*`
+- HTML issue pages: `GET /api/newsletter/library/{slug}/page` (no nginx static required)
 - Admin API: `/api/newsletter/admin/*` (`require_admin`)
+- Admin UI: `dashboard/newsletter_dispatch.html`
 - Story Library shell: `dashboard/nate_story_library.html`
-- Per-issue static: `dashboard/library/{slug}.html`
-- Trust auditor: `NewsletterAuditor` (10 checks, stagger 298s, baseline `newsletter_check_count`)
+- Local archive: `$DATA_DIR/newsletter_library/` (writable) + R2/Azure via blob_storage
+- Optional host sync: `bash scripts/sync_newsletter_library.sh`
+- Trust auditor: `NewsletterAuditor` (12 checks, stagger 298s, `newsletter_check_count`)
 
-## Migration
+## Migrations
 
-`backend/migrations/252_little_nate_dispatch.sql`
+- `252_little_nate_dispatch.sql` — core tables + baseline 10
+- `253_newsletter_gap_fixes.sql` — `learned_at`, library paths, baseline → 12
 
-## Deploy note
+## Deploy
 
-BLUE-only until migration applied on GREEN and `ENABLE_NEWSLETTER_AGENT=true` set. Do not enable on clone (`IS_CLONE`).
+```bash
+# On GREEN after pull
+docker exec -i nate_postgres psql -U nate_admin -d little_nate < backend/migrations/253_newsletter_gap_fixes.sql
+# Ensure ENABLE_NEWSLETTER_AGENT=true in .env (not on clone)
+bash scripts/safe_deploy.sh backend
+# Bridge if bridge_server Story Library recall changed
+bash scripts/safe_deploy.sh bridge
+# Dashboard shells
+rsync -av dashboard/nate_story_library.html dashboard/newsletter_dispatch.html \
+  /var/www/sovereign-command/
+rsync -av dashboard/nate_story_library.html /var/www/sovereignsanctuary-web/
+bash scripts/sync_newsletter_library.sh   # optional static /library/ mirror
+```

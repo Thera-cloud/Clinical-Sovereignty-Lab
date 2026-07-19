@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Little Nate Dispatch — Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--void:#050505;--gold:#C9A962;--dim:#8B7355;--cyan:#4ECDC4;--ok:#22C55E;--bad:#EF4444}
+*{box-sizing:border-box}body{margin:0;background:#050505;color:#E8D5A3;font-family:'DM Sans',sans-serif;padding:24px}
+h1{font-family:'Cormorant Garamond',serif;color:var(--gold);margin:0 0 8px}
+.sub{color:var(--dim);margin-bottom:24px}
+.row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+button{background:var(--gold);color:#111;border:0;padding:10px 16px;font-weight:600;cursor:pointer}
+button.secondary{background:#222;color:var(--gold);border:1px solid #333}
+button:disabled{opacity:.4;cursor:not-allowed}
+table{width:100%;border-collapse:collapse;margin-top:16px}
+th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #222;font-size:.9rem}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.75rem;background:#222}
+.badge.in_review{color:#E8D5A3}.badge.approved{color:var(--cyan)}.badge.sent{color:var(--ok)}.badge.rejected{color:var(--bad)}
+.msg{margin:12px 0;color:var(--cyan)}.err{color:var(--bad)}
+a{color:var(--cyan)}
+</style>
+</head>
+<body>
+<h1>Little Nate Dispatch</h1>
+<p class="sub">Human approval required before every send. Pipeline composes to <code>in_review</code> only.</p>
+<div class="row">
+  <button id="btnPipe" onclick="runPipeline()">Run pipeline → in_review</button>
+  <button class="secondary" onclick="loadIssues()">Refresh</button>
+  <a href="nate_story_library.html">Story Library</a>
+</div>
+<p id="msg" class="msg"></p>
+<table>
+  <thead><tr><th>Slug</th><th>Status</th><th>Topic</th><th>Created</th><th>Actions</th></tr></thead>
+  <tbody id="tbody"><tr><td colspan="5">Loading…</td></tr></tbody>
+</table>
+<script>
+function token(){return sessionStorage.getItem('token')||localStorage.getItem('sc_token')||'';}
+function apiBase(){return (location.hostname.indexOf('sovereignsanctuary')>=0)?'https://api.sovereignsanctuary.net':'';}
+function headers(){return {'Authorization':'Bearer '+token(),'Content-Type':'application/json'};}
+async function api(path,opts){
+  var r=await fetch(apiBase()+path,Object.assign({headers:headers()},opts||{}));
+  if(r.status===401){document.getElementById('msg').textContent='Auth issue — token may still be propagating';return null;}
+  return r;
+}
+async function loadIssues(){
+  var r=await api('/api/newsletter/admin/issues');
+  if(!r)return;
+  var d=await r.json();
+  var rows=d.issues||[];
+  var el=document.getElementById('tbody');
+  if(!rows.length){el.innerHTML='<tr><td colspan="5">No issues yet.</td></tr>';return;}
+  el.innerHTML=rows.map(function(i){
+    var st=i.status||'';
+    var acts='';
+    if(st==='in_review'){
+      acts='<button onclick="approve(\''+i.id+'\')">Approve</button> '
+        +'<button class="secondary" onclick="reject(\''+i.id+'\')">Reject</button>';
+    }else if(st==='approved'){
+      acts='<button onclick="sendIssue(\''+i.id+'\')">Send</button>';
+    }else if(st==='sent'){
+      acts='<a href="'+apiBase()+'/api/newsletter/library/'+encodeURIComponent(i.slug)+'/page" target="_blank">Open</a>';
+    }
+    return '<tr><td>'+(i.slug||'')+'</td><td><span class="badge '+st+'">'+st+'</span></td><td>'
+      +(i.topic||'').replace(/</g,'&lt;')+'</td><td>'+String(i.created_at||'').slice(0,16)+'</td><td>'+acts+'</td></tr>';
+  }).join('');
+}
+async function runPipeline(){
+  document.getElementById('btnPipe').disabled=true;
+  document.getElementById('msg').textContent='Running…';
+  var r=await api('/api/newsletter/admin/pipeline/run',{method:'POST',body:'{}'});
+  document.getElementById('btnPipe').disabled=false;
+  if(!r)return;
+  var d=await r.json();
+  document.getElementById('msg').textContent=d.ok?'Draft ready: '+(d.slug||d.issue_id):('Failed: '+(d.error||JSON.stringify(d.errors||d)));
+  loadIssues();
+}
+async function approve(id){
+  var r=await api('/api/newsletter/admin/issues/'+id+'/approve',{method:'POST',body:'{}'});
+  if(r){document.getElementById('msg').textContent='Approved';loadIssues();}
+}
+async function reject(id){
+  var r=await api('/api/newsletter/admin/issues/'+id+'/reject?reason=editor_reject',{method:'POST',body:'{}'});
+  if(r){document.getElementById('msg').textContent='Rejected';loadIssues();}
+}
+async function sendIssue(id){
+  if(!confirm('Send approved issue to all active subscribers?'))return;
+  var r=await api('/api/newsletter/admin/issues/'+id+'/send',{method:'POST',body:'{}'});
+  if(!r)return;
+  var d=await r.json();
+  document.getElementById('msg').textContent='Sent '+(d.sent||0)+' · '+(d.library_url||'');
+  loadIssues();
+}
+loadIssues();
+</script>
+</body>
+</html>

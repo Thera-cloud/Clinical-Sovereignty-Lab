@@ -1083,18 +1083,12 @@ async def generate_trial_response(ctx: TrialTurnContext) -> str:
         pool = get_db_pool()
         prior_user_texts = [h.get("user", "") for h in ctx.history[-6:] if h.get("user")]
 
-        # NO crystal recall for anonymous trial sessions — period.
+        # NO generic crystal recall for anonymous trial sessions.
         # 2026-07 red-team F4c: even global_only=True recall surfaced
-        # first-person narrative fragments ("your grandma's loss", "the
-        # secret your husband kept") to strangers. Two root causes: (a) the
-        # global pool is contaminated with narrative-style crystals ingested
-        # from public therapy datasets (blue_harvest/green_internal), and
-        # (b) crystallize_wisdom_absorption previously fail-opened real
-        # client wisdom into global scope when user_ref didn't resolve.
-        # (b) is fixed fail-closed in crystal_recall_bridge; (a) makes the
-        # entire global pool unsafe as trial context. An anonymous session
-        # gets ZERO stored-memory content of any kind — the trial persona,
-        # boundary, and in-session history are the whole context.
+        # first-person narrative fragments. Opt-in exception:
+        # ENABLE_TRIAL_LIBRARY_EDITORIAL=true allows ONLY published
+        # trial_safe Story Library Dispatch crystals (metadata.origin=
+        # newsletter_library) — never the general global crystal pool.
 
         enrichment = ""
         try:
@@ -1104,6 +1098,16 @@ async def generate_trial_response(ctx: TrialTurnContext) -> str:
             )
         except Exception as e:
             logger.info("public_trial_gate: enrichment skipped: %s", e)
+
+        # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch editorial-only (flagged)
+        try:
+            from app.services.newsletter_library_recall import recall_trial_editorial_only
+
+            _lib = await recall_trial_editorial_only(pool, ctx.text or "", max_issues=1)
+            if _lib:
+                enrichment = f"{enrichment}\n\n{_lib}" if enrichment else _lib
+        except Exception as e:
+            logger.info("public_trial_gate: editorial library skipped: %s", e)
 
         history_lines: List[str] = []
         for turn in ctx.history[-TRIAL_MAX_HISTORY_PAIRS:]:

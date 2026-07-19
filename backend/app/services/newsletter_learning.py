@@ -21,12 +21,26 @@ async def run_learning_for_due_issues(db_pool) -> Dict[str, Any]:
             FROM newsletter_issues i
             WHERE i.status = 'sent'
               AND i.sent_at IS NOT NULL
+              AND i.learned_at IS NULL
               AND i.sent_at <= NOW() - INTERVAL '72 hours'
-              AND i.sent_at > NOW() - INTERVAL '96 hours'
+            ORDER BY i.sent_at ASC
+            LIMIT 20
             """
         )
         for issue in rows:
-            # Aggregate feedback
+            # Claim row first (idempotent)
+            claimed = await conn.fetchval(
+                """
+                UPDATE newsletter_issues
+                SET learned_at = NOW(), updated_at = NOW()
+                WHERE id = $1 AND learned_at IS NULL
+                RETURNING id
+                """,
+                issue["id"],
+            )
+            if not claimed:
+                continue
+
             stats = await conn.fetchrow(
                 """
                 SELECT
@@ -62,7 +76,6 @@ async def run_learning_for_due_issues(db_pool) -> Dict[str, Any]:
                 conf,
                 issue["id"],
             )
-            # Editor style_note from draft vs final diff
             draft = issue.get("draft_body") or ""
             final = issue.get("final_body") or issue.get("body_md") or ""
             if draft and final and draft != final:
@@ -75,7 +88,6 @@ async def run_learning_for_due_issues(db_pool) -> Dict[str, Any]:
                     f"Editor revised {issue['slug']}: len_draft={len(draft)} len_final={len(final)}",
                     issue["id"],
                 )
-            # Decay low-confidence stale rules
             await conn.execute(
                 """
                 UPDATE newsletter_symbolic_memory
@@ -85,5 +97,14 @@ async def run_learning_for_due_issues(db_pool) -> Dict[str, Any]:
                   AND created_at < NOW() - INTERVAL '90 days'
                 """
             )
+            if issue.get("topic"):
+                try:
+                    from app.services.newsletter_signals import record_theme_signal
+
+                    await record_theme_signal(
+                        db_pool, issue["topic"], source="learning_outcome"
+                    )
+                except Exception:
+                    pass
             processed += 1
     return {"processed": processed}

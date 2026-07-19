@@ -35,42 +35,45 @@ def test_html_email_has_safety_footer_and_unsub():
     assert "Unsubscribe" in html
     assert "Story Library" in html
     assert "Little Nate Dispatch" in html
+    assert "/api/newsletter/library/test-issue/page" in html
 
 
-def test_library_static_html_has_crisis_footer(tmp_path, monkeypatch):
+def test_render_library_html_crisis_footer():
     delivery = _load("nl_delivery_ut2", "app/services/newsletter_delivery.py")
-    # Point write into tmp by patching Path parents usage via chdir of write helper
+    html = delivery.render_library_html(
+        {
+            "slug": "_test_dispatch_slug",
+            "subject_line": "Unit Test Issue",
+            "final_body": "Body copy",
+            "topic": "steadiness",
+        }
+    )
+    assert "988" in html
+    assert "not therapy" in html.lower() or "not medical" in html.lower()
+    assert delivery.library_page_url("_test_dispatch_slug").endswith(
+        "/api/newsletter/library/_test_dispatch_slug/page"
+    )
+
+
+def test_library_write_uses_data_dir(tmp_path, monkeypatch):
+    delivery = _load("nl_delivery_ut3", "app/services/newsletter_delivery.py")
     import asyncio
 
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("NEWSLETTER_SKIP_CLOUD_ARCHIVE", "true")
+
     async def _run():
-        # monkeypatch module Path root by writing via temp override
-        original = delivery._write_library_html
-
-        async def _patched(issue):
-            from pathlib import Path as P
-
-            root = tmp_path / "library"
-            root.mkdir(parents=True, exist_ok=True)
-            slug = issue.get("slug") or "issue"
-            body = (issue.get("final_body") or "").replace("\n", "<br>\n")
-            html = f"""<!DOCTYPE html><html><body>
-<article>{body}</article>
-<footer>not therapy or medical advice. Crisis: <a href="https://988lifeline.org">988</a></footer>
-</body></html>"""
-            (root / f"{slug}.html").write_text(html, encoding="utf-8")
-
-        await _patched(
+        meta = await delivery._write_library_html(
             {
                 "slug": "_test_dispatch_slug",
                 "subject_line": "Unit Test Issue",
-                "final_body": "Body copy",
+                "final_body": "Body copy long enough",
             }
         )
-        path = tmp_path / "library" / "_test_dispatch_slug.html"
+        path = tmp_path / "newsletter_library" / "_test_dispatch_slug.html"
         assert path.exists()
-        text = path.read_text(encoding="utf-8")
-        assert "988" in text
-        assert "not therapy" in text.lower() or "not medical" in text.lower()
+        assert "988" in path.read_text(encoding="utf-8")
+        assert meta.get("library_html_path")
 
     asyncio.run(_run())
 
@@ -106,10 +109,16 @@ def test_story_library_shell_exists():
     text = p.read_text(encoding="utf-8")
     assert "Story Library" in text
     assert "988" in text
+    assert "/api/newsletter/library/" in text
+
+
+def test_admin_dispatch_shell_exists():
+    p = ROOT / "dashboard" / "newsletter_dispatch.html"
+    assert p.exists()
+    assert "Approve" in p.read_text(encoding="utf-8")
 
 
 def test_summon_cache_key_scopes_by_user():
-    # Load summon service file carefully — may still pull deps; skip if FPE
     path = BACKEND / "app/services/nate_summon_service.py"
     text = path.read_text(encoding="utf-8")
     assert "_summon_cache_key" in text
@@ -117,7 +126,20 @@ def test_summon_cache_key_scopes_by_user():
     assert "ident" in text
 
 
-def test_migration_seeds_baseline_10():
+def test_migration_seeds_baseline_and_gap_fix():
     sql = (BACKEND / "migrations/252_little_nate_dispatch.sql").read_text()
     assert "newsletter_check_count" in sql
-    assert "'10'" in sql or '"10"' in sql or "10" in sql
+    gap = (BACKEND / "migrations/253_newsletter_gap_fixes.sql").read_text()
+    assert "learned_at" in gap
+    assert "library_html_path" in gap
+
+
+def test_signals_normalize_theme():
+    sig = _load("nl_signals_ut", "app/services/newsletter_signals.py")
+    assert sig._normalize_theme("  Anxiety!! Reach-Out  ") == "anxiety reach-out"
+
+
+def test_hive_kinds_dispatchable():
+    hive = _load("nl_hive_ut", "app/services/newsletter_hive.py")
+    assert hive.hive_enabled() in (True, False)
+    assert "newsletter_topic_patrol" in dir(hive) or callable(hive.run_hive_patrol)

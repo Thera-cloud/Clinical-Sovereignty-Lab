@@ -1,4 +1,4 @@
-"""Little Nate Dispatch auditor — 10 checks (stagger 298s).
+"""Little Nate Dispatch auditor — 12 checks (stagger 298s).
 
 # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch
 """
@@ -26,6 +26,8 @@ TAB_ENDPOINTS = [
             ("GET", "/api/newsletter/health"),
             ("GET", "/api/newsletter/library"),
             ("GET", "/api/newsletter/rss"),
+            ("GET", "/api/newsletter/library/__missing__/page"),
+            ("GET", "/api/newsletter/share"),
             ("POST", "/api/newsletter/subscribe"),
             ("GET", "/api/newsletter/confirm"),
         ],

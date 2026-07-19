@@ -49,7 +49,7 @@ footer a{color:var(--gold-dim)}
       var slug=i.slug||'';
       var title=i.subject_line||i.topic||slug;
       var when=i.sent_at||i.created_at||'';
-      var href='/library/'+encodeURIComponent(slug)+'.html';
+      var href=api+'/api/newsletter/library/'+encodeURIComponent(slug)+'/page';
       return '<article class="issue"><a href="'+href+'">'+title.replace(/</g,'&lt;')+'</a>'
         +'<div class="meta">'+(when?String(when).slice(0,10):'')+(i.topic?' · '+String(i.topic).replace(/</g,'&lt;'):'')+'</div></article>';
     }).join('');

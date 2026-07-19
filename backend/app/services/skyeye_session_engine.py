@@ -914,6 +914,19 @@ class SkyEyeSessionEngine:
                         bio_lower = bio.lower()
                         is_relevant = any(k in bio_lower for k in therapy_keywords)
                         send_dm_fn = getattr(adapter, "send_dm", None)
+                        # QUANTUM-CRYSTAL-ARCH — Dispatch warm lead (never auto-subscribe)
+                        try:
+                            from app.services.newsletter_warm_leads import capture_social_contact
+
+                            await capture_social_contact(
+                                self.db_pool,
+                                platform=platform,
+                                handle=handle,
+                                platform_user_id=str(n.get("actor_id") or "") or None,
+                                source_note=(bio or "")[:200],
+                            )
+                        except Exception:
+                            pass
 
                         if (is_relevant and send_dm_fn and dms_sent < max_dms
                                 and platform == "x" and n.get("actor_id")):
