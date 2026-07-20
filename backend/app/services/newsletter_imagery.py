@@ -1,4 +1,4 @@
-"""Topic hero images for Little Nate Dispatch — Grok Imagine with Gemini fallback.
+"""Topic hero images for Little Nate Dispatch — Gemini first, Grok Imagine fallback.
 
 # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch
 """
@@ -112,18 +112,8 @@ async def _generate_via_gemini(prompt: str) -> bytes:
 
 
 async def generate_hero_bytes(prompt: str) -> Tuple[bytes, str]:
-    """Grok Imagine first, then Gemini. Returns (bytes, provider)."""
+    """Gemini first, then Grok Imagine. Returns (bytes, provider)."""
     errors: list[str] = []
-
-    if _has_xai():
-        try:
-            image_bytes = await _generate_via_grok(prompt)
-            if image_bytes and len(image_bytes) >= 500:
-                return image_bytes, "grok_imagine"
-            errors.append("grok:empty_image")
-        except Exception as e:
-            logger.warning("newsletter hero Grok Imagine failed, trying Gemini: %s", e)
-            errors.append(f"grok:{e}")
 
     if _has_gemini():
         try:
@@ -132,8 +122,18 @@ async def generate_hero_bytes(prompt: str) -> Tuple[bytes, str]:
                 return image_bytes, "gemini"
             errors.append("gemini:empty_image")
         except Exception as e:
-            logger.warning("newsletter hero Gemini failed: %s", e)
+            logger.warning("newsletter hero Gemini failed, trying Grok: %s", e)
             errors.append(f"gemini:{e}")
+
+    if _has_xai():
+        try:
+            image_bytes = await _generate_via_grok(prompt)
+            if image_bytes and len(image_bytes) >= 500:
+                return image_bytes, "grok_imagine"
+            errors.append("grok:empty_image")
+        except Exception as e:
+            logger.warning("newsletter hero Grok Imagine failed: %s", e)
+            errors.append(f"grok:{e}")
 
     detail = "; ".join(errors) if errors else "no_image_provider"
     raise RuntimeError(detail)
@@ -142,7 +142,7 @@ async def generate_hero_bytes(prompt: str) -> Tuple[bytes, str]:
 async def generate_hero_for_issue(
     db_pool, issue_id: str, *, prompt_override: str = ""
 ) -> Dict[str, Any]:
-    """Generate topic still (Grok → Gemini), persist local + R2, set hero_image_url."""
+    """Generate topic still (Gemini → Grok), persist local + R2, set hero_image_url."""
     if not db_pool:
         return {"ok": False, "error": "no_db"}
     if not hero_enabled():

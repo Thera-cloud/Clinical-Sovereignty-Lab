@@ -1041,6 +1041,9 @@ async def build_rich_panel_prompt(user_id: str, db_pool) -> dict:
 
 async def generate_journey_panel(user_id: str, db_pool) -> dict:
     """Full pipeline: profile → biome → character → narrative → image → R2 → log."""
+    from app.sse.foundation.delivery_runtime import sse_imagery_generation_enabled
+    if not sse_imagery_generation_enabled():
+        return {"skipped": True, "reason": "sse_imagery_paused"}
     from app.sse.infrastructure.grok_imagine_client import generate_image
     from app.sse.infrastructure.r2_storage import store_image
 

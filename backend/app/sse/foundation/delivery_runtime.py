@@ -8,7 +8,7 @@ the same Grok Imagine + source_image_url approach used by the
 Thera-World Studio Pipeline's "Generate Character Refs".
 """
 from __future__ import annotations
-import asyncio, hashlib, json, logging, uuid
+import asyncio, hashlib, json, logging, os, uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from app.sse.infrastructure import grok_imagine_client as grok, r2_storage
@@ -23,6 +23,23 @@ from app.sse.adapters.clinical_translation import enrich_after_panel_generation
 logger = logging.getLogger(__name__)
 _BATCH, _COST_CAP = 10, 50.0
 _IMG_COST, _VID_COST = 0.07, 0.25
+
+
+def _env_truthy(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
+def sse_imagery_generation_enabled() -> bool:
+    """Master switch for daily panels + journey batch Grok Imagine."""
+    return _env_truthy("SSE_IMAGERY_GENERATION_ENABLED", "true")
+
+
+def sse_weekly_clips_enabled() -> bool:
+    return _env_truthy("SSE_WEEKLY_CLIPS_ENABLED", "false")
+
+
+def sse_monthly_recap_enabled() -> bool:
+    return _env_truthy("SSE_MONTHLY_RECAP_ENABLED", "false")
 
 
 async def _log(
@@ -66,6 +83,12 @@ async def _poll_video(vid_id: str, max_wait: int = 300) -> dict:
 
 
 async def generate_daily_panels(sid: str, db_pool, skip_check=None) -> dict[str, Any]:
+    if not sse_imagery_generation_enabled():
+        logger.info("SSE daily_panel skipped: SSE_IMAGERY_GENERATION_ENABLED=false")
+        return {
+            "storyboard_id": sid, "users_processed": 0,
+            "panels_generated": 0, "panels_failed": 0, "cost": 0, "status": "paused",
+        }
     gen = fail = 0; cost = 0.0; today = date.today().isoformat()
     async with db_pool.acquire() as c:
         if await _breaker(c, sid):
@@ -168,6 +191,12 @@ async def generate_daily_panels(sid: str, db_pool, skip_check=None) -> dict[str,
 
 
 async def generate_weekly_clips(sid: str, db_pool) -> dict[str, Any]:
+    if not sse_weekly_clips_enabled():
+        logger.info("SSE weekly_clip disabled (SSE_WEEKLY_CLIPS_ENABLED=false)")
+        return {
+            "storyboard_id": sid, "clips_generated": 0, "clips_failed": 0,
+            "substitutions": 0, "cost": 0, "status": "disabled",
+        }
     now = datetime.now(timezone.utc)
     week_of_month = (now.day - 1) // 7 + 1
     if week_of_month >= 4:
@@ -245,6 +274,12 @@ async def generate_weekly_clips(sid: str, db_pool) -> dict[str, Any]:
 
 
 async def generate_monthly_recap(sid: str, db_pool) -> dict[str, Any]:
+    if not sse_monthly_recap_enabled():
+        logger.info("SSE monthly_recap disabled (SSE_MONTHLY_RECAP_ENABLED=false)")
+        return {
+            "storyboard_id": sid, "recaps_generated": 0, "fallbacks": 0,
+            "cost": 0, "status": "disabled",
+        }
     gen = fb = 0; cost = 0.0; ms = date.today().replace(day=1)
     async with db_pool.acquire() as c:
         users = await c.fetch(

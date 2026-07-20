@@ -59,6 +59,14 @@ class SSEOrchestrator:
             handler = dispatch.get(stype)
             if not handler:
                 continue
+            from app.sse.foundation.delivery_runtime import (
+                sse_monthly_recap_enabled,
+                sse_weekly_clips_enabled,
+            )
+            if stype == "weekly_clip" and not sse_weekly_clips_enabled():
+                continue
+            if stype == "monthly_recap" and not sse_monthly_recap_enabled():
+                continue
             parts = row["cron_expression"].split()
             if len(parts) < 5:
                 continue
@@ -134,6 +142,10 @@ class SSEOrchestrator:
             return False
 
     async def _run_daily_panels(self, storyboard_id: str):
+        from app.sse.foundation.delivery_runtime import sse_imagery_generation_enabled
+        if not sse_imagery_generation_enabled():
+            logger.info("SSE daily_panel cron skipped: imagery generation paused")
+            return
         async with self._semaphore:
             try:
                 from app.sse.foundation import delivery_runtime as dr
@@ -148,6 +160,10 @@ class SSEOrchestrator:
                 logger.error("SSE daily_panel %s error: %s", storyboard_id, e)
 
     async def _run_weekly_clips(self, storyboard_id: str):
+        from app.sse.foundation.delivery_runtime import sse_weekly_clips_enabled
+        if not sse_weekly_clips_enabled():
+            logger.info("SSE weekly_clip cron skipped: disabled")
+            return
         # TODO Phase 5: Select best 3 journey panels from week → Grok Video Extend from
         #   Frame → chain clips → upload to Cloudflare Stream → push notification to user.
         #   Include quest/mission panels if active. Family recap aggregates member panels.
@@ -162,6 +178,10 @@ class SSEOrchestrator:
                 logger.error("SSE weekly_clip %s error: %s", storyboard_id, e)
 
     async def _run_monthly_recap(self, storyboard_id: str):
+        from app.sse.foundation.delivery_runtime import sse_monthly_recap_enabled
+        if not sse_monthly_recap_enabled():
+            logger.info("SSE monthly_recap cron skipped: disabled")
+            return
         async with self._semaphore:
             try:
                 from app.sse.foundation import delivery_runtime as dr
@@ -178,6 +198,10 @@ class SSEOrchestrator:
         Runs AFTER individual monthly recaps. One group at a time via semaphore.
         Fires on the last days of each month (28-31) at 06:00 UTC.
         """
+        from app.sse.foundation.delivery_runtime import sse_monthly_recap_enabled
+        if not sse_monthly_recap_enabled():
+            logger.info("SSE group_videos cron skipped: monthly recap disabled")
+            return
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
         month, year = now.month, now.year
@@ -213,6 +237,10 @@ class SSEOrchestrator:
 
     async def _run_journey_panels(self):
         """Generate Thera-World journey panels for all active clients."""
+        from app.sse.foundation.delivery_runtime import sse_imagery_generation_enabled
+        if not sse_imagery_generation_enabled():
+            logger.info("SSE journey panels skipped: imagery generation paused")
+            return
         async with self._semaphore:
             ok = fail = 0
             try:
