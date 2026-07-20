@@ -135,9 +135,9 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 
 | Step | Action | Done |
 |------|--------|------|
-| N.1 | Migration 247 applied (staging then prod) | [x] staging |
+| N.1 | Migration 247 applied (staging then prod) | [x] *(staging + prod `session_negotiations` 2026-07-20)* |
 | N.2 | Staging flag on + book → coach email/SMS/mailto → client update smoke | [x] HTTPS+slots; inbound caveat |
-| N.3 | Prod flag flip (after soak + Phase 0/1 prod) | [ ] |
+| N.3 | Prod flag flip (after soak + Phase 0/1 prod) | [x] *(2026-07-20 — `ENABLE_NATE_SESSION_NEGOTIATION=true` backend+bridge; vault 368→368)* |
 
 ---
 
@@ -162,8 +162,8 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 | Step | Action | Done |
 |------|--------|------|
 | 3.1 | Adversarial walk: `docs/AGENTIC_PHASE_3_REVIEW.md` | [x] *(Nathan Nevedal 2026-07-17)* |
-| 3.2 | Staging: coach REST assign/advance; client chat receives plan context block only | [ ] |
-| 3.3 | Production flag flip | [ ] |
+| 3.2 | Staging: coach REST assign/advance; client chat receives plan context block only | [x] *(2026-07-20 — `ENABLE_THERAPEUTIC_PLANS=true` staging; `/templates` enabled)* |
+| 3.3 | Production flag flip | [x] *(2026-07-20 — `ENABLE_THERAPEUTIC_PLANS=true` backend+bridge; `/api/coach/therapeutic-plans/templates` → 200 `[]`)* |
 
 *May run on a parallel track to Phase 2, but still one flag per pass.*
 
@@ -177,9 +177,9 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 |------|--------|------|
 | 4.1 | Discovery doc reviewed: `docs/AGENTIC_PHASE4_DISCOVERY.md` | [x] |
 | 4.2 | Adversarial walk: `docs/AGENTIC_PHASE_4_REVIEW.md` | [x] *(Nathan Nevedal 2026-07-17)* |
-| 4.3 | Staging: enable **coach alert only** first (`ENABLE_SELF_MONITOR_COACH_ALERT`) | [ ] |
-| 4.4 | Optional client touch (`ENABLE_SELF_MONITOR_TOUCH`) only after Phase 0+1 proven | [ ] |
-| 4.5 | Production flip per flag, separately | [ ] |
+| 4.3 | Staging: enable **coach alert only** first (`ENABLE_SELF_MONITOR_COACH_ALERT`) | [x] *(2026-07-20 — AGENT+COACH_ALERT; TOUCH remains false)* |
+| 4.4 | Optional client touch (`ENABLE_SELF_MONITOR_TOUCH`) only after Phase 0+1 proven | [ ] *(blocked: 0 clients with proactive_presence_consent)* |
+| 4.5 | Production flip per flag, separately | [x] *(2026-07-20 — AGENT+COACH_ALERT on; TOUCH off)* |
 
 ---
 
