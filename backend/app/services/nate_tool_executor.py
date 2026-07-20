@@ -216,7 +216,13 @@ async def _redis_get(redis_client: Any, key: str) -> Optional[str]:
     if not redis_client:
         return None
     try:
-        val = await redis_client.get(key)
+        import asyncio
+
+        get_fn = redis_client.get
+        if asyncio.iscoroutinefunction(get_fn):
+            val = await get_fn(key)
+        else:
+            val = await asyncio.to_thread(get_fn, key)
         if val is None:
             return None
         return val.decode() if isinstance(val, bytes) else str(val)
@@ -229,7 +235,13 @@ async def _redis_setex(redis_client: Any, key: str, payload: str) -> bool:
     if not redis_client:
         return False
     try:
-        await redis_client.setex(key, _PENDING_TTL_SECONDS, payload)
+        import asyncio
+
+        setex_fn = redis_client.setex
+        if asyncio.iscoroutinefunction(setex_fn):
+            await setex_fn(key, _PENDING_TTL_SECONDS, payload)
+        else:
+            await asyncio.to_thread(setex_fn, key, _PENDING_TTL_SECONDS, payload)
         return True
     except Exception as e:
         logger.warning("tool_executor: redis setex failed: %s", e)
@@ -240,7 +252,13 @@ async def _redis_delete(redis_client: Any, key: str) -> None:
     if not redis_client:
         return
     try:
-        await redis_client.delete(key)
+        import asyncio
+
+        del_fn = redis_client.delete
+        if asyncio.iscoroutinefunction(del_fn):
+            await del_fn(key)
+        else:
+            await asyncio.to_thread(del_fn, key)
     except Exception:
         pass
 

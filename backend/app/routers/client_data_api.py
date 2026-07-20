@@ -498,6 +498,49 @@ async def store_ai_consent(request: Request, user=Depends(_require_auth)):
     return {"status": "ok", "ai_consent_granted_at": consent_ts}
 
 
+@router.get("/proactive-presence-consent")
+async def get_proactive_presence_consent(request: Request, user=Depends(_require_auth)):
+    """QUANTUM-CRYSTAL-ARCH: Read proactive presence opt-in (Agentic Phase 0)."""
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        raise HTTPException(503, "Database unavailable")
+    identity = ""
+    if isinstance(user, dict):
+        identity = (user.get("hardware_id") or user.get("username") or "").strip()
+    if not identity:
+        raise HTTPException(400, "identity missing")
+    from app.services.nate_commitment_service import get_proactive_consent
+
+    return await get_proactive_consent(db_pool, identity)
+
+
+@router.put("/proactive-presence-consent")
+async def put_proactive_presence_consent(request: Request, user=Depends(_require_auth)):
+    """QUANTUM-CRYSTAL-ARCH: Persist proactive presence opt-in via REST (Safari-safe)."""
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        raise HTTPException(503, "Database unavailable")
+    if not isinstance(user, dict) or (user.get("role") or "").upper() != "CLIENT":
+        raise HTTPException(403, "Clients only")
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if "enabled" not in body:
+        raise HTTPException(400, "enabled field required")
+    enabled = bool(body.get("enabled"))
+    identity = (user.get("hardware_id") or user.get("username") or "").strip()
+    if not identity:
+        raise HTTPException(400, "identity missing")
+    from app.services.nate_commitment_service import update_proactive_consent
+
+    result = await update_proactive_consent(db_pool, hardware_id=identity, enabled=enabled)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "persist_failed")
+    return result
+
+
 @router.get("/health-check")
 async def client_health_check(request: Request, user=Depends(_require_auth)):
     """Enhanced health check that includes ai_consent_granted_at for consent gate."""
@@ -513,12 +556,17 @@ async def client_health_check(request: Request, user=Depends(_require_auth)):
         "ai_consent_granted_at": None,
         "timezone": "UTC",
         "timezone_source": "default_utc",
+        "proactive_presence_consent": False,
+        "proactive_presence_consent_key_set": False,
     }
 
     if db_pool and username:
         try:
             row = await db_pool.fetchrow(
                 """SELECT profile_data->>'ai_consent_granted_at' as consent,
+                          profile_data ? 'proactive_presence_consent' as presence_key_set,
+                          COALESCE((profile_data->>'proactive_presence_consent')::boolean, false)
+                              as presence_consent,
                           timezone,
                           timezone_source
                    FROM users WHERE username = $1""",
@@ -529,6 +577,8 @@ async def client_health_check(request: Request, user=Depends(_require_auth)):
             if row:
                 result["timezone"] = row["timezone"] or "UTC"
                 result["timezone_source"] = row["timezone_source"] or "default_utc"
+                result["proactive_presence_consent"] = bool(row["presence_consent"])
+                result["proactive_presence_consent_key_set"] = bool(row["presence_key_set"])
         except Exception as e:
             logger.warning("health-check consent lookup failed: %s", e)
 

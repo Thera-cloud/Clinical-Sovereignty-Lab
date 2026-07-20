@@ -339,6 +339,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     _refreshProfileFromServer();
     if (!_isCoachOnly) _fetchVoiceBalance();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _maybePromptProactivePresence();
       promptIfDeviceTimezoneDiffersFromAccount(
         context: context,
         profile: _profile,
@@ -1497,28 +1498,53 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     }
   }
 
+  void _applyProactiveConsentLocal(bool enabled) {
+    _proactivePresenceConsent = enabled;
+    final pd = _profile['profile_data'];
+    if (pd is Map) {
+      pd['proactive_presence_consent'] = enabled;
+    } else {
+      _profile['proactive_presence_consent'] = enabled;
+    }
+  }
+
   Future<void> _saveProactiveConsent(bool enabled) async {
     if (_savingProactiveConsent) return;
-    setState(() => _savingProactiveConsent = true);
+    final previous = _proactivePresenceConsent;
+    setState(() {
+      _savingProactiveConsent = true;
+      _applyProactiveConsentLocal(enabled);
+    });
     final token = (_profile['token'] ?? widget.profile['token'] ?? '').toString();
     final hwId = (_profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '').toString();
+    var ok = false;
     try {
-      final resp = await _ephemeralWsRequest(
-        token: token,
-        hardwareId: hwId,
-        request: {'type': 'client_update_proactive_consent', 'enabled': enabled},
-        expectedTypes: {'proactive_consent_updated', 'error'},
-      );
-      if (!mounted) return;
-      if (resp['ok'] == true) {
-        setState(() => _proactivePresenceConsent = enabled);
-        final pd = _profile['profile_data'];
-        if (pd is Map) {
-          pd['proactive_presence_consent'] = enabled;
-        } else {
-          _profile['proactive_presence_consent'] = enabled;
+      if (token.isNotEmpty) {
+        final httpResp = await http.put(
+          Uri.parse('${AppConfig.apiBaseUrl}/api/client/proactive-presence-consent'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode({'enabled': enabled}),
+        ).timeout(const Duration(seconds: 12));
+        if (httpResp.statusCode == 200) {
+          final body = jsonDecode(httpResp.body);
+          if (body is Map && body['ok'] == true) ok = true;
         }
-      } else {
+      }
+      if (!ok && token.isNotEmpty && hwId.isNotEmpty) {
+        final resp = await _ephemeralWsRequest(
+          token: token,
+          hardwareId: hwId,
+          request: {'type': 'client_update_proactive_consent', 'enabled': enabled},
+          expectedTypes: {'proactive_consent_updated', 'error'},
+        );
+        ok = resp['ok'] == true;
+      }
+      if (!mounted) return;
+      if (!ok) {
+        setState(() => _applyProactiveConsentLocal(previous));
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Could not update proactive presence setting'),
@@ -1528,12 +1554,70 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
       }
     } catch (e) {
       if (!mounted) return;
+      setState(() => _applyProactiveConsentLocal(previous));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Save failed: $e'), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _savingProactiveConsent = false);
     }
+  }
+
+  Future<void> _maybePromptProactivePresence() async {
+    final token = (_profile['token'] ?? '').toString();
+    final uname = (_profile['username'] ?? '').toString();
+    if (token.isEmpty || uname.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool('proactive_presence_prompted_$uname') == true) return;
+      final resp = await http.get(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/client/health-check'),
+        headers: {'Authorization': 'Bearer $token'},
+      ).timeout(const Duration(seconds: 8));
+      if (resp.statusCode != 200 || !mounted) return;
+      final data = jsonDecode(resp.body) as Map<String, dynamic>;
+      final keySet = data['proactive_presence_consent_key_set'] == true;
+      final enabled = data['proactive_presence_consent'] == true;
+      if (keySet) {
+        if (mounted && enabled != _proactivePresenceConsent) {
+          setState(() => _applyProactiveConsentLocal(enabled));
+        }
+        return;
+      }
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: _Design.bgCard,
+          title: const Text('Check-ins from Nate', style: TextStyle(color: _Design.gold)),
+          content: const Text(
+            'Allow Little Nate to occasionally check in between sessions '
+            '(commitments, gentle presence)? You can change this anytime in Settings.',
+            style: TextStyle(color: _Design.textSecondary),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await prefs.setBool('proactive_presence_prompted_$uname', true);
+                await _saveProactiveConsent(false);
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('Not now'),
+            ),
+            TextButton(
+              onPressed: () async {
+                await prefs.setBool('proactive_presence_prompted_$uname', true);
+                await _saveProactiveConsent(true);
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('Allow'),
+            ),
+          ],
+        ),
+      );
+      await prefs.setBool('proactive_presence_prompted_$uname', true);
+    } catch (_) {}
   }
 
   // SOVEREIGN-VOICE: B3 — await persisted confirmation before declaring success.
@@ -2954,9 +3038,15 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               setState(() => _notifCrisisAlerts = v);
               _saveNotificationPrefs();
             }),
-            _toggleRow('Proactive Presence', _proactivePresenceConsent, (v) {
-              _saveProactiveConsent(v);
-            }),
+            _toggleRow(
+              'Proactive Presence',
+              _proactivePresenceConsent,
+              (v) {
+                if (!_savingProactiveConsent) _saveProactiveConsent(v);
+              },
+              subtitle:
+                  'Lets Nate check in between sessions about commitments and presence. Off by default.',
+            ),
             _actionRow(Icons.event_note, "What Nate's Holding Onto", 'View or dismiss tracked commitments', () {
               Navigator.push(context, MaterialPageRoute(
                 builder: (_) => NateCommitmentsScreen(profile: _profile),
@@ -3597,13 +3687,32 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     );
   }
 
-  Widget _toggleRow(String label, bool value, ValueChanged<bool> onChanged) {
+  Widget _toggleRow(
+    String label,
+    bool value,
+    ValueChanged<bool> onChanged, {
+    String? subtitle,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(color: _Design.textPrimary, fontSize: 13)),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(color: _Design.textPrimary, fontSize: 13)),
+                if (subtitle != null && subtitle.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(color: _Design.textSecondary, fontSize: 11),
+                  ),
+                ],
+              ],
+            ),
+          ),
           Switch(
             value: value,
             activeColor: _Design.gold,

@@ -43,7 +43,15 @@ async def get_active_plan_context(db_pool: Any, user_id: str) -> str:
                 """
                 SELECT title, total_steps, current_step, step_definitions
                 FROM nate_therapeutic_plans
-                WHERE user_id = $1 AND status = 'active'
+                WHERE user_id IN (
+                    SELECT x FROM unnest(ARRAY[
+                        $1::text,
+                        (SELECT username FROM users WHERE hardware_id = $1 LIMIT 1),
+                        (SELECT hardware_id FROM users WHERE username = $1 LIMIT 1)
+                    ]) AS t(x)
+                    WHERE x IS NOT NULL AND x <> ''
+                )
+                AND status = 'active'
                 ORDER BY started_at DESC
                 LIMIT 1
                 """,

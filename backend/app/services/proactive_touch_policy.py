@@ -144,14 +144,28 @@ async def can_send_proactive_touch(
                 return PolicyDecision(allowed=False, reason="skipped_sensitive")
 
             if crystal_id:
-                crystal = await conn.fetchrow(
-                    """
-                    SELECT scope FROM nate_intelligence_crystals
-                    WHERE id = $1::uuid
-                    LIMIT 1
-                    """,
-                    str(crystal_id),
-                )
+                # id is SERIAL; also accept content_hash / uuid-looking strings
+                cid = str(crystal_id).strip()
+                crystal = None
+                if cid.isdigit():
+                    crystal = await conn.fetchrow(
+                        """
+                        SELECT scope FROM nate_intelligence_crystals
+                        WHERE id = $1::int
+                        LIMIT 1
+                        """,
+                        int(cid),
+                    )
+                else:
+                    crystal = await conn.fetchrow(
+                        """
+                        SELECT scope FROM nate_intelligence_crystals
+                        WHERE content_hash = $1
+                           OR id::text = $1
+                        LIMIT 1
+                        """,
+                        cid,
+                    )
                 if crystal and crystal["scope"] in ("admin_only", "archived"):
                     return PolicyDecision(allowed=False, reason="skipped_gate_error")
 

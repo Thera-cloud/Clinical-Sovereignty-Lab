@@ -32,33 +32,76 @@ async def update_proactive_consent(
     save_registry_fn=None,
     registry_cache=None,
 ) -> Dict[str, Any]:
+    """Persist consent via jsonb_set — never replace full profile_data."""
     if not db_pool or not hardware_id:
         return {"ok": False, "error": "missing_identity"}
     try:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT username, profile_data FROM users WHERE hardware_id = $1 LIMIT 1",
+                """
+                UPDATE users
+                SET profile_data = jsonb_set(
+                        COALESCE(profile_data, '{}'::jsonb),
+                        '{proactive_presence_consent}',
+                        to_jsonb($1::boolean),
+                        true
+                    ),
+                    updated_at = NOW()
+                WHERE hardware_id = $2 OR username = $2
+                RETURNING username, hardware_id
+                """,
+                bool(enabled),
                 hardware_id,
             )
             if not row:
                 return {"ok": False, "error": "user_not_found"}
-            pd = _profile_data(row["profile_data"])
-            pd["proactive_presence_consent"] = bool(enabled)
-            await conn.execute(
-                "UPDATE users SET profile_data = $1::jsonb, updated_at = NOW() WHERE hardware_id = $2",
-                json.dumps(pd),
-                hardware_id,
-            )
         if registry_cache is not None and save_registry_fn is not None:
-            for key, entry in registry_cache.items():
-                if entry.get("hardware_id") == hardware_id:
-                    entry.setdefault("profile_data", {})["proactive_presence_consent"] = bool(enabled)
+            hw = row["hardware_id"] or hardware_id
+            uname = row["username"] or ""
+            for _key, entry in registry_cache.items():
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("hardware_id") == hw or entry.get("username") == uname:
+                    entry.setdefault("profile_data", {})
+                    if isinstance(entry.get("profile_data"), dict):
+                        entry["profile_data"]["proactive_presence_consent"] = bool(enabled)
+                    entry["proactive_presence_consent"] = bool(enabled)
                     save_registry_fn(registry_cache)
                     break
-        return {"ok": True, "proactive_presence_consent": bool(enabled)}
+        return {
+            "ok": True,
+            "proactive_presence_consent": bool(enabled),
+            "username": row["username"],
+        }
     except Exception as e:
         logger.warning("commitment_service: consent update failed: %s", e)
         return {"ok": False, "error": "persist_failed"}
+
+
+async def get_proactive_consent(db_pool: Any, identity: str) -> Dict[str, Any]:
+    if not db_pool or not identity:
+        return {"ok": False, "proactive_presence_consent": False, "key_set": False}
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT profile_data FROM users
+                WHERE hardware_id = $1 OR username = $1
+                LIMIT 1
+                """,
+                identity,
+            )
+        if not row:
+            return {"ok": False, "proactive_presence_consent": False, "key_set": False}
+        pd = _profile_data(row["profile_data"])
+        return {
+            "ok": True,
+            "proactive_presence_consent": bool(pd.get("proactive_presence_consent")),
+            "key_set": "proactive_presence_consent" in pd,
+        }
+    except Exception as e:
+        logger.warning("commitment_service: consent read failed: %s", e)
+        return {"ok": False, "proactive_presence_consent": False, "key_set": False}
 
 
 async def list_commitments(db_pool: Any, hardware_id: str) -> List[Dict[str, Any]]:

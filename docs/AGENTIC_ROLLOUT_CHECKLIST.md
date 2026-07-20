@@ -178,8 +178,23 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 | 4.1 | Discovery doc reviewed: `docs/AGENTIC_PHASE4_DISCOVERY.md` | [x] |
 | 4.2 | Adversarial walk: `docs/AGENTIC_PHASE_4_REVIEW.md` | [x] *(Nathan Nevedal 2026-07-17)* |
 | 4.3 | Staging: enable **coach alert only** first (`ENABLE_SELF_MONITOR_COACH_ALERT`) | [x] *(2026-07-20 — AGENT+COACH_ALERT; TOUCH remains false)* |
-| 4.4 | Optional client touch (`ENABLE_SELF_MONITOR_TOUCH`) only after Phase 0+1 proven | [ ] *(blocked: 0 clients with proactive_presence_consent)* |
+| 4.4 | Optional client touch (`ENABLE_SELF_MONITOR_TOUCH`) only after Phase 0+1 proven | [ ] *(blocked: consent population — see Consent UX)* |
 | 4.5 | Production flip per flag, separately | [x] *(2026-07-20 — AGENT+COACH_ALERT on; TOUCH off)* |
+
+---
+
+## Consent UX / account opt-ins (gap close)
+
+Fail-closed consent left **0/50** clients able to receive proactive touches. Soft prompt + persist/API fixes — **no mass opt-in** without naming accounts + approval.
+
+| Step | Action | Done |
+|------|--------|------|
+| C.1 | Persist via `jsonb_set` (never full `profile_data` replace) | [x] *(code — `nate_commitment_service.update_proactive_consent`)* |
+| C.2 | REST `GET/PUT /api/client/proactive-presence-consent` + health-check `key_set` | [x] |
+| C.3 | Flutter Settings: subtitle, optimistic toggle, REST→WS fallback, one-shot soft prompt | [x] *(local; deploy Flutter when approved)* |
+| C.4 | Wiring: tool Redis sync client, book_session PG write, C_emo UUID, coach username resolve, crystal SERIAL id, plan username/hw | [x] |
+| C.5 | Compose pin Phase 0–4 + N.3 (`ENABLE_SELF_MONITOR_TOUCH=false`) | [x] |
+| C.6 | Prod deploy + consent round-trip on test client | [ ] |
 
 ---
 

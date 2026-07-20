@@ -162,17 +162,27 @@ class NateSelfMonitorAgent:
         if prior_count >= 2 and recent_count < prior_count * (1 - ENGAGEMENT_DROP_THRESHOLD):
             return True
 
-        cemo_rows = await conn.fetch(
+        user_uuid = await conn.fetchval(
             """
-            SELECT c_emo FROM nevedal_metrics
-            WHERE user_id IN ($1, $2)
-            ORDER BY recorded_at DESC NULLS LAST
-            LIMIT $3
+            SELECT id FROM users
+            WHERE username = $1 OR hardware_id = $2
+            LIMIT 1
             """,
             username,
             hw_id,
-            CEMO_DECLINE_STREAK + 1,
         )
+        cemo_rows = []
+        if user_uuid:
+            cemo_rows = await conn.fetch(
+                """
+                SELECT c_emo FROM nevedal_metrics
+                WHERE user_id = $1
+                ORDER BY recorded_at DESC NULLS LAST
+                LIMIT $2
+                """,
+                user_uuid,
+                CEMO_DECLINE_STREAK + 1,
+            )
         if len(cemo_rows) >= CEMO_DECLINE_STREAK:
             vals = [float(r["c_emo"]) for r in cemo_rows[:CEMO_DECLINE_STREAK] if r["c_emo"] is not None]
             if len(vals) == CEMO_DECLINE_STREAK and all(
@@ -181,31 +191,58 @@ class NateSelfMonitorAgent:
                 return True
         return False
 
+    async def _resolve_coach_username(self, coach_ref: str) -> Optional[str]:
+        if not coach_ref or not self._db_pool:
+            return None
+        ref = str(coach_ref).strip()
+        try:
+            async with self._db_pool.acquire() as conn:
+                return await conn.fetchval(
+                    """
+                    SELECT username FROM users
+                    WHERE role = 'COACH'
+                      AND (username = $1 OR hardware_id = $1)
+                    LIMIT 1
+                    """,
+                    ref,
+                )
+        except Exception as e:
+            logger.warning("self_monitor: coach resolve failed for %s: %s", ref, e)
+            return None
+
     async def _handle_flagged_client(self, row) -> None:
         username = row["username"]
         hw_id = row["hardware_id"] or username
-        coach = row["assigned_coach"] or row["coach_id"]
-        if coach_alert_enabled() and coach:
+        coach_ref = row["assigned_coach"] or row["coach_id"]
+        if coach_alert_enabled() and coach_ref:
             try:
                 from app.services.coach_notifications import notify_coach
 
-                await notify_coach(
-                    self._db_pool,
-                    str(coach),
-                    {
-                        "urgency": "medium",
-                        "subject": "Client engagement trend — review suggested",
-                        "message": (
-                            f"Little Nate noticed a sustained engagement or coherence decline "
-                            f"for {username}. Please review when convenient — this is informational, "
-                            f"not a crisis alert."
-                        ),
-                        "payload": {
-                            "alert_type": "self_monitor_engagement",
-                            "client_username": username,
+                coach_username = await self._resolve_coach_username(str(coach_ref))
+                if not coach_username:
+                    logger.warning(
+                        "self_monitor: no coach username for ref=%s client=%s",
+                        coach_ref,
+                        username,
+                    )
+                else:
+                    await notify_coach(
+                        self._db_pool,
+                        coach_username,
+                        {
+                            "urgency": "medium",
+                            "subject": "Client engagement trend — review suggested",
+                            "message": (
+                                f"Little Nate noticed a sustained engagement or coherence decline "
+                                f"for {username}. Please review when convenient — this is informational, "
+                                f"not a crisis alert."
+                            ),
+                            "payload": {
+                                "alert_type": "self_monitor_engagement",
+                                "client_username": username,
+                            },
                         },
-                    },
-                )
+                    )
             except Exception as e:
                 logger.warning("self_monitor: coach notify failed for %s: %s", username, e)
 

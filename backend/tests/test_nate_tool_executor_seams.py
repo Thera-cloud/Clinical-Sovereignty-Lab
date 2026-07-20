@@ -117,3 +117,36 @@ async def test_confirmation_returns_handled_key():
         # no db → persist fails but still handled
         assert out["handled"] is True
         assert "text" in out
+
+
+@pytest.mark.asyncio
+async def test_sync_redis_client_stores_pending():
+    """Bridge passes sync redis-py client; helpers must use to_thread."""
+    from app.services import nate_tool_executor as te
+
+    store = {}
+
+    class SyncRedis:
+        def get(self, key):
+            return store.get(key)
+
+        def setex(self, key, ttl, payload):
+            store[key] = payload
+            return True
+
+        def delete(self, key):
+            store.pop(key, None)
+
+    sync = SyncRedis()
+    with patch.dict("os.environ", {"ENABLE_NATE_TOOL_EXECUTOR": "true"}):
+        result = await propose_tool_action(
+            "HW_SYNC",
+            "",
+            "set_reminder",
+            {"text": "breathe", "scheduled_at": "2026-07-21T10:00:00+00:00"},
+            redis_client=sync,
+        )
+        assert result["proposed"] is True
+        assert te._pending_key("HW_SYNC") in store
+        loaded = await te._load_pending("HW_SYNC", sync)
+        assert loaded and loaded["tool_name"] == "set_reminder"

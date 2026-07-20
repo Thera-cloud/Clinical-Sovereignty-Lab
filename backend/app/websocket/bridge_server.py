@@ -9082,7 +9082,8 @@ class AzureCortex:
                 return ""
             try:
                 from app.services.nate_therapeutic_plan_service import get_active_plan_context
-                return await get_active_plan_context(_cpool, _hw_id)
+                # QUANTUM-CRYSTAL-ARCH: plans may key by username or hardware_id
+                return await get_active_plan_context(_cpool, _uname or _hw_id)
             except Exception:
                 return ""
 
@@ -13974,14 +13975,18 @@ async def handle_client(websocket, path=None):
                                     check_and_execute_confirmation,
                                     maybe_propose_from_utterance,
                                 )
-                                _tool = await check_and_execute_confirmation(uid, text, db_pool=db_pool)
+                                _tool = await check_and_execute_confirmation(
+                                    uid, text, db_pool=db_pool, redis_client=_token_redis_sync,
+                                )
                                 if _tool and _tool.get("handled"):
                                     await websocket.send(json.dumps({
                                         "type": "nate_response",
                                         "text": _tool.get("text", "Done."),
                                     }))
                                     continue
-                                _prop = await maybe_propose_from_utterance(uid, text)
+                                _prop = await maybe_propose_from_utterance(
+                                    uid, text, redis_client=_token_redis_sync,
+                                )
                                 if _prop and _prop.get("handled"):
                                     await websocket.send(json.dumps({
                                         "type": "nate_response",
