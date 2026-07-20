@@ -10493,7 +10493,10 @@ class AzureCortex:
             # FIX-THERAPEUTIC-CONTROLLER — post-flight: audit + optional regenerate
             if _ttc_audit_meta and full_response.strip():
                 try:
-                    if os.environ.get("ENABLE_SYMBOLIC_VERIFIER", "").lower() in ("true", "1", "yes"):
+                    # QUANTUM-CRYSTAL-ARCH: Phase 5a/5b — StateSymbol for extract persist + verifier
+                    _sym_ext_on = os.environ.get("ENABLE_SYMBOLIC_EXTRACTION", "").lower() in ("true", "1", "yes")
+                    _sym_ver_on = os.environ.get("ENABLE_SYMBOLIC_VERIFIER", "").lower() in ("true", "1", "yes")
+                    if _sym_ext_on or _sym_ver_on:
                         from dataclasses import asdict
                         from app.services.nate_commitment_extractor import build_state_symbol
                         _ttc_audit_meta["state_symbol"] = asdict(
@@ -10824,8 +10827,17 @@ class AzureCortex:
                     _ch_username = profile.get("username", uid)
                     _ch_session = self._ensure_session_id(uid)
                     _sym_persist = None
-                    if _ttc_audit_meta and _ttc_audit_meta.get("state_symbol"):
-                        _sym_persist = _ttc_audit_meta.get("state_symbol")
+                    # QUANTUM-CRYSTAL-ARCH: Phase 5a — nested {state} under metadata.symbols
+                    if os.getenv("ENABLE_SYMBOLIC_EXTRACTION", "false").strip().lower() in ("1", "true", "yes"):
+                        try:
+                            from dataclasses import asdict as _asdict_sym
+                            from app.services.nate_commitment_extractor import build_state_symbol as _bss
+                            _st = (_ttc_audit_meta or {}).get("state_symbol") if _ttc_audit_meta else None
+                            if not _st:
+                                _st = _asdict_sym(_bss(_qg_verbatim_user_text, audit_metadata=_ttc_audit_meta))
+                            _sym_persist = {"state": _st}
+                        except Exception:
+                            _sym_persist = None
                     asyncio.create_task(_persist_chat_to_conversation_history(
                         db_pool, _ch_username, _qg_verbatim_user_text, _final_response, _ch_session,
                         turn_id=_turn_id, crystal_ids=_crystal_ids_for_turn,

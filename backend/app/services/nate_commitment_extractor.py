@@ -288,6 +288,43 @@ async def persist_commitment(db_pool: Any, payload: Dict[str, Any]) -> Optional[
         return None
 
 
+async def attach_symbols_to_conversation_turn(
+    db_pool: Any,
+    *,
+    username: str,
+    user_text: str,
+    symbols: Dict[str, Any],
+) -> bool:
+    """QUANTUM-CRYSTAL-ARCH: Phase 5a — merge symbols onto matching chat row metadata."""
+    if not symbolic_extraction_enabled() or not db_pool or not username or not symbols:
+        return False
+    try:
+        async with db_pool.acquire() as conn:
+            updated = await conn.fetchval(
+                """
+                UPDATE conversation_history
+                SET metadata = COALESCE(metadata, '{}'::jsonb)
+                    || jsonb_build_object('symbols', $1::jsonb)
+                WHERE id = (
+                    SELECT id FROM conversation_history
+                    WHERE user_id = $2
+                      AND left(user_text, 200) = left($3::text, 200)
+                      AND created_at > NOW() - INTERVAL '10 minutes'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                )
+                RETURNING id
+                """,
+                json.dumps(symbols),
+                username,
+                (user_text or "")[:4000],
+            )
+            return updated is not None
+    except Exception as e:
+        logger.warning("commitment_extractor: attach symbols failed: %s", e)
+        return False
+
+
 _VALID_COMMITMENT_TYPES = frozenset(
     {"appointment", "practice_goal", "milestone", "custom"}
 )
@@ -334,6 +371,15 @@ async def run_post_turn_extraction(
         )
         if payload:
             await persist_commitment(db_pool, payload)
+            # QUANTUM-CRYSTAL-ARCH: Phase 5a — full {commitment,state} onto chat metadata
+            _syms = payload.get("symbols")
+            if _syms and username:
+                await attach_symbols_to_conversation_turn(
+                    db_pool,
+                    username=username,
+                    user_text=user_text,
+                    symbols=_syms,
+                )
     except Exception as e:
         logger.warning("commitment_extractor: post-turn failed: %s", e)
 
@@ -349,7 +395,8 @@ def schedule_post_turn_extraction(
     """QUANTUM-CRYSTAL-ARCH: one-liner schedule for chat surfaces (flag-gated)."""
     import asyncio
 
-    if not commitments_enabled():
+    # QUANTUM-CRYSTAL-ARCH: Phase 5a — schedule when commitments OR symbolic extraction ON
+    if not commitments_enabled() and not symbolic_extraction_enabled():
         return
     if not db_pool or not hardware_id or not (user_text or "").strip():
         return
