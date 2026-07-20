@@ -12928,160 +12928,176 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   Widget _buildInsightsChatBox() {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF0A0A0A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.3)),
-      ),
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF4ECDC4).withOpacity(0.08),
-              borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(12), topRight: Radius.circular(12)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.psychology, color: Color(0xFF4ECDC4), size: 16),
-                const SizedBox(width: 6),
-                const Text('LITTLE NATE',
-                    style: TextStyle(
-                        color: Color(0xFF4ECDC4),
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1)),
-                if (_focusedClientDisplayName() != null) ...[
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      '• ${_focusedClientDisplayName()}',
-                      style: const TextStyle(
-                          color: Color(0xFFC9A962),
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-                const Spacer(),
-                const Text('COACHING INSIGHTS',
-                    style: TextStyle(
-                        color: Colors.white38,
-                        fontSize: 9,
-                        letterSpacing: 0.5)),
-              ],
-            ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bubbleMaxWidth = constraints.maxWidth * 0.78;
+        return Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF0A0A0A),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.3)),
           ),
-          Expanded(
-            child: _insightsChatMessages.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text(
-                        'Ask about client patterns, coherence trends, risk indicators, or session insights...',
+          child: Column(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF4ECDC4).withOpacity(0.08),
+                  borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(12),
+                      topRight: Radius.circular(12)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.psychology,
+                        color: Color(0xFF4ECDC4), size: 20),
+                    const SizedBox(width: 8),
+                    const Text('LITTLE NATE',
                         style: TextStyle(
-                            color: Colors.white.withOpacity(0.3), fontSize: 12),
-                        textAlign: TextAlign.center,
+                            color: Color(0xFF4ECDC4),
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1)),
+                    if (_focusedClientDisplayName() != null) ...[
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Text(
+                          '• ${_focusedClientDisplayName()}',
+                          style: const TextStyle(
+                              color: Color(0xFFC9A962),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                    ),
-                  )
-                : ListView.builder(
-                    controller: _insightsChatScrollController,
-                    padding: const EdgeInsets.all(8),
-                    itemCount: _insightsChatMessages.length,
-                    itemBuilder: (ctx, i) {
-                      final msg = _insightsChatMessages[i];
-                      final isUser = msg['role'] == 'user';
-                      return Align(
-                        alignment: isUser
-                            ? Alignment.centerRight
-                            : Alignment.centerLeft,
-                        child: Container(
-                          margin: const EdgeInsets.only(bottom: 6),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 8),
-                          constraints: BoxConstraints(
-                              maxWidth: MediaQuery.of(ctx).size.width * 0.55),
-                          decoration: BoxDecoration(
-                            color: isUser
-                                ? const Color(0xFFC9A962).withOpacity(0.15)
-                                : const Color(0xFF4ECDC4).withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: isUser
-                                  ? const Color(0xFFC9A962).withOpacity(0.2)
-                                  : const Color(0xFF4ECDC4).withOpacity(0.15),
-                            ),
-                          ),
-                          child: SelectableText(
-                            msg['content'] ?? '',
+                    ],
+                    const Spacer(),
+                    const Text('COACHING INSIGHTS',
+                        style: TextStyle(
+                            color: Colors.white38,
+                            fontSize: 11,
+                            letterSpacing: 0.5)),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: _insightsChatMessages.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            'Ask about client patterns, coherence trends, risk indicators, or session insights...',
                             style: TextStyle(
-                                color: isUser
-                                    ? const Color(0xFFE8D5A3)
-                                    : Colors.white70,
-                                fontSize: 12,
-                                height: 1.4),
+                                color: Colors.white.withOpacity(0.35),
+                                fontSize: 14,
+                                height: 1.45),
+                            textAlign: TextAlign.center,
                           ),
                         ),
-                      );
-                    },
-                  ),
-          ),
-          if (_insightsChatLoading)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 4),
-              child: SizedBox(
-                  height: 16,
-                  width: 16,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 1.5, color: Color(0xFF4ECDC4))),
-            ),
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              border: Border(
-                  top: BorderSide(color: Colors.white.withOpacity(0.06))),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _insightsChatController,
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                    decoration: InputDecoration(
-                      hintText: 'Ask Nate about your clients...',
-                      hintStyle: TextStyle(
-                          color: Colors.white.withOpacity(0.25), fontSize: 12),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 8),
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide.none),
-                      filled: true,
-                      fillColor: Colors.white.withOpacity(0.04),
+                      )
+                    : ListView.builder(
+                        controller: _insightsChatScrollController,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 12),
+                        itemCount: _insightsChatMessages.length,
+                        itemBuilder: (ctx, i) {
+                          final msg = _insightsChatMessages[i];
+                          final isUser = msg['role'] == 'user';
+                          return Align(
+                            alignment: isUser
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 10),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 10),
+                              constraints: BoxConstraints(
+                                  maxWidth: bubbleMaxWidth),
+                              decoration: BoxDecoration(
+                                color: isUser
+                                    ? const Color(0xFFC9A962).withOpacity(0.15)
+                                    : const Color(0xFF4ECDC4).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isUser
+                                      ? const Color(0xFFC9A962).withOpacity(0.2)
+                                      : const Color(0xFF4ECDC4)
+                                          .withOpacity(0.15),
+                                ),
+                              ),
+                              child: SelectableText(
+                                msg['content'] ?? '',
+                                style: TextStyle(
+                                    color: isUser
+                                        ? const Color(0xFFE8D5A3)
+                                        : Colors.white70,
+                                    fontSize: 14,
+                                    height: 1.5),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+              if (_insightsChatLoading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 6),
+                  child: SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 1.5, color: Color(0xFF4ECDC4))),
+                ),
+              Container(
+                padding: const EdgeInsets.fromLTRB(12, 10, 8, 12),
+                decoration: BoxDecoration(
+                  border: Border(
+                      top: BorderSide(color: Colors.white.withOpacity(0.06))),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _insightsChatController,
+                        minLines: 1,
+                        maxLines: 4,
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 14),
+                        decoration: InputDecoration(
+                          hintText: 'Ask Nate about your clients...',
+                          hintStyle: TextStyle(
+                              color: Colors.white.withOpacity(0.25),
+                              fontSize: 14),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 12),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide.none),
+                          filled: true,
+                          fillColor: Colors.white.withOpacity(0.04),
+                        ),
+                        onSubmitted: _sendInsightsChat,
+                      ),
                     ),
-                    onSubmitted: _sendInsightsChat,
-                  ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.send,
+                          color: Color(0xFF4ECDC4), size: 22),
+                      onPressed: () =>
+                          _sendInsightsChat(_insightsChatController.text),
+                      padding: EdgeInsets.zero,
+                      constraints:
+                          const BoxConstraints(minWidth: 40, minHeight: 40),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 6),
-                IconButton(
-                  icon: const Icon(Icons.send,
-                      color: Color(0xFF4ECDC4), size: 18),
-                  onPressed: () =>
-                      _sendInsightsChat(_insightsChatController.text),
-                  padding: EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(minWidth: 32, minHeight: 32),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -13903,7 +13919,63 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     );
   }
 
+  double _insightsChatPanelHeight(BuildContext context) {
+    final h = MediaQuery.of(context).size.height;
+    if (kIsWeb) {
+      return (h * 0.48).clamp(420.0, 560.0);
+    }
+    return (h * 0.38).clamp(300.0, 440.0);
+  }
+
+  Widget _buildInsightsStatsStrip() {
+    final cards = [
+      _buildStatCard("Total Clients", _clients.length.toString(), Icons.people,
+          const Color(0xFF4361EE)),
+      _buildStatCard(
+          "High Risk", "0", Icons.warning, const Color(0xFFFF9F1C)),
+      _buildStatCard("Sessions Today", _schedule.length.toString(),
+          Icons.calendar_today, const Color(0xFF00F5D4)),
+      _buildStatCard(
+          "Breakthroughs", "0", Icons.star, const Color(0xFFFFD700)),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 720;
+        if (wide) {
+          return Row(
+            children: [
+              for (var i = 0; i < cards.length; i++) ...[
+                if (i > 0) const SizedBox(width: 10),
+                Expanded(child: cards[i]),
+              ],
+            ],
+          );
+        }
+        return Column(
+          children: [
+            Row(
+              children: [
+                Expanded(child: cards[0]),
+                const SizedBox(width: 10),
+                Expanded(child: cards[1]),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(child: cards[2]),
+                const SizedBox(width: 10),
+                Expanded(child: cards[3]),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildInsightsTab() {
+    final chatHeight = _insightsChatPanelHeight(context);
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -13953,63 +14025,15 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          // ── Chat Box + 2x2 Stats Grid ──
+          const SizedBox(height: 16),
+          // ── Full-width coaching chat (primary surface) ──
           SizedBox(
-            height: 240,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Chat box (left — takes ~60% width)
-                Expanded(
-                  flex: 3,
-                  child: _buildInsightsChatBox(),
-                ),
-                const SizedBox(width: 10),
-                // 2x2 stat grid (right — takes ~40% width)
-                Expanded(
-                  flex: 2,
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Expanded(
-                                child: _buildStatCard(
-                                    "Total Clients",
-                                    _clients.length.toString(),
-                                    Icons.people,
-                                    const Color(0xFF4361EE))),
-                            const SizedBox(width: 8),
-                            Expanded(
-                                child: _buildStatCard("High Risk", "0",
-                                    Icons.warning, const Color(0xFFFF9F1C))),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Expanded(
-                                child: _buildStatCard(
-                                    "Sessions Today",
-                                    _schedule.length.toString(),
-                                    Icons.calendar_today,
-                                    const Color(0xFF00F5D4))),
-                            const SizedBox(width: 8),
-                            Expanded(
-                                child: _buildStatCard("Breakthroughs", "0",
-                                    Icons.star, const Color(0xFFFFD700))),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+            height: chatHeight,
+            width: double.infinity,
+            child: _buildInsightsChatBox(),
           ),
+          const SizedBox(height: 12),
+          _buildInsightsStatsStrip(),
           const SizedBox(height: 24),
 
           // Search and filter
