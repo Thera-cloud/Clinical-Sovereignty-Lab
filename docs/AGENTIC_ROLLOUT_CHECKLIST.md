@@ -211,7 +211,7 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 | 5a.1 | Phase 0+1 flag-stable | [x] *(2026-07-20 — prod TOUCH+0+1 on; Track A/B stable)* |
 | 5a.2 | Adversarial walk: `docs/AGENTIC_PHASE_5A_REVIEW.md` | [x] *(Nathan Nevedal 2026-07-20 — all 5 gates; staging flip authorized)* |
 | 5a.3 | Seam tests: `test_symbolic_extraction_seams.py` | [x] *(included in CI gate 1658; staging helper `phase5a` added)* |
-| 5a.4 | Staging flip → verify `conversation_history.metadata.symbols` | [ ] |
+| 5a.4 | Staging flip → verify `conversation_history.metadata.symbols` | [x] *(2026-07-20 — `phase5a on`; staging backend+bridge `ENABLE_SYMBOLIC_EXTRACTION=true`; verifier/forward false; symbols count pending first staging chat turn)* |
 | 5a.5 | Production flip | [ ] |
 
 ---
