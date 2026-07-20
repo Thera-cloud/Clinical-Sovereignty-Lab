@@ -509,46 +509,217 @@ async def rewrite_existing_issue(
     }
 
 
+async def find_open_issue_this_week(db_pool) -> Optional[Dict[str, Any]]:
+    """Return newest non-sent pipeline issue created this UTC week (if any)."""
+    if not db_pool:
+        return None
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, slug, status, topic, content_hash, created_at
+                FROM newsletter_issues
+                WHERE status IN (
+                    'draft', 'researching', 'composing', 'critiquing',
+                    'in_review', 'approved'
+                )
+                  AND created_at >= date_trunc('week', NOW() AT TIME ZONE 'UTC')
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            )
+        return dict(row) if row else None
+    except Exception as e:
+        logger.warning("find_open_issue_this_week: %s", e)
+        return None
+
+
+async def reject_replicate_open_issues(db_pool) -> Dict[str, Any]:
+    """Keep newest open draft per content_hash / topic+day; reject older replicates."""
+    if not db_pool:
+        return {"rejected": 0}
+    rejected = 0
+    async with db_pool.acquire() as conn:
+        # Same content_hash among open issues
+        rows = await conn.fetch(
+            """
+            SELECT id, content_hash, created_at
+            FROM newsletter_issues
+            WHERE status IN ('draft', 'in_review', 'approved', 'rejected')
+              AND content_hash IS NOT NULL
+              AND content_hash <> ''
+              AND created_at > NOW() - INTERVAL '30 days'
+            ORDER BY content_hash, created_at DESC
+            """
+        )
+        seen_hash = set()
+        for r in rows:
+            ch = r["content_hash"]
+            if ch in seen_hash:
+                if r["id"]:
+                    # only reject draft/in_review/approved (not already rejected)
+                    did = await conn.fetchval(
+                        """
+                        UPDATE newsletter_issues
+                        SET status = 'rejected',
+                            rejected_reason = 'replicate_content_hash',
+                            updated_at = NOW()
+                        WHERE id = $1
+                          AND status IN ('draft', 'in_review', 'approved')
+                        RETURNING id
+                        """,
+                        r["id"],
+                    )
+                    if did:
+                        rejected += 1
+            else:
+                seen_hash.add(ch)
+        # Same topic same UTC day among open issues
+        topic_rows = await conn.fetch(
+            """
+            SELECT id, topic, (created_at AT TIME ZONE 'UTC')::date AS d, created_at
+            FROM newsletter_issues
+            WHERE status IN ('draft', 'in_review', 'approved')
+              AND topic IS NOT NULL AND topic <> ''
+              AND created_at > NOW() - INTERVAL '14 days'
+            ORDER BY topic, d, created_at DESC
+            """
+        )
+        seen_topic_day = set()
+        for r in topic_rows:
+            key = (str(r["topic"]).strip().lower(), str(r["d"]))
+            if key in seen_topic_day:
+                did = await conn.fetchval(
+                    """
+                    UPDATE newsletter_issues
+                    SET status = 'rejected',
+                        rejected_reason = 'replicate_topic_same_day',
+                        updated_at = NOW()
+                    WHERE id = $1 AND status IN ('draft', 'in_review', 'approved')
+                    RETURNING id
+                    """,
+                    r["id"],
+                )
+                if did:
+                    rejected += 1
+            else:
+                seen_topic_day.add(key)
+    return {"rejected": rejected}
+
+
 async def persist_issue(db_pool, draft: Dict[str, Any], status: str = "in_review") -> Optional[str]:
     if not db_pool:
         return None
+    import secrets as _secrets
+
+    slug = draft.get("slug") or _slugify(draft.get("topic") or "dispatch")
+    ch = draft.get("content_hash")
+
     async with db_pool.acquire() as conn:
-        issue_id = await conn.fetchval(
-            """
-            INSERT INTO newsletter_issues (
-                slug, status, topic, subject_line, opener, body_md, draft_body,
-                techniques, citations, external_link, research_bundle, content_hash
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7,
-                $8::jsonb, $9::jsonb, $10, $11::jsonb, $12
+        # Never create a second open issue that clones recently sent content
+        if ch:
+            twin = await conn.fetchval(
+                """
+                SELECT slug FROM newsletter_issues
+                WHERE content_hash = $1 AND status = 'sent'
+                  AND sent_at > NOW() - INTERVAL '180 days'
+                LIMIT 1
+                """,
+                ch,
             )
-            ON CONFLICT (slug) DO UPDATE SET
-                status = EXCLUDED.status,
-                topic = EXCLUDED.topic,
-                subject_line = EXCLUDED.subject_line,
-                opener = EXCLUDED.opener,
-                body_md = EXCLUDED.body_md,
-                draft_body = EXCLUDED.draft_body,
-                techniques = EXCLUDED.techniques,
-                citations = EXCLUDED.citations,
-                external_link = EXCLUDED.external_link,
-                research_bundle = EXCLUDED.research_bundle,
-                content_hash = EXCLUDED.content_hash,
-                updated_at = NOW()
-            RETURNING id
-            """,
-            draft["slug"],
-            status,
-            draft.get("topic"),
-            draft.get("subject_line"),
-            draft.get("opener"),
-            draft.get("body_md"),
-            draft.get("draft_body"),
-            json.dumps(draft.get("techniques") or []),
-            json.dumps(draft.get("citations") or []),
-            draft.get("external_link"),
-            json.dumps(draft.get("research_bundle") or {}),
-            draft.get("content_hash"),
+            if twin:
+                logger.warning("persist_issue blocked duplicate of sent slug=%s", twin)
+                return None
+
+        issue_id = None
+        for _attempt in range(6):
+            existing = await conn.fetchrow(
+                "SELECT id, status FROM newsletter_issues WHERE slug = $1", slug
+            )
+            if existing and existing["status"] in ("sent", "approved"):
+                # Never overwrite sent/approved — mint a unique slug
+                slug = f"{draft.get('slug') or _slugify('dispatch')}-{_secrets.token_hex(2)}"
+                draft["slug"] = slug
+                continue
+            if existing and existing["status"] in (
+                "draft",
+                "in_review",
+                "rejected",
+                "researching",
+                "composing",
+                "critiquing",
+            ):
+                issue_id = await conn.fetchval(
+                    """
+                    UPDATE newsletter_issues SET
+                        status = $2,
+                        topic = $3,
+                        subject_line = $4,
+                        opener = $5,
+                        body_md = $6,
+                        draft_body = $7,
+                        techniques = $8::jsonb,
+                        citations = $9::jsonb,
+                        external_link = $10,
+                        research_bundle = $11::jsonb,
+                        content_hash = $12,
+                        updated_at = NOW()
+                    WHERE id = $1
+                      AND status IN (
+                        'draft', 'in_review', 'rejected',
+                        'researching', 'composing', 'critiquing'
+                      )
+                    RETURNING id
+                    """,
+                    existing["id"],
+                    status,
+                    draft.get("topic"),
+                    draft.get("subject_line"),
+                    draft.get("opener"),
+                    draft.get("body_md"),
+                    draft.get("draft_body"),
+                    json.dumps(draft.get("techniques") or []),
+                    json.dumps(draft.get("citations") or []),
+                    draft.get("external_link"),
+                    json.dumps(draft.get("research_bundle") or {}),
+                    ch,
+                )
+                if issue_id:
+                    break
+                slug = f"{slug}-{_secrets.token_hex(2)}"
+                draft["slug"] = slug
+                continue
+            issue_id = await conn.fetchval(
+                """
+                INSERT INTO newsletter_issues (
+                    slug, status, topic, subject_line, opener, body_md, draft_body,
+                    techniques, citations, external_link, research_bundle, content_hash
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7,
+                    $8::jsonb, $9::jsonb, $10, $11::jsonb, $12
+                )
+                RETURNING id
+                """,
+                slug,
+                status,
+                draft.get("topic"),
+                draft.get("subject_line"),
+                draft.get("opener"),
+                draft.get("body_md"),
+                draft.get("draft_body"),
+                json.dumps(draft.get("techniques") or []),
+                json.dumps(draft.get("citations") or []),
+                draft.get("external_link"),
+                json.dumps(draft.get("research_bundle") or {}),
+                ch,
+            )
+            draft["slug"] = slug
+            break
+
+        if not issue_id:
+            return None
+        await conn.execute(
+            "DELETE FROM newsletter_citations WHERE issue_id = $1", issue_id
         )
         for c in draft.get("citations") or []:
             await conn.execute(

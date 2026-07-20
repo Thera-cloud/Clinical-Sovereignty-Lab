@@ -28,7 +28,18 @@ def _load(mod_name: str, rel: str):
 def test_html_email_has_safety_footer_and_unsub():
     delivery = _load("nl_delivery_ut", "app/services/newsletter_delivery.py")
     html = delivery._html_email(
-        {"subject_line": "Test", "final_body": "Hello", "slug": "test-issue"},
+        {
+            "subject_line": "Test",
+            "final_body": "Hello [NIMH](https://www.nimh.nih.gov/health)\n\n## Techniques\nStep one",
+            "slug": "test-issue",
+            "citations": [
+                {
+                    "source_name": "NIMH",
+                    "year": 2025,
+                    "url": "https://www.nimh.nih.gov/health",
+                }
+            ],
+        },
         rate_base="https://api.example/rate?t=abc",
         unsub_url="https://api.example/unsubscribe?sid=1&t=tok",
     )
@@ -36,6 +47,33 @@ def test_html_email_has_safety_footer_and_unsub():
     assert "Story Library" in html
     assert "Little Nate Dispatch" in html
     assert "/api/newsletter/library/test-issue/page" in html
+    assert 'href="https://www.nimh.nih.gov/health"' in html
+    assert "<h2" in html
+    assert "Open library page" in html
+
+
+def test_md_body_to_html_links_and_headers():
+    delivery = _load("nl_delivery_md_ut", "app/services/newsletter_delivery.py")
+    html = delivery.md_body_to_html("## Go deeper\nSee [988](https://988lifeline.org)")
+    assert "<h2" in html
+    assert 'href="https://988lifeline.org"' in html
+    escaped = delivery.md_body_to_html("<script>x</script>")
+    assert "<script>" not in escaped
+    assert "&lt;script&gt;" in escaped
+
+
+def test_rate_token_uses_canonical_salt(monkeypatch):
+    monkeypatch.setenv("NEWSLETTER_TOKEN_SALT", "nate-dispatch")
+    delivery = _load("nl_delivery_tok_ut", "app/services/newsletter_delivery.py")
+    tok = delivery.rate_token_for_subscriber(
+        "11111111-1111-1111-1111-111111111111",
+        "22222222-2222-2222-2222-222222222222",
+    )
+    expect = hashlib.sha256(
+        b"11111111-1111-1111-1111-111111111111:22222222-2222-2222-2222-222222222222:rate:nate-dispatch"
+    ).hexdigest()[:32]
+    assert tok == expect
+    assert len(delivery.library_rate_token("11111111-1111-1111-1111-111111111111")) == 32
 
 
 def test_render_library_html_crisis_footer():
@@ -235,6 +273,22 @@ def test_migration_seeds_baseline_and_gap_fix():
     gap = (BACKEND / "migrations/253_newsletter_gap_fixes.sql").read_text()
     assert "learned_at" in gap
     assert "library_html_path" in gap
+    gap255 = (BACKEND / "migrations/255_newsletter_wiring_gaps.sql").read_text()
+    assert "uq_newsletter_feedback_issue_sub" in gap255
+
+
+def test_library_recall_gate_ignores_short_unrelated():
+    recall = _load("nl_recall_gate_ut", "app/services/newsletter_library_recall.py")
+    assert recall._query_wants_library("hi") is False
+    assert recall._query_wants_library("anxiety sleep stress tonight") is True
+    assert recall._query_wants_library("story library") is True
+
+
+def test_admin_dispatch_has_insights_tab():
+    text = (ROOT / "dashboard" / "newsletter_dispatch.html").read_text(encoding="utf-8")
+    assert "Insights" in text
+    assert "/metrics" in text
+    assert "reject-replicates" in text
 
 
 def test_signals_normalize_theme():

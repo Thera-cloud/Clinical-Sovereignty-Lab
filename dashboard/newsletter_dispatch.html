@@ -71,6 +71,7 @@ iframe.preview{width:100%;min-height:70vh;border:1px solid var(--line);backgroun
         <div class="tab" data-tab="edit" onclick="switchTab('edit')">Edit</div>
         <div class="tab" data-tab="rewrite" onclick="switchTab('rewrite')">Rewrite</div>
         <div class="tab" data-tab="image" onclick="switchTab('image')">Image</div>
+        <div class="tab" data-tab="insights" onclick="switchTab('insights')">Insights</div>
       </div>
       <div class="pane active" id="pane-preview">
         <div class="meta" id="previewMeta"></div>
@@ -113,6 +114,16 @@ iframe.preview{width:100%;min-height:70vh;border:1px solid var(--line);backgroun
         </div>
         <p class="hint">Edit the descriptor anytime. Rewrite refreshes it from the new topic and regenerates the still. Grok first; Gemini if xAI fails. ~10–40s.</p>
       </div>
+      <div class="pane" id="pane-insights">
+        <div class="meta" id="insightsMeta">Ratings, opens, library views, and learning state.</div>
+        <pre id="insightsBody" style="white-space:pre-wrap;font-size:.85rem;color:var(--bright);background:#0a0a0a;border:1px solid #333;padding:14px;min-height:200px">Select an issue…</pre>
+        <div class="actions">
+          <button type="button" class="secondary" onclick="loadInsights()">Refresh metrics</button>
+          <button type="button" class="secondary" id="btnLearn" onclick="runLearning()">Run learning now</button>
+          <button type="button" class="secondary" onclick="rejectReplicates()">Reject replicate drafts</button>
+        </div>
+        <p class="hint">Learning normally waits 72h after send. “Run learning now” forces this issue. Replicate sweep rejects same-day topic / same content-hash open drafts.</p>
+      </div>
       <div class="actions" style="padding:0 20px 20px;border:0;margin:0">
         <button type="button" id="btnApprove" onclick="approveIssue()">Approve</button>
         <button type="button" id="btnSend" class="secondary" onclick="sendIssue()" style="display:none">Send to subscribers</button>
@@ -142,6 +153,7 @@ function switchTab(name){
   document.querySelectorAll('.pane').forEach(function(p){p.classList.toggle('active', p.id==='pane-'+name);});
   if(name==='preview' && current) loadPreview();
   if(name==='image' && current){ fillHeroPrompt(); refreshHero(); }
+  if(name==='insights' && current) loadInsights();
 }
 
 function stripProviderPrefix(s){
@@ -184,6 +196,65 @@ async function loadStats(){
   var a = (d.by_status&&d.by_status.active)||0;
   var p = (d.by_status&&d.by_status.pending)||0;
   document.getElementById('stats').textContent = a+' active · '+p+' pending · '+(d.warm_leads||0)+' warm leads';
+}
+
+async function loadInsights(){
+  if(!current)return;
+  var meta = document.getElementById('insightsMeta');
+  var body = document.getElementById('insightsBody');
+  meta.textContent = 'Loading metrics…';
+  body.textContent = '';
+  var r = await api('/api/newsletter/admin/issues/'+current.id+'/metrics');
+  if(!r)return;
+  var d = await r.json();
+  if(!r.ok){meta.textContent='Metrics unavailable';body.textContent=JSON.stringify(d.detail||d,null,2);return;}
+  var f = d.feedback||{};
+  var lib = d.library||{};
+  var lines = [
+    'Status: '+(d.issue&&d.issue.status||'')+' · slug: '+(d.issue&&d.issue.slug||''),
+    'Sent: '+(d.issue&&d.issue.sent_at||'—')+' · Learned: '+(d.issue&&d.issue.learned_at||'not yet'),
+    '',
+    'Ratings: '+(f.ratings||0)+' · avg helpful: '+(f.avg_helpful!=null?f.avg_helpful:'—')+' · likes: '+(f.likes||0),
+    'Sends: '+(d.sends||0)+' · Opens: '+(d.opens||0)+' · Clicks: '+(d.clicks||0),
+    'Library views: '+(lib.view_count||0)+' · shares: '+(lib.share_count||0)+' · chat cites: '+(lib.chat_reference_count||0),
+  ];
+  if(d.content_twins && d.content_twins.length){
+    lines.push('', 'Content twins (same hash):');
+    d.content_twins.forEach(function(t){
+      lines.push('  - '+(t.status||'')+' '+(t.slug||t.id));
+    });
+  }
+  if(d.symbolic && d.symbolic.length){
+    lines.push('', 'Symbolic memory:');
+    d.symbolic.forEach(function(s){
+      lines.push('  ['+(s.kind||'')+' @'+(s.confidence||'')+'] '+(s.content||'').slice(0,200));
+    });
+  }
+  meta.textContent = 'Issue metrics';
+  body.textContent = lines.join('\n');
+}
+
+async function runLearning(){
+  if(!current)return;
+  setMsg('Running learning…');
+  var q = current.status==='sent' ? ('?force_issue='+encodeURIComponent(current.id)) : '';
+  var r = await api('/api/newsletter/admin/learning/run'+q, {method:'POST', body:'{}'});
+  if(!r)return;
+  var d = await r.json();
+  if(!r.ok){setMsg(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail||d), true);return;}
+  setMsg('Learning processed '+(d.processed||0)+' issue(s)'+(d.forced?' (forced)':''));
+  loadInsights();
+  loadIssues(current.id);
+}
+
+async function rejectReplicates(){
+  if(!confirm('Reject open drafts that duplicate content hash or same-day topic?'))return;
+  var r = await api('/api/newsletter/admin/issues/reject-replicates', {method:'POST', body:'{}'});
+  if(!r)return;
+  var d = await r.json();
+  if(!r.ok){setMsg(JSON.stringify(d.detail||d), true);return;}
+  setMsg('Rejected '+(d.rejected||0)+' replicate draft(s)');
+  loadIssues(current&&current.id);
 }
 
 async function loadIssues(selectId){

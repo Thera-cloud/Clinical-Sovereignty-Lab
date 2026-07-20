@@ -22,6 +22,17 @@ def newsletter_enabled() -> bool:
     )
 
 
+def newsletter_learning_enabled() -> bool:
+    """Learning loop can run without weekly auto-compose."""
+    raw = os.getenv("ENABLE_NEWSLETTER_LEARNING", "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    # Default on when agent compose is on; else still on so +72h learning works
+    return True
+
+
 class NewsletterAgent:
     """30-min cycle: Wed start compose → in_review; send only when approved (manual)."""
 
@@ -37,7 +48,11 @@ class NewsletterAgent:
             return
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
-        logger.info("NewsletterAgent started")
+        logger.info(
+            "NewsletterAgent started (compose=%s learning=%s)",
+            newsletter_enabled(),
+            newsletter_learning_enabled(),
+        )
 
     async def stop(self):
         self._running = False
@@ -59,7 +74,7 @@ class NewsletterAgent:
             await asyncio.sleep(1800)  # 30 min
 
     async def _cycle(self):
-        if not newsletter_enabled() or not self._db_pool:
+        if not self._db_pool:
             return
         now = datetime.now(timezone.utc)
         # Avoid audit-hour restart windows (HH:50–HH:10 at 5/17/23)
@@ -68,13 +83,25 @@ class NewsletterAgent:
         if now.hour in (5, 17, 23) and now.minute < 10:
             return
 
+        # Dedup open drafts / same-day topic clones
+        try:
+            from app.services.newsletter_pipeline import reject_replicate_open_issues
+
+            await reject_replicate_open_issues(self._db_pool)
+        except Exception as e:
+            logger.warning("replicate sweep: %s", e)
+
+        # Learning job for issues sent ~72h ago (independent of compose flag)
+        if newsletter_learning_enabled():
+            await self._run_learning_due()
+
+        if not newsletter_enabled():
+            return
+
         # Wednesday UTC: ensure one in_review draft exists for the week
         if now.weekday() == 2 and self._last_compose_date != now.date():
             await self.run_pipeline_to_review()
             self._last_compose_date = now.date()
-
-        # Learning job for issues sent ~72h ago
-        await self._run_learning_due()
 
         # Warm leads (optional)
         if os.getenv("ENABLE_NEWSLETTER_WARM_LEADS", "false").strip().lower() in (
@@ -110,9 +137,22 @@ class NewsletterAgent:
             critique_issue,
             draft_issue_from_bundle,
             draft_issue_llm,
+            find_open_issue_this_week,
             persist_issue,
+            reject_replicate_open_issues,
             select_topic,
         )
+
+        await reject_replicate_open_issues(self._db_pool)
+        open_issue = await find_open_issue_this_week(self._db_pool)
+        if open_issue:
+            return {
+                "ok": False,
+                "error": "open_issue_exists",
+                "issue_id": str(open_issue["id"]),
+                "slug": open_issue.get("slug"),
+                "status": open_issue.get("status"),
+            }
 
         topic = await select_topic(self._db_pool)
         bundle = await build_research_bundle(topic)
@@ -125,6 +165,8 @@ class NewsletterAgent:
         if not ok:
             return {"ok": False, "errors": errors}
         issue_id = await persist_issue(self._db_pool, draft, status="in_review")
+        if not issue_id:
+            return {"ok": False, "error": "duplicate_or_persist_failed"}
         try:
             from app.services.ceo_inbox_notify import schedule_ceo_inbox_notify
 

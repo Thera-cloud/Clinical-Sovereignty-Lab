@@ -151,7 +151,8 @@ async def sendgrid_event_webhook(request: Request):
                 or (event.get("custom_args") or {}).get("channel")
                 or ""
             )
-            if str(channel).lower() == "newsletter":
+            _ca = event.get("custom_args") if isinstance(event.get("custom_args"), dict) else {}
+            if str(channel).lower() == "newsletter" or str(_ca.get("channel", "")).lower() == "newsletter":
                 await _handle_newsletter_sendgrid_event(
                     conn, event, event_type, sg_message_id, email, timestamp
                 )
@@ -243,11 +244,15 @@ async def _handle_newsletter_sendgrid_event(
         new_status = status_map.get(event_type)
         issue_id = None
         subscriber_id = None
+        custom = event.get("custom_args") if isinstance(event.get("custom_args"), dict) else {}
+        # Prefer ledger join on provider id; fall back to SendGrid custom_args
         if sg_message_id:
             row = await conn.fetchrow(
                 """
                 SELECT issue_id, subscriber_id FROM newsletter_sends
-                WHERE provider_message_id = $1 LIMIT 1
+                WHERE provider_message_id = $1
+                   OR provider_message_id LIKE $1 || '.%'
+                LIMIT 1
                 """,
                 sg_message_id,
             )
@@ -259,10 +264,46 @@ async def _handle_newsletter_sendgrid_event(
                         """
                         UPDATE newsletter_sends SET status = $1
                         WHERE provider_message_id = $2
+                           OR provider_message_id LIKE $2 || '.%'
                         """,
                         new_status,
                         sg_message_id,
                     )
+        if issue_id is None:
+            raw_issue = event.get("issue_id") or custom.get("issue_id")
+            if raw_issue:
+                try:
+                    import uuid as _uuid
+
+                    issue_id = _uuid.UUID(str(raw_issue))
+                except Exception:
+                    issue_id = None
+        if subscriber_id is None:
+            raw_sub = event.get("subscriber_id") or custom.get("subscriber_id")
+            if raw_sub:
+                try:
+                    import uuid as _uuid
+
+                    subscriber_id = _uuid.UUID(str(raw_sub))
+                except Exception:
+                    subscriber_id = None
+        if issue_id is None and email:
+            # Last resort: match active send by email for this event window
+            row = await conn.fetchrow(
+                """
+                SELECT s.issue_id, s.subscriber_id
+                FROM newsletter_sends s
+                JOIN newsletter_subscribers sub ON sub.id = s.subscriber_id
+                WHERE LOWER(sub.email) = LOWER($1)
+                  AND s.sent_at > NOW() - INTERVAL '14 days'
+                ORDER BY s.sent_at DESC NULLS LAST
+                LIMIT 1
+                """,
+                email,
+            )
+            if row:
+                issue_id = row["issue_id"]
+                subscriber_id = row["subscriber_id"]
         await conn.execute(
             """
             INSERT INTO newsletter_send_events
@@ -273,7 +314,14 @@ async def _handle_newsletter_sendgrid_event(
             subscriber_id,
             sg_message_id or None,
             event_type,
-            json.dumps({"email": email, "sg_message_id": sg_message_id})[:2000],
+            json.dumps(
+                {
+                    "email": email,
+                    "sg_message_id": sg_message_id,
+                    "issue_id": str(issue_id) if issue_id else None,
+                    "subscriber_id": str(subscriber_id) if subscriber_id else None,
+                }
+            )[:2000],
         )
         if event_type in ("bounce", "spamreport", "unsubscribe") and email:
             await conn.execute(

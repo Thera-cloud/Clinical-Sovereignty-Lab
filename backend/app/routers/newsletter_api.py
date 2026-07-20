@@ -362,18 +362,24 @@ async def rate(
     score: int = Query(..., ge=1, le=5),
     sid: Optional[str] = Query(None),
     t: str = Query(...),
+    liked: Optional[bool] = Query(None),
+    via: Optional[str] = Query(None),
 ):
-    """One-tap GET rating (email clients). Idempotent."""
+    """One-tap GET rating (email + Story Library). Idempotent per subscriber/fingerprint."""
+    from app.services.newsletter_delivery import (
+        library_rate_token,
+        rate_token_for_subscriber,
+    )
+
     pool = _pool(request)
     async with pool.acquire() as conn:
         issue_row = await conn.fetchrow(
-            "SELECT id FROM newsletter_issues WHERE slug = $1", issue
+            "SELECT id, topic FROM newsletter_issues WHERE slug = $1", issue
         )
         if not issue_row:
             raise HTTPException(404, "Issue not found")
-        # Lightweight token check: must match expected hash pattern length
-        if len(t) < 16:
-            raise HTTPException(400, "Invalid token")
+        issue_id = issue_row["id"]
+        topic = issue_row["topic"]
         sub_id = None
         if sid:
             try:
@@ -381,20 +387,85 @@ async def rate(
 
                 sub_id = _uuid.UUID(sid)
             except Exception:
-                sub_id = None
-        topic = await conn.fetchval(
-            "SELECT topic FROM newsletter_issues WHERE id = $1", issue_row["id"]
-        )
-        await conn.execute(
-            """
-            INSERT INTO newsletter_feedback (issue_id, subscriber_id, helpful_score, rating_token_hash)
-            VALUES ($1, $2, $3, $4)
-            """,
-            issue_row["id"],
-            sub_id,
-            score,
-            _hash_token(t),
-        )
+                raise HTTPException(400, "Invalid subscriber")
+        expected_lib = library_rate_token(issue_id)
+        ok = False
+        if sub_id is not None:
+            expected_sub = rate_token_for_subscriber(issue_id, sub_id)
+            ok = secrets.compare_digest(t, expected_sub)
+        if not ok:
+            ok = secrets.compare_digest(t, expected_lib)
+        if not ok:
+            raise HTTPException(400, "Invalid token")
+
+        # Fingerprint: subscriber token hash, or IP+day for library anonymous
+        if sub_id is not None:
+            token_fp = _hash_token(t)
+        else:
+            ip = (request.client.host if request.client else "0") or "0"
+            day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            token_fp = hashlib.sha256(
+                f"{issue_id}:{ip}:{day}:{TOKEN_SALT}:lib".encode()
+            ).hexdigest()
+
+        if sub_id is not None:
+            updated = await conn.fetchval(
+                """
+                UPDATE newsletter_feedback
+                SET helpful_score = $3,
+                    liked = COALESCE($4, liked),
+                    rating_token_hash = $5
+                WHERE issue_id = $1 AND subscriber_id = $2
+                RETURNING id
+                """,
+                issue_id,
+                sub_id,
+                score,
+                liked,
+                token_fp,
+            )
+            if not updated:
+                await conn.execute(
+                    """
+                    INSERT INTO newsletter_feedback
+                        (issue_id, subscriber_id, helpful_score, liked, rating_token_hash)
+                    VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    issue_id,
+                    sub_id,
+                    score,
+                    liked,
+                    token_fp,
+                )
+        else:
+            updated = await conn.fetchval(
+                """
+                UPDATE newsletter_feedback
+                SET helpful_score = $3, liked = COALESCE($4, liked)
+                WHERE issue_id = $1 AND rating_token_hash = $2
+                RETURNING id
+                """,
+                issue_id,
+                token_fp,
+                score,
+                liked,
+            )
+            if not updated:
+                try:
+                    await conn.execute(
+                        """
+                        INSERT INTO newsletter_feedback
+                            (issue_id, subscriber_id, helpful_score, liked, rating_token_hash)
+                        VALUES ($1, NULL, $2, $3, $4)
+                        """,
+                        issue_id,
+                        score,
+                        liked,
+                        token_fp,
+                    )
+                except Exception:
+                    # Unique token race — treat as success
+                    pass
     if topic:
         try:
             from app.services.newsletter_signals import record_theme_signal
@@ -436,8 +507,9 @@ async def library_issue(slug: str, request: Request):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT slug, topic, subject_line, opener, body_md, final_body,
-                   techniques, citations, external_link, sent_at
+            SELECT id, slug, topic, subject_line, opener, body_md, final_body,
+                   techniques, citations, external_link, sent_at,
+                   hero_image_url, hero_image_r2_key
             FROM newsletter_issues
             WHERE slug = $1 AND status = 'sent'
             """,
@@ -475,7 +547,8 @@ async def library_issue_html(slug: str, request: Request):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT slug, topic, subject_line, opener, body_md, final_body, sent_at,
+            SELECT id, slug, topic, subject_line, opener, body_md, final_body, sent_at,
+                   citations, external_link,
                    hero_image_url, hero_image_r2_key, hero_image_generated_at
             FROM newsletter_issues
             WHERE slug = $1 AND status = 'sent'
@@ -600,7 +673,8 @@ async def admin_list_issues(request: Request, admin: Dict = Depends(require_admi
             SELECT id, slug, status, topic, subject_line, opener,
                    LEFT(COALESCE(body_md, ''), 160) AS body_preview,
                    hero_image_url, hero_image_r2_key, hero_image_generated_at,
-                   hero_image_prompt, created_at, sent_at, approved_at, updated_at
+                   hero_image_prompt, created_at, sent_at, approved_at,
+                   learned_at, rejected_reason, updated_at
             FROM newsletter_issues
             ORDER BY created_at DESC LIMIT 50
             """
@@ -894,3 +968,134 @@ async def admin_sub_stats(request: Request, admin: Dict = Depends(require_admin)
         "by_status": {r["status"]: r["n"] for r in rows},
         "warm_leads": warm or 0,
     }
+
+
+@admin_router.get("/issues/{issue_id}/metrics")
+async def admin_issue_metrics(
+    issue_id: str, request: Request, admin: Dict = Depends(require_admin)
+):
+    """Ratings, opens, library views/shares, learning state for one issue."""
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        issue = await conn.fetchrow(
+            """
+            SELECT id, slug, topic, status, sent_at, learned_at, content_hash
+            FROM newsletter_issues WHERE id = $1::uuid
+            """,
+            issue_id,
+        )
+        if not issue:
+            raise HTTPException(404, "Issue not found")
+        feedback = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE helpful_score IS NOT NULL)::int AS ratings,
+                ROUND(AVG(helpful_score)::numeric, 2) AS avg_helpful,
+                COUNT(*) FILTER (WHERE liked IS TRUE)::int AS likes
+            FROM newsletter_feedback WHERE issue_id = $1
+            """,
+            issue["id"],
+        )
+        opens = await conn.fetchval(
+            """
+            SELECT COUNT(*)::int FROM newsletter_send_events
+            WHERE issue_id = $1 AND event_type = 'open'
+            """,
+            issue["id"],
+        )
+        clicks = await conn.fetchval(
+            """
+            SELECT COUNT(*)::int FROM newsletter_send_events
+            WHERE issue_id = $1 AND event_type = 'click'
+            """,
+            issue["id"],
+        )
+        sends = await conn.fetchval(
+            """
+            SELECT COUNT(*)::int FROM newsletter_sends
+            WHERE issue_id = $1 AND status IN ('sent', 'delivered', 'opened', 'clicked')
+            """,
+            issue["id"],
+        )
+        lib = await conn.fetchrow(
+            """
+            SELECT view_count, share_count, chat_reference_count
+            FROM newsletter_library_stats WHERE slug = $1
+            """,
+            issue["slug"],
+        )
+        symbolic = await conn.fetch(
+            """
+            SELECT kind, content, confidence, created_at
+            FROM newsletter_symbolic_memory
+            WHERE source_issue_id = $1 AND scope = 'active'
+            ORDER BY created_at DESC LIMIT 5
+            """,
+            issue["id"],
+        )
+        twins = await conn.fetch(
+            """
+            SELECT id, slug, status, created_at
+            FROM newsletter_issues
+            WHERE content_hash IS NOT NULL
+              AND content_hash = $1
+              AND id <> $2
+            ORDER BY created_at DESC LIMIT 5
+            """,
+            issue["content_hash"],
+            issue["id"],
+        )
+    return {
+        "status": "ok",
+        "issue": _row_json(issue),
+        "feedback": dict(feedback) if feedback else {},
+        "opens": opens or 0,
+        "clicks": clicks or 0,
+        "sends": sends or 0,
+        "library": _row_json(lib) if lib else {
+            "view_count": 0,
+            "share_count": 0,
+            "chat_reference_count": 0,
+        },
+        "symbolic": [_row_json(r) for r in symbolic],
+        "content_twins": [_row_json(r) for r in twins],
+    }
+
+
+@admin_router.post("/learning/run")
+async def admin_run_learning(
+    request: Request,
+    admin: Dict = Depends(require_admin),
+    force_issue: Optional[str] = Query(None),
+):
+    """Run +72h learning job; optional force_issue skips the 72h wait for one slug/id."""
+    from app.services.newsletter_learning import run_learning_for_due_issues
+
+    pool = _pool(request)
+    force_id = None
+    if force_issue:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id FROM newsletter_issues
+                WHERE status = 'sent'
+                  AND (id::text = $1 OR slug = $1)
+                """,
+                force_issue,
+            )
+            if not row:
+                raise HTTPException(404, "Sent issue not found")
+            force_id = row["id"]
+    result = await run_learning_for_due_issues(pool, force_issue_id=force_id)
+    return {"status": "ok", **result, "forced": bool(force_issue)}
+
+
+@admin_router.post("/issues/reject-replicates")
+async def admin_reject_replicates(
+    request: Request, admin: Dict = Depends(require_admin)
+):
+    """Reject open draft/approved clones sharing content_hash or same topic+day."""
+    from app.services.newsletter_pipeline import reject_replicate_open_issues
+
+    result = await reject_replicate_open_issues(_pool(request))
+    return {"status": "ok", **result}

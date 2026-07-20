@@ -5,11 +5,15 @@
 from __future__ import annotations
 
 import hashlib
+import html as html_mod
+import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
+from urllib.parse import quote
 
 logger = logging.getLogger("nate.newsletter_delivery")
 
@@ -23,6 +27,122 @@ PHYSICAL_ADDRESS = os.getenv(
     "NEWSLETTER_PHYSICAL_ADDRESS",
     "Sovereign Sanctuary, Stafford, TX 77477",
 )
+TOKEN_SALT = os.getenv("NEWSLETTER_TOKEN_SALT", "nate-dispatch")
+
+
+def rate_token_for_subscriber(issue_id: Union[str, Any], subscriber_id: Union[str, Any]) -> str:
+    """Canonical per-subscriber rating token (must match newsletter_api /rate)."""
+    return hashlib.sha256(
+        f"{issue_id}:{subscriber_id}:rate:{TOKEN_SALT}".encode()
+    ).hexdigest()[:32]
+
+
+def library_rate_token(issue_id: Union[str, Any]) -> str:
+    """Shared library-page rating token (anonymous, fingerprint added at API)."""
+    return hashlib.sha256(
+        f"{issue_id}:library_rate:{TOKEN_SALT}".encode()
+    ).hexdigest()[:32]
+
+
+def _inline_md(escaped_line: str) -> str:
+    """Apply link/bold/italic on an already HTML-escaped line."""
+
+    def _link(m: re.Match) -> str:
+        label, url = m.group(1), m.group(2).strip()
+        if not url.startswith(("http://", "https://", "mailto:")):
+            return m.group(0)
+        safe_url = html_mod.escape(url, quote=True)
+        return f'<a href="{safe_url}">{label}</a>'
+
+    s = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _link, escaped_line)
+    s = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", s)
+    s = re.sub(r"(?<!\w)_([^_]+)_(?!\w)", r"<em>\1</em>", s)
+    return s
+
+
+def md_body_to_html(md: str) -> str:
+    """Minimal safe markdown → HTML for email + Story Library (no external lib)."""
+    out: List[str] = []
+    for line in (md or "").split("\n"):
+        if line.startswith("### "):
+            out.append(f"<h3 style=\"color:#C9A962;\">{_inline_md(html_mod.escape(line[4:]))}</h3>")
+        elif line.startswith("## "):
+            out.append(f"<h2 style=\"color:#C9A962;\">{_inline_md(html_mod.escape(line[3:]))}</h2>")
+        elif line.startswith("# "):
+            out.append(f"<h1 style=\"color:#C9A962;\">{_inline_md(html_mod.escape(line[2:]))}</h1>")
+        elif not line.strip():
+            out.append("<br>")
+        else:
+            out.append(_inline_md(html_mod.escape(line)) + "<br>")
+    return "\n".join(out)
+
+
+def _parse_citations(issue: Dict[str, Any]) -> List[Dict[str, Any]]:
+    cites = issue.get("citations")
+    if isinstance(cites, str):
+        try:
+            cites = json.loads(cites)
+        except Exception:
+            cites = []
+    if not isinstance(cites, list):
+        return []
+    return [c for c in cites if isinstance(c, dict) and c.get("url")]
+
+
+def _sources_html(issue: Dict[str, Any]) -> str:
+    """Structured sources block when citations exist (clickable)."""
+    cites = _parse_citations(issue)
+    ext = (issue.get("external_link") or "").strip()
+    if not cites and not ext:
+        return ""
+    body_lower = (issue.get("final_body") or issue.get("body_md") or "").lower()
+    # Skip if body already has a Further reading section with a markdown link
+    if "further reading" in body_lower and "](http" in body_lower:
+        if not cites:
+            return ""
+    items = []
+    seen = set()
+    for c in cites[:8]:
+        url = (c.get("url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        name = html_mod.escape(str(c.get("source_name") or url)[:120])
+        year = c.get("year")
+        label = f"{name} ({year})" if year else name
+        items.append(
+            f'<li><a href="{html_mod.escape(url, quote=True)}" style="color:#4ECDC4;">{label}</a></li>'
+        )
+    if ext and ext not in seen:
+        items.append(
+            f'<li><a href="{html_mod.escape(ext, quote=True)}" style="color:#4ECDC4;">'
+            f"{html_mod.escape(ext[:80])}</a></li>"
+        )
+    if not items:
+        return ""
+    return (
+        '<div style="margin-top:28px;padding-top:16px;border-top:1px solid #333;">'
+        '<p style="color:#8B7355;font-size:13px;margin:0 0 8px;">Sources</p>'
+        f'<ul style="color:#E8D5A3;font-size:14px;padding-left:20px;">{"".join(items)}</ul></div>'
+    )
+
+
+def _library_rate_block(issue: Dict[str, Any]) -> str:
+    """1–5 rating links for Story Library HTML pages."""
+    issue_id = issue.get("id")
+    slug = issue.get("slug") or ""
+    if not issue_id or not slug:
+        return ""
+    tok = library_rate_token(issue_id)
+    base = f"{API_BASE}/api/newsletter/rate?issue={quote(slug)}&t={tok}&via=library"
+    links = " ".join(
+        f'<a href="{base}&score={s}" style="color:#C9A962;margin-right:8px;">{s}</a>'
+        for s in (5, 4, 3, 2, 1)
+    )
+    return (
+        f'<p style="margin-top:24px;">Was this helpful? {links}</p>'
+        '<p style="font-size:12px;color:#8B7355;">Your rating teaches Little Nate which themes to cover next.</p>'
+    )
 
 
 def library_page_url(slug: str) -> str:
@@ -66,16 +186,19 @@ def _hero_img_tag(
 
 def render_library_html(issue: Dict[str, Any], *, admin_preview: bool = False) -> str:
     slug = issue.get("slug") or "issue"
-    body = (issue.get("final_body") or issue.get("body_md") or "").replace("\n", "<br>\n")
+    body = md_body_to_html(issue.get("final_body") or issue.get("body_md") or "")
+    sources = _sources_html(issue)
+    rate_block = "" if admin_preview else _library_rate_block(issue)
     hero = _hero_img_tag(issue, placeholder=admin_preview)
     og_image = ""
     if issue.get("hero_image_url") or issue.get("hero_image_r2_key"):
         og_url = issue.get("hero_image_url") or _hero_stable_url(slug)
         og_image = f'<meta property="og:image" content="{og_url}">'
+    topic_esc = html_mod.escape(str(issue.get("topic") or ""))
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
-<meta charset="utf-8"><title>{issue.get('subject_line') or 'Little Nate Dispatch'}</title>
-<meta property="og:title" content="{issue.get('subject_line') or 'Little Nate Dispatch'}">
+<meta charset="utf-8"><title>{html_mod.escape(str(issue.get('subject_line') or 'Little Nate Dispatch'))}</title>
+<meta property="og:title" content="{html_mod.escape(str(issue.get('subject_line') or 'Little Nate Dispatch'))}">
 <meta property="og:description" content="Little Nate's Story Library">
 {og_image}
 <link rel="canonical" href="{library_page_url(slug)}">
@@ -86,9 +209,11 @@ def render_library_html(issue: Dict[str, Any], *, admin_preview: bool = False) -
 a{{color:#4ECDC4}} h1{{color:#C9A962}} img{{max-width:100%}}</style>
 </head><body>
 <h1>Little Nate Dispatch</h1>
-<p>{issue.get('topic') or ''}</p>
+<p>{topic_esc}</p>
 {hero}
 <article>{body}</article>
+{sources}
+{rate_block}
 <footer style="margin-top:48px;font-size:13px;color:#8B7355;">
 Little Nate is an AI companion — education, not therapy or medical advice.
 Crisis: <a href="https://988lifeline.org">988</a> · <a href="https://findahelpline.com">findahelpline.com</a>
@@ -98,16 +223,19 @@ Crisis: <a href="https://988lifeline.org">988</a> · <a href="https://findahelpl
 
 
 def _html_email(issue: Dict[str, Any], rate_base: str, unsub_url: str) -> str:
-    body = (issue.get("final_body") or issue.get("body_md") or "").replace("\n", "<br>\n")
+    body = md_body_to_html(issue.get("final_body") or issue.get("body_md") or "")
+    sources = _sources_html(issue)
     slug = issue.get("slug") or ""
     library_url = library_page_url(slug)
-    share_track = f"{API_BASE}/api/newsletter/share?slug={slug}&channel=email"
+    share_open = f"{API_BASE}/api/newsletter/share?slug={quote(slug)}&channel=email"
     hero = _hero_img_tag(issue, max_width="560px")
+    subject_esc = html_mod.escape(str(issue.get("subject_line") or ""))
     return f"""<!DOCTYPE html><html><body style="font-family:Georgia,serif;background:#050505;color:#E8D5A3;padding:24px;">
 <h1 style="color:#C9A962;">Little Nate Dispatch</h1>
-<p style="color:#8B7355;">{issue.get('subject_line') or ''}</p>
+<p style="color:#8B7355;">{subject_esc}</p>
 {hero}
 <div style="color:#ddd;line-height:1.55;">{body}</div>
+{sources}
 <hr style="border-color:#333;">
 <p><a href="{library_url}" style="color:#4ECDC4;">Read in Story Library</a></p>
 <p>Was this helpful?
@@ -117,10 +245,10 @@ def _html_email(issue: Dict[str, Any], rate_base: str, unsub_url: str) -> str:
  <a href="{rate_base}&score=2" style="color:#C9A962;">2</a>
  <a href="{rate_base}&score=1" style="color:#C9A962;">1</a>
 </p>
-<p><a href="mailto:?subject=Little%20Nate%20Dispatch&body={library_url}" style="color:#C9A962;">Share by email</a>
- · <a href="sms:?&body={library_url}" style="color:#C9A962;">Share by text</a>
- · <a href="{share_track}" style="color:#8B7355;">Track share</a></p>
-<p style="font-size:12px;color:#888;">{PHYSICAL_ADDRESS}<br>
+<p><a href="mailto:?subject=Little%20Nate%20Dispatch&amp;body={quote(library_url)}" style="color:#C9A962;">Share by email</a>
+ · <a href="sms:?&amp;body={quote(library_url)}" style="color:#C9A962;">Share by text</a>
+ · <a href="{share_open}" style="color:#8B7355;">Open library page</a></p>
+<p style="font-size:12px;color:#888;">{html_mod.escape(PHYSICAL_ADDRESS)}<br>
 <a href="{unsub_url}" style="color:#888;">Unsubscribe</a></p>
 </body></html>"""
 
@@ -159,6 +287,19 @@ async def send_issue_to_subscribers(db_pool, issue_id: str, redis=None) -> Dict[
 
     sms_sent = 0
     async with db_pool.acquire() as conn:
+        already = await conn.fetchrow(
+            "SELECT id, status, slug FROM newsletter_issues WHERE id = $1",
+            issue_id,
+        )
+        if not already:
+            return {"sent": 0, "error": "not_found"}
+        if already["status"] == "sent":
+            return {
+                "sent": 0,
+                "error": "already_sent",
+                "slug": already["slug"],
+                "issue_id": str(issue_id),
+            }
         issue = await conn.fetchrow(
             "SELECT * FROM newsletter_issues WHERE id = $1 AND status = 'approved'",
             issue_id,
@@ -166,6 +307,26 @@ async def send_issue_to_subscribers(db_pool, issue_id: str, redis=None) -> Dict[
         if not issue:
             return {"sent": 0, "error": "not_approved"}
         issue_d = dict(issue)
+        # Block near-replicate of a recently sent issue (same content_hash)
+        ch = issue_d.get("content_hash")
+        if ch:
+            twin = await conn.fetchval(
+                """
+                SELECT slug FROM newsletter_issues
+                WHERE content_hash = $1 AND status = 'sent' AND id <> $2::uuid
+                  AND sent_at > NOW() - INTERVAL '180 days'
+                LIMIT 1
+                """,
+                ch,
+                issue_id,
+            )
+            if twin:
+                return {
+                    "sent": 0,
+                    "error": "duplicate_content",
+                    "duplicate_of": twin,
+                    "issue_id": str(issue_id),
+                }
 
     # Ensure topic hero exists before HTML email (best-effort; send continues if Imagine fails)
     if not issue_d.get("hero_image_url"):
@@ -217,16 +378,13 @@ async def send_issue_to_subscribers(db_pool, issue_id: str, redis=None) -> Dict[
                 issue_id,
                 sub["id"],
             )
-            rate_token = hashlib.sha256(
-                f"{issue_id}:{sub['id']}:rate:{os.getenv('NEWSLETTER_TOKEN_SALT', 'nate')}".encode()
-            ).hexdigest()[:32]
+            rate_token = rate_token_for_subscriber(issue_id, sub["id"])
             rate_base = (
                 f"{API_BASE}/api/newsletter/rate"
                 f"?issue={issue_d['slug']}&sid={sub['id']}&t={rate_token}"
             )
-            salt = os.getenv("NEWSLETTER_TOKEN_SALT", "nate-dispatch")
             unsub_raw = hashlib.sha256(
-                f"{salt}:unsub:{sub['id']}".encode()
+                f"{TOKEN_SALT}:unsub:{sub['id']}".encode()
             ).hexdigest()[:40]
             unsub_url = (
                 f"{API_BASE}/api/newsletter/unsubscribe"

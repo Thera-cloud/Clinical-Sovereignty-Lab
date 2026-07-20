@@ -5,28 +5,52 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger("nate.newsletter_learning")
 
 
-async def run_learning_for_due_issues(db_pool) -> Dict[str, Any]:
+async def run_learning_for_due_issues(
+    db_pool, *, force_issue_id: Any = None
+) -> Dict[str, Any]:
     if not db_pool:
         return {"processed": 0}
     processed = 0
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT i.id, i.slug, i.topic, i.draft_body, i.final_body, i.body_md
-            FROM newsletter_issues i
-            WHERE i.status = 'sent'
-              AND i.sent_at IS NOT NULL
-              AND i.learned_at IS NULL
-              AND i.sent_at <= NOW() - INTERVAL '72 hours'
-            ORDER BY i.sent_at ASC
-            LIMIT 20
-            """
-        )
+        if force_issue_id:
+            rows = await conn.fetch(
+                """
+                SELECT i.id, i.slug, i.topic, i.draft_body, i.final_body, i.body_md
+                FROM newsletter_issues i
+                WHERE i.status = 'sent'
+                  AND i.id = $1::uuid
+                LIMIT 1
+                """,
+                force_issue_id,
+            )
+            # Allow re-learn on force
+            if rows:
+                await conn.execute(
+                    """
+                    UPDATE newsletter_issues
+                    SET learned_at = NULL, updated_at = NOW()
+                    WHERE id = $1::uuid
+                    """,
+                    force_issue_id,
+                )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT i.id, i.slug, i.topic, i.draft_body, i.final_body, i.body_md
+                FROM newsletter_issues i
+                WHERE i.status = 'sent'
+                  AND i.sent_at IS NOT NULL
+                  AND i.learned_at IS NULL
+                  AND i.sent_at <= NOW() - INTERVAL '72 hours'
+                ORDER BY i.sent_at ASC
+                LIMIT 20
+                """
+            )
         for issue in rows:
             # Claim row first (idempotent)
             claimed = await conn.fetchval(

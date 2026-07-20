@@ -11,6 +11,27 @@ from uuid import UUID
 logger = logging.getLogger("nate.newsletter_library_recall")
 
 
+_LIBRARY_INTENT = (
+    "dispatch",
+    "story library",
+    "newsletter",
+    "little nate dispatch",
+    "this week's issue",
+    "last issue",
+    "your article",
+    "your essay",
+)
+
+
+def _query_wants_library(query_text: str) -> bool:
+    """Avoid injecting Library on short/unrelated chat turns."""
+    q = (query_text or "").strip().lower()
+    if any(k in q for k in _LIBRARY_INTENT):
+        return len(q) >= 8
+    # Topical match via ILIKE — require enough signal
+    return len(q) >= 16
+
+
 async def recall_newsletter_library_context(
     db_pool,
     query_text: str,
@@ -29,8 +50,14 @@ async def recall_newsletter_library_context(
         return ""
 
     q = (query_text or "").strip()
+    if not _query_wants_library(q):
+        return ""
+
+    explicit = any(k in q.lower() for k in _LIBRARY_INTENT)
+    # Explicit Library ask with short phrase → latest published; else keyword ILIKE
+    fetch_q = "" if explicit and len(q) < 24 else q
     rows = await _fetch_library_crystals(
-        db_pool, q, max_issues=max_issues, trial_safe_only=trial_safe_only
+        db_pool, fetch_q, max_issues=max_issues, trial_safe_only=trial_safe_only
     )
     if not rows:
         return ""
@@ -48,7 +75,9 @@ async def recall_newsletter_library_context(
     lines = [
         "FROM LITTLE NATE'S STORY LIBRARY (editorial, not personal memory):",
         "When citing, use the exact issue title below. Never invent a Dispatch issue.",
+        "Share link pattern: https://api.sovereignsanctuary.net/api/newsletter/library/{slug}/page",
     ]
+    slugs = []
     for r in rows[:max_issues]:
         meta = r.get("metadata") or {}
         if isinstance(meta, str):
@@ -60,8 +89,31 @@ async def recall_newsletter_library_context(
                 meta = {}
         title = meta.get("title") or meta.get("slug") or "Dispatch issue"
         slug = meta.get("slug") or ""
+        if slug:
+            slugs.append(slug)
         text = (r.get("crystal_text") or r.get("text") or "")[:600]
-        lines.append(f"- [{title}] slug={slug}: {text}")
+        link = (
+            f"https://api.sovereignsanctuary.net/api/newsletter/library/{slug}/page"
+            if slug
+            else ""
+        )
+        lines.append(f"- [{title}] slug={slug} url={link}: {text}")
+
+    if slugs:
+        try:
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE newsletter_library_stats
+                    SET chat_reference_count = chat_reference_count + 1,
+                        updated_at = NOW()
+                    WHERE slug = ANY($1::text[])
+                    """,
+                    slugs,
+                )
+        except Exception as e:
+            logger.warning("chat_reference_count bump failed: %s", e)
+
     return "\n".join(lines)
 
 
@@ -72,7 +124,7 @@ async def _fetch_library_crystals(
     max_issues: int,
     trial_safe_only: bool,
 ) -> List[Dict[str, Any]]:
-    has_q = len(query_text) >= 8
+    has_q = len((query_text or "").strip()) >= 16
     try:
         async with db_pool.acquire() as conn:
             if has_q:

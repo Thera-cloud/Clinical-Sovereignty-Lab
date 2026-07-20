@@ -2722,10 +2722,15 @@ async def lifespan(app: FastAPI):
     _newsletter_agent = None
     _newsletter_auditor = None
     try:
-        from app.services.newsletter_agent import NewsletterAgent, newsletter_enabled
+        from app.services.newsletter_agent import (
+            NewsletterAgent,
+            newsletter_enabled,
+            newsletter_learning_enabled,
+        )
         from app.services.newsletter_auditor import NewsletterAuditor
         _newsletter_agent = NewsletterAgent(db_pool=db_pool, app_state=app.state)
-        if newsletter_enabled() and not _is_clone:
+        # QUANTUM-CRYSTAL-ARCH — start for compose and/or +72h learning
+        if (newsletter_enabled() or newsletter_learning_enabled()) and not _is_clone:
             await _newsletter_agent.start()
         app.state.newsletter_agent = _newsletter_agent
         _newsletter_auditor = NewsletterAuditor(
@@ -2737,7 +2742,10 @@ async def lifespan(app: FastAPI):
         if not _is_clone:
             await _newsletter_auditor.start()
         app.state.newsletter_auditor = _newsletter_auditor
-        print("   ✅ NewsletterAgent/Auditor ready (ENABLE_NEWSLETTER_AGENT)")
+        print(
+            "   ✅ NewsletterAgent/Auditor ready "
+            f"(compose={newsletter_enabled()} learning={newsletter_learning_enabled()})"
+        )
     except Exception as _nl_err:
         print(f"   ⚠️  Newsletter init failed: {_nl_err}")
 
