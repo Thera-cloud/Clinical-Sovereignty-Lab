@@ -1,6 +1,6 @@
 # Agentic Roadmap Rollout Checklist (Phases 0–5)
 
-**Status:** TRACK A + B BAKED ON STAGING, DUAL-REVIEWER SIGNED (2026-07-14) — migrations applied, Phase 0 + Phase 1 flipped/tested on `nate_staging_backend`, Flutter deployed, reviewed by Nathan Nevedal + Kristy Moore; audit token/accounts verified on GREEN. **Production Phase 0–4 + N.3 ON** (TOUCH still false; operator Nathan Nevedal 2026-07-20). **0.4/1.4 now closed, code-verified not data-verified** (consent-default seam test passes — that one *is* a real, executed test; shared-extractor isolation is closed on code+schema audit only — the requested staging query did run and returned 0/0, but that result is vacuous/non-dispositive since no staging traffic has ever exercised the path, see Known Limitation below — no live observation of isolation exists). **P3 forensic complete and closed** — log-verified: `daily_backup.sh`'s pre-migration dump completed at 13:33:40.952 UTC, ~50ms before the first 237–239 `CREATE TABLE` statement at 13:33:41 UTC (sequential, as designed). An earlier version of this note incorrectly claimed no snapshot existed, based on an unverified time estimate; retracted and corrected in the P3 note below once the actual postgres statement log was checked. `daily_backup.sh` exit-code gate closed in `staging_bake_setup.sh` (2026-07-20). Prod **0.5/0.6 + 1.1/1.5 + 2.1/2.3/2.4 + 3.3 + 4.5 complete 2026-07-20** (72h burn waived; TOUCH still off). Track C (Phase 5 neuro-symbolic) untouched.
+**Status:** TRACK A + B BAKED ON STAGING, DUAL-REVIEWER SIGNED (2026-07-14) — migrations applied, Phase 0 + Phase 1 flipped/tested on `nate_staging_backend`, Flutter deployed, reviewed by Nathan Nevedal + Kristy Moore; audit token/accounts verified on GREEN. **Production Phase 0–4 + N.3 ON** (TOUCH true as of 2026-07-20; 41 active CLIENTS opted into `proactive_presence_consent`; operator Nathan Nevedal). **0.4/1.4 now closed, code-verified not data-verified** (consent-default seam test passes — that one *is* a real, executed test; shared-extractor isolation is closed on code+schema audit only — the requested staging query did run and returned 0/0, but that result is vacuous/non-dispositive since no staging traffic has ever exercised the path, see Known Limitation below — no live observation of isolation exists). **P3 forensic complete and closed** — log-verified: `daily_backup.sh`'s pre-migration dump completed at 13:33:40.952 UTC, ~50ms before the first 237–239 `CREATE TABLE` statement at 13:33:41 UTC (sequential, as designed). An earlier version of this note incorrectly claimed no snapshot existed, based on an unverified time estimate; retracted and corrected in the P3 note below once the actual postgres statement log was checked. `daily_backup.sh` exit-code gate closed in `staging_bake_setup.sh` (2026-07-20). Prod **0.5/0.6 + 1.1/1.5 + 2.1/2.3/2.4 + 3.3 + 4.4/4.5 complete 2026-07-20** (72h burn waived; TOUCH on). Track C (Phase 5 neuro-symbolic) next.
 
 **Infrastructure:** `docker-compose.staging.yml` + `scripts/staging_bake_setup.sh` → `nate_staging_backend` on `127.0.0.1:8011`, DB `little_nate_staging`. (Port 8001 is already bound by host nginx on GREEN for an unrelated vhost — do not reuse it.)
 
@@ -178,8 +178,8 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 | 4.1 | Discovery doc reviewed: `docs/AGENTIC_PHASE4_DISCOVERY.md` | [x] |
 | 4.2 | Adversarial walk: `docs/AGENTIC_PHASE_4_REVIEW.md` | [x] *(Nathan Nevedal 2026-07-17)* |
 | 4.3 | Staging: enable **coach alert only** first (`ENABLE_SELF_MONITOR_COACH_ALERT`) | [x] *(2026-07-20 — AGENT+COACH_ALERT; TOUCH remains false)* |
-| 4.4 | Optional client touch (`ENABLE_SELF_MONITOR_TOUCH`) only after Phase 0+1 proven | [ ] *(blocked: consent population — see Consent UX)* |
-| 4.5 | Production flip per flag, separately | [x] *(2026-07-20 — AGENT+COACH_ALERT on; TOUCH off)* |
+| 4.4 | Optional client touch (`ENABLE_SELF_MONITOR_TOUCH`) only after Phase 0+1 proven | [x] *(2026-07-20 — mass opt-in 41 active CLIENTS via jsonb_set; 8 DELETED/DEACTIVATED skipped; `.env` TOUCH=true; safe_deploy backend+bridge)* |
+| 4.5 | Production flip per flag, separately | [x] *(2026-07-20 — AGENT+COACH_ALERT on; TOUCH on via 4.4)* |
 
 ---
 
@@ -303,7 +303,7 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 - [ ] `ENVIRONMENT=production` on backend **and** bridge
 - [ ] Trust enforcer window (optional): after audit hour
 - [ ] E2E smoke: real UI path for the phase (not linter-only)
-- [ ] Remaining open: **4.4** TOUCH off until consent population; live data verify for 0.4/1.4 still vacuous without traffic
+- [ ] Remaining open: live data verify for 0.4/1.4 still vacuous without traffic; **new CLIENT registrations still fail-closed** on `proactive_presence_consent` (app consent ≠ presence consent — Settings/soft prompt only unless registration is wired)
 
 ---
 
