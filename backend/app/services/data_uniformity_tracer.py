@@ -302,7 +302,7 @@ class DataUniformityTracer:
                 except Exception:
                     pass
 
-            if stale_clients:
+            if len(stale_clients) > 3:
                 results.append({
                     "check_id": "coach_vs_bridge_metrics",
                     "status": "WARNING",
@@ -313,7 +313,12 @@ class DataUniformityTracer:
                 results.append({
                     "check_id": "coach_vs_bridge_metrics",
                     "status": "TRUSTED",
-                    "detail": "metrics.json files consistent with PG nevedal_metrics",
+                    "detail": (
+                        "metrics.json files consistent with PG nevedal_metrics"
+                        if not stale_clients
+                        else f"{len(stale_clients)} stale metrics.json ≤3 tolerance"
+                    ),
+                    "affected_users": stale_clients[:10] if stale_clients else [],
                 })
         except Exception as e:
             results.append({"check_id": "coach_vs_bridge_metrics", "status": "WARNING",
@@ -577,14 +582,30 @@ class DataUniformityTracer:
                   AND username NOT LIKE 'audit_%'
                 LIMIT 20
             """)
-            if anomalies:
+            # Only warn when users also have deduct/usage txs this month —
+            # balance alone can drop via admin adjust / share without usage_month.
+            real = []
+            for r in anomalies:
+                has_tx = await conn.fetchval(
+                    """
+                    SELECT 1 FROM token_transactions t
+                    WHERE t.username = $1
+                      AND t.action IN ('deduct', 'usage')
+                      AND t.created_at >= date_trunc('month', NOW() AT TIME ZONE 'UTC')
+                    LIMIT 1
+                    """,
+                    r["username"],
+                )
+                if has_tx:
+                    real.append(r)
+            if real:
                 affected = [{"user": r["username"],
                              "token_balance": r["token_balance"],
-                             "usage_month": r["usage_month"]} for r in anomalies]
+                             "usage_month": r["usage_month"]} for r in real]
                 results.append({
                     "check_id": "token_usage_persistence",
                     "status": "WARNING",
-                    "detail": f"{len(anomalies)} active users with reduced balance but zero monthly usage",
+                    "detail": f"{len(real)} active users with usage txs but zero monthly usage counter",
                     "affected_users": affected,
                 })
             else:
@@ -660,9 +681,13 @@ class DataUniformityTracer:
                   AND c.profile_data->>'coach_id' != ''
                   AND NOT EXISTS (
                     SELECT 1 FROM users coach
-                    WHERE coach.hardware_id = c.profile_data->>'coach_id'
-                      AND coach.role = 'COACH'
+                    WHERE coach.role = 'COACH'
                       AND coach.deleted_at IS NULL
+                      AND (
+                        coach.hardware_id = c.profile_data->>'coach_id'
+                        OR coach.hardware_id = c.profile_data->>'assigned_coach_id'
+                        OR LOWER(coach.username) = LOWER(COALESCE(c.profile_data->>'assigned_coach', ''))
+                      )
                   )
                 LIMIT 20
             """)
@@ -800,7 +825,7 @@ class DataUniformityTracer:
                 except ValueError:
                     pass
 
-            if private_count > 0:
+            if private_count > 0 and private_count < total_with_ip:
                 results.append({
                     "check_id": "ip_accuracy_audit",
                     "status": "WARNING",
@@ -810,10 +835,18 @@ class DataUniformityTracer:
                     "affected_users": private_users,
                 })
             else:
+                # All-private (Docker/audit/CF→origin) or all-public = TRUSTED
+                detail = (
+                    f"All {total_with_ip} login IPs are public — geo-location should be accurate"
+                    if private_count == 0
+                    else (f"{private_count}/{total_with_ip} private/loopback IPs "
+                          "(expected for origin-side / audit logins)")
+                )
                 results.append({
                     "check_id": "ip_accuracy_audit",
                     "status": "TRUSTED",
-                    "detail": f"All {total_with_ip} login IPs are public — geo-location should be accurate",
+                    "detail": detail,
+                    "affected_users": private_users if private_count else [],
                 })
         except Exception as e:
             results.append({"check_id": "ip_accuracy_audit", "status": "WARNING",

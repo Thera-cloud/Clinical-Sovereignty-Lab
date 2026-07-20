@@ -762,6 +762,7 @@ async def prepare_therapeutic_context(
             )
     except Exception as _e:
         logger.warning("therapeutic_controller: bridge wiring skipped: %s", _e)
+    # end v1.3 Sensitive Clinical Bridge wiring seam
 
     # QUANTUM-CRYSTAL-ARCH (Sensitive Bridge v1.4 extension, additive):
     # Auto-ingest named IFS parts from chat into user_parts_registry as a

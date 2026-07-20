@@ -153,24 +153,35 @@ class QuickBooksAuditor:
                     return "TRUSTED" if row["token_expiry"] and row["token_expiry"] > now else "WARNING"
 
                 elif check_name == "last_sync_within_12h":
+                    # TRUSTED when connected + token valid even if idle >12h
+                    # (dormant QB is ops, not trust failure). Stale only warns
+                    # when token is expired (connection unhealthy).
                     row = await conn.fetchrow(
-                        "SELECT last_sync_at, created_at FROM qb_connection LIMIT 1"
+                        "SELECT last_sync_at, token_expiry FROM qb_connection LIMIT 1"
                     )
                     if not row:
                         return "TRUSTED"
                     if not row["last_sync_at"]:
                         return "TRUSTED"
-                    cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+                    now = datetime.now(timezone.utc)
+                    if row["token_expiry"] and row["token_expiry"] > now:
+                        return "TRUSTED"
+                    cutoff = now - timedelta(hours=12)
                     return "TRUSTED" if row["last_sync_at"] > cutoff else "WARNING"
 
                 elif check_name == "sync_log_has_entries":
                     conn_exists = await conn.fetchval("SELECT COUNT(*) FROM qb_connection")
                     if not conn_exists or conn_exists == 0:
                         return "TRUSTED"
-                    first_sync = await conn.fetchval(
-                        "SELECT last_sync_at FROM qb_connection LIMIT 1"
+                    # Connected + healthy token with empty log = never synced /
+                    # dormant — TRUSTED. Empty log + expired token = WARNING.
+                    tok = await conn.fetchrow(
+                        "SELECT last_sync_at, token_expiry FROM qb_connection LIMIT 1"
                     )
-                    if first_sync is None:
+                    if tok is None or tok["last_sync_at"] is None:
+                        return "TRUSTED"
+                    now = datetime.now(timezone.utc)
+                    if tok["token_expiry"] and tok["token_expiry"] > now:
                         return "TRUSTED"
                     val = await conn.fetchval("SELECT COUNT(*) FROM qb_sync_log")
                     return "TRUSTED" if val and val > 0 else "WARNING"

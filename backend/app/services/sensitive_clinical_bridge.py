@@ -3335,10 +3335,10 @@ def _auditor_self_check() -> Dict[str, bool]:
         import inspect
         from app.services.therapeutic_controller import prepare_therapeutic_context
         ctrl_src = inspect.getsource(prepare_therapeutic_context)
-        # Extract the seam block — opens with the marker comment, closes
-        # before the first non-seam statement (`tmc_result = ...`).
+        # Extract the seam block — opens with the marker comment, closes at
+        # the explicit end marker (v1.4 parts/book blocks live AFTER the seam).
         marker = "# v1.3 Sensitive Clinical Bridge — single wiring seam"
-        end_marker = "tmc_result = await _classify_tmc"
+        end_marker = "# end v1.3 Sensitive Clinical Bridge wiring seam"
         if marker in ctrl_src and end_marker in ctrl_src:
             i = ctrl_src.index(marker)
             j = ctrl_src.index(end_marker, i)
