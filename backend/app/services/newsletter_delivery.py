@@ -44,6 +44,78 @@ def library_rate_token(issue_id: Union[str, Any]) -> str:
     ).hexdigest()[:32]
 
 
+def utm_library_url(slug: str, channel: str) -> str:
+    """Public library page URL with share attribution query params."""
+    base = library_page_url(slug)
+    sep = "&" if "?" in base else "?"
+    return (
+        f"{base}{sep}utm_source=share&utm_medium={quote(channel[:32])}"
+        f"&utm_campaign=dispatch&ref={quote(slug)}"
+    )
+
+
+def share_tracker_url(slug: str, channel: str) -> str:
+    """API share endpoint — increments stats then 302s to network or library."""
+    return f"{API_BASE}/api/newsletter/share?slug={quote(slug)}&channel={quote(channel[:32])}"
+
+
+def share_intent_url(channel: str, library_utm_url: str, title: str = "") -> str:
+    """Build native share-intent URL for a social network (or passthrough)."""
+    enc = quote(library_utm_url, safe="")
+    t = quote((title or "Little Nate Dispatch")[:120], safe="")
+    ch = (channel or "link").lower()
+    if ch in ("x", "twitter"):
+        return f"https://twitter.com/intent/tweet?url={enc}&text={t}"
+    if ch == "facebook":
+        return f"https://www.facebook.com/sharer/sharer.php?u={enc}"
+    if ch == "linkedin":
+        return f"https://www.linkedin.com/sharing/share-offsite/?url={enc}"
+    if ch == "whatsapp":
+        return f"https://api.whatsapp.com/send?text={t}%20{enc}"
+    if ch == "email":
+        return f"mailto:?subject={t}&body={enc}"
+    if ch == "sms":
+        return f"sms:?&body={enc}"
+    return library_utm_url
+
+
+def _share_row_html(slug: str, title: str = "", *, style_inline: bool = True) -> str:
+    """Tracked share links for email + library pages."""
+    channels = (
+        ("x", "X"),
+        ("facebook", "Facebook"),
+        ("linkedin", "LinkedIn"),
+        ("whatsapp", "WhatsApp"),
+        ("email", "Email"),
+        ("sms", "Text"),
+    )
+    color = "#C9A962" if style_inline else "#4ECDC4"
+    parts = []
+    for ch, label in channels:
+        href = share_tracker_url(slug, ch)
+        parts.append(
+            f'<a href="{href}" style="color:{color};margin-right:10px;">{label}</a>'
+        )
+    return (
+        '<p style="margin:16px 0 8px;font-size:14px;">Share this Dispatch: '
+        + " · ".join(parts)
+        + "</p>"
+    )
+
+
+def _subscribe_cta_html(slug: str) -> str:
+    sub = (
+        f"{PUBLIC_BASE}/nate_story_library.html"
+        f"?subscribe=1&utm_source=library&utm_medium=cta&ref={quote(slug)}"
+    )
+    return (
+        f'<p style="margin:20px 0;padding:14px;border:1px solid #333;border-radius:4px;">'
+        f'<strong style="color:#C9A962;">Get the next Dispatch</strong><br>'
+        f'<span style="color:#8B7355;font-size:14px;">Weekly education from Little Nate — free.</span><br>'
+        f'<a href="{sub}" style="color:#4ECDC4;">Subscribe</a></p>'
+    )
+
+
 def _inline_md(escaped_line: str) -> str:
     """Apply link/bold/italic on an already HTML-escaped line."""
 
@@ -184,22 +256,38 @@ def _hero_img_tag(
     )
 
 
+def _og_description(issue: Dict[str, Any]) -> str:
+    raw = (issue.get("opener") or issue.get("final_body") or issue.get("body_md") or "")
+    raw = re.sub(r"[#*_`\[\]]+", "", raw)
+    raw = re.sub(r"\s+", " ", raw).strip()
+    return (raw[:180] + ("…" if len(raw) > 180 else "")) or "Little Nate's Story Library"
+
+
 def render_library_html(issue: Dict[str, Any], *, admin_preview: bool = False) -> str:
     slug = issue.get("slug") or "issue"
     body = md_body_to_html(issue.get("final_body") or issue.get("body_md") or "")
     sources = _sources_html(issue)
     rate_block = "" if admin_preview else _library_rate_block(issue)
     hero = _hero_img_tag(issue, placeholder=admin_preview)
+    share_row = "" if admin_preview else _share_row_html(
+        slug, str(issue.get("subject_line") or ""), style_inline=False
+    )
+    subscribe = "" if admin_preview else _subscribe_cta_html(slug)
     og_image = ""
     if issue.get("hero_image_url") or issue.get("hero_image_r2_key"):
         og_url = issue.get("hero_image_url") or _hero_stable_url(slug)
         og_image = f'<meta property="og:image" content="{og_url}">'
     topic_esc = html_mod.escape(str(issue.get("topic") or ""))
+    og_desc = html_mod.escape(_og_description(issue))
+    title_esc = html_mod.escape(str(issue.get("subject_line") or "Little Nate Dispatch"))
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
-<meta charset="utf-8"><title>{html_mod.escape(str(issue.get('subject_line') or 'Little Nate Dispatch'))}</title>
-<meta property="og:title" content="{html_mod.escape(str(issue.get('subject_line') or 'Little Nate Dispatch'))}">
-<meta property="og:description" content="Little Nate's Story Library">
+<meta charset="utf-8"><title>{title_esc}</title>
+<meta property="og:title" content="{title_esc}">
+<meta property="og:description" content="{og_desc}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{title_esc}">
+<meta name="twitter:description" content="{og_desc}">
 {og_image}
 <link rel="canonical" href="{library_page_url(slug)}">
 <script type="application/ld+json">
@@ -213,10 +301,13 @@ a{{color:#4ECDC4}} h1{{color:#C9A962}} img{{max-width:100%}}</style>
 {hero}
 <article>{body}</article>
 {sources}
+{share_row}
+{subscribe}
 {rate_block}
 <footer style="margin-top:48px;font-size:13px;color:#8B7355;">
 Little Nate is an AI companion — education, not therapy or medical advice.
-Crisis: <a href="https://988lifeline.org">988</a> · <a href="https://findahelpline.com">findahelpline.com</a>
+Crisis: <a href="https://988lifeline.org">988</a> · Veterans: 988 then press 1 ·
+<a href="https://findahelpline.com">findahelpline.com</a>
  · <a href="{PUBLIC_BASE}/nate_story_library.html">Story Library</a>
 </footer>
 </body></html>"""
@@ -227,9 +318,10 @@ def _html_email(issue: Dict[str, Any], rate_base: str, unsub_url: str) -> str:
     sources = _sources_html(issue)
     slug = issue.get("slug") or ""
     library_url = library_page_url(slug)
-    share_open = f"{API_BASE}/api/newsletter/share?slug={quote(slug)}&channel=email"
+    subject = str(issue.get("subject_line") or "Little Nate Dispatch")
+    share_row = _share_row_html(slug, subject, style_inline=True)
     hero = _hero_img_tag(issue, max_width="560px")
-    subject_esc = html_mod.escape(str(issue.get("subject_line") or ""))
+    subject_esc = html_mod.escape(subject)
     return f"""<!DOCTYPE html><html><body style="font-family:Georgia,serif;background:#050505;color:#E8D5A3;padding:24px;">
 <h1 style="color:#C9A962;">Little Nate Dispatch</h1>
 <p style="color:#8B7355;">{subject_esc}</p>
@@ -245,9 +337,7 @@ def _html_email(issue: Dict[str, Any], rate_base: str, unsub_url: str) -> str:
  <a href="{rate_base}&score=2" style="color:#C9A962;">2</a>
  <a href="{rate_base}&score=1" style="color:#C9A962;">1</a>
 </p>
-<p><a href="mailto:?subject=Little%20Nate%20Dispatch&amp;body={quote(library_url)}" style="color:#C9A962;">Share by email</a>
- · <a href="sms:?&amp;body={quote(library_url)}" style="color:#C9A962;">Share by text</a>
- · <a href="{share_open}" style="color:#8B7355;">Open library page</a></p>
+{share_row}
 <p style="font-size:12px;color:#888;">{html_mod.escape(PHYSICAL_ADDRESS)}<br>
 <a href="{unsub_url}" style="color:#888;">Unsubscribe</a></p>
 </body></html>"""

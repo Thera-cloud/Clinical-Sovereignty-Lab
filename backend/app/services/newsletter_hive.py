@@ -58,7 +58,7 @@ async def _topic_patrol(db_pool) -> Dict[str, Any]:
     from app.services.newsletter_signals import record_theme_signal, upsert_topic_forecast
 
     async with db_pool.acquire() as conn:
-        row = await conn.fetchrow(
+        rows = await conn.fetch(
             """
             SELECT i.topic AS topic, AVG(f.helpful_score)::float AS avg_h, COUNT(*)::int AS n
             FROM newsletter_feedback f
@@ -69,20 +69,42 @@ async def _topic_patrol(db_pool) -> Dict[str, Any]:
             GROUP BY i.topic
             HAVING COUNT(*) >= 2
             ORDER BY AVG(f.helpful_score) DESC
-            LIMIT 1
+            LIMIT 5
             """
         )
-    if not row or not row["topic"]:
-        return {"ok": True, "action": "noop"}
-    theme = row["topic"]
-    await record_theme_signal(db_pool, theme, source="hive_patrol")
-    await upsert_topic_forecast(
-        db_pool,
-        theme[:64].lower().replace(" ", "_"),
-        seasonal_label="hive_patrol",
-        foresight_score=min(0.9, 0.4 + (row["avg_h"] or 0) / 10),
-    )
-    return {"ok": True, "theme": theme, "n": row["n"]}
+    if not rows:
+        # Still refresh trend + pool even without ratings
+        pool_out = {}
+        try:
+            from app.services.newsletter_topic_engine import refresh_topic_pool
+            from app.services.newsletter_trend_pairing import run_trend_cycle
+
+            pool_out = await refresh_topic_pool(db_pool)
+            await run_trend_cycle(db_pool)
+        except Exception as e:
+            logger.warning("topic_patrol refresh: %s", e)
+        return {"ok": True, "action": "noop", "refresh": pool_out}
+    themes = []
+    for row in rows:
+        theme = row["topic"]
+        await record_theme_signal(db_pool, theme, source="hive_patrol")
+        await upsert_topic_forecast(
+            db_pool,
+            theme[:64].lower().replace(" ", "_"),
+            seasonal_label="hive_patrol",
+            foresight_score=min(0.9, 0.4 + (row["avg_h"] or 0) / 10),
+            news_velocity=0.1,
+        )
+        themes.append({"theme": theme, "n": row["n"]})
+    try:
+        from app.services.newsletter_topic_engine import refresh_topic_pool
+        from app.services.newsletter_trend_pairing import run_trend_cycle
+
+        await refresh_topic_pool(db_pool)
+        await run_trend_cycle(db_pool)
+    except Exception as e:
+        logger.warning("topic_patrol refresh: %s", e)
+    return {"ok": True, "themes": themes}
 
 
 async def _research_verify(db_pool) -> Dict[str, Any]:

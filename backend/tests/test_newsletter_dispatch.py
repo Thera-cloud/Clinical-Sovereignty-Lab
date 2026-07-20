@@ -49,7 +49,11 @@ def test_html_email_has_safety_footer_and_unsub():
     assert "/api/newsletter/library/test-issue/page" in html
     assert 'href="https://www.nimh.nih.gov/health"' in html
     assert "<h2" in html
-    assert "Open library page" in html
+    assert "Share this Dispatch" in html
+    assert "channel=x" in html
+    assert "channel=facebook" in html
+    assert "channel=linkedin" in html
+    assert "channel=whatsapp" in html
 
 
 def test_md_body_to_html_links_and_headers():
@@ -148,6 +152,9 @@ def test_story_library_shell_exists():
     assert "Story Library" in text
     assert "988" in text
     assert "/api/newsletter/library/" in text
+    assert "Subscribe" in text
+    assert "shareBase" in text
+    assert "channel=" in text
 
 
 def test_admin_dispatch_shell_exists():
@@ -159,6 +166,49 @@ def test_admin_dispatch_shell_exists():
     assert "Request rewrite" in text
     assert "/preview" in text
     assert "Generate topic image" in text
+    assert "Refresh topic pool" in text
+    assert "growthBody" in text
+
+
+def test_topic_engine_novelty_and_score():
+    eng = _load("nl_topic_eng_ut", "app/services/newsletter_topic_engine.py")
+    assert eng.novelty_penalty("Anxiety reach out", ["Anxiety reach out"]) == 1.0
+    assert eng.novelty_penalty("Brand new theme", ["Anxiety reach out"]) < 0.3
+    assert eng.infer_domain("ADHD and masking at work") == "neurodivergence"
+    assert eng.infer_domain("veteran reintegration after deployment") == "military"
+    assert eng.infer_domain("museum slow attention") == "arts"
+    s_hot = eng.score_candidate(news_velocity=0.9, foresight=0.8, novelty=0.0)
+    s_stale = eng.score_candidate(news_velocity=0.0, foresight=0.5, novelty=0.9)
+    assert s_hot > s_stale
+
+
+def test_share_intent_urls():
+    delivery = _load("nl_delivery_share_ut", "app/services/newsletter_delivery.py")
+    lib = "https://api.example/library/foo/page?utm_source=share&utm_medium=x&ref=foo"
+    x = delivery.share_intent_url("x", lib, "Hello")
+    assert "twitter.com/intent" in x
+    assert "facebook.com/sharer" in delivery.share_intent_url("facebook", lib, "Hello")
+    assert "linkedin.com/sharing" in delivery.share_intent_url("linkedin", lib, "Hello")
+    assert "whatsapp.com" in delivery.share_intent_url("whatsapp", lib, "Hello")
+    assert delivery.share_tracker_url("my-slug", "x").endswith("channel=x")
+
+
+def test_trend_heuristic_pair_politics_is_coping():
+    trend = _load("nl_trend_ut", "app/services/newsletter_trend_pairing.py")
+    p = trend._heuristic_pair("Election headlines spike", "politics")
+    assert "nervous" in p["title"].lower() or "headline" in p["title"].lower()
+    assert "vote for" not in p["title"].lower()
+
+
+def test_citation_allowlist_has_neuro_military_arts():
+    pipe = _load("nl_pipe_cite_ut", "app/services/newsletter_pipeline.py")
+    domains = set()
+    for c in pipe.CITATION_ALLOWLIST:
+        domains.update(c.get("domains") or ())
+    assert "neurodivergence" in domains
+    assert "military" in domains
+    assert "arts" in domains
+    assert "988 then press 1" in pipe.safety_footer_for_domain("military")
 
 
 def test_hero_prompt_is_safe_editorial():
@@ -275,6 +325,9 @@ def test_migration_seeds_baseline_and_gap_fix():
     assert "library_html_path" in gap
     gap255 = (BACKEND / "migrations/255_newsletter_wiring_gaps.sql").read_text()
     assert "uq_newsletter_feedback_issue_sub" in gap255
+    gap256 = (BACKEND / "migrations/256_newsletter_growth_engine.sql").read_text()
+    assert "newsletter_trend_candidates" in gap256
+    assert "ref_slug" in gap256
 
 
 def test_library_recall_gate_ignores_short_unrelated():

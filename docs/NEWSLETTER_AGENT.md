@@ -10,6 +10,8 @@ Weekly staged newsletter: topic → research (year ≥ 2024) → draft → criti
 | `ENABLE_NEWSLETTER_LEARNING` | true (default) | +72h learning loop + replicate sweep (starts even if compose off) |
 | `ENABLE_NEWSLETTER_WARM_LEADS` | false | Mine trial/users + send double-opt-in invites |
 | `ENABLE_NEWSLETTER_HIVE` | false | Queen/Worker patrol on CLI task kinds |
+| `ENABLE_NEWSLETTER_TREND_PAIRING` | true | Harvest headlines + pair therapeutic angles into topic forecast |
+| `ENABLE_NEWSLETTER_TOPIC_LLM` | true | Weekly LLM topic ideation into forecast pool |
 | `ENABLE_NEWSLETTER_LLM_DRAFT` | false | Optional inference-router compose (template fallback) |
 | `ENABLE_NEWSLETTER_SMS` | true | SMS link to active subscribers with `phone_e164` |
 | `ENABLE_NEWSLETTER_HERO_IMAGE` | true | Topic still: Grok Imagine → Gemini fallback (`XAI_*` and/or `GEMINI_API_KEY`) |
@@ -46,6 +48,16 @@ Weekly staged newsletter: topic → research (year ≥ 2024) → draft → criti
 - `253_newsletter_gap_fixes.sql` — `learned_at`, library paths, baseline → 12
 - `254_newsletter_hero_image.sql` — `hero_image_*` columns for topic stills (Grok → Gemini)
 - `255_newsletter_wiring_gaps.sql` — feedback uniqueness + open-issue indexes
+- `256_newsletter_growth_engine.sql` — trend candidates, `ref_slug`, seasonal forecast seed
+
+## Growth engine
+
+- Topic selection scores a pool (chat signals, forecast, seasonal calendar, crystal aggregates, LLM ideation, trend pairs) with last-8 novelty penalty — not a 2-topic oscillator
+- Domains: neurodivergence, arts/culture, military/veterans, fitness, grief, burnout, curiosity, …
+- Trend pairing: RSS headlines → therapeutic angle (politics = coping only) → `news_velocity` on forecast
+- Email + library: X / Facebook / LinkedIn / WhatsApp / email / SMS via `/share?channel=` → intent URL + UTM
+- Confirm credits `newsletter_growth_ledger` and records viral theme signal from `ref_slug`
+- Admin: `GET /growth`, `POST /growth/refresh-topics`; Insights tab Growth panel
 
 ## Wiring notes (post-gap fix)
 
@@ -54,7 +66,7 @@ Weekly staged newsletter: topic → research (year ≥ 2024) → draft → criti
 - SendGrid newsletter events join on `provider_message_id` **or** `custom_args.issue_id` / email
 - Pipeline skips compose when an open issue exists this UTC week; never overwrites `sent`/`approved` slugs
 - `POST /api/newsletter/admin/issues/reject-replicates` + agent sweep reject same-hash / same-day-topic clones
-- Dispatch UI **Insights** tab: ratings, opens, library stats, force learning
+- Dispatch UI **Insights** tab: ratings, opens, library stats, force learning, growth ledger
 
 ## Deploy
 

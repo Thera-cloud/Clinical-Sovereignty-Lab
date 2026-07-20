@@ -36,6 +36,102 @@ SAFETY_FOOTER = (
     "https://findahelpline.com. Unsubscribe anytime via the link below."
 )
 
+VETERANS_CRISIS_LINE = (
+    " Veterans and service members: Veterans Crisis Line — dial 988 then press 1, "
+    "or text 838255 (US)."
+)
+
+# Domain-tagged citation allowlist (2024+). Composer may only cite verified bundle.
+CITATION_ALLOWLIST = [
+    {
+        "source_name": "APA — Stress in America",
+        "year": 2024,
+        "url": "https://www.apa.org/news/press/releases/stress",
+        "modality": "psychoeducation",
+        "domains": ("general", "burnout", "curiosity"),
+    },
+    {
+        "source_name": "NIMH — Anxiety Disorders",
+        "year": 2024,
+        "url": "https://www.nimh.nih.gov/health/topics/anxiety-disorders",
+        "modality": "psychoeducation",
+        "domains": ("general", "relationships", "parenting"),
+    },
+    {
+        "source_name": "SAMHSA — Find Help",
+        "year": 2024,
+        "url": "https://www.samhsa.gov/find-help",
+        "modality": "help_seeking",
+        "domains": ("general", "grief", "burnout"),
+    },
+    {
+        "source_name": "WHO — Mental health",
+        "year": 2024,
+        "url": "https://www.who.int/health-topics/mental-health",
+        "modality": "psychoeducation",
+        "domains": ("general", "curiosity"),
+    },
+    {
+        "source_name": "CDC — Autism Spectrum Disorder",
+        "year": 2024,
+        "url": "https://www.cdc.gov/autism/index.html",
+        "modality": "psychoeducation",
+        "domains": ("neurodivergence",),
+    },
+    {
+        "source_name": "NIMH — ADHD",
+        "year": 2024,
+        "url": "https://www.nimh.nih.gov/health/topics/attention-deficit-hyperactivity-disorder-adhd",
+        "modality": "psychoeducation",
+        "domains": ("neurodivergence",),
+    },
+    {
+        "source_name": "CHADD — ADHD",
+        "year": 2024,
+        "url": "https://chadd.org/",
+        "modality": "advocacy",
+        "domains": ("neurodivergence",),
+    },
+    {
+        "source_name": "National Center for PTSD (VA)",
+        "year": 2024,
+        "url": "https://www.ptsd.va.gov/",
+        "modality": "psychoeducation",
+        "domains": ("military", "grief"),
+    },
+    {
+        "source_name": "VA — Mental Health",
+        "year": 2024,
+        "url": "https://www.mentalhealth.va.gov/",
+        "modality": "help_seeking",
+        "domains": ("military",),
+    },
+    {
+        "source_name": "NEA — Arts and Health",
+        "year": 2024,
+        "url": "https://www.arts.gov/impact/arts-health",
+        "modality": "psychoeducation",
+        "domains": ("arts", "curiosity", "fitness"),
+    },
+    {
+        "source_name": "NIH — Physical Activity and Mental Health",
+        "year": 2024,
+        "url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health",
+        "modality": "psychoeducation",
+        "domains": ("fitness", "sleep", "general"),
+    },
+]
+
+
+def safety_footer_for_domain(domain: Optional[str] = None) -> str:
+    footer = SAFETY_FOOTER
+    if (domain or "").lower() in ("military", "veteran", "war"):
+        footer = footer.replace(
+            "Unsubscribe anytime via the link below.",
+            VETERANS_CRISIS_LINE + " Unsubscribe anytime via the link below.",
+        )
+    return footer
+
 
 async def _load_symbolic_hints(db_pool) -> List[str]:
     """Marketing symbolic memory only — never inject into therapy prompts."""
@@ -59,70 +155,22 @@ async def _load_symbolic_hints(db_pool) -> List[str]:
 
 
 async def select_topic(db_pool) -> Dict[str, Any]:
-    """Score topics from signals, forecast, seasonal calendar, symbolic rules."""
-    topic = {
-        "topic_key": "anxiety_reach_out",
-        "title": "When anxiety asks you to shrink — reaching out anyway",
-        "seasonal_window": None,
-        "rationale": "default_bootstrap",
-        "symbolic_hints": [],
-    }
-    if not db_pool:
-        return topic
+    """Score topics from the growth engine pool (signals, forecast, trends, seasons)."""
     try:
-        hints = await _load_symbolic_hints(db_pool)
-        topic["symbolic_hints"] = hints
-        async with db_pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT theme, count_bucket FROM newsletter_chat_signals
-                WHERE count_bucket >= 3
-                ORDER BY count_bucket DESC, week_bucket DESC
-                LIMIT 1
-                """
-            )
-            if row:
-                theme = row["theme"]
-                topic = {
-                    "topic_key": re.sub(r"[^a-z0-9_]+", "_", theme.lower())[:64],
-                    "title": theme[:120],
-                    "seasonal_window": None,
-                    "rationale": f"chat_signal_n={row['count_bucket']}",
-                    "symbolic_hints": hints,
-                }
-            else:
-                forecast = await conn.fetchrow(
-                    """
-                    SELECT topic_key, seasonal_label, foresight_score
-                    FROM newsletter_topic_forecast
-                    WHERE target_week >= CURRENT_DATE - INTERVAL '14 days'
-                    ORDER BY foresight_score DESC, created_at DESC
-                    LIMIT 1
-                    """
-                )
-                if forecast and forecast["topic_key"]:
-                    key = forecast["topic_key"]
-                    topic = {
-                        "topic_key": key[:64],
-                        "title": key.replace("_", " ")[:120],
-                        "seasonal_window": forecast.get("seasonal_label"),
-                        "rationale": f"forecast_score={forecast['foresight_score']}",
-                        "symbolic_hints": hints,
-                    }
-            recent = await conn.fetchval(
-                """
-                SELECT topic FROM newsletter_issues
-                WHERE status = 'sent' AND topic IS NOT NULL
-                ORDER BY sent_at DESC NULLS LAST LIMIT 1
-                """
-            )
-            if recent and recent == topic.get("title"):
-                topic["title"] = "Building steadiness through small daily check-ins"
-                topic["topic_key"] = "daily_steadiness"
-                topic["rationale"] = "anti_repeat"
+        from app.services.newsletter_topic_engine import select_best_topic
+
+        return await select_best_topic(db_pool)
     except Exception as e:
-        logger.warning("select_topic fallback: %s", e)
-    return topic
+        logger.warning("select_topic growth engine fallback: %s", e)
+        hints = await _load_symbolic_hints(db_pool)
+        return {
+            "topic_key": "curiosity_lifelong_learning",
+            "title": "Staying curious when the world feels loud",
+            "seasonal_window": None,
+            "domain": "curiosity",
+            "rationale": "default_bootstrap",
+            "symbolic_hints": hints,
+        }
 
 
 async def verify_url(url: str, session: aiohttp.ClientSession) -> Tuple[int, bool]:
@@ -138,45 +186,48 @@ async def verify_url(url: str, session: aiohttp.ClientSession) -> Tuple[int, boo
 
 
 async def build_research_bundle(topic: Dict[str, Any]) -> Dict[str, Any]:
-    """Allowlisted 2024+ sources with URL liveness. Fail closed if none verify."""
-    # Curated starter set — composer may only cite from verified bundle
-    candidates = [
-        {
-            "source_name": "APA — Stress in America",
-            "year": 2024,
-            "url": "https://www.apa.org/news/press/releases/stress",
-            "modality": "psychoeducation",
-        },
-        {
-            "source_name": "NIMH — Anxiety Disorders",
-            "year": 2024,
-            "url": "https://www.nimh.nih.gov/health/topics/anxiety-disorders",
-            "modality": "psychoeducation",
-        },
-        {
-            "source_name": "SAMHSA — Find Help",
-            "year": 2024,
-            "url": "https://www.samhsa.gov/find-help",
-            "modality": "help_seeking",
-        },
-        {
-            "source_name": "WHO — Mental health",
-            "year": 2024,
-            "url": "https://www.who.int/health-topics/mental-health",
-            "modality": "psychoeducation",
-        },
+    """Allowlisted 2024+ sources with URL liveness. Domain-aware; fail closed if none verify."""
+    try:
+        from app.services.newsletter_topic_engine import infer_domain
+    except Exception:
+        infer_domain = lambda t: "general"  # noqa: E731
+
+    domain = (topic.get("domain") or infer_domain(
+        f"{topic.get('title') or ''} {topic.get('topic_key') or ''}"
+    )).lower()
+
+    # Prefer domain-matched sources, then general, then any remaining
+    domain_first = [
+        c for c in CITATION_ALLOWLIST if domain in c.get("domains", ())
     ]
+    general = [
+        c for c in CITATION_ALLOWLIST
+        if "general" in c.get("domains", ()) and c not in domain_first
+    ]
+    rest = [c for c in CITATION_ALLOWLIST if c not in domain_first and c not in general]
+    ordered = (domain_first + general + rest)[:8]
+
     verified = []
     async with aiohttp.ClientSession() as session:
-        for c in candidates:
+        for c in ordered:
             if int(c["year"]) < 2024:
                 continue
             code, ok = await verify_url(c["url"], session)
-            c = {**c, "http_status_checked": code, "verified": ok}
+            row = {
+                "source_name": c["source_name"],
+                "year": c["year"],
+                "url": c["url"],
+                "modality": c["modality"],
+                "http_status_checked": code,
+                "verified": ok,
+            }
             if ok:
-                verified.append(c)
+                verified.append(row)
+            if len(verified) >= 5:
+                break
     return {
         "topic": topic,
+        "domain": domain,
         "citations": verified,
         "external_reading": verified[0] if verified else None,
         "built_at": datetime.now(timezone.utc).isoformat(),
@@ -265,7 +316,7 @@ def draft_issue_from_bundle(topic: Dict[str, Any], bundle: Dict[str, Any]) -> Di
             f"## Further reading\n[{external['source_name']}]({external['url']})",
             "## Share\nForward this issue or use the share links in your email.",
             "## Next steps\nJoin Sovereign Sanctuary or try 20 free questions with Nate.",
-            SAFETY_FOOTER,
+            safety_footer_for_domain(topic.get("domain") or bundle.get("domain")),
         ]
     )
     slug = _slugify(topic.get("title") or topic.get("topic_key") or "dispatch")
@@ -322,7 +373,7 @@ async def draft_issue_llm(
         f"Topic: {topic.get('title')}\n\nAllowed citations:\n{cite_blob}\n\n"
         f"Style hints:\n{hints or '(none)'}\n\n"
         + (f"EDITOR REWRITE DIRECTION (apply, do not quote):\n{rewrite}\n\n" if rewrite else "")
-        + f"Must end with: {SAFETY_FOOTER}"
+        + f"Must end with: {safety_footer_for_domain(topic.get('domain') or bundle.get('domain'))}"
     )
     try:
         from app.services.nate_inference_router import NateInferenceRouter

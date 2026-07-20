@@ -42,6 +42,7 @@ class NewsletterAgent:
         self._task: Optional[asyncio.Task] = None
         self._running = False
         self._last_compose_date = None
+        self._last_trend_date = None
 
     async def start(self):
         if self._running:
@@ -94,6 +95,18 @@ class NewsletterAgent:
         # Learning job for issues sent ~72h ago (independent of compose flag)
         if newsletter_learning_enabled():
             await self._run_learning_due()
+
+        # Daily: harvest trends + refresh topic pool (works even if compose is off)
+        if self._last_trend_date != now.date():
+            try:
+                from app.services.newsletter_topic_engine import refresh_topic_pool
+                from app.services.newsletter_trend_pairing import run_trend_cycle
+
+                await run_trend_cycle(self._db_pool)
+                await refresh_topic_pool(self._db_pool)
+                self._last_trend_date = now.date()
+            except Exception as e:
+                logger.warning("trend/topic refresh: %s", e)
 
         if not newsletter_enabled():
             return

@@ -116,13 +116,17 @@ iframe.preview{width:100%;min-height:70vh;border:1px solid var(--line);backgroun
       </div>
       <div class="pane" id="pane-insights">
         <div class="meta" id="insightsMeta">Ratings, opens, library views, and learning state.</div>
-        <pre id="insightsBody" style="white-space:pre-wrap;font-size:.85rem;color:var(--bright);background:#0a0a0a;border:1px solid #333;padding:14px;min-height:200px">Select an issue…</pre>
+        <pre id="insightsBody" style="white-space:pre-wrap;font-size:.85rem;color:var(--bright);background:#0a0a0a;border:1px solid #333;padding:14px;min-height:160px">Select an issue…</pre>
+        <div class="meta" style="margin-top:16px">Growth (shares → subscribers)</div>
+        <pre id="growthBody" style="white-space:pre-wrap;font-size:.85rem;color:var(--bright);background:#0a0a0a;border:1px solid #333;padding:14px;min-height:120px">Loading growth…</pre>
         <div class="actions">
           <button type="button" class="secondary" onclick="loadInsights()">Refresh metrics</button>
+          <button type="button" class="secondary" onclick="loadGrowth()">Refresh growth</button>
+          <button type="button" class="secondary" onclick="refreshTopicPool()">Refresh topic pool</button>
           <button type="button" class="secondary" id="btnLearn" onclick="runLearning()">Run learning now</button>
           <button type="button" class="secondary" onclick="rejectReplicates()">Reject replicate drafts</button>
         </div>
-        <p class="hint">Learning normally waits 72h after send. “Run learning now” forces this issue. Replicate sweep rejects same-day topic / same content-hash open drafts.</p>
+        <p class="hint">Learning waits 72h after send unless forced. Topic pool = seasonal + crystals + LLM ideation + trend pairing. Growth credits share → confirm conversions.</p>
       </div>
       <div class="actions" style="padding:0 20px 20px;border:0;margin:0">
         <button type="button" id="btnApprove" onclick="approveIssue()">Approve</button>
@@ -153,7 +157,7 @@ function switchTab(name){
   document.querySelectorAll('.pane').forEach(function(p){p.classList.toggle('active', p.id==='pane-'+name);});
   if(name==='preview' && current) loadPreview();
   if(name==='image' && current){ fillHeroPrompt(); refreshHero(); }
-  if(name==='insights' && current) loadInsights();
+  if(name==='insights'){ if(current) loadInsights(); loadGrowth(); }
 }
 
 function stripProviderPrefix(s){
@@ -232,6 +236,51 @@ async function loadInsights(){
   }
   meta.textContent = 'Issue metrics';
   body.textContent = lines.join('\n');
+}
+
+async function loadGrowth(){
+  var body = document.getElementById('growthBody');
+  if(!body)return;
+  body.textContent = 'Loading…';
+  var r = await api('/api/newsletter/admin/growth?days=30');
+  if(!r)return;
+  var d = await r.json();
+  if(!r.ok){body.textContent=JSON.stringify(d.detail||d,null,2);return;}
+  var lines = [
+    'Forecast topics (21d): '+(d.forecast_recent||0),
+    '',
+    'Ledger by channel (30d):',
+  ];
+  (d.ledger||[]).forEach(function(row){
+    lines.push('  '+(row.channel||'')+': +'+(row.subscribers_gained||0)+' subs · '
+      +(row.invites_sent||0)+' shares · '+(row.conversions||0)+' conversions');
+  });
+  if(!(d.ledger||[]).length) lines.push('  (none yet)');
+  lines.push('', 'Top viral issues:');
+  (d.top_viral||[]).slice(0,8).forEach(function(v){
+    lines.push('  '+(v.share_count||0)+' shares · '+(v.view_count||0)+' views · '
+      +(v.topic||v.slug||'').slice(0,80));
+  });
+  if((d.trend_categories||[]).length){
+    lines.push('', 'Trend harvest (14d):');
+    d.trend_categories.forEach(function(t){
+      lines.push('  '+(t.category||'')+': '+(t.n||0)+' headlines · '+(t.paired||0)+' paired');
+    });
+  }
+  body.textContent = lines.join('\n');
+}
+
+async function refreshTopicPool(){
+  setMsg('Refreshing topic pool + trends…');
+  var r = await api('/api/newsletter/admin/growth/refresh-topics', {method:'POST', body:'{}'});
+  if(!r)return;
+  var d = await r.json();
+  if(!r.ok){setMsg(JSON.stringify(d.detail||d), true);return;}
+  setMsg('Pool: crystals='+((d.pool&&d.pool.crystal_themes)||0)
+    +' llm='+((d.pool&&d.pool.llm_topics)||0)
+    +' · trends inserted='+((d.trends&&d.trends.harvest&&d.trends.harvest.inserted)||0)
+    +' paired='+((d.trends&&d.trends.pair&&d.trends.pair.paired)||0));
+  loadGrowth();
 }
 
 async function runLearning(){

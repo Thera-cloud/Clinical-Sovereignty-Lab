@@ -143,17 +143,18 @@ async def subscribe(body: SubscribeBody, request: Request):
         if existing and existing["status"] == "suppressed":
             return {"status": "ok", "message": "If eligible, a confirmation was sent."}
 
+        ref_slug = (body.ref or "").strip()[:120] or None
         await conn.execute(
             """
             INSERT INTO newsletter_subscribers (
                 email, phone_e164, status, confirm_token_hash, confirm_token_expires_at,
                 unsubscribe_token_hash, consent_research_at, consent_ip, consent_scope,
-                source, utm_source, utm_medium, utm_campaign
+                source, utm_source, utm_medium, utm_campaign, ref_slug
             ) VALUES (
                 $1, $2, 'pending', $3, $4, $5,
                 CASE WHEN $6 THEN NOW() ELSE NULL END,
                 $7, 'delivery',
-                $8, $9, $10, $11
+                $8, $9, $10, $11, $12
             )
             ON CONFLICT (email) DO UPDATE SET
                 status = CASE
@@ -167,6 +168,10 @@ async def subscribe(body: SubscribeBody, request: Request):
                     WHEN $6 THEN NOW()
                     ELSE newsletter_subscribers.consent_research_at
                 END,
+                utm_source = COALESCE(EXCLUDED.utm_source, newsletter_subscribers.utm_source),
+                utm_medium = COALESCE(EXCLUDED.utm_medium, newsletter_subscribers.utm_medium),
+                utm_campaign = COALESCE(EXCLUDED.utm_campaign, newsletter_subscribers.utm_campaign),
+                ref_slug = COALESCE(EXCLUDED.ref_slug, newsletter_subscribers.ref_slug),
                 updated_at = NOW()
             """,
             email,
@@ -180,6 +185,7 @@ async def subscribe(body: SubscribeBody, request: Request):
             body.utm_source,
             body.utm_medium,
             body.utm_campaign,
+            ref_slug,
         )
 
     await _send_confirm_email(email, raw_confirm)
@@ -220,10 +226,12 @@ async def _send_confirm_email(email: str, raw_token: str) -> None:
 async def confirm(request: Request, t: str = Query(...)):
     pool = _pool(request)
     th = _hash_token(t)
+    viral_topic = None
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, confirm_token_expires_at FROM newsletter_subscribers
+            SELECT id, confirm_token_expires_at, email, utm_source, utm_medium, ref_slug
+            FROM newsletter_subscribers
             WHERE confirm_token_hash = $1 AND status = 'pending'
             """,
             th,
@@ -240,9 +248,7 @@ async def confirm(request: Request, t: str = Query(...)):
                 "<html><body><p>Link expired. Please subscribe again.</p></body></html>",
                 status_code=400,
             )
-        email = await conn.fetchval(
-            "SELECT email FROM newsletter_subscribers WHERE id = $1", row["id"]
-        )
+        email = row["email"]
         await conn.execute(
             """
             UPDATE newsletter_subscribers
@@ -254,6 +260,10 @@ async def confirm(request: Request, t: str = Query(...)):
             row["id"],
         )
         channel = "direct"
+        if row.get("utm_medium"):
+            channel = f"share_{str(row['utm_medium'])[:40]}"
+        elif row.get("utm_source") == "share":
+            channel = "share_link"
         if email:
             wl = await conn.fetchval(
                 """
@@ -269,14 +279,28 @@ async def confirm(request: Request, t: str = Query(...)):
         await conn.execute(
             """
             INSERT INTO newsletter_growth_ledger (day, channel, subscribers_gained, conversions)
-            VALUES (CURRENT_DATE, $1, 1, $2)
+            VALUES (CURRENT_DATE, $1, 1, 1)
             ON CONFLICT (day, channel) DO UPDATE
             SET subscribers_gained = newsletter_growth_ledger.subscribers_gained + 1,
-                conversions = newsletter_growth_ledger.conversions + EXCLUDED.conversions
+                conversions = newsletter_growth_ledger.conversions + 1
             """,
-            channel,
-            1 if channel == "warm_lead" else 0,
+            channel[:64],
         )
+        ref = row.get("ref_slug")
+        if ref:
+            topic = await conn.fetchval(
+                "SELECT topic FROM newsletter_issues WHERE slug = $1 AND status = 'sent'",
+                ref,
+            )
+            if topic:
+                viral_topic = topic
+    if viral_topic:
+        try:
+            from app.services.newsletter_signals import record_theme_signal
+
+            await record_theme_signal(pool, viral_topic, source="viral")
+        except Exception:
+            pass
     return HTMLResponse(
         "<html><body style='background:#050505;color:#C9A962;font-family:Georgia,serif;padding:40px;'>"
         "<h1>You're in.</h1><p>Little Nate Dispatch is confirmed.</p></body></html>"
@@ -594,10 +618,14 @@ async def share_track(
 ):
     pool = _pool(request)
     async with pool.acquire() as conn:
-        exists = await conn.fetchval(
-            "SELECT 1 FROM newsletter_issues WHERE slug = $1 AND status = 'sent'", slug
+        row = await conn.fetchrow(
+            """
+            SELECT slug, subject_line FROM newsletter_issues
+            WHERE slug = $1 AND status = 'sent'
+            """,
+            slug,
         )
-        if not exists:
+        if not row:
             raise HTTPException(404)
         await conn.execute(
             """
@@ -612,13 +640,21 @@ async def share_track(
     try:
         from app.services.newsletter_signals import bump_growth_ledger
 
-        await bump_growth_ledger(pool, f"share_{channel[:32]}", conversions=0)
+        await bump_growth_ledger(
+            pool, f"share_{channel[:32]}", invites_sent=1, conversions=0
+        )
     except Exception:
         pass
-    from app.services.newsletter_delivery import library_page_url
+    from app.services.newsletter_delivery import (
+        share_intent_url,
+        utm_library_url,
+    )
     from fastapi.responses import RedirectResponse
 
-    return RedirectResponse(library_page_url(slug), status_code=302)
+    ch = (channel or "link")[:32]
+    utm = utm_library_url(slug, ch)
+    dest = share_intent_url(ch, utm, str(row["subject_line"] or "Little Nate Dispatch"))
+    return RedirectResponse(dest, status_code=302)
 
 
 @router.get("/rss")
@@ -1060,6 +1096,79 @@ async def admin_issue_metrics(
         "symbolic": [_row_json(r) for r in symbolic],
         "content_twins": [_row_json(r) for r in twins],
     }
+
+
+@admin_router.get("/growth")
+async def admin_growth_overview(
+    request: Request, admin: Dict = Depends(require_admin), days: int = Query(30, ge=1, le=180)
+):
+    """Shares by channel, conversions by source, top viral library issues."""
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        ledger = await conn.fetch(
+            """
+            SELECT channel,
+                   SUM(subscribers_gained)::int AS subscribers_gained,
+                   SUM(invites_sent)::int AS invites_sent,
+                   SUM(conversions)::int AS conversions
+            FROM newsletter_growth_ledger
+            WHERE day >= CURRENT_DATE - ($1 || ' days')::interval
+            GROUP BY channel
+            ORDER BY conversions DESC, invites_sent DESC
+            LIMIT 40
+            """,
+            str(days),
+        )
+        viral = await conn.fetch(
+            """
+            SELECT i.slug, i.topic, i.subject_line, i.sent_at,
+                   COALESCE(s.share_count, 0)::int AS share_count,
+                   COALESCE(s.view_count, 0)::int AS view_count
+            FROM newsletter_issues i
+            LEFT JOIN newsletter_library_stats s ON s.slug = i.slug
+            WHERE i.status = 'sent'
+            ORDER BY COALESCE(s.share_count, 0) DESC, COALESCE(s.view_count, 0) DESC
+            LIMIT 15
+            """
+        )
+        trends = await conn.fetch(
+            """
+            SELECT category, COUNT(*)::int AS n,
+                   COUNT(*) FILTER (WHERE paired_at IS NOT NULL)::int AS paired
+            FROM newsletter_trend_candidates
+            WHERE harvested_at > NOW() - INTERVAL '14 days'
+            GROUP BY category
+            ORDER BY n DESC
+            """
+        )
+        forecast_n = await conn.fetchval(
+            """
+            SELECT COUNT(*)::int FROM newsletter_topic_forecast
+            WHERE created_at > NOW() - INTERVAL '21 days'
+            """
+        )
+    return {
+        "status": "ok",
+        "days": days,
+        "ledger": [_row_json(r) for r in ledger],
+        "top_viral": [_row_json(r) for r in viral],
+        "trend_categories": [_row_json(r) for r in trends],
+        "forecast_recent": forecast_n or 0,
+    }
+
+
+@admin_router.post("/growth/refresh-topics")
+async def admin_refresh_topics(
+    request: Request, admin: Dict = Depends(require_admin)
+):
+    """Mine crystals, LLM ideation, harvest+pair trends into the topic pool."""
+    pool = _pool(request)
+    from app.services.newsletter_topic_engine import refresh_topic_pool
+    from app.services.newsletter_trend_pairing import run_trend_cycle
+
+    pool_out = await refresh_topic_pool(pool)
+    trend_out = await run_trend_cycle(pool)
+    return {"status": "ok", "pool": pool_out, "trends": trend_out}
 
 
 @admin_router.post("/learning/run")
