@@ -204,12 +204,15 @@ async def extract_commitment_candidate(
             "Return null JSON if not a genuine commitment. Message: "
             + json.dumps(user_text[:1500])
         )
-        raw = await router.generate(
-            messages=[{"role": "user", "content": prompt}],
+        # QUANTUM-CRYSTAL-ARCH: NateInferenceRouter.generate(prompt=..., system=...) → dict
+        out = await router.generate(
+            prompt=prompt,
+            system="Return valid JSON only. No markdown fences.",
             domain="utility",
             max_tokens=200,
         )
-        text = (raw or "").strip()
+        raw = (out.get("text") if isinstance(out, dict) else out) or ""
+        text = str(raw).strip()
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):

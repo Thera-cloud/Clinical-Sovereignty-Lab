@@ -184,13 +184,16 @@ class NateCommitmentAgent:
                 f"Write a warm, brief proactive check-in (max 3 sentences) about this "
                 f"commitment: {text}. Client name: {name}. No clinical diagnosis."
             )
+            # QUANTUM-CRYSTAL-ARCH: generate(prompt=...) returns {"text": ...}
             out = await router.generate(
-                messages=[{"role": "user", "content": prompt}],
+                prompt=prompt,
+                system="Warm brief check-in. Max 3 sentences. No diagnosis.",
                 domain="clinical",
                 max_tokens=120,
             )
-            if out and out.strip():
-                return out.strip()
+            text_out = (out.get("text") if isinstance(out, dict) else out) or ""
+            if str(text_out).strip():
+                return str(text_out).strip()
         except Exception as e:
             logger.warning("commitment_agent: message gen failed: %s", e)
         return fallback
