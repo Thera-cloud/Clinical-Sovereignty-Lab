@@ -194,7 +194,7 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 | C.3 | Flutter Settings: subtitle, optimistic toggle, REST→WS fallback, one-shot soft prompt | [x] *(local; deploy Flutter when approved)* |
 | C.4 | Wiring: tool Redis sync client, book_session PG write, C_emo UUID, coach username resolve, crystal SERIAL id, plan username/hw | [x] |
 | C.5 | Compose pin Phase 0–4 + N.3 (`ENABLE_SELF_MONITOR_TOUCH=false`) | [x] |
-| C.6 | Prod deploy + consent round-trip on test client | [ ] |
+| C.6 | Prod deploy + consent round-trip on test client | [x] *(2026-07-20 — `b3f222e2` safe_deploy backend+bridge vault 368→368; Flutter+CF purge `v=2026.07.20.0116`; `audit_client` opted in `proactive_presence_consent=true`)* |
 
 ---
 
