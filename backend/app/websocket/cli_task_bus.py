@@ -25,13 +25,16 @@ MAX_REVIEW_ROUNDS = 2
 TASK_TTL_S = int(os.getenv("CLI_TASK_BUS_TTL", "86400"))
 PATH_LOCK_TTL_S = int(os.getenv("CLI_PATH_LOCK_TTL", "600"))
 
-# QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch hive task kinds (patrol / promote)
+# QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch hive task kinds (patrol / promote / learn)
 NEWSLETTER_TASK_KINDS = frozenset({
     "newsletter_topic_patrol",
     "newsletter_research_verify",
     "newsletter_draft_critique",
     "newsletter_growth_signal",
     "newsletter_symbolic_promote",
+    "newsletter_trend_pairing",
+    "newsletter_growth_attribution",
+    "newsletter_chat_learn",
 })
 
 
@@ -105,10 +108,19 @@ def ensure_bus_meta(client=None, *, consumer_active: bool = False) -> bool:
         ):
             features.append("dual_coo")
             features.append("ceo_inbox")
-        # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch
-        if os.getenv("ENABLE_NEWSLETTER_HIVE", "false").strip().lower() in (
-            "1", "true", "yes", "on",
-        ):
+        # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch (hive_enabled mirrors agent default)
+        _hive_on = False
+        try:
+            from app.services.newsletter_hive import hive_enabled as _hive_enabled
+
+            _hive_on = _hive_enabled()
+        except Exception:
+            _hive_on = os.getenv("ENABLE_NEWSLETTER_HIVE", "").strip().lower() in (
+                "1", "true", "yes", "on",
+            ) or os.getenv("ENABLE_NEWSLETTER_AGENT", "false").strip().lower() in (
+                "1", "true", "yes", "on",
+            )
+        if _hive_on:
             features.append("newsletter_hive")
             features.extend(sorted(NEWSLETTER_TASK_KINDS))
         meta = {

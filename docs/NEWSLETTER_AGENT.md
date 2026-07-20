@@ -9,7 +9,7 @@ Weekly staged newsletter: topic → research (year ≥ 2024) → draft → criti
 | `ENABLE_NEWSLETTER_AGENT` | false | Weekly auto-compose orchestrator (GREEN only; skipped when `IS_CLONE`) |
 | `ENABLE_NEWSLETTER_LEARNING` | true (default) | +72h learning loop + replicate sweep (starts even if compose off) |
 | `ENABLE_NEWSLETTER_WARM_LEADS` | false | Mine trial/users + send double-opt-in invites |
-| `ENABLE_NEWSLETTER_HIVE` | false | Queen/Worker patrol on CLI task kinds |
+| `ENABLE_NEWSLETTER_HIVE` | (auto) | Dispatch hive: local patrol + CLI bus enqueue; defaults **on** when agent on; set `false` to force off |
 | `ENABLE_NEWSLETTER_TREND_PAIRING` | true | Harvest headlines + pair therapeutic angles into topic forecast |
 | `ENABLE_NEWSLETTER_TOPIC_LLM` | true | Weekly LLM topic ideation into forecast pool |
 | `ENABLE_NEWSLETTER_LLM_DRAFT` | false | Optional inference-router compose (template fallback) |
@@ -26,9 +26,10 @@ Weekly staged newsletter: topic → research (year ≥ 2024) → draft → criti
 
 - No cold email without double opt-in confirm
 - Sends only after human approve (`status=approved`)
-- Clinical transcripts never feed topic engine raw (signals from feedback/library/hive only)
-- Symbolic marketing rules never inject into therapy prompts
+- Clinical transcripts never feed topic engine raw (signals from feedback/library/hive/chat only)
+- Draft style rules stay marketing-scoped; high-confidence **editorial outcomes** may appear in chat as a labeled `DISPATCH LEARNING` block (never as personal memory)
 - Library cite only when recall hits; never invent a Dispatch issue
+- Hive kinds enqueue onto CLI Dual-COO bus daily; `CliTaskBusConsumer` executes `newsletter_*` GREEN kinds
 - SendGrid events with `custom_args.channel=newsletter` update newsletter ledger only
 
 ## Surfaces
@@ -58,6 +59,9 @@ Weekly staged newsletter: topic → research (year ≥ 2024) → draft → criti
 - Email + library: X / Facebook / LinkedIn / WhatsApp / email / SMS via `/share?channel=` → intent URL + UTM
 - Confirm credits `newsletter_growth_ledger` and records viral theme signal from `ref_slug`
 - Admin: `GET /growth`, `POST /growth/refresh-topics`; Insights tab Growth panel
+- Learning: +72h (or +24h when ratings exist) → symbolic memory + crystal confidence reinforce + theme signals
+- Chat library refs → `newsletter_chat_signals` + optional editorial learning block
+- Hive kinds: topic_patrol, research_verify, draft_critique, growth_signal, symbolic_promote, trend_pairing, growth_attribution, chat_learn
 
 ## Wiring notes (post-gap fix)
 

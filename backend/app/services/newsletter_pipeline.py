@@ -134,7 +134,7 @@ def safety_footer_for_domain(domain: Optional[str] = None) -> str:
 
 
 async def _load_symbolic_hints(db_pool) -> List[str]:
-    """Marketing symbolic memory only — never inject into therapy prompts."""
+    """Draft-time marketing hints. Chat uses labeled DISPATCH LEARNING via library recall."""
     if not db_pool:
         return []
     try:

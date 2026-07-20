@@ -111,10 +111,69 @@ async def recall_newsletter_library_context(
                     """,
                     slugs,
                 )
+                topics = await conn.fetch(
+                    """
+                    SELECT DISTINCT topic FROM newsletter_issues
+                    WHERE slug = ANY($1::text[]) AND topic IS NOT NULL
+                    """,
+                    slugs,
+                )
+            # QUANTUM-CRYSTAL-ARCH — chat refs feed topic pool
+            try:
+                from app.services.newsletter_signals import record_theme_signal
+
+                for t in topics:
+                    if t.get("topic"):
+                        await record_theme_signal(
+                            db_pool, t["topic"], source="library_chat"
+                        )
+            except Exception as se:
+                logger.warning("chat theme signal failed: %s", se)
         except Exception as e:
             logger.warning("chat_reference_count bump failed: %s", e)
 
+    # Editorial learning (symbolic outcomes) — labeled, not personal memory
+    learn_block = await _load_editorial_learning_block(db_pool, slugs)
+    if learn_block:
+        lines.append(learn_block)
+
     return "\n".join(lines)
+
+
+async def _load_editorial_learning_block(db_pool, slugs: list) -> str:
+    """Inject high-confidence Dispatch learning into chat (editorial only)."""
+    if not db_pool:
+        return ""
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT content, confidence FROM newsletter_symbolic_memory
+                WHERE scope = 'active'
+                  AND kind IN ('outcome', 'rule')
+                  AND confidence >= 0.65
+                  AND (
+                        source_issue_id IS NULL
+                     OR source_issue_id IN (
+                          SELECT id FROM newsletter_issues WHERE slug = ANY($1::text[])
+                     )
+                  )
+                ORDER BY confidence DESC, created_at DESC
+                LIMIT 3
+                """,
+                slugs or [],
+            )
+        if not rows:
+            return ""
+        out = [
+            "DISPATCH LEARNING (editorial patterns from past issues — not personal memory):"
+        ]
+        for r in rows:
+            out.append(f"- {str(r['content'])[:280]}")
+        return "\n".join(out)
+    except Exception as e:
+        logger.warning("editorial learning block: %s", e)
+        return ""
 
 
 async def _fetch_library_crystals(

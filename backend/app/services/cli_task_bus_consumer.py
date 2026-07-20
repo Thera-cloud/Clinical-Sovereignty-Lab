@@ -35,6 +35,11 @@ _CLAIM_KINDS = (
     "brief_refine",
     "matching_weight",
     "coach_label",
+    # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch hive kinds
+    "newsletter_topic_patrol",
+    "newsletter_chat_learn",
+    "newsletter_trend_pairing",
+    "newsletter_growth_attribution",
 )
 
 
@@ -189,6 +194,9 @@ class CliTaskBusConsumer:
         # QUANTUM-CRYSTAL-ARCH — kind-aware Chief of Staff dispatch
         if kind in ("ops_fix", "compliance_redteam", "auditor_ops_fix"):
             findings, passed = await self._dispatch_ops_task(task)
+        elif kind.startswith("newsletter_"):
+            findings, passed = await self._dispatch_newsletter_kind(task, kind)
+            self._green_auto += 1
         elif kind in (
             "brief_refine",
             "matching_weight",
@@ -265,6 +273,39 @@ class CliTaskBusConsumer:
                 await propose_red_clinical_to_ceo(db)
         except Exception as e:
             logger.debug("CEO queue surface: %s", e)
+
+    async def _dispatch_newsletter_kind(self, task: Dict[str, Any], kind: str) -> tuple:
+        """QUANTUM-CRYSTAL-ARCH — Dual-COO Queen executes Dispatch hive kind."""
+        findings: List[Dict[str, Any]] = []
+        pool = getattr(self._app_state, "db_pool", None) if self._app_state else None
+        if not pool:
+            findings.append({
+                "detail": f"newsletter kind={kind} skipped — no db_pool",
+                "severity": "warn",
+            })
+            return findings, False
+        try:
+            from app.services.newsletter_hive import execute_newsletter_kind, hive_enabled
+
+            if not hive_enabled():
+                findings.append({
+                    "detail": f"newsletter kind={kind} skipped — hive off",
+                    "severity": "info",
+                })
+                return findings, True
+            out = await execute_newsletter_kind(pool, kind)
+            findings.append({
+                "detail": f"newsletter {kind}: {str(out)[:400]}",
+                "severity": "info",
+                "risk": "GREEN",
+            })
+            return findings, bool(out.get("ok", True))
+        except Exception as e:
+            findings.append({
+                "detail": f"newsletter {kind} failed: {e}",
+                "severity": "warn",
+            })
+            return findings, False
 
     async def _dispatch_ops_task(self, task: Dict[str, Any]) -> tuple:
         """GREEN ops/compliance: structured findings; no therapeutic code changes."""

@@ -63,6 +63,15 @@ _GREEN_KINDS = frozenset({
     "patent_crystal_tag",
     "patent_tag_propose",  # all claim↔code maps auto-green (Nathan 2026-07-17)
     "prior_art_flag",
+    # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch hive (digest only)
+    "newsletter_topic_patrol",
+    "newsletter_research_verify",
+    "newsletter_draft_critique",
+    "newsletter_growth_signal",
+    "newsletter_symbolic_promote",
+    "newsletter_trend_pairing",
+    "newsletter_growth_attribution",
+    "newsletter_chat_learn",
 })
 
 

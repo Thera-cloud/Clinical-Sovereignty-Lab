@@ -1,9 +1,10 @@
-"""72h post-send learning → symbolic memory + growth.
+"""Post-send learning → symbolic memory + crystal reinforce + theme signals.
 
 # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, Optional
 
@@ -20,7 +21,8 @@ async def run_learning_for_due_issues(
         if force_issue_id:
             rows = await conn.fetch(
                 """
-                SELECT i.id, i.slug, i.topic, i.draft_body, i.final_body, i.body_md
+                SELECT i.id, i.slug, i.topic, i.draft_body, i.final_body, i.body_md,
+                       i.crystal_id
                 FROM newsletter_issues i
                 WHERE i.status = 'sent'
                   AND i.id = $1::uuid
@@ -28,7 +30,6 @@ async def run_learning_for_due_issues(
                 """,
                 force_issue_id,
             )
-            # Allow re-learn on force
             if rows:
                 await conn.execute(
                     """
@@ -39,20 +40,31 @@ async def run_learning_for_due_issues(
                     force_issue_id,
                 )
         else:
+            # 72h default; 24h when feedback exists so learning is not empty forever
             rows = await conn.fetch(
                 """
-                SELECT i.id, i.slug, i.topic, i.draft_body, i.final_body, i.body_md
+                SELECT i.id, i.slug, i.topic, i.draft_body, i.final_body, i.body_md,
+                       i.crystal_id
                 FROM newsletter_issues i
                 WHERE i.status = 'sent'
                   AND i.sent_at IS NOT NULL
                   AND i.learned_at IS NULL
-                  AND i.sent_at <= NOW() - INTERVAL '72 hours'
+                  AND (
+                        i.sent_at <= NOW() - INTERVAL '72 hours'
+                     OR (
+                          i.sent_at <= NOW() - INTERVAL '24 hours'
+                          AND EXISTS (
+                            SELECT 1 FROM newsletter_feedback f
+                            WHERE f.issue_id = i.id
+                              AND (f.helpful_score IS NOT NULL OR f.liked IS TRUE)
+                          )
+                     )
+                  )
                 ORDER BY i.sent_at ASC
                 LIMIT 20
                 """
             )
         for issue in rows:
-            # Claim row first (idempotent)
             claimed = await conn.fetchval(
                 """
                 UPDATE newsletter_issues
@@ -82,14 +94,24 @@ async def run_learning_for_due_issues(
                 """,
                 issue["id"],
             )
+            chat_refs = await conn.fetchval(
+                """
+                SELECT COALESCE(chat_reference_count, 0) FROM newsletter_library_stats
+                WHERE slug = $1
+                """,
+                issue["slug"],
+            )
             content = (
                 f"Issue {issue['slug']} topic={issue['topic']}: "
                 f"avg_helpful={float(stats['avg_helpful'] or 0):.2f} "
-                f"ratings={stats['ratings']} likes={stats['likes']} opens={opens}"
+                f"ratings={stats['ratings']} likes={stats['likes']} "
+                f"opens={opens} chat_refs={chat_refs or 0}"
             )
             conf = 0.55
             if (stats["avg_helpful"] or 0) >= 4 and (stats["ratings"] or 0) >= 5:
                 conf = 0.75
+            elif (chat_refs or 0) >= 3:
+                conf = max(conf, 0.65)
             await conn.execute(
                 """
                 INSERT INTO newsletter_symbolic_memory
@@ -121,6 +143,31 @@ async def run_learning_for_due_issues(
                   AND created_at < NOW() - INTERVAL '90 days'
                 """
             )
+            # Reinforce existing library crystal + stamp learning metadata
+            crystal_id = issue.get("crystal_id")
+            if crystal_id:
+                try:
+                    bump = 0.05 if conf < 0.7 else 0.08
+                    await conn.execute(
+                        """
+                        UPDATE nate_intelligence_crystals
+                        SET confidence = LEAST(0.95, COALESCE(confidence, 0.5) + $2::float),
+                            recall_count = COALESCE(recall_count, 0) + 1,
+                            last_recalled_at = NOW(),
+                            metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb
+                        WHERE id = $1
+                        """,
+                        crystal_id,
+                        bump,
+                        json.dumps({
+                            "learning_outcome": content[:400],
+                            "learning_confidence": conf,
+                            "origin": "newsletter_library",
+                        }),
+                    )
+                except Exception as e:
+                    logger.warning("crystal reinforce %s: %s", issue["slug"], e)
+
             if issue.get("topic"):
                 try:
                     from app.services.newsletter_signals import record_theme_signal

@@ -353,3 +353,47 @@ def test_hive_kinds_dispatchable():
     hive = _load("nl_hive_ut", "app/services/newsletter_hive.py")
     assert hive.hive_enabled() in (True, False)
     assert "newsletter_topic_patrol" in dir(hive) or callable(hive.run_hive_patrol)
+    assert callable(hive.execute_newsletter_kind)
+    assert callable(hive.enqueue_hive_tasks)
+
+
+def test_newsletter_task_kinds_include_growth_loop():
+    bus = _load("nl_bus_kinds_ut", "app/websocket/cli_task_bus.py")
+    kinds = bus.NEWSLETTER_TASK_KINDS
+    for k in (
+        "newsletter_topic_patrol",
+        "newsletter_trend_pairing",
+        "newsletter_growth_attribution",
+        "newsletter_chat_learn",
+        "newsletter_symbolic_promote",
+    ):
+        assert k in kinds
+
+
+def test_hive_defaults_on_when_agent_on(monkeypatch):
+    hive = _load("nl_hive_default_ut", "app/services/newsletter_hive.py")
+    monkeypatch.setenv("ENABLE_NEWSLETTER_HIVE", "")
+    monkeypatch.setenv("ENABLE_NEWSLETTER_AGENT", "true")
+    assert hive.hive_enabled() is True
+    monkeypatch.setenv("ENABLE_NEWSLETTER_HIVE", "false")
+    assert hive.hive_enabled() is False
+
+
+def test_consumer_has_newsletter_dispatch():
+    text = (BACKEND / "app/services/cli_task_bus_consumer.py").read_text(encoding="utf-8")
+    assert "_dispatch_newsletter_kind" in text
+    assert "newsletter_chat_learn" in text
+
+
+def test_learning_reinforces_crystal_sql():
+    text = (BACKEND / "app/services/newsletter_learning.py").read_text(encoding="utf-8")
+    assert "nate_intelligence_crystals" in text
+    assert "learning_outcome" in text
+    assert "24 hours" in text
+
+
+def test_library_recall_records_chat_theme():
+    text = (BACKEND / "app/services/newsletter_library_recall.py").read_text(encoding="utf-8")
+    assert "library_chat" in text
+    assert "DISPATCH LEARNING" in text
+    assert "_load_editorial_learning_block" in text

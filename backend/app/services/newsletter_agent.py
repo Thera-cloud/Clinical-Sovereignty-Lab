@@ -130,19 +130,14 @@ class NewsletterAgent:
             except Exception as e:
                 logger.warning("warm leads: %s", e)
 
-        # Queen/Worker hive patrol (optional)
-        if os.getenv("ENABLE_NEWSLETTER_HIVE", "false").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        ):
-            try:
-                from app.services.newsletter_hive import run_hive_patrol
+        # Queen/Worker hive patrol — defaults on when agent on (unless hive explicitly off)
+        try:
+            from app.services.newsletter_hive import hive_enabled, run_hive_patrol
 
+            if hive_enabled():
                 await run_hive_patrol(self._db_pool)
-            except Exception as e:
-                logger.warning("newsletter hive: %s", e)
+        except Exception as e:
+            logger.warning("newsletter hive: %s", e)
 
     async def run_pipeline_to_review(self) -> Dict[str, Any]:
         from app.services.newsletter_pipeline import (
