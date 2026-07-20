@@ -120,6 +120,50 @@ def _soften_prompt(prompt: str) -> str:
     return f"Whimsical fantasy illustration, family-friendly animated style: {result}"
 
 
+def _is_credit_or_auth_block(err_str: str) -> bool:
+    """True when xAI refuses generation for credits / spend / permission."""
+    low = (err_str or "").lower()
+    return any(
+        marker in low
+        for marker in (
+            "permission-denied",
+            "used all available credits",
+            "monthly spending limit",
+            "insufficient credits",
+            "spending limit",
+            " 403:",
+            "grok imagine 403",
+        )
+    )
+
+
+async def _gemini_image_fallback(
+    prompt: str,
+    source_image_url: Optional[str] = None,
+) -> bytes:
+    """Gemini stills when Grok Imagine is unavailable (credits / missing key)."""
+    from app.services.skyeye_gemini_image import generate_image as gemini_generate
+
+    refs: list[tuple[bytes, str]] = []
+    if source_image_url:
+        try:
+            session = _get_session()
+            async with session.get(source_image_url) as resp:
+                if resp.status == 200:
+                    blob = await resp.read()
+                    ctype = (resp.headers.get("Content-Type") or "image/png").split(";")[0].strip()
+                    if blob and len(blob) >= 200:
+                        refs.append((blob, ctype or "image/png"))
+        except Exception as e:
+            logger.warning("Gemini fallback: archetype download failed: %s", e)
+
+    return await gemini_generate(
+        prompt,
+        aspect_ratio="1:1",
+        reference_images=refs or None,
+    )
+
+
 async def generate_image(
     prompt: str,
     size: str = "1024x1024",
@@ -129,6 +173,8 @@ async def generate_image(
 
     Returns raw image bytes downloaded from the response URL.
     Tries primary key first, falls back to XAI_FALLBACK_KEY on 429.
+    On credit/403 exhaustion (or missing xAI key), falls back to Gemini when
+    GEMINI_API_KEY is set — keeps Thera-World / Sovereign Journey panels alive.
     On content moderation rejection, retries once with a softened prompt.
     When source_image_url is provided, sends image_url in the payload
     for image-to-image generation (character consistency anchor).
@@ -136,6 +182,9 @@ async def generate_image(
     """
     key = _get_api_key()
     if not key:
+        if os.getenv("GEMINI_API_KEY", "").strip():
+            logger.warning("XAI key missing — generating via Gemini fallback")
+            return await _gemini_image_fallback(prompt, source_image_url)
         raise RuntimeError("XAI_API_KEY not set — cannot call Grok Imagine")
 
     payload: dict = {"model": "grok-imagine-image", "prompt": prompt, "n": 1}
@@ -154,19 +203,38 @@ async def generate_image(
             payload_soft: dict = {"model": "grok-imagine-image", "prompt": softened, "n": 1}
             if source_image_url:
                 payload_soft["image_url"] = source_image_url
-            result = await _imagine_with_key(key, payload_soft)
-            await asyncio.sleep(2)
-            return result
+            try:
+                result = await _imagine_with_key(key, payload_soft)
+                await asyncio.sleep(2)
+                return result
+            except RuntimeError as soft_err:
+                err_str = str(soft_err)
+                if _is_credit_or_auth_block(err_str) and os.getenv("GEMINI_API_KEY", "").strip():
+                    logger.warning("Grok Imagine credit/auth block after soften — Gemini fallback")
+                    return await _gemini_image_fallback(softened, source_image_url)
+                raise
+        if _is_credit_or_auth_block(err_str) and os.getenv("GEMINI_API_KEY", "").strip():
+            logger.warning("Grok Imagine credit/auth block — Gemini fallback: %s", err_str[:180])
+            return await _gemini_image_fallback(prompt, source_image_url)
         if "429" not in err_str:
             raise
         fallback = _get_fallback_key()
         if not fallback:
+            if os.getenv("GEMINI_API_KEY", "").strip():
+                logger.warning("Grok Imagine 429 and no XAI_FALLBACK_KEY — Gemini fallback")
+                return await _gemini_image_fallback(prompt, source_image_url)
             raise
         logger.info("Grok Imagine primary key 429 — retrying with fallback key")
 
-    result = await _imagine_with_key(fallback, payload)
-    await asyncio.sleep(2)
-    return result
+    try:
+        result = await _imagine_with_key(fallback, payload)
+        await asyncio.sleep(2)
+        return result
+    except RuntimeError as e:
+        if _is_credit_or_auth_block(str(e)) and os.getenv("GEMINI_API_KEY", "").strip():
+            logger.warning("Grok Imagine fallback key credit/auth block — Gemini fallback")
+            return await _gemini_image_fallback(prompt, source_image_url)
+        raise
 
 
 async def _video_with_key(key: str, payload: dict) -> str:

@@ -205,6 +205,9 @@ services:
       # QUANTUM-CRYSTAL-ARCH: SSE Grok Imagine cost controls (journey/daily/weekly/monthly)
       - SSE_IMAGERY_GENERATION_ENABLED=${SSE_IMAGERY_GENERATION_ENABLED:-false}
       - SSE_WEEKLY_CLIPS_ENABLED=${SSE_WEEKLY_CLIPS_ENABLED:-false}
+      # xAI Management API (prepaid balance for /api/sse/monitor/provider-credits)
+      - XAI_MANAGEMENT_KEY=${XAI_MANAGEMENT_KEY:-}
+      - XAI_TEAM_ID=${XAI_TEAM_ID:-}
       - SSE_MONTHLY_RECAP_ENABLED=${SSE_MONTHLY_RECAP_ENABLED:-false}
       - ENABLE_INTAKE_SYSTEM=${ENABLE_INTAKE_SYSTEM:-true}
       - ENABLE_INTAKE_WALKTHROUGH=${ENABLE_INTAKE_WALKTHROUGH:-false}

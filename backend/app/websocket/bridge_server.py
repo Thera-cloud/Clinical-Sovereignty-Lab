@@ -4255,6 +4255,16 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
         metadata={"registration_type": new_profile.get("registration_type")},
     )
 
+    # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch: auto opt-in (unsubscribe anytime)
+    if email and db_pool:
+        try:
+            from app.newsletter.opt_in import schedule_account_opt_in
+            schedule_account_opt_in(
+                db_pool, email, username=username or "", source="account_signup"
+            )
+        except Exception as _nl_err:
+            print(f">>> [REG] newsletter opt-in skipped: {_nl_err}")
+
     return True, "REGISTRATION_SUCCESS"
 
 MAX_FAMILY_MEMBERS = {"TOP_TIER": 5, "STANDARD": 0, "TRIAL": 0, "COACH_ONLY": 0}

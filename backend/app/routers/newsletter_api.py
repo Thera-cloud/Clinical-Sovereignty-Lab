@@ -1006,6 +1006,21 @@ async def admin_sub_stats(request: Request, admin: Dict = Depends(require_admin)
     }
 
 
+@admin_router.post("/subscribers/opt-in-platform-users")
+async def admin_opt_in_platform_users(
+    request: Request, admin: Dict = Depends(require_admin)
+):
+    """Opt all users.profile_data emails into Dispatch as active.
+
+    Preserves unsubscribed/suppressed. Promotes pending → active.
+    # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch
+    """
+    from app.newsletter.opt_in import opt_in_all_platform_users
+
+    result = await opt_in_all_platform_users(_pool(request))
+    return {"status": "ok", **result}
+
+
 @admin_router.get("/issues/{issue_id}/metrics")
 async def admin_issue_metrics(
     issue_id: str, request: Request, admin: Dict = Depends(require_admin)

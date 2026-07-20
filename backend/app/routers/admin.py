@@ -5911,6 +5911,47 @@ async def sse_monitor_breaker(request: Request):
         trips = await c.fetch("SELECT breaker_id,storyboard_id,triggered_at,daily_spend,resumed_at,status FROM sse_cost_circuit_breaker ORDER BY triggered_at DESC LIMIT 20")
     return {"daily_spend": float(daily), "monthly_spend": float(monthly), "trips": [dict(r) for r in trips]}
 
+
+@sse_router.get("/monitor/provider-credits")
+async def sse_monitor_provider_credits(request: Request):
+    """xAI prepaid balance (+ Gemini key presence). Admin-only via sse_router.
+
+    # QUANTUM-CRYSTAL-ARCH — surface provider credit exhaustion before panel cron fails
+    """
+    import os as _os
+
+    from app.sse.infrastructure.xai_billing import fetch_prepaid_balance
+
+    xai = await fetch_prepaid_balance()
+    gemini_key = bool(_os.getenv("GEMINI_API_KEY", "").strip())
+    imagery_on = _os.getenv("SSE_IMAGERY_GENERATION_ENABLED", "false").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    recent_credit_fails = 0
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool:
+        try:
+            async with pool.acquire() as c:
+                recent_credit_fails = await c.fetchval(
+                    "SELECT COUNT(*) FROM sse_delivery_generation_log "
+                    "WHERE status='failed' AND generated_at > NOW() - INTERVAL '48 hours' "
+                    "AND (error_message ILIKE '%available credits%' "
+                    " OR error_message ILIKE '%spending limit%' "
+                    " OR error_message ILIKE '%permission-denied%')"
+                ) or 0
+        except Exception:
+            recent_credit_fails = 0
+    return {
+        "xai": xai,
+        "gemini": {
+            "api_key_configured": gemini_key,
+            "balance_api": False,
+            "note": "Google AI Studio keys have no balance endpoint; use Cloud Billing console",
+        },
+        "sse_imagery_generation_enabled": imagery_on,
+        "recent_credit_fails_48h": int(recent_credit_fails),
+    }
+
 @sse_router.get("/monitor/heartbeat")
 async def sse_monitor_heartbeat(request: Request):
     pool = getattr(request.app.state, "db_pool", None)

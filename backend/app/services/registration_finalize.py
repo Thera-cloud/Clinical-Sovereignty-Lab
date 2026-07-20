@@ -368,6 +368,15 @@ async def finalize_signup(
         },
     )
 
+    # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch auto opt-in
+    try:
+        from app.newsletter.opt_in import schedule_account_opt_in
+        schedule_account_opt_in(
+            db_pool, email, username=username, source="account_signup_stripe"
+        )
+    except Exception as _nl_err:
+        logger.warning("newsletter opt-in skipped for %s: %s", username, _nl_err)
+
     return True, "REGISTRATION_SUCCESS"
 
 
@@ -949,6 +958,13 @@ async def finalize_dependent_signup(
                     "family_role": "SPOUSE",
                 },
             )
+            try:
+                from app.newsletter.opt_in import schedule_account_opt_in
+                schedule_account_opt_in(
+                    db_pool, email, username=username, source="account_signup_spouse"
+                )
+            except Exception as _nl_err:
+                logger.warning("newsletter opt-in skipped for spouse %s: %s", username, _nl_err)
             return True, "DEPENDENT_REGISTRATION_SUCCESS", {
                 "user_id": str(new_user_id),
                 "family_id": str(family_id),
@@ -1009,6 +1025,14 @@ async def finalize_dependent_signup(
             "is_minor": is_minor,
         },
     )
+
+    try:
+        from app.newsletter.opt_in import schedule_account_opt_in
+        schedule_account_opt_in(
+            db_pool, email, username=username, source="account_signup_dependent"
+        )
+    except Exception as _nl_err:
+        logger.warning("newsletter opt-in skipped for dependent %s: %s", username, _nl_err)
 
     return True, "DEPENDENT_REGISTRATION_SUCCESS", {
         "user_id": str(new_user_id),
@@ -1127,6 +1151,14 @@ async def finalize_paid_dependent_signup(
             "stripe_subscription_id": stripe_subscription_id,
         },
     )
+
+    try:
+        from app.newsletter.opt_in import schedule_account_opt_in
+        schedule_account_opt_in(
+            db_pool, email, username=username, source="account_signup_paid_dependent"
+        )
+    except Exception as _nl_err:
+        logger.warning("newsletter opt-in skipped for paid dependent %s: %s", username, _nl_err)
 
     return True, "DEPENDENT_PAID_REGISTRATION_SUCCESS", {
         "user_id": str(new_user_id),
