@@ -132,6 +132,25 @@ def test_hero_prompt_is_safe_editorial():
     assert img.hero_public_url("demo-slug").endswith("/api/newsletter/library/demo-slug/hero")
 
 
+def test_hero_sniff_png_and_jpeg():
+    img = _load("nl_img_sniff_ut", "app/services/newsletter_imagery.py")
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20
+    jpg = b"\xff\xd8\xff" + b"\x00" * 20
+    assert img.sniff_image_meta(png) == (".png", "image/png")
+    assert img.sniff_image_meta(jpg) == (".jpg", "image/jpeg")
+
+
+def test_hero_enabled_accepts_gemini_without_xai(monkeypatch):
+    img = _load("nl_img_en_ut", "app/services/newsletter_imagery.py")
+    monkeypatch.setenv("ENABLE_NEWSLETTER_HERO_IMAGE", "true")
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.delenv("XAI_SSE_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini")
+    assert img.hero_enabled() is True
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    assert img.hero_enabled() is False
+
+
 def test_email_html_embeds_hero_when_present():
     delivery = _load("nl_delivery_hero_ut", "app/services/newsletter_delivery.py")
     html = delivery._html_email(

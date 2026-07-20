@@ -494,15 +494,16 @@ async def library_issue_html(slug: str, request: Request):
 
 @router.get("/library/{slug}/hero")
 async def library_hero_image(slug: str, request: Request):
-    """Stable public hero PNG for email + library (survives R2 presign expiry)."""
-    from app.services.newsletter_imagery import load_hero_bytes
+    """Stable public hero image for email + library (survives R2 presign expiry)."""
+    from app.services.newsletter_imagery import load_hero_bytes, sniff_image_meta
 
     data = await load_hero_bytes(_pool(request), slug)
     if not data:
         raise HTTPException(404, "No hero image")
+    _, media_type = sniff_image_meta(data)
     return Response(
         content=data,
-        media_type="image/png",
+        media_type=media_type,
         headers={"Cache-Control": "public, max-age=86400"},
     )
 
@@ -722,7 +723,7 @@ async def admin_rewrite_issue(
 async def admin_generate_hero(
     issue_id: str, request: Request, admin: Dict = Depends(require_admin)
 ):
-    """Generate (or regenerate) Grok Imagine topic hero for this issue."""
+    """Generate (or regenerate) topic hero — Grok Imagine, then Gemini fallback."""
     from app.services.newsletter_imagery import generate_hero_for_issue
 
     result = await generate_hero_for_issue(_pool(request), issue_id)
@@ -738,6 +739,7 @@ async def admin_generate_hero(
         "generated": True,
         "issue": _row_json(row) if row else None,
         "hero_image_url": result.get("hero_image_url"),
+        "provider": result.get("provider"),
         "editor": admin.get("username") or "admin",
     }
 
