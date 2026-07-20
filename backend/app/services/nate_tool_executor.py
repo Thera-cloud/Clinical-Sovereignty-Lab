@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 logger = logging.getLogger("nate.tool_executor")
@@ -23,6 +24,33 @@ _NO_RE = re.compile(
     re.I,
 )
 
+# Intent detectors (propose path) — require explicit tool language
+_BOOK_RE = re.compile(
+    r"\b(?:book|schedule|set up)\b.{0,40}\b(?:session|appointment|coaching)\b"
+    r"|\b(?:session|appointment)\b.{0,40}\b(?:book|schedule)\b",
+    re.I,
+)
+_REMIND_RE = re.compile(
+    r"\bremind me\b(?:\s+to\b|\s+about\b)?\s+(.+)",
+    re.I,
+)
+_SET_REMINDER_RE = re.compile(
+    r"\b(?:set|create)\b.{0,20}\breminder\b(?:\s+(?:to|for|about)\b)?\s*(.+)?",
+    re.I,
+)
+_RESOURCE_RE = re.compile(
+    r"\b(?:send|queue|share)\b.{0,30}\b(?:resource|article|reading|worksheet)\b"
+    r"(?:\s+(?:on|about|for)\b)?\s*(.+)?",
+    re.I,
+)
+_ISO_DT_RE = re.compile(
+    r"\b(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?(?:Z|[+-]\d{2}:?\d{2})?)\b"
+)
+_RELATIVE_DAY_RE = re.compile(
+    r"\b(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+    re.I,
+)
+
 # In-memory fallback when Redis unavailable
 _memory_pending: Dict[str, Dict[str, Any]] = {}
 
@@ -33,6 +61,24 @@ def tool_executor_enabled() -> bool:
         "true",
         "yes",
     )
+
+
+async def _resolve_user_uuid(db_pool: Any, hw_id: str) -> Optional[Any]:
+    if not db_pool or not hw_id:
+        return None
+    try:
+        async with db_pool.acquire() as conn:
+            return await conn.fetchval(
+                """
+                SELECT id FROM users
+                WHERE hardware_id = $1 OR username = $1
+                LIMIT 1
+                """,
+                hw_id,
+            )
+    except Exception as e:
+        logger.warning("tool_executor: resolve user uuid failed: %s", e)
+        return None
 
 
 async def _book_session_executor(
@@ -53,18 +99,47 @@ async def _book_session_executor(
 async def _set_reminder_executor(
     db_pool: Any, hw_id: str, params: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Stub — full delivery via nate_nudges + proactive_touch_policy in Phase 2 wiring."""
+    """Persist reminder to nate_nudges (content column; user_id = users.id UUID)."""
     reminder_text = (params.get("text") or params.get("message") or "").strip()
     scheduled_at = params.get("scheduled_at")
     if not reminder_text or not scheduled_at:
         return {"success": False, "error": "missing_reminder_fields"}
-    return {
-        "success": True,
-        "status": "scheduled_stub",
-        "user_id": hw_id,
-        "text": reminder_text[:500],
-        "scheduled_at": scheduled_at,
-    }
+    if not db_pool:
+        return {"success": False, "error": "database_unavailable"}
+    try:
+        sched_dt = datetime.fromisoformat(str(scheduled_at).replace("Z", "+00:00"))
+    except Exception:
+        return {"success": False, "error": "invalid_scheduled_at"}
+
+    user_uuid = await _resolve_user_uuid(db_pool, hw_id)
+    if not user_uuid:
+        return {"success": False, "error": "user_not_found"}
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO nate_nudges
+                    (user_id, nudge_type, title, content, status, scheduled_at, metadata)
+                VALUES ($1, 'tool_reminder', 'Reminder from Nate', $2, 'pending', $3,
+                        jsonb_build_object('source', 'nate_tool_executor', 'hw_id', $4::text))
+                RETURNING id
+                """,
+                user_uuid,
+                reminder_text[:2000],
+                sched_dt,
+                hw_id,
+            )
+        return {
+            "success": True,
+            "status": "scheduled",
+            "nudge_id": str(row["id"]) if row else None,
+            "user_id": hw_id,
+            "text": reminder_text[:500],
+            "scheduled_at": sched_dt.isoformat(),
+        }
+    except Exception as e:
+        logger.warning("tool_executor: set_reminder insert failed: %s", e)
+        return {"success": False, "error": "reminder_persist_failed", "detail": str(e)[:200]}
 
 
 async def _queue_resource_executor(
@@ -73,12 +148,37 @@ async def _queue_resource_executor(
     resource = (params.get("resource_id") or params.get("topic") or "").strip()
     if not resource:
         return {"success": False, "error": "missing_resource"}
-    return {
-        "success": True,
-        "status": "queued_stub",
-        "user_id": hw_id,
-        "resource": resource[:200],
-    }
+    if not db_pool:
+        return {"success": False, "error": "database_unavailable"}
+    user_uuid = await _resolve_user_uuid(db_pool, hw_id)
+    if not user_uuid:
+        return {"success": False, "error": "user_not_found"}
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO nate_nudges
+                    (user_id, nudge_type, title, content, status, scheduled_at, metadata)
+                VALUES ($1, 'queued_resource', 'Resource from Nate', $2, 'pending', NOW(),
+                        jsonb_build_object('source', 'nate_tool_executor',
+                                          'resource', $3::text, 'hw_id', $4::text))
+                RETURNING id
+                """,
+                user_uuid,
+                f"Queued resource: {resource[:500]}",
+                resource[:200],
+                hw_id,
+            )
+        return {
+            "success": True,
+            "status": "queued",
+            "nudge_id": str(row["id"]) if row else None,
+            "user_id": hw_id,
+            "resource": resource[:200],
+        }
+    except Exception as e:
+        logger.warning("tool_executor: queue_resource insert failed: %s", e)
+        return {"success": False, "error": "resource_persist_failed", "detail": str(e)[:200]}
 
 
 NATE_TOOLS: Dict[str, Dict[str, Any]] = {
@@ -145,6 +245,76 @@ async def _redis_delete(redis_client: Any, key: str) -> None:
         pass
 
 
+def _default_slot_start(user_text: str) -> str:
+    """ISO slot: explicit ISO in text, else tomorrow 10:00 UTC."""
+    m = _ISO_DT_RE.search(user_text or "")
+    if m:
+        raw = m.group(1).replace(" ", "T")
+        try:
+            datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            return raw if "T" in raw or " " in m.group(1) else f"{raw}T10:00:00+00:00"
+        except Exception:
+            pass
+    base = datetime.now(timezone.utc).replace(hour=10, minute=0, second=0, microsecond=0)
+    if re.search(r"\btoday\b", user_text or "", re.I):
+        return base.isoformat()
+    return (base + timedelta(days=1)).isoformat()
+
+
+def detect_tool_intent(user_text: str) -> Optional[Dict[str, Any]]:
+    """
+    Heuristic propose detector. Returns tool_name, params, confirmation prompt.
+    Does not store pending — caller must call propose_tool_action.
+    """
+    text = (user_text or "").strip()
+    if not text or len(text) < 8:
+        return None
+
+    if _BOOK_RE.search(text):
+        slot = _default_slot_start(text)
+        return {
+            "tool_name": "book_session",
+            "params": {
+                "slot_start": slot,
+                "session_type": "individual",
+                "notes": text[:500],
+            },
+            "prompt": (
+                f"I can request a coaching session around {slot}. "
+                "Say yes to send that to your coach, or no to cancel."
+            ),
+        }
+
+    m = _REMIND_RE.search(text) or _SET_REMINDER_RE.search(text)
+    if m:
+        body = (m.group(1) or text).strip()[:500]
+        if len(body) < 3:
+            body = text[:500]
+        when = _default_slot_start(text)
+        return {
+            "tool_name": "set_reminder",
+            "params": {"text": body, "scheduled_at": when},
+            "prompt": (
+                f'I can set a reminder for "{body[:120]}" around {when}. '
+                "Say yes to save it, or no to cancel."
+            ),
+        }
+
+    m = _RESOURCE_RE.search(text)
+    if m:
+        topic = (m.group(1) or "general").strip()[:200] or "general"
+        return {
+            "tool_name": "queue_resource",
+            "params": {"topic": topic},
+            "prompt": (
+                f'I can queue a resource about "{topic}" for you. '
+                "Say yes to queue it, or no to cancel."
+            ),
+        }
+
+    return None
+
+
 async def propose_tool_action(
     hw_id: str,
     conversation_id: str,
@@ -170,6 +340,40 @@ async def propose_tool_action(
     if not stored:
         _memory_pending[hw_id] = pending
     return {"proposed": True, "tool_name": tool_name, "awaiting_confirmation": True}
+
+
+async def maybe_propose_from_utterance(
+    hw_id: str,
+    user_text: str,
+    *,
+    conversation_id: str = "",
+    redis_client: Any = None,
+) -> Optional[Dict[str, Any]]:
+    """Detect intent, store pending, return handled response for bridge."""
+    if not tool_executor_enabled():
+        return None
+    # Don't overwrite an existing pending action
+    existing = await _load_pending(hw_id, redis_client)
+    if existing:
+        return None
+    intent = detect_tool_intent(user_text)
+    if not intent:
+        return None
+    result = await propose_tool_action(
+        hw_id,
+        conversation_id,
+        intent["tool_name"],
+        intent.get("params") or {},
+        redis_client=redis_client,
+    )
+    if not result.get("proposed"):
+        return None
+    return {
+        "handled": True,
+        "proposed": True,
+        "tool_name": intent["tool_name"],
+        "text": intent.get("prompt") or "Should I go ahead with that?",
+    }
 
 
 def _classify_confirmation(user_text: str) -> Optional[bool]:
@@ -214,7 +418,7 @@ async def check_and_execute_confirmation(
 ) -> Optional[Dict[str, Any]]:
     """
     Returns None if no pending action or ambiguous confirmation.
-    Otherwise returns dict with action taken and tool result.
+    On yes/no: clears pending and returns handled=True for bridge WS.
     """
     if not tool_executor_enabled():
         return None
@@ -231,15 +435,22 @@ async def check_and_execute_confirmation(
 
     if not decision:
         return {
+            "handled": True,
             "confirmed": False,
             "tool_name": pending.get("tool_name"),
+            "text": "Okay — I won't do that.",
             "message": "Okay — I won't do that.",
         }
 
     tool_name = pending.get("tool_name")
     spec = NATE_TOOLS.get(tool_name or "")
     if not spec:
-        return {"confirmed": True, "error": "unknown_tool"}
+        return {
+            "handled": True,
+            "confirmed": True,
+            "error": "unknown_tool",
+            "text": "I lost track of that action. Please ask again.",
+        }
 
     executor: Callable[..., Awaitable[Dict[str, Any]]] = spec["executor_fn"]
     try:
@@ -248,8 +459,25 @@ async def check_and_execute_confirmation(
         logger.warning("tool_executor: %s failed: %s", tool_name, e)
         result = {"success": False, "error": str(e)[:200]}
 
+    ok = bool(result.get("success"))
+    if ok:
+        if tool_name == "book_session":
+            text = result.get("message") or "Session request is ready for your coach."
+        elif tool_name == "set_reminder":
+            text = "Reminder saved."
+        elif tool_name == "queue_resource":
+            text = "Resource queued for you."
+        else:
+            text = "Done."
+    else:
+        err = result.get("error") or "failed"
+        text = f"I couldn't complete that ({err})."
+
     return {
+        "handled": True,
         "confirmed": True,
         "tool_name": tool_name,
         "result": result,
+        "text": text,
+        "message": text,
     }

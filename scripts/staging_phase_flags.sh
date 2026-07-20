@@ -2,6 +2,7 @@
 # Flip agentic flags on staging_backend only (not production nate_backend).
 # Usage: bash scripts/staging_phase_flags.sh phase0 on|off
 #        bash scripts/staging_phase_flags.sh phase1 on|off
+#        bash scripts/staging_phase_flags.sh phase2 on|off
 
 set -euo pipefail
 
@@ -11,7 +12,7 @@ PHASE="${1:-}"
 STATE="${2:-}"
 
 if [ -z "$PHASE" ] || [ -z "$STATE" ]; then
-  echo "Usage: $0 <phase0|phase1> <on|off>" >&2
+  echo "Usage: $0 <phase0|phase1|phase2> <on|off>" >&2
   exit 1
 fi
 
@@ -40,14 +41,21 @@ case "$PHASE" in
     fi
     export STAGING_ENABLE_PROACTIVE_COMMITMENTS="$(_val)"
     ;;
+  phase2)
+    if [ "$STATE" = "on" ]; then
+      export STAGING_ENABLE_PROACTIVE_TOUCH_POLICY=true
+      export STAGING_ENABLE_PROACTIVE_COMMITMENTS=true
+    fi
+    export STAGING_ENABLE_NATE_TOOL_EXECUTOR="$(_val)"
+    ;;
   *)
     echo "Unknown phase: $PHASE" >&2
     exit 1
     ;;
 esac
 
-echo "[staging_flags] ${PHASE} ${STATE} — recreating staging_backend"
-docker compose -f docker-compose.prod.yml -f docker-compose.staging.yml up -d staging_backend
+echo "[staging_flags] ${PHASE} ${STATE} — recreating staging_backend + staging_bridge"
+docker compose -f docker-compose.prod.yml -f docker-compose.staging.yml up -d staging_backend staging_bridge
 
 echo "[staging_flags] Waiting for staging_backend health (up to 90s)"
 for i in $(seq 1 30); do
@@ -56,7 +64,8 @@ for i in $(seq 1 30); do
   fi
   sleep 3
 done
-docker exec nate_staging_backend printenv ENABLE_PROACTIVE_TOUCH_POLICY ENABLE_PROACTIVE_COMMITMENTS 2>/dev/null || true
+docker exec nate_staging_backend printenv ENABLE_PROACTIVE_TOUCH_POLICY ENABLE_PROACTIVE_COMMITMENTS ENABLE_NATE_TOOL_EXECUTOR 2>/dev/null || true
+docker exec nate_staging_bridge printenv ENABLE_NATE_TOOL_EXECUTOR 2>/dev/null || true
 curl -sf http://127.0.0.1:8011/health
 echo ""
 echo "[staging_flags] OK"

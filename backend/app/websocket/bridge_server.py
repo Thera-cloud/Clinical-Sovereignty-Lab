@@ -10727,17 +10727,17 @@ class AzureCortex:
                 except Exception:
                     pass
                 # QUANTUM-CRYSTAL-ARCH: Agentic Phase 1 — post-turn commitment extraction
-                if os.environ.get("ENABLE_PROACTIVE_COMMITMENTS", "").lower() in ("true", "1", "yes"):
-                    try:
-                        from app.services.nate_commitment_extractor import run_post_turn_extraction
-                        _uname_commit = profile.get("username") or uid
-                        asyncio.create_task(run_post_turn_extraction(
-                            db_pool, username=_uname_commit, hardware_id=uid,
-                            user_text=_qg_verbatim_user_text,
-                            audit_metadata=_ttc_audit_meta if _ttc_audit_meta else None,
-                        ))
-                    except Exception:
-                        pass
+                try:
+                    from app.services.nate_commitment_extractor import schedule_post_turn_extraction
+                    schedule_post_turn_extraction(
+                        db_pool,
+                        username=profile.get("username") or uid,
+                        hardware_id=uid,
+                        user_text=_qg_verbatim_user_text,
+                        audit_metadata=_ttc_audit_meta if _ttc_audit_meta else None,
+                    )
+                except Exception:
+                    pass
 
                 # QUANTUM-CRYSTAL-ARCH: accumulate turns, create session summary every N turns
                 try:
@@ -11261,6 +11261,15 @@ class AzureCortex:
                                 min_score=3,
                                 origin_surface="family_sanctuary",
                             ))
+                            # QUANTUM-CRYSTAL-ARCH: Phase 1 commitment extract (family)
+                            try:
+                                from app.services.nate_commitment_extractor import schedule_post_turn_extraction
+                                schedule_post_turn_extraction(
+                                    db_pool, username=_hw_by_id[_msg_sender],
+                                    hardware_id=_msg_sender, user_text=_msg_text,
+                                )
+                            except Exception:
+                                pass
                 except Exception as e:
                     logging.getLogger("bridge").warning("Crystallization failed in %s for %s: %s", "family_sanctuary", sanctuary_data.get("head_of_household_id") or sanctuary_data.get("created_by") or "", e)
                     pass
@@ -11555,6 +11564,15 @@ class AzureCortex:
                                 min_score=3,
                                 origin_surface="group_coaching",
                             ))
+                            # QUANTUM-CRYSTAL-ARCH: Phase 1 commitment extract (group)
+                            try:
+                                from app.services.nate_commitment_extractor import schedule_post_turn_extraction
+                                schedule_post_turn_extraction(
+                                    db_pool, username=_target_name or _target_hw,
+                                    hardware_id=_target_hw, user_text=_msg_text,
+                                )
+                            except Exception:
+                                pass
                 except Exception as e:
                     logging.getLogger("bridge").warning("Crystallization failed in %s for %s: %s", "group_coaching", target_member.get("hardware_id", ""), e)
                     pass
@@ -11839,6 +11857,12 @@ class AzureCortex:
                             min_score=3,
                             origin_surface="private_coaching",
                         ))
+                        # QUANTUM-CRYSTAL-ARCH: Phase 1 commitment extract (private)
+                        from app.services.nate_commitment_extractor import schedule_post_turn_extraction
+                        schedule_post_turn_extraction(
+                            db_pool, username=member_name or member_id,
+                            hardware_id=member_id or "", user_text=user_prompt,
+                        )
                     except Exception as e:
                         logging.getLogger("bridge").warning("Crystallization failed in %s for %s: %s", "private_coaching", member_id or "", e)
                         pass
@@ -13943,15 +13967,25 @@ async def handle_client(websocket, path=None):
                         except Exception as _neg_chat_err:
                             print(f">>> [NEGOTIATION] chat hook error uid={uid}: {_neg_chat_err}")
 
-                        # --- Nate tool confirmation (Agentic Phase 2) ---
+                        # --- Nate tool propose/confirm (Agentic Phase 2) --- # QUANTUM-CRYSTAL-ARCH
                         if os.environ.get("ENABLE_NATE_TOOL_EXECUTOR", "").lower() in ("true", "1", "yes"):
                             try:
-                                from app.services.nate_tool_executor import check_and_execute_confirmation
+                                from app.services.nate_tool_executor import (
+                                    check_and_execute_confirmation,
+                                    maybe_propose_from_utterance,
+                                )
                                 _tool = await check_and_execute_confirmation(uid, text, db_pool=db_pool)
                                 if _tool and _tool.get("handled"):
                                     await websocket.send(json.dumps({
                                         "type": "nate_response",
                                         "text": _tool.get("text", "Done."),
+                                    }))
+                                    continue
+                                _prop = await maybe_propose_from_utterance(uid, text)
+                                if _prop and _prop.get("handled"):
+                                    await websocket.send(json.dumps({
+                                        "type": "nate_response",
+                                        "text": _prop.get("text", "Should I go ahead?"),
                                     }))
                                     continue
                             except Exception as _tool_err:

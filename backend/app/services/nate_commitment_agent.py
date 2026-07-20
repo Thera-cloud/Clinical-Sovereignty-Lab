@@ -84,9 +84,9 @@ class NateCommitmentAgent:
         async with self.db_pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT c.*, u.profile_data, u.username
+                SELECT c.*, u.profile_data, u.username, u.hardware_id AS resolved_hw_id
                 FROM nate_commitments c
-                JOIN users u ON u.hardware_id = c.user_id
+                JOIN users u ON (u.hardware_id = c.user_id OR u.username = c.user_id)
                 WHERE c.status = 'active'
                   AND c.target_date IS NOT NULL
                   AND c.target_date BETWEEN $1 AND $2
@@ -116,7 +116,7 @@ class NateCommitmentAgent:
             record_skipped_touch,
         )
 
-        hw_id = row["user_id"]
+        hw_id = row.get("resolved_hw_id") or row["user_id"]
         commitment_id = str(row["id"])
         if await self._recent_touch(conn, commitment_id):
             return
@@ -216,14 +216,18 @@ class NateCommitmentAgent:
     async def _create_nudge(self, conn, hw_id: str, msg: str):
         try:
             user_uuid = await conn.fetchval(
-                "SELECT id FROM users WHERE hardware_id = $1 LIMIT 1",
+                """
+                SELECT id FROM users
+                WHERE hardware_id = $1 OR username = $1
+                LIMIT 1
+                """,
                 hw_id,
             )
             if not user_uuid:
                 return
             await conn.execute(
                 """
-                INSERT INTO nate_nudges (user_id, nudge_type, title, body, created_at)
+                INSERT INTO nate_nudges (user_id, nudge_type, title, content, created_at)
                 VALUES ($1, 'commitment_touch', 'What Nate is holding', $2, NOW())
                 """,
                 user_uuid,

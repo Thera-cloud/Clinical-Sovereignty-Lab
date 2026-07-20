@@ -1699,6 +1699,19 @@ async def run_twilio_grok_xtts_bridge(
                                     domain="clinical",
                                     origin_surface="voice_call",
                                 )
+                                # QUANTUM-CRYSTAL-ARCH: Phase 1 commitment extract (voice)
+                                try:
+                                    from app.services.nate_commitment_extractor import (
+                                        schedule_post_turn_extraction,
+                                    )
+                                    schedule_post_turn_extraction(
+                                        db_pool,
+                                        username=session_username,
+                                        hardware_id=session_username,
+                                        user_text=_u,
+                                    )
+                                except Exception:
+                                    pass
                                 if _vec_index:
                                     try:
                                         await _vec_index(

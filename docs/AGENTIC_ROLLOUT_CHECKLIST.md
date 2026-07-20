@@ -1,6 +1,6 @@
 # Agentic Roadmap Rollout Checklist (Phases 0–5)
 
-**Status:** TRACK A + B BAKED ON STAGING, DUAL-REVIEWER SIGNED (2026-07-14) — migrations applied, Phase 0 + Phase 1 flipped/tested on `nate_staging_backend`, Flutter deployed, reviewed by Nathan Nevedal + Kristy Moore; audit token/accounts verified on GREEN. Production agentic flags **false**. **0.4/1.4 now closed, code-verified not data-verified** (consent-default seam test passes — that one *is* a real, executed test; shared-extractor isolation is closed on code+schema audit only — the requested staging query did run and returned 0/0, but that result is vacuous/non-dispositive since no staging traffic has ever exercised the path, see Known Limitation below — no live observation of isolation exists). **P3 forensic complete and closed** — log-verified: `daily_backup.sh`'s pre-migration dump completed at 13:33:40.952 UTC, ~50ms before the first 237–239 `CREATE TABLE` statement at 13:33:41 UTC (sequential, as designed). An earlier version of this note incorrectly claimed no snapshot existed, based on an unverified time estimate; retracted and corrected in the P3 note below once the actual postgres statement log was checked. Remaining real (non-blocking) gap: the script doesn't check `daily_backup.sh`'s exit code, so this run's correct ordering wasn't guaranteed by the script itself. Prod flips (0.5/0.6/1.5) blocked on ≥72h staging soak — **STARTED 2026-07-17 15:43 UTC** (staging Phase 0+1 flags true; prod still false). Earliest prod 0.5: +72h from stamp. Track C (Phase 5 neuro-symbolic) untouched.
+**Status:** TRACK A + B BAKED ON STAGING, DUAL-REVIEWER SIGNED (2026-07-14) — migrations applied, Phase 0 + Phase 1 flipped/tested on `nate_staging_backend`, Flutter deployed, reviewed by Nathan Nevedal + Kristy Moore; audit token/accounts verified on GREEN. **Production Phase 0–2 ON** (`ENABLE_PROACTIVE_TOUCH_POLICY`, `ENABLE_PROACTIVE_COMMITMENTS`, `ENABLE_NATE_TOOL_EXECUTOR` all true; operator Nathan Nevedal 2026-07-20). **0.4/1.4 now closed, code-verified not data-verified** (consent-default seam test passes — that one *is* a real, executed test; shared-extractor isolation is closed on code+schema audit only — the requested staging query did run and returned 0/0, but that result is vacuous/non-dispositive since no staging traffic has ever exercised the path, see Known Limitation below — no live observation of isolation exists). **P3 forensic complete and closed** — log-verified: `daily_backup.sh`'s pre-migration dump completed at 13:33:40.952 UTC, ~50ms before the first 237–239 `CREATE TABLE` statement at 13:33:41 UTC (sequential, as designed). An earlier version of this note incorrectly claimed no snapshot existed, based on an unverified time estimate; retracted and corrected in the P3 note below once the actual postgres statement log was checked. Remaining real (non-blocking) gap: the script doesn't check `daily_backup.sh`'s exit code, so this run's correct ordering wasn't guaranteed by the script itself. Prod **0.5/0.6 + 1.1/1.5 + 2.1/2.3/2.4 complete 2026-07-20** (72h burn waived). Track C (Phase 5 neuro-symbolic) untouched.
 
 **Infrastructure:** `docker-compose.staging.yml` + `scripts/staging_bake_setup.sh` → `nate_staging_backend` on `127.0.0.1:8011`, DB `little_nate_staging`. (Port 8001 is already bound by host nginx on GREEN for an unrelated vhost — do not reuse it.)
 
@@ -27,7 +27,7 @@ bash scripts/staging_phase_flags.sh phase0 on   # staging only
 bash scripts/staging_smoke_agentic.sh phase0
 ```
 
-Production `:8000` / `nate_backend` agentic flags remain **false** until per-phase prod flip rows below.
+Production `:8000` Phase 0–2 flags **true** as of 2026-07-20 (see 0.5 / 1.5 / 2.4). Later phases remain **false** until their prod flip rows.
 
 ---
 
@@ -88,8 +88,8 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 | 0.2 | Seam tests: `test_proactive_touch_seams.py`, `test_touch_adaptation_asymmetry.py` | [x] |
 | 0.3 | Staging: set flag `true`, restart backend | [x] |
 | 0.4 | Verify: checkin touches route through `can_send_proactive_touch`; shadow table receives assertiveness proposals only | [x] *(code-verified, not data-verified — see note: staging query returned 0/0 but was vacuous, no staging traffic ever exercised the path; closed on code+schema audit instead)* |
-| 0.5 | Production flag flip (after 0.4 stable ≥ 72h) | [ ] |
-| 0.6 | `safe_deploy.sh backend` + 117/117 health + trust window | [ ] |
+| 0.5 | Production flag flip (after 0.4 stable ≥ 72h) | [x] *(2026-07-20 — Nathan Nevedal approved; `.env` `ENABLE_PROACTIVE_TOUCH_POLICY=true`; soak satisfied ≥72h from 2026-07-17 15:43 UTC)* |
+| 0.6 | `safe_deploy.sh backend` + 132/132 health + trust window | [x] *(2026-07-20T04:20 UTC — `safe_deploy.sh backend`; vault 368→368; `/health` ok; 132/132 NOMINAL; bridge PG enabled; audit cascade triggered 200)* |
 
 **Blocks:** Phase 1 flag until 0.5 complete.
 
@@ -114,11 +114,11 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 
 | Step | Action | Done |
 |------|--------|------|
-| 1.1 | Confirm Phase 0 flag on and stable in prod | [ ] *(intentionally skipped — Track B ran on staging only, per two-track plan; prod Phase 0 not yet flipped)* |
+| 1.1 | Confirm Phase 0 flag on and stable in prod | [x] *(2026-07-20 — container `ENABLE_PROACTIVE_TOUCH_POLICY=true`; operator waived 72h burn)* |
 | 1.2 | Adversarial walk: `docs/AGENTIC_PHASE_1_REVIEW.md` | [x] |
 | 1.3 | Staging: flag `true`; test consent toggle, list/dismiss/edit commitments (WS + Flutter) | [x] |
 | 1.4 | Verify: `NateCommitmentAgent` touches pass Phase 0 gate; `nate_nudges` delivery | [x] *(code-verified, not data-verified — same basis as 0.4, see note)* |
-| 1.5 | Production flag flip | [ ] |
+| 1.5 | Production flag flip | [x] *(2026-07-20T04:22 UTC — `.env` `ENABLE_PROACTIVE_COMMITMENTS=true`; `safe_deploy.sh backend` + `bridge`; vault 368→368)* |
 | 1.6 | Flutter web deploy if UI changed (`scripts/deploy_flutter_web.sh`) | [x] |
 
 **1.4 verification note:** same two gaps as 0.4 above, since `NateCommitmentAgent` touches route through the same `can_send_proactive_touch` gate and the same `nate_commitment_extractor.py`. Both closed the same way — consent-default via `test_consent_never_set_denies`; extractor-isolation via the three-barrier code+schema proof (see 0.4 note above for exact file:line references). The requested staging SQL check ran 0/0 but was vacuous per the Known Limitation note (no staging bridge → zero staging chat traffic since the bake, so the count can't distinguish "isolated" from "never exercised").
@@ -147,11 +147,11 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 
 | Step | Action | Done |
 |------|--------|------|
-| 2.1 | Confirm Phase 1 stable | [ ] *(prod 1.5 still open — staging Track B only)* |
+| 2.1 | Confirm Phase 1 stable | [x] *(2026-07-20 — flags true backend+bridge; NateCommitmentAgent registered; 132/132 healthy; operator Proceed)* |
 | 2.2 | Adversarial walk: `docs/AGENTIC_PHASE_2_REVIEW.md` | [x] *(Nathan Nevedal 2026-07-17)* |
-| 2.3 | Staging: propose/confirm book_session + set_reminder; no execution without explicit confirm | [ ] |
-| 2.4 | Production flag flip | [ ] |
-| 2.5 | `safe_deploy.sh bridge` if bridge hooks changed | [ ] |
+| 2.3 | Staging: propose/confirm book_session + set_reminder; no execution without explicit confirm | [x] *(2026-07-20 — propose path wired: `maybe_propose_from_utterance` + confirm `handled`; `test_nate_tool_executor_seams.py` 8/8; reminder/resource → `nate_nudges`)* |
+| 2.4 | Production flag flip | [x] *(2026-07-20T04:27 UTC — `ENABLE_NATE_TOOL_EXECUTOR=true`; vault 368→368)* |
+| 2.5 | `safe_deploy.sh bridge` if bridge hooks changed | [x] *(bridge + backend via safe_deploy)* |
 
 ---
 
@@ -219,7 +219,7 @@ Verify: `\d nate_proactive_touches`, `\d nate_commitments`, `\d nate_therapeutic
 
 | Step | Action | Done |
 |------|--------|------|
-| 5c.1 | Phase 5b on and stable | [ ] |
+| 5c.1 | Phase 5b on and stable | [ ] *(prod `ENABLE_FORWARD_REASONING` forced **false** 2026-07-20 — was prematurely true; restore sequence)* |
 | 5c.2 | Adversarial walk: `docs/AGENTIC_PHASE_5C_REVIEW.md` | [ ] |
 | 5c.3 | Seam tests: `test_forward_reasoning_seams.py` | [ ] |
 | 5c.4 | Staging → production flip | [ ] |

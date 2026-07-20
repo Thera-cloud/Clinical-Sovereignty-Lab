@@ -1,11 +1,15 @@
 # AGENTIC_WIRING_INVENTORY.md
 
-**Inventory date:** 2026-07-10  
+**Inventory date:** 2026-07-10 (delta 2026-07-20)  
 **Scope:** Typed extraction, verifier constraint locations, C_emo/nevedal state schema, dormant knowledge-graph flags  
 **Related plan:** `.cursor/plans/little_nate_agentic_roadmap_ef224a28.plan.md`  
 **Mode:** Read-only factual snapshot — no fixes, no proposals
 
 ---
+
+## Executive verdict (updated 2026-07-20 — Phase 0–2 prod ON)
+
+Phases **0–2** live in prod (`ENABLE_PROACTIVE_TOUCH_POLICY`, `ENABLE_PROACTIVE_COMMITMENTS`, `ENABLE_NATE_TOOL_EXECUTOR`). Propose/confirm wired via `maybe_propose_from_utterance` + `check_and_execute_confirmation` (`handled`/`text`). Reminder/resource persist to `nate_nudges.content`. Commitment extract scheduled on chat + family/group/private + voice. `ENABLE_FORWARD_REASONING` / `ENABLE_CRYSTAL_GRAPH` forced **false** until Phase 5 gates. Consent gate still fails closed when `proactive_presence_consent` absent (0 clients opted in as of flip).
 
 ## Executive verdict (updated 2026-07-10 — implementation landed, flags default **off**)
 

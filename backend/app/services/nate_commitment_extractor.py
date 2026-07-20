@@ -336,3 +336,32 @@ async def run_post_turn_extraction(
             await persist_commitment(db_pool, payload)
     except Exception as e:
         logger.warning("commitment_extractor: post-turn failed: %s", e)
+
+
+def schedule_post_turn_extraction(
+    db_pool: Any,
+    *,
+    username: Optional[str],
+    hardware_id: str,
+    user_text: str,
+    audit_metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    """QUANTUM-CRYSTAL-ARCH: one-liner schedule for chat surfaces (flag-gated)."""
+    import asyncio
+
+    if not commitments_enabled():
+        return
+    if not db_pool or not hardware_id or not (user_text or "").strip():
+        return
+    try:
+        asyncio.create_task(
+            run_post_turn_extraction(
+                db_pool,
+                username=username or hardware_id,
+                hardware_id=hardware_id,
+                user_text=user_text,
+                audit_metadata=audit_metadata,
+            )
+        )
+    except Exception as e:
+        logger.warning("commitment_extractor: schedule failed: %s", e)
