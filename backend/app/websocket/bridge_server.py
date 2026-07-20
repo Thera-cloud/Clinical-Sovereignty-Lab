@@ -2016,6 +2016,7 @@ USER_RELOAD_CHANNEL = "nate:user_reload"
 REGISTRY_RELOAD_CHANNEL = "nate:registry_reload"
 PAYMENT_CONFIRMED_CHANNEL = "nate:payment_confirmed"  # QUANTUM-CRYSTAL-ARCH
 SESSION_NEGOTIATION_CHANNEL = "nate:session_negotiation"  # QUANTUM-CRYSTAL-ARCH
+COMMITMENT_TOUCH_CHANNEL = "nate:commitment_touch"  # QUANTUM-CRYSTAL-ARCH
 
 
 def _cache_sync_blocking_listener():
@@ -2051,9 +2052,10 @@ def _cache_sync_blocking_listener():
             pubsub.subscribe(
                 BALANCE_SYNC_CHANNEL, USER_RELOAD_CHANNEL, REGISTRY_RELOAD_CHANNEL,
                 PAYMENT_CONFIRMED_CHANNEL, SESSION_NEGOTIATION_CHANNEL,
+                COMMITMENT_TOUCH_CHANNEL,  # QUANTUM-CRYSTAL-ARCH
             )
             _cache_sync_blocking_listener._retry = 0
-            print(f"[*] Cache sync listener subscribed to balance_sync + user_reload + registry_reload + payment_confirmed + session_negotiation", flush=True)
+            print(f"[*] Cache sync listener subscribed to balance_sync + user_reload + registry_reload + payment_confirmed + session_negotiation + commitment_touch", flush=True)
 
             for message in pubsub.listen():
                 if message["type"] != "message":
@@ -2070,6 +2072,8 @@ def _cache_sync_blocking_listener():
                         _handle_payment_confirmed(message["data"])
                     elif channel == SESSION_NEGOTIATION_CHANNEL:
                         _handle_session_negotiation_fanout(message["data"])  # QUANTUM-CRYSTAL-ARCH
+                    elif channel == COMMITMENT_TOUCH_CHANNEL:
+                        _handle_commitment_touch_fanout(message["data"])  # QUANTUM-CRYSTAL-ARCH
                 except Exception as e:
                     print(f"[!] Cache sync message error on {channel}: {e}", flush=True)
 
@@ -2213,6 +2217,31 @@ def _handle_session_negotiation_fanout(raw_data: str):  # QUANTUM-CRYSTAL-ARCH
         )
     except Exception as e:
         print(f"[NEGOTIATION FANOUT] {e}", flush=True)
+
+
+def _handle_commitment_touch_fanout(raw_data: str):  # QUANTUM-CRYSTAL-ARCH
+    """Push commitment_touch to online client WS when agent publishes via Redis."""
+    try:
+        data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
+    except Exception:
+        return
+    hw_id = (data.get("hardware_id") or "").strip()
+    if not hw_id:
+        return
+    ws = connected_clients.get(hw_id)
+    if not ws:
+        return
+    import asyncio as _asyncio
+    msg = json.dumps({
+        "type": "commitment_touch",
+        "text": data.get("text", ""),
+        "commitment_id": data.get("commitment_id", ""),
+    })
+    try:
+        loop = _asyncio.get_running_loop()
+        loop.call_soon_threadsafe(lambda: loop.create_task(ws.send(msg)))
+    except RuntimeError:
+        pass
 
 
 async def _balance_sync_listener():
@@ -10736,6 +10765,16 @@ class AzureCortex:
                         hardware_id=uid,
                         user_text=_qg_verbatim_user_text,
                         audit_metadata=_ttc_audit_meta if _ttc_audit_meta else None,
+                    )
+                except Exception:
+                    pass
+                # QUANTUM-CRYSTAL-ARCH: Agentic Phase 3 — plan divergence log (no auto-pause)
+                try:
+                    from app.services.nate_therapeutic_plan_service import schedule_plan_divergence_check
+                    schedule_plan_divergence_check(
+                        db_pool,
+                        user_id=profile.get("username") or uid,
+                        conversation_text=_qg_verbatim_user_text,
                     )
                 except Exception:
                     pass

@@ -10,6 +10,6 @@
 | Seam | Does optional touch call `can_send_proactive_touch`? | [x] |
 | Time | Is daily cycle sufficient (not 30-min spam)? | [x] |
 
-**Flags:** `ENABLE_SELF_MONITOR_COACH_ALERT`, `ENABLE_SELF_MONITOR_TOUCH` — staging walk approved; prod flip not yet authorized (flip coach-alert separately from touch)
+**Flags:** `ENABLE_SELF_MONITOR_AGENT` + `ENABLE_SELF_MONITOR_COACH_ALERT` prod **true** (2026-07-20); `ENABLE_SELF_MONITOR_TOUCH` remains **false** until consent population (checklist 4.4).
 
-**Reviewer:** Nathan Nevedal **Date:** 2026-07-17
+**Reviewer:** Nathan Nevedal **Date:** 2026-07-17 (prod coach-alert flip 2026-07-20)

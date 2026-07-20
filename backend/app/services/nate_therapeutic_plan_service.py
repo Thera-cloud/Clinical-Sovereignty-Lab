@@ -126,3 +126,77 @@ async def append_adaptation_log(
             )
     except Exception as e:
         logger.warning("therapeutic_plan: adaptation_log append failed: %s", e)
+
+
+async def maybe_record_plan_divergence(
+    db_pool: Any,
+    user_id: str,
+    conversation_text: str,
+) -> bool:
+    """QUANTUM-CRYSTAL-ARCH: Log divergence to adaptation_log; never auto-pause."""
+    if not therapeutic_plans_enabled() or not db_pool or not user_id or not conversation_text:
+        return False
+    try:
+        from datetime import datetime, timezone
+
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, current_step, step_definitions
+                FROM nate_therapeutic_plans
+                WHERE user_id IN (
+                    SELECT x FROM unnest(ARRAY[
+                        $1::text,
+                        (SELECT username FROM users WHERE hardware_id = $1 LIMIT 1),
+                        (SELECT hardware_id FROM users WHERE username = $1 LIMIT 1)
+                    ]) AS t(x)
+                    WHERE x IS NOT NULL AND x <> ''
+                )
+                AND status = 'active'
+                ORDER BY started_at DESC
+                LIMIT 1
+                """,
+                user_id,
+            )
+        if not row:
+            return False
+        steps = row["step_definitions"]
+        if isinstance(steps, str):
+            steps = json.loads(steps)
+        theme = _step_theme(steps if isinstance(steps, list) else [], int(row["current_step"]))
+        if not detect_plan_divergence(conversation_text, theme):
+            return False
+        await append_adaptation_log(
+            db_pool,
+            str(row["id"]),
+            {
+                "event": "divergence",
+                "at": datetime.now(timezone.utc).isoformat(),
+                "step": int(row["current_step"]),
+                "theme": theme[:200],
+                "note": "keyword drift — coach/client acknowledgment required to pause",
+            },
+        )
+        return True
+    except Exception as e:
+        logger.warning("therapeutic_plan: maybe_record_plan_divergence failed: %s", e)
+        return False
+
+
+def schedule_plan_divergence_check(
+    db_pool: Any,
+    *,
+    user_id: str,
+    conversation_text: str,
+) -> None:
+    """Fire-and-forget post-turn divergence check (bridge chat path)."""
+    if not therapeutic_plans_enabled() or not db_pool or not user_id:
+        return
+    try:
+        import asyncio
+
+        asyncio.create_task(
+            maybe_record_plan_divergence(db_pool, user_id, conversation_text or "")
+        )
+    except Exception:
+        pass

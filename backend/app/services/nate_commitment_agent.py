@@ -237,10 +237,44 @@ class NateCommitmentAgent:
             logger.warning("commitment_agent: nudge insert failed: %s", e)
 
     async def _ws_push(self, hw_id: str, msg: str, commitment_id: str):
+        # QUANTUM-CRYSTAL-ARCH: prefer app.state.commitment_ws_push; else Redis fanout
+        payload = {
+            "type": "commitment_touch",
+            "text": msg,
+            "commitment_id": commitment_id,
+            "hardware_id": hw_id,
+        }
         push = getattr(self.app_state, "commitment_ws_push", None) if self.app_state else None
-        if not push:
-            return
+        if push:
+            try:
+                await push(hw_id, payload)
+                return
+            except Exception as e:
+                logger.warning("commitment_agent: ws push failed: %s", e)
         try:
-            await push(hw_id, {"type": "commitment_touch", "text": msg, "commitment_id": commitment_id})
+            await publish_commitment_touch_fanout(payload)
         except Exception as e:
-            logger.warning("commitment_agent: ws push failed: %s", e)
+            logger.warning("commitment_agent: redis fanout failed: %s", e)
+
+
+COMMITMENT_TOUCH_CHANNEL = "nate:commitment_touch"
+
+
+async def publish_commitment_touch_fanout(payload: Dict[str, Any]) -> None:
+    """QUANTUM-CRYSTAL-ARCH: Bridge listens on nate:commitment_touch."""
+    try:
+        import redis.asyncio as aioredis
+
+        url = os.getenv("REDIS_URL") or ""
+        if not url:
+            host = os.getenv("REDIS_HOST", "redis")
+            port = os.getenv("REDIS_PORT", "6379")
+            pw = os.getenv("REDIS_PASSWORD", "")
+            url = f"redis://:{pw}@{host}:{port}" if pw else f"redis://{host}:{port}"
+        client = aioredis.from_url(url, decode_responses=True)
+        try:
+            await client.publish(COMMITMENT_TOUCH_CHANNEL, json.dumps(payload, default=str))
+        finally:
+            await client.aclose()
+    except Exception as e:
+        logger.warning("commitment_agent: publish_commitment_touch_fanout failed: %s", e)

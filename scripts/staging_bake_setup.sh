@@ -14,7 +14,11 @@ fi
 
 echo "[staging_bake] Pre-flight backup"
 if [ -x scripts/daily_backup.sh ]; then
-  bash scripts/daily_backup.sh || echo "[staging_bake] WARN: daily_backup non-zero (continuing)"
+  # Fail closed: migrations must not run without a successful pre-migration dump
+  bash scripts/daily_backup.sh
+else
+  echo "[staging_bake] ERROR: scripts/daily_backup.sh missing or not executable" >&2
+  exit 1
 fi
 
 echo "[staging_bake] Apply agentic migrations to production little_nate"

@@ -7,9 +7,9 @@
 
 ---
 
-## Executive verdict (updated 2026-07-20 — Phase 0–2 prod ON)
+## Executive verdict (updated 2026-07-20 — Phase 0–4 + N.3 prod ON; TOUCH off)
 
-Phases **0–2** live in prod (`ENABLE_PROACTIVE_TOUCH_POLICY`, `ENABLE_PROACTIVE_COMMITMENTS`, `ENABLE_NATE_TOOL_EXECUTOR`). Propose/confirm wired via `maybe_propose_from_utterance` + `check_and_execute_confirmation` (`handled`/`text`). Reminder/resource persist to `nate_nudges.content`. Commitment extract scheduled on chat + family/group/private + voice. `ENABLE_FORWARD_REASONING` / `ENABLE_CRYSTAL_GRAPH` forced **false** until Phase 5 gates. Consent gate still fails closed when `proactive_presence_consent` absent (0 clients opted in as of flip).
+Phases **0–4** + session negotiation live in prod (flags true; `ENABLE_SELF_MONITOR_TOUCH=false`). Propose/confirm wired via `maybe_propose_from_utterance` + `check_and_execute_confirmation`. Commitment extract + plan context + plan divergence log on bridge chat path. Commitment touches: `nate_nudges` + Redis `nate:commitment_touch` → bridge WS. `ENABLE_FORWARD_REASONING` / `ENABLE_CRYSTAL_GRAPH` forced **false** until Phase 5 gates. Consent fails closed when `proactive_presence_consent` absent (opt-in via Settings / soft prompt; test account opted in).
 
 ## Executive verdict (updated 2026-07-10 — implementation landed, flags default **off**)
 

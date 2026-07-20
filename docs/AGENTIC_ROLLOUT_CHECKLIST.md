@@ -1,6 +1,6 @@
 # Agentic Roadmap Rollout Checklist (Phases 0–5)
 
-**Status:** TRACK A + B BAKED ON STAGING, DUAL-REVIEWER SIGNED (2026-07-14) — migrations applied, Phase 0 + Phase 1 flipped/tested on `nate_staging_backend`, Flutter deployed, reviewed by Nathan Nevedal + Kristy Moore; audit token/accounts verified on GREEN. **Production Phase 0–2 ON** (`ENABLE_PROACTIVE_TOUCH_POLICY`, `ENABLE_PROACTIVE_COMMITMENTS`, `ENABLE_NATE_TOOL_EXECUTOR` all true; operator Nathan Nevedal 2026-07-20). **0.4/1.4 now closed, code-verified not data-verified** (consent-default seam test passes — that one *is* a real, executed test; shared-extractor isolation is closed on code+schema audit only — the requested staging query did run and returned 0/0, but that result is vacuous/non-dispositive since no staging traffic has ever exercised the path, see Known Limitation below — no live observation of isolation exists). **P3 forensic complete and closed** — log-verified: `daily_backup.sh`'s pre-migration dump completed at 13:33:40.952 UTC, ~50ms before the first 237–239 `CREATE TABLE` statement at 13:33:41 UTC (sequential, as designed). An earlier version of this note incorrectly claimed no snapshot existed, based on an unverified time estimate; retracted and corrected in the P3 note below once the actual postgres statement log was checked. Remaining real (non-blocking) gap: the script doesn't check `daily_backup.sh`'s exit code, so this run's correct ordering wasn't guaranteed by the script itself. Prod **0.5/0.6 + 1.1/1.5 + 2.1/2.3/2.4 complete 2026-07-20** (72h burn waived). Track C (Phase 5 neuro-symbolic) untouched.
+**Status:** TRACK A + B BAKED ON STAGING, DUAL-REVIEWER SIGNED (2026-07-14) — migrations applied, Phase 0 + Phase 1 flipped/tested on `nate_staging_backend`, Flutter deployed, reviewed by Nathan Nevedal + Kristy Moore; audit token/accounts verified on GREEN. **Production Phase 0–4 + N.3 ON** (TOUCH still false; operator Nathan Nevedal 2026-07-20). **0.4/1.4 now closed, code-verified not data-verified** (consent-default seam test passes — that one *is* a real, executed test; shared-extractor isolation is closed on code+schema audit only — the requested staging query did run and returned 0/0, but that result is vacuous/non-dispositive since no staging traffic has ever exercised the path, see Known Limitation below — no live observation of isolation exists). **P3 forensic complete and closed** — log-verified: `daily_backup.sh`'s pre-migration dump completed at 13:33:40.952 UTC, ~50ms before the first 237–239 `CREATE TABLE` statement at 13:33:41 UTC (sequential, as designed). An earlier version of this note incorrectly claimed no snapshot existed, based on an unverified time estimate; retracted and corrected in the P3 note below once the actual postgres statement log was checked. `daily_backup.sh` exit-code gate closed in `staging_bake_setup.sh` (2026-07-20). Prod **0.5/0.6 + 1.1/1.5 + 2.1/2.3/2.4 + 3.3 + 4.5 complete 2026-07-20** (72h burn waived; TOUCH still off). Track C (Phase 5 neuro-symbolic) untouched.
 
 **Infrastructure:** `docker-compose.staging.yml` + `scripts/staging_bake_setup.sh` → `nate_staging_backend` on `127.0.0.1:8011`, DB `little_nate_staging`. (Port 8001 is already bound by host nginx on GREEN for an unrelated vhost — do not reuse it.)
 
@@ -60,7 +60,7 @@ ssh root@68.183.168.75 "ls -la --time-style=full-iso /mnt/volume_sfo2_01/backups
 
 Backup 1 finished writing **before** migration run 1's first statement (by a fraction of a second — consistent with sequential shell execution: `daily_backup.sh` runs to completion, then the migration `psql` call fires immediately after). Same pattern holds for run 2. **Corrected net finding: a pre-migration snapshot did exist, and did precede the first application of 237–239 by design, not by luck of an old cron.** The originally-reported "3-month gap, no snapshot" claim is retracted.
 
-What remains true and is a real, separate finding: the March 31–April 14, 2026 encrypted daily backups (`.tar.gz.enc`, cron-driven, 03:00 UTC) have no continuation through July 14 in this listing — either the cron stopped or those files rotated out of retention before this check; not distinguished here. The three July 14 dumps exist only because `staging_bake_setup.sh` invoked `daily_backup.sh` directly, not because a schedule caught this bake. And the script still does not check `daily_backup.sh`'s exit code before proceeding to migrations — this run's correct ordering was empirically observed, not guaranteed by the script. That gap (no exit-code gate) is the one still worth closing before the next migration; the "no snapshot existed" gap is not real and should not have been reported as closed-but-failing.
+What remains true and is a real, separate finding: the March 31–April 14, 2026 encrypted daily backups (`.tar.gz.enc`, cron-driven, 03:00 UTC) have no continuation through July 14 in this listing — either the cron stopped or those files rotated out of retention before this check; not distinguished here. The three July 14 dumps exist only because `staging_bake_setup.sh` invoked `daily_backup.sh` directly, not because a schedule caught this bake. **Exit-code gate closed 2026-07-20:** `staging_bake_setup.sh` now fails closed if `daily_backup.sh` is missing or exits non-zero before migrations run.
 
 ---
 
@@ -195,6 +195,10 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 | C.4 | Wiring: tool Redis sync client, book_session PG write, C_emo UUID, coach username resolve, crystal SERIAL id, plan username/hw | [x] |
 | C.5 | Compose pin Phase 0–4 + N.3 (`ENABLE_SELF_MONITOR_TOUCH=false`) | [x] |
 | C.6 | Prod deploy + consent round-trip on test client | [x] *(2026-07-20 — `b3f222e2` safe_deploy backend+bridge vault 368→368; Flutter+CF purge `v=2026.07.20.0116`; `audit_client` opted in `proactive_presence_consent=true`)* |
+| C.7 | `commitment_ws_push` + Redis `nate:commitment_touch` bridge fanout | [x] *(code 2026-07-20)* |
+| C.8 | Plan divergence post-turn → `adaptation_log` (no auto-pause) | [x] *(code 2026-07-20)* |
+| C.9 | `staging_smoke_agentic.sh` phase2/3/4 + seam tests | [x] *(code 2026-07-20)* |
+| C.10 | `staging_bake_setup.sh` fail-closed on `daily_backup.sh` exit | [x] *(code 2026-07-20)* |
 
 ---
 
@@ -294,11 +298,12 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 
 ## Post-deploy verification (every phase)
 
-- [ ] `docker logs nate_backend --since 2m | grep 'STARTUP COMPLETE'` → 117/117 (or current denominator)
+- [ ] `docker logs nate_backend --since 2m | grep 'STARTUP COMPLETE'` → 129/129 (or current denominator)
 - [ ] Bridge PG connected (`UserStore ready` in bridge logs)
 - [ ] `ENVIRONMENT=production` on backend **and** bridge
-- [ ] Trust enforcer window (optional): 580/580 after audit hour
+- [ ] Trust enforcer window (optional): after audit hour
 - [ ] E2E smoke: real UI path for the phase (not linter-only)
+- [ ] Remaining open: **4.4** TOUCH off until consent population; live data verify for 0.4/1.4 still vacuous without traffic
 
 ---
 

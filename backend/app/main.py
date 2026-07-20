@@ -2862,7 +2862,17 @@ async def lifespan(app: FastAPI):
     # QUANTUM-CRYSTAL-ARCH: Nate Commitment Agent — proactive commitment touches (Phase 1)
     _nate_commitment_agent = None
     try:
-        from app.services.nate_commitment_agent import NateCommitmentAgent
+        from app.services.nate_commitment_agent import (
+            NateCommitmentAgent,
+            publish_commitment_touch_fanout,
+        )
+
+        async def _commitment_ws_push(hw_id: str, payload: dict):
+            body = dict(payload or {})
+            body.setdefault("hardware_id", hw_id)
+            await publish_commitment_touch_fanout(body)
+
+        app.state.commitment_ws_push = _commitment_ws_push
         _nate_commitment_agent = NateCommitmentAgent(
             db_pool=db_pool,
             notification_system=getattr(app.state, "notification_system", None),
