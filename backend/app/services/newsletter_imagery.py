@@ -48,6 +48,9 @@ def hero_public_url(slug: str) -> str:
     return f"{API_BASE}/api/newsletter/library/{slug}/hero"
 
 
+_PROVIDER_PREFIX_RE = re.compile(r"^\[provider:[^\]]+\]\s*\n?", re.IGNORECASE)
+
+
 def build_hero_prompt(topic: str, subject: str = "") -> str:
     """Safe, editorial still — no clinical gore, no identifiable faces in crisis."""
     theme = (topic or subject or "emotional steadiness").strip()
@@ -61,6 +64,26 @@ def build_hero_prompt(topic: str, subject: str = "") -> str:
         "Painterly digital art, no text, no logos, no medical equipment, no blood, no weapons, "
         "no photorealistic identifiable faces, family-safe, contemplative, 1:1 square composition."
     )
+
+
+def strip_provider_prefix(stored: str) -> str:
+    """Remove audit prefix so editors see a clean descriptor."""
+    return _PROVIDER_PREFIX_RE.sub("", (stored or "").strip()).strip()
+
+
+def resolve_hero_prompt(
+    topic: str = "",
+    subject: str = "",
+    *,
+    stored_prompt: str = "",
+    override: str = "",
+) -> str:
+    """Prefer editor override, then saved descriptor, then default from topic."""
+    for candidate in (override, strip_provider_prefix(stored_prompt)):
+        text = (candidate or "").strip()
+        if text:
+            return text[:2000]
+    return build_hero_prompt(topic, subject)
 
 
 def sniff_image_meta(data: bytes) -> Tuple[str, str]:
@@ -116,7 +139,9 @@ async def generate_hero_bytes(prompt: str) -> Tuple[bytes, str]:
     raise RuntimeError(detail)
 
 
-async def generate_hero_for_issue(db_pool, issue_id: str) -> Dict[str, Any]:
+async def generate_hero_for_issue(
+    db_pool, issue_id: str, *, prompt_override: str = ""
+) -> Dict[str, Any]:
     """Generate topic still (Grok → Gemini), persist local + R2, set hero_image_url."""
     if not db_pool:
         return {"ok": False, "error": "no_db"}
@@ -126,7 +151,7 @@ async def generate_hero_for_issue(db_pool, issue_id: str) -> Dict[str, Any]:
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, slug, topic, subject_line, status
+            SELECT id, slug, topic, subject_line, status, hero_image_prompt
             FROM newsletter_issues WHERE id = $1::uuid
             """,
             issue_id,
@@ -135,7 +160,12 @@ async def generate_hero_for_issue(db_pool, issue_id: str) -> Dict[str, Any]:
         return {"ok": False, "error": "not_found"}
 
     slug = row["slug"]
-    prompt = build_hero_prompt(row["topic"] or "", row["subject_line"] or "")
+    prompt = resolve_hero_prompt(
+        row["topic"] or "",
+        row["subject_line"] or "",
+        stored_prompt=row["hero_image_prompt"] or "",
+        override=prompt_override or "",
+    )
 
     try:
         image_bytes, provider = await generate_hero_bytes(prompt)

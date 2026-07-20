@@ -457,6 +457,17 @@ async def rewrite_existing_issue(
     if not ok:
         return {"ok": False, "errors": errors}
 
+    # Refresh image descriptor from topic; clear stale hero so preview/send regenerate
+    try:
+        from app.services.newsletter_imagery import build_hero_prompt
+
+        new_prompt = build_hero_prompt(
+            draft.get("topic") or row["topic"] or "",
+            draft.get("subject_line") or row["subject_line"] or "",
+        )
+    except Exception:
+        new_prompt = None
+
     async with db_pool.acquire() as conn:
         await conn.execute(
             """
@@ -472,6 +483,10 @@ async def rewrite_existing_issue(
                 research_bundle = $8::jsonb,
                 content_hash = $9,
                 rejected_reason = NULL,
+                hero_image_prompt = COALESCE($10, hero_image_prompt),
+                hero_image_url = NULL,
+                hero_image_r2_key = NULL,
+                hero_image_generated_at = NULL,
                 updated_at = NOW()
             WHERE id = $1::uuid
             """,
@@ -484,8 +499,14 @@ async def rewrite_existing_issue(
             json.dumps(draft.get("citations") or cites),
             json.dumps(bundle),
             draft.get("content_hash"),
+            new_prompt,
         )
-    return {"ok": True, "issue_id": issue_id, "slug": row["slug"]}
+    return {
+        "ok": True,
+        "issue_id": issue_id,
+        "slug": row["slug"],
+        "hero_reset": True,
+    }
 
 
 async def persist_issue(db_pool, draft: Dict[str, Any], status: str = "in_review") -> Optional[str]:

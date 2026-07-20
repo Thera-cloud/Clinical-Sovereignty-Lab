@@ -151,6 +151,32 @@ def test_hero_enabled_accepts_gemini_without_xai(monkeypatch):
     assert img.hero_enabled() is False
 
 
+def test_resolve_hero_prompt_prefers_override_then_stored():
+    img = _load("nl_img_resolve_ut", "app/services/newsletter_imagery.py")
+    stored = "[provider:gemini]\nCustom lantern in fog"
+    assert img.strip_provider_prefix(stored) == "Custom lantern in fog"
+    assert (
+        img.resolve_hero_prompt("topic", stored_prompt=stored, override="Editor override")
+        == "Editor override"
+    )
+    assert img.resolve_hero_prompt("topic", stored_prompt=stored) == "Custom lantern in fog"
+    assert "Little Nate Dispatch" in img.resolve_hero_prompt("Quiet check-ins")
+
+
+def test_admin_preview_shows_hero_placeholder_when_missing():
+    delivery = _load("nl_delivery_placeholder_ut", "app/services/newsletter_delivery.py")
+    html = delivery.render_library_html(
+        {"slug": "demo", "subject_line": "Test", "final_body": "Body", "topic": "steadiness"},
+        admin_preview=True,
+    )
+    assert "Topic image not generated yet" in html
+    public = delivery.render_library_html(
+        {"slug": "demo", "subject_line": "Test", "final_body": "Body", "topic": "steadiness"},
+        admin_preview=False,
+    )
+    assert "Topic image not generated yet" not in public
+
+
 def test_email_html_embeds_hero_when_present():
     delivery = _load("nl_delivery_hero_ut", "app/services/newsletter_delivery.py")
     html = delivery._html_email(

@@ -67,10 +67,15 @@ class UpdateIssueBody(BaseModel):
     topic: Optional[str] = Field(None, max_length=300)
     opener: Optional[str] = Field(None, max_length=2000)
     body_md: Optional[str] = Field(None, max_length=50000)
+    hero_image_prompt: Optional[str] = Field(None, max_length=2000)
 
 
 class RewriteIssueBody(BaseModel):
     notes: Optional[str] = Field(None, max_length=2000)
+
+
+class GenerateImageBody(BaseModel):
+    prompt: Optional[str] = Field(None, max_length=2000)
 
 
 def _row_json(row) -> Dict[str, Any]:
@@ -594,7 +599,8 @@ async def admin_list_issues(request: Request, admin: Dict = Depends(require_admi
             """
             SELECT id, slug, status, topic, subject_line, opener,
                    LEFT(COALESCE(body_md, ''), 160) AS body_preview,
-                   hero_image_url, created_at, sent_at, approved_at, updated_at
+                   hero_image_url, hero_image_r2_key, hero_image_generated_at,
+                   hero_image_prompt, created_at, sent_at, approved_at, updated_at
             FROM newsletter_issues
             ORDER BY created_at DESC LIMIT 50
             """
@@ -631,7 +637,7 @@ async def admin_preview_issue(
     issue = _row_json(row)
     # Preview uses current editor body, not only final_body
     issue["final_body"] = issue.get("body_md") or issue.get("final_body") or ""
-    return HTMLResponse(render_library_html(issue))
+    return HTMLResponse(render_library_html(issue, admin_preview=True))
 
 
 @admin_router.put("/issues/{issue_id}")
@@ -659,6 +665,11 @@ async def admin_update_issue(
         content_hash = (
             hashlib.sha256((new_body or "").encode()).hexdigest() if new_body else None
         )
+        prompt_val = fields.get("hero_image_prompt")
+        if prompt_val is not None:
+            from app.services.newsletter_imagery import strip_provider_prefix
+
+            prompt_val = strip_provider_prefix(prompt_val)[:2000] or None
         await conn.execute(
             """
             UPDATE newsletter_issues SET
@@ -669,6 +680,7 @@ async def admin_update_issue(
                 draft_body = COALESCE($5, draft_body),
                 final_body = NULL,
                 content_hash = COALESCE($6, content_hash),
+                hero_image_prompt = COALESCE($7, hero_image_prompt),
                 status = CASE WHEN status = 'rejected' THEN 'in_review' ELSE status END,
                 updated_at = NOW()
             WHERE id = $1::uuid
@@ -679,6 +691,7 @@ async def admin_update_issue(
             fields.get("opener"),
             fields.get("body_md"),
             content_hash,
+            prompt_val,
         )
         updated = await conn.fetchrow(
             "SELECT * FROM newsletter_issues WHERE id = $1::uuid", issue_id
@@ -699,6 +712,8 @@ async def admin_rewrite_issue(
     admin: Dict = Depends(require_admin),
 ):
     """Regenerate draft from research bundle + optional editor direction."""
+    import asyncio
+
     from app.services.newsletter_pipeline import rewrite_existing_issue
 
     result = await rewrite_existing_issue(
@@ -707,6 +722,15 @@ async def admin_rewrite_issue(
     if not result.get("ok"):
         raise HTTPException(400, detail=result)
     pool = _pool(request)
+    # After rewrite: new descriptor + cleared hero → regenerate still (best-effort)
+    if result.get("hero_reset"):
+        try:
+            from app.services.newsletter_imagery import generate_hero_for_issue, hero_enabled
+
+            if hero_enabled():
+                asyncio.create_task(generate_hero_for_issue(pool, issue_id))
+        except Exception:
+            pass
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM newsletter_issues WHERE id = $1::uuid", issue_id
@@ -714,6 +738,8 @@ async def admin_rewrite_issue(
     return {
         "status": "ok",
         "rewritten": True,
+        "hero_reset": bool(result.get("hero_reset")),
+        "hero_pending": True,
         "issue": _row_json(row) if row else None,
         "editor": admin.get("username") or "admin",
     }
@@ -721,12 +747,33 @@ async def admin_rewrite_issue(
 
 @admin_router.post("/issues/{issue_id}/generate-image")
 async def admin_generate_hero(
-    issue_id: str, request: Request, admin: Dict = Depends(require_admin)
+    issue_id: str,
+    request: Request,
+    admin: Dict = Depends(require_admin),
+    body: GenerateImageBody = GenerateImageBody(),
 ):
     """Generate (or regenerate) topic hero — Grok Imagine, then Gemini fallback."""
-    from app.services.newsletter_imagery import generate_hero_for_issue
+    from app.services.newsletter_imagery import (
+        generate_hero_for_issue,
+        strip_provider_prefix,
+    )
 
-    result = await generate_hero_for_issue(_pool(request), issue_id)
+    prompt = strip_provider_prefix(body.prompt or "") if body.prompt else ""
+    if prompt:
+        pool = _pool(request)
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE newsletter_issues
+                SET hero_image_prompt = $2, updated_at = NOW()
+                WHERE id = $1::uuid
+                """,
+                issue_id,
+                prompt[:2000],
+            )
+    result = await generate_hero_for_issue(
+        _pool(request), issue_id, prompt_override=prompt
+    )
     if not result.get("ok"):
         raise HTTPException(400, detail=result)
     pool = _pool(request)

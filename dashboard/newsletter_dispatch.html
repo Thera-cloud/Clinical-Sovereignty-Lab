@@ -100,14 +100,18 @@ iframe.preview{width:100%;min-height:70vh;border:1px solid var(--line);backgroun
         </div>
       </div>
       <div class="pane" id="pane-image">
-        <p class="meta">Topic image via Grok Imagine (Gemini fallback) — email + Story Library.</p>
+        <p class="meta">Topic image via Grok Imagine (Gemini fallback) — Preview, email, and Story Library.</p>
         <img id="heroImg" alt="Topic hero" style="max-width:420px;width:100%;border:1px solid #333;border-radius:4px;display:none;margin:12px 0;">
-        <p id="heroMissing" class="hint">No image yet.</p>
+        <p id="heroMissing" class="hint">No image yet — edit the descriptor below, then Generate.</p>
+        <label for="fHeroPrompt">Image descriptor (prompt)</label>
+        <textarea id="fHeroPrompt" class="notes" maxlength="2000" placeholder="Describe the editorial still you want…"></textarea>
         <div class="actions">
+          <button type="button" class="secondary" id="btnSavePrompt" onclick="saveHeroPrompt()">Save descriptor</button>
+          <button type="button" class="secondary" id="btnResetPrompt" onclick="resetHeroPrompt()">Reset from topic</button>
           <button type="button" id="btnHero" onclick="generateHero()">Generate topic image</button>
-          <button type="button" class="secondary" onclick="refreshHero()">Refresh</button>
+          <button type="button" class="secondary" onclick="refreshHero()">Refresh image</button>
         </div>
-        <p class="hint">Safe editorial still (symbolic, no clinical gore). Grok first; Gemini if xAI fails. ~10–40s.</p>
+        <p class="hint">Edit the descriptor anytime. Rewrite refreshes it from the new topic and regenerates the still. Grok first; Gemini if xAI fails. ~10–40s.</p>
       </div>
       <div class="actions" style="padding:0 20px 20px;border:0;margin:0">
         <button type="button" id="btnApprove" onclick="approveIssue()">Approve</button>
@@ -137,7 +141,28 @@ function switchTab(name){
   document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active', t.getAttribute('data-tab')===name);});
   document.querySelectorAll('.pane').forEach(function(p){p.classList.toggle('active', p.id==='pane-'+name);});
   if(name==='preview' && current) loadPreview();
-  if(name==='image' && current) refreshHero();
+  if(name==='image' && current){ fillHeroPrompt(); refreshHero(); }
+}
+
+function stripProviderPrefix(s){
+  return String(s||'').replace(/^\[provider:[^\]]+\]\s*\n?/i,'').trim();
+}
+
+function defaultHeroPrompt(){
+  var theme = ((current&&(current.topic||current.subject_line))||'emotional steadiness').replace(/\s+/g,' ').slice(0,180);
+  return 'Editorial illustration for a mental-health newsletter called Little Nate Dispatch. Theme: '+theme+'. '
+    +'Warm cinematic atmosphere, soft gold and deep charcoal palette (#C9A962 accents on #050505), '
+    +'symbolic and hopeful — light through fog, open doorway, small figure reaching toward connection, '
+    +'or quiet landscape with a single lantern. Painterly digital art, no text, no logos, no medical equipment, '
+    +'no blood, no weapons, no photorealistic identifiable faces, family-safe, contemplative, 1:1 square composition.';
+}
+
+function fillHeroPrompt(){
+  if(!current)return;
+  var el = document.getElementById('fHeroPrompt');
+  if(!el)return;
+  var saved = stripProviderPrefix(current.hero_image_prompt||'');
+  el.value = saved || defaultHeroPrompt();
 }
 
 function renderList(){
@@ -197,6 +222,7 @@ async function selectIssue(id){
   document.getElementById('btnSend').style.display = current.status==='approved' ? '' : 'none';
   document.getElementById('btnSend').disabled = current.status!=='approved';
   document.getElementById('btnHero').disabled = false;
+  fillHeroPrompt();
   renderList();
   switchTab('preview');
   loadPreview();
@@ -219,17 +245,43 @@ function refreshHero(){
   }
 }
 
+async function saveHeroPrompt(){
+  if(!current)return;
+  var prompt = document.getElementById('fHeroPrompt').value.trim();
+  if(!prompt){setMsg('Descriptor cannot be empty', true);return;}
+  var r = await api('/api/newsletter/admin/issues/'+current.id, {
+    method:'PUT',
+    body: JSON.stringify({hero_image_prompt: prompt})
+  });
+  if(!r)return;
+  var d = await r.json();
+  if(!r.ok){setMsg(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail||d), true);return;}
+  current = d.issue || current;
+  fillHeroPrompt();
+  setMsg('Image descriptor saved');
+}
+
+function resetHeroPrompt(){
+  document.getElementById('fHeroPrompt').value = defaultHeroPrompt();
+  setMsg('Descriptor reset from topic — Save or Generate to apply');
+}
+
 async function generateHero(){
   if(!current)return;
   document.getElementById('btnHero').disabled = true;
   setMsg('Generating topic image (Grok → Gemini)…');
-  var r = await api('/api/newsletter/admin/issues/'+current.id+'/generate-image', {method:'POST', body:'{}'});
+  var prompt = document.getElementById('fHeroPrompt').value.trim();
+  var r = await api('/api/newsletter/admin/issues/'+current.id+'/generate-image', {
+    method:'POST',
+    body: JSON.stringify({prompt: prompt||undefined})
+  });
   document.getElementById('btnHero').disabled = false;
   if(!r)return;
   var d = await r.json();
   if(!r.ok){setMsg(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail||d), true);return;}
   current = d.issue || current;
   if(d.hero_image_url) current.hero_image_url = d.hero_image_url;
+  fillHeroPrompt();
   setMsg('Topic image ready'+(d.provider?' ('+d.provider+')':''));
   refreshHero();
   loadPreview();
@@ -292,14 +344,21 @@ async function requestRewrite(){
   if(!r.ok){setMsg(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail||d), true);return;}
   dirty = false;
   current = d.issue;
-  setMsg('Rewrite ready — review in Preview, then edit or approve');
+  setMsg(d.hero_reset
+    ? 'Rewrite ready — image descriptor refreshed; new still generating in background'
+    : 'Rewrite ready — review in Preview, then edit or approve');
   document.getElementById('fSubject').value = current.subject_line||'';
   document.getElementById('fTopic').value = current.topic||'';
   document.getElementById('fOpener').value = current.opener||'';
   document.getElementById('fBody').value = current.body_md||'';
+  fillHeroPrompt();
+  refreshHero();
   switchTab('preview');
   loadPreview();
   loadIssues(current.id);
+  if(d.hero_reset){
+    setTimeout(function(){ loadIssues(current.id); loadPreview(); refreshHero(); }, 25000);
+  }
 }
 
 async function approveIssue(){

@@ -34,7 +34,12 @@ def _hero_stable_url(slug: str) -> str:
     return f"{API_BASE}/api/newsletter/library/{slug}/hero"
 
 
-def _hero_img_tag(issue: Dict[str, Any], *, max_width: str = "100%") -> str:
+def _hero_img_tag(
+    issue: Dict[str, Any],
+    *,
+    max_width: str = "100%",
+    placeholder: bool = False,
+) -> str:
     url = (issue.get("hero_image_url") or "").strip()
     slug = issue.get("slug") or ""
     if not url and slug and (
@@ -42,7 +47,14 @@ def _hero_img_tag(issue: Dict[str, Any], *, max_width: str = "100%") -> str:
     ):
         url = _hero_stable_url(slug)
     if not url:
-        return ""
+        if not placeholder:
+            return ""
+        return (
+            '<div style="max-width:560px;margin:16px 0;padding:48px 20px;border:1px dashed #8B7355;'
+            'border-radius:4px;color:#8B7355;text-align:center;font-size:14px;">'
+            "Topic image not generated yet — open the Image tab to write a descriptor and generate."
+            "</div>"
+        )
     alt = (issue.get("topic") or issue.get("subject_line") or "Little Nate Dispatch").replace(
         '"', "'"
     )[:120]
@@ -52,10 +64,10 @@ def _hero_img_tag(issue: Dict[str, Any], *, max_width: str = "100%") -> str:
     )
 
 
-def render_library_html(issue: Dict[str, Any]) -> str:
+def render_library_html(issue: Dict[str, Any], *, admin_preview: bool = False) -> str:
     slug = issue.get("slug") or "issue"
     body = (issue.get("final_body") or issue.get("body_md") or "").replace("\n", "<br>\n")
-    hero = _hero_img_tag(issue)
+    hero = _hero_img_tag(issue, placeholder=admin_preview)
     og_image = ""
     if issue.get("hero_image_url") or issue.get("hero_image_r2_key"):
         og_url = issue.get("hero_image_url") or _hero_stable_url(slug)
