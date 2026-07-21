@@ -82,6 +82,14 @@ class TestNightlyGate(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(out.get("ok"))
         self.assertEqual(out.get("error"), "outside_02_03_utc")
 
+    def test_force_is_not_automatically_smoke(self):
+        """D.14b: schedule bypass must not imply is_smoke."""
+        import inspect
+
+        src = inspect.getsource(_agent.SixQuotientBatteryAgent._maybe_nightly)
+        self.assertIn("is_smoke = bool(smoke)", src)
+        self.assertNotIn("is_smoke = bool(force)", src)
+
 
 class TestRotationSQL(unittest.TestCase):
     def test_nightly_sql_excludes_held_out_and_orders(self):

@@ -8,11 +8,14 @@
 
 ## Seed rows
 
+Stems source: `backend/app/data/six_quotient_human_gold_stems_v1.json` (50 unique).
+
 ```bash
 # After migration 251 on GREEN
-docker exec -e DATABASE_URL=... nate_backend \
-  python /app/scripts/seed_human_gold_worksheet.py
+docker exec nate_backend python /app/scripts/seed_human_gold_worksheet.py
 ```
+
+Worksheet rows ≠ scored gold. D.14b needs `human_scored=true` on ≥50 rows after clinician rating.
 
 ## Scoring rubric (0–3 each)
 

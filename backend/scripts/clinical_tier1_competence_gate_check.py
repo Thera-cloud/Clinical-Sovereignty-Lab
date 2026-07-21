@@ -91,16 +91,21 @@ async def _main() -> int:
         auto_cal = _truthy("ALLOW_AUTO_JUDGE_CALIBRATION")
         quarantine = _truthy("SIX_QUOTIENT_BATTERY_QUARANTINE", "true")
 
-        # Prefer non-smoke counts when column exists
+        # Prefer distinct calendar nights (non-smoke nightly) — not same-day spam
         try:
             trend_n = await conn.fetchval(
-                "SELECT COUNT(*) FROM six_quotient_theta_trend WHERE COALESCE(is_smoke,false)=false"
+                """SELECT COUNT(DISTINCT (created_at AT TIME ZONE 'UTC')::date)
+                   FROM six_quotient_theta_trend
+                   WHERE COALESCE(is_smoke,false)=false AND run_kind='nightly'"""
             )
             smoke_n = await conn.fetchval(
                 "SELECT COUNT(*) FROM six_quotient_theta_trend WHERE COALESCE(is_smoke,false)=true"
             )
         except Exception:
-            trend_n = await conn.fetchval("SELECT COUNT(*) FROM six_quotient_theta_trend")
+            trend_n = await conn.fetchval(
+                """SELECT COUNT(DISTINCT (created_at AT TIME ZONE 'UTC')::date)
+                   FROM six_quotient_theta_trend WHERE run_kind='nightly'"""
+            )
             smoke_n = 0
 
         held_out = await conn.fetchval(

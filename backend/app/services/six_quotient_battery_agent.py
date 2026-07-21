@@ -235,10 +235,21 @@ class SixQuotientBatteryAgent:
         self.last_result = result
         logger.info("Weekly six-quotient battery finished: %s", result.get("run_id"))
 
-    async def _maybe_nightly(self, *, force: bool = False, limit: int = 8) -> Dict[str, Any]:
+    async def _maybe_nightly(
+        self,
+        *,
+        force: bool = False,
+        limit: int = 8,
+        smoke: bool = False,
+        transfer: Optional[bool] = None,
+    ) -> Dict[str, Any]:
         """
         Measurement-only: dry_run persist + auto-judge + trend row.
         Never changes live_focus, CEO inbox, or crystals.
+
+        force = bypass 02–03 UTC / once-per-day schedule only (NOT smoke).
+        smoke = mark trend/run as non-qualifying soak noise.
+        transfer = held-out rotation (default: True on Saturdays UTC).
         """
         now = datetime.now(timezone.utc)
         if not _nightly_on():
@@ -260,7 +271,7 @@ class SixQuotientBatteryAgent:
         )
 
         # Saturday: held-out transfer check (trend only — no set_ability)
-        do_transfer = now.weekday() == 5
+        do_transfer = bool(transfer) if transfer is not None else (now.weekday() == 5)
         rows = await select_rotation(
             self.db_pool, held_out=do_transfer, limit=limit
         )
@@ -278,8 +289,8 @@ class SixQuotientBatteryAgent:
         keys = [str(s.get("scenario_key") or s.get("id")) for s in scenarios]
         run_kind = "transfer" if do_transfer else "nightly"
 
-        # QUANTUM-CRYSTAL-ARCH — D.14b: force/partial runs are smoke (not soak)
-        is_smoke = bool(force) or len(scenarios) < 6
+        # QUANTUM-CRYSTAL-ARCH — D.14b: schedule bypass ≠ smoke; short packs are smoke
+        is_smoke = bool(smoke) or len(scenarios) < 6
         result = await self.run_once(
             dry_run=True,
             limit=len(scenarios),

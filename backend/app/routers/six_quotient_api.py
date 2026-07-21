@@ -577,6 +577,9 @@ class HoldoutBody(BaseModel):
 
 class NightlyTriggerBody(BaseModel):
     limit: int = 8
+    # QUANTUM-CRYSTAL-ARCH — D.14b: force≠smoke; transfer None=Saturday auto
+    smoke: bool = False
+    transfer: Optional[bool] = None
 
 
 @router.post("/bank/holdout")
@@ -637,12 +640,17 @@ async def theta_trend(
 
 @router.post("/nightly/trigger")
 async def trigger_nightly(body: NightlyTriggerBody, request: Request):
-    """Smoke: force nightly measure (bypasses 02–03 UTC hour gate)."""
-    # QUANTUM-CRYSTAL-ARCH
+    """Bypass schedule for nightly/transfer measure. smoke=true → non-soak."""
+    # QUANTUM-CRYSTAL-ARCH — D.14b
     agent = getattr(request.app.state, "six_quotient_battery_agent", None)
     if not agent or not hasattr(agent, "_maybe_nightly"):
         raise HTTPException(503, "six_quotient_battery_agent unavailable")
-    result = await agent._maybe_nightly(force=True, limit=body.limit)
+    result = await agent._maybe_nightly(
+        force=True,
+        limit=body.limit,
+        smoke=bool(body.smoke),
+        transfer=body.transfer,
+    )
     if result.get("status") == 409 or (
         not result.get("ok") and "off" in str(result.get("error") or "")
     ):

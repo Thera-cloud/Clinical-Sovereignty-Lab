@@ -305,7 +305,7 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 | D.12 | Nightly measure / weekly act: holdout+trend mig 248, auto-judge, `SIX_QUOTIENT_NIGHTLY_MEASURE`, auditor 17→18 | [x] *(2026-07-21 — `ca46ee91`/`6b9e75bd` GREEN; mig 248; flag false; trend `[]`; 133/133)* |
 | D.13 | Acceleration: cycle Brier + PGSD channel + PMB-mined drafts, mig 249, `ENABLE_SIX_QUOTIENT_ACCELERATION`, auditor 18 | [x] *(2026-07-21 — `59eea5ff`/`6b9e75bd` GREEN; mig 249; `GET .../acceleration` ok enabled=false sparse; baseline 18; flags stay false until soak)* |
 | D.14a | Flywheel **infra** shipped: nightly+accel ON, cycle `sweep_and_predict`, gate script, journey doc | [x] `7356b3c0` — preds persist, θ trend rows write, judge smoke κ≈0.72 @ n=8 (**smoke only, not clinician calibration**); `WEEKLY_LIVE=false` |
-| D.14b | Tier-1 **certification** (clinical competence exit) | [ ] **Scaffolding shipped; certification OPEN.** Code: quarantine + mig 251 + smoke tags + crisis evidence writer + gate rename + weekly soak guard + gold seed. **Still blocked:** crisis re-proof row on GREEN; ≥7 non-smoke nights; human gold ≥50 scored; transfer series; gate GREEN without BLOCKER. See `docs/TIER1_HUMAN_GOLD_WORKSHEET.md`. |
+| D.14b | Tier-1 **certification** (clinical competence exit) | [ ] **Scaffolding shipped; certification OPEN.** Crisis SLA evidence on GREEN ✓; quarantine ✓; force≠smoke + distinct-night soak counting ✓; gold stems JSON (50) ✓. **Still blocked:** ≥7 distinct UTC nightly dates; non-smoke transfer series; human gold ≥50 **scored**; judge spot-checks. See `docs/TIER1_HUMAN_GOLD_WORKSHEET.md`. |
 
 > **Naming:** Prefer **Tier 1 clinical competence** over “clinical AGI-class” until D.14b certified.
 
