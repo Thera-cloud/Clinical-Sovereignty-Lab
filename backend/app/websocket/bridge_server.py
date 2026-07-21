@@ -4478,6 +4478,19 @@ async def create_dependent_account(guardian_id: str, data: dict) -> Tuple[bool, 
         },
     )
 
+    # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch: auto opt-in spouse/dependent
+    if _dep_email and db_pool:
+        try:
+            from app.newsletter.opt_in import schedule_account_opt_in
+            schedule_account_opt_in(
+                db_pool,
+                _dep_email,
+                username=username or "",
+                source=f"account_signup_ws_{_req_role.lower()}",
+            )
+        except Exception as _nl_err:
+            print(f">>> [REG] newsletter opt-in skipped for dependent: {_nl_err}")
+
     return True, "DEPENDENT_CREATED"
 
 # ------------------------------------------------------------------------------

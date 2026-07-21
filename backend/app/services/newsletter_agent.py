@@ -43,6 +43,7 @@ class NewsletterAgent:
         self._running = False
         self._last_compose_date = None
         self._last_trend_date = None
+        self._last_opt_in_date = None
 
     async def start(self):
         if self._running:
@@ -83,6 +84,23 @@ class NewsletterAgent:
             return
         if now.hour in (5, 17, 23) and now.minute < 10:
             return
+
+        # QUANTUM-CRYSTAL-ARCH — auto-enroll all account emails (new + old)
+        if self._last_opt_in_date != now.date():
+            try:
+                from app.newsletter.opt_in import opt_in_all_platform_users
+
+                result = await opt_in_all_platform_users(self._db_pool)
+                logger.info(
+                    "newsletter account opt-in: considered=%s inserted=%s updated=%s preserved=%s",
+                    result.get("emails_considered"),
+                    result.get("inserted"),
+                    result.get("updated"),
+                    result.get("preserved_unsub_or_suppressed"),
+                )
+                self._last_opt_in_date = now.date()
+            except Exception as e:
+                logger.warning("newsletter account opt-in: %s", e)
 
         # Dedup open drafts / same-day topic clones
         try:
