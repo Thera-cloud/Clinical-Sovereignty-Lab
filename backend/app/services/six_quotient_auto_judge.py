@@ -119,6 +119,65 @@ async def _llm_judge(
     }
 
 
+async def ensure_evaluator_calibrated(
+    db_pool,
+    app_state,
+    evaluator_id: str = DEFAULT_EVALUATOR,
+) -> Dict[str, Any]:
+    """
+    If grok-judge-v1 has no passing calibration in 90d, score gold set via LLM and persist.
+    """
+    from app.services.six_quotient_judge_calibration import (
+        calibrate_evaluator,
+        evaluator_is_calibrated,
+        load_gold,
+        persist_calibration,
+    )
+
+    if await evaluator_is_calibrated(db_pool, evaluator_id):
+        return {"ok": True, "already_calibrated": True, "evaluator_id": evaluator_id}
+
+    gold = load_gold()
+    items = gold.get("items") or []
+    if len(items) < 4:
+        return {"ok": False, "error": "gold set missing or too small"}
+
+    ratings: List[Dict[str, Any]] = []
+    for it in items:
+        judged = await _llm_judge(
+            app_state,
+            scenario_id=str(it.get("id") or ""),
+            section=str(it.get("section") or ""),
+            rubric_focus="gold_calibration",
+            client_says=str(it.get("client_says") or ""),
+            response=str(it.get("response") or ""),
+        )
+        if not judged:
+            return {
+                "ok": False,
+                "error": f"gold judge failed for {it.get('id')}",
+                "scored_partial": len(ratings),
+            }
+        ratings.append({"id": it["id"], **judged})
+
+    result = calibrate_evaluator(ratings)
+    cal_id = await persist_calibration(db_pool, evaluator_id, result)
+    if not result.get("passed"):
+        return {
+            "ok": False,
+            "error": "calibration failed thresholds",
+            "calibration_id": cal_id,
+            "result": result,
+        }
+    return {
+        "ok": True,
+        "already_calibrated": False,
+        "calibration_id": cal_id,
+        "evaluator_id": evaluator_id,
+        "result": result,
+    }
+
+
 async def auto_score_run(
     db_pool,
     app_state,
@@ -135,6 +194,11 @@ async def auto_score_run(
     """
     if not db_pool:
         return {"ok": False, "error": "no_db_pool"}
+
+    cal = await ensure_evaluator_calibrated(db_pool, app_state, evaluator_id)
+    if not cal.get("ok"):
+        return {"ok": False, "error": cal.get("error") or "calibration required", "calibration": cal}
+
     try:
         async with db_pool.acquire() as conn:
             run = await conn.fetchrow(
