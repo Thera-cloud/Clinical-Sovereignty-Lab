@@ -45,11 +45,11 @@ async def _main() -> int:
         inserted = 0
         for sec in sections:
             rows = await conn.fetch(
-                """SELECT scenario_id, section, COALESCE(client_says,'') AS client_says
+                """SELECT scenario_key, section, COALESCE(client_says,'') AS client_says
                    FROM six_quotient_scenario_bank
                    WHERE status='approved' AND section=$1
-                     AND scenario_id NOT IN (SELECT scenario_id FROM six_quotient_human_gold)
-                   ORDER BY scenario_id
+                     AND scenario_key NOT IN (SELECT scenario_id FROM six_quotient_human_gold)
+                   ORDER BY scenario_key
                    LIMIT $2""",
                 sec,
                 per + 2,
@@ -62,9 +62,9 @@ async def _main() -> int:
                        (scenario_id, section, client_says, human_scored, blinded)
                        VALUES ($1, $2, $3, false, true)
                        ON CONFLICT (scenario_id) DO NOTHING""",
-                    r["scenario_id"],
+                    r["scenario_key"],
                     r["section"],
-                    r["client_says"][:2000],
+                    (r["client_says"] or "")[:2000],
                 )
                 inserted += 1
         total = await conn.fetchval("SELECT COUNT(*) FROM six_quotient_human_gold")
