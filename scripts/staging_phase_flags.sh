@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Flip agentic flags on staging_backend/bridge only (not production nate_*).
-# Usage: bash scripts/staging_phase_flags.sh phase0|phase1|phase2|phase3|phase4|phase5a|n3 on|off
+# Usage: bash scripts/staging_phase_flags.sh phase0|phase1|phase2|phase3|phase4|phase5a|phase5b|n3 on|off
 #
 # Preserves other STAGING_ENABLE_* values from .env so one phase flip does not
 # clobber siblings (e.g. phase3 must not reset session negotiation).
@@ -13,7 +13,7 @@ PHASE="${1:-}"
 STATE="${2:-}"
 
 if [ -z "$PHASE" ] || [ -z "$STATE" ]; then
-  echo "Usage: $0 <phase0|phase1|phase2|phase3|phase4|phase5a|n3> <on|off>" >&2
+  echo "Usage: $0 <phase0|phase1|phase2|phase3|phase4|phase5a|phase5b|n3> <on|off>" >&2
   exit 1
 fi
 
@@ -113,6 +113,21 @@ case "$PHASE" in
     _persist STAGING_ENABLE_SYMBOLIC_VERIFIER false
     _persist STAGING_ENABLE_FORWARD_REASONING false
     ;;
+  phase5b)
+    # Track C — symbolic verifier (requires extraction on; never forward/graph via this helper)
+    if [ "$STATE" = "on" ]; then
+      export STAGING_ENABLE_PROACTIVE_TOUCH_POLICY=true
+      export STAGING_ENABLE_PROACTIVE_COMMITMENTS=true
+      export STAGING_ENABLE_SYMBOLIC_EXTRACTION=true
+      _persist STAGING_ENABLE_PROACTIVE_TOUCH_POLICY true
+      _persist STAGING_ENABLE_PROACTIVE_COMMITMENTS true
+      _persist STAGING_ENABLE_SYMBOLIC_EXTRACTION true
+    fi
+    export STAGING_ENABLE_SYMBOLIC_VERIFIER="$(_val)"
+    export STAGING_ENABLE_FORWARD_REASONING=false
+    _persist STAGING_ENABLE_SYMBOLIC_VERIFIER "$STAGING_ENABLE_SYMBOLIC_VERIFIER"
+    _persist STAGING_ENABLE_FORWARD_REASONING false
+    ;;
   *)
     echo "Unknown phase: $PHASE" >&2
     exit 1
@@ -137,7 +152,7 @@ docker exec nate_staging_backend printenv \
   2>/dev/null || true
 docker exec nate_staging_bridge printenv \
   ENABLE_NATE_TOOL_EXECUTOR ENABLE_THERAPEUTIC_PLANS ENABLE_NATE_SESSION_NEGOTIATION \
-  ENABLE_SYMBOLIC_EXTRACTION \
+  ENABLE_SYMBOLIC_EXTRACTION ENABLE_SYMBOLIC_VERIFIER \
   2>/dev/null || true
 curl -sf http://127.0.0.1:8011/health
 echo ""

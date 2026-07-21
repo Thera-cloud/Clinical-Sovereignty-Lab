@@ -218,15 +218,15 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 
 ## Phase 5b — Symbolic verifier (deepest review)
 
-**Flag:** `ENABLE_SYMBOLIC_VERIFIER=false` (default)
+**Flag:** `ENABLE_SYMBOLIC_VERIFIER` — signed for flip 2026-07-21 (Kristy Moore + Nathan Nevedal)
 
 > **Do not rush.** This layer can regenerate clinical replies and append crisis resources. Requires the longest adversarial walk and operator clinical sign-off.
 
 | Step | Action | Done |
 |------|--------|------|
 | 5b.1 | Phase 5a on and stable | [x] *(prod extract true 2026-07-20; see 5a.5)* |
-| 5b.2 | **Deep adversarial walk:** `docs/AGENTIC_PHASE_5B_REVIEW.md` (distress+proud, 988, regen cap, crisis exempt) | [ ] *(automated gates PASS; needs two-human sign-off)* |
-| 5b.3 | Seam tests: `test_symbolic_verifier_seams.py` | [x] *(8/8 local 2026-07-20; code pending commit)* |
+| 5b.2 | **Deep adversarial walk:** `docs/AGENTIC_PHASE_5B_REVIEW.md` (distress+proud, 988, regen cap, crisis exempt) | [x] *(Kristy Moore + Nathan Nevedal 2026-07-21 — all 5 gates; flag flip authorized)* |
+| 5b.3 | Seam tests: `test_symbolic_verifier_seams.py` | [x] *(8/8; committed `fa8ab3b9`)* |
 | 5b.4 | Staging: verify `sse_therapeutic_audit_log` + `skyeye_activity` type `symbolic_verifier_action` | [ ] |
 | 5b.5 | Production flip only after 5b.2 signed by **two humans** | [ ] |
 
