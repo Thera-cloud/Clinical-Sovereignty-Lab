@@ -7,6 +7,10 @@
 
 ---
 
+## Executive verdict (updated 2026-07-21 — Phase 6 pre-flip ready)
+
+Phase **6** six-quotient battery code + migration 245 live; staging 6.1–6.6 verified. Prod defaults: `ENABLE_SIX_QUOTIENT_BATTERY=false`, `SIX_QUOTIENT_BATTERY_LIVE_WS=false` (compose wires LIVE_WS + `TEST_PASSWORD`/`AUDIT_CLIENT_PASSWORD`). Pre-flip smoke: `backend/scripts/prod_phase6_battery_smoke.py`. Flip **6.7** = battery flag only; keep LIVE_WS false until post-flip soak. Track D living/standards/gen stay false on prod (D.8).
+
 ## Executive verdict (updated 2026-07-21 — Phase 5a–5d prod ON)
 
 Phase **5** flags live on GREEN backend: `ENABLE_SYMBOLIC_EXTRACTION` / `ENABLE_SYMBOLIC_VERIFIER` / `ENABLE_FORWARD_REASONING` / `ENABLE_CRYSTAL_GRAPH` = **true**. Bridge carries extract/verifier/forward; graph constellation is **backend** `app.state.crystal_graph` only (`ENABLE_CRYSTAL_GRAPH` not required on bridge). Live `retrieve_constellation(..., requester_user_id=)` enforces `enforce_traversal_scope` (nodes load `scope`/`user_id`).
@@ -27,6 +31,8 @@ Phases **0–5** code paths are **implemented behind feature flags** (see rollou
 | 3 | `239_nate_therapeutic_plans.sql`, plan service + coach REST, chat context injection | `ENABLE_THERAPEUTIC_PLANS` |
 | 4 | `nate_self_monitor_agent.py`, `docs/AGENTIC_PHASE4_DISCOVERY.md` | `ENABLE_SELF_MONITOR_*` |
 | 5a–5d | Symbolic extractor/verifier, forward reasoning, graph isolation, phi auditor extension | `ENABLE_SYMBOLIC_*`, `ENABLE_FORWARD_REASONING`, `ENABLE_CRYSTAL_GRAPH` |
+| 6 | Six-quotient battery agent/API/runner, growth engine, auditor | `ENABLE_SIX_QUOTIENT_BATTERY`, `SIX_QUOTIENT_BATTERY_LIVE_WS` |
+| D | Living battery v5 (bank/standards/gen) | `ENABLE_SIX_QUOTIENT_LIVING_*`, `*_STANDARDS_INDEX`, `*_SCENARIO_GEN` |
 
 **Prior snapshot (pre-build) below retained for audit trail.**
 
