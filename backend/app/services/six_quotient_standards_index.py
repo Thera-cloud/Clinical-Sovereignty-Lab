@@ -126,11 +126,16 @@ class SixQuotientStandardsIndex:
         return result
 
     async def _fetch_rss(self, session: aiohttp.ClientSession, url: str) -> List[Dict[str, str]]:
-        async with session.get(url, headers={"User-Agent": "LittleNateStandards/1.0"}) as resp:
+        async with session.get(
+            url, headers={"User-Agent": "Mozilla/5.0 LittleNateStandards/1.0"}
+        ) as resp:
             if resp.status != 200:
                 return []
             text = await resp.text()
-        # QUANTUM-CRYSTAL-ARCH — many pro feeds serve HTML-wrapped/invalid XML; parse then regex fallback
+        # QUANTUM-CRYSTAL-ARCH — reject HTML error pages masquerading as feeds
+        head = (text or "")[:400].lower()
+        if "<html" in head or "<!doctype html" in head:
+            return []
         items = self._parse_rss_xml(text)
         if not items:
             items = self._parse_rss_regex(text)

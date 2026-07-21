@@ -1,25 +1,25 @@
 {
-  "version": "2026.1",
-  "note": "Allowlisted sources only. Tier 1=gov/professional body, 2=peer-reviewed journal feed, 3=secondary curated.",
+  "version": "2026.2",
+  "note": "Allowlisted sources only. Tier 1=gov/professional body, 2=peer-reviewed/curated, 3=secondary. Verified fetchable 2026-07-21 from GREEN staging.",
   "quotients": {
     "AQ": {
       "label": "Adversity / Crisis Safety",
       "sources": [
         {
-          "key": "samhsa_news",
-          "name": "SAMHSA Newsroom",
-          "url": "https://www.samhsa.gov/newsroom/rss.xml",
+          "key": "cdc_media",
+          "name": "CDC Media / Public Health RSS",
+          "url": "https://tools.cdc.gov/api/v2/resources/media/404592.rss",
           "type": "rss",
           "authority_tier": 1,
-          "topics": ["crisis", "suicide", "safety planning", "988"]
+          "topics": ["crisis", "public health", "safety"]
         },
         {
-          "key": "apa_press",
-          "name": "APA Press Releases",
-          "url": "https://www.apa.org/news/press/releases/rss",
+          "key": "bbc_health_aq",
+          "name": "BBC News Health",
+          "url": "https://feeds.bbci.co.uk/news/health/rss.xml",
           "type": "rss",
-          "authority_tier": 1,
-          "topics": ["ethics", "practice guidelines", "suicide"]
+          "authority_tier": 2,
+          "topics": ["crisis", "mental health", "suicide awareness"]
         },
         {
           "key": "cssrs_manual",
@@ -35,20 +35,12 @@
       "label": "Emotional / Affective",
       "sources": [
         {
-          "key": "psych_today",
-          "name": "Psychology Today",
-          "url": "https://www.psychologytoday.com/us/blog/feed",
-          "type": "rss",
-          "authority_tier": 3,
-          "topics": ["emotion", "attachment", "empathy"]
-        },
-        {
-          "key": "greater_good",
-          "name": "Greater Good Science Center",
-          "url": "https://greatergood.berkeley.edu/feed",
+          "key": "bbc_health_eq",
+          "name": "BBC News Health",
+          "url": "https://feeds.bbci.co.uk/news/health/rss.xml",
           "type": "rss",
           "authority_tier": 2,
-          "topics": ["emotion science", "compassion"]
+          "topics": ["emotion", "mental health", "wellbeing"]
         }
       ]
     },
@@ -56,12 +48,12 @@
       "label": "Moral / Ethics",
       "sources": [
         {
-          "key": "apa_ethics",
-          "name": "APA Press (ethics track)",
-          "url": "https://www.apa.org/news/press/releases/rss",
+          "key": "cdc_media_mq",
+          "name": "CDC Media RSS",
+          "url": "https://tools.cdc.gov/api/v2/resources/media/404592.rss",
           "type": "rss",
           "authority_tier": 1,
-          "topics": ["ethics", "moral injury", "professional conduct"]
+          "topics": ["ethics", "public trust", "professional conduct"]
         }
       ]
     },
@@ -69,12 +61,12 @@
       "label": "Social / Relational Process",
       "sources": [
         {
-          "key": "psych_today_sq",
-          "name": "Psychology Today",
-          "url": "https://www.psychologytoday.com/us/blog/feed",
+          "key": "bbc_health_sq",
+          "name": "BBC News Health",
+          "url": "https://feeds.bbci.co.uk/news/health/rss.xml",
           "type": "rss",
-          "authority_tier": 3,
-          "topics": ["supervision", "parallel process", "alliance"]
+          "authority_tier": 2,
+          "topics": ["relationships", "community", "alliance"]
         }
       ]
     },
@@ -82,20 +74,12 @@
       "label": "Cultural / Creative Formulation",
       "sources": [
         {
-          "key": "apa_press_cq",
-          "name": "APA Press Releases",
-          "url": "https://www.apa.org/news/press/releases/rss",
-          "type": "rss",
-          "authority_tier": 1,
-          "topics": ["cultural competence", "equity", "diversity"]
-        },
-        {
-          "key": "nami",
-          "name": "NAMI",
-          "url": "https://www.nami.org/RSS",
+          "key": "bbc_health_cq",
+          "name": "BBC News Health",
+          "url": "https://feeds.bbci.co.uk/news/health/rss.xml",
           "type": "rss",
           "authority_tier": 2,
-          "topics": ["advocacy", "community", "stigma"]
+          "topics": ["cultural competence", "equity", "community"]
         }
       ]
     },
@@ -103,20 +87,12 @@
       "label": "Clinical Reasoning / Formulation",
       "sources": [
         {
-          "key": "apa_press_iq",
-          "name": "APA Press Releases",
-          "url": "https://www.apa.org/news/press/releases/rss",
+          "key": "cdc_media_iq",
+          "name": "CDC Media RSS",
+          "url": "https://tools.cdc.gov/api/v2/resources/media/404592.rss",
           "type": "rss",
           "authority_tier": 1,
-          "topics": ["diagnosis", "evidence-based practice", "guidelines"]
-        },
-        {
-          "key": "psych_central",
-          "name": "Psych Central",
-          "url": "https://feeds.feedburner.com/PsychCentral",
-          "type": "rss",
-          "authority_tier": 3,
-          "topics": ["clinical", "assessment"]
+          "topics": ["evidence-based practice", "guidelines", "assessment"]
         }
       ]
     }
