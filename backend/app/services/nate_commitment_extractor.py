@@ -128,7 +128,21 @@ def build_state_symbol(
         pass
 
     lower = user_text.lower()
-    if any(w in lower for w in ("afraid", "scared", "anxious", "panic", "overwhelmed")):
+    if any(
+        w in lower
+        for w in (
+            "afraid",
+            "scared",
+            "anxious",
+            "panic",
+            "overwhelmed",
+            "hopeless",
+            "want to die",
+            "end my life",
+            "kill myself",
+            "suicide",
+        )
+    ):
         distress = True
         valence = "distressed"
     elif any(w in lower for w in ("excited", "proud", "happy", "grateful")):

@@ -214,6 +214,23 @@ def test_ensure_crisis_resource_reasserts_after_strip():
     assert ensure_crisis_resource_in_text(already, meta) == already
 
 
+def test_seam_si_user_text_with_rest_tmc_still_requires_988():
+    """TMC often labels SI turns REST; user-text intent must still gate 988."""
+    meta = {
+        "state_symbol": {},
+        "tmc_class": "REST",
+        "user_text_for_audit": "I feel hopeless and want to end my life.",
+    }
+    missing = _symbolic_audit_violations("That sounds really hard.", meta)
+    assert "symbolic_crisis_resource_missing" in missing
+    assert "988" in ensure_crisis_resource_in_text("That sounds really hard.", meta)
+    cleared = _symbolic_audit_violations(
+        "If you're in crisis, call or text 988 for support.",
+        meta,
+    )
+    assert "symbolic_crisis_resource_missing" not in cleared
+
+
 def test_plain_user_scope_does_not_trip_isolation():
     v = _symbolic_audit_violations(
         "I hear you.",

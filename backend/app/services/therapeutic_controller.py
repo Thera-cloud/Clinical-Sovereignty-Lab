@@ -676,6 +676,13 @@ def _apply_sensitive_bridge_decision(bridge_decision, fallback_register: Optiona
 
 from app.services.sovereign_standard_gate import therapeutic_module
 
+# QUANTUM-CRYSTAL-ARCH — user-text crisis when TMC mislabels (e.g. REST on SI)
+_USER_CRISIS_INTENT = re.compile(
+    r"\b(?:kill myself|suicide|end my life|want to die|end it all|"
+    r"not want to (?:be )?alive|take my (?:own )?life)\b",
+    re.IGNORECASE,
+)
+
 
 @therapeutic_module
 async def prepare_therapeutic_context(
@@ -1003,7 +1010,8 @@ async def prepare_therapeutic_context(
             # QUANTUM-CRYSTAL-ARCH — Phase 5b Key + Surface gates
             "state_symbol": _state_sym,
             "crisis_exempt": (tmc_class or "").lower()
-            in ("crisis", "suicide_ideation"),
+            in ("crisis", "suicide_ideation")
+            or bool(_USER_CRISIS_INTENT.search(user_text or "")),
             "requester_user_id": canonical_user_id or user_id,
         },
     }
@@ -1033,11 +1041,20 @@ _CRISIS_RESOURCE_SUFFIX = (
 )
 
 
+def _user_text_implies_crisis(audit_metadata: Optional[dict] = None) -> bool:
+    """QUANTUM-CRYSTAL-ARCH: SI intent from user text even when tmc_class is REST."""
+    meta = audit_metadata or {}
+    tmc = (meta.get("tmc_class") or "").lower()
+    if tmc in ("crisis", "suicide_ideation"):
+        return True
+    ut = meta.get("user_text_for_audit") or ""
+    return bool(_USER_CRISIS_INTENT.search(ut))
+
+
 def ensure_crisis_resource_in_text(response_text: str, audit_metadata: Optional[dict] = None) -> str:
     """QUANTUM-CRYSTAL-ARCH: Re-assert 988 after post-processors that may strip it."""
     meta = audit_metadata or {}
-    tmc = (meta.get("tmc_class") or "").lower()
-    if tmc not in ("crisis", "suicide_ideation"):
+    if not _user_text_implies_crisis(meta):
         return response_text or ""
     text = response_text or ""
     if _symbolic_has_crisis_resource(text, meta):
@@ -1080,7 +1097,8 @@ async def light_symbolic_post_audit(
         meta = {
             "state_symbol": _st,
             "tmc_class": tmc,
-            "crisis_exempt": tmc in ("crisis", "suicide_ideation"),
+            "crisis_exempt": tmc in ("crisis", "suicide_ideation")
+            or bool(_USER_CRISIS_INTENT.search(user_text or "")),
             "crystal_scopes": list(crystal_scopes or [])[:50],
             "requester_user_id": requester,
             "user_id": requester,
@@ -1125,8 +1143,7 @@ def _symbolic_audit_violations(response_text: str, audit_metadata: dict) -> list
         celebratory = ("proud of", "celebrat", "smiling through", "so glad you", "amazing progress")
         if any(m in rl for m in celebratory):
             violations.append("symbolic_emotion_mirror")
-    tmc = (audit_metadata.get("tmc_class") or "").lower()
-    if tmc in ("crisis", "suicide_ideation"):
+    if _user_text_implies_crisis(audit_metadata):
         if not _symbolic_has_crisis_resource(response_text, audit_metadata):
             violations.append("symbolic_crisis_resource_missing")
     # QUANTUM-CRYSTAL-ARCH — Seam: admin_only / archived scopes must not reach clients
