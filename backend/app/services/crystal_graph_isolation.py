@@ -93,14 +93,19 @@ async def audit_graph_traversal_isolation(
                     if cid in visited:
                         continue
                     visited.add(cid)
+                    # QUANTUM-CRYSTAL-ARCH: edges store 16-char prefixes; crystals use 64-char SHA
+                    key = str(cid)
+                    key16 = key[:16]
                     crystal = await conn.fetchrow(
                         """
-                        SELECT id, scope, user_id, crystal_text
+                        SELECT id, scope, user_id, crystal_text, content_hash
                         FROM nate_intelligence_crystals
-                        WHERE id::text = $1 OR content_hash = $1
+                        WHERE id::text = $1
+                           OR content_hash = $1
+                           OR left(content_hash, 16) = left($1, 16)
                         LIMIT 1
                         """,
-                        str(cid),
+                        key,
                     )
                     if not crystal:
                         continue
@@ -115,21 +120,21 @@ async def audit_graph_traversal_isolation(
                             }
                         )
 
+                    full_hash = str(crystal.get("content_hash") or key)
                     edges = await conn.fetch(
                         """
                         SELECT crystal_a_hash, crystal_b_hash
                         FROM crystal_edges
-                        WHERE crystal_a_hash = $1 OR crystal_b_hash = $1
+                        WHERE crystal_a_hash IN ($1, $2)
+                           OR crystal_b_hash IN ($1, $2)
                         LIMIT 50
                         """,
-                        str(cid),
+                        full_hash,
+                        full_hash[:16],
                     )
                     for e in edges:
-                        neighbor = (
-                            e["crystal_b_hash"]
-                            if e["crystal_a_hash"] == str(cid)
-                            else e["crystal_a_hash"]
-                        )
+                        a, b = str(e["crystal_a_hash"]), str(e["crystal_b_hash"])
+                        neighbor = b if a in (full_hash, full_hash[:16], key16) else a
                         if neighbor and neighbor not in visited:
                             next_frontier.append(neighbor)
                 frontier = next_frontier
@@ -154,10 +159,13 @@ async def fetch_graph_surfaced_crystal_ids(db_pool: Any, limit: int = 200) -> Li
                 FROM nate_intelligence_crystals c
                 WHERE EXISTS (
                     SELECT 1 FROM crystal_edges e
-                    WHERE e.crystal_a_hash = c.content_hash::text
+                    WHERE e.crystal_a_hash = left(c.content_hash::text, 16)
+                       OR e.crystal_b_hash = left(c.content_hash::text, 16)
+                       OR e.crystal_a_hash = c.content_hash::text
                        OR e.crystal_b_hash = c.content_hash::text
                 )
                 AND c.scope IS DISTINCT FROM 'archived'
+                AND c.content_hash IS NOT NULL AND c.content_hash != ''
                 ORDER BY c.id
                 LIMIT $1
                 """,

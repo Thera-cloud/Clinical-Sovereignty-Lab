@@ -280,10 +280,11 @@ class CrystalGraph:
                     b_node = self._nodes.get(b_id)
                     if not b_node:
                         continue
+                    # QUANTUM-CRYSTAL-ARCH: persist 16-char prefixes (matches live crystal_edges)
                     if a_node.content_hash < b_node.content_hash:
                         edges_batch.append((
-                            a_node.content_hash,
-                            b_node.content_hash,
+                            a_node.content_hash[:16],
+                            b_node.content_hash[:16],
                             weight,
                         ))
 

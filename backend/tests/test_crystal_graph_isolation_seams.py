@@ -61,10 +61,11 @@ async def test_seam_isolation_audit_reports_cross_boundary():
     class _Conn:
         async def fetchrow(self, sql, *args):
             return {
-                "id": "11111111-1111-1111-1111-111111111111",
+                "id": 111,
                 "scope": "admin_only",
                 "user_id": None,
                 "crystal_text": "secret",
+                "content_hash": "seedhash00000001deadbeefcafe0123456789abcdef0123456789abcdef",
             }
 
         async def fetch(self, sql, *args):
@@ -82,7 +83,7 @@ async def test_seam_isolation_audit_reports_cross_boundary():
 
     report = await audit_graph_traversal_isolation(
         _Pool(),
-        seed_crystal_ids=["seed-hash"],
+        seed_crystal_ids=["seedhash00000001deadbeefcafe0123456789abcdef0123456789abcdef"],
         requester_user_id="client1",
         max_hops=1,
     )
@@ -100,10 +101,11 @@ async def test_time_readonly_audit_safe_with_flag_off():
     class _Conn:
         async def fetchrow(self, sql, *args):
             return {
-                "id": "22222222-2222-2222-2222-222222222222",
+                "id": 222,
                 "scope": "global",
                 "user_id": None,
                 "crystal_text": "ok",
+                "content_hash": "g1" + ("0" * 62),
             }
 
         async def fetch(self, sql, *args):
@@ -121,7 +123,7 @@ async def test_time_readonly_audit_safe_with_flag_off():
 
     report = await audit_graph_traversal_isolation(
         _Pool(),
-        seed_crystal_ids=["g1"],
+        seed_crystal_ids=["g1" + ("0" * 62)],
         requester_user_id="client1",
         max_hops=1,
     )
@@ -133,6 +135,29 @@ async def test_time_readonly_audit_safe_with_flag_off():
 @pytest.mark.asyncio
 async def test_fetch_graph_surfaced_ids_empty_without_pool():
     assert await fetch_graph_surfaced_crystal_ids(None) == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_graph_surfaced_matches_16char_edge_prefix():
+    """PHI helper must join full content_hash to 16-char crystal_edges hashes."""
+
+    class _Conn:
+        async def fetch(self, sql, *args):
+            assert "left(c.content_hash" in sql.replace(" ", "")
+            return [{"id": 99}]
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class _Pool:
+        def acquire(self):
+            return _Conn()
+
+    ids = await fetch_graph_surfaced_crystal_ids(_Pool(), limit=10)
+    assert ids == [99]
 
 
 def test_cross_user_owned_crystal_blocked():
