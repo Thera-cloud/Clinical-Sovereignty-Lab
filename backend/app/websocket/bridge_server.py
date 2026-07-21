@@ -10529,6 +10529,16 @@ class AzureCortex:
                         full_response = _ttc_audited["response_text"]
                 except Exception as _ttc_post_err:
                     print(f">>> [THERAPEUTIC-CTRL] post-audit failed for {uid}: {_ttc_post_err}")
+            elif full_response.strip():
+                # QUANTUM-CRYSTAL-ARCH — prepare failed: light symbolic verifier fallback
+                try:
+                    from app.services.therapeutic_controller import light_symbolic_post_audit as _lspa_fb
+                    full_response = await _lspa_fb(
+                        full_response, user_text=_qg_verbatim_user_text,
+                        user_id=profile.get("username") or uid, db_pool=db_pool, profile=profile,
+                    )
+                except Exception as _ttc_fb_err:
+                    print(f">>> [THERAPEUTIC-CTRL] light fallback failed for {uid}: {_ttc_fb_err}")
 
             # QUANTUM-CRYSTAL-ARCH — SOLUTION 1 stance closer guard (default OFF; mutates final text only)
             if _ENABLE_STANCE_RESOLVER and _stance_mod is not None and full_response.strip():
