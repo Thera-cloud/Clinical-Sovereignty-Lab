@@ -192,10 +192,16 @@ class SixQuotientBatteryAgent:
         try:
             from app.services.six_quotient_acceleration import run_acceleration_pass
 
+            _cde = (
+                getattr(self.app_state, "cycle_detection_engine", None)
+                if self.app_state
+                else None
+            )
             result["acceleration"] = await run_acceleration_pass(
                 self.db_pool,
                 environment=_battery_env(),
                 mine_pmb=True,
+                cycle_engine=_cde,
             )
         except Exception as e:
             result["acceleration"] = {"ok": False, "error": str(e)[:160]}
@@ -336,10 +342,16 @@ class SixQuotientBatteryAgent:
         try:
             from app.services.six_quotient_acceleration import run_acceleration_pass
 
+            _cde = (
+                getattr(self.app_state, "cycle_detection_engine", None)
+                if self.app_state
+                else None
+            )
             accel = await run_acceleration_pass(
                 self.db_pool,
                 environment=env,
                 mine_pmb=do_transfer,
+                cycle_engine=_cde,
             )
         except Exception as e:
             logger.warning("acceleration pass: %s", e)

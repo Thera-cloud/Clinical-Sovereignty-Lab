@@ -89,6 +89,15 @@ class TestAccelerationFlag(unittest.IsolatedAsyncioTestCase):
         self.assertIn("off", str(out.get("error") or ""))
 
 
+class TestCycleSweepHook(unittest.TestCase):
+    def test_sweep_and_predict_exists_on_engine_module(self):
+        # Import path only — CycleDetectionEngine is heavy; assert API surface via source load
+        eng_path = APP / "services" / "cycle_detection_engine.py"
+        text = eng_path.read_text(encoding="utf-8")
+        self.assertIn("async def sweep_and_predict", text)
+        self.assertIn("fetchval", text)
+
+
 class TestAuditorEighteen(unittest.TestCase):
     def test_eighteen_checks(self):
         total = sum(len(t["endpoints"]) for t in _aud.TAB_ENDPOINTS)

@@ -684,8 +684,12 @@ async def acceleration_trigger(body: AccelTriggerBody, request: Request):
     pool = _pool(request)
     from app.services.six_quotient_acceleration import run_acceleration_pass
 
+    cde = getattr(request.app.state, "cycle_detection_engine", None)
     result = await run_acceleration_pass(
-        pool, environment=body.environment, mine_pmb=body.mine_pmb
+        pool,
+        environment=body.environment,
+        mine_pmb=body.mine_pmb,
+        cycle_engine=cde,
     )
     if result.get("skipped") and not result.get("ok"):
         raise HTTPException(409, result.get("error") or "acceleration off")

@@ -304,6 +304,9 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 | D.11 | Gap close: battery→live therapy, CEO self-dev apply, BATTERY_ENV=production, WEEKLY_LIVE gate, page standards, crystal conf≥0.58, auditor 15 | [x] *(2026-07-21 — `9ea513a8` GREEN; mig 247; LIVE_CONTEXT=true; WEEKLY_LIVE=false; apply→AQ live_focus; addendum CEO cue; 6 battery crystals ≥0.55; C-SSRS page pending_review; 133/133)* |
 | D.12 | Nightly measure / weekly act: holdout+trend mig 248, auto-judge, `SIX_QUOTIENT_NIGHTLY_MEASURE`, auditor 17→18 | [x] *(2026-07-21 — `ca46ee91`/`6b9e75bd` GREEN; mig 248; flag false; trend `[]`; 133/133)* |
 | D.13 | Acceleration: cycle Brier + PGSD channel + PMB-mined drafts, mig 249, `ENABLE_SIX_QUOTIENT_ACCELERATION`, auditor 18 | [x] *(2026-07-21 — `59eea5ff`/`6b9e75bd` GREEN; mig 249; `GET .../acceleration` ok enabled=false sparse; baseline 18; flags stay false until soak)* |
+| D.14 | Clinical AGI-class spin: nightly+accel ON, cycle `sweep_and_predict`, gate script, ASI research doc | [ ] *(in progress — WEEKLY_LIVE stays false until ≥7 trend nights)* |
+
+Journey doc: `docs/CLINICAL_AGI_ASI_JOURNEY.md` · Gate: `backend/scripts/clinical_agi_class_gate_check.py`
 
 ---
 

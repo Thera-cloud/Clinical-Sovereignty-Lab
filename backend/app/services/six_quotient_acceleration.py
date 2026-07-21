@@ -363,10 +363,20 @@ async def run_acceleration_pass(
     environment: str = "production",
     trend_id: Optional[int] = None,
     mine_pmb: bool = False,
+    cycle_engine: Any = None,
 ) -> Dict[str, Any]:
     """Full acceleration tick — measurement meta only unless mine_pmb."""
     if not _flag_on():
         return {"ok": False, "error": "ENABLE_SIX_QUOTIENT_ACCELERATION off", "skipped": True}
+
+    # QUANTUM-CRYSTAL-ARCH — refill free labels before resolve/Brier
+    sweep: Dict[str, Any] = {"skipped": True}
+    if cycle_engine is not None and hasattr(cycle_engine, "sweep_and_predict"):
+        try:
+            sweep = await cycle_engine.sweep_and_predict(predict=True)
+        except Exception as e:
+            logger.warning("cycle sweep_and_predict: %s", e)
+            sweep = {"ok": False, "error": str(e)[:160]}
 
     resolve = await resolve_cycle_predictions(db_pool)
     world = await compute_world_model_calibration(db_pool)
@@ -378,6 +388,7 @@ async def run_acceleration_pass(
         pmb = await mine_pmb_scenario_seeds(db_pool)
 
     meta = {
+        "sweep": sweep,
         "resolve": resolve,
         "world_model": world,
         "pgsd": pgsd,

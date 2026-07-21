@@ -634,7 +634,8 @@ class CycleDetectionEngine:
                     try:
                         async with self.db_pool.acquire() as conn:
                             for c in cycles:
-                                await conn.execute("""
+                                # QUANTUM-CRYSTAL-ARCH — fetchval for RETURNING (was NameError on det_row)
+                                det_row = await conn.fetchval("""
                                     INSERT INTO cycle_detections
                                     (user_id, domain, detected_period_days, amplitude,
                                      phase_offset, confidence, method, expires_at)
@@ -916,27 +917,79 @@ class CycleDetectionEngine:
     # QUANTUM-CRYSTAL-ARCH: background sweep for all active users
     async def sweep_all_users(self) -> int:
         """Run cycle detection for all users with sufficient conversation history."""
+        meta = await self.sweep_and_predict(predict=False)
+        return int(meta.get("detected") or 0)
+
+    async def sweep_and_predict(
+        self, *, predict: bool = True, limit_users: int = 40
+    ) -> Dict[str, Any]:
+        """
+        Detect cycles (+ optional predictions) for active users.
+        Feeds D.13 Brier calibration — free labels when predictions resolve.
+        """
+        # QUANTUM-CRYSTAL-ARCH — clinical AGI-class free-label channel
         if not self.db_pool:
-            return 0
+            return {"ok": False, "error": "no_db", "detected": 0, "predicted": 0}
         detected = 0
+        predicted = 0
+        scanned = 0
         try:
             async with self.db_pool.acquire() as conn:
                 rows = await conn.fetch(
-                    """SELECT DISTINCT user_id FROM conversation_history
+                    """SELECT user_id FROM conversation_history
                        WHERE created_at > NOW() - INTERVAL '180 days'
-                       GROUP BY user_id HAVING COUNT(*) >= 20"""
+                       GROUP BY user_id HAVING COUNT(*) >= 20
+                       ORDER BY MAX(created_at) DESC
+                       LIMIT $1""",
+                    max(1, min(int(limit_users or 40), 80)),
                 )
             for row in rows:
+                uid = row["user_id"]
+                scanned += 1
                 try:
-                    result = await self.detect_cycles(row["user_id"])
-                    if any(
-                        r.get("status") == "cycles_detected"
-                        for r in (result.get("results") or {}).values()
-                    ):
-                        detected += 1
+                    if predict:
+                        ev = await self.predict_next_events(uid, horizon_days=30)
+                        if any(
+                            (ev.get("predictions") or {}).get(d)
+                            for d in (ev.get("predictions") or {})
+                        ):
+                            predicted += 1
+                            detected += 1
+                        else:
+                            result = await self.detect_cycles(uid)
+                            if any(
+                                r.get("status") == "cycles_detected"
+                                for r in (result.get("results") or {}).values()
+                            ):
+                                detected += 1
+                    else:
+                        result = await self.detect_cycles(uid)
+                        if any(
+                            r.get("status") == "cycles_detected"
+                            for r in (result.get("results") or {}).values()
+                        ):
+                            detected += 1
                 except Exception:
                     continue
         except Exception as e:
-            logger.warning("CycleDetectionEngine sweep failed: %s", e)
-        logger.info("CycleDetectionEngine sweep: %d users with detected cycles", detected)
-        return detected
+            logger.warning("CycleDetectionEngine sweep_and_predict failed: %s", e)
+            return {
+                "ok": False,
+                "error": str(e)[:160],
+                "scanned": scanned,
+                "detected": detected,
+                "predicted": predicted,
+            }
+        logger.info(
+            "CycleDetectionEngine sweep_and_predict: scanned=%d detected=%d predicted=%d",
+            scanned,
+            detected,
+            predicted,
+        )
+        return {
+            "ok": True,
+            "scanned": scanned,
+            "detected": detected,
+            "predicted": predicted,
+            "predict": predict,
+        }

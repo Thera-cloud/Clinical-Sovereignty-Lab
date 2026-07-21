@@ -7,9 +7,13 @@
 
 ---
 
+## Executive verdict (updated 2026-07-21 — Clinical AGI-class spin D.14)
+
+Tier **1** path: flip `SIX_QUOTIENT_NIGHTLY_MEASURE` + `ENABLE_SIX_QUOTIENT_ACCELERATION` on GREEN; cycle engine `sweep_and_predict` feeds free labels into D.13; `WEEKLY_LIVE` stays false until ≥7 trend nights. Journey: `docs/CLINICAL_AGI_ASI_JOURNEY.md`. Gate script: `backend/scripts/clinical_agi_class_gate_check.py`. ASI = research horizon only (no prod flag).
+
 ## Executive verdict (updated 2026-07-21 — D.13 acceleration)
 
-Phase **6** + Track D. **`ENABLE_SIX_QUOTIENT_ACCELERATION`** (default false): cycle prediction resolve → Brier (≥5 clients), PGSD coherence delta + θ correlation, optional PMB-mined `pending_review` bank drafts (`source=pmb_mined`, requires scenario gen flag). Wired into nightly + weekly battery ticks; `GET/POST .../acceleration`. Mig **249**. Auditor expected **18**.
+Phase **6** + Track D. **`ENABLE_SIX_QUOTIENT_ACCELERATION`**: cycle prediction resolve → Brier (≥5 clients), PGSD coherence delta + θ correlation, optional PMB-mined `pending_review` bank drafts (`source=pmb_mined`, requires scenario gen flag). Wired into nightly + weekly battery ticks; `GET/POST .../acceleration`. Mig **249**. Auditor expected **18**.
 
 ## Executive verdict (updated 2026-07-21 — D.12 nightly measure)
 
