@@ -267,55 +267,24 @@ async def submit_scores(body: ScoresIntake, request: Request):
     if not body.scores:
         raise HTTPException(400, "scores required")
 
-    # QUANTUM-CRYSTAL-ARCH — AI judges must pass gold-set calibration (D.6)
-    if _is_ai_evaluator(body.evaluator_id):
-        from app.services.six_quotient_judge_calibration import evaluator_is_calibrated
+    # QUANTUM-CRYSTAL-ARCH — shared intake (REST + auto-judge)
+    from app.services.six_quotient_score_intake import upsert_scores
 
-        if not await evaluator_is_calibrated(pool, body.evaluator_id):
-            raise HTTPException(
-                403,
-                "AI evaluator not calibrated — POST /api/admin/six-quotient/judge/calibrate first",
-            )
-
-    async with pool.acquire() as conn:
-        run = await conn.fetchrow(
-            "SELECT id, status FROM six_quotient_runs WHERE id = $1::uuid",
-            body.run_id,
-        )
-        if not run:
-            raise HTTPException(404, "run not found")
-
-        inserted = 0
-        for item in body.scores:
-            section = item.section or item.scenario_id.split("-")[0]
-            await conn.execute(
-                """INSERT INTO six_quotient_scores
-                   (run_id, scenario_id, section, primary_score, accuracy_score,
-                    naturalness_score, evaluator_id, notes)
-                   VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8)
-                   ON CONFLICT (run_id, scenario_id) DO UPDATE SET
-                     primary_score = EXCLUDED.primary_score,
-                     accuracy_score = EXCLUDED.accuracy_score,
-                     naturalness_score = EXCLUDED.naturalness_score,
-                     evaluator_id = EXCLUDED.evaluator_id,
-                     notes = EXCLUDED.notes""",
-                body.run_id,
-                item.scenario_id,
-                section.upper(),
-                item.primary,
-                item.accuracy,
-                item.naturalness,
-                body.evaluator_id,
-                item.notes or "",
-            )
-            inserted += 1
-
-        await conn.execute(
-            """UPDATE six_quotient_runs
-               SET status = 'awaiting_scores', updated_at = NOW()
-               WHERE id = $1::uuid AND status IN ('running', 'awaiting_scores', 'failed')""",
-            body.run_id,
-        )
+    up = await upsert_scores(
+        pool,
+        run_id=body.run_id,
+        evaluator_id=body.evaluator_id,
+        scores=[s.model_dump() for s in body.scores],
+        require_calibration=True,
+    )
+    if not up.get("ok"):
+        err = up.get("error") or "score_intake_failed"
+        if "not found" in err:
+            raise HTTPException(404, err)
+        if "calibrat" in err:
+            raise HTTPException(403, err)
+        raise HTTPException(400, err)
+    inserted = int(up.get("scores_upserted") or 0)
 
     analysis: Dict[str, Any] = {"skipped": True}
     if body.analyze:
@@ -599,3 +568,83 @@ async def judge_calibrate(body: JudgeCalibrateBody, request: Request):
         "evaluator_id": body.evaluator_id,
         "result": result,
     }
+
+
+class HoldoutBody(BaseModel):
+    fraction: float = 0.3
+    environment: str = "production"
+
+
+class NightlyTriggerBody(BaseModel):
+    limit: int = 8
+
+
+@router.post("/bank/holdout")
+async def bank_holdout(body: HoldoutBody, request: Request):
+    """Deterministic holdout split for transfer measurement (D.12)."""
+    # QUANTUM-CRYSTAL-ARCH
+    pool = _pool(request)
+    from app.services.six_quotient_scenario_bank import mark_holdout
+
+    result = await mark_holdout(
+        pool, fraction=body.fraction, environment=body.environment
+    )
+    return {"status": "ok", **result}
+
+
+@router.get("/trend")
+async def theta_trend(
+    request: Request,
+    days: int = 30,
+    environment: str = "production",
+):
+    """Nightly/weekly/transfer θ trend rows (newest first)."""
+    # QUANTUM-CRYSTAL-ARCH
+    pool = _pool(request)
+    days = max(1, min(int(days or 30), 365))
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT id, environment, run_id::text, run_kind, theta,
+                          theta_by_section, seen_theta, held_out_theta,
+                          scenario_count, created_at
+                   FROM six_quotient_theta_trend
+                   WHERE environment = $1
+                     AND created_at >= NOW() - ($2::int * INTERVAL '1 day')
+                   ORDER BY created_at DESC
+                   LIMIT 200""",
+                environment,
+                days,
+            )
+    except Exception as e:
+        logger.warning("trend query: %s", e)
+        return []
+    out = []
+    for r in rows:
+        d = dict(r)
+        if d.get("created_at"):
+            d["created_at"] = d["created_at"].isoformat()
+        tbs = d.get("theta_by_section")
+        if isinstance(tbs, str):
+            try:
+                d["theta_by_section"] = json.loads(tbs)
+            except Exception:
+                pass
+        out.append(d)
+    # Auditor rule: empty list, never {}
+    return out
+
+
+@router.post("/nightly/trigger")
+async def trigger_nightly(body: NightlyTriggerBody, request: Request):
+    """Smoke: force nightly measure (bypasses 02–03 UTC hour gate)."""
+    # QUANTUM-CRYSTAL-ARCH
+    agent = getattr(request.app.state, "six_quotient_battery_agent", None)
+    if not agent or not hasattr(agent, "_maybe_nightly"):
+        raise HTTPException(503, "six_quotient_battery_agent unavailable")
+    result = await agent._maybe_nightly(force=True, limit=body.limit)
+    if result.get("status") == 409 or (
+        not result.get("ok") and "off" in str(result.get("error") or "")
+    ):
+        raise HTTPException(409, result.get("error") or "nightly off")
+    return {"status": "ok", "result": result}

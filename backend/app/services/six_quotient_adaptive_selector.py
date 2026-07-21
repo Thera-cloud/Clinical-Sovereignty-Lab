@@ -46,6 +46,7 @@ async def select_battery(
     environment: str = "staging",
     limit: int = 0,
     gap_summary: Optional[Dict[str, Any]] = None,
+    include_held_out: bool = True,
 ) -> Dict[str, Any]:
     """
     Returns {scenarios, mode, theta, weak_sections}.
@@ -64,7 +65,12 @@ async def select_battery(
         }
 
     try:
-        approved = await list_bank(db_pool, status="approved", limit=500)
+        approved = await list_bank(
+            db_pool,
+            status="approved",
+            limit=500,
+            include_held_out=include_held_out,
+        )
     except Exception as e:
         logger.warning("bank list failed, falling back to v4: %s", e)
         sc = _v4_scenarios()[:target_n]

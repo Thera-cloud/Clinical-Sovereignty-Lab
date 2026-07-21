@@ -60,6 +60,13 @@ def _battery_env() -> str:
     )
 
 
+def _nightly_on() -> bool:
+    # QUANTUM-CRYSTAL-ARCH — D.12 nightly measure (default off)
+    return os.getenv("SIX_QUOTIENT_NIGHTLY_MEASURE", "false").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
 def _git_hash() -> str:
     try:
         root = Path(__file__).resolve().parents[3]
@@ -79,7 +86,9 @@ class SixQuotientBatteryAgent:
         self._running = False
         self._task: Optional[asyncio.Task] = None
         self._last_run_date: Optional[str] = None
+        self._last_nightly_date: Optional[str] = None
         self.last_result: Dict[str, Any] = {}
+        self.last_nightly_result: Dict[str, Any] = {}
 
     async def start(self):
         if self._running:
@@ -111,6 +120,7 @@ class SixQuotientBatteryAgent:
         while self._running:
             try:
                 if _flag_on():
+                    await self._maybe_nightly()
                     await self._maybe_weekly()
                     if _living_on() and self._sunday_gen_window():
                         await self._maybe_generate()
@@ -166,10 +176,167 @@ class SixQuotientBatteryAgent:
             limit=0,
             environment=_battery_env(),
             persist=True,
+            run_kind="weekly",
+            include_held_out=True,
         )
+        # QUANTUM-CRYSTAL-ARCH — attach transfer delta for self-dev gap_summary
+        try:
+            from app.services.six_quotient_scenario_bank import latest_transfer_delta
+
+            result["transfer"] = await latest_transfer_delta(
+                self.db_pool, _battery_env()
+            )
+        except Exception:
+            result["transfer"] = {}
         self._last_run_date = day_key
         self.last_result = result
         logger.info("Weekly six-quotient battery finished: %s", result.get("run_id"))
+
+    async def _maybe_nightly(self, *, force: bool = False, limit: int = 8) -> Dict[str, Any]:
+        """
+        Measurement-only: dry_run persist + auto-judge + trend row.
+        Never changes live_focus, CEO inbox, or crystals.
+        """
+        now = datetime.now(timezone.utc)
+        if not _nightly_on():
+            return {"ok": False, "error": "SIX_QUOTIENT_NIGHTLY_MEASURE off", "status": 409}
+        if not force and not (2 <= now.hour < 3):
+            return {"ok": False, "error": "outside_02_03_utc"}
+        day_key = now.strftime("%Y-%m-%d")
+        if not force and self._last_nightly_date == day_key:
+            return {"ok": False, "error": "already_ran_today"}
+
+        env = _battery_env()
+        limit = max(1, min(int(limit or 8), 24))
+        from app.services.six_quotient_scenario_bank import (
+            bank_row_to_scenario,
+            get_ability,
+            insert_theta_trend,
+            select_rotation,
+            touch_last_measured,
+        )
+
+        # Saturday: held-out transfer check (trend only — no set_ability)
+        do_transfer = now.weekday() == 5
+        rows = await select_rotation(
+            self.db_pool, held_out=do_transfer, limit=limit
+        )
+        if not rows:
+            self._last_nightly_date = day_key
+            out = {
+                "ok": False,
+                "error": "no_rotation_scenarios",
+                "run_kind": "transfer" if do_transfer else "nightly",
+            }
+            self.last_nightly_result = out
+            return out
+
+        scenarios = [bank_row_to_scenario(r) for r in rows]
+        keys = [str(s.get("scenario_key") or s.get("id")) for s in scenarios]
+        run_kind = "transfer" if do_transfer else "nightly"
+
+        result = await self.run_once(
+            dry_run=True,
+            limit=len(scenarios),
+            environment=env,
+            persist=True,
+            multi_turn=True,
+            scenarios_override=scenarios,
+            run_kind=run_kind,
+            include_held_out=not do_transfer,
+        )
+        run_id = result.get("run_id")
+        if run_id:
+            await touch_last_measured(self.db_pool, keys)
+
+        judge_out: Dict[str, Any] = {"ok": False, "skipped": True}
+        if run_id:
+            from app.services.six_quotient_auto_judge import auto_score_run
+
+            judge_out = await auto_score_run(
+                self.db_pool,
+                self.app_state,
+                run_id,
+                enqueue_ceo=False,
+                update_ability=not do_transfer,
+                ingest_growth=False,
+            )
+
+        ability = await get_ability(self.db_pool, env)
+        theta = float(ability.get("theta") or 0.0)
+        tbs = ability.get("theta_by_section") or {}
+        seen_theta = None
+        held_out_theta = None
+        if do_transfer:
+            held_out_theta = float(
+                (judge_out.get("analysis") or {}).get("composite", {}).get("pct", 0)
+            ) / 100.0 * 2.0 - 1.0  # rough map pct→θ scale; prefer ability if updated
+            # Prefer theta from analysis section thetas if present
+            try:
+                from app.services.six_quotient_irt import score_to_theta
+
+                comps = (judge_out.get("analysis") or {}).get("quotients") or {}
+                if comps:
+                    vals = [
+                        score_to_theta(float(m.get("pct") or 0) / 100.0 * 9.0, max_total=9.0)
+                        for m in comps.values()
+                    ]
+                    held_out_theta = sum(vals) / len(vals) if vals else held_out_theta
+            except Exception:
+                pass
+            # Latest nightly θ as seen
+            try:
+                async with self.db_pool.acquire() as conn:
+                    prev = await conn.fetchrow(
+                        """SELECT theta FROM six_quotient_theta_trend
+                           WHERE environment = $1 AND run_kind = 'nightly'
+                           ORDER BY created_at DESC LIMIT 1""",
+                        env,
+                    )
+                seen_theta = float(prev["theta"]) if prev else theta
+            except Exception:
+                seen_theta = theta
+            trend_theta = float(held_out_theta if held_out_theta is not None else theta)
+        else:
+            trend_theta = theta
+            if judge_out.get("ok"):
+                ability = await get_ability(self.db_pool, env)
+                trend_theta = float(ability.get("theta") or theta)
+                tbs = ability.get("theta_by_section") or tbs
+
+        if run_id and judge_out.get("ok"):
+            try:
+                await insert_theta_trend(
+                    self.db_pool,
+                    environment=env,
+                    run_id=run_id,
+                    run_kind=run_kind,
+                    theta=trend_theta,
+                    theta_by_section=tbs if isinstance(tbs, dict) else {},
+                    scenario_count=len(scenarios),
+                    seen_theta=seen_theta,
+                    held_out_theta=held_out_theta,
+                )
+            except Exception as e:
+                logger.warning("theta trend insert: %s", e)
+
+        self._last_nightly_date = day_key
+        out = {
+            "ok": bool(result.get("ok") and judge_out.get("ok")),
+            "run_kind": run_kind,
+            "run_id": run_id,
+            "scenarios": len(scenarios),
+            "judge": judge_out,
+            "theta": trend_theta,
+        }
+        self.last_nightly_result = out
+        logger.info(
+            "Nightly six-quotient measure: kind=%s run=%s ok=%s",
+            run_kind,
+            run_id,
+            out["ok"],
+        )
+        return out
 
     async def run_once(
         self,
@@ -179,12 +346,29 @@ class SixQuotientBatteryAgent:
         environment: Optional[str] = None,
         persist: bool = True,
         multi_turn: Optional[bool] = None,
+        scenarios_override: Optional[List[Dict[str, Any]]] = None,
+        run_kind: str = "weekly",
+        include_held_out: bool = True,
     ) -> Dict[str, Any]:
         from app.services.six_quotient_pregrader import pregrade_battery
 
         environment = environment or _battery_env()
-        selection = await self._select_scenarios(environment=environment, limit=limit)
-        scenarios = selection.get("scenarios") or []
+        if scenarios_override is not None:
+            scenarios = list(scenarios_override)
+            selection = {
+                "scenarios": scenarios,
+                "mode": "nightly_rotation",
+                "theta": 0.0,
+                "weak_sections": [],
+                "battery_version": "v5",
+            }
+        else:
+            selection = await self._select_scenarios(
+                environment=environment,
+                limit=limit,
+                include_held_out=include_held_out,
+            )
+            scenarios = selection.get("scenarios") or []
         if not scenarios:
             return {"ok": False, "error": "no scenarios selected"}
 
@@ -258,7 +442,9 @@ class SixQuotientBatteryAgent:
         }
 
         if persist and self.db_pool:
-            run_id = await self._persist(pack, graded, environment, git_hash, status)
+            run_id = await self._persist(
+                pack, graded, environment, git_hash, status, run_kind=run_kind
+            )
             if run_id and use_mt:
                 await self._persist_transcripts(run_id, graded)
 
@@ -272,6 +458,7 @@ class SixQuotientBatteryAgent:
             "scenarios": len(graded),
             "run_id": run_id,
             "status": status,
+            "run_kind": run_kind,
             "enabled": _flag_on(),
             "living": _living_on(),
             "git_hash": git_hash,
@@ -280,7 +467,7 @@ class SixQuotientBatteryAgent:
         return result
 
     async def _select_scenarios(
-        self, *, environment: str, limit: int
+        self, *, environment: str, limit: int, include_held_out: bool = True
     ) -> Dict[str, Any]:
         try:
             from app.services.six_quotient_adaptive_selector import select_battery
@@ -289,6 +476,7 @@ class SixQuotientBatteryAgent:
                 self.db_pool,
                 environment=environment,
                 limit=limit,
+                include_held_out=include_held_out,
             )
         except Exception as e:
             logger.warning("selector failed: %s", e)
@@ -381,6 +569,7 @@ class SixQuotientBatteryAgent:
         environment: str,
         git_hash: str,
         status: str,
+        run_kind: str = "weekly",
     ) -> Optional[str]:
         run_id = str(uuid.uuid4())
         # Strip bulky turns from results_json summary (kept in transcripts table)
@@ -395,22 +584,39 @@ class SixQuotientBatteryAgent:
             "weak_sections": pack.get("weak_sections"),
             "rubric": pack.get("rubric"),
             "results": slim,
+            "run_kind": run_kind,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
         try:
             async with self.db_pool.acquire() as conn:
-                await conn.execute(
-                    """INSERT INTO six_quotient_runs
-                       (id, battery_version, environment, git_hash, status,
-                        results_json, finished_at)
-                       VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb, NOW())""",
-                    run_id,
-                    pack.get("battery_version", "v4"),
-                    environment,
-                    git_hash,
-                    status,
-                    json.dumps(payload),
-                )
+                try:
+                    await conn.execute(
+                        """INSERT INTO six_quotient_runs
+                           (id, battery_version, environment, git_hash, status,
+                            results_json, finished_at, run_kind)
+                           VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb, NOW(), $7)""",
+                        run_id,
+                        pack.get("battery_version", "v4"),
+                        environment,
+                        git_hash,
+                        status,
+                        json.dumps(payload),
+                        run_kind,
+                    )
+                except Exception:
+                    # Pre-migration 248: no run_kind column
+                    await conn.execute(
+                        """INSERT INTO six_quotient_runs
+                           (id, battery_version, environment, git_hash, status,
+                            results_json, finished_at)
+                           VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb, NOW())""",
+                        run_id,
+                        pack.get("battery_version", "v4"),
+                        environment,
+                        git_hash,
+                        status,
+                        json.dumps(payload),
+                    )
             return run_id
         except Exception as e:
             logger.warning("persist battery run failed: %s", e)

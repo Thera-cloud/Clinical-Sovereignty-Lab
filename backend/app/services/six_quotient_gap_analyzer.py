@@ -80,8 +80,10 @@ async def analyze_and_enqueue(
     run_id: str,
     *,
     origin: str = "six_quotient_battery",
+    enqueue_ceo: bool = True,
+    update_ability: bool = True,
 ) -> Dict[str, Any]:
-    """Load scores for run, compute gaps, enqueue Dual-COO items, persist summary."""
+    """Load scores for run, compute gaps, optionally enqueue Dual-COO, persist summary."""
     if not db_pool:
         return {"ok": False, "error": "no_db_pool"}
 
@@ -129,6 +131,17 @@ async def analyze_and_enqueue(
         composite_max = sum(v["max"] for v in by_section.values())
         composite_pct = round(100.0 * composite_score / composite_max, 1) if composite_max else 0.0
 
+        # QUANTUM-CRYSTAL-ARCH — transfer delta for generalization (D.12)
+        transfer_meta: Dict[str, Any] = {}
+        try:
+            from app.services.six_quotient_scenario_bank import latest_transfer_delta
+
+            transfer_meta = await latest_transfer_delta(
+                db_pool, run["environment"] or "production"
+            )
+        except Exception:
+            transfer_meta = {}
+
         summary = {
             "run_id": str(run_id),
             "battery_version": run["battery_version"],
@@ -142,6 +155,7 @@ async def analyze_and_enqueue(
                 "baseline_pct": COMPOSITE_BASELINE["pct"],
                 "delta_pct": round(composite_pct - COMPOSITE_BASELINE["pct"], 1),
             },
+            "transfer": transfer_meta,
         }
 
         await conn.execute(
@@ -155,44 +169,49 @@ async def analyze_and_enqueue(
             json.dumps(summary),
         )
 
-    # Dual-COO: YELLOW/RED → CEO inbox. GREEN stays in gap_summary only.
+    # Dual-COO: YELLOW/RED → CEO inbox. Nightly measurement skips enqueue.
     enqueued: List[Dict[str, str]] = []
-    try:
-        from app.websocket.cli_dual_coo import RISK_RED, RISK_YELLOW, enqueue_ceo
+    if enqueue_ceo:
+        try:
+            from app.websocket.cli_dual_coo import RISK_RED, RISK_YELLOW, enqueue_ceo as _enq
 
-        for q, data in by_section.items():
-            risk = data["risk"]
-            if risk == RISK_RED:
-                enqueue_ceo(
-                    risk=RISK_RED,
-                    title=f"Six-Quotient {q} REGRESSION — CEO review required",
-                    detail=json.dumps({"run_id": str(run_id), **data})[:2000],
-                    origin=origin,
-                    payload={"kind": "six_quotient_regression", "quotient": q},
-                )
-                enqueued.append({"quotient": q, "risk": RISK_RED})
-            elif risk == RISK_YELLOW:
-                enqueue_ceo(
-                    risk=RISK_YELLOW,
-                    title=f"Six-Quotient {q} dip — candidate fix review",
-                    detail=json.dumps({"run_id": str(run_id), **data})[:2000],
-                    origin=origin,
-                    payload={"kind": "six_quotient_gap", "quotient": q},
-                )
-                enqueued.append({"quotient": q, "risk": RISK_YELLOW})
-            else:
-                enqueued.append({"quotient": q, "risk": "GREEN"})
-    except Exception as e:
-        logger.warning("Dual-COO enqueue failed (non-fatal): %s", e)
+            for q, data in by_section.items():
+                risk = data["risk"]
+                if risk == RISK_RED:
+                    _enq(
+                        risk=RISK_RED,
+                        title=f"Six-Quotient {q} REGRESSION — CEO review required",
+                        detail=json.dumps({"run_id": str(run_id), **data})[:2000],
+                        origin=origin,
+                        payload={"kind": "six_quotient_regression", "quotient": q},
+                    )
+                    enqueued.append({"quotient": q, "risk": RISK_RED})
+                elif risk == RISK_YELLOW:
+                    _enq(
+                        risk=RISK_YELLOW,
+                        title=f"Six-Quotient {q} dip — candidate fix review",
+                        detail=json.dumps({"run_id": str(run_id), **data})[:2000],
+                        origin=origin,
+                        payload={"kind": "six_quotient_gap", "quotient": q},
+                    )
+                    enqueued.append({"quotient": q, "risk": RISK_YELLOW})
+                else:
+                    enqueued.append({"quotient": q, "risk": "GREEN"})
+        except Exception as e:
+            logger.warning("Dual-COO enqueue failed (non-fatal): %s", e)
+    else:
+        enqueued = [{"quotient": q, "risk": data["risk"], "skipped": "nightly"} for q, data in by_section.items()]
 
     summary["enqueued"] = enqueued
     summary["ok"] = True
 
     # Living Battery: update IRT ability + item params (non-fatal)
-    try:
-        await _calibrate_living(db_pool, run_id, score_dicts, by_section, run["environment"])
-    except Exception as e:
-        logger.warning("living IRT calibrate (non-fatal): %s", e)
+    # QUANTUM-CRYSTAL-ARCH — held-out transfer never updates live ability
+    if update_ability:
+        try:
+            await _calibrate_living(db_pool, run_id, score_dicts, by_section, run["environment"])
+        except Exception as e:
+            logger.warning("living IRT calibrate (non-fatal): %s", e)
 
     return summary
 

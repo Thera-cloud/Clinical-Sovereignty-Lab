@@ -7,9 +7,9 @@
 
 ---
 
-## Executive verdict (updated 2026-07-21 — D.11 live-context close)
+## Executive verdict (updated 2026-07-21 — D.12 nightly measure)
 
-Phase **6** + Track D on GREEN. **`SIX_QUOTIENT_BATTERY_LIVE_WS=true` does not alone fire Sunday live** — needs `SIX_QUOTIENT_WEEKLY_LIVE=true` too (default false). Ability/battery env: `SIX_QUOTIENT_BATTERY_ENV=production`. CEO APPROVE on `six_quotient_self_dev` → `live_focus` + crystal bump ≥0.58. Live therapy cues: `ENABLE_SIX_QUOTIENT_LIVE_CONTEXT` → `therapeutic_controller` addendum. Battery crystals forge at **0.58** (global recall floor). Standards ingest RSS **and** `type:page` (C-SSRS). Auditor expected **15**.
+Phase **6** + Track D on GREEN. **`SIX_QUOTIENT_NIGHTLY_MEASURE`** (default false): 02–03 UTC dry-run rotation + `grok-judge-v1` auto-score + `six_quotient_theta_trend` (no CEO / no crystals / no `live_focus`). Saturday transfer = held-out only (trend, not ability). Weekly act unchanged (Sunday 06–07). **`SIX_QUOTIENT_BATTERY_LIVE_WS` alone does not fire Sunday live** — needs `SIX_QUOTIENT_WEEKLY_LIVE`. CEO APPROVE `six_quotient_self_dev` → `live_focus`. Live cues: `ENABLE_SIX_QUOTIENT_LIVE_CONTEXT`. Auditor expected **17**.
 
 ## Executive verdict (updated 2026-07-21 — Phase 6.7 prod ON)
 
@@ -43,6 +43,7 @@ Phases **0–5** code paths are **implemented behind feature flags** (see rollou
 | D | Living battery v5 (bank/standards/gen) | `ENABLE_SIX_QUOTIENT_LIVING_*`, `*_STANDARDS_INDEX`, `*_SCENARIO_GEN` |
 | D.9 | Bi-weekly self-dev → CEO YELLOW inbox | `ENABLE_SIX_QUOTIENT_SELF_DEV` |
 | D.11 | Live therapy cues + CEO apply focus | `ENABLE_SIX_QUOTIENT_LIVE_CONTEXT` |
+| D.12 | Nightly measure / holdout transfer trend | `SIX_QUOTIENT_NIGHTLY_MEASURE` |
 
 **Prior snapshot (pre-build) below retained for audit trail.**
 
