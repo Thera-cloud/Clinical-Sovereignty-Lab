@@ -57,12 +57,15 @@ async def _main() -> int:
         inserted = 0
         stems = _load_stems()
         for s in stems:
-            if inserted >= need:
+            total_now = int(
+                await conn.fetchval("SELECT COUNT(*) FROM six_quotient_human_gold") or 0
+            )
+            if total_now >= target:
                 break
             sid = str(s.get("scenario_id") or "").strip()
             if not sid:
                 continue
-            await conn.execute(
+            status = await conn.execute(
                 """INSERT INTO six_quotient_human_gold
                    (scenario_id, section, client_says, human_scored, blinded, notes)
                    VALUES ($1, $2, $3, false, true, $4)
@@ -72,11 +75,16 @@ async def _main() -> int:
                 str(s.get("client_says") or "")[:2000],
                 str(s.get("title") or "")[:200] or None,
             )
-            inserted += 1
+            # asyncpg: "INSERT 0 1" when inserted
+            if status and status.endswith("1"):
+                inserted += 1
 
         # Fallback: bank keys not already in gold
-        if existing + inserted < target:
-            still = target - (existing + inserted)
+        total_now = int(
+            await conn.fetchval("SELECT COUNT(*) FROM six_quotient_human_gold") or 0
+        )
+        if total_now < target:
+            still = target - total_now
             rows = await conn.fetch(
                 """SELECT scenario_key, section, COALESCE(client_says,'') AS client_says
                    FROM six_quotient_scenario_bank
@@ -87,9 +95,13 @@ async def _main() -> int:
                 still + 5,
             )
             for r in rows:
-                if inserted >= need:
+                total_now = int(
+                    await conn.fetchval("SELECT COUNT(*) FROM six_quotient_human_gold")
+                    or 0
+                )
+                if total_now >= target:
                     break
-                await conn.execute(
+                status = await conn.execute(
                     """INSERT INTO six_quotient_human_gold
                        (scenario_id, section, client_says, human_scored, blinded)
                        VALUES ($1, $2, $3, false, true)
@@ -98,7 +110,8 @@ async def _main() -> int:
                     r["section"],
                     (r["client_says"] or "")[:2000],
                 )
-                inserted += 1
+                if status and status.endswith("1"):
+                    inserted += 1
 
         total = await conn.fetchval("SELECT COUNT(*) FROM six_quotient_human_gold")
         scored = await conn.fetchval(
