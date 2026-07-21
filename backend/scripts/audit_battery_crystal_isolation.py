@@ -30,30 +30,43 @@ async def _main() -> int:
 
     conn = await asyncpg.connect(dsn)
     try:
-        await conn.execute("SET statement_timeout = '15s'")
-        # Metadata-only first (avoids full crystal_text seqscan on large tables)
+        await conn.execute("SET statement_timeout = '60s'")
+        # Prefer indexed origin_surface / metadata before crystal_text probes
         rows = await conn.fetch(
             """SELECT id::text, LEFT(crystal_text, 120) AS preview, scope
                FROM nate_intelligence_crystals
                WHERE COALESCE(scope, '') != 'archived'
-                 AND (
-                   origin_surface IN (
-                     'six_quotient_battery', 'six_quotient_nightly',
-                     'six_quotient_weekly', 'six_quotient_transfer',
-                     'six_quotient_smoke'
-                   )
-                   OR (
-                     metadata IS NOT NULL AND (
+                 AND origin_surface IN (
+                   'six_quotient_battery', 'six_quotient_nightly',
+                   'six_quotient_weekly', 'six_quotient_transfer',
+                   'six_quotient_smoke'
+                 )
+               LIMIT 25"""
+        )
+        if not rows:
+            rows = await conn.fetch(
+                """SELECT id::text, LEFT(crystal_text, 120) AS preview, scope
+                   FROM nate_intelligence_crystals
+                   WHERE COALESCE(scope, '') != 'archived'
+                     AND metadata IS NOT NULL
+                     AND (
                        metadata::text ILIKE '%six_quotient_battery%'
                        OR metadata::text ILIKE '%six_quotient_nightly%'
                        OR metadata::text ILIKE '%six_quotient_weekly%'
                      )
-                   )
-                   OR crystal_text ILIKE 'BATTERY-VALIDATED%'
-                   OR crystal_text LIKE '%[SIX_QUOTIENT_BATTERY]%'
-                 )
-               LIMIT 25"""
-        )
+                   LIMIT 25"""
+            )
+        if not rows:
+            rows = await conn.fetch(
+                """SELECT id::text, LEFT(crystal_text, 120) AS preview, scope
+                   FROM nate_intelligence_crystals
+                   WHERE COALESCE(scope, '') != 'archived'
+                     AND (
+                       crystal_text LIKE 'BATTERY-VALIDATED%'
+                       OR crystal_text LIKE '%[SIX_QUOTIENT_BATTERY]%'
+                     )
+                   LIMIT 10"""
+            )
         print("=== Battery crystal isolation audit ===")
         print(f"marker_hits={len(rows)}")
         for r in rows[:20]:
