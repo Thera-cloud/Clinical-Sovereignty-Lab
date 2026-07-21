@@ -290,7 +290,7 @@ class TestAiEvaluatorGate(unittest.TestCase):
 
 
 class TestAuditorEndpointCount(unittest.TestCase):
-    def test_twelve_checks(self):
+    def test_fifteen_checks(self):
         aud = _load(
             "app.services.six_quotient_battery_auditor",
             APP / "services" / "six_quotient_battery_auditor.py",
