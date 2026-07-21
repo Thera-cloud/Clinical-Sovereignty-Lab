@@ -7,6 +7,7 @@ Boundary mode: target IRT b near current θ (P≈0.5).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -14,6 +15,9 @@ import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+# QUANTUM-CRYSTAL-ARCH — keep /generate under HTTP budgets; fall back to template
+_LLM_GENERATE_TIMEOUT_S = float(os.getenv("SIX_QUOTIENT_GEN_LLM_TIMEOUT_S", "45"))
 
 logger = logging.getLogger("sovereign.six_quotient_generator")
 
@@ -214,14 +218,22 @@ async def _one_draft(
         )
     if router and hasattr(router, "generate"):
         try:
-            resp = await router.generate(
-                prompt=user,
-                system=system,
-                domain="clinical",
-                max_tokens=900,
-                temperature=0.7,
+            resp = await asyncio.wait_for(
+                router.generate(
+                    prompt=user,
+                    system=system,
+                    domain="clinical",
+                    max_tokens=900,
+                    temperature=0.7,
+                ),
+                timeout=_LLM_GENERATE_TIMEOUT_S,
             )
             text, provider = _extract_generate_text(resp)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "generator LLM timeout after %.0fs — template fallback",
+                _LLM_GENERATE_TIMEOUT_S,
+            )
         except Exception as e:
             logger.warning("generator LLM: %s", e)
 

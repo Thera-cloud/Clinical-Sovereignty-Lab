@@ -294,8 +294,8 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 | D.1 | Migration `246_six_quotient_living_battery.sql` applied (prod + staging DBs) | [x] *(2026-07-17 @ 5f8954d0)* |
 | D.2 | `POST /api/admin/six-quotient/bank/seed` — v4 anchors approved | [x] *(24 anchors)* |
 | D.3 | Dry-run multi-turn: `POST .../trigger` `{dry_run:true, multi_turn:true}` | [x] *(staging: living_adaptive v5)* |
-| D.4 | Standards sync (staging): `POST .../standards/sync` → review → approve | [x] *(2026-07-21 — CDC/BBC registry; staging 12 inserted)* |
-| D.5 | Scenario gen (flag on): `POST .../generate` → human approve drafts | [~] *(flags on; approve path still operator)* |
+| D.4 | Standards sync (staging): `POST .../standards/sync` → review → approve | [~] *(2026-07-21 — registry 2026.3 CDC-only; BBC junk rejected; approve CDC after review)* |
+| D.5 | Scenario gen (flag on): `POST .../generate` → human approve drafts | [~] *(LLM timeout+template fallback; approve AQ drafts after gen)* |
 | D.6 | Judge calibrate: `POST .../judge/calibrate` before AI evaluators *(API gate enforces for AI ids)* | [x] *(grok-judge-v1 kappa=1.0)* |
 | D.7 | Ability/IRT: `GET .../ability` after first scored run | [x] *(prod run `09716350…` scored)* |
 | D.8 | Prod living/standards/gen flags remain **false** until soak | [x] *(superseded 2026-07-21 — living/standards/gen/LIVE_WS true after soak)* |

@@ -302,6 +302,22 @@ class SixQuotientStandardsIndex:
                     logger.warning("standards crystallize hook: %s", e)
         return {"ok": True, "item": dict(row), "crystal_hook": crystal_hook}
 
+    async def reject(self, item_id: str, rejected_by: str = "admin") -> Dict[str, Any]:
+        """Mark pending_review item rejected (junk / off-topic RSS)."""
+        # QUANTUM-CRYSTAL-ARCH
+        async with self.db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """UPDATE six_quotient_standards_items
+                   SET status = 'rejected', approved_by = $2, approved_at = NOW()
+                   WHERE id = $1::uuid AND status = 'pending_review'
+                   RETURNING id::text, quotient, title, status""",
+                item_id,
+                (rejected_by or "").strip() or "admin",
+            )
+        if not row:
+            return {"ok": False, "error": "not found or not pending"}
+        return {"ok": True, "item": dict(row)}
+
     async def approved_for_prompt(self, *, max_per_q: int = 2) -> str:
         """Compact context block for scenario generator."""
         parts = []

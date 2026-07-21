@@ -111,6 +111,11 @@ class StandardsApproveBody(BaseModel):
     crystallize: bool = True
 
 
+class StandardsRejectBody(BaseModel):
+    item_id: str
+    rejected_by: str = "admin"
+
+
 class JudgeCalibrateBody(BaseModel):
     evaluator_id: str
     ratings: List[Dict[str, Any]]
@@ -522,6 +527,19 @@ async def approve_standard(body: StandardsApproveBody, request: Request):
     )
     if not result.get("ok"):
         raise HTTPException(400, result.get("error", "approve_failed"))
+    return {"status": "ok", **result}
+
+
+@router.post("/standards/reject")
+async def reject_standard(body: StandardsRejectBody, request: Request):
+    """Reject off-topic / junk pending_review standards items."""
+    # QUANTUM-CRYSTAL-ARCH
+    idx = getattr(request.app.state, "six_quotient_standards_index", None)
+    if not idx or not hasattr(idx, "reject"):
+        raise HTTPException(503, "standards index unavailable")
+    result = await idx.reject(body.item_id, body.rejected_by)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error", "reject_failed"))
     return {"status": "ok", **result}
 
 

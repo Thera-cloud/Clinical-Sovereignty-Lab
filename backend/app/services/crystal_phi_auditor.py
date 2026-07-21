@@ -158,50 +158,65 @@ class CrystalPhiAuditor:
             "scope_drift_orphans": scope_drift_count,
             "checked_at": datetime.now(timezone.utc).isoformat(),
         }
+        # QUANTUM-CRYSTAL-ARCH: graph-surfaced scan BEFORE activity log (Phase 5d evidence)
+        if os.getenv("ENABLE_CRYSTAL_GRAPH", "false").lower() in ("1", "true", "yes"):
+            try:
+                from app.services.crystal_graph_isolation import (
+                    fetch_graph_surfaced_crystal_ids,
+                )
+
+                graph_ids = await fetch_graph_surfaced_crystal_ids(
+                    self.db_pool, limit=100
+                )
+                graph_matches = 0
+                for gid in graph_ids:
+                    row = await self._fetch_crystal_by_id(gid)
+                    if not row:
+                        continue
+                    if row["user_id"] is not None:
+                        continue
+                    if text_contains_client_name(row["crystal_text"] or ""):
+                        graph_matches += 1
+                        if await self._quarantine(gid):
+                            await self._write_audit_log_entry({
+                                "id": gid,
+                                "prior_scope": row["scope"],
+                                "origin_surface": row.get("origin_surface"),
+                                "domain": row.get("domain"),
+                            })
+                summary["graph_surfaced_scanned"] = len(graph_ids)
+                summary["graph_surfaced_quarantined"] = graph_matches
+            except Exception as e:
+                logger.warning(
+                    "CrystalPhiAuditor: graph-surfaced scan skipped: %s", e
+                )
+                summary["graph_surfaced_scanned"] = 0
+                summary["graph_surfaced_quarantined"] = 0
+
         self.last_cycle_summary = summary
 
         severity = "critical" if matches else "info"
+        g_scan = summary.get("graph_surfaced_scanned")
+        g_q = summary.get("graph_surfaced_quarantined")
+        graph_clause = ""
+        if g_scan is not None:
+            graph_clause = (
+                f" graph_surfaced_scanned={g_scan}"
+                f" graph_surfaced_quarantined={g_q or 0}."
+            )
         content = (
             f"Scanned {summary['scanned']} ownerless crystals. "
             f"{summary['name_matches']} live-client-name match(es) found, "
             f"{summary['quarantined']} auto-quarantined. "
             f"{summary['scope_drift_orphans']} non-global orphaned-scope "
             f"crystal(s) flagged for hygiene review (unreachable via recall "
-            f"allowlist, not PHI-confirmed)."
+            f"allowlist, not PHI-confirmed).{graph_clause}"
         )
         await self._log_activity("crystal_phi_audit_cycle", content, severity)
         logger.info("CrystalPhiAuditor: %s", content)
 
         if matches:
             await self._alert(matches, summary)
-
-        # QUANTUM-CRYSTAL-ARCH: graph-surfaced crystals — ownerless + live-name PHI (Phase 5d)
-        if os.getenv("ENABLE_CRYSTAL_GRAPH", "false").lower() not in ("1", "true", "yes"):
-            return
-        try:
-            from app.services.crystal_graph_isolation import fetch_graph_surfaced_crystal_ids
-
-            graph_ids = await fetch_graph_surfaced_crystal_ids(self.db_pool, limit=100)
-            graph_matches = 0
-            for gid in graph_ids:
-                row = await self._fetch_crystal_by_id(gid)
-                if not row:
-                    continue
-                if row["user_id"] is not None:
-                    continue
-                if text_contains_client_name(row["crystal_text"] or ""):
-                    graph_matches += 1
-                    if await self._quarantine(gid):
-                        await self._write_audit_log_entry({
-                            "id": gid,
-                            "prior_scope": row["scope"],
-                            "origin_surface": row.get("origin_surface"),
-                            "domain": row.get("domain"),
-                        })
-            summary["graph_surfaced_scanned"] = len(graph_ids)
-            summary["graph_surfaced_quarantined"] = graph_matches
-        except Exception as e:
-            logger.warning("CrystalPhiAuditor: graph-surfaced scan skipped: %s", e)
 
     async def _fetch_crystal_by_id(self, crystal_id: int):
         try:

@@ -1,6 +1,6 @@
 {
-  "version": "2026.2",
-  "note": "Allowlisted sources only. Tier 1=gov/professional body, 2=peer-reviewed/curated, 3=secondary. Verified fetchable 2026-07-21 from GREEN staging.",
+  "version": "2026.3",
+  "note": "Allowlisted sources only. Tier 1=gov/professional body. BBC Health removed 2026-07-21 (consumer news polluted pending_review). Verified fetchable from GREEN.",
   "quotients": {
     "AQ": {
       "label": "Adversity / Crisis Safety",
@@ -12,14 +12,6 @@
           "type": "rss",
           "authority_tier": 1,
           "topics": ["crisis", "public health", "safety"]
-        },
-        {
-          "key": "bbc_health_aq",
-          "name": "BBC News Health",
-          "url": "https://feeds.bbci.co.uk/news/health/rss.xml",
-          "type": "rss",
-          "authority_tier": 2,
-          "topics": ["crisis", "mental health", "suicide awareness"]
         },
         {
           "key": "cssrs_manual",
@@ -35,11 +27,11 @@
       "label": "Emotional / Affective",
       "sources": [
         {
-          "key": "bbc_health_eq",
-          "name": "BBC News Health",
-          "url": "https://feeds.bbci.co.uk/news/health/rss.xml",
+          "key": "cdc_media_eq",
+          "name": "CDC Media RSS",
+          "url": "https://tools.cdc.gov/api/v2/resources/media/404592.rss",
           "type": "rss",
-          "authority_tier": 2,
+          "authority_tier": 1,
           "topics": ["emotion", "mental health", "wellbeing"]
         }
       ]
@@ -61,11 +53,11 @@
       "label": "Social / Relational Process",
       "sources": [
         {
-          "key": "bbc_health_sq",
-          "name": "BBC News Health",
-          "url": "https://feeds.bbci.co.uk/news/health/rss.xml",
+          "key": "cdc_media_sq",
+          "name": "CDC Media RSS",
+          "url": "https://tools.cdc.gov/api/v2/resources/media/404592.rss",
           "type": "rss",
-          "authority_tier": 2,
+          "authority_tier": 1,
           "topics": ["relationships", "community", "alliance"]
         }
       ]
@@ -74,11 +66,11 @@
       "label": "Cultural / Creative Formulation",
       "sources": [
         {
-          "key": "bbc_health_cq",
-          "name": "BBC News Health",
-          "url": "https://feeds.bbci.co.uk/news/health/rss.xml",
+          "key": "cdc_media_cq",
+          "name": "CDC Media RSS",
+          "url": "https://tools.cdc.gov/api/v2/resources/media/404592.rss",
           "type": "rss",
-          "authority_tier": 2,
+          "authority_tier": 1,
           "topics": ["cultural competence", "equity", "community"]
         }
       ]
