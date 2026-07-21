@@ -174,6 +174,15 @@ def test_user_scope_requires_matching_requester():
     assert scope_allows_recall("user:client_a", None, "client_b") is False
 
 
+def test_legacy_user_colon_username_ok_when_owner_uuid_matches():
+    """Audit false-positive: scope user:client1 with owner UUID == requester."""
+    uuid = "73a80349-e8dd-4c11-aeb7-6c40354a60b3"
+    assert scope_allows_recall("user:client1", uuid, uuid) is True
+    crystal = {"scope": "user:client1", "user_id": uuid}
+    assert enforce_traversal_scope(crystal, uuid, requester_aliases={"client1"}) is True
+    assert enforce_traversal_scope(crystal, uuid) is True
+
+
 def test_plain_user_scope_allowed_when_owner_unknown():
     """DB personal crystals use scope='user'; verifier passes owner=None."""
     assert scope_allows_recall("user", None, "client1") is True

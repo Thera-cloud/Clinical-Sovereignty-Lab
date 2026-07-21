@@ -42,13 +42,19 @@ def scope_allows_recall(scope: Optional[str], owner_user_id: Optional[str], requ
         if not requester_user_id:
             return False
         suffix = s.split(":", 1)[1]
-        return suffix in (requester_user_id, str(requester_user_id))
+        if suffix in (requester_user_id, str(requester_user_id)):
+            return True
+        # QUANTUM-CRYSTAL-ARCH: legacy scope user:<username> with owner UUID match
+        if owner_user_id and str(owner_user_id) == str(requester_user_id):
+            return True
+        return False
     return False
 
 
 def enforce_traversal_scope(
     crystal: Dict[str, Any],
     requester_user_id: Optional[str],
+    requester_aliases: Optional[Set[str]] = None,
 ) -> bool:
     """Return True if this crystal may be included in graph traversal for requester."""
     if not crystal:
@@ -57,6 +63,11 @@ def enforce_traversal_scope(
     owner = crystal.get("user_id")
     if owner and requester_user_id and str(owner) != str(requester_user_id):
         return False
+    s = (scope or "global").strip()
+    if s.startswith("user:") and requester_aliases:
+        suffix = s.split(":", 1)[1]
+        if suffix in {str(a) for a in requester_aliases}:
+            return True
     return scope_allows_recall(scope, str(owner) if owner else None, requester_user_id)
 
 
@@ -66,6 +77,7 @@ async def audit_graph_traversal_isolation(
     seed_crystal_ids: List[str],
     requester_user_id: str,
     max_hops: int = 2,
+    requester_aliases: Optional[Set[str]] = None,
 ) -> Dict[str, Any]:
     """
     Read-only BFS over crystal_edges; report any cross-boundary violations.
@@ -84,6 +96,7 @@ async def audit_graph_traversal_isolation(
     visited: Set[str] = set()
     frontier = list(seed_crystal_ids)
     hops = 0
+    aliases = set(requester_aliases or ())
 
     try:
         async with db_pool.acquire() as conn:
@@ -111,7 +124,9 @@ async def audit_graph_traversal_isolation(
                         continue
                     report["visited"] += 1
                     cdict = dict(crystal)
-                    if not enforce_traversal_scope(cdict, requester_user_id):
+                    if not enforce_traversal_scope(
+                        cdict, requester_user_id, requester_aliases=aliases,
+                    ):
                         report["violations"].append(
                             {
                                 "crystal_id": str(crystal["id"]),
