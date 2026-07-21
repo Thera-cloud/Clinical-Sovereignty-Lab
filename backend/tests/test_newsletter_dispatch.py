@@ -309,6 +309,44 @@ def test_template_draft_applies_rewrite_notes_without_dumping_instructions():
     assert "988" in body
 
 
+def test_template_draft_excludes_ops_hints_and_weaves_worldly_hook():
+    pipe = _load("nl_pipe_worldly_ut", "app/services/newsletter_pipeline.py")
+    topic = {
+        "title": "When a song holds what you cannot say yet",
+        "topic_key": "music_and_catharsis",
+        "headline": "As Dubstep’s Popularity Surges, Bass-Focused Rampage",
+        "angle": "Let a song hold grief without letting the feed own your nervous system",
+        "domain": "arts",
+        "symbolic_hints": [
+            "GROWTH_7D: warm_lead: +7 subs / 7 conv",
+            "Issue 20260719-x topic=Building: avg_helpful=5.00",
+        ],
+    }
+    bundle = {
+        "citations": [
+            {
+                "source_name": "NIMH",
+                "year": 2025,
+                "url": "https://www.nimh.nih.gov/health/topics/anxiety-disorders",
+                "verified": True,
+                "modality": "psychoeducation",
+            }
+        ],
+        "external_reading": {
+            "source_name": "NIMH",
+            "year": 2025,
+            "url": "https://www.nimh.nih.gov/health/topics/anxiety-disorders",
+        },
+    }
+    body = pipe.draft_issue_from_bundle(topic, bundle)["body_md"]
+    assert "Voice notes" not in body
+    assert "GROWTH_7D" not in body
+    assert "avg_helpful" not in body
+    assert "Dubstep" in body or "wider world" in body.lower()
+    assert "nervous system" in body.lower() or "stance on the news" in body.lower()
+    assert "headline from what my body" in body.lower() or "culture or the news" in body.lower()
+
+
 def test_summon_cache_key_scopes_by_user():
     path = BACKEND / "app/services/nate_summon_service.py"
     text = path.read_text(encoding="utf-8")

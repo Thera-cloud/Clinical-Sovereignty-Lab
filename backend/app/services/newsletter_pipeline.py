@@ -134,7 +134,7 @@ def safety_footer_for_domain(domain: Optional[str] = None) -> str:
 
 
 async def _load_symbolic_hints(db_pool) -> List[str]:
-    """Draft-time marketing hints. Chat uses labeled DISPATCH LEARNING via library recall."""
+    """LLM-only style hints (rules/style_notes). Never outcomes/growth telemetry."""
     if not db_pool:
         return []
     try:
@@ -142,8 +142,9 @@ async def _load_symbolic_hints(db_pool) -> List[str]:
             rows = await conn.fetch(
                 """
                 SELECT content FROM newsletter_symbolic_memory
-                WHERE scope = 'active' AND kind IN ('rule', 'style_note', 'outcome')
+                WHERE scope = 'active' AND kind IN ('rule', 'style_note')
                   AND confidence >= 0.55
+                  AND content NOT ILIKE 'GROWTH\\_7D%'
                 ORDER BY confidence DESC, created_at DESC
                 LIMIT 5
                 """
@@ -154,12 +155,81 @@ async def _load_symbolic_hints(db_pool) -> List[str]:
         return []
 
 
+def _techniques_for_topic(topic: Dict[str, Any]) -> List[Dict[str, Any]]:
+    title = (topic.get("title") or "this week's theme").strip()[:70]
+    return [
+        {
+            "step": 1,
+            "text": f"Name one feeling that showed up around “{title}” in one plain sentence.",
+            "modality": "CBT",
+        },
+        {
+            "step": 2,
+            "text": "Ground for 60 seconds: feet, breath, one object in the room — then return to the theme.",
+            "modality": "somatic",
+        },
+        {
+            "step": 3,
+            "text": "Ask for one concrete kind of support (or one curious question for Little Nate) tied to what stirred.",
+            "modality": "MI",
+        },
+    ]
+
+
+def _feature_lead_for_topic(topic: Dict[str, Any], rewrite: str) -> str:
+    title = (topic.get("title") or "steadiness").strip()
+    headline = re.sub(r"\s+", " ", (topic.get("headline") or "").strip())[:160]
+    angle = re.sub(r"\s+", " ", (topic.get("angle") or "").strip())[:220]
+    if rewrite:
+        return (
+            f"This week we explore {title} with a sharper focus "
+            f"on what your editor asked for: {rewrite}. "
+            "Small, structured steps restore agency without forcing a perfect plan.\n\n"
+        )
+    if headline or angle:
+        bits = []
+        if headline:
+            bits.append(f"In the wider world: {headline}.")
+        if angle:
+            bits.append(angle if angle.endswith(".") else f"{angle}.")
+        else:
+            bits.append(
+                f"This Dispatch uses that cultural moment to explore {title} — "
+                "skills for staying steady when the feed moves fast."
+            )
+        bits.append(
+            "Education and nervous-system skills only — not a stance on the news itself.\n\n"
+        )
+        return " ".join(bits)
+    return (
+        f"This week we explore {title} — how overwhelm can make reaching out feel risky, "
+        "and how small, structured steps restore agency without forcing a perfect plan.\n\n"
+    )
+
+
+def _go_deeper_for_topic(topic: Dict[str, Any]) -> str:
+    if topic.get("headline") or topic.get("angle"):
+        return (
+            "Try opening with Little Nate:\n"
+            '1. "Something in culture or the news stirred me — sit with what it touched."\n'
+            '2. "Help me separate the headline from what my body is doing."\n'
+            '3. "What skill would help me stay curious without getting swept?"'
+        )
+    return (
+        "Try opening with Little Nate:\n"
+        '1. "I keep putting off asking for help — sit with me in that."\n'
+        '2. "What am I protecting by staying quiet?"\n'
+        '3. "Help me practice one sentence I could send to someone safe."'
+    )
+
+
 async def select_topic(db_pool) -> Dict[str, Any]:
     """Score topics from the growth engine pool (signals, forecast, trends, seasons)."""
     try:
         from app.services.newsletter_topic_engine import select_best_topic
 
-        return await select_best_topic(db_pool)
+        topic = await select_best_topic(db_pool)
+        return await enrich_topic_worldly_hook(db_pool, topic)
     except Exception as e:
         logger.warning("select_topic growth engine fallback: %s", e)
         hints = await _load_symbolic_hints(db_pool)
@@ -249,26 +319,8 @@ def draft_issue_from_bundle(topic: Dict[str, Any], bundle: Dict[str, Any]) -> Di
     for c in cites[:5]:
         cite_lines.append(f"- {c['source_name']} ({c['year']}): {c['url']}")
 
-    techniques = [
-        {
-            "step": 1,
-            "text": "Name what you feel in one plain sentence (affect labeling).",
-            "modality": "CBT",
-        },
-        {
-            "step": 2,
-            "text": "Ground for 60 seconds: feet, breath, one object in the room.",
-            "modality": "somatic",
-        },
-        {
-            "step": 3,
-            "text": "Ask for one concrete kind of support from a safe person or Little Nate.",
-            "modality": "MI",
-        },
-    ]
-
-    hints = topic.get("symbolic_hints") or []
-    # Symbolic memory may shape tone; never dump raw editor instructions into the body.
+    techniques = _techniques_for_topic(topic)
+    # Symbolic hints stay LLM-only — never paste ops/outcomes into subscriber body.
     rewrite = (bundle.get("editor_rewrite_notes") or "").strip()
     rewrite = re.sub(r"\s+", " ", rewrite)[:400]
 
@@ -276,33 +328,14 @@ def draft_issue_from_bundle(topic: Dict[str, Any], bundle: Dict[str, Any]) -> Di
         "You do not have to earn rest or connection. Strength includes asking — "
         "and I am here when you are ready to take the next small step."
     )
-    if rewrite:
-        feature_lead = (
-            f"This week we explore {topic.get('title') or 'steadiness'} with a sharper focus "
-            f"on what your editor asked for: {rewrite}. "
-            "Small, structured steps restore agency without forcing a perfect plan.\n\n"
-        )
-    else:
-        feature_lead = (
-            "This week we explore how overwhelm can make reaching out feel risky — "
-            "and how small, structured steps restore agency without forcing a perfect plan.\n\n"
-        )
+    feature_lead = _feature_lead_for_topic(topic, rewrite)
     feature = (
         f"## {topic.get('title')}\n\n"
         + feature_lead
         + "Clinical context (education only, not diagnosis):\n"
         + "\n".join(cite_lines)
     )
-    if hints and not rewrite:
-        feature += "\n\n_Voice notes (from prior Dispatch outcomes):_\n" + "\n".join(
-            f"- {h}" for h in hints[:3]
-        )
-    go_deeper = (
-        "Try opening with Little Nate:\n"
-        "1. \"I keep putting off asking for help — sit with me in that.\"\n"
-        "2. \"What am I protecting by staying quiet?\"\n"
-        "3. \"Help me practice one sentence I could send to someone safe.\""
-    )
+    go_deeper = _go_deeper_for_topic(topic)
     external = bundle.get("external_reading") or cites[0]
     body = "\n\n".join(
         [
@@ -369,9 +402,17 @@ async def draft_issue_llm(
         "Never paste editor instructions verbatim into the article. "
         "Output markdown with sections: opener, feature, techniques (3), go deeper, further reading."
     )
+    worldly = ""
+    if topic.get("headline") or topic.get("angle"):
+        worldly = (
+            f"Worldly hook (weave into feature; do not dump raw ops metrics):\n"
+            f"- Headline: {topic.get('headline') or '(none)'}\n"
+            f"- Therapeutic angle: {topic.get('angle') or '(none)'}\n\n"
+        )
     user = (
         f"Topic: {topic.get('title')}\n\nAllowed citations:\n{cite_blob}\n\n"
-        f"Style hints:\n{hints or '(none)'}\n\n"
+        + worldly
+        + f"Style hints (tone only — never paste into the article):\n{hints or '(none)'}\n\n"
         + (f"EDITOR REWRITE DIRECTION (apply, do not quote):\n{rewrite}\n\n" if rewrite else "")
         + f"Must end with: {safety_footer_for_domain(topic.get('domain') or bundle.get('domain'))}"
     )
@@ -447,6 +488,72 @@ def critique_issue(draft: Dict[str, Any], bundle: Dict[str, Any]) -> Tuple[bool,
     return len(errors) == 0, errors
 
 
+async def enrich_topic_worldly_hook(db_pool, topic: Dict[str, Any]) -> Dict[str, Any]:
+    """Attach headline/angle from trend pairing or forecast metadata when present."""
+    if not db_pool or not topic:
+        return topic
+    out = dict(topic)
+    if out.get("headline") and out.get("angle"):
+        return out
+    key = (out.get("topic_key") or "").strip()
+    title = (out.get("title") or "").strip()
+    slug_key = re.sub(r"[^a-z0-9_]+", "_", (key or title).lower())[:64].strip("_")
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT headline, paired_title, metadata
+                FROM newsletter_trend_candidates
+                WHERE paired_at IS NOT NULL
+                  AND (
+                    paired_topic_key = $1
+                    OR paired_topic_key = $2
+                    OR LOWER(paired_title) = LOWER($3)
+                  )
+                ORDER BY paired_at DESC
+                LIMIT 1
+                """,
+                key or slug_key,
+                slug_key,
+                title or key,
+            )
+            if not row:
+                row = await conn.fetchrow(
+                    """
+                    SELECT NULL::text AS headline, metadata
+                    FROM newsletter_topic_forecast
+                    WHERE topic_key = $1 OR topic_key = $2
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    key or slug_key,
+                    slug_key,
+                )
+        if not row:
+            return out
+        meta = row.get("metadata") or {}
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except Exception:
+                meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        if not out.get("headline"):
+            out["headline"] = (row.get("headline") or meta.get("headline") or "")[:200]
+        if not out.get("angle"):
+            out["angle"] = (meta.get("angle") or "")[:300]
+        if meta.get("domain") and not out.get("domain"):
+            out["domain"] = str(meta["domain"])[:32]
+        if meta.get("title") and (
+            not out.get("title") or out.get("title") == out.get("topic_key")
+        ):
+            out["title"] = str(meta["title"])[:120]
+    except Exception as e:
+        logger.warning("enrich worldly hook: %s", e)
+    return out
+
+
 async def rewrite_existing_issue(
     db_pool, issue_id: str, notes: str = ""
 ) -> Dict[str, Any]:
@@ -497,8 +604,10 @@ async def rewrite_existing_issue(
     topic = {
         "title": row["topic"] or row["slug"],
         "topic_key": row["slug"],
+        "domain": (bundle.get("domain") if isinstance(bundle, dict) else None) or "general",
         "symbolic_hints": [],
     }
+    topic = await enrich_topic_worldly_hook(db_pool, topic)
     draft = await draft_issue_llm(topic, bundle, force=bool(notes))
     if not draft:
         draft = draft_issue_from_bundle(topic, bundle)

@@ -291,6 +291,7 @@ async def pair_unpaired_trends(db_pool, limit: int = 5) -> Dict[str, Any]:
                             "domain": result.get("domain"),
                             "title": result["title"],
                             "headline": r["headline"][:200],
+                            "angle": (result.get("angle") or "")[:300],
                             "source": "trend_pairing",
                         }
                     ),

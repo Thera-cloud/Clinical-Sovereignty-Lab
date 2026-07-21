@@ -264,6 +264,9 @@ async def collect_candidates(db_pool) -> List[Dict[str, Any]]:
                     or title,
                     "seasonal_window": f["seasonal_label"],
                     "domain": domain,
+                    "headline": (meta.get("headline") if isinstance(meta, dict) else None)
+                    or "",
+                    "angle": (meta.get("angle") if isinstance(meta, dict) else None) or "",
                     "rationale": f"forecast_score={f['foresight_score']}",
                     "score": score_candidate(
                         foresight=f["foresight_score"] or 0,
@@ -296,6 +299,8 @@ async def select_best_topic(db_pool) -> Dict[str, Any]:
                 "title": c["title"][:120],
                 "seasonal_window": c.get("seasonal_window"),
                 "domain": c.get("domain") or "general",
+                "headline": (c.get("headline") or "")[:200],
+                "angle": (c.get("angle") or "")[:300],
                 "rationale": f"{c.get('rationale')}|score={c['score']}",
                 "symbolic_hints": hints,
             }
