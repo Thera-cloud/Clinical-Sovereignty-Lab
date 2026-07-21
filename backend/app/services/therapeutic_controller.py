@@ -1147,6 +1147,67 @@ def _symbolic_has_crisis_resource(response_text: str, audit_metadata: dict) -> b
         return False
 
 
+# QUANTUM-CRYSTAL-ARCH — clinical precision: named kinship / invented soma / advice dump
+_KINSHIP_TERMS = (
+    "brother", "sister", "mom", "mother", "dad", "father", "wife", "husband",
+    "son", "daughter", "spouse", "partner", "uncle", "aunt", "cousin",
+    "boyfriend", "girlfriend", "fiancé", "fiance", "grandma", "grandfather",
+    "grandmother", "grandpa",
+)
+_SOMATIC_CLAIM = re.compile(
+    r"\b(?:in your (?:chest|throat|stomach|gut|shoulders?|jaw|hands?)|"
+    r"(?:tightness|heaviness|pressure) in your|"
+    r"i (?:can )?feel (?:the )?(?:tightness|heaviness|weight) in your|"
+    r"your (?:chest|throat|shoulders?) (?:is|are|feels?))\b",
+    re.I,
+)
+_SOMATIC_USER_MARKERS = (
+    "chest", "throat", "stomach", "gut", "shoulder", "jaw", "breath",
+    "body", "tight", "heavy", "nause", "heart rac", "shak",
+)
+_ADVICE_ASK = re.compile(
+    r"\b(?:what should i do|what do i do|tell me what to do|give me advice|"
+    r"how do i (?:fix|handle|deal)|any advice)\b",
+    re.I,
+)
+_TIP_DUMP = re.compile(
+    r"(?:^\s*\d+[\.\)]\s+|here(?:'s| are) (?:a few |some )?things? (?:you can|to try)|"
+    r"\byou should\b|\btry to\b|\bstart by\b)",
+    re.I | re.M,
+)
+_WITNESS_BRIDGE = (
+    "what's coming up", "what comes up", "stay with", "before we",
+    "your coach", "bring this to", "i'm here with", "right here with",
+    "we can sit", "don't have to solve",
+)
+
+
+def _symbolic_precision_violations(response_text: str, audit_metadata: dict) -> list:
+    """QUANTUM-CRYSTAL-ARCH: referent lock, invented soma, advice-before-witness."""
+    out: list = []
+    user_text = (audit_metadata.get("user_text_for_audit") or "").strip()
+    if not user_text or not (response_text or "").strip():
+        return out
+    ul = user_text.lower()
+    rl = response_text.lower()
+
+    # Named-referent drop: kinship in user turn + "this/that person" without kinship echo
+    kin_hits = [k for k in _KINSHIP_TERMS if re.search(rf"\b{re.escape(k)}\b", ul)]
+    if kin_hits and re.search(r"\b(?:this|that) person\b", rl):
+        if not any(re.search(rf"\b{re.escape(k)}\b", rl) for k in kin_hits):
+            out.append("symbolic_referent_drop")
+
+    # Invented somatic claim not grounded in user text
+    if _SOMATIC_CLAIM.search(response_text) and not any(m in ul for m in _SOMATIC_USER_MARKERS):
+        out.append("symbolic_invented_somatic")
+
+    # Advice dump without witness/coach bridge (skip crisis — 988 path owns that)
+    if not bool(audit_metadata.get("crisis_exempt")) and _ADVICE_ASK.search(user_text):
+        if _TIP_DUMP.search(response_text) and not any(w in rl for w in _WITNESS_BRIDGE):
+            out.append("symbolic_advice_dump")
+    return out
+
+
 def _symbolic_audit_violations(response_text: str, audit_metadata: dict) -> list:
     """QUANTUM-CRYSTAL-ARCH: Phase 5b symbolic constraint checks."""
     if not _symbolic_verifier_enabled():
@@ -1178,6 +1239,8 @@ def _symbolic_audit_violations(response_text: str, audit_metadata: dict) -> list
                 break
     except Exception as _sc_exc:
         logger.warning("therapeutic_controller: scope isolation check skipped: %s", _sc_exc)
+    # QUANTUM-CRYSTAL-ARCH — clinical precision (Jake-class misses)
+    violations.extend(_symbolic_precision_violations(response_text, audit_metadata))
     return violations
 
 

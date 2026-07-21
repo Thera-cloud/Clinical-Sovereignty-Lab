@@ -265,3 +265,59 @@ def test_scopes_from_recall_context_helper():
     attributed = _AttributedContext("x")
     attributed.crystal_scopes = ["user", "global"]
     assert scopes_from_recall_context(attributed) == ["user", "global"]
+
+
+def test_seam_referent_drop_caught():
+    v = _symbolic_audit_violations(
+        "It sounds like this person really hurt you.",
+        {
+            "state_symbol": {},
+            "tmc_class": "distress",
+            "user_text_for_audit": "My brother lied to me again.",
+        },
+    )
+    assert "symbolic_referent_drop" in v
+    ok = _symbolic_audit_violations(
+        "It sounds like your brother really hurt you.",
+        {
+            "state_symbol": {},
+            "tmc_class": "distress",
+            "user_text_for_audit": "My brother lied to me again.",
+        },
+    )
+    assert "symbolic_referent_drop" not in ok
+
+
+def test_seam_invented_somatic_caught():
+    v = _symbolic_audit_violations(
+        "I can feel the tightness in your chest as you say that.",
+        {
+            "state_symbol": {},
+            "tmc_class": "distress",
+            "user_text_for_audit": "I'm angry about what happened at work.",
+        },
+    )
+    assert "symbolic_invented_somatic" in v
+
+
+def test_seam_advice_dump_without_witness_caught():
+    v = _symbolic_audit_violations(
+        "1. Take a walk. 2. Write it down. You should also call a friend.",
+        {
+            "state_symbol": {},
+            "tmc_class": "distress",
+            "crisis_exempt": False,
+            "user_text_for_audit": "What should I do about this fight?",
+        },
+    )
+    assert "symbolic_advice_dump" in v
+    ok = _symbolic_audit_violations(
+        "What's coming up as you sit with that? We can bring strategies to your coach.",
+        {
+            "state_symbol": {},
+            "tmc_class": "distress",
+            "crisis_exempt": False,
+            "user_text_for_audit": "What should I do about this fight?",
+        },
+    )
+    assert "symbolic_advice_dump" not in ok

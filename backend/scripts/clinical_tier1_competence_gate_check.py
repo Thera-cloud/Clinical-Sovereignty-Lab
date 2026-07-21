@@ -96,7 +96,8 @@ async def _main() -> int:
             trend_n = await conn.fetchval(
                 """SELECT COUNT(DISTINCT (created_at AT TIME ZONE 'UTC')::date)
                    FROM six_quotient_theta_trend
-                   WHERE COALESCE(is_smoke,false)=false AND run_kind='nightly'"""
+                   WHERE COALESCE(is_smoke,false)=false AND run_kind='nightly'
+                     AND COALESCE(scenario_count, 0) >= 6"""
             )
             smoke_n = await conn.fetchval(
                 "SELECT COUNT(*) FROM six_quotient_theta_trend WHERE COALESCE(is_smoke,false)=true"
@@ -140,6 +141,8 @@ async def _main() -> int:
             crisis_ok = -1  # table missing
 
         gold_n = 0
+        gold_floor_ok = False
+        gold_floor_ratio = None
         try:
             gold_n = int(
                 await conn.fetchval(
@@ -148,8 +151,63 @@ async def _main() -> int:
                 )
                 or 0
             )
+            # Provenance floor among scored (migration 258); pending drafts don't count
+            row = await conn.fetchrow(
+                """SELECT
+                     COUNT(*)::float AS n,
+                     COUNT(*) FILTER (
+                       WHERE provenance IN (
+                         'april_battery_clinician_authored',
+                         'model_generated_then_clinician_revised',
+                         'literature_adapted'
+                       )
+                     )::float AS floor_n
+                   FROM six_quotient_human_gold WHERE human_scored = true"""
+            )
+            if row and float(row["n"] or 0) > 0:
+                gold_floor_ratio = float(row["floor_n"] or 0) / float(row["n"])
+                gold_floor_ok = gold_floor_ratio >= 0.50
+            elif gold_n == 0:
+                gold_floor_ok = False
         except Exception:
-            gold_n = 0
+            # Column missing until migration 258
+            gold_floor_ok = False
+            gold_floor_ratio = None
+
+        # Pre-registered aggregate κ ≥ 0.60 (Claude Fable gap 4)
+        kappa_thr = 0.60
+        try:
+            thr_raw = await conn.fetchval(
+                """SELECT parameter_value->>'expected'
+                   FROM trust_baseline
+                   WHERE parameter_key = 'tier1_gold_kappa_threshold'"""
+            )
+            if thr_raw is not None:
+                kappa_thr = float(thr_raw)
+        except Exception:
+            pass
+        kappa_val = None
+        try:
+            kappa_val = await conn.fetchval(
+                """SELECT aggregate_kappa FROM six_quotient_judge_kappa_evidence
+                   WHERE gold_locked = true
+                   ORDER BY created_at DESC LIMIT 1"""
+            )
+            if kappa_val is not None:
+                kappa_val = float(kappa_val)
+        except Exception:
+            kappa_val = None
+
+        rater_rel_n = 0
+        try:
+            rater_rel_n = int(
+                await conn.fetchval(
+                    "SELECT COUNT(*) FROM six_quotient_gold_rater_reliability"
+                )
+                or 0
+            )
+        except Exception:
+            rater_rel_n = 0
 
         spot_n = 0
         try:
@@ -185,6 +243,11 @@ async def _main() -> int:
             f"cycle_pending={pending_pred} cycle_resolved={resolved_pred} "
             f"ability_theta={ability} crisis_sla_14d={crisis_ok} "
             f"human_gold={gold_n} judge_spot_checks={spot_n}"
+        )
+        print(
+            f"gold_provenance_floor={gold_floor_ratio} "
+            f"aggregate_kappa={kappa_val} kappa_thr={kappa_thr} "
+            f"rater_reliability_rows={rater_rel_n}"
         )
 
         tree_ok, tree_msg = _dirty_tree_fail()
@@ -240,15 +303,47 @@ async def _main() -> int:
             blockers.append("no non-smoke transfer series row yet")
         if gold_n < 50:
             blockers.append(f"human-blinded gold {gold_n}<50")
+        if gold_n >= 50 and not gold_floor_ok:
+            blockers.append(
+                f"gold provenance floor <50% among scored "
+                f"(ratio={gold_floor_ratio}; revise G-stems or apply mig 258)"
+            )
+        if gold_n >= 50 and kappa_val is None:
+            blockers.append(
+                f"no aggregate κ evidence vs locked gold "
+                f"(pre-registered thr≥{kappa_thr}; score then insert "
+                f"six_quotient_judge_kappa_evidence)"
+            )
+        elif kappa_val is not None and kappa_val < kappa_thr:
+            blockers.append(
+                f"aggregate κ {kappa_val:.3f}<{kappa_thr} "
+                f"(revise judge → re-freeze → re-run; never edit gold)"
+            )
+        if gold_n >= 50 and rater_rel_n < 1:
+            blockers.append(
+                "no rater reliability row "
+                "(intra ~15 items @≥14d or inter-rater subset)"
+            )
         if spot_n < 1:
             blockers.append("no cross-judge spot checks logged")
         if int(pending_pred or 0) + int(resolved_pred or 0) < 1:
             warns.append("no cycle_predictions yet")
+        warns.append(
+            "v1 certifies aggregate κ only; per-quotient κ directional until n≥20/quotient"
+        )
 
+        kappa_pass = kappa_val is not None and kappa_val >= kappa_thr
         if weekly:
-            if int(trend_n or 0) < 7 or gold_n < 50:
+            if (
+                int(trend_n or 0) < 7
+                or gold_n < 50
+                or not gold_floor_ok
+                or not kappa_pass
+                or rater_rel_n < 1
+            ):
                 print(
-                    "HARD FAIL: WEEKLY_LIVE=true before qualifying soak + human gold"
+                    "HARD FAIL: WEEKLY_LIVE=true before soak + scored gold "
+                    "+ provenance floor + κ≥thr + rater reliability"
                 )
                 hard_ok = False
             else:

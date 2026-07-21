@@ -53,3 +53,21 @@ def test_format_addendum_empty_without_signals():
         {"quotients": {"AQ": {"risk": "GREEN"}}},
     )
     assert text == ""
+
+
+def test_focus_is_smoke_rejects_lab_stamps():
+    assert _mod._focus_is_smoke(
+        {
+            "approved_by": "smoke_d11",
+            "source_run_id": "smoke-d11",
+            "focus_quotient": "AQ",
+        }
+    )
+    assert _mod._focus_is_smoke({})
+    assert not _mod._focus_is_smoke(
+        {
+            "approved_by": "DrNevedal1",
+            "source_run_id": "run-abc",
+            "focus_quotient": "AQ",
+        }
+    )

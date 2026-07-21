@@ -157,20 +157,29 @@ class SixQuotientBatteryAgent:
             logger.warning("weekly gen: %s", e)
 
     async def _weekly_live_allowed(self) -> bool:
-        """QUANTUM-CRYSTAL-ARCH — refuse WEEKLY_LIVE until qualifying soak nights."""
+        """QUANTUM-CRYSTAL-ARCH — refuse WEEKLY_LIVE until qualifying soak nights.
+
+        Matches clinical_tier1_competence_gate_check: distinct UTC calendar
+        nights, non-smoke, nightly, scenario_count >= 6.
+        """
         if not self.db_pool:
             return False
         try:
             async with self.db_pool.acquire() as conn:
                 try:
                     n = await conn.fetchval(
-                        """SELECT COUNT(*) FROM six_quotient_theta_trend
+                        """SELECT COUNT(DISTINCT (created_at AT TIME ZONE 'UTC')::date)
+                           FROM six_quotient_theta_trend
                            WHERE COALESCE(is_smoke,false)=false
-                             AND run_kind='nightly'"""
+                             AND run_kind='nightly'
+                             AND COALESCE(scenario_count, 0) >= 6"""
                     )
                 except Exception:
                     n = await conn.fetchval(
-                        "SELECT COUNT(*) FROM six_quotient_theta_trend WHERE run_kind='nightly'"
+                        """SELECT COUNT(DISTINCT (created_at AT TIME ZONE 'UTC')::date)
+                           FROM six_quotient_theta_trend
+                           WHERE COALESCE(is_smoke,false)=false
+                             AND run_kind='nightly'"""
                     )
             return int(n or 0) >= 7
         except Exception as e:

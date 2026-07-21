@@ -546,11 +546,27 @@ class SixQuotientGrowthEngine:
     ) -> Dict:
         """
         Crystallize lessons from a scored battery run.
-        Confidence starts at 0.58 (above global recall floor 0.55).
-        QUANTUM-CRYSTAL-ARCH — was 0.45/cap 0.50 (dead to live recall).
+        QUANTUM-CRYSTAL-ARCH — D.14b: when quarantine is on, never forge live
+        global crystals (REST analyze / auto_judge must not contaminate recall).
         """
         if not self.db_pool or not analysis or not analysis.get("ok"):
             return {"forged": 0}
+        try:
+            from app.services.six_quotient_battery_quarantine import quarantine_enabled
+            if quarantine_enabled():
+                logger.info(
+                    "Battery crystal forge skipped (quarantine on) run=%s",
+                    run_id,
+                )
+                return {
+                    "forged": 0,
+                    "skipped": True,
+                    "quarantined": True,
+                    "run_id": str(run_id),
+                }
+        except Exception:
+            # Fail closed: do not forge if quarantine module unavailable
+            return {"forged": 0, "skipped": True, "quarantined": True, "run_id": str(run_id)}
         quotients = analysis.get("quotients") or {}
         forged = 0
         for q, data in quotients.items():

@@ -49,13 +49,43 @@ async def _main() -> int:
         existing = int(
             await conn.fetchval("SELECT COUNT(*) FROM six_quotient_human_gold") or 0
         )
+        stems = _load_stems()
+        # Always sync provenance metadata onto unscored rows (mig 258)
+        synced = 0
+        for s in stems:
+            sid = str(s.get("scenario_id") or "").strip()
+            if not sid:
+                continue
+            try:
+                status = await conn.execute(
+                    """UPDATE six_quotient_human_gold
+                       SET provenance = $2,
+                           response_class = $3,
+                           difficulty = $4,
+                           author_note = COALESCE($5, author_note),
+                           notes = COALESCE($6, notes)
+                       WHERE scenario_id = $1 AND human_scored = false""",
+                    sid,
+                    str(s.get("provenance") or "unknown_requires_label")[:80],
+                    str(s.get("response_class") or "therapeutic_engage")[:40],
+                    str(s.get("difficulty") or "medium")[:20],
+                    str(s.get("author") or "")[:300] or None,
+                    str(s.get("title") or "")[:200] or None,
+                )
+                if status and status.endswith("1"):
+                    synced += 1
+            except Exception:
+                break  # columns missing until migration 258
+
         need = max(0, target - existing)
         if need == 0:
-            print(f"OK: already have {existing} gold rows (target {target})")
+            print(
+                f"OK: already have {existing} gold rows (target {target}); "
+                f"provenance_synced≈{synced}"
+            )
             return 0
 
         inserted = 0
-        stems = _load_stems()
         for s in stems:
             total_now = int(
                 await conn.fetchval("SELECT COUNT(*) FROM six_quotient_human_gold") or 0
@@ -65,16 +95,40 @@ async def _main() -> int:
             sid = str(s.get("scenario_id") or "").strip()
             if not sid:
                 continue
-            status = await conn.execute(
-                """INSERT INTO six_quotient_human_gold
-                   (scenario_id, section, client_says, human_scored, blinded, notes)
-                   VALUES ($1, $2, $3, false, true, $4)
-                   ON CONFLICT (scenario_id) DO NOTHING""",
-                sid,
-                str(s.get("section") or "AQ")[:8],
-                str(s.get("client_says") or "")[:2000],
-                str(s.get("title") or "")[:200] or None,
-            )
+            # Prefer columns from migration 253; fall back if not applied yet
+            try:
+                status = await conn.execute(
+                    """INSERT INTO six_quotient_human_gold
+                       (scenario_id, section, client_says, human_scored, blinded, notes,
+                        provenance, response_class, difficulty, author_note)
+                       VALUES ($1, $2, $3, false, true, $4, $5, $6, $7, $8)
+                       ON CONFLICT (scenario_id) DO UPDATE SET
+                         provenance = EXCLUDED.provenance,
+                         response_class = EXCLUDED.response_class,
+                         difficulty = EXCLUDED.difficulty,
+                         author_note = COALESCE(EXCLUDED.author_note, six_quotient_human_gold.author_note),
+                         notes = COALESCE(EXCLUDED.notes, six_quotient_human_gold.notes)
+                       WHERE six_quotient_human_gold.human_scored = false""",
+                    sid,
+                    str(s.get("section") or "AQ")[:8],
+                    str(s.get("client_says") or "")[:2000],
+                    str(s.get("title") or "")[:200] or None,
+                    str(s.get("provenance") or "unknown_requires_label")[:80],
+                    str(s.get("response_class") or "therapeutic_engage")[:40],
+                    str(s.get("difficulty") or "medium")[:20],
+                    str(s.get("author") or "")[:300] or None,
+                )
+            except Exception:
+                status = await conn.execute(
+                    """INSERT INTO six_quotient_human_gold
+                       (scenario_id, section, client_says, human_scored, blinded, notes)
+                       VALUES ($1, $2, $3, false, true, $4)
+                       ON CONFLICT (scenario_id) DO NOTHING""",
+                    sid,
+                    str(s.get("section") or "AQ")[:8],
+                    str(s.get("client_says") or "")[:2000],
+                    str(s.get("title") or "")[:200] or None,
+                )
             # asyncpg: "INSERT 0 1" when inserted
             if status and status.endswith("1"):
                 inserted += 1

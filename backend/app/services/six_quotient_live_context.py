@@ -42,6 +42,21 @@ def _env_name() -> str:
     )
 
 
+def _focus_is_smoke(focus: Dict[str, Any]) -> bool:
+    """QUANTUM-CRYSTAL-ARCH — reject smoke/lab stamps from live therapy cues."""
+    if not focus:
+        return True
+    approved = str(focus.get("approved_by") or "").strip().lower()
+    run_id = str(focus.get("source_run_id") or "").strip().lower()
+    if not approved:
+        return True
+    if "smoke" in approved or approved in ("lab", "test", "dry_run"):
+        return True
+    if run_id.startswith("smoke") or "smoke" in run_id:
+        return True
+    return False
+
+
 async def get_live_addendum(
     db_pool,
     *,
@@ -56,6 +71,8 @@ async def get_live_addendum(
 
         ability = await get_ability(db_pool, env)
         focus = await _load_live_focus(db_pool, env)
+        if _focus_is_smoke(focus):
+            focus = {}
         gap = await _latest_gap(db_pool, env)
         return _format_addendum(ability, focus, gap)
     except Exception as e:
@@ -96,20 +113,33 @@ async def apply_self_dev_focus(
             env,
             json.dumps(focus),
         )
-        bumped = await conn.execute(
-            """UPDATE nate_intelligence_crystals
-               SET confidence = GREATEST(confidence, 0.58),
-                   updated_at = NOW()
-               WHERE origin_surface = 'six_quotient_battery'
-                 AND metadata->>'quotient' = $1
-                 AND superseded_by IS NULL""",
-            section,
-        )
+        # QUANTUM-CRYSTAL-ARCH — D.14b: never bump battery crystals under quarantine;
+        # never touch archived rows (would keep contamination warm).
+        bumped = "UPDATE 0"
+        bump_skipped = True
+        try:
+            from app.services.six_quotient_battery_quarantine import quarantine_enabled
+            _q_on = quarantine_enabled()
+        except Exception:
+            _q_on = True
+        if not _q_on:
+            bumped = await conn.execute(
+                """UPDATE nate_intelligence_crystals
+                   SET confidence = GREATEST(confidence, 0.58),
+                       updated_at = NOW()
+                   WHERE origin_surface = 'six_quotient_battery'
+                     AND metadata->>'quotient' = $1
+                     AND superseded_by IS NULL
+                     AND COALESCE(scope, '') != 'archived'""",
+                section,
+            )
+            bump_skipped = False
     return {
         "ok": True,
         "environment": env,
         "focus": focus,
         "crystals_bumped": bumped,
+        "crystal_bump_skipped": bump_skipped,
     }
 
 
