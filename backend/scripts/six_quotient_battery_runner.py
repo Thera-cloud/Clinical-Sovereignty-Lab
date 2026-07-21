@@ -104,7 +104,9 @@ async def _one_scenario_ws(
             ws = await websockets.connect(ws_url, additional_headers=origin, **kwargs)
         except TypeError:
             ws = await websockets.connect(ws_url, extra_headers=origin, **kwargs)
-        async with ws:
+        # websockets 12+: connect() returns a protocol that is not always an
+        # async context manager — use try/finally close instead of `async with`.
+        try:
             hello = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
             if hello.get("type") != "connected":
                 err = f"bad_handshake:{hello.get('type')}"
@@ -144,6 +146,11 @@ async def _one_scenario_ws(
                             if got:
                                 break
                     response = (full or "").strip()
+        finally:
+            try:
+                await ws.close()
+            except Exception:
+                pass
     except Exception as e:
         err = str(e)
 

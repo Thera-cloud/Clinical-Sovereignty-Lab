@@ -270,12 +270,12 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 
 | Step | Action | Done |
 |------|--------|------|
-| 6.1 | Migration `245_six_quotient_battery.sql` applied | [ ] |
-| 6.2 | Staging bridge up (`staging_bridge` host :8767 → container :8765; nginx owns :8766) via `staging_bake_setup.sh` | [ ] |
-| 6.3 | Dry-run: `POST /api/admin/six-quotient/trigger` `{dry_run:true}` | [ ] |
-| 6.4 | External scores: `POST /api/admin/six-quotient/scores` (evaluator_id required) | [ ] |
-| 6.5 | Gap → Dual-COO CEO inbox + growth crystal feed verified | [ ] |
-| 6.6 | Live WS battery (`SIX_QUOTIENT_BATTERY_LIVE_WS`) only after staging bridge smoke | [ ] |
+| 6.1 | Migration `245_six_quotient_battery.sql` applied | [x] *(prod+staging tables present; trust_baseline `six_quotient_battery_check_count`)* |
+| 6.2 | Staging bridge up (`staging_bridge` host :8767 → container :8765; nginx owns :8766) via `staging_bake_setup.sh` | [x] *(2026-07-21 — :8011/:8767 healthy; UserStore 58 users)* |
+| 6.3 | Dry-run: `POST /api/admin/six-quotient/trigger` `{dry_run:true}` | [x] *(run `daffd21c…` awaiting_scores → scored)* |
+| 6.4 | External scores: `POST /api/admin/six-quotient/scores` (evaluator_id required) | [x] *(human-reviewer-nathan; AI ids require calibrate)* |
+| 6.5 | Gap → Dual-COO CEO inbox + growth crystal feed verified | [x] *(CEO inbox RED/YELLOW six_quotient_* items; analyze ingest path)* |
+| 6.6 | Live WS battery (`SIX_QUOTIENT_BATTERY_LIVE_WS`) only after staging bridge smoke | [x] *(2026-07-21 — `live_ws` run `2ae070a5…` awaiting_scores; resp_len 679; runner websockets fix + staging TEST_PASSWORD)* |
 | 6.7 | Production flag flip | [ ] |
 
 *Scores are external-only. Runner/pregrader never assign quotient points.*

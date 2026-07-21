@@ -51,6 +51,10 @@ services:
       - SIX_QUOTIENT_BATTERY_ENV=staging
       - SIX_QUOTIENT_BATTERY_LIVE_WS=${STAGING_SIX_QUOTIENT_BATTERY_LIVE_WS:-false}
       - SIX_QUOTIENT_BRIDGE_WS_URL=${STAGING_SIX_QUOTIENT_BRIDGE_WS_URL:-ws://staging_bridge:8765/ws}
+      # Live WS battery login (matches LoginAuditor TEST_ACCOUNTS)
+      - TEST_USERNAME=${TEST_USERNAME:-audit_client}
+      - TEST_PASSWORD=${TEST_PASSWORD:-AuditClient2026!}
+      - AUDIT_CLIENT_PASSWORD=${AUDIT_CLIENT_PASSWORD:-AuditClient2026!}
     ports:
       - "127.0.0.1:8011:8000"
     depends_on:
