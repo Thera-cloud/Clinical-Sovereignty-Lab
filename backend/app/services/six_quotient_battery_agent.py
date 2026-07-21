@@ -321,7 +321,8 @@ class SixQuotientBatteryAgent:
                 trend_theta = float(ability.get("theta") or theta)
                 tbs = ability.get("theta_by_section") or tbs
 
-        if run_id and judge_out.get("ok"):
+        # QUANTUM-CRYSTAL-ARCH — persist θ trend even when judge fails (ability snapshot)
+        if run_id:
             try:
                 await insert_theta_trend(
                     self.db_pool,

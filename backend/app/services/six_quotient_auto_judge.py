@@ -68,41 +68,69 @@ async def _llm_judge(
         f"client_says: {client_says}\n"
         f"nate_response: {response}\n"
     )
+    # Prefer lightweight router for scoring (avoid full helix/crystal path).
     router = None
+    use_lite = False
     if app_state:
-        router = getattr(app_state, "littlenate_inference", None) or getattr(
-            app_state, "nate_inference_router", None
-        )
+        router = getattr(app_state, "nate_inference_router", None)
+        use_lite = bool(router and hasattr(router, "generate"))
+        if not use_lite:
+            router = getattr(app_state, "littlenate_inference", None)
     if not router or not hasattr(router, "generate"):
+        logger.warning("auto_judge LLM: no inference router")
         return None
     try:
-        resp = await asyncio.wait_for(
-            router.generate(
-                prompt=user,
-                system=system,
-                domain="clinical",
-                max_tokens=300,
-                temperature=0.2,
-            ),
-            timeout=_LLM_TIMEOUT_S,
-        )
+        if use_lite:
+            resp = await asyncio.wait_for(
+                router.generate(
+                    prompt=user,
+                    system=system,
+                    domain="clinical",
+                    tier="analytical",
+                    max_tokens=300,
+                    temperature=0.2,
+                ),
+                timeout=_LLM_TIMEOUT_S,
+            )
+        else:
+            resp = await asyncio.wait_for(
+                router.generate(
+                    prompt=user,
+                    system=system,
+                    domain="clinical",
+                    max_tokens=300,
+                    temperature=0.2,
+                    include_crystals=False,
+                    include_helix=False,
+                    include_quantum=False,
+                    is_realtime=False,
+                ),
+                timeout=_LLM_TIMEOUT_S,
+            )
     except Exception as e:
-        logger.warning("auto_judge LLM: %s", e)
+        logger.warning("auto_judge LLM: %s: %s", type(e).__name__, e or repr(e))
         return None
     text = ""
     if isinstance(resp, dict):
         text = str(resp.get("text") or resp.get("content") or resp.get("response") or "")
     else:
-        text = str(getattr(resp, "text", None) or resp or "")
+        text = str(getattr(resp, "text", None) or getattr(resp, "content", None) or resp or "")
     parsed = _extract_json(text)
     if not parsed:
+        logger.warning("auto_judge parse fail: %s", (text or "")[:180])
         return None
     p = _clamp_score(parsed.get("primary"))
     a = _clamp_score(parsed.get("accuracy"))
     n = _clamp_score(parsed.get("naturalness"))
     if p is None or a is None or n is None:
+        logger.warning("auto_judge score clamp fail: %s", parsed)
         return None
-    return {"primary": p, "accuracy": a, "naturalness": n, "notes": str(parsed.get("notes") or "")[:500]}
+    return {
+        "primary": p,
+        "accuracy": a,
+        "naturalness": n,
+        "notes": str(parsed.get("notes") or "")[:500],
+    }
 
 
 async def auto_score_run(

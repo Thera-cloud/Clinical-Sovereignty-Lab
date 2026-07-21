@@ -20,6 +20,26 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def _as_utc_dt(value: Any) -> Optional[datetime]:
+    """Coerce isoformat strings / datetimes for asyncpg timestamptz params."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+    if isinstance(value, str):
+        try:
+            s = value.strip().replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except Exception:
+            return None
+    return None
+
+
 # =============================================================================
 # DOMAIN CONFIGURATION
 # =============================================================================
@@ -723,15 +743,19 @@ class CycleDetectionEngine:
                 try:
                     async with self.db_pool.acquire() as conn:
                         for p in preds[:5]:
+                            # QUANTUM-CRYSTAL-ARCH — asyncpg needs datetime, not isoformat str
+                            pat = _as_utc_dt(p.get("predicted_at"))
+                            w0 = _as_utc_dt(p.get("intervention_window_start"))
+                            w1 = _as_utc_dt(p.get("intervention_window_end"))
+                            if pat is None:
+                                continue
                             await conn.execute("""
                                 INSERT INTO cycle_predictions
                                 (user_id, domain, predicted_event, predicted_at, confidence,
                                  intervention_window_start, intervention_window_end)
-                                VALUES ($1, $2, $3, $4::timestamptz, $5, $6::timestamptz, $7::timestamptz)
+                                VALUES ($1, $2, $3, $4, $5, $6, $7)
                             """, user_id, dom_id, p["predicted_event"],
-                                p["predicted_at"], p["confidence"],
-                                p.get("intervention_window_start"),
-                                p.get("intervention_window_end"))
+                                pat, p["confidence"], w0, w1)
                 except Exception as e:
                     logger.warning("CycleDetection: store prediction error: %s", e)
 
