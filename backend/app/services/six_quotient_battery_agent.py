@@ -51,6 +51,15 @@ def _living_on() -> bool:
     )
 
 
+def _battery_env() -> str:
+    # QUANTUM-CRYSTAL-ARCH — default production (was hardcoded staging)
+    return (
+        os.getenv("SIX_QUOTIENT_BATTERY_ENV")
+        or os.getenv("ENVIRONMENT")
+        or "production"
+    )
+
+
 def _git_hash() -> str:
     try:
         root = Path(__file__).resolve().parents[3]
@@ -130,7 +139,7 @@ class SixQuotientBatteryAgent:
                 sections=["AQ", "SQ", "CQ", "MQ"],
                 n_per_section=1,
                 boundary=True,
-                environment=os.getenv("SIX_QUOTIENT_BATTERY_ENV", "staging"),
+                environment=_battery_env(),
             )
             self._last_gen_date = day_key
             logger.info("Weekly scenario gen: %s", result)
@@ -144,13 +153,18 @@ class SixQuotientBatteryAgent:
         day_key = now.strftime("%Y-%m-%d")
         if self._last_run_date == day_key:
             return
-        live = os.getenv("SIX_QUOTIENT_BATTERY_LIVE_WS", "false").strip().lower() in (
+        # QUANTUM-CRYSTAL-ARCH — LIVE_WS alone is for smoke; weekly live needs WEEKLY_LIVE
+        live_ws = os.getenv("SIX_QUOTIENT_BATTERY_LIVE_WS", "false").strip().lower() in (
             "1", "true", "yes", "on",
         )
+        weekly_live = os.getenv("SIX_QUOTIENT_WEEKLY_LIVE", "false").strip().lower() in (
+            "1", "true", "yes", "on",
+        )
+        live = live_ws and weekly_live
         result = await self.run_once(
             dry_run=not live,
             limit=0,
-            environment=os.getenv("SIX_QUOTIENT_BATTERY_ENV", "staging"),
+            environment=_battery_env(),
             persist=True,
         )
         self._last_run_date = day_key
@@ -162,12 +176,13 @@ class SixQuotientBatteryAgent:
         *,
         dry_run: bool = True,
         limit: int = 0,
-        environment: str = "staging",
+        environment: Optional[str] = None,
         persist: bool = True,
         multi_turn: Optional[bool] = None,
     ) -> Dict[str, Any]:
         from app.services.six_quotient_pregrader import pregrade_battery
 
+        environment = environment or _battery_env()
         selection = await self._select_scenarios(environment=environment, limit=limit)
         scenarios = selection.get("scenarios") or []
         if not scenarios:

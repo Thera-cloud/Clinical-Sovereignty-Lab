@@ -541,6 +541,17 @@ async def _apply_ceo_payload(
             )
         except Exception as e:
             out["patents_error"] = str(e)[:200]
+
+    # QUANTUM-CRYSTAL-ARCH — self-dev APPROVE persists live focus + recallable crystals
+    if payload.get("kind") == "six_quotient_self_dev":
+        try:
+            from app.services.six_quotient_live_context import apply_self_dev_focus
+
+            out["six_quotient_self_dev"] = await apply_self_dev_focus(
+                db_pool, payload, approved_by=approved_by
+            )
+        except Exception as e:
+            out["six_quotient_self_dev_error"] = str(e)[:200]
     return out
 
 

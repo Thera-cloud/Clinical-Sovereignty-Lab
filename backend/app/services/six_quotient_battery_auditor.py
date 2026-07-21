@@ -1,7 +1,7 @@
 """
-Six-Quotient Living Battery Auditor — 12 checks (health/bank/standards/judge + DB).
+Six-Quotient Living Battery Auditor — 15 checks (health/bank/judge/actions + DB).
 
-Baseline key: six_quotient_battery_check_count (expected: 12)
+Baseline key: six_quotient_battery_check_count (expected: 15)
 Activity: six_quotient_battery_audit_sent
 Stagger: 298s (under Trust Enforcer minute-10 ceiling)
 """
@@ -55,8 +55,17 @@ TAB_ENDPOINTS = [
         ],
     },
     {
-        "tab": "Data Integrity",
+        "tab": "Actions",
         "tab_num": 4,
+        "endpoints": [
+            ("POST", "/api/admin/six-quotient/generate"),
+            ("POST", "/api/admin/six-quotient/self-dev/trigger"),
+            ("POST", "/api/admin/six-quotient/standards/reject"),
+        ],
+    },
+    {
+        "tab": "Data Integrity",
+        "tab_num": 5,
         "endpoints": [
             ("DB", "scenario_bank_table"),
         ],

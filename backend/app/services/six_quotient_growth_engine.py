@@ -546,7 +546,8 @@ class SixQuotientGrowthEngine:
     ) -> Dict:
         """
         Crystallize lessons from a scored battery run.
-        Confidence capped at 0.50; tagged source=six_quotient_battery.
+        Confidence starts at 0.58 (above global recall floor 0.55).
+        QUANTUM-CRYSTAL-ARCH — was 0.45/cap 0.50 (dead to live recall).
         """
         if not self.db_pool or not analysis or not analysis.get("ok"):
             return {"forged": 0}
@@ -583,11 +584,14 @@ class SixQuotientGrowthEngine:
                            (crystal_text, domain, scope, topics, source_count,
                             generation, confidence, content_hash, origin_surface,
                             metadata)
-                         VALUES ($1, 'clinical', 'global', $2, 2, 0, 0.45, $3,
+                         VALUES ($1, 'clinical', 'global', $2, 2, 0, 0.58, $3,
                                  'six_quotient_battery', $4::jsonb)
                          ON CONFLICT (content_hash) DO UPDATE
                            SET confidence = LEAST(
-                                 nate_intelligence_crystals.confidence + 0.02, 0.50),
+                                 GREATEST(
+                                   nate_intelligence_crystals.confidence + 0.02,
+                                   0.58),
+                                 0.70),
                                updated_at = NOW()""",
                         crystal_text,
                         [q],

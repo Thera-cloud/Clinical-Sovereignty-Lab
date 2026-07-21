@@ -7,9 +7,9 @@
 
 ---
 
-## Executive verdict (updated 2026-07-21 — Track D + self-dev)
+## Executive verdict (updated 2026-07-21 — D.11 live-context close)
 
-Phase **6** + Track D flags live on GREEN (battery, living, standards, gen, `LIVE_WS=true`). Self-dev agent: `ENABLE_SIX_QUOTIENT_SELF_DEV` (default false) → `SixQuotientSelfDevelopmentAgent` + `POST /api/admin/six-quotient/self-dev/trigger` → CEO YELLOW `six_quotient_self_dev`. Neuro-symbolic Phase 5a–5d remains ON.
+Phase **6** + Track D on GREEN. **`SIX_QUOTIENT_BATTERY_LIVE_WS=true` does not alone fire Sunday live** — needs `SIX_QUOTIENT_WEEKLY_LIVE=true` too (default false). Ability/battery env: `SIX_QUOTIENT_BATTERY_ENV=production`. CEO APPROVE on `six_quotient_self_dev` → `live_focus` + crystal bump ≥0.58. Live therapy cues: `ENABLE_SIX_QUOTIENT_LIVE_CONTEXT` → `therapeutic_controller` addendum. Battery crystals forge at **0.58** (global recall floor). Standards ingest RSS **and** `type:page` (C-SSRS). Auditor expected **15**.
 
 ## Executive verdict (updated 2026-07-21 — Phase 6.7 prod ON)
 
@@ -39,9 +39,10 @@ Phases **0–5** code paths are **implemented behind feature flags** (see rollou
 | 3 | `239_nate_therapeutic_plans.sql`, plan service + coach REST, chat context injection | `ENABLE_THERAPEUTIC_PLANS` |
 | 4 | `nate_self_monitor_agent.py`, `docs/AGENTIC_PHASE4_DISCOVERY.md` | `ENABLE_SELF_MONITOR_*` |
 | 5a–5d | Symbolic extractor/verifier, forward reasoning, graph isolation, phi auditor extension | `ENABLE_SYMBOLIC_*`, `ENABLE_FORWARD_REASONING`, `ENABLE_CRYSTAL_GRAPH` |
-| 6 | Six-quotient battery agent/API/runner, growth engine, auditor | `ENABLE_SIX_QUOTIENT_BATTERY`, `SIX_QUOTIENT_BATTERY_LIVE_WS` |
+| 6 | Six-quotient battery agent/API/runner, growth engine, auditor | `ENABLE_SIX_QUOTIENT_BATTERY`, `SIX_QUOTIENT_BATTERY_LIVE_WS`, `SIX_QUOTIENT_WEEKLY_LIVE`, `SIX_QUOTIENT_BATTERY_ENV` |
 | D | Living battery v5 (bank/standards/gen) | `ENABLE_SIX_QUOTIENT_LIVING_*`, `*_STANDARDS_INDEX`, `*_SCENARIO_GEN` |
 | D.9 | Bi-weekly self-dev → CEO YELLOW inbox | `ENABLE_SIX_QUOTIENT_SELF_DEV` |
+| D.11 | Live therapy cues + CEO apply focus | `ENABLE_SIX_QUOTIENT_LIVE_CONTEXT` |
 
 **Prior snapshot (pre-build) below retained for audit trail.**
 

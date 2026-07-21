@@ -264,17 +264,27 @@ async def update_irt(
 
 async def get_ability(db_pool, environment: str = "staging") -> Dict[str, Any]:
     async with db_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """SELECT environment, theta, theta_by_section, last_run_id::text, updated_at
-               FROM six_quotient_ability_state WHERE environment = $1""",
-            environment,
-        )
+        try:
+            row = await conn.fetchrow(
+                """SELECT environment, theta, theta_by_section, last_run_id::text, updated_at,
+                          COALESCE(live_focus, '{}'::jsonb) AS live_focus
+                   FROM six_quotient_ability_state WHERE environment = $1""",
+                environment,
+            )
+        except Exception:
+            # Pre-migration 247: live_focus column absent
+            row = await conn.fetchrow(
+                """SELECT environment, theta, theta_by_section, last_run_id::text, updated_at
+                   FROM six_quotient_ability_state WHERE environment = $1""",
+                environment,
+            )
     if not row:
         return {
             "environment": environment,
             "theta": 0.0,
             "theta_by_section": {q: 0.0 for q in _QUOTIENTS},
             "last_run_id": None,
+            "live_focus": {},
         }
     d = dict(row)
     tbs = d.get("theta_by_section") or {}
@@ -284,6 +294,13 @@ async def get_ability(db_pool, environment: str = "staging") -> Dict[str, Any]:
         except Exception:
             tbs = {}
     d["theta_by_section"] = tbs
+    focus = d.get("live_focus") or {}
+    if isinstance(focus, str):
+        try:
+            focus = json.loads(focus)
+        except Exception:
+            focus = {}
+    d["live_focus"] = focus if isinstance(focus, dict) else {}
     if d.get("updated_at"):
         d["updated_at"] = d["updated_at"].isoformat()
     return d

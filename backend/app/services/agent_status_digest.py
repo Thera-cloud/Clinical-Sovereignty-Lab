@@ -190,6 +190,8 @@ class AgentStatusDigest:
             ("Dual-COO Loop Closer", "dual_coo_loop_closer"),  # QUANTUM-CRYSTAL-ARCH
             ("Six-Quotient Battery", "six_quotient_battery_agent"),  # QUANTUM-CRYSTAL-ARCH
             ("Six-Quotient Battery Auditor", "six_quotient_battery_auditor"),  # QUANTUM-CRYSTAL-ARCH
+            ("Six-Quotient Standards Index", "six_quotient_standards_index"),  # QUANTUM-CRYSTAL-ARCH
+            ("Six-Quotient Growth Engine", "six_quotient_growth_engine"),  # QUANTUM-CRYSTAL-ARCH
             ("Six-Quotient Self-Dev", "six_quotient_self_dev_agent"),  # QUANTUM-CRYSTAL-ARCH
         ]:
             agent = getattr(self.app, attr, None)

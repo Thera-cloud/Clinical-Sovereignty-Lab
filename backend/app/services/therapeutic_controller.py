@@ -960,6 +960,17 @@ async def prepare_therapeutic_context(
     except Exception as _fr_exc:
         logger.warning("therapeutic_controller: forward reasoning skipped: %s", _fr_exc)
 
+    # QUANTUM-CRYSTAL-ARCH — battery/CEO self-dev cues into live therapy (flag-gated)
+    six_q_live_block = ""
+    try:
+        from app.services.six_quotient_live_context import get_live_addendum
+
+        _sq_add = await get_live_addendum(db_pool)
+        if _sq_add:
+            six_q_live_block = "\n" + _sq_add + "\n"
+    except Exception as _sq_exc:
+        logger.warning("therapeutic_controller: six-quotient live context skipped: %s", _sq_exc)
+
     enriched = (
         f"## DNA — NEUROSCIENCE BEDROCK\n{_DNA_PREFIX}\n\n"
         f"## CURRENT THERAPEUTIC STATE\n"
@@ -971,6 +982,7 @@ async def prepare_therapeutic_context(
         f"{lens_bridge_block}\n"
         f"{mismatch_block}\n"
         f"{forward_reasoning_block}\n"
+        f"{six_q_live_block}"
         f"{book_context_block}\n"
         f"{neuroscience_ctx}\n"
         f"{_anti_repeat_block(recent_narratives)}\n\n"

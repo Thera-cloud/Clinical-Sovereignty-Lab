@@ -98,9 +98,31 @@ class SixQuotientStandardsIndex:
         ) as session:
             for quotient, block in (reg.get("quotients") or {}).items():
                 for src in block.get("sources") or []:
-                    if src.get("type") != "rss":
-                        continue
+                    stype = (src.get("type") or "rss").lower()
                     try:
+                        if stype == "page":
+                            # QUANTUM-CRYSTAL-ARCH — static authority pages (e.g. C-SSRS)
+                            scanned += 1
+                            title = (
+                                src.get("title")
+                                or src.get("name")
+                                or src.get("key")
+                                or "Standards page"
+                            )
+                            ok = await self._store_candidate(
+                                quotient=quotient.upper(),
+                                source_key=src.get("key") or "",
+                                source_name=src.get("name") or "",
+                                title=str(title)[:500],
+                                url=src.get("url") or "",
+                                authority_tier=int(src.get("authority_tier") or 1),
+                                topics=src.get("topics") or [],
+                            )
+                            if ok:
+                                inserted += 1
+                            continue
+                        if stype != "rss":
+                            continue
                         articles = await self._fetch_rss(session, src["url"])
                         scanned += len(articles)
                         for art in articles[:max_per_source]:

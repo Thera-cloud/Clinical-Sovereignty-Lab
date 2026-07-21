@@ -301,6 +301,7 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 | D.8 | Prod living/standards/gen flags remain **false** until soak | [x] *(superseded 2026-07-21 — living/standards/gen/LIVE_WS true after soak)* |
 | D.9 | Self-dev agent: bi-weekly YELLOW proposals (`ENABLE_SIX_QUOTIENT_SELF_DEV`) | [x] *(2026-07-21 — `e065c029` on GREEN; 133/133; trigger → AQ YELLOW CEO `1784634272-six_-2cde91e5`)* |
 | D.10 | Stale `awaiting_scores` runs → `failed` (status CHK) | [x] *(2026-07-21 — `cca31e87…`)* |
+| D.11 | Gap close: battery→live therapy, CEO self-dev apply, BATTERY_ENV=production, WEEKLY_LIVE gate, page standards, crystal conf≥0.58, auditor 15 | [ ] *(migration `247_six_quotient_live_focus.sql`; `ENABLE_SIX_QUOTIENT_LIVE_CONTEXT`)* |
 
 ---
 

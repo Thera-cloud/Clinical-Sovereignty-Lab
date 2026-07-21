@@ -242,10 +242,15 @@ async def _one_draft(
         parsed = _template_draft(section, target_b)
         provider = "template"
 
+    _title = (parsed.get("title") or f"{section} generated case")[:200]
+    # QUANTUM-CRYSTAL-ARCH — uniquify template titles (identical titles blocked bank UX)
+    if provider == "template":
+        _title = f"{_title} [{uuid.uuid4().hex[:6]}]"[:200]
+
     return {
         "scenario_key": f"v5-{section}-{uuid.uuid4().hex[:8]}",
         "section": section,
-        "title": (parsed.get("title") or f"{section} generated case")[:200],
+        "title": _title,
         "rubric_focus": parsed.get("rubric_focus") or "",
         "client_says": parsed.get("client_says") or "",
         "client_beats": parsed.get("client_beats") or [],
