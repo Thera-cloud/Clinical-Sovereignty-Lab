@@ -56,11 +56,17 @@ def main() -> int:
         return 1
     print(f"[*] requester {REQUESTER} -> {uid}")
 
+    # Prefer crystals that appear in crystal_edges (16-char prefix join) so BFS hops fire
     seeds_raw = _psql(
-        "SELECT content_hash FROM nate_intelligence_crystals "
-        "WHERE scope IS DISTINCT FROM 'archived' "
-        "AND content_hash IS NOT NULL AND content_hash != '' "
-        f"ORDER BY created_at DESC NULLS LAST LIMIT {MAX_SEEDS};"
+        "SELECT c.content_hash FROM nate_intelligence_crystals c "
+        "WHERE c.scope IS DISTINCT FROM 'archived' "
+        "AND c.content_hash IS NOT NULL AND c.content_hash != '' "
+        "AND EXISTS ("
+        "  SELECT 1 FROM crystal_edges e "
+        "  WHERE e.crystal_a_hash = left(c.content_hash, 16) "
+        "     OR e.crystal_b_hash = left(c.content_hash, 16)"
+        ") "
+        f"ORDER BY c.created_at DESC NULLS LAST LIMIT {MAX_SEEDS};"
     )
     seeds = [s.strip() for s in seeds_raw.splitlines() if s.strip()]
     print(f"[*] seeds={len(seeds)}")

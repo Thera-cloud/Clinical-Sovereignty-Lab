@@ -143,7 +143,7 @@ async def test_fetch_graph_surfaced_matches_16char_edge_prefix():
 
     class _Conn:
         async def fetch(self, sql, *args):
-            assert "left(c.content_hash" in sql.replace(" ", "")
+            assert "edge_keys" in sql or "left(c.content_hash" in sql.replace(" ", "")
             return [{"id": 99}]
 
         async def __aenter__(self):

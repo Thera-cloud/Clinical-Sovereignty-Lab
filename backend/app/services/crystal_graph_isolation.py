@@ -153,19 +153,19 @@ async def fetch_graph_surfaced_crystal_ids(db_pool: Any, limit: int = 200) -> Li
         return []
     try:
         async with db_pool.acquire() as conn:
+            # QUANTUM-CRYSTAL-ARCH: edge hashes are 16-char prefixes of content_hash
             rows = await conn.fetch(
                 """
-                SELECT DISTINCT c.id
-                FROM nate_intelligence_crystals c
-                WHERE EXISTS (
-                    SELECT 1 FROM crystal_edges e
-                    WHERE e.crystal_a_hash = left(c.content_hash::text, 16)
-                       OR e.crystal_b_hash = left(c.content_hash::text, 16)
-                       OR e.crystal_a_hash = c.content_hash::text
-                       OR e.crystal_b_hash = c.content_hash::text
+                WITH edge_keys AS (
+                    SELECT DISTINCT crystal_a_hash AS h FROM crystal_edges
+                    UNION
+                    SELECT DISTINCT crystal_b_hash AS h FROM crystal_edges
                 )
-                AND c.scope IS DISTINCT FROM 'archived'
-                AND c.content_hash IS NOT NULL AND c.content_hash != ''
+                SELECT c.id
+                FROM nate_intelligence_crystals c
+                JOIN edge_keys ek ON ek.h = left(c.content_hash::text, 16)
+                WHERE c.scope IS DISTINCT FROM 'archived'
+                  AND c.content_hash IS NOT NULL AND c.content_hash != ''
                 ORDER BY c.id
                 LIMIT $1
                 """,
