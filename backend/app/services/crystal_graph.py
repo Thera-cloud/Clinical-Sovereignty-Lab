@@ -373,6 +373,12 @@ class CrystalGraph:
         """Given a query, find the most relevant crystal and return
         its neighbourhood (1- or 2-hop), ordered by combined relevance.
         """
+        # QUANTUM-CRYSTAL-ARCH: Patent 5 floors + Patent 9 personal affinity
+        from app.services.crystal_graph_isolation import (
+            meets_domain_retention_floor,
+            personal_affinity_boost,
+        )
+
         await self.maybe_rebuild()
         if not self._nodes:
             return []
@@ -386,7 +392,10 @@ class CrystalGraph:
         for nid, node in self._nodes.items():
             if not self._node_allowed_for(node, requester_user_id):
                 continue
+            if not meets_domain_retention_floor(node.domain, node.confidence):
+                continue
             score = _jaccard(query_terms, node.terms) * node.confidence
+            score += personal_affinity_boost(node.scope, node.user_id, requester_user_id)
             if score > best_score:
                 best_score = score
                 best_id = nid
@@ -406,7 +415,12 @@ class CrystalGraph:
                     neighbour = self._nodes.get(neighbour_id)
                     if not self._node_allowed_for(neighbour, requester_user_id):
                         continue
+                    if not meets_domain_retention_floor(neighbour.domain, neighbour.confidence):
+                        continue
                     combined = edge_w * neighbour.confidence
+                    combined += personal_affinity_boost(
+                        neighbour.scope, neighbour.user_id, requester_user_id,
+                    )
                     visited[neighbour_id] = combined
                     next_frontier.append(neighbour_id)
             frontier = next_frontier

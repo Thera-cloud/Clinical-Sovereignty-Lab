@@ -8,9 +8,12 @@ import pytest
 
 from app.services.crystal_graph_isolation import (
     audit_graph_traversal_isolation,
+    constellation_depth_for_budget,
     crystal_graph_enabled,
     enforce_traversal_scope,
     fetch_graph_surfaced_crystal_ids,
+    meets_domain_retention_floor,
+    personal_affinity_boost,
     scope_allows_recall,
 )
 
@@ -219,6 +222,54 @@ async def test_live_retrieve_constellation_blocks_cross_user():
     assert results
     assert all(r.get("user_id") == "client_a" for r in results)
     assert not any(r.get("user_id") == "client_b" for r in results)
+
+
+def test_patent5_domain_retention_floors():
+    """Patent 5 Claim 1(d): crisis floor 0.30; clinical 0.25."""
+    assert meets_domain_retention_floor("crisis", 0.30) is True
+    assert meets_domain_retention_floor("crisis", 0.29) is False
+    assert meets_domain_retention_floor("clinical", 0.25) is True
+    assert meets_domain_retention_floor("clinical", 0.20) is False
+
+
+def test_patent9_personal_affinity_boost():
+    """Patent 9 Claim 3: own crystals outrank equal global peers."""
+    assert personal_affinity_boost("user", "client_a", "client_a") == 0.15
+    assert personal_affinity_boost("global", None, "client_a") == 0.0
+    assert personal_affinity_boost("user:client_a", None, "client_a") == 0.12
+
+
+def test_patent6_odpe_constellation_depth():
+    """Patent 6: LOCKED shallow; TENSION deeper."""
+    assert constellation_depth_for_budget(350) == (1, 5)
+    assert constellation_depth_for_budget(500) == (2, 8)
+    assert constellation_depth_for_budget(700) == (2, 12)
+    assert constellation_depth_for_budget(None) == (2, 8)
+
+
+@pytest.mark.asyncio
+async def test_constellation_drops_below_retention_floor():
+    """Patent 5: low-confidence crisis neighbor excluded from constellation."""
+    from app.services.crystal_graph import CrystalGraph, CrystalNode
+
+    g = CrystalGraph(db_pool=None)
+    seed = CrystalNode({
+        "id": "s", "crystal_text": "crisis safety plan", "domain": "clinical",
+        "confidence": 0.9, "content_hash": "hs", "scope": "global", "user_id": None,
+    })
+    weak = CrystalNode({
+        "id": "w", "crystal_text": "crisis safety plan", "domain": "crisis",
+        "confidence": 0.20, "content_hash": "hw", "scope": "global", "user_id": None,
+    })
+    g._nodes = {seed.id: seed, weak.id: weak}
+    g._adj = {seed.id: {weak.id: 0.8}, weak.id: {seed.id: 0.8}}
+    g._last_rebuild = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+
+    results = await g.retrieve_constellation(
+        "crisis safety plan", max_depth=1, max_results=10, requester_user_id="anyone",
+    )
+    assert results
+    assert not any(r.get("content_hash") == "hw" for r in results)
 
 
 @pytest.mark.asyncio

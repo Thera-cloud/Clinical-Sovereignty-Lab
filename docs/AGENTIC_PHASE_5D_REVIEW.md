@@ -14,5 +14,11 @@
 
 **Flag:** `ENABLE_CRYSTAL_GRAPH` — [x] approved and flipped (staging then GREEN prod) 2026-07-21
 
+**Patent alignment (implemented on constellation path):**
+- Patent 5 Claim 1(d)/7(c) — domain retention floors at recall (`meets_domain_retention_floor`)
+- Patent 5 Claim 3 / Patent 9 Claim 3 — personal affinity boost for requester-owned crystals
+- Patent 6 ODPE — `context_budget` → constellation `(max_depth, max_results)` via FederatedSearch
+- Scope isolation remains Patent 5/9 hippocampal safety invariant (requester-scoped traversal)
+
 **Reviewer:** Nathan Nevedal **Date:** 2026-07-21  
 **Co-sign (optional):** _______________ **Date:** _______________

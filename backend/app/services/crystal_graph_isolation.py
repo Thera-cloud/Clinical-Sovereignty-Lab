@@ -190,3 +190,78 @@ async def fetch_graph_surfaced_crystal_ids(db_pool: Any, limit: int = 200) -> Li
     except Exception as e:
         logger.warning("crystal_graph_isolation: fetch surfaced ids failed: %s", e)
         return []
+
+
+# ── Patent 5 / 6 / 9 retrieval helpers (constellation path) ──
+
+# Patent 5 Claim 1(d)/7(c) — domain retention floors (aligned with crystallizer)
+# Keep in sync with CONFIDENCE_FLOOR_BY_DOMAIN (nate_memory_crystallizer.py)
+_PATENT5_DOMAIN_FLOORS = {
+    "coding": 0.15,
+    "defense": 0.15,
+    "machining": 0.15,
+    "general": 0.20,
+    "clinical": 0.25,
+    "coaching": 0.20,
+    "research": 0.20,
+    "marketing": 0.20,
+    "culture": 0.20,
+    "legal": 0.20,
+    "pmp": 0.18,
+    "teaching": 0.18,
+    "business": 0.18,
+    "accounting": 0.20,
+    "crisis": 0.30,
+}
+
+
+def domain_retention_floor(domain: Optional[str]) -> float:
+    """Patent 5 Claim 1(d): per-domain confidence floor at crystallize + recall.
+
+    Mirrors ``CONFIDENCE_FLOOR_BY_DOMAIN`` in nate_memory_crystallizer (no import —
+    keeps recall path free of crystallizer/numpy load).
+    """
+    return float(_PATENT5_DOMAIN_FLOORS.get(domain or "general", 0.15))
+
+
+def meets_domain_retention_floor(domain: Optional[str], confidence: float) -> bool:
+    """Discard constellation candidates below Patent 5 retention floor."""
+    try:
+        return float(confidence) >= domain_retention_floor(domain)
+    except (TypeError, ValueError):
+        return False
+
+
+def personal_affinity_boost(
+    scope: Optional[str],
+    crystal_user_id: Optional[str],
+    requester_user_id: Optional[str],
+) -> float:
+    """Patent 5 Claim 3 / Patent 9 Claim 3: prefer client-associated crystals."""
+    if not requester_user_id:
+        return 0.0
+    rid = str(requester_user_id)
+    if crystal_user_id and str(crystal_user_id) == rid:
+        return 0.15
+    s = (scope or "").strip()
+    if s.startswith("user:") and s.split(":", 1)[1] in (rid, requester_user_id):
+        return 0.12
+    return 0.0
+
+
+def constellation_depth_for_budget(context_budget: Optional[int]) -> tuple:
+    """Patent 6 ODPE: map context_budget → (max_depth, max_results).
+
+    LOCKED (~350) → shallow/fast; TENSION (~700) → deeper neighbourhood.
+    """
+    if context_budget is None:
+        return 2, 8
+    try:
+        b = int(context_budget)
+    except (TypeError, ValueError):
+        return 2, 8
+    if b <= 400:
+        return 1, 5
+    if b >= 650:
+        return 2, 12
+    return 2, 8

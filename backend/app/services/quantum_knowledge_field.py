@@ -366,9 +366,11 @@ class FederatedSearchCoordinator:
             labels.append("blue_local")
 
         # Graph tier: constellation retrieval (Phase 2 — neighbourhood search)
-        # QUANTUM-CRYSTAL-ARCH: pass requester for live scope isolation
+        # QUANTUM-CRYSTAL-ARCH: requester scope + Patent 6 ODPE depth via context_budget
         if self._crystal_graph:
-            tasks.append(self._search_constellation(query, user_id=user_id))
+            tasks.append(self._search_constellation(
+                query, user_id=user_id, context_budget=context_budget,
+            ))
             labels.append("constellation")
 
         results_list = await asyncio.gather(*tasks, return_exceptions=True)
@@ -623,18 +625,25 @@ class FederatedSearchCoordinator:
             logger.warning("FederatedSearch BLUE local search failed: %s", e)
             return []
 
-    async def _search_constellation(self, query: str, user_id: Optional[str] = None) -> List[Dict]:
+    async def _search_constellation(
+        self,
+        query: str,
+        user_id: Optional[str] = None,
+        context_budget: Optional[int] = None,
+    ) -> List[Dict]:
         """Graph tier: constellation retrieval from CrystalGraph (Phase 2).
 
-        Returns the best-matching crystal plus its 2-hop neighbourhood,
+        Returns the best-matching crystal plus its N-hop neighbourhood,
         capturing contextual depth that keyword or semantic search alone miss.
         """
         if not self._crystal_graph:
             return []
         try:
-            # QUANTUM-CRYSTAL-ARCH: requester-scoped traversal
+            # QUANTUM-CRYSTAL-ARCH: Patent 6 ODPE depth + requester-scoped traversal
+            from app.services.crystal_graph_isolation import constellation_depth_for_budget
+            depth, max_r = constellation_depth_for_budget(context_budget)
             results = await self._crystal_graph.retrieve_constellation(
-                query, max_depth=2, max_results=8, requester_user_id=user_id,
+                query, max_depth=depth, max_results=max_r, requester_user_id=user_id,
             )
             for r in results:
                 r["source"] = "constellation"
