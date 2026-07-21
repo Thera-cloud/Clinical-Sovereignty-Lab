@@ -7820,6 +7820,13 @@ class _ChatMemorySearchTrigger:
     def should_trigger(self, text: str) -> bool:
         if not text or len(text) < 8:
             return False
+        # QUANTUM-CRYSTAL-ARCH — soft path: imported AI history questions (1-gate)
+        try:
+            from app.services.transfer_memory_recall import should_search_imported_history
+            if should_search_imported_history(text):
+                return True
+        except Exception:
+            pass
         if _re_mod.search(
             r"\b(when i (was|used|talked) (on|with)|told (claude|chatgpt|gemini|replika))\b",
             text,
@@ -9302,6 +9309,23 @@ class AzureCortex:
             except Exception as _dmi_err:
                 logger.warning("Deep memory prompt instruction failed: %s", _dmi_err)
 
+        # QUANTUM-CRYSTAL-ARCH — always inject Transfer Crystal continuity (flag-gated)
+        transfer_summary_context = ""
+        try:
+            if (
+                not is_dojo_simulation
+                and os.environ.get("ENABLE_TRANSFER_FULL_RECALL", "true").lower()
+                not in ("0", "false", "no")
+            ):
+                from app.services.transfer_memory_recall import fetch_transfer_crystal_summary
+                transfer_summary_context = await fetch_transfer_crystal_summary(
+                    db_pool,
+                    username=profile.get("username", uid),
+                    hardware_id=uid,
+                ) or ""
+        except Exception as _ts_err:
+            logger.warning("Transfer summary inject failed: %s", _ts_err)
+
         # === OBSERVER PROTOCOL: Build perception/shame/PMB context (Patent 2 Section 15) ===
         observer_context = ""
         try:
@@ -9689,6 +9713,7 @@ class AzureCortex:
 
         {crystal_context}
         {vault_context}
+        {transfer_summary_context}
 
         THERAPEUTIC WORKBOOK GUIDANCE (Evidence-based techniques and frameworks from clinical materials - apply these principles in your responses):
         {workbook_guidance if workbook_guidance else "None available"}

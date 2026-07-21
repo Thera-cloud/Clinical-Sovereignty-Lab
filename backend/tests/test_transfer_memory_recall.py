@@ -7,6 +7,7 @@ import pytest
 from app.services.transfer_memory_recall import (
     format_deep_memory_prompt_instruction,
     search_imported_transfer_history,
+    should_search_imported_history,
 )
 from app.services.vault.transfer_crystal import TransferCrystalBuilder
 
@@ -73,6 +74,31 @@ class TestMemorySearchTrigger:
             text,
             re.I,
         )
+
+    def test_soft_import_trigger_single_platform_mention(self):
+        assert should_search_imported_history("What was in my ChatGPT export about divorce?")
+        assert should_search_imported_history("Tell me about my imported history")
+        assert not should_search_imported_history("How are you today?")
+
+
+class TestFlatImportWrap:
+    def test_gemini_flat_messages_wrap_to_conversation(self):
+        flat = [
+            {"text": "I feel alone", "timestamp": 1},
+            {"text": "Work is hard", "timestamp": 2},
+        ]
+        convs = TransferCrystalBuilder._flat_messages_to_conversations(flat, "gemini")
+        assert len(convs) == 1
+        assert convs[0]["title"] == "Gemini import"
+        assert len(convs[0]["messages"]) == 2
+        assert convs[0]["messages"][0]["role"] == "user"
+
+    def test_stub_crystal_has_continuity_fields(self):
+        stub = TransferCrystalBuilder._stub_crystal(
+            "claude", {"message_count": 12, "conversation_count": 3},
+        )
+        assert "claude" in stub["core_identity_summary"]
+        assert stub.get("_stub") is True
 
 
 class TestDeepMemoryPrompt:

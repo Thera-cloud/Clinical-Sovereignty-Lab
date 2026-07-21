@@ -274,7 +274,8 @@ class TransferCrystalBuilder:
         if not messages:
             raise ValueError("No user messages found in export")
 
-        # Conversation-shaped parsers (ChatGPT, Claude) return vault-importable threads
+        # Conversation-shaped parsers (ChatGPT, Claude) return vault-importable threads.
+        # Flat parsers (Gemini, Replika) are wrapped so full history still lands in vault.
         conversations = None
         if messages and isinstance(messages[0], dict) and "messages" in messages[0]:
             conversations = messages
@@ -289,8 +290,21 @@ class TransferCrystalBuilder:
                             "_folder_name": conv.get("folder_name", ""),
                         })
             stats["conversation_count"] = len(conversations)
+        else:
+            conversations = self._flat_messages_to_conversations(messages, source)
+            stats["conversation_count"] = len(conversations)
 
         stats["message_count"] = len(messages)
+        if not messages and conversations:
+            for conv in conversations:
+                for m in conv.get("messages", []):
+                    if m.get("role") == "user":
+                        messages.append({
+                            "text": m.get("text", ""),
+                            "timestamp": m.get("timestamp"),
+                            "_conv_title": conv.get("title", ""),
+                        })
+            stats["message_count"] = len(messages)
 
         # 2. Sort chronologically
         def _ts(m: dict) -> float:
@@ -332,8 +346,22 @@ class TransferCrystalBuilder:
             if last_ts:
                 stats["date_range_end"] = datetime.utcfromtimestamp(last_ts).isoformat()
 
-        # 5. Batch analysis
-        batches = self.create_batches(messages, self.BATCH_TOKEN_LIMIT)
+        # 5. Vault import FIRST — full history must persist even if Azure synthesis fails
+        vault_import_stats = None
+        if conversations:
+            try:
+                vault_import_stats = await self.import_to_vault(
+                    member_id=member_id,
+                    conversations=conversations,
+                    tier=tier,
+                    source_platform=source,
+                )
+            except Exception as e:
+                logger.warning("Vault import failed: %s", e)
+                stats["errors"].append(f"Vault import: {e}")
+
+        # 6. Batch analysis + crystal (best-effort; vault capture is the hard guarantee)
+        batches = self.create_batches(messages, self.BATCH_TOKEN_LIMIT) if messages else []
         stats["batch_count"] = len(batches)
         batch_analyses: List[dict] = []
 
@@ -346,43 +374,94 @@ class TransferCrystalBuilder:
                 logger.exception("Batch %d analysis failed", i + 1)
                 stats["errors"].append(f"Batch {i + 1}: {e}")
 
-        if not batch_analyses:
-            raise ValueError("All batch analyses failed; cannot synthesize crystal")
+        crystal: Optional[dict] = None
+        if batch_analyses:
+            crystal = await self.synthesize_crystal(member_id, batch_analyses, source)
 
-        # 6. Synthesize crystal
-        crystal = await self.synthesize_crystal(member_id, batch_analyses, source)
         if not crystal:
-            raise ValueError("Synthesis failed; no crystal produced")
+            # Minimal continuity profile so chat can still inject import awareness
+            crystal = self._stub_crystal(source, stats)
+            stats["errors"].append("Azure synthesis unavailable; stored vault-backed stub crystal")
 
-        # 7. Store
+        # 7. Store crystal (full or stub)
         elapsed = (datetime.utcnow() - start_time).total_seconds()
         stats["processing_time_seconds"] = elapsed
-        await self.store_crystal(
-            member_id=member_id,
-            crystal=crystal,
-            source=source,
-            stats=stats,
-        )
+        try:
+            await self.store_crystal(
+                member_id=member_id,
+                crystal=crystal,
+                source=source,
+                stats=stats,
+            )
+        except Exception as e:
+            logger.warning("Crystal store failed (vault may still have history): %s", e)
+            stats["errors"].append(f"Crystal store: {e}")
 
-        # Vault import (if conversations available)
-        vault_import_stats = None
-        if conversations:
-            try:
-                vault_import_stats = await self.import_to_vault(
-                    member_id=member_id,
-                    conversations=conversations,
-                    tier=tier,
-                    source_platform=source,
-                )
-            except Exception as e:
-                logger.warning("Vault import failed (crystal still saved): %s", e)
-                stats["errors"].append(f"Vault import: {e}")
+        _vault_ok = bool(
+            vault_import_stats and (vault_import_stats.get("conversations_imported") or 0) > 0
+        )
+        if not _vault_ok and not crystal.get("id"):
+            raise ValueError("Import failed: neither vault history nor crystal was saved")
 
         return {
             "id": crystal.get("id"),
             "crystal": crystal,
             "stats": stats,
             "vault_import": vault_import_stats,
+        }
+
+    @staticmethod
+    def _flat_messages_to_conversations(
+        messages: List[dict], source: str,
+    ) -> List[dict]:
+        """Wrap flat user-message lists (Gemini/Replika) into vault conversation shape."""
+        conv_msgs: List[dict] = []
+        for m in messages or []:
+            if not isinstance(m, dict):
+                continue
+            if "messages" in m:
+                continue
+            text = (m.get("text") or m.get("content") or "").strip()
+            if not text:
+                continue
+            conv_msgs.append({
+                "role": m.get("role") or "user",
+                "text": text[:MAX_MESSAGE_TEXT_CHARS],
+                "timestamp": m.get("timestamp") or m.get("created_at"),
+            })
+        if not conv_msgs:
+            return []
+        return [{
+            "title": f"{source.title()} import",
+            "create_time": conv_msgs[0].get("timestamp") or 0,
+            "messages": conv_msgs[:MAX_MESSAGES_PER_CONV],
+            "folder_id": "",
+            "folder_name": "",
+        }]
+
+    @staticmethod
+    def _stub_crystal(source: str, stats: Dict[str, Any]) -> dict:
+        """Vault-backed continuity profile when Azure batch/synthesis is unavailable."""
+        n_msg = stats.get("message_count") or 0
+        n_conv = stats.get("conversation_count") or 0
+        return {
+            "core_identity_summary": (
+                f"Member imported prior AI history from {source} "
+                f"({n_conv} conversations, {n_msg} user messages). "
+                "Full threads are stored in Transfer History vault for recall."
+            ),
+            "relationship_map": "",
+            "active_therapeutic_themes": "",
+            "historical_themes": "",
+            "communication_profile": "",
+            "unresolved_work": "Explore topics from their imported history when they ask.",
+            "strengths_and_resources": "",
+            "clinical_considerations": "Imported content is pre-Sanctuary; verify with the member.",
+            "first_session_guidance": (
+                "Acknowledge their imported history is available. Invite them to name "
+                "what matters most from that prior work."
+            ),
+            "_stub": True,
         }
 
     # -------------------------------------------------------------------------
