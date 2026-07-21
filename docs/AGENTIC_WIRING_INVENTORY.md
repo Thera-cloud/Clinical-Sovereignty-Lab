@@ -7,9 +7,13 @@
 
 ---
 
+## Executive verdict (updated 2026-07-21 — Phase 6.7 prod ON)
+
+Phase **6** core flywheel live on GREEN: `ENABLE_SIX_QUOTIENT_BATTERY=true`, `SIX_QUOTIENT_BATTERY_LIVE_WS=false`. Staging 6.1–6.6 + prod smoke verified. Track D living/standards/gen remain **false** (D.8). Neuro-symbolic Phase 5a–5d remains ON.
+
 ## Executive verdict (updated 2026-07-21 — Phase 6 pre-flip ready)
 
-Phase **6** six-quotient battery code + migration 245 live; staging 6.1–6.6 verified. Prod defaults: `ENABLE_SIX_QUOTIENT_BATTERY=false`, `SIX_QUOTIENT_BATTERY_LIVE_WS=false` (compose wires LIVE_WS + `TEST_PASSWORD`/`AUDIT_CLIENT_PASSWORD`). Pre-flip smoke: `backend/scripts/prod_phase6_battery_smoke.py`. Flip **6.7** = battery flag only; keep LIVE_WS false until post-flip soak. Track D living/standards/gen stay false on prod (D.8).
+Phase **6** six-quotient battery code + migration 245 live; staging 6.1–6.6 verified. Prod defaults: `ENABLE_SIX_QUOTIENT_BATTERY=false`, `SIX_QUOTIENT_BATTERY_LIVE_WS=false` (compose wires LIVE_WS + `TEST_PASSWORD`/`AUDIT_CLIENT_PASSWORD`). Pre-flip smoke: `backend/scripts/prod_phase6_battery_smoke.py`. Flip **6.7** = battery flag only; keep LIVE_WS false until post-flip soak. Track D living/standards/gen stay false on prod (D.8). *(Superseded — see 6.7 ON verdict above.)*
 
 ## Executive verdict (updated 2026-07-21 — Phase 5a–5d prod ON)
 

@@ -277,7 +277,7 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 | 6.5 | Gap → Dual-COO CEO inbox + growth crystal feed verified | [x] *(CEO inbox RED/YELLOW six_quotient_* items; analyze ingest path)* |
 | 6.6 | Live WS battery (`SIX_QUOTIENT_BATTERY_LIVE_WS`) only after staging bridge smoke | [x] *(2026-07-21 — `live_ws` run `2ae070a5…` awaiting_scores; resp_len 679; runner websockets fix + staging TEST_PASSWORD)* |
 | 6.6b | Pre-flip gap close: GREEN ≥`04073d99`, prod compose LIVE_WS+creds (default false), wiring inventory, `prod_phase6_battery_smoke.py` | [x] *(2026-07-21)* |
-| 6.7 | Production flag flip | [ ] *(operator: `.env` `ENABLE_SIX_QUOTIENT_BATTERY=true` only; LIVE_WS stays false; then `safe_deploy.sh backend` + smoke)* |
+| 6.7 | Production flag flip | [x] *(2026-07-21 — GREEN `.env` `ENABLE_SIX_QUOTIENT_BATTERY=true`; LIVE_WS false; backend recreate vault 368→368; smoke OK; health enabled=true)* |
 
 *Scores are external-only. Runner/pregrader never assign quotient points.*
 
