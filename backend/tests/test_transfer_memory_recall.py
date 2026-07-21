@@ -78,7 +78,61 @@ class TestMemorySearchTrigger:
     def test_soft_import_trigger_single_platform_mention(self):
         assert should_search_imported_history("What was in my ChatGPT export about divorce?")
         assert should_search_imported_history("Tell me about my imported history")
+        assert should_search_imported_history("What did I ask in Google AI Mode about anxiety?")
+        assert should_search_imported_history("Can you read my MyActivity download?")
         assert not should_search_imported_history("How are you today?")
+
+
+class TestGoogleAiModeParse:
+    def test_detect_and_parse_myactivity_blocks(self):
+        sample = (
+            "AI Mode\n\n"
+            "Searched for how do I download AI chats from google?\n"
+            "Jul 21, 2026, 9:21:03 AM PDT\n"
+            "Your prompt:\n"
+            "how do I download AI chats from google?\n\n"
+            "Search's response:\n"
+            "Yes, your AI chat history (Gemini) is saved.\n"
+            "Searched for why do I feel anxious at night\n"
+            "Jun 1, 2026, 8:00:00 PM PDT\n"
+            "Your prompt:\n"
+            "why do I feel anxious at night\n\n"
+            "Search's response:\n"
+            "Nighttime anxiety is common when the day quiets down.\n"
+        ).encode()
+
+        builder = TransferCrystalBuilder(db_pool=None)
+        assert builder.detect_source("MyActivity_AI Mode.txt", sample) == "google_ai_mode"
+        convs = builder.parse_google_ai_mode(sample)
+        assert len(convs) >= 1
+        msgs = convs[0]["messages"]
+        assert any(m["role"] == "user" and "download AI chats" in m["text"] for m in msgs)
+        assert any(m["role"] == "assistant" and "Gemini" in m["text"] for m in msgs)
+        assert any(m["role"] == "user" and "anxious at night" in m["text"] for m in msgs)
+
+    def test_parse_myactivity_crlf_without_searched_for(self):
+        # Real Google exports use CRLF; many turns omit the "Searched for" line.
+        sample = (
+            "AI Mode\r\n\r\n"
+            "Jul 21, 2026, 9:21:03\u202fAM PDT\r\n"
+            "Your prompt:\r\n"
+            "how do I download AI chats from google?\r\n\r\n"
+            "Search's response:\r\n"
+            "Yes, your AI chat history (Gemini) is saved.\r\n"
+            "Jun 1, 2026, 8:00:00 PM PDT\r\n"
+            "Your prompt:\r\n"
+            "why do I feel anxious at night\r\n\r\n"
+            "Search's response:\r\n"
+            "Nighttime anxiety is common.\r\n"
+        ).encode()
+
+        builder = TransferCrystalBuilder(db_pool=None)
+        assert builder.detect_source("MyActivity_AI Mode.txt", sample) == "google_ai_mode"
+        convs = builder.parse_google_ai_mode(sample)
+        assert len(convs) >= 1
+        user_texts = [m["text"] for m in convs[0]["messages"] if m["role"] == "user"]
+        assert any("download AI chats" in t for t in user_texts)
+        assert any("anxious at night" in t for t in user_texts)
 
 
 class TestFlatImportWrap:

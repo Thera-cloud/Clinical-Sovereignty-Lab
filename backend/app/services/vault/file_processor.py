@@ -43,6 +43,16 @@ BLOCKED_TYPES = [
 ]
 
 MAX_EXTRACTED_CHARS = 50_000
+# Google AI Mode / MyActivity exports are multi-MB plain text; keep enough for FTS + chat.
+AI_EXPORT_MAX_CHARS = 500_000
+
+
+def _looks_like_ai_chat_export(text: str) -> bool:
+    head = (text or "")[:8000].replace("\r\n", "\n").replace("\r", "\n").replace("\u2019", "'")
+    return (
+        ("Your prompt:" in head and "Search's response:" in head)
+        or (head.lstrip().startswith("AI Mode") and "Your prompt:" in head)
+    )
 MAX_IMAGE_DIMENSION = 4096
 
 # Tier storage limits (bytes)
@@ -234,12 +244,14 @@ class FileProcessor:
             raw = file_bytes.decode("utf-8", errors="replace")
         except Exception as e:
             raise ValueError(f"Text decode failed: {e}") from e
-        if len(raw) > MAX_EXTRACTED_CHARS:
-            raw = raw[:MAX_EXTRACTED_CHARS] + "\n[...truncated]"
+        limit = AI_EXPORT_MAX_CHARS if _looks_like_ai_chat_export(raw) else MAX_EXTRACTED_CHARS
+        if len(raw) > limit:
+            raw = raw[:limit] + "\n[...truncated]"
             flags = ["truncated"]
         else:
             flags = []
-        preview = raw[:500].strip() if raw else None
+        # Store full extracted text as preview for vault FTS / chat (capped above).
+        preview = raw.strip() if raw else None
         return ProcessedFile(
             type="document",
             text=raw or None,

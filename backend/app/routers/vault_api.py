@@ -5,6 +5,7 @@ Endpoints for vault folders, items, uploads, search, stats, export.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -22,6 +23,39 @@ from app.services.vault.file_processor import FileProcessor
 from app.services.vault.blob_manager import VaultBlobManager
 
 _log = logging.getLogger("vault.metrics")
+
+
+async def _auto_transfer_import_if_ai_export(
+    db_pool,
+    member_id: str,
+    tier: str,
+    filename: str,
+    content: bytes,
+) -> None:
+    """If upload is a known AI chat export, run Transfer Crystal pipeline (background)."""
+    try:
+        from app.services.vault.transfer_crystal import TransferCrystalBuilder, IMPORT_SOURCES
+
+        builder = TransferCrystalBuilder(db_pool)
+        source = builder.detect_source(filename or "", content)
+        if source == "unknown" or source not in IMPORT_SOURCES:
+            return
+        _log.info(
+            "vault_upload: auto Transfer Crystal import source=%s member=%s file=%s",
+            source, member_id, filename,
+        )
+        await builder.build(
+            member_id=member_id,
+            source=source,
+            raw_data=content,
+            content_sentinel_scan=True,
+            tier=tier,
+        )
+    except Exception:
+        _log.warning(
+            "vault_upload: auto Transfer Crystal import failed member=%s file=%s",
+            member_id, filename, exc_info=True,
+        )
 
 
 # =============================================================================
@@ -192,7 +226,10 @@ def create_vault_router(db_pool) -> APIRouter:
             thumbnail_path=None,
             size_bytes=processed.size_bytes,
             mime_type=mime_type,
-            extracted_text_preview=processed.preview[:500] if processed.preview else None,
+            # Prefer full extracted text (AI Mode exports can be large; processor caps).
+            extracted_text_preview=(
+                (processed.text or processed.preview or "")[:500_000] or None
+            ),
             page_count=processed.page_count,
             dimensions=processed.dimensions,
         )
@@ -209,6 +246,17 @@ def create_vault_router(db_pool) -> APIRouter:
             )
         except Exception:
             _log.debug("vault_upload metric write skipped", exc_info=True)
+
+        # Background: parse AI chat exports (MyActivity / ChatGPT / Claude / …)
+        # into Transfer History so LN can recall without a separate /vault/import.
+        try:
+            asyncio.create_task(
+                _auto_transfer_import_if_ai_export(
+                    db_pool, member_id, tier, _safe_display, content,
+                )
+            )
+        except Exception:
+            _log.debug("vault_upload: auto-import task schedule skipped", exc_info=True)
 
         return {
             "upload_id": upload_id,

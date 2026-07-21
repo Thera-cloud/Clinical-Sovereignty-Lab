@@ -13,6 +13,7 @@ import io
 import json
 import logging
 import os
+import re
 import zipfile
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -39,12 +40,20 @@ IMPORT_SOURCES = {
         "file_format": "Google Takeout export",
         "parser": "gemini_parser",
     },
+    "google_ai_mode": {
+        "name": "Google AI Mode / Gemini Apps activity",
+        "file_format": "MyActivity_AI Mode.txt (plain text)",
+        "parser": "google_ai_mode_parser",
+    },
     "replika": {
         "name": "Replika",
         "file_format": "data export (JSON or CSV)",
         "parser": "replika_parser",
     },
 }
+
+# Chunk size for Google AI Mode vault threads (messages = user+assistant pairs)
+_GOOGLE_AI_MODE_CHUNK_MSGS = 80
 
 IMPORT_TRIGGER_PHRASES = [
     "import my chatgpt",
@@ -536,6 +545,24 @@ class TransferCrystalBuilder:
         if filename_lower.endswith(".csv"):
             return "replika"
 
+        # Google AI Mode / Gemini Apps activity export (plain text MyActivity)
+        try:
+            head = raw_data[:12000].decode("utf-8", errors="replace")
+            head = head.replace("\r\n", "\n").replace("\r", "\n").replace("\u2019", "'")
+        except Exception:
+            head = ""
+        if (
+            "Your prompt:" in head
+            and "Search's response:" in head
+        ) or (
+            "AI Mode" in head[:200]
+            and "Your prompt:" in head
+        ) or (
+            "myactivity" in filename_lower
+            and ("ai mode" in filename_lower or "ai_mode" in filename_lower)
+        ):
+            return "google_ai_mode"
+
         return "unknown"
 
     # -------------------------------------------------------------------------
@@ -937,6 +964,121 @@ class TransferCrystalBuilder:
             raise ValueError(f"Gemini parse failed: {e}") from e
 
         return messages
+
+    @staticmethod
+    def _parse_google_ai_mode_timestamp(date_s: str) -> float:
+        """Best-effort parse of MyActivity date lines like 'Jul 21, 2026, 9:21:03 AM PDT'."""
+        if not date_s:
+            return 0.0
+        cleaned = (
+            date_s.replace("\u202f", " ")
+            .replace("\xa0", " ")
+            .strip()
+        )
+        # Drop timezone abbreviation (PDT/PST/UTC/GMT…)
+        cleaned = re.sub(r"\s+[A-Z]{2,5}\s*$", "", cleaned)
+        for fmt in (
+            "%b %d, %Y, %I:%M:%S %p",
+            "%B %d, %Y, %I:%M:%S %p",
+            "%b %d, %Y, %H:%M:%S",
+            "%Y-%m-%d %H:%M:%S",
+        ):
+            try:
+                return datetime.strptime(cleaned, fmt).timestamp()
+            except (ValueError, OSError):
+                continue
+        return 0.0
+
+    def parse_google_ai_mode(self, raw_data: bytes) -> List[dict]:
+        """Parse Google AI Mode / Gemini Apps MyActivity plain-text export.
+
+        Format blocks (often CRLF; many omit the 'Searched for' line):
+          [Searched for <summary>]
+          <date>
+          Your prompt:
+          <user text>
+
+          Search's response:
+          <assistant text>
+        """
+        text = raw_data.decode("utf-8", errors="replace")
+        # MyActivity exports are Windows CRLF; normalize before regex
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        # Normalize curly apostrophe in "Search's response"
+        text = text.replace("\u2019", "'")
+
+        # Primary path: split on Your prompt: (real exports omit "Searched for" often)
+        turns: List[dict] = []
+        parts = re.split(r"(?:^|\n)Your prompt:\n", text)
+        date_before_re = re.compile(
+            r"(?:Searched for (?P<head>[^\n]*)\n)?"
+            r"(?P<date>[A-Za-z]{3,9}\s+\d{1,2},\s+\d{4}[^\n]*)\s*$",
+            re.DOTALL,
+        )
+        for i, part in enumerate(parts[1:], start=1):
+            # Date/head live in the tail of the previous segment
+            prev_tail = parts[i - 1][-240:] if parts[i - 1] else ""
+            dm = date_before_re.search(prev_tail)
+            date_s = (dm.group("date") if dm else "") or ""
+            head = (dm.group("head") if dm else "") or ""
+            ts = self._parse_google_ai_mode_timestamp(date_s.strip())
+
+            if "\nSearch's response:\n" in part:
+                prompt, response = part.split("\nSearch's response:\n", 1)
+            else:
+                prompt, response = part, ""
+            prompt = prompt.strip()
+            # Stop response at next activity header (date / searched-for / next prompt)
+            response = re.split(
+                r"\n(?:Searched for |Your prompt:|[A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})",
+                response,
+                maxsplit=1,
+            )[0].strip()
+            if prompt:
+                turns.append({
+                    "role": "user",
+                    "text": prompt[:MAX_MESSAGE_TEXT_CHARS],
+                    "timestamp": ts,
+                    "_head": (head or prompt)[:80],
+                })
+            if response:
+                turns.append({
+                    "role": "assistant",
+                    "text": response[:MAX_MESSAGE_TEXT_CHARS],
+                    "timestamp": ts,
+                })
+
+        if not turns:
+            return []
+
+        conversations: List[dict] = []
+        chunk = _GOOGLE_AI_MODE_CHUNK_MSGS
+        for i in range(0, len(turns), chunk):
+            slice_msgs = turns[i : i + chunk]
+            title_src = (
+                slice_msgs[0].get("_head")
+                or (slice_msgs[0].get("text") or "")[:60]
+                or "Untitled"
+            )
+            clean_msgs = [
+                {
+                    "role": m["role"],
+                    "text": m["text"],
+                    "timestamp": m.get("timestamp") or 0,
+                }
+                for m in slice_msgs
+            ]
+            conversations.append({
+                "title": f"Google AI Mode: {title_src}"[:255],
+                "create_time": clean_msgs[0].get("timestamp") or 0,
+                "messages": clean_msgs[:MAX_MESSAGES_PER_CONV],
+                "folder_id": "google_ai_mode",
+                "folder_name": "Google AI Mode",
+            })
+            if len(conversations) >= MAX_CONVERSATIONS:
+                break
+
+        return conversations
 
     def parse_replika(self, raw_data: bytes) -> List[dict]:
         """Parse Replika JSON or CSV export."""

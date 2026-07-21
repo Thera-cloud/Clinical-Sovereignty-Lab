@@ -26,9 +26,14 @@ _NATE_SECTION_MARKERS = (
 # Soft trigger: single-category import intent (bridge uses this to bypass 2-gate)
 _IMPORT_SOFT_PATTERNS = [
     re.compile(r"\b(claude|chatgpt|gemini|replika)\b", re.I),
+    re.compile(r"\b(google\s+(ai|gemini)|ai\s+mode|myactivity)\b", re.I),
     re.compile(r"\b(imported|transfer(red)?)\s+(history|chat|conversations?)\b", re.I),
-    re.compile(r"\b(from my export|transfer crystal|my (chatgpt|claude) (history|export|chats?))\b", re.I),
+    re.compile(
+        r"\b(from my export|transfer crystal|my (chatgpt|claude|gemini|google) (history|export|chats?))\b",
+        re.I,
+    ),
     re.compile(r"\b(before (i )?(came|joined|switching)|prior (ai|chat) (history|conversations?))\b", re.I),
+    re.compile(r"\b(downloaded?\s+(my\s+)?(ai|chat|gemini)|from\s+(my\s+)?google)\b", re.I),
 ]
 
 _PREVIEW_CHARS = int(os.environ.get("TRANSFER_RECALL_PREVIEW_CHARS", "4000"))
@@ -128,7 +133,7 @@ async def search_imported_transfer_history(
     search_terms: str,
     max_results: int = 8,
 ) -> str:
-    """FTS vault_items (transfer_conversation) for imported platform chat threads."""
+    """FTS vault_items (transfer_conversation + AI Mode upload docs) for imports."""
     if not db_pool or not search_terms or not str(search_terms).strip():
         return ""
 
@@ -138,18 +143,30 @@ async def search_imported_transfer_history(
             member_ids.append(mid)
 
     preview_n = max(400, min(_PREVIEW_CHARS, 20000))
+    term0 = search_terms.split()[0] if search_terms.split() else search_terms
     try:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(
                 """
                 SELECT display_name, extracted_text_preview, themes, uploaded_at,
+                       content_type,
                        ts_rank(
                            search_vector,
                            plainto_tsquery('english', $2)
                        ) AS rank
                 FROM vault_items
                 WHERE member_id = ANY($1::text[])
-                  AND content_type = 'transfer_conversation'
+                  AND (
+                      content_type = 'transfer_conversation'
+                      OR (
+                          content_type = 'upload_document'
+                          AND (
+                              display_name ILIKE '%MyActivity%'
+                              OR display_name ILIKE '%AI Mode%'
+                              OR extracted_text_preview ILIKE '%Your prompt:%'
+                          )
+                      )
+                  )
                   AND search_vector @@ plainto_tsquery('english', $2)
                 ORDER BY rank DESC, uploaded_at DESC
                 LIMIT $3
@@ -163,10 +180,21 @@ async def search_imported_transfer_history(
                 rows = await conn.fetch(
                     """
                     SELECT display_name, extracted_text_preview, themes, uploaded_at,
+                           content_type,
                            0.0::float AS rank
                     FROM vault_items
                     WHERE member_id = ANY($1::text[])
-                      AND content_type = 'transfer_conversation'
+                      AND (
+                          content_type = 'transfer_conversation'
+                          OR (
+                              content_type = 'upload_document'
+                              AND (
+                                  display_name ILIKE '%MyActivity%'
+                                  OR display_name ILIKE '%AI Mode%'
+                                  OR extracted_text_preview ILIKE '%Your prompt:%'
+                              )
+                          )
+                      )
                       AND (
                           extracted_text_preview ILIKE '%' || $2 || '%'
                           OR display_name ILIKE '%' || $2 || '%'
@@ -175,7 +203,7 @@ async def search_imported_transfer_history(
                     LIMIT $3
                     """,
                     member_ids,
-                    search_terms.split()[0] if search_terms.split() else search_terms,
+                    term0,
                     max_results,
                 )
     except Exception as e:
@@ -189,7 +217,7 @@ async def search_imported_transfer_history(
     total = 0
     for row in rows:
         themes = row["themes"] or []
-        platform = _platform_from_themes(themes)
+        platform = _platform_from_themes(themes, row["display_name"], row["content_type"])
         ts = ""
         if row["uploaded_at"]:
             ts = row["uploaded_at"].strftime("%b %d %Y")
@@ -216,10 +244,19 @@ async def search_imported_transfer_history(
     return block
 
 
-def _platform_from_themes(themes: list) -> str:
+def _platform_from_themes(
+    themes: list,
+    display_name: Optional[str] = None,
+    content_type: Optional[str] = None,
+) -> str:
     for t in themes or []:
-        if t in ("chatgpt", "claude", "gemini", "replika"):
-            return t
+        if t in ("chatgpt", "claude", "gemini", "replika", "google_ai_mode"):
+            return "google_ai_mode" if t == "google_ai_mode" else t
+    name = (display_name or "").lower()
+    if "myactivity" in name or "ai mode" in name:
+        return "google_ai_mode"
+    if content_type == "upload_document" and ("gemini" in name or "google" in name):
+        return "gemini"
     return "imported"
 
 
@@ -248,7 +285,8 @@ def format_deep_memory_prompt_instruction(context: str) -> str:
             f"Sections labeled {_IMPORTED_HEADER} are from their exported chats on other AI "
             "platforms BEFORE they joined Sanctuary. You were NOT in those threads. "
             "Never say 'we talked' or 'when you told me' for imported content alone. "
-            "Say instead: 'In your Claude history...' or 'From what you shared from ChatGPT...'. "
+            "Say instead: 'In your Claude history...' or 'From what you shared from ChatGPT...' "
+            "or 'In your Google AI Mode / Gemini export...'. "
             "Quote the excerpt; do not invent assistant replies that are not in the excerpt."
         )
 
