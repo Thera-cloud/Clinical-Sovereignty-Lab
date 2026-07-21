@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("sovereign.six_quotient_auto_judge")
 
-_LLM_TIMEOUT_S = 45.0
+_LLM_TIMEOUT_S = 120.0  # QUANTUM-CRYSTAL-ARCH — clinical judge prompts can exceed 45s on Workers/Grok
 DEFAULT_EVALUATOR = "grok-judge-v1"
 
 
