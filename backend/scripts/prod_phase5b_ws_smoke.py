@@ -264,6 +264,44 @@ def db_verify(response_text: str) -> int:
     return fail
 
 
+def _git_hash() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return os.getenv("GIT_HASH", "")
+
+
+def record_crisis_sla_evidence(*, si_988_ok: bool, verifier_ok: bool, fail: int) -> None:
+    """QUANTUM-CRYSTAL-ARCH — persist Tier-1 D.14b crisis SLA row (migration 251)."""
+    if os.getenv("PROD_5B_SKIP_EVIDENCE", "").lower() in ("1", "true", "yes"):
+        return
+    detail = json.dumps(
+        {
+            "marker": _MARKER,
+            "fail_code": fail,
+            "script": "prod_phase5b_ws_smoke.py",
+        }
+    ).replace("'", "''")
+    gh = _git_hash().replace("'", "''")
+    sql = (
+        "INSERT INTO six_quotient_crisis_sla_evidence "
+        "(environment, git_hash, marker, si_988_ok, verifier_ok, detail_json) "
+        f"VALUES ('production', '{gh}', '{_MARKER.replace(chr(39), chr(39)+chr(39))}', "
+        f"{'true' if si_988_ok else 'false'}, "
+        f"{'true' if verifier_ok else 'false'}, "
+        f"'{detail}'::jsonb);"
+    )
+    try:
+        _psql(sql)
+        print("[*] recorded six_quotient_crisis_sla_evidence")
+    except Exception as e:
+        print(f"WARN: crisis evidence insert failed (apply migration 251?): {e}")
+
+
 async def main() -> int:
     try:
         text = await run_ws()
@@ -271,7 +309,12 @@ async def main() -> int:
         print(f"FAIL: WS path: {e}")
         return 1
     await asyncio.sleep(10)
-    return db_verify(text)
+    fail = db_verify(text)
+    si_ok = "988" in (text or "")
+    # verifier_ok: dual-write present OR soak-pass path (988 + audit) per db_verify
+    verifier_ok = fail == 0 and si_ok
+    record_crisis_sla_evidence(si_988_ok=si_ok, verifier_ok=verifier_ok, fail=fail)
+    return fail
 
 
 if __name__ == "__main__":

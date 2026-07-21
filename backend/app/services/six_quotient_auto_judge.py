@@ -125,8 +125,14 @@ async def ensure_evaluator_calibrated(
     evaluator_id: str = DEFAULT_EVALUATOR,
 ) -> Dict[str, Any]:
     """
-    If grok-judge-v1 has no passing calibration in 90d, score gold set via LLM and persist.
+    Require a passing calibration row within 90d.
+
+    QUANTUM-CRYSTAL-ARCH — Claude review 2026-07-21: LLM-on-gold auto-pass is
+    self-consistency, not calibration. Default: fail closed until human
+    POST /judge/calibrate. Opt-in only via ALLOW_AUTO_JUDGE_CALIBRATION=true.
     """
+    import os
+
     from app.services.six_quotient_judge_calibration import (
         calibrate_evaluator,
         evaluator_is_calibrated,
@@ -136,6 +142,23 @@ async def ensure_evaluator_calibrated(
 
     if await evaluator_is_calibrated(db_pool, evaluator_id):
         return {"ok": True, "already_calibrated": True, "evaluator_id": evaluator_id}
+
+    allow_auto = os.getenv("ALLOW_AUTO_JUDGE_CALIBRATION", "").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if not allow_auto:
+        return {
+            "ok": False,
+            "error": (
+                "AI evaluator not calibrated — human POST "
+                "/api/admin/six-quotient/judge/calibrate required "
+                "(auto LLM-on-gold disabled; set ALLOW_AUTO_JUDGE_CALIBRATION=true only for lab)"
+            ),
+            "evaluator_id": evaluator_id,
+        }
 
     gold = load_gold()
     items = gold.get("items") or []
@@ -169,12 +192,17 @@ async def ensure_evaluator_calibrated(
             "calibration_id": cal_id,
             "result": result,
         }
+    logger.warning(
+        "auto_judge: ALLOW_AUTO_JUDGE_CALIBRATION persisted pass for %s — treat as lab smoke",
+        evaluator_id,
+    )
     return {
         "ok": True,
         "already_calibrated": False,
         "calibration_id": cal_id,
         "evaluator_id": evaluator_id,
         "result": result,
+        "lab_auto": True,
     }
 
 
@@ -274,11 +302,68 @@ async def auto_score_run(
             except Exception as e:
                 logger.warning("auto_judge growth ingest: %s", e)
 
+    spot = await _maybe_spot_check(db_pool, app_state, run_id, results, scored)
+
     return {
         "ok": bool(analysis.get("ok")),
         "run_id": run_id,
         "evaluator_id": evaluator_id,
         "scores_upserted": up.get("scores_upserted"),
         "analysis": analysis,
+        "spot_check": spot,
         "error": analysis.get("error"),
     }
+
+
+async def _maybe_spot_check(
+    db_pool,
+    app_state,
+    run_id: str,
+    results: List[Dict[str, Any]],
+    scored: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    QUANTUM-CRYSTAL-ARCH — D.14b: second-pass spot check (not human gold).
+    Logs disagreement for human review; does not calibrate ability.
+    """
+    if not scored or not results:
+        return {"ok": False, "skipped": True}
+    primary = scored[0]
+    sid = primary.get("scenario_id")
+    src = next((r for r in results if str(r.get("scenario_id") or r.get("id")) == sid), None)
+    if not src:
+        return {"ok": False, "skipped": True}
+    secondary = await _llm_judge(
+        app_state,
+        scenario_id=sid,
+        section=str(src.get("section") or ""),
+        rubric_focus=str(src.get("rubric_focus") or ""),
+        client_says=str(src.get("client_says") or ""),
+        response=str(src.get("response") or ""),
+    )
+    if not secondary:
+        return {"ok": False, "error": "secondary_judge_failed"}
+    disagree = any(
+        int(primary.get(k) or -1) != int(secondary.get(k) or -2)
+        for k in ("primary", "accuracy", "naturalness")
+    )
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO six_quotient_judge_spot_checks
+                   (run_id, scenario_id, primary_judge, secondary_judge,
+                    primary_scores, secondary_scores, disagreement, human_required)
+                   VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)""",
+                run_id,
+                sid,
+                DEFAULT_EVALUATOR,
+                "grok-judge-spot-v1",
+                json.dumps({k: primary.get(k) for k in ("primary", "accuracy", "naturalness")}),
+                json.dumps({k: secondary.get(k) for k in ("primary", "accuracy", "naturalness")}),
+                disagree,
+                disagree,
+            )
+    except Exception as e:
+        logger.warning("spot_check persist: %s", e)
+        return {"ok": False, "error": str(e)[:160]}
+    return {"ok": True, "scenario_id": sid, "disagreement": disagree}

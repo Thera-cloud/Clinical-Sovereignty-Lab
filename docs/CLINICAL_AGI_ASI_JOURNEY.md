@@ -1,35 +1,42 @@
-# Clinical AGI-Class → ASI Research Journey
+# Tier 1 Clinical Competence → ASI Research Journey
 
 **Status:** Operational path (not a marketing claim)  
-**Updated:** 2026-07-21  
-**Related:** `docs/AGENTIC_ROLLOUT_CHECKLIST.md` Track D.12–D.13, `docs/AGENTIC_WIRING_INVENTORY.md`
+**Updated:** 2026-07-21 (revised after Claude adversarial review — REVISE CLAIMS)  
+**Related:** `docs/AGENTIC_ROLLOUT_CHECKLIST.md` Track D.12–D.14b, `docs/AGENTIC_WIRING_INVENTORY.md`  
+**Preferred name:** Tier 1 clinical competence (avoid “AGI-class” in UI/ops until D.14b)
 
 ## Honesty rule (Tier 0)
 
 - Never claim **AGI** or **ASI** from flag flips, crystal counts, or judge κ alone.
 - Scoreboard = external six-quotient + human/clinician review + held-out transfer.
 - ASI is a **research horizon** with containment — not a feature flag.
+- **133/133 NOMINAL = liveness, not clinical correctness.**
+- **κ @ n=8 gold = smoke that the judge runs**, not evidence it judges well. Do not cite as “calibrated” without CIs + human-blinded gold.
+- **θ is plumbing verification** until Saturday transfer series + human-blinded gold exist — not a skill signal for dashboards or weekly act.
+- **LLM-on-gold auto-pass is self-consistency, not calibration.** Human `POST /judge/calibrate` (or explicit `ALLOW_AUTO_JUDGE_CALIBRATION`) required.
 
 ## Tier map
 
 | Tier | Name | Goal | Prod gate |
 |------|------|------|-----------|
-| 0 | Clinical ANI | Neuro-symbolic + tools + battery scaffolding | Phases 0–5d + Phase 6 / Track D core — **done** |
-| 1 | Clinical AGI-class | Transfer on held-out bank; live cues move θ; free-label calibration | D.12 nightly + D.13 accel + soak → then `SIX_QUOTIENT_WEEKLY_LIVE` |
+| 0 | Clinical ANI | Neuro-symbolic + tools + battery scaffolding | Phases 0–5d + Phase 6 / Track D — **deployed / in soak** (not “done” until crisis SLA re-proven in *current* config) |
+| 1 | Clinical competence (was: “AGI-class”) | Transfer on held-out bank; live cues move θ; free-label calibration | D.14a infra shipped; **D.14b certification open**; then `SIX_QUOTIENT_WEEKLY_LIVE` |
 | 2 | Narrow AGI | Same mind across therapy / family / DOJO / truth-bound ops | Cross-domain batteries + privacy walls |
 | 3 | AGI | Open novel problems + gated self-improve | Sovereign train + formal verify |
 | 4 | ASI | Superhuman recursive improve | Containment + society-scale eval — **not a ship date** |
 
-## Clinical AGI-class exit criteria (Tier 1)
+## Tier-1 exit criteria (clinical competence)
 
-All must hold before any “clinical AGI-class” language:
+All must hold before any “clinical AGI-class” **or** “Tier-1 certified” language:
 
-1. **Nightly measure active** — `SIX_QUOTIENT_NIGHTLY_MEASURE=true`; `six_quotient_theta_trend` growing (nightly + Saturday transfer).
-2. **Held-out transfer** — `bank_held_out ≥ 5`; transfer Δ logged; ability θ not updated from transfer runs.
+1. **Nightly measure active** — `SIX_QUOTIENT_NIGHTLY_MEASURE=true`; `six_quotient_theta_trend` growing from **qualifying (non-smoke) nights** + Saturday transfer.
+2. **Held-out transfer** — `bank_held_out ≥ 5`; transfer Δ logged; ability θ not updated from transfer runs; series exists (not design-only).
 3. **Acceleration channel** — `ENABLE_SIX_QUOTIENT_ACCELERATION=true`; cycle sweep writes predictions; Brier computable when `n_clients ≥ 5` (sparse OK until then).
-4. **Weekly act gated** — `SIX_QUOTIENT_WEEKLY_LIVE=true` only after ≥7 nights of trend + human review of self-dev/CEO path.
-5. **Crisis / hallu SLA** — no high-severity hallucination crystals in audit windows; crisis false-negative below clinical SLA.
-6. **Gate script green** — `python3 backend/scripts/clinical_agi_class_gate_check.py` (read-only).
+4. **Weekly act gated** — `SIX_QUOTIENT_WEEKLY_LIVE=true` only after ≥7 qualifying nights + human/cross-family judge agreement gate + human review of self-dev/CEO path.
+5. **Crisis / hallu SLA** — re-proven **in the same evidence window as the current inference/judge deploy** (SI→988 + verifier); not a prior-phase soak alone.
+6. **Gate script green** — `clinical_tier1_competence_gate_check.py` hard gates + optional `TIER1_REQUIRE_CLEAN_TREE=true` + no BLOCKER lines (gold/soak/transfer).
+7. **Battery quarantine** — battery turns excluded from crystal harvest; battery-time recall cannot return battery-derived crystals (isolation audit).
+8. **Human-blinded gold** — ≥50 items, stratified, clinician-scored before judge; per-quotient κ with CIs; frozen judge version.
 
 ## Flag sequence (do not skip)
 

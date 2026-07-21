@@ -7,9 +7,9 @@
 
 ---
 
-## Executive verdict (updated 2026-07-21 — Clinical AGI-class spin D.14)
+## Executive verdict (updated 2026-07-21 — Tier-1 flywheel D.14a infra / D.14b open)
 
-Tier **1** path: flip `SIX_QUOTIENT_NIGHTLY_MEASURE` + `ENABLE_SIX_QUOTIENT_ACCELERATION` on GREEN; cycle engine `sweep_and_predict` feeds free labels into D.13; `WEEKLY_LIVE` stays false until ≥7 trend nights. Journey: `docs/CLINICAL_AGI_ASI_JOURNEY.md`. Gate script: `backend/scripts/clinical_agi_class_gate_check.py`. ASI = research horizon only (no prod flag).
+**D.14a infra shipped** (nightly+accel ON; preds+θ trends write). **D.14b certification NOT done** (Claude review REVISE CLAIMS). Prefer language **Tier 1 clinical competence**; do not treat “AGI-class” or κ@n=8 as certified. `WEEKLY_LIVE` stays false. θ = plumbing until transfer series + human-blinded gold. Journey: `docs/CLINICAL_AGI_ASI_JOURNEY.md`. ASI = research horizon only (no prod flag).
 
 ## Executive verdict (updated 2026-07-21 — D.13 acceleration)
 

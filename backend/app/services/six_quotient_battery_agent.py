@@ -156,6 +156,27 @@ class SixQuotientBatteryAgent:
         except Exception as e:
             logger.warning("weekly gen: %s", e)
 
+    async def _weekly_live_allowed(self) -> bool:
+        """QUANTUM-CRYSTAL-ARCH — refuse WEEKLY_LIVE until qualifying soak nights."""
+        if not self.db_pool:
+            return False
+        try:
+            async with self.db_pool.acquire() as conn:
+                try:
+                    n = await conn.fetchval(
+                        """SELECT COUNT(*) FROM six_quotient_theta_trend
+                           WHERE COALESCE(is_smoke,false)=false
+                             AND run_kind='nightly'"""
+                    )
+                except Exception:
+                    n = await conn.fetchval(
+                        "SELECT COUNT(*) FROM six_quotient_theta_trend WHERE run_kind='nightly'"
+                    )
+            return int(n or 0) >= 7
+        except Exception as e:
+            logger.warning("weekly live gate: %s", e)
+            return False
+
     async def _maybe_weekly(self):
         now = datetime.now(timezone.utc)
         if now.weekday() != 6 or not (6 <= now.hour < 7):
@@ -171,6 +192,11 @@ class SixQuotientBatteryAgent:
             "1", "true", "yes", "on",
         )
         live = live_ws and weekly_live
+        if live and not await self._weekly_live_allowed():
+            logger.warning(
+                "WEEKLY_LIVE requested but qualifying nightly trend <7 — forcing dry_run"
+            )
+            live = False
         result = await self.run_once(
             dry_run=not live,
             limit=0,
@@ -252,6 +278,8 @@ class SixQuotientBatteryAgent:
         keys = [str(s.get("scenario_key") or s.get("id")) for s in scenarios]
         run_kind = "transfer" if do_transfer else "nightly"
 
+        # QUANTUM-CRYSTAL-ARCH — D.14b: force/partial runs are smoke (not soak)
+        is_smoke = bool(force) or len(scenarios) < 6
         result = await self.run_once(
             dry_run=True,
             limit=len(scenarios),
@@ -261,6 +289,7 @@ class SixQuotientBatteryAgent:
             scenarios_override=scenarios,
             run_kind=run_kind,
             include_held_out=not do_transfer,
+            is_smoke=is_smoke,
         )
         run_id = result.get("run_id")
         if run_id:
@@ -334,6 +363,7 @@ class SixQuotientBatteryAgent:
                     scenario_count=len(scenarios),
                     seen_theta=seen_theta,
                     held_out_theta=held_out_theta,
+                    is_smoke=is_smoke,
                 )
             except Exception as e:
                 logger.warning("theta trend insert: %s", e)
@@ -388,6 +418,7 @@ class SixQuotientBatteryAgent:
         scenarios_override: Optional[List[Dict[str, Any]]] = None,
         run_kind: str = "weekly",
         include_held_out: bool = True,
+        is_smoke: bool = False,
     ) -> Dict[str, Any]:
         from app.services.six_quotient_pregrader import pregrade_battery
 
@@ -482,7 +513,13 @@ class SixQuotientBatteryAgent:
 
         if persist and self.db_pool:
             run_id = await self._persist(
-                pack, graded, environment, git_hash, status, run_kind=run_kind
+                pack,
+                graded,
+                environment,
+                git_hash,
+                status,
+                run_kind=run_kind,
+                is_smoke=is_smoke,
             )
             if run_id and use_mt:
                 await self._persist_transcripts(run_id, graded)
@@ -498,6 +535,7 @@ class SixQuotientBatteryAgent:
             "run_id": run_id,
             "status": status,
             "run_kind": run_kind,
+            "is_smoke": bool(is_smoke),
             "enabled": _flag_on(),
             "living": _living_on(),
             "git_hash": git_hash,
@@ -609,6 +647,7 @@ class SixQuotientBatteryAgent:
         git_hash: str,
         status: str,
         run_kind: str = "weekly",
+        is_smoke: bool = False,
     ) -> Optional[str]:
         run_id = str(uuid.uuid4())
         # Strip bulky turns from results_json summary (kept in transcripts table)
@@ -624,6 +663,7 @@ class SixQuotientBatteryAgent:
             "rubric": pack.get("rubric"),
             "results": slim,
             "run_kind": run_kind,
+            "is_smoke": bool(is_smoke),
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
         try:
@@ -632,8 +672,8 @@ class SixQuotientBatteryAgent:
                     await conn.execute(
                         """INSERT INTO six_quotient_runs
                            (id, battery_version, environment, git_hash, status,
-                            results_json, finished_at, run_kind)
-                           VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb, NOW(), $7)""",
+                            results_json, finished_at, run_kind, is_smoke)
+                           VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb, NOW(), $7, $8)""",
                         run_id,
                         pack.get("battery_version", "v4"),
                         environment,
@@ -641,21 +681,36 @@ class SixQuotientBatteryAgent:
                         status,
                         json.dumps(payload),
                         run_kind,
+                        bool(is_smoke),
                     )
                 except Exception:
-                    # Pre-migration 248: no run_kind column
-                    await conn.execute(
-                        """INSERT INTO six_quotient_runs
-                           (id, battery_version, environment, git_hash, status,
-                            results_json, finished_at)
-                           VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb, NOW())""",
-                        run_id,
-                        pack.get("battery_version", "v4"),
-                        environment,
-                        git_hash,
-                        status,
-                        json.dumps(payload),
-                    )
+                    try:
+                        await conn.execute(
+                            """INSERT INTO six_quotient_runs
+                               (id, battery_version, environment, git_hash, status,
+                                results_json, finished_at, run_kind)
+                               VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb, NOW(), $7)""",
+                            run_id,
+                            pack.get("battery_version", "v4"),
+                            environment,
+                            git_hash,
+                            status,
+                            json.dumps(payload),
+                            run_kind,
+                        )
+                    except Exception:
+                        await conn.execute(
+                            """INSERT INTO six_quotient_runs
+                               (id, battery_version, environment, git_hash, status,
+                                results_json, finished_at)
+                               VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb, NOW())""",
+                            run_id,
+                            pack.get("battery_version", "v4"),
+                            environment,
+                            git_hash,
+                            status,
+                            json.dumps(payload),
+                        )
             return run_id
         except Exception as e:
             logger.warning("persist battery run failed: %s", e)

@@ -441,6 +441,16 @@ async def recall_crystals_for_context(
         else:
             user_crystals = list(user_crystals) + deep_extras
 
+        # QUANTUM-CRYSTAL-ARCH — Tier-1 D.14b: drop battery-contaminated recall
+        try:
+            from app.services.six_quotient_battery_quarantine import filter_crystals
+
+            user_crystals = filter_crystals(list(user_crystals))
+            clinical_dna = filter_crystals(list(clinical_dna))
+            global_crystals = filter_crystals(list(global_crystals))
+        except Exception:
+            pass
+
         crystals = user_crystals + clinical_dna + list(global_crystals)
         if not crystals:
             return ""
@@ -976,6 +986,18 @@ async def crystallize_from_conversation(
     """
     if not db_pool or not hardware_id:
         return None
+    # QUANTUM-CRYSTAL-ARCH — Tier-1 D.14b: never forge crystals from battery turns
+    try:
+        from app.services.six_quotient_battery_quarantine import should_block_crystallize
+
+        if should_block_crystallize(
+            origin_surface=origin_surface or "",
+            user_text=user_text or "",
+            nate_response=nate_response or "",
+        ):
+            return None
+    except Exception:
+        pass
     is_voice = origin_surface == "voice_call"
     effective_min_len = _MIN_USER_LEN_VOICE if is_voice else _MIN_USER_LEN
     if len(user_text) < effective_min_len:

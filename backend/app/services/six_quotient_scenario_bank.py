@@ -298,22 +298,41 @@ async def insert_theta_trend(
     scenario_count: int = 0,
     seen_theta: Optional[float] = None,
     held_out_theta: Optional[float] = None,
+    is_smoke: bool = False,
 ) -> None:
     async with db_pool.acquire() as conn:
-        await conn.execute(
-            """INSERT INTO six_quotient_theta_trend
-               (environment, run_id, run_kind, theta, theta_by_section,
-                seen_theta, held_out_theta, scenario_count)
-               VALUES ($1, $2::uuid, $3, $4, $5::jsonb, $6, $7, $8)""",
-            environment,
-            run_id,
-            run_kind,
-            float(theta),
-            json.dumps(theta_by_section or {}),
-            seen_theta,
-            held_out_theta,
-            int(scenario_count or 0),
-        )
+        try:
+            await conn.execute(
+                """INSERT INTO six_quotient_theta_trend
+                   (environment, run_id, run_kind, theta, theta_by_section,
+                    seen_theta, held_out_theta, scenario_count, is_smoke)
+                   VALUES ($1, $2::uuid, $3, $4, $5::jsonb, $6, $7, $8, $9)""",
+                environment,
+                run_id,
+                run_kind,
+                float(theta),
+                json.dumps(theta_by_section or {}),
+                seen_theta,
+                held_out_theta,
+                int(scenario_count or 0),
+                bool(is_smoke),
+            )
+        except Exception:
+            # Pre-migration 251: no is_smoke column
+            await conn.execute(
+                """INSERT INTO six_quotient_theta_trend
+                   (environment, run_id, run_kind, theta, theta_by_section,
+                    seen_theta, held_out_theta, scenario_count)
+                   VALUES ($1, $2::uuid, $3, $4, $5::jsonb, $6, $7, $8)""",
+                environment,
+                run_id,
+                run_kind,
+                float(theta),
+                json.dumps(theta_by_section or {}),
+                seen_theta,
+                held_out_theta,
+                int(scenario_count or 0),
+            )
 
 
 async def latest_transfer_delta(db_pool, environment: str) -> Dict[str, Any]:
