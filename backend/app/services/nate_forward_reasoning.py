@@ -119,19 +119,31 @@ async def build_forward_constraints(
     if db_pool and (username or hardware_id):
         try:
             async with db_pool.acquire() as conn:
-                row = await conn.fetchrow(
+                # QUANTUM-CRYSTAL-ARCH — resolve to users.id (UUID); biometrics jsonb
+                uid = await conn.fetchval(
                     """
-                    SELECT c_emo, metrics_json
-                    FROM nevedal_metrics
-                    WHERE user_id IN ($1, $2)
-                    ORDER BY recorded_at DESC NULLS LAST
+                    SELECT id FROM users
+                    WHERE username = $1 OR hardware_id = $1
+                       OR username = $2 OR hardware_id = $2
                     LIMIT 1
                     """,
                     username or hardware_id,
                     hardware_id or username,
                 )
-            if row and row["metrics_json"]:
-                mj = row["metrics_json"]
+                row = None
+                if uid:
+                    row = await conn.fetchrow(
+                        """
+                        SELECT c_emo, biometrics
+                        FROM nevedal_metrics
+                        WHERE user_id = $1
+                        ORDER BY recorded_at DESC NULLS LAST
+                        LIMIT 1
+                        """,
+                        uid,
+                    )
+            if row and row["biometrics"]:
+                mj = row["biometrics"]
                 if isinstance(mj, str):
                     mj = json.loads(mj)
                 crisis = (mj or {}).get("crisis_perception") or {}

@@ -235,14 +235,15 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 
 ## Phase 5c — Forward reasoning
 
-**Flag:** `ENABLE_FORWARD_REASONING=false` (default)
+**Flag:** `ENABLE_FORWARD_REASONING` — operator-authorized flip 2026-07-21 (Nathan Nevedal; optional Kristy co-sign open)
 
 | Step | Action | Done |
 |------|--------|------|
-| 5c.1 | Phase 5b on and stable | [x] *(2026-07-21 — 5b.6 soak exit 0; FORWARD remains false until 5c.2–5c.4)* |
-| 5c.2 | Adversarial walk: `docs/AGENTIC_PHASE_5C_REVIEW.md` | [ ] |
-| 5c.3 | Seam tests: `test_forward_reasoning_seams.py` | [ ] |
-| 5c.4 | Staging → production flip | [ ] |
+| 5c.1 | Phase 5b on and stable | [x] *(2026-07-21 — 5b.6 soak exit 0)* |
+| 5c.2 | Adversarial walk: `docs/AGENTIC_PHASE_5C_REVIEW.md` | [x] *(Nathan Nevedal 2026-07-21 — all 5 gates; enable after 9/9 seams)* |
+| 5c.3 | Seam tests: `test_forward_reasoning_seams.py` | [x] *(9/9 offline 2026-07-21)* |
+| 5c.4 | Staging → production flip | [x] *(2026-07-21 — GREEN `.env` `ENABLE_FORWARD_REASONING=true`; safe_deploy bridge+backend vault 368→368; 132/132; biometrics+UUID fix)* |
+| 5c.5 | Optional live prod soak (`client1`) | [x] *(2026-07-21 — `prod_phase5c_ws_smoke.py` exit 0; flags true/true/true; `forward_reasoning n=3` slow_pacing/witness/hold_space)* |
 
 ---
 

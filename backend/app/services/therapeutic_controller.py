@@ -952,6 +952,11 @@ async def prepare_therapeutic_context(
         _fr_text = format_constraints_for_prompt(_constraints)
         if _fr_text:
             forward_reasoning_block = "\n" + _fr_text + "\n"
+            # QUANTUM-CRYSTAL-ARCH — Phase 5c soak visibility
+            print(
+                f">>> [THERAPEUTIC-CTRL] forward_reasoning n={len(_constraints)} "
+                f"types={[c.get('type') for c in _constraints]}"
+            )
     except Exception as _fr_exc:
         logger.warning("therapeutic_controller: forward reasoning skipped: %s", _fr_exc)
 
