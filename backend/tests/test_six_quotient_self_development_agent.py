@@ -64,8 +64,6 @@ def test_rank_weaknesses_prefers_red_then_low_theta():
 
 def test_run_once_no_db_returns_error():
     agent = SixQuotientSelfDevelopmentAgent(db_pool=None)
-    out = asyncio.get_event_loop().run_until_complete(
-        agent.run_once(enqueue=False, persist_drafts=False)
-    )
+    out = asyncio.run(agent.run_once(enqueue=False, persist_drafts=False))
     assert out.get("ok") is False
     assert out.get("error") == "no_db_pool"
