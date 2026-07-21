@@ -99,6 +99,15 @@ class _AttributedContext(str):
     crystal_ids: list = []
     crystal_scopes: list = []  # QUANTUM-CRYSTAL-ARCH — Phase 5b
 
+
+def scopes_from_recall_context(ctx) -> list:
+    """QUANTUM-CRYSTAL-ARCH: Phase 5b scopes off recall return (str or attributed)."""
+    try:
+        return list(getattr(ctx, "crystal_scopes", None) or [])[:50]
+    except Exception:
+        return []
+
+
 try:
     from .bridge_enrichment import (
         is_memory_turn as _enr_is_memory_turn,
@@ -492,9 +501,12 @@ async def recall_crystals_for_context(
         result = "\n".join(lines)
         # QUANTUM-CRYSTAL-ARCH: Commit 2 — expose which crystals were injected
         # so the bridge chat persist path can attribute the response to them.
-        if _ENABLE_CRYSTAL_ATTRIBUTION and crystal_ids:
+        # Scopes always attach when crystals recalled (verifier needs them even
+        # if attribution ids are disabled).
+        if crystal_ids:
             attributed = _AttributedContext(result)
-            attributed.crystal_ids = list(crystal_ids)[:50]
+            if _ENABLE_CRYSTAL_ATTRIBUTION:
+                attributed.crystal_ids = list(crystal_ids)[:50]
             # QUANTUM-CRYSTAL-ARCH — Phase 5b: scopes for symbolic verifier isolation
             # asyncpg Records are not dicts — read scope via mapping access.
             _scopes = []

@@ -31,6 +31,16 @@ def test_agent_capabilities_declare_live_and_reserved():
     assert len(reserved) >= 2
 
 
+def test_symbolic_verify_capability_live_when_flag_on(monkeypatch):
+    monkeypatch.setenv("ENABLE_ASK_NATE_SYMBOLIC", "true")
+    monkeypatch.setenv("ENABLE_SYMBOLIC_VERIFIER", "false")
+    caps = ci._capabilities_snapshot()
+    by_id = {c["id"]: c for c in caps}
+    assert by_id["symbolic_verify"]["status"] == "live"
+    env = ci._agentic_envelope("CLIENT_X", "q")
+    assert "symbolic_verify" in env["tools_live"]
+
+
 def test_ns_snapshot_formats_core_fields():
     snap = ci._ns_snapshot(
         {
@@ -73,8 +83,9 @@ async def test_build_pack_client_mode_assembles_sources(monkeypatch):
         return "[LIVED WISDOM]\nSession tip: stay with longing"
 
     async def _symbols(db, cid):
-        return ""
+        return '[SYMBOLIC LAYER — typed facts from prior turns]\n[{"type":"state"}]'
 
+    monkeypatch.setenv("ENABLE_ASK_NATE_SYMBOLIC", "true")
     monkeypatch.setattr(ci, "_load_crystals", _crystals)
     monkeypatch.setattr(ci, "_load_main_chat", _chat)
     monkeypatch.setattr(ci, "_load_metrics", _metrics)
@@ -100,8 +111,11 @@ async def test_build_pack_client_mode_assembles_sources(monkeypatch):
     assert "crystals" in meta["sources"]
     assert "main_chat" in meta["sources"]
     assert "lived_wisdom" in meta["sources"]
+    assert "symbolic_layer" in meta["sources"]
+    assert "SYMBOLIC VERIFY" in prefix
     assert meta["mode"] == "client"
     assert meta["agent_envelope"]["surface"] == "sovereign_command_ask_nate"
+    assert meta["flags"]["symbolic"] is True
 
 
 @pytest.mark.asyncio

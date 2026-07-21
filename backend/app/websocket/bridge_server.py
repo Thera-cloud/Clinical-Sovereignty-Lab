@@ -42,6 +42,7 @@ try:
         crystallize_from_conversation,
         crystallize_session_summary,
         crystallize_coach_observation,
+        scopes_from_recall_context,
     )
     from .nevedal_handlers import NevedalHandler
     from .sanctuary_engine import FamilySanctuaryEngine
@@ -62,6 +63,7 @@ except Exception:
         crystallize_from_conversation,
         crystallize_session_summary,
         crystallize_coach_observation,
+        scopes_from_recall_context,
     )
     from nevedal_handlers import NevedalHandler
     from sanctuary_engine import FamilySanctuaryEngine
@@ -10536,6 +10538,7 @@ class AzureCortex:
                     full_response = await _lspa_fb(
                         full_response, user_text=_qg_verbatim_user_text,
                         user_id=profile.get("username") or uid, db_pool=db_pool, profile=profile,
+                        crystal_scopes=list(_crystal_scopes_for_turn),
                     )
                 except Exception as _ttc_fb_err:
                     print(f">>> [THERAPEUTIC-CTRL] light fallback failed for {uid}: {_ttc_fb_err}")
@@ -11020,6 +11023,7 @@ class AzureCortex:
             wisdom_text = wisdom[:500] if wisdom else "Use family therapy principles."
 
             _member_crystal_parts = []
+            _sanctuary_scopes = []  # QUANTUM-CRYSTAL-ARCH — Phase 5b light verifier
             for _fp in family_profiles:
                 _fp_hw = _fp.get("hardware_id", "")
                 if _fp_hw:
@@ -11027,6 +11031,7 @@ class AzureCortex:
                     if _fp_ctx:
                         _fp_name = _fp.get("name", "Member")
                         _member_crystal_parts.append(f"[{_fp_name}'s memory]:\n{_fp_ctx}")
+                        _sanctuary_scopes.extend(scopes_from_recall_context(_fp_ctx))
             sanctuary_crystal_ctx = "\n\n".join(_member_crystal_parts) if _member_crystal_parts else ""
 
             # Pull short, relevant workbook guidance (local RAG) if available
@@ -11354,6 +11359,7 @@ class AzureCortex:
                     _u0 = (recent_messages[-1].get("content") if recent_messages else "") or ""
                     clean_response = await _lspa(
                         clean_response, user_text=_u0, user_id=hoh_id or "", db_pool=db_pool,
+                        crystal_scopes=_sanctuary_scopes,
                     )
                 except Exception:
                     pass
@@ -11445,6 +11451,7 @@ class AzureCortex:
                 db_pool, target_member.get("hardware_id", ""), max_results=5,
                 source="group_coaching", query_text=conversation[:200],
             )
+            _gc_scopes = scopes_from_recall_context(gc_crystal_ctx)  # QUANTUM-CRYSTAL-ARCH
 
             # Pull short, relevant workbook guidance (local RAG) if available
             workbook_guidance = ""
@@ -11662,7 +11669,10 @@ class AzureCortex:
                     try:
                         from app.services.therapeutic_controller import light_symbolic_post_audit as _lspa_gc
                         _gc_u = next((m.get("content") or "" for m in reversed(recent_messages[-8:]) if (m.get("sender_id") or m.get("user_id")) == _target_hw), "")
-                        _gc_response = await _lspa_gc(_gc_response, user_text=_gc_u, user_id=_target_hw, db_pool=db_pool)
+                        _gc_response = await _lspa_gc(
+                            _gc_response, user_text=_gc_u, user_id=_target_hw, db_pool=db_pool,
+                            crystal_scopes=_gc_scopes,
+                        )
                         result["suggested_response"] = _gc_response
                     except Exception:
                         pass
@@ -11731,6 +11741,7 @@ class AzureCortex:
                 metrics = self.metrics.load_metrics(member_profile)
                 triggering_message = coaching_session.get("triggering_message", "")
                 pc_crystal_ctx = await recall_crystals_for_context(db_pool, member_id or "", max_results=5, source="private_coaching", query_text=triggering_message[:200])  # QUANTUM-CRYSTAL-ARCH
+                _pc_scopes = scopes_from_recall_context(pc_crystal_ctx)  # QUANTUM-CRYSTAL-ARCH
                 
                 # Get coaching session context
                 attempt_number = coaching_session.get("attempt_number", 1)
@@ -11970,6 +11981,7 @@ class AzureCortex:
                         from app.services.therapeutic_controller import light_symbolic_post_audit as _lspa_pc
                         clean_response = await _lspa_pc(
                             clean_response, user_text=user_prompt, user_id=member_id or "", db_pool=db_pool,
+                            crystal_scopes=_pc_scopes,
                         )
                     except Exception:
                         pass

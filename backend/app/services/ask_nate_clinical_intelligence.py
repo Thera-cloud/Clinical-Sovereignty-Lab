@@ -46,7 +46,20 @@ _MAX_PROMPT_CHARS = 14000
 
 
 def _env_on(name: str, default: str = "false") -> bool:
-    return os.getenv(name, default).lower() in ("1", "true", "yes")
+    return (os.getenv(name, default) or "").strip().lower() in ("1", "true", "yes")
+
+
+def _capabilities_snapshot() -> List[Dict[str, str]]:
+    """QUANTUM-CRYSTAL-ARCH: flip symbolic_verify to live when Ask Nate symbolic is on."""
+    caps = [dict(c) for c in ASK_NATE_AGENT_CAPABILITIES]
+    if _env_on("ENABLE_ASK_NATE_SYMBOLIC") or _env_on("ENABLE_SYMBOLIC_VERIFIER"):
+        for c in caps:
+            if c["id"] == "symbolic_verify":
+                c["status"] = "live"
+                c["desc"] = (
+                    "Phase 5b: symbols in prompt + bridge process_interaction verifier"
+                )
+    return caps
 
 
 def _ns_snapshot(nevedal_state: Optional[Dict[str, Any]]) -> str:
@@ -212,8 +225,9 @@ async def _load_symbols(db_pool, client_id: str) -> str:
 
 def _agentic_envelope(client_id: str, query: str) -> Dict[str, Any]:
     """Reserved agent slot — structure only until ENABLE_ASK_NATE_AGENTIC."""
-    live = [c["id"] for c in ASK_NATE_AGENT_CAPABILITIES if c["status"] == "live"]
-    reserved = [c["id"] for c in ASK_NATE_AGENT_CAPABILITIES if c["status"] == "reserved"]
+    caps = _capabilities_snapshot()
+    live = [c["id"] for c in caps if c["status"] == "live"]
+    reserved = [c["id"] for c in caps if c["status"] == "reserved"]
     enabled = _env_on("ENABLE_ASK_NATE_AGENTIC")
     return {
         "surface": "sovereign_command_ask_nate",
@@ -221,7 +235,7 @@ def _agentic_envelope(client_id: str, query: str) -> Dict[str, Any]:
         "client_id": client_id or None,
         "query_preview": (query or "")[:120],
         "tools_live": live,
-        "tools_reserved": reserved if enabled else reserved,
+        "tools_reserved": reserved,
         "neuro_symbolic_ready": _env_on("ENABLE_ASK_NATE_SYMBOLIC"),
         "odpe_domain": "clinical",
         "inference_hint": "TENSION preferred for clinical depth when ODPE classifies tension",
@@ -300,6 +314,14 @@ async def build_ask_nate_prompt_pack(
         if symbols:
             parts.append(symbols)
             sources.append("symbolic_layer")
+            # QUANTUM-CRYSTAL-ARCH — Phase 5b Ask Nate symbolic seam
+            parts.append(
+                "[SYMBOLIC VERIFY — advisory]\n"
+                "Treat [SYMBOLIC LAYER] as typed prior facts. Do not contradict them "
+                "without saying the memory layer is incomplete. Never invent crisis "
+                "resources; if distress is present, cite 988 only when clinically warranted "
+                "for the CLIENT (advise the admin — do not therapy the admin)."
+            )
 
         parts.append(
             f"[FOCUS CLIENT ID]: {cid}\n"
@@ -343,12 +365,13 @@ async def build_ask_nate_prompt_pack(
             "client_id": cid or None,
             "sources": sources,
             "memory_used": bool(sources),
-            "capabilities": ASK_NATE_AGENT_CAPABILITIES,
+            "capabilities": _capabilities_snapshot(),
             "agent_envelope": agent_envelope,
             "flags": {
                 "clinical_intel": True,
                 "symbolic": _env_on("ENABLE_ASK_NATE_SYMBOLIC"),
                 "agentic": _env_on("ENABLE_ASK_NATE_AGENTIC"),
+                "symbolic_verifier": _env_on("ENABLE_SYMBOLIC_VERIFIER"),
             },
         },
     }

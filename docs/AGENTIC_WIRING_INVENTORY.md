@@ -74,7 +74,7 @@ Phases **0–5** code paths are **implemented behind feature flags** (see rollou
 
 | Layer | File | Rule |
 |-------|------|------|
-| Recall query filters | `backend/app/websocket/crystal_recall_bridge.py` | `scope NOT IN ('archived')`, `superseded_by IS NULL`; user slot `confidence >= 0.30`, global `>= 0.55` |
+| Recall query filters | `backend/app/websocket/crystal_recall_bridge.py` | User: `(scope = 'user' OR scope LIKE 'user:%')`; global: `scope = 'global'`; `superseded_by IS NULL`; user conf `>= 0.30`, global `>= 0.55` |
 | Orphan write guard | `crystal_recall_bridge.py` → `crystallize_from_conversation()` | Refuses insert if `user_uuid` unresolved (fail-closed on `scope='user'`) |
 | Crystallizer scope | `backend/app/services/nate_memory_crystallizer.py` | Fragment `scope`: `user:{id}`, `global`, `admin_only`, `response_pattern`; decay → `archived` |
 | Sensitive factory L1/L2 | `sensitive_clinical_bridge.py` → `_load_crystal_factory_layer1/2()` | User `scope != 'archived'` OR global; L2 requires `scope='response_pattern'` |
@@ -221,7 +221,7 @@ Pre-build verification for Neuro-Symbolic Layer — merged into [`.cursor/plans/
 | Bridge hook | `bridge_server.py` `ask_nate_coaching` — additive pack inject + `ask_nate_intel_meta` |
 | Live layers | crystals (`source=ask_nate_command`), main chat, lived wisdom, classroom, Nevedal metrics |
 | Flag (default on) | `ENABLE_ASK_NATE_CLINICAL_INTEL=true` |
-| Neuro-symbolic seam | `ENABLE_ASK_NATE_SYMBOLIC` → reads `conversation_history.metadata.symbols` |
+| Neuro-symbolic seam | `ENABLE_ASK_NATE_SYMBOLIC` → reads `conversation_history.metadata.symbols` + verify guidance; `symbolic_verify` capability flips **live** when symbolic or `ENABLE_SYMBOLIC_VERIFIER` on; Ask Nate replies still go through bridge `process_interaction` post-audit |
 | Agentic seam | `ENABLE_ASK_NATE_AGENTIC` → capability envelope only (no tool dispatch yet) |
 | Tests | `backend/tests/test_ask_nate_clinical_intelligence_seams.py` |
 

@@ -236,3 +236,15 @@ async def test_light_symbolic_post_audit_appends_988(monkeypatch):
         db_pool=None,
     )
     assert "988" in out
+
+
+def test_scopes_from_recall_context_helper():
+    from app.websocket.crystal_recall_bridge import (
+        _AttributedContext,
+        scopes_from_recall_context,
+    )
+
+    assert scopes_from_recall_context("plain") == []
+    attributed = _AttributedContext("x")
+    attributed.crystal_scopes = ["user", "global"]
+    assert scopes_from_recall_context(attributed) == ["user", "global"]

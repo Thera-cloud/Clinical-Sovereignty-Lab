@@ -129,12 +129,16 @@ def _default_phone_instructions(username: str, db_pool=None, user_id=None) -> st
     )
 
 
-async def _build_grounded_voice_prompt(username: str, db_pool) -> str:
-    """Build a system prompt grounded with crystal context and conversation history."""
+async def _build_grounded_voice_prompt(username: str, db_pool):
+    """Build a system prompt grounded with crystal context and conversation history.
+
+    QUANTUM-CRYSTAL-ARCH: returns (prompt, crystal_scopes) for Phase 5b light audit.
+    """
     who = username or "friend"
 
     crystal_context = "No prior history with this user."
     recent_summary = "First conversation with this user."
+    crystal_scopes: list = []
 
     if db_pool and username:
         if _crystal_recall:
@@ -142,6 +146,7 @@ async def _build_grounded_voice_prompt(username: str, db_pool) -> str:
                 ctx = await _crystal_recall(db_pool, username, max_results=8, source="voice_call")
                 if ctx:
                     crystal_context = ctx
+                    crystal_scopes = list(getattr(ctx, "crystal_scopes", None) or [])[:50]
                     print(f"[VOICE-MEMORY] crystal recall returned {len(ctx)} chars for {username}")
                 else:
                     print(f"[VOICE-MEMORY] no crystals found for {username}")
@@ -231,7 +236,7 @@ async def _build_grounded_voice_prompt(username: str, db_pool) -> str:
     except Exception:
         pass
 
-    return (
+    prompt = (
         memory_block
         + story_block
         + pop_block
@@ -255,6 +260,7 @@ async def _build_grounded_voice_prompt(username: str, db_pool) -> str:
         "You will receive the search results as a follow-up message. Summarize them conversationally. "
         "Never say you cannot search the internet.\n"
     )
+    return prompt, crystal_scopes
 
 
 def _rissc_params_for_profile(profile: str):
@@ -1172,6 +1178,7 @@ async def run_twilio_grok_xtts_bridge(
     session_start: Optional[float] = None
     session_call_sid: Optional[str] = None
     session_username: Optional[str] = None
+    _session_crystal_scopes: list = []  # QUANTUM-CRYSTAL-ARCH — Phase 5b
     slot_acquired = False
     user_turns: List[Dict[str, Any]] = []
     assistant_turns: List[Dict[str, Any]] = []
@@ -1533,10 +1540,13 @@ async def run_twilio_grok_xtts_bridge(
                 _voice_db = ctx.get("db_pool")
                 if _voice_db and uname:
                     try:
-                        instructions = await _build_grounded_voice_prompt(uname, _voice_db)
+                        instructions, _session_crystal_scopes = await _build_grounded_voice_prompt(
+                            uname, _voice_db
+                        )
                     except Exception as e:
                         logger.warning("Grounded voice prompt failed, using default: %s", e)
                         instructions = _default_phone_instructions(uname)
+                        _session_crystal_scopes = []
                 else:
                     instructions = _default_phone_instructions(uname)
                 if grok_task and not grok_task.done():
@@ -1701,6 +1711,7 @@ async def run_twilio_grok_xtts_bridge(
                                     _a = await _lspa_v(
                                         _a, user_text=_u, user_id=session_username,
                                         db_pool=db_pool,
+                                        crystal_scopes=_session_crystal_scopes,
                                     )
                                 except Exception:
                                     pass
