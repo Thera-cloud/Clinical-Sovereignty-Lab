@@ -3,9 +3,9 @@ description: All 117 services must remain healthy at startup. Never introduce ch
 alwaysApply: true
 ---
 
-# 129/129 Service Health Requirement
+# 133/133 Service Health Requirement
 
-The backend reports `STARTUP COMPLETE: N/129 services healthy` on boot. The target is **129/129 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
+The backend reports `STARTUP COMPLETE: N/133 services healthy` on boot. The target is **133/133 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
 
 > Service #117 is `account_event_reconciler` (added 2026-05-17 as part of the user creation audit hook). It runs on every boot regardless of `ENABLE_USER_CREATION_HOOK`; when the flag is off it is a silent no-op so the count stays stable.
 

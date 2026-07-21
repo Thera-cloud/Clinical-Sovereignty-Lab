@@ -533,6 +533,29 @@ async def get_ability_state(request: Request, environment: str = "staging"):
     return {"status": "ok", "ability": await get_ability(pool, environment)}
 
 
+class SelfDevTriggerBody(BaseModel):
+    environment: str = "production"
+    persist_drafts: bool = True
+    enqueue: bool = True
+    n_drafts: int = 2
+
+
+@router.post("/self-dev/trigger")
+async def trigger_self_development(body: SelfDevTriggerBody, request: Request):
+    """On-demand Nate self-development proposal (bi-weekly agent also runs)."""
+    # QUANTUM-CRYSTAL-ARCH
+    agent = getattr(request.app.state, "six_quotient_self_dev_agent", None)
+    if not agent or not hasattr(agent, "run_once"):
+        raise HTTPException(503, "six_quotient_self_dev_agent unavailable")
+    result = await agent.run_once(
+        environment=body.environment,
+        persist_drafts=body.persist_drafts,
+        enqueue=body.enqueue,
+        n_drafts=body.n_drafts,
+    )
+    return {"status": "ok", "result": result}
+
+
 @router.get("/judge/gold")
 async def judge_gold(request: Request):
     from app.services.six_quotient_judge_calibration import load_gold

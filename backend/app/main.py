@@ -2836,6 +2836,19 @@ async def lifespan(app: FastAPI):
     except Exception as _sqba_err:
         print(f"   ⚠️  SixQuotientBatteryAuditor init failed: {_sqba_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — bi-weekly self-dev proposals → CEO YELLOW inbox
+    _six_q_self_dev_agent = None
+    try:
+        from app.services.six_quotient_self_development_agent import (
+            SixQuotientSelfDevelopmentAgent,
+        )
+        _six_q_self_dev_agent = SixQuotientSelfDevelopmentAgent(db_pool, app_state=app.state)
+        await _six_q_self_dev_agent.start()
+        app.state.six_quotient_self_dev_agent = _six_q_self_dev_agent
+        print("   ✅ SixQuotientSelfDevelopmentAgent started (ENABLE_SIX_QUOTIENT_SELF_DEV)")
+    except Exception as _sqsd_err:
+        print(f"   ⚠️  SixQuotientSelfDevelopmentAgent init failed: {_sqsd_err}")
+
     # ── Nate Check-In Agent — 72h inactivity outreach for clients + coaches ──
     _nate_checkin_agent = None
     try:
@@ -3320,6 +3333,7 @@ async def lifespan(app: FastAPI):
         ("six_quotient_battery_agent", _six_q_battery_agent is not None),  # QUANTUM-CRYSTAL-ARCH
         ("six_quotient_standards_index", _six_q_standards is not None),  # QUANTUM-CRYSTAL-ARCH
         ("six_quotient_battery_auditor", _six_q_battery_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("six_quotient_self_dev_agent", _six_q_self_dev_agent is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", _nate_checkin_agent is not None),
         ("nate_commitment_agent", _nate_commitment_agent is not None),
         ("nate_self_monitor_agent", _nate_self_monitor_agent is not None),
@@ -3480,6 +3494,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ SixQuotientBatteryAuditor stopped")
         except Exception as _sqba_stop:
             print(f"   ⚠️  SixQuotientBatteryAuditor shutdown: {_sqba_stop}")
+    _six_q_self_dev_h = getattr(app.state, "six_quotient_self_dev_agent", None)  # QUANTUM-CRYSTAL-ARCH
+    if _six_q_self_dev_h:
+        try:
+            await _six_q_self_dev_h.stop()
+            print("   ✅ SixQuotientSelfDevelopmentAgent stopped")
+        except Exception as _sqsd_stop:
+            print(f"   ⚠️  SixQuotientSelfDevelopmentAgent shutdown: {_sqsd_stop}")
     if _sse_orchestrator:
         try:
             await _sse_orchestrator.stop()

@@ -7,9 +7,13 @@
 
 ---
 
+## Executive verdict (updated 2026-07-21 — Track D + self-dev)
+
+Phase **6** + Track D flags live on GREEN (battery, living, standards, gen, `LIVE_WS=true`). Self-dev agent: `ENABLE_SIX_QUOTIENT_SELF_DEV` (default false) → `SixQuotientSelfDevelopmentAgent` + `POST /api/admin/six-quotient/self-dev/trigger` → CEO YELLOW `six_quotient_self_dev`. Neuro-symbolic Phase 5a–5d remains ON.
+
 ## Executive verdict (updated 2026-07-21 — Phase 6.7 prod ON)
 
-Phase **6** core flywheel live on GREEN: `ENABLE_SIX_QUOTIENT_BATTERY=true`, `SIX_QUOTIENT_BATTERY_LIVE_WS=false`. Staging 6.1–6.6 + prod smoke verified. Track D living/standards/gen remain **false** (D.8). Neuro-symbolic Phase 5a–5d remains ON.
+Phase **6** core flywheel live on GREEN: `ENABLE_SIX_QUOTIENT_BATTERY=true`, `SIX_QUOTIENT_BATTERY_LIVE_WS=false`. Staging 6.1–6.6 + prod smoke verified. Track D living/standards/gen remain **false** (D.8). Neuro-symbolic Phase 5a–5d remains ON. *(Superseded — see Track D + self-dev verdict.)*
 
 ## Executive verdict (updated 2026-07-21 — Phase 6 pre-flip ready)
 
@@ -37,6 +41,7 @@ Phases **0–5** code paths are **implemented behind feature flags** (see rollou
 | 5a–5d | Symbolic extractor/verifier, forward reasoning, graph isolation, phi auditor extension | `ENABLE_SYMBOLIC_*`, `ENABLE_FORWARD_REASONING`, `ENABLE_CRYSTAL_GRAPH` |
 | 6 | Six-quotient battery agent/API/runner, growth engine, auditor | `ENABLE_SIX_QUOTIENT_BATTERY`, `SIX_QUOTIENT_BATTERY_LIVE_WS` |
 | D | Living battery v5 (bank/standards/gen) | `ENABLE_SIX_QUOTIENT_LIVING_*`, `*_STANDARDS_INDEX`, `*_SCENARIO_GEN` |
+| D.9 | Bi-weekly self-dev → CEO YELLOW inbox | `ENABLE_SIX_QUOTIENT_SELF_DEV` |
 
 **Prior snapshot (pre-build) below retained for audit trail.**
 
