@@ -137,7 +137,7 @@ class TestAutoJudgeFailure(unittest.IsolatedAsyncioTestCase):
 class TestAuditorSeventeen(unittest.TestCase):
     def test_count(self):
         total = sum(len(t["endpoints"]) for t in _aud.TAB_ENDPOINTS)
-        self.assertEqual(total, 17)
+        self.assertEqual(total, 18)
 
 
 if __name__ == "__main__":

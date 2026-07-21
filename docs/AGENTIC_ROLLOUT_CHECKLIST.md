@@ -303,6 +303,7 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 | D.10 | Stale `awaiting_scores` runs → `failed` (status CHK) | [x] *(2026-07-21 — `cca31e87…`)* |
 | D.11 | Gap close: battery→live therapy, CEO self-dev apply, BATTERY_ENV=production, WEEKLY_LIVE gate, page standards, crystal conf≥0.58, auditor 15 | [x] *(2026-07-21 — `9ea513a8` GREEN; mig 247; LIVE_CONTEXT=true; WEEKLY_LIVE=false; apply→AQ live_focus; addendum CEO cue; 6 battery crystals ≥0.55; C-SSRS page pending_review; 133/133)* |
 | D.12 | Nightly measure / weekly act: holdout+trend mig 248, auto-judge, `SIX_QUOTIENT_NIGHTLY_MEASURE`, auditor 17 | [ ] *(code `ca46ee91` — pending push + GREEN mig 248 + smoke; flag stays false until smoke)* |
+| D.13 | Acceleration: cycle Brier + PGSD channel + PMB-mined drafts, mig 249, `ENABLE_SIX_QUOTIENT_ACCELERATION`, auditor 18 | [ ] *(pending commit/push + GREEN mig 249 + smoke; flag stays false until smoke)* |
 
 ---
 

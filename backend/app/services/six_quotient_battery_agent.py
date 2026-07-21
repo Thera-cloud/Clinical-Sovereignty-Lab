@@ -188,6 +188,17 @@ class SixQuotientBatteryAgent:
             )
         except Exception:
             result["transfer"] = {}
+        # QUANTUM-CRYSTAL-ARCH — D.13 PGSD/world-model enrichment + PMB bank growth
+        try:
+            from app.services.six_quotient_acceleration import run_acceleration_pass
+
+            result["acceleration"] = await run_acceleration_pass(
+                self.db_pool,
+                environment=_battery_env(),
+                mine_pmb=True,
+            )
+        except Exception as e:
+            result["acceleration"] = {"ok": False, "error": str(e)[:160]}
         self._last_run_date = day_key
         self.last_result = result
         logger.info("Weekly six-quotient battery finished: %s", result.get("run_id"))
@@ -320,6 +331,20 @@ class SixQuotientBatteryAgent:
             except Exception as e:
                 logger.warning("theta trend insert: %s", e)
 
+        # QUANTUM-CRYSTAL-ARCH — D.13 acceleration (world-model + PGSD; PMB mine on Sat)
+        accel: Dict[str, Any] = {"skipped": True}
+        try:
+            from app.services.six_quotient_acceleration import run_acceleration_pass
+
+            accel = await run_acceleration_pass(
+                self.db_pool,
+                environment=env,
+                mine_pmb=do_transfer,
+            )
+        except Exception as e:
+            logger.warning("acceleration pass: %s", e)
+            accel = {"ok": False, "error": str(e)[:160]}
+
         self._last_nightly_date = day_key
         out = {
             "ok": bool(result.get("ok") and judge_out.get("ok")),
@@ -328,6 +353,7 @@ class SixQuotientBatteryAgent:
             "scenarios": len(scenarios),
             "judge": judge_out,
             "theta": trend_theta,
+            "acceleration": accel,
         }
         self.last_nightly_result = out
         logger.info(

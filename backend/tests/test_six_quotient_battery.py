@@ -290,13 +290,13 @@ class TestAiEvaluatorGate(unittest.TestCase):
 
 
 class TestAuditorEndpointCount(unittest.TestCase):
-    def test_seventeen_checks(self):
+    def test_eighteen_checks(self):
         aud = _load(
             "app.services.six_quotient_battery_auditor",
             APP / "services" / "six_quotient_battery_auditor.py",
         )
         total = sum(len(t["endpoints"]) for t in aud.TAB_ENDPOINTS)
-        self.assertEqual(total, 17)
+        self.assertEqual(total, 18)
 
 
 class TestMultiTurnProcess(unittest.TestCase):

@@ -7,9 +7,13 @@
 
 ---
 
+## Executive verdict (updated 2026-07-21 — D.13 acceleration)
+
+Phase **6** + Track D. **`ENABLE_SIX_QUOTIENT_ACCELERATION`** (default false): cycle prediction resolve → Brier (≥5 clients), PGSD coherence delta + θ correlation, optional PMB-mined `pending_review` bank drafts (`source=pmb_mined`, requires scenario gen flag). Wired into nightly + weekly battery ticks; `GET/POST .../acceleration`. Mig **249**. Auditor expected **18**.
+
 ## Executive verdict (updated 2026-07-21 — D.12 nightly measure)
 
-Phase **6** + Track D on GREEN. **`SIX_QUOTIENT_NIGHTLY_MEASURE`** (default false): 02–03 UTC dry-run rotation + `grok-judge-v1` auto-score + `six_quotient_theta_trend` (no CEO / no crystals / no `live_focus`). Saturday transfer = held-out only (trend, not ability). Weekly act unchanged (Sunday 06–07). **`SIX_QUOTIENT_BATTERY_LIVE_WS` alone does not fire Sunday live** — needs `SIX_QUOTIENT_WEEKLY_LIVE`. CEO APPROVE `six_quotient_self_dev` → `live_focus`. Live cues: `ENABLE_SIX_QUOTIENT_LIVE_CONTEXT`. Auditor expected **17**.
+Phase **6** + Track D on GREEN. **`SIX_QUOTIENT_NIGHTLY_MEASURE`** (default false): 02–03 UTC dry-run rotation + `grok-judge-v1` auto-score + `six_quotient_theta_trend` (no CEO / no crystals / no `live_focus`). Saturday transfer = held-out only (trend, not ability). Weekly act unchanged (Sunday 06–07). **`SIX_QUOTIENT_BATTERY_LIVE_WS` alone does not fire Sunday live** — needs `SIX_QUOTIENT_WEEKLY_LIVE`. CEO APPROVE `six_quotient_self_dev` → `live_focus`. Live cues: `ENABLE_SIX_QUOTIENT_LIVE_CONTEXT`. Auditor expected **18** (D.13).
 
 ## Executive verdict (updated 2026-07-21 — Phase 6.7 prod ON)
 
@@ -44,6 +48,7 @@ Phases **0–5** code paths are **implemented behind feature flags** (see rollou
 | D.9 | Bi-weekly self-dev → CEO YELLOW inbox | `ENABLE_SIX_QUOTIENT_SELF_DEV` |
 | D.11 | Live therapy cues + CEO apply focus | `ENABLE_SIX_QUOTIENT_LIVE_CONTEXT` |
 | D.12 | Nightly measure / holdout transfer trend | `SIX_QUOTIENT_NIGHTLY_MEASURE` |
+| D.13 | Cycle Brier / PGSD / PMB bank seeds | `ENABLE_SIX_QUOTIENT_ACCELERATION` |
 
 **Prior snapshot (pre-build) below retained for audit trail.**
 

@@ -648,3 +648,45 @@ async def trigger_nightly(body: NightlyTriggerBody, request: Request):
     ):
         raise HTTPException(409, result.get("error") or "nightly off")
     return {"status": "ok", "result": result}
+
+
+class AccelTriggerBody(BaseModel):
+    environment: str = "production"
+    mine_pmb: bool = False
+
+
+@router.get("/acceleration")
+async def acceleration_status(request: Request, environment: str = "production"):
+    """Latest world-model / PGSD acceleration snapshot (never empty {})."""
+    # QUANTUM-CRYSTAL-ARCH — D.13
+    pool = _pool(request)
+    from app.services.six_quotient_acceleration import (
+        acceleration_enabled,
+        compute_pgsd_live_channel,
+        compute_world_model_calibration,
+    )
+
+    world = await compute_world_model_calibration(pool)
+    pgsd = await compute_pgsd_live_channel(pool, environment)
+    return {
+        "status": "ok",
+        "enabled": acceleration_enabled(),
+        "world_model": world,
+        "pgsd": pgsd,
+        "environment": environment,
+    }
+
+
+@router.post("/acceleration/trigger")
+async def acceleration_trigger(body: AccelTriggerBody, request: Request):
+    """On-demand acceleration pass (resolve cycles + calibrate + optional PMB mine)."""
+    # QUANTUM-CRYSTAL-ARCH
+    pool = _pool(request)
+    from app.services.six_quotient_acceleration import run_acceleration_pass
+
+    result = await run_acceleration_pass(
+        pool, environment=body.environment, mine_pmb=body.mine_pmb
+    )
+    if result.get("skipped") and not result.get("ok"):
+        raise HTTPException(409, result.get("error") or "acceleration off")
+    return {"status": "ok", "result": result}
