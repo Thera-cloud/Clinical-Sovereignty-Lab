@@ -130,15 +130,24 @@ class SixQuotientStandardsIndex:
             if resp.status != 200:
                 return []
             text = await resp.text()
-        root = ElementTree.fromstring(text)
-        items = []
+        # QUANTUM-CRYSTAL-ARCH — many pro feeds serve HTML-wrapped/invalid XML; parse then regex fallback
+        items = self._parse_rss_xml(text)
+        if not items:
+            items = self._parse_rss_regex(text)
+        return items[:15]
+
+    def _parse_rss_xml(self, text: str) -> List[Dict[str, str]]:
+        try:
+            root = ElementTree.fromstring(text)
+        except Exception:
+            return []
+        items: List[Dict[str, str]] = []
         for item in root.findall(".//item")[:15]:
             title = (item.findtext("title") or "").strip()
             link = (item.findtext("link") or "").strip()
             if title and link:
                 items.append({"title": title, "url": link})
         if not items:
-            # Atom
             ns = {"a": "http://www.w3.org/2005/Atom"}
             for entry in root.findall(".//a:entry", ns)[:15]:
                 title = (entry.findtext("a:title", default="", namespaces=ns) or "").strip()
@@ -146,6 +155,21 @@ class SixQuotientStandardsIndex:
                 link = (link_el.get("href") if link_el is not None else "") or ""
                 if title and link:
                     items.append({"title": title, "url": link})
+        return items
+
+    def _parse_rss_regex(self, text: str) -> List[Dict[str, str]]:
+        """Best-effort extract when ElementTree rejects the feed body."""
+        items: List[Dict[str, str]] = []
+        for block in re.findall(r"<item\b[^>]*>(.*?)</item>", text, flags=re.I | re.S)[:15]:
+            tm = re.search(r"<title[^>]*>(.*?)</title>", block, flags=re.I | re.S)
+            lm = re.search(r"<link[^>]*>(.*?)</link>", block, flags=re.I | re.S)
+            if not lm:
+                lm = re.search(r'href=["\'](https?://[^"\']+)["\']', block, flags=re.I)
+            title = re.sub(r"<[^>]+>", "", tm.group(1)).strip() if tm else ""
+            link = (lm.group(1) if lm else "").strip()
+            link = re.sub(r"<[^>]+>", "", link).strip()
+            if title and link.startswith("http"):
+                items.append({"title": title[:500], "url": link[:1000]})
         return items
 
     async def _store_candidate(

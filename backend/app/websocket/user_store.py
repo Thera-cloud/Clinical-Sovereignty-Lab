@@ -203,8 +203,8 @@ class UserStore:
             logger.warning("[UserStore] Invalid email format")
             return False
 
-        # Validate role
-        valid_roles = {"CLIENT", "COACH", "ADMIN"}
+        # Validate role (match users_role_check — CORP_ADMIN/RESEARCHER are valid in PG)
+        valid_roles = {"CLIENT", "COACH", "ADMIN", "CORP_ADMIN", "RESEARCHER"}
         if role and role.upper() not in valid_roles:
             logger.warning(f"[UserStore] Invalid role: {role}")
             return False
