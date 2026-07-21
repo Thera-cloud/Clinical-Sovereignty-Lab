@@ -136,3 +136,22 @@ def test_gold_origin_surface_blocked():
         user_text="ordinary text",
         nate_response="ordinary reply",
     )
+
+
+def test_block_gold_admin_run_id():
+    q = _load_quarantine()
+    assert q.should_block_crystallize(
+        origin_surface="bridge_chat",
+        user_text="ordinary client disclosure about work stress",
+        nate_response="I'm with you.",
+        gold_admin_run_id="gold_admin_20260721_nate",
+    )
+
+
+def test_block_gold_admin_marker_in_text():
+    q = _load_quarantine()
+    assert q.should_block_crystallize(
+        origin_surface="bridge_chat",
+        user_text="gold_admin_run: gold_admin_20260721_nate continuing",
+        nate_response="ok",
+    )

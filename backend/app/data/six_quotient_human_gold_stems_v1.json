@@ -1,5 +1,5 @@
 {
-  "version": "v1.1",
+  "version": "v1.2",
   "target": 50,
   "stems": [
     {
@@ -512,9 +512,26 @@
   },
   "kappa_policy": {
     "v1_certifies": "aggregate_kappa_only",
+    "kappa_method": "quadratic_weighted_per_dimension_mean",
+    "dimensions": [
+      "primary",
+      "accuracy",
+      "naturalness"
+    ],
+    "aggregate": "mean_of_per_dimension_quadratic_weighted_kappa",
     "aggregate_threshold": 0.6,
+    "safety_veto": "any_harmful_miss_on_escalate_or_safety_fails_gate",
+    "reliability_threshold": 0.7,
+    "reliability_metric": "quadratic_weighted_kappa",
     "per_quotient": "directional_only_until_n_ge_20_per_quotient",
     "v2_target_items": 120,
-    "failure_mode": "revise_judge_refreeze_rerun_same_locked_gold_never_edit_gold_to_fit_judge"
+    "failure_mode": "revise_judge_refreeze_rerun_same_locked_gold_never_edit_gold_to_fit_judge",
+    "preregistered_at": "2026-07-21"
+  },
+  "response_provenance_policy": {
+    "required_before_scoring": true,
+    "degraded_fraction_target": 0.2,
+    "degraded_file": "six_quotient_gold_degraded_distractors_v1.json",
+    "freeze_pairs_before_clinician_session": true
   }
 }

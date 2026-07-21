@@ -113,14 +113,26 @@ async def _main() -> int:
     inferred = 0
     try:
         mapping = await _responses_from_runs(conn)
-        rows = await conn.fetch(
-            """SELECT id, scenario_id, section, client_says, nate_response
-               FROM six_quotient_human_gold
-               WHERE COALESCE(nate_response, '') = ''
-               ORDER BY section, scenario_id
-               LIMIT $1""",
-            max(1, args.limit),
-        )
+        try:
+            rows = await conn.fetch(
+                """SELECT id, scenario_id, section, client_says, nate_response
+                   FROM six_quotient_human_gold
+                   WHERE COALESCE(nate_response, '') = ''
+                     AND COALESCE(is_degraded_distractor, false) = false
+                     AND COALESCE(pairs_locked, false) = false
+                   ORDER BY section, scenario_id
+                   LIMIT $1""",
+                max(1, args.limit),
+            )
+        except Exception:
+            rows = await conn.fetch(
+                """SELECT id, scenario_id, section, client_says, nate_response
+                   FROM six_quotient_human_gold
+                   WHERE COALESCE(nate_response, '') = ''
+                   ORDER BY section, scenario_id
+                   LIMIT $1""",
+                max(1, args.limit),
+            )
         app_state = None
         if args.infer_missing:
             try:
@@ -140,13 +152,25 @@ async def _main() -> int:
                     inferred += 1
             if not text:
                 continue
-            await conn.execute(
-                """UPDATE six_quotient_human_gold
-                   SET nate_response = $2
-                   WHERE id = $1 AND COALESCE(nate_response, '') = ''""",
-                r["id"],
-                text,
-            )
+            try:
+                await conn.execute(
+                    """UPDATE six_quotient_human_gold
+                       SET nate_response = $2,
+                           response_provenance = 'nate_genuine_attempt'
+                       WHERE id = $1
+                         AND COALESCE(nate_response, '') = ''
+                         AND COALESCE(pairs_locked, false) = false""",
+                    r["id"],
+                    text,
+                )
+            except Exception:
+                await conn.execute(
+                    """UPDATE six_quotient_human_gold
+                       SET nate_response = $2
+                       WHERE id = $1 AND COALESCE(nate_response, '') = ''""",
+                    r["id"],
+                    text,
+                )
             filled += 1
 
         total = await conn.fetchval("SELECT COUNT(*) FROM six_quotient_human_gold")

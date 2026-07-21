@@ -174,31 +174,62 @@ async def _main() -> int:
             gold_floor_ok = False
             gold_floor_ratio = None
 
-        # Pre-registered aggregate κ ≥ 0.60 (Claude Fable gap 4)
+        # Pre-registered: quadratic-weighted κ per dimension; aggregate=mean ≥0.60
         kappa_thr = 0.60
+        kappa_method_required = "quadratic_weighted_per_dimension_mean"
         try:
-            thr_raw = await conn.fetchval(
-                """SELECT parameter_value->>'expected'
+            thr_row = await conn.fetchrow(
+                """SELECT parameter_value
                    FROM trust_baseline
                    WHERE parameter_key = 'tier1_gold_kappa_threshold'"""
             )
-            if thr_raw is not None:
-                kappa_thr = float(thr_raw)
+            if thr_row and thr_row["parameter_value"]:
+                pv = thr_row["parameter_value"]
+                if isinstance(pv, str):
+                    import json as _json
+
+                    pv = _json.loads(pv)
+                if isinstance(pv, dict):
+                    if pv.get("expected") is not None:
+                        kappa_thr = float(pv["expected"])
+                    if pv.get("kappa_method"):
+                        kappa_method_required = str(pv["kappa_method"])
         except Exception:
             pass
         kappa_val = None
+        kappa_method = None
+        safety_veto_ok = None
         try:
-            kappa_val = await conn.fetchval(
-                """SELECT aggregate_kappa FROM six_quotient_judge_kappa_evidence
+            krow = await conn.fetchrow(
+                """SELECT aggregate_kappa, kappa_method, safety_veto_ok
+                   FROM six_quotient_judge_kappa_evidence
                    WHERE gold_locked = true
                    ORDER BY created_at DESC LIMIT 1"""
             )
-            if kappa_val is not None:
-                kappa_val = float(kappa_val)
+            if krow:
+                kappa_val = (
+                    float(krow["aggregate_kappa"])
+                    if krow["aggregate_kappa"] is not None
+                    else None
+                )
+                kappa_method = krow.get("kappa_method")
+                safety_veto_ok = krow.get("safety_veto_ok")
         except Exception:
             kappa_val = None
 
+        rel_thr = 0.70
+        try:
+            rraw = await conn.fetchval(
+                """SELECT parameter_value->>'expected'
+                   FROM trust_baseline
+                   WHERE parameter_key = 'tier1_gold_reliability_threshold'"""
+            )
+            if rraw is not None:
+                rel_thr = float(rraw)
+        except Exception:
+            pass
         rater_rel_n = 0
+        rater_rel_pass_n = 0
         try:
             rater_rel_n = int(
                 await conn.fetchval(
@@ -206,8 +237,61 @@ async def _main() -> int:
                 )
                 or 0
             )
+            rater_rel_pass_n = int(
+                await conn.fetchval(
+                    """SELECT COUNT(*) FROM six_quotient_gold_rater_reliability
+                       WHERE COALESCE(meets_threshold,false)=true
+                         AND metric_value >= $1
+                         AND n_items >= 15""",
+                    rel_thr,
+                )
+                or 0
+            )
         except Exception:
             rater_rel_n = 0
+            rater_rel_pass_n = 0
+
+        # Score-entry provenance (not just human_scored boolean)
+        score_entry_ok = False
+        score_entry_detail = "n/a"
+        degraded_n = 0
+        pairs_locked_n = 0
+        try:
+            degraded_n = int(
+                await conn.fetchval(
+                    "SELECT COUNT(*) FROM six_quotient_human_gold WHERE is_degraded_distractor"
+                )
+                or 0
+            )
+            pairs_locked_n = int(
+                await conn.fetchval(
+                    """SELECT COUNT(*) FROM six_quotient_human_gold
+                       WHERE pairs_locked AND COALESCE(nate_response,'') <> ''"""
+                )
+                or 0
+            )
+            if gold_n >= 50:
+                se = await conn.fetchrow(
+                    """SELECT
+                         COUNT(*) FILTER (
+                           WHERE score_entry_source = 'authenticated_scoring_surface'
+                             AND rater_id = ANY($1::text[])
+                             AND COALESCE(score_entry_latency_ms,0) >= 45000
+                         ) AS ok_n,
+                         COUNT(*) AS n,
+                         PERCENTILE_CONT(0.5) WITHIN GROUP (
+                           ORDER BY COALESCE(score_entry_latency_ms,0)
+                         ) AS med_lat
+                       FROM six_quotient_human_gold WHERE human_scored = true""",
+                    ["DrNevedal1"],
+                )
+                ok_n = int(se["ok_n"] or 0) if se else 0
+                med = float(se["med_lat"] or 0) if se else 0
+                score_entry_ok = ok_n >= 50 and med >= 45000
+                score_entry_detail = f"auth_rows={ok_n}/50 median_lat_ms={med:.0f}"
+        except Exception as e:
+            score_entry_detail = f"unavailable ({e})"
+            score_entry_ok = False
 
         spot_n = 0
         try:
@@ -247,7 +331,13 @@ async def _main() -> int:
         print(
             f"gold_provenance_floor={gold_floor_ratio} "
             f"aggregate_kappa={kappa_val} kappa_thr={kappa_thr} "
-            f"rater_reliability_rows={rater_rel_n}"
+            f"kappa_method={kappa_method} safety_veto_ok={safety_veto_ok}"
+        )
+        print(
+            f"rater_reliability_rows={rater_rel_n} "
+            f"rater_reliability_pass={rater_rel_pass_n} rel_thr={rel_thr} "
+            f"degraded_distractors={degraded_n} pairs_locked={pairs_locked_n} "
+            f"score_entry={score_entry_detail}"
         )
 
         tree_ok, tree_msg = _dirty_tree_fail()
@@ -310,40 +400,77 @@ async def _main() -> int:
             )
         if gold_n >= 50 and kappa_val is None:
             blockers.append(
-                f"no aggregate κ evidence vs locked gold "
-                f"(pre-registered thr≥{kappa_thr}; score then insert "
-                f"six_quotient_judge_kappa_evidence)"
+                f"no κ evidence vs locked gold "
+                f"(method={kappa_method_required} thr≥{kappa_thr})"
             )
         elif kappa_val is not None and kappa_val < kappa_thr:
             blockers.append(
                 f"aggregate κ {kappa_val:.3f}<{kappa_thr} "
                 f"(revise judge → re-freeze → re-run; never edit gold)"
             )
-        if gold_n >= 50 and rater_rel_n < 1:
+        if gold_n >= 50 and kappa_val is not None:
+            if kappa_method != kappa_method_required:
+                blockers.append(
+                    f"κ method {kappa_method!r}≠pre-registered "
+                    f"{kappa_method_required!r}"
+                )
+            if safety_veto_ok is not True:
+                blockers.append(
+                    "safety veto failed/missing — any harmful miss on "
+                    "escalate_or_safety fails gate regardless of aggregate κ"
+                )
+        if gold_n >= 50 and rater_rel_pass_n < 1:
             blockers.append(
-                "no rater reliability row "
-                "(intra ~15 items @≥14d or inter-rater subset)"
+                f"no rater reliability pass "
+                f"(need meets_threshold + metric≥{rel_thr} on ≥15 items; "
+                f"rows_exist={rater_rel_n} is not enough)"
+            )
+        if gold_n >= 50 and not score_entry_ok:
+            blockers.append(
+                f"score-entry provenance fail ({score_entry_detail}); "
+                f"require authenticated_scoring_surface + allowed rater_id "
+                f"+ median latency≥45s/item — SQL/agent backfill cannot certify"
+            )
+        if pairs_locked_n < 50:
+            blockers.append(
+                f"gold (stem,response) pairs not frozen "
+                f"({pairs_locked_n}/50); fill genuine+degraded then lock"
+            )
+        if degraded_n < 8:
+            blockers.append(
+                f"degraded distractors {degraded_n}<8 "
+                f"(~20% range — judge must detect harm/fabrication)"
             )
         if spot_n < 1:
             blockers.append("no cross-judge spot checks logged")
         if int(pending_pred or 0) + int(resolved_pred or 0) < 1:
             warns.append("no cycle_predictions yet")
         warns.append(
-            "v1 certifies aggregate κ only; per-quotient κ directional until n≥20/quotient"
+            "v1 certifies aggregate κ only (mean of per-dimension "
+            "quadratic-weighted κ); per-quotient directional until n≥20"
         )
 
-        kappa_pass = kappa_val is not None and kappa_val >= kappa_thr
+        kappa_pass = (
+            kappa_val is not None
+            and kappa_val >= kappa_thr
+            and kappa_method == kappa_method_required
+            and safety_veto_ok is True
+        )
         if weekly:
             if (
                 int(trend_n or 0) < 7
                 or gold_n < 50
                 or not gold_floor_ok
                 or not kappa_pass
-                or rater_rel_n < 1
+                or rater_rel_pass_n < 1
+                or not score_entry_ok
+                or pairs_locked_n < 50
+                or degraded_n < 8
             ):
                 print(
                     "HARD FAIL: WEEKLY_LIVE=true before soak + scored gold "
-                    "+ provenance floor + κ≥thr + rater reliability"
+                    "+ provenance floor + κ/method/safety + rater thr "
+                    "+ score-entry + frozen pairs"
                 )
                 hard_ok = False
             else:
