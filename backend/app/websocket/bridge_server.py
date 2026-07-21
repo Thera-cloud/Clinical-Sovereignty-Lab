@@ -9137,16 +9137,29 @@ class AzureCortex:
                 return ""
 
         async def _fetch_plan_context():
+            # QUANTUM-CRYSTAL-ARCH: coach plans + cycle skill micro-plans
             if not _cpool or _role != "CLIENT":
                 return ""
-            if os.environ.get("ENABLE_THERAPEUTIC_PLANS", "").lower() not in ("true", "1", "yes"):
-                return ""
-            try:
-                from app.services.nate_therapeutic_plan_service import get_active_plan_context
-                # QUANTUM-CRYSTAL-ARCH: plans may key by username or hardware_id
-                return await get_active_plan_context(_cpool, _uname or _hw_id)
-            except Exception:
-                return ""
+            blocks = []
+            _plans_on = os.environ.get("ENABLE_THERAPEUTIC_PLANS", "").lower() in ("true", "1", "yes")
+            _cycle_on = os.environ.get("ENABLE_CYCLE_SKILL_PLANS", "").lower() in ("true", "1", "yes")
+            if _plans_on:
+                try:
+                    from app.services.nate_therapeutic_plan_service import get_active_plan_context
+                    _pc = await get_active_plan_context(_cpool, _uname or _hw_id)
+                    if _pc:
+                        blocks.append(_pc)
+                except Exception:
+                    pass
+            if _cycle_on:
+                try:
+                    from app.services.cycle_skill_plan_service import build_cycle_skill_plan_context
+                    _cc = await build_cycle_skill_plan_context(_cpool, _uname or _hw_id)
+                    if _cc:
+                        blocks.append(_cc)
+                except Exception:
+                    pass
+            return "\n\n".join(blocks)
 
         relational_context, checkin_context, crystal_context, pg_history_context, intake_context, fsf_context, reconnect_context, _enrich_addendum, trial_context_block, plan_context_block = await asyncio.gather(
             _timed("relational", self._get_relational_context(profile)),
@@ -9737,7 +9750,7 @@ class AzureCortex:
         {"Note: TRIAL CONTEXT summarizes the anonymous trial chat before this account was created." if trial_context_block else ""}
 
         {plan_context_block}
-        {"Note: THERAPEUTIC PLAN context reflects coach-assigned step progress — reference naturally when relevant." if plan_context_block else ""}
+        {"Note: THERAPEUTIC / CYCLE SKILL PLAN context — coach steps and/or cycle-matched short practices (grounding, mindful noticing, CBT/DBT/ACT skills). Offer at most one practice; prefer body/ground first when activated; stack only after the client completes a step. Check in on prior practice before advancing. Never dump a syllabus or reading list." if plan_context_block else ""}
 
         FAMILY SANCTUARY HISTORY (This is the users OWN conversation history from sessions they participated in. It is appropriate and therapeutic to reference their words back to them. This is NOT confidential information about others - it is their own experience.):
         {sanctuary_context}
@@ -10867,6 +10880,16 @@ class AzureCortex:
                         db_pool,
                         user_id=profile.get("username") or uid,
                         conversation_text=_qg_verbatim_user_text,
+                    )
+                except Exception:
+                    pass
+                # QUANTUM-CRYSTAL-ARCH: cycle → stacked skill plans + check-ins
+                try:
+                    from app.services.cycle_skill_plan_service import schedule_cycle_skill_plan_tick
+                    schedule_cycle_skill_plan_tick(
+                        db_pool,
+                        user_id=profile.get("username") or uid,
+                        user_text=_qg_verbatim_user_text,
                     )
                 except Exception:
                     pass
