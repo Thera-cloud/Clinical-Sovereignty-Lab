@@ -128,11 +128,11 @@ async def _fast_recall_crystals(conn, user_uuid, query_text: str, max_user: int 
             rows = await conn.fetch(
                 """
                 WITH topic_matched AS (
-                    SELECT id, crystal_text, confidence, domain, metadata
+                    SELECT id, crystal_text, confidence, domain, metadata, scope
                     FROM nate_intelligence_crystals
                     WHERE user_id = $1
                       AND confidence >= 0.30
-                      AND scope NOT IN ('archived')
+                      AND scope NOT IN ('archived', 'admin_only')
                       AND superseded_by IS NULL
                       AND (crystal_status IS NULL OR crystal_status = 'production')
                       AND to_tsvector('english', crystal_text) @@ plainto_tsquery('english', $2)
@@ -141,11 +141,11 @@ async def _fast_recall_crystals(conn, user_uuid, query_text: str, max_user: int 
                     LIMIT 3
                 ),
                 recent_user AS (
-                    SELECT id, crystal_text, confidence, domain, metadata
+                    SELECT id, crystal_text, confidence, domain, metadata, scope
                     FROM nate_intelligence_crystals
                     WHERE user_id = $1
                       AND confidence >= 0.30
-                      AND scope NOT IN ('archived')
+                      AND scope NOT IN ('archived', 'admin_only')
                       AND superseded_by IS NULL
                       AND (crystal_status IS NULL OR crystal_status = 'production')
                       AND id NOT IN (SELECT id FROM topic_matched)
@@ -161,11 +161,11 @@ async def _fast_recall_crystals(conn, user_uuid, query_text: str, max_user: int 
         else:
             rows = await conn.fetch(
                 """
-                SELECT id, crystal_text, confidence, domain, metadata, 'recent' as source
+                SELECT id, crystal_text, confidence, domain, metadata, scope, 'recent' as source
                 FROM nate_intelligence_crystals
                 WHERE user_id = $1
                   AND confidence >= 0.30
-                  AND scope NOT IN ('archived')
+                  AND scope NOT IN ('archived', 'admin_only')
                   AND superseded_by IS NULL
                   AND (crystal_status IS NULL OR crystal_status = 'production')
                 ORDER BY created_at DESC, confidence DESC
@@ -182,7 +182,7 @@ async def _fast_recall_crystals(conn, user_uuid, query_text: str, max_user: int 
     _now = _t.monotonic()
     if _global_crystal_cache["expires"] < _now or not _global_crystal_cache["rows"]:
         _g_top_all = await conn.fetch(
-            "SELECT id, crystal_text, confidence, domain, metadata "
+            "SELECT id, crystal_text, confidence, domain, metadata, scope "
             "FROM nate_intelligence_crystals "
             "WHERE user_id IS NULL AND confidence >= 0.55 "
             "AND scope = 'global' AND superseded_by IS NULL "
@@ -228,7 +228,7 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
             if user_uuid:
                 _u_cold_cnt = await conn.fetchval(
                     "SELECT count(*) FROM nate_intelligence_crystals "
-                    "WHERE user_id = $1 AND confidence >= 0.30 AND scope NOT IN ('archived') "
+                    "WHERE user_id = $1 AND confidence >= 0.30 AND scope NOT IN ('archived', 'admin_only') "
                     "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
                     "AND (crystal_status IS NULL OR crystal_status = 'production') "
                     "AND created_at > NOW() - INTERVAL '180 days'",
@@ -236,9 +236,9 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
                 )
                 if _u_cold_cnt > 0:
                     _cold = await conn.fetch(
-                        "SELECT id, crystal_text, confidence, domain, metadata "
+                        "SELECT id, crystal_text, confidence, domain, metadata, scope "
                         "FROM nate_intelligence_crystals "
-                        "WHERE user_id = $1 AND confidence >= 0.30 AND scope NOT IN ('archived') "
+                        "WHERE user_id = $1 AND confidence >= 0.30 AND scope NOT IN ('archived', 'admin_only') "
                         "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
                         "AND (crystal_status IS NULL OR crystal_status = 'production') "
                         "AND created_at > NOW() - INTERVAL '180 days' "
@@ -259,7 +259,7 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
                 )
                 if _g_cold_cnt > 0:
                     _g_cold = await conn.fetch(
-                        "SELECT id, crystal_text, confidence, domain, metadata "
+                        "SELECT id, crystal_text, confidence, domain, metadata, scope "
                         "FROM nate_intelligence_crystals "
                         "WHERE user_id IS NULL AND confidence >= 0.55 AND scope = 'global' "
                         "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
@@ -273,7 +273,7 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
 
                 _g_topic = await conn.fetch(
                     """
-                    SELECT id, crystal_text, confidence, domain, metadata
+                    SELECT id, crystal_text, confidence, domain, metadata, scope
                     FROM nate_intelligence_crystals
                     WHERE user_id IS NULL
                       AND confidence >= 0.55
@@ -300,7 +300,7 @@ async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text
             )
             if _dna_cnt > 0:
                 _dna_rows = await conn.fetch(
-                    "SELECT id, crystal_text, confidence, domain, metadata "
+                    "SELECT id, crystal_text, confidence, domain, metadata, scope "
                     "FROM nate_intelligence_crystals "
                     "WHERE user_id IS NULL AND confidence >= 0.85 AND scope = 'global' "
                     "AND superseded_by IS NULL AND origin_surface IN ('growth_engine', 'clinical_edge_seed') "
@@ -496,9 +496,14 @@ async def recall_crystals_for_context(
             attributed = _AttributedContext(result)
             attributed.crystal_ids = list(crystal_ids)[:50]
             # QUANTUM-CRYSTAL-ARCH — Phase 5b: scopes for symbolic verifier isolation
-            attributed.crystal_scopes = [
-                str(c.get("scope") or "global") for c in crystals if isinstance(c, dict)
-            ][:50]
+            # asyncpg Records are not dicts — read scope via mapping access.
+            _scopes = []
+            for c in crystals:
+                try:
+                    _scopes.append(str(c["scope"] if "scope" in c.keys() else "global"))
+                except Exception:
+                    _scopes.append(str((c.get("scope") if isinstance(c, dict) else None) or "global"))
+            attributed.crystal_scopes = _scopes[:50]
             return attributed
         return result
     except Exception as e:
@@ -641,7 +646,7 @@ async def retrieve_anticipatory_crystals(
                    WHERE metadata->>'anticipatory' = 'true'
                      AND metadata->>'target_user_id' = $1
                      AND created_at > NOW() - INTERVAL '14 days'
-                     AND scope NOT IN ('archived')
+                     AND scope NOT IN ('archived', 'admin_only')
                      AND (crystal_status IS NULL OR crystal_status = 'production')
                    ORDER BY created_at DESC
                    LIMIT 5""",

@@ -203,9 +203,12 @@ Pre-build verification for Neuro-Symbolic Layer — merged into [`.cursor/plans/
 | Extractor piggybacks crystallizer LLM | **False** | `crystallize_from_conversation()` is heuristic-only, zero LLM (`crystal_recall_bridge.py` ~907–916) |
 | Phase 5a hook timing | **Locked** | Same post-turn `asyncio.create_task` bundle as crystallize (~10643–10648); StateSymbol deterministic; CommitmentSymbol utility-tier async LLM |
 | `sensitivity` source | **Locked** | Set after LLM parse from PII/Sensitive-Bridge signals — **not** from LLM JSON |
-| Verifier regen on symbolic violation | **Not yet** | Extend `_audit_violations()`; add `symbolic_violation_regen` branch (max 1 LLM regen); second failure → `resolve_audit_fallback()` / `TRANSPARENT_AUDIT_FALLBACK_MESSAGE` |
-| Verifier logging | **Partial today** | Primary: `sse_therapeutic_audit_log` via `_log_audit()`; add `skyeye_activity` type `symbolic_verifier_action` (dual-write) |
-| `mismatch_delivered` as fallback | **Wrong for 5b** | Existing mismatch path unchanged; symbolic second-failure uses transparent audit fallback, not mismatch semantics |
+| Verifier regen on symbolic violation | **Shipped (5b)** | `ENABLE_SYMBOLIC_VERIFIER`; max 1 LLM regen; 988 append always; `crisis_exempt` skips LLM only |
+| Verifier logging | **Shipped (5b)** | `sse_therapeutic_audit_log` + `skyeye_activity` type `symbolic_verifier_action`; admin REST `/api/admin/symbolic-verifier/*` |
+| Surfaces covered | **Chat + sanctuary/group/private/voice light path** | Full TTC on bridge chat; `light_symbolic_post_audit` on other WS/voice surfaces; prepare-fail falls back to light audit |
+| Crystal scope isolation | **Fixed** | Recall SELECT includes `scope`; excludes `admin_only`; `scope_allows_recall` accepts plain `user` |
+| Forward reasoning (5c) | **Pre-wired, flag off** | `profile` passed into `build_forward_constraints`; compose default `ENABLE_FORWARD_REASONING=false` |
+| `mismatch_delivered` as fallback | **Unchanged** | Existing mismatch path unchanged; symbolic second-failure uses transparent audit fallback, not mismatch semantics |
 
 **Correction to gap matrix:** commitment extract row will be satisfied by **shared** Phase 1/5a `nate_commitment_extractor.py` — one module, not two extraction paths.
 

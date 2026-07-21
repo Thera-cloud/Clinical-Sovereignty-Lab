@@ -4355,6 +4355,15 @@ try:
 except Exception as _tp_err:
     print(f"   ⚠️  therapeutic_plan_api router failed: {_tp_err}")
 
+# QUANTUM-CRYSTAL-ARCH — Phase 5b symbolic verifier telemetry
+try:
+    from app.routers.symbolic_verifier_api import router as symbolic_verifier_router
+
+    app.include_router(symbolic_verifier_router)
+    print("   ✅ symbolic_verifier_api router mounted")
+except Exception as _sv_err:
+    print(f"   ⚠️  symbolic_verifier_api router failed: {_sv_err}")
+
 
 # QUANTUM-CRYSTAL-ARCH: conditional routers — mount if dependencies are satisfied
 for _rmod, _ralias in [

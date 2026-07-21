@@ -12,6 +12,8 @@ from app.services.therapeutic_controller import (
     _symbolic_audit_violations,
     _symbolic_has_crisis_resource,
     audit_therapeutic_response,
+    ensure_crisis_resource_in_text,
+    light_symbolic_post_audit,
 )
 
 
@@ -203,3 +205,34 @@ async def test_missing_988_appended_even_when_crisis_exempt(monkeypatch):
     )
     assert "988" in out["response_text"]
     assert "symbolic_crisis_resource_missing" not in (out.get("violations") or [])
+
+
+def test_ensure_crisis_resource_reasserts_after_strip():
+    meta = {"tmc_class": "crisis"}
+    assert "988" in ensure_crisis_resource_in_text("Hard day.", meta)
+    already = "Call 988 now."
+    assert ensure_crisis_resource_in_text(already, meta) == already
+
+
+def test_plain_user_scope_does_not_trip_isolation():
+    v = _symbolic_audit_violations(
+        "I hear you.",
+        {
+            "state_symbol": {},
+            "tmc_class": "coaching",
+            "crystal_scopes": ["user", "global"],
+            "requester_user_id": "client1",
+        },
+    )
+    assert "symbolic_scope_isolation" not in v
+
+
+@pytest.mark.asyncio
+async def test_light_symbolic_post_audit_appends_988(monkeypatch):
+    out = await light_symbolic_post_audit(
+        "I'm here with you.",
+        user_text="I want to kill myself",
+        user_id="client1",
+        db_pool=None,
+    )
+    assert "988" in out

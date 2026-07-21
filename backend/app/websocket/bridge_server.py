@@ -10154,6 +10154,7 @@ class AzureCortex:
                     # bridge steps 15 (mandatory reporting) + 16 (coach alert) can fire.
                     session_id=_turn_id,
                     coach_id=(profile.get("assigned_coach") or None),
+                    profile=profile,  # QUANTUM-CRYSTAL-ARCH — Phase 5c trial exclusion
                 )
                 if _ttc_pack:
                     system_prompt = _ttc_pack.get("enriched_system_prompt", system_prompt)
@@ -10498,8 +10499,8 @@ class AzureCortex:
             if _ttc_audit_meta and full_response.strip():
                 try:
                     # QUANTUM-CRYSTAL-ARCH: Phase 5a/5b — StateSymbol for extract persist + verifier
-                    _sym_ext_on = os.environ.get("ENABLE_SYMBOLIC_EXTRACTION", "").lower() in ("true", "1", "yes")
-                    _sym_ver_on = os.environ.get("ENABLE_SYMBOLIC_VERIFIER", "").lower() in ("true", "1", "yes")
+                    _sym_ext_on = os.getenv("ENABLE_SYMBOLIC_EXTRACTION", "false").strip().lower() in ("1", "true", "yes")
+                    _sym_ver_on = os.getenv("ENABLE_SYMBOLIC_VERIFIER", "false").strip().lower() in ("1", "true", "yes")
                     if _sym_ext_on or _sym_ver_on:
                         from dataclasses import asdict
                         from app.services.nate_commitment_extractor import build_state_symbol
@@ -10514,7 +10515,11 @@ class AzureCortex:
                             "crisis",
                             "suicide_ideation",
                         )
-                        _ttc_audit_meta["requester_user_id"] = uid
+                        _ttc_audit_meta["requester_user_id"] = (
+                            _ttc_audit_meta.get("requester_user_id")
+                            or profile.get("username")
+                            or uid
+                        )
                     from app.services.therapeutic_controller import audit_therapeutic_response as _ttc_post
                     _ttc_audited = await _ttc_post(
                         response_text=full_response, audit_metadata=_ttc_audit_meta,
@@ -10686,6 +10691,17 @@ class AzureCortex:
                         print(f">>> [LAYER 9] Queens Guard L3 blocked output for {uid}")
                 except Exception as _qg_err:
                     print(f">>> [LAYER 9] Queens Guard L3 error (non-fatal): {_qg_err}")
+
+            # QUANTUM-CRYSTAL-ARCH — Phase 5b: re-assert 988 after stance/sanitize/L8/L9
+            if _ttc_audit_meta and _final_response.strip():
+                try:
+                    from app.services.therapeutic_controller import ensure_crisis_resource_in_text as _ens_988
+                    _fixed_988 = _ens_988(_final_response, _ttc_audit_meta)
+                    if _fixed_988 != _final_response:
+                        _final_response = _fixed_988
+                        await self._send(uid, _final_response, client_context=_ctx, turn_id=_turn_id)
+                except Exception:
+                    pass
 
             # QUANTUM-CRYSTAL-ARCH — LIMINAL RESOLVE post-response
             if _lr_engine and lr_context and _final_response.strip():
@@ -11321,6 +11337,16 @@ class AzureCortex:
                     "crisis_level": crisis_level,
                     "tokens_est": tokens_est,
                 })
+
+                # QUANTUM-CRYSTAL-ARCH — Phase 5b: symbolic verifier before crystallize
+                try:
+                    from app.services.therapeutic_controller import light_symbolic_post_audit as _lspa
+                    _u0 = (recent_messages[-1].get("content") if recent_messages else "") or ""
+                    clean_response = await _lspa(
+                        clean_response, user_text=_u0, user_id=hoh_id or "", db_pool=db_pool,
+                    )
+                except Exception:
+                    pass
                     
                 try:
                     _hw_by_id = {p.get("hardware_id", ""): p.get("name", "Member") for p in family_profiles if p.get("hardware_id")}
@@ -11622,6 +11648,14 @@ class AzureCortex:
                     _target_hw = target_member.get("hardware_id", "")
                     _target_name = target_member.get("name", "")
                     _gc_response = result.get("suggested_response", "")
+                    # QUANTUM-CRYSTAL-ARCH — Phase 5b verifier on group coaching suggestion
+                    try:
+                        from app.services.therapeutic_controller import light_symbolic_post_audit as _lspa_gc
+                        _gc_u = next((m.get("content") or "" for m in reversed(recent_messages[-8:]) if (m.get("sender_id") or m.get("user_id")) == _target_hw), "")
+                        _gc_response = await _lspa_gc(_gc_response, user_text=_gc_u, user_id=_target_hw, db_pool=db_pool)
+                        result["suggested_response"] = _gc_response
+                    except Exception:
+                        pass
                     # QUANTUM-CRYSTAL-ARCH — GA hardening: sweep target's latest message (flag-gated)
                     for _sb_m in reversed(recent_messages[-8:]):
                         if (_sb_m.get("sender_id") or _sb_m.get("user_id")) == _target_hw and _sb_m.get("content"):
@@ -11920,6 +11954,15 @@ class AzureCortex:
 
                     clean_response, _ = self._extract_eft_markers(response_text)
                     clean_response, _ = self._extract_recon_markers(clean_response)
+
+                    # QUANTUM-CRYSTAL-ARCH — Phase 5b verifier on private coaching
+                    try:
+                        from app.services.therapeutic_controller import light_symbolic_post_audit as _lspa_pc
+                        clean_response = await _lspa_pc(
+                            clean_response, user_text=user_prompt, user_id=member_id or "", db_pool=db_pool,
+                        )
+                    except Exception:
+                        pass
 
                     # QUANTUM-CRYSTAL-ARCH — GA hardening: detection-only bridge sweep (flag-gated)
                     _sb_surface_sweep(db_pool, member_id or "", user_prompt, "private_coaching")

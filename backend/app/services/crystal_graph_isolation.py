@@ -31,6 +31,13 @@ def scope_allows_recall(scope: Optional[str], owner_user_id: Optional[str], requ
         return False
     if s == "global":
         return owner_user_id is None
+    # QUANTUM-CRYSTAL-ARCH: DB personal crystals use scope='user' (not user:<id>)
+    if s == "user":
+        if owner_user_id is None:
+            return True  # already filtered by recall SQL; verifier passes owner=None
+        if not requester_user_id:
+            return False
+        return str(owner_user_id) == str(requester_user_id)
     if s.startswith("user:"):
         if not requester_user_id:
             return False

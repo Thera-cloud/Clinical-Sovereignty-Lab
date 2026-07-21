@@ -699,6 +699,8 @@ async def prepare_therapeutic_context(
     # Defaults (None) preserve prior behavior at every other call site.
     session_id: Optional[str] = None,
     coach_id: Optional[str] = None,
+    # QUANTUM-CRYSTAL-ARCH — Phase 5c: profile for trial exclusion in forward reasoning
+    profile: Optional[dict] = None,
 ) -> dict:
     """Classify state, assemble context, shape prompt + cap. Always returns
     a dict; on partial failure, fields default to the original prompt/cap.
@@ -938,7 +940,7 @@ async def prepare_therapeutic_context(
             hardware_id=user_id,
             state_symbol=_state_sym,
             nevedal_snapshot={"c_emo": ec_current, "c_emo_trend": _emo_trend},
-            profile=None,
+            profile=profile if isinstance(profile, dict) else None,
         )
         _fr_text = format_constraints_for_prompt(_constraints)
         if _fr_text:
@@ -1023,6 +1025,78 @@ _SYMBOLIC_CRISIS_MARKERS = re.compile(
     r"\b(?:988|741741|838255|267-5463|copline|veterans crisis line)\b",
     re.IGNORECASE,
 )
+
+
+_CRISIS_RESOURCE_SUFFIX = (
+    " If you're in crisis, call or text 988 for support, "
+    "or text HOME to 741741."
+)
+
+
+def ensure_crisis_resource_in_text(response_text: str, audit_metadata: Optional[dict] = None) -> str:
+    """QUANTUM-CRYSTAL-ARCH: Re-assert 988 after post-processors that may strip it."""
+    meta = audit_metadata or {}
+    tmc = (meta.get("tmc_class") or "").lower()
+    if tmc not in ("crisis", "suicide_ideation"):
+        return response_text or ""
+    text = response_text or ""
+    if _symbolic_has_crisis_resource(text, meta):
+        return text
+    return text.rstrip() + _CRISIS_RESOURCE_SUFFIX
+
+
+async def light_symbolic_post_audit(
+    response_text: str,
+    *,
+    user_text: str,
+    user_id: str,
+    db_pool,
+    profile: Optional[dict] = None,
+    crystal_scopes: Optional[list] = None,
+) -> str:
+    """QUANTUM-CRYSTAL-ARCH: Verifier for sanctuary/coaching/voice (no full prepare)."""
+    if not _symbolic_verifier_enabled() or not (response_text or "").strip():
+        return response_text or ""
+    try:
+        from dataclasses import asdict as _asdict
+
+        from app.services.nate_commitment_extractor import build_state_symbol as _bss
+
+        _st = _asdict(_bss(user_text or "", audit_metadata=None))
+        _distress = bool(_st.get("distress_present"))
+        _crisis_kw = bool(
+            re.search(
+                r"\b(?:kill myself|suicide|end my life|want to die|988)\b",
+                (user_text or ""),
+                re.I,
+            )
+        )
+        tmc = "crisis" if _crisis_kw else ("distress" if _distress else "coaching")
+        requester = (
+            (profile or {}).get("username")
+            or (profile or {}).get("hardware_id")
+            or user_id
+        )
+        meta = {
+            "state_symbol": _st,
+            "tmc_class": tmc,
+            "crisis_exempt": tmc in ("crisis", "suicide_ideation"),
+            "crystal_scopes": list(crystal_scopes or [])[:50],
+            "requester_user_id": requester,
+            "user_id": requester,
+            "max_tokens": 600,
+            "user_text_for_audit": (user_text or "")[:800],
+        }
+        out = await audit_therapeutic_response(
+            response_text=response_text,
+            audit_metadata=meta,
+            user_id=str(requester),
+            db_pool=db_pool,
+        )
+        return (out or {}).get("response_text") or response_text
+    except Exception as e:
+        logger.warning("therapeutic_controller: light_symbolic_post_audit failed: %s", e)
+        return response_text
 
 
 def _symbolic_has_crisis_resource(response_text: str, audit_metadata: dict) -> bool:
@@ -1225,11 +1299,7 @@ async def audit_therapeutic_response(
         sym_violations = [v for v in violations if v.startswith("symbolic_")]
         if sym_violations and not audit_metadata.get("symbolic_regen_used"):
             if "symbolic_crisis_resource_missing" in sym_violations:
-                final_text = (
-                    final_text.rstrip()
-                    + " If you're in crisis, call or text 988 for support, "
-                    "or text HOME to 741741."
-                )
+                final_text = ensure_crisis_resource_in_text(final_text, audit_metadata)
                 violations = _audit_violations(final_text, audit_metadata, recent_narratives)
                 audit_passed = len(violations) == 0
             elif not crisis_exempt and sym_violations:

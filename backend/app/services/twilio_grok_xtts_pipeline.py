@@ -1693,6 +1693,17 @@ async def run_twilio_grok_xtts_bridge(
                             _u = user_turns[_ci].get("text", "")
                             _a = assistant_turns[_ci].get("text", "")
                             if _u and len(_u) >= 40:
+                                # QUANTUM-CRYSTAL-ARCH — Phase 5b: light verifier on voice reply
+                                try:
+                                    from app.services.therapeutic_controller import (
+                                        light_symbolic_post_audit as _lspa_v,
+                                    )
+                                    _a = await _lspa_v(
+                                        _a, user_text=_u, user_id=session_username,
+                                        db_pool=db_pool,
+                                    )
+                                except Exception:
+                                    pass
                                 await _crystal_forge(
                                     db_pool, session_username, _u, _a,
                                     user_name=session_username,

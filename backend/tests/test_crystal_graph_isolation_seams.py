@@ -22,6 +22,13 @@ def test_user_scope_requires_matching_requester():
     assert scope_allows_recall("user:client_a", None, "client_b") is False
 
 
+def test_plain_user_scope_allowed_when_owner_unknown():
+    """DB personal crystals use scope='user'; verifier passes owner=None."""
+    assert scope_allows_recall("user", None, "client1") is True
+    assert scope_allows_recall("user", "uuid-a", "uuid-a") is True
+    assert scope_allows_recall("user", "uuid-a", "uuid-b") is False
+
+
 def test_global_ownerless_allowed():
     assert scope_allows_recall("global", None, "client1") is True
     assert scope_allows_recall("global", "some-owner", "client1") is False
