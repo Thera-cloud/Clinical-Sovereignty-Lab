@@ -658,6 +658,16 @@ def build_system_addendum(
             "constraint generically, then move straight to a new option."
         )
 
+    # QUANTUM-CRYSTAL-ARCH — per-client style overrides (LetsGoLisa direct-first)
+    try:
+        from app.services.client_style_overrides import build_client_style_addendum
+
+        _style = build_client_style_addendum(profile, user_msg=user_msg)
+        if _style:
+            base += "\n\n" + _style
+    except ImportError:
+        pass
+
     return base
 
 
@@ -755,6 +765,25 @@ def prepare_response(
         signals["clinical_boundary_active"] = True
         for _topic in _clinical_topics.keys():
             signals[f"clinical_boundary_{_topic}"] = True
+
+    # QUANTUM-CRYSTAL-ARCH — per-client mode bias (flag-gated; LetsGoLisa)
+    try:
+        from app.services.client_style_overrides import maybe_bias_mode
+
+        _uid = ""
+        if profile:
+            _uid = str(
+                profile.get("username")
+                or profile.get("hardware_id")
+                or ""
+            )
+        mode, _style_sigs = maybe_bias_mode(mode, user_msg, profile, user_id=_uid)
+        if _style_sigs:
+            signals.update(_style_sigs)
+            state.current_mode = mode
+    except ImportError:
+        pass
+
     addendum = build_system_addendum(mode, signals, profile, user_msg=user_msg)
 
     if mode == "handoff":

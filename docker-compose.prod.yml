@@ -367,6 +367,8 @@ services:
       # Coaching scope gate stack — dark-launch defaults; flip after 48h review + clinical sign-off
       - ENABLE_COACHING_SCOPE_GATE=${ENABLE_COACHING_SCOPE_GATE:-false}
       - ENABLE_CLASSIFIER_LAYER=${ENABLE_CLASSIFIER_LAYER:-false}
+      # QUANTUM-CRYSTAL-ARCH — LetsGoLisa direct-first / mode-switch style overrides
+      - ENABLE_CLIENT_STYLE_OVERRIDES=${ENABLE_CLIENT_STYLE_OVERRIDES:-true}
       - ENABLE_ARC_MEMORY=${ENABLE_ARC_MEMORY:-false}
       - ENABLE_STANCE_RESOLVER=${ENABLE_STANCE_RESOLVER:-false}
       - ENABLE_STALL_SUPPRESSION=${ENABLE_STALL_SUPPRESSION:-false}
