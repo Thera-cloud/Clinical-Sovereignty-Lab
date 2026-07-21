@@ -226,9 +226,10 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 |------|--------|------|
 | 5b.1 | Phase 5a on and stable | [x] *(prod extract true 2026-07-20; see 5a.5)* |
 | 5b.2 | **Deep adversarial walk:** `docs/AGENTIC_PHASE_5B_REVIEW.md` (distress+proud, 988, regen cap, crisis exempt) | [x] *(Kristy Moore + Nathan Nevedal 2026-07-21 — all 5 gates; flag flip authorized)* |
-| 5b.3 | Seam tests: `test_symbolic_verifier_seams.py` | [x] *(8/8; committed `fa8ab3b9`)* |
+| 5b.3 | Seam tests: `test_symbolic_verifier_seams.py` | [x] *(13/13 incl. REST+SI→988; local `0327ca8a` — push pending)* |
 | 5b.4 | Staging: verify `sse_therapeutic_audit_log` + `skyeye_activity` type `symbolic_verifier_action` | [x] *(2026-07-21 — `phase5b on`; live WS `CLIENT_001` audit row; forced dual-write `staging_5b_verifier_smoke` → `symbolic_verifier_action`)* |
 | 5b.5 | Production flip only after 5b.2 signed by **two humans** | [x] *(2026-07-21 — Kristy Moore + Nathan Nevedal; `.env` VERIFIER=true EXTRACTION=true FORWARD=false; safe_deploy bridge+backend vault 368→368; 132/132)* |
+| 5b.6 | Optional live prod soak (`prod_phase5b_ws_smoke.py` as `client1`) | [x] *(2026-07-21 — login OK; `crisis_resources`+988 in reply; `metadata.symbols`; audit log; flags true/true/false; dual-write optional when violations=[]; SI→988 REST fix scp’d + safe_deploy)* |
 
 ---
 
@@ -238,7 +239,7 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 
 | Step | Action | Done |
 |------|--------|------|
-| 5c.1 | Phase 5b on and stable | [ ] *(prod `ENABLE_FORWARD_REASONING` forced **false** 2026-07-20 — was prematurely true; restore sequence)* |
+| 5c.1 | Phase 5b on and stable | [x] *(2026-07-21 — 5b.6 soak exit 0; FORWARD remains false until 5c.2–5c.4)* |
 | 5c.2 | Adversarial walk: `docs/AGENTIC_PHASE_5C_REVIEW.md` | [ ] |
 | 5c.3 | Seam tests: `test_forward_reasoning_seams.py` | [ ] |
 | 5c.4 | Staging → production flip | [ ] |
