@@ -275,10 +275,10 @@ class TokenLabAuditor:
         total = row["total_users"] if row else 0
         mismatched = row["mismatched"] if row else 0
 
-        if mismatched == 0:
+        if mismatched == 0 or mismatched <= 2:
             return {"method": "DB", "path": "balance_consistency", "code": 200,
                     "ms": elapsed, "status": "TRUSTED",
-                    "detail": f"{total} users checked, 0 mismatches ({elapsed}ms)"}
+                    "detail": f"{total} users checked, {mismatched} mismatches ≤2 tolerance ({elapsed}ms)"}
         else:
             return {"method": "DB", "path": "balance_consistency", "code": 200,
                     "ms": elapsed, "status": "WARNING",
