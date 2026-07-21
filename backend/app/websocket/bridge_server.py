@@ -12623,6 +12623,19 @@ async def _dispatch_public_trial_message(websocket, t: str, d: dict, client_ip: 
             pass
 
 
+
+def _resolve_bridge_mesh_engine(db_pool):
+    """SOVEREIGN-VOICE: mesh engine on backend app.state; bridge constructs from db_pool."""
+    if not db_pool:
+        return None
+    try:
+        from app.services.coaching_mesh_engine import CoachingMeshEngine
+        return CoachingMeshEngine(db_pool)
+    except Exception as _me_err:
+        print(f">>> [MESH] Engine init failed: {_me_err}")
+        return None
+
+
 async def handle_client(websocket, path=None):
     """Handle WebSocket connections"""
     uid = "GUEST"
@@ -16675,6 +16688,7 @@ async def handle_client(websocket, path=None):
                         "monthly_sessions": monthly_sessions,
                         "w9_submitted": coach_data.get("w9_submitted", False),
                         "requires_1099": coach_data.get("requires_1099", False),
+                        "w9_data": coach_data.get("w9_data") or {},  # SOVEREIGN-VOICE
                         "ledger": ledger[-50:],  # Last 50 transactions
                     }))
 
@@ -16720,7 +16734,11 @@ async def handle_client(websocket, path=None):
             # === COACH: SUBMIT W-9 ===
             elif t == "coach_submit_w9":
                 if current_profile and current_profile.get("role") == "COACH":
-                    w9_data = d.get("w9_data", {})
+                    w9_data = dict(d.get("w9_data", {}) or {})
+                    # SOVEREIGN-VOICE: accept Flutter aliases (street/city/…/certified)
+                    for _src, _dst in (("street", "address_street"), ("city", "address_city"), ("state", "address_state"), ("zip", "address_zip"), ("certified", "certification")):
+                        if w9_data.get(_src) not in (None, "") and not w9_data.get(_dst):
+                            w9_data[_dst] = w9_data[_src]
                     required = ["legal_name", "address_street", "address_city", "address_state", "address_zip", "tin", "tax_classification", "certification"]
                     missing = [f for f in required if not w9_data.get(f)]
                     if missing:
@@ -31763,8 +31781,7 @@ IMPORTANT:
             elif t == "coaching_mesh_create":
                 if current_profile and current_profile.get("role") in ("COACH", "ADMIN"):
                     try:
-                        _app = getattr(sys.modules.get('__main__'), 'app', None)
-                        _mesh_engine = getattr(getattr(_app, 'state', None), 'coaching_mesh_engine', None) if _app else None
+                        _mesh_engine = _resolve_bridge_mesh_engine(db_pool)  # SOVEREIGN-VOICE
                         if _mesh_engine:
                             _result = await _mesh_engine.create_session(
                                 master_id=current_hardware_id,
@@ -31785,8 +31802,7 @@ IMPORTANT:
 
             elif t == "coaching_mesh_join":
                 try:
-                    _app = getattr(sys.modules.get('__main__'), 'app', None)
-                    _mesh_engine = getattr(getattr(_app, 'state', None), 'coaching_mesh_engine', None) if _app else None
+                    _mesh_engine = _resolve_bridge_mesh_engine(db_pool)  # SOVEREIGN-VOICE
                     if _mesh_engine:
                         _role = "client_observer" if current_profile.get("role") == "CLIENT" else "assistant"
                         _result = await _mesh_engine.join_session(
@@ -31825,8 +31841,7 @@ IMPORTANT:
 
             elif t == "coaching_mesh_leave":
                 try:
-                    _app = getattr(sys.modules.get('__main__'), 'app', None)
-                    _mesh_engine = getattr(getattr(_app, 'state', None), 'coaching_mesh_engine', None) if _app else None
+                    _mesh_engine = _resolve_bridge_mesh_engine(db_pool)  # SOVEREIGN-VOICE
                     if _mesh_engine:
                         _result = await _mesh_engine.leave_session(d.get("session_id", ""), current_hardware_id)
                         await websocket.send(json.dumps({"type": "coaching_mesh_left", **_result}))
@@ -31836,8 +31851,7 @@ IMPORTANT:
             elif t == "coaching_mesh_end":
                 if current_profile and current_profile.get("role") in ("COACH", "ADMIN"):
                     try:
-                        _app = getattr(sys.modules.get('__main__'), 'app', None)
-                        _mesh_engine = getattr(getattr(_app, 'state', None), 'coaching_mesh_engine', None) if _app else None
+                        _mesh_engine = _resolve_bridge_mesh_engine(db_pool)  # SOVEREIGN-VOICE
                         if _mesh_engine:
                             _sid = d.get("session_id", "")
                             _result = await _mesh_engine.end_session(_sid, current_hardware_id)
@@ -31867,8 +31881,7 @@ IMPORTANT:
 
             elif t == "coaching_mesh_message":
                 try:
-                    _app = getattr(sys.modules.get('__main__'), 'app', None)
-                    _mesh_engine = getattr(getattr(_app, 'state', None), 'coaching_mesh_engine', None) if _app else None
+                    _mesh_engine = _resolve_bridge_mesh_engine(db_pool)  # SOVEREIGN-VOICE
                     if _mesh_engine:
                         _sid = d.get("session_id", "")
                         _msg_result = await _mesh_engine.post_message(
@@ -31906,8 +31919,7 @@ IMPORTANT:
             elif t == "coaching_mesh_push_quiz":
                 if current_profile and current_profile.get("role") in ("COACH", "ADMIN"):
                     try:
-                        _app = getattr(sys.modules.get('__main__'), 'app', None)
-                        _mesh_engine = getattr(getattr(_app, 'state', None), 'coaching_mesh_engine', None) if _app else None
+                        _mesh_engine = _resolve_bridge_mesh_engine(db_pool)  # SOVEREIGN-VOICE
                         if _mesh_engine:
                             _sid = d.get("session_id", "")
                             _result = await _mesh_engine.push_quiz(_sid, current_hardware_id, d.get("questions", []))
@@ -31938,8 +31950,7 @@ IMPORTANT:
 
             elif t == "coaching_mesh_answer":
                 try:
-                    _app = getattr(sys.modules.get('__main__'), 'app', None)
-                    _mesh_engine = getattr(getattr(_app, 'state', None), 'coaching_mesh_engine', None) if _app else None
+                    _mesh_engine = _resolve_bridge_mesh_engine(db_pool)  # SOVEREIGN-VOICE
                     if _mesh_engine:
                         _sid = d.get("session_id", "")
                         _result = await _mesh_engine.submit_quiz_answer(
@@ -31975,8 +31986,7 @@ IMPORTANT:
             elif t == "coaching_mesh_push_scenario":
                 if current_profile and current_profile.get("role") in ("COACH", "ADMIN"):
                     try:
-                        _app = getattr(sys.modules.get('__main__'), 'app', None)
-                        _mesh_engine = getattr(getattr(_app, 'state', None), 'coaching_mesh_engine', None) if _app else None
+                        _mesh_engine = _resolve_bridge_mesh_engine(db_pool)  # SOVEREIGN-VOICE
                         if _mesh_engine:
                             _sid = d.get("session_id", "")
                             _result = await _mesh_engine.push_scenario(
@@ -32012,8 +32022,7 @@ IMPORTANT:
 
             elif t == "coaching_mesh_ask_nate":
                 try:
-                    _app = getattr(sys.modules.get('__main__'), 'app', None)
-                    _mesh_engine = getattr(getattr(_app, 'state', None), 'coaching_mesh_engine', None) if _app else None
+                    _mesh_engine = _resolve_bridge_mesh_engine(db_pool)  # SOVEREIGN-VOICE
                     if _mesh_engine:
                         _sid = d.get("session_id", "")
                         _result = await _mesh_engine.get_nate_feedback(
@@ -32048,8 +32057,7 @@ IMPORTANT:
             elif t == "coaching_mesh_scores":
                 if current_profile and current_profile.get("role") in ("COACH", "ADMIN"):
                     try:
-                        _app = getattr(sys.modules.get('__main__'), 'app', None)
-                        _mesh_engine = getattr(getattr(_app, 'state', None), 'coaching_mesh_engine', None) if _app else None
+                        _mesh_engine = _resolve_bridge_mesh_engine(db_pool)  # SOVEREIGN-VOICE
                         if _mesh_engine:
                             _sid = d.get("session_id", "")
                             _scores = await _mesh_engine.get_session_scores(_sid)

@@ -46,6 +46,7 @@ import 'screens/onboarding_paid_screen.dart';
 import 'screens/community_mesh_screen.dart';
 import 'screens/sensitive_clinical_profile_screen.dart';
 import 'screens/high_risk_crisis_screens.dart';
+import 'screens/coach_portal_v2_complete.dart' show CoachQuickBooksTab;
 import 'screens/intake_form_coach_panel.dart';
 import 'screens/daily_reconnect_screen.dart';
 import 'screens/training_ground_screen.dart';
@@ -8141,6 +8142,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         _debugLog(">>> COACH AUTHENTICATED. Fetching Data...");
         _wsReconnectAttempts = 0;
         _authToken = data['token']?.toString();
+        // Keep profile map in sync so child screens reading profile['token'] work.
+        if (_authToken != null && _authToken!.isNotEmpty) {
+          widget.currentUserProfile['token'] = _authToken;
+        }
         final profile = data['profile'] as Map<String, dynamic>?;
         _coachHardwareId = profile?['hardware_id']?.toString();
         _pushDojoIframeAuthIfNeeded();
@@ -9217,19 +9222,6 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                 _activateCoachAiMode('supervisor', clientId);
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.edit_note, color: Color(0xFFF59E0B)),
-              title: const Text('Editor',
-                  style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold)),
-              subtitle: const Text(
-                  'Literary writing companion — 7 master writers as collective intelligence',
-                  style: TextStyle(color: Colors.white38, fontSize: 12)),
-              onTap: () {
-                Navigator.pop(ctx);
-                _activateCoachAiMode('editor', clientId);
-              },
-            ),
             const SizedBox(height: 16),
           ],
         ),
@@ -9283,20 +9275,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                           child: Text("Individual Coherence",
                               style: TextStyle(color: Colors.white))),
                       DropdownMenuItem(
-                          value: "dyad_comparison",
-                          child: Text("Dyad Comparison",
-                              style: TextStyle(color: Colors.white))),
-                      DropdownMenuItem(
-                          value: "family_dynamics",
-                          child: Text("Family Dynamics",
-                              style: TextStyle(color: Colors.white))),
-                      DropdownMenuItem(
                           value: "longitudinal_trends",
                           child: Text("Longitudinal Trends",
-                              style: TextStyle(color: Colors.white))),
-                      DropdownMenuItem(
-                          value: "coach_efficacy",
-                          child: Text("Coach Efficacy",
                               style: TextStyle(color: Colors.white))),
                     ],
                     onChanged: (v) =>
@@ -9367,12 +9347,15 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                         try {
                           final uri = Uri.parse(
                               '$_apiBaseUrl/api/research/nevedal/reports/generate');
+                          final reportTok = (_authToken ??
+                                  widget.currentUserProfile['token'] ??
+                                  '')
+                              .toString();
                           final resp = await http.post(
                             uri,
                             headers: {
                               'Content-Type': 'application/json',
-                              'Authorization':
-                                  'Bearer ${widget.currentUserProfile['token']}',
+                              'Authorization': 'Bearer $reportTok',
                             },
                             body: jsonEncode({
                               'report_type': reportType,
@@ -9779,6 +9762,72 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             const SizedBox(height: 24),
           ],
 
+          // Session focus / breakthroughs / crystals (bridge enrichments)
+          if ((brief['session_focus'] ?? '').toString().trim().isNotEmpty) ...[
+            const Text("SESSION FOCUS",
+                style: TextStyle(
+                    color: Colors.grey,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.5,
+                    fontSize: 12)),
+            const SizedBox(height: 8),
+            Text(brief['session_focus'].toString(),
+                style: const TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 24),
+          ],
+          if ((brief['recent_breakthroughs'] is List &&
+                  (brief['recent_breakthroughs'] as List).isNotEmpty) ||
+              (brief['crystal_memory'] ?? '').toString().trim().isNotEmpty) ...[
+            const Text("MEMORY & BREAKTHROUGHS",
+                style: TextStyle(
+                    color: Colors.grey,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.5,
+                    fontSize: 12)),
+            const SizedBox(height: 8),
+            if ((brief['crystal_memory'] ?? '').toString().trim().isNotEmpty)
+              Text(brief['crystal_memory'].toString(),
+                  style: const TextStyle(color: Color(0xFF4ECDC4), fontSize: 12)),
+            if (brief['recent_breakthroughs'] is List)
+              ...List<Widget>.from((brief['recent_breakthroughs'] as List).take(5).map((b) => Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text("• ${b is Map ? (b['text'] ?? b['summary'] ?? b) : b}",
+                        style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                  ))),
+            const SizedBox(height: 24),
+          ],
+          if ((brief['fcodes_active'] is List &&
+                  (brief['fcodes_active'] as List).isNotEmpty) ||
+              (brief['zoom_ai_insight'] ?? '').toString().trim().isNotEmpty) ...[
+            const Text("CLINICAL SIGNALS",
+                style: TextStyle(
+                    color: Colors.grey,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.5,
+                    fontSize: 12)),
+            const SizedBox(height: 8),
+            if (brief['fcodes_active'] is List)
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: (brief['fcodes_active'] as List)
+                    .take(8)
+                    .map((f) => Chip(
+                          label: Text(f.toString(),
+                              style: const TextStyle(fontSize: 11, color: Colors.white)),
+                          backgroundColor: const Color(0xFF1A1A2E),
+                        ))
+                    .toList(),
+              ),
+            if ((brief['zoom_ai_insight'] ?? '').toString().trim().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(brief['zoom_ai_insight'].toString(),
+                    style: const TextStyle(color: Colors.white60, fontSize: 12)),
+              ),
+            const SizedBox(height: 24),
+          ],
+
           // Recent conversations (shared threaded log)
           if (recentConversations.isNotEmpty) ...[
             const Text(
@@ -9968,7 +10017,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       );
       return;
     }
-    final token = (widget.currentUserProfile['token'] ?? '').toString();
+    final token = (_authToken ?? widget.currentUserProfile['token'] ?? '').toString();
     final displayName = ((brief['client'] is Map) ? (brief['client']['name'] ?? '') : '').toString();
     Navigator.push(
       context,
@@ -10158,9 +10207,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       }));
     } catch (_) {}
     if (!mounted) return;
+    final sensitiveProfile =
+        Map<String, dynamic>.from(widget.currentUserProfile);
+    final stok =
+        (_authToken ?? sensitiveProfile['token'] ?? '').toString();
+    if (stok.isNotEmpty) sensitiveProfile['token'] = stok;
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => SensitiveClinicalProfileScreen(
-        currentUserProfile: widget.currentUserProfile,
+        currentUserProfile: sensitiveProfile,
         targetUserId: clientUsername,
         closeBriefSheetOnExit: true,
       ),
@@ -10671,7 +10725,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                           clients: List<Map<String, dynamic>>.from(
                               f['clients'] ?? []),
                         );
-                        _tabController.animateTo(8); // FOLDER
+                        _tabController.animateTo(3); // BRIEFINGS
                       },
                       style: TextButton.styleFrom(
                         foregroundColor: const Color(0xFFFFD700),
@@ -13967,15 +14021,55 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   Widget _buildInsightsStatsStrip() {
+    final highRisk = _clients.where((c) {
+      if (c is! Map) return false;
+      final m = Map<String, dynamic>.from(c as Map);
+      final risk = (m['risk_level'] ??
+              (m['metrics'] is Map ? m['metrics']['risk_level'] : null) ??
+              (m['nevedal_state'] is Map
+                  ? m['nevedal_state']['risk_level']
+                  : null) ??
+              '')
+          .toString()
+          .toUpperCase();
+      return risk == 'HIGH' || risk == 'CRITICAL' || risk == 'ELEVATED';
+    }).length;
+    final breakthroughs = _clients.fold<int>(0, (sum, c) {
+      if (c is! Map) return sum;
+      final m = Map<String, dynamic>.from(c as Map);
+      final n = m['breakthrough_count'] ??
+          (m['metrics'] is Map ? m['metrics']['breakthrough_count'] : null) ??
+          (m['nevedal_state'] is Map
+              ? m['nevedal_state']['breakthrough_count']
+              : null) ??
+          0;
+      return sum + (n is num ? n.toInt() : int.tryParse('$n') ?? 0);
+    });
+    final today = DateTime.now();
+    final sessionsToday = _schedule.where((s) {
+      if (s is! Map) return false;
+      final raw = (s['scheduled_start'] ??
+              s['start'] ??
+              s['date'] ??
+              s['session_date'] ??
+              '')
+          .toString();
+      if (raw.isEmpty) return false;
+      final dt = DateTime.tryParse(raw);
+      if (dt == null) return false;
+      return dt.year == today.year &&
+          dt.month == today.month &&
+          dt.day == today.day;
+    }).length;
     final cards = [
       _buildStatCard("Total Clients", _clients.length.toString(), Icons.people,
           const Color(0xFF4361EE)),
       _buildStatCard(
-          "High Risk", "0", Icons.warning, const Color(0xFFFF9F1C)),
-      _buildStatCard("Sessions Today", _schedule.length.toString(),
+          "High Risk", highRisk.toString(), Icons.warning, const Color(0xFFFF9F1C)),
+      _buildStatCard("Sessions Today", sessionsToday.toString(),
           Icons.calendar_today, const Color(0xFF00F5D4)),
       _buildStatCard(
-          "Breakthroughs", "0", Icons.star, const Color(0xFFFFD700)),
+          "Breakthroughs", breakthroughs.toString(), Icons.star, const Color(0xFFFFD700)),
     ];
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -15114,7 +15208,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   Widget _buildNateMemorySection() {
     // Get client IDs for this folder
     final clientIds = _selectedFolderClients
-        .map((c) => (c['hardware_id'] ?? c['client_id'] ?? '').toString())
+        .map((c) =>
+            (c['hardware_id'] ?? c['client_id'] ?? c['id'] ?? '').toString())
         .where((id) => id.isNotEmpty)
         .toList();
 
@@ -17894,8 +17989,26 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               .trim();
       final coachId =
           (widget.currentUserProfile?['hardware_id'] ?? '').toString();
-      final clientId =
-          _clients.isNotEmpty ? (_clients.first['id'] ?? '').toString() : '';
+      String clientId = '';
+      if (_classroomSelectedSessionId != null) {
+        for (final s in _classroomSessions) {
+          if (s is! Map) continue;
+          final sid = (s['session_id'] ?? s['id'] ?? '').toString();
+          if (sid == _classroomSelectedSessionId) {
+            clientId = (s['client_id'] ?? s['client_hardware_id'] ?? '').toString();
+            break;
+          }
+        }
+      }
+      if (clientId.isEmpty && _focusedClientId.isNotEmpty) {
+        clientId = _focusedClientId;
+      }
+      if (clientId.isEmpty && _clients.isNotEmpty) {
+        final c0 = _clients.first;
+        if (c0 is Map) {
+          clientId = (c0['id'] ?? c0['hardware_id'] ?? '').toString();
+        }
+      }
 
       final result = await uploadLargeVideoDirectToR2(
         file: picked,
@@ -20727,16 +20840,23 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         ),
       );
     }
+    final meshProfile = Map<String, dynamic>.from(widget.currentUserProfile);
+    final meshToken =
+        (_authToken ?? meshProfile['token'] ?? '').toString();
+    if (meshToken.isNotEmpty) meshProfile['token'] = meshToken;
     return CoachingMeshScreen(
-      profile: widget.currentUserProfile,
-      token: widget.currentUserProfile['token'] ?? '',
+      profile: meshProfile,
+      token: meshToken,
       isMaster: isMaster,
     );
   }
 
   Widget _lazyCommunityMeshScreen() {
+    final communityProfile = Map<String, dynamic>.from(widget.currentUserProfile);
+    final t = (_authToken ?? communityProfile['token'] ?? '').toString();
+    if (t.isNotEmpty) communityProfile['token'] = t;
     return CommunityMeshScreen(
-      profile: widget.currentUserProfile,
+      profile: communityProfile,
     );
   }
 
@@ -20745,11 +20865,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       final hwId = widget.currentUserProfile['hardware_id'] ?? '';
       final url =
           '${AppConfig.apiBaseUrl}/api/coach/mesh/sessions/$hwId?limit=5';
+      final tok =
+          (_authToken ?? widget.currentUserProfile['token'] ?? '').toString();
       final resp = await http.get(
         Uri.parse(url),
-        headers: {
-          'Authorization': 'Bearer ${widget.currentUserProfile['token']}'
-        },
+        headers: {'Authorization': 'Bearer $tok'},
       );
       if (resp.statusCode == 200) return jsonDecode(resp.body) as List;
     } catch (_) {}
@@ -21007,7 +21127,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                 : 0.0));
 
     return RefreshIndicator(
-      onRefresh: () async => _requestFinancials(),
+      onRefresh: () async {
+        _requestFinancials();
+        _loadConnectStatus();
+        _requestDojoSubscriptions();
+      },
       color: const Color(0xFFFFD700),
       child: ListView(
         padding: const EdgeInsets.all(16),
@@ -21070,6 +21194,37 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                   child: _buildFinancialCard("Sessions Billed", sessionsBilled,
                       Icons.event_available, const Color(0xFF9D4EDD))),
             ],
+          ),
+
+          const SizedBox(height: 16),
+          // ===== QUICKBOOKS =====
+          OutlinedButton.icon(
+            onPressed: () {
+              final qbProfile =
+                  Map<String, dynamic>.from(widget.currentUserProfile);
+              final tok =
+                  (_authToken ?? qbProfile['token'] ?? '').toString();
+              if (tok.isNotEmpty) qbProfile['token'] = tok;
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => Scaffold(
+                  backgroundColor: const Color(0xFF050505),
+                  appBar: AppBar(
+                    backgroundColor: const Color(0xFF0A0A0A),
+                    title: const Text('QuickBooks',
+                        style: TextStyle(color: Color(0xFFC9A962))),
+                    iconTheme: const IconThemeData(color: Color(0xFFC9A962)),
+                  ),
+                  body: CoachQuickBooksTab(coachProfile: qbProfile),
+                ),
+              ));
+            },
+            icon: const Icon(Icons.account_balance, color: Color(0xFF2CA01C)),
+            label: const Text('QuickBooks Sync',
+                style: TextStyle(color: Color(0xFF2CA01C))),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Color(0xFF2CA01C)),
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+            ),
           ),
 
           const SizedBox(height: 24),
@@ -22088,10 +22243,15 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     if (existingW9.isNotEmpty) {
       legalNameCtrl.text = (existingW9['legal_name'] ?? '').toString();
       businessNameCtrl.text = (existingW9['business_name'] ?? '').toString();
-      streetCtrl.text = (existingW9['street'] ?? '').toString();
-      cityCtrl.text = (existingW9['city'] ?? '').toString();
-      stateCtrl.text = (existingW9['state'] ?? '').toString();
-      zipCtrl.text = (existingW9['zip'] ?? '').toString();
+      streetCtrl.text =
+          (existingW9['address_street'] ?? existingW9['street'] ?? '')
+              .toString();
+      cityCtrl.text =
+          (existingW9['address_city'] ?? existingW9['city'] ?? '').toString();
+      stateCtrl.text =
+          (existingW9['address_state'] ?? existingW9['state'] ?? '').toString();
+      zipCtrl.text =
+          (existingW9['address_zip'] ?? existingW9['zip'] ?? '').toString();
       taxClass = (existingW9['tax_classification'] ?? 'individual').toString();
     }
 
@@ -22213,12 +22373,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                   "legal_name": legalNameCtrl.text.trim(),
                   "business_name": businessNameCtrl.text.trim(),
                   "tax_classification": taxClass,
-                  "street": streetCtrl.text.trim(),
-                  "city": cityCtrl.text.trim(),
-                  "state": stateCtrl.text.trim(),
-                  "zip": zipCtrl.text.trim(),
+                  "address_street": streetCtrl.text.trim(),
+                  "address_city": cityCtrl.text.trim(),
+                  "address_state": stateCtrl.text.trim(),
+                  "address_zip": zipCtrl.text.trim(),
                   "tin": tinCtrl.text.trim(),
-                  "certified": true,
+                  "certification": true,
                   "signature": signatureCtrl.text.trim(),
                   "signed_date": DateTime.now().toIso8601String(),
                 });

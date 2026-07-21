@@ -175,6 +175,7 @@ class _CoachingMeshScreenState extends State<CoachingMeshScreen>
     {'id': 'case_review', 'name': 'Case Review'},
   ];
   List<Map<String, dynamic>> _dojoMethods = [];
+  bool _wsAuthed = false;
 
   @override
   void initState() {
@@ -223,12 +224,12 @@ class _CoachingMeshScreenState extends State<CoachingMeshScreen>
         }
       },
     );
+    _wsAuthed = false;
     _wsChannel!.sink.add(jsonEncode({
-      'type': 'login_request',
-      'username': widget.profile['username'],
-      'password_hash': widget.token,
+      'type': 'auth',
+      'token': widget.token,
       'hardware_id': widget.profile['hardware_id'],
-      'expected_role': widget.profile['role'],
+      'client_context': 'coaching_mesh',
     }));
   }
 
@@ -237,6 +238,19 @@ class _CoachingMeshScreenState extends State<CoachingMeshScreen>
     final type = msg['type'] as String? ?? '';
 
     switch (type) {
+      case 'auth_success':
+        setState(() {
+          _wsAuthed = true;
+          _errorMessage = null;
+        });
+        break;
+      case 'auth_failed':
+        setState(() {
+          _wsAuthed = false;
+          _isLoading = false;
+          _errorMessage = msg['message']?.toString() ?? 'Auth failed';
+        });
+        break;
       case 'coaching_mesh_created':
         setState(() {
           _sessionId = msg['session_id'];
@@ -389,6 +403,10 @@ class _CoachingMeshScreenState extends State<CoachingMeshScreen>
       setState(() => _errorMessage = 'Please enter a session title');
       return;
     }
+    if (!_wsAuthed) {
+      setState(() => _errorMessage = 'Still connecting — try again in a moment');
+      return;
+    }
     setState(() => _isLoading = true);
     _wsChannel?.sink.add(jsonEncode({
       'type': 'coaching_mesh_create',
@@ -400,6 +418,10 @@ class _CoachingMeshScreenState extends State<CoachingMeshScreen>
   }
 
   void _joinSession(String sessionId) {
+    if (!_wsAuthed) {
+      setState(() => _errorMessage = 'Still connecting — try again in a moment');
+      return;
+    }
     setState(() => _isLoading = true);
     _wsChannel?.sink.add(jsonEncode({
       'type': 'coaching_mesh_join',

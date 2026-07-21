@@ -195,9 +195,9 @@ async def invite_assistant(body: InviteRequest, request: Request):
 
         await conn.execute(
             """INSERT INTO coach_hierarchy (master_coach_id, assistant_id, status)
-               VALUES ($1, $2, 'pending')
+               VALUES ($1, $2, 'pending_admin')
                ON CONFLICT (master_coach_id, assistant_id)
-               DO UPDATE SET status = 'pending', invited_at = NOW(), revoked_at = NULL""",
+               DO UPDATE SET status = 'pending_admin', invited_at = NOW(), revoked_at = NULL""",
             master_hw, assistant["hardware_id"],
         )
     return {"status": "invited", "assistant": body.assistant_username}
