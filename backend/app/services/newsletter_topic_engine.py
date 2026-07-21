@@ -14,32 +14,49 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("nate.newsletter_topic_engine")
 
 TOPIC_DOMAINS = (
-    "neurodivergence",
-    "arts",
-    "military",
-    "grief",
+    "cbt",
+    "dbt",
+    "act",
+    "ifs",
+    "adep",
+    "somatic",
     "relationships",
-    "parenting",
-    "burnout",
-    "sleep",
-    "fitness",
-    "curiosity",
+    "nate_usage",
+    "mi",
     "self_compassion",
+    "neurodivergence",
+    "grief",
+    "burnout",
     "general",
 )
 
+# Culture/news domains — downranked when clinical editorial mode is on.
+NON_CLINICAL_DOMAINS = frozenset({"arts", "fitness", "curiosity", "military"})
+
 DOMAIN_KEYWORDS = {
+    "cbt": ("cbt", "thought record", "behavioral activation", "exposure ladder", "cognitive"),
+    "dbt": ("dbt", "dear man", "distress tolerance", "tipp", "opposite action"),
+    "act": ("act", "defusion", "values", "acceptance and commitment"),
+    "ifs": ("ifs", "parts", "protector", "self energy"),
+    "adep": ("adep", "attachment", "pursue", "withdraw", "eft"),
+    "somatic": ("grounding", "polyvagal", "window of tolerance", "somatic", "5-4-3-2-1"),
+    "nate_usage": ("little nate", "ask nate", "nate usage", "how to use"),
+    "relationships": (
+        "relationship", "partner", "repair", "listening", "communication", "couple",
+    ),
+    "mi": ("motivational interview", "change talk", "ambivalence"),
+    "self_compassion": ("shame", "self-compassion", "self compassion"),
     "neurodivergence": (
         "adhd", "autism", "neurodiverg", "sensory", "executive function",
         "masking", "unmask", "asd",
     ),
-    "arts": (
-        "movie", "film", "play", "theater", "theatre", "museum", "music",
-        "art", "gallery", "novel", "book", "album", "broadway",
-    ),
     "military": (
         "veteran", "military", "deployment", "war", "ptsd", "moral injury",
         "soldier", "reintegration",
+    ),
+    "arts": (
+        "movie", "film", "play", "theater", "theatre", "museum", "music",
+        "art", "gallery", "novel", "book", "album", "broadway",
     ),
     "fitness": ("fitness", "workout", "exercise", "movement", "body"),
     "grief": ("grief", "loss", "bereave", "mourning"),
@@ -91,16 +108,28 @@ def score_candidate(
     share_velocity: float = 0.0,
     rating_boost: float = 0.0,
     novelty: float = 0.0,
+    clinical_boost: float = 0.0,
+    domain: str = "",
 ) -> float:
-    """Higher is better. Novelty subtracts."""
+    """Higher is better. Novelty subtracts. Clinical mode zeros news/viral weights."""
+    from app.services.newsletter_clinical_curriculum import clinical_editorial_mode
+
+    clinical = clinical_editorial_mode()
+    nv_w = 0.0 if clinical else 1.5
+    share_w = 0.2 if clinical else 0.7
+    domain_penalty = 0.0
+    if clinical and (domain or "").lower() in NON_CLINICAL_DOMAINS:
+        domain_penalty = 1.5
     raw = (
         1.2 * float(foresight)
-        + 1.5 * float(news_velocity)
+        + nv_w * float(news_velocity)
         + 0.9 * min(float(chat_bucket) / 10.0, 1.0)
         + 0.8 * float(seasonal_boost)
-        + 0.7 * float(share_velocity)
+        + share_w * float(share_velocity)
         + 0.6 * float(rating_boost)
+        + 2.4 * float(clinical_boost)
         - 2.0 * float(novelty)
+        - domain_penalty
     )
     return round(raw, 4)
 
@@ -185,17 +214,62 @@ def _seasonal_boost(label: Optional[str], target_week) -> float:
 
 
 async def collect_candidates(db_pool) -> List[Dict[str, Any]]:
-    if not db_pool:
-        return []
+    from app.services.newsletter_clinical_curriculum import (
+        clinical_editorial_mode,
+        curriculum_as_candidates,
+    )
+
     candidates: List[Dict[str, Any]] = []
+    recent: List[str] = []
+    chat: Dict[str, int] = {}
+    shares: Dict[str, float] = {}
+    ratings: Dict[str, float] = {}
+
+    # Always seed clinical curriculum (works even if DB pool missing).
+    for c in curriculum_as_candidates():
+        nov = novelty_penalty(c["title"], recent)
+        candidates.append(
+            {
+                **c,
+                "score": score_candidate(
+                    clinical_boost=c.get("clinical_boost") or 1.0,
+                    foresight=0.85,
+                    novelty=nov,
+                    domain=c.get("domain") or "",
+                ),
+                "novelty": nov,
+            }
+        )
+
+    if not db_pool:
+        candidates.sort(key=lambda c: c["score"], reverse=True)
+        return candidates
+
     async with db_pool.acquire() as conn:
         recent = await _recent_sent_topics(conn, 8)
         chat = await _chat_signal_map(conn)
         shares = await _share_velocity_map(conn)
         ratings = await _rating_boost_map(conn)
 
+        # Re-score curriculum with real novelty vs sent topics
+        for c in candidates:
+            if c.get("rationale") != "clinical_curriculum":
+                continue
+            nov = novelty_penalty(c["title"], recent)
+            c["novelty"] = nov
+            c["score"] = score_candidate(
+                clinical_boost=c.get("clinical_boost") or 1.0,
+                foresight=0.85,
+                novelty=nov,
+                domain=c.get("domain") or "",
+                rating_boost=ratings.get(c["title"].lower(), 0),
+            )
+
         for theme, bucket in chat.items():
             if bucket < 2:
+                continue
+            domain = infer_domain(theme)
+            if clinical_editorial_mode() and domain in NON_CLINICAL_DOMAINS:
                 continue
             nov = novelty_penalty(theme, recent)
             candidates.append(
@@ -203,13 +277,15 @@ async def collect_candidates(db_pool) -> List[Dict[str, Any]]:
                     "topic_key": _slug_key(theme),
                     "title": theme[:120],
                     "seasonal_window": None,
-                    "domain": infer_domain(theme),
+                    "domain": domain,
                     "rationale": f"chat_signal_n={bucket}",
                     "score": score_candidate(
                         chat_bucket=bucket,
                         share_velocity=shares.get(theme.lower(), 0),
                         rating_boost=ratings.get(theme.lower(), 0),
                         novelty=nov,
+                        clinical_boost=0.35 if domain in TOPIC_DOMAINS else 0.0,
+                        domain=domain,
                     ),
                     "novelty": nov,
                 }
@@ -229,6 +305,12 @@ async def collect_candidates(db_pool) -> List[Dict[str, Any]]:
         seen_keys = {c["topic_key"] for c in candidates}
         for f in forecasts:
             key = f["topic_key"]
+            meta = f["metadata"] or {}
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except Exception:
+                    meta = {}
             if key in seen_keys:
                 # bump existing with forecast scores
                 for c in candidates:
@@ -243,31 +325,35 @@ async def collect_candidates(db_pool) -> List[Dict[str, Any]]:
                             share_velocity=shares.get(c["title"].lower(), 0),
                             rating_boost=ratings.get(c["title"].lower(), 0),
                             novelty=c.get("novelty", 0),
+                            clinical_boost=c.get("clinical_boost")
+                            or (1.0 if meta.get("clinical") else 0.0),
+                            domain=c.get("domain") or "",
                         )
                         break
                 continue
-            title = key.replace("_", " ")[:120]
-            meta = f["metadata"] or {}
-            if isinstance(meta, str):
-                try:
-                    meta = json.loads(meta)
-                except Exception:
-                    meta = {}
+            title = (
+                (meta.get("title") if isinstance(meta, dict) else None)
+                or key.replace("_", " ")[:120]
+            )
             domain = (meta.get("domain") if isinstance(meta, dict) else None) or infer_domain(
                 title + " " + (f["seasonal_label"] or "")
             )
+            if clinical_editorial_mode() and domain in NON_CLINICAL_DOMAINS:
+                continue
+            if clinical_editorial_mode() and meta.get("trend_pair"):
+                continue
             nov = novelty_penalty(title, recent)
+            clin = 1.0 if (isinstance(meta, dict) and meta.get("clinical")) else 0.0
             candidates.append(
                 {
                     "topic_key": key[:64],
-                    "title": (meta.get("title") if isinstance(meta, dict) else None)
-                    or title,
+                    "title": title,
                     "seasonal_window": f["seasonal_label"],
                     "domain": domain,
-                    "headline": (meta.get("headline") if isinstance(meta, dict) else None)
-                    or "",
-                    "angle": (meta.get("angle") if isinstance(meta, dict) else None) or "",
+                    "headline": "",
+                    "angle": "",
                     "rationale": f"forecast_score={f['foresight_score']}",
+                    "clinical_boost": clin,
                     "score": score_candidate(
                         foresight=f["foresight_score"] or 0,
                         news_velocity=f["news_velocity"] or 0,
@@ -275,6 +361,8 @@ async def collect_candidates(db_pool) -> List[Dict[str, Any]]:
                             f["seasonal_label"], f["target_week"]
                         ),
                         novelty=nov,
+                        clinical_boost=clin,
+                        domain=domain,
                     ),
                     "novelty": nov,
                 }
@@ -286,30 +374,47 @@ async def collect_candidates(db_pool) -> List[Dict[str, Any]]:
 
 
 async def select_best_topic(db_pool) -> Dict[str, Any]:
-    """Pick highest-scoring novel topic; bootstrap default if pool empty."""
+    """Pick highest-scoring novel clinical topic; bootstrap CBT default."""
+    from app.services.newsletter_clinical_curriculum import (
+        CLINICAL_CURRICULUM,
+        clinical_editorial_mode,
+    )
     from app.services.newsletter_pipeline import _load_symbolic_hints
 
     hints = await _load_symbolic_hints(db_pool)
     pool = await collect_candidates(db_pool)
-    # Prefer novelty < 0.85
+    # Prefer novelty < 0.85; in clinical mode prefer curriculum rows first
+    if clinical_editorial_mode():
+        pool = sorted(
+            pool,
+            key=lambda c: (
+                0 if c.get("rationale") == "clinical_curriculum" else 1,
+                -float(c.get("score") or 0),
+            ),
+        )
     for c in pool:
         if c.get("novelty", 0) < 0.85:
             return {
                 "topic_key": c["topic_key"],
                 "title": c["title"][:120],
                 "seasonal_window": c.get("seasonal_window"),
-                "domain": c.get("domain") or "general",
-                "headline": (c.get("headline") or "")[:200],
-                "angle": (c.get("angle") or "")[:300],
+                "domain": c.get("domain") or "cbt",
+                "headline": "" if clinical_editorial_mode() else (c.get("headline") or "")[:200],
+                "angle": "" if clinical_editorial_mode() else (c.get("angle") or "")[:300],
+                "psychoeducation": (c.get("psychoeducation") or "")[:600],
+                "modalities": list(c.get("modalities") or []),
                 "rationale": f"{c.get('rationale')}|score={c['score']}",
                 "symbolic_hints": hints,
             }
+    boot = CLINICAL_CURRICULUM[0]
     return {
-        "topic_key": "curiosity_lifelong_learning",
-        "title": "Staying curious when the world feels loud",
+        "topic_key": boot["topic_key"],
+        "title": boot["title"],
         "seasonal_window": None,
-        "domain": "curiosity",
-        "rationale": "default_bootstrap_growth",
+        "domain": boot["domain"],
+        "psychoeducation": boot["psychoeducation"],
+        "modalities": list(boot.get("modalities") or []),
+        "rationale": "default_bootstrap_clinical",
         "symbolic_hints": hints,
     }
 
@@ -361,8 +466,14 @@ async def mine_crystal_themes(db_pool) -> int:
 
 
 async def ideate_topics_llm(db_pool) -> int:
-    """Propose domain-rotated topics via inference router; write to forecast."""
-    if not db_pool or os.getenv("ENABLE_NEWSLETTER_TOPIC_LLM", "true").strip().lower() in (
+    """Propose clinical topics via inference router; write to forecast.
+
+    Default OFF in clinical editorial mode (curriculum bank is enough).
+    """
+    from app.services.newsletter_clinical_curriculum import clinical_editorial_mode
+
+    default_llm = "false" if clinical_editorial_mode() else "true"
+    if not db_pool or os.getenv("ENABLE_NEWSLETTER_TOPIC_LLM", default_llm).strip().lower() in (
         "0",
         "false",
         "no",
@@ -383,15 +494,16 @@ async def ideate_topics_llm(db_pool) -> int:
 
     domain_cycle = TOPIC_DOMAINS[datetime.now(timezone.utc).timetuple().tm_yday % len(TOPIC_DOMAINS)]
     prompt = (
-        "You write topic ideas for Little Nate Dispatch, a mental-health education newsletter "
-        "(not therapy, not medical advice). Propose exactly 5 JSON objects in a JSON array. "
-        "Each object: topic_key (snake_case), title (human, under 100 chars), domain, angle "
-        "(one sentence therapeutic/educational framing). "
-        f"Prioritize domain '{domain_cycle}' plus rotate across: neurodivergence, arts/culture "
-        "(movies, plays, museums, music), military/veterans/war coping, fitness, grief, "
-        "relationships, burnout, curiosity. "
-        "Avoid political positions; for politics/war headlines frame nervous-system coping only. "
-        "Do not name private individuals negatively. "
+        "You write topic ideas for Little Nate Dispatch — clinical psychoeducation newsletter "
+        "(not therapy, not medical advice, not culture/news commentary). "
+        "Propose exactly 5 JSON objects in a JSON array. "
+        "Each object: topic_key (snake_case), title (human, under 100 chars), domain, "
+        "angle (one sentence naming the modality skill + how to practice with Little Nate). "
+        f"Prioritize domain '{domain_cycle}' and rotate across: CBT, DBT, ACT, IFS, ADEP/attachment, "
+        "grounding/somatic, Motivational Interviewing, relationship communication tools, "
+        "and Nate usage prompts (how to ask Nate for skills). "
+        "Do NOT propose arts, music, film, fitness trends, or headline/news hooks. "
+        "Do not name private individuals. "
         f"Avoid repeating these recent topics: {recent}. "
         f"Audience signals: {signals}. "
         "Return ONLY the JSON array."
@@ -447,6 +559,7 @@ async def ideate_topics_llm(db_pool) -> int:
                             "title": title,
                             "angle": str(item.get("angle") or "")[:300],
                             "source": "llm_ideation",
+                            "clinical": True,
                         }
                     ),
                 )

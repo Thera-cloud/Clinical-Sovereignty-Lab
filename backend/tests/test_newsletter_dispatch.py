@@ -175,11 +175,15 @@ def test_topic_engine_novelty_and_score():
     assert eng.novelty_penalty("Anxiety reach out", ["Anxiety reach out"]) == 1.0
     assert eng.novelty_penalty("Brand new theme", ["Anxiety reach out"]) < 0.3
     assert eng.infer_domain("ADHD and masking at work") == "neurodivergence"
-    assert eng.infer_domain("veteran reintegration after deployment") == "military"
-    assert eng.infer_domain("museum slow attention") == "arts"
-    s_hot = eng.score_candidate(news_velocity=0.9, foresight=0.8, novelty=0.0)
-    s_stale = eng.score_candidate(news_velocity=0.0, foresight=0.5, novelty=0.9)
-    assert s_hot > s_stale
+    assert eng.infer_domain("CBT thought record practice") == "cbt"
+    assert eng.infer_domain("DEAR MAN ask for space") == "dbt"
+    # Clinical editorial (default): curriculum beat beats news_velocity
+    s_clinical = eng.score_candidate(clinical_boost=1.0, news_velocity=0.0, novelty=0.0, domain="cbt")
+    s_trend = eng.score_candidate(clinical_boost=0.0, news_velocity=0.9, foresight=0.8, novelty=0.0, domain="arts")
+    assert s_clinical > s_trend
+    s_fresh = eng.score_candidate(clinical_boost=1.0, novelty=0.0, domain="cbt")
+    s_stale = eng.score_candidate(clinical_boost=1.0, novelty=0.9, domain="cbt")
+    assert s_fresh > s_stale
 
 
 def test_share_intent_urls():
@@ -309,14 +313,14 @@ def test_template_draft_applies_rewrite_notes_without_dumping_instructions():
     assert "988" in body
 
 
-def test_template_draft_excludes_ops_hints_and_weaves_worldly_hook():
-    pipe = _load("nl_pipe_worldly_ut", "app/services/newsletter_pipeline.py")
+def test_template_draft_clinical_psychoeducation_and_nate_prompts():
+    pipe = _load("nl_pipe_clinical_ut", "app/services/newsletter_pipeline.py")
     topic = {
-        "title": "When a song holds what you cannot say yet",
-        "topic_key": "music_and_catharsis",
-        "headline": "As Dubstep’s Popularity Surges, Bass-Focused Rampage",
-        "angle": "Let a song hold grief without letting the feed own your nervous system",
-        "domain": "arts",
+        "title": "CBT thought records: catching the story before it runs you",
+        "topic_key": "cbt_thought_records",
+        "domain": "cbt",
+        "headline": "SHOULD NOT APPEAR IN CLINICAL MODE",
+        "angle": "SHOULD NOT APPEAR",
         "symbolic_hints": [
             "GROWTH_7D: warm_lead: +7 subs / 7 conv",
             "Issue 20260719-x topic=Building: avg_helpful=5.00",
@@ -342,9 +346,22 @@ def test_template_draft_excludes_ops_hints_and_weaves_worldly_hook():
     assert "Voice notes" not in body
     assert "GROWTH_7D" not in body
     assert "avg_helpful" not in body
-    assert "Dubstep" in body or "wider world" in body.lower()
-    assert "nervous system" in body.lower() or "stance on the news" in body.lower()
-    assert "headline from what my body" in body.lower() or "culture or the news" in body.lower()
+    assert "SHOULD NOT APPEAR" not in body
+    assert "Cognitive Behavioral" in body or "thought record" in body.lower()
+    assert "**CBT:**" in body or "CBT" in body
+    assert "Practice with Little Nate" in body
+    assert "thought record" in body.lower()
+
+
+def test_clinical_curriculum_bank_loaded():
+    cur = _load("nl_clin_cur_ut", "app/services/newsletter_clinical_curriculum.py")
+    assert cur.clinical_editorial_mode() is True
+    assert len(cur.CLINICAL_CURRICULUM) >= 12
+    hit = cur.curriculum_by_key("dbt_interpersonal_effectiveness")
+    assert hit
+    assert "DEAR MAN" in hit["title"] or any("DEAR MAN" in p for p in hit["nate_prompts"])
+    assert any("Assert" in t["text"] for t in hit["techniques"])
+    assert len(hit["nate_prompts"]) >= 2
 
 
 def test_summon_cache_key_scopes_by_user():

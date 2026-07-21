@@ -32,7 +32,8 @@ TREND_FEEDS = [
 
 
 def trend_pairing_enabled() -> bool:
-    return os.getenv("ENABLE_NEWSLETTER_TREND_PAIRING", "true").strip().lower() in (
+    """Default OFF — clinical psychoeducation editorial does not use news hooks."""
+    return os.getenv("ENABLE_NEWSLETTER_TREND_PAIRING", "false").strip().lower() in (
         "1",
         "true",
         "yes",

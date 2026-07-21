@@ -156,89 +156,125 @@ async def _load_symbolic_hints(db_pool) -> List[str]:
 
 
 def _techniques_for_topic(topic: Dict[str, Any]) -> List[Dict[str, Any]]:
+    from app.services.newsletter_clinical_curriculum import match_curriculum
+
+    cur = match_curriculum(topic or {})
+    if cur and cur.get("techniques"):
+        return list(cur["techniques"])[:5]
     title = (topic.get("title") or "this week's theme").strip()[:70]
     return [
         {
             "step": 1,
-            "text": f"Name one feeling that showed up around “{title}” in one plain sentence.",
+            "text": f"Name one automatic thought around “{title}” in one plain sentence.",
             "modality": "CBT",
         },
         {
             "step": 2,
-            "text": "Ground for 60 seconds: feet, breath, one object in the room — then return to the theme.",
-            "modality": "somatic",
+            "text": "Ground 60 seconds (feet, breath, one object), then re-rate intensity 0–10.",
+            "modality": "grounding",
         },
         {
             "step": 3,
-            "text": "Ask for one concrete kind of support (or one curious question for Little Nate) tied to what stirred.",
-            "modality": "MI",
+            "text": "Write one DEAR MAN ask or one valued next action tied to what you noticed.",
+            "modality": "DBT",
+        },
+        {
+            "step": 4,
+            "text": "Ask Little Nate to coach that modality skill with your exact situation.",
+            "modality": "Nate usage",
         },
     ]
 
 
 def _feature_lead_for_topic(topic: Dict[str, Any], rewrite: str) -> str:
+    from app.services.newsletter_clinical_curriculum import (
+        clinical_editorial_mode,
+        match_curriculum,
+    )
+
     title = (topic.get("title") or "steadiness").strip()
-    headline = re.sub(r"\s+", " ", (topic.get("headline") or "").strip())[:160]
-    angle = re.sub(r"\s+", " ", (topic.get("angle") or "").strip())[:220]
+    cur = match_curriculum(topic or {})
+    psycho = (topic.get("psychoeducation") or (cur or {}).get("psychoeducation") or "").strip()
+    mods = topic.get("modalities") or (cur or {}).get("modalities") or []
+    mod_line = ", ".join(str(m) for m in mods[:4]) if mods else "clinical skills"
+
     if rewrite:
         return (
-            f"This week we explore {title} with a sharper focus "
-            f"on what your editor asked for: {rewrite}. "
-            "Small, structured steps restore agency without forcing a perfect plan.\n\n"
+            f"This week’s skill focus: {title}. "
+            f"Editor direction: {rewrite}. "
+            f"Modalities in play: {mod_line}. "
+            "Education only — not therapy or diagnosis.\n\n"
+            + (f"{psycho}\n\n" if psycho else "")
         )
+
+    if clinical_editorial_mode() or psycho:
+        return (
+            f"This week’s Dispatch is clinical psychoeducation on **{title}** "
+            f"({mod_line}). "
+            "You will get structured techniques plus copy-paste prompts for Little Nate — "
+            "skills practice, not news commentary.\n\n"
+            + (f"{psycho}\n\n" if psycho else "")
+        )
+
+    # Legacy path only when clinical focus is explicitly off
+    headline = re.sub(r"\s+", " ", (topic.get("headline") or "").strip())[:160]
+    angle = re.sub(r"\s+", " ", (topic.get("angle") or "").strip())[:220]
     if headline or angle:
         bits = []
         if headline:
             bits.append(f"In the wider world: {headline}.")
         if angle:
             bits.append(angle if angle.endswith(".") else f"{angle}.")
-        else:
-            bits.append(
-                f"This Dispatch uses that cultural moment to explore {title} — "
-                "skills for staying steady when the feed moves fast."
-            )
         bits.append(
             "Education and nervous-system skills only — not a stance on the news itself.\n\n"
         )
         return " ".join(bits)
     return (
-        f"This week we explore {title} — how overwhelm can make reaching out feel risky, "
-        "and how small, structured steps restore agency without forcing a perfect plan.\n\n"
+        f"This week we explore {title} with structured clinical skills "
+        "and clear prompts for practicing with Little Nate.\n\n"
     )
 
 
 def _go_deeper_for_topic(topic: Dict[str, Any]) -> str:
-    if topic.get("headline") or topic.get("angle"):
-        return (
-            "Try opening with Little Nate:\n"
-            '1. "Something in culture or the news stirred me — sit with what it touched."\n'
-            '2. "Help me separate the headline from what my body is doing."\n'
-            '3. "What skill would help me stay curious without getting swept?"'
-        )
+    from app.services.newsletter_clinical_curriculum import match_curriculum
+
+    cur = match_curriculum(topic or {})
+    prompts = list((cur or {}).get("nate_prompts") or [])
+    if prompts:
+        lines = ["Try opening with Little Nate:"]
+        for i, p in enumerate(prompts[:3], 1):
+            lines.append(f'{i}. "{p}"')
+        return "\n".join(lines)
     return (
         "Try opening with Little Nate:\n"
-        '1. "I keep putting off asking for help — sit with me in that."\n'
-        '2. "What am I protecting by staying quiet?"\n'
-        '3. "Help me practice one sentence I could send to someone safe."'
+        '1. "Use CBT on this automatic thought — one thought record, then stop."\n'
+        '2. "Coach a DBT skill for this moment — TIPP or DEAR MAN."\n'
+        '3. "Help me practice reflective listening / a repair attempt for this conflict."'
     )
 
 
 async def select_topic(db_pool) -> Dict[str, Any]:
-    """Score topics from the growth engine pool (signals, forecast, trends, seasons)."""
+    """Score topics from clinical curriculum + forecast (trends off by default)."""
     try:
+        from app.services.newsletter_clinical_curriculum import clinical_editorial_mode
         from app.services.newsletter_topic_engine import select_best_topic
 
         topic = await select_best_topic(db_pool)
+        if clinical_editorial_mode():
+            topic = dict(topic)
+            topic["headline"] = ""
+            topic["angle"] = ""
+            return topic
         return await enrich_topic_worldly_hook(db_pool, topic)
     except Exception as e:
-        logger.warning("select_topic growth engine fallback: %s", e)
+        logger.warning("select_topic clinical/curriculum fallback: %s", e)
         hints = await _load_symbolic_hints(db_pool)
         return {
-            "topic_key": "curiosity_lifelong_learning",
-            "title": "Staying curious when the world feels loud",
+            "topic_key": "cbt_thought_records",
+            "title": "CBT thought records: catching the story before it runs you",
             "seasonal_window": None,
-            "domain": "curiosity",
-            "rationale": "default_bootstrap",
+            "domain": "cbt",
+            "rationale": "default_bootstrap_clinical",
             "symbolic_hints": hints,
         }
 
@@ -341,11 +377,11 @@ def draft_issue_from_bundle(topic: Dict[str, Any], bundle: Dict[str, Any]) -> Di
         [
             opener,
             feature,
-            "## Techniques\n"
+            "## Techniques (practice these)\n"
             + "\n".join(
-                f"{t['step']}. {t['text']} _(modality: {t['modality']})_" for t in techniques
+                f"{t['step']}. **{t['modality']}:** {t['text']}" for t in techniques
             ),
-            "## Go Deeper with Little Nate\n" + go_deeper,
+            "## Practice with Little Nate\n" + go_deeper,
             f"## Further reading\n[{external['source_name']}]({external['url']})",
             "## Share\nForward this issue or use the share links in your email.",
             "## Next steps\nJoin Sovereign Sanctuary or try 20 free questions with Nate.",
@@ -396,21 +432,30 @@ async def draft_issue_llm(
     hints = "\n".join(topic.get("symbolic_hints") or [])
     rewrite = (bundle.get("editor_rewrite_notes") or "").strip()
     system = (
-        "You write Little Nate Dispatch — warm, educational mental-health newsletter. "
-        "NOT therapy or diagnosis. Cite ONLY URLs from the research list. "
+        "You write Little Nate Dispatch — clinical psychoeducation newsletter. "
+        "Focus: modality techniques (CBT/DBT/ACT/IFS/ADEP/grounding), relationship "
+        "communication tools, and how to practice with Little Nate. "
+        "NOT therapy, diagnosis, culture commentary, or news hooks. "
+        "Cite ONLY URLs from the research list. "
         "Include crisis footer with 988 and findahelpline.com. "
         "Never paste editor instructions verbatim into the article. "
-        "Output markdown with sections: opener, feature, techniques (3), go deeper, further reading."
+        "Output markdown: opener, feature (psychoeducation), techniques (3–5 with modality labels), "
+        "Go Deeper with Little Nate (3 copy-paste prompts), further reading."
     )
     worldly = ""
-    if topic.get("headline") or topic.get("angle"):
+    from app.services.newsletter_clinical_curriculum import clinical_editorial_mode
+
+    if not clinical_editorial_mode() and (topic.get("headline") or topic.get("angle")):
         worldly = (
             f"Worldly hook (weave into feature; do not dump raw ops metrics):\n"
             f"- Headline: {topic.get('headline') or '(none)'}\n"
             f"- Therapeutic angle: {topic.get('angle') or '(none)'}\n\n"
         )
+    psycho = (topic.get("psychoeducation") or "").strip()
     user = (
-        f"Topic: {topic.get('title')}\n\nAllowed citations:\n{cite_blob}\n\n"
+        f"Topic: {topic.get('title')}\nDomain: {topic.get('domain')}\n"
+        f"Psychoeducation notes: {psycho or '(derive from topic)'}\n\n"
+        f"Allowed citations:\n{cite_blob}\n\n"
         + worldly
         + f"Style hints (tone only — never paste into the article):\n{hints or '(none)'}\n\n"
         + (f"EDITOR REWRITE DIRECTION (apply, do not quote):\n{rewrite}\n\n" if rewrite else "")
@@ -601,13 +646,16 @@ async def rewrite_existing_issue(
     if not cites:
         return {"ok": False, "error": "no_citations_on_issue"}
 
+    from app.services.newsletter_clinical_curriculum import clinical_editorial_mode
+
     topic = {
         "title": row["topic"] or row["slug"],
         "topic_key": row["slug"],
-        "domain": (bundle.get("domain") if isinstance(bundle, dict) else None) or "general",
+        "domain": (bundle.get("domain") if isinstance(bundle, dict) else None) or "cbt",
         "symbolic_hints": [],
     }
-    topic = await enrich_topic_worldly_hook(db_pool, topic)
+    if not clinical_editorial_mode():
+        topic = await enrich_topic_worldly_hook(db_pool, topic)
     draft = await draft_issue_llm(topic, bundle, force=bool(notes))
     if not draft:
         draft = draft_issue_from_bundle(topic, bundle)

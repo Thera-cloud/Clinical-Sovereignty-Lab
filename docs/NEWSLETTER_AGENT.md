@@ -10,8 +10,9 @@ Weekly staged newsletter: topic → research (year ≥ 2024) → draft → criti
 | `ENABLE_NEWSLETTER_LEARNING` | true (default) | +72h learning loop + replicate sweep (starts even if compose off) |
 | `ENABLE_NEWSLETTER_WARM_LEADS` | false | Mine trial/users + send double-opt-in invites |
 | `ENABLE_NEWSLETTER_HIVE` | (auto) | Dispatch hive: local patrol + CLI bus enqueue; defaults **on** when agent on; set `false` to force off |
-| `ENABLE_NEWSLETTER_TREND_PAIRING` | true | Harvest headlines + pair therapeutic angles into topic forecast |
-| `ENABLE_NEWSLETTER_TOPIC_LLM` | true | Weekly LLM topic ideation into forecast pool |
+| `ENABLE_NEWSLETTER_CLINICAL_FOCUS` | **true** | Clinical psychoeducation + modality techniques + Nate usage (default). Zeros news/viral topic weights |
+| `ENABLE_NEWSLETTER_TREND_PAIRING` | **false** | Harvest headlines + pair angles (off — culture/news hooks disabled) |
+| `ENABLE_NEWSLETTER_TOPIC_LLM` | false (when clinical focus on) | Optional LLM topic ideation; curriculum bank is primary |
 | `ENABLE_NEWSLETTER_LLM_DRAFT` | false | Optional inference-router compose (template fallback) |
 | `ENABLE_NEWSLETTER_SMS` | true | SMS link to active subscribers with `phone_e164` |
 | `ENABLE_NEWSLETTER_HERO_IMAGE` | true | Topic still: Grok Imagine → Gemini fallback (`XAI_*` and/or `GEMINI_API_KEY`) |
@@ -51,17 +52,21 @@ Weekly staged newsletter: topic → research (year ≥ 2024) → draft → criti
 - `255_newsletter_wiring_gaps.sql` — feedback uniqueness + open-issue indexes
 - `256_newsletter_growth_engine.sql` — trend candidates, `ref_slug`, seasonal forecast seed
 
-## Growth engine
+## Editorial direction (clinical — 2026-07-21)
 
-- Topic selection scores a pool (chat signals, forecast, seasonal calendar, crystal aggregates, LLM ideation, trend pairs) with last-8 novelty penalty — not a 2-topic oscillator
-- Domains: neurodivergence, arts/culture, military/veterans, fitness, grief, burnout, curiosity, …
-- Trend pairing: RSS headlines → therapeutic angle (politics = coping only) → `news_velocity` on forecast
-- Email + library: X / Facebook / LinkedIn / WhatsApp / email / SMS via `/share?channel=` → intent URL + UTM
-- Confirm credits `newsletter_growth_ledger` and records viral theme signal from `ref_slug`
+- **Primary product:** clinical psychoeducation + modality techniques (CBT / DBT / ACT / IFS / ADEP / grounding / MI) + relationship communication tools + **how to use Little Nate** (copy-paste skill prompts)
+- Curriculum bank: `newsletter_clinical_curriculum.py` (scored into topic pool every cycle)
+- Culture/news trend pairing **off by default**; migration `259_newsletter_clinical_editorial_reset.sql` wipes prior issues/forecast/trends and reseeds clinical topics
+- Share/growth ledgers still work; they no longer dominate topic selection under clinical focus
+
+## Growth engine (secondary)
+
+- Topic selection scores clinical curriculum first, then chat signals / clinical forecast, with last-8 novelty penalty
+- Domains: cbt, dbt, act, ifs, adep, somatic, relationships, nate_usage, mi, self_compassion, …
+- Email + library share buttons unchanged
 - Admin: `GET /growth`, `POST /growth/refresh-topics`; Insights tab Growth panel
-- Learning: +72h (or +24h when ratings exist) → symbolic memory + crystal confidence reinforce + theme signals
-- Chat library refs → `newsletter_chat_signals` + optional editorial learning block
-- Hive kinds: topic_patrol, research_verify, draft_critique, growth_signal, symbolic_promote, trend_pairing, growth_attribution, chat_learn
+- Learning: +72h → symbolic memory + theme signals (clinical themes preferred)
+- Hive kinds: topic_patrol, research_verify, draft_critique, growth_signal, symbolic_promote, chat_learn (trend_pairing optional)
 
 ## Wiring notes (post-gap fix)
 
