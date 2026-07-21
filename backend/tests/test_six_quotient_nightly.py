@@ -123,13 +123,18 @@ class TestAutoJudgeFailure(unittest.IsolatedAsyncioTestCase):
         cm.__aexit__ = AsyncMock(return_value=None)
         pool.acquire = MagicMock(return_value=cm)
 
-        with patch.object(_judge, "_llm_judge", AsyncMock(return_value=None)):
-            with patch(
-                "app.services.six_quotient_score_intake.upsert_scores",
-                new_callable=AsyncMock,
-            ) as upsert:
-                out = await _judge.auto_score_run(pool, None, "r1")
-                upsert.assert_not_called()
+        with patch.object(
+            _judge,
+            "ensure_evaluator_calibrated",
+            AsyncMock(return_value={"ok": True, "already_calibrated": True}),
+        ):
+            with patch.object(_judge, "_llm_judge", AsyncMock(return_value=None)):
+                with patch(
+                    "app.services.six_quotient_score_intake.upsert_scores",
+                    new_callable=AsyncMock,
+                ) as upsert:
+                    out = await _judge.auto_score_run(pool, None, "r1")
+                    upsert.assert_not_called()
         self.assertFalse(out.get("ok"))
         self.assertIn("judge failed", str(out.get("error") or ""))
 
