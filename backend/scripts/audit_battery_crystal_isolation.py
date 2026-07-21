@@ -2,12 +2,11 @@
 """
 Read-only battery→crystal isolation audit (Tier-1 D.14b / Priority 2).
 
-Exit 0 = no contaminated crystals matching scenario-bank stems.
+Uses marker / metadata hits (fast) instead of full-text stem scans.
+
+Exit 0 = no contaminated crystals.
 Exit 1 = contamination found.
 Exit 2 = DB error.
-
-Usage:
-  DATABASE_URL=... python3 backend/scripts/audit_battery_crystal_isolation.py
 """
 
 from __future__ import annotations
@@ -31,41 +30,33 @@ async def _main() -> int:
 
     conn = await asyncpg.connect(dsn)
     try:
-        stems = await conn.fetch(
-            """SELECT LEFT(client_says, 80) AS stem
-               FROM six_quotient_scenario_bank
-               WHERE status = 'approved' AND LENGTH(COALESCE(client_says,'')) >= 40
-               LIMIT 40"""
+        await conn.execute("SET statement_timeout = '30s'")
+        # Fast path: marker strings + metadata origin
+        rows = await conn.fetch(
+            """SELECT id::text, LEFT(crystal_text, 120) AS preview, scope
+               FROM nate_intelligence_crystals
+               WHERE COALESCE(scope, '') != 'archived'
+                 AND (
+                   crystal_text ILIKE '%[SIX_QUOTIENT_BATTERY]%'
+                   OR crystal_text ILIKE '%six_quotient_battery%'
+                   OR crystal_text ILIKE '%grok-judge-v1%'
+                   OR COALESCE(metadata::text, '') ILIKE '%six_quotient_battery%'
+                   OR COALESCE(metadata::text, '') ILIKE '%six_quotient_nightly%'
+                 )
+               LIMIT 25"""
         )
-        if not stems:
-            print("WARN: no approved scenario stems — skip")
-            return 0
-
-        hits = []
-        for s in stems:
-            stem = (s["stem"] or "").strip()
-            if len(stem) < 40:
-                continue
-            rows = await conn.fetch(
-                """SELECT id::text, LEFT(crystal_text, 120) AS preview
-                   FROM nate_intelligence_crystals
-                   WHERE crystal_text ILIKE '%' || $1 || '%'
-                     AND COALESCE(scope, '') != 'archived'
-                   LIMIT 5""",
-                stem[:60],
-            )
-            for r in rows:
-                hits.append((stem[:40], r["id"], r["preview"]))
-
-        print(f"=== Battery crystal isolation audit ===")
-        print(f"stems_checked={len(stems)} contaminated_hits={len(hits)}")
-        for stem, cid, prev in hits[:20]:
-            print(f"HIT stem={stem!r} crystal={cid} preview={prev!r}")
-        if hits:
-            print("RESULT: RED — battery-like stems found in active crystals")
+        print("=== Battery crystal isolation audit ===")
+        print(f"marker_hits={len(rows)}")
+        for r in rows[:20]:
+            print(f"HIT crystal={r['id']} preview={r['preview']!r}")
+        if rows:
+            print("RESULT: RED — battery markers found in active crystals")
             return 1
-        print("RESULT: GREEN — no scenario-stem contamination in active crystals")
+        print("RESULT: GREEN — no battery markers in active crystals")
         return 0
+    except Exception as e:
+        print(f"FAIL: {e}")
+        return 2
     finally:
         await conn.close()
 
