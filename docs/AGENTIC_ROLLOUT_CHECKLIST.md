@@ -299,7 +299,7 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 | D.6 | Judge calibrate: `POST .../judge/calibrate` before AI evaluators *(API gate enforces for AI ids)* | [x] *(grok-judge-v1 kappa=1.0)* |
 | D.7 | Ability/IRT: `GET .../ability` after first scored run | [x] *(prod run `09716350…` scored)* |
 | D.8 | Prod living/standards/gen flags remain **false** until soak | [x] *(superseded 2026-07-21 — living/standards/gen/LIVE_WS true after soak)* |
-| D.9 | Self-dev agent: bi-weekly YELLOW proposals (`ENABLE_SIX_QUOTIENT_SELF_DEV`) | [ ] *(code landed; flip+trigger after deploy)* |
+| D.9 | Self-dev agent: bi-weekly YELLOW proposals (`ENABLE_SIX_QUOTIENT_SELF_DEV`) | [x] *(2026-07-21 — `e065c029` on GREEN; 133/133; trigger → AQ YELLOW CEO `1784634272-six_-2cde91e5`)* |
 | D.10 | Stale `awaiting_scores` runs → `failed` (status CHK) | [x] *(2026-07-21 — `cca31e87…`)* |
 
 ---
