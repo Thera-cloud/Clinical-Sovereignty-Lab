@@ -90,8 +90,11 @@ class SixQuotientStandardsIndex:
         inserted = 0
         scanned = 0
         errors: List[str] = []
+        # QUANTUM-CRYSTAL-ARCH — WHO/CDC send large CSP headers (>8190); raise limits
         async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=25)
+            timeout=aiohttp.ClientTimeout(total=25),
+            max_line_size=65536,
+            max_field_size=65536,
         ) as session:
             for quotient, block in (reg.get("quotients") or {}).items():
                 for src in block.get("sources") or []:
