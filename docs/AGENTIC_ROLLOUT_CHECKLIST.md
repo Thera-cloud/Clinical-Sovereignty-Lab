@@ -212,7 +212,7 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 | 5a.2 | Adversarial walk: `docs/AGENTIC_PHASE_5A_REVIEW.md` | [x] *(Nathan Nevedal 2026-07-20 — all 5 gates; staging flip authorized)* |
 | 5a.3 | Seam tests: `test_symbolic_extraction_seams.py` | [x] *(included in CI gate 1658; staging helper `phase5a` added)* |
 | 5a.4 | Staging flip → verify `conversation_history.metadata.symbols` | [x] *(2026-07-20 — `phase5a on`; persist wired: every turn writes `{state}`; commitment extract merges `{commitment,state}` — redeploy staging bridge to pick up)* |
-| 5a.5 | Production flip | [ ] |
+| 5a.5 | Production flip | [x] *(2026-07-21T03:52 UTC — `.env` EXTRACTION=true, VERIFIER=false, FORWARD=false; safe_deploy bridge+backend vault 368→368; 132/132; live WS `client1`/`CLIENT_001` → `metadata.symbols` state+commitment + `nate_commitments` row)* |
 
 ---
 
