@@ -4961,237 +4961,276 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         ),
         backgroundColor: Colors.transparent,
         elevation: 0,
+        // Portrait: icon row exceeds width — horizontal slide (Avatar → Exit).
+        // Landscape: same row; scrolls only when icons overflow.
         actions: [
-          // Avatar Mode Toggle (only visible to eligible users)
-          if (_canUseAvatarMode())
-            IconButton(
-              icon: Icon(
-                _avatarModeEnabled ? Icons.face : Icons.face_outlined,
-                color: _avatarModeEnabled
-                    ? const Color(0xFFFFD700)
-                    : Colors.white54,
-              ),
-              tooltip:
-                  _avatarModeEnabled ? 'Avatar Mode ON' : 'Avatar Mode OFF',
-              onPressed: () => _toggleAvatarMode(!_avatarModeEnabled),
-            ),
-          // Text size controls (chat + avatar mode) — clamp 0.85..1.6, step 0.1
-          SizedBox(
-            width: 44,
-            height: 44,
-            child: IconButton(
-              icon: const Icon(Icons.text_decrease),
-              iconSize: 20,
-              color: _chatTextScale > _chatTextScaleMin
-                  ? Colors.white70
-                  : Colors.white24,
-              tooltip: 'Text size',
-              onPressed: _chatTextScale > _chatTextScaleMin
-                  ? () => _adjustChatTextScale(-_chatTextScaleStep)
-                  : null,
-            ),
-          ),
-          SizedBox(
-            width: 44,
-            height: 44,
-            child: IconButton(
-              icon: const Icon(Icons.text_increase),
-              iconSize: 20,
-              color: _chatTextScale < _chatTextScaleMax
-                  ? Colors.white70
-                  : Colors.white24,
-              tooltip: 'Text size',
-              onPressed: _chatTextScale < _chatTextScaleMax
-                  ? () => _adjustChatTextScale(_chatTextScaleStep)
-                  : null,
-            ),
-          ),
-          // Daily Reconnect (always shown next to Family Sanctuary; backend tier-gates the join)
-          IconButton(
-              icon: const Icon(Icons.favorite_outline, color: Color(0xFFC9A962)),
-              tooltip: 'Daily Reconnect',
-              onPressed: () async {
-                _wsCh?.sink.close();
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => DailyReconnectScreen(
-                      profile: widget.currentUserProfile ?? {},
-                      username: widget.username,
-                      password: widget.password,
-                    ),
-                  ),
-                );
-                if (mounted) _connectToCortex();
-              },
-            ),
-          IconButton(
-              icon: const Icon(Icons.psychology_outlined, color: Color(0xFF4ECDC4)),
-              tooltip: 'Training Ground',
-              onPressed: () async {
-                _wsCh?.sink.close();
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => TrainingGroundScreen(
-                      profile: widget.currentUserProfile ?? {},
-                      username: widget.username,
-                      password: widget.password,
-                    ),
-                  ),
-                );
-                if (mounted) _connectToCortex();
-              },
-            ),
-          // Family Sanctuary button
-          IconButton(
-            icon: const Icon(Icons.family_restroom, color: Colors.amber),
-            onPressed: () async {
-              // Close parent socket -- iOS Safari struggles with concurrent
-              // WebSocket connections to the same origin for the same user
-              _wsCh?.sink.close(); // FIX-H shared or owned channel
-              await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => FamilySanctuaryScreen(
-                      profile: widget.currentUserProfile ?? {},
-                      username: widget.username,
-                      password: widget.password,
-                    ),
-                  ));
-              // Reconnect when returning from Family Sanctuary
-              if (mounted) _connectToCortex();
-            },
-            tooltip: "Family Sanctuary",
-          ),
-          // AI Modes button
-          IconButton(
-            icon: Icon(
-              _activeAiMode != null
-                  ? Icons.psychology
-                  : Icons.psychology_outlined,
-              color: _activeAiMode != null
-                  ? const Color(0xFF9D4EDD)
-                  : Colors.white54,
-            ),
-            onPressed: _showAiModePicker,
-            tooltip: _activeAiMode != null
-                ? 'AI Mode: ${_activeAiMode!.toUpperCase()}'
-                : 'AI Modes',
-          ),
-          // Nudge badge button
-          if (_pendingNudges.isNotEmpty)
-            Stack(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.notifications_active,
-                      color: Color(0xFFC9A962)),
-                  onPressed: _showNudgesSheet,
-                  tooltip: 'Nate Nudges',
-                ),
-                Positioned(
-                  right: 6,
-                  top: 6,
-                  child: Container(
-                    padding: const EdgeInsets.all(3),
-                    decoration: const BoxDecoration(
-                        color: Colors.red, shape: BoxShape.circle),
-                    child: Text('${_pendingNudges.length}',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold)),
-                  ),
-                ),
-              ],
-            ),
-          // Metrics button
-          IconButton(
-            icon: const Icon(Icons.analytics, color: Colors.cyanAccent),
-            onPressed: _showMetricsSheet,
-            tooltip: "View Metrics",
-          ),
-          IconButton(
-            icon: const Icon(Icons.menu_book, color: Color(0xFFC9A962)),
-            onPressed: _openVocabularySheet,
-            tooltip: "Custom Vocabulary",
-          ),
-          IconButton(
-            icon: Icon(_isSpeaking ? Icons.stop_circle : Icons.volume_up,
-                color: Colors.white70),
-            onPressed: _isSpeaking
-                ? _stopReading
-                : () async {
-                    await _unlockTtsOnce();
-                    await _readBackDraft();
-                  },
-            tooltip: _isSpeaking ? "Stop reading" : "Read draft aloud",
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings, color: Color(0xFFC9A962)),
-            tooltip: 'Settings',
-            onPressed: () {
-              Navigator.push<dynamic>(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ClientSettingsScreen(
-                      profile: _clientProfile(),
-                      socket: _wsCh,
-                      onLogout: () {
-                        _wsCh?.sink.close(); // FIX-H
-                      },
-                    ),
-                  )).then((result) {
-                if (result is Map && result['profilePatch'] is Map && mounted) {
-                  setState(() {
-                    _profilePatchOverrides.addAll(
-                      Map<String, dynamic>.from(result['profilePatch'] as Map),
-                    );
-                  });
-                }
-                if (mounted) _checkSseIntake();
-                if (result is Map &&
-                    result['askNateMessage'] != null &&
-                    mounted) {
-                  _chatController.text =
-                      '${_chatController.text}${result['askNateMessage']}'.trim();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Journey panel attached. Tap Send to ask Nate.',
+          Builder(
+            builder: (context) {
+              final screenW = MediaQuery.sizeOf(context).width;
+              final actionsW = (screenW - 148).clamp(160.0, screenW * 0.72);
+              return SizedBox(
+                width: actionsW,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Avatar Mode Toggle (only visible to eligible users)
+                      if (_canUseAvatarMode())
+                        IconButton(
+                          icon: Icon(
+                            _avatarModeEnabled
+                                ? Icons.face
+                                : Icons.face_outlined,
+                            color: _avatarModeEnabled
+                                ? const Color(0xFFFFD700)
+                                : Colors.white54,
+                          ),
+                          tooltip: _avatarModeEnabled
+                              ? 'Avatar Mode ON'
+                              : 'Avatar Mode OFF',
+                          onPressed: () =>
+                              _toggleAvatarMode(!_avatarModeEnabled),
+                        ),
+                      // Text size controls — clamp 0.85..1.6, step 0.1
+                      SizedBox(
+                        width: 44,
+                        height: 44,
+                        child: IconButton(
+                          icon: const Icon(Icons.text_decrease),
+                          iconSize: 20,
+                          color: _chatTextScale > _chatTextScaleMin
+                              ? Colors.white70
+                              : Colors.white24,
+                          tooltip: 'Text size',
+                          onPressed: _chatTextScale > _chatTextScaleMin
+                              ? () =>
+                                  _adjustChatTextScale(-_chatTextScaleStep)
+                              : null,
+                        ),
                       ),
-                      backgroundColor: Color(0xFFC9A962),
-                      duration: Duration(seconds: 4),
-                    ),
-                  );
-                  FocusScope.of(context).requestFocus(FocusNode());
-                } else if (result is Map &&
-                    result['askNateVault'] != null &&
-                    mounted) {
-                  final itemId = result['askNateVault'].toString();
-                  _chatController.text =
-                      '${_chatController.text}[Vault:$itemId] '.trim();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Vault item attached. Tap Send to ask Nate.',
+                      SizedBox(
+                        width: 44,
+                        height: 44,
+                        child: IconButton(
+                          icon: const Icon(Icons.text_increase),
+                          iconSize: 20,
+                          color: _chatTextScale < _chatTextScaleMax
+                              ? Colors.white70
+                              : Colors.white24,
+                          tooltip: 'Text size',
+                          onPressed: _chatTextScale < _chatTextScaleMax
+                              ? () =>
+                                  _adjustChatTextScale(_chatTextScaleStep)
+                              : null,
+                        ),
                       ),
-                      backgroundColor: Color(0xFFC9A962),
-                      duration: Duration(seconds: 4),
-                    ),
-                  );
-                  FocusScope.of(context).requestFocus(FocusNode());
-                }
-              });
+                      IconButton(
+                        icon: const Icon(Icons.favorite_outline,
+                            color: Color(0xFFC9A962)),
+                        tooltip: 'Daily Reconnect',
+                        onPressed: () async {
+                          _wsCh?.sink.close();
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => DailyReconnectScreen(
+                                profile: widget.currentUserProfile ?? {},
+                                username: widget.username,
+                                password: widget.password,
+                              ),
+                            ),
+                          );
+                          if (mounted) _connectToCortex();
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.psychology_outlined,
+                            color: Color(0xFF4ECDC4)),
+                        tooltip: 'Training Ground',
+                        onPressed: () async {
+                          _wsCh?.sink.close();
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => TrainingGroundScreen(
+                                profile: widget.currentUserProfile ?? {},
+                                username: widget.username,
+                                password: widget.password,
+                              ),
+                            ),
+                          );
+                          if (mounted) _connectToCortex();
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.family_restroom,
+                            color: Colors.amber),
+                        onPressed: () async {
+                          _wsCh?.sink.close(); // FIX-H
+                          await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => FamilySanctuaryScreen(
+                                  profile: widget.currentUserProfile ?? {},
+                                  username: widget.username,
+                                  password: widget.password,
+                                ),
+                              ));
+                          if (mounted) _connectToCortex();
+                        },
+                        tooltip: "Family Sanctuary",
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          _activeAiMode != null
+                              ? Icons.psychology
+                              : Icons.psychology_outlined,
+                          color: _activeAiMode != null
+                              ? const Color(0xFF9D4EDD)
+                              : Colors.white54,
+                        ),
+                        onPressed: _showAiModePicker,
+                        tooltip: _activeAiMode != null
+                            ? 'AI Mode: ${_activeAiMode!.toUpperCase()}'
+                            : 'AI Modes',
+                      ),
+                      if (_pendingNudges.isNotEmpty)
+                        Stack(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.notifications_active,
+                                  color: Color(0xFFC9A962)),
+                              onPressed: _showNudgesSheet,
+                              tooltip: 'Nate Nudges',
+                            ),
+                            Positioned(
+                              right: 6,
+                              top: 6,
+                              child: Container(
+                                padding: const EdgeInsets.all(3),
+                                decoration: const BoxDecoration(
+                                    color: Colors.red, shape: BoxShape.circle),
+                                child: Text('${_pendingNudges.length}',
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.analytics,
+                            color: Colors.cyanAccent),
+                        onPressed: _showMetricsSheet,
+                        tooltip: "View Metrics",
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.menu_book,
+                            color: Color(0xFFC9A962)),
+                        onPressed: _openVocabularySheet,
+                        tooltip: "Custom Vocabulary",
+                      ),
+                      IconButton(
+                        icon: Icon(
+                            _isSpeaking
+                                ? Icons.stop_circle
+                                : Icons.volume_up,
+                            color: Colors.white70),
+                        onPressed: _isSpeaking
+                            ? _stopReading
+                            : () async {
+                                await _unlockTtsOnce();
+                                await _readBackDraft();
+                              },
+                        tooltip: _isSpeaking
+                            ? "Stop reading"
+                            : "Read draft aloud",
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.settings,
+                            color: Color(0xFFC9A962)),
+                        tooltip: 'Settings',
+                        onPressed: () {
+                          Navigator.push<dynamic>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ClientSettingsScreen(
+                                  profile: _clientProfile(),
+                                  socket: _wsCh,
+                                  onLogout: () {
+                                    _wsCh?.sink.close(); // FIX-H
+                                  },
+                                ),
+                              )).then((result) {
+                            if (result is Map &&
+                                result['profilePatch'] is Map &&
+                                mounted) {
+                              setState(() {
+                                _profilePatchOverrides.addAll(
+                                  Map<String, dynamic>.from(
+                                      result['profilePatch'] as Map),
+                                );
+                              });
+                            }
+                            if (mounted) _checkSseIntake();
+                            if (result is Map &&
+                                result['askNateMessage'] != null &&
+                                mounted) {
+                              _chatController.text =
+                                  '${_chatController.text}${result['askNateMessage']}'
+                                      .trim();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Journey panel attached. Tap Send to ask Nate.',
+                                  ),
+                                  backgroundColor: Color(0xFFC9A962),
+                                  duration: Duration(seconds: 4),
+                                ),
+                              );
+                              FocusScope.of(context)
+                                  .requestFocus(FocusNode());
+                            } else if (result is Map &&
+                                result['askNateVault'] != null &&
+                                mounted) {
+                              final itemId =
+                                  result['askNateVault'].toString();
+                              _chatController.text =
+                                  '${_chatController.text}[Vault:$itemId] '
+                                      .trim();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Vault item attached. Tap Send to ask Nate.',
+                                  ),
+                                  backgroundColor: Color(0xFFC9A962),
+                                  duration: Duration(seconds: 4),
+                                ),
+                              );
+                              FocusScope.of(context)
+                                  .requestFocus(FocusNode());
+                            }
+                          });
+                        },
+                      ),
+                      IconButton(
+                          icon: const Icon(Icons.logout, color: Colors.red),
+                          onPressed: () {
+                            _wsCh?.sink.close(); // FIX-H
+                            Navigator.pushReplacement(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const LobbyScreen()));
+                          }),
+                    ],
+                  ),
+                ),
+              );
             },
           ),
-          IconButton(
-              icon: const Icon(Icons.logout, color: Colors.red),
-              onPressed: () {
-                _wsCh?.sink.close(); // FIX-H
-                Navigator.pushReplacement(context,
-                    MaterialPageRoute(builder: (_) => const LobbyScreen()));
-              })
         ],
       ),
       body: Column(
