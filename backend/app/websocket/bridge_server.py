@@ -9145,6 +9145,10 @@ class AzureCortex:
         # attribution BEFORE crystal_context is re-wrapped as a plain str
         # below (the enrichment merge loses the .crystal_ids attribute).
         _crystal_ids_for_turn = list(getattr(crystal_context, "crystal_ids", None) or [])[:50]
+        # QUANTUM-CRYSTAL-ARCH — Phase 5b: capture scopes before str re-wrap
+        _crystal_scopes_for_turn = list(
+            getattr(crystal_context, "crystal_scopes", None) or []
+        )[:50]
         if _enrich_addendum:  # QUANTUM-CRYSTAL-ARCH — Tier 2: fold directive into crystal context
             crystal_context = f"{crystal_context}\n\n{_enrich_addendum}" if crystal_context else _enrich_addendum
         # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch Story Library (explicit cite only)
@@ -10503,6 +10507,14 @@ class AzureCortex:
                             build_state_symbol(_qg_verbatim_user_text, audit_metadata=_ttc_audit_meta)
                         )
                         _ttc_audit_meta["crystal_ids"] = _crystal_ids_for_turn
+                        # QUANTUM-CRYSTAL-ARCH — Phase 5b Seam/Surface: scopes + crisis exempt
+                        _ttc_audit_meta["crystal_scopes"] = list(_crystal_scopes_for_turn)
+                        _tmc = (_ttc_audit_meta.get("tmc_class") or "").lower()
+                        _ttc_audit_meta["crisis_exempt"] = _tmc in (
+                            "crisis",
+                            "suicide_ideation",
+                        )
+                        _ttc_audit_meta["requester_user_id"] = uid
                     from app.services.therapeutic_controller import audit_therapeutic_response as _ttc_post
                     _ttc_audited = await _ttc_post(
                         response_text=full_response, audit_metadata=_ttc_audit_meta,

@@ -97,6 +97,7 @@ class _AttributedContext(str):
     `.crystal_ids` sees the extra data — no caller signature changed.
     """
     crystal_ids: list = []
+    crystal_scopes: list = []  # QUANTUM-CRYSTAL-ARCH — Phase 5b
 
 try:
     from .bridge_enrichment import (
@@ -494,6 +495,10 @@ async def recall_crystals_for_context(
         if _ENABLE_CRYSTAL_ATTRIBUTION and crystal_ids:
             attributed = _AttributedContext(result)
             attributed.crystal_ids = list(crystal_ids)[:50]
+            # QUANTUM-CRYSTAL-ARCH — Phase 5b: scopes for symbolic verifier isolation
+            attributed.crystal_scopes = [
+                str(c.get("scope") or "global") for c in crystals if isinstance(c, dict)
+            ][:50]
             return attributed
         return result
     except Exception as e:

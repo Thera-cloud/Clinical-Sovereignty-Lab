@@ -224,9 +224,9 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 
 | Step | Action | Done |
 |------|--------|------|
-| 5b.1 | Phase 5a on and stable | [ ] |
-| 5b.2 | **Deep adversarial walk:** `docs/AGENTIC_PHASE_5B_REVIEW.md` (distress+proud, 988, regen cap, crisis exempt) | [ ] |
-| 5b.3 | Seam tests: `test_symbolic_verifier_seams.py` | [ ] |
+| 5b.1 | Phase 5a on and stable | [x] *(prod extract true 2026-07-20; see 5a.5)* |
+| 5b.2 | **Deep adversarial walk:** `docs/AGENTIC_PHASE_5B_REVIEW.md` (distress+proud, 988, regen cap, crisis exempt) | [ ] *(automated gates PASS; needs two-human sign-off)* |
+| 5b.3 | Seam tests: `test_symbolic_verifier_seams.py` | [x] *(8/8 local 2026-07-20; code pending commit)* |
 | 5b.4 | Staging: verify `sse_therapeutic_audit_log` + `skyeye_activity` type `symbolic_verifier_action` | [ ] |
 | 5b.5 | Production flip only after 5b.2 signed by **two humans** | [ ] |
 

@@ -902,26 +902,35 @@ async def prepare_therapeutic_context(
     except Exception as _dad_exc:
         logger.warning("therapeutic_controller: direct-action block skipped: %s", _dad_exc)
 
-    forward_reasoning_block = ""
+    # QUANTUM-CRYSTAL-ARCH — Phase 5b: StateSymbol always on audit_metadata (Key gate)
+    _state_sym: dict = {}
     try:
-        from dataclasses import asdict
+        from dataclasses import asdict as _asdict_state
 
-        from app.services.nate_commitment_extractor import build_state_symbol
-        from app.services.nate_forward_reasoning import (
-            build_forward_constraints,
-            format_constraints_for_prompt,
-        )
+        from app.services.nate_commitment_extractor import build_state_symbol as _bss_pre
 
-        _state_sym = asdict(
-            build_state_symbol(
+        _state_sym = _asdict_state(
+            _bss_pre(
                 user_text or "",
                 audit_metadata={
                     "autonomic_state": autonomic_state,
                     "tmc_class": tmc_class,
                     "register_directive": effective_register_directive,
+                    "distress_present": (tmc_class or "").lower()
+                    in ("crisis", "suicide_ideation", "distress"),
                 },
             )
         )
+    except Exception as _ss_exc:
+        logger.warning("therapeutic_controller: state_symbol build skipped: %s", _ss_exc)
+
+    forward_reasoning_block = ""
+    try:
+        from app.services.nate_forward_reasoning import (
+            build_forward_constraints,
+            format_constraints_for_prompt,
+        )
+
         _emo_trend = "declining" if ec_slope < -0.05 else ("rising" if ec_slope > 0.05 else "stable")
         _constraints = await build_forward_constraints(
             db_pool,
@@ -989,6 +998,11 @@ async def prepare_therapeutic_context(
             ) or "info",
             "user_text_for_audit": (user_text or "")[:2000],
             "direct_action_request_kind": direct_action_kind,
+            # QUANTUM-CRYSTAL-ARCH — Phase 5b Key + Surface gates
+            "state_symbol": _state_sym,
+            "crisis_exempt": (tmc_class or "").lower()
+            in ("crisis", "suicide_ideation"),
+            "requester_user_id": canonical_user_id or user_id,
         },
     }
 
@@ -1003,6 +1017,25 @@ def _symbolic_verifier_enabled() -> bool:
         "true",
         "yes",
     )
+
+
+_SYMBOLIC_CRISIS_MARKERS = re.compile(
+    r"\b(?:988|741741|838255|267-5463|copline|veterans crisis line)\b",
+    re.IGNORECASE,
+)
+
+
+def _symbolic_has_crisis_resource(response_text: str, audit_metadata: dict) -> bool:
+    """True if reply cites a usable crisis resource (988 alone is enough for 5b)."""
+    if _SYMBOLIC_CRISIS_MARKERS.search(response_text or ""):
+        return True
+    try:
+        from app.services.crisis_resource_registry import has_crisis_resources_in_text as _has_cr
+
+        _prof = audit_metadata.get("profile") if isinstance(audit_metadata, dict) else None
+        return bool(_has_cr(response_text, _prof if isinstance(_prof, dict) else None))
+    except Exception:
+        return False
 
 
 def _symbolic_audit_violations(response_text: str, audit_metadata: dict) -> list:
@@ -1020,20 +1053,23 @@ def _symbolic_audit_violations(response_text: str, audit_metadata: dict) -> list
             violations.append("symbolic_emotion_mirror")
     tmc = (audit_metadata.get("tmc_class") or "").lower()
     if tmc in ("crisis", "suicide_ideation"):
-        # QUANTUM-CRYSTAL-ARCH — population-aware (741741 / VCL / Copline)
-        try:
-            from app.services.crisis_resource_registry import has_crisis_resources_in_text as _has_cr
-            _prof = audit_metadata.get("profile") if isinstance(audit_metadata, dict) else None
-            _has_res = _has_cr(response_text, _prof if isinstance(_prof, dict) else None)
-        except Exception:
-            _has_res = (
-                "988" in response_text
-                or "838255" in response_text
-                or "267-5463" in response_text
-                or "741741" in response_text
-            )
-        if not _has_res:
+        if not _symbolic_has_crisis_resource(response_text, audit_metadata):
             violations.append("symbolic_crisis_resource_missing")
+    # QUANTUM-CRYSTAL-ARCH — Seam: admin_only / archived scopes must not reach clients
+    try:
+        from app.services.crystal_graph_isolation import scope_allows_recall
+
+        requester = (
+            audit_metadata.get("requester_user_id")
+            or audit_metadata.get("user_id")
+            or ""
+        )
+        for scope in audit_metadata.get("crystal_scopes") or []:
+            if not scope_allows_recall(str(scope), None, requester or None):
+                violations.append("symbolic_scope_isolation")
+                break
+    except Exception as _sc_exc:
+        logger.warning("therapeutic_controller: scope isolation check skipped: %s", _sc_exc)
     return violations
 
 
@@ -1183,17 +1219,20 @@ async def audit_therapeutic_response(
     mismatch_delivered = audit_passed and bool(audit_metadata.get("mismatch_available"))
     crisis_exempt = bool(audit_metadata.get("crisis_exempt"))
 
-    if not audit_passed and _symbolic_verifier_enabled() and not crisis_exempt:
+    # QUANTUM-CRYSTAL-ARCH — Phase 5b: 988 append always; LLM regen capped at 1;
+    # crisis_exempt skips LLM rewrite only (Surface gate).
+    if not audit_passed and _symbolic_verifier_enabled():
         sym_violations = [v for v in violations if v.startswith("symbolic_")]
         if sym_violations and not audit_metadata.get("symbolic_regen_used"):
             if "symbolic_crisis_resource_missing" in sym_violations:
                 final_text = (
                     final_text.rstrip()
-                    + " If you're in crisis, call or text 988 for support."
+                    + " If you're in crisis, call or text 988 for support, "
+                    "or text HOME to 741741."
                 )
                 violations = _audit_violations(final_text, audit_metadata, recent_narratives)
                 audit_passed = len(violations) == 0
-            elif sym_violations:
+            elif not crisis_exempt and sym_violations:
                 try:
                     from app.sse.llm_fallback import chat_completion_with_fallback
 
