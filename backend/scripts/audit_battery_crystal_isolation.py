@@ -30,21 +30,29 @@ async def _main() -> int:
 
     conn = await asyncpg.connect(dsn)
     try:
-        await conn.execute("SET statement_timeout = '30s'")
-        # Fast path: marker strings + metadata origin
+        await conn.execute("SET statement_timeout = '15s'")
+        # Metadata-only first (avoids full crystal_text seqscan on large tables)
         rows = await conn.fetch(
             """SELECT id::text, LEFT(crystal_text, 120) AS preview, scope
                FROM nate_intelligence_crystals
                WHERE COALESCE(scope, '') != 'archived'
+                 AND metadata IS NOT NULL
                  AND (
-                   crystal_text ILIKE '%[SIX_QUOTIENT_BATTERY]%'
-                   OR crystal_text ILIKE '%six_quotient_battery%'
-                   OR crystal_text ILIKE '%grok-judge-v1%'
-                   OR COALESCE(metadata::text, '') ILIKE '%six_quotient_battery%'
-                   OR COALESCE(metadata::text, '') ILIKE '%six_quotient_nightly%'
+                   metadata::text ILIKE '%six_quotient_battery%'
+                   OR metadata::text ILIKE '%six_quotient_nightly%'
+                   OR metadata::text ILIKE '%six_quotient_weekly%'
                  )
                LIMIT 25"""
         )
+        if not rows:
+            # Narrow marker probe (bounded)
+            rows = await conn.fetch(
+                """SELECT id::text, LEFT(crystal_text, 120) AS preview, scope
+                   FROM nate_intelligence_crystals
+                   WHERE COALESCE(scope, '') != 'archived'
+                     AND crystal_text LIKE '%[SIX_QUOTIENT_BATTERY]%'
+                   LIMIT 10"""
+            )
         print("=== Battery crystal isolation audit ===")
         print(f"marker_hits={len(rows)}")
         for r in rows[:20]:
