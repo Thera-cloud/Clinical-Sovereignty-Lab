@@ -68,45 +68,31 @@ async def _llm_judge(
         f"client_says: {client_says}\n"
         f"nate_response: {response}\n"
     )
-    # Prefer lightweight router for scoring (avoid full helix/crystal path).
+    # QUANTUM-CRYSTAL-ARCH — app.state has littlenate_inference only; router not mounted.
+    # Instantiate NateInferenceRouter (same pattern as newsletter / commitments).
     router = None
-    use_lite = False
     if app_state:
         router = getattr(app_state, "nate_inference_router", None)
-        use_lite = bool(router and hasattr(router, "generate"))
-        if not use_lite:
-            router = getattr(app_state, "littlenate_inference", None)
-    if not router or not hasattr(router, "generate"):
-        logger.warning("auto_judge LLM: no inference router")
-        return None
+    if router is None or not hasattr(router, "generate"):
+        try:
+            from app.services.nate_inference_router import NateInferenceRouter
+
+            router = NateInferenceRouter(app_state=app_state)
+        except Exception as e:
+            logger.warning("auto_judge LLM: router init failed: %s", e)
+            return None
     try:
-        if use_lite:
-            resp = await asyncio.wait_for(
-                router.generate(
-                    prompt=user,
-                    system=system,
-                    domain="clinical",
-                    tier="analytical",
-                    max_tokens=300,
-                    temperature=0.2,
-                ),
-                timeout=_LLM_TIMEOUT_S,
-            )
-        else:
-            resp = await asyncio.wait_for(
-                router.generate(
-                    prompt=user,
-                    system=system,
-                    domain="clinical",
-                    max_tokens=300,
-                    temperature=0.2,
-                    include_crystals=False,
-                    include_helix=False,
-                    include_quantum=False,
-                    is_realtime=False,
-                ),
-                timeout=_LLM_TIMEOUT_S,
-            )
+        resp = await asyncio.wait_for(
+            router.generate(
+                prompt=user,
+                system=system,
+                domain="clinical",
+                tier="clinical",
+                max_tokens=300,
+                temperature=0.2,
+            ),
+            timeout=_LLM_TIMEOUT_S,
+        )
     except Exception as e:
         logger.warning("auto_judge LLM: %s: %s", type(e).__name__, e or repr(e))
         return None
