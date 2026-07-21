@@ -200,8 +200,8 @@ services:
       - ENABLE_PEER_CULTURE_VOICE=${ENABLE_PEER_CULTURE_VOICE:-true}
       - ENABLE_CHECKIN_RISK_WINDOWS=${ENABLE_CHECKIN_RISK_WINDOWS:-true}
       - ENABLE_LETHAL_MEANS_GUIDANCE=${ENABLE_LETHAL_MEANS_GUIDANCE:-false}
-      # QUANTUM-CRYSTAL-ARCH: pauses 4h semantic_neighbor rebuild (Vectorize cost); recall unchanged
-      - ENABLE_CRYSTAL_GRAPH=false
+      # QUANTUM-CRYSTAL-ARCH: CrystalGraph rebuild + constellation (Phase 5d; default off)
+      - ENABLE_CRYSTAL_GRAPH=${ENABLE_CRYSTAL_GRAPH:-false}
       # QUANTUM-CRYSTAL-ARCH: SSE Grok Imagine cost controls (journey/daily/weekly/monthly)
       - SSE_IMAGERY_GENERATION_ENABLED=${SSE_IMAGERY_GENERATION_ENABLED:-false}
       - SSE_WEEKLY_CLIPS_ENABLED=${SSE_WEEKLY_CLIPS_ENABLED:-false}
@@ -219,10 +219,11 @@ services:
       - MAC_AGENT_TOKEN=${MAC_AGENT_TOKEN:-}
       # QUANTUM-CRYSTAL-ARCH — CLI neuro-symbolic + Mac↔Cloud task bus (Agents API / partner runs)
       - ENABLE_ASK_NATE_SYMBOLIC=${ENABLE_ASK_NATE_SYMBOLIC:-true}
-      # QUANTUM-CRYSTAL-ARCH — Phase 5b on; 5c forward stays off until sign-off
+      # QUANTUM-CRYSTAL-ARCH — Phase 5b/5c on after sign-off; graph separate (5d)
       - ENABLE_SYMBOLIC_EXTRACTION=${ENABLE_SYMBOLIC_EXTRACTION:-true}
       - ENABLE_SYMBOLIC_VERIFIER=${ENABLE_SYMBOLIC_VERIFIER:-true}
       - ENABLE_FORWARD_REASONING=${ENABLE_FORWARD_REASONING:-false}
+      - ENABLE_CRYSTAL_GRAPH=${ENABLE_CRYSTAL_GRAPH:-false}
       - CLI_TASK_BUS_ENABLED=${CLI_TASK_BUS_ENABLED:-true}
       - CLI_TASK_BUS_CONSUMER_ENABLED=${CLI_TASK_BUS_CONSUMER_ENABLED:-true}
       - CLI_DUAL_COO_ENABLED=${CLI_DUAL_COO_ENABLED:-true}

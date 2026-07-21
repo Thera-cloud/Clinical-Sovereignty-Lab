@@ -249,17 +249,18 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 
 ## Phase 5d — Crystal graph (isolation audit required)
 
-**Flag:** `ENABLE_CRYSTAL_GRAPH=false` (default)
+**Flag:** `ENABLE_CRYSTAL_GRAPH` — operator-authorized 2026-07-21 (Nathan Nevedal)
 
 > **Separate gate:** Run read-only isolation report (`crystal_graph_isolation.py`) and document cross-boundary findings **before** any flip. Phi auditor graph scan is tied to this same flag.
 
 | Step | Action | Done |
 |------|--------|------|
-| 5d.1 | **Isolation audit** complete (read-only traversal report, no flag flip) | [ ] |
-| 5d.2 | Adversarial walk: `docs/AGENTIC_PHASE_5D_REVIEW.md` | [ ] |
-| 5d.3 | Seam tests: `test_crystal_graph_isolation_seams.py` | [ ] |
-| 5d.4 | Staging flip only; verify phi auditor graph-surfaced scan + scope enforcement | [ ] |
-| 5d.5 | Production flip — **last** Phase 5 flag | [ ] |
+| 5d.1 | **Isolation audit** complete (read-only traversal report, no flag flip) | [x] *(2026-07-21 — client1 UUID; 25 seeds / 25 visited / 0 violations; 60500 edges; flag false)* |
+| 5d.2 | Adversarial walk: `docs/AGENTIC_PHASE_5D_REVIEW.md` | [x] *(Nathan Nevedal 2026-07-21 — all 5 gates)* |
+| 5d.3 | Seam tests: `test_crystal_graph_isolation_seams.py` | [x] *(11/11 offline 2026-07-21)* |
+| 5d.4 | Staging flip only; verify phi auditor graph-surfaced scan + scope enforcement | [x] *(2026-07-21 — `staging_phase_flags.sh phase5d on`; CrystalGraph init; 132/132 staging)* |
+| 5d.5 | Production flip — **last** Phase 5 flag | [x] *(2026-07-21 — compose `${ENABLE_CRYSTAL_GRAPH}`; `.env` true; safe_deploy backend vault 368→368; CrystalGraph init; 132/132)* |
+| 5d.6 | Optional live prod soak (`client1`) | [x] *(2026-07-21 — `prod_phase5d_ws_smoke.py` exit 0; chat OK; isolation 0 violations)* |
 
 ---
 

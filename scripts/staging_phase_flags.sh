@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Flip agentic flags on staging_backend/bridge only (not production nate_*).
-# Usage: bash scripts/staging_phase_flags.sh phase0|phase1|phase2|phase3|phase4|phase5a|phase5b|n3 on|off
+# Usage: bash scripts/staging_phase_flags.sh phase0|phase1|phase2|phase3|phase4|phase5a|phase5b|phase5c|phase5d|n3 on|off
 #
 # Preserves other STAGING_ENABLE_* values from .env so one phase flip does not
 # clobber siblings (e.g. phase3 must not reset session negotiation).
@@ -43,6 +43,7 @@ export STAGING_ENABLE_SELF_MONITOR_TOUCH="$(_env_or STAGING_ENABLE_SELF_MONITOR_
 export STAGING_ENABLE_SYMBOLIC_EXTRACTION="$(_env_or STAGING_ENABLE_SYMBOLIC_EXTRACTION false)"
 export STAGING_ENABLE_SYMBOLIC_VERIFIER="$(_env_or STAGING_ENABLE_SYMBOLIC_VERIFIER false)"
 export STAGING_ENABLE_FORWARD_REASONING="$(_env_or STAGING_ENABLE_FORWARD_REASONING false)"
+export STAGING_ENABLE_CRYSTAL_GRAPH="$(_env_or STAGING_ENABLE_CRYSTAL_GRAPH false)"
 
 _val() {
   if [ "$STATE" = "on" ]; then echo "true"; else echo "false"; fi
@@ -125,8 +126,36 @@ case "$PHASE" in
     fi
     export STAGING_ENABLE_SYMBOLIC_VERIFIER="$(_val)"
     export STAGING_ENABLE_FORWARD_REASONING=false
+    export STAGING_ENABLE_CRYSTAL_GRAPH=false
     _persist STAGING_ENABLE_SYMBOLIC_VERIFIER "$STAGING_ENABLE_SYMBOLIC_VERIFIER"
     _persist STAGING_ENABLE_FORWARD_REASONING false
+    _persist STAGING_ENABLE_CRYSTAL_GRAPH false
+    ;;
+  phase5c)
+    # Track C — forward reasoning (graph stays off)
+    if [ "$STATE" = "on" ]; then
+      export STAGING_ENABLE_SYMBOLIC_EXTRACTION=true
+      export STAGING_ENABLE_SYMBOLIC_VERIFIER=true
+      _persist STAGING_ENABLE_SYMBOLIC_EXTRACTION true
+      _persist STAGING_ENABLE_SYMBOLIC_VERIFIER true
+    fi
+    export STAGING_ENABLE_FORWARD_REASONING="$(_val)"
+    export STAGING_ENABLE_CRYSTAL_GRAPH=false
+    _persist STAGING_ENABLE_FORWARD_REASONING "$STAGING_ENABLE_FORWARD_REASONING"
+    _persist STAGING_ENABLE_CRYSTAL_GRAPH false
+    ;;
+  phase5d)
+    # Track C — crystal graph (last Phase 5 flag)
+    if [ "$STATE" = "on" ]; then
+      export STAGING_ENABLE_SYMBOLIC_EXTRACTION=true
+      export STAGING_ENABLE_SYMBOLIC_VERIFIER=true
+      export STAGING_ENABLE_FORWARD_REASONING=true
+      _persist STAGING_ENABLE_SYMBOLIC_EXTRACTION true
+      _persist STAGING_ENABLE_SYMBOLIC_VERIFIER true
+      _persist STAGING_ENABLE_FORWARD_REASONING true
+    fi
+    export STAGING_ENABLE_CRYSTAL_GRAPH="$(_val)"
+    _persist STAGING_ENABLE_CRYSTAL_GRAPH "$STAGING_ENABLE_CRYSTAL_GRAPH"
     ;;
   *)
     echo "Unknown phase: $PHASE" >&2
@@ -149,10 +178,11 @@ docker exec nate_staging_backend printenv \
   ENABLE_THERAPEUTIC_PLANS ENABLE_NATE_SESSION_NEGOTIATION \
   ENABLE_SELF_MONITOR_AGENT ENABLE_SELF_MONITOR_COACH_ALERT ENABLE_SELF_MONITOR_TOUCH \
   ENABLE_SYMBOLIC_EXTRACTION ENABLE_SYMBOLIC_VERIFIER ENABLE_FORWARD_REASONING \
+  ENABLE_CRYSTAL_GRAPH \
   2>/dev/null || true
 docker exec nate_staging_bridge printenv \
   ENABLE_NATE_TOOL_EXECUTOR ENABLE_THERAPEUTIC_PLANS ENABLE_NATE_SESSION_NEGOTIATION \
-  ENABLE_SYMBOLIC_EXTRACTION ENABLE_SYMBOLIC_VERIFIER \
+  ENABLE_SYMBOLIC_EXTRACTION ENABLE_SYMBOLIC_VERIFIER ENABLE_FORWARD_REASONING \
   2>/dev/null || true
 curl -sf http://127.0.0.1:8011/health
 echo ""
