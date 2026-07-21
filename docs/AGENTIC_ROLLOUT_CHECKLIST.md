@@ -226,7 +226,7 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 |------|--------|------|
 | 5b.1 | Phase 5a on and stable | [x] *(prod extract true 2026-07-20; see 5a.5)* |
 | 5b.2 | **Deep adversarial walk:** `docs/AGENTIC_PHASE_5B_REVIEW.md` (distress+proud, 988, regen cap, crisis exempt) | [x] *(Kristy Moore + Nathan Nevedal 2026-07-21 — all 5 gates; flag flip authorized)* |
-| 5b.3 | Seam tests: `test_symbolic_verifier_seams.py` | [x] *(13/13 incl. REST+SI→988; local `0327ca8a` — push pending)* |
+| 5b.3 | Seam tests: `test_symbolic_verifier_seams.py` | [x] *(13/13 incl. REST+SI→988; on main)* |
 | 5b.4 | Staging: verify `sse_therapeutic_audit_log` + `skyeye_activity` type `symbolic_verifier_action` | [x] *(2026-07-21 — `phase5b on`; live WS `CLIENT_001` audit row; forced dual-write `staging_5b_verifier_smoke` → `symbolic_verifier_action`)* |
 | 5b.5 | Production flip only after 5b.2 signed by **two humans** | [x] *(2026-07-21 — Kristy Moore + Nathan Nevedal; `.env` VERIFIER=true EXTRACTION=true FORWARD=false; safe_deploy bridge+backend vault 368→368; 132/132)* |
 | 5b.6 | Optional live prod soak (`prod_phase5b_ws_smoke.py` as `client1`) | [x] *(2026-07-21 — login OK; `crisis_resources`+988 in reply; `metadata.symbols`; audit log; flags true/true/false; dual-write optional when violations=[]; SI→988 REST fix scp’d + safe_deploy)* |
@@ -258,7 +258,7 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 | 5d.1 | **Isolation audit** complete (read-only traversal report, no flag flip) | [x] *(2026-07-21 — client1 UUID; 25 seeds / 25 visited / 0 violations; 60500 edges; flag false)* |
 | 5d.2 | Adversarial walk: `docs/AGENTIC_PHASE_5D_REVIEW.md` | [x] *(Nathan Nevedal 2026-07-21 — all 5 gates)* |
 | 5d.3 | Seam tests: `test_crystal_graph_isolation_seams.py` | [x] *(11/11 offline 2026-07-21)* |
-| 5d.4 | Staging flip only; verify phi auditor graph-surfaced scan + scope enforcement | [x] *(2026-07-21 — `staging_phase_flags.sh phase5d on`; CrystalGraph init; 132/132 staging)* |
+| 5d.4 | Staging flip only; verify phi auditor graph-surfaced scan + scope enforcement | [x] *(2026-07-21 — staging graph init; live scope wired in `retrieve_constellation`; PHI graph_surfaced first-cycle log still pending)* |
 | 5d.5 | Production flip — **last** Phase 5 flag | [x] *(2026-07-21 — compose `${ENABLE_CRYSTAL_GRAPH}`; `.env` true; safe_deploy backend vault 368→368; CrystalGraph init; 132/132)* |
 | 5d.6 | Optional live prod soak (`client1`) | [x] *(2026-07-21 — `prod_phase5d_ws_smoke.py` exit 0; chat OK; isolation 0 violations)* |
 

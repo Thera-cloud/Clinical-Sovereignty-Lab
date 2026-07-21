@@ -1,15 +1,19 @@
 # AGENTIC_WIRING_INVENTORY.md
 
-**Inventory date:** 2026-07-10 (delta 2026-07-20)  
+**Inventory date:** 2026-07-10 (delta 2026-07-21)  
 **Scope:** Typed extraction, verifier constraint locations, C_emo/nevedal state schema, dormant knowledge-graph flags  
 **Related plan:** `.cursor/plans/little_nate_agentic_roadmap_ef224a28.plan.md`  
 **Mode:** Read-only factual snapshot — no fixes, no proposals
 
 ---
 
+## Executive verdict (updated 2026-07-21 — Phase 5a–5d prod ON)
+
+Phase **5** flags live on GREEN backend: `ENABLE_SYMBOLIC_EXTRACTION` / `ENABLE_SYMBOLIC_VERIFIER` / `ENABLE_FORWARD_REASONING` / `ENABLE_CRYSTAL_GRAPH` = **true**. Bridge carries extract/verifier/forward; graph constellation is **backend** `app.state.crystal_graph` only (`ENABLE_CRYSTAL_GRAPH` not required on bridge). Live `retrieve_constellation(..., requester_user_id=)` enforces `enforce_traversal_scope` (nodes load `scope`/`user_id`).
+
 ## Executive verdict (updated 2026-07-20 — Phase 0–4 + N.3 prod ON; TOUCH off)
 
-Phases **0–4** + session negotiation live in prod (flags true; `ENABLE_SELF_MONITOR_TOUCH=false`). Propose/confirm wired via `maybe_propose_from_utterance` + `check_and_execute_confirmation`. Commitment extract + plan context + plan divergence log on bridge chat path. Commitment touches: `nate_nudges` + Redis `nate:commitment_touch` → bridge WS. `ENABLE_FORWARD_REASONING` / `ENABLE_CRYSTAL_GRAPH` forced **false** until Phase 5 gates. Consent fails closed when `proactive_presence_consent` absent (opt-in via Settings / soft prompt; test account opted in).
+Phases **0–4** + session negotiation live in prod (flags true; `ENABLE_SELF_MONITOR_TOUCH=false`). Propose/confirm wired via `maybe_propose_from_utterance` + `check_and_execute_confirmation`. Commitment extract + plan context + plan divergence log on bridge chat path. Commitment touches: `nate_nudges` + Redis `nate:commitment_touch` → bridge WS. *(Superseded for 5c/5d flags — see 2026-07-21 verdict.)* Consent fails closed when `proactive_presence_consent` absent (opt-in via Settings / soft prompt; test account opted in).
 
 ## Executive verdict (updated 2026-07-10 — implementation landed, flags default **off**)
 
@@ -172,8 +176,8 @@ Scope invariant (documented): scope may only **narrow** (`global` → `archived`
 | Table | `crystal_edges` (`152_crystal_edges.sql`; enhanced `154_quantum_crystal_orchestrator.sql`) |
 | Columns | `crystal_a_hash`, `crystal_b_hash`, `similarity`, `edge_type`, `strength`, `co_activation_count`, `source`, … |
 | Purpose | Constellation retrieval, meta-crystal synthesis, edge persistence |
-| Why off | Settings comment: paused; recall uses `crystal_recall_bridge` |
-| If enabled | `main.py` starts graph + 4h rebuild; `FederatedSearchCoordinator._search_constellation()`; `EntanglementGraph` in `quantum_crystal_orchestrator.py`; co-activation from `crystal_recall_bridge.py` |
+| Prod (2026-07-21) | **ON** — `retrieve_constellation` filters by requester via `enforce_traversal_scope`; rebuild SELECTs `scope`,`user_id` |
+| If enabled | `main.py` starts graph + 4h rebuild; `FederatedSearchCoordinator._search_constellation(user_id=)`; `EntanglementGraph` in `quantum_crystal_orchestrator.py`; co-activation from `crystal_recall_bridge.py` |
 
 ---
 
@@ -188,7 +192,7 @@ Scope invariant (documented): scope may only **narrow** (`global` → `archived`
 | Crisis / SI coach path | **Yes** (flag-gated) |
 | `sensitivity='sensitive'` push block | **No** |
 | `crystal_knowledge_graph` traversal | **No** (flag only) |
-| `ENABLE_CRYSTAL_GRAPH` traversal | **Code exists, flag off** |
+| `ENABLE_CRYSTAL_GRAPH` traversal | **Shipped (5d)** — prod flag on; live scope filter on constellation |
 
 ---
 
@@ -207,7 +211,7 @@ Pre-build verification for Neuro-Symbolic Layer — merged into [`.cursor/plans/
 | Verifier logging | **Shipped (5b)** | `sse_therapeutic_audit_log` + `skyeye_activity` type `symbolic_verifier_action`; admin REST `/api/admin/symbolic-verifier/*` |
 | Surfaces covered | **Chat + sanctuary/group/private/voice light path** | Full TTC on bridge chat; `light_symbolic_post_audit` on other WS/voice surfaces; prepare-fail falls back to light audit |
 | Crystal scope isolation | **Fixed** | Recall SELECT includes `scope`; excludes `admin_only`; `scope_allows_recall` accepts plain `user` |
-| Forward reasoning (5c) | **Pre-wired, flag off** | `profile` passed into `build_forward_constraints`; compose default `ENABLE_FORWARD_REASONING=false` |
+| Forward reasoning (5c) | **Shipped (5c)** | prod `ENABLE_FORWARD_REASONING=true`; `profile` → `build_forward_constraints`; compose `${ENABLE_FORWARD_REASONING:-false}` |
 | `mismatch_delivered` as fallback | **Unchanged** | Existing mismatch path unchanged; symbolic second-failure uses transparent audit fallback, not mismatch semantics |
 
 **Correction to gap matrix:** commitment extract row will be satisfied by **shared** Phase 1/5a `nate_commitment_extractor.py` — one module, not two extraction paths.

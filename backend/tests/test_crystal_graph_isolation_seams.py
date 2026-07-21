@@ -159,3 +159,29 @@ def test_plain_user_scope_allowed_when_owner_unknown():
 def test_global_ownerless_allowed():
     assert scope_allows_recall("global", None, "client1") is True
     assert scope_allows_recall("global", "some-owner", "client1") is False
+
+
+@pytest.mark.asyncio
+async def test_live_retrieve_constellation_blocks_cross_user():
+    """Live path: retrieve_constellation must not return another user's crystal."""
+    from app.services.crystal_graph import CrystalGraph, CrystalNode
+
+    g = CrystalGraph(db_pool=None)
+    own = CrystalNode({
+        "id": "a", "crystal_text": "anxiety coping breath", "domain": "clinical",
+        "confidence": 0.9, "content_hash": "h1", "scope": "user", "user_id": "client_a",
+    })
+    other = CrystalNode({
+        "id": "b", "crystal_text": "anxiety coping breath", "domain": "clinical",
+        "confidence": 0.95, "content_hash": "h2", "scope": "user", "user_id": "client_b",
+    })
+    g._nodes = {own.id: own, other.id: other}
+    g._adj = {own.id: {other.id: 0.5}, other.id: {own.id: 0.5}}
+    g._last_rebuild = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+
+    results = await g.retrieve_constellation(
+        "anxiety coping breath", max_depth=2, max_results=10, requester_user_id="client_a",
+    )
+    assert results
+    assert all(r.get("user_id") == "client_a" for r in results)
+    assert not any(r.get("user_id") == "client_b" for r in results)

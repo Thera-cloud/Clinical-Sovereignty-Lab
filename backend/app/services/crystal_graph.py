@@ -72,7 +72,8 @@ def _jaccard(a: Set[str], b: Set[str]) -> float:
 
 
 class CrystalNode:
-    __slots__ = ("id", "content_hash", "domain", "confidence", "text", "terms", "recall_count")
+    # QUANTUM-CRYSTAL-ARCH: scope + user_id required for live traversal isolation
+    __slots__ = ("id", "content_hash", "domain", "confidence", "text", "terms", "recall_count", "scope", "user_id")
 
     def __init__(self, row: Dict):
         self.id = row.get("id")
@@ -82,6 +83,8 @@ class CrystalNode:
         self.text = row.get("crystal_text", "")[:1500]
         self.terms = _extract_terms(self.text)
         self.recall_count = int(row.get("recall_count") or 0)
+        self.scope = row.get("scope") or "global"
+        self.user_id = row.get("user_id")
 
 
 class CrystalGraph:
@@ -139,7 +142,7 @@ class CrystalGraph:
         while True:
             async with self._db_pool.acquire() as conn:
                 rows = await conn.fetch("""
-                    SELECT id, crystal_text, domain, confidence, content_hash
+                    SELECT id, crystal_text, domain, confidence, content_hash, scope, user_id
                     FROM nate_intelligence_crystals
                     WHERE scope != 'archived' AND superseded_by IS NULL
                     ORDER BY created_at ASC
@@ -316,7 +319,7 @@ class CrystalGraph:
                 async with self._db_pool.acquire() as conn:
                     rows = await conn.fetch("""
                         SELECT id, crystal_text, domain, confidence,
-                               content_hash, recall_count
+                               content_hash, recall_count, scope, user_id
                         FROM nate_intelligence_crystals
                         WHERE superseded_by IS NULL
                           AND scope != 'archived'
@@ -349,11 +352,22 @@ class CrystalGraph:
 
     # ── Constellation Retrieval (Phase 2) ──
 
+    def _node_allowed_for(self, node: Optional[CrystalNode], requester_user_id: Optional[str]) -> bool:
+        # QUANTUM-CRYSTAL-ARCH: live constellation must use isolation helper
+        if not node:
+            return False
+        from app.services.crystal_graph_isolation import enforce_traversal_scope
+        return enforce_traversal_scope(
+            {"scope": getattr(node, "scope", "global"), "user_id": getattr(node, "user_id", None)},
+            requester_user_id,
+        )
+
     async def retrieve_constellation(
         self,
         query: str,
         max_depth: int = 2,
         max_results: int = 15,
+        requester_user_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Given a query, find the most relevant crystal and return
         its neighbourhood (1- or 2-hop), ordered by combined relevance.
@@ -369,6 +383,8 @@ class CrystalGraph:
         best_id = None
         best_score = -1.0
         for nid, node in self._nodes.items():
+            if not self._node_allowed_for(node, requester_user_id):
+                continue
             score = _jaccard(query_terms, node.terms) * node.confidence
             if score > best_score:
                 best_score = score
@@ -386,7 +402,10 @@ class CrystalGraph:
                 for neighbour_id, edge_w in self._adj.get(nid, {}).items():
                     if neighbour_id in visited:
                         continue
-                    combined = edge_w * self._nodes[neighbour_id].confidence
+                    neighbour = self._nodes.get(neighbour_id)
+                    if not self._node_allowed_for(neighbour, requester_user_id):
+                        continue
+                    combined = edge_w * neighbour.confidence
                     visited[neighbour_id] = combined
                     next_frontier.append(neighbour_id)
             frontier = next_frontier
@@ -396,13 +415,15 @@ class CrystalGraph:
         results = []
         for nid, score in ranked:
             node = self._nodes.get(nid)
-            if node:
+            if node and self._node_allowed_for(node, requester_user_id):
                 results.append({
                     "crystal_text": node.text,
                     "domain": node.domain,
                     "confidence": node.confidence,
                     "recall_count": node.recall_count,
                     "content_hash": node.content_hash,
+                    "scope": getattr(node, "scope", "global"),
+                    "user_id": getattr(node, "user_id", None),
                     "graph_score": round(score, 4),
                     "source": "constellation",
                 })
