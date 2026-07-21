@@ -117,7 +117,7 @@ webhook_fortress, guardian_fibre, sentinel_mesh, pipeline_drum, hepa_filter, bil
 
 3. **Singletons require constructor args** — `SessionMemoryStore(storage_root)`, `NotificationSystem(data_dir, api_key)`, etc. Never instantiate these bare. Reuse the instance from `app.state` when available.
 
-4. **After any `main.py` change, verify health** — deploy, restart, and confirm the startup log shows `129/129 services healthy` and `ALL SYSTEMS NOMINAL`. If degraded, fix before considering the deploy complete.
+4. **After any `main.py` change, verify health** — deploy, restart, and confirm the startup log shows `133/133 services healthy` and `ALL SYSTEMS NOMINAL`. If degraded, fix before considering the deploy complete.
 
 5. **Agent Status Digest emails 3x daily** to `support@sovereignsanctuary.net`. If the digest reports any agent as FAILED or WARNING, investigate — it means a live process is not running as expected.
 
