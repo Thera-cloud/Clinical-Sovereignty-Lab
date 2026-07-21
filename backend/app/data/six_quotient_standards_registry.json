@@ -1,14 +1,14 @@
 {
-  "version": "2026.3",
-  "note": "Allowlisted sources only. Tier 1=gov/professional body. BBC Health removed 2026-07-21 (consumer news polluted pending_review). Verified fetchable from GREEN.",
+  "version": "2026.4",
+  "note": "Allowlisted sources only. Tier 1=gov/IGO. CDC media/404592.rss is a podcast shell with 0 items — replaced by WHO news RSS (verified 2026-07-21 on GREEN). BBC removed (consumer junk).",
   "quotients": {
     "AQ": {
       "label": "Adversity / Crisis Safety",
       "sources": [
         {
-          "key": "cdc_media",
-          "name": "CDC Media / Public Health RSS",
-          "url": "https://tools.cdc.gov/api/v2/resources/media/404592.rss",
+          "key": "who_news_aq",
+          "name": "WHO News (English RSS)",
+          "url": "https://www.who.int/rss-feeds/news-english.xml",
           "type": "rss",
           "authority_tier": 1,
           "topics": ["crisis", "public health", "safety"]
@@ -27,9 +27,9 @@
       "label": "Emotional / Affective",
       "sources": [
         {
-          "key": "cdc_media_eq",
-          "name": "CDC Media RSS",
-          "url": "https://tools.cdc.gov/api/v2/resources/media/404592.rss",
+          "key": "who_news_eq",
+          "name": "WHO News (English RSS)",
+          "url": "https://www.who.int/rss-feeds/news-english.xml",
           "type": "rss",
           "authority_tier": 1,
           "topics": ["emotion", "mental health", "wellbeing"]
@@ -40,9 +40,9 @@
       "label": "Moral / Ethics",
       "sources": [
         {
-          "key": "cdc_media_mq",
-          "name": "CDC Media RSS",
-          "url": "https://tools.cdc.gov/api/v2/resources/media/404592.rss",
+          "key": "who_news_mq",
+          "name": "WHO News (English RSS)",
+          "url": "https://www.who.int/rss-feeds/news-english.xml",
           "type": "rss",
           "authority_tier": 1,
           "topics": ["ethics", "public trust", "professional conduct"]
@@ -53,9 +53,9 @@
       "label": "Social / Relational Process",
       "sources": [
         {
-          "key": "cdc_media_sq",
-          "name": "CDC Media RSS",
-          "url": "https://tools.cdc.gov/api/v2/resources/media/404592.rss",
+          "key": "who_news_sq",
+          "name": "WHO News (English RSS)",
+          "url": "https://www.who.int/rss-feeds/news-english.xml",
           "type": "rss",
           "authority_tier": 1,
           "topics": ["relationships", "community", "alliance"]
@@ -66,9 +66,9 @@
       "label": "Cultural / Creative Formulation",
       "sources": [
         {
-          "key": "cdc_media_cq",
-          "name": "CDC Media RSS",
-          "url": "https://tools.cdc.gov/api/v2/resources/media/404592.rss",
+          "key": "who_news_cq",
+          "name": "WHO News (English RSS)",
+          "url": "https://www.who.int/rss-feeds/news-english.xml",
           "type": "rss",
           "authority_tier": 1,
           "topics": ["cultural competence", "equity", "community"]
@@ -79,9 +79,9 @@
       "label": "Clinical Reasoning / Formulation",
       "sources": [
         {
-          "key": "cdc_media_iq",
-          "name": "CDC Media RSS",
-          "url": "https://tools.cdc.gov/api/v2/resources/media/404592.rss",
+          "key": "who_news_iq",
+          "name": "WHO News (English RSS)",
+          "url": "https://www.who.int/rss-feeds/news-english.xml",
           "type": "rss",
           "authority_tier": 1,
           "topics": ["evidence-based practice", "guidelines", "assessment"]
