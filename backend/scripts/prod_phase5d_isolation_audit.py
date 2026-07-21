@@ -40,11 +40,12 @@ def _psql(sql: str) -> str:
 
 
 def main() -> int:
+    # Graph lives on backend; bridge flag is usually false by design
     flag = subprocess.check_output(
-        ["docker", "exec", "nate_bridge", "printenv", "ENABLE_CRYSTAL_GRAPH"],
+        ["docker", "exec", "nate_backend", "printenv", "ENABLE_CRYSTAL_GRAPH"],
         text=True,
     ).strip()
-    print(f"[*] bridge ENABLE_CRYSTAL_GRAPH={flag!r}")
+    print(f"[*] backend ENABLE_CRYSTAL_GRAPH={flag!r}")
     if flag.lower() == "true":
         print("WARN: graph already enabled — audit remains SELECT-only")
 

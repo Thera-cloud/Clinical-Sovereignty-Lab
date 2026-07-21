@@ -107,7 +107,13 @@ class EntanglementGraph:
     def __init__(self, db_pool=None):
         self.db_pool = db_pool
 
-    async def get_neighbors(self, crystal_hash: str, max_depth: int = 2, limit: int = 40) -> List[Dict[str, Any]]:
+    async def get_neighbors(
+        self,
+        crystal_hash: str,
+        max_depth: int = 2,
+        limit: int = 40,
+        requester_user_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         if not self.db_pool or not crystal_hash:
             return []
         async with self.db_pool.acquire() as conn:
@@ -132,7 +138,28 @@ class EntanglementGraph:
                 max_depth,
                 limit,
             )
-        return [dict(r) for r in rows]
+            # QUANTUM-CRYSTAL-ARCH: drop neighbors outside requester scope
+            if not requester_user_id:
+                return []
+            from app.services.crystal_graph_isolation import enforce_traversal_scope
+            out: List[Dict[str, Any]] = []
+            for r in rows:
+                dst = str(r.get("dst") or "")
+                if not dst:
+                    continue
+                meta = await conn.fetchrow(
+                    """
+                    SELECT scope, user_id FROM nate_intelligence_crystals
+                    WHERE content_hash = $1 OR left(content_hash, 16) = left($1, 16)
+                    LIMIT 1
+                    """,
+                    dst,
+                )
+                if not meta:
+                    continue
+                if enforce_traversal_scope(dict(meta), requester_user_id):
+                    out.append(dict(r))
+            return out
 
 
 class NevedalWaveEngine:
@@ -311,7 +338,7 @@ class QuantumCrystalOrchestrator:
             return {"crystals": [], "ec": await self.nevedal_wave.compute_ec(user_id), "time_crystals": []}
         recall_result = await self.recall_engine.run(query, user_id, crystals, max_results)
         ranked = recall_result["ranked"]
-        neighbors = await self._expand_with_neighbors(ranked)
+        neighbors = await self._expand_with_neighbors(ranked, user_id)
         ranked = (ranked + neighbors)[:max_results]
         await self.reinforce_and_log_recall_hits(
             ranked,
@@ -333,7 +360,9 @@ class QuantumCrystalOrchestrator:
             "time_crystals": await self.get_time_crystal_context(user_id),
         }
 
-    async def _expand_with_neighbors(self, ranked: List[FiveDMemoryCrystal]) -> List[FiveDMemoryCrystal]:
+    async def _expand_with_neighbors(
+        self, ranked: List[FiveDMemoryCrystal], requester_user_id: str,
+    ) -> List[FiveDMemoryCrystal]:
         """Gap 3: Entanglement traversal — expand top crystals with graph neighbors."""
         if not ranked:
             return []
@@ -343,7 +372,11 @@ class QuantumCrystalOrchestrator:
             if not c.content_hash:
                 continue
             try:
-                edges = await self.entanglement_graph.get_neighbors(c.content_hash[:16], max_depth=1, limit=5)
+                # QUANTUM-CRYSTAL-ARCH: requester-scoped entanglement walk
+                edges = await self.entanglement_graph.get_neighbors(
+                    c.content_hash[:16], max_depth=1, limit=5,
+                    requester_user_id=requester_user_id,
+                )
                 for edge in edges:
                     dst = edge.get("dst", "")
                     if dst and dst not in seen:

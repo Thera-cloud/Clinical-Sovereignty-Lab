@@ -185,3 +185,29 @@ async def test_live_retrieve_constellation_blocks_cross_user():
     assert results
     assert all(r.get("user_id") == "client_a" for r in results)
     assert not any(r.get("user_id") == "client_b" for r in results)
+
+
+@pytest.mark.asyncio
+async def test_entanglement_get_neighbors_requires_requester():
+    """EntanglementGraph fails closed without requester_user_id."""
+    from app.services.quantum_crystal_orchestrator import EntanglementGraph
+
+    class _Conn:
+        async def fetch(self, *a, **k):
+            return [{"src": "a", "dst": "b", "edge_type": "x", "strength": 0.5, "depth": 1}]
+
+        async def fetchrow(self, *a, **k):
+            return {"scope": "user", "user_id": "other"}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class _Pool:
+        def acquire(self):
+            return _Conn()
+
+    g = EntanglementGraph(db_pool=_Pool())
+    assert await g.get_neighbors("abcdefghijklmnop") == []
