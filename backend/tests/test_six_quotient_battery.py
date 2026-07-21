@@ -296,7 +296,7 @@ class TestAuditorEndpointCount(unittest.TestCase):
             APP / "services" / "six_quotient_battery_auditor.py",
         )
         total = sum(len(t["endpoints"]) for t in aud.TAB_ENDPOINTS)
-        self.assertEqual(total, 12)
+        self.assertEqual(total, 15)
 
 
 class TestMultiTurnProcess(unittest.TestCase):
