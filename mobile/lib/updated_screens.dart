@@ -7617,7 +7617,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       });
       if (!mounted || resp.statusCode != 200) return;
       final decoded = jsonDecode(resp.body);
-      final list = decoded is List ? decoded : const [];
+      final list = decoded is List
+          ? decoded
+          : (decoded is Map && decoded['plans'] is List
+              ? decoded['plans'] as List
+              : const []);
       setState(() {
         _clientSkillPlans = list
             .whereType<Map>()
