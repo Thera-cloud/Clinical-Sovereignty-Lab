@@ -41,7 +41,7 @@ async def get_active_plan_context(db_pool: Any, user_id: str) -> str:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT title, total_steps, current_step, step_definitions
+                SELECT title, total_steps, current_step, step_definitions, source
                 FROM nate_therapeutic_plans
                 WHERE user_id IN (
                     SELECT x FROM unnest(ARRAY[
@@ -52,6 +52,7 @@ async def get_active_plan_context(db_pool: Any, user_id: str) -> str:
                     WHERE x IS NOT NULL AND x <> ''
                 )
                 AND status = 'active'
+                AND COALESCE(source, 'coach') IN ('coach', 'nate_suggest')
                 ORDER BY started_at DESC
                 LIMIT 1
                 """,
@@ -64,9 +65,12 @@ async def get_active_plan_context(db_pool: Any, user_id: str) -> str:
         if isinstance(steps, str):
             steps = json.loads(steps)
         theme = _step_theme(steps if isinstance(steps, list) else [], int(row["current_step"]))
+        src = row.get("source") or "coach"
         return (
-            f"PLAN CONTEXT: Step {row['current_step']} of {row['total_steps']} — "
-            f"{row['title']}. This week's focus: {theme or 'see plan steps'}."
+            f"COACH PLAN CONTEXT ({src}): Step {row['current_step']} of {row['total_steps']} — "
+            f"{row['title']}. This week's focus: {theme or 'see plan steps'}. "
+            f"If a SKILL FIDELITY LOCK also appears, teach that micro-skill without abandoning "
+            f"this coach plan focus."
         )
     except Exception as e:
         logger.warning("therapeutic_plan: get_active_plan_context failed: %s", e)

@@ -77,23 +77,60 @@ _DOMAIN_TEMPLATE: Dict[str, Tuple[str, str, Optional[str]]] = {
 _SKIP_AUTO_DOMAINS = frozenset({"harm_risk", "criminal_intent", "economic", "code_learning"})
 
 _ACCEPT_RE = re.compile(
-    r"\b(yes|yeah|yep|ok|okay|sure|let'?s try|i'?ll (try|practice)|sounds good|"
-    r"i want (to )?(try|practice)|start (that|this)|i'?m in)\b",
+    r"\b(yes|yeah|yep|yup|ok|okay|sure|alright|all right|let'?s try|let'?s do (it|that)|"
+    r"i'?ll (try|practice|do (it|that))|sounds good|that works|i'?m willing|"
+    r"i want (to )?(try|practice)|start (that|this)|i'?m in|go ahead|why not)\b",
     re.I,
 )
 _ADVANCE_RE = re.compile(
-    r"\b(i (did|practiced|finished|completed)|did the (stop|tipp|practice|step|"
-    r"grounding|5-4-3-2-1|mindful)|"
-    r"tried (it|the)|worked on (step|the practice)|check[- ]?in:?)\b",
+    r"\b(i (did|practiced|finished|completed|used|tried)|did the (stop|tipp|practice|step|"
+    r"grounding|5-4-3-2-1|mindful|dear|thought)|"
+    r"tried (it|the)|worked on (step|the practice)|check[- ]?in:?"
+    r"|it helped|that helped|that worked|i used (the|that)|practiced (today|it))\b",
     re.I,
 )
 _DECLINE_RE = re.compile(
-    r"\b(not now|no thanks|don'?t want|skip (that|this)|no plan|stop (suggesting|offering))\b",
+    r"\b(not now|no thanks|don'?t want|skip (that|this)|no plan|stop (suggesting|offering)|"
+    r"maybe later|not interested)\b",
     re.I,
 )
 
 _MIN_CONFIDENCE = float(os.getenv("CYCLE_SKILL_MIN_CONFIDENCE", "0.55"))
 _CHECKIN_HOURS = int(os.getenv("CYCLE_SKILL_CHECKIN_HOURS", "48"))
+_EMAILABLE_EVENTS = frozenset(
+    {"suggested", "activated", "advanced", "checkin_due", "completed"}
+)
+# Coaches also see declines (client opted out of an offered practice).
+_COACH_EMAILABLE_EVENTS = _EMAILABLE_EVENTS | {"declined"}
+
+
+def _therapeutic_plans_flag_on() -> bool:
+    return os.getenv("ENABLE_THERAPEUTIC_PLANS", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def cycle_skill_emails_enabled() -> bool:
+    """Client progress emails (default on when skill or coach treatment plans enabled)."""
+    raw = os.getenv("CYCLE_SKILL_EMAILS", "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    return cycle_skill_plans_enabled() or _therapeutic_plans_flag_on()
+
+
+def cycle_skill_coach_emails_enabled() -> bool:
+    """Coach notifications for client skill/treatment plan progress."""
+    raw = os.getenv("CYCLE_SKILL_COACH_EMAILS", "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    return cycle_skill_plans_enabled() or _therapeutic_plans_flag_on()
 
 # Substitutions that collapse Clinical-AGI skill offers into generic soothing.
 _GROUNDING_ATTRACTOR_RE = re.compile(
@@ -397,29 +434,60 @@ async def _get_plan_row(
     user_id: str,
     *,
     statuses: Tuple[str, ...] = ("suggested", "active"),
+    sources: Optional[Tuple[str, ...]] = ("cycle_skill",),
 ) -> Optional[Dict[str, Any]]:
+    """Fetch plan row. Default sources=cycle_skill so coach plans never suppress skills."""
     try:
         async with db_pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT id, title, total_steps, current_step, step_definitions,
-                       status, source, cycle_domain, modality, parent_plan_id,
-                       next_checkin_at
-                FROM nate_therapeutic_plans
-                WHERE {_identity_clause().strip()}
-                  AND status = ANY($2::text[])
-                ORDER BY
-                    CASE status WHEN 'active' THEN 0 WHEN 'suggested' THEN 1 ELSE 2 END,
-                    started_at DESC
-                LIMIT 1
-                """,
-                user_id,
-                list(statuses),
-            )
+            if sources is None:
+                row = await conn.fetchrow(
+                    f"""
+                    SELECT id, title, total_steps, current_step, step_definitions,
+                           status, source, cycle_domain, modality, parent_plan_id,
+                           next_checkin_at
+                    FROM nate_therapeutic_plans
+                    WHERE {_identity_clause().strip()}
+                      AND status = ANY($2::text[])
+                    ORDER BY
+                        CASE status WHEN 'active' THEN 0 WHEN 'suggested' THEN 1 ELSE 2 END,
+                        started_at DESC
+                    LIMIT 1
+                    """,
+                    user_id,
+                    list(statuses),
+                )
+            else:
+                row = await conn.fetchrow(
+                    f"""
+                    SELECT id, title, total_steps, current_step, step_definitions,
+                           status, source, cycle_domain, modality, parent_plan_id,
+                           next_checkin_at
+                    FROM nate_therapeutic_plans
+                    WHERE {_identity_clause().strip()}
+                      AND status = ANY($2::text[])
+                      AND source = ANY($3::text[])
+                    ORDER BY
+                        CASE status WHEN 'active' THEN 0 WHEN 'suggested' THEN 1 ELSE 2 END,
+                        started_at DESC
+                    LIMIT 1
+                    """,
+                    user_id,
+                    list(statuses),
+                    list(sources),
+                )
         return dict(row) if row else None
     except Exception as e:
         logger.warning("cycle_skill_plan: get plan failed: %s", e)
         return None
+
+
+def _checkin_due(plan: Dict[str, Any]) -> bool:
+    nca = plan.get("next_checkin_at")
+    if not nca:
+        return False
+    if getattr(nca, "tzinfo", None) is None:
+        nca = nca.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) >= nca
 
 
 def _step_payload(steps: Any, step_num: int) -> Dict[str, Any]:
@@ -499,6 +567,15 @@ async def ensure_suggested_plan_from_cycles(
         modality,
         domain,
     )
+    plan = await _get_plan_row(db_pool, username)
+    if plan:
+        await _log_skill_learning(
+            db_pool,
+            user_id=username,
+            plan=plan,
+            event="suggested",
+            detail=f"domain={domain}",
+        )
     return {
         "ok": True,
         "action": "suggested",
@@ -561,7 +638,13 @@ async def build_cycle_skill_plan_context(db_pool: Any, user_id: str) -> str:
         if status == "active":
             check = step.get("check_in")
             if check:
-                parts.append(f"CHECK-IN PROMPT (use if natural): {check}")
+                if _checkin_due(plan):
+                    parts.append(
+                        "IN-CHAT CHECK-IN DUE (ask this turn even if proactive "
+                        f"outreach consent is off): {check}"
+                    )
+                else:
+                    parts.append(f"CHECK-IN PROMPT (use if natural): {check}")
     elif cycles:
         domain = cycles[0].get("domain") or ""
         mapping = _DOMAIN_TEMPLATE.get(str(domain))
@@ -636,12 +719,29 @@ async def _insert_suggested_plan(
         return None
 
 
+async def _stamp_next_checkin(db_pool: Any, plan_id: str, target: datetime) -> None:
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE nate_therapeutic_plans
+                SET next_checkin_at = $2, updated_at = NOW()
+                WHERE id = $1::uuid
+                """,
+                plan_id,
+                target,
+            )
+    except Exception as e:
+        logger.warning("cycle_skill_plan: stamp next_checkin failed: %s", e)
+
+
 async def _schedule_followup_commitment(
     db_pool: Any,
     *,
     user_id: str,
     plan: Dict[str, Any],
 ) -> None:
+    """Always stamp next_checkin_at; write nate_commitments only with proactive consent."""
     step = _step_payload(plan.get("step_definitions"), int(plan.get("current_step") or 1))
     theme = step.get("theme") or plan.get("title") or "skills practice"
     check = step.get("check_in") or f"How did \"{theme}\" go?"
@@ -650,9 +750,13 @@ async def _schedule_followup_commitment(
         f"Skills practice check-in (step {plan.get('current_step')}/"
         f"{plan.get('total_steps')} — {plan.get('title')}): {check}"
     )
+    plan_id = str(plan["id"])
+    await _stamp_next_checkin(db_pool, plan_id, target)
+    plan["next_checkin_at"] = target
+    if not await _has_proactive_consent(db_pool, user_id):
+        return
     try:
         async with db_pool.acquire() as conn:
-            # Avoid duplicate active cycle-skill commitments for same plan step
             existing = await conn.fetchval(
                 """
                 SELECT id FROM nate_commitments
@@ -678,19 +782,566 @@ async def _schedule_followup_commitment(
                 text[:800],
                 target,
             )
-        # Stamp next_checkin_at on plan
+    except Exception as e:
+        logger.warning("cycle_skill_plan: follow-up commitment failed: %s", e)
+
+
+def build_skill_plan_email_copy(
+    *,
+    event: str,
+    name: str,
+    plan: Dict[str, Any],
+) -> Tuple[str, str]:
+    """Subject + HTML body for client plan/progress emails."""
+    step = _step_payload(
+        plan.get("step_definitions"), int(plan.get("current_step") or 1)
+    )
+    title = str(plan.get("title") or "skills practice")
+    modality = str(plan.get("modality") or step.get("modality") or "skills")
+    theme = str(step.get("theme") or "")
+    practice = str(step.get("practice") or theme or "your practice")
+    cur = int(plan.get("current_step") or 1)
+    total = int(plan.get("total_steps") or 1)
+    who = (name or "friend").strip() or "friend"
+    app_url = os.getenv("APP_URL", "https://app.sovereignsanctuary.net").rstrip("/")
+
+    headlines = {
+        "suggested": f"{who}, Nate has a short skills practice for you",
+        "activated": f"{who}, you're starting: {title}",
+        "advanced": f"{who}, progress on {title} — step {cur} of {total}",
+        "checkin_due": f"{who}, gentle check-in on your skills practice",
+        "completed": f"{who}, you completed {title}",
+    }
+    bodies = {
+        "suggested": (
+            f"Based on a pattern Nate noticed, there's an optional "
+            f"<strong>{modality}</strong> practice: <em>{title}</em>. "
+            f"This week's focus: {theme or practice}. "
+            f"Open the app and say yes if you want to try it — no pressure."
+        ),
+        "activated": (
+            f"You're on step {cur} of {total} for <em>{title}</em> ({modality}). "
+            f"Practice: {practice} "
+            f"When you've tried it, tell Nate in chat — he'll track your progress."
+        ),
+        "advanced": (
+            f"Nice work. You're now on step {cur} of {total} for <em>{title}</em>. "
+            f"Next focus: {theme or practice}. "
+            f"Keep it small — one practice is enough."
+        ),
+        "checkin_due": (
+            f"How did <em>{title}</em> go? "
+            f"{step.get('check_in') or 'What did you notice when you practiced?'} "
+            f"Reply in the Sanctuary app when you have a moment."
+        ),
+        "completed": (
+            f"You finished <em>{title}</em>. That matters. "
+            f"Nate may offer a short stacked follow-up practice next — "
+            f"only if it still fits. Celebrate this step."
+        ),
+    }
+    subject = headlines.get(event, f"{who}, update on your skills practice")
+    body = bodies.get(event, f"Update on <em>{title}</em> (step {cur}/{total}).")
+    html = f"""<!DOCTYPE html>
+<html><body style="font-family:Georgia,serif;background:#050505;color:#F5F5F5;padding:32px;">
+<div style="max-width:600px;margin:auto;background:#111;border:1px solid #1A1A1A;padding:32px;border-radius:4px;">
+  <div style="color:#C9A962;letter-spacing:3px;font-size:14px;margin-bottom:24px;">SANCTUARY</div>
+  <h1 style="font-weight:300;font-size:24px;color:#F5F5F5;">{subject}</h1>
+  <p style="color:#9A9A9A;line-height:1.8;">{body}</p>
+  <p style="margin-top:28px;">
+    <a href="{app_url}" style="display:inline-block;background:#C9A962;color:#050505;text-decoration:none;padding:12px 28px;font-size:13px;letter-spacing:1px;">Open Sanctuary</a>
+  </p>
+  <p style="color:#5A5A5A;font-size:12px;margin-top:32px;">Little Nate · skills practice updates · Sovereign Sanctuary</p>
+</div></body></html>"""
+    return subject, html
+
+
+async def _resolve_client_email(
+    db_pool: Any, user_id: str
+) -> Tuple[Optional[str], str]:
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT username, profile_data
+                FROM users
+                WHERE username = $1 OR hardware_id = $1
+                LIMIT 1
+                """,
+                user_id,
+            )
+        if not row:
+            return None, ""
+        pd = row.get("profile_data") or {}
+        if isinstance(pd, str):
+            try:
+                pd = json.loads(pd)
+            except Exception:
+                pd = {}
+        if not isinstance(pd, dict):
+            pd = {}
+        if pd.get("email_opt_out") is True:
+            return None, ""
+        preferred = str(pd.get("preferred_contact") or "email").strip().lower()
+        if preferred in ("sms", "none", "off"):
+            return None, ""
+        email = (pd.get("email") or "").strip()
+        name = (pd.get("name") or row.get("username") or "").strip()
+        return (email or None), name
+    except Exception as e:
+        logger.warning("cycle_skill_plan: resolve email failed: %s", e)
+        return None, ""
+
+
+async def _recently_emailed(
+    db_pool: Any,
+    plan_id: str,
+    event: str,
+    *,
+    hours: int = 12,
+    marker_prefix: str = "email_sent",
+) -> bool:
+    if not plan_id:
+        return False
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT adaptation_log FROM nate_therapeutic_plans
+                WHERE id = $1::uuid
+                """,
+                plan_id,
+            )
+        if not row:
+            return False
+        log = row.get("adaptation_log") or []
+        if isinstance(log, str):
+            try:
+                log = json.loads(log)
+            except Exception:
+                log = []
+        if not isinstance(log, list):
+            return False
+        marker = f"{marker_prefix}:{event}"
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        for entry in reversed(log[-40:]):
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("event") != marker:
+                continue
+            at_raw = entry.get("at") or ""
+            try:
+                at = datetime.fromisoformat(str(at_raw).replace("Z", "+00:00"))
+                if at.tzinfo is None:
+                    at = at.replace(tzinfo=timezone.utc)
+                if at >= cutoff:
+                    return True
+            except Exception:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+async def _stamp_email_marker(
+    db_pool: Any, plan_id: str, marker: str
+) -> None:
+    if not plan_id:
+        return
+    try:
         async with db_pool.acquire() as conn:
             await conn.execute(
                 """
                 UPDATE nate_therapeutic_plans
-                SET next_checkin_at = $2, updated_at = NOW()
+                SET adaptation_log = adaptation_log || $2::jsonb,
+                    updated_at = NOW()
                 WHERE id = $1::uuid
                 """,
-                str(plan["id"]),
-                target,
+                plan_id,
+                json.dumps(
+                    [
+                        {
+                            "event": marker,
+                            "at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    ]
+                ),
             )
+    except Exception:
+        pass
+
+
+async def _resolve_assigned_coach_username(
+    db_pool: Any, client_user_id: str
+) -> Optional[str]:
+    """Resolve coach username from client profile (assigned_coach / coach_id)."""
+    if not db_pool or not client_user_id:
+        return None
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT username, profile_data
+                FROM users
+                WHERE username = $1 OR hardware_id = $1
+                LIMIT 1
+                """,
+                client_user_id,
+            )
+        if not row:
+            return None
+        pd = row.get("profile_data") or {}
+        if isinstance(pd, str):
+            try:
+                pd = json.loads(pd)
+            except Exception:
+                pd = {}
+        if not isinstance(pd, dict):
+            pd = {}
+        for key in ("assigned_coach", "coach_username"):
+            v = pd.get(key)
+            if v and str(v).strip():
+                return str(v).strip()
+        cid = pd.get("coach_id") or pd.get("assigned_coach_id")
+        if not cid:
+            return None
+        hw = str(cid).strip()
+        async with db_pool.acquire() as conn:
+            r2 = await conn.fetchrow(
+                """
+                SELECT username FROM users
+                WHERE (hardware_id = $1 OR username = $1)
+                  AND role IN ('COACH', 'ADMIN')
+                LIMIT 1
+                """,
+                hw,
+            )
+        if r2 and r2.get("username"):
+            return str(r2["username"]).strip()
     except Exception as e:
-        logger.warning("cycle_skill_plan: follow-up commitment failed: %s", e)
+        logger.warning("cycle_skill_plan: resolve coach failed: %s", e)
+    return None
+
+
+def build_coach_skill_plan_copy(
+    *,
+    event: str,
+    client_name: str,
+    client_username: str,
+    plan: Dict[str, Any],
+) -> Tuple[str, str]:
+    """Subject + plain body for coach plan/progress notifications."""
+    title = str(plan.get("title") or "skills practice")
+    modality = str(plan.get("modality") or "skills")
+    domain = str(plan.get("cycle_domain") or "").replace("_", " ")
+    cur = int(plan.get("current_step") or 1)
+    total = int(plan.get("total_steps") or 1)
+    who = (client_name or client_username or "Client").strip()
+    handle = (client_username or "").strip()
+    label = f"{who} ({handle})" if handle and handle != who else who
+    coach_url = os.getenv(
+        "COACH_APP_URL", "https://coach.sovereignsanctuary.net"
+    ).rstrip("/")
+
+    subjects = {
+        "suggested": f"Plan offered: {label} — {title}",
+        "activated": f"Plan started: {label} — {title}",
+        "advanced": f"Plan progress: {label} — step {cur}/{total}",
+        "checkin_due": f"Check-in due: {label} — {title}",
+        "completed": f"Plan completed: {label} — {title}",
+        "declined": f"Plan declined: {label} — {title}",
+    }
+    bodies = {
+        "suggested": (
+            f"Little Nate offered {label} an optional {modality} practice "
+            f"({title}"
+            + (f", cycle: {domain}" if domain else "")
+            + "). Status: suggested — awaiting client acceptance."
+        ),
+        "activated": (
+            f"{label} accepted {title} ({modality}). "
+            f"Now on step {cur} of {total}."
+        ),
+        "advanced": (
+            f"{label} advanced on {title} ({modality}) to step {cur} of {total}."
+        ),
+        "checkin_due": (
+            f"A skills check-in is due for {label} on {title} "
+            f"(step {cur}/{total}). Nate will ask in chat; review if helpful."
+        ),
+        "completed": (
+            f"{label} completed {title} ({modality}). "
+            f"A stacked follow-up may be offered next."
+        ),
+        "declined": (
+            f"{label} declined the offered practice {title} ({modality}). "
+            f"No further auto-offers until cooldown ends."
+        ),
+    }
+    subject = subjects.get(event, f"Treatment plan update: {label}")
+    body = bodies.get(event, f"Update on {title} for {label} (step {cur}/{total}).")
+    body = f"{body}\n\nOpen Coach Portal: {coach_url}"
+    return subject, body
+
+
+async def notify_coach_skill_plan(
+    db_pool: Any,
+    *,
+    user_id: str,
+    plan: Dict[str, Any],
+    event: str,
+) -> bool:
+    """In-app + email coach on client skill/treatment plan progress."""
+    if event not in _COACH_EMAILABLE_EVENTS:
+        return False
+    if not cycle_skill_coach_emails_enabled() or not db_pool or not user_id:
+        return False
+    plan_id = str(plan.get("id") or "")
+    if await _recently_emailed(
+        db_pool, plan_id, event, marker_prefix="coach_email_sent"
+    ):
+        return False
+    coach_username = await _resolve_assigned_coach_username(db_pool, user_id)
+    if not coach_username:
+        return False
+    _, client_name = await _resolve_client_email(db_pool, user_id)
+    # Name resolution may return None email when client opted out of email —
+    # still resolve display name from profile for coach copy.
+    if not client_name:
+        try:
+            async with db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT username, profile_data->>'name' AS name
+                    FROM users
+                    WHERE username = $1 OR hardware_id = $1
+                    LIMIT 1
+                    """,
+                    user_id,
+                )
+            if row:
+                client_name = (row.get("name") or row.get("username") or "").strip()
+                user_id = str(row.get("username") or user_id)
+        except Exception:
+            pass
+    subject, message = build_coach_skill_plan_copy(
+        event=event,
+        client_name=client_name or user_id,
+        client_username=user_id,
+        plan=plan,
+    )
+    ok_any = False
+    try:
+        from app.services.coach_notifications import notify_coach
+
+        result = await notify_coach(
+            db_pool,
+            coach_username,
+            {
+                "urgency": "medium",
+                "subject": subject[:200],
+                "message": message[:4000],
+                "payload": {
+                    "alert_type": "cycle_skill_plan",
+                    "event": event,
+                    "client_username": user_id,
+                    "plan_id": plan_id,
+                    "modality": plan.get("modality"),
+                    "title": plan.get("title"),
+                },
+            },
+        )
+        ok_any = bool(result.get("sent", {}).get("in_app"))
+    except Exception as e:
+        logger.warning("cycle_skill_plan: coach in-app notify failed: %s", e)
+
+    # notify_coach only emails on critical — send plan emails explicitly.
+    try:
+        from app.services.coach_notifications import (
+            _lookup_coach_contact,
+            _send_sendgrid_simple,
+        )
+
+        _phone, coach_email = await _lookup_coach_contact(db_pool, coach_username)
+        if coach_email and "@" in coach_email and os.getenv("SENDGRID_API_KEY"):
+            if await _send_sendgrid_simple(coach_email, subject[:200], message):
+                ok_any = True
+                logger.info(
+                    "cycle_skill_plan: coach emailed %s event=%s plan=%s",
+                    coach_username,
+                    event,
+                    plan_id[:8] if plan_id else "",
+                )
+    except Exception as e:
+        logger.warning("cycle_skill_plan: coach email failed: %s", e)
+
+    if ok_any and plan_id:
+        await _stamp_email_marker(db_pool, plan_id, f"coach_email_sent:{event}")
+    return ok_any
+
+
+def schedule_coach_skill_plan_notify(
+    db_pool: Any,
+    *,
+    user_id: str,
+    plan: Dict[str, Any],
+    event: str,
+) -> None:
+    if not cycle_skill_coach_emails_enabled() or event not in _COACH_EMAILABLE_EVENTS:
+        return
+    try:
+        import asyncio
+
+        asyncio.create_task(
+            notify_coach_skill_plan(
+                db_pool, user_id=user_id, plan=plan, event=event
+            )
+        )
+    except Exception:
+        pass
+
+
+async def notify_client_skill_plan_email(
+    db_pool: Any,
+    *,
+    user_id: str,
+    plan: Dict[str, Any],
+    event: str,
+) -> bool:
+    """Email the client on plan offer / progress (SendGrid). Debounced per event."""
+    if event not in _EMAILABLE_EVENTS:
+        return False
+    if not cycle_skill_emails_enabled() or not db_pool or not user_id:
+        return False
+    plan_id = str(plan.get("id") or "")
+    if await _recently_emailed(db_pool, plan_id, event):
+        return False
+    email, name = await _resolve_client_email(db_pool, user_id)
+    if not email or "@" not in email:
+        return False
+    subject, html = build_skill_plan_email_copy(event=event, name=name, plan=plan)
+    api_key = (os.getenv("SENDGRID_API_KEY") or "").strip()
+    if not api_key:
+        logger.warning("cycle_skill_plan: email skipped — SENDGRID_API_KEY unset")
+        return False
+    from_email = os.getenv("FROM_EMAIL", "support@sovereignsanctuary.net")
+    from_name = os.getenv("FROM_NAME", "Little Nate")
+    try:
+        import aiohttp
+
+        payload = {
+            "personalizations": [{"to": [{"email": email}]}],
+            "from": {"email": from_email, "name": from_name},
+            "subject": subject[:200],
+            "content": [{"type": "text/html", "value": html}],
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.sendgrid.com/v3/mail/send",
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                ok = resp.status in (200, 202)
+        if ok and plan_id:
+            await _stamp_email_marker(db_pool, plan_id, f"email_sent:{event}")
+            logger.info(
+                "cycle_skill_plan: emailed %s event=%s plan=%s",
+                email[:3] + "***",
+                event,
+                plan_id[:8],
+            )
+        return ok
+    except Exception as e:
+        logger.warning("cycle_skill_plan: email send failed: %s", e)
+        return False
+
+
+def schedule_client_skill_plan_email(
+    db_pool: Any,
+    *,
+    user_id: str,
+    plan: Dict[str, Any],
+    event: str,
+) -> None:
+    if not cycle_skill_emails_enabled() or event not in _EMAILABLE_EVENTS:
+        return
+    try:
+        import asyncio
+
+        asyncio.create_task(
+            notify_client_skill_plan_email(
+                db_pool, user_id=user_id, plan=plan, event=event
+            )
+        )
+    except Exception:
+        pass
+
+
+async def _log_skill_learning(
+    db_pool: Any,
+    *,
+    user_id: str,
+    plan: Dict[str, Any],
+    event: str,
+    detail: str = "",
+) -> None:
+    """Learning hook: adaptation_log + skyeye_activity + client/coach notify."""
+    plan_id = str(plan.get("id") or "")
+    entry = {
+        "event": event,
+        "modality": plan.get("modality"),
+        "cycle_domain": plan.get("cycle_domain"),
+        "step": plan.get("current_step"),
+        "detail": (detail or "")[:240],
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        if plan_id:
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE nate_therapeutic_plans
+                    SET adaptation_log = adaptation_log || $2::jsonb,
+                        updated_at = NOW()
+                    WHERE id = $1::uuid
+                    """,
+                    plan_id,
+                    json.dumps([entry]),
+                )
+    except Exception as e:
+        logger.warning("cycle_skill_plan: adaptation_log failed: %s", e)
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO skyeye_activity (type, content, platform, created_at)
+                VALUES (
+                    'cycle_skill_learning',
+                    $1::text,
+                    'cycle_skill',
+                    NOW()
+                )
+                """,
+                json.dumps(
+                    {
+                        "user_id": user_id,
+                        "plan_id": plan_id,
+                        **entry,
+                    }
+                )[:2000],
+            )
+    except Exception:
+        pass
+    schedule_client_skill_plan_email(
+        db_pool, user_id=user_id, plan=plan, event=event
+    )
+    schedule_coach_skill_plan_notify(
+        db_pool, user_id=user_id, plan=plan, event=event
+    )
 
 
 async def _activate_plan(db_pool: Any, plan_id: str) -> None:
@@ -829,6 +1480,15 @@ async def _advance_or_stack(
                         new_id,
                         plan_id,
                     )
+                    stacked = await _get_plan_row(db_pool, user_id)
+                    if stacked and str(stacked.get("id")) == new_id:
+                        await _log_skill_learning(
+                            db_pool,
+                            user_id=user_id,
+                            plan=stacked,
+                            event="suggested",
+                            detail=f"stacked_after={plan_id}",
+                        )
     except Exception as e:
         logger.warning("cycle_skill_plan: advance/stack failed: %s", e)
 
@@ -853,33 +1513,56 @@ async def maybe_tick_cycle_skill_plan(
 
     if plan and _DECLINE_RE.search(text):
         await _decline_plan(db_pool, str(plan["id"]))
+        await _log_skill_learning(
+            db_pool, user_id=username, plan=plan, event="declined", detail=text[:120]
+        )
         return {"ok": True, "action": "declined", "plan_id": str(plan["id"])}
 
     if plan and plan.get("status") == "suggested" and _ACCEPT_RE.search(text):
         await _activate_plan(db_pool, str(plan["id"]))
         plan["status"] = "active"
-        if await _has_proactive_consent(db_pool, username):
-            await _schedule_followup_commitment(
-                db_pool, user_id=username, plan=plan
-            )
+        await _schedule_followup_commitment(db_pool, user_id=username, plan=plan)
+        await _log_skill_learning(
+            db_pool, user_id=username, plan=plan, event="activated", detail=text[:120]
+        )
         return {"ok": True, "action": "activated", "plan_id": str(plan["id"])}
 
     if plan and plan.get("status") == "active" and _ADVANCE_RE.search(text):
+        cur = int(plan.get("current_step") or 1)
+        total = int(plan.get("total_steps") or 1)
+        completing = cur >= total
         await _advance_or_stack(db_pool, user_id=username, plan=plan)
-        return {"ok": True, "action": "advanced", "plan_id": str(plan["id"])}
+        if completing:
+            plan["status"] = "completed"
+        event = "completed" if completing else "advanced"
+        await _log_skill_learning(
+            db_pool, user_id=username, plan=plan, event=event, detail=text[:120]
+        )
+        return {
+            "ok": True,
+            "action": "completed" if completing else "advanced",
+            "plan_id": str(plan["id"]),
+        }
 
     if plan:
-        # Due check-in: refresh commitment if next_checkin_at passed
-        nca = plan.get("next_checkin_at")
-        if nca and await _has_proactive_consent(db_pool, username):
-            if getattr(nca, "tzinfo", None) is None:
-                nca = nca.replace(tzinfo=timezone.utc)
-            if datetime.now(timezone.utc) >= nca:
-                await _schedule_followup_commitment(
-                    db_pool, user_id=username, plan=plan
-                )
-                out = {"ok": True, "action": "checkin_scheduled", "plan_id": str(plan["id"])}
-        return out if out.get("action") != "noop" else {"ok": True, "action": "has_plan"}
+        # Due check-in: always re-stamp; commitment row only if consent
+        if _checkin_due(plan):
+            await _schedule_followup_commitment(
+                db_pool, user_id=username, plan=plan
+            )
+            await _log_skill_learning(
+                db_pool,
+                user_id=username,
+                plan=plan,
+                event="checkin_due",
+                detail="in_chat_or_commitment",
+            )
+            return {
+                "ok": True,
+                "action": "checkin_scheduled",
+                "plan_id": str(plan["id"]),
+            }
+        return {"ok": True, "action": "has_plan", "plan_id": str(plan["id"])}
 
     # Fallback if pre-turn ensure missed (race / no plan context path)
     if await _recent_decline_cooldown(db_pool, username):
@@ -895,19 +1578,160 @@ def schedule_cycle_skill_plan_tick(
     *,
     user_id: str,
     user_text: str,
+    on_done: Any = None,
 ) -> None:
     if not cycle_skill_plans_enabled() or not db_pool or not user_id:
         return
     try:
         import asyncio
 
-        asyncio.create_task(
-            maybe_tick_cycle_skill_plan(
+        async def _run() -> None:
+            result = await maybe_tick_cycle_skill_plan(
                 db_pool, user_id=user_id, user_text=user_text or ""
             )
+            if on_done is not None:
+                try:
+                    maybe = on_done(result)
+                    if asyncio.iscoroutine(maybe):
+                        await maybe
+                except Exception as e:
+                    logger.warning("cycle_skill_plan: on_done failed: %s", e)
+
+        asyncio.create_task(_run())
+    except Exception:
+        pass
+
+
+def schedule_skill_plan_post_turn(
+    db_pool: Any,
+    *,
+    user_id: str,
+    user_text: str,
+    nate_response: str,
+    user_name: str = "",
+    on_done: Any = None,
+    origin_surface: str = "cycle_skill",
+) -> None:
+    """Crystallize + tick after any chat surface (main / sanctuary / private)."""
+    if not cycle_skill_plans_enabled() or not db_pool or not user_id:
+        return
+    try:
+        import asyncio
+
+        asyncio.create_task(
+            crystallize_skill_plan_turn(
+                db_pool,
+                user_id=user_id,
+                user_text=user_text or "",
+                nate_response=nate_response or "",
+                user_name=user_name or "",
+                origin_surface=origin_surface,
+            )
+        )
+        schedule_cycle_skill_plan_tick(
+            db_pool, user_id=user_id, user_text=user_text or "", on_done=on_done
         )
     except Exception:
         pass
+
+
+async def augment_recall_query_for_skill_plan(
+    db_pool: Any, user_id: str, base_query: str
+) -> str:
+    """Bias crystal recall toward active/suggested cycle skill practice terms."""
+    if not cycle_skill_plans_enabled() or not db_pool or not user_id:
+        return base_query or ""
+    plan = await _get_plan_row(db_pool, user_id)
+    if not plan:
+        return base_query or ""
+    step = _step_payload(
+        plan.get("step_definitions"), int(plan.get("current_step") or 1)
+    )
+    bits = [
+        (base_query or "").strip(),
+        str(plan.get("modality") or ""),
+        str(step.get("skill") or "").replace("_", " "),
+        str(step.get("theme") or ""),
+        str(step.get("practice") or "")[:120],
+        "skills practice",
+    ]
+    return " ".join(b for b in bits if b).strip()[:500]
+
+
+async def crystallize_skill_plan_turn(
+    db_pool: Any,
+    *,
+    user_id: str,
+    user_text: str,
+    nate_response: str,
+    user_name: str = "",
+    origin_surface: str = "cycle_skill",
+) -> Optional[str]:
+    """Tag skill-plan turns into crystals (origin_surface=cycle_skill) for memory loop."""
+    if not cycle_skill_plans_enabled() or not db_pool or not user_id:
+        return None
+    plan = await _get_plan_row(db_pool, user_id)
+    if not plan:
+        return None
+    step = _step_payload(
+        plan.get("step_definitions"), int(plan.get("current_step") or 1)
+    )
+    modality = plan.get("modality") or step.get("modality") or "skills"
+    skill = str(step.get("skill") or "").replace("_", " ")
+    tagged = (
+        f"[cycle_skill {modality} step {plan.get('current_step')}/{plan.get('total_steps')}"
+        f" {skill}] {(user_text or '').strip()}"
+    )
+    try:
+        from app.websocket.crystal_recall_bridge import crystallize_from_conversation
+    except ImportError:
+        try:
+            from crystal_recall_bridge import crystallize_from_conversation  # type: ignore
+        except ImportError:
+            return None
+    try:
+        return await crystallize_from_conversation(
+            db_pool,
+            user_id,
+            tagged,
+            nate_response or "",
+            user_name=user_name,
+            domain="clinical",
+            min_score=3,
+            origin_surface=origin_surface,
+        )
+    except Exception as e:
+        logger.warning("cycle_skill_plan: crystallize turn failed: %s", e)
+        return None
+
+
+async def build_client_skill_plan_status(
+    db_pool: Any, user_id: str
+) -> Optional[Dict[str, Any]]:
+    """Compact status for Flutter / coach UI (WebSocket cycle_skill_plan_update)."""
+    if not cycle_skill_plans_enabled() or not db_pool or not user_id:
+        return None
+    plan = await _get_plan_row(db_pool, user_id)
+    if not plan:
+        return None
+    step = _step_payload(
+        plan.get("step_definitions"), int(plan.get("current_step") or 1)
+    )
+    return {
+        "plan_id": str(plan["id"]),
+        "title": plan.get("title"),
+        "status": plan.get("status"),
+        "source": plan.get("source"),
+        "modality": plan.get("modality") or step.get("modality"),
+        "cycle_domain": plan.get("cycle_domain"),
+        "current_step": plan.get("current_step"),
+        "total_steps": plan.get("total_steps"),
+        "theme": step.get("theme"),
+        "skill": step.get("skill"),
+        "practice": step.get("practice"),
+        "check_in": step.get("check_in"),
+        "checkin_due": _checkin_due(plan),
+    }
 
 
 def compose_skill_teach_block(

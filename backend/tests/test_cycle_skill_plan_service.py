@@ -27,6 +27,79 @@ def test_flag_default_off(monkeypatch):
     assert csp.cycle_skill_plans_enabled() is True
 
 
+def test_skill_emails_follow_plans_flag(monkeypatch):
+    monkeypatch.delenv("CYCLE_SKILL_EMAILS", raising=False)
+    monkeypatch.setenv("ENABLE_CYCLE_SKILL_PLANS", "false")
+    monkeypatch.setenv("ENABLE_THERAPEUTIC_PLANS", "false")
+    assert csp.cycle_skill_emails_enabled() is False
+    monkeypatch.setenv("ENABLE_CYCLE_SKILL_PLANS", "true")
+    assert csp.cycle_skill_emails_enabled() is True
+    monkeypatch.setenv("ENABLE_CYCLE_SKILL_PLANS", "false")
+    monkeypatch.setenv("ENABLE_THERAPEUTIC_PLANS", "true")
+    assert csp.cycle_skill_emails_enabled() is True
+    monkeypatch.setenv("CYCLE_SKILL_EMAILS", "false")
+    assert csp.cycle_skill_emails_enabled() is False
+
+
+def test_skill_plan_email_copy_covers_lifecycle():
+    plan = {
+        "title": "Ground & settle",
+        "modality": "grounding",
+        "current_step": 1,
+        "total_steps": 3,
+        "step_definitions": [
+            {
+                "step_number": 1,
+                "theme": "Feet on floor",
+                "practice": "Name 5 things you see",
+                "check_in": "What shifted in your body?",
+            }
+        ],
+    }
+    for event in ("suggested", "activated", "advanced", "checkin_due", "completed"):
+        subject, html = csp.build_skill_plan_email_copy(
+            event=event, name="Alex", plan=plan
+        )
+        assert "Alex" in subject
+        assert "Ground & settle" in html or "skills" in html.lower()
+        assert "Open Sanctuary" in html
+
+
+def test_coach_skill_emails_follow_plans_flag(monkeypatch):
+    monkeypatch.delenv("CYCLE_SKILL_COACH_EMAILS", raising=False)
+    monkeypatch.setenv("ENABLE_CYCLE_SKILL_PLANS", "true")
+    assert csp.cycle_skill_coach_emails_enabled() is True
+    monkeypatch.setenv("CYCLE_SKILL_COACH_EMAILS", "false")
+    assert csp.cycle_skill_coach_emails_enabled() is False
+
+
+def test_coach_skill_plan_copy_covers_lifecycle():
+    plan = {
+        "title": "Ground & settle",
+        "modality": "grounding",
+        "cycle_domain": "emotional_state",
+        "current_step": 2,
+        "total_steps": 3,
+    }
+    for event in (
+        "suggested",
+        "activated",
+        "advanced",
+        "checkin_due",
+        "completed",
+        "declined",
+    ):
+        subject, body = csp.build_coach_skill_plan_copy(
+            event=event,
+            client_name="Alex",
+            client_username="client1",
+            plan=plan,
+        )
+        assert "Alex" in subject or "client1" in subject
+        assert "Ground & settle" in body or "practice" in body.lower()
+        assert "Coach Portal" in body
+
+
 def test_domain_maps_to_modality_templates():
     assert "emotional_state" in csp._DOMAIN_TEMPLATE
     assert "addiction" in csp._DOMAIN_TEMPLATE

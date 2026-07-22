@@ -9161,13 +9161,23 @@ class AzureCortex:
                     pass
             return "\n\n".join(blocks)
 
+        async def _recall_with_skill_bias(_pool, _hid, _q, _un):
+            # QUANTUM-CRYSTAL-ARCH: bias recall toward active cycle skill practice
+            _qq = _q or ""
+            try:
+                if _pool and os.environ.get("ENABLE_CYCLE_SKILL_PLANS", "").lower() in ("true", "1", "yes"):
+                    from app.services.cycle_skill_plan_service import augment_recall_query_for_skill_plan
+                    _qq = await augment_recall_query_for_skill_plan(_pool, _un or _hid, _qq)
+            except Exception:
+                pass
+            return await recall_crystals_for_context(
+                _pool, _hid, max_results=8, source="bridge_chat", query_text=_qq or _q,
+            )
+
         relational_context, checkin_context, crystal_context, pg_history_context, intake_context, fsf_context, reconnect_context, _enrich_addendum, trial_context_block, plan_context_block = await asyncio.gather(
             _timed("relational", self._get_relational_context(profile)),
             _timed("checkin", self._get_checkin_context(profile)),
-            _timed("crystals", recall_crystals_for_context(
-                _cpool, _hw_id, max_results=8,
-                source="bridge_chat", query_text=user_text,
-            )),
+            _timed("crystals", _recall_with_skill_bias(_cpool, _hw_id, user_text, _uname)),
             _timed("pg_history", _fetch_pg_history_for_chat(_cpool, _uname, _hw_id, limit=15)),
             _timed("intake_s1", _fetch_intake_context()),
             _timed("fsf", _fetch_fsf_context()),
@@ -10878,6 +10888,16 @@ class AzureCortex:
                     ))
                 except Exception:
                     pass
+                # QUANTUM-CRYSTAL-ARCH: skill-plan crystallize + accept/advance tick
+                try:
+                    from app.services.cycle_skill_plan_service import schedule_skill_plan_post_turn
+                    schedule_skill_plan_post_turn(
+                        db_pool, user_id=profile.get("username") or uid,
+                        user_text=_qg_verbatim_user_text, nate_response=_final_response,
+                        user_name=profile.get("name", ""), origin_surface="bridge_chat",
+                    )
+                except Exception:
+                    pass
                 # QUANTUM-CRYSTAL-ARCH: Agentic Phase 1 — post-turn commitment extraction
                 try:
                     from app.services.nate_commitment_extractor import schedule_post_turn_extraction
@@ -10897,16 +10917,6 @@ class AzureCortex:
                         db_pool,
                         user_id=profile.get("username") or uid,
                         conversation_text=_qg_verbatim_user_text,
-                    )
-                except Exception:
-                    pass
-                # QUANTUM-CRYSTAL-ARCH: cycle → stacked skill plans + check-ins
-                try:
-                    from app.services.cycle_skill_plan_service import schedule_cycle_skill_plan_tick
-                    schedule_cycle_skill_plan_tick(
-                        db_pool,
-                        user_id=profile.get("username") or uid,
-                        user_text=_qg_verbatim_user_text,
                     )
                 except Exception:
                     pass

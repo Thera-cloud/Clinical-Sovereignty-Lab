@@ -115,9 +115,10 @@ async def assign_plan(
             """
             INSERT INTO nate_therapeutic_plans
                 (user_id, coach_id, template_id, title, total_steps,
-                 current_step, step_definitions, status)
-            VALUES ($1, $2, $3::uuid, $4, $5, 1, $6::jsonb, 'active')
-            RETURNING id, title, total_steps, current_step, status, started_at
+                 current_step, step_definitions, status, source)
+            VALUES ($1, $2, $3::uuid, $4, $5, 1, $6::jsonb, 'active', 'coach')
+            RETURNING id, title, total_steps, current_step, status, started_at,
+                      step_definitions
             """,
             body.user_id,
             coach_hw,
@@ -126,6 +127,32 @@ async def assign_plan(
             int(total_steps),
             json.dumps(steps),
         )
+
+    # QUANTUM-CRYSTAL-ARCH: email client when coach assigns a treatment plan
+    try:
+        from app.services.cycle_skill_plan_service import (
+            schedule_client_skill_plan_email,
+            schedule_coach_skill_plan_notify,
+        )
+
+        plan_payload = {
+            "id": str(row["id"]),
+            "title": row["title"],
+            "total_steps": row["total_steps"],
+            "current_step": row["current_step"],
+            "step_definitions": row["step_definitions"],
+            "modality": "treatment",
+            "status": "active",
+            "source": "coach",
+        }
+        schedule_client_skill_plan_email(
+            pool, user_id=body.user_id, plan=plan_payload, event="activated"
+        )
+        schedule_coach_skill_plan_notify(
+            pool, user_id=body.user_id, plan=plan_payload, event="activated"
+        )
+    except Exception as e:
+        logger.warning("therapeutic_plan: assign notify failed: %s", e)
 
     return {
         "plan_id": str(row["id"]),
