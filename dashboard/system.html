@@ -21,23 +21,26 @@
         .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
         .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
         .page-title { font-size: 14px; color: var(--text-secondary); }
-        .back-btn { padding: 8px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 12px; text-decoration: none; }
+        .back-btn { padding: 8px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 12px; text-decoration: none; cursor: pointer; }
         .content { padding: 24px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
         .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
         .card.full { grid-column: span 2; }
-        .card-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+        .card-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; justify-content: space-between; }
         .status-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
         .status-item { background: var(--bg-elevated); border-radius: 8px; padding: 16px; }
         .status-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; }
-        .status-value { font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-        .status-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .status-value { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text-secondary); }
         .status-dot.green { background: var(--green); box-shadow: 0 0 8px var(--green); }
+        .status-dot.red { background: var(--red); box-shadow: 0 0 8px var(--red); }
+        .status-dot.orange { background: var(--orange); box-shadow: 0 0 8px var(--orange); }
         .metric-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); }
         .metric-row:last-child { border-bottom: none; }
         .metric-label { color: var(--text-secondary); font-size: 13px; }
         .metric-value { font-weight: 600; font-size: 13px; }
         .metric-value.green { color: var(--green); }
         .metric-value.gold { color: var(--gold); }
+        .metric-value.red { color: var(--red); }
         .action-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
         .action-btn { padding: 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; text-align: center; cursor: pointer; transition: all 0.2s; }
         .action-btn:hover { border-color: var(--gold); transform: translateY(-2px); }
@@ -45,11 +48,19 @@
         .action-btn .label { font-size: 11px; color: var(--text-secondary); }
         .log-list { max-height: 300px; overflow-y: auto; }
         .log-item { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 12px; display: flex; gap: 12px; }
-        .log-time { color: var(--text-secondary); white-space: nowrap; }
-        .log-type { padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; }
+        .log-time { color: var(--text-secondary); white-space: nowrap; min-width: 70px; }
+        .log-type { padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; height: fit-content; }
         .log-type.info { background: var(--cyan-dim); color: var(--cyan); }
         .log-type.success { background: var(--green-dim); color: var(--green); }
+        .log-type.error { background: var(--red-dim); color: var(--red); }
         .log-msg { flex: 1; }
+        .refresh-btn { font-size: 11px; padding: 4px 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; color: var(--gold); cursor: pointer; }
+        .muted { color: var(--text-secondary); font-size: 12px; }
+        @media (max-width: 800px) {
+            .content { grid-template-columns: 1fr; }
+            .card.full { grid-column: span 1; }
+            .action-grid { grid-template-columns: repeat(2, 1fr); }
+        }
     </style>
 </head>
 <body>
@@ -58,60 +69,62 @@
             <div class="logo-icon">⚙️</div>
             <div>
                 <div class="logo-text">SYSTEM STATUS</div>
-                <div class="page-title">Infrastructure monitoring</div>
+                <div class="page-title">Live infrastructure probes</div>
             </div>
         </div>
-        <a href="command.html" class="back-btn">← Back to Dashboard</a>
+        <a href="#" class="back-btn" id="backBtn">← Back to Dashboard</a>
     </header>
     <div class="content">
         <div class="card">
-            <div class="card-title">🔌 Service Status</div>
-            <div class="status-grid">
-                <div class="status-item"><div class="status-label">Sovereign Bridge</div><div class="status-value"><span class="status-dot green"></span> Online</div></div>
-                <div class="status-item"><div class="status-label">Nate AI</div><div class="status-value"><span class="status-dot green"></span> Ready</div></div>
-                <div class="status-item"><div class="status-label">Azure Cortex</div><div class="status-value"><span class="status-dot green"></span> Connected</div></div>
-                <div class="status-item"><div class="status-label">Night School</div><div class="status-value"><span class="status-dot green"></span> Active</div></div>
+            <div class="card-title">
+                <span>🔌 Service Status</span>
+                <button class="refresh-btn" onclick="refreshAll()">Refresh</button>
+            </div>
+            <div class="status-grid" id="statusGrid">
+                <div class="status-item"><div class="status-label">API /health</div><div class="status-value" id="st-api"><span class="status-dot"></span> …</div></div>
+                <div class="status-item"><div class="status-label">PostgreSQL</div><div class="status-value" id="st-db"><span class="status-dot"></span> …</div></div>
+                <div class="status-item"><div class="status-label">SkyEye Pulse</div><div class="status-value" id="st-skyeye"><span class="status-dot"></span> …</div></div>
+                <div class="status-item"><div class="status-label">SSE Monitor</div><div class="status-value" id="st-sse"><span class="status-dot"></span> …</div></div>
+                <div class="status-item"><div class="status-label">Token Lab</div><div class="status-value" id="st-tokenlab"><span class="status-dot"></span> …</div></div>
+                <div class="status-item"><div class="status-label">GKM Ministry</div><div class="status-value" id="st-gkm"><span class="status-dot"></span> …</div></div>
             </div>
         </div>
         <div class="card">
-            <div class="card-title">📊 Performance Metrics</div>
-            <div class="metric-row"><span class="metric-label">Uptime</span><span class="metric-value green">99.9%</span></div>
-            <div class="metric-row"><span class="metric-label">Avg Response Time</span><span class="metric-value">142ms</span></div>
-            <div class="metric-row"><span class="metric-label">Active Connections</span><span class="metric-value gold">1</span></div>
-            <div class="metric-row"><span class="metric-label">Memory Usage</span><span class="metric-value">324 MB</span></div>
+            <div class="card-title">📊 Live Metrics</div>
+            <div class="metric-row"><span class="metric-label">API latency</span><span class="metric-value" id="m-latency">—</span></div>
+            <div class="metric-row"><span class="metric-label">Total users</span><span class="metric-value gold" id="m-users">—</span></div>
+            <div class="metric-row"><span class="metric-label">Active today</span><span class="metric-value" id="m-active">—</span></div>
+            <div class="metric-row"><span class="metric-label">Live sessions</span><span class="metric-value" id="m-sessions">—</span></div>
+            <div class="metric-row"><span class="metric-label">Crisis alerts</span><span class="metric-value" id="m-crisis">—</span></div>
+            <div class="metric-row"><span class="metric-label">SSE panels today</span><span class="metric-value" id="m-panels">—</span></div>
+            <p class="muted" style="margin-top:12px;" id="m-updated">Last probe: never</p>
         </div>
         <div class="card">
-            <div class="card-title">⚡ Quick Actions</div>
+            <div class="card-title">⚡ Quick Links</div>
             <div class="action-grid">
-                <div class="action-btn" onclick="alert('Cache refreshed')"><div class="icon">🔄</div><div class="label">Refresh Cache</div></div>
-                <div class="action-btn" onclick="alert('Diagnostics running')"><div class="icon">🔍</div><div class="label">Run Diagnostics</div></div>
-                <div class="action-btn" onclick="alert('Exporting logs')"><div class="icon">📥</div><div class="label">Export Logs</div></div>
-                <div class="action-btn" onclick="alert('Sessions cleared')"><div class="icon">🧹</div><div class="label">Clear Sessions</div></div>
-                <div class="action-btn" onclick="alert('Night School training')"><div class="icon">🧠</div><div class="label">Retrain Nate</div></div>
-                <div class="action-btn" onclick="alert('Backup started')"><div class="icon">💾</div><div class="label">Backup Data</div></div>
+                <div class="action-btn" onclick="navTo('skyeye.html')"><div class="icon">👁️</div><div class="label">SkyEye</div></div>
+                <div class="action-btn" onclick="navTo('sse_monitoring.html')"><div class="icon">📡</div><div class="label">SSE Monitor</div></div>
+                <div class="action-btn" onclick="navTo('token_lab.html')"><div class="icon">🪙</div><div class="label">Token Lab</div></div>
+                <div class="action-btn" onclick="navTo('crisis_center.html')"><div class="icon">🚨</div><div class="label">Crisis Center</div></div>
+                <div class="action-btn" onclick="navTo('settings.html')"><div class="icon">⚙️</div><div class="label">Settings</div></div>
+                <div class="action-btn" onclick="refreshAll()"><div class="icon">🔄</div><div class="label">Re-probe All</div></div>
             </div>
         </div>
         <div class="card">
-            <div class="card-title">📜 Recent Logs</div>
-            <div class="log-list">
-                <div class="log-item"><span class="log-time">Just now</span><span class="log-type success">SUCCESS</span><span class="log-msg">System page loaded</span></div>
-                <div class="log-item"><span class="log-time">1m ago</span><span class="log-type info">INFO</span><span class="log-msg">User authenticated successfully</span></div>
-                <div class="log-item"><span class="log-time">5m ago</span><span class="log-type info">INFO</span><span class="log-msg">Bridge server started on port 8765</span></div>
-                <div class="log-item"><span class="log-time">5m ago</span><span class="log-type success">SUCCESS</span><span class="log-msg">Night School session completed</span></div>
-            </div>
+            <div class="card-title">📜 Probe Log</div>
+            <div class="log-list" id="probeLog"></div>
         </div>
         <div class="card full" id="adminTools" style="display:none;">
             <div class="card-title">🔧 Admin Tools</div>
             <div class="action-grid">
-                <div class="action-btn" onclick="window.location.href='night_school.html'"><div class="icon">🥋</div><div class="label">Night School</div></div>
-                <div class="action-btn" onclick="window.location.href='the_eye.html'"><div class="icon">👁️</div><div class="label">The Eye</div></div>
-                <div class="action-btn" onclick="window.location.href='nevedal_lab_live.html'"><div class="icon">🔬</div><div class="label">Nevedal Lab</div></div>
-                <div class="action-btn" onclick="window.location.href='pgsd.html'"><div class="icon">🌌</div><div class="label">PGSD</div></div>
+                <div class="action-btn" onclick="navTo('night_school.html')"><div class="icon">🥋</div><div class="label">Night School</div></div>
+                <div class="action-btn" onclick="navTo('the_eye.html')"><div class="icon">👁️</div><div class="label">The Eye</div></div>
+                <div class="action-btn" onclick="navTo('nevedal_lab_live.html')"><div class="icon">🔬</div><div class="label">Nevedal Lab</div></div>
+                <div class="action-btn" onclick="navTo('pgsd.html')"><div class="icon">🌌</div><div class="label">PGSD</div></div>
             </div>
         </div>
     </div>
     <script>
-
 function _recoverAuth() {
   function _ck(n) { var m = document.cookie.match(new RegExp('(^| )' + n + '=([^;]+)')); return m ? decodeURIComponent(m[2]) : ''; }
   var hp = new URLSearchParams(location.hash.slice(1));
@@ -130,13 +143,129 @@ var _ykVerified = false;
 try { _ykVerified = sessionStorage.getItem('sc_yubikey_verified') === 'true'; } catch(e) {}
 if (!_ykVerified) { window.location.href = 'command.html'; }
 
-        if (!(sessionStorage.getItem("username") || localStorage.getItem("sc_username"))) {
-            window.location.href = "index.html";
-        }
-        const profile = JSON.parse((sessionStorage.getItem("profile") || localStorage.getItem("sc_profile")) || "{}");
-        if (profile.role === "ADMIN") {
-            document.getElementById("adminTools").style.display = "block";
-        }
+if (!(sessionStorage.getItem("username") || localStorage.getItem("sc_username"))) {
+    window.location.href = "index.html";
+}
+var profile = {};
+try { profile = JSON.parse((sessionStorage.getItem("profile") || localStorage.getItem("sc_profile")) || "{}"); } catch(e) { profile = {}; }
+if (profile.role === "ADMIN") {
+    document.getElementById("adminTools").style.display = "block";
+}
+
+var API = (function () {
+    var h = window.location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8000';
+    if (h === 'command.sovereignsanctuary.net' ||
+        h === 'app.sovereignsanctuary.net' ||
+        h === 'coach.sovereignsanctuary.net') return '';
+    return 'https://api.sovereignsanctuary.net';
+})();
+
+function _authHeaders(ct) {
+    var h = {};
+    var t = sessionStorage.getItem('token') || localStorage.getItem('sc_token');
+    if (t) h['Authorization'] = 'Bearer ' + t;
+    if (ct) h['Content-Type'] = ct;
+    return h;
+}
+
+function navTo(page) {
+    var t = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
+    var u = sessionStorage.getItem('username') || localStorage.getItem('sc_username') || '';
+    var p = sessionStorage.getItem('profile') || localStorage.getItem('sc_profile') || '';
+    window.location.href = page + '#t=' + encodeURIComponent(t) + '&u=' + encodeURIComponent(u) + '&p=' + encodeURIComponent(p);
+}
+
+document.getElementById('backBtn').addEventListener('click', function(e) {
+    e.preventDefault();
+    navTo('command.html');
+});
+
+function setStatus(id, ok, label) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var cls = ok === true ? 'green' : (ok === false ? 'red' : 'orange');
+    el.innerHTML = '<span class="status-dot ' + cls + '"></span> ' + (label || (ok ? 'Online' : 'Down'));
+}
+
+function logProbe(type, msg) {
+    var list = document.getElementById('probeLog');
+    var row = document.createElement('div');
+    row.className = 'log-item';
+    var now = new Date();
+    var ts = now.toLocaleTimeString();
+    row.innerHTML = '<span class="log-time">' + ts + '</span><span class="log-type ' + type + '">' + type.toUpperCase() + '</span><span class="log-msg"></span>';
+    row.querySelector('.log-msg').textContent = msg;
+    list.insertBefore(row, list.firstChild);
+    while (list.children.length > 40) list.removeChild(list.lastChild);
+}
+
+async function probe(path, auth) {
+    var t0 = performance.now();
+    try {
+        var opts = auth ? { headers: _authHeaders() } : {};
+        var resp = await fetch(API + path, opts);
+        var ms = Math.round(performance.now() - t0);
+        var body = null;
+        try { body = await resp.json(); } catch (e) { body = null; }
+        return { ok: resp.ok, status: resp.status, ms: ms, body: body };
+    } catch (e) {
+        return { ok: false, status: 0, ms: Math.round(performance.now() - t0), body: null, error: String(e) };
+    }
+}
+
+async function refreshAll() {
+    logProbe('info', 'Starting live probes…');
+
+    var health = await probe('/health', false);
+    setStatus('st-api', health.ok, health.ok ? ('Healthy (' + health.ms + 'ms)') : ('Fail ' + (health.status || 'net')));
+    document.getElementById('m-latency').textContent = health.ms + 'ms';
+    document.getElementById('m-latency').className = 'metric-value ' + (health.ok ? 'green' : 'red');
+    logProbe(health.ok ? 'success' : 'error', '/health → ' + (health.status || 'error') + ' in ' + health.ms + 'ms');
+
+    var overview = await probe('/api/admin/overview', true);
+    if (overview.status === 401) {
+        setStatus('st-db', null, 'Auth pending');
+        logProbe('error', '/api/admin/overview → 401 (token may still be propagating)');
+    } else if (overview.ok && overview.body) {
+        setStatus('st-db', true, 'Reachable');
+        document.getElementById('m-users').textContent = overview.body.total_users != null ? overview.body.total_users : '—';
+        document.getElementById('m-active').textContent = overview.body.active_today != null ? overview.body.active_today : '—';
+        document.getElementById('m-sessions').textContent = overview.body.live_sessions != null ? overview.body.live_sessions : '—';
+        var crisis = overview.body.crisis_alerts != null ? overview.body.crisis_alerts : 0;
+        var cEl = document.getElementById('m-crisis');
+        cEl.textContent = crisis;
+        cEl.className = 'metric-value ' + (crisis > 0 ? 'red' : 'green');
+        logProbe('success', 'Admin overview OK — users=' + overview.body.total_users);
+    } else {
+        setStatus('st-db', false, 'Unreachable');
+        logProbe('error', '/api/admin/overview → ' + (overview.status || 'error'));
+    }
+
+    var pulse = await probe('/api/skyeye/pulse', true);
+    setStatus('st-skyeye', pulse.ok, pulse.ok ? 'Pulse OK' : ('HTTP ' + pulse.status));
+    logProbe(pulse.ok ? 'success' : 'error', '/api/skyeye/pulse → ' + pulse.status);
+
+    var sse = await probe('/api/sse/monitor/metrics', true);
+    setStatus('st-sse', sse.ok, sse.ok ? 'Metrics OK' : ('HTTP ' + sse.status));
+    if (sse.ok && sse.body) {
+        document.getElementById('m-panels').textContent = sse.body.panels_today != null ? sse.body.panels_today : '—';
+    }
+    logProbe(sse.ok ? 'success' : 'error', '/api/sse/monitor/metrics → ' + sse.status);
+
+    var tl = await probe('/api/token-lab/health', true);
+    setStatus('st-tokenlab', tl.ok, tl.ok ? 'OK' : ('HTTP ' + tl.status));
+    logProbe(tl.ok ? 'success' : 'error', '/api/token-lab/health → ' + tl.status);
+
+    var gkm = await probe('/api/gkm/health', true);
+    setStatus('st-gkm', gkm.ok, gkm.ok ? 'OK' : ('HTTP ' + gkm.status));
+    logProbe(gkm.ok ? 'success' : 'error', '/api/gkm/health → ' + gkm.status);
+
+    document.getElementById('m-updated').textContent = 'Last probe: ' + new Date().toLocaleString();
+}
+
+refreshAll();
+setInterval(refreshAll, 60000);
     </script>
 </body>
 </html>

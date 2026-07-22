@@ -19,7 +19,7 @@ Trust Enforcer (meta-agent)
 │   └── Redis — responds to PING
 │
 └── 33 Auditors (see trust_baseline sum; includes High-Risk Crisis)
-├── SkyEye Dashboard ........... 61 endpoints
+├── SkyEye Dashboard ........... 62 endpoints
 ├── Sovereign Command .......... 25 endpoints
 ├── The Eye ..................... 21 endpoints
 ├── Nevedal Research Lab ........ 30 checks (24 REST + 6 DB pipeline)
@@ -173,7 +173,7 @@ After deploying any backend, database, or infrastructure change:
 
 | Auditor | Expected | Baseline Key |
 |---------|----------|-------------|
-| SkyEye | 61 | `skyeye_endpoint_count` |
+| SkyEye | 62 | `skyeye_endpoint_count` |
 | Sovereign Command | 25 | `command_endpoint_count` |
 | The Eye | 21 | `eye_endpoint_count` |
 | Nevedal Lab | 30 | `nevedal_lab_endpoint_count` |

@@ -209,6 +209,8 @@ if (!_ykVerified) { window.location.href = 'command.html'; }
                 } else {
                     alert("Reinstate failed.");
                 }
+            } else if (data.type === "force_disconnect_done") {
+                alert(data.message || ("Disconnect result for " + (data.client_id || "user")));
             } else if (data.type === "error" && data.message) {
                 alert("Error: " + data.message);
             }
@@ -270,6 +272,51 @@ if (!_ykVerified) { window.location.href = 'command.html'; }
             socket.send(JSON.stringify({
                 type: "get_user_discipline",
                 target_uid: selectedUser.id
+            }));
+        }
+
+        function _usersApiBase() {
+            var h = window.location.hostname;
+            if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8000';
+            if (h === 'command.sovereignsanctuary.net' ||
+                h === 'app.sovereignsanctuary.net' ||
+                h === 'coach.sovereignsanctuary.net') return '';
+            return 'https://api.sovereignsanctuary.net';
+        }
+
+        async function resetBiometricsForUser() {
+            if (!selectedUser || !selectedUser.id) { alert("Select a user first."); return; }
+            if (!confirm("Reset voice biometrics for " + (selectedUser.name || selectedUser.id) + "? They must re-enroll.")) return;
+            var token = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
+            try {
+                var resp = await fetch(_usersApiBase() + '/api/admin/reset-biometrics', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({ user_id: selectedUser.id })
+                });
+                if (resp.status === 401) {
+                    console.warn('Auth issue on reset-biometrics — token may still be propagating');
+                    alert('Auth issue — wait a moment and try again.');
+                    return;
+                }
+                var data = await resp.json().catch(function() { return {}; });
+                if (!resp.ok) {
+                    alert('Reset failed: ' + (data.detail || ('HTTP ' + resp.status)));
+                    return;
+                }
+                alert(data.message || 'Biometrics cleared. User must re-enroll.');
+            } catch (e) {
+                alert('Reset failed: ' + e.message);
+            }
+        }
+
+        function forceLogoutForUser() {
+            if (!selectedUser || !selectedUser.id) { alert("Select a user first."); return; }
+            if (!confirm("Force disconnect " + (selectedUser.name || selectedUser.id) + " from any active session?")) return;
+            if (!socket || socket.readyState !== 1) { alert("Not connected to bridge."); return; }
+            socket.send(JSON.stringify({
+                type: "admin_force_disconnect",
+                client_id: selectedUser.id
             }));
         }
 
@@ -468,8 +515,8 @@ if (!_ykVerified) { window.location.href = 'command.html'; }
             html += "<div class='profile-card full'><div class='card-label'>Identity Actions</div>";
             html += "<div class='identity-actions'>";
             html += "<div class='identity-action' onclick=\"resetPasswordForUser()\"><div class='icon'>🔑</div><div class='label'>Reset Password</div></div>";
-            html += "<div class='identity-action' onclick=\"alert('Reset biometrics')\"><div class='icon'>👆</div><div class='label'>Reset Biometrics</div></div>";
-            html += "<div class='identity-action' onclick=\"alert('Force logout')\"><div class='icon'>📱</div><div class='label'>Force Logout</div></div>";
+            html += "<div class='identity-action' onclick=\"resetBiometricsForUser()\"><div class='icon'>👆</div><div class='label'>Reset Biometrics</div></div>";
+            html += "<div class='identity-action' onclick=\"forceLogoutForUser()\"><div class='icon'>📱</div><div class='label'>Force Logout</div></div>";
             html += "<div class='identity-action' onclick=\"viewViolationsForUser()\"><div class='icon'>📋</div><div class='label'>View Violations</div></div>";
             html += "<div class='identity-action' onclick=\"banUserAccount()\"><div class='icon'>🚫</div><div class='label'>Ban Account</div></div>";
             html += "<div class='identity-action' style='border-color:#ef4444' onclick=\"deleteUserAccount()\"><div class='icon'>🗑️</div><div class='label'>Delete Account</div></div>";

@@ -2290,7 +2290,10 @@ function _authHeaders(contentType) {
 async function apiFetch(path) {
   try {
     const resp = await fetch(`${API}${path}`, { headers: _authHeaders() });
-    if (resp.status === 401) { window.location.href = 'index.html'; return null; }
+    if (resp.status === 401) {
+      console.warn('Auth issue on', path, '— token may still be propagating');
+      return null;
+    }
     if (!resp.ok) throw new Error(`API ${resp.status}`);
     return await resp.json();
   } catch (e) {
@@ -2306,7 +2309,10 @@ async function apiPost(path, body) {
       headers: _authHeaders('application/json'),
       body: JSON.stringify(body)
     });
-    if (resp.status === 401) { window.location.href = 'index.html'; return null; }
+    if (resp.status === 401) {
+      console.warn('Auth issue on', path, '— token may still be propagating');
+      return null;
+    }
     if (!resp.ok) {
       try {
         const errBody = await resp.json();
@@ -2328,7 +2334,10 @@ async function apiPut(path, body) {
       headers: _authHeaders('application/json'),
       body: JSON.stringify(body)
     });
-    if (resp.status === 401) { window.location.href = 'index.html'; return null; }
+    if (resp.status === 401) {
+      console.warn('Auth issue on', path, '— token may still be propagating');
+      return null;
+    }
     if (!resp.ok) throw new Error(`API ${resp.status}`);
     return await resp.json();
   } catch (e) {

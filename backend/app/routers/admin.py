@@ -5840,8 +5840,29 @@ async def sse_pipeline_queue(request: Request):
     pool = getattr(request.app.state, "db_pool", None)
     if not pool: return []
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT provenance_id, filename, status, story_plot_id, source_hash, upload_timestamp FROM sse_ip_provenance ORDER BY upload_timestamp DESC LIMIT 50")
+        rows = await conn.fetch(
+            "SELECT provenance_id, filename, status, story_plot_id, source_hash, upload_timestamp "
+            "FROM sse_ip_provenance WHERE status IS DISTINCT FROM 'deleted' "
+            "ORDER BY upload_timestamp DESC LIMIT 50"
+        )
     return [dict(r) for r in rows]
+
+@sse_router.delete("/pipeline/{provenance_id}")
+async def sse_pipeline_delete(provenance_id: str, request: Request):
+    """Soft-delete an SSE Stories pipeline run (UI delete button)."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "No database pool")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "UPDATE sse_ip_provenance SET status = 'deleted' "
+            "WHERE provenance_id = $1 AND status IS DISTINCT FROM 'deleted' "
+            "RETURNING provenance_id, status",
+            provenance_id,
+        )
+    if not row:
+        raise HTTPException(404, "Not found")
+    return {"provenance_id": str(row["provenance_id"]), "status": "deleted"}
 
 @sse_router.get("/pipeline/result/{provenance_id}")
 async def sse_pipeline_result(provenance_id: str, request: Request):

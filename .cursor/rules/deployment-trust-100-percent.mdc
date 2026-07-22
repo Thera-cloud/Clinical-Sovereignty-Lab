@@ -48,7 +48,7 @@ After deploying backend changes, follow this exact sequence to ensure all 23 aud
 
 | Auditor | Expected | Checks |
 |---------|----------|--------|
-| SkyEye Tab | 61/61 | 21 tabs, 61 API endpoints |
+| SkyEye Tab | 62/62 | 22 tabs, 62 API endpoints |
 | Command Tab | 25/25 | Sovereign Command endpoints |
 | The Eye | 21/21 | The Eye dashboard endpoints |
 | Login | 2/2 | WebSocket login (client + coach) |

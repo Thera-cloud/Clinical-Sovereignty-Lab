@@ -506,7 +506,11 @@ function deleteStory(pid) {
   pid = pid || _currentProvId;
   if (!pid || !confirm('Delete this story?')) return;
   fetch(API + '/api/sse/pipeline/' + pid, { method: 'DELETE', headers: _authHeaders() })
-    .then(function() { closeReview(); loadQueue(); })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(b) { throw new Error(b.detail || ('HTTP ' + r.status)); });
+      closeReview();
+      loadQueue();
+    })
     .catch(function(e) { alert('Delete failed: ' + e.message); });
 }
 
