@@ -218,6 +218,32 @@ def test_compose_skill_teach_block_includes_practice():
 
 
 @pytest.mark.asyncio
+async def test_build_family_skill_plan_context_empty(monkeypatch):
+    monkeypatch.setenv("ENABLE_CYCLE_SKILL_PLANS", "true")
+    assert await csp.build_family_skill_plan_context(None, []) == ""
+    assert await csp.build_family_skill_plan_context(None, [{"name": "A"}]) == ""
+
+
+def test_schedule_skill_plan_post_turn_noop_when_disabled(monkeypatch):
+    monkeypatch.setenv("ENABLE_CYCLE_SKILL_PLANS", "false")
+    csp.schedule_skill_plan_post_turn(
+        object(),
+        user_id="u1",
+        user_text="hello",
+        nate_response="hi",
+        origin_surface="bridge_chat",
+    )
+    csp.schedule_skill_plan_post_turn_with_ws(
+        object(),
+        sockets={},
+        uid="u1",
+        user_id="u1",
+        user_text="hello",
+        nate_response="hi",
+    )
+
+
+@pytest.mark.asyncio
 async def test_fidelity_guard_appends_teach_when_off_modality(monkeypatch):
     monkeypatch.setenv("ENABLE_CYCLE_SKILL_PLANS", "true")
 

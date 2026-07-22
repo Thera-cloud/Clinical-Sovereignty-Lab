@@ -1526,6 +1526,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   }
 
   final List<String> _chatHistory = [];
+  Map<String, dynamic>? _skillPlanStatus;
   static const int _kMaxTurnBubbleMap = 200;
   final Map<String, int> _turnIdToChatIndex = {};
   final Map<String, String> _latestNateTextByTurnForTts = {};
@@ -2068,6 +2069,32 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
               _updateAvatarFromSentiment(_metrics['mood_current'], reply);
             }
           }
+        }
+      } else if (data['type'] == 'cycle_skill_plan_update') {
+        final title = (data['title'] as String?)?.trim().isNotEmpty == true
+            ? data['title'] as String
+            : 'Skills practice';
+        final status = (data['status'] as String?)?.trim() ?? '';
+        final step = data['current_step'];
+        final total = data['total_steps'];
+        final practice = (data['practice'] as String?)?.trim() ?? '';
+        final stepBit = (step != null && total != null) ? ' — step $step/$total' : '';
+        final practiceBit = practice.isNotEmpty ? ': $practice' : '';
+        final line =
+            'System: [Skill plan${status.isNotEmpty ? ' $status' : ''}] $title$stepBit$practiceBit';
+        if (mounted) {
+          setState(() {
+            _skillPlanStatus = Map<String, dynamic>.from(data);
+            _chatHistory.add(line);
+            _scrollToBottom();
+          });
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                line.replaceFirst('System: ', ''),
+                style: const TextStyle(color: Colors.white)),
+            backgroundColor: const Color(0xFF1A1A2E),
+            duration: const Duration(seconds: 5),
+          ));
         }
       } else if (data['type'] == 'offer_coach_handoff') {
         final coachName = (data['coach_name'] as String?)?.trim().isNotEmpty == true
@@ -5605,6 +5632,28 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   /// Avatar Mode split layout — chat and avatar never overlap in either
   /// case, so no PointerInterceptor wrapper is needed here.
   Widget _buildChatMessageList() {
+    final plan = _skillPlanStatus;
+    final planBanner = plan == null
+        ? null
+        : Container(
+            width: double.infinity,
+            margin: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFC9A962).withOpacity(0.12),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.4)),
+            ),
+            child: Text(
+              '${plan['title'] ?? 'Skill plan'}'
+              '${plan['current_step'] != null && plan['total_steps'] != null ? ' · step ${plan['current_step']}/${plan['total_steps']}' : ''}'
+              '${(plan['practice'] ?? '').toString().isNotEmpty ? ' — ${plan['practice']}' : ''}',
+              style: const TextStyle(
+                  color: Color(0xFFE8D5A3), fontSize: 12, fontFamily: 'Courier'),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          );
     return MediaQuery(
       data: MediaQuery.of(context)
           .copyWith(textScaler: TextScaler.linear(_chatTextScale)),
@@ -5614,7 +5663,11 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
             setState(() => _isTextSelected = false);
           }
         },
-        child: SelectionArea(
+        child: Column(
+          children: [
+            if (planBanner != null) planBanner,
+            Expanded(
+              child: SelectionArea(
           onSelectionChanged: (value) {
             final selecting = value != null && value.plainText.isNotEmpty;
             if (selecting != _isTextSelected) {
@@ -5723,6 +5776,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
             },
           ),
         ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -5801,6 +5857,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   List<dynamic> _clients = [];
   List<dynamic> _schedule = [];
   Map<String, dynamic>? _selectedClientBrief;
+  List<Map<String, dynamic>> _clientSkillPlans = [];
   final Map<String, bool> _assistEnabledBySession = {};
   final Map<String, String> _sessionServiceMode =
       {}; // live_id -> green|yellow|blue|grey
@@ -7541,6 +7598,33 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     if (clientId.isNotEmpty) _setFocusedClient(clientId);
     _socket?.sink.add(
         jsonEncode({"type": "get_presession_brief", "client_id": clientId}));
+    _loadClientSkillPlans(clientId);
+  }
+
+  Future<void> _loadClientSkillPlans(String clientId) async {
+    if (clientId.isEmpty) return;
+    final token = (widget.currentUserProfile['token'] ?? '').toString();
+    if (token.isEmpty) return;
+    try {
+      final uri = Uri.parse(
+              '${AppConfig.apiBaseUrl}/api/coach/therapeutic-plans')
+          .replace(queryParameters: {
+        'user_id': clientId,
+        'status': 'active,suggested',
+      });
+      final resp = await http.get(uri, headers: {
+        'Authorization': 'Bearer $token',
+      });
+      if (!mounted || resp.statusCode != 200) return;
+      final decoded = jsonDecode(resp.body);
+      final list = decoded is List ? decoded : const [];
+      setState(() {
+        _clientSkillPlans = list
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      });
+    } catch (_) {}
   }
 
   void _refreshCoachOverridePanel() {
@@ -9721,6 +9805,63 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
           // Nevedal metrics
           NevedalMetricsGrid(metrics: metrics),
+
+          if (_clientSkillPlans.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            const Text(
+              "SKILL / TREATMENT PLANS",
+              style: TextStyle(
+                  color: Colors.grey,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.5,
+                  fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            ..._clientSkillPlans.map((p) {
+              final title = (p['title'] ?? 'Plan').toString();
+              final status = (p['status'] ?? '').toString();
+              final source = (p['source'] ?? '').toString();
+              final step = p['current_step'];
+              final total = p['total_steps'];
+              final theme = (p['theme'] ?? p['practice'] ?? '').toString();
+              final modality = (p['modality'] ?? '').toString();
+              return Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1A1A2E),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.35)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(
+                            color: Color(0xFFC9A962),
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Text(
+                      [
+                        if (status.isNotEmpty) status,
+                        if (source.isNotEmpty) source,
+                        if (modality.isNotEmpty) modality,
+                        if (step != null && total != null) 'step $step/$total',
+                      ].join(' · '),
+                      style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                    ),
+                    if (theme.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(theme,
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 13)),
+                    ],
+                  ],
+                ),
+              );
+            }),
+          ],
 
           const SizedBox(height: 24),
 
