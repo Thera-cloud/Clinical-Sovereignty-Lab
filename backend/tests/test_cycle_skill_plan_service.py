@@ -106,21 +106,18 @@ def test_score_skill_offer_fidelity_penalizes_grounding_for_cbt():
         "If you want, we can catch one hot thought: write the situation and "
         "the automatic thought in one sentence — no fixing yet."
     )
-    assert (
-        csp.score_skill_offer_fidelity(
-            bad, modality="CBT", skill="thought_record", practice="hot thought"
-        )
-        <= 2
+    assert csp.score_skill_offer_fidelity(bad, modality="CBT") <= 2
+    assert csp.score_skill_offer_fidelity(good, modality="CBT") >= 4
+    dbt = (
+        "Let's try the STOP skill: Stop, take a step back, observe your body "
+        "and urges without acting, then proceed mindfully."
     )
-    assert (
-        csp.score_skill_offer_fidelity(
-            good,
-            modality="CBT",
-            skill="thought_record",
-            practice="Catch one hot thought: write situation",
-        )
-        >= 4
+    assert csp.score_skill_offer_fidelity(dbt, modality="DBT") >= 4
+    act = (
+        'Would you like to try defusion? Say once: "I notice I am having the '
+        'thought that…" and finish the sentence.'
     )
+    assert csp.score_skill_offer_fidelity(act, modality="ACT") >= 4
 
 
 def test_score_grounding_offer_high_when_on_modality():

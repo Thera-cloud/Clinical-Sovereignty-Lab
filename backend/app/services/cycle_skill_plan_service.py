@@ -158,6 +158,56 @@ def _skill_must_include(step: Dict[str, Any], modality: str) -> str:
     }.get(mod, "the named practice")
 
 
+_MODALITY_MARKERS: Dict[str, Tuple[str, ...]] = {
+    "CBT": (
+        "hot thought",
+        "automatic thought",
+        "thought check",
+        "evidence for",
+        "writing down",
+        "write down",
+        "write one",
+        "behavioral experiment",
+    ),
+    "DBT": (
+        "stop skill",
+        " stop,",
+        "take a step back",
+        "tipp",
+        "urge-surf",
+        "urge surf",
+        "dear man",
+        "opposite action",
+        "describe without",
+        "facts-only",
+        "facts only",
+    ),
+    "ACT": (
+        "defusion",
+        "i notice i am having the thought",
+        "having the thought that",
+        "valued action",
+        "one value",
+        "committed action",
+    ),
+    "grounding": (
+        "5-4-3-2-1",
+        "five things you see",
+        "feet on",
+        "sit bones",
+        "paced breath",
+    ),
+    "mindfulness": (
+        "5-4-3-2-1",
+        "observe",
+        "like weather",
+        "mindful",
+        "label",
+        "thinking",
+    ),
+}
+
+
 def score_skill_offer_fidelity(
     response: str,
     *,
@@ -186,32 +236,36 @@ def score_skill_offer_fidelity(
         if w
         not in {"then", "with", "that", "this", "from", "your", "have", "into"}
     ][:8]
-    hit_skill = any(t in low for t in skill_toks) if skill_toks else False
-    hit_practice = sum(1 for t in practice_toks if t in low)
+    markers = _MODALITY_MARKERS.get(mod, ())
+    hit_markers = sum(1 for m in markers if m in low)
+    hit_skill = any(t in low for t in skill_toks) if skill_toks else hit_markers >= 1
+    hit_practice = sum(1 for t in practice_toks if t in low) + hit_markers
     grounding_main = bool(_GROUNDING_ATTRACTOR_RE.search(text))
-    optional_tone = bool(
-        re.search(r"\b(if you want|optional|would you like|try|practice)\b", low)
+    teaches = bool(
+        re.search(
+            r"\b(let'?s try|try this|the practice|step back|write|list 2|"
+            r"name one|say or write|role-play|notice 5)\b",
+            low,
+        )
     )
 
     if mod in ("CBT", "DBT", "ACT"):
-        if grounding_main and not hit_skill and hit_practice < 2:
+        if grounding_main and hit_markers == 0 and not hit_skill:
             return 1
-        if hit_skill or hit_practice >= 2:
-            score = 4
-        if hit_skill and hit_practice >= 2:
-            score = 5
-        if optional_tone and score >= 4:
-            score = min(5, score)
+        if hit_markers >= 1 or hit_skill:
+            score = 4 if teaches or hit_practice >= 2 else 3
+        if (hit_markers >= 1 or hit_skill) and teaches:
+            score = 5 if hit_practice >= 2 or hit_markers >= 2 else 4
         return score
 
     if mod in ("grounding", "mindfulness"):
-        if grounding_main or hit_skill or hit_practice >= 2:
+        if grounding_main or hit_markers >= 1 or hit_skill:
             score = 4
-        if (grounding_main or hit_skill) and hit_practice >= 1:
+        if (grounding_main or hit_markers >= 1) and teaches:
             score = 5
         return score
 
-    if hit_skill or hit_practice >= 2:
+    if hit_skill or hit_markers >= 1:
         return 4
     return score
 
@@ -237,13 +291,15 @@ def build_fidelity_directive(
     if status == "suggested":
         return (
             f"SKILL FIDELITY LOCK ({mod}) — REQUIRED for this reply:\n"
-            f"1) One short empathic join (1–2 sentences). Avoid repeating "
-            f"\"Behind the feeling…\" every turn.\n"
+            f"1) One short empathic join (1–2 sentences MAX). Do NOT open with "
+            f"\"Behind the feeling…\" / \"Behind your willingness…\".\n"
             f"2) Offer THIS optional practice only — modality {mod}, skill \"{must}\", "
             f"step focus \"{theme}\" from \"{title}\".\n"
-            f"REQUIRED PRACTICE TEXT (teach this technique; light paraphrase OK, "
+            f"REQUIRED PRACTICE TEXT (teach the steps in the reply; light paraphrase OK, "
             f"same skill required):\n\"{practice}\"\n"
-            f"3) Ask if they want to try it. Do not dump a syllabus.\n"
+            f"3) If the client is accepting (yes / let's try / I'm in): TEACH the full "
+            f"REQUIRED PRACTICE now — do not only empathize or promise to start later.\n"
+            f"4) If not yet accepted: ask once if they want to try it.\n"
             f"FORBIDDEN: {forbid}\n"
             f"If you name a practice, it must be {mod} ({must}), not a different school."
         )
@@ -251,9 +307,9 @@ def build_fidelity_directive(
         f"SKILL FIDELITY LOCK ({mod}) — ACTIVE PRACTICE step {step_num}/{total_steps}:\n"
         f"Title: \"{title}\". Focus: {theme}. Skill: {must}.\n"
         f"REQUIRED PRACTICE: \"{practice}\"\n"
-        f"If they completed the last step, acknowledge THAT skill by name, then offer "
-        f"the practice above (or confirm completion if they finished the plan).\n"
-        f"FORBIDDEN: {forbid}"
+        f"If they completed the last step, name the skill they finished, then teach "
+        f"the next REQUIRED PRACTICE above (or celebrate plan completion).\n"
+        f"Do NOT open with \"Behind the feeling…\". FORBIDDEN: {forbid}"
     )
 
 
