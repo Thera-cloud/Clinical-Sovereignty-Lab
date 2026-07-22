@@ -1046,6 +1046,10 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
         }
         if discounts:
             session_params["discounts"] = discounts
+            disc_code = (body.discount_code or pricing_snapshot.get("discount_code") or "").strip().upper()
+            if disc_code:
+                session_params["metadata"]["applied_promo_code"] = disc_code
+                session_params["metadata"]["applied_promo_source"] = "promotional_specials"
 
         checkout_session = stripe.checkout.Session.create(**session_params)
     except stripe.StripeError as e:

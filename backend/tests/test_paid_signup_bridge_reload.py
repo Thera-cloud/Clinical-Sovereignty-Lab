@@ -68,6 +68,60 @@ async def test_pending_signup_triggers_bridge_user_reload(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_pending_signup_increments_promo_redemption(monkeypatch):
+    row = {
+        "id": "33333333-3333-3333-3333-333333333333",
+        "role": "CLIENT",
+        "username": "promo_user",
+        "password_hash": "salt:hash",
+        "email": "promo@example.com",
+        "payload": {"name": "Promo User"},
+        "tier": "STANDARD",
+        "selected_dojos": [],
+        "discount_code": "LPCMVP-100",
+    }
+    db = _FakeDB(row)
+    handler = StripeWebhookHandler(db)
+
+    async def _fake_finalize_signup(*_args, **_kwargs):
+        return True, "REGISTRATION_SUCCESS"
+
+    record_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        "app.services.registration_finalize.finalize_signup",
+        _fake_finalize_signup,
+    )
+    monkeypatch.setattr(
+        "app.services.promo_redemption.record_promo_redemption",
+        record_mock,
+    )
+    handler._send_support_paid_registration_notice = AsyncMock()
+    handler._send_support_trial_started_notice = AsyncMock()
+    handler._send_registration_receipt = AsyncMock()
+    handler._notify_bridge_reload = AsyncMock()
+
+    await handler._handle_pending_signup(
+        {
+            "id": "cs_test_promo",
+            "customer": "cus_test_promo",
+            "subscription": "sub_test_promo",
+            "amount_total": 4900,
+            "mode": "subscription",
+            "metadata": {
+                "applied_promo_code": "LPCMVP-100",
+                "applied_promo_source": "promotional_specials",
+            },
+        },
+        "33333333-3333-3333-3333-333333333333",
+        "evt_test_promo",
+    )
+
+    record_mock.assert_awaited_once()
+    assert record_mock.await_args.kwargs["promo_code"] == "LPCMVP-100"
+    handler._notify_bridge_reload.assert_awaited_once_with("promo_user")
+
+
+@pytest.mark.asyncio
 async def test_pending_dependent_signup_triggers_bridge_user_reload(monkeypatch):
     row = {
         "id": "22222222-2222-2222-2222-222222222222",

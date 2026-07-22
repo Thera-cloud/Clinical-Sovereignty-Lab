@@ -1871,28 +1871,21 @@ class StripeWebhookHandler:
 
             # Promo redemption is counted only after a successful checkout completion.
             # This prevents codes being consumed on abandoned or expired sessions.
+            from app.services.promo_redemption import record_promo_redemption
+
             applied_source = metadata.get("applied_promo_source", "")
             applied_code = metadata.get("applied_promo_code", "")
             if applied_source and applied_code:
-                cleaned_code = applied_code.strip().upper()[:40]
-                try:
-                    if applied_source == "promotional_specials":
-                        await self.db.execute(
-                            "UPDATE promotional_specials SET current_redemptions = current_redemptions + 1 WHERE promo_code = $1",
-                            cleaned_code,
-                        )
-                    elif applied_source == "school_codes":
-                        await self.db.execute(
-                            "UPDATE school_codes SET current_students = current_students + 1 WHERE school_code = $1",
-                            cleaned_code,
-                        )
-                    elif applied_source == "corporate_sponsors":
-                        await self.db.execute(
-                            "UPDATE corporate_sponsors SET current_employees = current_employees + 1 WHERE sponsor_code = $1",
-                            cleaned_code,
-                        )
-                except Exception as e:
-                    print(f">>> [STRIPE] Promo redemption update failed ({applied_source}/{applied_code}): {e}")
+                updated = await record_promo_redemption(
+                    self.db,
+                    promo_code=applied_code,
+                    source=applied_source,
+                )
+                if updated:
+                    print(
+                        f">>> [STRIPE] Promo redemption update "
+                        f"({applied_source}/{applied_code})"
+                    )
 
             # Notify bridge to reload this user's cache from PG
             try:
@@ -2333,6 +2326,21 @@ class StripeWebhookHandler:
                 "UPDATE pending_signups SET status='completed', consumed_at=NOW() WHERE id=$1",
                 signup_uuid,
             )
+            session_meta = session.get("metadata") or {}
+            promo_code = (row["discount_code"] or session_meta.get("applied_promo_code") or "")
+            promo_source = session_meta.get("applied_promo_source") or "promotional_specials"
+            if promo_code:
+                from app.services.promo_redemption import record_promo_redemption
+
+                if await record_promo_redemption(
+                    self.db,
+                    promo_code=str(promo_code),
+                    source=str(promo_source),
+                ):
+                    print(
+                        f">>> [STRIPE] Promo redemption update "
+                        f"({promo_source}/{promo_code}) pending_signup"
+                    )
             await self._notify_bridge_reload(row["username"])
             print(f">>> [STRIPE] Registration finalized for {row['username']}")
             stripe_sub_snap = None
