@@ -1,0 +1,4174 @@
+{
+  "version": "1.0.0",
+  "title": "Little Nate Clinical Technique Directory",
+  "purpose": "Modality techniques, care-plan templates, and switch protocols for LN assistance.",
+  "disclaimer": "Psychoeducation and coaching scaffolding only. Not a substitute for licensed mental health care, diagnosis, or emergency services.",
+  "modalities": [
+    {
+      "id": "cbt",
+      "name": "Cognitive Behavioral Therapy",
+      "family": "secular",
+      "aliases": [
+        "cbt",
+        "cognitive behavioral"
+      ]
+    },
+    {
+      "id": "dbt",
+      "name": "Dialectical Behavior Therapy",
+      "family": "secular",
+      "aliases": [
+        "dbt",
+        "dialectical"
+      ]
+    },
+    {
+      "id": "act",
+      "name": "Acceptance and Commitment Therapy",
+      "family": "secular",
+      "aliases": [
+        "act",
+        "acceptance and commitment"
+      ]
+    },
+    {
+      "id": "ifs",
+      "name": "Internal Family Systems",
+      "family": "secular",
+      "aliases": [
+        "ifs",
+        "parts work",
+        "parts"
+      ]
+    },
+    {
+      "id": "eft",
+      "name": "Emotionally Focused Therapy",
+      "family": "secular",
+      "aliases": [
+        "eft",
+        "emotionally focused"
+      ]
+    },
+    {
+      "id": "adep",
+      "name": "Attachment / ADEP-informed",
+      "family": "secular",
+      "aliases": [
+        "adep",
+        "attachment"
+      ]
+    },
+    {
+      "id": "gottman",
+      "name": "Gottman Method",
+      "family": "secular",
+      "aliases": [
+        "gottman",
+        "four horsemen"
+      ]
+    },
+    {
+      "id": "mi",
+      "name": "Motivational Interviewing",
+      "family": "secular",
+      "aliases": [
+        "mi",
+        "motivational interviewing",
+        "oars"
+      ]
+    },
+    {
+      "id": "somatic",
+      "name": "Somatic / nervous-system regulation",
+      "family": "secular",
+      "aliases": [
+        "somatic",
+        "se",
+        "polyvagal",
+        "nervous system"
+      ]
+    },
+    {
+      "id": "grounding",
+      "name": "Grounding & orientation",
+      "family": "secular",
+      "aliases": [
+        "grounding",
+        "5-4-3-2-1"
+      ]
+    },
+    {
+      "id": "mindfulness",
+      "name": "Mindfulness-based skills",
+      "family": "secular",
+      "aliases": [
+        "mindfulness",
+        "mbsr",
+        "mbct"
+      ]
+    },
+    {
+      "id": "self_compassion",
+      "name": "Self-Compassion (Neff-informed)",
+      "family": "secular",
+      "aliases": [
+        "self-compassion",
+        "self compassion"
+      ]
+    },
+    {
+      "id": "psychodynamic",
+      "name": "Psychodynamic / insight-oriented",
+      "family": "secular",
+      "aliases": [
+        "psychodynamic",
+        "transference",
+        "defense"
+      ]
+    },
+    {
+      "id": "narrative",
+      "name": "Narrative Therapy",
+      "family": "secular",
+      "aliases": [
+        "narrative",
+        "externalize",
+        "re-authoring"
+      ]
+    },
+    {
+      "id": "family_systems",
+      "name": "Family Systems / Bowen",
+      "family": "secular",
+      "aliases": [
+        "family systems",
+        "bowen",
+        "differentiation",
+        "genogram"
+      ]
+    },
+    {
+      "id": "sfbt",
+      "name": "Solution-Focused Brief Therapy",
+      "family": "secular",
+      "aliases": [
+        "sfbt",
+        "solution focused",
+        "miracle question"
+      ]
+    },
+    {
+      "id": "exposure",
+      "name": "Exposure / anxiety hierarchy",
+      "family": "secular",
+      "aliases": [
+        "exposure",
+        "hierarchy",
+        "erp"
+      ]
+    },
+    {
+      "id": "trauma_informed",
+      "name": "Trauma-informed stabilization",
+      "family": "secular",
+      "aliases": [
+        "trauma",
+        "ptsd",
+        "trauma-informed",
+        "stabilization"
+      ]
+    },
+    {
+      "id": "grief",
+      "name": "Grief & loss support",
+      "family": "secular",
+      "aliases": [
+        "grief",
+        "bereavement",
+        "mourning"
+      ]
+    },
+    {
+      "id": "twelve_step",
+      "name": "12-Step informed recovery support",
+      "family": "other",
+      "aliases": [
+        "12-step",
+        "twelve step",
+        "aa",
+        "na",
+        "recovery"
+      ]
+    },
+    {
+      "id": "faith_integrated",
+      "name": "Faith-integrated counseling (client-led)",
+      "family": "other",
+      "aliases": [
+        "faith",
+        "christian counseling",
+        "pastoral",
+        "spiritual"
+      ]
+    },
+    {
+      "id": "crisis",
+      "name": "Crisis & safety planning",
+      "family": "secular",
+      "aliases": [
+        "crisis",
+        "safety plan",
+        "suicidality"
+      ]
+    },
+    {
+      "id": "relationships",
+      "name": "Relationship communication skills",
+      "family": "secular",
+      "aliases": [
+        "relationships",
+        "couples",
+        "communication"
+      ]
+    },
+    {
+      "id": "sleep",
+      "name": "Sleep / CBT-I lite skills",
+      "family": "secular",
+      "aliases": [
+        "sleep",
+        "insomnia",
+        "cbt-i"
+      ]
+    }
+  ],
+  "techniques": [
+    {
+      "id": "cbt_thought_record",
+      "modality_id": "cbt",
+      "name": "Thought record (4-column)",
+      "indication": "Sticky automatic thoughts, anxiety, depression",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Write one concrete situation (who/where/what)."
+        },
+        {
+          "n": 2,
+          "text": "Write the automatic thought verbatim."
+        },
+        {
+          "n": 3,
+          "text": "List 2 facts for and 2 against."
+        },
+        {
+          "n": 4,
+          "text": "Write one balanced reframe without toxic positivity."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "cognitive",
+        "homework"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "cbt_behavioral_activation",
+      "modality_id": "cbt",
+      "name": "Behavioral activation (10-minute)",
+      "indication": "Low mood, avoidance, shutdown",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Name one valued domain gone quiet (body, connection, mastery, joy)."
+        },
+        {
+          "n": 2,
+          "text": "Pick a 10-minute action smaller than pride allows."
+        },
+        {
+          "n": 3,
+          "text": "Schedule a start time."
+        },
+        {
+          "n": 4,
+          "text": "Rate mood 0\u201310 before/after."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "behavioral"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "cbt_cognitive_distortions_spot",
+      "modality_id": "cbt",
+      "name": "Distortion spotting",
+      "indication": "All-or-nothing, mind-reading, catastrophizing",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Name the thought."
+        },
+        {
+          "n": 2,
+          "text": "Match 1\u20132 distortion labels (e.g., catastrophizing)."
+        },
+        {
+          "n": 3,
+          "text": "Rewrite as a testable prediction."
+        },
+        {
+          "n": 4,
+          "text": "Plan one data-check this week."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "cognitive"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "cbt_behavioral_experiment",
+      "modality_id": "cbt",
+      "name": "Behavioral experiment",
+      "indication": "Beliefs maintained by avoidance",
+      "steps": [
+        {
+          "n": 1,
+          "text": "State belief as a prediction."
+        },
+        {
+          "n": 2,
+          "text": "Design a safe, time-boxed test."
+        },
+        {
+          "n": 3,
+          "text": "Predict outcome 0\u2013100."
+        },
+        {
+          "n": 4,
+          "text": "Run test; compare prediction vs result."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "behavioral",
+        "exposure_adjacent"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "cbt_worry_postpone",
+      "modality_id": "cbt",
+      "name": "Worry postponement",
+      "indication": "Ruminative anxiety",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Catch the worry loop."
+        },
+        {
+          "n": 2,
+          "text": "Schedule a 15-min worry window later today."
+        },
+        {
+          "n": 3,
+          "text": "Park the topic in one sentence."
+        },
+        {
+          "n": 4,
+          "text": "Return attention to one present task."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "anxiety"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "cbt_problem_solve",
+      "modality_id": "cbt",
+      "name": "Structured problem-solving",
+      "indication": "Practical stuckness (not trauma processing)",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Define the problem in one sentence."
+        },
+        {
+          "n": 2,
+          "text": "Brainstorm 5 options without judging."
+        },
+        {
+          "n": 3,
+          "text": "Pick one doable option."
+        },
+        {
+          "n": 4,
+          "text": "Schedule first action within 48h."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "skills"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "dbt_stop",
+      "modality_id": "dbt",
+      "name": "STOP skill",
+      "indication": "Urge to act impulsively",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Stop \u2014 freeze the action."
+        },
+        {
+          "n": 2,
+          "text": "Take one paced breath."
+        },
+        {
+          "n": 3,
+          "text": "Observe body, urge, facts."
+        },
+        {
+          "n": 4,
+          "text": "Proceed with one wise next step."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "distress_tolerance"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "dbt_tipp",
+      "modality_id": "dbt",
+      "name": "TIPP (temperature/intensity)",
+      "indication": "High arousal spike",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Cool face/hands or sip cold water (safe)."
+        },
+        {
+          "n": 2,
+          "text": "Intense exercise 30\u201360s if medically ok."
+        },
+        {
+          "n": 3,
+          "text": "Paced breathing (longer exhale)."
+        },
+        {
+          "n": 4,
+          "text": "Paired muscle relaxation once."
+        }
+      ],
+      "contraindications": [
+        "Medical limits on cold/exercise \u2014 adapt"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "distress_tolerance"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "dbt_urge_surf",
+      "modality_id": "dbt",
+      "name": "Urge surfing",
+      "indication": "Cravings, self-harm urges (non-crisis)",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Rate urge 0\u201310 now."
+        },
+        {
+          "n": 2,
+          "text": "Describe sensations without acting."
+        },
+        {
+          "n": 3,
+          "text": "Re-rate every 60s for 5 minutes."
+        },
+        {
+          "n": 4,
+          "text": "Choose one opposite-action micro-step."
+        }
+      ],
+      "contraindications": [
+        "Active suicidal crisis \u2014 use crisis pathway"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "distress_tolerance"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "dbt_dear_man",
+      "modality_id": "dbt",
+      "name": "DEAR MAN ask",
+      "indication": "Hard interpersonal asks",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Describe facts neutrally."
+        },
+        {
+          "n": 2,
+          "text": "Express feeling with I-statement."
+        },
+        {
+          "n": 3,
+          "text": "Assert specific ask."
+        },
+        {
+          "n": 4,
+          "text": "Reinforce mutual benefit; negotiate."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "interpersonal"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "dbt_opposite_action",
+      "modality_id": "dbt",
+      "name": "Opposite action (lite)",
+      "indication": "Emotion-driven avoidance/aggression",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Name the emotion and urge."
+        },
+        {
+          "n": 2,
+          "text": "Check if emotion fits facts."
+        },
+        {
+          "n": 3,
+          "text": "Identify opposite action that is safe."
+        },
+        {
+          "n": 4,
+          "text": "Do the smallest opposite for 2 minutes."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "emotion_regulation"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "dbt_check_facts",
+      "modality_id": "dbt",
+      "name": "Check the facts",
+      "indication": "Emotion-mind stories",
+      "steps": [
+        {
+          "n": 1,
+          "text": "What event triggered this?"
+        },
+        {
+          "n": 2,
+          "text": "What interpretations am I adding?"
+        },
+        {
+          "n": 3,
+          "text": "What would a camera show?"
+        },
+        {
+          "n": 4,
+          "text": "Adjust intensity to fit facts."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "emotion_regulation"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "dbt_please",
+      "modality_id": "dbt",
+      "name": "PLEASE basics",
+      "indication": "Vulnerability to emotion mind",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Physical illness: address basics (meds/food if needed)."
+        },
+        {
+          "n": 2,
+          "text": "Eating: regular fuel."
+        },
+        {
+          "n": 3,
+          "text": "Avoid mood-altering misuse."
+        },
+        {
+          "n": 4,
+          "text": "Sleep + exercise: one realistic tweak tonight."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "emotion_regulation"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "act_defusion",
+      "modality_id": "act",
+      "name": "Defusion: 'having the thought that\u2026'",
+      "indication": "Fusion with sticky thoughts",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Catch the thought."
+        },
+        {
+          "n": 2,
+          "text": "Prefix: I'm having the thought that\u2026"
+        },
+        {
+          "n": 3,
+          "text": "Thank the mind for protecting."
+        },
+        {
+          "n": 4,
+          "text": "Return to one valued action."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "defusion"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "act_values_card",
+      "modality_id": "act",
+      "name": "Values \u2192 tiny committed action",
+      "indication": "Avoidance of valued life",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Pick one value word for today."
+        },
+        {
+          "n": 2,
+          "text": "Name the feeling that shows up with it."
+        },
+        {
+          "n": 3,
+          "text": "Choose a 5-minute action serving the value."
+        },
+        {
+          "n": 4,
+          "text": "Do it with the feeling present."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "values"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "act_leaves_on_stream",
+      "modality_id": "act",
+      "name": "Leaves on a stream (imagery)",
+      "indication": "Thought traffic",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Sit; notice breath."
+        },
+        {
+          "n": 2,
+          "text": "Place each thought on a leaf."
+        },
+        {
+          "n": 3,
+          "text": "Watch it float; don't force."
+        },
+        {
+          "n": 4,
+          "text": "Gently return when you chase a leaf."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "mindfulness"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "act_willingness",
+      "modality_id": "act",
+      "name": "Willingness dial",
+      "indication": "Struggle with unwanted feeling",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Name the feeling and where it lives in the body."
+        },
+        {
+          "n": 2,
+          "text": "Rate struggle 0\u201310."
+        },
+        {
+          "n": 3,
+          "text": "Lower struggle by 1 (not erase feeling)."
+        },
+        {
+          "n": 4,
+          "text": "Take one valued step while allowing the rest."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "acceptance"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "ifs_parts_map",
+      "modality_id": "ifs",
+      "name": "Parts mapping (non-clinical)",
+      "indication": "Inner conflict, protectors",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Notice which part got loud."
+        },
+        {
+          "n": 2,
+          "text": "Thank the protector for its job."
+        },
+        {
+          "n": 3,
+          "text": "Ask what it fears if it stands down."
+        },
+        {
+          "n": 4,
+          "text": "Offer one boundary + appreciation."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "parts"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "ifs_self_energy_check",
+      "modality_id": "ifs",
+      "name": "Self-energy check",
+      "indication": "Blended / hijacked states",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Scan: curious? calm? compassionate?"
+        },
+        {
+          "n": 2,
+          "text": "If no, pause and breathe."
+        },
+        {
+          "n": 3,
+          "text": "Ask the loud part for 10% space."
+        },
+        {
+          "n": 4,
+          "text": "Speak from that clearer seat."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "parts"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "ifs_unblend",
+      "modality_id": "ifs",
+      "name": "Unblending language",
+      "indication": "Over-identification with a part",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Say: A part of me feels\u2026"
+        },
+        {
+          "n": 2,
+          "text": "Locate it in body."
+        },
+        {
+          "n": 3,
+          "text": "Ask permission to get curious."
+        },
+        {
+          "n": 4,
+          "text": "Do not force exile contact."
+        }
+      ],
+      "contraindications": [
+        "Do not dig for trauma memories without a clinician"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "parts"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "eft_soft_emotion",
+      "modality_id": "eft",
+      "name": "Soft emotion under protest",
+      "indication": "Pursue-withdraw cycles",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Name hard strategy (pursue/withdraw/freeze)."
+        },
+        {
+          "n": 2,
+          "text": "Name soft feeling under it."
+        },
+        {
+          "n": 3,
+          "text": "Draft: When ___, I felt ___, I needed ___."
+        },
+        {
+          "n": 4,
+          "text": "Practice once aloud before live talk."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "attachment",
+        "couples"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "adep_attachment_message",
+      "modality_id": "adep",
+      "name": "Attachment need message",
+      "indication": "Bids for safety misheard as attack",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Identify protest behavior."
+        },
+        {
+          "n": 2,
+          "text": "Translate to attachment need."
+        },
+        {
+          "n": 3,
+          "text": "Write one clean need sentence."
+        },
+        {
+          "n": 4,
+          "text": "Share when both are regulated."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "attachment"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "gottman_repair",
+      "modality_id": "gottman",
+      "name": "Repair attempt",
+      "indication": "Escalating conflict",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Spot Four Horsemen if present."
+        },
+        {
+          "n": 2,
+          "text": "Use a repair phrase (soft start / apology / humor that lands)."
+        },
+        {
+          "n": 3,
+          "text": "Take a 20-min break if flooded (>100bpm feel)."
+        },
+        {
+          "n": 4,
+          "text": "Return with one appreciation + one ask."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "couples"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "gottman_soft_startup",
+      "modality_id": "gottman",
+      "name": "Soft startup",
+      "indication": "Harsh startups",
+      "steps": [
+        {
+          "n": 1,
+          "text": "I feel ___ about ___."
+        },
+        {
+          "n": 2,
+          "text": "I need ___."
+        },
+        {
+          "n": 3,
+          "text": "Avoid you always/never."
+        },
+        {
+          "n": 4,
+          "text": "Invite partner's view."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "couples"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "rel_speaker_listener",
+      "modality_id": "relationships",
+      "name": "Speaker-listener",
+      "indication": "Talks that become debates",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Speaker: short share (2 min)."
+        },
+        {
+          "n": 2,
+          "text": "Listener: paraphrase only."
+        },
+        {
+          "n": 3,
+          "text": "Speaker: confirms accuracy."
+        },
+        {
+          "n": 4,
+          "text": "Switch roles."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "communication"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "mi_oars",
+      "modality_id": "mi",
+      "name": "OARS micro-loop",
+      "indication": "Ambivalence about change",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Open question about change."
+        },
+        {
+          "n": 2,
+          "text": "Affirm effort (specific)."
+        },
+        {
+          "n": 3,
+          "text": "Reflect meaning."
+        },
+        {
+          "n": 4,
+          "text": "Summarize both sides of ambivalence."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "change"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "mi_importance_confidence",
+      "modality_id": "mi",
+      "name": "Importance \u00d7 confidence rulers",
+      "indication": "Stuck motivation",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Rate importance of change 0\u201310."
+        },
+        {
+          "n": 2,
+          "text": "Why not lower?"
+        },
+        {
+          "n": 3,
+          "text": "Rate confidence 0\u201310."
+        },
+        {
+          "n": 4,
+          "text": "What would raise confidence by 1?"
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "change"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "mi_change_talk",
+      "modality_id": "mi",
+      "name": "Evoke change talk",
+      "indication": "Sustain talk dominance",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Ask for desire/ability/reasons/need."
+        },
+        {
+          "n": 2,
+          "text": "Reflect change talk more than sustain talk."
+        },
+        {
+          "n": 3,
+          "text": "Ask permission before advice."
+        },
+        {
+          "n": 4,
+          "text": "Invite next small step."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "change"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "ground_54321",
+      "modality_id": "grounding",
+      "name": "5-4-3-2-1 sensory grounding",
+      "indication": "Anxiety spike, dissociation lite",
+      "steps": [
+        {
+          "n": 1,
+          "text": "5 things you see."
+        },
+        {
+          "n": 2,
+          "text": "4 you can touch."
+        },
+        {
+          "n": 3,
+          "text": "3 you hear."
+        },
+        {
+          "n": 4,
+          "text": "2 smell / 1 taste (or safe substitute)."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "orientation"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "som_orienting",
+      "modality_id": "somatic",
+      "name": "Orienting to the room",
+      "indication": "Hypervigilance",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Slowly turn head; name 3 colors."
+        },
+        {
+          "n": 2,
+          "text": "Feel feet/sit bones."
+        },
+        {
+          "n": 3,
+          "text": "Lengthen exhale \u00d75."
+        },
+        {
+          "n": 4,
+          "text": "Name one safe-enough cue now."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "regulation"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "som_paced_breath",
+      "modality_id": "somatic",
+      "name": "Paced breathing (longer exhale)",
+      "indication": "Arousal up",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Inhale 4."
+        },
+        {
+          "n": 2,
+          "text": "Exhale 6."
+        },
+        {
+          "n": 3,
+          "text": "Repeat 6 cycles."
+        },
+        {
+          "n": 4,
+          "text": "Notice one body change."
+        }
+      ],
+      "contraindications": [
+        "Panic with breath focus \u2014 switch to grounding"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "regulation"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "mind_label_thinking",
+      "modality_id": "mindfulness",
+      "name": "Labeling: 'thinking'",
+      "indication": "Rumination",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Notice mind wandering."
+        },
+        {
+          "n": 2,
+          "text": "Softly label: thinking."
+        },
+        {
+          "n": 3,
+          "text": "Return to breath or feet."
+        },
+        {
+          "n": 4,
+          "text": "No judgment of how often."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "mindfulness"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "mind_body_scan_lite",
+      "modality_id": "mindfulness",
+      "name": "2-minute body scan lite",
+      "indication": "Disconnected from body",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Feet \u2192 belly \u2192 jaw \u2192 forehead."
+        },
+        {
+          "n": 2,
+          "text": "Name sensation without fixing."
+        },
+        {
+          "n": 3,
+          "text": "Breathe into tightest spot once."
+        },
+        {
+          "n": 4,
+          "text": "Open eyes; name one intention."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "mindfulness"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "sc_break",
+      "modality_id": "self_compassion",
+      "name": "Self-compassion break",
+      "indication": "Harsh self-criticism",
+      "steps": [
+        {
+          "n": 1,
+          "text": "This is a moment of suffering."
+        },
+        {
+          "n": 2,
+          "text": "Suffering is part of being human."
+        },
+        {
+          "n": 3,
+          "text": "May I be kind to myself."
+        },
+        {
+          "n": 4,
+          "text": "Hand on heart optional."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "compassion"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "sc_tone_rewrite",
+      "modality_id": "self_compassion",
+      "name": "Tone rewrite",
+      "indication": "Inner critic attacks",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Write the critic sentence."
+        },
+        {
+          "n": 2,
+          "text": "Rewrite as a supportive coach would."
+        },
+        {
+          "n": 3,
+          "text": "Keep accountability without shame."
+        },
+        {
+          "n": 4,
+          "text": "Say the rewrite once aloud."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "compassion"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "pd_pattern_name",
+      "modality_id": "psychodynamic",
+      "name": "Name the repeating pattern",
+      "indication": "Insight into recurrence",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Describe the latest episode."
+        },
+        {
+          "n": 2,
+          "text": "Where have you felt this before?"
+        },
+        {
+          "n": 3,
+          "text": "What role did you take?"
+        },
+        {
+          "n": 4,
+          "text": "What need was unmet then and now?"
+        }
+      ],
+      "contraindications": [
+        "Not for acute crisis processing"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "insight"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "nar_externalize",
+      "modality_id": "narrative",
+      "name": "Externalize the problem",
+      "indication": "Identity fused with problem",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Name the problem as a thing (e.g., The Fog)."
+        },
+        {
+          "n": 2,
+          "text": "When does it show up?"
+        },
+        {
+          "n": 3,
+          "text": "When are you freer from it?"
+        },
+        {
+          "n": 4,
+          "text": "What supports those freer moments?"
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "narrative"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "fam_differentiation",
+      "modality_id": "family_systems",
+      "name": "Differentiation micro-practice",
+      "indication": "Enmeshment / fusion",
+      "steps": [
+        {
+          "n": 1,
+          "text": "State your I-position in one sentence."
+        },
+        {
+          "n": 2,
+          "text": "Tolerate disagreement without over-explaining."
+        },
+        {
+          "n": 3,
+          "text": "Keep contact without fixing."
+        },
+        {
+          "n": 4,
+          "text": "Journal the pull to triangulate."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "family"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "sfbt_miracle",
+      "modality_id": "sfbt",
+      "name": "Miracle question (scaled)",
+      "indication": "Goal clarification",
+      "steps": [
+        {
+          "n": 1,
+          "text": "If a miracle fixed this overnight, what would you notice first?"
+        },
+        {
+          "n": 2,
+          "text": "Who else would notice?"
+        },
+        {
+          "n": 3,
+          "text": "On 0\u201310, where are you now?"
+        },
+        {
+          "n": 4,
+          "text": "What moves you +1?"
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "solution"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "sfbt_exception",
+      "modality_id": "sfbt",
+      "name": "Exception finding",
+      "indication": "Problem-saturated story",
+      "steps": [
+        {
+          "n": 1,
+          "text": "When was the problem a bit less?"
+        },
+        {
+          "n": 2,
+          "text": "What were you doing then?"
+        },
+        {
+          "n": 3,
+          "text": "Who helped?"
+        },
+        {
+          "n": 4,
+          "text": "How do we recreate 10% of that?"
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "solution"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "exp_ladder",
+      "modality_id": "exposure",
+      "name": "Fear hierarchy ladder",
+      "indication": "Avoidance-maintained fear (non-trauma flooding)",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Name avoided situation; rate fear 0\u2013100."
+        },
+        {
+          "n": 2,
+          "text": "Build 5 rungs easy\u2192hard."
+        },
+        {
+          "n": 3,
+          "text": "Do rung 1 until fear ~halves or 15 min."
+        },
+        {
+          "n": 4,
+          "text": "Drop one safety behavior."
+        }
+      ],
+      "contraindications": [
+        "Trauma memory flooding \u2014 clinician-led only"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "anxiety"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "trauma_window",
+      "modality_id": "trauma_informed",
+      "name": "Window of tolerance check",
+      "indication": "Activation / shutdown",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Am I hyper (sped up) or hypo (numb)?"
+        },
+        {
+          "n": 2,
+          "text": "Name 2 present-safety cues."
+        },
+        {
+          "n": 3,
+          "text": "Use grounding or paced breath."
+        },
+        {
+          "n": 4,
+          "text": "Pause trauma talk; return to now."
+        }
+      ],
+      "contraindications": [
+        "Do not process trauma memories in chat without clinician"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "stabilization"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "trauma_resourcing",
+      "modality_id": "trauma_informed",
+      "name": "Dual attention resource",
+      "indication": "Overwhelm during recall of hard material",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Name a resource image/person/place."
+        },
+        {
+          "n": 2,
+          "text": "Feel feet on floor."
+        },
+        {
+          "n": 3,
+          "text": "Glance at resource, then topic briefly."
+        },
+        {
+          "n": 4,
+          "text": "End in present orientation."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "stabilization"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "grief_dual_process",
+      "modality_id": "grief",
+      "name": "Dual process: loss \u2194 restoration",
+      "indication": "Grief oscillation",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Name today's loss-oriented need."
+        },
+        {
+          "n": 2,
+          "text": "Name one restoration task (life admin / rest)."
+        },
+        {
+          "n": 3,
+          "text": "Allow oscillation without shame."
+        },
+        {
+          "n": 4,
+          "text": "Ask for one support."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "grief"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "grief_continuing_bonds",
+      "modality_id": "grief",
+      "name": "Continuing bonds note",
+      "indication": "Connection after loss",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Write what you still want them to know."
+        },
+        {
+          "n": 2,
+          "text": "Choose a ritual (letter, visit, song)."
+        },
+        {
+          "n": 3,
+          "text": "Notice mixed emotions."
+        },
+        {
+          "n": 4,
+          "text": "Share with a safe person if wanted."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "grief"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "sleep_wind_down",
+      "modality_id": "sleep",
+      "name": "Wind-down buffer",
+      "indication": "Insomnia habits",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Pick a consistent wake time."
+        },
+        {
+          "n": 2,
+          "text": "30-min screen-dim buffer."
+        },
+        {
+          "n": 3,
+          "text": "If awake >20 min, leave bed for quiet activity."
+        },
+        {
+          "n": 4,
+          "text": "No clock-watching."
+        }
+      ],
+      "contraindications": [
+        "Not medical sleep treatment"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "sleep"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "crisis_safety_plan",
+      "modality_id": "crisis",
+      "name": "Collaborative safety plan (support)",
+      "indication": "Elevated risk ideation (non-emergency)",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Warn: if in immediate danger call local emergency / 988 (US)."
+        },
+        {
+          "n": 2,
+          "text": "Identify 3 warning signs."
+        },
+        {
+          "n": 3,
+          "text": "List 3 coping steps + 2 people to contact."
+        },
+        {
+          "n": 4,
+          "text": "Remove/reduce means access with support."
+        }
+      ],
+      "contraindications": [
+        "Emergency = call emergency services; LN is not crisis dispatch"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "safety"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "ts_halt",
+      "modality_id": "twelve_step",
+      "name": "HALT check",
+      "indication": "Relapse risk / irritability",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Hungry? Angry? Lonely? Tired?"
+        },
+        {
+          "n": 2,
+          "text": "Fix the body need first if safe."
+        },
+        {
+          "n": 3,
+          "text": "Tell one recovery contact."
+        },
+        {
+          "n": 4,
+          "text": "One meeting / one day focus."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "recovery"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "ts_one_day",
+      "modality_id": "twelve_step",
+      "name": "One-day-at-a-time plan",
+      "indication": "Overwhelm in recovery",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Define sobriety/recovery action for today only."
+        },
+        {
+          "n": 2,
+          "text": "Identify people/places/things risk."
+        },
+        {
+          "n": 3,
+          "text": "Plan one support contact."
+        },
+        {
+          "n": 4,
+          "text": "Evening honesty check."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "recovery"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "faith_lament",
+      "modality_id": "faith_integrated",
+      "name": "Lament / honest prayer structure (client-led)",
+      "indication": "Spiritual distress when client wants faith frame",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Ask permission to use faith language."
+        },
+        {
+          "n": 2,
+          "text": "Name the honest complaint/pain."
+        },
+        {
+          "n": 3,
+          "text": "Name the ask / hope."
+        },
+        {
+          "n": 4,
+          "text": "One embodied practice (walk, breath, reading) client chooses."
+        }
+      ],
+      "contraindications": [
+        "Never impose faith; follow client lead"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "spiritual"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "faith_values_bridge",
+      "modality_id": "faith_integrated",
+      "name": "Faith \u2194 values bridge",
+      "indication": "Moral injury / values conflict",
+      "steps": [
+        {
+          "n": 1,
+          "text": "What value/faith principle matters here?"
+        },
+        {
+          "n": 2,
+          "text": "Where does shame speak louder than grace/growth?"
+        },
+        {
+          "n": 3,
+          "text": "One repair action consistent with that value."
+        },
+        {
+          "n": 4,
+          "text": "Who is a trusted spiritual/community support?"
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "spiritual"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "cbt_activity_schedule",
+      "modality_id": "cbt",
+      "name": "Hourly activity schedule",
+      "indication": "Depression inertia",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Block tomorrow in 1\u20132h chunks."
+        },
+        {
+          "n": 2,
+          "text": "Put one mastery + one pleasure."
+        },
+        {
+          "n": 3,
+          "text": "Keep plans tiny."
+        },
+        {
+          "n": 4,
+          "text": "Review completion without shame."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "behavioral"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "cbt_downward_arrow",
+      "modality_id": "cbt",
+      "name": "Downward arrow (core belief lite)",
+      "indication": "Surface thoughts \u2192 deeper rule",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Start with hot thought."
+        },
+        {
+          "n": 2,
+          "text": "Ask: if that were true, what would it mean about me?"
+        },
+        {
+          "n": 3,
+          "text": "Stop at first core-rule guess."
+        },
+        {
+          "n": 4,
+          "text": "Softly test with evidence \u2014 no deep excavation."
+        }
+      ],
+      "contraindications": [
+        "Stop if flooding; return to grounding"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "cognitive"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "dbt_validate_self",
+      "modality_id": "dbt",
+      "name": "Self-validation",
+      "indication": "Invalidating environments internalized",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Name the emotion."
+        },
+        {
+          "n": 2,
+          "text": "Find how it makes sense given history/context."
+        },
+        {
+          "n": 3,
+          "text": "Separate validation from agreement with action."
+        },
+        {
+          "n": 4,
+          "text": "Choose wise-mind next step."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "emotion_regulation"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "dbt_wise_mind",
+      "modality_id": "dbt",
+      "name": "Wise mind pause",
+      "indication": "Emotion vs reason tug-of-war",
+      "steps": [
+        {
+          "n": 1,
+          "text": "What does emotion mind want?"
+        },
+        {
+          "n": 2,
+          "text": "What does reason mind say?"
+        },
+        {
+          "n": 3,
+          "text": "What is the wise-mind both/and?"
+        },
+        {
+          "n": 4,
+          "text": "Take that one step."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "mindfulness"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "mi_decisional_balance",
+      "modality_id": "mi",
+      "name": "Decisional balance",
+      "indication": "Ambivalence",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Pros of staying the same."
+        },
+        {
+          "n": 2,
+          "text": "Cons of staying the same."
+        },
+        {
+          "n": 3,
+          "text": "Pros of changing."
+        },
+        {
+          "n": 4,
+          "text": "Cons of changing \u2014 then summarize."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "change"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "rel_xyz_statement",
+      "modality_id": "relationships",
+      "name": "X-Y-Z feedback",
+      "indication": "Criticism spirals",
+      "steps": [
+        {
+          "n": 1,
+          "text": "When you do X in situation Y\u2026"
+        },
+        {
+          "n": 2,
+          "text": "I feel Z\u2026"
+        },
+        {
+          "n": 3,
+          "text": "I need / request \u2026"
+        },
+        {
+          "n": 4,
+          "text": "Invite their experience."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "communication"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "nar_unique_outcome",
+      "modality_id": "narrative",
+      "name": "Unique outcome",
+      "indication": "Problem identity",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Find a time the problem didn't win."
+        },
+        {
+          "n": 2,
+          "text": "What did you do differently?"
+        },
+        {
+          "n": 3,
+          "text": "Who witnessed it?"
+        },
+        {
+          "n": 4,
+          "text": "How do we thicken that story?"
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "narrative"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "fam_genogram_lite",
+      "modality_id": "family_systems",
+      "name": "Genogram lite (2 generations)",
+      "indication": "Pattern inheritance curiosity",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Map parents + siblings roles."
+        },
+        {
+          "n": 2,
+          "text": "Note repeating rules (don't cry, achieve, keep peace)."
+        },
+        {
+          "n": 3,
+          "text": "Where do you still obey a rule that hurts?"
+        },
+        {
+          "n": 4,
+          "text": "One new I-position this week."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "family"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "exp_interoceptive_lite",
+      "modality_id": "exposure",
+      "name": "Interoceptive lite (clinician-aware)",
+      "indication": "Fear of body sensations",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Pick a safe sensation (spin once, breathe fast 10s if medically ok)."
+        },
+        {
+          "n": 2,
+          "text": "Rate fear."
+        },
+        {
+          "n": 3,
+          "text": "Stay until peak passes."
+        },
+        {
+          "n": 4,
+          "text": "Re-rate; note survival."
+        }
+      ],
+      "contraindications": [
+        "Cardiac/vestibular issues \u2014 skip; clinician guidance preferred"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "anxiety"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "sleep_stimulus_control",
+      "modality_id": "sleep",
+      "name": "Stimulus control lite",
+      "indication": "Bed associated with worry",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Bed = sleep/sex only."
+        },
+        {
+          "n": 2,
+          "text": "If awake ~20 min, leave bed."
+        },
+        {
+          "n": 3,
+          "text": "Return only when sleepy."
+        },
+        {
+          "n": 4,
+          "text": "Same wake time daily."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "sleep"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "crisis_hope_box",
+      "modality_id": "crisis",
+      "name": "Hope box / reasons for living list",
+      "indication": "Low hope (non-emergency)",
+      "steps": [
+        {
+          "n": 1,
+          "text": "List 3 reasons for living / people."
+        },
+        {
+          "n": 2,
+          "text": "List 3 sensory comforts."
+        },
+        {
+          "n": 3,
+          "text": "List 1 professional/crisis resource."
+        },
+        {
+          "n": 4,
+          "text": "Store where reachable."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "safety"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "som_pendulation",
+      "modality_id": "somatic",
+      "name": "Pendulation (resource \u2194 activation)",
+      "indication": "Trauma-adjacent activation",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Feel a resource (safe image/place)."
+        },
+        {
+          "n": 2,
+          "text": "Touch the edge of distress briefly."
+        },
+        {
+          "n": 3,
+          "text": "Return to resource."
+        },
+        {
+          "n": 4,
+          "text": "End resourced; no flooding."
+        }
+      ],
+      "contraindications": [
+        "If flooding, stop and ground"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "regulation"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "act_matrix_lite",
+      "modality_id": "act",
+      "name": "ACT matrix lite",
+      "indication": "Away vs toward moves",
+      "steps": [
+        {
+          "n": 1,
+          "text": "What unwanted stuff shows up inside?"
+        },
+        {
+          "n": 2,
+          "text": "What do you do to get away?"
+        },
+        {
+          "n": 3,
+          "text": "Who/what matters?"
+        },
+        {
+          "n": 4,
+          "text": "What toward move is available now?"
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "values"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "gottman_stress_reducing",
+      "modality_id": "gottman",
+      "name": "Stress-reducing conversation",
+      "indication": "External stress spilling into couple",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Speaker: vent about outside stress 10 min."
+        },
+        {
+          "n": 2,
+          "text": "Listener: support, no solving unless asked."
+        },
+        {
+          "n": 3,
+          "text": "Switch."
+        },
+        {
+          "n": 4,
+          "text": "End with appreciation."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "couples"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "eft_enactment_prep",
+      "modality_id": "eft",
+      "name": "Enactment prep (words only)",
+      "indication": "Attachment protest",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Name secondary emotion (anger/numb)."
+        },
+        {
+          "n": 2,
+          "text": "Name primary (fear/shame/lonely)."
+        },
+        {
+          "n": 3,
+          "text": "Craft reach: I get scared you\u2026"
+        },
+        {
+          "n": 4,
+          "text": "Practice with Nate before partner."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "attachment",
+        "couples"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "pd_defense_spot",
+      "modality_id": "psychodynamic",
+      "name": "Defense spotting (gentle)",
+      "indication": "Avoidance of affect",
+      "steps": [
+        {
+          "n": 1,
+          "text": "What feeling almost showed?"
+        },
+        {
+          "n": 2,
+          "text": "What did you do instead (joke, analyze, caretake)?"
+        },
+        {
+          "n": 3,
+          "text": "What might the feeling ask for?"
+        },
+        {
+          "n": 4,
+          "text": "Stay 30s with the feeling's edge."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "insight"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "sc_common_humanity",
+      "modality_id": "self_compassion",
+      "name": "Common humanity reframe",
+      "indication": "Isolation in pain",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Name the painful thought 'only I\u2026'"
+        },
+        {
+          "n": 2,
+          "text": "Rewrite: many humans feel this when\u2026"
+        },
+        {
+          "n": 3,
+          "text": "One kind action toward self."
+        },
+        {
+          "n": 4,
+          "text": "Optional: reach to a safe person."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "compassion"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "mind_urge_note",
+      "modality_id": "mindfulness",
+      "name": "Urge noting",
+      "indication": "Compulsive loops",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Note: wanting\u2026"
+        },
+        {
+          "n": 2,
+          "text": "Note: feeling\u2026"
+        },
+        {
+          "n": 3,
+          "text": "Ride 3 breaths."
+        },
+        {
+          "n": 4,
+          "text": "Choose response vs reaction."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "mindfulness"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "mi_ask_permission",
+      "modality_id": "mi",
+      "name": "Ask permission before advice",
+      "indication": "Resistance to advice",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Would it be okay if I share an idea?"
+        },
+        {
+          "n": 2,
+          "text": "If no \u2014 explore instead."
+        },
+        {
+          "n": 3,
+          "text": "If yes \u2014 one idea + ask what fits."
+        },
+        {
+          "n": 4,
+          "text": "Affirm autonomy."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "change"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "cbt_assertiveness",
+      "modality_id": "cbt",
+      "name": "Assertiveness script",
+      "indication": "Passive/aggressive patterns",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Facts of situation."
+        },
+        {
+          "n": 2,
+          "text": "Feeling."
+        },
+        {
+          "n": 3,
+          "text": "Request."
+        },
+        {
+          "n": 4,
+          "text": "Consequence/benefit (non-threat)."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "skills"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "dbt_radical_acceptance_lite",
+      "modality_id": "dbt",
+      "name": "Radical acceptance lite",
+      "indication": "Fighting unchangeable reality",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Name what you cannot change right now."
+        },
+        {
+          "n": 2,
+          "text": "Notice the fighting in body."
+        },
+        {
+          "n": 3,
+          "text": "Say: it is what it is right now."
+        },
+        {
+          "n": 4,
+          "text": "Choose one effective next step inside reality."
+        }
+      ],
+      "contraindications": [
+        "Not for accepting abuse as okay \u2014 safety first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "distress_tolerance"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "rel_boundary_script",
+      "modality_id": "relationships",
+      "name": "Boundary script",
+      "indication": "Boundary setting",
+      "steps": [
+        {
+          "n": 1,
+          "text": "I will / I won't \u2026"
+        },
+        {
+          "n": 2,
+          "text": "If X happens, I will Y (follow-through)."
+        },
+        {
+          "n": 3,
+          "text": "Deliver calmly once."
+        },
+        {
+          "n": 4,
+          "text": "Do not over-justify."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "communication"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "trauma_container",
+      "modality_id": "trauma_informed",
+      "name": "Container imagery",
+      "indication": "Intrusions between sessions",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Imagine a container that can hold hard material."
+        },
+        {
+          "n": 2,
+          "text": "Place images/thoughts inside with consent."
+        },
+        {
+          "n": 3,
+          "text": "Seal; remind you can reopen with support."
+        },
+        {
+          "n": 4,
+          "text": "Orient to room."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "stabilization"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "faith_examen_lite",
+      "modality_id": "faith_integrated",
+      "name": "Examen-lite (client-led)",
+      "indication": "Daily spiritual reflection request",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Ask permission."
+        },
+        {
+          "n": 2,
+          "text": "Where did you feel consolation/connection?"
+        },
+        {
+          "n": 3,
+          "text": "Where desolation/disconnect?"
+        },
+        {
+          "n": 4,
+          "text": "One gratitude + one ask for tomorrow."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "spiritual"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "twelve_step_inventory_lite",
+      "modality_id": "twelve_step",
+      "name": "Daily inventory lite",
+      "indication": "Step 10 style honesty",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Where was I resentful/afraid/selfish today?"
+        },
+        {
+          "n": 2,
+          "text": "Whom did I harm (even small)?"
+        },
+        {
+          "n": 3,
+          "text": "Amend if safe/appropriate."
+        },
+        {
+          "n": 4,
+          "text": "One gratitude."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "recovery"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "sfbt_scaling",
+      "modality_id": "sfbt",
+      "name": "Scaling question session",
+      "indication": "Progress tracking",
+      "steps": [
+        {
+          "n": 1,
+          "text": "On 0\u201310, where is the problem today?"
+        },
+        {
+          "n": 2,
+          "text": "What keeps it from being lower?"
+        },
+        {
+          "n": 3,
+          "text": "What would +1 look like?"
+        },
+        {
+          "n": 4,
+          "text": "Schedule the +1 action."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "solution"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "grief_waves",
+      "modality_id": "grief",
+      "name": "Wave riding for grief spikes",
+      "indication": "Sudden grief waves",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Name: this is a wave."
+        },
+        {
+          "n": 2,
+          "text": "Breathe; don't argue with the wave."
+        },
+        {
+          "n": 3,
+          "text": "Orient to present after peak."
+        },
+        {
+          "n": 4,
+          "text": "Optional continuing-bond gesture."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "grief"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "cbt_sleep_worry",
+      "modality_id": "cbt",
+      "name": "Bedtime worry dump",
+      "indication": "Bedtime rumination",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Write worries for 5 min before wind-down."
+        },
+        {
+          "n": 2,
+          "text": "Park them on paper."
+        },
+        {
+          "n": 3,
+          "text": "One next-day park time."
+        },
+        {
+          "n": 4,
+          "text": "Begin wind-down buffer."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "sleep",
+        "anxiety"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "act_self_as_context",
+      "modality_id": "act",
+      "name": "Observer self reminder",
+      "indication": "Over-identification with story",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Notice the story of me."
+        },
+        {
+          "n": 2,
+          "text": "Notice the noticer noticing."
+        },
+        {
+          "n": 3,
+          "text": "Rest as the observer for 3 breaths."
+        },
+        {
+          "n": 4,
+          "text": "Choose a toward move."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "defusion"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "ifs_protector_interview",
+      "modality_id": "ifs",
+      "name": "Protector interview (gentle)",
+      "indication": "Inner critic / controller",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Ask: what are you protecting me from?"
+        },
+        {
+          "n": 2,
+          "text": "How long have you worked this job?"
+        },
+        {
+          "n": 3,
+          "text": "What do you need from me to ease 10%?"
+        },
+        {
+          "n": 4,
+          "text": "Thank; no exile diving."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "parts"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "gottman_bids",
+      "modality_id": "gottman",
+      "name": "Turn toward bids",
+      "indication": "Missed connection",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Spot a bid (comment, sigh, joke, touch)."
+        },
+        {
+          "n": 2,
+          "text": "Turn toward with interest."
+        },
+        {
+          "n": 3,
+          "text": "Reflect what you heard."
+        },
+        {
+          "n": 4,
+          "text": "One appreciative response."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "couples"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "exposure_safety_behavior_audit",
+      "modality_id": "exposure",
+      "name": "Safety behavior audit",
+      "indication": "Subtle avoidance",
+      "steps": [
+        {
+          "n": 1,
+          "text": "List what you do to feel safer in feared situations."
+        },
+        {
+          "n": 2,
+          "text": "Pick one to drop on next rung."
+        },
+        {
+          "n": 3,
+          "text": "Predict catastrophe."
+        },
+        {
+          "n": 4,
+          "text": "Test and update belief."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "anxiety"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "family_i_position",
+      "modality_id": "family_systems",
+      "name": "I-position in triangle",
+      "indication": "Triangulation pull",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Notice the triangle invite."
+        },
+        {
+          "n": 2,
+          "text": "State your view without recruiting allies."
+        },
+        {
+          "n": 3,
+          "text": "Stay in contact with both if safe."
+        },
+        {
+          "n": 4,
+          "text": "Journal pull to fix."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "family"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    },
+    {
+      "id": "crisis_988",
+      "modality_id": "crisis",
+      "name": "Crisis resource redirect",
+      "indication": "Imminent risk language",
+      "steps": [
+        {
+          "n": 1,
+          "text": "If user may be in danger: urge emergency services / 988 (US) / local equivalent."
+        },
+        {
+          "n": 2,
+          "text": "Stay present; do not dig for methods."
+        },
+        {
+          "n": 3,
+          "text": "Encourage contact with human supports."
+        },
+        {
+          "n": 4,
+          "text": "Follow platform crisis protocols."
+        }
+      ],
+      "contraindications": [
+        "Active crisis without safety plan \u2014 stabilize first"
+      ],
+      "plan_hooks": [
+        "skill_practice",
+        "between_session"
+      ],
+      "tags": [
+        "safety"
+      ],
+      "source": "seed_directory_v1",
+      "disclaimer": "Psychoeducation and coaching support only \u2014 not a substitute for licensed diagnosis or treatment."
+    }
+  ],
+  "plan_templates": [
+    {
+      "id": "plan_anxiety_cbt_4wk",
+      "title": "4-week anxiety skills (CBT + grounding)",
+      "modality_ids": [
+        "cbt",
+        "grounding",
+        "mindfulness"
+      ],
+      "technique_ids": [
+        "ground_54321",
+        "cbt_thought_record",
+        "cbt_worry_postpone",
+        "cbt_behavioral_experiment"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "Stabilize & ground",
+          "technique_ids": [
+            "ground_54321",
+            "som_paced_breath"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "Catch automatic thoughts",
+          "technique_ids": [
+            "cbt_thought_record",
+            "cbt_cognitive_distortions_spot"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "Postpone worry & problem-solve",
+          "technique_ids": [
+            "cbt_worry_postpone",
+            "cbt_problem_solve"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "Test one prediction",
+          "technique_ids": [
+            "cbt_behavioral_experiment"
+          ]
+        }
+      ],
+      "switch_when": [
+        "Flooding / trauma material dominates \u2192 switch to trauma stabilization",
+        "Severe depression inertia \u2192 switch to BA plan"
+      ],
+      "switch_to_plan_ids": [
+        "plan_trauma_stabilize",
+        "plan_depression_ba"
+      ],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    },
+    {
+      "id": "plan_depression_ba",
+      "title": "Behavioral activation restart (2\u20134 weeks)",
+      "modality_ids": [
+        "cbt",
+        "act"
+      ],
+      "technique_ids": [
+        "cbt_behavioral_activation",
+        "cbt_activity_schedule",
+        "act_values_card",
+        "sc_break"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "Tiny activation",
+          "technique_ids": [
+            "cbt_behavioral_activation",
+            "sc_break"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "Schedule mastery + pleasure",
+          "technique_ids": [
+            "cbt_activity_schedule"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "Values-linked action",
+          "technique_ids": [
+            "act_values_card"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "Review data & adjust",
+          "technique_ids": [
+            "sfbt_scaling",
+            "cbt_behavioral_activation"
+          ]
+        }
+      ],
+      "switch_when": [
+        "Acute risk \u2192 crisis pathway",
+        "Anxiety avoidance primary \u2192 anxiety CBT plan"
+      ],
+      "switch_to_plan_ids": [
+        "plan_crisis_stabilize",
+        "plan_anxiety_cbt_4wk"
+      ],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    },
+    {
+      "id": "plan_dbt_distress",
+      "title": "Distress tolerance toolkit (DBT)",
+      "modality_ids": [
+        "dbt",
+        "somatic"
+      ],
+      "technique_ids": [
+        "dbt_stop",
+        "dbt_tipp",
+        "dbt_urge_surf",
+        "dbt_opposite_action"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "STOP + TIPP",
+          "technique_ids": [
+            "dbt_stop",
+            "dbt_tipp"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "Urge surf",
+          "technique_ids": [
+            "dbt_urge_surf"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "Opposite action lite",
+          "technique_ids": [
+            "dbt_opposite_action"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "PLEASE basics + wise mind",
+          "technique_ids": [
+            "dbt_please",
+            "dbt_wise_mind"
+          ]
+        }
+      ],
+      "switch_when": [
+        "Interpersonal conflict primary \u2192 DEAR MAN plan",
+        "Trauma flooding \u2192 trauma stabilize"
+      ],
+      "switch_to_plan_ids": [
+        "plan_interpersonal_dbt",
+        "plan_trauma_stabilize"
+      ],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    },
+    {
+      "id": "plan_interpersonal_dbt",
+      "title": "Interpersonal effectiveness (DBT + Gottman soft start)",
+      "modality_ids": [
+        "dbt",
+        "gottman",
+        "relationships"
+      ],
+      "technique_ids": [
+        "dbt_dear_man",
+        "gottman_soft_startup",
+        "rel_speaker_listener",
+        "rel_boundary_script"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "Soft startup",
+          "technique_ids": [
+            "gottman_soft_startup"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "DEAR MAN ask",
+          "technique_ids": [
+            "dbt_dear_man"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "Speaker-listener",
+          "technique_ids": [
+            "rel_speaker_listener"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "Boundaries with follow-through",
+          "technique_ids": [
+            "rel_boundary_script"
+          ]
+        }
+      ],
+      "switch_when": [
+        "Attachment protest / pursue-withdraw \u2192 EFT/ADEP plan"
+      ],
+      "switch_to_plan_ids": [
+        "plan_attachment_repair"
+      ],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    },
+    {
+      "id": "plan_attachment_repair",
+      "title": "Attachment repair language (EFT/ADEP)",
+      "modality_ids": [
+        "eft",
+        "adep",
+        "gottman"
+      ],
+      "technique_ids": [
+        "eft_soft_emotion",
+        "adep_attachment_message",
+        "eft_enactment_prep",
+        "gottman_repair"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "Map pursue/withdraw",
+          "technique_ids": [
+            "eft_soft_emotion"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "Attachment need sentence",
+          "technique_ids": [
+            "adep_attachment_message"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "Enactment prep",
+          "technique_ids": [
+            "eft_enactment_prep"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "Repair attempts",
+          "technique_ids": [
+            "gottman_repair"
+          ]
+        }
+      ],
+      "switch_when": [
+        "Safety/abuse concerns \u2192 crisis + human clinician",
+        "Skill deficits in asks \u2192 interpersonal DBT"
+      ],
+      "switch_to_plan_ids": [
+        "plan_crisis_stabilize",
+        "plan_interpersonal_dbt"
+      ],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    },
+    {
+      "id": "plan_act_flexibility",
+      "title": "Psychological flexibility (ACT)",
+      "modality_ids": [
+        "act",
+        "mindfulness"
+      ],
+      "technique_ids": [
+        "act_defusion",
+        "act_values_card",
+        "act_willingness",
+        "act_matrix_lite"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "Defusion",
+          "technique_ids": [
+            "act_defusion"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "Willingness",
+          "technique_ids": [
+            "act_willingness"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "Values action",
+          "technique_ids": [
+            "act_values_card"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "Matrix toward moves",
+          "technique_ids": [
+            "act_matrix_lite"
+          ]
+        }
+      ],
+      "switch_when": [
+        "High impulsivity / self-harm urges \u2192 DBT distress plan"
+      ],
+      "switch_to_plan_ids": [
+        "plan_dbt_distress"
+      ],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    },
+    {
+      "id": "plan_ifs_parts",
+      "title": "Parts language introduction (IFS-informed)",
+      "modality_ids": [
+        "ifs",
+        "self_compassion"
+      ],
+      "technique_ids": [
+        "ifs_parts_map",
+        "ifs_self_energy_check",
+        "ifs_unblend",
+        "ifs_protector_interview"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "Map protectors",
+          "technique_ids": [
+            "ifs_parts_map"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "Self-energy check",
+          "technique_ids": [
+            "ifs_self_energy_check"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "Unblend language",
+          "technique_ids": [
+            "ifs_unblend"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "Protector interview",
+          "technique_ids": [
+            "ifs_protector_interview"
+          ]
+        }
+      ],
+      "switch_when": [
+        "Trauma memory pressing \u2192 trauma stabilize; no exile excavation"
+      ],
+      "switch_to_plan_ids": [
+        "plan_trauma_stabilize"
+      ],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    },
+    {
+      "id": "plan_trauma_stabilize",
+      "title": "Trauma-informed stabilization (not trauma processing)",
+      "modality_ids": [
+        "trauma_informed",
+        "grounding",
+        "somatic"
+      ],
+      "technique_ids": [
+        "trauma_window",
+        "ground_54321",
+        "trauma_resourcing",
+        "trauma_container"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "Window of tolerance",
+          "technique_ids": [
+            "trauma_window"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "Present orientation",
+          "technique_ids": [
+            "ground_54321",
+            "som_orienting"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "Resourcing",
+          "technique_ids": [
+            "trauma_resourcing"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "Containment between sessions",
+          "technique_ids": [
+            "trauma_container"
+          ]
+        }
+      ],
+      "switch_when": [
+        "Client requests exposure for phobia (non-trauma) \u2192 exposure ladder plan",
+        "Acute risk \u2192 crisis"
+      ],
+      "switch_to_plan_ids": [
+        "plan_exposure_phobia",
+        "plan_crisis_stabilize"
+      ],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    },
+    {
+      "id": "plan_exposure_phobia",
+      "title": "Gentle exposure ladder (non-trauma)",
+      "modality_ids": [
+        "exposure",
+        "cbt"
+      ],
+      "technique_ids": [
+        "exp_ladder",
+        "exposure_safety_behavior_audit",
+        "cbt_behavioral_experiment"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "Build ladder",
+          "technique_ids": [
+            "exp_ladder"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "Audit safety behaviors",
+          "technique_ids": [
+            "exposure_safety_behavior_audit"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "Rung practice",
+          "technique_ids": [
+            "exp_ladder"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "Belief update experiment",
+          "technique_ids": [
+            "cbt_behavioral_experiment"
+          ]
+        }
+      ],
+      "switch_when": [
+        "Trauma memory / PTSD processing need \u2192 trauma stabilize + clinician"
+      ],
+      "switch_to_plan_ids": [
+        "plan_trauma_stabilize"
+      ],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    },
+    {
+      "id": "plan_mi_change",
+      "title": "Change ambivalence (MI)",
+      "modality_ids": [
+        "mi",
+        "act"
+      ],
+      "technique_ids": [
+        "mi_oars",
+        "mi_importance_confidence",
+        "mi_decisional_balance",
+        "mi_change_talk"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "OARS",
+          "technique_ids": [
+            "mi_oars"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "Rulers",
+          "technique_ids": [
+            "mi_importance_confidence"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "Decisional balance",
+          "technique_ids": [
+            "mi_decisional_balance"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "Evoke change talk + next step",
+          "technique_ids": [
+            "mi_change_talk"
+          ]
+        }
+      ],
+      "switch_when": [
+        "Addiction recovery framing wanted \u2192 12-step informed plan"
+      ],
+      "switch_to_plan_ids": [
+        "plan_recovery_support"
+      ],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    },
+    {
+      "id": "plan_recovery_support",
+      "title": "Recovery support (12-step informed + MI)",
+      "modality_ids": [
+        "twelve_step",
+        "mi",
+        "dbt"
+      ],
+      "technique_ids": [
+        "ts_halt",
+        "ts_one_day",
+        "mi_oars",
+        "dbt_urge_surf"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "HALT + one day",
+          "technique_ids": [
+            "ts_halt",
+            "ts_one_day"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "Urge surf",
+          "technique_ids": [
+            "dbt_urge_surf"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "MI around recovery steps",
+          "technique_ids": [
+            "mi_oars"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "Daily inventory lite",
+          "technique_ids": [
+            "twelve_step_inventory_lite"
+          ]
+        }
+      ],
+      "switch_when": [
+        "Medical detox / acute withdrawal \u2192 urgent human medical care"
+      ],
+      "switch_to_plan_ids": [
+        "plan_crisis_stabilize"
+      ],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    },
+    {
+      "id": "plan_grief_support",
+      "title": "Grief accompaniment",
+      "modality_ids": [
+        "grief",
+        "self_compassion"
+      ],
+      "technique_ids": [
+        "grief_dual_process",
+        "grief_waves",
+        "grief_continuing_bonds",
+        "sc_break"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "Dual process permission",
+          "technique_ids": [
+            "grief_dual_process"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "Ride waves",
+          "technique_ids": [
+            "grief_waves"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "Continuing bonds",
+          "technique_ids": [
+            "grief_continuing_bonds"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "Self-compassion",
+          "technique_ids": [
+            "sc_break"
+          ]
+        }
+      ],
+      "switch_when": [
+        "Complicated grief / trauma overlay \u2192 trauma stabilize + clinician"
+      ],
+      "switch_to_plan_ids": [
+        "plan_trauma_stabilize"
+      ],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    },
+    {
+      "id": "plan_sleep_cbt_i_lite",
+      "title": "Sleep skills (CBT-I lite)",
+      "modality_ids": [
+        "sleep",
+        "cbt"
+      ],
+      "technique_ids": [
+        "sleep_wind_down",
+        "sleep_stimulus_control",
+        "cbt_sleep_worry"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "Wake time + wind-down",
+          "technique_ids": [
+            "sleep_wind_down"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "Stimulus control",
+          "technique_ids": [
+            "sleep_stimulus_control"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "Worry dump",
+          "technique_ids": [
+            "cbt_sleep_worry"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "Review & adjust",
+          "technique_ids": [
+            "sfbt_scaling"
+          ]
+        }
+      ],
+      "switch_when": [
+        "Severe insomnia / apnea signs \u2192 medical referral"
+      ],
+      "switch_to_plan_ids": [],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    },
+    {
+      "id": "plan_faith_integrated",
+      "title": "Faith-integrated support (client-led only)",
+      "modality_ids": [
+        "faith_integrated",
+        "self_compassion",
+        "act"
+      ],
+      "technique_ids": [
+        "faith_lament",
+        "faith_values_bridge",
+        "faith_examen_lite",
+        "sc_break"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "Permission + lament",
+          "technique_ids": [
+            "faith_lament"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "Values bridge",
+          "technique_ids": [
+            "faith_values_bridge"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "Examen-lite",
+          "technique_ids": [
+            "faith_examen_lite"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "Compassion + action",
+          "technique_ids": [
+            "sc_break",
+            "act_values_card"
+          ]
+        }
+      ],
+      "switch_when": [
+        "Client declines faith frame \u2192 switch to ACT/CBT secular plan"
+      ],
+      "switch_to_plan_ids": [
+        "plan_act_flexibility",
+        "plan_anxiety_cbt_4wk"
+      ],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    },
+    {
+      "id": "plan_crisis_stabilize",
+      "title": "Crisis stabilization & safety scaffolding",
+      "modality_ids": [
+        "crisis",
+        "grounding",
+        "dbt"
+      ],
+      "technique_ids": [
+        "crisis_988",
+        "crisis_safety_plan",
+        "crisis_hope_box",
+        "ground_54321",
+        "dbt_stop"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "Immediate safety / resources",
+          "technique_ids": [
+            "crisis_988"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "Collaborative safety plan",
+          "technique_ids": [
+            "crisis_safety_plan"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "Hope box / reasons",
+          "technique_ids": [
+            "crisis_hope_box"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "Ground + STOP for urges",
+          "technique_ids": [
+            "ground_54321",
+            "dbt_stop"
+          ]
+        }
+      ],
+      "switch_when": [
+        "Stabilized + skills focus \u2192 match presenting problem plan"
+      ],
+      "switch_to_plan_ids": [
+        "plan_dbt_distress",
+        "plan_depression_ba",
+        "plan_anxiety_cbt_4wk"
+      ],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    },
+    {
+      "id": "plan_sfbt_brief",
+      "title": "Brief solution-focused arc",
+      "modality_ids": [
+        "sfbt"
+      ],
+      "technique_ids": [
+        "sfbt_miracle",
+        "sfbt_exception",
+        "sfbt_scaling"
+      ],
+      "steps": [
+        {
+          "step_number": 1,
+          "theme": "Miracle / preferred future",
+          "technique_ids": [
+            "sfbt_miracle"
+          ]
+        },
+        {
+          "step_number": 2,
+          "theme": "Exceptions",
+          "technique_ids": [
+            "sfbt_exception"
+          ]
+        },
+        {
+          "step_number": 3,
+          "theme": "Scaling +1",
+          "technique_ids": [
+            "sfbt_scaling"
+          ]
+        },
+        {
+          "step_number": 4,
+          "theme": "Consolidate wins",
+          "technique_ids": [
+            "sfbt_scaling"
+          ]
+        }
+      ],
+      "switch_when": [
+        "Deep trauma / severe depression \u2192 specialized plans"
+      ],
+      "switch_to_plan_ids": [
+        "plan_trauma_stabilize",
+        "plan_depression_ba"
+      ],
+      "disclaimer": "Supportive care-plan scaffolding for coaching with Little Nate \u2014 not a clinical diagnosis or licensed treatment plan."
+    }
+  ],
+  "switch_protocol": {
+    "principles": [
+      "Stabilize safety and window of tolerance before insight, exposure, or exile/parts excavation.",
+      "Match plan to primary maintaining process (avoidance, emotion dysregulation, ambivalence, attachment cycle).",
+      "When switching: summarize what worked, name the new focus, keep one carry-forward skill, pause the old homework.",
+      "Never claim licensed diagnosis; invite coach/clinician for formal treatment planning.",
+      "Faith modalities only with explicit client request/permission."
+    ],
+    "protocol_steps": [
+      "Name why the current plan is a poor fit (stuck \u22652 weeks, worsening, wrong target, client request).",
+      "Pick target plan_id from switch_to_plan_ids or search directory.",
+      "Mark old plan paused/abandoned with adaptation_log reason.",
+      "Activate new plan at step 1; keep one bridging technique.",
+      "Confirm with client in plain language; notify coach when therapeutic plans enabled."
+    ]
+  }
+}

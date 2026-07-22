@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -79,6 +80,99 @@ async def list_templates(
         }
         for r in rows
     ]
+
+
+@router.get("")
+@router.get("/")
+async def list_coach_plans(
+    request: Request,
+    status: Optional[str] = None,
+    user_id: Optional[str] = None,
+    coach: Dict[str, Any] = Depends(require_coach),
+):
+    """List treatment + cycle-skill plans for this coach's clients."""
+    if not therapeutic_plans_enabled() and not os.getenv(
+        "ENABLE_CYCLE_SKILL_PLANS", ""
+    ).strip().lower() in ("1", "true", "yes", "on"):
+        raise HTTPException(404, "Therapeutic plans feature disabled")
+    pool = _get_db(request)
+    coach_hw = _coach_id(coach)
+    coach_uname = (coach.get("username") or "").strip()
+    statuses = (
+        [s.strip() for s in (status or "active,suggested").split(",") if s.strip()]
+        or ["active", "suggested"]
+    )
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT p.id, p.user_id, p.title, p.total_steps, p.current_step,
+                   p.status, p.source, p.modality, p.cycle_domain,
+                   p.started_at, p.updated_at, p.completed_at,
+                   p.step_definitions,
+                   COALESCE(u.profile_data->>'name', p.user_id) AS client_name
+            FROM nate_therapeutic_plans p
+            LEFT JOIN users u
+              ON u.username = p.user_id OR u.hardware_id = p.user_id
+            WHERE (
+                p.coach_id = $1
+                OR p.coach_id = $2
+                OR (
+                    COALESCE(p.source, 'coach') = 'cycle_skill'
+                    AND (
+                        u.profile_data->>'coach_id' = $1
+                        OR u.profile_data->>'assigned_coach_id' = $1
+                        OR LOWER(COALESCE(u.profile_data->>'assigned_coach', ''))
+                            = LOWER($2)
+                    )
+                )
+            )
+            AND ($3::text IS NULL OR p.user_id = $3 OR u.username = $3
+                 OR u.hardware_id = $3)
+            AND p.status = ANY($4::text[])
+            ORDER BY COALESCE(p.updated_at, p.started_at) DESC NULLS LAST
+            LIMIT 100
+            """,
+            coach_hw,
+            coach_uname,
+            user_id,
+            statuses,
+        )
+    out = []
+    for r in rows:
+        steps = r["step_definitions"]
+        if isinstance(steps, str):
+            try:
+                steps = json.loads(steps)
+            except Exception:
+                steps = []
+        theme = ""
+        cur = int(r["current_step"] or 1)
+        if isinstance(steps, list):
+            for s in steps:
+                if isinstance(s, dict) and int(s.get("step_number") or 0) == cur:
+                    theme = str(s.get("theme") or s.get("practice") or "")
+                    break
+        out.append(
+            {
+                "plan_id": str(r["id"]),
+                "user_id": r["user_id"],
+                "client_name": r["client_name"],
+                "title": r["title"],
+                "total_steps": r["total_steps"],
+                "current_step": r["current_step"],
+                "status": r["status"],
+                "source": r["source"],
+                "modality": r["modality"],
+                "cycle_domain": r["cycle_domain"],
+                "theme": theme,
+                "started_at": r["started_at"].isoformat() if r["started_at"] else None,
+                "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+                "completed_at": r["completed_at"].isoformat()
+                if r["completed_at"]
+                else None,
+            }
+        )
+    return {"plans": out, "count": len(out)}
 
 
 @router.post("/assign")

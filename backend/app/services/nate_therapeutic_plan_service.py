@@ -66,12 +66,26 @@ async def get_active_plan_context(db_pool: Any, user_id: str) -> str:
             steps = json.loads(steps)
         theme = _step_theme(steps if isinstance(steps, list) else [], int(row["current_step"]))
         src = row.get("source") or "coach"
-        return (
+        base = (
             f"COACH PLAN CONTEXT ({src}): Step {row['current_step']} of {row['total_steps']} — "
             f"{row['title']}. This week's focus: {theme or 'see plan steps'}. "
             f"If a SKILL FIDELITY LOCK also appears, teach that micro-skill without abandoning "
             f"this coach plan focus."
         )
+        # QUANTUM-CRYSTAL-ARCH: attach matching directory techniques for current theme
+        try:
+            from app.services.clinical_technique_directory import (
+                build_directory_context,
+                clinical_directory_enabled,
+            )
+
+            if clinical_directory_enabled() and theme:
+                _dir = build_directory_context(theme, active_plan_theme=theme, max_techniques=2)
+                if _dir:
+                    return f"{base}\n\n{_dir}"
+        except Exception:
+            pass
+        return base
     except Exception as e:
         logger.warning("therapeutic_plan: get_active_plan_context failed: %s", e)
         return ""

@@ -662,6 +662,19 @@ async def build_cycle_skill_plan_context(db_pool: Any, user_id: str) -> str:
     return "CYCLE SKILL PLAN CONTEXT:\n" + "\n".join(parts)
 
 
+async def build_family_skill_plan_context(db_pool: Any, family_profiles: list) -> str:
+    """QUANTUM-CRYSTAL-ARCH: per-member skill-plan blocks for Family Sanctuary."""
+    parts: List[str] = []
+    for fp in family_profiles or []:
+        hw = (fp or {}).get("hardware_id") or ""
+        if not hw:
+            continue
+        sk = await build_cycle_skill_plan_context(db_pool, hw)
+        if sk:
+            parts.append(f"[{(fp or {}).get('name', 'Member')}]\n{sk}")
+    return "\n\n".join(parts)
+
+
 async def _load_template(db_pool: Any, template_id: str) -> Optional[Dict[str, Any]]:
     try:
         async with db_pool.acquire() as conn:
@@ -1633,6 +1646,57 @@ def schedule_skill_plan_post_turn(
         )
     except Exception:
         pass
+
+
+async def push_skill_plan_ws_update(
+    sockets: Any,
+    uid: str,
+    db_pool: Any,
+    user_id: str,
+    ctx: Any = None,
+) -> None:
+    """Send cycle_skill_plan_update to open sockets for uid."""
+    st = await build_client_skill_plan_status(db_pool, user_id)
+    if not st or not sockets or uid not in sockets:
+        return
+    for _ws in list(sockets.get(uid, [])):
+        if ctx is not None and getattr(_ws, "_eviction_context", "main") != ctx:
+            continue
+        try:
+            await _ws.send(json.dumps({"type": "cycle_skill_plan_update", **st}))
+        except Exception:
+            try:
+                sockets[uid].discard(_ws)
+            except Exception:
+                pass
+
+
+def schedule_skill_plan_post_turn_with_ws(
+    db_pool: Any,
+    *,
+    sockets: Any,
+    uid: str,
+    user_id: str,
+    user_text: str,
+    nate_response: str,
+    user_name: str = "",
+    ctx: Any = None,
+    origin_surface: str = "bridge_chat",
+) -> None:
+    """Post-turn skill plan + Flutter WS status (keeps bridge call sites tiny)."""
+
+    async def _on_done(_r: Any) -> None:
+        await push_skill_plan_ws_update(sockets, uid, db_pool, user_id, ctx)
+
+    schedule_skill_plan_post_turn(
+        db_pool,
+        user_id=user_id,
+        user_text=user_text,
+        nate_response=nate_response,
+        user_name=user_name,
+        on_done=_on_done,
+        origin_surface=origin_surface,
+    )
 
 
 async def augment_recall_query_for_skill_plan(

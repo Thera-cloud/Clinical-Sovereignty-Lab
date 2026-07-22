@@ -200,6 +200,38 @@ async def _build_grounded_voice_prompt(username: str, db_pool):
             memory_block += f"TRANSCRIPTS FROM RECENT PRIOR CALLS:\n{recent_summary}\n\n"
         memory_block += "=== END PRIOR SESSION MEMORY ===\n\n"
 
+    # QUANTUM-CRYSTAL-ARCH: cycle skill / treatment plan for voice
+    skill_plan_block = ""
+    try:
+        from app.services.cycle_skill_plan_service import build_cycle_skill_plan_context as _sk_voice
+        _sk = await _sk_voice(db_pool, username) if db_pool and username else ""
+        if _sk:
+            skill_plan_block = (
+                "=== SKILL PLAN (plain language only on call) ===\n"
+                f"{_sk}\n=== END SKILL PLAN ===\n\n"
+            )
+    except Exception:
+        skill_plan_block = ""
+
+    # QUANTUM-CRYSTAL-ARCH: clinical technique directory / care-plan assist
+    directory_block = ""
+    try:
+        if os.getenv("ENABLE_CLINICAL_TECHNIQUE_DIRECTORY", "").lower() in ("true", "1", "yes"):
+            from app.services.clinical_technique_directory import build_directory_context
+            from app.services.nate_therapeutic_plan_service import get_active_plan_context
+
+            _pc = await get_active_plan_context(db_pool, username) if db_pool and username else ""
+            _dc = build_directory_context(_pc or "skills practice", active_plan_theme=(_pc or "")[:200])
+            if _pc or _dc:
+                directory_block = (
+                    "=== CLINICAL DIRECTORY / PLAN (plain language only on call) ===\n"
+                    + ((_pc + "\n\n") if _pc else "")
+                    + (_dc or "")
+                    + "\n=== END CLINICAL DIRECTORY ===\n\n"
+                )
+    except Exception:
+        directory_block = ""
+
     # SOVEREIGN-VOICE: inject SSE story context if available
     story_block = ""
     try:
@@ -238,6 +270,8 @@ async def _build_grounded_voice_prompt(username: str, db_pool):
 
     prompt = (
         memory_block
+        + skill_plan_block
+        + directory_block
         + story_block
         + pop_block
         + f"You are Little Nate, a warm, concise therapeutic coach on a live phone call with {who}.\n"
@@ -1721,6 +1755,12 @@ async def run_twilio_grok_xtts_bridge(
                                     domain="clinical",
                                     origin_surface="voice_call",
                                 )
+                                # QUANTUM-CRYSTAL-ARCH: skill-plan tick (voice)
+                                try:
+                                    from app.services.cycle_skill_plan_service import schedule_skill_plan_post_turn as _sk_tick
+                                    _sk_tick(db_pool, user_id=session_username, user_text=_u, nate_response=_a, user_name=session_username, origin_surface="voice_call")
+                                except Exception:
+                                    pass
                                 # QUANTUM-CRYSTAL-ARCH: Phase 1 commitment extract (voice)
                                 try:
                                     from app.services.nate_commitment_extractor import (

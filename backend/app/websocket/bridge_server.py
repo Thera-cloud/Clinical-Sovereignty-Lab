@@ -9159,6 +9159,27 @@ class AzureCortex:
                         blocks.append(_cc)
                 except Exception:
                     pass
+            # QUANTUM-CRYSTAL-ARCH: clinical technique directory + care-plan assist + web enrich
+            if os.environ.get("ENABLE_CLINICAL_TECHNIQUE_DIRECTORY", "").lower() in ("true", "1", "yes"):
+                try:
+                    from app.services.clinical_technique_directory import (
+                        build_directory_context_for_turn,
+                        maybe_create_suggested_care_plan,
+                    )
+                    _uid = _uname or _hw_id
+                    await maybe_create_suggested_care_plan(
+                        _cpool, user_id=_uid, user_text=user_text or ""
+                    )
+                    _dc = await build_directory_context_for_turn(
+                        user_text or "",
+                        db_pool=_cpool,
+                        user_id=_uid,
+                        search_proxy=search_proxy,
+                    )
+                    if _dc:
+                        blocks.append(_dc)
+                except Exception:
+                    pass
             return "\n\n".join(blocks)
 
         async def _recall_with_skill_bias(_pool, _hid, _q, _un):
@@ -10888,11 +10909,14 @@ class AzureCortex:
                     ))
                 except Exception:
                     pass
-                # QUANTUM-CRYSTAL-ARCH: skill-plan crystallize + accept/advance tick
+                # QUANTUM-CRYSTAL-ARCH: skill-plan crystallize + tick + WS status
                 try:
-                    from app.services.cycle_skill_plan_service import schedule_skill_plan_post_turn
-                    schedule_skill_plan_post_turn(
-                        db_pool, user_id=profile.get("username") or uid,
+                    from app.services.cycle_skill_plan_service import (
+                        schedule_skill_plan_post_turn_with_ws,
+                    )
+                    schedule_skill_plan_post_turn_with_ws(
+                        db_pool, sockets=self.sockets, uid=uid, ctx=_ctx,
+                        user_id=profile.get("username") or uid,
                         user_text=_qg_verbatim_user_text, nate_response=_final_response,
                         user_name=profile.get("name", ""), origin_surface="bridge_chat",
                     )
@@ -11121,6 +11145,14 @@ class AzureCortex:
                         _member_crystal_parts.append(f"[{_fp_name}'s memory]:\n{_fp_ctx}")
                         _sanctuary_scopes.extend(scopes_from_recall_context(_fp_ctx))
             sanctuary_crystal_ctx = "\n\n".join(_member_crystal_parts) if _member_crystal_parts else ""
+            # QUANTUM-CRYSTAL-ARCH: per-member cycle skill plans
+            try:
+                from app.services.cycle_skill_plan_service import build_family_skill_plan_context as _sk_fam
+                _sk = await _sk_fam(db_pool, family_profiles)
+                if _sk:
+                    sanctuary_crystal_ctx = ((sanctuary_crystal_ctx + "\n\n") if sanctuary_crystal_ctx else "") + _sk
+            except Exception:
+                pass
 
             # Pull short, relevant workbook guidance (local RAG) if available
             workbook_guidance = ""
@@ -11465,6 +11497,12 @@ class AzureCortex:
                                 min_score=3,
                                 origin_surface="family_sanctuary",
                             ))
+                            # QUANTUM-CRYSTAL-ARCH: skill-plan tick (family sanctuary)
+                            try:
+                                from app.services.cycle_skill_plan_service import schedule_skill_plan_post_turn as _sk_tick
+                                _sk_tick(db_pool, user_id=_msg_sender, user_text=_msg_text, nate_response=clean_response, user_name=_hw_by_id[_msg_sender], origin_surface="family_sanctuary")
+                            except Exception:
+                                pass
                             # QUANTUM-CRYSTAL-ARCH: Phase 1 commitment extract (family)
                             try:
                                 from app.services.nate_commitment_extractor import schedule_post_turn_extraction
@@ -11830,6 +11868,14 @@ class AzureCortex:
                 triggering_message = coaching_session.get("triggering_message", "")
                 pc_crystal_ctx = await recall_crystals_for_context(db_pool, member_id or "", max_results=5, source="private_coaching", query_text=triggering_message[:200])  # QUANTUM-CRYSTAL-ARCH
                 _pc_scopes = scopes_from_recall_context(pc_crystal_ctx)  # QUANTUM-CRYSTAL-ARCH
+                # QUANTUM-CRYSTAL-ARCH: skill plan in private coaching
+                try:
+                    from app.services.cycle_skill_plan_service import build_cycle_skill_plan_context as _sk_pc
+                    _pc_sk = await _sk_pc(db_pool, member_id or "")
+                    if _pc_sk:
+                        pc_crystal_ctx = ((pc_crystal_ctx or "") + "\n\n" + _pc_sk).strip()
+                except Exception:
+                    pass
                 
                 # Get coaching session context
                 attempt_number = coaching_session.get("attempt_number", 1)
@@ -12084,6 +12130,9 @@ class AzureCortex:
                             min_score=3,
                             origin_surface="private_coaching",
                         ))
+                        # QUANTUM-CRYSTAL-ARCH: skill-plan tick (private coaching)
+                        from app.services.cycle_skill_plan_service import schedule_skill_plan_post_turn as _sk_tick
+                        _sk_tick(db_pool, user_id=member_id or "", user_text=user_prompt, nate_response=clean_response, user_name=member_name or "", origin_surface="private_coaching")
                         # QUANTUM-CRYSTAL-ARCH: Phase 1 commitment extract (private)
                         from app.services.nate_commitment_extractor import schedule_post_turn_extraction
                         schedule_post_turn_extraction(

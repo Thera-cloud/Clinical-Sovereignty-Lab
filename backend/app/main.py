@@ -4376,6 +4376,15 @@ try:
 except Exception as _tp_err:
     print(f"   ⚠️  therapeutic_plan_api router failed: {_tp_err}")
 
+# QUANTUM-CRYSTAL-ARCH: clinical technique directory (care plans + modality assist)
+try:
+    from app.routers.clinical_directory_api import router as clinical_directory_router
+
+    app.include_router(clinical_directory_router)
+    print("   ✅ clinical_directory_api router mounted")
+except Exception as _cd_err:
+    print(f"   ⚠️  clinical_directory_api router failed: {_cd_err}")
+
 # QUANTUM-CRYSTAL-ARCH — Phase 5b symbolic verifier telemetry
 try:
     from app.routers.symbolic_verifier_api import router as symbolic_verifier_router
