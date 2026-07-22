@@ -76,6 +76,8 @@ class ApprovalProtocolService:
     CRITICAL_COOLING_HOURS = 4
     # Escalation timeout (hours) — if no response, escalate to next authority
     ESCALATION_TIMEOUT_HOURS = 8
+    # Stop re-sending [ESCALATED] email/SMS after this many escalation cycles.
+    MAX_ESCALATION_EMAILS = 2
 
     def __init__(self, db_pool, wisdom_mesh=None):
         self.db_pool = db_pool
@@ -1337,6 +1339,67 @@ class ApprovalProtocolService:
 
     # ─── Escalation Check ───
 
+    async def reconcile_stale_ceo_proposals(self) -> List[Dict[str, Any]]:
+        """Close pending CEO-inbox proposals whose Redis queue item was already cleared.
+
+        Prevents orphaned strategy_proposals from re-firing [ESCALATED] emails after
+        the dashboard ACK path cleared Redis without closing the DB row.
+        """
+        try:
+            from app.websocket.cli_dual_coo import peek_ceo_inbox
+        except ImportError:
+            return []
+
+        active_ids = {
+            str(i.get("id") or "")
+            for i in peek_ceo_inbox(200)
+            if i.get("id")
+        }
+        reconciled: List[Dict[str, Any]] = []
+        now = datetime.utcnow()
+        async with self.db_pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT proposal_id, metadata->>'ceo_inbox_item_id' AS item_id
+                FROM strategy_proposals
+                WHERE status = 'pending_approval'
+                  AND COALESCE(metadata->>'ceo_inbox', 'false') = 'true'
+                  AND COALESCE(metadata->>'ceo_inbox_item_id', '') != ''
+            """)
+            for row in rows:
+                item_id = str(row["item_id"] or "")
+                if item_id in active_ids:
+                    continue
+                pid = row["proposal_id"]
+                await conn.execute("""
+                    UPDATE strategy_proposals
+                    SET status = 'rejected',
+                        rejection_reason = 'stale_ceo_inbox_cleared',
+                        updated_at = NOW(),
+                        metadata = metadata || $2::jsonb
+                    WHERE proposal_id = $1
+                """, pid, json.dumps({
+                    "escalated": False,
+                    "auto_reconciled_at": now.isoformat(),
+                    "auto_reconcile_reason": "ceo_inbox_item_absent",
+                }))
+                await conn.execute("""
+                    INSERT INTO approval_decisions_audit
+                        (proposal_id, decision, channel, approver,
+                         approval_category, raw_message, metadata)
+                    VALUES ($1, 'ACK', 'system', 'reconcile_stale_ceo',
+                            'act', $2, $3)
+                """, pid, "Auto-cleared: CEO inbox item no longer in Redis queue",
+                    json.dumps({"item_id": item_id}))
+                reconciled.append({
+                    "proposal_id": str(pid),
+                    "item_id": item_id,
+                })
+                print(
+                    f">>> [APPROVAL] Reconciled stale CEO proposal {pid} "
+                    f"(inbox item {item_id} absent)"
+                )
+        return reconciled
+
     async def check_escalation_timeouts(self) -> List[Dict]:
         """
         Find proposals that have been pending_approval longer than
@@ -1382,6 +1445,13 @@ class ApprovalProtocolService:
                 prior = meta.get("escalation") if isinstance(meta.get("escalation"), dict) else {}
                 prior_count = int(prior.get("count") or 0)
                 last_escalated_at = prior.get("escalated_at")
+
+                if prior_count >= self.MAX_ESCALATION_EMAILS:
+                    print(
+                        f">>> [APPROVAL] Escalation cap ({self.MAX_ESCALATION_EMAILS}) "
+                        f"reached for {pid} — no further emails"
+                    )
+                    continue
 
                 # Skip if we just escalated this one within the current window
                 # (otherwise every scheduler tick would re-fire).

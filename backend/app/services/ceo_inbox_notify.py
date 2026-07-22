@@ -309,7 +309,7 @@ async def notify_ceo_inbox_item(item: Dict[str, Any]) -> Dict[str, Any]:
     protocol = ApprovalProtocolService(db_pool)
     proposal = await _insert_ceo_proposal(db_pool, item)
     if not proposal:
-        return {"status": "error", "error": "insert_failed"}
+        return {"status": "skipped", "reason": "duplicate_or_insert_failed"}
 
     pid = proposal.get("proposal_id")
     email_id = await protocol.send_email_notification(
@@ -594,6 +594,24 @@ async def _insert_ceo_proposal(db_pool, item: Dict[str, Any]) -> Optional[Dict[s
     )
     try:
         async with db_pool.acquire() as conn:
+            inbox_item_id = str(item.get("id") or "")
+            if inbox_item_id:
+                dup = await conn.fetchrow(
+                    """
+                    SELECT * FROM strategy_proposals
+                    WHERE status = 'pending_approval'
+                      AND metadata->>'ceo_inbox_item_id' = $1
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    inbox_item_id,
+                )
+                if dup:
+                    logger.info(
+                        "ceo_inbox_notify: pending proposal exists for item %s",
+                        inbox_item_id[:24],
+                    )
+                    return None
             row = await conn.fetchrow(
                 """
                 INSERT INTO strategy_proposals

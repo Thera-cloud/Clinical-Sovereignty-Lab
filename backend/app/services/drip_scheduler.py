@@ -746,6 +746,12 @@ class DripScheduler:
         try:
             from app.services.approval_protocol import ApprovalProtocolService
             approval = ApprovalProtocolService(db_pool=self.db_pool)
+            reconciled = await approval.reconcile_stale_ceo_proposals()
+            if reconciled:
+                print(
+                    f">>> [DRIP] Reconciled {len(reconciled)} stale CEO proposals "
+                    f"(no repeat [ESCALATED] email)"
+                )
             escalated = await approval.check_escalation_timeouts()
             if escalated:
                 print(f">>> [DRIP] Escalated {len(escalated)} overdue proposals")

@@ -575,6 +575,30 @@ class TestEscalationGuards:
         assert result[0]["proposal_id"] == str(pid)
         assert result[0]["escalation_count"] == 1
 
+    @pytest.mark.asyncio
+    async def test_check_escalation_stops_at_max_cap(
+        self, fake_pool, fake_conn, monkeypatch,
+    ):
+        """After MAX_ESCALATION_EMAILS cycles, no further escalation emails."""
+        pid = uuid4()
+        fake_conn._fetch_results = [{
+            "proposal_id": pid,
+            "title": "capped proposal",
+            "status": "pending_approval",
+            "risk": "low",
+            "metadata": {"escalation": {"count": 2, "escalated_at": "2026-01-01T00:00:00"}},
+            "created_at": datetime(2026, 1, 1),
+        }]
+        fake_conn._fetchval_result = None
+
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        async def _noop(*a, **kw): return None
+        svc.send_email_notification = _noop
+        svc.send_sms_notification = _noop
+
+        result = await svc.check_escalation_timeouts()
+        assert result == []
+
 
 class TestSendSmsNotification:
     @pytest.mark.asyncio
