@@ -313,6 +313,24 @@ Crisis: <a href="https://988lifeline.org">988</a> · Veterans: 988 then press 1 
 </body></html>"""
 
 
+def _email_preheader(issue: Dict[str, Any]) -> str:
+    """Distinct inbox preview — never reuse the subject line."""
+    pre = (issue.get("preheader") or "").strip()
+    subject = str(issue.get("subject_line") or "").strip()
+    if pre and pre.lower() != subject.lower():
+        return pre[:160]
+    opener = (issue.get("opener") or "").strip()
+    if opener:
+        m = re.match(r"(.+?[.!?])(\s|$)", re.sub(r"\s+", " ", opener))
+        hook = (m.group(1) if m else opener)[:160].strip()
+        if hook and hook.lower() != subject.lower():
+            return hook
+    topic = str(issue.get("topic") or "").strip()
+    if topic and f"Little Nate Dispatch: {topic}" != subject:
+        return topic[:160]
+    return "Skills practice with Little Nate — education, not therapy."
+
+
 def _html_email(issue: Dict[str, Any], rate_base: str, unsub_url: str) -> str:
     body = md_body_to_html(issue.get("final_body") or issue.get("body_md") or "")
     sources = _sources_html(issue)
@@ -321,10 +339,12 @@ def _html_email(issue: Dict[str, Any], rate_base: str, unsub_url: str) -> str:
     subject = str(issue.get("subject_line") or "Little Nate Dispatch")
     share_row = _share_row_html(slug, subject, style_inline=True)
     hero = _hero_img_tag(issue, max_width="560px")
-    subject_esc = html_mod.escape(subject)
+    topic_esc = html_mod.escape(str(issue.get("topic") or "This week’s skills"))
+    pre_esc = html_mod.escape(_email_preheader(issue))
     return f"""<!DOCTYPE html><html><body style="font-family:Georgia,serif;background:#050505;color:#E8D5A3;padding:24px;">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">{pre_esc}</div>
 <h1 style="color:#C9A962;">Little Nate Dispatch</h1>
-<p style="color:#8B7355;">{subject_esc}</p>
+<p style="color:#8B7355;">{topic_esc}</p>
 {hero}
 <div style="color:#ddd;line-height:1.55;">{body}</div>
 {sources}

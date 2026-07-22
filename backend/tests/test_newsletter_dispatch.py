@@ -25,6 +25,39 @@ def _load(mod_name: str, rel: str):
     return mod
 
 
+def _ensure_lite_services_pkg():
+    """Register newsletter modules under app.services.* without importing services/__init__ (numpy FPE)."""
+    import types
+
+    if "app" not in sys.modules:
+        app_pkg = types.ModuleType("app")
+        app_pkg.__path__ = [str(BACKEND / "app")]  # type: ignore[attr-defined]
+        sys.modules["app"] = app_pkg
+
+    existing = sys.modules.get("app.services")
+    if existing is None or not getattr(existing, "_nl_lite", False):
+        # Blank package shell so `from app.services.X` does not exec __init__.py
+        svc = types.ModuleType("app.services")
+        svc.__path__ = [str(BACKEND / "app" / "services")]  # type: ignore[attr-defined]
+        svc._nl_lite = True  # type: ignore[attr-defined]
+        sys.modules["app.services"] = svc
+        sys.modules["app"].services = svc  # type: ignore[attr-defined]
+
+    deps = (
+        ("app.services.newsletter_clinical_curriculum", "app/services/newsletter_clinical_curriculum.py"),
+        ("app.services.newsletter_clinical_gate", "app/services/newsletter_clinical_gate.py"),
+        ("app.services.newsletter_topic_engine", "app/services/newsletter_topic_engine.py"),
+    )
+    for name, rel in deps:
+        if name not in sys.modules:
+            _load(name, rel)
+
+
+def _load_pipeline(alias: str):
+    _ensure_lite_services_pkg()
+    return _load(alias, "app/services/newsletter_pipeline.py")
+
+
 def test_html_email_has_safety_footer_and_unsub():
     delivery = _load("nl_delivery_ut", "app/services/newsletter_delivery.py")
     html = delivery._html_email(
@@ -171,6 +204,7 @@ def test_admin_dispatch_shell_exists():
 
 
 def test_topic_engine_novelty_and_score():
+    _ensure_lite_services_pkg()
     eng = _load("nl_topic_eng_ut", "app/services/newsletter_topic_engine.py")
     assert eng.novelty_penalty("Anxiety reach out", ["Anxiety reach out"]) == 1.0
     assert eng.novelty_penalty("Brand new theme", ["Anxiety reach out"]) < 0.3
@@ -205,14 +239,94 @@ def test_trend_heuristic_pair_politics_is_coping():
 
 
 def test_citation_allowlist_has_neuro_military_arts():
-    pipe = _load("nl_pipe_cite_ut", "app/services/newsletter_pipeline.py")
+    pipe = _load_pipeline("nl_pipe_cite_ut")
     domains = set()
     for c in pipe.CITATION_ALLOWLIST:
         domains.update(c.get("domains") or ())
+        domains.update(c.get("topic_tags") or ())
     assert "neurodivergence" in domains
     assert "military" in domains
     assert "arts" in domains
+    assert "cbt" in domains
+    assert "dbt" in domains
+    assert "act" in domains
     assert "988 then press 1" in pipe.safety_footer_for_domain("military")
+    # No mislabeled Physical Activity → caring-for-your-mental-health
+    for c in pipe.CITATION_ALLOWLIST:
+        if "physical activity" in (c.get("source_name") or "").lower():
+            assert "caring-for-your-mental-health" not in c["url"]
+        if "caring for your mental health" in (c.get("source_name") or "").lower():
+            assert "caring-for-your-mental-health" in c["url"]
+
+
+def test_clinical_gate_topic_match_universal_modalities():
+    _ensure_lite_services_pkg()
+    gate = sys.modules["app.services.newsletter_clinical_gate"]
+    pipe = _load_pipeline("nl_pipe_gate_ut")
+
+    cbt_topic = {
+        "title": "CBT thought records: catching the story before it runs you",
+        "topic_key": "cbt_thought_records",
+        "domain": "cbt",
+        "modalities": ["CBT"],
+    }
+    dbt_topic = {
+        "title": "DBT distress tolerance when the wave hits",
+        "topic_key": "dbt_distress_tolerance",
+        "domain": "dbt",
+        "modalities": ["DBT"],
+    }
+    cbt_cites = gate.select_relevant_citations(pipe.CITATION_ALLOWLIST, cbt_topic, limit=5)
+    dbt_cites = gate.select_relevant_citations(pipe.CITATION_ALLOWLIST, dbt_topic, limit=5)
+    assert cbt_cites
+    assert dbt_cites
+    assert all("autism" not in (c.get("url") or "").lower() for c in cbt_cites)
+    assert any(c.get("supports_technique") for c in cbt_cites)
+    assert any("dbt" in (c.get("topic_tags") or c.get("domains") or ()) for c in dbt_cites)
+
+    # Autism allowlist entry only for neurodivergence topics
+    neuro = {
+        "title": "Autism and sensory load",
+        "topic_key": "neuro_autism",
+        "domain": "neurodivergence",
+        "modalities": ["neurodivergence"],
+    }
+    neuro_cites = gate.select_relevant_citations(pipe.CITATION_ALLOWLIST, neuro, limit=5)
+    assert any("autism" in (c.get("url") or "").lower() for c in neuro_cites)
+
+    # Label mismatch fails gate
+    bad = {
+        "citations": [
+            {
+                "source_name": "NIH — Physical Activity",
+                "page_title": "Caring for Your Mental Health",
+                "year": 2025,
+                "url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health",
+                "verified": True,
+                "topic_tags": ["cbt"],
+                "technique_tags": ["cbt"],
+                "supports_technique": True,
+            }
+        ]
+    }
+    errs = gate.validate_clinical_citations(bad, bad, topic=cbt_topic)
+    assert any("cite_label_mismatch" in e for e in errs)
+
+    good_cite = {
+        "source_name": "APA — Cognitive Behavioral Therapy",
+        "page_title": "Cognitive Behavioral Therapy",
+        "year": 2025,
+        "url": "https://www.apa.org/ptsd-guideline/patients-and-families/cognitive-behavioral",
+        "verified": True,
+        "topic_tags": ["cbt"],
+        "technique_tags": ["cbt"],
+        "supports_technique": True,
+        "modality": "psychoeducation",
+    }
+    ok_errs = gate.validate_clinical_citations(
+        {"citations": [good_cite]}, {"citations": [good_cite], "topic": cbt_topic}, topic=cbt_topic
+    )
+    assert ok_errs == []
 
 
 def test_hero_prompt_is_safe_editorial():
@@ -273,7 +387,9 @@ def test_email_html_embeds_hero_when_present():
     delivery = _load("nl_delivery_hero_ut", "app/services/newsletter_delivery.py")
     html = delivery._html_email(
         {
-            "subject_line": "Test",
+            "subject_line": "Little Nate Dispatch: steadiness",
+            "preheader": "You do not have to earn rest or connection.",
+            "opener": "You do not have to earn rest or connection. Strength includes asking.",
             "final_body": "Hello",
             "slug": "demo-slug",
             "hero_image_url": "https://api.example/api/newsletter/library/demo-slug/hero",
@@ -284,37 +400,48 @@ def test_email_html_embeds_hero_when_present():
     )
     assert "<img " in html
     assert "demo-slug/hero" in html
+    assert "display:none" in html
+    assert "You do not have to earn rest" in html
+    # Subject must not be the first visible preview line
+    assert html.index("display:none") < html.index("Little Nate Dispatch")
 
 
 def test_template_draft_applies_rewrite_notes_without_dumping_instructions():
-    pipe = _load("nl_pipe_ut", "app/services/newsletter_pipeline.py")
-    topic = {"title": "Asking for help", "topic_key": "ask"}
+    pipe = _load_pipeline("nl_pipe_ut")
+    topic = {"title": "Asking for help", "topic_key": "ask", "domain": "somatic"}
     bundle = {
         "citations": [
             {
-                "source_name": "NIMH",
+                "source_name": "NIMH — Caring for Your Mental Health",
+                "page_title": "Caring for Your Mental Health",
                 "year": 2025,
-                "url": "https://www.nimh.nih.gov/health/topics/anxiety-disorders",
+                "url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health",
                 "verified": True,
                 "modality": "psychoeducation",
+                "topic_tags": ["somatic"],
+                "technique_tags": ["somatic"],
+                "supports_technique": True,
             }
         ],
         "external_reading": {
-            "source_name": "NIMH",
+            "source_name": "NIMH — Caring for Your Mental Health",
             "year": 2025,
-            "url": "https://www.nimh.nih.gov/health/topics/anxiety-disorders",
+            "url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health",
         },
         "editor_rewrite_notes": "Lead with grounding before research",
+        "topic": topic,
+        "domain": "somatic",
     }
     draft = pipe.draft_issue_from_bundle(topic, bundle)
     body = draft["body_md"]
     assert "Lead with grounding" in body
     assert "EDITOR REWRITE" not in body
     assert "988" in body
+    assert "This week's Dispatch is clinical psychoeducation on" not in body
 
 
 def test_template_draft_clinical_psychoeducation_and_nate_prompts():
-    pipe = _load("nl_pipe_clinical_ut", "app/services/newsletter_pipeline.py")
+    pipe = _load_pipeline("nl_pipe_clinical_ut")
     topic = {
         "title": "CBT thought records: catching the story before it runs you",
         "topic_key": "cbt_thought_records",
@@ -329,20 +456,27 @@ def test_template_draft_clinical_psychoeducation_and_nate_prompts():
     bundle = {
         "citations": [
             {
-                "source_name": "NIMH",
+                "source_name": "APA — Cognitive Behavioral Therapy",
+                "page_title": "Cognitive Behavioral Therapy",
                 "year": 2025,
-                "url": "https://www.nimh.nih.gov/health/topics/anxiety-disorders",
+                "url": "https://www.apa.org/ptsd-guideline/patients-and-families/cognitive-behavioral",
                 "verified": True,
                 "modality": "psychoeducation",
+                "topic_tags": ["cbt"],
+                "technique_tags": ["cbt"],
+                "supports_technique": True,
             }
         ],
         "external_reading": {
-            "source_name": "NIMH",
+            "source_name": "APA — Cognitive Behavioral Therapy",
             "year": 2025,
-            "url": "https://www.nimh.nih.gov/health/topics/anxiety-disorders",
+            "url": "https://www.apa.org/ptsd-guideline/patients-and-families/cognitive-behavioral",
         },
+        "topic": topic,
+        "domain": "cbt",
     }
-    body = pipe.draft_issue_from_bundle(topic, bundle)["body_md"]
+    draft = pipe.draft_issue_from_bundle(topic, bundle)
+    body = draft["body_md"]
     assert "Voice notes" not in body
     assert "GROWTH_7D" not in body
     assert "avg_helpful" not in body
@@ -351,6 +485,12 @@ def test_template_draft_clinical_psychoeducation_and_nate_prompts():
     assert "**CBT:**" in body or "CBT" in body
     assert "Practice with Little Nate" in body
     assert "thought record" in body.lower()
+    assert "This week's Dispatch is clinical psychoeducation on" not in body
+    assert "(CBT)" not in body.split("\n")[0]  # no redundant modality tag on intro line
+    assert draft.get("preheader")
+    assert draft["preheader"].lower() != (draft.get("subject_line") or "").lower()
+    ok, errs = pipe.critique_issue(draft, bundle)
+    assert ok, errs
 
 
 def test_clinical_curriculum_bank_loaded():

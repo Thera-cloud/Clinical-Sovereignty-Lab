@@ -58,6 +58,8 @@ Weekly staged newsletter: topic → research (year ≥ 2024) → draft → criti
 - Curriculum bank: `newsletter_clinical_curriculum.py` (scored into topic pool every cycle)
 - Culture/news trend pairing **off by default**; migration `259_newsletter_clinical_editorial_reset.sql` wipes prior issues/forecast/trends and reseeds clinical topics
 - Share/growth ledgers still work; they no longer dominate topic selection under clinical focus
+- **Citation relevance** (`newsletter_clinical_gate.py`): (a) cite `topic_tags` must overlap issue tags for *any* modality, (b) `source_name` must match `page_title`, (c) ≥1 `supports_technique` cite for the featured skill. Research bundle never pads with unrelated allowlist rows (e.g. CDC autism on a CBT issue).
+- Template drafts write psychoeducation as the feature lead (no “Dispatch is clinical psychoeducation on **{title}** (CBT)” stitch). Email preheader is a distinct opener hook, not the subject line.
 
 ## Growth engine (secondary)
 

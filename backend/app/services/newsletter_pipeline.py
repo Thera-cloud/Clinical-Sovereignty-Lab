@@ -41,84 +41,266 @@ VETERANS_CRISIS_LINE = (
     "or text 838255 (US)."
 )
 
-# Domain-tagged citation allowlist (2024+). Composer may only cite verified bundle.
+# Topic-tagged citation allowlist (2024+). Composer may only cite verified, relevant bundle.
+# topic_tags: issue overlap required | technique_tags + supports_technique: featured-skill cites
+# page_title: must match source_name label (clinical gate check b)
 CITATION_ALLOWLIST = [
+    # —— CBT / anxiety / exposure ——
     {
-        "source_name": "APA — Stress in America",
+        "source_name": "APA — Cognitive Behavioral Therapy",
+        "page_title": "Cognitive Behavioral Therapy",
         "year": 2024,
-        "url": "https://www.apa.org/news/press/releases/stress",
+        "url": "https://www.apa.org/ptsd-guideline/patients-and-families/cognitive-behavioral",
         "modality": "psychoeducation",
-        "domains": ("general", "burnout", "curiosity"),
+        "domains": ("cbt",),
+        "topic_tags": ("cbt", "anxiety", "military"),
+        "technique_tags": ("cbt",),
+        "supports_technique": True,
+    },
+    {
+        "source_name": "NIMH — Psychotherapies",
+        "page_title": "Psychotherapies",
+        "year": 2024,
+        "url": "https://www.nimh.nih.gov/health/topics/psychotherapies",
+        "modality": "psychoeducation",
+        "domains": ("cbt", "dbt", "act"),
+        "topic_tags": ("cbt", "dbt", "act", "mi"),
+        "technique_tags": ("cbt", "dbt", "act"),
+        "supports_technique": True,
+    },
+    {
+        "source_name": "NHS — Cognitive behavioural therapy (CBT)",
+        "page_title": "Cognitive behavioural therapy (CBT)",
+        "year": 2024,
+        "url": (
+            "https://www.nhs.uk/mental-health/talking-therapies-medicine-treatments/"
+            "talking-therapies-and-counselling/cognitive-behavioural-therapy-cbt/overview/"
+        ),
+        "modality": "psychoeducation",
+        "domains": ("cbt",),
+        "topic_tags": ("cbt",),
+        "technique_tags": ("cbt",),
+        "supports_technique": True,
     },
     {
         "source_name": "NIMH — Anxiety Disorders",
+        "page_title": "Anxiety Disorders",
         "year": 2024,
         "url": "https://www.nimh.nih.gov/health/topics/anxiety-disorders",
         "modality": "psychoeducation",
-        "domains": ("general", "relationships", "parenting"),
+        "domains": ("cbt",),
+        "topic_tags": ("cbt", "anxiety", "parenting"),
+        "technique_tags": ("cbt",),
+        "supports_technique": True,
     },
+    # —— DBT ——
     {
-        "source_name": "SAMHSA — Find Help",
+        "source_name": "Behavioral Tech — What is DBT?",
+        "page_title": "What is DBT?",
         "year": 2024,
-        "url": "https://www.samhsa.gov/find-help",
-        "modality": "help_seeking",
-        "domains": ("general", "grief", "burnout"),
-    },
-    {
-        "source_name": "WHO — Mental health",
-        "year": 2024,
-        "url": "https://www.who.int/health-topics/mental-health",
+        "url": "https://behavioraltech.org/dialectical-behavior-therapy-dbt/",
         "modality": "psychoeducation",
-        "domains": ("general", "curiosity"),
+        "domains": ("dbt",),
+        "topic_tags": ("dbt",),
+        "technique_tags": ("dbt",),
+        "supports_technique": True,
     },
+    # —— ACT ——
+    {
+        "source_name": "ACBS — Acceptance and Commitment Therapy",
+        "page_title": "Acceptance and Commitment Therapy (ACT)",
+        "year": 2024,
+        "url": "https://contextualscience.org/act",
+        "modality": "psychoeducation",
+        "domains": ("act",),
+        "topic_tags": ("act",),
+        "technique_tags": ("act",),
+        "supports_technique": True,
+    },
+    # —— IFS ——
+    {
+        "source_name": "IFS Institute — What is Internal Family Systems?",
+        "page_title": "What is Internal Family Systems?",
+        "year": 2024,
+        "url": "https://ifs-institute.com/about-us/what-is-ifs",
+        "modality": "psychoeducation",
+        "domains": ("ifs",),
+        "topic_tags": ("ifs",),
+        "technique_tags": ("ifs",),
+        "supports_technique": True,
+    },
+    # —— Attachment / EFT / ADEP ——
+    {
+        "source_name": "ICEEFT — What is EFT?",
+        "page_title": "What is EFT?",
+        "year": 2024,
+        "url": "https://iceeft.com/what-is-eft/",
+        "modality": "psychoeducation",
+        "domains": ("adep", "relationships"),
+        "topic_tags": ("adep", "relationships"),
+        "technique_tags": ("adep", "relationships"),
+        "supports_technique": True,
+    },
+    # —— Relationships / Gottman ——
+    {
+        "source_name": "Gottman Institute — Repair Checklists",
+        "page_title": "Repair Checklists",
+        "year": 2024,
+        "url": "https://www.gottman.com/blog/repair-checklists/",
+        "modality": "psychoeducation",
+        "domains": ("relationships",),
+        "topic_tags": ("relationships",),
+        "technique_tags": ("relationships",),
+        "supports_technique": True,
+    },
+    # —— MI ——
+    {
+        "source_name": "MINT — Motivational Interviewing",
+        "page_title": "Motivational Interviewing",
+        "year": 2024,
+        "url": "https://motivationalinterviewing.org/",
+        "modality": "psychoeducation",
+        "domains": ("mi",),
+        "topic_tags": ("mi",),
+        "technique_tags": ("mi",),
+        "supports_technique": True,
+    },
+    # —— Somatic / grounding / self-compassion ——
+    {
+        "source_name": "NIMH — Caring for Your Mental Health",
+        "page_title": "Caring for Your Mental Health",
+        "year": 2024,
+        "url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health",
+        "modality": "psychoeducation",
+        "domains": ("somatic", "self_compassion"),
+        "topic_tags": ("somatic", "self_compassion", "nate_usage", "sleep"),
+        "technique_tags": ("somatic", "self_compassion"),
+        "supports_technique": True,
+    },
+    {
+        "source_name": "Center for Mindful Self-Compassion",
+        "page_title": "Center for Mindful Self-Compassion",
+        "year": 2024,
+        "url": "https://centerformsc.org/",
+        "modality": "psychoeducation",
+        "domains": ("self_compassion",),
+        "topic_tags": ("self_compassion",),
+        "technique_tags": ("self_compassion",),
+        "supports_technique": True,
+    },
+    # —— Neurodivergence (only when topic tags match) ——
     {
         "source_name": "CDC — Autism Spectrum Disorder",
+        "page_title": "Autism Spectrum Disorder (ASD)",
         "year": 2024,
         "url": "https://www.cdc.gov/autism/index.html",
         "modality": "psychoeducation",
         "domains": ("neurodivergence",),
+        "topic_tags": ("neurodivergence",),
+        "technique_tags": ("neurodivergence",),
+        "supports_technique": True,
     },
     {
         "source_name": "NIMH — ADHD",
+        "page_title": "Attention-Deficit/Hyperactivity Disorder (ADHD)",
         "year": 2024,
         "url": "https://www.nimh.nih.gov/health/topics/attention-deficit-hyperactivity-disorder-adhd",
         "modality": "psychoeducation",
         "domains": ("neurodivergence",),
+        "topic_tags": ("neurodivergence",),
+        "technique_tags": ("neurodivergence",),
+        "supports_technique": True,
     },
     {
         "source_name": "CHADD — ADHD",
+        "page_title": "CHADD",
         "year": 2024,
         "url": "https://chadd.org/",
         "modality": "advocacy",
         "domains": ("neurodivergence",),
+        "topic_tags": ("neurodivergence",),
+        "technique_tags": ("neurodivergence",),
+        "supports_technique": True,
     },
+    # —— Military / PTSD ——
     {
         "source_name": "National Center for PTSD (VA)",
+        "page_title": "PTSD: National Center for PTSD",
         "year": 2024,
         "url": "https://www.ptsd.va.gov/",
         "modality": "psychoeducation",
-        "domains": ("military", "grief"),
+        "domains": ("military",),
+        "topic_tags": ("military", "grief"),
+        "technique_tags": ("military", "somatic"),
+        "supports_technique": True,
     },
     {
         "source_name": "VA — Mental Health",
+        "page_title": "Mental Health",
         "year": 2024,
         "url": "https://www.mentalhealth.va.gov/",
         "modality": "help_seeking",
         "domains": ("military",),
+        "topic_tags": ("military", "help_seeking"),
+        "technique_tags": (),
+        "supports_technique": False,
+    },
+    # —— Domain-specific secondary ——
+    {
+        "source_name": "APA — Stress in America",
+        "page_title": "Stress in America",
+        "year": 2024,
+        "url": "https://www.apa.org/news/press/releases/stress",
+        "modality": "psychoeducation",
+        "domains": ("burnout",),
+        "topic_tags": ("burnout", "curiosity"),
+        "technique_tags": ("burnout",),
+        "supports_technique": True,
     },
     {
         "source_name": "NEA — Arts and Health",
+        "page_title": "Arts and Health",
         "year": 2024,
         "url": "https://www.arts.gov/impact/arts-health",
         "modality": "psychoeducation",
-        "domains": ("arts", "curiosity", "fitness"),
+        "domains": ("arts",),
+        "topic_tags": ("arts", "curiosity"),
+        "technique_tags": ("arts",),
+        "supports_technique": True,
     },
     {
-        "source_name": "NIH — Physical Activity and Mental Health",
+        "source_name": "CDC — Physical Activity Basics",
+        "page_title": "Physical Activity Basics",
         "year": 2024,
-        "url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health",
+        "url": "https://www.cdc.gov/physical-activity-basics/health-benefits/index.html",
         "modality": "psychoeducation",
-        "domains": ("fitness", "sleep", "general"),
+        "domains": ("fitness",),
+        "topic_tags": ("fitness",),
+        "technique_tags": ("fitness",),
+        "supports_technique": True,
+    },
+    {
+        "source_name": "WHO — Mental health",
+        "page_title": "Mental health",
+        "year": 2024,
+        "url": "https://www.who.int/health-topics/mental-health",
+        "modality": "psychoeducation",
+        "domains": ("curiosity",),
+        "topic_tags": ("curiosity",),
+        "technique_tags": ("curiosity",),
+        "supports_technique": True,
+    },
+    # —— Help-seeking (supplement only after a technique cite) ——
+    {
+        "source_name": "SAMHSA — Find Help",
+        "page_title": "Find Help",
+        "year": 2024,
+        "url": "https://www.samhsa.gov/find-help",
+        "modality": "help_seeking",
+        "domains": ("help_seeking",),
+        "topic_tags": ("help_seeking", "grief", "burnout", "safety"),
+        "technique_tags": (),
+        "supports_technique": False,
     },
 ]
 
@@ -187,33 +369,37 @@ def _techniques_for_topic(topic: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _feature_lead_for_topic(topic: Dict[str, Any], rewrite: str) -> str:
+    """Composer lead — never slot-fill the issue title into a fixed frame."""
     from app.services.newsletter_clinical_curriculum import (
         clinical_editorial_mode,
         match_curriculum,
     )
 
-    title = (topic.get("title") or "steadiness").strip()
     cur = match_curriculum(topic or {})
     psycho = (topic.get("psychoeducation") or (cur or {}).get("psychoeducation") or "").strip()
     mods = topic.get("modalities") or (cur or {}).get("modalities") or []
     mod_line = ", ".join(str(m) for m in mods[:4]) if mods else "clinical skills"
 
     if rewrite:
-        return (
-            f"This week’s skill focus: {title}. "
-            f"Editor direction: {rewrite}. "
-            f"Modalities in play: {mod_line}. "
-            "Education only — not therapy or diagnosis.\n\n"
-            + (f"{psycho}\n\n" if psycho else "")
-        )
+        parts = [
+            f"Editor direction (applied): {rewrite}.",
+            "Education only — not therapy or diagnosis.",
+        ]
+        if psycho:
+            parts.append(psycho)
+        return "\n\n".join(parts) + "\n\n"
 
     if clinical_editorial_mode() or psycho:
+        if psycho:
+            return (
+                psycho
+                + "\n\n"
+                + "Structured techniques and copy-paste prompts for Little Nate follow — "
+                "skills practice, not news commentary.\n\n"
+            )
         return (
-            f"This week’s Dispatch is clinical psychoeducation on **{title}** "
-            f"({mod_line}). "
-            "You will get structured techniques plus copy-paste prompts for Little Nate — "
-            "skills practice, not news commentary.\n\n"
-            + (f"{psycho}\n\n" if psycho else "")
+            f"This week’s practice centers on {mod_line}: clear steps you can try, "
+            "plus prompts for Little Nate — skills education, not diagnosis.\n\n"
         )
 
     # Legacy path only when clinical focus is explicitly off
@@ -230,9 +416,26 @@ def _feature_lead_for_topic(topic: Dict[str, Any], rewrite: str) -> str:
         )
         return " ".join(bits)
     return (
-        f"This week we explore {title} with structured clinical skills "
-        "and clear prompts for practicing with Little Nate.\n\n"
+        f"Structured {mod_line} practice with clear prompts for Little Nate.\n\n"
     )
+
+
+def _preheader_from_opener(opener: str, subject: str) -> str:
+    """Inbox preview distinct from subject — first opener sentence."""
+    text = re.sub(r"\s+", " ", (opener or "").strip())
+    text = re.sub(r"^#+\s*", "", text)
+    if not text:
+        return "Skills practice with Little Nate — education, not therapy."
+    # First sentence
+    m = re.match(r"(.+?[.!?])(\s|$)", text)
+    hook = (m.group(1) if m else text)[:160].strip()
+    sub = re.sub(r"\s+", " ", (subject or "").strip())
+    if hook.lower() == sub.lower() or hook.lower() in sub.lower():
+        rest = text[len(hook) :].strip()
+        if rest:
+            m2 = re.match(r"(.+?[.!?])(\s|$)", rest)
+            hook = (m2.group(1) if m2 else rest)[:160].strip()
+    return hook or "Skills practice with Little Nate — education, not therapy."
 
 
 def _go_deeper_for_topic(topic: Dict[str, Any]) -> str:
@@ -292,7 +495,9 @@ async def verify_url(url: str, session: aiohttp.ClientSession) -> Tuple[int, boo
 
 
 async def build_research_bundle(topic: Dict[str, Any]) -> Dict[str, Any]:
-    """Allowlisted 2024+ sources with URL liveness. Domain-aware; fail closed if none verify."""
+    """Allowlisted 2024+ sources: topic-tag match + liveness. Never pad with unrelated cites."""
+    from app.services.newsletter_clinical_gate import select_relevant_citations
+
     try:
         from app.services.newsletter_topic_engine import infer_domain
     except Exception:
@@ -302,16 +507,22 @@ async def build_research_bundle(topic: Dict[str, Any]) -> Dict[str, Any]:
         f"{topic.get('title') or ''} {topic.get('topic_key') or ''}"
     )).lower()
 
-    # Prefer domain-matched sources, then general, then any remaining
-    domain_first = [
-        c for c in CITATION_ALLOWLIST if domain in c.get("domains", ())
-    ]
-    general = [
-        c for c in CITATION_ALLOWLIST
-        if "general" in c.get("domains", ()) and c not in domain_first
-    ]
-    rest = [c for c in CITATION_ALLOWLIST if c not in domain_first and c not in general]
-    ordered = (domain_first + general + rest)[:8]
+    # Enrich modalities from curriculum so tag matching is universal across modalities
+    try:
+        from app.services.newsletter_clinical_curriculum import match_curriculum
+
+        cur = match_curriculum(topic or {})
+        if cur:
+            topic = dict(topic)
+            topic.setdefault("domain", cur.get("domain") or domain)
+            topic.setdefault("modalities", list(cur.get("modalities") or []))
+            topic.setdefault("psychoeducation", cur.get("psychoeducation") or "")
+            topic.setdefault("topic_key", cur.get("topic_key") or topic.get("topic_key"))
+            domain = (topic.get("domain") or domain).lower()
+    except Exception:
+        pass
+
+    ordered = select_relevant_citations(CITATION_ALLOWLIST, topic, limit=8)
 
     verified = []
     async with aiohttp.ClientSession() as session:
@@ -321,9 +532,13 @@ async def build_research_bundle(topic: Dict[str, Any]) -> Dict[str, Any]:
             code, ok = await verify_url(c["url"], session)
             row = {
                 "source_name": c["source_name"],
+                "page_title": c.get("page_title") or "",
                 "year": c["year"],
                 "url": c["url"],
                 "modality": c["modality"],
+                "topic_tags": list(c.get("topic_tags") or c.get("domains") or ()),
+                "technique_tags": list(c.get("technique_tags") or ()),
+                "supports_technique": bool(c.get("supports_technique")),
                 "http_status_checked": code,
                 "verified": ok,
             }
@@ -389,10 +604,12 @@ def draft_issue_from_bundle(topic: Dict[str, Any], bundle: Dict[str, Any]) -> Di
         ]
     )
     slug = _slugify(topic.get("title") or topic.get("topic_key") or "dispatch")
+    subject = f"Little Nate Dispatch: {topic.get('title')}"
     return {
         "slug": slug,
         "topic": topic.get("title"),
-        "subject_line": f"Little Nate Dispatch: {topic.get('title')}",
+        "subject_line": subject,
+        "preheader": _preheader_from_opener(opener, subject),
         "opener": opener,
         "body_md": body,
         "draft_body": body,
@@ -436,9 +653,12 @@ async def draft_issue_llm(
         "Focus: modality techniques (CBT/DBT/ACT/IFS/ADEP/grounding), relationship "
         "communication tools, and how to practice with Little Nate. "
         "NOT therapy, diagnosis, culture commentary, or news hooks. "
-        "Cite ONLY URLs from the research list. "
+        "Cite ONLY URLs from the research list (they are already topic-matched). "
         "Include crisis footer with 988 and findahelpline.com. "
         "Never paste editor instructions verbatim into the article. "
+        "Write a natural opener — do NOT begin with "
+        "'This week\\'s Dispatch is clinical psychoeducation on [title]'. "
+        "Do not interpolate the issue title into a fixed sentence frame. "
         "Output markdown: opener, feature (psychoeducation), techniques (3–5 with modality labels), "
         "Go Deeper with Little Nate (3 copy-paste prompts), further reading."
     )
@@ -481,7 +701,11 @@ async def draft_issue_llm(
         base = draft_issue_from_bundle(topic, bundle)
         base["body_md"] = text
         base["draft_body"] = text
-        base["opener"] = text.split("\n", 1)[0][:400]
+        opener = text.split("\n", 1)[0][:400]
+        base["opener"] = opener
+        base["preheader"] = _preheader_from_opener(
+            opener, base.get("subject_line") or ""
+        )
         base["content_hash"] = hashlib.sha256(text.encode()).hexdigest()
         base["research_bundle"] = {**bundle, "llm_draft": True}
         return base
@@ -491,7 +715,9 @@ async def draft_issue_llm(
 
 
 def critique_issue(draft: Dict[str, Any], bundle: Dict[str, Any]) -> Tuple[bool, List[str]]:
-    """Fail closed on citation mismatch, missing footer, year < 2024."""
+    """Fail closed on citation mismatch, relevance, label match, footer, year < 2024."""
+    from app.services.newsletter_clinical_gate import validate_clinical_citations
+
     errors: List[str] = []
     body = draft.get("body_md") or ""
     if "988" not in body and "findahelpline" not in body.lower():
@@ -516,7 +742,21 @@ def critique_issue(draft: Dict[str, Any], bundle: Dict[str, Any]) -> Tuple[bool,
             continue
         if u.rstrip(").,") not in allowed and not any(u.startswith(a) for a in allowed):
             # soft: only flag if looks like citation domain
-            if any(k in host for k in ("apa.org", "nimh.nih.gov", "who.int", "nih.gov")):
+            if any(
+                k in host
+                for k in (
+                    "apa.org",
+                    "nimh.nih.gov",
+                    "who.int",
+                    "nih.gov",
+                    "cdc.gov",
+                    "nhs.uk",
+                    "gottman.com",
+                    "ifs-institute.com",
+                    "contextualscience.org",
+                    "behavioraltech.org",
+                )
+            ):
                 if u.rstrip(").,") not in allowed:
                     errors.append(f"ungrounded_cite:{u[:80]}")
 
@@ -529,6 +769,28 @@ def critique_issue(draft: Dict[str, Any], bundle: Dict[str, Any]) -> Tuple[bool,
     techniques = draft.get("techniques") or []
     if not (1 <= len(techniques) <= 5):
         errors.append("techniques_count")
+
+    # (a) topic-tag overlap (b) label↔page title (c) technique-supporting cite
+    topic = bundle.get("topic") if isinstance(bundle.get("topic"), dict) else {}
+    if not isinstance(topic, dict):
+        topic = {}
+    if draft.get("topic") and not topic.get("title"):
+        topic = {**topic, "title": draft.get("topic")}
+    errors.extend(validate_clinical_citations(draft, bundle, topic=topic))
+
+    # Subject must not be reused as preheader
+    pre = (draft.get("preheader") or "").strip().lower()
+    sub = (draft.get("subject_line") or "").strip().lower()
+    if pre and sub and pre == sub:
+        errors.append("preheader_duplicates_subject")
+
+    # Ban title-slot intro artifact
+    if re.search(
+        r"this week.?s dispatch is clinical psychoeducation on",
+        body,
+        re.I,
+    ):
+        errors.append("template_stitched_title_intro")
 
     return len(errors) == 0, errors
 
@@ -643,9 +905,6 @@ async def rewrite_existing_issue(
         )
         bundle["rewrite_history"] = hist[-10:]
 
-    if not cites:
-        return {"ok": False, "error": "no_citations_on_issue"}
-
     from app.services.newsletter_clinical_curriculum import clinical_editorial_mode
 
     topic = {
@@ -654,8 +913,23 @@ async def rewrite_existing_issue(
         "domain": (bundle.get("domain") if isinstance(bundle, dict) else None) or "cbt",
         "symbolic_hints": [],
     }
+    if isinstance(bundle.get("topic"), dict):
+        topic = {**bundle["topic"], **topic}
     if not clinical_editorial_mode():
         topic = await enrich_topic_worldly_hook(db_pool, topic)
+    # Re-select topic-matched cites on rewrite (never keep stale cross-domain dump)
+    try:
+        fresh = await build_research_bundle(topic)
+        if fresh.get("citations"):
+            if notes:
+                fresh["editor_rewrite_notes"] = notes
+                fresh["rewrite_history"] = bundle.get("rewrite_history") or []
+            bundle = fresh
+            cites = fresh["citations"]
+    except Exception as e:
+        logger.warning("rewrite research refresh: %s", e)
+    if not cites:
+        return {"ok": False, "error": "no_citations_on_issue"}
     draft = await draft_issue_llm(topic, bundle, force=bool(notes))
     if not draft:
         draft = draft_issue_from_bundle(topic, bundle)
