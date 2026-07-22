@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import ssl
 import subprocess
 import sys
@@ -343,7 +344,17 @@ async def main() -> int:
 
     passed = sum(1 for r in results if r.get("ok"))
     print(f"\nSUMMARY: {passed}/{len(results)} technique paths OK")
-    print(json.dumps(results, indent=2, default=str)[:8000])
+    print("SCORES:")
+    for r in results:
+        sc = r.get("scores") or {}
+        print(
+            f"  {r.get('technique')}: trigger={sc.get('trigger')} "
+            f"accept={sc.get('accept')} mean={sc.get('mean')} ok={r.get('ok')}"
+        )
+    out_path = os.environ.get("LIVE_CYCLE_SKILL_OUT", "/tmp/live_cycle_skill_results.json")
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(results, fh, indent=2, default=str)
+    print(f"Full results → {out_path}")
     return 0 if passed == len(results) else 1
 
 
