@@ -131,3 +131,76 @@ def test_score_grounding_offer_high_when_on_modality():
         )
         >= 4
     )
+
+
+def test_compose_skill_teach_block_includes_practice():
+    block = csp.compose_skill_teach_block(
+        modality="CBT",
+        skill="thought_record",
+        practice="Catch one hot thought in one sentence.",
+        accepting=True,
+    )
+    assert "hot thought" in block.lower()
+    assert "CBT" in block or "cbt" in block.lower()
+
+
+@pytest.mark.asyncio
+async def test_fidelity_guard_appends_teach_when_off_modality(monkeypatch):
+    monkeypatch.setenv("ENABLE_CYCLE_SKILL_PLANS", "true")
+
+    class _Conn:
+        async def fetchrow(self, *a, **k):
+            return {
+                "id": "p1",
+                "title": "Thought check",
+                "total_steps": 3,
+                "current_step": 1,
+                "step_definitions": [
+                    {
+                        "step_number": 1,
+                        "skill": "thought_record",
+                        "modality": "CBT",
+                        "theme": "Catch",
+                        "practice": "Catch one hot thought in one sentence.",
+                    }
+                ],
+                "status": "suggested",
+                "source": "cycle_skill",
+                "cycle_domain": "financial",
+                "modality": "CBT",
+                "parent_plan_id": None,
+                "next_checkin_at": None,
+            }
+
+        async def fetchval(self, *a, **k):
+            return None
+
+        async def fetch(self, *a, **k):
+            return []
+
+        async def execute(self, *a, **k):
+            return None
+
+    class _Pool:
+        class _Ctx:
+            def __init__(self, c):
+                self.c = c
+
+            async def __aenter__(self):
+                return self.c
+
+            async def __aexit__(self, *a):
+                return False
+
+        def acquire(self):
+            return _Pool._Ctx(_Conn())
+
+    bad = (
+        "Would a simple grounding practice help, noticing your feet on the ground? "
+        "Let's try 5-4-3-2-1."
+    )
+    out = await csp.apply_skill_fidelity_guard(
+        _Pool(), "client1", "yes let's try", bad
+    )
+    assert "hot thought" in out.lower()
+    assert csp.score_skill_offer_fidelity(out, modality="CBT") >= 4

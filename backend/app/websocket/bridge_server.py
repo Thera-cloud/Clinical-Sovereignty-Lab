@@ -10767,6 +10767,23 @@ class AzureCortex:
                 except Exception:
                     pass
 
+            # QUANTUM-CRYSTAL-ARCH: cycle skill Clinical-AGI fidelity floor (teach on-modality)
+            if _role == "CLIENT" and _final_response.strip() and db_pool:
+                try:
+                    if os.environ.get("ENABLE_CYCLE_SKILL_PLANS", "").lower() in ("true", "1", "yes"):
+                        from app.services.cycle_skill_plan_service import apply_skill_fidelity_guard
+                        _sk_fixed = await apply_skill_fidelity_guard(
+                            db_pool,
+                            profile.get("username") or uid,
+                            _qg_verbatim_user_text or user_text,
+                            _final_response,
+                        )
+                        if _sk_fixed != _final_response:
+                            _final_response = _sk_fixed
+                            await self._send(uid, _final_response, client_context=_ctx, turn_id=_turn_id)
+                except Exception as _sk_err:
+                    print(f">>> [CYCLE-SKILL] fidelity guard error (non-fatal): {_sk_err}")
+
             # QUANTUM-CRYSTAL-ARCH — LIMINAL RESOLVE post-response
             if _lr_engine and lr_context and _final_response.strip():
                 try:

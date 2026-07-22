@@ -243,8 +243,8 @@ def score_skill_offer_fidelity(
     grounding_main = bool(_GROUNDING_ATTRACTOR_RE.search(text))
     teaches = bool(
         re.search(
-            r"\b(let'?s try|try this|the practice|step back|write|list 2|"
-            r"name one|say or write|role-play|notice 5)\b",
+            r"\b(let'?s (try|do)|try this|the practice|step back|write|list 2|"
+            r"name one|say or write|role-play|notice 5|catch one|optional .+ practice)\b",
             low,
         )
     )
@@ -900,3 +900,109 @@ def schedule_cycle_skill_plan_tick(
         )
     except Exception:
         pass
+
+
+def compose_skill_teach_block(
+    *,
+    modality: str,
+    skill: str,
+    practice: str,
+    accepting: bool,
+) -> str:
+    """Deterministic client-facing teach paragraph (Clinical-AGI floor)."""
+    mod = _norm_modality(modality)
+    skill_label = (skill or _skill_must_include({"skill": skill}, mod)).replace("_", " ")
+    practice = (practice or "").strip()
+    if accepting:
+        return (
+            f"Since you're willing — let's do this {mod} move ({skill_label}) now: "
+            f"{practice}"
+        )
+    return (
+        f"If it fits, here's one optional {mod} practice ({skill_label}): "
+        f"{practice} Want to try that?"
+    )
+
+
+async def apply_skill_fidelity_guard(
+    db_pool: Any,
+    user_id: str,
+    user_text: str,
+    response: str,
+    *,
+    min_score: int = 4,
+) -> str:
+    """
+    Post-LLM guarantee: if spoken reply drifts off-modality / doesn't teach,
+    append (or correct) a deterministic practice block so clients get a real skill.
+    """
+    if not cycle_skill_plans_enabled() or not db_pool or not user_id:
+        return response or ""
+    text = response or ""
+    username = await _resolve_username(db_pool, user_id)
+    plan = await _get_plan_row(db_pool, username)
+    if not plan:
+        # Pre-turn suggest may have raced; try once more for cycle-driven first offer
+        await ensure_suggested_plan_from_cycles(db_pool, username)
+        plan = await _get_plan_row(db_pool, username)
+    if not plan:
+        return text
+
+    step = _step_payload(
+        plan.get("step_definitions"), int(plan.get("current_step") or 1)
+    )
+    modality = str(plan.get("modality") or step.get("modality") or "")
+    skill = str(step.get("skill") or "")
+    practice = str(step.get("practice") or step.get("theme") or "").strip()
+    if not practice:
+        return text
+
+    accepting = bool(_ACCEPT_RE.search(user_text or ""))
+    advancing = bool(_ADVANCE_RE.search(user_text or ""))
+    score = score_skill_offer_fidelity(
+        text, modality=modality, skill=skill, practice=practice
+    )
+    mod = _norm_modality(modality)
+    grounding_wrong = bool(_GROUNDING_ATTRACTOR_RE.search(text)) and mod in (
+        "CBT",
+        "DBT",
+        "ACT",
+    )
+
+    # Advance turns: only patch if acknowledgment lacks skill name entirely
+    if advancing and plan.get("status") == "active":
+        if score >= 3:
+            return text
+        return (
+            f"{text.rstrip()}\n\n"
+            f"For the next step ({skill.replace('_', ' ') or mod}): {practice}"
+        ).strip()
+
+    if score >= min_score and not (accepting and score < 5 and grounding_wrong):
+        if accepting and score < 5:
+            # Force full teach on accept even if soft 4
+            block = compose_skill_teach_block(
+                modality=modality, skill=skill, practice=practice, accepting=True
+            )
+            if practice.lower()[:40] in text.lower():
+                return text
+            return f"{text.rstrip()}\n\n{block}".strip()
+        return text
+
+    block = compose_skill_teach_block(
+        modality=modality,
+        skill=skill,
+        practice=practice,
+        accepting=accepting or plan.get("status") == "active",
+    )
+
+    if grounding_wrong and score <= 2:
+        # Replace attractor-heavy reply with short join + correct skill
+        return (
+            "I hear that this has been looping and you want something usable. "
+            f"{block}"
+        ).strip()
+
+    if practice.lower()[:48] in text.lower():
+        return text
+    return f"{text.rstrip()}\n\n{block}".strip()
