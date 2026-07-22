@@ -171,8 +171,13 @@ _MODALITY_MARKERS: Dict[str, Tuple[str, ...]] = {
     ),
     "DBT": (
         "stop skill",
-        " stop,",
+        'called "stop"',
+        "called stop",
+        '"stop"',
+        " stop ",
+        "stopping",
         "take a step back",
+        "taking a step",
         "tipp",
         "urge-surf",
         "urge surf",
@@ -181,6 +186,9 @@ _MODALITY_MARKERS: Dict[str, Tuple[str, ...]] = {
         "describe without",
         "facts-only",
         "facts only",
+        "facts-only sentence",
+        "express (feeling)",
+        "clear ask",
     ),
     "ACT": (
         "defusion",
@@ -968,25 +976,38 @@ async def apply_skill_fidelity_guard(
         "DBT",
         "ACT",
     )
+    practice_l = practice.lower()
+    # Core skill must appear for suggested/accept turns (Clinical-AGI floor)
+    core_ok = False
+    if skill:
+        core_ok = skill.lower().replace("_", " ") in text.lower() or skill.lower() in text.lower()
+    if not core_ok:
+        core_ok = any(
+            m in text.lower()
+            for m in _MODALITY_MARKERS.get(mod, ())[:6]
+        )
+    if practice_l[:32] and practice_l[:32] in text.lower():
+        core_ok = True
 
     # Advance turns: only patch if acknowledgment lacks skill name entirely
     if advancing and plan.get("status") == "active":
-        if score >= 3:
+        if score >= 3 and core_ok:
             return text
         return (
             f"{text.rstrip()}\n\n"
             f"For the next step ({skill.replace('_', ' ') or mod}): {practice}"
         ).strip()
 
-    if score >= min_score and not (accepting and score < 5 and grounding_wrong):
-        if accepting and score < 5:
-            # Force full teach on accept even if soft 4
-            block = compose_skill_teach_block(
-                modality=modality, skill=skill, practice=practice, accepting=True
-            )
-            if practice.lower()[:40] in text.lower():
-                return text
-            return f"{text.rstrip()}\n\n{block}".strip()
+    # Suggested first offer: require teachable on-modality content (score>=4 AND core)
+    need = min_score
+    if plan.get("status") == "suggested" and not accepting:
+        need = 4
+        if score >= need and core_ok and not grounding_wrong:
+            return text
+    elif accepting:
+        if score >= 5 and core_ok:
+            return text
+    elif score >= min_score and core_ok and not grounding_wrong:
         return text
 
     block = compose_skill_teach_block(
@@ -996,13 +1017,12 @@ async def apply_skill_fidelity_guard(
         accepting=accepting or plan.get("status") == "active",
     )
 
-    if grounding_wrong and score <= 2:
-        # Replace attractor-heavy reply with short join + correct skill
+    if grounding_wrong and (score <= 2 or not core_ok):
         return (
             "I hear that this has been looping and you want something usable. "
             f"{block}"
         ).strip()
 
-    if practice.lower()[:48] in text.lower():
+    if practice_l[:48] in text.lower() and core_ok and score >= need:
         return text
     return f"{text.rstrip()}\n\n{block}".strip()

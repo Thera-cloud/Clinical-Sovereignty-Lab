@@ -223,7 +223,22 @@ async def chat(ws, text: str) -> str:
         json.dumps({"type": "nate_query", "text": text, "nate_query": text})
     )
     _, texts = await _recv_until(ws, {"nate_response", "ai_response"}, timeout=120)
-    return " ".join(texts)[-1200:]
+    # Fidelity guard may re-send a corrected full reply shortly after stream end
+    extra_deadline = time.monotonic() + 4.0
+    while time.monotonic() < extra_deadline:
+        try:
+            raw = await asyncio.wait_for(ws.recv(), timeout=0.8)
+            msg = json.loads(raw)
+            if msg.get("type") in ("nate_response", "ai_response"):
+                body = msg.get("text") or msg.get("response") or ""
+                if body:
+                    texts.append(str(body))
+        except Exception:
+            break
+    # Prefer last full message (guard patch) when longer / contains skill teach
+    if not texts:
+        return ""
+    return max(texts, key=len)[-2000:]
 
 
 async def run_technique(
