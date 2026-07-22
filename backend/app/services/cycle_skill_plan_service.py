@@ -95,12 +95,165 @@ _DECLINE_RE = re.compile(
 _MIN_CONFIDENCE = float(os.getenv("CYCLE_SKILL_MIN_CONFIDENCE", "0.55"))
 _CHECKIN_HOURS = int(os.getenv("CYCLE_SKILL_CHECKIN_HOURS", "48"))
 
+# Substitutions that collapse Clinical-AGI skill offers into generic soothing.
+_GROUNDING_ATTRACTOR_RE = re.compile(
+    r"\b(5-4-3-2-1|five things you see|feet on (the )?(floor|ground)|"
+    r"simple grounding practice|sensory grounding)\b",
+    re.I,
+)
+
+# Per-modality: phrases Nate must NOT use as the main offer when another skill is active.
+_FORBIDDEN_BY_MODALITY: Dict[str, str] = {
+    "CBT": (
+        "Do NOT make 5-4-3-2-1, feet-on-floor, or breath-only grounding the main practice. "
+        "If flooded, one 10-second orient is OK, then return to the hot thought / evidence work."
+    ),
+    "DBT": (
+        "Do NOT replace STOP/TIPP/urge-surf/DEAR MAN with a standalone 5-4-3-2-1 grounding lesson. "
+        "Teach the named DBT skill in this step."
+    ),
+    "ACT": (
+        "Do NOT replace defusion/values/committed action with sensory grounding as the practice. "
+        "Teach the ACT move named below."
+    ),
+    "grounding": (
+        "Stay with orienting / body anchor / 5-4-3-2-1 as written — do not invent CBT thought records."
+    ),
+    "mindfulness": (
+        "Teach observe/label or mindful return as written — do not swap in thought-challenging or TIPP."
+    ),
+}
+
 
 def cycle_skill_plans_enabled() -> bool:
     return os.getenv("ENABLE_CYCLE_SKILL_PLANS", "false").strip().lower() in (
         "1",
         "true",
         "yes",
+    )
+
+
+def _norm_modality(modality: str) -> str:
+    m = (modality or "").strip()
+    if m.upper() == "CBT":
+        return "CBT"
+    if m.upper() == "ACT":
+        return "ACT"
+    if m.upper() == "DBT":
+        return "DBT"
+    return m.lower() if m else "skills"
+
+
+def _skill_must_include(step: Dict[str, Any], modality: str) -> str:
+    skill = (step.get("skill") or "").strip()
+    if skill:
+        return skill.replace("_", " ")
+    mod = _norm_modality(modality)
+    return {
+        "CBT": "hot thought / thought check",
+        "DBT": "STOP or TIPP or DEAR MAN (as named in practice)",
+        "ACT": "defusion or values action",
+        "grounding": "5-4-3-2-1 or feet/seat/breath",
+        "mindfulness": "mindful observe or mindful return",
+    }.get(mod, "the named practice")
+
+
+def score_skill_offer_fidelity(
+    response: str,
+    *,
+    modality: str,
+    skill: str = "",
+    practice: str = "",
+) -> int:
+    """
+    Heuristic 0–5 Clinical-AGI score for spoken skill offers.
+    5 = on-modality + teachable steps; 1 = wrong modality (grounding attractor).
+    """
+    text = response or ""
+    if not text.strip():
+        return 0
+    mod = _norm_modality(modality)
+    low = text.lower()
+    score = 2  # warm baseline
+    skill_toks = [
+        t
+        for t in re.split(r"[\s_/]+", (skill or "").lower())
+        if len(t) >= 3 and t not in {"the", "and", "for"}
+    ]
+    practice_toks = [
+        w
+        for w in re.findall(r"[a-z0-9\-]{4,}", (practice or "").lower())
+        if w
+        not in {"then", "with", "that", "this", "from", "your", "have", "into"}
+    ][:8]
+    hit_skill = any(t in low for t in skill_toks) if skill_toks else False
+    hit_practice = sum(1 for t in practice_toks if t in low)
+    grounding_main = bool(_GROUNDING_ATTRACTOR_RE.search(text))
+    optional_tone = bool(
+        re.search(r"\b(if you want|optional|would you like|try|practice)\b", low)
+    )
+
+    if mod in ("CBT", "DBT", "ACT"):
+        if grounding_main and not hit_skill and hit_practice < 2:
+            return 1
+        if hit_skill or hit_practice >= 2:
+            score = 4
+        if hit_skill and hit_practice >= 2:
+            score = 5
+        if optional_tone and score >= 4:
+            score = min(5, score)
+        return score
+
+    if mod in ("grounding", "mindfulness"):
+        if grounding_main or hit_skill or hit_practice >= 2:
+            score = 4
+        if (grounding_main or hit_skill) and hit_practice >= 1:
+            score = 5
+        return score
+
+    if hit_skill or hit_practice >= 2:
+        return 4
+    return score
+
+
+def build_fidelity_directive(
+    *,
+    modality: str,
+    status: str,
+    title: str,
+    theme: str,
+    practice: str,
+    skill: str,
+    step_num: int,
+    total_steps: int,
+) -> str:
+    """Clinical-AGI lock: force on-modality teachable offer (not grounding default)."""
+    mod = _norm_modality(modality)
+    forbid = _FORBIDDEN_BY_MODALITY.get(
+        mod,
+        "Do not substitute a different modality than the one named here.",
+    )
+    must = skill or _skill_must_include({"skill": skill}, mod)
+    if status == "suggested":
+        return (
+            f"SKILL FIDELITY LOCK ({mod}) — REQUIRED for this reply:\n"
+            f"1) One short empathic join (1–2 sentences). Avoid repeating "
+            f"\"Behind the feeling…\" every turn.\n"
+            f"2) Offer THIS optional practice only — modality {mod}, skill \"{must}\", "
+            f"step focus \"{theme}\" from \"{title}\".\n"
+            f"REQUIRED PRACTICE TEXT (teach this technique; light paraphrase OK, "
+            f"same skill required):\n\"{practice}\"\n"
+            f"3) Ask if they want to try it. Do not dump a syllabus.\n"
+            f"FORBIDDEN: {forbid}\n"
+            f"If you name a practice, it must be {mod} ({must}), not a different school."
+        )
+    return (
+        f"SKILL FIDELITY LOCK ({mod}) — ACTIVE PRACTICE step {step_num}/{total_steps}:\n"
+        f"Title: \"{title}\". Focus: {theme}. Skill: {must}.\n"
+        f"REQUIRED PRACTICE: \"{practice}\"\n"
+        f"If they completed the last step, acknowledge THAT skill by name, then offer "
+        f"the practice above (or confirm completion if they finished the plan).\n"
+        f"FORBIDDEN: {forbid}"
     )
 
 
@@ -221,10 +374,83 @@ def _step_payload(steps: Any, step_num: int) -> Dict[str, Any]:
     return {}
 
 
+async def _recent_decline_cooldown(db_pool: Any, username: str) -> bool:
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchval(
+                f"""
+                SELECT id FROM nate_therapeutic_plans
+                WHERE {_identity_clause().strip()}
+                  AND source = 'cycle_skill'
+                  AND status = 'abandoned'
+                  AND updated_at > NOW() - INTERVAL '7 days'
+                LIMIT 1
+                """,
+                username,
+            )
+        return bool(row)
+    except Exception:
+        return False
+
+
+async def ensure_suggested_plan_from_cycles(
+    db_pool: Any, user_id: str
+) -> Optional[Dict[str, Any]]:
+    """
+    Pre-turn: create suggested plan from strongest cycle so fidelity context
+    exists BEFORE the LLM reply (not only after).
+    """
+    if not cycle_skill_plans_enabled() or not db_pool or not user_id:
+        return None
+    username = await _resolve_username(db_pool, user_id)
+    existing = await _get_plan_row(db_pool, username)
+    if existing:
+        return None
+    if await _recent_decline_cooldown(db_pool, username):
+        return None
+    cycles = await fetch_user_cycle_signals(db_pool, username)
+    if not cycles:
+        return None
+    domain = str(cycles[0].get("domain") or "")
+    mapping = _DOMAIN_TEMPLATE.get(domain)
+    if not mapping:
+        return None
+    tpl_id, modality, _ = mapping
+    tpl = await _load_template(db_pool, tpl_id)
+    if not tpl:
+        return None
+    new_id = await _insert_suggested_plan(
+        db_pool,
+        user_id=username,
+        template=tpl,
+        domain=domain,
+        modality=modality,
+        parent_plan_id=None,
+    )
+    if not new_id:
+        return None
+    logger.info(
+        "cycle_skill_plan: pre-turn suggested %s modality=%s domain=%s",
+        new_id,
+        modality,
+        domain,
+    )
+    return {
+        "ok": True,
+        "action": "suggested",
+        "plan_id": new_id,
+        "domain": domain,
+        "modality": modality,
+    }
+
+
 async def build_cycle_skill_plan_context(db_pool: Any, user_id: str) -> str:
-    """Prompt block: cycle signals + suggested/active micro-plan guidance."""
+    """Prompt block: cycle signals + Clinical-AGI fidelity-locked skill offer."""
     if not cycle_skill_plans_enabled() or not db_pool or not user_id:
         return ""
+
+    # QUANTUM-CRYSTAL-ARCH: suggest before generation so first turn is on-modality
+    await ensure_suggested_plan_from_cycles(db_pool, user_id)
 
     cycles = await fetch_user_cycle_signals(db_pool, user_id)
     plan = await _get_plan_row(db_pool, user_id)
@@ -236,9 +462,9 @@ async def build_cycle_skill_plan_context(db_pool: Any, user_id: str) -> str:
         conf = float(top.get("confidence") or 0)
         parts.append(
             f"CYCLE SIGNAL: Recent {domain.replace('_', ' ')} pattern "
-            f"(confidence {conf:.2f}). Prefer one short practice (grounding, mindful "
-            f"noticing, or a CBT/DBT/ACT skill) over generic advice if the client is "
-            f"open — body/ground first when activated; never a curriculum dump."
+            f"(confidence {conf:.2f}). If a SKILL FIDELITY LOCK is present below, "
+            f"that lock OVERRIDES any impulse to offer generic grounding or coping tips. "
+            f"Never dump a multi-week curriculum."
         )
         if len(cycles) > 1:
             others = ", ".join(
@@ -248,27 +474,27 @@ async def build_cycle_skill_plan_context(db_pool: Any, user_id: str) -> str:
             parts.append(f"Other recent cycle signals: {others}.")
 
     if plan:
-        step = _step_payload(plan.get("step_definitions"), int(plan.get("current_step") or 1))
+        step = _step_payload(
+            plan.get("step_definitions"), int(plan.get("current_step") or 1)
+        )
         practice = step.get("practice") or step.get("theme") or "this week's practice"
         theme = step.get("theme") or ""
-        status = plan.get("status")
+        status = str(plan.get("status") or "")
         modality = plan.get("modality") or step.get("modality") or ""
-        if status == "suggested":
-            parts.append(
-                f"SKILLS PRACTICE SUGGESTION ({modality or 'skills'}, not yet accepted): "
-                f"\"{plan.get('title')}\" — step 1 focus: {theme}. "
-                f"Offer once, warmly, as optional practice: {practice} "
-                f"Ask if they want to try it — do NOT label it as a treatment program or dump a reading list. "
-                f"If they decline, drop it. If they accept, treat it as active."
+        skill = str(step.get("skill") or "")
+        parts.append(
+            build_fidelity_directive(
+                modality=str(modality),
+                status=status,
+                title=str(plan.get("title") or "skills practice"),
+                theme=str(theme),
+                practice=str(practice),
+                skill=skill,
+                step_num=int(plan.get("current_step") or 1),
+                total_steps=int(plan.get("total_steps") or 1),
             )
-        else:
-            parts.append(
-                f"ACTIVE SKILLS PRACTICE: Step {plan.get('current_step')} of "
-                f"{plan.get('total_steps')} — {plan.get('title')}. "
-                f"Focus: {theme}. Practice: {practice} "
-                f"Check in on last practice briefly; if they completed it, acknowledge and "
-                f"offer the next step only. Keep offers short (2–4 sentences)."
-            )
+        )
+        if status == "active":
             check = step.get("check_in")
             if check:
                 parts.append(f"CHECK-IN PROMPT (use if natural): {check}")
@@ -278,9 +504,10 @@ async def build_cycle_skill_plan_context(db_pool: Any, user_id: str) -> str:
         if mapping:
             _, modality, _ = mapping
             parts.append(
-                f"No active skills practice yet. You may offer ONE short "
-                f"{modality}-informed practice matched to the {domain.replace('_', ' ')} "
-                f"pattern — invite collaboration; never prescribe a multi-week syllabus."
+                f"No plan row yet (cooldown or template miss). If you offer a skill, "
+                f"use one short {modality}-informed practice for "
+                f"{str(domain).replace('_', ' ')} — not a generic grounding default "
+                f"unless modality is grounding/mindfulness."
             )
 
     if not parts:
@@ -590,53 +817,13 @@ async def maybe_tick_cycle_skill_plan(
                 out = {"ok": True, "action": "checkin_scheduled", "plan_id": str(plan["id"])}
         return out if out.get("action") != "noop" else {"ok": True, "action": "has_plan"}
 
-    # No plan — maybe suggest from strongest cycle (cooldown after decline)
-    try:
-        async with db_pool.acquire() as conn:
-            recent_decline = await conn.fetchval(
-                f"""
-                SELECT id FROM nate_therapeutic_plans
-                WHERE {_identity_clause().strip()}
-                  AND source = 'cycle_skill'
-                  AND status = 'abandoned'
-                  AND updated_at > NOW() - INTERVAL '7 days'
-                LIMIT 1
-                """,
-                username,
-            )
-        if recent_decline:
-            return {"ok": True, "action": "cooldown"}
-    except Exception:
-        pass
-
-    cycles = await fetch_user_cycle_signals(db_pool, username)
-    if not cycles:
-        return out
-    domain = str(cycles[0].get("domain") or "")
-    mapping = _DOMAIN_TEMPLATE.get(domain)
-    if not mapping:
-        return out
-    tpl_id, modality, _ = mapping
-    tpl = await _load_template(db_pool, tpl_id)
-    if not tpl:
-        return out
-    new_id = await _insert_suggested_plan(
-        db_pool,
-        user_id=username,
-        template=tpl,
-        domain=domain,
-        modality=modality,
-        parent_plan_id=None,
-    )
-    if not new_id:
-        return out
-    return {
-        "ok": True,
-        "action": "suggested",
-        "plan_id": new_id,
-        "domain": domain,
-        "modality": modality,
-    }
+    # Fallback if pre-turn ensure missed (race / no plan context path)
+    if await _recent_decline_cooldown(db_pool, username):
+        return {"ok": True, "action": "cooldown"}
+    created = await ensure_suggested_plan_from_cycles(db_pool, username)
+    if created:
+        return created
+    return out
 
 
 def schedule_cycle_skill_plan_tick(

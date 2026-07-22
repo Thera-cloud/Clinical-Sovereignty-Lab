@@ -78,3 +78,59 @@ async def test_tick_noop_when_flag_off(monkeypatch):
         object(), user_id="u1", user_text="yes let's try"
     )
     assert out["action"] == "noop"
+
+
+def test_fidelity_directive_locks_cbt_not_grounding():
+    block = csp.build_fidelity_directive(
+        modality="CBT",
+        status="suggested",
+        title="Thought check practice (CBT-informed)",
+        theme="Catch the automatic thought",
+        practice="Catch one hot thought: write situation + the automatic thought.",
+        skill="thought_record",
+        step_num=1,
+        total_steps=3,
+    )
+    assert "SKILL FIDELITY LOCK (CBT)" in block
+    assert "hot thought" in block.lower()
+    assert "FORBIDDEN" in block
+    assert "5-4-3-2-1" in block  # named as forbidden attractor
+
+
+def test_score_skill_offer_fidelity_penalizes_grounding_for_cbt():
+    bad = (
+        "Would a simple grounding practice help, something like noticing "
+        "your feet on the ground? Let's try 5-4-3-2-1."
+    )
+    good = (
+        "If you want, we can catch one hot thought: write the situation and "
+        "the automatic thought in one sentence — no fixing yet."
+    )
+    assert (
+        csp.score_skill_offer_fidelity(
+            bad, modality="CBT", skill="thought_record", practice="hot thought"
+        )
+        <= 2
+    )
+    assert (
+        csp.score_skill_offer_fidelity(
+            good,
+            modality="CBT",
+            skill="thought_record",
+            practice="Catch one hot thought: write situation",
+        )
+        >= 4
+    )
+
+
+def test_score_grounding_offer_high_when_on_modality():
+    text = (
+        "Optional 5-4-3-2-1: name 5 things you see, 4 you feel, 3 you hear, "
+        "2 you smell, 1 taste."
+    )
+    assert (
+        csp.score_skill_offer_fidelity(
+            text, modality="grounding", skill="5_4_3_2_1", practice="5-4-3-2-1"
+        )
+        >= 4
+    )

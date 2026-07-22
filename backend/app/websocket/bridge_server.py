@@ -9728,6 +9728,9 @@ class AzureCortex:
         {vault_context}
         {transfer_summary_context}
 
+        {plan_context_block}
+        {"PRIORITY — THERAPEUTIC / CYCLE SKILL PLAN: If SKILL FIDELITY LOCK appears above, teach THAT modality and REQUIRED PRACTICE only. Do not substitute generic 5-4-3-2-1 / feet-on-floor grounding unless the lock modality is grounding or mindfulness. Offer at most one practice; check in before advancing; never dump a syllabus." if plan_context_block else ""}
+
         THERAPEUTIC WORKBOOK GUIDANCE (Evidence-based techniques and frameworks from clinical materials - apply these principles in your responses):
         {workbook_guidance if workbook_guidance else "None available"}
         
@@ -9748,9 +9751,6 @@ class AzureCortex:
 
         {trial_context_block}
         {"Note: TRIAL CONTEXT summarizes the anonymous trial chat before this account was created." if trial_context_block else ""}
-
-        {plan_context_block}
-        {"Note: THERAPEUTIC / CYCLE SKILL PLAN context — coach steps and/or cycle-matched short practices (grounding, mindful noticing, CBT/DBT/ACT skills). Offer at most one practice; prefer body/ground first when activated; stack only after the client completes a step. Check in on prior practice before advancing. Never dump a syllabus or reading list." if plan_context_block else ""}
 
         FAMILY SANCTUARY HISTORY (This is the users OWN conversation history from sessions they participated in. It is appropriate and therapeutic to reference their words back to them. This is NOT confidential information about others - it is their own experience.):
         {sanctuary_context}
