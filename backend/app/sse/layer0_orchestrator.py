@@ -114,8 +114,17 @@ class SSEOrchestrator:
         logger.info("SSEOrchestrator: started with %d schedule(s) + heartbeat", len(schedules))
 
     async def reload(self):
-        """Re-read schedules without restarting the scheduler."""
-        self.scheduler.remove_all_jobs()
+        """Re-read schedules without restarting the scheduler.
+
+        # QUANTUM-CRYSTAL-ARCH — must clear singleton gate or start() no-ops
+        # after remove_all_jobs(), leaving heartbeat/cron permanently dead.
+        """
+        global _SINGLETON_STARTED
+        try:
+            self.scheduler.remove_all_jobs()
+        except Exception as e:
+            logger.warning("SSEOrchestrator.reload: remove_all_jobs failed: %s", e)
+        _SINGLETON_STARTED = False
         await self.start()
 
     def shutdown(self):
