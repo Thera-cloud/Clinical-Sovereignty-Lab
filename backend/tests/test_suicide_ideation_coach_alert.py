@@ -37,6 +37,7 @@ def _load(name: str, filename: str):
         sys.modules["app.services"] = svc
     sys.modules["app"].services = sys.modules["app.services"]
     spec.loader.exec_module(mod)
+    setattr(sys.modules["app.services"], name, mod)
     return mod
 
 
@@ -75,8 +76,9 @@ match_violence_user_text = lex.match_violence_user_text
 
 
 def _patch_dispatch(mock):
-    return patch(
-        "app.services.sensitive_alert_dispatcher.dispatch_sensitive_alert",
+    return patch.object(
+        sys.modules["app.services.sensitive_alert_dispatcher"],
+        "dispatch_sensitive_alert",
         new=mock,
     )
 
