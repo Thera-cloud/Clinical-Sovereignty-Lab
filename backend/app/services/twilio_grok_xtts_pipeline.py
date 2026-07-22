@@ -217,11 +217,23 @@ async def _build_grounded_voice_prompt(username: str, db_pool):
     directory_block = ""
     try:
         if os.getenv("ENABLE_CLINICAL_TECHNIQUE_DIRECTORY", "").lower() in ("true", "1", "yes"):
-            from app.services.clinical_technique_directory import build_directory_context
+            from app.services.clinical_technique_directory import (
+                directory_context_for_surface,
+                extract_plan_focus_theme,
+            )
             from app.services.nate_therapeutic_plan_service import get_active_plan_context
 
             _pc = await get_active_plan_context(db_pool, username) if db_pool and username else ""
-            _dc = build_directory_context(_pc or "skills practice", active_plan_theme=(_pc or "")[:200])
+            _theme = extract_plan_focus_theme(_pc or "")
+            _dc = await directory_context_for_surface(
+                _theme or "skills practice grounding emotion regulation",
+                db_pool=db_pool,
+                user_id=username or "",
+                search_proxy=_get_voice_search_proxy(),
+                active_plan_theme=_theme,
+                allow_web=False,
+                max_techniques=3,
+            )
             if _pc or _dc:
                 directory_block = (
                     "=== CLINICAL DIRECTORY / PLAN (plain language only on call) ===\n"
@@ -1480,6 +1492,39 @@ async def run_twilio_grok_xtts_bridge(
                                 print("[VOICE-WEB-SEARCH] no results — Grok will respond naturally")
                         except Exception as e:
                             logger.warning("Web search pipeline failed (non-fatal): %s", e)
+
+                    # QUANTUM-CRYSTAL-ARCH: mid-call clinical directory / care-plan assist
+                    elif (
+                        os.getenv("ENABLE_CLINICAL_TECHNIQUE_DIRECTORY", "").lower()
+                        in ("true", "1", "yes")
+                        and session_username
+                        and ctx.get("db_pool")
+                    ):
+                        try:
+                            from app.services.clinical_technique_directory import (
+                                directory_context_for_surface,
+                                is_care_plan_request,
+                                wants_web_enrichment,
+                            )
+                            if is_care_plan_request(user_txt) or wants_web_enrichment(user_txt):
+                                print(f"[VOICE-CLINICAL-DIR] care-plan/enrich: '{user_txt[:80]}'")
+                                _vdir = await directory_context_for_surface(
+                                    user_txt,
+                                    db_pool=ctx["db_pool"],
+                                    user_id=session_username,
+                                    search_proxy=_get_voice_search_proxy(),
+                                    suggest_plan=True,
+                                    allow_web=True,
+                                    max_techniques=3,
+                                )
+                                if _vdir:
+                                    await _inject_memory_context(
+                                        grok_ws,
+                                        session_username,
+                                        "[CLINICAL DIRECTORY / CARE PLAN]\n" + _vdir,
+                                    )
+                        except Exception as e:
+                            logger.warning("Voice clinical directory inject failed (non-fatal): %s", e)
 
         except asyncio.CancelledError:
             raise

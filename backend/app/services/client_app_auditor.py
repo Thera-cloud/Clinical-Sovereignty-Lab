@@ -115,6 +115,14 @@ TAB_ENDPOINTS = [
             ("POST", "/api/calls/initiate"),
         ],
     },
+    {
+        "tab": "Clinical Technique Directory",
+        "tab_num": 12,
+        "endpoints": [
+            ("GET", "/api/clinical-directory/health"),
+            ("GET", "/api/clinical-directory/plans"),
+        ],
+    },
 ]
 
 

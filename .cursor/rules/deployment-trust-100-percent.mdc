@@ -52,7 +52,7 @@ After deploying backend changes, follow this exact sequence to ensure all 23 aud
 | Command Tab | 25/25 | Sovereign Command endpoints |
 | The Eye | 21/21 | The Eye dashboard endpoints |
 | Login | 2/2 | WebSocket login (client + coach) |
-| Client App | 23/23 | Client-facing REST endpoints |
+| Client App | 25/25 | Client-facing REST endpoints |
 | Coach Dojo | 55/55 | Coach portal, DOJO, Night School, Coach QuickBooks |
 | Billing | 35/35 | Billing pipeline + discount management + sync-stripe endpoints |
 | Defense | 8/8 | Hive Defense subsystem |

@@ -70,7 +70,7 @@ After EVERY deploy to GREEN, before declaring done:
 |-------------------------------------|---------:|----------------------------------------------------------|
 | `command_endpoint_count`            |       78 | `backend/app/services/command_tab_auditor.py`            |
 | `eye_endpoint_count`                |       21 | `backend/app/services/the_eye_auditor.py`                |
-| `client_app_endpoint_count`         |       23 | `backend/app/services/client_app_auditor.py`             |
+| `client_app_endpoint_count`         |       25 | `backend/app/services/client_app_auditor.py`             |
 | `coach_dojo_endpoint_count`         |       56 | `backend/app/services/coach_dojo_auditor.py`             |
 | `nevedal_lab_endpoint_count`        |       31 | `backend/app/services/nevedal_lab_auditor.py`            |
 | `dojo_session_endpoint_count`       |       29 | `backend/app/services/dojo_session_auditor.py`           |

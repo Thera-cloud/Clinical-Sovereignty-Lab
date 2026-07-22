@@ -5858,6 +5858,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   List<dynamic> _schedule = [];
   Map<String, dynamic>? _selectedClientBrief;
   List<Map<String, dynamic>> _clientSkillPlans = [];
+  int _clinicalDirectoryPlanCount = 0;
   final Map<String, bool> _assistEnabledBySession = {};
   final Map<String, String> _sessionServiceMode =
       {}; // live_id -> green|yellow|blue|grey
@@ -7628,6 +7629,22 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             .map((e) => Map<String, dynamic>.from(e))
             .toList();
       });
+    } catch (_) {}
+    // QUANTUM-CRYSTAL-ARCH: clinical directory availability for coach briefing
+    try {
+      final hUri =
+          Uri.parse('${AppConfig.apiBaseUrl}/api/clinical-directory/health');
+      final hResp = await http.get(hUri, headers: {
+        'Authorization': 'Bearer $token',
+      });
+      if (!mounted || hResp.statusCode != 200) return;
+      final h = jsonDecode(hResp.body);
+      if (h is Map && h['enabled'] == true) {
+        setState(() {
+          _clinicalDirectoryPlanCount =
+              (h['plan_templates'] as num?)?.toInt() ?? 0;
+        });
+      }
     } catch (_) {}
   }
 
@@ -9810,6 +9827,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           // Nevedal metrics
           NevedalMetricsGrid(metrics: metrics),
 
+          if (_clinicalDirectoryPlanCount > 0) ...[
+            const SizedBox(height: 16),
+            Text(
+              "CLINICAL DIRECTORY: $_clinicalDirectoryPlanCount care-plan templates available — Nate can suggest when the client asks for a care/treatment plan.",
+              style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11, height: 1.4),
+            ),
+          ],
           if (_clientSkillPlans.isNotEmpty) ...[
             const SizedBox(height: 24),
             const Text(

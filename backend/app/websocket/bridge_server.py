@@ -9163,18 +9163,18 @@ class AzureCortex:
             if os.environ.get("ENABLE_CLINICAL_TECHNIQUE_DIRECTORY", "").lower() in ("true", "1", "yes"):
                 try:
                     from app.services.clinical_technique_directory import (
-                        build_directory_context_for_turn,
-                        maybe_create_suggested_care_plan,
+                        directory_context_for_surface,
+                        extract_plan_focus_theme,
                     )
                     _uid = _uname or _hw_id
-                    await maybe_create_suggested_care_plan(
-                        _cpool, user_id=_uid, user_text=user_text or ""
-                    )
-                    _dc = await build_directory_context_for_turn(
+                    _theme = extract_plan_focus_theme("\n".join(blocks))
+                    _dc = await directory_context_for_surface(
                         user_text or "",
                         db_pool=_cpool,
                         user_id=_uid,
                         search_proxy=search_proxy,
+                        active_plan_theme=_theme,
+                        suggest_plan=True,
                     )
                     if _dc:
                         blocks.append(_dc)
@@ -11153,6 +11153,15 @@ class AzureCortex:
                     sanctuary_crystal_ctx = ((sanctuary_crystal_ctx + "\n\n") if sanctuary_crystal_ctx else "") + _sk
             except Exception:
                 pass
+            # QUANTUM-CRYSTAL-ARCH: clinical technique directory (family surface)
+            try:
+                from app.services.clinical_technique_directory import directory_context_for_surface as _cd_surf
+                _cd_uid = (family_profiles[0].get("hardware_id") if family_profiles else "") or ""
+                _cd = await _cd_surf((sanctuary_data.get("message") or sanctuary_data.get("topic") or "family communication")[:400], db_pool=db_pool, user_id=_cd_uid, search_proxy=search_proxy, allow_web=False, max_techniques=2)
+                if _cd:
+                    sanctuary_crystal_ctx = ((sanctuary_crystal_ctx + "\n\n") if sanctuary_crystal_ctx else "") + _cd
+            except Exception:
+                pass
 
             # Pull short, relevant workbook guidance (local RAG) if available
             workbook_guidance = ""
@@ -11578,6 +11587,14 @@ class AzureCortex:
                 source="group_coaching", query_text=conversation[:200],
             )
             _gc_scopes = scopes_from_recall_context(gc_crystal_ctx)  # QUANTUM-CRYSTAL-ARCH
+            # QUANTUM-CRYSTAL-ARCH: clinical technique directory (group coaching)
+            try:
+                from app.services.clinical_technique_directory import directory_context_for_surface as _cd_gc
+                _cdg = await _cd_gc(conversation[:400], db_pool=db_pool, user_id=target_member.get("hardware_id", "") or "", search_proxy=search_proxy, allow_web=False, max_techniques=2)
+                if _cdg:
+                    gc_crystal_ctx = ((gc_crystal_ctx or "") + "\n\n" + _cdg).strip()
+            except Exception:
+                pass
 
             # Pull short, relevant workbook guidance (local RAG) if available
             workbook_guidance = ""
@@ -11876,10 +11893,17 @@ class AzureCortex:
                         pc_crystal_ctx = ((pc_crystal_ctx or "") + "\n\n" + _pc_sk).strip()
                 except Exception:
                     pass
-                
                 # Get coaching session context
                 attempt_number = coaching_session.get("attempt_number", 1)
                 coaching_messages = coaching_session.get("messages", [])
+                # QUANTUM-CRYSTAL-ARCH: clinical technique directory (private coaching)
+                try:
+                    from app.services.clinical_technique_directory import directory_context_for_surface as _cd_pc
+                    _cdp = await _cd_pc(coaching_session.get("triggering_message", "") or trigger, db_pool=db_pool, user_id=member_id or "", search_proxy=search_proxy, suggest_plan=True, allow_web=False, max_techniques=2)
+                    if _cdp:
+                        pc_crystal_ctx = ((pc_crystal_ctx or "") + "\n\n" + _cdp).strip()
+                except Exception:
+                    pass
                 
                 # Format private conversation so far
                 private_convo = ""

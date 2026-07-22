@@ -59,7 +59,7 @@ for t in TAB_ENDPOINTS:
 | Sovereign Command | `command_tab_audit_sent` | `command_endpoint_count` | 25 | 130s |
 | The Eye | `eye_tab_audit_sent` | `eye_endpoint_count` | 21 | 140s |
 | Login | `login_audit_sent` | `login_test_accounts` | 2 | 150s |
-| Client App | `client_app_audit_sent` | `client_app_endpoint_count` | 23 | 160s |
+| Client App | `client_app_audit_sent` | `client_app_endpoint_count` | 25 | 160s |
 | Coach & DOJO | `coach_dojo_audit_sent` | `coach_dojo_endpoint_count` | 55 | 170s |
 | Billing | `billing_audit_sent` | `billing_endpoint_count` | 32 | 180s |
 | Defense | `defense_audit_sent` | `defense_subsystem_count` | 8 | 190s |

@@ -94,3 +94,26 @@ def test_disabled_returns_empty(monkeypatch):
     mod = _load_mod()
     mod.load_directory.cache_clear()
     assert mod.build_directory_context("care plan for anxiety") == ""
+
+
+def test_synthetic_technique_and_merge(_enable_directory):
+    mod = _enable_directory
+    synth = mod._synthetic_technique_from_enrichment(
+        query="DBT TIPP skill",
+        summary="- Tip the temperature\n- Intense exercise\n- Paced breathing",
+        modality_hint="dbt",
+        technique_hint="TIPP",
+    )
+    assert synth["id"].startswith("web_")
+    assert synth["name"] == "TIPP"
+    mod._promoted_techniques = [synth]
+    hits = mod.search_techniques("TIPP temperature intense")
+    assert any(h.get("id") == synth["id"] for h in hits)
+
+
+def test_extract_plan_focus_theme(_enable_directory):
+    mod = _enable_directory
+    theme = mod.extract_plan_focus_theme(
+        "COACH PLAN CONTEXT (coach): Step 1 of 4 — Anxiety. This week's focus: panic body cues."
+    )
+    assert "panic" in theme.lower()

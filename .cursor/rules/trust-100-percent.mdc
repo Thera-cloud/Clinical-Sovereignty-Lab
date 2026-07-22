@@ -25,7 +25,7 @@ Trust Enforcer (meta-agent)
 ├── Nevedal Research Lab ........ 30 checks (24 REST + 6 DB pipeline)
 ├── Billing Pipeline ........... 35 endpoints
 ├── Coach & DOJO ............... 55 endpoints
-├── Client App ................. 23 endpoints
+├── Client App ................. 25 endpoints
 ├── System Integrity ........... 18 checks
 ├── Tier Gating ................ 12 tests
 ├── WebSocket Flows ............ 10 tests
@@ -180,7 +180,7 @@ After deploying any backend, database, or infrastructure change:
 | Billing | 35 | `billing_endpoint_count` |
 | Coach & DOJO | 55 | `coach_dojo_endpoint_count` |
 | System Integrity | 18 | `system_integrity_check_count` |
-| Client App | 23 | `client_app_endpoint_count` |
+| Client App | 25 | `client_app_endpoint_count` |
 | Tier Gating | 12 | `tier_gate_test_count` |
 | WS Flows | 10 | `ws_flow_test_count` |
 | Defense | 8 | `defense_subsystem_count` |

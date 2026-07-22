@@ -135,6 +135,21 @@ async def lifespan(app: FastAPI):
     # Store pool in app state
     app.state.db_pool = db_pool
 
+    # QUANTUM-CRYSTAL-ARCH: SecureSearchProxy for clinical directory enrich + related APIs
+    try:
+        from app.services.search_proxy import SecureSearchProxy
+        import os as _os_sp
+        from pathlib import Path as _Path_sp
+
+        _sp_dir = _os_sp.getenv("DATA_DIR") or str(_Path_sp("/app/data"))
+        app.state.search_proxy = SecureSearchProxy(
+            _sp_dir, _os_sp.getenv("BING_SEARCH_API_KEY", "")
+        )
+        print("   ✅ search_proxy on app.state")
+    except Exception as _sp_err:
+        app.state.search_proxy = None
+        print(f"   ⚠️  search_proxy init failed: {_sp_err}")
+
     # Share db_pool with twilio_webhook and sendgrid_inbound routers
     twilio_webhook.router._db_pool = db_pool
     try:

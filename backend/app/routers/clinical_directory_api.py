@@ -42,13 +42,28 @@ def _pool(request: Request):
 
 
 @router.get("/health")
-async def health() -> Dict[str, Any]:
+async def health(request: Request) -> Dict[str, Any]:
+    from app.services.clinical_technique_directory import (
+        promoted_technique_count,
+        refresh_promoted_techniques,
+    )
+
     data = load_directory() if clinical_directory_enabled() else {}
+    grown = 0
+    if clinical_directory_enabled():
+        pool = getattr(request.app.state, "db_pool", None)
+        if pool:
+            grown = await refresh_promoted_techniques(pool)
+        else:
+            grown = promoted_technique_count()
+    seed_tech = len(data.get("techniques") or [])
     return {
         "status": "ok",
         "enabled": clinical_directory_enabled(),
         "modalities": len(data.get("modalities") or []),
-        "techniques": len(data.get("techniques") or []),
+        "techniques": seed_tech + grown,
+        "techniques_seed": seed_tech,
+        "techniques_grown": grown,
         "plan_templates": len(data.get("plan_templates") or []),
     }
 
@@ -163,16 +178,7 @@ async def enrich(
         raise HTTPException(404, "Clinical technique directory disabled")
     proxy = getattr(request.app.state, "search_proxy", None)
     if proxy is None:
-        # Best-effort construct (same pattern as bridge)
-        try:
-            from app.services.search_proxy import SecureSearchProxy
-            import os
-            from pathlib import Path
-
-            data_dir = os.getenv("DATA_DIR") or str(Path("/app/data"))
-            proxy = SecureSearchProxy(data_dir)
-        except Exception as e:
-            raise HTTPException(503, f"Search unavailable: {e}") from e
+        raise HTTPException(503, "Search proxy not initialized on app.state")
     uid = user.get("username") or user.get("hardware_id") or "coach"
     block = await enrich_from_web(
         body.query,

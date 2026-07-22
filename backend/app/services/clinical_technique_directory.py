@@ -5,15 +5,22 @@ Psychoeducation / coaching scaffolding for Little Nate; not licensed diagnosis o
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import re
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("nate.clinical_directory")
+
+# QUANTUM-CRYSTAL-ARCH: in-process merge of DB-promoted techniques (directory growth)
+_promoted_techniques: List[Dict[str, Any]] = []
+_promoted_loaded_at: float = 0.0
+_PROMOTED_TTL_S = 120.0
 
 _DATA_PATH = (
     Path(__file__).resolve().parent.parent / "data" / "clinical_technique_directory.json"
@@ -103,9 +110,26 @@ def _technique_blob(t: Dict[str, Any]) -> str:
     )
 
 
-def search_techniques(query: str, *, limit: int = 6) -> List[Dict[str, Any]]:
+def _all_techniques() -> List[Dict[str, Any]]:
+    """Seed JSON techniques + promoted web-grown entries."""
     data = load_directory()
-    techniques = data.get("techniques") or []
+    seed = [t for t in (data.get("techniques") or []) if isinstance(t, dict)]
+    seen = {str(t.get("id") or "") for t in seed if t.get("id")}
+    grown: List[Dict[str, Any]] = []
+    for t in _promoted_techniques:
+        if not isinstance(t, dict):
+            continue
+        tid = str(t.get("id") or "")
+        if tid and tid in seen:
+            continue
+        if tid:
+            seen.add(tid)
+        grown.append(t)
+    return seed + grown
+
+
+def search_techniques(query: str, *, limit: int = 6) -> List[Dict[str, Any]]:
+    techniques = _all_techniques()
     q = _norm(query)
     if not q or not techniques:
         return []
@@ -161,7 +185,7 @@ def search_modalities(query: str, *, limit: int = 5) -> List[Dict[str, Any]]:
 
 def get_technique(technique_id: str) -> Optional[Dict[str, Any]]:
     tid = (technique_id or "").strip().lower()
-    for t in load_directory().get("techniques") or []:
+    for t in _all_techniques():
         if isinstance(t, dict) and str(t.get("id") or "").lower() == tid:
             return t
     return None
@@ -361,6 +385,80 @@ async def fetch_persisted_enrichments(
         return []
 
 
+def _synthetic_technique_from_enrichment(
+    *,
+    query: str,
+    summary: str,
+    modality_hint: str = "",
+    technique_hint: str = "",
+) -> Dict[str, Any]:
+    """Build a searchable technique dict from a web enrichment (unverified)."""
+    digest = hashlib.sha256(f"{query}|{summary[:400]}".encode()).hexdigest()[:12]
+    name = (technique_hint or query or "Web technique").strip()[:120]
+    steps = []
+    for line in (summary or "").split("\n"):
+        line = line.strip(" -•\t")
+        if len(line) >= 12:
+            steps.append({"text": line[:400]})
+        if len(steps) >= 5:
+            break
+    if not steps:
+        steps = [{"text": (summary or query)[:400]}]
+    return {
+        "id": f"web_{digest}",
+        "name": name,
+        "modality_id": (modality_hint or "general")[:80] or "general",
+        "indication": (query or "")[:200],
+        "steps": steps,
+        "tags": ["web_enriched", "unverified", "directory_growth"],
+        "source": "web_enrichment",
+    }
+
+
+def promoted_technique_count() -> int:
+    return len(_promoted_techniques)
+
+
+async def refresh_promoted_techniques(db_pool: Any, *, force: bool = False) -> int:
+    """Load promoted technique_payload rows into process cache (directory growth)."""
+    global _promoted_techniques, _promoted_loaded_at
+    if not db_pool or not clinical_directory_enabled():
+        return 0
+    now = time.monotonic()
+    if not force and _promoted_techniques and (now - _promoted_loaded_at) < _PROMOTED_TTL_S:
+        return len(_promoted_techniques)
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT technique_payload
+                FROM clinical_directory_enrichments
+                WHERE status = 'active'
+                  AND promoted = TRUE
+                  AND technique_payload IS NOT NULL
+                ORDER BY created_at DESC
+                LIMIT 200
+                """
+            )
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            payload = r["technique_payload"]
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    continue
+            if isinstance(payload, dict) and payload.get("id"):
+                out.append(payload)
+        _promoted_techniques = out
+        _promoted_loaded_at = now
+        return len(out)
+    except Exception as e:
+        # Column may be missing until migration 264 — non-fatal
+        logger.warning("clinical_directory: promoted refresh failed: %s", e)
+        return 0
+
+
 async def persist_enrichment(
     db_pool: Any,
     *,
@@ -370,26 +468,66 @@ async def persist_enrichment(
     technique_hint: str = "",
     source_urls: Optional[List[str]] = None,
     user_id: str = "",
-) -> None:
+    promote: bool = True,
+) -> Optional[Dict[str, Any]]:
     if not db_pool or not summary.strip():
-        return
+        return None
+    payload = (
+        _synthetic_technique_from_enrichment(
+            query=query,
+            summary=summary,
+            modality_hint=modality_hint,
+            technique_hint=technique_hint,
+        )
+        if promote
+        else None
+    )
     try:
         async with db_pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO clinical_directory_enrichments
-                    (query_text, modality_hint, technique_hint, summary, source_urls, user_id, status)
-                VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'active')
-                """,
-                (query or "")[:300],
-                (modality_hint or "")[:80],
-                (technique_hint or "")[:120],
-                summary[:4000],
-                json.dumps(source_urls or []),
-                (user_id or "")[:64] or None,
-            )
+            try:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO clinical_directory_enrichments
+                        (query_text, modality_hint, technique_hint, summary,
+                         source_urls, user_id, status, technique_payload, promoted)
+                    VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'active', $7::jsonb, $8)
+                    RETURNING id
+                    """,
+                    (query or "")[:300],
+                    (modality_hint or "")[:80],
+                    (technique_hint or "")[:120],
+                    summary[:4000],
+                    json.dumps(source_urls or []),
+                    (user_id or "")[:64] or None,
+                    json.dumps(payload) if payload else None,
+                    bool(payload),
+                )
+            except Exception:
+                # Pre-264 schema fallback
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO clinical_directory_enrichments
+                        (query_text, modality_hint, technique_hint, summary, source_urls, user_id, status)
+                    VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'active')
+                    RETURNING id
+                    """,
+                    (query or "")[:300],
+                    (modality_hint or "")[:80],
+                    (technique_hint or "")[:120],
+                    summary[:4000],
+                    json.dumps(source_urls or []),
+                    (user_id or "")[:64] or None,
+                )
+        if payload:
+            global _promoted_techniques, _promoted_loaded_at
+            _promoted_techniques = [payload] + [
+                t for t in _promoted_techniques if t.get("id") != payload.get("id")
+            ]
+            _promoted_loaded_at = time.monotonic()
+        return {"id": str(row["id"]) if row else None, "technique": payload}
     except Exception as e:
         logger.warning("clinical_directory: persist enrichment failed: %s", e)
+        return None
 
 
 async def enrich_from_web(
@@ -451,9 +589,12 @@ async def enrich_from_web(
             query=clean,
             summary=summary,
             modality_hint=(mods[0].get("id") if mods else "") or "",
-            technique_hint=(techs[0].get("id") if techs else "") or "",
+            technique_hint=(techs[0].get("name") if techs else "")
+            or (techs[0].get("id") if techs else "")
+            or clean[:80],
             source_urls=urls,
             user_id=user_id,
+            promote=True,
         )
     block = (
         "DIRECTORY WEB ENRICHMENT (public internet — treat as unverified adjunct; "
@@ -470,13 +611,17 @@ async def build_directory_context_for_turn(
     user_id: str = "",
     search_proxy: Any = None,
     active_plan_theme: str = "",
+    max_techniques: int = 4,
+    allow_web: bool = True,
 ) -> str:
     """Full turn helper: directory match + stored enrichments + optional live web enrich."""
     if not clinical_directory_enabled():
         return ""
+    if db_pool:
+        await refresh_promoted_techniques(db_pool)
     parts: List[str] = []
     base = build_directory_context(
-        user_text, active_plan_theme=active_plan_theme, max_techniques=4
+        user_text, active_plan_theme=active_plan_theme, max_techniques=max_techniques
     )
     if base:
         parts.append(base)
@@ -495,7 +640,11 @@ async def build_directory_context_for_turn(
 
     # Live web enrich when asked, or care-plan request with thin local match
     thin = not base or len(base) < 200
-    if clinical_directory_web_enrich_enabled() and search_proxy is not None:
+    if (
+        allow_web
+        and clinical_directory_web_enrich_enabled()
+        and search_proxy is not None
+    ):
         if wants_web_enrichment(user_text) or (is_care_plan_request(user_text) and thin):
             web = await enrich_from_web(
                 user_text,
@@ -507,6 +656,53 @@ async def build_directory_context_for_turn(
                 parts.append(web)
 
     return "\n\n".join(parts)
+
+
+async def directory_context_for_surface(
+    user_text: str,
+    *,
+    db_pool: Any = None,
+    user_id: str = "",
+    search_proxy: Any = None,
+    active_plan_theme: str = "",
+    suggest_plan: bool = False,
+    allow_web: bool = True,
+    max_techniques: int = 3,
+) -> str:
+    """
+    QUANTUM-CRYSTAL-ARCH: shared injector for chat / sanctuary / coaching / voice surfaces.
+    """
+    if not clinical_directory_enabled():
+        return ""
+    try:
+        if suggest_plan and db_pool and user_id:
+            await maybe_create_suggested_care_plan(
+                db_pool, user_id=user_id, user_text=user_text or ""
+            )
+        return await build_directory_context_for_turn(
+            user_text or "",
+            db_pool=db_pool,
+            user_id=user_id,
+            search_proxy=search_proxy,
+            active_plan_theme=active_plan_theme,
+            max_techniques=max_techniques,
+            allow_web=allow_web,
+        )
+    except Exception as e:
+        logger.warning("clinical_directory: surface context failed: %s", e)
+        return ""
+
+
+def extract_plan_focus_theme(plan_context_block: str) -> str:
+    """Parse theme from get_active_plan_context text for directory matching."""
+    if not plan_context_block:
+        return ""
+    m = re.search(
+        r"This week's focus:\s*(.+?)(?:\.|$)",
+        plan_context_block,
+        flags=re.I | re.S,
+    )
+    return (m.group(1).strip()[:200] if m else "")
 
 
 def plan_template_to_step_definitions(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
