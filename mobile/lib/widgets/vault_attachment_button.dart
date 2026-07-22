@@ -329,11 +329,11 @@ class _VaultAttachmentButtonState extends State<VaultAttachmentButton> {
         );
       }
 
-      final userId = (widget.profile?['hardware_id'] ?? widget.profile?['id'] ?? '').toString();
+      final token = (widget.profile?['token'] ?? '').toString();
       final baseUrl = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
       final uri = Uri.parse('$baseUrl/api/v1/vault/import');
       final request = http.MultipartRequest('POST', uri);
-      request.headers['X-User-Id'] = userId;
+      if (token.isNotEmpty) request.headers['Authorization'] = 'Bearer $token';
       request.fields['source'] = source;
       request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: picked.name));
       final streamed = await request.send().timeout(const Duration(seconds: 120));

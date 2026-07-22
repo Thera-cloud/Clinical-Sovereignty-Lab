@@ -3575,11 +3575,11 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         );
       }
 
-      final userId = (_profile['hardware_id'] ?? _profile['id'] ?? '').toString();
+      final token = (_profile['token'] ?? '').toString();
       final base = AppConfig.apiBaseUrl;
       final uri = Uri.parse('$base/api/v1/vault/import');
       final request = http.MultipartRequest('POST', uri);
-      request.headers['X-User-Id'] = userId;
+      if (token.isNotEmpty) request.headers['Authorization'] = 'Bearer $token';
       request.fields['source'] = source;
       request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: file.name));
       final streamed = await request.send().timeout(const Duration(seconds: 120));
@@ -6645,11 +6645,14 @@ class _WeeklyBriefDialogState extends State<_WeeklyBriefDialog> {
 
   Future<void> _fetchBrief() async {
     try {
-      final userId = (widget.profile['hardware_id'] ?? widget.profile['id'] ?? '').toString();
+      final token = (widget.profile['token'] ?? '').toString();
       final baseUrl = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
+      final headers = <String, String>{
+        if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+      };
       final resp = await http.get(
         Uri.parse('$baseUrl/api/research/nevedal/reports/brief'),
-        headers: {'X-User-Id': userId},
+        headers: headers,
       ).timeout(const Duration(seconds: 35));
 
       if (resp.statusCode == 200) {

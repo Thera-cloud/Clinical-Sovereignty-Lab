@@ -1672,19 +1672,23 @@
         // NAVIGATION — pass auth via URL hash so sub-pages always receive credentials
         // =============================================================================
         function navTo(page) {
-            const t = token || sessionStorage.getItem('token') || localStorage.getItem('sc_token') || _ck('sc_token') || '';
-            const u = sessionStorage.getItem('username') || localStorage.getItem('sc_username') || _ck('sc_username') || '';
-            const p = sessionStorage.getItem('profile') || localStorage.getItem('sc_profile') || _ck('sc_profile') || '';
-            try { localStorage.setItem('sc_token', t); } catch(e) {}
-            try { localStorage.setItem('sc_username', u); } catch(e) {}
-            try { localStorage.setItem('sc_profile', p); } catch(e) {}
+            // Persist via sessionStorage + localStorage only — never put tokens in URL hash or JS cookies
+            // (hash leaks via Referer/history; document.cookie is readable by any XSS).
+            const t = token || sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
+            const u = sessionStorage.getItem('username') || localStorage.getItem('sc_username') || '';
+            const p = sessionStorage.getItem('profile') || localStorage.getItem('sc_profile') || '';
+            try { if (t) sessionStorage.setItem('token', t); } catch(e) {}
+            try { if (t) localStorage.setItem('sc_token', t); } catch(e) {}
+            try { if (u) { sessionStorage.setItem('username', u); localStorage.setItem('sc_username', u); } } catch(e) {}
+            try { if (p) { sessionStorage.setItem('profile', p); localStorage.setItem('sc_profile', p); } } catch(e) {}
             try {
-                var _ckOpts = '; path=/; max-age=86400; samesite=strict' + (location.protocol === 'https:' ? '; secure' : '');
-                document.cookie = 'sc_token=' + encodeURIComponent(t) + _ckOpts;
-                document.cookie = 'sc_username=' + encodeURIComponent(u) + _ckOpts;
-                document.cookie = 'sc_profile=' + encodeURIComponent(p) + _ckOpts;
+                // Expire any legacy JS-writable auth cookies
+                var _expire = '; path=/; max-age=0; samesite=strict' + (location.protocol === 'https:' ? '; secure' : '');
+                document.cookie = 'sc_token=' + _expire;
+                document.cookie = 'sc_username=' + _expire;
+                document.cookie = 'sc_profile=' + _expire;
             } catch(e) {}
-            window.location.href = page + '#t=' + encodeURIComponent(t) + '&u=' + encodeURIComponent(u) + '&p=' + encodeURIComponent(p);
+            window.location.href = page;
         }
 
         // =============================================================================
@@ -1697,22 +1701,19 @@
             let storedProfile = sessionStorage.getItem('profile');
             let storedUsername = sessionStorage.getItem('username');
 
-            // Recover token: hash → localStorage → cookie
-            if (!storedToken) {
-                const hp = new URLSearchParams(location.hash.slice(1));
-                const ht = hp.get('t');
-                if (ht) storedToken = decodeURIComponent(ht);
-            }
+            // Recover token: sessionStorage → localStorage only (no URL hash / JS cookie)
             if (!storedToken) storedToken = localStorage.getItem('sc_token');
-            if (!storedToken) storedToken = _ck('sc_token');
-
-            // Recover profile & username from any available source
             if (!storedProfile) storedProfile = localStorage.getItem('sc_profile');
-            if (!storedProfile) storedProfile = _ck('sc_profile');
             if (!storedUsername) storedUsername = localStorage.getItem('sc_username');
-            if (!storedUsername) storedUsername = _ck('sc_username');
 
+            // Strip legacy hash tokens from address bar / history immediately
             if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+            try {
+                var _expire = '; path=/; max-age=0; samesite=strict' + (location.protocol === 'https:' ? '; secure' : '');
+                document.cookie = 'sc_token=' + _expire;
+                document.cookie = 'sc_username=' + _expire;
+                document.cookie = 'sc_profile=' + _expire;
+            } catch(e) {}
 
             if (!storedToken) {
                 window.location.href = 'index.html';
@@ -1722,13 +1723,9 @@
             // Persist everything back to sessionStorage so sub-pages can find it
             try { sessionStorage.setItem('token', storedToken); } catch(e) {}
             if (storedUsername) { try { sessionStorage.setItem('username', storedUsername); } catch(e) {} }
-            // Also refresh cookie (extends lifetime)
-            try {
-                var _ckOpts = '; path=/; max-age=86400; samesite=strict' + (location.protocol === 'https:' ? '; secure' : '');
-                document.cookie = 'sc_token=' + encodeURIComponent(storedToken) + _ckOpts;
-                if (storedUsername) document.cookie = 'sc_username=' + encodeURIComponent(storedUsername) + _ckOpts;
-                if (storedProfile) document.cookie = 'sc_profile=' + encodeURIComponent(storedProfile) + _ckOpts;
-            } catch(e) {}
+            try { localStorage.setItem('sc_token', storedToken); } catch(e) {}
+            if (storedUsername) { try { localStorage.setItem('sc_username', storedUsername); } catch(e) {} }
+            if (storedProfile) { try { localStorage.setItem('sc_profile', storedProfile); } catch(e) {} }
 
             if (storedProfile) {
                 try {

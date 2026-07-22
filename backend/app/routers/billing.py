@@ -1860,12 +1860,8 @@ async def get_my_token_usage(request: Request, days: int = 30):
         raise HTTPException(503, "Database unavailable")
 
     user = getattr(request.state, "user", None) or {}
-    username = user.get("username", "")
-    if not username:
-        auth_header = request.headers.get("authorization", "")
-        x_user = request.headers.get("x-user-id", "")
-        if x_user:
-            username = x_user
+    username = user.get("username", "") or getattr(request.state, "user_id", "") or ""
+    # Bare X-User-Id is not identity — router Depends(get_current_user_id) already enforced Bearer
 
     if not username:
         raise HTTPException(401, "Cannot determine user identity")

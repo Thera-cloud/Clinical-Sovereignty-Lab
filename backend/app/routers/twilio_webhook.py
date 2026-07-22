@@ -31,14 +31,20 @@ TWILIO_WEBHOOK_URL = os.getenv("TWILIO_WEBHOOK_URL", "")  # The full public URL 
 
 
 def verify_twilio_signature(request_url: str, params: dict, signature: str) -> bool:
-    """Verify Twilio webhook signature."""
+    """Verify Twilio webhook signature. Fail-closed unless explicit skip for local tunnels."""
+    if os.getenv("TWILIO_SKIP_SIGNATURE_VERIFY", "").lower() in ("1", "true", "yes"):
+        print(">>> [TWILIO] WARNING: signature verification SKIPPED (TWILIO_SKIP_SIGNATURE_VERIFY)")
+        return True
     if not TWILIO_AUTH_TOKEN:
-        print(">>> [TWILIO] WARNING: TWILIO_AUTH_TOKEN not set — skipping signature verification")
-        return True  # Allow in dev mode
+        print(">>> [TWILIO] ERROR: TWILIO_AUTH_TOKEN not set — rejecting webhook")
+        return False
+    if not signature:
+        print(">>> [TWILIO] ERROR: missing X-Twilio-Signature — rejecting webhook")
+        return False
     # Build the data string: URL + sorted POST params
     data = request_url
     for key in sorted(params.keys()):
-        data += key + params[key]
+        data += key + str(params[key])
     # HMAC-SHA1
     mac = hmac.new(TWILIO_AUTH_TOKEN.encode('utf-8'), data.encode('utf-8'), hashlib.sha1)
     computed = base64.b64encode(mac.digest()).decode('utf-8')

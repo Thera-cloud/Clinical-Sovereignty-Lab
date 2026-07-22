@@ -23,11 +23,12 @@ import '../services/checkout_launcher.dart';
 import 'payment_confirmation_screen.dart';
 import '../config/app_config.dart';
 
-/// Build standard auth headers for REST API calls.
-/// Backend auth accepts X-User-Id as a fallback for service/internal calls.
-Map<String, String> _authHeaders(String userId, {bool json = false}) {
-  final h = <String, String>{'X-User-Id': userId};
+/// Build standard auth headers for REST API calls (Bearer required).
+Map<String, String> _authHeaders(Map<String, dynamic> profile, {bool json = false}) {
+  final token = (profile['token'] ?? '').toString();
+  final h = <String, String>{};
   if (json) h['Content-Type'] = 'application/json';
+  if (token.isNotEmpty) h['Authorization'] = 'Bearer $token';
   return h;
 }
 
@@ -96,7 +97,7 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
       final plan = Uri.encodeComponent(_currentPlan);
       final resp = await http.get(
         Uri.parse('$defaultApiBaseUrl/api/billing/verify-promo/${Uri.encodeComponent(code)}?tier=$plan'),
-        headers: _authHeaders(uid),
+        headers: _authHeaders(widget.currentUserProfile),
       );
       if (resp.statusCode == 200 && mounted) {
         setState(() => _verifiedPromo = code);
@@ -230,7 +231,7 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
                             Uri.parse(
                               '$defaultApiBaseUrl/api/billing/verify-promo/${Uri.encodeComponent(code)}?tier=$plan',
                             ),
-                            headers: _authHeaders(uid),
+                            headers: _authHeaders(widget.currentUserProfile),
                           );
                           if (resp.statusCode == 200) {
                             setState(() => _verifiedPromo = code);
@@ -932,7 +933,7 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
       final resp = await http.get(
         Uri.parse(
             '$defaultApiBaseUrl/api/billing/family/members?family_id=$_familyId'),
-        headers: _authHeaders(_userId),
+        headers: _authHeaders(widget.currentUserProfile),
       );
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body);
@@ -1457,7 +1458,7 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
       // Load packs
       final packsResp = await http.get(
         Uri.parse('$defaultApiBaseUrl/api/billing/coaching/packs/$_userId'),
-        headers: _authHeaders(_userId),
+        headers: _authHeaders(widget.currentUserProfile),
       );
       if (packsResp.statusCode == 200) {
         final data = jsonDecode(packsResp.body);
@@ -1468,7 +1469,7 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
       // Load sessions
       final sessResp = await http.get(
         Uri.parse('$defaultApiBaseUrl/api/billing/coaching/sessions/$_userId'),
-        headers: _authHeaders(_userId),
+        headers: _authHeaders(widget.currentUserProfile),
       );
       if (sessResp.statusCode == 200) {
         final data = jsonDecode(sessResp.body);
@@ -1532,7 +1533,7 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
               try {
                 final resp = await http.post(
                   Uri.parse('$defaultApiBaseUrl/api/billing/coaching/purchase'),
-                  headers: _authHeaders(_userId, json: true),
+                  headers: _authHeaders(widget.currentUserProfile, json: true),
                   body: jsonEncode({
                     'pack_type': packType,
                     'success_url': 'https://app.sovereignsanctuary.net/payment-complete',
@@ -1619,7 +1620,7 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
                 final resp = await http.post(
                   Uri.parse(
                       '$defaultApiBaseUrl/api/billing/coaching/cancel/${session['session_id']}'),
-                  headers: _authHeaders(_userId, json: true),
+                  headers: _authHeaders(widget.currentUserProfile, json: true),
                   body: jsonEncode({
                     'user_id': _userId,
                     'reason': 'Client requested cancellation',
@@ -1920,7 +1921,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     try {
       final resp = await http.get(
         Uri.parse('$defaultApiBaseUrl/api/billing/payment-methods/$_userId'),
-        headers: _authHeaders(_userId),
+        headers: _authHeaders(widget.currentUserProfile),
       );
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body);
@@ -1941,7 +1942,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     try {
       final resp = await http.get(
         Uri.parse('$defaultApiBaseUrl/api/billing/invoices/$_userId'),
-        headers: _authHeaders(_userId),
+        headers: _authHeaders(widget.currentUserProfile),
       );
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body);
@@ -1963,7 +1964,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
       final resp = await http.delete(
         Uri.parse(
             '$defaultApiBaseUrl/api/billing/payment-methods/$pmId?user_id=$_userId'),
-        headers: _authHeaders(_userId),
+        headers: _authHeaders(widget.currentUserProfile),
       );
       if (resp.statusCode == 200) {
         setState(() => _methods.removeWhere((m) => m['id'] == pmId));
@@ -1988,7 +1989,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     try {
       final resp = await http.get(
         Uri.parse('$defaultApiBaseUrl/api/billing/scholarship/user/$_userId'),
-        headers: _authHeaders(_userId),
+        headers: _authHeaders(widget.currentUserProfile),
       );
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body);
@@ -2008,7 +2009,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     try {
       final resp = await http.post(
         Uri.parse('$defaultApiBaseUrl/api/billing/payment-method/default'),
-        headers: _authHeaders(_userId, json: true),
+        headers: _authHeaders(widget.currentUserProfile, json: true),
         body: jsonEncode({'user_id': _userId, 'payment_method_id': pmId}),
       );
       if (resp.statusCode == 200) {
@@ -2031,7 +2032,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     try {
       final verifyResp = await http.get(
         Uri.parse('$defaultApiBaseUrl/api/billing/verify-school-code/${Uri.encodeComponent(code)}'),
-        headers: _authHeaders(_userId),
+        headers: _authHeaders(widget.currentUserProfile),
       );
       if (verifyResp.statusCode != 200) {
         final err = jsonDecode(verifyResp.body);
@@ -2040,7 +2041,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
       }
       final applyResp = await http.post(
         Uri.parse('$defaultApiBaseUrl/api/billing/apply-school-code'),
-        headers: _authHeaders(_userId, json: true),
+        headers: _authHeaders(widget.currentUserProfile, json: true),
         body: jsonEncode({'user_id': _userId, 'school_code': code}),
       );
       if (applyResp.statusCode == 200) {
@@ -2063,7 +2064,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     try {
       final verifyResp = await http.get(
         Uri.parse('$defaultApiBaseUrl/api/billing/verify-corporate-code/${Uri.encodeComponent(code)}'),
-        headers: _authHeaders(_userId),
+        headers: _authHeaders(widget.currentUserProfile),
       );
       if (verifyResp.statusCode != 200) {
         final err = jsonDecode(verifyResp.body);
@@ -2072,7 +2073,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
       }
       final applyResp = await http.post(
         Uri.parse('$defaultApiBaseUrl/api/billing/apply-corporate-code'),
-        headers: _authHeaders(_userId, json: true),
+        headers: _authHeaders(widget.currentUserProfile, json: true),
         body: jsonEncode({'user_id': _userId, 'sponsor_code': code}),
       );
       if (applyResp.statusCode == 200) {
@@ -2104,7 +2105,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
           '$defaultApiBaseUrl/api/billing/verify-promo/${Uri.encodeComponent(code)}'
           '?tier=${Uri.encodeComponent(plan)}',
         ),
-        headers: _authHeaders(_userId),
+        headers: _authHeaders(widget.currentUserProfile),
       );
       if (verifyResp.statusCode != 200) {
         final err = jsonDecode(verifyResp.body);
@@ -2129,7 +2130,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     try {
       final resp = await http.get(
         Uri.parse('$defaultApiBaseUrl/api/billing/superbill/$_userId?month=$m'),
-        headers: _authHeaders(_userId),
+        headers: _authHeaders(widget.currentUserProfile),
       );
       if (resp.statusCode == 200 && mounted) {
         final data = jsonDecode(resp.body);
@@ -2205,7 +2206,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     try {
       final resp = await http.post(
         Uri.parse('$defaultApiBaseUrl/api/billing/payment-method/add-checkout'),
-        headers: _authHeaders(_userId, json: true),
+        headers: _authHeaders(widget.currentUserProfile, json: true),
         body: jsonEncode({'user_id': _userId, 'method_type': type}),
       );
       if (resp.statusCode == 200) {

@@ -13155,7 +13155,8 @@ async def handle_client(websocket, path=None):
                     handle_client._login_attempts = {}
                 _login_user = (d.get("username", "") or "").strip().lower()
                 _login_ip = getattr(websocket, 'remote_address', ('unknown',))[0] if hasattr(websocket, 'remote_address') else 'unknown'
-                _bf_key = f"{_login_user}:{_login_ip}"
+                # QUANTUM-CRYSTAL-ARCH: username lockout (IP rotation cannot bypass)
+                _bf_key = _login_user or f"ip:{_login_ip}"
                 _bf = handle_client._login_attempts.get(_bf_key, {"count": 0, "locked_until": None})
                 if _bf.get("locked_until") and datetime.datetime.now() < _bf["locked_until"]:
                     _remaining = int((_bf["locked_until"] - datetime.datetime.now()).total_seconds())
@@ -13174,7 +13175,6 @@ async def handle_client(websocket, path=None):
                 except Exception:
                     _hive_v4 = None
 
-                _login_blocked = False
                 if _hive_v4:
                     try:
                         _role = d.get("expected_role", "CLIENT")
@@ -13189,12 +13189,10 @@ async def handle_client(websocket, path=None):
                                     "cooldown_seconds": _lg_cooldown,
                                     "remaining_attempts": 0,
                                 }))
-                                _login_blocked = True
+                                # QUANTUM-CRYSTAL-ARCH: do not verify password while locked
+                                continue
                     except Exception as _lg_err:
                         print(f">>> [LoginGuardian] Non-blocking check error: {_lg_err}")
-
-                if not _login_blocked:
-                    pass  # Proceed with normal login
 
                 tok, res = authenticate_user(d["username"], d["password"], d.get("expected_role"))
                 # SOVEREIGN-VOICE: cache-miss recovery — paid signup just finalized in PG
@@ -13217,10 +13215,6 @@ async def handle_client(websocket, path=None):
                                     tok, res = authenticate_user(d["username"], d["password"], d.get("expected_role"))
                     except Exception as _cmr_err:
                         print(f">>> [LOGIN_AUDIT] cache-miss recovery error: {_cmr_err}", flush=True)
-                if _login_blocked:
-                    tok = None
-                    res = "RATE_LIMITED"
-
                 if tok and res == "FORCE_PASSWORD_RESET":
                     await websocket.send(json.dumps({
                         "type": "force_password_reset",

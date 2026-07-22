@@ -7,6 +7,7 @@ All auth attempts (success/failure) are logged to audit trail (Hive Defense v4.3
 """
 
 import asyncio
+import hmac
 import json
 import os
 import logging
@@ -64,6 +65,10 @@ async def _write_auth_audit(
         logger.warning("Auth audit write failed (non-fatal): %s", exc)
 
 
+# Optional shared secret for true service-to-service calls (never accept bare X-User-Id).
+_INTERNAL_SERVICE_KEY = os.getenv("INTERNAL_SERVICE_KEY", "").strip()
+
+
 async def get_current_user_id(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
@@ -75,8 +80,9 @@ async def get_current_user_id(
 
     Priority:
     1. JWT Bearer token (production)
-    2. X-User-Id header (internal service calls)
-    3. user_id query param (development only — logged as warning)
+    2. Bridge session Bearer token (Redis)
+    3. Internal service key + X-User-Id (INTERNAL_SERVICE_KEY must match)
+    4. user_id query param (development + localhost only)
 
     Raises HTTPException 401 if no valid identity found.
     """
@@ -126,12 +132,28 @@ async def get_current_user_id(
             except Exception as bt_err:
                 logger.warning("Bridge token Redis check failed (non-fatal): %s", bt_err)
 
-    # 2. Try X-User-Id header (for internal service-to-service calls)
-    header_user_id = request.headers.get("X-User-Id")
+    # 2. Internal service auth — requires shared secret; bare X-User-Id is never enough
+    header_user_id = (request.headers.get("X-User-Id") or "").strip()
+    service_key = (request.headers.get("X-Internal-Service-Key") or "").strip()
     if header_user_id:
-        request.state.user_id = str(header_user_id).strip()
-        _log_auth_attempt(request, str(header_user_id).strip(), "x_user_id_header", True)
-        return str(header_user_id).strip()
+        if (
+            _INTERNAL_SERVICE_KEY
+            and service_key
+            and len(service_key) == len(_INTERNAL_SERVICE_KEY)
+            and hmac.compare_digest(service_key, _INTERNAL_SERVICE_KEY)
+        ):
+            request.state.user_id = header_user_id
+            _log_auth_attempt(request, header_user_id, "internal_service_key", True)
+            return header_user_id
+        _log_auth_attempt(
+            request, header_user_id, "x_user_id_header", False,
+            reason="rejected_unauthenticated_x_user_id",
+        )
+        logger.warning(
+            "Rejected unauthenticated X-User-Id from ip=%s path=%s",
+            request.client.host if request.client else "unknown",
+            request.url.path,
+        )
 
     # 3. Fallback: user_id query param (development only, localhost only)
     #    Read from request.query_params to avoid conflicting with {user_id} path params
@@ -155,5 +177,5 @@ async def get_current_user_id(
     _log_auth_attempt(request, "", "none", False, reason="no_credentials_provided")
     raise HTTPException(
         status_code=401,
-        detail="Authentication required. Provide Bearer token or X-User-Id header."
+        detail="Authentication required. Provide a valid Bearer token.",
     )
