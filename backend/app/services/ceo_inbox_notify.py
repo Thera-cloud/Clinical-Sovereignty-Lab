@@ -22,6 +22,8 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 from uuid import UUID
 
+from app.ceo_notify_policy import ceo_external_notify_enabled
+
 logger = logging.getLogger("nate.ceo_inbox_notify")
 
 CEO_NOTIFY_EMAIL = os.getenv(
@@ -312,13 +314,22 @@ async def notify_ceo_inbox_item(item: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "skipped", "reason": "duplicate_or_insert_failed"}
 
     pid = proposal.get("proposal_id")
-    email_id = await protocol.send_email_notification(
-        proposal, to_email=CEO_NOTIFY_EMAIL
-    )
+    email_id = None
     sms_sid = None
-    if risk == "RED":
-        sms_sid = await protocol.send_sms_notification(
-            proposal, to_number=CEO_NOTIFY_SMS
+    if ceo_external_notify_enabled():
+        email_id = await protocol.send_email_notification(
+            proposal, to_email=CEO_NOTIFY_EMAIL
+        )
+        if risk == "RED":
+            sms_sid = await protocol.send_sms_notification(
+                proposal, to_number=CEO_NOTIFY_SMS
+            )
+    else:
+        logger.info(
+            "ceo_inbox_notify: external notify disabled (ENVIRONMENT=%s) — "
+            "proposal %s recorded without email/SMS",
+            os.getenv("ENVIRONMENT", "production"),
+            pid,
         )
 
     if pid:

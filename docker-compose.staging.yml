@@ -27,6 +27,8 @@ services:
       - STAGING_PUBLIC_API_BASE=${STAGING_PUBLIC_API_BASE:-http://127.0.0.1:8011}
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=staging
+      # Staging shares SendGrid with prod — never email support@ / CEO from bake traffic
+      - ENABLE_CEO_INBOX_EXTERNAL_NOTIFY=false
       - DEBUG=false
       - WEB_CONCURRENCY=1
       - NODE_COLOR=green

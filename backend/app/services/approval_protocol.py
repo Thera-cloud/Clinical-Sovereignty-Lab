@@ -22,6 +22,10 @@ from uuid import UUID
 
 from app.config import settings
 from app.models.strategy import ApprovalCategory, ProposalRisk
+from app.ceo_notify_policy import (
+    ceo_external_notify_enabled,
+    resolve_ceo_notify_email,
+)
 from app.services.exceptions import (
     ApprovalTimeoutException,
     AutoExecuteBlockedException,
@@ -542,7 +546,7 @@ class ApprovalProtocolService:
 
             subject, body = self._build_proposal_email(proposal)
             html_body = self._build_proposal_email_html(proposal, subject, body)
-            dest = (to_email or "").strip() or settings.FROM_EMAIL
+            dest = (to_email or "").strip() or resolve_ceo_notify_email(proposal)
 
             message = Mail(
                 from_email=Email(settings.FROM_EMAIL, settings.FROM_NAME),
@@ -1512,8 +1516,16 @@ class ApprovalProtocolService:
                 # Re-render with the freshly-stored escalation metadata so the
                 # email shows the new ESCALATION REASON block.
                 proposal["metadata"] = {**meta, "escalated": True, "escalation": escalation_block}
-                await self.send_email_notification(proposal)
-                await self.send_sms_notification(proposal)
+                if ceo_external_notify_enabled():
+                    await self.send_email_notification(
+                        proposal, to_email=resolve_ceo_notify_email(proposal)
+                    )
+                    await self.send_sms_notification(proposal)
+                else:
+                    print(
+                        f">>> [APPROVAL] Escalation metadata updated for {pid} "
+                        f"(external notify disabled — no email/SMS)"
+                    )
 
                 escalated.append({
                     "proposal_id": str(pid),

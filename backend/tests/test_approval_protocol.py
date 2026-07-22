@@ -427,6 +427,21 @@ class TestProposalEmailReplyTo:
         )
         assert "approve@reply.sovereignsanctuary.net" in str(reply_addr)
 
+    @pytest.mark.asyncio
+    async def test_escalation_resolves_ceo_email_not_from_address(
+        self, fake_pool, monkeypatch,
+    ):
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        stub = _StubSendGrid()
+        svc._sendgrid_client = stub
+        monkeypatch.setenv("CEO_NOTIFY_EMAIL", "admin@ceo.test")
+        monkeypatch.setenv("FROM_EMAIL", "support@sovereignsanctuary.net")
+
+        await svc.send_email_notification(_enriched_proposal())
+
+        message = stub.sent[0]
+        to_list = message.personalizations[0].tos
+        assert to_list[0]["email"] == "admin@ceo.test"
 
 # ─── FIX 3: post-decision confirmation email ───────────────────────────────
 
@@ -574,6 +589,38 @@ class TestEscalationGuards:
         assert len(result) == 1
         assert result[0]["proposal_id"] == str(pid)
         assert result[0]["escalation_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_check_escalation_skips_external_notify_when_staging(
+        self, fake_pool, fake_conn, monkeypatch,
+    ):
+        pid = uuid4()
+        fake_conn._fetch_results = [{
+            "proposal_id": pid,
+            "title": "staging proposal",
+            "status": "pending_approval",
+            "risk": "low",
+            "metadata": {},
+            "created_at": datetime(2026, 1, 1),
+        }]
+        fake_conn._fetchval_result = None
+        monkeypatch.setenv("ENVIRONMENT", "staging")
+        monkeypatch.delenv("ENABLE_CEO_INBOX_EXTERNAL_NOTIFY", raising=False)
+
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        email_calls: list = []
+
+        async def _track_email(*a, **kw):
+            email_calls.append(1)
+            return None
+
+        svc.send_email_notification = _track_email
+        svc.send_sms_notification = lambda *a, **kw: None
+
+        result = await svc.check_escalation_timeouts()
+
+        assert len(result) == 1
+        assert email_calls == []
 
     @pytest.mark.asyncio
     async def test_check_escalation_stops_at_max_cap(
