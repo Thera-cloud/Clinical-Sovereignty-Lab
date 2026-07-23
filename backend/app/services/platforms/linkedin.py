@@ -505,7 +505,7 @@ class LinkedInAdapter(SocialPlatformAdapter):
 
     # ── Content Publishing (Posts API) ──────────────────────────────
 
-    @retry_on_failure(max_retries=2)
+    # No retry_on_failure: a retry after a successful /posts call duplicates the feed item.
     async def post_content(self, text: str, media_url: Optional[str] = None,
                            content_type: ContentType = ContentType.POST,
                            **kwargs) -> PostResult:
@@ -522,6 +522,9 @@ class LinkedInAdapter(SocialPlatformAdapter):
             * "company" — company page only (requires org_urn + w_organization_social)
             * "both"    — posts to personal profile AND company page; returns the
                           personal PostResult but logs both post IDs
+
+        NOTE: Not wrapped in retry_on_failure — a retry after a successful personal
+        publish would create duplicate LinkedIn Activity posts.
 
         Endpoint: POST /rest/posts (LinkedIn-Version: 202401)
         """
@@ -611,7 +614,9 @@ class LinkedInAdapter(SocialPlatformAdapter):
                 company_urn = self._company_org_urn or self._org_urn
                 company_token = self._company_access_token
                 if company_urn and company_token:
-                    publish_targets.append((company_urn, company_token))
+                    # Dedup: never post twice to the same author URN
+                    if not any(u == company_urn for u, _ in publish_targets):
+                        publish_targets.append((company_urn, company_token))
                 elif post_as == "company":
                     return PostResult(
                         success=False,
@@ -633,11 +638,21 @@ class LinkedInAdapter(SocialPlatformAdapter):
                     platform="linkedin", action=ActionResult.FAILED,
                 )
 
+            # Cap at one destination unless explicitly both with distinct URNs.
+            # Prevents accidental person×2 when org_urn mis-resolves to person.
+            if post_as != "both" and len(publish_targets) > 1:
+                publish_targets = publish_targets[:1]
+
             first_result: Optional[PostResult] = None
             for urn, token in publish_targets:
                 result = await _publish_as(urn, token)
                 if first_result is None:
                     first_result = result
+                elif result.success:
+                    logger.info(
+                        "LinkedIn: secondary publish ok as %s post_id=%s",
+                        urn, result.post_id,
+                    )
 
             return first_result or PostResult(
                 success=False, error="No author URNs resolved",

@@ -724,14 +724,47 @@ class LinkedInCampaignExecutor:
 
         return None
 
+    async def _claim_queue_item(self, item_id: int) -> bool:
+        """Atomically claim an approved slot so overlapping ticks cannot double-publish."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    UPDATE skyeye_content_queue
+                    SET status = 'publishing', updated_at = NOW()
+                    WHERE id = $1
+                      AND platform = 'linkedin'
+                      AND generated_by = $2
+                      AND status = 'approved'
+                    RETURNING id
+                    """,
+                    item_id,
+                    GENERATED_BY,
+                )
+            return row is not None
+        except Exception as e:
+            logger.warning("LinkedIn campaign claim failed for #%s: %s", item_id, e)
+            return False
+
     async def _publish_item(self, item: Dict[str, Any]) -> bool:
         from app.services.platforms import get_adapter
         from app.services.skyeye_content_generator import SkyEyeContentGenerator
         from app.services.skyeye_platform_base import ContentType
 
+        if not await self._claim_queue_item(item["id"]):
+            logger.info(
+                "LinkedIn campaign: skip queue #%s — already claimed or not approved",
+                item["id"],
+            )
+            return False
+
         adapter = get_adapter("linkedin", self.db_pool)
         if not adapter or not await adapter.authenticate():
             logger.warning("LinkedIn campaign publish: adapter not ready")
+            gen = SkyEyeContentGenerator(self.db_pool)
+            await gen.update_queue_status(
+                item["id"], "approved", error_message="adapter not ready — reclaim"
+            )
             return False
 
         meta_raw = item.get("emotion_context") or "{}"
@@ -740,14 +773,17 @@ class LinkedInCampaignExecutor:
         except Exception:
             meta = {}
 
+        # Coach Portal / campaign creatives: one LinkedIn destination per slot.
+        # post_as=both previously published person+company with the same copy
+        # (and retry_on_failure could fire the personal publish twice).
         post_as = meta.get("post_as", "person")
         if post_as == "both":
-            await adapter._load_company_token()
-            if not getattr(adapter, "_company_access_token", None):
-                logger.info(
-                    "LinkedIn campaign: post_as=both downgraded to person (no company token)"
-                )
-                post_as = "person"
+            logger.info(
+                "LinkedIn campaign: post_as=both coerced to person for queue #%s "
+                "(prevent duplicate Activity posts)",
+                item["id"],
+            )
+            post_as = "person"
         ct = item.get("content_type", "post")
         post_ct = ContentType.ARTICLE if ct == "article" else ContentType.POST
         lane = (meta.get("lane") or "").upper()
@@ -800,6 +836,7 @@ class LinkedInCampaignExecutor:
                             "slot_key": meta.get("slot_key"),
                             "lane": lane,
                             "had_image": bool(image_bytes),
+                            "post_as": post_as,
                             "post_id": result.post_id,
                             "post_url": result.post_url,
                         }),

@@ -27,6 +27,9 @@ services:
       - STAGING_PUBLIC_API_BASE=${STAGING_PUBLIC_API_BASE:-http://127.0.0.1:8011}
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=staging
+      # Staging must never publish to live LinkedIn/X (shares OAuth tokens from .env)
+      - ENABLE_SKYEYE_SESSIONS=false
+      - ENABLE_SKYEYE=false
       # Staging shares SendGrid with prod — never email support@ / CEO from bake traffic
       - ENABLE_CEO_INBOX_EXTERNAL_NOTIFY=false
       - DEBUG=false

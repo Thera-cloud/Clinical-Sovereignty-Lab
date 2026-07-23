@@ -255,23 +255,30 @@ async def lifespan(app: FastAPI):
             print(f"   ✅ SkyEye session engine started")
         except Exception as e:
             print(f"   ⚠️  SkyEye session engine failed to start: {e}")
-        try:
-            from app.services.linkedin_campaign_scheduler import LinkedInCampaignScheduler
-            linkedin_campaign_scheduler = LinkedInCampaignScheduler(db_pool)
-            linkedin_campaign_scheduler.start()
-            app.state.linkedin_campaign_scheduler = linkedin_campaign_scheduler
-            print(f"   ✅ LinkedIn campaign scheduler started")
+        # QUANTUM-CRYSTAL-ARCH: LinkedIn campaign publish is production GREEN-only
+        # Staging shares LinkedIn OAuth tokens and was double-posting live creatives.
+        _env = (os.environ.get("ENVIRONMENT") or getattr(settings, "ENVIRONMENT", "") or "").lower()
+        _skip_li_campaign = _is_clone or _env in ("staging", "test", "development")
+        if not _skip_li_campaign:
             try:
-                from app.services.linkedin_campaign_coach_portal import (
-                    bootstrap_coach_portal_campaign_if_enabled,
-                )
-                boot_msg = await bootstrap_coach_portal_campaign_if_enabled(db_pool)
-                if boot_msg:
-                    print(f"   ✅ Coach Portal LinkedIn campaign: {boot_msg[:120]}")
-            except Exception as boot_e:
-                print(f"   ⚠️  Coach Portal campaign bootstrap: {boot_e}")
-        except Exception as e:
-            print(f"   ⚠️  LinkedIn campaign scheduler failed to start: {e}")
+                from app.services.linkedin_campaign_scheduler import LinkedInCampaignScheduler
+                linkedin_campaign_scheduler = LinkedInCampaignScheduler(db_pool)
+                linkedin_campaign_scheduler.start()
+                app.state.linkedin_campaign_scheduler = linkedin_campaign_scheduler
+                print(f"   ✅ LinkedIn campaign scheduler started")
+                try:
+                    from app.services.linkedin_campaign_coach_portal import (
+                        bootstrap_coach_portal_campaign_if_enabled,
+                    )
+                    boot_msg = await bootstrap_coach_portal_campaign_if_enabled(db_pool)
+                    if boot_msg:
+                        print(f"   ✅ Coach Portal LinkedIn campaign: {boot_msg[:120]}")
+                except Exception as boot_e:
+                    print(f"   ⚠️  Coach Portal campaign bootstrap: {boot_e}")
+            except Exception as e:
+                print(f"   ⚠️  LinkedIn campaign scheduler failed to start: {e}")
+        else:
+            print(f"   ⏭️  LinkedIn campaign scheduler skipped (clone/staging env={_env or 'clone'})")
     
     # Start Marketing Automation Worker
     marketing_worker = None

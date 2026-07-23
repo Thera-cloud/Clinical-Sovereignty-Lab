@@ -263,10 +263,12 @@ def is_coach_portal_campaign_message(message: str) -> bool:
 def parse_post_as(message: str) -> str:
     m = (message or "").lower()
     if re.search(r"\bboth\b|\bcompany page\b.*\bfounder\b|\bfounder\b.*\bcompany\b", m):
-        return "both"
+        # Explicit both still allowed, but campaign publisher coerces to person
+        # to avoid duplicate Activity posts until company-only lane exists.
+        return "person"
     if re.search(r"\bcompany page\b|\borganization page\b", m):
         return "company"
-    return "both"
+    return "person"
 
 
 def first_tuesday_on_or_after(start: date) -> date:
