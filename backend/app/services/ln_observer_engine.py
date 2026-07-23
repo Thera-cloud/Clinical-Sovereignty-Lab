@@ -455,26 +455,42 @@ class LNObserverEngine:
         look_now: bool = False,
         lean: bool = False,
     ) -> str:
-        # QUANTUM-CRYSTAL-ARCH — hard ceiling so WS chat never hangs forever
+        # QUANTUM-CRYSTAL-ARCH — hard ceiling; LNI/crystal path was hanging 50s+
+        budget = 22.0 if (look_now or lean) else 18.0
         try:
             return await asyncio.wait_for(
-                self._generate_chat_inner(
+                self._generate_chat_fast(
                     sess, coach_message, look_now=look_now, lean=lean
                 ),
-                timeout=50.0,
+                timeout=budget,
             )
         except asyncio.TimeoutError:
             logger.warning(
-                "LNObserverEngine generate_chat timeout lean=%s look_now=%s",
+                "LNObserverEngine generate_chat timeout lean=%s look_now=%s frames=%s",
                 lean,
                 look_now,
+                len(sess.frames),
             )
+            n = len(sess.frames)
+            if n <= 0:
+                return (
+                    "I am live with you, but I do not have a usable screen frame yet. "
+                    "Keep FEED LIVE on for a few seconds, then ask again — or tap "
+                    "Ask LN to look closely."
+                )
             return (
-                "I lost the thread on that one — my vision pass timed out. "
-                "Ask again, or describe what you're looking at."
+                f"I have {n} screen frame(s) buffered, but my screen-read timed out. "
+                "Tap Ask LN to look closely once more, or tell me what is on screen."
             )
 
-    async def _generate_chat_inner(
+    def _normalize_frame_b64(self, fr: str) -> str:
+        if not fr:
+            return ""
+        if fr.startswith("data:"):
+            return fr.split(",", 1)[-1]
+        return fr
+
+    async def _generate_chat_fast(
         self,
         sess: LiveSession,
         coach_message: str,
@@ -482,82 +498,123 @@ class LNObserverEngine:
         look_now: bool = False,
         lean: bool = False,
     ) -> str:
-        inference = self._inference()
-        if not inference:
-            return "Little Nate inference is not available right now."
-
-        recall_query = self.build_recall_query(sess, coach_message)
-        also_ids = self.match_client_ids(sess, self.live_haystack(sess, coach_message))
+        """Router-only Observer path — no helix/crystals/wisdom (those hung chat)."""
+        # QUANTUM-CRYSTAL-ARCH
         what = self.build_what_you_know(sess)
-        transcript = self.context_block(sess, n=12)
+        transcript = self.context_block(sess, n=10)
         chat_tail = ""
-        for m in sess.chat[-12:]:
+        for m in sess.chat[-8:]:
             role = "COACH" if m.get("role") == "user" else "LN"
             chat_tail += f"[{role}] {m.get('content', '')}\n"
-        conversation_context = (
-            f"{what}\n\n[ROLLING TRANSCRIPT]\n{transcript}\n\n[CHAT]\n{chat_tail}"
-        )
-        # QUANTUM-CRYSTAL-ARCH — vision only for look_now / lean observe.
-        # Normal chat is text-first (Azure vision was hanging ~50s → no UI reply).
-        images: Optional[List[str]] = None
-        if look_now or lean:
-            n_frames = 2 if look_now else 1
-            raw_frames = sess.frames[-n_frames:] if sess.frames else []
-            images = []
-            for fr in raw_frames:
-                if not fr:
-                    continue
-                if isinstance(fr, str) and fr.startswith("data:"):
-                    fr = fr.split(",", 1)[-1]
-                images.append(fr)
-            if not images:
-                images = None
 
-        logger.info(
-            "LNObserverEngine generate start lean=%s look_now=%s frames=%s msg_len=%s",
+        images: Optional[List[str]] = None
+        want_vision = bool(look_now or lean)
+        if want_vision and sess.frames:
+            fr = self._normalize_frame_b64(sess.frames[-1])
+            # Cap payload — oversized JPEG was a common Azure hang vector
+            if fr and len(fr) <= 450_000:
+                images = [fr]
+            elif fr:
+                logger.warning(
+                    "LNObserverEngine skipping oversized frame (%s chars)",
+                    len(fr),
+                )
+
+        n_buf = len(sess.frames)
+        if lean:
+            user_prompt = (
+                "Internal observation (1-2 sentences): what is on screen and any "
+                "clinically noteworthy cue. Be terse."
+            )
+        elif look_now:
+            user_prompt = (
+                coach_message
+                or "Look at the attached screen frame and describe what you see "
+                   "for the coach — file names, UI, and clinically relevant cues."
+            )
+        else:
+            user_prompt = coach_message
+
+        vision_note = (
+            "A JPEG of the coach's shared screen is attached — describe it."
+            if images
+            else (
+                f"No vision frame attached this turn (buffered={n_buf}). "
+                "Say clearly if you cannot see the screen; use transcript/chat only."
+            )
+        )
+        prompt = (
+            "You are Little Nate in LN-Observer mode, co-watching with the coach.\n"
+            f"{vision_note}\n\n"
+            f"[SESSION]\n{what}\n\n"
+            f"[TRANSCRIPT]\n{transcript}\n\n"
+            f"[CHAT]\n{chat_tail}\n"
+            f"Coach: {user_prompt}"
+        )
+        system = (
+            "You are Little Nate observing a live coach screen share. "
+            "Be concrete about what you can and cannot see. "
+            "Never invent on-screen text you did not actually read."
+        )
+
+        logger.warning(
+            "LNObserverEngine fast-gen lean=%s look_now=%s vision=%s buf=%s msg_len=%s",
             lean,
             look_now,
-            len(images or []),
+            bool(images),
+            n_buf,
             len(coach_message or ""),
         )
+
         try:
-            # QUANTUM-CRYSTAL-ARCH — skip helix/quantum on Observer realtime path
-            # (helix entropy stalls were blocking chat with no ln_reply)
-            result = await inference.generate(
-                prompt=coach_message if not lean else (
-                    "Internal observation pass (not chat): in 1-2 sentences, note what is "
-                    "on screen now and anything clinically noteworthy. Be terse."
-                ),
-                user_id=sess.coach_id,
+            from app.services.nate_inference_router import NateInferenceRouter
+
+            router = NateInferenceRouter(app_state=self._app_state)
+            # Vision forces Azure; text uses utility (Workers AI) for speed
+            tier = "clinical" if images else "utility"
+            result = await router.generate(
+                prompt=prompt,
+                system=system,
+                tier=tier,
+                temperature=0.35,
+                max_tokens=100 if lean else (420 if look_now else 500),
                 domain="coaching",
-                tier="clinical",
-                conversation_context=conversation_context,
-                recall_query=None if lean else recall_query,
-                recall_also_user_ids=None if lean else (also_ids or None),
-                recall_top_k=8,
+                odpe_signal=None if images else "LOCKED",
+                allow_deep=False,
                 images=images,
-                mode="lean" if lean else "full",
-                attach_wisdom=not lean,
-                include_crystals=not lean,
-                include_helix=False,
-                include_quantum=False,
-                max_tokens=120 if lean else (800 if not look_now else 900),
-                is_realtime=True,
             )
-            reply = (result.text or "").strip()
-            logger.info(
-                "LNObserverEngine generate done lean=%s provider=%s reply_len=%s err=%s",
-                lean,
-                getattr(result, "provider", "?"),
+            reply = ""
+            if isinstance(result, dict):
+                reply = (result.get("text") or "").strip()
+                provider = result.get("provider") or "?"
+                err = result.get("error")
+            else:
+                provider = "?"
+                err = None
+            logger.warning(
+                "LNObserverEngine fast-gen done provider=%s len=%s err=%s",
+                provider,
                 len(reply),
-                getattr(result, "error", None),
+                err,
             )
-            if getattr(result, "error", None) and "content_filter" in str(result.error).lower():
+            if err and "content_filter" in str(err).lower():
                 return (
                     "I need to skip that frame — the vision filter blocked it. "
                     "Share a different view or describe what you're seeing."
                 )
-            return reply or "(no response)"
+            if reply and "unable to process" not in reply.lower():
+                return reply
+            if n_buf <= 0:
+                return (
+                    "I am with you on the observation, but I cannot see the screen yet — "
+                    "no frames have arrived. Confirm FEED LIVE, wait a few seconds, "
+                    "then tap Ask LN to look closely."
+                )
+            return (
+                f"I am receiving the share ({n_buf} frame(s) buffered) but could not "
+                "complete a screen read just now. Tap Ask LN to look closely, or "
+                "describe what you want me to notice."
+            )
         except Exception as e:
             err = str(e)
             if "content_filter" in err.lower() or "ResponsibleAIPolicyViolation" in err:
@@ -565,7 +622,7 @@ class LNObserverEngine:
                     "I need to skip that frame — the vision filter blocked it. "
                     "Share a different view or describe what you're seeing."
                 )
-            logger.warning("LNObserverEngine generate failed: %s", e)
+            logger.warning("LNObserverEngine fast-gen failed: %s", e)
             return f"(LN-Observer reasoning error: {e})"
 
     async def close_summary(self, sess: LiveSession) -> Optional[str]:

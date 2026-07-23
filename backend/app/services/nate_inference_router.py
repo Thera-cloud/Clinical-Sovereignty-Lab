@@ -420,13 +420,18 @@ class NateInferenceRouter:
             f"https://{_AZURE_ENDPOINT}/openai/deployments/"
             f"{_AZURE_DEPLOYMENT}/chat/completions?api-version=2024-06-01"
         )
+        # QUANTUM-CRYSTAL-ARCH — shorter budget for multimodal (Observer hung at 60s)
+        has_vision = any(
+            isinstance(m.get("content"), list) for m in messages if isinstance(m, dict)
+        )
+        azure_timeout = 25 if has_vision else 60
         async with aiohttp.ClientSession() as sess:
             async with sess.post(url, json={
                 "messages": messages,
                 "temperature": temperature,
                 "max_completion_tokens": max_tokens,
             }, headers={"api-key": _AZURE_KEY},
-                timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                timeout=aiohttp.ClientTimeout(total=azure_timeout)) as resp:
                 if resp.status != 200:
                     raise RuntimeError(f"Azure returned {resp.status}")
                 data = await resp.json()

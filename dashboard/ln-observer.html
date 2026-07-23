@@ -203,8 +203,9 @@ let AUTH_TOKEN = window.SS_AUTH_TOKEN || "";
 let WS_TICKET = "";
 let _authReady = false;
 
-const FRAME_INTERVAL_MS = 2000, FRAME_MAX_W = 1024, AUDIO_CHUNK_MS = 8000;
-const FRAME_DIFF_THRESHOLD = 0.04, RMS_SILENCE = 0.008;
+const FRAME_INTERVAL_MS = 1500, FRAME_MAX_W = 720, AUDIO_CHUNK_MS = 8000;
+const FRAME_DIFF_THRESHOLD = 0.02, RMS_SILENCE = 0.008;
+const FRAME_HEARTBEAT_MS = 8000; /* force a frame even if screen is static */
 
 let sessionId=null, ws=null, stream=null, frameTimer=null, recorder=null;
 let _wsRetry=0, _ending=false, _lastFrameData=null, _audioCtx=null, _analyser=null;
@@ -419,6 +420,7 @@ function _frameDiffRatio(a, b){
 function startFrames(){
   if(frameTimer) clearInterval(frameTimer);
   const video = $("preview"), canvas = document.createElement("canvas");
+  let _lastForced = 0;
   frameTimer = setInterval(()=>{
     if(!ws || ws.readyState !== 1 || !video.videoWidth) return;
     const scale = Math.min(1, FRAME_MAX_W / video.videoWidth);
@@ -427,9 +429,12 @@ function startFrames(){
     const ctx = canvas.getContext("2d");
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const img = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    if(_frameDiffRatio(img, _lastFrameData) < FRAME_DIFF_THRESHOLD) return;
+    const now = Date.now();
+    const force = (now - _lastForced) >= FRAME_HEARTBEAT_MS;
+    if(!force && _frameDiffRatio(img, _lastFrameData) < FRAME_DIFF_THRESHOLD) return;
     _lastFrameData = img;
-    const b64 = canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+    if(force) _lastForced = now;
+    const b64 = canvas.toDataURL("image/jpeg", 0.55).split(",")[1];
     ws.send(JSON.stringify({type:"frame", jpeg_b64:b64}));
   }, FRAME_INTERVAL_MS);
 }
