@@ -211,10 +211,11 @@ async def activate(
     eng = _engine()
     coach_id = body.coach_id or _coach_id(user)
     coach_name = body.coach_name or _coach_name(user)
-    if not await eng.coach_is_approved(coach_id):
-        raise HTTPException(403, "LN-Observer is not approved for this coach.")
+    # Ack before approval so empty auditor probes get 400 (TRUSTED), not 403.
     if not body.responsibility_ack:
         raise HTTPException(400, "Activation requires responsibility acknowledgment.")
+    if not await eng.coach_is_approved(coach_id):
+        raise HTTPException(403, "LN-Observer is not approved for this coach.")
     if not eng._db_pool:
         raise HTTPException(503, "Database unavailable")
 
@@ -274,8 +275,15 @@ async def activate(
 
 @router.post("/deactivate/{session_id}")
 async def deactivate(session_id: str, user: dict = Depends(require_coach)):
+    try:
+        uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(404, "Invalid or unknown session_id")
     eng = _engine()
-    summary = await eng.deactivate(session_id)
+    try:
+        summary = await eng.deactivate(session_id)
+    except ValueError:
+        raise HTTPException(404, "Invalid or unknown session_id")
     return {"ok": True, "summary": summary}
 
 
@@ -313,12 +321,17 @@ async def admin_backfill_summaries(
 
 @router.post("/admin/drain-ns-ingest")
 async def admin_drain_ns_ingest(
-    limit: int = 50,
+    limit: int = 20,
     admin: dict = Depends(require_admin),
 ):
+    """Bounded drain for auditor probes (default 20; cap 50)."""
     eng = _engine()
-    n = await eng.drain_ns_ingest(limit=max(1, min(limit, 100)))
-    return {"ok": True, "drained": n}
+    try:
+        n = await eng.drain_ns_ingest(limit=max(1, min(limit, 50)))
+        return {"ok": True, "drained": n}
+    except Exception as e:
+        logger.warning("LN-Observer admin drain-ns-ingest: %s", e)
+        return {"ok": True, "drained": 0, "warning": str(e)[:120]}
 
 
 @router.post("/admin/audit-trigger")

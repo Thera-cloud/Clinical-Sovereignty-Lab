@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import uuid as uuid_mod
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -22,9 +24,23 @@ _PROMOTION_INCREMENT = 0.03
 _PROMOTION_CAP = 0.95
 
 
-def _wisdom_path() -> Path:
+def _wisdom_candidates() -> List[Path]:
+    """Resolve Night School wisdom across backend/bridge mounts. # QUANTUM-CRYSTAL-ARCH"""
     data_dir = Path(os.environ.get("DATA_DIR", "/app/data"))
-    return data_dir / "Vaults" / "Admin" / "little_nate_wisdom.json"
+    bridge_dir = Path(os.environ.get("BRIDGE_DATA_DIR", "/app/bridge_data"))
+    return [
+        data_dir / "Vaults" / "Admin" / "little_nate_wisdom.json",
+        bridge_dir / "Vaults" / "Admin" / "little_nate_wisdom.json",
+        data_dir.parent / "bridge" / "Vaults" / "Admin" / "little_nate_wisdom.json",
+        Path("/opt/clinical-sovereignty-lab/data/bridge/Vaults/Admin/little_nate_wisdom.json"),
+    ]
+
+
+def _wisdom_path() -> Path:
+    for p in _wisdom_candidates():
+        if p.exists():
+            return p
+    return _wisdom_candidates()[0]
 
 
 def load_wisdom_snapshot(char_budget: int = _WISDOM_CHAR_BUDGET) -> str:
@@ -34,11 +50,10 @@ def load_wisdom_snapshot(char_budget: int = _WISDOM_CHAR_BUDGET) -> str:
         return _WISDOM_CACHE
     path = _wisdom_path()
     if not path.exists():
-        # Bridge vault path used on some mounts
-        alt = Path(os.environ.get("DATA_DIR", "/app/data")).parent / "bridge" / "Vaults" / "Admin" / "little_nate_wisdom.json"
-        path = alt if alt.exists() else path
-    if not path.exists():
-        logger.warning("LN-Observer wisdom file missing: %s", path)
+        logger.warning(
+            "LN-Observer wisdom file missing (tried %s)",
+            [str(p) for p in _wisdom_candidates()],
+        )
         _WISDOM_CACHE = ""
         return ""
     try:
@@ -204,8 +219,92 @@ async def retrieve_crystals_multi(
                 merged.append(c)
         merged.sort(key=lambda c: c.get("score", 0), reverse=True)
         top = merged[:top_k]
+        if not top and db_pool:
+            # QUANTUM-CRYSTAL-ARCH — PG keyword fallback when Vectorize cold/empty
+            top = await _pg_keyword_crystal_fallback(
+                db_pool, query, primary, also, limit=top_k
+            )
         await _reinforce_recall(db_pool, top, limit=min(10, top_k))
         return top
     except Exception as e:
         logger.warning("LN-Observer multi-user crystal retrieve failed: %s", e)
+        return []
+
+
+async def _pg_keyword_crystal_fallback(
+    db_pool,
+    query: str,
+    primary_uuid: str,
+    also_uuids: List[str],
+    limit: int = 8,
+) -> List[Dict[str, Any]]:
+    """ILIKE fallback for Observer same-brain when Vectorize returns 0 hits."""
+    tokens = [
+        t for t in re.findall(r"[A-Za-z]{4,}", query or "")
+        if t.lower() not in {
+            "what", "which", "with", "that", "this", "about", "from",
+            "have", "your", "their", "modality", "surface", "night",
+            "school", "wisdom", "relevant", "memory", "observe",
+        }
+    ][:6]
+    if not tokens:
+        return []
+    try:
+        ids = []
+        for u in [primary_uuid] + list(also_uuids or []):
+            try:
+                ids.append(uuid_mod.UUID(str(u)))
+            except Exception:
+                continue
+        if not ids:
+            return []
+        like_patterns = [f"%{t}%" for t in tokens[:4]]
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT crystal_text, content_hash, confidence, domain
+                   FROM nate_intelligence_crystals
+                   WHERE superseded_by IS NULL
+                     AND COALESCE(confidence, 0) >= 0.30
+                     AND (
+                       user_id = ANY($1::uuid[])
+                       OR user_id IS NULL
+                     )
+                     AND (
+                       crystal_text ILIKE ANY($2::text[])
+                     )
+                   ORDER BY
+                     CASE WHEN user_id = ANY($1::uuid[]) THEN 0 ELSE 1 END,
+                     confidence DESC NULLS LAST,
+                     created_at DESC
+                   LIMIT $3""",
+                ids,
+                like_patterns,
+                limit,
+            )
+        out: List[Dict[str, Any]] = []
+        for r in rows or []:
+            text = (r["crystal_text"] or "").strip()
+            if not text:
+                continue
+            out.append(
+                {
+                    "text": text,
+                    "score": float(r["confidence"] or 0.5),
+                    "metadata": {
+                        "text": text,
+                        "content_hash": r["content_hash"],
+                        "domain": r["domain"],
+                        "source": "pg_fallback",
+                    },
+                }
+            )
+        if out:
+            logger.warning(
+                "LN-Observer PG crystal fallback hits=%s tokens=%s",
+                len(out),
+                tokens[:4],
+            )
+        return out
+    except Exception as e:
+        logger.warning("LN-Observer PG crystal fallback failed: %s", e)
         return []

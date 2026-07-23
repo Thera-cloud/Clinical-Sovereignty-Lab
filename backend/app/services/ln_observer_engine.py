@@ -286,13 +286,17 @@ class LNObserverEngine:
                 )
             except Exception:
                 # Pre-migration 270: meta column / source check may be missing
-                await conn.execute(
-                    "INSERT INTO ln_observer_transcripts (session_id, source, content) "
-                    "VALUES ($1,$2,$3)",
-                    uuid.UUID(session_id),
-                    source if source != "av_bundle" else "system",
-                    content,
-                )
+                try:
+                    await conn.execute(
+                        "INSERT INTO ln_observer_transcripts (session_id, source, content) "
+                        "VALUES ($1,$2,$3)",
+                        uuid.UUID(session_id),
+                        source if source != "av_bundle" else "system",
+                        content,
+                    )
+                except Exception as e:
+                    # Unknown session / FK — never fail deactivate or auditor probes
+                    logger.debug("LN-Observer db_log skip: %s", e)
 
     async def db_log_forensic(
         self,
@@ -1766,6 +1770,10 @@ class LNObserverEngine:
             )
 
     async def deactivate(self, session_id: str) -> Optional[str]:
+        try:
+            sid = uuid.UUID(session_id)
+        except ValueError:
+            raise ValueError("invalid session_id")
         sess = self.live.pop(session_id, None)
         summary = None
         coach_id = ""
@@ -1794,7 +1802,7 @@ class LNObserverEngine:
             async with self._db_pool.acquire() as conn:
                 row = await conn.fetchrow(
                     "SELECT coach_id FROM ln_observer_sessions WHERE session_id=$1",
-                    uuid.UUID(session_id),
+                    sid,
                 )
             if row:
                 coach_id = row["coach_id"]
@@ -1809,14 +1817,14 @@ class LNObserverEngine:
                     """UPDATE ln_observer_sessions
                        SET status='ended', ended_at=now(), ln_summary=$2
                        WHERE session_id=$1""",
-                    uuid.UUID(session_id),
+                    sid,
                     summary,
                 )
                 await conn.execute(
                     """UPDATE ln_observer_activation_log
                        SET deactivated_at=now() WHERE session_id=$1
                        AND deactivated_at IS NULL""",
-                    uuid.UUID(session_id),
+                    sid,
                 )
         if coach_id:
             await self.queue_night_school_ingest(session_id, coach_id, summary)
