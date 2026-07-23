@@ -10,6 +10,7 @@ import json
 import logging
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import (
@@ -294,13 +295,37 @@ async def health():
 async def _bg_frame_observe(ws: WebSocket, eng, sess, session_id: str) -> None:
     """Lean observe off the receive loop so chat is never blocked. # QUANTUM-CRYSTAL-ARCH"""
     try:
+        # Capture frame_id BEFORE vision so note binds to the correct JPEG
+        fid = sess.last_frame_id or ""
+        fr = sess.frame_by_id(fid) if fid else None
         note = await eng.generate_chat(sess, "observe", lean=True)
         if note and not note.startswith("("):
+            meta = {"frame_id": fid, "lean": True}
+            storage_key = ""
+            if fr and fr.get("b64"):
+                storage_key = await eng.persist_frame_jpeg(
+                    session_id, fid, fr.get("b64") or ""
+                )
+                if storage_key:
+                    meta["storage_key"] = storage_key
             async with sess.lock:
-                sess.add_transcript("frame_observation", note)
-            await eng.db_log(session_id, "frame_observation", note)
+                sess.set_frame_note(fid, note)
+                sess.add_transcript("frame_observation", note, meta=meta)
+            await eng.db_log(session_id, "frame_observation", note, meta=meta)
+            await eng.db_log_forensic(
+                session_id,
+                "seen",
+                frame_id=fid,
+                seen_text=note,
+                storage_key=storage_key,
+                payload=meta,
+            )
             try:
-                await ws.send_json({"type": "observation", "text": note})
+                await ws.send_json({
+                    "type": "observation",
+                    "text": note,
+                    "frame_id": fid,
+                })
             except Exception:
                 pass
     except Exception as e:
@@ -374,9 +399,10 @@ async def observer_ws(ws: WebSocket, session_id: str):
             if raw_msg.get("bytes") is not None:
                 text = await eng.transcribe_audio(raw_msg["bytes"])
                 if text:
-                    async with sess.lock:
-                        sess.add_transcript("audio_transcript", text)
-                    await eng.db_log(session_id, "audio_transcript", text)
+                    # QUANTUM-CRYSTAL-ARCH — pair STT window to nearest visual frame
+                    bundle = await eng.ingest_audio_transcript(
+                        sess, session_id, text
+                    )
                     if eng._db_pool:
                         async with eng._db_pool.acquire() as conn:
                             await conn.execute(
@@ -384,7 +410,17 @@ async def observer_ws(ws: WebSocket, session_id: str):
                                 "WHERE session_id=$1",
                                 uuid.UUID(session_id),
                             )
-                    await ws.send_json({"type": "transcript", "text": text})
+                    await ws.send_json({
+                        "type": "transcript",
+                        "text": text,
+                        "forensic": {
+                            "frame_id": bundle.get("frame_id"),
+                            "frame_delta_ms": bundle.get("frame_delta_ms"),
+                            "aligned": bundle.get("aligned"),
+                            "t_start": bundle.get("t_audio_start_iso"),
+                            "t_end": bundle.get("t_audio_end_iso"),
+                        },
+                    })
                 continue
 
             if raw_msg.get("text") is None:
@@ -392,9 +428,25 @@ async def observer_ws(ws: WebSocket, session_id: str):
             msg = json.loads(raw_msg["text"])
             mtype = msg.get("type")
 
-            if mtype == "frame":
+            if mtype == "audio_window":
+                # Client declares capture window before binary WebM chunk
                 async with sess.lock:
-                    sess.add_frame(msg.get("jpeg_b64", ""))
+                    sess.pending_audio_window = {
+                        "t_start_ms": msg.get("t_start_ms"),
+                        "t_end_ms": msg.get("t_end_ms"),
+                        "seq": msg.get("seq"),
+                        "nearest_frame_id": msg.get("nearest_frame_id"),
+                    }
+
+            elif mtype == "frame":
+                captured_at = msg.get("captured_at_ms") or msg.get("captured_at")
+                frame_id = msg.get("frame_id")
+                async with sess.lock:
+                    fmeta = sess.add_frame(
+                        msg.get("jpeg_b64", ""),
+                        captured_at_ms=captured_at,
+                        frame_id=frame_id,
+                    )
                 frame_counter += 1
                 if eng._db_pool:
                     async with eng._db_pool.acquire() as conn:
@@ -403,10 +455,23 @@ async def observer_ws(ws: WebSocket, session_id: str):
                             "WHERE session_id=$1",
                             uuid.UUID(session_id),
                         )
+                    await eng.db_log_forensic(
+                        session_id,
+                        "frame",
+                        t_start=datetime.fromtimestamp(
+                            fmeta["captured_at_ms"] / 1000.0, tz=timezone.utc
+                        ),
+                        frame_id=fmeta.get("frame_id") or "",
+                        payload={
+                            "server_recv_ms": fmeta.get("server_recv_ms"),
+                            "iso": fmeta.get("iso"),
+                        },
+                    )
                 now = time.time()
                 if (
                     frame_counter % OBSERVE_EVERY_N == 0
                     and (now - sess.last_observe_at) >= OBSERVE_DEBOUNCE_S
+                    and not sess.vision_inflight
                 ):
                     sess.last_observe_at = now
                     # QUANTUM-CRYSTAL-ARCH — never block chat WS on lean observe
@@ -465,6 +530,8 @@ async def observer_ws(ws: WebSocket, session_id: str):
                     or "Look closely at what is on screen right now and note "
                        "clinically relevant cues for the coach."
                 )
+                fid = sess.last_frame_id or ""
+                fr = sess.frame_by_id(fid) if fid else None
                 try:
                     note = await eng.generate_chat(
                         sess,
@@ -475,12 +542,37 @@ async def observer_ws(ws: WebSocket, session_id: str):
                     logger.warning("LN-Observer look_now crashed: %s", e)
                     note = "(Look closely timed out — try again.)"
                 if note:
+                    meta = {"frame_id": fid, "look_now": True}
+                    storage_key = ""
+                    if fr and fr.get("b64"):
+                        storage_key = await eng.persist_frame_jpeg(
+                            session_id, fid, fr.get("b64") or ""
+                        )
+                        if storage_key:
+                            meta["storage_key"] = storage_key
                     async with sess.lock:
-                        sess.add_transcript("frame_observation", note)
-                    await eng.db_log(session_id, "frame_observation", note)
-                    # Gap 4 — forge requires user_text >= 40 chars
+                        sess.set_frame_note(fid, note)
+                        sess.add_transcript(
+                            "frame_observation", note, meta=meta
+                        )
+                        sess.chat.append({"role": "assistant", "content": note})
+                        sess.last_ln_reply = note
+                    await eng.db_log(
+                        session_id, "frame_observation", note, meta=meta
+                    )
+                    await eng.db_log(session_id, "ln_chat", note, meta=meta)
+                    await eng.db_log_forensic(
+                        session_id,
+                        "look_now",
+                        frame_id=fid,
+                        seen_text=note,
+                        storage_key=storage_key,
+                        payload={"prompt": look_prompt[:200]},
+                    )
+                    # Gap 4 — forge with forensic A/V bundle
                     crystallize_user = (
-                        f"LN-Observer look_now: {look_prompt}\n"
+                        f"LN-Observer look_now frame={fid}: {look_prompt}\n"
+                        f"Forensic A/V:\n{eng.forensic_timeline(sess, n=4)}\n"
                         f"Context: {eng.context_block(sess, n=6)[:400]}"
                     )
                     await eng._crystallize_safe(
@@ -490,7 +582,12 @@ async def observer_ws(ws: WebSocket, session_id: str):
                         coach_name=sess.coach_name,
                         min_score=2,
                     )
-                    await ws.send_json({"type": "observation", "text": note})
+                    await ws.send_json({"type": "ln_reply", "text": note})
+                    await ws.send_json({
+                        "type": "observation",
+                        "text": note,
+                        "frame_id": fid,
+                    })
 
             elif mtype == "end":
                 break

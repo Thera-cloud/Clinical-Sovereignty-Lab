@@ -95,6 +95,18 @@ main{flex:1;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,1fr
 .ticker .line{margin-bottom:4px}
 .ticker .tag{color:var(--ember);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;margin-right:8px}
 
+.forensic-strip{
+  display:none;gap:12px;align-items:center;padding:10px 16px;
+  border-top:1px solid var(--line);background:#0e0c18;
+}
+.forensic-strip.on{display:flex}
+.forensic-strip img{
+  width:160px;height:90px;object-fit:contain;background:#000;
+  border:1px solid var(--line);border-radius:6px;flex-shrink:0;
+}
+.forensic-strip .meta{font-size:12px;color:var(--ink-dim);line-height:1.45}
+.forensic-strip .meta strong{color:var(--ember);font-weight:600}
+
 .feed-controls{display:flex;gap:10px;padding:12px 16px;background:var(--panel);border-top:1px solid var(--line)}
 
 /* Right: the observation chat */
@@ -155,6 +167,10 @@ main{flex:1;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,1fr
       </div>
     </div>
     <div class="ticker" id="ticker" aria-live="polite"></div>
+    <div class="forensic-strip" id="forensicStrip" aria-live="polite">
+      <img id="forensicThumb" alt="Frame LN paired / analyzed"/>
+      <div class="meta" id="forensicMeta">Ground truth: waiting for A/V pair…</div>
+    </div>
     <div class="feed-controls">
       <button id="btnLook" class="ghost" disabled>Ask LN to look closely</button>
       <span class="badge" id="feedBadge">Feed off</span>
@@ -203,15 +219,32 @@ let AUTH_TOKEN = window.SS_AUTH_TOKEN || "";
 let WS_TICKET = "";
 let _authReady = false;
 
-const FRAME_INTERVAL_MS = 1500, FRAME_MAX_W = 720, AUDIO_CHUNK_MS = 8000;
+const FRAME_INTERVAL_MS = 1500, FRAME_MAX_W = 1280, AUDIO_CHUNK_MS = 8000;
 const FRAME_DIFF_THRESHOLD = 0.02, RMS_SILENCE = 0.008;
-const FRAME_HEARTBEAT_MS = 8000; /* force a frame even if screen is static */
+const FRAME_HEARTBEAT_MS = 6000; /* force a frame even if screen is static */
+const FRAME_JPEG_Q = 0.78; /* OCR needs sharper frames than 0.55 */
 
 let sessionId=null, ws=null, stream=null, frameTimer=null, recorder=null;
 let _wsRetry=0, _ending=false, _lastFrameData=null, _audioCtx=null, _analyser=null;
 let _thinkTimer=null;
 let _ackAcceptedThisPage=false; /* skip re-ack veil for back-to-back shares */
 let _reconnectTimer=null;
+let _audioSeq=0, _audioChunkStart=0;
+let _lastFrameId="";
+let _frameThumbs = {}; /* frame_id → data URL (coach ground truth) */
+
+function showForensic(frameId, label){
+  const strip = $("forensicStrip");
+  const img = $("forensicThumb");
+  const meta = $("forensicMeta");
+  if(!strip || !img || !meta) return;
+  const src = frameId ? _frameThumbs[frameId] : null;
+  if(src){ img.src = src; strip.classList.add("on"); }
+  else if(!strip.classList.contains("on")){ strip.classList.add("on"); }
+  meta.innerHTML = "<strong>" + (label || "Frame") + "</strong>" +
+    (frameId ? (" · " + frameId) : "") +
+    (src ? "" : " · (thumb not in local cache — pixels archived server-side)");
+}
 
 const $ = id => document.getElementById(id);
 const iris=$("iris"), badge=$("statusBadge"), feedBadge=$("feedBadge");
@@ -393,8 +426,24 @@ function onWsMessage(ev){
     startAudio();
     addTicker("SYS","LN-Observer is live. Little Nate is watching with you.");
   }
-  else if(m.type === "transcript"){ addTicker("Audio", m.text); }
-  else if(m.type === "observation"){ addMsg("obs", "LN noticed", m.text); setIris("watching"); }
+  else if(m.type === "transcript"){
+    const f = m.forensic || {};
+    let label = "Audio";
+    if(f.frame_id){
+      label = f.aligned ? "A/V ALIGNED" : "A/V LOOSE";
+      addTicker(label, (m.text||"") + " ⟺ " + f.frame_id +
+        (f.frame_delta_ms!=null ? " Δ"+f.frame_delta_ms+"ms" : ""));
+      showForensic(f.frame_id, label);
+    } else {
+      addTicker(label, m.text);
+    }
+  }
+  else if(m.type === "observation"){
+    const fid = m.frame_id || "";
+    addMsg("obs", "LN noticed"+(fid?(" ["+fid+"]"):""), m.text);
+    if(fid) showForensic(fid, "LN looked");
+    setIris("watching");
+  }
   else if(m.type === "thinking"){
     setIris("thinking");
     if(_thinkTimer) clearTimeout(_thinkTimer);
@@ -434,8 +483,29 @@ function startFrames(){
     if(!force && _frameDiffRatio(img, _lastFrameData) < FRAME_DIFF_THRESHOLD) return;
     _lastFrameData = img;
     if(force) _lastForced = now;
-    const b64 = canvas.toDataURL("image/jpeg", 0.55).split(",")[1];
-    ws.send(JSON.stringify({type:"frame", jpeg_b64:b64}));
+    const dataUrl = canvas.toDataURL("image/jpeg", FRAME_JPEG_Q);
+    const b64 = dataUrl.split(",")[1];
+    const captured_at_ms = Date.now();
+    const frame_id = "f_" + captured_at_ms.toString(36) + "_" + Math.floor(Math.random()*1e4).toString(36);
+    _lastFrameId = frame_id;
+    // Tiny thumb for coach ground-truth panel (separate low-q canvas)
+    try{
+      const tc = document.createElement("canvas");
+      const tw = 320, th = Math.max(1, Math.round(canvas.height * (320/canvas.width)));
+      tc.width = tw; tc.height = th;
+      tc.getContext("2d").drawImage(canvas, 0, 0, tw, th);
+      _frameThumbs[frame_id] = tc.toDataURL("image/jpeg", 0.55);
+      const keys = Object.keys(_frameThumbs);
+      if(keys.length > 40){
+        keys.slice(0, keys.length-40).forEach(k => { delete _frameThumbs[k]; });
+      }
+    }catch(e){}
+    ws.send(JSON.stringify({
+      type:"frame",
+      jpeg_b64:b64,
+      captured_at_ms,
+      frame_id
+    }));
   }, FRAME_INTERVAL_MS);
 }
 
@@ -462,13 +532,30 @@ function startAudio(){
     if(e.data.size < 2000 || !ws || ws.readyState !== 1) return;
     const buf = await e.data.arrayBuffer();
     if(_chunkRms(buf) < RMS_SILENCE && e.data.size < 4000) return;
+    const t_end_ms = Date.now();
+    const t_start_ms = _audioChunkStart || (t_end_ms - AUDIO_CHUNK_MS);
+    const seq = ++_audioSeq;
+    // QUANTUM-CRYSTAL-ARCH — declare window before binary so server can A/V-pair
+    try{
+      ws.send(JSON.stringify({
+        type:"audio_window",
+        t_start_ms,
+        t_end_ms,
+        seq,
+        nearest_frame_id: _lastFrameId || null
+      }));
+    }catch(err){}
     ws.send(buf);
   };
   recorder.onstop = () => {
     if(!sessionId || !recorder) return;
-    try{ recorder.start(); }catch(e){}
+    try{
+      _audioChunkStart = Date.now();
+      recorder.start();
+    }catch(e){}
     setTimeout(()=>{ if(sessionId&&recorder&&recorder.state==="recording") recorder.stop(); }, AUDIO_CHUNK_MS);
   };
+  _audioChunkStart = Date.now();
   recorder.start();
   setTimeout(()=>{ if(recorder && recorder.state==="recording") recorder.stop(); }, AUDIO_CHUNK_MS);
 }

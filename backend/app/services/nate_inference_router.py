@@ -260,17 +260,28 @@ class NateInferenceRouter:
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
-        # QUANTUM-CRYSTAL-ARCH — multimodal user content when images provided
+        # QUANTUM-CRYSTAL-ARCH — text instruction first, then image (better OCR grounding)
         if images:
-            content: List[Any] = []
+            content: List[Any] = [
+                {
+                    "type": "text",
+                    "text": (
+                        "Read the screenshot below carefully. Quote only legible "
+                        "on-screen text. Do not invent UI, filenames, or code.\n\n"
+                        + prompt
+                    ),
+                }
+            ]
             for b64 in images[:4]:
                 if not b64:
                     continue
                 content.append({
                     "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{b64}",
+                        "detail": "high",
+                    },
                 })
-            content.append({"type": "text", "text": prompt})
             messages.append({"role": "user", "content": content})
         else:
             messages.append({"role": "user", "content": prompt})

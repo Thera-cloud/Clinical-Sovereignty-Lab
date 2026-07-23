@@ -19,13 +19,27 @@ from typing import Any, Dict, List, Optional, Set
 logger = logging.getLogger(__name__)
 
 MAX_CONTEXT_FRAMES = 4
-MAX_TRANSCRIPT_LINES = 60
-FRAME_BUFFER_SIZE = 6
+MAX_TRANSCRIPT_LINES = 80
+FRAME_BUFFER_SIZE = 8
+FRAME_RING_SIZE = 24
 RECONNECT_GRACE_S = 90
 MAX_SESSION_S = 3 * 3600
 WARN_SESSION_S = int(2.75 * 3600)  # 2:45 warn before 3h cap
 OBSERVE_DEBOUNCE_S = 20
 CHAT_COMPACT_EVERY = 20
+# QUANTUM-CRYSTAL-ARCH — max gap to claim A/V "aligned" for forensics
+AV_ALIGN_MAX_MS = 4000
+# QUANTUM-CRYSTAL-ARCH — detail/OCR questions that need a fresh frame (not stale notes)
+_DETAIL_RE = re.compile(
+    r"\b("
+    r"see|seeing|saw|look|looking|observe|observing|watching|screen|"
+    r"what do you see|can you see|able to see|closer look|describe what|"
+    r"on screen|are you able|what word|between|title|browser|bar|"
+    r"read|quote|exact|filename|file name|top of|bottom of|says|"
+    r"written|text on|cli|input"
+    r")\b",
+    re.I,
+)
 ACK_TEXT_V1 = (
     "By activating LN-Observer, the coach accepts full responsibility for the "
     "activation and for all content shared to the observation feed. Sovereign "
@@ -80,6 +94,8 @@ class LiveSession:
         self.coach_profile = coach_profile or {}
         self.activation_memory = activation_memory or ""
         self.frames: List[str] = []
+        # Forensic ring: {frame_id, b64, captured_at_ms, server_recv_ms, iso}
+        self.frame_ring: List[Dict[str, Any]] = []
         self.transcript: List[dict] = []
         self.chat: List[dict] = []
         self.chat_compact: str = ""
@@ -92,6 +108,14 @@ class LiveSession:
         self.pending_crystallize_at = 0.0
         self.started_at = time.time()
         self.warn_245_sent = False
+        self.last_frame_observation = ""
+        self.last_frame_id = ""
+        self.vision_inflight = False
+        # Pending audio window from client {t_start_ms, t_end_ms, seq}
+        self.pending_audio_window: Optional[Dict[str, Any]] = None
+        self.av_bundles: List[Dict[str, Any]] = []
+        # frame_id → vision note that was produced FROM that frame
+        self.frame_notes: Dict[str, str] = {}
 
     @property
     def lock(self) -> asyncio.Lock:
@@ -99,17 +123,78 @@ class LiveSession:
             self._lock = asyncio.Lock()
         return self._lock
 
-    def add_frame(self, b64jpeg: str):
+    def add_frame(
+        self,
+        b64jpeg: str,
+        captured_at_ms: Optional[float] = None,
+        frame_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Store JPEG + forensic timestamp. # QUANTUM-CRYSTAL-ARCH"""
+        now_ms = time.time() * 1000.0
+        ms = float(captured_at_ms) if captured_at_ms else now_ms
+        fid = (frame_id or "").strip() or f"f_{uuid.uuid4().hex[:12]}"
+        iso = datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc).isoformat()
+        meta = {
+            "frame_id": fid,
+            "b64": b64jpeg,
+            "captured_at_ms": ms,
+            "server_recv_ms": now_ms,
+            "iso": iso,
+        }
         self.frames.append(b64jpeg)
         if len(self.frames) > FRAME_BUFFER_SIZE:
             self.frames = self.frames[-FRAME_BUFFER_SIZE:]
+        self.frame_ring.append(meta)
+        if len(self.frame_ring) > FRAME_RING_SIZE:
+            self.frame_ring = self.frame_ring[-FRAME_RING_SIZE:]
+        self.last_frame_id = fid
+        # Bound note map to ring
+        if len(self.frame_notes) > FRAME_RING_SIZE * 2:
+            keep = {f["frame_id"] for f in self.frame_ring}
+            self.frame_notes = {
+                k: v for k, v in self.frame_notes.items() if k in keep
+            }
+        return meta
 
-    def add_transcript(self, source: str, content: str):
+    def frame_by_id(self, frame_id: str) -> Optional[Dict[str, Any]]:
+        if not frame_id:
+            return None
+        for f in reversed(self.frame_ring):
+            if f.get("frame_id") == frame_id:
+                return f
+        return None
+
+    def set_frame_note(self, frame_id: str, note: str):
+        if frame_id and note:
+            self.frame_notes[frame_id] = note
+            self.last_frame_observation = note
+            self.last_frame_id = frame_id
+
+    def nearest_frame(self, t_ms: float) -> Optional[Dict[str, Any]]:
+        if not self.frame_ring:
+            return None
+        return min(
+            self.frame_ring,
+            key=lambda f: abs(float(f.get("captured_at_ms") or 0) - t_ms),
+        )
+
+    def recent_frames_for_vision(self, n: int = MAX_CONTEXT_FRAMES) -> List[Dict[str, Any]]:
+        return list(self.frame_ring[-max(1, n) :])
+
+    def add_transcript(
+        self,
+        source: str,
+        content: str,
+        *,
+        meta: Optional[Dict[str, Any]] = None,
+        ts_iso: Optional[str] = None,
+    ):
         self.transcript.append(
             {
                 "source": source,
                 "content": content,
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": ts_iso or datetime.now(timezone.utc).isoformat(),
+                "meta": meta or {},
             }
         )
         if len(self.transcript) > MAX_TRANSCRIPT_LINES:
@@ -167,17 +252,98 @@ class LNObserverEngine:
             )
         return bool(row and row["status"] == "approved")
 
-    async def db_log(self, session_id: str, source: str, content: str):
+    async def db_log(
+        self,
+        session_id: str,
+        source: str,
+        content: str,
+        meta: Optional[Dict[str, Any]] = None,
+    ):
         if not self._db_pool:
             return
+        import json as _json
+
+        meta_obj = meta or {}
         async with self._db_pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO ln_observer_transcripts (session_id, source, content) "
-                "VALUES ($1,$2,$3)",
-                uuid.UUID(session_id),
-                source,
-                content,
-            )
+            try:
+                await conn.execute(
+                    "INSERT INTO ln_observer_transcripts "
+                    "(session_id, source, content, meta) VALUES ($1,$2,$3,$4::jsonb)",
+                    uuid.UUID(session_id),
+                    source,
+                    content,
+                    _json.dumps(meta_obj),
+                )
+            except Exception:
+                # Pre-migration 270: meta column / source check may be missing
+                await conn.execute(
+                    "INSERT INTO ln_observer_transcripts (session_id, source, content) "
+                    "VALUES ($1,$2,$3)",
+                    uuid.UUID(session_id),
+                    source if source != "av_bundle" else "system",
+                    content,
+                )
+
+    async def db_log_forensic(
+        self,
+        session_id: str,
+        event_type: str,
+        *,
+        t_start: Optional[datetime] = None,
+        t_end: Optional[datetime] = None,
+        frame_id: str = "",
+        frame_delta_ms: Optional[int] = None,
+        audio_text: str = "",
+        seen_text: str = "",
+        storage_key: str = "",
+        payload: Optional[Dict[str, Any]] = None,
+    ):
+        if not self._db_pool:
+            return
+        import json as _json
+
+        safe_payload = {
+            k: v for k, v in (payload or {}).items() if k != "_b64"
+        }
+        if storage_key:
+            safe_payload["storage_key"] = storage_key
+        async with self._db_pool.acquire() as conn:
+            try:
+                await conn.execute(
+                    """INSERT INTO ln_observer_forensic_events
+                       (session_id, event_type, t_start, t_end, frame_id,
+                        frame_delta_ms, audio_text, seen_text, storage_key, payload)
+                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)""",
+                    uuid.UUID(session_id),
+                    event_type,
+                    t_start,
+                    t_end,
+                    frame_id or None,
+                    frame_delta_ms,
+                    audio_text or None,
+                    seen_text or None,
+                    storage_key or None,
+                    _json.dumps(safe_payload),
+                )
+            except Exception:
+                try:
+                    await conn.execute(
+                        """INSERT INTO ln_observer_forensic_events
+                           (session_id, event_type, t_start, t_end, frame_id,
+                            frame_delta_ms, audio_text, seen_text, payload)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)""",
+                        uuid.UUID(session_id),
+                        event_type,
+                        t_start,
+                        t_end,
+                        frame_id or None,
+                        frame_delta_ms,
+                        audio_text or None,
+                        seen_text or None,
+                        _json.dumps(safe_payload),
+                    )
+                except Exception as e:
+                    logger.warning("LNObserverEngine forensic insert failed: %s", e)
 
     async def load_prior_summaries(self, coach_id: str, limit: int = 5) -> str:
         if not self._db_pool:
@@ -315,9 +481,146 @@ class LNObserverEngine:
                 "coach_chat": "COACH",
                 "ln_chat": "LN",
                 "system": "SYS",
+                "av_bundle": "AV",
+                "frame_meta": "FRAME",
             }.get(t["source"], "?")
-            lines.append(f"[{tag}] {t['content']}")
+            ts = (t.get("ts") or "")[:19]
+            meta = t.get("meta") or {}
+            fid = meta.get("frame_id") or ""
+            prefix = f"[{tag} @{ts}"
+            if fid:
+                prefix += f" frame={fid}"
+            delta = meta.get("frame_delta_ms")
+            if delta is not None:
+                prefix += f" Δ{delta}ms"
+            prefix += "]"
+            lines.append(f"{prefix} {t['content']}")
         return "\n".join(lines) if lines else "(session just started — no transcript yet)"
+
+    def forensic_timeline(self, sess: LiveSession, n: int = 6) -> str:
+        """Compact A/V sync lines for prompts / crystallize. # QUANTUM-CRYSTAL-ARCH"""
+        bundles = sess.av_bundles[-n:]
+        if not bundles:
+            return "(no A/V sync pairs yet)"
+        lines = []
+        for b in bundles:
+            aligned = "ALIGNED" if b.get("aligned") else "LOOSE"
+            lines.append(
+                f"[{aligned}] audio@{b.get('t_audio_start_iso','?')}→"
+                f"{b.get('t_audio_end_iso','?')} | "
+                f"frame={b.get('frame_id','?')} Δ{b.get('frame_delta_ms','?')}ms | "
+                f"said: {(b.get('audio_text') or '')[:160]} | "
+                f"seen: {(b.get('seen_text') or '(no vision note yet)')[:160]}"
+            )
+        return "\n".join(lines)
+
+    def pair_audio_to_frame(
+        self,
+        sess: LiveSession,
+        audio_text: str,
+        *,
+        t_start_ms: Optional[float] = None,
+        t_end_ms: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Hard-link an STT window to the nearest visual frame."""
+        now_ms = time.time() * 1000.0
+        win = sess.pending_audio_window or {}
+        start = float(
+            t_start_ms
+            if t_start_ms is not None
+            else win.get("t_start_ms") or (now_ms - 8000)
+        )
+        end = float(
+            t_end_ms if t_end_ms is not None else win.get("t_end_ms") or now_ms
+        )
+        mid = (start + end) / 2.0
+        # Prefer client-declared nearest_frame_id when still in ring
+        hint = (win.get("nearest_frame_id") or "").strip()
+        fr = sess.frame_by_id(hint) if hint else None
+        match_mode = "client_hint" if fr else "nearest_mid"
+        if not fr:
+            fr = sess.nearest_frame(mid)
+        delta = None
+        frame_id = ""
+        frame_iso = ""
+        b64 = ""
+        if fr:
+            delta = int(abs(float(fr["captured_at_ms"]) - mid))
+            frame_id = fr.get("frame_id") or ""
+            frame_iso = fr.get("iso") or ""
+            b64 = fr.get("b64") or ""
+        aligned = bool(fr and delta is not None and delta <= AV_ALIGN_MAX_MS)
+        # seen_text MUST be the note for THIS frame_id when available
+        seen = ""
+        if frame_id and frame_id in sess.frame_notes:
+            seen = sess.frame_notes[frame_id]
+        elif aligned:
+            seen = ""  # do not attach stale lean from another frame
+        start_iso = datetime.fromtimestamp(start / 1000.0, tz=timezone.utc).isoformat()
+        end_iso = datetime.fromtimestamp(end / 1000.0, tz=timezone.utc).isoformat()
+        bundle = {
+            "event": "av_bundle",
+            "aligned": aligned,
+            "match_mode": match_mode,
+            "t_audio_start_ms": start,
+            "t_audio_end_ms": end,
+            "t_audio_start_iso": start_iso,
+            "t_audio_end_iso": end_iso,
+            "audio_text": audio_text,
+            "frame_id": frame_id,
+            "frame_captured_at": frame_iso,
+            "frame_delta_ms": delta,
+            "seen_text": seen,
+            "seq": win.get("seq"),
+            "_b64": b64,  # stripped before DB payload
+        }
+        sess.av_bundles.append({k: v for k, v in bundle.items() if k != "_b64"})
+        if len(sess.av_bundles) > 40:
+            sess.av_bundles = sess.av_bundles[-40:]
+        sess.pending_audio_window = None
+        return bundle
+
+    async def persist_frame_jpeg(
+        self,
+        session_id: str,
+        frame_id: str,
+        b64jpeg: str,
+    ) -> str:
+        """Archive paired-frame pixels (R2 → local). Returns storage_key or ''."""
+        # QUANTUM-CRYSTAL-ARCH
+        if not b64jpeg or not frame_id:
+            return ""
+        try:
+            import base64
+
+            raw = base64.b64decode(self._normalize_frame_b64(b64jpeg), validate=False)
+        except Exception:
+            return ""
+        if len(raw) < 200:
+            return ""
+        key = f"ln-observer/{session_id}/{frame_id}.jpg"
+        try:
+            from app.services.r2_storage import upload_bytes_async
+
+            await upload_bytes_async(
+                key=key, content=raw, content_type="image/jpeg"
+            )
+            return key
+        except Exception as e:
+            logger.warning("LNObserverEngine R2 frame archive failed: %s", e)
+        try:
+            from app.services.blob_storage import upload_bytes
+
+            kind, loc = await asyncio.to_thread(
+                upload_bytes,
+                rel_path=key,
+                content=raw,
+                content_type="image/jpeg",
+            )
+            return f"{kind}:{loc}" if loc else key
+        except Exception as e2:
+            logger.warning("LNObserverEngine local frame archive failed: %s", e2)
+            return ""
 
     def live_haystack(self, sess: LiveSession, coach_message: str = "") -> str:
         """Live coach/transcript text only — used for Gap 7 client matching (not roster stuffing)."""
@@ -507,77 +810,119 @@ class LNObserverEngine:
             role = "COACH" if m.get("role") == "user" else "LN"
             chat_tail += f"[{role}] {m.get('content', '')}\n"
 
+        detail_q = bool(_DETAIL_RE.search(coach_message or ""))
+        # QUANTUM-CRYSTAL-ARCH — Observer chat always attaches latest frame when available
+        want_vision = bool(look_now or lean or detail_q or (not lean and sess.frames))
         images: Optional[List[str]] = None
-        want_vision = bool(look_now or lean)
-        if want_vision and sess.frames:
-            fr = self._normalize_frame_b64(sess.frames[-1])
-            # Cap payload — oversized JPEG was a common Azure hang vector
-            if fr and len(fr) <= 450_000:
-                images = [fr]
-            elif fr:
-                logger.warning(
-                    "LNObserverEngine skipping oversized frame (%s chars)",
-                    len(fr),
+        frame_ages: List[str] = []
+        if want_vision and sess.frame_ring:
+            # look_now / detail: up to MAX_CONTEXT_FRAMES; lean/chat: latest only
+            take_n = MAX_CONTEXT_FRAMES if (look_now or detail_q) else 1
+            chosen = sess.recent_frames_for_vision(take_n)
+            now_ms = time.time() * 1000.0
+            images = []
+            for fm in chosen:
+                fr = self._normalize_frame_b64(fm.get("b64") or "")
+                if not fr or len(fr) > 1_800_000:
+                    continue
+                images.append(fr)
+                age = int(now_ms - float(fm.get("captured_at_ms") or now_ms))
+                frame_ages.append(
+                    f"{fm.get('frame_id')} age≈{age}ms @{fm.get('iso','')[:19]}"
                 )
+            if not images:
+                images = None
 
         n_buf = len(sess.frames)
+        forensic = self.forensic_timeline(sess, n=5)
+        # Stale lean notes poison OCR — only use when NO fresh image this turn
+        obs_block = ""
+        if not images:
+            if sess.last_frame_observation:
+                obs_block = sess.last_frame_observation
+
         if lean:
             user_prompt = (
-                "Internal observation (1-2 sentences): what is on screen and any "
-                "clinically noteworthy cue. Be terse."
+                "OCR the attached screenshot only. Name the app/window title if "
+                "legible, the open file name, and 1 clinical cue if any. "
+                "1-2 sentences. Quote only text you can actually read."
             )
-        elif look_now:
+        elif look_now or detail_q:
             user_prompt = (
                 coach_message
-                or "Look at the attached screen frame and describe what you see "
-                   "for the coach — file names, UI, and clinically relevant cues."
+                or "Read the attached screenshot(s) carefully. Quote window titles, "
+                   "open filenames, and any visible prompt/CLI text exactly. "
+                   "Use [FORENSIC A/V TIMELINE] to sync what was said with what was shown."
             )
         else:
             user_prompt = coach_message
 
-        vision_note = (
-            "A JPEG of the coach's shared screen is attached — describe it."
-            if images
-            else (
-                f"No vision frame attached this turn (buffered={n_buf}). "
-                "Say clearly if you cannot see the screen; use transcript/chat only."
+        if images:
+            vision_note = (
+                "PRIMARY SOURCE: attached JPEG screenshot(s) (live share), newest last. "
+                "Ignore prior chat guesses about the screen. "
+                f"Buffer depth={n_buf}. Frames: {', '.join(frame_ages) or 'latest'}. "
+                "Quote only legible on-screen text. If blurry, say you cannot read it."
             )
-        )
+        elif obs_block:
+            vision_note = (
+                f"No fresh JPEG this turn (buffer={n_buf}). "
+                "You may reference the last observation as UNVERIFIED/possibly stale. "
+                "Use forensic A/V pairs only when marked ALIGNED."
+            )
+        else:
+            vision_note = (
+                f"No vision frame yet (buffered={n_buf}). "
+                "Say you cannot see the screen yet; ask them to keep FEED LIVE on."
+            )
+
         prompt = (
             "You are Little Nate in LN-Observer mode, co-watching with the coach.\n"
             f"{vision_note}\n\n"
             f"[SESSION]\n{what}\n\n"
+            f"[FORENSIC A/V TIMELINE]\n{forensic}\n\n"
             f"[TRANSCRIPT]\n{transcript}\n\n"
-            f"[CHAT]\n{chat_tail}\n"
-            f"Coach: {user_prompt}"
         )
+        if obs_block and not images:
+            prompt += (
+                f"[LAST OBSERVATION — UNVERIFIED / MAY BE STALE]\n{obs_block}\n\n"
+            )
+        prompt += f"[CHAT]\n{chat_tail}\nCoach: {user_prompt}"
+
         system = (
-            "You are Little Nate observing a live coach screen share. "
-            "Be concrete about what you can and cannot see. "
-            "Never invent on-screen text you did not actually read."
+            "You are Little Nate observing a live coach screen share with forensic "
+            "A/V alignment. ACCURACY RULES: (1) When JPEGs are attached, answer from "
+            "those images first. (2) When citing spoken content, prefer ALIGNED "
+            "forensic pairs (audio window linked to a frame). (3) Never invent "
+            "on-screen text. (4) Prefer 'I cannot read that clearly' over a guess."
         )
 
         logger.warning(
-            "LNObserverEngine fast-gen lean=%s look_now=%s vision=%s buf=%s msg_len=%s",
+            "LNObserverEngine fast-gen lean=%s look_now=%s detail=%s vision=%s buf=%s msg_len=%s",
             lean,
             look_now,
+            detail_q,
             bool(images),
             n_buf,
             len(coach_message or ""),
         )
 
+        # Serialize Azure vision so lean+look_now+chat don't pile up ("maxed out")
+        if images and sess.vision_inflight and lean and not look_now and not detail_q:
+            return ""
+        if images:
+            sess.vision_inflight = True
         try:
             from app.services.nate_inference_router import NateInferenceRouter
 
             router = NateInferenceRouter(app_state=self._app_state)
-            # Vision forces Azure; text uses utility (Workers AI) for speed
             tier = "clinical" if images else "utility"
             result = await router.generate(
                 prompt=prompt,
                 system=system,
                 tier=tier,
-                temperature=0.35,
-                max_tokens=100 if lean else (420 if look_now else 500),
+                temperature=0.15 if images else 0.35,
+                max_tokens=120 if lean else (480 if (look_now or detail_q) else 500),
                 domain="coaching",
                 odpe_signal=None if images else "LOCKED",
                 allow_deep=False,
@@ -603,17 +948,24 @@ class LNObserverEngine:
                     "Share a different view or describe what you're seeing."
                 )
             if reply and "unable to process" not in reply.lower():
+                if images and (look_now or lean or detail_q or len(reply) > 80):
+                    sess.last_frame_observation = reply
                 return reply
-            if n_buf <= 0:
+            if n_buf <= 0 and not obs_block:
                 return (
                     "I am with you on the observation, but I cannot see the screen yet — "
                     "no frames have arrived. Confirm FEED LIVE, wait a few seconds, "
                     "then tap Ask LN to look closely."
                 )
+            if obs_block:
+                return (
+                    "I could not complete a fresh screen read just now. "
+                    "My last note (may be outdated — tap Ask LN to look closely): "
+                    + obs_block[:500]
+                )
             return (
                 f"I am receiving the share ({n_buf} frame(s) buffered) but could not "
-                "complete a screen read just now. Tap Ask LN to look closely, or "
-                "describe what you want me to notice."
+                "complete a screen read just now. Tap Ask LN to look closely once more."
             )
         except Exception as e:
             err = str(e)
@@ -624,17 +976,21 @@ class LNObserverEngine:
                 )
             logger.warning("LNObserverEngine fast-gen failed: %s", e)
             return f"(LN-Observer reasoning error: {e})"
+        finally:
+            if images:
+                sess.vision_inflight = False
 
     async def close_summary(self, sess: LiveSession) -> Optional[str]:
         inference = self._inference()
         if not inference:
             return None
         prompt = (
-            f"The LN-Observer session with {sess.coach_name} is ending. Full transcript:\n"
-            f"{self.context_block(sess, n=40)}\n\n"
-            "Write a closing synthesis for warm memory: key observations, therapeutic "
-            "themes, what the coach engaged with, and anything to carry forward. "
-            "1 short paragraph."
+            f"The LN-Observer session with {sess.coach_name} is ending.\n"
+            f"Forensic A/V timeline:\n{self.forensic_timeline(sess, n=12)}\n\n"
+            f"Full transcript:\n{self.context_block(sess, n=40)}\n\n"
+            "Write a closing synthesis for warm memory: key observations, "
+            "aligned audio-visual moments, therapeutic themes, what the coach "
+            "engaged with, and anything to carry forward. 1 short paragraph."
         )
         try:
             result = await inference.generate(
@@ -694,6 +1050,39 @@ class LNObserverEngine:
             assigned_clients=clients,
             coach_profile=profile,
         )
+        # Restore forensic timeline text (pixels stay in R2; ring refills from live frames)
+        try:
+            async with self._db_pool.acquire() as conn:
+                fevs = await conn.fetch(
+                    """SELECT event_type, t_start, t_end, frame_id, frame_delta_ms,
+                              audio_text, seen_text, COALESCE(storage_key,'') AS storage_key,
+                              payload
+                       FROM ln_observer_forensic_events
+                       WHERE session_id=$1 AND event_type='av_pair'
+                       ORDER BY created_at DESC LIMIT 20""",
+                    uuid.UUID(session_id),
+                )
+            for ev in reversed(list(fevs or [])):
+                sess.av_bundles.append(
+                    {
+                        "aligned": (ev["frame_delta_ms"] or 99999) <= AV_ALIGN_MAX_MS,
+                        "t_audio_start_iso": (
+                            ev["t_start"].isoformat() if ev["t_start"] else ""
+                        ),
+                        "t_audio_end_iso": (
+                            ev["t_end"].isoformat() if ev["t_end"] else ""
+                        ),
+                        "audio_text": ev["audio_text"] or "",
+                        "frame_id": ev["frame_id"] or "",
+                        "frame_delta_ms": ev["frame_delta_ms"],
+                        "seen_text": ev["seen_text"] or "",
+                        "storage_key": ev["storage_key"] or "",
+                    }
+                )
+                if ev["frame_id"] and ev["seen_text"]:
+                    sess.frame_notes[ev["frame_id"]] = ev["seen_text"]
+        except Exception as e:
+            logger.warning("LNObserverEngine hydrate forensics: %s", e)
         self.live[session_id] = sess
         return sess
 
@@ -785,6 +1174,108 @@ class LNObserverEngine:
         except Exception as e:
             logger.warning("LNObserverEngine STT failed: %s", e)
             return ""
+
+    async def ingest_audio_transcript(
+        self,
+        sess: LiveSession,
+        session_id: str,
+        audio_text: str,
+    ) -> Dict[str, Any]:
+        """STT → nearest-frame pair → transcript + forensic table. # QUANTUM-CRYSTAL-ARCH"""
+        async with sess.lock:
+            bundle = self.pair_audio_to_frame(sess, audio_text)
+            meta = {
+                "frame_id": bundle.get("frame_id"),
+                "frame_delta_ms": bundle.get("frame_delta_ms"),
+                "aligned": bundle.get("aligned"),
+                "t_audio_start_iso": bundle.get("t_audio_start_iso"),
+                "t_audio_end_iso": bundle.get("t_audio_end_iso"),
+            }
+            display = audio_text
+            if bundle.get("frame_id"):
+                display = (
+                    f"{audio_text}  ⟺ frame {bundle['frame_id']} "
+                    f"(Δ{bundle.get('frame_delta_ms')}ms, "
+                    f"{'ALIGNED' if bundle.get('aligned') else 'LOOSE'})"
+                )
+            sess.add_transcript(
+                "audio_transcript",
+                display,
+                meta=meta,
+                ts_iso=bundle.get("t_audio_end_iso"),
+            )
+            sess.add_transcript(
+                "av_bundle",
+                (
+                    f"AUDIO: {audio_text[:500]} || "
+                    f"FRAME {bundle.get('frame_id') or 'none'} || "
+                    f"SEEN: {(bundle.get('seen_text') or '')[:300]}"
+                ),
+                meta=meta,
+                ts_iso=bundle.get("t_audio_end_iso"),
+            )
+        storage_key = ""
+        b64 = bundle.pop("_b64", "") or ""
+        if bundle.get("aligned") and b64 and bundle.get("frame_id"):
+            storage_key = await self.persist_frame_jpeg(
+                session_id, bundle["frame_id"], b64
+            )
+            if storage_key:
+                bundle["storage_key"] = storage_key
+                meta["storage_key"] = storage_key
+
+        await self.db_log(session_id, "audio_transcript", display, meta=meta)
+        await self.db_log(
+            session_id,
+            "av_bundle",
+            (
+                f"AUDIO: {audio_text[:800]} || "
+                f"FRAME {bundle.get('frame_id') or 'none'} || "
+                f"SEEN: {(bundle.get('seen_text') or '')[:400]}"
+            ),
+            meta={k: v for k, v in bundle.items() if k != "_b64"},
+        )
+        t0 = datetime.fromtimestamp(
+            bundle["t_audio_start_ms"] / 1000.0, tz=timezone.utc
+        )
+        t1 = datetime.fromtimestamp(
+            bundle["t_audio_end_ms"] / 1000.0, tz=timezone.utc
+        )
+        await self.db_log_forensic(
+            session_id,
+            "av_pair",
+            t_start=t0,
+            t_end=t1,
+            frame_id=bundle.get("frame_id") or "",
+            frame_delta_ms=bundle.get("frame_delta_ms"),
+            audio_text=audio_text,
+            seen_text=bundle.get("seen_text") or "",
+            storage_key=storage_key,
+            payload=bundle,
+        )
+        # Align durable learning: crystallize ALIGNED pairs with enough substance
+        if bundle.get("aligned") and len(audio_text) >= 40:
+            forge_user = (
+                f"LN-Observer forensic A/V pair ({bundle.get('t_audio_start_iso')}–"
+                f"{bundle.get('t_audio_end_iso')}) frame={bundle.get('frame_id')} "
+                f"Δ{bundle.get('frame_delta_ms')}ms ALIGNED "
+                f"storage={storage_key or 'none'}.\n"
+                f"Audio: {audio_text}\n"
+                f"Visual note: {bundle.get('seen_text') or '(pixels archived; no OCR yet)'}"
+            )
+            forge_resp = (
+                f"Unified observation: frame {bundle.get('frame_id')} "
+                f"({(bundle.get('seen_text') or 'live screen')[:280]}); "
+                f"session audio said: {audio_text[:400]}"
+            )
+            await self._crystallize_safe(
+                sess.coach_id,
+                forge_user,
+                forge_resp,
+                coach_name=sess.coach_name,
+                min_score=2,
+            )
+        return bundle
 
 
 # Module singleton wired from main.py
