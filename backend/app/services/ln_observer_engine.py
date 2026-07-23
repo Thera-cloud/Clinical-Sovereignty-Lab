@@ -27,6 +27,10 @@ MAX_SESSION_S = 3 * 3600
 WARN_SESSION_S = int(2.75 * 3600)  # 2:45 warn before 3h cap
 OBSERVE_DEBOUNCE_S = 20
 CHAT_COMPACT_EVERY = 20
+# QUANTUM-CRYSTAL-ARCH — same-brain enrichment (non-lean only; bounded)
+SAME_BRAIN_RECALL_TIMEOUT_S = 2.5
+SAME_BRAIN_LNI_TIMEOUT_S = 12.0
+SAME_BRAIN_CACHE_TTL_S = 15.0
 # QUANTUM-CRYSTAL-ARCH — max gap to claim A/V "aligned" for forensics
 AV_ALIGN_MAX_MS = 4000
 # QUANTUM-CRYSTAL-ARCH — detail/OCR questions that need a fresh frame (not stale notes)
@@ -116,6 +120,9 @@ class LiveSession:
         self.av_bundles: List[Dict[str, Any]] = []
         # frame_id → vision note that was produced FROM that frame
         self.frame_notes: Dict[str, str] = {}
+        # QUANTUM-CRYSTAL-ARCH — cached same-brain blocks (wisdom + RELEVANT MEMORY)
+        self.same_brain_prefix: str = ""
+        self.same_brain_at: float = 0.0
 
     @property
     def lock(self) -> asyncio.Lock:
@@ -646,6 +653,79 @@ class LNObserverEngine:
             chunks.append(" ".join(proper[:12]))
         return " ".join(x for x in chunks if x)[:2000]
 
+    def format_relevant_memory(self, crystals: List[Dict[str, Any]], cap: int = 8) -> str:
+        """Format crystal hits as Observer [RELEVANT MEMORY] block. # QUANTUM-CRYSTAL-ARCH"""
+        lines: List[str] = []
+        for c in crystals[:cap]:
+            meta = c.get("metadata") or {}
+            text = (meta.get("text") or c.get("text") or "").strip()
+            if text:
+                lines.append(f"- {text[:220]}")
+        if not lines:
+            return ""
+        return "[RELEVANT MEMORY]\n" + "\n".join(lines) + "\n"
+
+    async def fetch_same_brain_prefix(
+        self, sess: LiveSession, coach_message: str, *, force: bool = False
+    ) -> str:
+        """
+        Bounded Night School wisdom + topical crystal recall for full chat turns.
+        Lean observe must NOT call this. Never raises. # QUANTUM-CRYSTAL-ARCH
+        """
+        now = time.time()
+        if (
+            not force
+            and sess.same_brain_prefix
+            and (now - sess.same_brain_at) < SAME_BRAIN_CACHE_TTL_S
+        ):
+            return sess.same_brain_prefix
+
+        parts: List[str] = []
+        try:
+            from app.services.ln_observer_lni_support import load_wisdom_snapshot
+
+            wisdom = load_wisdom_snapshot()
+            if wisdom:
+                parts.append(f"[NIGHT SCHOOL WISDOM]\n{wisdom}")
+        except Exception as e:
+            logger.warning("LNObserverEngine same-brain wisdom: %s", e)
+
+        try:
+            from app.services.ln_observer_lni_support import retrieve_crystals_multi
+
+            rq = self.build_recall_query(sess, coach_message)
+            also = self.match_client_ids(
+                sess, self.live_haystack(sess, coach_message)
+            )
+            crystals = await asyncio.wait_for(
+                retrieve_crystals_multi(
+                    rq,
+                    sess.coach_id,
+                    also,
+                    top_k=8,
+                    db_pool=self._db_pool,
+                ),
+                timeout=SAME_BRAIN_RECALL_TIMEOUT_S,
+            )
+            mem = self.format_relevant_memory(crystals, cap=8)
+            if mem:
+                parts.append(mem.rstrip())
+            logger.warning(
+                "LNObserverEngine same-brain recall hits=%s also=%s qlen=%s",
+                len(crystals or []),
+                len(also),
+                len(rq),
+            )
+        except asyncio.TimeoutError:
+            logger.warning("LNObserverEngine same-brain recall timeout")
+        except Exception as e:
+            logger.warning("LNObserverEngine same-brain recall: %s", e)
+
+        prefix = "\n\n".join(parts).strip()
+        sess.same_brain_prefix = prefix
+        sess.same_brain_at = now
+        return prefix
+
     def match_client_ids(self, sess: LiveSession, haystack: str) -> List[str]:
         """Match assigned clients only when name/username appears in live text (Gap 7)."""
         q = (haystack or "").lower()
@@ -758,12 +838,46 @@ class LNObserverEngine:
         look_now: bool = False,
         lean: bool = False,
     ) -> str:
-        # QUANTUM-CRYSTAL-ARCH — hard ceiling; LNI/crystal path was hanging 50s+
-        budget = 22.0 if (look_now or lean) else 18.0
+        # QUANTUM-CRYSTAL-ARCH — lean stays router-only; full chat gets same-brain
+        budget = 22.0 if (look_now or lean) else 20.0
+        same_brain = ""
+        if not lean:
+            try:
+                same_brain = await self.fetch_same_brain_prefix(
+                    sess, coach_message or "observe", force=look_now
+                )
+            except Exception as e:
+                logger.warning("LNObserverEngine same-brain prefetch: %s", e)
+
+        if not lean:
+            try:
+                reply = await asyncio.wait_for(
+                    self._generate_chat_lni_safe(
+                        sess,
+                        coach_message,
+                        look_now=look_now,
+                        same_brain_prefix=same_brain,
+                    ),
+                    timeout=SAME_BRAIN_LNI_TIMEOUT_S,
+                )
+                if reply:
+                    return reply
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "LNObserverEngine LNI-safe timeout → fast path look_now=%s",
+                    look_now,
+                )
+            except Exception as e:
+                logger.warning("LNObserverEngine LNI-safe failed → fast: %s", e)
+
         try:
             return await asyncio.wait_for(
                 self._generate_chat_fast(
-                    sess, coach_message, look_now=look_now, lean=lean
+                    sess,
+                    coach_message,
+                    look_now=look_now,
+                    lean=lean,
+                    same_brain_prefix=same_brain if not lean else "",
                 ),
                 timeout=budget,
             )
@@ -793,30 +907,20 @@ class LNObserverEngine:
             return fr.split(",", 1)[-1]
         return fr
 
-    async def _generate_chat_fast(
+    def _collect_vision(
         self,
         sess: LiveSession,
         coach_message: str,
         *,
-        look_now: bool = False,
-        lean: bool = False,
-    ) -> str:
-        """Router-only Observer path — no helix/crystals/wisdom (those hung chat)."""
-        # QUANTUM-CRYSTAL-ARCH
-        what = self.build_what_you_know(sess)
-        transcript = self.context_block(sess, n=10)
-        chat_tail = ""
-        for m in sess.chat[-8:]:
-            role = "COACH" if m.get("role") == "user" else "LN"
-            chat_tail += f"[{role}] {m.get('content', '')}\n"
-
+        look_now: bool,
+        lean: bool,
+    ) -> tuple:
+        """Return (images, frame_ages, detail_q, n_buf, obs_block). # QUANTUM-CRYSTAL-ARCH"""
         detail_q = bool(_DETAIL_RE.search(coach_message or ""))
-        # QUANTUM-CRYSTAL-ARCH — Observer chat always attaches latest frame when available
         want_vision = bool(look_now or lean or detail_q or (not lean and sess.frames))
         images: Optional[List[str]] = None
         frame_ages: List[str] = []
         if want_vision and sess.frame_ring:
-            # look_now / detail: up to MAX_CONTEXT_FRAMES; lean/chat: latest only
             take_n = MAX_CONTEXT_FRAMES if (look_now or detail_q) else 1
             chosen = sess.recent_frames_for_vision(take_n)
             now_ms = time.time() * 1000.0
@@ -832,14 +936,34 @@ class LNObserverEngine:
                 )
             if not images:
                 images = None
-
         n_buf = len(sess.frames)
-        forensic = self.forensic_timeline(sess, n=5)
-        # Stale lean notes poison OCR — only use when NO fresh image this turn
         obs_block = ""
-        if not images:
-            if sess.last_frame_observation:
-                obs_block = sess.last_frame_observation
+        if not images and sess.last_frame_observation:
+            obs_block = sess.last_frame_observation
+        return images, frame_ages, detail_q, n_buf, obs_block
+
+    def _build_observer_prompts(
+        self,
+        sess: LiveSession,
+        coach_message: str,
+        *,
+        look_now: bool,
+        lean: bool,
+        images: Optional[List[str]],
+        frame_ages: List[str],
+        detail_q: bool,
+        n_buf: int,
+        obs_block: str,
+        same_brain_prefix: str = "",
+    ) -> tuple:
+        """Shared prompt/system for LNI-safe + fast paths. # QUANTUM-CRYSTAL-ARCH"""
+        what = self.build_what_you_know(sess)
+        transcript = self.context_block(sess, n=10)
+        forensic = self.forensic_timeline(sess, n=5)
+        chat_tail = ""
+        for m in sess.chat[-8:]:
+            role = "COACH" if m.get("role") == "user" else "LN"
+            chat_tail += f"[{role}] {m.get('content', '')}\n"
 
         if lean:
             user_prompt = (
@@ -876,9 +1000,14 @@ class LNObserverEngine:
                 "Say you cannot see the screen yet; ask them to keep FEED LIVE on."
             )
 
+        sb = (same_brain_prefix or "").strip()
         prompt = (
             "You are Little Nate in LN-Observer mode, co-watching with the coach.\n"
             f"{vision_note}\n\n"
+        )
+        if sb and not lean:
+            prompt += f"{sb}\n\n"
+        prompt += (
             f"[SESSION]\n{what}\n\n"
             f"[FORENSIC A/V TIMELINE]\n{forensic}\n\n"
             f"[TRANSCRIPT]\n{transcript}\n\n"
@@ -894,15 +1023,131 @@ class LNObserverEngine:
             "A/V alignment. ACCURACY RULES: (1) When JPEGs are attached, answer from "
             "those images first. (2) When citing spoken content, prefer ALIGNED "
             "forensic pairs (audio window linked to a frame). (3) Never invent "
-            "on-screen text. (4) Prefer 'I cannot read that clearly' over a guess."
+            "on-screen text. (4) Prefer 'I cannot read that clearly' over a guess. "
+            "(5) When [RELEVANT MEMORY] or [NIGHT SCHOOL WISDOM] are present, use them "
+            "as clinical continuity — do not invent memories not listed there."
+        )
+        return prompt, system
+
+    async def _generate_chat_lni_safe(
+        self,
+        sess: LiveSession,
+        coach_message: str,
+        *,
+        look_now: bool = False,
+        same_brain_prefix: str = "",
+    ) -> str:
+        """
+        Slim LNI path: crystals/wisdom already prefetched; helix+quantum OFF.
+        Returns "" to signal fallback to fast-gen. # QUANTUM-CRYSTAL-ARCH
+        """
+        lni = self._inference()
+        if not lni:
+            return ""
+
+        images, frame_ages, detail_q, n_buf, obs_block = self._collect_vision(
+            sess, coach_message, look_now=look_now, lean=False
+        )
+        if images and sess.vision_inflight and not look_now and not detail_q:
+            return ""
+
+        prompt, system = self._build_observer_prompts(
+            sess,
+            coach_message,
+            look_now=look_now,
+            lean=False,
+            images=images,
+            frame_ages=frame_ages,
+            detail_q=detail_q,
+            n_buf=n_buf,
+            obs_block=obs_block,
+            same_brain_prefix=same_brain_prefix,
+        )
+
+        if images:
+            sess.vision_inflight = True
+        try:
+            logger.warning(
+                "LNObserverEngine lni-safe look_now=%s vision=%s sb=%s buf=%s",
+                look_now,
+                bool(images),
+                bool(same_brain_prefix),
+                n_buf,
+            )
+            result = await lni.generate(
+                prompt=prompt,
+                system=system,
+                user_id=sess.coach_id,
+                domain="coaching",
+                tier="clinical" if images else "utility",
+                temperature=0.15 if images else 0.35,
+                max_tokens=480 if (look_now or detail_q) else 500,
+                include_crystals=False,  # already in same_brain_prefix
+                include_helix=False,  # hang mitigation
+                include_quantum=False,
+                attach_wisdom=False,  # already in same_brain_prefix
+                images=images,
+                mode="ln_observer",
+                is_realtime=True,
+                allow_deep=False,
+            )
+            reply = (getattr(result, "text", None) or "").strip()
+            err = getattr(result, "error", None)
+            logger.warning(
+                "LNObserverEngine lni-safe done provider=%s len=%s err=%s",
+                getattr(result, "provider", "?"),
+                len(reply),
+                err,
+            )
+            if err and "content_filter" in str(err).lower():
+                return (
+                    "I need to skip that frame — the vision filter blocked it. "
+                    "Share a different view or describe what you're seeing."
+                )
+            if reply and "unable to process" not in reply.lower():
+                if images and (look_now or detail_q or len(reply) > 80):
+                    sess.last_frame_observation = reply
+                return reply
+            return ""
+        finally:
+            if images:
+                sess.vision_inflight = False
+
+    async def _generate_chat_fast(
+        self,
+        sess: LiveSession,
+        coach_message: str,
+        *,
+        look_now: bool = False,
+        lean: bool = False,
+        same_brain_prefix: str = "",
+    ) -> str:
+        """Router path; non-lean may carry prefetched same-brain blocks."""
+        # QUANTUM-CRYSTAL-ARCH
+        images, frame_ages, detail_q, n_buf, obs_block = self._collect_vision(
+            sess, coach_message, look_now=look_now, lean=lean
+        )
+        prompt, system = self._build_observer_prompts(
+            sess,
+            coach_message,
+            look_now=look_now,
+            lean=lean,
+            images=images,
+            frame_ages=frame_ages,
+            detail_q=detail_q,
+            n_buf=n_buf,
+            obs_block=obs_block,
+            same_brain_prefix="" if lean else same_brain_prefix,
         )
 
         logger.warning(
-            "LNObserverEngine fast-gen lean=%s look_now=%s detail=%s vision=%s buf=%s msg_len=%s",
+            "LNObserverEngine fast-gen lean=%s look_now=%s detail=%s vision=%s "
+            "sb=%s buf=%s msg_len=%s",
             lean,
             look_now,
             detail_q,
             bool(images),
+            bool(same_brain_prefix) and not lean,
             n_buf,
             len(coach_message or ""),
         )

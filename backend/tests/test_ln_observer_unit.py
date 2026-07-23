@@ -142,3 +142,52 @@ def test_what_you_know_includes_profile_and_prefetch():
     assert "EFT" in text
     assert "Activation memory prefetch" in text
     assert "Pat" in text
+
+
+def test_format_relevant_memory_block():
+    eng = _load("app.services.ln_observer_engine", _SERVICES / "ln_observer_engine.py")
+    engine = eng.LNObserverEngine()
+    assert engine.format_relevant_memory([]) == ""
+    block = engine.format_relevant_memory(
+        [
+            {"metadata": {"text": "Attachment repair after rupture"}, "score": 0.9},
+            {"text": "Pursue-withdraw cycle noted", "score": 0.8},
+        ]
+    )
+    assert block.startswith("[RELEVANT MEMORY]")
+    assert "Attachment repair" in block
+    assert "Pursue-withdraw" in block
+
+
+def test_build_observer_prompts_injects_same_brain_only_when_not_lean():
+    eng = _load("app.services.ln_observer_engine", _SERVICES / "ln_observer_engine.py")
+    sess = eng.LiveSession("s1", "CoachN", "Coach N")
+    engine = eng.LNObserverEngine()
+    sb = "[NIGHT SCHOOL WISDOM]\nEmpathy first.\n\n[RELEVANT MEMORY]\n- attachment"
+    prompt_full, _ = engine._build_observer_prompts(
+        sess,
+        "How is the bond?",
+        look_now=False,
+        lean=False,
+        images=None,
+        frame_ages=[],
+        detail_q=False,
+        n_buf=0,
+        obs_block="",
+        same_brain_prefix=sb,
+    )
+    assert "[NIGHT SCHOOL WISDOM]" in prompt_full
+    assert "[RELEVANT MEMORY]" in prompt_full
+    prompt_lean, _ = engine._build_observer_prompts(
+        sess,
+        "observe",
+        look_now=False,
+        lean=True,
+        images=None,
+        frame_ages=[],
+        detail_q=False,
+        n_buf=0,
+        obs_block="",
+        same_brain_prefix=sb,
+    )
+    assert "[NIGHT SCHOOL WISDOM]" not in prompt_lean
