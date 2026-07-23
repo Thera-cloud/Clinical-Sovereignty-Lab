@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Install: sudo cp scripts/blue/com.sovereign.code-server.plist /Library/LaunchDaemons/
+     sudo launchctl load /Library/LaunchDaemons/com.sovereign.code-server.plist
+     Edit UserName / WorkingDirectory / ProgramArguments paths for this Mac. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.sovereign.code-server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/code-server</string>
+    <string>/Users/REPLACE/Desktop/Clinical-Sovereignty-Lab-2</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>UserName</key>
+  <string>REPLACE</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/tmp/code-server.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/code-server.err.log</string>
+</dict>
+</plist>

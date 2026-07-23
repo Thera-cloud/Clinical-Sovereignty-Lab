@@ -224,8 +224,16 @@ def build_capabilities_manifest(
         "NATE_CHAT_URL_set": bool(os.getenv("NATE_CHAT_URL")),
         "CLI_REASONING_PREFER_AZURE": os.getenv("CLI_REASONING_PREFER_AZURE", "1"),
         "NATE_CLI_REASONING_MODEL_set": bool(
-            os.getenv("NATE_CLI_REASONING_MODEL") or os.getenv("NATE_CHAT_REASONING_MODEL")
+            os.getenv("NATE_CLI_REASONING_MODEL")
+            or os.getenv("NATE_CLI_CODE_MODEL")
+            or os.getenv("NATE_CHAT_REASONING_MODEL")
         ),
+        "NATE_CLI_REASONING_MODEL": (
+            os.getenv("NATE_CLI_REASONING_MODEL")
+            or os.getenv("NATE_CLI_CODE_MODEL")
+            or ""
+        ),
+        "ENABLE_WORKSPACE_PROVIDER": os.getenv("ENABLE_WORKSPACE_PROVIDER", "0"),
         "note": "CLI uses direct Grok/Azure streaming; Workers AI is not on this path.",
     }
 

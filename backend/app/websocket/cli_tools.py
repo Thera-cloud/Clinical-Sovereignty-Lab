@@ -3265,8 +3265,17 @@ async def execute_tool(
         cli_type = "cloud"
         if mode not in ("ln_fab", "debug"):
             mode = "ln_fab"
+    # QUANTUM-CRYSTAL-ARCH — VS Code / code-server workspace provider (opt-in)
+    if workspace_router is None and not force_sandbox:
+        try:
+            from app.websocket.workspace_provider_router import enabled as _ws_enabled
+            from app.websocket.workspace_provider_router import route_tool_call as _ws_route
+            if _ws_enabled():
+                workspace_router = _ws_route
+        except Exception:
+            workspace_router = None
     _WORKSPACE_ROUTABLE = {
-        "read_file", "search_code", "list_directory",
+        "read_file", "search_code", "list_directory", "glob_files",
         "read_diagnostics", "read_git_status", "proposed_edit",
         "write_file", "create_file", "delete_file", "rename_file",
         "run_command", "read_open_editors",

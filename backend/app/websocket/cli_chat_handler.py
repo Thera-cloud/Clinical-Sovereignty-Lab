@@ -93,8 +93,10 @@ def _ensure_grok_config():
         _GROK_KEY = os.getenv("NATE_CHAT_KEY", os.getenv("AZURE_API_KEY", ""))
         _GROK_URL = os.getenv("NATE_CHAT_URL", "")
         _GROK_MODEL = os.getenv("NATE_CHAT_MODEL", "grok-4-1-fast-non-reasoning")
+    # Phase A0: LN-FAB/DEBUG prefer NATE_CLI_REASONING_MODEL, else NATE_CLI_CODE_MODEL
     _GROK_REASONING_MODEL = (
         os.getenv("NATE_CLI_REASONING_MODEL")
+        or os.getenv("NATE_CLI_CODE_MODEL")
         or os.getenv("NATE_CHAT_REASONING_MODEL")
         or ""
     )
@@ -1584,16 +1586,41 @@ async def _stream_with_tools(
         "api-key": _GROK_KEY,
         "Content-Type": "application/json",
     }
+    grok_url = _GROK_URL
     grok_model = _GROK_MODEL or "grok"
-    # Sol 1: LN-FAB/DEBUG → reasoning model (or Azure primary); ASK/PLAN → fast Grok
+    # Sol 1 / Phase A0: LN-FAB/DEBUG → grok-4.5 (or Azure primary); ASK/PLAN → fast Grok
     prefer_azure_primary = False
     if mode in _REASONING_MODES:
         if _GROK_REASONING_MODEL:
             grok_model = _GROK_REASONING_MODEL
+            # Optional separate xAI/Foundry endpoint for code model (does not clobber clinical)
+            code_url = (os.getenv("NATE_CLI_CODE_URL") or "").strip()
+            code_key = (
+                os.getenv("NATE_CLI_CODE_KEY")
+                or os.getenv("XAI_API_KEY")
+                or ""
+            ).strip()
+            if code_url and code_key:
+                grok_url = code_url
+                grok_headers = {
+                    "Authorization": f"Bearer {code_key}",
+                    "Content-Type": "application/json",
+                }
+                # xAI chat completions accept api-key-style too; keep Bearer primary
+            elif code_key and not code_url:
+                grok_headers = {
+                    "Authorization": f"Bearer {code_key}",
+                    "api-key": code_key,
+                    "Content-Type": "application/json",
+                }
         else:
             prefer_azure_primary = os.getenv("CLI_REASONING_PREFER_AZURE", "1") in (
                 "1", "true", "TRUE", "yes",
             )
+    logger.info(
+        "CLI stream mode=%s model=%s prefer_azure=%s",
+        mode, grok_model, prefer_azure_primary,
+    )
 
     async def _try_azure() -> tuple:
         azure_url, azure_headers = _azure_chat_url_and_headers()
@@ -1655,11 +1682,11 @@ async def _stream_with_tools(
             return await _try_workers_ai()
         except Exception as w_err:
             logger.warning("Workers AI failed, falling back to Grok: %s", w_err)
-            return await _do_stream(_GROK_URL, grok_headers, grok_model, "grok")
+            return await _do_stream(grok_url, grok_headers, grok_model, "grok")
     if force_provider == "azure":
         return await _try_azure()
     if force_provider == "grok":
-        return await _do_stream(_GROK_URL, grok_headers, grok_model, "grok")
+        return await _do_stream(grok_url, grok_headers, grok_model, "grok")
 
     if prefer_azure_primary:
         try:
@@ -1667,14 +1694,14 @@ async def _stream_with_tools(
         except Exception as azure_err:
             logger.warning("Azure primary (reasoning mode) failed, trying Grok: %s", azure_err)
             try:
-                return await _do_stream(_GROK_URL, grok_headers, grok_model, "grok")
+                return await _do_stream(grok_url, grok_headers, grok_model, "grok")
             except Exception as grok_err:
                 raise RuntimeError(
                     f"Azure primary failed ({azure_err}); Grok fallback failed ({grok_err})"
                 ) from grok_err
 
     try:
-        return await _do_stream(_GROK_URL, grok_headers, grok_model, "grok")
+        return await _do_stream(grok_url, grok_headers, grok_model, "grok")
     except Exception as grok_err:
         logger.warning("Grok stream failed, trying Azure fallback: %s", grok_err)
         try:

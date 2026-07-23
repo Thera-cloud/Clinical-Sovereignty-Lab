@@ -13013,6 +13013,10 @@ async def handle_client(websocket, path=None):
                 "crystal_system_control",
                 # --- CLI Command Terminal --- # SOVEREIGN-VOICE
                 "nate_cli_chat",
+                # --- Workspace provider (VS Code / code-server) --- # QUANTUM-CRYSTAL-ARCH
+                "workspace_provider_register", "workspace_provider_replaced",
+                "workspace_provider_available", "tool_call_result", "tool_call_ack",
+                "tool_call_cancel", "workspace_event",
                 # --- PGSD WebSocket router --- # QUANTUM-CRYSTAL-ARCH
                 "pgsd_compute_snapshot", "pgsd_get_history", "pgsd_get_trajectory",
                 "pgsd_get_family_entanglement", "pgsd_get_zero_time_route",
@@ -32193,12 +32197,29 @@ IMPORTANT:
                 if current_profile and current_profile.get("role") == "ADMIN":
                     try:
                         from app.websocket.cli_chat_handler import handle_nate_cli_chat  # SOVEREIGN-VOICE
+                        try:
+                            from app.websocket.workspace_provider_router import register_cli_socket  # QUANTUM-CRYSTAL-ARCH
+                            register_cli_socket(websocket)
+                        except Exception:
+                            pass
                         asyncio.create_task(handle_nate_cli_chat(websocket, d, current_profile, db_pool))
                     except Exception as _cli_err:
                         print(f">>> [CLI] Handler error: {_cli_err}")
                         await websocket.send(json.dumps({"type": "nate_cli_chat_error", "error": str(_cli_err)}))
                 else:
                     await websocket.send(json.dumps({"type": "nate_cli_chat_error", "error": "Admin role required"}))
+
+            # QUANTUM-CRYSTAL-ARCH — VS Code / code-server workspace provider
+            elif t in (
+                "workspace_provider_register", "tool_call_result", "tool_call_ack",
+                "tool_call_cancel", "workspace_event",
+            ):
+                try:
+                    from app.websocket.workspace_provider_router import handle_workspace_message
+                    _ws_role = (current_profile or {}).get("role", "")
+                    await handle_workspace_message(t, d, websocket, _ws_role)
+                except Exception as _ws_err:
+                    print(f">>> [WORKSPACE] Handler error: {_ws_err}")
 
             # =================================================================
             # UNKNOWN MESSAGE TYPE — catch-all
@@ -32256,6 +32277,13 @@ IMPORTANT:
         if uid and uid in connected_clients:
             connected_clients.pop(uid, None)
             print(f"[Dashboard] Unregistered client connection: {uid}")
+
+        # QUANTUM-CRYSTAL-ARCH — workspace provider disconnect → local tool fallback
+        try:
+            from app.websocket.workspace_provider_router import on_disconnect as _ws_on_disconnect
+            await _ws_on_disconnect(websocket)
+        except Exception:
+            pass
         
         # Broadcast updated stats to connected admins on disconnect
         try:

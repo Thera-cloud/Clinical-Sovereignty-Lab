@@ -28,6 +28,17 @@ NATE_CHAT_MODEL = os.getenv(
     "grok-4-1-fast-non-reasoning",
 )
 
+# Command Terminal LN-FAB/DEBUG / Sovereign IDE code model (Phase A0)
+# Prefer NATE_CLI_REASONING_MODEL; NATE_CLI_CODE_MODEL is the clean alias.
+NATE_CLI_REASONING_MODEL = (
+    os.getenv("NATE_CLI_REASONING_MODEL")
+    or os.getenv("NATE_CLI_CODE_MODEL")
+    or ""
+)
+NATE_CLI_CODE_MODEL = os.getenv("NATE_CLI_CODE_MODEL", "") or NATE_CLI_REASONING_MODEL
+NATE_CLI_CODE_URL = os.getenv("NATE_CLI_CODE_URL", "")
+NATE_CLI_CODE_KEY = os.getenv("NATE_CLI_CODE_KEY", "") or os.getenv("XAI_API_KEY", "")
+
 # ---------------------------------------------------------------------------
 # Standard temperature range (all users)
 # ---------------------------------------------------------------------------
