@@ -63,7 +63,11 @@ async def _main() -> int:
                            response_class = $3,
                            difficulty = $4,
                            author_note = COALESCE($5, author_note),
-                           notes = COALESCE($6, notes)
+                           notes = COALESCE($6, notes),
+                           client_says = CASE
+                             WHEN COALESCE(pairs_locked, false) THEN client_says
+                             ELSE $7
+                           END
                        WHERE scenario_id = $1 AND human_scored = false""",
                     sid,
                     str(s.get("provenance") or "unknown_requires_label")[:80],
@@ -71,6 +75,7 @@ async def _main() -> int:
                     str(s.get("difficulty") or "medium")[:20],
                     str(s.get("author") or "")[:300] or None,
                     str(s.get("title") or "")[:200] or None,
+                    str(s.get("client_says") or "")[:8000],
                 )
                 if status and status.endswith("1"):
                     synced += 1
@@ -107,11 +112,16 @@ async def _main() -> int:
                          response_class = EXCLUDED.response_class,
                          difficulty = EXCLUDED.difficulty,
                          author_note = COALESCE(EXCLUDED.author_note, six_quotient_human_gold.author_note),
-                         notes = COALESCE(EXCLUDED.notes, six_quotient_human_gold.notes)
+                         notes = COALESCE(EXCLUDED.notes, six_quotient_human_gold.notes),
+                         client_says = CASE
+                           WHEN COALESCE(six_quotient_human_gold.pairs_locked, false)
+                           THEN six_quotient_human_gold.client_says
+                           ELSE EXCLUDED.client_says
+                         END
                        WHERE six_quotient_human_gold.human_scored = false""",
                     sid,
                     str(s.get("section") or "AQ")[:8],
-                    str(s.get("client_says") or "")[:2000],
+                    str(s.get("client_says") or "")[:8000],
                     str(s.get("title") or "")[:200] or None,
                     str(s.get("provenance") or "unknown_requires_label")[:80],
                     str(s.get("response_class") or "therapeutic_engage")[:40],
