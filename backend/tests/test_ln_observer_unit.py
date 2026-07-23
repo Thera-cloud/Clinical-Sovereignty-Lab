@@ -191,3 +191,19 @@ def test_build_observer_prompts_injects_same_brain_only_when_not_lean():
         same_brain_prefix=sb,
     )
     assert "[NIGHT SCHOOL WISDOM]" not in prompt_lean
+
+
+def test_extractive_close_summary_nonempty():
+    eng = _load("app.services.ln_observer_engine", _SERVICES / "ln_observer_engine.py")
+    sess = eng.LiveSession("s1", "CoachN", "Coach N")
+    sess.add_transcript("frame_observation", "Screen shows Zoom gallery.")
+    text = eng.LNObserverEngine()._extractive_close_summary(sess)
+    assert "Zoom gallery" in text
+    assert text.startswith("LN-Observer close")
+
+
+def test_whisper_stt_has_429_backoff_constants():
+    stt = _load("app.services.whisper_stt", _SERVICES / "whisper_stt.py")
+    assert stt._STT_MIN_INTERVAL_S >= 1.0
+    assert stt._STT_MAX_RETRIES >= 2
+    assert hasattr(stt, "_STT_LOCK")

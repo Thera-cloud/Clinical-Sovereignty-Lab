@@ -1225,10 +1225,22 @@ class LNObserverEngine:
             if images:
                 sess.vision_inflight = False
 
+    def _extractive_close_summary(self, sess: LiveSession) -> str:
+        """Fallback when LNI unavailable — never leave ln_summary empty. # QUANTUM-CRYSTAL-ARCH"""
+        lines = []
+        for t in sess.transcript[-24:]:
+            src = t.get("source") or ""
+            if src in ("audio_transcript", "frame_observation", "coach_chat", "ln_chat", "av_bundle"):
+                content = (t.get("content") or "").strip()
+                if content:
+                    lines.append(f"{src}: {content[:180]}")
+        body = " | ".join(lines[-12:]) if lines else "Session ended with limited transcript."
+        return (
+            f"LN-Observer close ({sess.coach_name}): {body}"
+        )[:900]
+
     async def close_summary(self, sess: LiveSession) -> Optional[str]:
-        inference = self._inference()
-        if not inference:
-            return None
+        # QUANTUM-CRYSTAL-ARCH — slim LNI (no helix) + timeout + extractive fallback
         prompt = (
             f"The LN-Observer session with {sess.coach_name} is ending.\n"
             f"Forensic A/V timeline:\n{self.forensic_timeline(sess, n=12)}\n\n"
@@ -1237,30 +1249,135 @@ class LNObserverEngine:
             "aligned audio-visual moments, therapeutic themes, what the coach "
             "engaged with, and anything to carry forward. 1 short paragraph."
         )
-        try:
-            result = await inference.generate(
-                prompt=prompt,
-                user_id=sess.coach_id,
-                domain="coaching",
-                tier="clinical",
-                conversation_context=self.build_what_you_know(sess),
-                attach_wisdom=True,
-                include_crystals=True,
-                max_tokens=400,
-                is_realtime=False,
-                allow_deep=True,
-            )
-            summary = (result.text or "").strip()
-            validator = self._validator()
-            if summary and validator:
+        summary = ""
+        inference = self._inference()
+        if inference:
+            try:
+                result = await asyncio.wait_for(
+                    inference.generate(
+                        prompt=prompt,
+                        user_id=sess.coach_id,
+                        domain="coaching",
+                        tier="clinical",
+                        conversation_context=self.build_what_you_know(sess),
+                        attach_wisdom=True,
+                        include_crystals=False,
+                        include_helix=False,
+                        include_quantum=False,
+                        max_tokens=400,
+                        is_realtime=True,
+                        allow_deep=False,
+                        mode="ln_observer",
+                    ),
+                    timeout=18.0,
+                )
+                summary = (getattr(result, "text", None) or "").strip()
+            except asyncio.TimeoutError:
+                logger.warning("LNObserverEngine close summary timeout → extractive")
+            except Exception as e:
+                logger.warning("LNObserverEngine close summary failed: %s", e)
+
+        if not summary:
+            summary = self._extractive_close_summary(sess)
+
+        validator = self._validator()
+        if summary and validator:
+            try:
                 _, warnings = await validator.validate(summary, {})
                 if validator.is_high_severity(warnings):
                     logger.warning("LNObserverEngine: ln_summary blocked by validator")
-                    return None
-            return summary or None
+                    # Still persist a truncated extractive note (no hallucinated claims)
+                    summary = self._extractive_close_summary(sess)[:400]
+            except Exception as e:
+                logger.warning("LNObserverEngine close validator: %s", e)
+        return summary or None
+
+    async def hydrate_transcript_into(self, sess: LiveSession) -> None:
+        """Load PG transcripts into LiveSession when memory was lost (restart)."""
+        if not self._db_pool or sess.transcript:
+            return
+        try:
+            async with self._db_pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """SELECT source, content, meta, ts
+                       FROM ln_observer_transcripts
+                       WHERE session_id=$1
+                       ORDER BY ts ASC LIMIT 120""",
+                    uuid.UUID(sess.session_id),
+                )
+            for r in rows or []:
+                meta = r["meta"] if isinstance(r["meta"], dict) else {}
+                ts = r["ts"].isoformat() if r["ts"] else None
+                sess.add_transcript(
+                    r["source"], r["content"] or "", meta=meta, ts_iso=ts
+                )
         except Exception as e:
-            logger.warning("LNObserverEngine close summary failed: %s", e)
-            return None
+            logger.warning("LNObserverEngine hydrate transcripts: %s", e)
+
+    async def queue_night_school_ingest(
+        self, session_id: str, coach_id: str, summary: Optional[str]
+    ) -> int:
+        """
+        Phase 2 — chunk session transcripts into NS ingest queue (PII-light).
+        # QUANTUM-CRYSTAL-ARCH
+        """
+        if not self._db_pool:
+            return 0
+        try:
+            async with self._db_pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """SELECT source, content FROM ln_observer_transcripts
+                       WHERE session_id=$1
+                         AND source IN ('audio_transcript','coach_chat','ln_chat',
+                                        'frame_observation','av_bundle')
+                       ORDER BY ts ASC LIMIT 200""",
+                    uuid.UUID(session_id),
+                )
+            chunks: List[str] = []
+            buf: List[str] = []
+            size = 0
+            for r in rows or []:
+                line = f"{r['source']}: {(r['content'] or '')[:500]}"
+                # Light PII scrub — SSNs / emails
+                line = re.sub(r"\b\d{3}-\d{2}-\d{4}\b", "[SSN]", line)
+                line = re.sub(
+                    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
+                    "[EMAIL]",
+                    line,
+                )
+                buf.append(line)
+                size += len(line)
+                if size >= 1200:
+                    chunks.append("\n".join(buf))
+                    buf, size = [], 0
+            if buf:
+                chunks.append("\n".join(buf))
+            if summary:
+                chunks.insert(0, f"ln_summary: {summary[:800]}")
+            if not chunks:
+                return 0
+            n = 0
+            async with self._db_pool.acquire() as conn:
+                for ch in chunks[:12]:
+                    await conn.execute(
+                        """INSERT INTO ln_observer_ns_ingest
+                           (session_id, coach_id, chunk_text, pii_cleared, status)
+                           VALUES ($1,$2,$3,true,'pending')""",
+                        uuid.UUID(session_id),
+                        coach_id,
+                        ch[:4000],
+                    )
+                    n += 1
+            logger.warning(
+                "LNObserverEngine NS ingest queued session=%s chunks=%s",
+                session_id[:8],
+                n,
+            )
+            return n
+        except Exception as e:
+            # Table may not exist yet — non-fatal
+            logger.warning("LNObserverEngine NS ingest queue failed: %s", e)
+            return 0
 
     async def hydrate_session(self, session_id: str) -> Optional[LiveSession]:
         if session_id in self.live:
@@ -1356,7 +1473,15 @@ class LNObserverEngine:
     async def deactivate(self, session_id: str) -> Optional[str]:
         sess = self.live.pop(session_id, None)
         summary = None
+        coach_id = ""
+        # QUANTUM-CRYSTAL-ARCH — hydrate from PG when process memory lost (restart/sweep)
+        if sess is None:
+            sess = await self.hydrate_session(session_id)
+            if sess:
+                self.live.pop(session_id, None)
         if sess:
+            await self.hydrate_transcript_into(sess)
+            coach_id = sess.coach_id
             summary = await self.close_summary(sess)
             if summary:
                 close_user = (
@@ -1370,6 +1495,19 @@ class LNObserverEngine:
                     coach_name=sess.coach_name,
                     min_score=2,
                 )
+        elif self._db_pool:
+            async with self._db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT coach_id FROM ln_observer_sessions WHERE session_id=$1",
+                    uuid.UUID(session_id),
+                )
+            if row:
+                coach_id = row["coach_id"]
+                summary = (
+                    f"LN-Observer session ended (coach={coach_id}); "
+                    "in-memory context unavailable at close."
+                )[:400]
+
         if self._db_pool:
             async with self._db_pool.acquire() as conn:
                 await conn.execute(
@@ -1385,6 +1523,8 @@ class LNObserverEngine:
                        AND deactivated_at IS NULL""",
                     uuid.UUID(session_id),
                 )
+        if coach_id:
+            await self.queue_night_school_ingest(session_id, coach_id, summary)
         await self.db_log(session_id, "system", "LN-Observer deactivated.")
         return summary
 
@@ -1397,13 +1537,37 @@ class LNObserverEngine:
                    WHERE status='reconnecting'
                      AND disconnected_at < NOW() - INTERVAL '90 seconds'"""
             )
-            # Also end live sessions over 3h
+            # Also end live/reconnecting sessions over 3h
             old = await conn.fetch(
                 """SELECT session_id::text AS sid FROM ln_observer_sessions
                    WHERE status IN ('live','reconnecting')
                      AND started_at < NOW() - INTERVAL '3 hours'"""
             )
-        sids: Set[str] = {r["sid"] for r in rows} | {r["sid"] for r in old}
+            # Stale live: no transcript activity for 10m and started >15m ago
+            # (catches WS death without reconnecting mark)
+            stale = await conn.fetch(
+                """SELECT s.session_id::text AS sid
+                   FROM ln_observer_sessions s
+                   WHERE s.status='live'
+                     AND s.started_at < NOW() - INTERVAL '15 minutes'
+                     AND NOT EXISTS (
+                       SELECT 1 FROM ln_observer_transcripts t
+                       WHERE t.session_id = s.session_id
+                         AND t.ts > NOW() - INTERVAL '10 minutes'
+                     )"""
+            )
+        sids: Set[str] = (
+            {r["sid"] for r in rows}
+            | {r["sid"] for r in old}
+            | {r["sid"] for r in stale}
+        )
+        # Never sweep sessions still held in this process's live map with recent activity
+        for sid in list(sids):
+            live = self.live.get(sid)
+            if live and (time.time() - live.started_at) < MAX_SESSION_S:
+                # If in-memory and recently observed, skip stale-SQL false positive
+                if live.last_observe_at and (time.time() - live.last_observe_at) < 600:
+                    sids.discard(sid)
         for sid in sids:
             try:
                 await self.deactivate(sid)

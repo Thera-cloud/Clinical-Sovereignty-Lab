@@ -2898,6 +2898,22 @@ async def lifespan(app: FastAPI):
     except Exception as _ln_sba_err:
         print(f"   ⚠️  LNSandboxAuditor init failed: {_ln_sba_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — LN-Observer auditor (11 checks, stagger 289s)
+    _ln_observer_auditor = None
+    try:
+        from app.services.ln_observer_auditor import LNObserverAuditor
+        _ln_observer_auditor = LNObserverAuditor(
+            db_pool,
+            auth_token=os.environ.get("SKYEYE_AUDIT_TOKEN", ""),
+            app_state=app.state,
+        )
+        if not _is_clone:
+            await _ln_observer_auditor.start()
+        app.state.ln_observer_auditor = _ln_observer_auditor
+        print("   ✅ LNObserverAuditor started (3x daily, stagger 289s)")
+    except Exception as _ln_oa_err:
+        print(f"   ⚠️  LNObserverAuditor init failed: {_ln_oa_err}")
+
     # ── Nate Check-In Agent — 72h inactivity outreach for clients + coaches ──
     _nate_checkin_agent = None
     try:
@@ -3399,6 +3415,7 @@ async def lifespan(app: FastAPI):
         ("six_quotient_self_dev_agent", _six_q_self_dev_agent is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln_sandbox_engine", _ln_sandbox_engine is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln_sandbox_auditor", _ln_sandbox_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("ln_observer_auditor", _ln_observer_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", _nate_checkin_agent is not None),
         ("nate_commitment_agent", _nate_commitment_agent is not None),
         ("nate_self_monitor_agent", _nate_self_monitor_agent is not None),
@@ -3477,6 +3494,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ LNObserverEngine stopped")
         except Exception as _lnobs_stop:
             print(f"   ⚠️  LNObserverEngine shutdown: {_lnobs_stop}")
+    _ln_observer_auditor_h = getattr(app.state, "ln_observer_auditor", None)
+    if _ln_observer_auditor_h:
+        try:
+            await _ln_observer_auditor_h.stop()
+            print("   ✅ LNObserverAuditor stopped")
+        except Exception as _ln_oa_stop:
+            print(f"   ⚠️  LNObserverAuditor shutdown: {_ln_oa_stop}")
 
     # SOVEREIGN-VOICE: stop voice background agents
     if _voice_call_center:

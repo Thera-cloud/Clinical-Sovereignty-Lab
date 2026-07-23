@@ -12,6 +12,7 @@ import asyncio
 import io
 import logging
 import os
+import time
 from typing import Optional
 
 import httpx
@@ -30,6 +31,12 @@ _AZURE_KEY = os.getenv(
 
 _DEPLOYMENT = os.getenv("AZURE_WHISPER_DEPLOYMENT", "nate-whisper")
 _API_VERSION = os.getenv("AZURE_WHISPER_API_VERSION", "2024-06-01")
+
+# QUANTUM-CRYSTAL-ARCH — serialize Whisper to avoid S0 429 storms (LN-Observer)
+_STT_LOCK = asyncio.Lock()
+_STT_MIN_INTERVAL_S = float(os.getenv("WHISPER_MIN_INTERVAL_S", "1.25"))
+_STT_LAST_AT = 0.0
+_STT_MAX_RETRIES = int(os.getenv("WHISPER_MAX_RETRIES", "3"))
 
 
 def is_whisper_configured() -> bool:
@@ -84,33 +91,63 @@ async def transcribe(
 
     headers = {"api-key": _AZURE_KEY}
 
-    try:
-        # Chunked long-form STT may send 30–90s of audio; allow up to 2 minutes.
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                _transcription_url(),
-                headers=headers,
-                files=form_data,
-            )
+    global _STT_LAST_AT
+    async with _STT_LOCK:
+        # Pace calls so Observer chunk storms don't 429 the S0 tier
+        gap = time.monotonic() - _STT_LAST_AT
+        if gap < _STT_MIN_INTERVAL_S:
+            await asyncio.sleep(_STT_MIN_INTERVAL_S - gap)
 
-        if resp.status_code == 200:
-            text = resp.text.strip()
-            if text:
-                _logger.debug("Whisper STT: %d bytes → %d chars", len(audio_data), len(text))
-                return text
-            return None
+        last_err = ""
+        for attempt in range(_STT_MAX_RETRIES):
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    resp = await client.post(
+                        _transcription_url(),
+                        headers=headers,
+                        files=form_data,
+                    )
+                _STT_LAST_AT = time.monotonic()
 
-        _logger.warning(
-            "Whisper STT failed: HTTP %d — %s",
-            resp.status_code, resp.text[:200],
-        )
-        return None
+                if resp.status_code == 200:
+                    text = resp.text.strip()
+                    if text:
+                        _logger.debug(
+                            "Whisper STT: %d bytes → %d chars",
+                            len(audio_data), len(text),
+                        )
+                        return text
+                    return None
 
-    except httpx.TimeoutException:
-        _logger.warning("Whisper STT timeout for %d bytes of audio", len(audio_data))
-        return None
-    except Exception as e:
-        _logger.warning("Whisper STT error: %s", e)
+                last_err = f"HTTP {resp.status_code} — {resp.text[:200]}"
+                if resp.status_code == 429 and attempt + 1 < _STT_MAX_RETRIES:
+                    # Retry-After header or exponential backoff
+                    ra = resp.headers.get("Retry-After")
+                    try:
+                        wait_s = float(ra) if ra else (1.5 * (2 ** attempt))
+                    except ValueError:
+                        wait_s = 1.5 * (2 ** attempt)
+                    wait_s = min(max(wait_s, 1.0), 20.0)
+                    _logger.warning(
+                        "Whisper STT 429 — backoff %.1fs (attempt %d/%d)",
+                        wait_s, attempt + 1, _STT_MAX_RETRIES,
+                    )
+                    await asyncio.sleep(wait_s)
+                    continue
+
+                _logger.warning("Whisper STT failed: %s", last_err)
+                return None
+
+            except httpx.TimeoutException:
+                _logger.warning(
+                    "Whisper STT timeout for %d bytes of audio", len(audio_data)
+                )
+                return None
+            except Exception as e:
+                _logger.warning("Whisper STT error: %s", e)
+                return None
+
+        _logger.warning("Whisper STT exhausted retries: %s", last_err)
         return None
 
 

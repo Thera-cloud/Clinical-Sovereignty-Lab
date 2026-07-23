@@ -85,6 +85,7 @@ AUDITOR_ACTIVITY_TYPES = [
     "high_risk_crisis_audit_sent",
     "newsletter_audit_sent",
     "ln_sandbox_audit_sent",
+    "ln_observer_audit_sent",
 ]
 
 AUDITOR_LABELS = {
@@ -123,6 +124,7 @@ AUDITOR_LABELS = {
     "high_risk_crisis_audit_sent": "High-Risk Occupational Crisis",
     "newsletter_audit_sent": "Little Nate Dispatch",
     "ln_sandbox_audit_sent": "LN Sandbox DOJO",
+    "ln_observer_audit_sent": "LN-Observer",
 }
 
 REMEDIATION_CATEGORIES = {
@@ -586,6 +588,7 @@ class TrustEnforcer:
             "high_risk_crisis_audit_sent": "high_risk_crisis_check_count",
             "newsletter_audit_sent": "newsletter_check_count",
             "ln_sandbox_audit_sent": "ln_sandbox_check_count",
+            "ln_observer_audit_sent": "ln_observer_check_count",
         }
         return mapping.get(activity_type, "")
 

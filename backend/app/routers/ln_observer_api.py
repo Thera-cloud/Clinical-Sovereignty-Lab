@@ -590,6 +590,8 @@ async def observer_ws(ws: WebSocket, session_id: str):
                     })
 
             elif mtype == "end":
+                # QUANTUM-CRYSTAL-ARCH — explicit end closes + summarizes (not reconnect grace)
+                await eng.deactivate(session_id)
                 break
 
     except WebSocketDisconnect:
@@ -597,4 +599,4 @@ async def observer_ws(ws: WebSocket, session_id: str):
     except Exception as e:
         logger.warning("LN-Observer WS error: %s", e)
         await eng.mark_reconnecting(session_id)
-    # Grace: do not deactivate immediately — sweep handles orphans after 90s
+    # Abrupt disconnect: reconnecting grace; sweep deactivates after 90s / stale live
