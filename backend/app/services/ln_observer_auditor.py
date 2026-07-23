@@ -1,4 +1,4 @@
-"""LN-Observer auditor — 11 checks (REST + DB), 3x daily, stagger 289s.
+"""LN-Observer auditor — 13 checks (REST + DB), 3x daily, stagger 289s.
 
 Email silenced — Trust Enforcer sends consolidated report.
 # QUANTUM-CRYSTAL-ARCH
@@ -51,8 +51,16 @@ TAB_ENDPOINTS = [
         ],
     },
     {
-        "tab": "Data Integrity",
+        "tab": "Gap Closure Ops",
         "tab_num": 4,
+        "endpoints": [
+            ("POST", "/api/ln-observer/admin/drain-ns-ingest"),
+            ("POST", "/api/ln-observer/admin/backfill-summaries"),
+        ],
+    },
+    {
+        "tab": "Data Integrity",
+        "tab_num": 5,
         "endpoints": [
             ("DB", "tables_exist"),
             ("DB", "ns_ingest_table"),

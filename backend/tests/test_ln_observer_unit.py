@@ -209,3 +209,12 @@ def test_whisper_stt_has_429_backoff_constants():
     assert "Retry-After" in src
     assert "_STT_LOCK" in src
     assert "_STT_MAX_RETRIES" in src
+
+
+def test_engine_has_ns_drain_and_smoke_methods():
+    eng = _load("app.services.ln_observer_engine", _SERVICES / "ln_observer_engine.py")
+    engine = eng.LNObserverEngine()
+    assert callable(engine.drain_ns_ingest)
+    assert callable(engine.backfill_empty_summaries)
+    assert callable(engine.run_acceptance_smoke)
+    assert callable(engine._deliver_ns_chunk)

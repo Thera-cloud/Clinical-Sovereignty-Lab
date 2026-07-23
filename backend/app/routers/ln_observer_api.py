@@ -289,6 +289,56 @@ async def health():
     }
 
 
+# ── Admin gap-closure ops (smoke / backfill / NS drain) ─────
+
+
+@router.post("/admin/smoke")
+async def admin_acceptance_smoke(
+    coach_id: str = "CoachN",
+    admin: dict = Depends(require_admin),
+):
+    """GREEN Clinical-AGI smoke: same-brain + chat + summary + NS drain."""
+    eng = _engine()
+    return await eng.run_acceptance_smoke(coach_id=coach_id)
+
+
+@router.post("/admin/backfill-summaries")
+async def admin_backfill_summaries(
+    limit: int = 20,
+    admin: dict = Depends(require_admin),
+):
+    eng = _engine()
+    return await eng.backfill_empty_summaries(limit=max(1, min(limit, 50)))
+
+
+@router.post("/admin/drain-ns-ingest")
+async def admin_drain_ns_ingest(
+    limit: int = 50,
+    admin: dict = Depends(require_admin),
+):
+    eng = _engine()
+    n = await eng.drain_ns_ingest(limit=max(1, min(limit, 100)))
+    return {"ok": True, "drained": n}
+
+
+@router.post("/admin/audit-trigger")
+async def admin_audit_trigger(admin: dict = Depends(require_admin)):
+    """Fire LN-Observer auditor scorecard immediately."""
+    from datetime import datetime, timezone
+
+    eng = _engine()
+    auditor = (
+        getattr(eng._app_state, "ln_observer_auditor", None)
+        if eng._app_state
+        else None
+    )
+    if auditor is None:
+        raise HTTPException(503, "LNObserverAuditor not registered")
+    now = datetime.now(timezone.utc)
+    await auditor._build_and_send(now)
+    return {"ok": True, "timestamp": now.isoformat()}
+
+
 # ── WebSocket ──────────────────────────────────────────────
 
 

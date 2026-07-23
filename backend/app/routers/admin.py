@@ -4330,6 +4330,9 @@ async def trigger_all_audits(request: Request):
         "sensitive_bridge_auditor", "quickbooks_auditor",
         "corporate_command_auditor", "voice_infra_auditor",
         "classroom_learning_auditor",
+        "ln_observer_auditor",  # QUANTUM-CRYSTAL-ARCH
+        "ln_sandbox_auditor",  # QUANTUM-CRYSTAL-ARCH
+        "newsletter_auditor",  # QUANTUM-CRYSTAL-ARCH
     ]
     for attr in auditor_attrs:
         auditor = getattr(request.app.state, attr, None)

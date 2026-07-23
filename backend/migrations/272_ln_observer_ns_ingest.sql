@@ -25,7 +25,7 @@ CREATE INDEX IF NOT EXISTS idx_lnobs_ns_ingest_session
 INSERT INTO trust_baseline (parameter_key, parameter_value)
 VALUES (
     'ln_observer_check_count',
-    '{"expected": 11, "description": "LN-Observer trust checks (7 REST + 4 DB)", "updated": "2026-07-23"}'::jsonb
+    '{"expected": 13, "description": "LN-Observer trust checks (9 REST + 4 DB)", "updated": "2026-07-23"}'::jsonb
 )
 ON CONFLICT (parameter_key) DO UPDATE
 SET parameter_value = EXCLUDED.parameter_value,

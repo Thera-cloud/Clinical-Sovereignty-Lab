@@ -148,9 +148,9 @@ def test_close_summary_falls_back_when_inference_missing():
     assert out and "trust repair" in out.lower()
 
 
-def test_auditor_endpoint_count_is_11():
+def test_auditor_endpoint_count_is_13():
     aud = _load(
         "app.services.ln_observer_auditor", _SERVICES / "ln_observer_auditor.py"
     )
     total = sum(len(t["endpoints"]) for t in aud.TAB_ENDPOINTS)
-    assert total == 11
+    assert total == 13
