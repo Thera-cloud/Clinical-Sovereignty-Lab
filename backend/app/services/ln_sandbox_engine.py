@@ -474,33 +474,40 @@ class LNSandboxEngine:
                 "I'm here with you in this, and we can look at what your body "
                 "is doing in this moment without rushing a plan."
             )
+        timeout_s = float(os.getenv("LN_SANDBOX_GENERATE_TIMEOUT_S", "90"))
         try:
-            result = await lni.generate(
-                prompt,
-                system=(
-                    "You are Little Nate in SANDBOX practice mode. "
-                    "This is a simulated client — practice freely, but stay "
-                    "clinically disciplined. Restraints still apply to phrasing."
+            result = await asyncio.wait_for(
+                lni.generate(
+                    prompt,
+                    system=(
+                        "You are Little Nate in SANDBOX practice mode. "
+                        "This is a simulated client — practice freely, but stay "
+                        "clinically disciplined. Restraints still apply to phrasing."
+                    ),
+                    user_id="sandbox_practice",
+                    domain=domain if domain in (
+                        "clinical", "coaching", "research", "defense", "general"
+                    ) else "clinical",
+                    tier="clinical" if domain == "clinical" else "utility",
+                    temperature=0.35 if domain == "clinical" else 0.25,
+                    max_tokens=400,
+                    include_crystals=False,
+                    include_helix=False,
+                    include_quantum=False,
+                    is_realtime=False,
+                    allow_deep=False,
+                    attach_wisdom=False,
                 ),
-                user_id="sandbox_practice",
-                domain=domain if domain in (
-                    "clinical", "coaching", "research", "defense", "general"
-                ) else "clinical",
-                tier="clinical" if domain == "clinical" else "utility",
-                temperature=0.35 if domain == "clinical" else 0.25,
-                max_tokens=400,
-                include_crystals=True,
-                include_helix=False,
-                include_quantum=False,
-                is_realtime=False,
-                allow_deep=True,
-                attach_wisdom=False,
+                timeout=timeout_s,
             )
             if hasattr(result, "text"):
                 return (result.text or "").strip()
             if isinstance(result, dict):
                 return (result.get("text") or "").strip()
             return str(result)[:2000]
+        except asyncio.TimeoutError:
+            logger.warning("ln_sandbox generate timeout after %ss", timeout_s)
+            return ""
         except Exception as e:
             logger.warning("ln_sandbox generate failed: %s", e)
             return ""
