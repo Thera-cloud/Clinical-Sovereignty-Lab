@@ -809,10 +809,25 @@ def record_assistant_turn(state: SessionState, assistant_msg: str) -> None:
 
 
 def handle_coach_offer_response(state: SessionState, user_msg: str) -> str:
-    lower = user_msg.lower()
-    if any(w in lower for w in ["yes", "sure", "okay", "please", "ok"]):
+    """Accept only clear coach-offer opt-in — not substring 'sure' inside 'not sure'."""
+    t = (user_msg or "").strip()
+    lower = t.lower()
+    if re.search(r"\b(not\s+sure|unsure|not now|maybe later)\b", lower):
+        state.coach_declined_at_turn = state.turn_count
+        return "declined"
+    if re.fullmatch(r"(yes|yeah|yep|yup|please|go ahead)[.!]?", lower):
         return "accepted"
-    if any(w in lower for w in ["no", "not now", "later", "i'm fine"]):
+    if re.search(
+        r"\b(yes|yeah|yep)[,!]?\s+(please|go ahead|i'?d like|connect|talk)\b"
+        r"|\b(sure|ok(?:ay)?)[,!]?\s+(please|go ahead|i'?d like|connect)\b"
+        r"|\bi'?d like (a |to talk to )?(coach|human)\b",
+        lower,
+    ):
+        return "accepted"
+    if any(w in lower for w in ["no thanks", "not now", "later", "i'm fine", "no coach"]):
+        state.coach_declined_at_turn = state.turn_count
+        return "declined"
+    if re.fullmatch(r"(no|nah|nope)[.!]?", lower):
         state.coach_declined_at_turn = state.turn_count
         return "declined"
     return "ambiguous"

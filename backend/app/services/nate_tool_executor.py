@@ -15,8 +15,12 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 logger = logging.getLogger("nate.tool_executor")
 
 _PENDING_TTL_SECONDS = 600
+# QUANTUM-CRYSTAL-ARCH: confirm only clear yes — not "I'm not sure" / soft story "ok"
 _YES_RE = re.compile(
-    r"\b(yes|yeah|yep|sure|go ahead|do it|please do|ok(?:ay)?|sounds good)\b",
+    r"^(yes|yeah|yep|yup|go ahead|do it|please do)[.!]?\s*$"
+    r"|\b(yes|yeah|yep)[,!]?\s+(please|do it|go ahead|confirm|book|schedule)\b"
+    r"|\b(sure|ok(?:ay)?)[,!]?\s+(do it|go ahead|please|confirm|book|schedule)\b"
+    r"|\bsounds good[,!]?\s*(do it|go ahead|please)?\s*$",
     re.I,
 )
 _NO_RE = re.compile(

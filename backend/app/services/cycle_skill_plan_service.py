@@ -76,27 +76,92 @@ _DOMAIN_TEMPLATE: Dict[str, Tuple[str, str, Optional[str]]] = {
 # Domains that must never auto-suggest skills (crisis / legal risk)
 _SKIP_AUTO_DOMAINS = frozenset({"harm_risk", "criminal_intent", "economic", "code_learning"})
 
+# QUANTUM-CRYSTAL-ARCH: practice-intent accept only (no bare ok/sure/alright/why not)
 _ACCEPT_RE = re.compile(
-    r"\b(yes|yeah|yep|yup|ok|okay|sure|alright|all right|let'?s try|let'?s do (it|that)|"
-    r"i'?ll (try|practice|do (it|that))|sounds good|that works|i'?m willing|"
-    r"i want (to )?(try|practice)|start (that|this)|i'?m in|go ahead|why not)\b",
+    r"\b("
+    r"let'?s try(?:\s+(it|that|this|the (practice|skill|step|exercise)))?(?:\s*[.!]|\s*$)|"
+    r"let'?s do (it|that|this)|"
+    r"let'?s practice|"
+    r"i'?ll (try|do) (it|that|this)|"
+    r"i'?ll practice|"
+    r"(?:yes|yeah|yep|yup|ok|okay|alright|all right|sure)[,!]?\s+"
+    r"(?:let'?s|i'?ll|i want|sounds good|go ahead|try (it|that)|practice|do (it|that)|"
+    r"i'?m (?:in|willing))|"
+    r"i want (to )?(try|practice)|"
+    r"i'?m willing|"
+    r"count me in|"
+    r"i'?m in[,!]?\s*(?:for (that|this|it)|let'?s|to try)|"
+    r"go ahead[,!]?\s*(?:and )?(?:let'?s|i'?ll|try|with (that|this|it))|"
+    r"start (that|this) (practice|step|skill|plan)|"
+    r"sure[,!]?\s+(let'?s|i'?ll|sounds|ok|okay)|"
+    r"i'?m sure (i want|let'?s|i'?ll)"
+    r")\b",
     re.I,
 )
+_ACCEPT_SHORT_RE = re.compile(
+    r"^(yes|yeah|yep|yup|go ahead|i'?m in|count me in|i'?m willing)[.!]?$",
+    re.I,
+)
+_ACCEPT_BLOCK_RE = re.compile(
+    r"\b(not\s+sure|unsure|don'?t know why|why (would|are|did) you|"
+    r"glitch(?:ing)?|buggy|bug\b|broken|not working|big nate|"
+    r"i'?m in a (bad|dark|rough|hard)|it'?s okay i'?m)\b",
+    re.I,
+)
+# QUANTUM-CRYSTAL-ARCH: advance only on practice evidence (not "I tried to call mom")
 _ADVANCE_RE = re.compile(
-    r"\b(i (did|practiced|finished|completed|used|tried)|did the (stop|tipp|practice|step|"
-    r"grounding|5-4-3-2-1|mindful|dear|thought)|"
-    r"tried (it|the)|worked on (step|the practice)|check[- ]?in:?"
-    r"|it helped|that helped|that worked|i used (the|that)|practiced (today|it))\b",
+    r"\b("
+    r"i (did|practiced|finished|completed) (the )?(stop|tipp|practice|step|"
+    r"grounding|5-4-3-2-1|mindful|dear|thought|skill)|"
+    r"i practiced (today|it|the)|"
+    r"did the (stop|tipp|practice|step|grounding|5-4-3-2-1|mindful|skill)|"
+    r"tried (it|the (practice|step|grounding|exercise|skill))|"
+    r"worked on (step|the practice)|"
+    r"(the )?(practice|step|grounding|exercise|skill) (helped|worked)|"
+    r"that (practice|step|exercise|skill) (helped|worked)|"
+    r"i used (the|that) (skill|practice|stop|tipp|grounding)"
+    r")\b"
+    r"|things\s+seen\s*:"
+    r"|things\s+felt\s*:"
+    r"|things\s+heard\s*:"
+    r"|things\s+(?:smelt|smelled)\s*:"
+    r"|things?\s+tasted\s*:"
+    r"|\b5\s*[-–]?\s*4\s*[-–]?\s*3\s*[-–]?\s*2\s*[-–]?\s*1\b",
     re.I,
 )
 _DECLINE_RE = re.compile(
     r"\b(not now|no thanks|don'?t want|skip (that|this)|no plan|stop (suggesting|offering)|"
-    r"maybe later|not interested)\b",
+    r"maybe later|not interested|stop (that|this|pushing))\b|"
+    r"^(no|nah)[.!]?\s*$|"
+    r"\b(no|nah)[,!]?\s+(thanks|thank you|not now|i don'?t|i do not)\b",
+    re.I,
+)
+# Skip forced skill teach when client is on imagery/tech meta, not practice
+_SKILL_META_SKIP_RE = re.compile(
+    r"\b(glitch(?:ing)?|buggy|bug\b|broken|not working|big nate|"
+    r"picture of me|this picture|image (looks|seems|is)|looks? (like )?a female|"
+    r"why (would|are|did) you (ask|say)|i'?m not sure why)\b",
     re.I,
 )
 
+
+def _client_accepts_plan(text: str) -> bool:
+    """True only for clear practice opt-in — never soft ack or 'I'm not sure…'."""
+    t = (text or "").strip()
+    if not t or _ACCEPT_BLOCK_RE.search(t):
+        return False
+    if _ACCEPT_SHORT_RE.match(t):
+        return True
+    return bool(_ACCEPT_RE.search(t))
+
+
+def _client_advances_plan(text: str) -> bool:
+    return bool(_ADVANCE_RE.search(text or ""))
+
 _MIN_CONFIDENCE = float(os.getenv("CYCLE_SKILL_MIN_CONFIDENCE", "0.55"))
 _CHECKIN_HOURS = int(os.getenv("CYCLE_SKILL_CHECKIN_HOURS", "48"))
+# QUANTUM-CRYSTAL-ARCH: no same-turn curriculum stack after completion
+_STACK_COOLDOWN_HOURS = int(os.getenv("CYCLE_SKILL_STACK_COOLDOWN_HOURS", "48"))
 _EMAILABLE_EVENTS = frozenset(
     {"suggested", "activated", "advanced", "checkin_due", "completed"}
 )
@@ -334,26 +399,31 @@ def build_fidelity_directive(
     )
     must = skill or _skill_must_include({"skill": skill}, mod)
     if status == "suggested":
+        # QUANTUM-CRYSTAL-ARCH: suggested = optional one-liner; never script without accept
         return (
-            f"SKILL FIDELITY LOCK ({mod}) — REQUIRED for this reply:\n"
-            f"1) One short empathic join (1–2 sentences MAX). Do NOT open with "
-            f"\"Behind the feeling…\" / \"Behind your willingness…\".\n"
-            f"2) Offer THIS optional practice only — modality {mod}, skill \"{must}\", "
-            f"step focus \"{theme}\" from \"{title}\".\n"
-            f"REQUIRED PRACTICE TEXT (teach the steps in the reply; light paraphrase OK, "
-            f"same skill required):\n\"{practice}\"\n"
-            f"3) If the client is accepting (yes / let's try / I'm in): TEACH the full "
-            f"REQUIRED PRACTICE now — do not only empathize or promise to start later.\n"
-            f"4) If not yet accepted: ask once if they want to try it.\n"
+            f"SKILL FIDELITY LOCK ({mod}) — OPTIONAL OFFER (not yet accepted):\n"
+            f"1) Stay with the client's stated need/topic first. Reflect and respond to "
+            f"WHAT THEY SAID — do not conjecture a skill they did not ask for.\n"
+            f"2) Do NOT teach, script, or walk through a practice this turn unless they "
+            f"clearly ask for a skill/tool OR clearly accept "
+            f"(yes let's try / I'll practice / sure, let's). Soft ok/alright is NOT accept.\n"
+            f"3) Only if they ask for help coping OR the topic clearly invites a tool: "
+            f"offer ONE short optional {mod} line (skill \"{must}\", \"{theme}\" / \"{title}\") "
+            f"— max one sentence, as a question, not a lesson:\n"
+            f"\"{practice}\"\n"
+            f"4) Never re-pitch every turn. Prefer connection over curriculum.\n"
             f"FORBIDDEN: {forbid}\n"
             f"If you name a practice, it must be {mod} ({must}), not a different school."
         )
     return (
         f"SKILL FIDELITY LOCK ({mod}) — ACTIVE PRACTICE step {step_num}/{total_steps}:\n"
         f"Title: \"{title}\". Focus: {theme}. Skill: {must}.\n"
-        f"REQUIRED PRACTICE: \"{practice}\"\n"
-        f"If they completed the last step, name the skill they finished, then teach "
-        f"the next REQUIRED PRACTICE above (or celebrate plan completion).\n"
+        f"AGREED PRACTICE (only when they engage it): \"{practice}\"\n"
+        f"Default: answer their current need. Teach/check the AGREED PRACTICE only when "
+        f"they bring up the skill, report practice, or ask for the next step — "
+        f"never hijack unrelated turns with a technique dump.\n"
+        f"If they completed the last step, briefly acknowledge, then offer the next "
+        f"practice only if they want to continue (or celebrate completion).\n"
         f"Do NOT open with \"Behind the feeling…\". FORBIDDEN: {forbid}"
     )
 
@@ -525,6 +595,159 @@ async def _recent_decline_cooldown(db_pool: Any, username: str) -> bool:
         return False
 
 
+async def _recent_completion_cooldown(db_pool: Any, username: str) -> bool:
+    """True while inside post-complete stack window (blocks cycle re-suggest)."""
+    hours = max(1, min(int(_STACK_COOLDOWN_HOURS), 336))
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchval(
+                f"""
+                SELECT id FROM nate_therapeutic_plans
+                WHERE {_identity_clause().strip()}
+                  AND source = 'cycle_skill'
+                  AND status = 'completed'
+                  AND COALESCE(completed_at, updated_at)
+                      > NOW() - INTERVAL '{hours} hours'
+                LIMIT 1
+                """,
+                username,
+            )
+        return bool(row)
+    except Exception:
+        return False
+
+
+def _pending_stack_from_log(adaptation_log: Any) -> Optional[Dict[str, Any]]:
+    """Latest pending_stack event from adaptation_log JSON list."""
+    if not adaptation_log:
+        return None
+    events = adaptation_log
+    if isinstance(events, str):
+        try:
+            events = json.loads(events)
+        except Exception:
+            return None
+    if not isinstance(events, list):
+        return None
+    for ev in reversed(events):
+        if isinstance(ev, dict) and ev.get("event") == "pending_stack":
+            return ev
+    return None
+
+
+async def _maybe_release_pending_stack(
+    db_pool: Any, username: str
+) -> Optional[Dict[str, Any]]:
+    """
+    After STACK_COOLDOWN, offer the succession template once.
+    Same-turn stacking after completion is forbidden (curriculum conveyor).
+    """
+    if not db_pool or not username:
+        return None
+    if await _get_plan_row(db_pool, username):
+        return None
+    if await _recent_decline_cooldown(db_pool, username):
+        return None
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT id, adaptation_log, cycle_domain, modality, completed_at, updated_at
+                FROM nate_therapeutic_plans
+                WHERE {_identity_clause().strip()}
+                  AND source = 'cycle_skill'
+                  AND status = 'completed'
+                ORDER BY COALESCE(completed_at, updated_at) DESC
+                LIMIT 1
+                """,
+                username,
+            )
+        if not row:
+            return None
+        pending = _pending_stack_from_log(row.get("adaptation_log"))
+        if not pending:
+            return None
+        offer_after = pending.get("offer_after")
+        if offer_after:
+            try:
+                oa = datetime.fromisoformat(str(offer_after).replace("Z", "+00:00"))
+                if oa.tzinfo is None:
+                    oa = oa.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) < oa:
+                    return None
+            except Exception:
+                return None
+        else:
+            # Fallback: honor stack cooldown from completed_at
+            done = row.get("completed_at") or row.get("updated_at")
+            if done:
+                if getattr(done, "tzinfo", None) is None:
+                    done = done.replace(tzinfo=timezone.utc)
+                age_h = (datetime.now(timezone.utc) - done).total_seconds() / 3600.0
+                if age_h < _STACK_COOLDOWN_HOURS:
+                    return None
+        tpl_id = pending.get("template_id")
+        if not tpl_id:
+            return None
+        tpl = await _load_template(db_pool, str(tpl_id))
+        if not tpl:
+            return None
+        domain = str(pending.get("domain") or row.get("cycle_domain") or "")
+        modality = str(pending.get("modality") or row.get("modality") or "skills")
+        parent_id = str(pending.get("parent_plan_id") or row["id"])
+        new_id = await _insert_suggested_plan(
+            db_pool,
+            user_id=username,
+            template=tpl,
+            domain=domain,
+            modality=modality,
+            parent_plan_id=parent_id,
+        )
+        if not new_id:
+            return None
+        # Clear pending_stack so we don't re-offer
+        try:
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE nate_therapeutic_plans
+                    SET adaptation_log = adaptation_log || $2::jsonb,
+                        updated_at = NOW()
+                    WHERE id = $1::uuid
+                    """,
+                    str(row["id"]),
+                    json.dumps(
+                        [
+                            {
+                                "event": "pending_stack_released",
+                                "new_plan_id": new_id,
+                                "at": datetime.now(timezone.utc).isoformat(),
+                            }
+                        ]
+                    ),
+                )
+        except Exception as e:
+            logger.warning("cycle_skill_plan: clear pending_stack failed: %s", e)
+        stacked = await _get_plan_row(db_pool, username)
+        if stacked:
+            await _log_skill_learning(
+                db_pool,
+                user_id=username,
+                plan=stacked,
+                event="suggested",
+                detail=f"stacked_after_cooldown={parent_id}",
+            )
+        logger.info(
+            "cycle_skill_plan: released pending stack %s after %s",
+            new_id,
+            parent_id,
+        )
+        return {"ok": True, "action": "stacked_after_cooldown", "plan_id": new_id}
+    except Exception as e:
+        logger.warning("cycle_skill_plan: pending stack release failed: %s", e)
+        return None
+
+
 async def ensure_suggested_plan_from_cycles(
     db_pool: Any, user_id: str
 ) -> Optional[Dict[str, Any]]:
@@ -539,6 +762,12 @@ async def ensure_suggested_plan_from_cycles(
     if existing:
         return None
     if await _recent_decline_cooldown(db_pool, username):
+        return None
+    # QUANTUM-CRYSTAL-ARCH: after complete, wait stack cooldown (no conveyor)
+    released = await _maybe_release_pending_stack(db_pool, username)
+    if released:
+        return released
+    if await _recent_completion_cooldown(db_pool, username):
         return None
     cycles = await fetch_user_cycle_signals(db_pool, username)
     if not cycles:
@@ -602,10 +831,10 @@ async def build_cycle_skill_plan_context(db_pool: Any, user_id: str) -> str:
         domain = top.get("domain") or "pattern"
         conf = float(top.get("confidence") or 0)
         parts.append(
-            f"CYCLE SIGNAL: Recent {domain.replace('_', ' ')} pattern "
-            f"(confidence {conf:.2f}). If a SKILL FIDELITY LOCK is present below, "
-            f"that lock OVERRIDES any impulse to offer generic grounding or coping tips. "
-            f"Never dump a multi-week curriculum."
+            f"CYCLE SIGNAL (background only): Recent {domain.replace('_', ' ')} pattern "
+            f"(confidence {conf:.2f}). Use for context — do NOT lead with a technique. "
+            f"If a SKILL FIDELITY LOCK is present, still answer the client's need first; "
+            f"never dump grounding/coping tips or a multi-week curriculum unprompted."
         )
         if len(cycles) > 1:
             others = ", ".join(
@@ -640,21 +869,32 @@ async def build_cycle_skill_plan_context(db_pool: Any, user_id: str) -> str:
             if check:
                 if _checkin_due(plan):
                     parts.append(
-                        "IN-CHAT CHECK-IN DUE (ask this turn even if proactive "
-                        f"outreach consent is off): {check}"
+                        "CHECK-IN AVAILABLE (only if they mention the practice, ask "
+                        "how they're doing with it, or clearly want structure — "
+                        f"otherwise stay on their topic): {check}"
                     )
                 else:
-                    parts.append(f"CHECK-IN PROMPT (use if natural): {check}")
+                    parts.append(
+                        f"CHECK-IN PROMPT (only if natural to their topic): {check}"
+                    )
+            parts.append(
+                "If the client already completed this step (e.g. listed things "
+                "seen/felt/heard/smelled/tasted, or said they practiced), "
+                "ACKNOWLEDGE completion and move on — do NOT re-teach the same "
+                "5-4-3-2-1 / practice. If they report a glitch, bug, wrong image, "
+                "or ask about Big Nate / system issues, answer that meta concern "
+                "directly and do NOT append a skills practice block."
+            )
     elif cycles:
         domain = cycles[0].get("domain") or ""
         mapping = _DOMAIN_TEMPLATE.get(str(domain))
         if mapping:
             _, modality, _ = mapping
             parts.append(
-                f"No plan row yet (cooldown or template miss). If you offer a skill, "
-                f"use one short {modality}-informed practice for "
-                f"{str(domain).replace('_', ' ')} — not a generic grounding default "
-                f"unless modality is grounding/mindfulness."
+                f"No plan row yet. Do not invent a practice. Only if they ask for a "
+                f"skill/tool: one short {modality}-informed line for "
+                f"{str(domain).replace('_', ' ')} — not generic grounding unless "
+                f"modality is grounding/mindfulness."
             )
 
     if not parts:
@@ -1442,7 +1682,49 @@ async def _advance_or_stack(
             await _schedule_followup_commitment(db_pool, user_id=user_id, plan=plan)
             return
 
-        # Complete + stack next template if mapped
+        # Complete — queue succession for after STACK_COOLDOWN (no same-turn stack)
+        domain = plan.get("cycle_domain") or ""
+        mapping = _DOMAIN_TEMPLATE.get(str(domain))
+        next_tpl_id = mapping[2] if mapping else None
+        offer_after = (
+            datetime.now(timezone.utc) + timedelta(hours=_STACK_COOLDOWN_HOURS)
+        ).isoformat()
+        complete_events: List[Dict[str, Any]] = [
+            {
+                "event": "completed",
+                "at": datetime.now(timezone.utc).isoformat(),
+            }
+        ]
+        if next_tpl_id:
+            modality = mapping[1] if mapping else "skills"
+            tpl = await _load_template(db_pool, next_tpl_id)
+            if tpl:
+                title_l = (tpl.get("title") or "").lower()
+                if "ground" in title_l or "mindful" in title_l:
+                    modality = "grounding"
+                elif "cbt" in title_l:
+                    modality = "CBT"
+                elif "act" in title_l:
+                    modality = "ACT"
+                elif "dbt" in title_l:
+                    modality = "DBT"
+                complete_events.append(
+                    {
+                        "event": "pending_stack",
+                        "template_id": next_tpl_id,
+                        "domain": str(domain),
+                        "modality": modality,
+                        "parent_plan_id": plan_id,
+                        "offer_after": offer_after,
+                        "at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                logger.info(
+                    "cycle_skill_plan: queued pending_stack %s after %s (offer_after=%s)",
+                    next_tpl_id,
+                    plan_id,
+                    offer_after,
+                )
         async with db_pool.acquire() as conn:
             await conn.execute(
                 """
@@ -1453,55 +1735,8 @@ async def _advance_or_stack(
                 WHERE id = $1::uuid
                 """,
                 plan_id,
-                json.dumps(
-                    [
-                        {
-                            "event": "completed",
-                            "at": datetime.now(timezone.utc).isoformat(),
-                        }
-                    ]
-                ),
+                json.dumps(complete_events),
             )
-        domain = plan.get("cycle_domain") or ""
-        mapping = _DOMAIN_TEMPLATE.get(str(domain))
-        next_tpl_id = mapping[2] if mapping else None
-        if next_tpl_id:
-            tpl = await _load_template(db_pool, next_tpl_id)
-            if tpl:
-                modality = mapping[1] if mapping else "skills"
-                # Prefer modality from next template title
-                title_l = (tpl.get("title") or "").lower()
-                if "ground" in title_l or "mindful" in title_l:
-                    modality = "grounding"
-                elif "cbt" in title_l:
-                    modality = "CBT"
-                elif "act" in title_l:
-                    modality = "ACT"
-                elif "dbt" in title_l:
-                    modality = "DBT"
-                new_id = await _insert_suggested_plan(
-                    db_pool,
-                    user_id=user_id,
-                    template=tpl,
-                    domain=str(domain),
-                    modality=modality,
-                    parent_plan_id=plan_id,
-                )
-                if new_id:
-                    logger.info(
-                        "cycle_skill_plan: stacked next plan %s after %s",
-                        new_id,
-                        plan_id,
-                    )
-                    stacked = await _get_plan_row(db_pool, user_id)
-                    if stacked and str(stacked.get("id")) == new_id:
-                        await _log_skill_learning(
-                            db_pool,
-                            user_id=user_id,
-                            plan=stacked,
-                            event="suggested",
-                            detail=f"stacked_after={plan_id}",
-                        )
     except Exception as e:
         logger.warning("cycle_skill_plan: advance/stack failed: %s", e)
 
@@ -1531,7 +1766,7 @@ async def maybe_tick_cycle_skill_plan(
         )
         return {"ok": True, "action": "declined", "plan_id": str(plan["id"])}
 
-    if plan and plan.get("status") == "suggested" and _ACCEPT_RE.search(text):
+    if plan and plan.get("status") == "suggested" and _client_accepts_plan(text):
         await _activate_plan(db_pool, str(plan["id"]))
         plan["status"] = "active"
         await _schedule_followup_commitment(db_pool, user_id=username, plan=plan)
@@ -1540,7 +1775,19 @@ async def maybe_tick_cycle_skill_plan(
         )
         return {"ok": True, "action": "activated", "plan_id": str(plan["id"])}
 
-    if plan and plan.get("status") == "active" and _ADVANCE_RE.search(text):
+    # QUANTUM-CRYSTAL-ARCH: practice evidence on suggested = activate only (no skip-ahead)
+    if plan and plan.get("status") == "suggested" and _client_advances_plan(text):
+        await _activate_plan(db_pool, str(plan["id"]))
+        plan["status"] = "active"
+        await _schedule_followup_commitment(db_pool, user_id=username, plan=plan)
+        await _log_skill_learning(
+            db_pool, user_id=username, plan=plan, event="activated",
+            detail=f"practice_evidence:{text[:100]}",
+        )
+        return {"ok": True, "action": "activated", "plan_id": str(plan["id"])}
+
+    # Advance/complete only after the plan is active (accepted or practice-evidence activate)
+    if plan and plan.get("status") == "active" and _client_advances_plan(text):
         cur = int(plan.get("current_step") or 1)
         total = int(plan.get("total_steps") or 1)
         completing = cur >= total
@@ -1580,6 +1827,11 @@ async def maybe_tick_cycle_skill_plan(
     # Fallback if pre-turn ensure missed (race / no plan context path)
     if await _recent_decline_cooldown(db_pool, username):
         return {"ok": True, "action": "cooldown"}
+    released = await _maybe_release_pending_stack(db_pool, username)
+    if released:
+        return released
+    if await _recent_completion_cooldown(db_pool, username):
+        return {"ok": True, "action": "stack_cooldown"}
     created = await ensure_suggested_plan_from_cycles(db_pool, username)
     if created:
         return created
@@ -1702,22 +1954,20 @@ def schedule_skill_plan_post_turn_with_ws(
 async def augment_recall_query_for_skill_plan(
     db_pool: Any, user_id: str, base_query: str
 ) -> str:
-    """Bias crystal recall toward active/suggested cycle skill practice terms."""
+    """Bias crystal recall only for ACTIVE accepted plans (not suggested offers)."""
     if not cycle_skill_plans_enabled() or not db_pool or not user_id:
         return base_query or ""
     plan = await _get_plan_row(db_pool, user_id)
-    if not plan:
+    if not plan or str(plan.get("status") or "") != "active":
         return base_query or ""
     step = _step_payload(
         plan.get("step_definitions"), int(plan.get("current_step") or 1)
     )
+    # Light bias: modality + skill name only — not full practice script
     bits = [
         (base_query or "").strip(),
         str(plan.get("modality") or ""),
         str(step.get("skill") or "").replace("_", " "),
-        str(step.get("theme") or ""),
-        str(step.get("practice") or "")[:120],
-        "skills practice",
     ]
     return " ".join(b for b in bits if b).strip()[:500]
 
@@ -1853,8 +2103,19 @@ async def apply_skill_fidelity_guard(
     if not practice:
         return text
 
-    accepting = bool(_ACCEPT_RE.search(user_text or ""))
-    advancing = bool(_ADVANCE_RE.search(user_text or ""))
+    accepting = _client_accepts_plan(user_text or "")
+    advancing = _client_advances_plan(user_text or "")
+    status = str(plan.get("status") or "")
+    # QUANTUM-CRYSTAL-ARCH: never force practice onto glitch/image/meta turns
+    if _SKILL_META_SKIP_RE.search(user_text or "") and not accepting:
+        return text
+    # Suggested without clear accept: never post-LLM append (prompt may still offer)
+    if status == "suggested" and not accepting and not advancing:
+        return text
+    # Active without accept/advance this turn: do not hijack with teach block
+    if status == "active" and not accepting and not advancing:
+        return text
+
     score = score_skill_offer_fidelity(
         text, modality=modality, skill=skill, practice=practice
     )
@@ -1865,7 +2126,6 @@ async def apply_skill_fidelity_guard(
         "ACT",
     )
     practice_l = practice.lower()
-    # Core skill must appear for suggested/accept turns (Clinical-AGI floor)
     core_ok = False
     if skill:
         core_ok = skill.lower().replace("_", " ") in text.lower() or skill.lower() in text.lower()
@@ -1877,32 +2137,29 @@ async def apply_skill_fidelity_guard(
     if practice_l[:32] and practice_l[:32] in text.lower():
         core_ok = True
 
-    # Advance turns: only patch if acknowledgment lacks skill name entirely
-    if advancing and plan.get("status") == "active":
+    # QUANTUM-CRYSTAL-ARCH: never append next-step teach on suggested (activate-only path)
+    if advancing and status == "active":
         if score >= 3 and core_ok:
             return text
         return (
             f"{text.rstrip()}\n\n"
             f"For the next step ({skill.replace('_', ' ') or mod}): {practice}"
         ).strip()
+    if advancing and status == "suggested":
+        return text
 
-    # Suggested first offer: require teachable on-modality content (score>=4 AND core)
-    need = min_score
-    if plan.get("status") == "suggested" and not accepting:
-        need = 4
-        if score >= need and core_ok and not grounding_wrong:
-            return text
-    elif accepting:
-        if score >= 5 and core_ok:
-            return text
-    elif score >= min_score and core_ok and not grounding_wrong:
+    # Clear accept: enforce on-modality teach (Clinical-AGI floor)
+    need = 5 if accepting else min_score
+    if accepting and score >= need and core_ok and not grounding_wrong:
+        return text
+    if not accepting:
         return text
 
     block = compose_skill_teach_block(
         modality=modality,
         skill=skill,
         practice=practice,
-        accepting=accepting or plan.get("status") == "active",
+        accepting=accepting,
     )
 
     if grounding_wrong and (score <= 2 or not core_ok):

@@ -370,6 +370,51 @@ async def determine_character(profile: dict, panel_sequence: int = 0) -> Tuple[s
     return matches[panel_sequence % len(matches)]
 
 
+def _protagonist_gender_lock(character_visual: str, archetype_hint: str = "") -> str:
+    """Hard sex lock for image prompts — prevents hero→female drift (LetsGoBill).
+
+    Returns a short fragment to append, or '' if undetermined.
+    """
+    blob = f"{character_visual or ''} {archetype_hint or ''}".lower()
+    if not blob.strip():
+        return ""
+    female = bool(
+        re.search(
+            r"\b(woman|female|she|her|girl|lady|mother|wife|daughter)\b",
+            blob,
+        )
+    )
+    male = bool(
+        re.search(
+            r"\b(man|male|he|him|his|boy|father|husband|son|"
+            r"a man (does|doesn)|bearded|gentleman)\b",
+            blob,
+        )
+    )
+    if male and not female:
+        return (
+            "adult male protagonist as the central figure, clearly masculine "
+            "presentation, not female, not androgynous"
+        )
+    if female and not male:
+        return (
+            "adult female protagonist as the central figure, clearly feminine "
+            "presentation, not male, not androgynous"
+        )
+    return ""
+
+
+def apply_protagonist_gender_lock(image_prompt: str, character_visual: str,
+                                  archetype_hint: str = "") -> str:
+    """Append gender lock once if missing from prompt."""
+    lock = _protagonist_gender_lock(character_visual, archetype_hint)
+    if not lock or not (image_prompt or "").strip():
+        return image_prompt or ""
+    if "clearly masculine" in image_prompt.lower() or "clearly feminine" in image_prompt.lower():
+        return image_prompt
+    return f"{image_prompt.rstrip()}, {lock}"
+
+
 async def _get_archetype_identity(user_id: str, journey: dict, db_pool) -> Dict[str, str]:
     """Resolve the user's archetype (hint + visual + ref image) for narrative/image use.
 
@@ -686,12 +731,19 @@ async def compose_journey_narrative(
         _protag_desc = f"a {archetype_hint or 'journeying'} archetype"
         if character_visual:
             _protag_desc += f" — {character_visual[:200]}"
+        _g_lock = _protagonist_gender_lock(character_visual, archetype_hint)
+        _g_line = (
+            f" SEX/GENDER LOCK (mandatory in image_prompt): {_g_lock}."
+            if _g_lock
+            else ""
+        )
         protagonist_block = (
             f"THE PROTAGONIST (the user's own forged character): {_protag_desc}.\n"
             "The protagonist is the central figure of every scene — this is THEIR adventure. "
             "Write narrative_text in a way that places the protagonist in the scene (second person 'you' "
             "addressing them as this character), and the image_prompt MUST describe the protagonist "
-            "as the main figure using the visual description above, not a generic solitary figure.\n"
+            "as the main figure using the visual description above, not a generic solitary figure."
+            f"{_g_line}\n"
         )
 
     fallback = {
@@ -1182,6 +1234,12 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
 
     image_prompt += ", no text, no words, no lettering, no calligraphy, no writing on image"
     image_prompt += f", {character[1]}"
+    # QUANTUM-CRYSTAL-ARCH: lock sex from forge visual (prevent female-hero drift)
+    image_prompt = apply_protagonist_gender_lock(
+        image_prompt,
+        arch_ident.get("character_visual", ""),
+        arch_hint,
+    )
 
     archetype_ref_url = arch_ident.get("archetype_image_url") or None
     if not archetype_ref_url:

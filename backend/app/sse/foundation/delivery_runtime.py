@@ -109,11 +109,15 @@ async def generate_daily_panels(sid: str, db_pool, skip_check=None) -> dict[str,
                     continue
                 archetype_url = await get_archetype_ref(uid, db_pool)
                 arch_hint = None
+                _cvis = ""
                 try:
                     async with db_pool.acquire() as _fc:
-                        arch_hint = await _fc.fetchval(
-                            "SELECT archetype_hint FROM sse_identity_forge "
+                        _forge = await _fc.fetchrow(
+                            "SELECT archetype_hint, character_visual FROM sse_identity_forge "
                             "WHERE user_id=$1 AND status='complete' LIMIT 1", uid)
+                        if _forge:
+                            arch_hint = _forge["archetype_hint"]
+                            _cvis = _forge["character_visual"] or ""
                 except Exception:
                     pass
                 rich: dict = {}
@@ -134,6 +138,12 @@ async def generate_daily_panels(sid: str, db_pool, skip_check=None) -> dict[str,
                     prompt += f", {manifestation}"
                 except Exception as _man_err:
                     logger.warning("Manifestation suffix failed for %s: %s", uid, _man_err)
+                try:
+                    from app.sse.thera_world_engine import apply_protagonist_gender_lock
+                    prompt = apply_protagonist_gender_lock(
+                        prompt, _cvis or "", arch_hint or "")
+                except Exception as _glock_err:
+                    logger.warning("Gender lock failed for %s: %s", uid, _glock_err)
                 h = hashlib.md5(prompt.encode()).hexdigest()[:12]
                 key = f"stories/{uid}/daily_panel/{today}/{h}.png"
                 try:

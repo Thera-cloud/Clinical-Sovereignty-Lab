@@ -209,14 +209,46 @@ class PublicTrialDigest:
             except asyncio.CancelledError:
                 pass
 
+    async def _already_sent_today(self, now: datetime) -> bool:
+        """Durable same-UTC-day dedupe (survives backend restarts/deploys)."""
+        if not self.db_pool:
+            return False
+        # asyncpg needs a date object for ::date binds (str → toordinal error)
+        day = now.astimezone(timezone.utc).date()
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchval(
+                    """
+                    SELECT 1 FROM skyeye_activity
+                    WHERE type = 'public_trial_digest_sent'
+                      AND created_at >= $1::timestamptz
+                      AND created_at < ($1::timestamptz + INTERVAL '1 day')
+                    LIMIT 1
+                    """,
+                    datetime(day.year, day.month, day.day, tzinfo=timezone.utc),
+                )
+            return bool(row)
+        except Exception as e:
+            logger.warning("PublicTrialDigest: already_sent check failed: %s", e)
+            # Fail CLOSED on check error during DIGEST_HOUR — never spam on deploy
+            return True
+
     async def _run_loop(self):
         await asyncio.sleep(130)
         while self._running:
             try:
                 now = datetime.now(timezone.utc)
-                if now.hour == DIGEST_HOUR_UTC and self._sent_date != now.date().isoformat():
-                    await self.build_and_send(now)
-                    self._sent_date = now.date().isoformat()
+                day = now.date().isoformat()
+                if now.hour == DIGEST_HOUR_UTC and self._sent_date != day:
+                    # QUANTUM-CRYSTAL-ARCH: in-memory flag alone re-fires on every deploy
+                    if await self._already_sent_today(now):
+                        self._sent_date = day
+                        logger.info(
+                            "PublicTrialDigest: skip — already logged for %s", day
+                        )
+                    else:
+                        await self.build_and_send(now, force=False)
+                        self._sent_date = day
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -227,9 +259,21 @@ class PublicTrialDigest:
         self,
         now: Optional[datetime] = None,
         overrides: Optional[Dict[str, Any]] = None,
+        *,
+        force: bool = False,
     ) -> Dict[str, Any]:
         now = now or datetime.now(timezone.utc)
         overrides = overrides or {}
+        if not force and await self._already_sent_today(now):
+            day = now.astimezone(timezone.utc).date().isoformat()
+            self._sent_date = day
+            logger.info("PublicTrialDigest: skip send — already sent %s", day)
+            return {
+                "sent": False,
+                "skipped": "already_sent_today",
+                "subject": "",
+                "data": {},
+            }
         data = await self._collect(now, overrides)
         subject = self._subject(data, now)
         html = self._render_html(data, now)
@@ -243,6 +287,7 @@ class PublicTrialDigest:
             except Exception as e:
                 logger.error("PublicTrialDigest: email send failed: %s", e)
         await self._log_sent(now, data.get("verdict", ""))
+        self._sent_date = now.astimezone(timezone.utc).date().isoformat()
         return {"sent": sent, "subject": subject, "data": data}
 
     async def _collect(self, now: datetime, overrides: Dict[str, Any]) -> Dict[str, Any]:

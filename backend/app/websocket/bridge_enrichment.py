@@ -177,6 +177,14 @@ _CONTROL_MARKERS = re.compile(
     r"i need strategies not therapy|give me a list|tell me what to do)\b",
     re.I,
 )
+# QUANTUM-CRYSTAL-ARCH: literal tech/product/image Qs — never mirror/somatic-hijack
+_LITERAL_TOPIC_SKIP_RE = re.compile(
+    r"\b(glitch(?:ing)?|buggy|bug\b|broken|not working|big nate|"
+    r"picture of me|this picture|image (looks|seems|is)|looks? (like )?a female|"
+    r"zoom|login|password|schedule|sse|journey picture|"
+    r"why (would|are|did) you (ask|say)|i'?m not sure why)\b",
+    re.I,
+)
 _INTELLECTUALIZATION = re.compile(
     r"\b(depersonalization|attachment style|tachycardia|cortisol|amygdala|"
     r"precipitating stressor|textbook case|from a research perspective|"
@@ -203,9 +211,11 @@ def detect_priority_overrides(user_text: str) -> List[str]:
     if not user_text:
         return []
     active: List[str] = []
-    if _CONTROL_MARKERS.search(user_text):
+    literal_skip = bool(_LITERAL_TOPIC_SKIP_RE.search(user_text))
+    # Frame-control only — skip tech/image/meta literal questions
+    if _CONTROL_MARKERS.search(user_text) and not literal_skip:
         active.append("parallel_process")
-    if _INTELLECTUALIZATION.search(user_text):
+    if _INTELLECTUALIZATION.search(user_text) and not literal_skip:
         active.append("somatic_interrupt")
     if _WITNESSING.search(user_text):
         active.append("witnessing")
@@ -227,15 +237,16 @@ def build_priority_override_addendum(user_text: str) -> str:
     ]
     if "parallel_process" in active:
         lines.append(
-            "- PARALLEL PROCESS: client used control/demand language. Do NOT "
-            "answer their question or give strategies. Mirror the control "
-            "dynamic in the room, then stop."
+            "- PARALLEL PROCESS: client is locking the therapeutic FRAME. Do NOT "
+            "accommodate with strategies. Mirror the control dynamic, then stop. "
+            "(If this were a tech/image/schedule question, answer that instead.)"
         )
     if "somatic_interrupt" in active:
         lines.append(
-            "- SOMATIC INTERRUPT: client is intellectualizing. Do NOT discuss "
-            "diagnosis or validate analysis. Interrupt and ask what is "
-            "happening in their body right now."
+            "- SOMATIC INTERRUPT: if intellectualization is the main defense, briefly "
+            "name it and ask ONE gentle felt-sense question — not a grounding script. "
+            "If they asked a clear emotional/practical question, answer that need first. "
+            "(Answer product/image questions first; never hijack those.)"
         )
     if "witnessing" in active:
         lines.append(

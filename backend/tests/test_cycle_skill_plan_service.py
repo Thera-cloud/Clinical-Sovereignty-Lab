@@ -117,15 +117,72 @@ def test_advance_recognizes_grounding_practice():
     assert csp._ADVANCE_RE.search("I practiced the grounding exercise")
     assert csp._ADVANCE_RE.search("I did the 5-4-3-2-1")
     assert csp._ADVANCE_RE.search("I finished the mindful step")
+    assert csp._client_advances_plan(
+        "Things seen: crystals.\nthings felt: stones under my feet."
+    )
+    assert csp._client_advances_plan("things heard: dawn song\nthings smelt: earth")
+
+
+def test_pending_stack_from_log_and_cooldown_constant():
+    assert csp._STACK_COOLDOWN_HOURS >= 1
+    log = [
+        {"event": "completed", "at": "2026-07-23T00:00:00+00:00"},
+        {
+            "event": "pending_stack",
+            "template_id": csp._TPL_DBT,
+            "offer_after": "2026-07-25T00:00:00+00:00",
+        },
+    ]
+    pending = csp._pending_stack_from_log(log)
+    assert pending and pending["template_id"] == csp._TPL_DBT
+    assert csp._pending_stack_from_log([]) is None
+    assert csp._pending_stack_from_log(None) is None
 
 
 def test_accept_advance_decline_patterns():
-    assert csp._ACCEPT_RE.search("yeah let's try that")
-    assert csp._ACCEPT_RE.search("I'll practice this week")
-    assert csp._ADVANCE_RE.search("I practiced the STOP skill today")
-    assert csp._ADVANCE_RE.search("I finished step one")
+    assert csp._client_accepts_plan("yeah let's try that")
+    assert csp._client_accepts_plan("I'll practice this week")
+    assert csp._client_advances_plan("I practiced the STOP skill today")
+    assert csp._client_advances_plan("I finished the grounding step")
     assert csp._DECLINE_RE.search("not now thanks")
-    assert not csp._ACCEPT_RE.search("I feel sad about my mother")
+    assert not csp._client_accepts_plan("I feel sad about my mother")
+    # LetsGoBill false-accept regression: "not sure" must never activate
+    assert not csp._client_accepts_plan(
+        "I'm not sure why you would ask that?"
+    )
+    assert not csp._client_accepts_plan("not sure")
+    assert csp._client_accepts_plan("sure, let's try")
+    assert csp._client_accepts_plan("yes I'm in")
+    assert csp._client_accepts_plan("yes")
+    assert not csp._client_accepts_plan(
+        "Lil Nate I think you are glitching. Should you contact Big Nate?"
+    )
+    # Soft-ack / story FPs must not activate
+    for bad in (
+        "OK so my wife left",
+        "okay then I cried",
+        "alright I hear you but no",
+        "why not just leave me alone",
+        "that works for some people but not me",
+        "sounds good in theory but",
+        "I'm in a bad place",
+        "I'll try to sleep",
+        "start that car",
+    ):
+        assert not csp._client_accepts_plan(bad), bad
+    # Advance FPs: everyday past tense must not advance
+    for bad in (
+        "I tried to call my mom",
+        "I used to drink",
+        "it helped that she left",
+        "I finished my coffee",
+        "I did not mean that",
+    ):
+        assert not csp._client_advances_plan(bad), bad
+    assert csp._DECLINE_RE.search("no")
+    assert csp._DECLINE_RE.search("no thanks")
+    # Mid-story "no" must not false-decline
+    assert not csp._DECLINE_RE.search("I said no to the promotion at work")
 
 
 def test_step_payload_extracts_practice():
@@ -165,9 +222,23 @@ def test_fidelity_directive_locks_cbt_not_grounding():
         total_steps=3,
     )
     assert "SKILL FIDELITY LOCK (CBT)" in block
+    assert "OPTIONAL OFFER" in block
+    assert "stated need" in block.lower() or "WHAT THEY SAID" in block
     assert "hot thought" in block.lower()
     assert "FORBIDDEN" in block
     assert "5-4-3-2-1" in block  # named as forbidden attractor
+    active = csp.build_fidelity_directive(
+        modality="CBT",
+        status="active",
+        title="Thought check",
+        theme="Catch",
+        practice="Catch one hot thought.",
+        skill="thought_record",
+        step_num=1,
+        total_steps=3,
+    )
+    assert "AGREED PRACTICE" in active
+    assert "current need" in active.lower()
 
 
 def test_score_skill_offer_fidelity_penalizes_grounding_for_cbt():
@@ -303,3 +374,87 @@ async def test_fidelity_guard_appends_teach_when_off_modality(monkeypatch):
     )
     assert "hot thought" in out.lower()
     assert csp.score_skill_offer_fidelity(out, modality="CBT") >= 4
+
+    # Suggested + no accept: never append practice (topic takeover guard)
+    out_noop = await csp.apply_skill_fidelity_guard(
+        _Pool(), "client1", "OK so my wife left", bad
+    )
+    assert out_noop == bad
+    out_meta = await csp.apply_skill_fidelity_guard(
+        _Pool(),
+        "client1",
+        "the picture of me looks like a female",
+        bad,
+    )
+    assert out_meta == bad
+    # Suggested + practice evidence: do not append next-step teach
+    out_adv = await csp.apply_skill_fidelity_guard(
+        _Pool(),
+        "client1",
+        "things seen: lamp\nthings felt: chair\nthings heard: fan",
+        "Thanks for sharing that inventory.",
+    )
+    assert "For the next step" not in out_adv
+
+
+@pytest.mark.asyncio
+async def test_augment_recall_only_when_active(monkeypatch):
+    monkeypatch.setenv("ENABLE_CYCLE_SKILL_PLANS", "true")
+
+    class _Conn:
+        def __init__(self, status):
+            self.status = status
+
+        async def fetchrow(self, *a, **k):
+            return {
+                "id": "p1",
+                "title": "Thought check",
+                "total_steps": 3,
+                "current_step": 1,
+                "step_definitions": [
+                    {
+                        "step_number": 1,
+                        "skill": "thought_record",
+                        "modality": "CBT",
+                        "theme": "Catch",
+                        "practice": "Catch one hot thought in one sentence.",
+                    }
+                ],
+                "status": self.status,
+                "source": "cycle_skill",
+                "cycle_domain": "financial",
+                "modality": "CBT",
+                "parent_plan_id": None,
+                "next_checkin_at": None,
+            }
+
+        async def fetchval(self, *a, **k):
+            return None
+
+    class _Pool:
+        def __init__(self, status):
+            self.status = status
+
+        class _Ctx:
+            def __init__(self, c):
+                self.c = c
+
+            async def __aenter__(self):
+                return self.c
+
+            async def __aexit__(self, *a):
+                return False
+
+        def acquire(self):
+            return _Pool._Ctx(_Conn(self.status))
+
+    q = await csp.augment_recall_query_for_skill_plan(
+        _Pool("suggested"), "client1", "my wife left"
+    )
+    assert q == "my wife left"
+    assert "hot thought" not in q.lower()
+    q2 = await csp.augment_recall_query_for_skill_plan(
+        _Pool("active"), "client1", "my wife left"
+    )
+    assert "thought record" in q2.lower() or "CBT" in q2
+    assert "hot thought" not in q2.lower()

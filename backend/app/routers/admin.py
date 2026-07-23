@@ -4247,9 +4247,11 @@ async def trigger_public_trial_digest(request: Request):
     if not digest:
         raise HTTPException(503, "PublicTrialDigest not running")
     now = datetime.now(timezone.utc)
-    result = await digest.build_and_send(now)
+    # force=True: admin manual send bypasses same-day restart dedupe
+    result = await digest.build_and_send(now, force=True)
     return {
         "status": "sent" if result.get("sent") else "failed",
+        "skipped": result.get("skipped"),
         "subject": result.get("subject"),
         "timestamp": now.isoformat(),
     }

@@ -33,7 +33,10 @@ _ALT_RE = re.compile(
     re.I,
 )
 _ACCEPT_ALT_RE = re.compile(
-    r"\b(yes|yeah|yep|sure|ok(?:ay)?|that\s+works|i'?ll\s+take|book\s+(that|it)|accept)\b",
+    r"^(yes|yeah|yep|yup|ok(?:ay)?|sure|that works|accept)[.!]?\s*$"
+    r"|\b(yes|yeah|yep)[,!]?\s+(that|this|please|book|take)\b"
+    r"|\b(sure|ok(?:ay)?)[,!]?\s+(that|this|please|book|i'?ll take)\b"
+    r"|\bi'?ll\s+take\b|\bbook\s+(that|it)\b|\baccept\b",
     re.I,
 )
 _REJECT_ALT_RE = re.compile(

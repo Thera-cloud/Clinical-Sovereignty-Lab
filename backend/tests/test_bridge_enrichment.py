@@ -130,6 +130,19 @@ def test_detect_priority_overrides():
     assert "witnessing" in enr.detect_priority_overrides(
         "Sometimes I think about suicide.")
     assert not enr.detect_priority_overrides("The weather was nice.")
+    # Literal tech/image — must not fire parallel_process / somatic
+    assert "parallel_process" not in enr.detect_priority_overrides(
+        "That's not helpful — the picture of me looks like a female and sad."
+    )
+    assert "parallel_process" not in enr.detect_priority_overrides(
+        "I think you are glitching. Can we focus on the image?"
+    )
+    somatic = enr.build_priority_override_addendum(
+        "From a research perspective this is textbook depersonalization with cortisol spikes."
+    )
+    assert "SOMATIC INTERRUPT" in somatic
+    assert "grounding script" in somatic.lower() or "felt-sense" in somatic.lower()
+    assert "clipboard" not in somatic.lower()
 
 
 # ─── Tier 3: language guard ──────────────────────────────────────────────

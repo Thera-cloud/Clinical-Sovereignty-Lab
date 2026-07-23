@@ -80,7 +80,8 @@ async def main() -> int:
             notification_system=notifications,
             redis_url=os.getenv("REDIS_URL", ""),
         )
-        result = await digest.build_and_send(overrides=overrides)
+        # Manual/cron script: force=True bypasses same-day restart dedupe
+        result = await digest.build_and_send(overrides=overrides, force=True)
         print(f"subject={result['subject']}")
         print(f"sent={result['sent']}")
         print(f"organic_conversations={result['data'].get('organic_conv_count')}")

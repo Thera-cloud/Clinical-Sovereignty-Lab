@@ -1,14 +1,26 @@
 """Offline tests for Public Trial Daily Digest builder."""
+import importlib.util
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
-from app.services.public_trial_digest import (
-    PublicTrialDigest,
-    _first_user_message,
-    _is_probe_session,
-    _parse_history,
-    _tone_label,
+import pytest
+
+_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "app"
+    / "services"
+    / "public_trial_digest.py"
 )
+_spec = importlib.util.spec_from_file_location("public_trial_digest", _PATH)
+ptd = importlib.util.module_from_spec(_spec)
+assert _spec and _spec.loader
+_spec.loader.exec_module(ptd)
+PublicTrialDigest = ptd.PublicTrialDigest
+_first_user_message = ptd._first_user_message
+_is_probe_session = ptd._is_probe_session
+_parse_history = ptd._parse_history
+_tone_label = ptd._tone_label
 
 
 def test_parse_history_json_string():
@@ -178,3 +190,38 @@ def test_subject_review_needed():
     data = {"emoji": "🔴", "verdict": "REVIEW NEEDED"}
     subj = d._subject(data, datetime(2026, 7, 10, 12, 0, tzinfo=timezone.utc))
     assert "🔴" in subj and "REVIEW NEEDED" in subj
+
+
+@pytest.mark.asyncio
+async def test_build_and_send_skips_when_already_sent_today():
+    """Restart during DIGEST_HOUR must not email again the same UTC day."""
+
+    class _Conn:
+        async def fetchval(self, *a, **k):
+            return 1  # already logged
+
+        async def execute(self, *a, **k):
+            return None
+
+    class _Pool:
+        class _Ctx:
+            def __init__(self, c):
+                self.c = c
+
+            async def __aenter__(self):
+                return self.c
+
+            async def __aexit__(self, *a):
+                return False
+
+        def acquire(self):
+            return _Pool._Ctx(_Conn())
+
+    d = PublicTrialDigest(db_pool=_Pool())
+    out = await d.build_and_send(
+        datetime(2026, 7, 23, 12, 45, tzinfo=timezone.utc),
+        force=False,
+    )
+    assert out["sent"] is False
+    assert out["skipped"] == "already_sent_today"
+    assert d._sent_date == "2026-07-23"
