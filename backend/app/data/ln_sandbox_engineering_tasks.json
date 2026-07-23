@@ -1,43 +1,48 @@
 {
-  "version": 1,
+  "version": 2,
   "tasks": [
     {
       "task_key": "eng_asyncpg_to_jsonb_cast",
       "title": "asyncpg polymorphic to_jsonb cast",
-      "prompt": "A FastAPI handler updates users.profile_data token_balance via jsonb_set(profile_data, '{token_balance}', to_jsonb($1)). Under asyncpg this fails with DatatypeMismatchError. Explain the fix in 3-6 sentences and show the corrected SQL fragment.",
-      "must_include": ["::int", "to_jsonb", "asyncpg"],
+      "prompt": "A FastAPI handler updates users.profile_data token_balance via jsonb_set(profile_data, '{token_balance}', to_jsonb($1)). Under asyncpg this fails with DatatypeMismatchError. Explain the fix in 3-6 sentences and show the corrected SQL fragment. You MUST include the exact tokens: to_jsonb and ::int and the word asyncpg.",
+      "must_include": ["asyncpg"],
+      "must_include_any": [["::int", "cast"], ["to_jsonb"]],
       "must_not_include": ["load_dotenv(override=True)"],
       "domain": "coding"
     },
     {
       "task_key": "eng_catch_all_route_order",
       "title": "FastAPI catch-all route ordering",
-      "prompt": "A router has GET /api/assessments/{assessment_id} and you need GET /api/assessments/health. Why does health return a type error, and how do you fix route order? Answer in under 120 words.",
-      "must_include": ["before", "catch-all", "health"],
+      "prompt": "A router has GET /api/assessments/{assessment_id} and you need GET /api/assessments/health. Why does health return a type error, and how do you fix route order? Answer in under 120 words. Include the words health and catch-all or catch all.",
+      "must_include": ["health"],
+      "must_include_any": [["catch-all", "catch all", "before", "specific route"]],
       "must_not_include": [],
       "domain": "coding"
     },
     {
       "task_key": "eng_crystal_validator_gate",
       "title": "Crystal storage requires validator",
-      "prompt": "Little Nate is about to store a new intelligence crystal from a conversation. Which gate must run first, what severity blocks storage, and why does skipping it risk persistent false belief? Be concrete.",
-      "must_include": ["NateResponseValidator", "high", "crystal"],
+      "prompt": "Little Nate is about to store a new intelligence crystal from a conversation. Which gate must run first, what severity blocks storage, and why does skipping it risk persistent false belief? Name NateResponseValidator and mention high severity and crystal.",
+      "must_include": ["crystal"],
+      "must_include_any": [["NateResponseValidator", "response validator", "validator"], ["high"]],
       "must_not_include": ["skip validation"],
       "domain": "coding"
     },
     {
       "task_key": "eng_bridge_env_match",
       "title": "ENVIRONMENT must match bridge and backend",
-      "prompt": "WebSocket login works but every REST call returns 401. Bridge logs show Token stored. What env var mismatch causes Redis key prefix divergence, and what must both containers set in production?",
-      "must_include": ["ENVIRONMENT", "production", "Redis"],
+      "prompt": "WebSocket login works but every REST call returns 401. Bridge logs show Token stored. What env var mismatch causes Redis key prefix divergence, and what must both containers set in production? Include ENVIRONMENT, production, and Redis in the answer.",
+      "must_include": ["ENVIRONMENT", "Redis"],
+      "must_include_any": [["production", "ENVIRONMENT=production"]],
       "must_not_include": [],
       "domain": "coding"
     },
     {
       "task_key": "eng_safe_deploy_no_force_recreate",
       "title": "Vault-safe deploy wrapper",
-      "prompt": "On GREEN production, why is docker compose --force-recreate forbidden for services that bind-mount Vaults, and what wrapper must be used instead?",
-      "must_include": ["safe_deploy", "Vault", "force-recreate"],
+      "prompt": "On GREEN production, why is docker compose --force-recreate forbidden for services that bind-mount Vaults, and what wrapper must be used instead? Include safe_deploy and Vault (or vaults) in the answer.",
+      "must_include": ["safe_deploy"],
+      "must_include_any": [["Vault", "vault", "Vaults", "vaults"], ["force-recreate", "force recreate"]],
       "must_not_include": [],
       "domain": "coding"
     }

@@ -25,6 +25,8 @@ Unsupervised practice loop so Little Nate learns while humans sleep. Two tracks 
 | `LN_SANDBOX_CLINICAL` | true | Clinical strategy practice |
 | `LN_SANDBOX_ENGINEERING` | true | Engineering fixture practice |
 | `LN_SANDBOX_CLIENT_PREP` | true | Idle-client candidate drafts |
+| `LN_SANDBOX_GENERATE_TIMEOUT_S` | 25 | Router wait budget (seconds) |
+| `LN_SANDBOX_SKIP_LNI` | true | Skip heavy LittleNateInference (prevents 90s hangs) |
 
 ## Hard rules
 
@@ -45,7 +47,7 @@ Unsupervised practice loop so Little Nate learns while humans sleep. Two tracks 
 
 ## Cycle
 
-Default 30 minutes (`LN_SANDBOX_CYCLE_SECONDS`). Stagger 195s. Idle prep threshold: `LN_SANDBOX_IDLE_HOURS` (default 6). Generate timeout: `LN_SANDBOX_GENERATE_TIMEOUT_S` (default 45).
+Default 30 minutes (`LN_SANDBOX_CYCLE_SECONDS`). Stagger 195s. Idle prep threshold: `LN_SANDBOX_IDLE_HOURS` (default 6). Generate: Workers AI via router (`LOCKED`), `LN_SANDBOX_GENERATE_TIMEOUT_S` default 25, LNI skipped by default.
 
 ## Verification
 

@@ -76,12 +76,31 @@ async def get_sandbox_candidates_for_user(
                    ORDER BY created_at DESC
                    LIMIT 1"""
             )
+            # QUANTUM-CRYSTAL-ARCH — admin_only crystals never hit crystal_recall_bridge;
+            # surface human-promoted sandbox clinical as candidates only
+            crystal_promoted = await conn.fetch(
+                """SELECT LEFT(crystal_text, 320) AS body,
+                          COALESCE(metadata->>'title', 'promoted_sandbox') AS title,
+                          confidence AS score
+                   FROM nate_intelligence_crystals
+                   WHERE origin_surface = 'ln_sandbox_promoted'
+                     AND domain = 'clinical'
+                     AND superseded_by IS NULL
+                     AND confidence >= 0.50
+                     AND (
+                       scope = 'admin_only'
+                       OR scope LIKE 'user:%'
+                     )
+                   ORDER BY created_at DESC
+                   LIMIT 1"""
+            )
     except Exception as e:
         logger.warning("get_sandbox_candidates_for_user: %s", e)
         return ""
 
     rows = list(drafts or []) + list(clinical_promoted or [])
-    if not restraints and not rows:
+    crystal_rows = list(crystal_promoted or [])
+    if not restraints and not rows and not crystal_rows:
         return ""
 
     parts: List[str] = [
@@ -102,6 +121,10 @@ async def get_sandbox_candidates_for_user(
                 f"- [{d['status']}/{d['kind']}{score_s}] {d['title']}: "
                 f"{(d['body'] or '')[:320]}"
             )
+    if crystal_rows:
+        parts.append("PROMOTED SANDBOX CLINICAL (candidate, not authority):")
+        for c in crystal_rows:
+            parts.append(f"- [crystal] {c['title']}: {(c['body'] or '')[:320]}")
     return "\n".join(parts)
 
 

@@ -178,5 +178,47 @@ class TestPromotionScope(unittest.TestCase):
         self.assertEqual(_promo._domain_for_track("client_prep"), "clinical")
 
 
+class TestScoreAnyGroups(unittest.TestCase):
+    def test_must_include_any_or_group(self):
+        text = (
+            "Under asyncpg you must cast: to_jsonb($1::int) so the polymorphic "
+            "type resolves. Never use bare to_jsonb($1)."
+        )
+        j = _engine.score_response(
+            text,
+            must_include=["asyncpg"],
+            must_include_any=[["::int", "cast"], ["to_jsonb"]],
+        )
+        self.assertTrue(j["passed"])
+        self.assertGreaterEqual(j["score"], 0.67)
+
+    def test_must_include_any_misses(self):
+        text = (
+            "You should always cast parameters carefully when talking to "
+            "Postgres from Python drivers in production systems."
+        )
+        j = _engine.score_response(
+            text,
+            must_include=["asyncpg"],
+            must_include_any=[["::int"], ["to_jsonb"]],
+        )
+        self.assertFalse(j["passed"])
+
+
+class TestGenerateSkipsLniByDefault(unittest.IsolatedAsyncioTestCase):
+    async def test_router_hit_never_calls_lni(self):
+        eng = _engine.LNSandboxEngine(db_pool=None, app_state=MagicMock())
+        eng.app_state.littlenate_inference = MagicMock()
+        eng.app_state.littlenate_inference.generate = AsyncMock(
+            side_effect=AssertionError("LNI must not run")
+        )
+        eng._generate_via_router = AsyncMock(
+            return_value="I hear you. I'm here with you right now and we can notice."
+        )
+        text = await eng._generate("practice", domain="coding")
+        self.assertNotIn("[SANDBOX_FALLBACK]", text)
+        eng.app_state.littlenate_inference.generate.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
