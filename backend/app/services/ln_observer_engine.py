@@ -497,18 +497,21 @@ class LNObserverEngine:
         conversation_context = (
             f"{what}\n\n[ROLLING TRANSCRIPT]\n{transcript}\n\n[CHAT]\n{chat_tail}"
         )
-        # QUANTUM-CRYSTAL-ARCH — fewer frames; strip data-URL prefix if present
-        n_frames = 2 if look_now else (1 if lean else 1)
-        raw_frames = sess.frames[-n_frames:] if sess.frames else []
-        images: Optional[List[str]] = []
-        for fr in raw_frames:
-            if not fr:
-                continue
-            if isinstance(fr, str) and fr.startswith("data:"):
-                fr = fr.split(",", 1)[-1]
-            images.append(fr)
-        if not images:
-            images = None
+        # QUANTUM-CRYSTAL-ARCH — vision only for look_now / lean observe.
+        # Normal chat is text-first (Azure vision was hanging ~50s → no UI reply).
+        images: Optional[List[str]] = None
+        if look_now or lean:
+            n_frames = 2 if look_now else 1
+            raw_frames = sess.frames[-n_frames:] if sess.frames else []
+            images = []
+            for fr in raw_frames:
+                if not fr:
+                    continue
+                if isinstance(fr, str) and fr.startswith("data:"):
+                    fr = fr.split(",", 1)[-1]
+                images.append(fr)
+            if not images:
+                images = None
 
         logger.info(
             "LNObserverEngine generate start lean=%s look_now=%s frames=%s msg_len=%s",

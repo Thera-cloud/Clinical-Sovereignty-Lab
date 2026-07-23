@@ -81,6 +81,12 @@ class TestSandboxScore(unittest.TestCase):
 class TestSandboxEngineOffline(unittest.IsolatedAsyncioTestCase):
     async def test_generate_fallback_without_lni(self):
         eng = _engine.LNSandboxEngine(db_pool=None, app_state=None)
+        # Force offline path — full CI suite may load .env provider URLs that
+        # make NateInferenceRouter return live text (flake vs SANDBOX_FALLBACK).
+        async def _no_router(*_a, **_k):
+            return ""
+
+        eng._generate_via_router = _no_router  # type: ignore[method-assign]
         text = await eng._generate("practice", domain="clinical")
         self.assertIn("[SANDBOX_FALLBACK]", text)
         self.assertGreater(len(text), 40)
