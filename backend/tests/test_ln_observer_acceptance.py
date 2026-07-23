@@ -109,20 +109,31 @@ def test_acceptance_4_write_path_origin_surface_kwarg():
         called.update(kwargs)
         return "crystal-id"
 
-    bridge = types.ModuleType("app.websocket.crystal_recall_bridge")
-    bridge.crystallize_from_conversation = fake_crystallize
-    sys.modules["app.websocket"] = types.ModuleType("app.websocket")
-    sys.modules["app.websocket.crystal_recall_bridge"] = bridge
-
-    asyncio.run(
-        engine._crystallize_safe(
-            "CoachN",
-            "LN-Observer look_now frame=x: clinically relevant cues for coach.",
-            "Aligned visual note about attachment repair and safety.",
-            coach_name="Coach N",
-            min_score=2,
+    # Isolate stub — restore so later suites can import the real bridge
+    saved = {
+        k: sys.modules.get(k)
+        for k in ("app.websocket", "app.websocket.crystal_recall_bridge")
+    }
+    try:
+        bridge = types.ModuleType("app.websocket.crystal_recall_bridge")
+        bridge.crystallize_from_conversation = fake_crystallize
+        sys.modules["app.websocket"] = types.ModuleType("app.websocket")
+        sys.modules["app.websocket.crystal_recall_bridge"] = bridge
+        asyncio.run(
+            engine._crystallize_safe(
+                "CoachN",
+                "LN-Observer look_now frame=x: clinically relevant cues for coach.",
+                "Aligned visual note about attachment repair and safety.",
+                coach_name="Coach N",
+                min_score=2,
+            )
         )
-    )
+    finally:
+        for k, prev in saved.items():
+            if prev is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = prev
     assert called.get("origin_surface") == "ln_observer"
 
 
