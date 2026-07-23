@@ -11,6 +11,7 @@
             --gold: #C9A962;
             --gold-bright: #E8D5A3;
             --muted: #5a5850;
+            --red: #EF4444;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -74,98 +75,203 @@
         <a class="back" href="command.html">← Sovereign Command</a>
     </div>
     <script>
+        // Same-origin /api via command nginx (matches command.html). Do NOT use api.* here — CORS → Failed to fetch.
         var IDE_URL = 'https://ide.sovereignsanctuary.net';
-        var API = (typeof window !== 'undefined' && window.location && window.location.origin.indexOf('localhost') >= 0)
-            ? 'http://localhost:8000'
-            : 'https://api.sovereignsanctuary.net';
+
+        function _cookie(name) {
+            try {
+                var m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+                return m ? decodeURIComponent(m[1]) : '';
+            } catch (e) { return ''; }
+        }
+
+        function _recoverAuth() {
+            try {
+                var hash = (location.hash || '').replace(/^#/, '');
+                if (hash) {
+                    var params = new URLSearchParams(hash);
+                    var ht = params.get('t');
+                    if (ht) {
+                        sessionStorage.setItem('token', ht);
+                        localStorage.setItem('sc_token', ht);
+                    }
+                }
+            } catch (e) {}
+            try {
+                if (!sessionStorage.getItem('token')) {
+                    var t = localStorage.getItem('sc_token') || _cookie('sc_token') || '';
+                    if (t) sessionStorage.setItem('token', t);
+                }
+            } catch (e) {}
+        }
 
         function _token() {
             try {
                 return sessionStorage.getItem('token')
                     || localStorage.getItem('sc_token')
+                    || _cookie('sc_token')
                     || '';
             } catch (e) { return ''; }
         }
 
-        function _authHeaders(ct) {
-            var h = { 'Authorization': 'Bearer ' + _token() };
-            if (ct) h['Content-Type'] = ct;
-            return h;
+        function _scB64toBuffer(b64) {
+            var s = String(b64 || '').replace(/-/g, '+').replace(/_/g, '/');
+            while (s.length % 4) s += '=';
+            var bin = atob(s);
+            var buf = new Uint8Array(bin.length);
+            for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+            return buf.buffer;
         }
 
-        function bufferToBase64url(buf) {
+        function _scBufferToB64(buf) {
             var bytes = new Uint8Array(buf);
-            var str = '';
-            for (var i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
-            return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            var s = '';
+            for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+            return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
         }
 
-        function base64urlToBuffer(s) {
-            var pad = '='.repeat((4 - (s.length % 4)) % 4);
-            var b64 = (s + pad).replace(/-/g, '+').replace(/_/g, '/');
-            var raw = atob(b64);
-            var buf = new ArrayBuffer(raw.length);
-            var view = new Uint8Array(buf);
-            for (var i = 0; i < raw.length; i++) view[i] = raw.charCodeAt(i);
-            return buf;
+        async function _scApiPost(path, body) {
+            var t = _token();
+            try {
+                var resp = await fetch(path, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + t,
+                    },
+                    body: JSON.stringify(body || {}),
+                });
+                if (!resp.ok) {
+                    var errText = '';
+                    try {
+                        var ej = await resp.json();
+                        errText = ej.detail || JSON.stringify(ej);
+                    } catch (e2) {
+                        errText = resp.statusText;
+                    }
+                    return { _error: true, status: resp.status, detail: errText };
+                }
+                return await resp.json();
+            } catch (e) {
+                return { _error: true, status: 0, detail: e.message || 'Failed to fetch' };
+            }
         }
 
-        async function apiPost(path, body) {
-            var resp = await fetch(API + path, {
-                method: 'POST',
-                headers: _authHeaders('application/json'),
-                body: JSON.stringify(body || {}),
-            });
-            var text = await resp.text();
-            var data = null;
-            try { data = text ? JSON.parse(text) : null; } catch (e) { data = { raw: text }; }
-            if (!resp.ok) throw new Error((data && (data.detail || data.error)) || ('HTTP ' + resp.status));
-            return data;
+        function _openIde() {
+            window.location.href = IDE_URL;
         }
 
         async function verifyAndRedirect() {
             var btn = document.getElementById('ykBtn');
             var status = document.getElementById('status');
+            _recoverAuth();
+
             if (!_token()) {
-                status.textContent = 'No admin session. Open Command and log in first.';
+                status.textContent = 'No admin session. Open Command, log in, then use the IDE tab.';
+                status.style.color = 'var(--red)';
                 return;
             }
+            if (!window.PublicKeyCredential) {
+                status.textContent = 'WebAuthn not supported in this browser.';
+                status.style.color = 'var(--red)';
+                return;
+            }
+
+            // Already verified this browser session (Command gate) — open IDE.
+            try {
+                if (sessionStorage.getItem('sc_yubikey_verified') === 'true') {
+                    status.textContent = 'Already verified. Opening IDE...';
+                    status.style.color = '#22C55E';
+                    _openIde();
+                    return;
+                }
+            } catch (e) {}
+
             btn.disabled = true;
             status.textContent = 'Requesting challenge...';
+            status.style.color = 'var(--gold)';
+
             try {
-                var optionsResp = await apiPost('/api/admin/webauthn/auth-options', {});
-                var publicKey = optionsResp.publicKey || optionsResp;
-                publicKey.challenge = base64urlToBuffer(publicKey.challenge);
-                if (publicKey.allowCredentials) {
-                    publicKey.allowCredentials = publicKey.allowCredentials.map(function (c) {
-                        return Object.assign({}, c, { id: base64urlToBuffer(c.id) });
+                var optionsResp = await _scApiPost('/api/admin/webauthn/auth-options', {});
+                if (!optionsResp || optionsResp._error || !optionsResp.options) {
+                    var msg = 'Failed to get auth challenge.';
+                    if (optionsResp && optionsResp._error) {
+                        msg += ' (' + optionsResp.status + ': ' + (optionsResp.detail || 'unknown') + ')';
+                        if (optionsResp.status === 0) {
+                            msg += ' — use Command IDE tab (same-origin /api), not a direct file open.';
+                        }
+                    }
+                    status.textContent = msg;
+                    status.style.color = 'var(--red)';
+                    btn.disabled = false;
+                    return;
+                }
+
+                var options = optionsResp.options;
+                options.challenge = _scB64toBuffer(options.challenge);
+                if (options.allowCredentials) {
+                    options.allowCredentials = options.allowCredentials.map(function (c) {
+                        return Object.assign({}, c, { id: _scB64toBuffer(c.id) });
                     });
                 }
+
                 status.textContent = 'Touch your YubiKey now...';
-                var cred = await navigator.credentials.get({ publicKey: publicKey });
+                btn.textContent = 'Waiting for key...';
+
+                var credential = await navigator.credentials.get({ publicKey: options });
                 var assertion = {
-                    id: cred.id,
-                    rawId: bufferToBase64url(cred.rawId),
-                    type: cred.type,
+                    id: credential.id,
+                    rawId: _scBufferToB64(credential.rawId),
+                    type: credential.type,
                     response: {
-                        authenticatorData: bufferToBase64url(cred.response.authenticatorData),
-                        clientDataJSON: bufferToBase64url(cred.response.clientDataJSON),
-                        signature: bufferToBase64url(cred.response.signature),
-                        userHandle: cred.response.userHandle
-                            ? bufferToBase64url(cred.response.userHandle)
-                            : null,
+                        clientDataJSON: _scBufferToB64(credential.response.clientDataJSON),
+                        authenticatorData: _scBufferToB64(credential.response.authenticatorData),
+                        signature: _scBufferToB64(credential.response.signature),
                     },
                 };
-                await apiPost('/api/admin/webauthn/auth-verify', { credential: assertion });
-                status.textContent = 'Verified. Opening IDE...';
-                window.location.href = IDE_URL;
-            } catch (e) {
-                status.textContent = String(e.message || e);
+
+                status.textContent = 'Verifying...';
+                var result = await _scApiPost('/api/admin/webauthn/auth-verify', { credential: assertion });
+                if (result && !result._error && result.verified) {
+                    try { sessionStorage.setItem('sc_yubikey_verified', 'true'); } catch (e) {}
+                    status.textContent = 'Verified. Opening IDE...';
+                    status.style.color = '#22C55E';
+                    setTimeout(_openIde, 400);
+                } else {
+                    var vmsg = 'Key verification failed.';
+                    if (result && result._error) {
+                        vmsg += ' (' + result.status + ': ' + (result.detail || 'unknown') + ')';
+                    }
+                    status.textContent = vmsg;
+                    status.style.color = 'var(--red)';
+                    btn.disabled = false;
+                    btn.textContent = 'Tap YubiKey to Open IDE';
+                }
+            } catch (err) {
+                if (err && err.name === 'NotAllowedError') {
+                    status.textContent = 'Verification cancelled.';
+                    status.style.color = 'var(--muted)';
+                } else {
+                    status.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+                    status.style.color = 'var(--red)';
+                }
                 btn.disabled = false;
+                btn.textContent = 'Tap YubiKey to Open IDE';
             }
         }
 
+        _recoverAuth();
         document.getElementById('ykBtn').addEventListener('click', verifyAndRedirect);
+
+        // Auto-open if already YubiKey-verified in this Command session
+        try {
+            if (_token() && sessionStorage.getItem('sc_yubikey_verified') === 'true') {
+                document.getElementById('status').textContent = 'Session verified. Tap to open IDE, or wait…';
+                setTimeout(function () {
+                    if (sessionStorage.getItem('sc_yubikey_verified') === 'true') _openIde();
+                }, 1200);
+            }
+        } catch (e) {}
     </script>
 </body>
 </html>
