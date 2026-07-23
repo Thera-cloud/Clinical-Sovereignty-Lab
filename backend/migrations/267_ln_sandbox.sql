@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS ln_sandbox_sessions (
     track           VARCHAR(32) NOT NULL
         CHECK (track IN ('clinical_strategy', 'engineering', 'client_prep')),
     trigger_reason  VARCHAR(64) NOT NULL DEFAULT 'scheduled'
-        CHECK (trigger_reason IN ('scheduled', 'idle_window', 'manual', 'ci_fixture')),
+        CHECK (trigger_reason IN ('scheduled', 'idle_window', 'manual', 'ci_fixture', 'engineering_ci')),
     status          VARCHAR(24) NOT NULL DEFAULT 'running'
         CHECK (status IN ('running', 'completed', 'failed', 'aborted')),
     task_key        TEXT,

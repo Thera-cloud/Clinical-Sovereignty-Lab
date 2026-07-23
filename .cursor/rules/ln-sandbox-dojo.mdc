@@ -14,7 +14,7 @@ Unsupervised practice loop so Little Nate learns while humans sleep. Two tracks 
 | Auditor | `backend/app/services/ln_sandbox_auditor.py` (8 checks, stagger 287s) |
 | API | `backend/app/routers/ln_sandbox_api.py` |
 | Admin UI | `dashboard/ln_sandbox.html` |
-| Migration | `backend/migrations/267_ln_sandbox.sql` + `268_ln_sandbox_auditor_baseline.sql` |
+| Migration | `267_ln_sandbox.sql` + `268_ln_sandbox_auditor_baseline.sql` + `269_ln_sandbox_engineering_ci_trigger.sql` |
 | Eng fixtures | `backend/app/data/ln_sandbox_engineering_tasks.json` |
 | Eng CI packs | `backend/app/data/ln_sandbox_ci_packs/` |
 | Eng CI runner | `backend/app/services/ln_sandbox_engineering_ci.py` |
