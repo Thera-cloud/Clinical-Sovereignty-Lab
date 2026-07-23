@@ -291,6 +291,22 @@ async def health():
 # ── WebSocket ──────────────────────────────────────────────
 
 
+async def _bg_frame_observe(ws: WebSocket, eng, sess, session_id: str) -> None:
+    """Lean observe off the receive loop so chat is never blocked. # QUANTUM-CRYSTAL-ARCH"""
+    try:
+        note = await eng.generate_chat(sess, "observe", lean=True)
+        if note and not note.startswith("("):
+            async with sess.lock:
+                sess.add_transcript("frame_observation", note)
+            await eng.db_log(session_id, "frame_observation", note)
+            try:
+                await ws.send_json({"type": "observation", "text": note})
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning("LN-Observer bg frame observe failed: %s", e)
+
+
 @router.websocket("/ws/{session_id}")
 async def observer_ws(ws: WebSocket, session_id: str):
     eng = _engine()
@@ -393,14 +409,10 @@ async def observer_ws(ws: WebSocket, session_id: str):
                     and (now - sess.last_observe_at) >= OBSERVE_DEBOUNCE_S
                 ):
                     sess.last_observe_at = now
-                    note = await eng.generate_chat(
-                        sess, "observe", lean=True
+                    # QUANTUM-CRYSTAL-ARCH — never block chat WS on lean observe
+                    asyncio.create_task(
+                        _bg_frame_observe(ws, eng, sess, session_id)
                     )
-                    if note and not note.startswith("("):
-                        async with sess.lock:
-                            sess.add_transcript("frame_observation", note)
-                        await eng.db_log(session_id, "frame_observation", note)
-                        await ws.send_json({"type": "observation", "text": note})
 
             elif mtype == "chat":
                 coach_text = (msg.get("text") or "").strip()
@@ -410,7 +422,14 @@ async def observer_ws(ws: WebSocket, session_id: str):
                     sess.add_transcript("coach_chat", coach_text)
                 await eng.db_log(session_id, "coach_chat", coach_text)
                 await ws.send_json({"type": "thinking"})
-                reply = await eng.generate_chat(sess, coach_text, lean=False)
+                try:
+                    reply = await eng.generate_chat(sess, coach_text, lean=False)
+                except Exception as e:
+                    logger.warning("LN-Observer chat generate crashed: %s", e)
+                    reply = (
+                        "I hit a snag reasoning on that — try once more, "
+                        "or describe the screen in a sentence."
+                    )
                 async with sess.lock:
                     sess.add_transcript("ln_chat", reply)
                     sess.chat.append({"role": "user", "content": coach_text})
@@ -446,11 +465,15 @@ async def observer_ws(ws: WebSocket, session_id: str):
                     or "Look closely at what is on screen right now and note "
                        "clinically relevant cues for the coach."
                 )
-                note = await eng.generate_chat(
-                    sess,
-                    look_prompt,
-                    look_now=True,
-                )
+                try:
+                    note = await eng.generate_chat(
+                        sess,
+                        look_prompt,
+                        look_now=True,
+                    )
+                except Exception as e:
+                    logger.warning("LN-Observer look_now crashed: %s", e)
+                    note = "(Look closely timed out — try again.)"
                 if note:
                     async with sess.lock:
                         sess.add_transcript("frame_observation", note)

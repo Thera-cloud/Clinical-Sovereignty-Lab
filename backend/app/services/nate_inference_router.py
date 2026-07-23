@@ -222,6 +222,21 @@ class NateInferenceRouter:
                 logger.warning("Inference %s failed: %s", provider, e)
                 continue
 
+        # QUANTUM-CRYSTAL-ARCH — vision-only Azure failed: retry text path
+        if images:
+            logger.warning("Inference vision path failed — retrying text-only")
+            return await self.generate(
+                prompt=prompt,
+                system=system,
+                tier=tier,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                domain=domain,
+                odpe_signal=odpe_signal,
+                allow_deep=allow_deep,
+                images=None,
+            )
+
         return {
             "text": "I'm temporarily unable to process this request.",
             "provider": "none",

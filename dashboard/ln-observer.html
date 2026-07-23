@@ -208,6 +208,9 @@ const FRAME_DIFF_THRESHOLD = 0.04, RMS_SILENCE = 0.008;
 
 let sessionId=null, ws=null, stream=null, frameTimer=null, recorder=null;
 let _wsRetry=0, _ending=false, _lastFrameData=null, _audioCtx=null, _analyser=null;
+let _thinkTimer=null;
+let _ackAcceptedThisPage=false; /* skip re-ack veil for back-to-back shares */
+let _reconnectTimer=null;
 
 const $ = id => document.getElementById(id);
 const iris=$("iris"), badge=$("statusBadge"), feedBadge=$("feedBadge");
@@ -267,11 +270,16 @@ $("btnActivate").onclick = async () => {
     $("btnActivate").disabled = true;
     return;
   }
+  if(_ackAcceptedThisPage){
+    await startSession();
+    return;
+  }
   $("ackVeil").classList.remove("hidden");
 };
 $("btnAckCancel").onclick = () => $("ackVeil").classList.add("hidden");
 $("btnAckConfirm").onclick = async () => {
   $("ackVeil").classList.add("hidden");
+  _ackAcceptedThisPage = true;
   await startSession();
 };
 
@@ -283,6 +291,7 @@ async function acquireDisplay(){
 }
 
 async function startSession(){
+  if(_ending) return;
   try{ stream = await acquireDisplay(); }
   catch(e){ addTicker("SYS","Screen share was cancelled."); return; }
   if(!stream.getAudioTracks().length){
@@ -291,10 +300,20 @@ async function startSession(){
   const r = await fetch(`${API_BASE}/activate`,{method:"POST",
     headers:_authHeaders("application/json"),
     body:JSON.stringify({coach_id:COACH_ID, coach_name:COACH_NAME, responsibility_ack:true})});
-  if(!r.ok){ addTicker("SYS","Activation refused ("+r.status+")."); stopMedia(false); return; }
+  if(!r.ok){
+    addTicker("SYS","Activation refused ("+r.status+").");
+    stopMedia(false);
+    resetToReady({
+      title: "Could not start — still approved.",
+      body: "Try Start new observation again. You do not need to log out."
+    });
+    return;
+  }
   const data = await r.json();
   sessionId = data.session_id;
   WS_TICKET = data.ws_ticket || "";
+  _ackAcceptedThisPage = true;
+  addTicker("SYS","New observation started — prior sessions loaded into LN context.");
   wireLiveUi();
   connectWs();
 }
@@ -316,7 +335,8 @@ function wireLiveUi(){
 }
 
 function connectWs(){
-  if(!sessionId) return;
+  if(!sessionId || _ending) return;
+  if(_reconnectTimer){ clearTimeout(_reconnectTimer); _reconnectTimer=null; }
   ws = new WebSocket(`${WS_BASE}/${sessionId}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = onWsMessage;
@@ -327,12 +347,42 @@ function connectWs(){
     const base = Math.min(1000 * Math.pow(2, attempt), 15000);
     const jitter = Math.floor(base * 0.2 * Math.random());
     _wsRetry++;
-    setTimeout(connectWs, base + jitter);
+    _reconnectTimer = setTimeout(connectWs, base + jitter);
   };
   ws.onopen = () => {
     _wsRetry = 0;
     ws.send(JSON.stringify({type:"auth", token: WS_TICKET}));
   };
+}
+
+function resetToReady(opts){
+  opts = opts || {};
+  if(_reconnectTimer){ clearTimeout(_reconnectTimer); _reconnectTimer=null; }
+  _wsRetry = 0;
+  WS_TICKET = "";
+  sessionId = null;
+  stopMedia(true);
+  badge.textContent = "Approved — ready";
+  badge.classList.remove("live");
+  feedBadge.textContent = "Feed off";
+  feedBadge.classList.remove("live");
+  $("btnEnd").classList.add("hidden");
+  $("btnSwitch").classList.add("hidden");
+  $("btnSwitch").disabled = true;
+  $("btnActivate").classList.remove("hidden");
+  $("btnActivate").textContent = "Start new observation";
+  $("btnActivate").disabled = false;
+  $("btnActivate").dataset.mode = "";
+  $("btnLook").disabled = true;
+  $("input").disabled = true;
+  $("btnSend").disabled = true;
+  $("preview").classList.add("hidden");
+  $("preview").srcObject = null;
+  $("emptyState").classList.remove("hidden");
+  $("emptyState").querySelector("h2").textContent = opts.title || "Ready for the next share.";
+  $("emptyState").querySelector("p").textContent = opts.body ||
+    "Prior observation is cached for Little Nate. Click Start new observation to share another tab — no re-login needed.";
+  setIris("idle");
 }
 
 function onWsMessage(ev){
@@ -344,8 +394,19 @@ function onWsMessage(ev){
   }
   else if(m.type === "transcript"){ addTicker("Audio", m.text); }
   else if(m.type === "observation"){ addMsg("obs", "LN noticed", m.text); setIris("watching"); }
-  else if(m.type === "thinking"){ setIris("thinking"); }
-  else if(m.type === "ln_reply"){ addMsg("ln", "Little Nate", m.text); setIris("watching"); }
+  else if(m.type === "thinking"){
+    setIris("thinking");
+    if(_thinkTimer) clearTimeout(_thinkTimer);
+    _thinkTimer = setTimeout(()=>{
+      if($("iris") && $("iris").classList.contains("thinking")){
+        addTicker("SYS","LN is still thinking — if nothing arrives, End session and Start new observation.");
+      }
+    }, 55000);
+  }
+  else if(m.type === "ln_reply"){
+    if(_thinkTimer){ clearTimeout(_thinkTimer); _thinkTimer=null; }
+    addMsg("ln", "Little Nate", m.text); setIris("watching");
+  }
 }
 
 function _frameDiffRatio(a, b){
@@ -435,25 +496,37 @@ $("btnLook").onclick = ()=>{ if(ws && ws.readyState===1){ ws.send(JSON.stringify
 
 $("btnEnd").onclick = endSession;
 async function endSession(){
-  if(!sessionId || _ending) return;
-  _ending = true;
-  const sid = sessionId; sessionId = null;
-  try{ ws && ws.send(JSON.stringify({type:"end"})); }catch(e){}
-  stopMedia(true);
-  const r = await fetch(`${API_BASE}/deactivate/${sid}`, {method:"POST", headers:_authHeaders()});
-  if(r.ok){
-    const d = await r.json();
-    if(d.summary) addMsg("ln","Little Nate — closing synthesis", d.summary);
+  if(_ending) return;
+  if(!sessionId){
+    resetToReady();
+    return;
   }
-  addTicker("SYS","Session ended. Activation and transcript are logged.");
-  badge.textContent = "Approved"; badge.classList.remove("live");
-  feedBadge.textContent = "Feed off"; feedBadge.classList.remove("live");
-  $("btnEnd").classList.add("hidden");
-  $("btnSwitch").classList.add("hidden");
-  $("btnActivate").classList.remove("hidden");
-  $("btnLook").disabled = true; $("input").disabled = true; $("btnSend").disabled = true;
-  $("preview").classList.add("hidden"); $("emptyState").classList.remove("hidden");
-  setIris("idle");
+  _ending = true;
+  const sid = sessionId;
+  sessionId = null; /* stop reconnect loop immediately */
+  try{ if(ws && ws.readyState===1) ws.send(JSON.stringify({type:"end"})); }catch(e){}
+  stopMedia(true);
+  addTicker("SYS","Ending — caching this observation for LN…");
+  let summary = null;
+  try{
+    const r = await fetch(`${API_BASE}/deactivate/${sid}`, {method:"POST", headers:_authHeaders()});
+    if(r.ok){
+      const d = await r.json();
+      summary = d.summary || null;
+      if(summary) addMsg("ln","Little Nate — closing synthesis", summary);
+    } else {
+      addTicker("SYS","Deactivate returned "+r.status+" — UI reset; prior session may still finalize server-side.");
+    }
+  }catch(e){
+    addTicker("SYS","Deactivate network error — UI reset anyway.");
+  }
+  resetToReady({
+    title: "Observation cached. Ready when you are.",
+    body: summary
+      ? "Closing notes are in the chat. Start new observation to share the next screen — LN keeps prior session context."
+      : "Session closed. Start new observation for the next screen share — no logout required."
+  });
+  addTicker("SYS","Session ended. Feed cached. Click Start new observation when ready.");
   _ending = false;
 }
 function stopMedia(closeWs){

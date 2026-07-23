@@ -12,6 +12,8 @@ void notifyLnObserverIframeAuth({
 
 void disposeLnObserverIframe() {}
 
+void reloadLnObserverIframe() {}
+
 Widget buildLnObserverIframe(String url) {
   return const Center(
     child: Text(

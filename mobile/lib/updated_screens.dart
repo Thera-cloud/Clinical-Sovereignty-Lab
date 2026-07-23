@@ -6071,7 +6071,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         _emitFetchCoachCalendar();
       }
       if (_tabController.index == 5) {
-        _pushLnObserverIframeAuthIfNeeded();
+        _loadLnObserverStatus();
+        if (_lnObserverShowDeck) {
+          _pushLnObserverIframeAuthIfNeeded();
+        }
       }
       if (_tabController.index == 10 &&
           _assistantMetrics.isEmpty &&
@@ -10508,7 +10511,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               icon: Icon(Icons.refresh,
                   color: Colors.grey, size: isMobile ? 20 : 24),
               onPressed: () {
-                setState(() => _isLoading = true);
+                // Do not unmount TabBarView (that destroys HtmlElementView
+                // iframes for DOJO / LN-Observer and leaves a blank gray pane).
+                setState(() {
+                  _isLoading = true;
+                  _lnObserverShowDeck = false;
+                });
                 _fetchDashboard();
               }),
           IconButton(
@@ -10541,33 +10549,43 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           )
         ],
       ),
-      body: _isLoading
-          ? Center(
-              child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const CircularProgressIndicator(color: Color(0xFFFFD700)),
-                const SizedBox(height: 20),
-                Text(_statusMessage, style: const TextStyle(color: Colors.grey))
-              ],
-            ))
-          : TabBarView(
-              controller: _tabController,
-              physics: isMobile ? const NeverScrollableScrollPhysics() : null,
-              children: [
-                _buildClientsTab(),
-                _buildScheduleTab(),
-                _buildInsightsTab(),
-                _buildBriefingsTab(),
-                _CoachDojoTabKeepAlive(builder: _buildDojoTab),
-                _CoachDojoTabKeepAlive(builder: _buildLnObserverTab),
-                _buildClassroomTab(),
-                _buildTrainingTab(),
-                _buildFinancialsTab(),
-                _buildFolderTab(),
-                _buildAssistantsTab(),
-              ],
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          TabBarView(
+            controller: _tabController,
+            physics: isMobile ? const NeverScrollableScrollPhysics() : null,
+            children: [
+              _buildClientsTab(),
+              _buildScheduleTab(),
+              _buildInsightsTab(),
+              _buildBriefingsTab(),
+              _CoachDojoTabKeepAlive(builder: _buildDojoTab),
+              _CoachDojoTabKeepAlive(builder: _buildLnObserverTab),
+              _buildClassroomTab(),
+              _buildTrainingTab(),
+              _buildFinancialsTab(),
+              _buildFolderTab(),
+              _buildAssistantsTab(),
+            ],
+          ),
+          if (_isLoading)
+            ColoredBox(
+              color: const Color(0xCC0A0A0F),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const CircularProgressIndicator(color: Color(0xFFFFD700)),
+                    const SizedBox(height: 20),
+                    Text(_statusMessage,
+                        style: const TextStyle(color: Colors.grey)),
+                  ],
+                ),
+              ),
             ),
+        ],
+      ),
     );
 
     return Stack(
@@ -17104,6 +17122,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   String? _dojoLastPushedAuthToken;
   String? _lnObserverLastPushedAuthToken;
 
+  /// LN-Observer approval gate (Flutter shell — iframe only after Open deck).
+  String? _lnObserverAccessStatus; // none | pending | approved | revoked
+  bool _lnObserverStatusLoading = false;
+  String? _lnObserverStatusError;
+  bool _lnObserverShowDeck = false;
+  bool _lnObserverRequesting = false;
+
   void _pushDojoIframeAuthIfNeeded() {
     if (!kIsWeb) return;
     final token = (_authToken ?? '').trim();
@@ -17142,23 +17167,103 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     );
   }
 
+  String get _lnObserverCoachId =>
+      (widget.currentUserProfile['username'] ?? _coachHardwareId ?? '')
+          .toString()
+          .trim();
+
+  String get _lnObserverCoachName =>
+      (widget.currentUserProfile['name'] ??
+              widget.currentUserProfile['username'] ??
+              'Coach')
+          .toString()
+          .trim();
+
+  Future<void> _loadLnObserverStatus() async {
+    final token = (_authToken ?? '').trim();
+    final coachId = _lnObserverCoachId;
+    if (token.isEmpty || coachId.isEmpty) return;
+    if (_lnObserverStatusLoading) return;
+    setState(() {
+      _lnObserverStatusLoading = true;
+      _lnObserverStatusError = null;
+    });
+    try {
+      final uri = Uri.parse(
+          '$_apiBaseUrl/api/ln-observer/status/${Uri.encodeComponent(coachId)}');
+      final resp = await http.get(uri, headers: {
+        'Authorization': 'Bearer $token',
+        'Accept': 'application/json',
+      });
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        setState(() {
+          _lnObserverAccessStatus =
+              (data['status'] ?? 'none').toString().toLowerCase();
+          _lnObserverStatusLoading = false;
+        });
+      } else {
+        setState(() {
+          _lnObserverStatusError =
+              'Status check failed (${resp.statusCode})';
+          _lnObserverStatusLoading = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _lnObserverStatusError = 'Status check failed';
+        _lnObserverStatusLoading = false;
+      });
+    }
+  }
+
+  Future<void> _requestLnObserverAccess() async {
+    final token = (_authToken ?? '').trim();
+    final coachId = _lnObserverCoachId;
+    if (token.isEmpty || coachId.isEmpty || _lnObserverRequesting) return;
+    setState(() => _lnObserverRequesting = true);
+    try {
+      final uri = Uri.parse('$_apiBaseUrl/api/ln-observer/request-access');
+      final resp = await http.post(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({
+          'coach_id': coachId,
+          'coach_name': _lnObserverCoachName,
+        }),
+      );
+      if (!mounted) return;
+      if (resp.statusCode == 200 || resp.statusCode == 201) {
+        setState(() {
+          _lnObserverAccessStatus = 'pending';
+          _lnObserverRequesting = false;
+        });
+      } else {
+        setState(() {
+          _lnObserverStatusError =
+              'Request failed (${resp.statusCode})';
+          _lnObserverRequesting = false;
+        });
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _lnObserverStatusError = 'Request failed';
+        _lnObserverRequesting = false;
+      });
+    }
+  }
+
   Widget _buildLnObserverTab() {
     final tokenNow = (_authToken ?? '').trim();
     if (_cachedLnObserverUrl == null && tokenNow.isNotEmpty && kIsWeb) {
       _cachedLnObserverUrl = '/ln-observer.html';
-    }
-    if (!kIsWeb) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'LN-Observer is available on Coach Command web '
-            '(display capture + tab audio).',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.grey, fontSize: 14),
-          ),
-        ),
-      );
     }
     if (tokenNow.isEmpty) {
       return const Center(
@@ -17166,8 +17271,171 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             style: TextStyle(color: Colors.grey, fontSize: 14)),
       );
     }
-    _pushLnObserverIframeAuthIfNeeded();
-    return buildLnObserverIframe(_cachedLnObserverUrl ?? '/ln-observer.html');
+
+    // Observation deck (screen share) — web iframe only after coach opens it.
+    if (kIsWeb && _lnObserverShowDeck) {
+      _pushLnObserverIframeAuthIfNeeded();
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          const ColoredBox(color: Color(0xFF131022)),
+          SizedBox.expand(
+            child: buildLnObserverIframe(
+                _cachedLnObserverUrl ?? '/ln-observer.html'),
+          ),
+          Positioned(
+            top: 8,
+            left: 8,
+            child: TextButton.icon(
+              onPressed: () => setState(() => _lnObserverShowDeck = false),
+              icon: const Icon(Icons.arrow_back, size: 18, color: Color(0xFFE8A24C)),
+              label: const Text('Access',
+                  style: TextStyle(color: Color(0xFFE8A24C))),
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (_lnObserverAccessStatus == null && !_lnObserverStatusLoading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadLnObserverStatus();
+      });
+    }
+
+    final status = _lnObserverAccessStatus ?? 'none';
+    return ColoredBox(
+      color: const Color(0xFF131022),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Icon(Icons.visibility, size: 48, color: Color(0xFFE8A24C)),
+                const SizedBox(height: 16),
+                const Text(
+                  'LN-Observer',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFFECE8F6),
+                    fontSize: 26,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Request access, wait for admin approval, then open the '
+                  'observation deck to share screen and talk with Little Nate.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFF9D96BD), fontSize: 14, height: 1.45),
+                ),
+                const SizedBox(height: 28),
+                if (_lnObserverStatusLoading)
+                  const Center(
+                    child: CircularProgressIndicator(color: Color(0xFFE8A24C)),
+                  )
+                else ...[
+                  Text(
+                    _lnObserverGateLabel(status),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFFE8A24C),
+                      fontSize: 13,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (_lnObserverStatusError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      _lnObserverStatusError!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Color(0xFFE0705F), fontSize: 13),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  if (status == 'none' || status == 'revoked')
+                    ElevatedButton(
+                      onPressed: _lnObserverRequesting
+                          ? null
+                          : _requestLnObserverAccess,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFE8A24C),
+                        foregroundColor: const Color(0xFF241608),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: Text(_lnObserverRequesting
+                          ? 'Submitting…'
+                          : 'Request access'),
+                    ),
+                  if (status == 'pending')
+                    OutlinedButton(
+                      onPressed: _loadLnObserverStatus,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF9D96BD),
+                        side: const BorderSide(color: Color(0xFF37305C)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: const Text('Refresh status'),
+                    ),
+                  if (status == 'approved') ...[
+                    ElevatedButton(
+                      onPressed: kIsWeb
+                          ? () {
+                              setState(() => _lnObserverShowDeck = true);
+                              _pushLnObserverIframeAuthIfNeeded();
+                              reloadLnObserverIframe();
+                            }
+                          : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFE8A24C),
+                        foregroundColor: const Color(0xFF241608),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: Text(kIsWeb
+                          ? 'Open observation deck'
+                          : 'Use Coach Command web for screen share'),
+                    ),
+                    if (!kIsWeb)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 12),
+                        child: Text(
+                          'LN-Observer screen share requires Coach Command in a browser.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Color(0xFF9D96BD), fontSize: 13),
+                        ),
+                      ),
+                  ],
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: _loadLnObserverStatus,
+                    child: const Text('Check access status',
+                        style: TextStyle(color: Color(0xFF9D96BD))),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _lnObserverGateLabel(String status) {
+    switch (status) {
+      case 'approved':
+        return 'ACCESS APPROVED';
+      case 'pending':
+        return 'AWAITING ADMIN APPROVAL';
+      case 'revoked':
+        return 'ACCESS REVOKED — REQUEST AGAIN';
+      default:
+        return 'NOT REQUESTED';
+    }
   }
 
   Widget _buildDojoTab() {

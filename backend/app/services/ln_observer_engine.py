@@ -455,6 +455,33 @@ class LNObserverEngine:
         look_now: bool = False,
         lean: bool = False,
     ) -> str:
+        # QUANTUM-CRYSTAL-ARCH — hard ceiling so WS chat never hangs forever
+        try:
+            return await asyncio.wait_for(
+                self._generate_chat_inner(
+                    sess, coach_message, look_now=look_now, lean=lean
+                ),
+                timeout=50.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "LNObserverEngine generate_chat timeout lean=%s look_now=%s",
+                lean,
+                look_now,
+            )
+            return (
+                "I lost the thread on that one — my vision pass timed out. "
+                "Ask again, or describe what you're looking at."
+            )
+
+    async def _generate_chat_inner(
+        self,
+        sess: LiveSession,
+        coach_message: str,
+        *,
+        look_now: bool = False,
+        lean: bool = False,
+    ) -> str:
         inference = self._inference()
         if not inference:
             return "Little Nate inference is not available right now."
@@ -470,10 +497,29 @@ class LNObserverEngine:
         conversation_context = (
             f"{what}\n\n[ROLLING TRANSCRIPT]\n{transcript}\n\n[CHAT]\n{chat_tail}"
         )
-        n_frames = 4 if look_now else (1 if lean else 3)
-        images = sess.frames[-n_frames:] if sess.frames else None
+        # QUANTUM-CRYSTAL-ARCH — fewer frames; strip data-URL prefix if present
+        n_frames = 2 if look_now else (1 if lean else 1)
+        raw_frames = sess.frames[-n_frames:] if sess.frames else []
+        images: Optional[List[str]] = []
+        for fr in raw_frames:
+            if not fr:
+                continue
+            if isinstance(fr, str) and fr.startswith("data:"):
+                fr = fr.split(",", 1)[-1]
+            images.append(fr)
+        if not images:
+            images = None
 
+        logger.info(
+            "LNObserverEngine generate start lean=%s look_now=%s frames=%s msg_len=%s",
+            lean,
+            look_now,
+            len(images or []),
+            len(coach_message or ""),
+        )
         try:
+            # QUANTUM-CRYSTAL-ARCH — skip helix/quantum on Observer realtime path
+            # (helix entropy stalls were blocking chat with no ln_reply)
             result = await inference.generate(
                 prompt=coach_message if not lean else (
                     "Internal observation pass (not chat): in 1-2 sentences, note what is "
@@ -490,12 +536,19 @@ class LNObserverEngine:
                 mode="lean" if lean else "full",
                 attach_wisdom=not lean,
                 include_crystals=not lean,
-                include_helix=not lean,
-                include_quantum=not lean,
+                include_helix=False,
+                include_quantum=False,
                 max_tokens=120 if lean else (800 if not look_now else 900),
                 is_realtime=True,
             )
             reply = (result.text or "").strip()
+            logger.info(
+                "LNObserverEngine generate done lean=%s provider=%s reply_len=%s err=%s",
+                lean,
+                getattr(result, "provider", "?"),
+                len(reply),
+                getattr(result, "error", None),
+            )
             if getattr(result, "error", None) and "content_filter" in str(result.error).lower():
                 return (
                     "I need to skip that frame — the vision filter blocked it. "

@@ -56,12 +56,25 @@ void notifyLnObserverIframeAuth({
 }
 
 void disposeLnObserverIframe() {
+  try {
+    _observerIframe?.remove();
+  } catch (_) {}
   _observerIframe = null;
   _pendingAuthToken = null;
   _pendingAuthHw = null;
   _pendingAuthName = null;
   _pendingAuthApi = null;
   _pendingAuthWs = null;
+}
+
+/// Force a fresh load of the observation deck (after End session / recovery).
+void reloadLnObserverIframe() {
+  final iframe = _observerIframe;
+  if (iframe == null) return;
+  final src = iframe.src;
+  if (src == null || src.isEmpty) return;
+  final sep = src.contains('?') ? '&' : '?';
+  iframe.src = '$src${sep}_r=${DateTime.now().millisecondsSinceEpoch}';
 }
 
 Widget buildLnObserverIframe(String url) {
@@ -74,11 +87,12 @@ Widget buildLnObserverIframe(String url) {
           ..style.border = 'none'
           ..style.width = '100%'
           ..style.height = '100%'
+          ..style.backgroundColor = '#131022'
           ..allow = 'display-capture; microphone'
           ..setAttribute('allowfullscreen', 'true')
           ..setAttribute(
             'sandbox',
-            'allow-scripts allow-same-origin allow-forms allow-popups allow-modals',
+            'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads',
           );
         iframe.onLoad.listen((_) => _postAuthToObserverIframe());
         _observerIframe = iframe;
@@ -86,6 +100,14 @@ Widget buildLnObserverIframe(String url) {
       },
     );
     _observerFactoryRegistered = true;
+  } else {
+    final iframe = _observerIframe;
+    if (iframe != null) {
+      final cur = iframe.src ?? '';
+      if (!cur.contains(url.split('?').first)) {
+        iframe.src = url;
+      }
+    }
   }
 
   return const HtmlElementView(
