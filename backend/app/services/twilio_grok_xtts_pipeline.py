@@ -1540,6 +1540,28 @@ async def run_twilio_grok_xtts_bridge(
                                     )
                         except Exception as e:
                             logger.warning("Voice clinical directory inject failed (non-fatal): %s", e)
+                    # QUANTUM-CRYSTAL-ARCH — mid-call sandbox candidates when directory off
+                    elif (
+                        os.getenv("ENABLE_LN_SANDBOX", "").lower()
+                        in ("true", "1", "yes", "on")
+                        and session_username
+                        and ctx.get("db_pool")
+                    ):
+                        try:
+                            from app.services.ln_sandbox_context import (
+                                get_sandbox_candidates_for_user,
+                            )
+                            _vsb = await get_sandbox_candidates_for_user(
+                                ctx["db_pool"], session_username, max_items=2
+                            )
+                            if _vsb:
+                                await _inject_memory_context(
+                                    grok_ws,
+                                    session_username,
+                                    "[LN SANDBOX CANDIDATES]\n" + _vsb,
+                                )
+                        except Exception as e:
+                            logger.warning("Voice sandbox inject failed (non-fatal): %s", e)
 
         except asyncio.CancelledError:
             raise

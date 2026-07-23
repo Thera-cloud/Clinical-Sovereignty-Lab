@@ -1,7 +1,8 @@
 """Inject sandbox practice candidates into LN context (never as authority).
 
-Live sessions may pull draft/queued/promoted client_prep + restraint refs.
+Live sessions may pull quality client_prep / promoted clinical drafts.
 Sandbox drafts are labeled CANDIDATE — restraints always listed first.
+Failure lessons and low-score drafts are never injected.
 """
 from __future__ import annotations
 
@@ -9,6 +10,10 @@ import logging
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("sovereign.ln_sandbox_context")
+
+# QUANTUM-CRYSTAL-ARCH — live inject quality gate
+_LIVE_KINDS = ("success_pattern", "client_prep", "technique_pattern")
+_MIN_DRAFT_SCORE = 0.67
 
 
 async def get_sandbox_candidates_for_user(
@@ -36,25 +41,47 @@ async def get_sandbox_candidates_for_user(
                    WHERE track = 'restraint_ref' AND status = 'promoted'
                    ORDER BY created_at ASC LIMIT 3"""
             )
+            # User-scoped quality drafts only (never failure_lesson / score-0)
             drafts = await conn.fetch(
-                """SELECT title, body, kind, score, status
+                """SELECT title, body, kind, score, status, track
                    FROM ln_sandbox_practice_corpus
                    WHERE target_user_id IN ($1, $2)
                      AND track IN ('client_prep', 'clinical_strategy')
-                     AND status IN ('draft', 'queued', 'promoted')
+                     AND kind = ANY($3::text[])
+                     AND kind != 'failure_lesson'
+                     AND (
+                       status IN ('queued', 'promoted')
+                       OR (status = 'draft' AND COALESCE(score, 0) >= $4)
+                     )
                    ORDER BY
                      CASE status WHEN 'promoted' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,
+                     COALESCE(score, 0) DESC,
                      created_at DESC
-                   LIMIT $3""",
+                   LIMIT $5""",
                 username,
                 hw or username,
-                max(1, min(int(max_items), 8)),
+                list(_LIVE_KINDS),
+                _MIN_DRAFT_SCORE,
+                max(1, min(int(max_items), 6)),
+            )
+            # Promoted clinical successes (no target) — candidate-only, never as facts
+            clinical_promoted = await conn.fetch(
+                """SELECT title, body, kind, score, status, track
+                   FROM ln_sandbox_practice_corpus
+                   WHERE track = 'clinical_strategy'
+                     AND status = 'promoted'
+                     AND kind = 'success_pattern'
+                     AND COALESCE(score, 0) >= 0.85
+                     AND COALESCE(target_user_id, '') = ''
+                   ORDER BY created_at DESC
+                   LIMIT 1"""
             )
     except Exception as e:
         logger.warning("get_sandbox_candidates_for_user: %s", e)
         return ""
 
-    if not restraints and not drafts:
+    rows = list(drafts or []) + list(clinical_promoted or [])
+    if not restraints and not rows:
         return ""
 
     parts: List[str] = [
@@ -66,9 +93,9 @@ async def get_sandbox_candidates_for_user(
         parts.append("RESTRAINTS (binding):")
         for r in restraints:
             parts.append(f"- {r['title']}: {(r['body'] or '')[:280]}")
-    if drafts:
+    if rows:
         parts.append("CANDIDATE APPROACHES (sandbox):")
-        for d in drafts:
+        for d in rows[: max_items]:
             score = d["score"]
             score_s = f" score={score:.2f}" if score is not None else ""
             parts.append(
@@ -88,22 +115,24 @@ async def get_sandbox_stats(db_pool) -> Dict[str, Any]:
                    FROM ln_sandbox_practice_corpus
                    GROUP BY 1, 2 ORDER BY 1, 2"""
             )
-            sessions = await conn.fetchval(
-                """SELECT COUNT(*)::int FROM ln_sandbox_sessions
-                   WHERE started_at > NOW() - INTERVAL '7 days'"""
-            )
             pending = await conn.fetchval(
                 """SELECT COUNT(*)::int FROM ln_sandbox_promotion_queue
                    WHERE decision = 'pending'"""
             )
+            sessions = await conn.fetchval(
+                """SELECT COUNT(*)::int FROM ln_sandbox_sessions
+                   WHERE started_at > NOW() - INTERVAL '24 hours'"""
+            )
+            queued = await conn.fetchval(
+                """SELECT COUNT(*)::int FROM ln_sandbox_practice_corpus
+                   WHERE status = 'queued'"""
+            )
         return {
             "ok": True,
-            "sessions_7d": sessions or 0,
+            "by_track_status": [dict(r) for r in by_track],
             "promotion_pending": pending or 0,
-            "corpus": [
-                {"track": r["track"], "status": r["status"], "count": r["n"]}
-                for r in by_track
-            ],
+            "corpus_queued": queued or 0,
+            "sessions_24h": sessions or 0,
         }
     except Exception as e:
         logger.warning("get_sandbox_stats: %s", e)

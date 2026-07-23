@@ -11164,14 +11164,31 @@ class AzureCortex:
             except Exception:
                 pass
             # QUANTUM-CRYSTAL-ARCH: clinical technique directory (family surface)
+            # Prefer speaking member for sandbox/directory inject (not HOH-only)
             try:
                 from app.services.clinical_technique_directory import directory_context_for_surface as _cd_surf
-                _cd_uid = (family_profiles[0].get("hardware_id") if family_profiles else "") or ""
+                _sender = (
+                    sanctuary_data.get("sender_id")
+                    or sanctuary_data.get("user_id")
+                    or sanctuary_data.get("hardware_id")
+                    or ""
+                )
+                _cd_uid = _sender
+                for _fp in (family_profiles or []):
+                    if _sender and (
+                        _fp.get("hardware_id") == _sender
+                        or _fp.get("username") == _sender
+                        or _fp.get("id") == _sender
+                    ):
+                        _cd_uid = _fp.get("hardware_id") or _fp.get("username") or _sender
+                        break
+                if not _cd_uid and family_profiles:
+                    _cd_uid = family_profiles[0].get("hardware_id") or ""
                 _cd = await _cd_surf((sanctuary_data.get("message") or sanctuary_data.get("topic") or "family communication")[:400], db_pool=db_pool, user_id=_cd_uid, search_proxy=search_proxy, allow_web=False, max_techniques=2)
                 if _cd:
                     sanctuary_crystal_ctx = ((sanctuary_crystal_ctx + "\n\n") if sanctuary_crystal_ctx else "") + _cd
-            except Exception:
-                pass
+            except Exception as _sbe:
+                print(f"[LN_SANDBOX] sanctuary inject failed: {_sbe}")
 
             # Pull short, relevant workbook guidance (local RAG) if available
             workbook_guidance = ""

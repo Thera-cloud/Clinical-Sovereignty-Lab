@@ -123,6 +123,60 @@ class TestContextEmpty(unittest.IsolatedAsyncioTestCase):
         text = await _ctx.get_sandbox_candidates_for_user(None, "alice")
         self.assertEqual(text, "")
 
+    def test_inject_gate_excludes_failure_lesson(self):
+        self.assertNotIn("failure_lesson", _ctx._LIVE_KINDS)
+        self.assertIn("success_pattern", _ctx._LIVE_KINDS)
+        self.assertIn("client_prep", _ctx._LIVE_KINDS)
+        self.assertGreaterEqual(_ctx._MIN_DRAFT_SCORE, 0.67)
+
+    def test_injectable_predicate(self):
+        def injectable(kind, status, score):
+            if kind == "failure_lesson" or kind not in _ctx._LIVE_KINDS:
+                return False
+            if status in ("queued", "promoted"):
+                return True
+            return status == "draft" and (score or 0) >= _ctx._MIN_DRAFT_SCORE
+
+        self.assertFalse(injectable("failure_lesson", "draft", 0.99))
+        self.assertFalse(injectable("success_pattern", "draft", 0.2))
+        self.assertTrue(injectable("success_pattern", "draft", 0.7))
+        self.assertTrue(injectable("client_prep", "queued", 0.0))
+
+
+class TestFallbackCorpusSkip(unittest.IsolatedAsyncioTestCase):
+    async def test_fallback_only_skips_corpus_write(self):
+        eng = _engine.LNSandboxEngine(db_pool=MagicMock(), app_state=None)
+        eng._open_session = AsyncMock(return_value="sess-1")
+        eng._close_session = AsyncMock()
+        eng._record_attempt = AsyncMock()
+        eng._write_corpus = AsyncMock(return_value="should-not-run")
+        eng._generate = AsyncMock(
+            return_value="[SANDBOX_FALLBACK] I hear you. I'm here with you right now."
+        )
+        task = {
+            "task_key": "t1",
+            "title": "fallback only",
+            "prompt": "practice",
+            "domain": "clinical",
+            "must_include": ["hear", "here"],
+            "must_not_include": ["liminal"],
+        }
+        out = await eng._practice_loop(
+            track="clinical_strategy",
+            task=task,
+            trigger_reason="test",
+            target_user_id=None,
+        )
+        self.assertTrue(out["ok"])
+        self.assertEqual(out.get("skipped_corpus"), "fallback_only")
+        self.assertIsNone(out.get("corpus_id"))
+        eng._write_corpus.assert_not_called()
+
+
+class TestPromotionScope(unittest.TestCase):
+    def test_client_prep_domain(self):
+        self.assertEqual(_promo._domain_for_track("client_prep"), "clinical")
+
 
 if __name__ == "__main__":
     unittest.main()

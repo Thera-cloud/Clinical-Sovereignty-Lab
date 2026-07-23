@@ -11,8 +11,10 @@ Unsupervised practice loop so Little Nate learns while humans sleep. Two tracks 
 | Engine | `backend/app/services/ln_sandbox_engine.py` |
 | Promotion gate | `backend/app/services/ln_sandbox_promotion.py` |
 | Context inject | `backend/app/services/ln_sandbox_context.py` |
+| Auditor | `backend/app/services/ln_sandbox_auditor.py` (8 checks, stagger 287s) |
 | API | `backend/app/routers/ln_sandbox_api.py` |
-| Migration | `backend/migrations/267_ln_sandbox.sql` |
+| Admin UI | `dashboard/ln_sandbox.html` |
+| Migration | `backend/migrations/267_ln_sandbox.sql` + `268_ln_sandbox_auditor_baseline.sql` |
 | Eng fixtures | `backend/app/data/ln_sandbox_engineering_tasks.json` |
 
 ## Flags
@@ -32,10 +34,14 @@ Unsupervised practice loop so Little Nate learns while humans sleep. Two tracks 
 4. **origin_surface** for promoted rows: `ln_sandbox_promoted`. Drafts stay in `ln_sandbox_practice_corpus`.
 5. **Restraints win** — seeded `restraint_ref` rows + Predictive Restraint / crisis / Sensitive Bridge on live turns. Sandbox score never bypasses live gates.
 6. **No GREEN code mutation** — engineering track uses JSON fixtures + text judge, not repo edits on production.
-7. **Live inject is candidate-only** — labeled CANDIDATE. When `ENABLE_CLINICAL_TECHNIQUE_DIRECTORY` is on, inject rides inside `directory_context_for_surface`. When directory is off but `ENABLE_LN_SANDBOX` is on, chat + voice call `get_sandbox_candidates_for_user` directly.
-8. **Generate path** — prefer `NateInferenceRouter` (`odpe_signal=LOCKED` / utility), then LNI, then marked `[SANDBOX_FALLBACK]` (never auto-queue).
-9. **Stale sessions** — cycle start aborts `running` rows older than 15 minutes; practice loop always closes in `finally`. Cycle lock rejects overlapping `run-cycle`.
-10. **Idle identity** — `conversation_history.user_id` matched against username **or** hardware_id.
+7. **Live inject is candidate-only** — labeled CANDIDATE. When `ENABLE_CLINICAL_TECHNIQUE_DIRECTORY` is on, inject rides inside `directory_context_for_surface`. When directory is off but `ENABLE_LN_SANDBOX` is on, chat + voice (call-start + mid-call) call `get_sandbox_candidates_for_user` directly. Sanctuary inject prefers the speaking member, not HOH-only.
+8. **Inject quality gate** — kinds `success_pattern` / `client_prep` / `technique_pattern` only; never `failure_lesson`. Drafts need `score >= 0.67` unless status is `queued`/`promoted`.
+9. **Fallback-only cycles** — if every attempt is `[SANDBOX_FALLBACK]`, skip corpus write and do not auto-queue.
+10. **Generate path** — prefer `NateInferenceRouter` (`odpe_signal=LOCKED` / utility), then LNI, then marked `[SANDBOX_FALLBACK]` (never auto-queue).
+11. **Stale sessions** — cycle start aborts `running` rows older than 15 minutes; practice loop always closes in `finally`. Cycle lock rejects overlapping `run-cycle`.
+12. **Idle identity** — `conversation_history.user_id` matched against username **or** hardware_id.
+13. **Promote → recall** — `client_prep` crystals use `scope=user:{target}` + `user_id` UUID; Vectorize `index_wisdom` after DB write. Clinical without target stays `admin_only`.
+14. **Trust** — baseline key `ln_sandbox_check_count` expected 8; activity `ln_sandbox_audit_sent`.
 
 ## Cycle
 

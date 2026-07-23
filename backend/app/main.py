@@ -2875,6 +2875,22 @@ async def lifespan(app: FastAPI):
     except Exception as _ln_sb_err:
         print(f"   ⚠️  LNSandboxEngine init failed: {_ln_sb_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — LN Sandbox auditor (8 checks, stagger 287s)
+    _ln_sandbox_auditor = None
+    try:
+        from app.services.ln_sandbox_auditor import LNSandboxAuditor
+        _ln_sandbox_auditor = LNSandboxAuditor(
+            db_pool,
+            auth_token=os.environ.get("SKYEYE_AUDIT_TOKEN", ""),
+            app_state=app.state,
+        )
+        if not _is_clone:
+            await _ln_sandbox_auditor.start()
+        app.state.ln_sandbox_auditor = _ln_sandbox_auditor
+        print("   ✅ LNSandboxAuditor started (3x daily, stagger 287s)")
+    except Exception as _ln_sba_err:
+        print(f"   ⚠️  LNSandboxAuditor init failed: {_ln_sba_err}")
+
     # ── Nate Check-In Agent — 72h inactivity outreach for clients + coaches ──
     _nate_checkin_agent = None
     try:
@@ -3375,6 +3391,7 @@ async def lifespan(app: FastAPI):
         ("six_quotient_battery_auditor", _six_q_battery_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("six_quotient_self_dev_agent", _six_q_self_dev_agent is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln_sandbox_engine", _ln_sandbox_engine is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("ln_sandbox_auditor", _ln_sandbox_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", _nate_checkin_agent is not None),
         ("nate_commitment_agent", _nate_commitment_agent is not None),
         ("nate_self_monitor_agent", _nate_self_monitor_agent is not None),
@@ -3558,6 +3575,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ LNSandboxEngine stopped")
         except Exception as _ln_sb_stop:
             print(f"   ⚠️  LNSandboxEngine shutdown: {_ln_sb_stop}")
+    _ln_sandbox_a = getattr(app.state, "ln_sandbox_auditor", None)  # QUANTUM-CRYSTAL-ARCH
+    if _ln_sandbox_a:
+        try:
+            await _ln_sandbox_a.stop()
+            print("   ✅ LNSandboxAuditor stopped")
+        except Exception as _ln_sba_stop:
+            print(f"   ⚠️  LNSandboxAuditor shutdown: {_ln_sba_stop}")
     if _sse_orchestrator:
         try:
             await _sse_orchestrator.stop()

@@ -340,6 +340,7 @@ class LNSandboxEngine:
         critique = ""
         n = 0
         used_fallback = False
+        had_real_llm = False
 
         try:
             for n in range(1, MAX_ATTEMPTS + 1):
@@ -352,9 +353,12 @@ class LNSandboxEngine:
                 text = await self._generate(
                     prompt, domain=task.get("domain") or "clinical"
                 )
-                if text.startswith("[SANDBOX_FALLBACK]"):
+                attempt_fallback = text.startswith("[SANDBOX_FALLBACK]")
+                if attempt_fallback:
                     used_fallback = True
                     text = text.replace("[SANDBOX_FALLBACK]", "", 1).strip()
+                else:
+                    had_real_llm = True
                 last_text = text
                 judged = score_response(
                     text,
@@ -362,7 +366,7 @@ class LNSandboxEngine:
                     must_not_include=task.get("must_not_include"),
                 )
                 # Never auto-pass / auto-queue canned fallback as real learning
-                if used_fallback:
+                if attempt_fallback:
                     judged = {
                         **judged,
                         "passed": False,
@@ -393,6 +397,18 @@ class LNSandboxEngine:
             except Exception as e:
                 logger.warning("ln_sandbox close session failed: %s", e)
 
+        # Skip corpus when every attempt was canned fallback (no learning signal)
+        if not had_real_llm and not passed:
+            return {
+                "ok": True,
+                "session_id": session_id,
+                "passed": False,
+                "best_score": best_score,
+                "corpus_id": None,
+                "task_key": task.get("task_key"),
+                "skipped_corpus": "fallback_only",
+            }
+
         kind = "success_pattern" if passed else "failure_lesson"
         title = task.get("title") or task.get("task_key") or track
         body = (
@@ -421,7 +437,7 @@ class LNSandboxEngine:
         )
 
         # Auto-queue strong passes for human review (still not production)
-        if passed and best_score >= 0.85 and corpus_id and not used_fallback:
+        if passed and best_score >= 0.85 and corpus_id and had_real_llm:
             try:
                 from app.services.ln_sandbox_promotion import enqueue_promotion
 

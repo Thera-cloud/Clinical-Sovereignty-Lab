@@ -78,6 +78,13 @@ async def decide_promotion(
     if not db_pool:
         return {"ok": False, "error": "no_db"}
 
+    crystal_id = None
+    crystal_text = ""
+    domain = "clinical"
+    write_scope = "admin_only"
+    target = ""
+    user_uuid = None
+
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             """SELECT c.id, c.title, c.body, c.track, c.kind, c.scope,
@@ -129,19 +136,30 @@ async def decide_promotion(
         domain = _domain_for_track(row["track"])
         content_hash = hashlib.sha256(crystal_text.encode("utf-8")).hexdigest()
         user_uuid = None
+        target = row["target_user_id"] or ""
         scope = row["scope"] or "admin_only"
-        if row["target_user_id"] and str(scope).startswith("user"):
-            user_uuid = await _resolve_user_uuid(conn, row["target_user_id"])
+        # QUANTUM-CRYSTAL-ARCH — client_prep must be user-scoped for crystal recall
+        if row["track"] == "client_prep" and target:
+            scope = f"user:{target}"
+            user_uuid = await _resolve_user_uuid(conn, target)
+        elif target and str(scope).startswith("user"):
+            user_uuid = await _resolve_user_uuid(conn, target)
 
         conf = float(row["confidence"] or 0.55)
         conf = max(0.40, min(0.85, conf))
+        # User-scoped recall floor is 0.30; keep promoted client_prep recallable
+        if user_uuid is not None:
+            conf = max(0.50, conf)
 
         write_scope = (
             scope
             if scope in ("global", "admin_only") or str(scope).startswith("user")
             else "admin_only"
         )
+        # Clinical without a target stays admin_only (never widen to global)
         if domain == "clinical" and write_scope == "global":
+            write_scope = "admin_only"
+        if row["track"] == "clinical_strategy" and not target:
             write_scope = "admin_only"
 
         crystal_id = await conn.fetchval(
@@ -152,7 +170,15 @@ async def decide_promotion(
                VALUES ($1, $2, $3, '{}'::text[], 2, 0, $4, $5, $6,
                        $7, $8::jsonb)
                ON CONFLICT (content_hash) DO UPDATE
-               SET updated_at = NOW()
+               SET updated_at = NOW(),
+                   confidence = GREATEST(
+                       nate_intelligence_crystals.confidence, EXCLUDED.confidence),
+                   user_id = COALESCE(
+                       nate_intelligence_crystals.user_id, EXCLUDED.user_id),
+                   scope = CASE
+                       WHEN EXCLUDED.scope LIKE 'user:%' THEN EXCLUDED.scope
+                       ELSE nate_intelligence_crystals.scope
+                   END
                RETURNING id""",
             crystal_text[:8000],
             domain,
@@ -176,7 +202,7 @@ async def decide_promotion(
                    metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb
                WHERE id = $1::uuid""",
             corpus_id,
-            json.dumps({"crystal_id": crystal_id}),
+            json.dumps({"crystal_id": str(crystal_id) if crystal_id else None}),
         )
         await conn.execute(
             """UPDATE ln_sandbox_promotion_queue
@@ -202,17 +228,37 @@ async def decide_promotion(
                     "text": crystal_text[:2000],
                     "source": PROMOTED_ORIGIN,
                     "domain": domain,
-                    "scope": "admin_only" if domain == "clinical" else scope,
+                    "scope": write_scope,
                     "created_at": datetime.now(timezone.utc),
                 })
         except Exception as e:
             logger.warning("ln_sandbox_promotion: harvest append failed: %s", e)
+
+    # Vectorize outside DB transaction hold (network I/O)
+    if crystal_id:
+        try:
+            from app.services.vectorize_service import index_wisdom, is_vectorize_configured
+
+            if is_vectorize_configured():
+                await index_wisdom(
+                    user_id=str(target or "sandbox"),
+                    wisdom_id=str(crystal_id),
+                    insight_type="ln_sandbox_promoted",
+                    content=crystal_text[:4000],
+                    source=PROMOTED_ORIGIN,
+                    domain=domain,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                )
+        except Exception as e:
+            logger.warning("ln_sandbox_promotion: vectorize failed: %s", e)
 
     return {
         "ok": True,
         "decision": "approved",
         "corpus_id": corpus_id,
         "crystal_id": str(crystal_id),
+        "scope": write_scope,
+        "user_id": str(user_uuid) if user_uuid else None,
     }
 
 

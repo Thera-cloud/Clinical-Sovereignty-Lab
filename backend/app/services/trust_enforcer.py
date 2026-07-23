@@ -84,6 +84,7 @@ AUDITOR_ACTIVITY_TYPES = [
     "six_quotient_battery_audit_sent",
     "high_risk_crisis_audit_sent",
     "newsletter_audit_sent",
+    "ln_sandbox_audit_sent",
 ]
 
 AUDITOR_LABELS = {
@@ -121,6 +122,7 @@ AUDITOR_LABELS = {
     "six_quotient_battery_audit_sent": "Six-Quotient Battery",
     "high_risk_crisis_audit_sent": "High-Risk Occupational Crisis",
     "newsletter_audit_sent": "Little Nate Dispatch",
+    "ln_sandbox_audit_sent": "LN Sandbox DOJO",
 }
 
 REMEDIATION_CATEGORIES = {
@@ -583,6 +585,7 @@ class TrustEnforcer:
             "six_quotient_battery_audit_sent": "six_quotient_battery_check_count",
             "high_risk_crisis_audit_sent": "high_risk_crisis_check_count",
             "newsletter_audit_sent": "newsletter_check_count",
+            "ln_sandbox_audit_sent": "ln_sandbox_check_count",
         }
         return mapping.get(activity_type, "")
 

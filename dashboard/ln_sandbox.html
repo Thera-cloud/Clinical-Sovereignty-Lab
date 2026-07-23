@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LN Sandbox DOJO</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--void:#050505;--elev:#111;--gold:#C9A962;--bright:#E8D5A3;--dim:#8B7355;--cyan:#4ECDC4;--ok:#22C55E;--bad:#EF4444;--line:#222}
+*{box-sizing:border-box}body{margin:0;background:var(--void);color:var(--bright);font-family:'DM Sans',sans-serif;min-height:100vh}
+a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
+header{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+h1{font-family:'Cormorant Garamond',serif;color:var(--gold);margin:0;font-size:1.6rem;font-weight:600}
+.sub{color:var(--dim);font-size:.85rem;margin:4px 0 0}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button{background:var(--gold);color:#111;border:0;padding:9px 14px;font-weight:600;cursor:pointer;font-family:inherit;font-size:.85rem;border-radius:2px}
+button.secondary{background:#1a1a1a;color:var(--gold);border:1px solid #333}
+button.danger{background:transparent;color:var(--bad);border:1px solid var(--bad)}
+button:disabled{opacity:.4;cursor:not-allowed}
+.msg{margin:12px 20px;font-size:.9rem;color:var(--cyan)}.msg.err{color:var(--bad)}
+.stats{display:flex;flex-wrap:wrap;gap:10px;padding:12px 20px}
+.chip{background:var(--elev);border:1px solid var(--line);padding:8px 12px;font-size:.8rem;color:var(--dim)}
+.chip b{color:var(--bright);font-weight:600}
+.filters{padding:0 20px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+select{background:#0a0a0a;border:1px solid #333;color:var(--bright);padding:8px 10px;font-family:inherit}
+.layout{display:grid;grid-template-columns:1fr 360px;gap:0;border-top:1px solid var(--line);min-height:calc(100vh - 200px)}
+@media(max-width:960px){.layout{grid-template-columns:1fr}}
+.list{overflow:auto;max-height:calc(100vh - 200px)}
+.item{padding:14px 18px;border-bottom:1px solid var(--line);cursor:pointer}
+.item:hover{background:#141414}.item.active{background:#1a1810;border-left:3px solid var(--gold)}
+.item .t{font-size:.95rem;margin:0 0 4px}.item .m{font-size:.75rem;color:var(--dim)}
+.badge{display:inline-block;padding:2px 7px;font-size:.68rem;background:#222;margin-right:4px;text-transform:uppercase}
+.badge.queued{color:var(--cyan)}.badge.draft{color:var(--dim)}.badge.promoted{color:var(--ok)}.badge.failure_lesson{color:var(--bad)}
+.detail{border-left:1px solid var(--line);padding:18px;overflow:auto;background:#0a0a0a}
+.detail h2{font-family:'Cormorant Garamond',serif;color:var(--gold);font-size:1.25rem;margin:0 0 8px}
+.meta{font-size:.8rem;color:var(--dim);margin-bottom:12px}
+.body{white-space:pre-wrap;font-size:.88rem;line-height:1.5;border:1px solid var(--line);padding:12px;background:#050505;max-height:50vh;overflow:auto}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.empty{padding:40px;color:var(--dim);text-align:center}
+label{display:block;color:var(--dim);font-size:.72rem;margin:12px 0 4px;text-transform:uppercase;letter-spacing:.06em}
+textarea{width:100%;min-height:70px;background:#050505;border:1px solid #333;color:var(--bright);padding:10px;font-family:inherit}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>LN Sandbox DOJO</h1>
+    <p class="sub">Practice corpus → human promote gate. Failure lessons never inject live.</p>
+  </div>
+  <div class="toolbar">
+    <button type="button" class="secondary" onclick="loadAll()">Refresh</button>
+    <button type="button" onclick="runCycle()">Run cycle</button>
+    <a class="secondary" href="command.html" style="padding:9px 14px;border:1px solid #333;display:inline-block">Command</a>
+  </div>
+</header>
+<p id="msg" class="msg"></p>
+<div class="stats" id="stats"></div>
+<div class="filters">
+  <label for="statusSel" style="margin:0">Status</label>
+  <select id="statusSel" onchange="loadCorpus()">
+    <option value="queued">queued</option>
+    <option value="draft">draft</option>
+    <option value="promoted">promoted</option>
+    <option value="rejected">rejected</option>
+  </select>
+  <label for="trackSel" style="margin:0">Track</label>
+  <select id="trackSel" onchange="loadCorpus()">
+    <option value="">all</option>
+    <option value="clinical_strategy">clinical_strategy</option>
+    <option value="client_prep">client_prep</option>
+    <option value="engineering">engineering</option>
+  </select>
+</div>
+<div class="layout">
+  <aside class="list" id="list"><div class="empty">Loading…</div></aside>
+  <section class="detail" id="detail"><div class="empty">Select a corpus row.</div></section>
+</div>
+<script>
+var items=[], current=null;
+
+function token(){return sessionStorage.getItem('token')||localStorage.getItem('sc_token')||'';}
+function apiBase(){return (location.hostname.indexOf('sovereignsanctuary')>=0)?'https://api.sovereignsanctuary.net':'';}
+function headers(){return {'Authorization':'Bearer '+token(),'Content-Type':'application/json'};}
+function setMsg(t, err){var el=document.getElementById('msg');el.textContent=t||'';el.className=err?'msg err':'msg';}
+
+async function api(path, opts){
+  var r=await fetch(apiBase()+path, Object.assign({headers:headers()}, opts||{}));
+  if(r.status===401){setMsg('Auth issue — open Command, then return', true);return null;}
+  return r;
+}
+
+async function loadAll(){await loadStatus();await loadCorpus();}
+
+async function loadStatus(){
+  var r=await api('/api/ln-sandbox/status');
+  if(!r)return;
+  var j=await r.json();
+  var s=j.stats||{};
+  var el=document.getElementById('stats');
+  var bits=[];
+  if(j.engine) bits.push('<span class="chip"><b>engine</b> '+(j.engine.running?'running':'idle')+'</span>');
+  bits.push('<span class="chip"><b>pending promote</b> '+(s.promotion_pending!=null?s.promotion_pending:'—')+'</span>');
+  bits.push('<span class="chip"><b>corpus queued</b> '+(s.corpus_queued!=null?s.corpus_queued:'—')+'</span>');
+  (s.by_track_status||[]).slice(0,8).forEach(function(row){
+    bits.push('<span class="chip"><b>'+row.track+'/'+row.status+'</b> '+row.n+'</span>');
+  });
+  el.innerHTML=bits.join('')||'<span class="chip">No stats</span>';
+}
+
+async function loadCorpus(){
+  var st=document.getElementById('statusSel').value;
+  var tr=document.getElementById('trackSel').value;
+  var q='/api/ln-sandbox/corpus?status='+encodeURIComponent(st)+'&limit=60';
+  if(tr) q+='&track='+encodeURIComponent(tr);
+  var r=await api(q);
+  if(!r)return;
+  var j=await r.json();
+  items=j.items||[];
+  var list=document.getElementById('list');
+  if(!items.length){list.innerHTML='<div class="empty">No rows for this filter.</div>';return;}
+  list.innerHTML=items.map(function(it,i){
+    return '<div class="item" data-i="'+i+'" onclick="selectItem('+i+')">'
+      +'<div class="t">'+esc(it.title||'(untitled)')+'</div>'
+      +'<div class="m"><span class="badge '+esc(it.status)+'">'+esc(it.status)+'</span>'
+      +'<span class="badge">'+esc(it.track)+'</span>'
+      +'<span class="badge '+(it.kind==='failure_lesson'?'failure_lesson':'')+'">'+esc(it.kind)+'</span>'
+      +' score='+(it.score!=null?Number(it.score).toFixed(2):'—')
+      +(it.target_user_id?' · '+esc(it.target_user_id):'')
+      +'</div></div>';
+  }).join('');
+}
+
+function selectItem(i){
+  current=items[i];
+  document.querySelectorAll('.item').forEach(function(el,idx){el.classList.toggle('active',idx===i);});
+  var d=document.getElementById('detail');
+  if(!current){d.innerHTML='<div class="empty">Select a corpus row.</div>';return;}
+  var canPromote=['draft','queued'].indexOf(current.status)>=0 && current.kind!=='failure_lesson';
+  d.innerHTML='<h2>'+esc(current.title||'')+'</h2>'
+    +'<div class="meta">'+esc(current.id)+' · '+esc(current.track)+' / '+esc(current.kind)
+    +' · status='+esc(current.status)+' · score='+(current.score!=null?Number(current.score).toFixed(2):'—')+'</div>'
+    +'<div class="body">'+esc(current.body_preview||'')+'</div>'
+    +'<label for="notes">Decide notes (optional)</label><textarea id="notes" maxlength="2000"></textarea>'
+    +'<div class="actions">'
+    +(canPromote?'<button type="button" onclick="enqueue()">Enqueue promote</button>':'')
+    +(current.status==='queued'?'<button type="button" onclick="decide(true)">Approve → crystal</button><button type="button" class="danger" onclick="decide(false)">Reject</button>':'')
+    +'</div>';
+}
+
+async function enqueue(){
+  if(!current)return;
+  var r=await api('/api/ln-sandbox/promote/enqueue',{method:'POST',body:JSON.stringify({corpus_id:current.id,requested_by:'admin_ui'})});
+  if(!r)return;
+  var j=await r.json().catch(function(){return {};});
+  if(!r.ok){setMsg((j.detail||j.error||r.status)+'',true);return;}
+  setMsg('Queued for promote');
+  document.getElementById('statusSel').value='queued';
+  await loadAll();
+}
+
+async function decide(approve){
+  if(!current)return;
+  var notes=(document.getElementById('notes')||{}).value||'';
+  var r=await api('/api/ln-sandbox/promote/decide',{method:'POST',body:JSON.stringify({corpus_id:current.id,approve:!!approve,notes:notes})});
+  if(!r)return;
+  var j=await r.json().catch(function(){return {};});
+  if(!r.ok){setMsg(JSON.stringify(j.detail||j).slice(0,240),true);return;}
+  setMsg(approve?'Promoted to crystal':'Rejected');
+  await loadAll();
+}
+
+async function runCycle(){
+  setMsg('Running cycle…');
+  var r=await api('/api/ln-sandbox/run-cycle',{method:'POST',body:JSON.stringify({})});
+  if(!r)return;
+  var j=await r.json().catch(function(){return {};});
+  if(!r.ok){setMsg(JSON.stringify(j).slice(0,240),true);return;}
+  setMsg('Cycle finished');
+  await loadAll();
+}
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]);});}
+
+loadAll();
+</script>
+</body>
+</html>
