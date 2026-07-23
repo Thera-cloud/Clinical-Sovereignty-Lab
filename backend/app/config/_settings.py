@@ -187,6 +187,7 @@ class Settings(BaseSettings):
     ENABLE_DRIP_CAMPAIGN: bool = True
     ENABLE_SKYEYE: bool = True
     ENABLE_SKYEYE_SESSIONS: bool = True  # Auto session engine — autonomous posting enabled
+    ENABLE_LN_OBSERVER: bool = False  # QUANTUM-CRYSTAL-ARCH — Coach LN-Observer
     ENABLE_SOVEREIGN_SWARM: bool = True   # Sovereign Swarm Intelligence Framework
     ENABLE_NATE_NUDGE: bool = True        # Nate the Nudge proactive notification system
     # QUANTUM-CRYSTAL-ARCH: progressive rollout flags default OFF

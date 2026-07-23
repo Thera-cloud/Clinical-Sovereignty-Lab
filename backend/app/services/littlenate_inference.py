@@ -93,6 +93,13 @@ class LittleNateInference:
         silence_spark: Optional[str] = None,
         allow_deep: bool = False,
         is_realtime: bool = True,
+        # QUANTUM-CRYSTAL-ARCH — LN-Observer optional hooks (defaults = bit-identical)
+        attach_wisdom: bool = False,
+        images: Optional[List[str]] = None,
+        recall_query: Optional[str] = None,
+        recall_top_k: int = 15,
+        recall_also_user_ids: Optional[List[str]] = None,
+        mode: str = "",
     ) -> InferenceResult:
         """
         Full cognitive inference pipeline with SDH context compression and ODPE routing.
@@ -137,7 +144,17 @@ class LittleNateInference:
         if not sdh_used:
             # Step 2: Crystal retrieval
             if include_crystals:
-                crystals = await self._retrieve_crystals(prompt, user_id)
+                _rq = (recall_query or prompt).strip() or prompt
+                # QUANTUM-CRYSTAL-ARCH — Observer path: honor recall_query/top_k/also_ids
+                if recall_query is not None or recall_also_user_ids:
+                    from app.services.ln_observer_lni_support import retrieve_crystals_multi
+                    crystals = await retrieve_crystals_multi(
+                        _rq, user_id, recall_also_user_ids,
+                        top_k=recall_top_k if recall_top_k else 8,
+                        db_pool=self._db_pool,
+                    )
+                else:
+                    crystals = await self._retrieve_crystals(_rq, user_id)
                 result.crystals_retrieved = len(crystals)
 
             # Step 3: Helix orchestrator cognitive pre-processing
@@ -217,6 +234,20 @@ class LittleNateInference:
                 silence_spark=silence_spark,
                 story_context=_story_ctx,
             )
+        # QUANTUM-CRYSTAL-ARCH — Observer acceptance label (mode set only by LN-Observer)
+        if mode and "[RELEVANT WISDOM]" in enriched_prompt:
+            enriched_prompt = enriched_prompt.replace(
+                "[RELEVANT WISDOM]", "[RELEVANT MEMORY]", 1,
+            )
+        # QUANTUM-CRYSTAL-ARCH — Observer-only Night School wisdom snapshot (~1.8K tokens)
+        if attach_wisdom:
+            try:
+                from app.services.ln_observer_lni_support import load_wisdom_snapshot
+                _w = load_wisdom_snapshot()
+                if _w:
+                    enriched_prompt = f"[NIGHT SCHOOL WISDOM]\n{_w}\n\n{enriched_prompt}"
+            except Exception as _we:
+                logger.debug("attach_wisdom skipped: %s", _we)
 
         if self._quantum_orchestrator:
             try:
@@ -252,6 +283,7 @@ class LittleNateInference:
                     domain=domain,
                     odpe_signal=odpe_signal,
                     allow_deep=allow_deep,
+                    images=images,  # QUANTUM-CRYSTAL-ARCH
                 )
                 result.text = llm_result.get("text", "")
                 result.provider = llm_result.get("provider", "none")

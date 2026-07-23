@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LN-Observer · Coach Command</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --night:#131022;        /* deep sanctuary night */
+  --panel:#1c1830;
+  --panel-2:#241f3d;
+  --line:#37305c;
+  --ink:#ece8f6;
+  --ink-dim:#9d96bd;
+  --ember:#e8a24c;        /* candlelight amber — LN's presence */
+  --ember-soft:rgba(232,162,76,.14);
+  --live:#7fd6a4;
+  --danger:#e0705f;
+  --radius:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--night);
+  color:var(--ink);
+  font-family:'Public Sans',system-ui,sans-serif;
+  font-size:15px;line-height:1.55;
+  display:flex;flex-direction:column;
+}
+h1,h2{font-family:'Fraunces',serif;font-weight:600;letter-spacing:.01em}
+
+/* ---------- Top bar ---------- */
+header{
+  display:flex;align-items:center;gap:14px;
+  padding:14px 20px;border-bottom:1px solid var(--line);
+  background:var(--panel);
+}
+header h1{font-size:19px}
+header .sub{font-size:12px;color:var(--ink-dim);letter-spacing:.08em;text-transform:uppercase}
+.spacer{flex:1}
+
+/* The Observation Iris — LN's presence indicator */
+.iris{width:34px;height:34px;border-radius:50%;position:relative;flex:none}
+.iris::before,.iris::after{
+  content:"";position:absolute;inset:0;border-radius:50%;
+  border:2px solid var(--ember);opacity:.9;
+}
+.iris::after{inset:7px;border-width:1.5px;opacity:.55}
+.iris.idle::before,.iris.idle::after{border-color:var(--ink-dim);opacity:.35;animation:none}
+.iris.watching::before{animation:breathe 3.2s ease-in-out infinite}
+.iris.watching::after{animation:breathe 3.2s ease-in-out infinite reverse}
+.iris.thinking::before{animation:tighten .9s ease-in-out infinite alternate}
+.iris.thinking::after{animation:tighten .9s ease-in-out infinite alternate-reverse}
+@keyframes breathe{0%,100%{transform:scale(1);opacity:.9}50%{transform:scale(1.12);opacity:.5}}
+@keyframes tighten{from{transform:scale(1)}to{transform:scale(.82)}}
+@media (prefers-reduced-motion: reduce){.iris::before,.iris::after{animation:none!important}}
+
+.badge{
+  font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;
+  padding:5px 12px;border-radius:999px;border:1px solid var(--line);color:var(--ink-dim);
+}
+.badge.live{border-color:var(--live);color:var(--live)}
+
+button{
+  font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;
+  border:none;border-radius:10px;padding:10px 18px;
+  background:var(--ember);color:#241608;
+  transition:transform .08s ease, filter .15s ease;
+}
+button:hover{filter:brightness(1.08)}
+button:active{transform:scale(.98)}
+button:focus-visible{outline:2px solid var(--ember);outline-offset:2px}
+button.ghost{background:transparent;color:var(--ink-dim);border:1px solid var(--line)}
+button.danger{background:transparent;color:var(--danger);border:1px solid var(--danger)}
+button:disabled{opacity:.45;cursor:not-allowed}
+
+/* ---------- Layout ---------- */
+main{flex:1;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,1fr);gap:0;min-height:0}
+@media(max-width:900px){main{grid-template-columns:1fr;grid-template-rows:auto 1fr}}
+
+/* Left: the feed */
+.feed{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
+.stage{position:relative;background:#0b0917;flex:1;min-height:220px;display:flex;align-items:center;justify-content:center}
+.stage video{width:100%;height:100%;object-fit:contain}
+.stage .empty{color:var(--ink-dim);text-align:center;max-width:340px;padding:24px}
+.stage .empty h2{font-size:22px;color:var(--ink);margin-bottom:8px}
+
+.ticker{
+  border-top:1px solid var(--line);background:var(--panel);
+  padding:10px 16px;min-height:64px;max-height:120px;overflow-y:auto;
+  font-size:13px;color:var(--ink-dim);
+}
+.ticker .line{margin-bottom:4px}
+.ticker .tag{color:var(--ember);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;margin-right:8px}
+
+.feed-controls{display:flex;gap:10px;padding:12px 16px;background:var(--panel);border-top:1px solid var(--line)}
+
+/* Right: the observation chat */
+.chatcol{display:flex;flex-direction:column;min-height:0;background:var(--panel)}
+.chatcol .chathead{padding:12px 16px;border-bottom:1px solid var(--line);font-size:12px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim)}
+.msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:88%;padding:10px 14px;border-radius:var(--radius);white-space:pre-wrap}
+.msg.coach{align-self:flex-end;background:var(--panel-2);border:1px solid var(--line)}
+.msg.ln{align-self:flex-start;background:var(--ember-soft);border:1px solid rgba(232,162,76,.35)}
+.msg.obs{align-self:stretch;max-width:100%;background:transparent;border:1px dashed var(--line);
+  color:var(--ink-dim);font-size:13px}
+.msg .who{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ember);margin-bottom:4px}
+.msg.coach .who{color:var(--ink-dim)}
+.composer{display:flex;gap:10px;padding:12px 16px;border-top:1px solid var(--line)}
+.composer textarea{
+  flex:1;resize:none;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;
+  color:var(--ink);font-family:inherit;font-size:14px;padding:10px 12px;height:48px;
+}
+.composer textarea:focus{outline:2px solid var(--ember);outline-offset:1px}
+
+/* ---------- Activation modal ---------- */
+.veil{position:fixed;inset:0;background:rgba(10,8,20,.8);display:flex;
+  align-items:center;justify-content:center;z-index:50;padding:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;
+  max-width:520px;width:100%;padding:28px}
+.card h2{font-size:24px;margin-bottom:6px}
+.card .eyebrow{font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ember);margin-bottom:14px}
+.card p{color:var(--ink-dim);margin-bottom:14px;font-size:14px}
+.card .ack{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;
+  padding:14px;font-size:13.5px;color:var(--ink);margin-bottom:18px}
+.card .row{display:flex;gap:10px;justify-content:flex-end}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="iris idle" id="iris" aria-hidden="true"></div>
+  <div>
+    <h1>LN-Observer</h1>
+    <div class="sub">Coach Command · Sovereign Sanctuary</div>
+  </div>
+  <div class="spacer"></div>
+  <span class="badge" id="statusBadge">Checking access…</span>
+  <button id="btnActivate" disabled>Activate LN-Observer</button>
+  <button id="btnSwitch" class="ghost hidden" disabled>Switch view</button>
+  <button id="btnEnd" class="danger hidden">End session</button>
+</header>
+
+<main>
+  <section class="feed">
+    <div class="stage">
+      <video id="preview" autoplay muted playsinline class="hidden"></video>
+      <div class="empty" id="emptyState">
+        <h2>The observation deck is dark.</h2>
+        <p>Activate LN-Observer to share your screen and audio. Little Nate watches with you, transcribes what plays, and brings full clinical depth to the conversation.</p>
+      </div>
+    </div>
+    <div class="ticker" id="ticker" aria-live="polite"></div>
+    <div class="feed-controls">
+      <button id="btnLook" class="ghost" disabled>Ask LN to look closely</button>
+      <span class="badge" id="feedBadge">Feed off</span>
+    </div>
+  </section>
+
+  <section class="chatcol">
+    <div class="chathead">Observation chat — you &amp; Little Nate</div>
+    <div class="msgs" id="msgs"></div>
+    <div class="composer">
+      <textarea id="input" placeholder="Discuss what's on screen with LN…" disabled></textarea>
+      <button id="btnSend" disabled>Send</button>
+    </div>
+  </section>
+</main>
+
+<!-- Activation acknowledgment -->
+<div class="veil hidden" id="ackVeil" role="dialog" aria-modal="true" aria-labelledby="ackTitle">
+  <div class="card">
+    <div class="eyebrow">Activation record</div>
+    <h2 id="ackTitle">You are activating LN-Observer.</h2>
+    <p>Your screen and its audio will be shared to Little Nate for live observation, auto-transcription, and discussion until you end the session.</p>
+    <div class="ack">By activating LN-Observer, you accept full responsibility for this activation and for all content shared to the observation feed. Sovereign Sanctuary logs the activating coach and timestamp as the record of activation.</div>
+    <div class="row">
+      <button class="ghost" id="btnAckCancel">Cancel</button>
+      <button id="btnAckConfirm">I accept — activate</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* LN-Observer coach UI — auth via postMessage; brain = littlenate_inference */
+const ORIGIN_ALLOW = new Set([
+  "https://coach.sovereignsanctuary.net",
+  "https://app.sovereignsanctuary.net",
+  "http://localhost:3000",
+  "http://localhost:8080",
+  "http://127.0.0.1:8080",
+  window.location.origin
+]);
+let API_BASE = window.SS_API_BASE || "https://api.sovereignsanctuary.net/api/ln-observer";
+let WS_BASE  = window.SS_WS_BASE  || "wss://api.sovereignsanctuary.net/api/ln-observer/ws";
+let COACH_ID = window.SS_COACH_ID || "";
+let COACH_NAME = window.SS_COACH_NAME || "Coach";
+let AUTH_TOKEN = window.SS_AUTH_TOKEN || "";
+let WS_TICKET = "";
+let _authReady = false;
+
+const FRAME_INTERVAL_MS = 2000, FRAME_MAX_W = 1024, AUDIO_CHUNK_MS = 8000;
+const FRAME_DIFF_THRESHOLD = 0.04, RMS_SILENCE = 0.008;
+
+let sessionId=null, ws=null, stream=null, frameTimer=null, recorder=null;
+let _wsRetry=0, _ending=false, _lastFrameData=null, _audioCtx=null, _analyser=null;
+
+const $ = id => document.getElementById(id);
+const iris=$("iris"), badge=$("statusBadge"), feedBadge=$("feedBadge");
+function setIris(mode){ iris.className = "iris " + mode; }
+function _authHeaders(ct){
+  const h = {};
+  if(ct) h["Content-Type"] = ct;
+  if(AUTH_TOKEN) h["Authorization"] = "Bearer " + AUTH_TOKEN;
+  return h;
+}
+
+window.addEventListener("message", (e) => {
+  if(!ORIGIN_ALLOW.has(e.origin)) return;
+  const d = e.data || {};
+  if(d.type !== "ln_observer_auth") return;
+  AUTH_TOKEN = (d.token || "").trim();
+  COACH_ID = (d.hw || d.username || COACH_ID || "").trim();
+  COACH_NAME = (d.name || COACH_NAME || "Coach").trim();
+  if(d.api) API_BASE = d.api.replace(/\/$/, "");
+  if(d.ws) WS_BASE = d.ws.replace(/\/$/, "");
+  _authReady = !!AUTH_TOKEN && !!COACH_ID;
+  if(_authReady) checkAccess();
+  else badge.textContent = "Waiting for auth…";
+});
+
+async function checkAccess(){
+  if(!_authReady){ badge.textContent = "Waiting for auth…"; return; }
+  try{
+    const r = await fetch(`${API_BASE}/status/${encodeURIComponent(COACH_ID)}`, {headers:_authHeaders()});
+    const d = await r.json();
+    $("btnActivate").dataset.mode = "";
+    if(d.status === "approved"){
+      badge.textContent = "Approved"; badge.classList.remove("live");
+      $("btnActivate").textContent = "Activate LN-Observer";
+      $("btnActivate").disabled = false;
+    } else if(d.status === "pending"){
+      badge.textContent = "Awaiting admin approval";
+      $("btnActivate").disabled = true;
+    } else if(d.status === "revoked"){
+      badge.textContent = "Access revoked — contact admin";
+      $("btnActivate").disabled = true;
+    } else {
+      badge.textContent = "Not requested";
+      $("btnActivate").textContent = "Request access";
+      $("btnActivate").disabled = false;
+      $("btnActivate").dataset.mode = "request";
+    }
+  }catch(e){ badge.textContent = "Access check failed"; }
+}
+
+$("btnActivate").onclick = async () => {
+  if(!$("btnActivate").dataset.mode && !_authReady){ badge.textContent = "Waiting for auth…"; return; }
+  if($("btnActivate").dataset.mode === "request"){
+    await fetch(`${API_BASE}/request-access`,{method:"POST",headers:_authHeaders("application/json"),
+      body:JSON.stringify({coach_id:COACH_ID, coach_name:COACH_NAME})});
+    badge.textContent = "Awaiting admin approval";
+    $("btnActivate").disabled = true;
+    return;
+  }
+  $("ackVeil").classList.remove("hidden");
+};
+$("btnAckCancel").onclick = () => $("ackVeil").classList.add("hidden");
+$("btnAckConfirm").onclick = async () => {
+  $("ackVeil").classList.add("hidden");
+  await startSession();
+};
+
+async function acquireDisplay(){
+  return navigator.mediaDevices.getDisplayMedia({
+    video:{frameRate:15},
+    audio:{echoCancellation:false, noiseSuppression:false}
+  });
+}
+
+async function startSession(){
+  try{ stream = await acquireDisplay(); }
+  catch(e){ addTicker("SYS","Screen share was cancelled."); return; }
+  if(!stream.getAudioTracks().length){
+    addTicker("SYS","No tab audio — enable 'Share audio' for transcription. Safari may not support tab audio.");
+  }
+  const r = await fetch(`${API_BASE}/activate`,{method:"POST",
+    headers:_authHeaders("application/json"),
+    body:JSON.stringify({coach_id:COACH_ID, coach_name:COACH_NAME, responsibility_ack:true})});
+  if(!r.ok){ addTicker("SYS","Activation refused ("+r.status+")."); stopMedia(false); return; }
+  const data = await r.json();
+  sessionId = data.session_id;
+  WS_TICKET = data.ws_ticket || "";
+  wireLiveUi();
+  connectWs();
+}
+
+function wireLiveUi(){
+  $("preview").srcObject = stream;
+  $("preview").classList.remove("hidden");
+  $("emptyState").classList.add("hidden");
+  $("btnActivate").classList.add("hidden");
+  $("btnEnd").classList.remove("hidden");
+  $("btnSwitch").classList.remove("hidden");
+  $("btnSwitch").disabled = false;
+  $("btnLook").disabled = false;
+  $("input").disabled = false; $("btnSend").disabled = false;
+  badge.textContent = "Session live"; badge.classList.add("live");
+  feedBadge.textContent = "Feed live"; feedBadge.classList.add("live");
+  setIris("watching");
+  stream.getVideoTracks()[0].addEventListener("ended", () => { if(!_ending) endSession(); });
+}
+
+function connectWs(){
+  if(!sessionId) return;
+  ws = new WebSocket(`${WS_BASE}/${sessionId}`);
+  ws.binaryType = "arraybuffer";
+  ws.onmessage = onWsMessage;
+  ws.onclose = () => {
+    if(!sessionId || _ending) return;
+    addTicker("SYS","Connection blip — reconnecting…");
+    const attempt = Math.min(_wsRetry, 8);
+    const base = Math.min(1000 * Math.pow(2, attempt), 15000);
+    const jitter = Math.floor(base * 0.2 * Math.random());
+    _wsRetry++;
+    setTimeout(connectWs, base + jitter);
+  };
+  ws.onopen = () => {
+    _wsRetry = 0;
+    ws.send(JSON.stringify({type:"auth", token: WS_TICKET}));
+  };
+}
+
+function onWsMessage(ev){
+  const m = JSON.parse(ev.data);
+  if(m.type === "ready"){
+    startFrames();
+    startAudio();
+    addTicker("SYS","LN-Observer is live. Little Nate is watching with you.");
+  }
+  else if(m.type === "transcript"){ addTicker("Audio", m.text); }
+  else if(m.type === "observation"){ addMsg("obs", "LN noticed", m.text); setIris("watching"); }
+  else if(m.type === "thinking"){ setIris("thinking"); }
+  else if(m.type === "ln_reply"){ addMsg("ln", "Little Nate", m.text); setIris("watching"); }
+}
+
+function _frameDiffRatio(a, b){
+  if(!a || !b || a.length !== b.length) return 1;
+  let diff = 0, step = 16;
+  for(let i=0;i<a.length;i+=step){ if(Math.abs(a[i]-b[i]) > 18) diff++; }
+  return diff / (a.length / step);
+}
+
+function startFrames(){
+  if(frameTimer) clearInterval(frameTimer);
+  const video = $("preview"), canvas = document.createElement("canvas");
+  frameTimer = setInterval(()=>{
+    if(!ws || ws.readyState !== 1 || !video.videoWidth) return;
+    const scale = Math.min(1, FRAME_MAX_W / video.videoWidth);
+    canvas.width = Math.max(1, Math.floor(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.floor(video.videoHeight * scale));
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    if(_frameDiffRatio(img, _lastFrameData) < FRAME_DIFF_THRESHOLD) return;
+    _lastFrameData = img;
+    const b64 = canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+    ws.send(JSON.stringify({type:"frame", jpeg_b64:b64}));
+  }, FRAME_INTERVAL_MS);
+}
+
+function _chunkRms(buf){
+  try{
+    const ab = buf.slice(0);
+    // Approximate: skip if tiny blob
+    return ab.byteLength > 2500 ? 1 : 0;
+  }catch(e){ return 1; }
+}
+
+function startAudio(){
+  if(recorder){ try{ recorder.onstop=null; recorder.stop(); }catch(e){} recorder=null; }
+  const audioTracks = stream.getAudioTracks();
+  if(!audioTracks.length){
+    addTicker("SYS","No audio track — transcription off. Share a tab with audio.");
+    return;
+  }
+  const audioStream = new MediaStream(audioTracks);
+  const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+    ? "audio/webm;codecs=opus" : "audio/webm";
+  recorder = new MediaRecorder(audioStream, {mimeType:mime});
+  recorder.ondataavailable = async e => {
+    if(e.data.size < 2000 || !ws || ws.readyState !== 1) return;
+    const buf = await e.data.arrayBuffer();
+    if(_chunkRms(buf) < RMS_SILENCE && e.data.size < 4000) return;
+    ws.send(buf);
+  };
+  recorder.onstop = () => {
+    if(!sessionId || !recorder) return;
+    try{ recorder.start(); }catch(e){}
+    setTimeout(()=>{ if(sessionId&&recorder&&recorder.state==="recording") recorder.stop(); }, AUDIO_CHUNK_MS);
+  };
+  recorder.start();
+  setTimeout(()=>{ if(recorder && recorder.state==="recording") recorder.stop(); }, AUDIO_CHUNK_MS);
+}
+
+$("btnSwitch").onclick = async () => {
+  if(!sessionId) return;
+  try{
+    const next = await acquireDisplay();
+    if(recorder){ try{ recorder.onstop=null; recorder.stop(); }catch(e){} recorder=null; }
+    if(stream) stream.getTracks().forEach(t=>t.stop());
+    stream = next;
+    $("preview").srcObject = stream;
+    stream.getVideoTracks()[0].addEventListener("ended", () => { if(!_ending) endSession(); });
+    _lastFrameData = null;
+    startAudio();
+    addTicker("SYS","Switched view — recorder recreated.");
+  }catch(e){ addTicker("SYS","Switch view cancelled."); }
+};
+
+function sendChat(){
+  const t = $("input").value.trim();
+  if(!t || !ws || ws.readyState !== 1) return;
+  addMsg("coach", COACH_NAME, t);
+  ws.send(JSON.stringify({type:"chat", text:t}));
+  $("input").value = "";
+}
+$("btnSend").onclick = sendChat;
+$("input").addEventListener("keydown", e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); sendChat(); }});
+$("btnLook").onclick = ()=>{ if(ws && ws.readyState===1){ ws.send(JSON.stringify({type:"look_now"})); addTicker("SYS","Asked LN to look closely…"); }};
+
+$("btnEnd").onclick = endSession;
+async function endSession(){
+  if(!sessionId || _ending) return;
+  _ending = true;
+  const sid = sessionId; sessionId = null;
+  try{ ws && ws.send(JSON.stringify({type:"end"})); }catch(e){}
+  stopMedia(true);
+  const r = await fetch(`${API_BASE}/deactivate/${sid}`, {method:"POST", headers:_authHeaders()});
+  if(r.ok){
+    const d = await r.json();
+    if(d.summary) addMsg("ln","Little Nate — closing synthesis", d.summary);
+  }
+  addTicker("SYS","Session ended. Activation and transcript are logged.");
+  badge.textContent = "Approved"; badge.classList.remove("live");
+  feedBadge.textContent = "Feed off"; feedBadge.classList.remove("live");
+  $("btnEnd").classList.add("hidden");
+  $("btnSwitch").classList.add("hidden");
+  $("btnActivate").classList.remove("hidden");
+  $("btnLook").disabled = true; $("input").disabled = true; $("btnSend").disabled = true;
+  $("preview").classList.add("hidden"); $("emptyState").classList.remove("hidden");
+  setIris("idle");
+  _ending = false;
+}
+function stopMedia(closeWs){
+  if(frameTimer){ clearInterval(frameTimer); frameTimer=null; }
+  if(recorder){ try{recorder.onstop=null; recorder.stop();}catch(e){} recorder=null; }
+  if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+  if(closeWs && ws){ try{ws.close();}catch(e){} ws=null; }
+  _lastFrameData = null;
+}
+
+function addMsg(kind, who, text){
+  const div = document.createElement("div");
+  div.className = "msg " + kind;
+  div.innerHTML = `<div class="who"></div><div class="body"></div>`;
+  div.querySelector(".who").textContent = who;
+  div.querySelector(".body").textContent = text;
+  $("msgs").appendChild(div);
+  $("msgs").scrollTop = $("msgs").scrollHeight;
+}
+function addTicker(tag, text){
+  const line = document.createElement("div");
+  line.className = "line";
+  line.innerHTML = `<span class="tag"></span><span class="tx"></span>`;
+  line.querySelector(".tag").textContent = tag;
+  line.querySelector(".tx").textContent = text;
+  $("ticker").appendChild(line);
+  $("ticker").scrollTop = $("ticker").scrollHeight;
+}
+
+if(AUTH_TOKEN && COACH_ID){ _authReady = true; checkAccess(); }
+else badge.textContent = "Waiting for auth…";
+</script>
+</body>
+</html>

@@ -19,6 +19,8 @@ import 'metrics_widgets.dart';
 
 // Conditional import for web iframe support
 import 'dojo_iframe_stub.dart' if (dart.library.html) 'dojo_iframe_web.dart';
+import 'ln_observer_iframe_stub.dart'
+    if (dart.library.html) 'ln_observer_iframe_web.dart';
 import 'dojo_parent_message_stub.dart'
     if (dart.library.html) 'dojo_parent_message_web.dart';
 import 'shared_widgets.dart';
@@ -6062,13 +6064,16 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 10, vsync: this);
+    _tabController = TabController(length: 11, vsync: this);
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
       if (_tabController.index == 1) {
         _emitFetchCoachCalendar();
       }
-      if (_tabController.index == 9 &&
+      if (_tabController.index == 5) {
+        _pushLnObserverIframeAuthIfNeeded();
+      }
+      if (_tabController.index == 10 &&
           _assistantMetrics.isEmpty &&
           !_assistantsTabLoading) {
         _loadAssistantMetrics();
@@ -10409,7 +10414,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     _sessionAssistantChatCtrl.dispose();
     _sessionAssistantChatScroll.dispose();
     _dojoBackUnregister?.call();
-    if (kIsWeb) disposeDojoIframe();
+    if (kIsWeb) {
+      disposeDojoIframe();
+      disposeLnObserverIframe();
+    }
     _tabController.dispose();
     _wsReconnectTimer?.cancel();
     _coachWsSub?.cancel();
@@ -10424,6 +10432,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     "INSIGHTS",
     "BRIEFINGS",
     "DOJO",
+    "OBSERVER",
     "CLASSROOM",
     "TRAINING",
     "FINANCIALS",
@@ -10436,6 +10445,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     Icons.insights,
     Icons.folder_shared,
     Icons.sports_martial_arts,
+    Icons.visibility,
     Icons.school,
     Icons.fitness_center,
     Icons.account_balance_wallet,
@@ -10477,6 +10487,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                   Tab(icon: Icon(Icons.insights), text: "INSIGHTS"),
                   Tab(icon: Icon(Icons.folder_shared), text: "BRIEFINGS"),
                   Tab(icon: Icon(Icons.sports_martial_arts), text: "DOJO"),
+                  Tab(icon: Icon(Icons.visibility), text: "OBSERVER"),
                   Tab(icon: Icon(Icons.school), text: "CLASSROOM"),
                   Tab(icon: Icon(Icons.fitness_center), text: "TRAINING"),
                   Tab(
@@ -10549,6 +10560,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                 _buildInsightsTab(),
                 _buildBriefingsTab(),
                 _CoachDojoTabKeepAlive(builder: _buildDojoTab),
+                _CoachDojoTabKeepAlive(builder: _buildLnObserverTab),
                 _buildClassroomTab(),
                 _buildTrainingTab(),
                 _buildFinancialsTab(),
@@ -17087,8 +17099,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
   // Dojo embed URL locked once per dashboard session (token via postMessage on web).
   String? _cachedDojoUrl;
+  String? _cachedLnObserverUrl;
 
   String? _dojoLastPushedAuthToken;
+  String? _lnObserverLastPushedAuthToken;
 
   void _pushDojoIframeAuthIfNeeded() {
     if (!kIsWeb) return;
@@ -17100,6 +17114,60 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       hw: (_coachHardwareId ?? '').trim(),
       ws: _serverUrl,
     );
+  }
+
+  void _pushLnObserverIframeAuthIfNeeded() {
+    if (!kIsWeb) return;
+    final token = (_authToken ?? '').trim();
+    if (token.isEmpty) return;
+    _lnObserverLastPushedAuthToken = token;
+    final api = _apiBaseUrl.replaceAll(RegExp(r'/+$'), '');
+    final apiObserver = '$api/api/ln-observer';
+    final wsObserver = api
+        .replaceFirst('https://', 'wss://')
+        .replaceFirst('http://', 'ws://')
+        .replaceAll(RegExp(r'/+$'), '');
+    notifyLnObserverIframeAuth(
+      token: token,
+      hw: (widget.currentUserProfile['username'] ?? _coachHardwareId ?? '')
+          .toString()
+          .trim(),
+      name: (widget.currentUserProfile['name'] ??
+              widget.currentUserProfile['username'] ??
+              'Coach')
+          .toString()
+          .trim(),
+      api: apiObserver,
+      ws: '$wsObserver/api/ln-observer/ws',
+    );
+  }
+
+  Widget _buildLnObserverTab() {
+    final tokenNow = (_authToken ?? '').trim();
+    if (_cachedLnObserverUrl == null && tokenNow.isNotEmpty && kIsWeb) {
+      _cachedLnObserverUrl = '/ln-observer.html';
+    }
+    if (!kIsWeb) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'LN-Observer is available on Coach Command web '
+            '(display capture + tab audio).',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey, fontSize: 14),
+          ),
+        ),
+      );
+    }
+    if (tokenNow.isEmpty) {
+      return const Center(
+        child: Text('Waiting for login…',
+            style: TextStyle(color: Colors.grey, fontSize: 14)),
+      );
+    }
+    _pushLnObserverIframeAuthIfNeeded();
+    return buildLnObserverIframe(_cachedLnObserverUrl ?? '/ln-observer.html');
   }
 
   Widget _buildDojoTab() {

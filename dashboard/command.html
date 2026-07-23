@@ -1092,6 +1092,9 @@
         <div class="nav-tab" data-tab="ceo" onclick="navTo('ceo_inbox.html')" title="CEO Dual-COO Inbox">
             CEO Inbox
         </div>
+        <div class="nav-tab" data-tab="ln_observer" onclick="navTo('ln-observer-admin.html')" title="LN-Observer approvals">
+            <span>👁</span> LN-Observer
+        </div>
         <div class="nav-tab" data-tab="tokenlab" onclick="navTo('token_lab.html')">
             <span>🪙</span> Token Lab
         </div>
@@ -2308,7 +2311,10 @@
 
         function viewCrisis(hardwareId) {
             if (!hardwareId) return;
-            navTo('crisis_center.html');
+            lastBriefingRequest = { kind: 'client', client_id: hardwareId };
+            lastBriefingPayload = null;
+            openBriefingModal('Crisis Review', (clientNameById[hardwareId] || hardwareId), true);
+            requestClientBriefing(hardwareId);
         }
 
         function resolveCrisis(hardwareId, userName) {

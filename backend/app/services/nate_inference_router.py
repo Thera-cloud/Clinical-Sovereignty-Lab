@@ -16,7 +16,7 @@ import asyncio
 import logging
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import aiohttp
 
@@ -148,6 +148,7 @@ class NateInferenceRouter:
         domain: Optional[str] = None,
         odpe_signal: Optional[str] = None,
         allow_deep: bool = False,
+        images: Optional[List[str]] = None,  # QUANTUM-CRYSTAL-ARCH — multimodal (Azure)
     ) -> Dict[str, Any]:
         """
         Route a generation request to the best available provider.
@@ -160,7 +161,7 @@ class NateInferenceRouter:
           DEEP_TENSION → TIER_CLINICAL → Grok 4.1 Fast via Foundry
           NOISE → skip LLM call entirely
         """
-        if odpe_signal == "NOISE":
+        if odpe_signal == "NOISE" and not images:
             return {
                 "text": "",
                 "provider": "odpe_skip",
@@ -181,7 +182,8 @@ class NateInferenceRouter:
         if temperature is None:
             temperature = DOMAIN_TEMPERATURES.get(domain or "general", 0.6)
 
-        providers = _TIER_PRIORITY.get(tier, ["azure"])
+        # Vision requires Azure multimodal; force azure when images present
+        providers = ["azure"] if images else _TIER_PRIORITY.get(tier, ["azure"])
 
         for provider in providers:
             if provider == "sovereign" and not self._sovereign_healthy:
@@ -202,6 +204,7 @@ class NateInferenceRouter:
                 result = await self._call_provider(
                     provider, prompt, system, temperature, max_tokens,
                     sovereign_model=sovereign_model,
+                    images=images,
                 )
                 latency = int((time.time() - start) * 1000)
 
@@ -235,13 +238,27 @@ class NateInferenceRouter:
         temperature: float,
         max_tokens: int,
         sovereign_model: str = "",
+        images: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         self._sase_validate_outbound(provider)
 
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
+        # QUANTUM-CRYSTAL-ARCH — multimodal user content when images provided
+        if images:
+            content: List[Any] = []
+            for b64 in images[:4]:
+                if not b64:
+                    continue
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                })
+            content.append({"type": "text", "text": prompt})
+            messages.append({"role": "user", "content": content})
+        else:
+            messages.append({"role": "user", "content": prompt})
 
         if provider == "sovereign":
             return await self._call_sovereign(

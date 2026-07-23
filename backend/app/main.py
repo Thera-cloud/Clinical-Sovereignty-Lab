@@ -3137,6 +3137,20 @@ async def lifespan(app: FastAPI):
         from app.services.quantum_knowledge_field import FederatedSearchCoordinator
         app.state.federated_search = FederatedSearchCoordinator(db_pool=db_pool, app_state=app.state)
         print("   ✅ NateMemoryCrystallizer + HelixOrchestrator + LittleNateInference + FederatedSearch wired")
+        # QUANTUM-CRYSTAL-ARCH — LN-Observer engine (feature-flagged)
+        if getattr(settings, "ENABLE_LN_OBSERVER", False):
+            from app.services.ln_observer_engine import ln_observer_engine as _lnobs
+            # QUANTUM-CRYSTAL-ARCH — shared validator for Observer crystallize gate
+            if not getattr(app.state, "nate_response_validator", None):
+                try:
+                    from app.services.nate_response_validator import NateResponseValidator
+                    app.state.nate_response_validator = NateResponseValidator()
+                except Exception:
+                    pass
+            _lnobs.bind(db_pool=db_pool, app_state=app.state)
+            await _lnobs.start()
+            app.state.ln_observer_engine = _lnobs
+            print("   ✅ LNObserverEngine wired")
     except Exception as _cog_err:
         print(f"   ⚠️  Cognitive stack wiring failed: {_cog_err}")
 
@@ -3418,6 +3432,15 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     print("👋 Shutting down...")
+
+    # QUANTUM-CRYSTAL-ARCH — LN-Observer sweep stop
+    _lnobs_h = getattr(app.state, "ln_observer_engine", None)
+    if _lnobs_h:
+        try:
+            await _lnobs_h.stop()
+            print("   ✅ LNObserverEngine stopped")
+        except Exception as _lnobs_stop:
+            print(f"   ⚠️  LNObserverEngine shutdown: {_lnobs_stop}")
 
     # SOVEREIGN-VOICE: stop voice background agents
     if _voice_call_center:
@@ -3992,6 +4015,11 @@ if settings.ENABLE_SKYEYE:
 # Marketing Brain (always enabled when SkyEye is enabled)
 if settings.ENABLE_SKYEYE:
     app.include_router(marketing_api.router)
+
+# QUANTUM-CRYSTAL-ARCH — LN-Observer (Coach Command)
+if getattr(settings, "ENABLE_LN_OBSERVER", False):
+    from app.routers.ln_observer_api import router as ln_observer_router
+    app.include_router(ln_observer_router)
 
 # Coherence Engine (Sovereign Swarm)
 app.include_router(coherence_api.router)
