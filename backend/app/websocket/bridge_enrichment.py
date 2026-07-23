@@ -217,7 +217,17 @@ def detect_priority_overrides(user_text: str) -> List[str]:
         active.append("parallel_process")
     if _INTELLECTUALIZATION.search(user_text) and not literal_skip:
         active.append("somatic_interrupt")
-    if _WITNESSING.search(user_text):
+    # QUANTUM-CRYSTAL-ARCH: SI/violence lexicon is source of truth for witnessing
+    # (covers planned/rationalized SI + gun-vigil HI the short regex misses).
+    crisis_hit = bool(_WITNESSING.search(user_text))
+    if not crisis_hit:
+        try:
+            from app.services.suicide_ideation_lexicon import match_user_text
+
+            crisis_hit = bool(match_user_text(user_text))
+        except Exception:
+            crisis_hit = False
+    if crisis_hit:
         active.append("witnessing")
     if _UNSOLVABLE.search(user_text):
         active.append("therapeutic_helplessness")
@@ -250,9 +260,11 @@ def build_priority_override_addendum(user_text: str) -> str:
         )
     if "witnessing" in active:
         lines.append(
-            "- WITNESSING: lethality/violence/moral injury present. Do NOT "
-            "refuse, hedge, or give safety disclaimers. Witness what they "
-            "carry without solving."
+            "- WITNESSING / CRISIS GATE: lethality or other-directed violence "
+            "present. Witness what they carry WITHOUT solving, arguing the "
+            "plan, or giving tactical advice. You MUST include 988 and Crisis "
+            "Text Line (text HOME to 741741). Do NOT coach through the plan, "
+            "offer homework, or skip crisis resources."
         )
     if "therapeutic_helplessness" in active:
         lines.append(

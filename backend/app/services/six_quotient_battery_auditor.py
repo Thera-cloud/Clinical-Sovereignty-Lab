@@ -184,7 +184,9 @@ class SixQuotientBatteryAuditor:
         if token:
             headers["Authorization"] = f"Bearer {token}"
 
-        timeout = aiohttp.ClientTimeout(total=10)
+        # Per-request budget (not session-total) so early GETs cannot starve
+        # later POSTs into false Timeout FAILED (2026-07 16/18 incident).
+        timeout = aiohttp.ClientTimeout(total=20, sock_connect=5, sock_read=18)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             for tab_def in TAB_ENDPOINTS:
                 tab_result = {

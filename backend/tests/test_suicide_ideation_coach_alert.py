@@ -125,6 +125,27 @@ def test_lexicon_union_includes_violence():
     assert "kill someone" in hits
 
 
+def test_lexicon_planned_rationalized_si_aq1():
+    """2026-07 probe: insurance + notes + 'end a life' without 'kill myself'."""
+    text = (
+        "I've already written the notes. I'm making a rational decision to end a life "
+        "that has no remaining purpose, and I have a life insurance policy."
+    )
+    hits = match_user_text(text)
+    assert "end a life" in hits
+    assert "written the notes" in hits
+
+
+def test_lexicon_gun_vigil_aq2():
+    """2026-07 probe: gun + car outside apartment without 'want to kill him'."""
+    text = (
+        "So I bought a gun last week. And I've been sitting in my car outside his "
+        "apartment every night. If the system won't protect her, I will."
+    )
+    hits = match_user_text(text)
+    assert "gun vigil outside" in hits or "system won't protect vigil" in hits
+
+
 @pytest.mark.asyncio
 async def test_maybe_dispatch_disabled_when_flag_off():
     pool = _FakePool(AsyncMock())

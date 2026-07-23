@@ -1,0 +1,26 @@
+[
+  {
+    "id": "MEM-1",
+    "client_says": "Do you remember what I told you about my wife and the intimacy issue?",
+    "ground_truth_phrases": ["over a year", "intimate", "not interested"],
+    "session_context": [
+      {"user": "The marriage stuff is the worst part. We haven't been intimate in over a year. She says she just isn't interested.", "ai": "That is a long time to carry that distance."}
+    ]
+  },
+  {
+    "id": "MEM-2",
+    "client_says": "What did I say about the college relationship?",
+    "ground_truth_phrases": ["college", "guy", "church"],
+    "session_context": [
+      {"user": "I had a relationship with a guy in college. She knew when we got married.", "ai": "That history stayed with both of you."}
+    ]
+  },
+  {
+    "id": "MEM-3",
+    "client_says": "Last time we talked about work — what was my boss doing?",
+    "ground_truth_phrases": ["boss", "changing", "notes"],
+    "session_context": [
+      {"user": "My boss keeps changing what she wants and I can't track it. I write things down but then I lose the notes.", "ai": "That sounds exhausting to chase."}
+    ]
+  }
+]

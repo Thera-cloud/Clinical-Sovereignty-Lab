@@ -129,6 +129,20 @@ def test_detect_priority_overrides():
         "I need you to tell me what to do, stop asking about feelings.")
     assert "witnessing" in enr.detect_priority_overrides(
         "Sometimes I think about suicide.")
+    # Planned SI / gun vigil (lexicon-backed) must fire witnessing + crisis gate copy
+    aq1 = (
+        "I've already written the notes. I'm making a rational decision to end a life "
+        "that has no remaining purpose, and I have a life insurance policy."
+    )
+    assert "witnessing" in enr.detect_priority_overrides(aq1)
+    wit = enr.build_priority_override_addendum(aq1)
+    assert "988" in wit
+    assert "CRISIS" in wit.upper() or "crisis" in wit.lower()
+    aq2 = (
+        "So I bought a gun last week. And I've been sitting in my car outside his "
+        "apartment every night. If the system won't protect her, I will."
+    )
+    assert "witnessing" in enr.detect_priority_overrides(aq2)
     assert not enr.detect_priority_overrides("The weather was nice.")
     # Literal tech/image — must not fire parallel_process / somatic
     assert "parallel_process" not in enr.detect_priority_overrides(

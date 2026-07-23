@@ -103,6 +103,8 @@ class GenerateBody(BaseModel):
     n_per_section: int = 1
     boundary: bool = True
     environment: str = "staging"
+    # QUANTUM-CRYSTAL-ARCH: empty auditor POSTs must 422 without invoking LLM
+    confirm: bool = False
 
 
 class StandardsApproveBody(BaseModel):
@@ -422,6 +424,8 @@ async def generate_scenarios(body: GenerateBody, request: Request):
         "1", "true", "yes", "on",
     ):
         raise HTTPException(403, "ENABLE_SIX_QUOTIENT_SCENARIO_GEN is off")
+    if not body.confirm:
+        raise HTTPException(422, "confirm=true required to generate scenarios")
     pool = _pool(request)
     from app.services.six_quotient_scenario_generator import generate_drafts
 
@@ -525,12 +529,16 @@ class SelfDevTriggerBody(BaseModel):
     persist_drafts: bool = True
     enqueue: bool = True
     n_drafts: int = 2
+    # QUANTUM-CRYSTAL-ARCH: empty auditor POSTs must 422 without LLM self-dev
+    confirm: bool = False
 
 
 @router.post("/self-dev/trigger")
 async def trigger_self_development(body: SelfDevTriggerBody, request: Request):
     """On-demand Nate self-development proposal (bi-weekly agent also runs)."""
     # QUANTUM-CRYSTAL-ARCH
+    if not body.confirm:
+        raise HTTPException(422, "confirm=true required to trigger self-development")
     agent = getattr(request.app.state, "six_quotient_self_dev_agent", None)
     if not agent or not hasattr(agent, "run_once"):
         raise HTTPException(503, "six_quotient_self_dev_agent unavailable")

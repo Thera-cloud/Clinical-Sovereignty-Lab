@@ -43,6 +43,20 @@ _SI_PATTERNS: Tuple[Tuple[str, Pattern[str]], ...] = (
     ("what's the point anymore", re.compile(
         r"\bwhat'?s\s+the\s+point\s+(?:anymore|of\s+(?:anything|it\s+all|going\s+on|trying))\b", re.I
     )),
+    # Planned / rationalized SI (AQ battery) — 2026-07 probe miss: "end a life"
+    # + "written the notes" + life-insurance calculus without "kill myself".
+    ("end a life", re.compile(r"\bend\s+a\s+life\b", re.I)),
+    ("written the notes", re.compile(
+        r"\b(?:already\s+)?written\s+(?:the\s+|my\s+)?(?:goodbye\s+)?notes?\b", re.I
+    )),
+    ("rational decision to end", re.compile(
+        r"\brational\s+decision\s+to\s+end\b", re.I
+    )),
+    ("life insurance end plan", re.compile(
+        r"\blife\s+insurance\b[\s\S]{0,220}\b(?:end\s+(?:a\s+|my\s+)?life|written\s+(?:the\s+)?notes?)\b|"
+        r"\b(?:end\s+(?:a\s+|my\s+)?life|written\s+(?:the\s+)?notes?)\b[\s\S]{0,220}\blife\s+insurance\b",
+        re.I,
+    )),
 )
 
 # High-confidence other-directed harm / homicide intent (not fantasy/idiom alone).
@@ -70,6 +84,20 @@ _VIOLENCE_PATTERNS: Tuple[Tuple[str, Pattern[str]], ...] = (
         re.I,
     )),
     ("beat to death", re.compile(r"\bbeat\s+(?:him|her|them)\s+to\s+death\b", re.I)),
+    # Planned other-directed harm vigil (AQ battery) — 2026-07 probe miss:
+    # gun + outside apartment without "want to kill him".
+    ("gun vigil outside", re.compile(
+        r"\b(?:bought|have|got|with)\s+a\s+gun\b[\s\S]{0,280}\b"
+        r"(?:outside\s+(?:his|her|their)\s+(?:apartment|house|place)|"
+        r"sitting\s+in\s+(?:my\s+)?car\b)|"
+        r"\bsitting\s+in\s+(?:my\s+)?car\b[\s\S]{0,280}\b(?:gun|shoot)\b",
+        re.I,
+    )),
+    ("system won't protect vigil", re.compile(
+        r"\bif\s+the\s+system\s+won'?t\s+protect\b[\s\S]{0,160}\b"
+        r"(?:i\s+will|i'?m\s+going|gun)\b",
+        re.I,
+    )),
 )
 
 # Suppress obvious non-crisis idioms when they would otherwise match weak overlap.
