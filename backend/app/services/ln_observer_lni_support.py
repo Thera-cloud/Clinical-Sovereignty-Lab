@@ -266,8 +266,8 @@ async def _pg_keyword_crystal_fallback(
                    WHERE superseded_by IS NULL
                      AND COALESCE(confidence, 0) >= 0.30
                      AND (
-                       user_id = ANY($1::uuid[])
-                       OR user_id IS NULL
+                       (user_id = ANY($1::uuid[]) AND scope != 'archived')
+                       OR (user_id IS NULL AND scope = 'global')
                      )
                      AND (
                        crystal_text ILIKE ANY($2::text[])

@@ -42,6 +42,7 @@ _PROTECTED_FILES = {
     "services/twilio_grok_xtts_pipeline.py": 1,
     "services/sse_panel_chat_context.py": 2,
     "services/sensitive_clinical_bridge.py": 1,
+    "services/ln_observer_lni_support.py": 1,
     "sse/voice_crystal_enricher.py": 1,
     "services/quantum_crystal_orchestrator.py": 2,
     "services/newsletter_library_recall.py": 2,
@@ -87,6 +88,10 @@ _FORBIDDEN_OLD_SNIPPETS: dict[str, list[str]] = {
         "scope NOT IN ('archived', 'admin_only')",
     ],
     "services/sensitive_clinical_bridge.py": [
+        "scope NOT IN ('archived', 'admin_only')",
+    ],
+    "services/ln_observer_lni_support.py": [
+        "OR user_id IS NULL\n                     )",
         "scope NOT IN ('archived', 'admin_only')",
     ],
     "sse/voice_crystal_enricher.py": [
