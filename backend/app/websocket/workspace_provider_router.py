@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 WORKSPACE_TOOLS = frozenset({
     "read_file", "search_code", "list_directory", "glob_files",
-    "read_diagnostics", "read_git_status", "proposed_edit",
+    "read_diagnostics", "read_git_status", "git_log", "proposed_edit",
     "write_file", "create_file", "delete_file", "rename_file",
     "run_command", "read_open_editors",
 })

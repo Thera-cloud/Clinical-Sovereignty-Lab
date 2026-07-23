@@ -44,6 +44,8 @@ try:
             "switch_mode": 1,
             "provider_stats": 5,
             "self_capabilities": 2,
+            "read_git_status": 8,
+            "git_log": 10,
             "query_sessions": 10,
             "query_coherence_data": 10,
             "query_user_profile": 5,
@@ -81,6 +83,8 @@ except (ImportError, AttributeError) as _ln_imp_err:
         "switch_mode": 1,
         "provider_stats": 5,
         "self_capabilities": 2,
+        "read_git_status": 8,
+        "git_log": 10,
         "query_sessions": 10,
         "query_coherence_data": 10,
         "query_user_profile": 5,
@@ -745,6 +749,45 @@ _READ_TOOL_DEFS = [
                 "properties": {
                     "path": {"type": "string", "description": "Relative directory path (default: project root)"},
                     "pattern": {"type": "string", "description": "Glob filter e.g. '*.py' (optional)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_git_status",
+            "description": (
+                "Read-only git status for the project workspace (branch, dirty files, "
+                "ahead/behind). Available in ASK/PLAN — does not require shell mode."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_log",
+            "description": (
+                "Read-only git log (recent commits). Use for 'what landed' / development "
+                "history. Optional path filter. Available in ASK/PLAN."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "max_count": {
+                        "type": "integer",
+                        "description": "Number of commits (default 15, max 40)",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Optional path to limit history (relative to repo root)",
+                    },
                 },
                 "required": [],
             },
@@ -1802,6 +1845,128 @@ def _list_directory_sync(path: Optional[str], pattern: Optional[str]) -> Dict[st
     root = _get_project_root()
     rel = os.path.relpath(resolved, root) if resolved != root else "."
     return {"status": "ok", "result": entries, "path": rel, "count": len(entries)}
+
+
+def _git_repo_root() -> Optional[str]:
+    """Find git toplevel from project root (works in Docker bind mounts)."""
+    import subprocess
+
+    root = _get_project_root()
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if r.returncode == 0:
+            return (r.stdout or "").strip() or root
+    except Exception:
+        pass
+    if os.path.isdir(os.path.join(root, ".git")):
+        return root
+    return None
+
+
+def _read_git_status_sync() -> Dict[str, Any]:
+    """Read-only git status — available in ASK/PLAN without shell tool."""
+    import subprocess
+
+    repo = _git_repo_root()
+    if not repo:
+        return {
+            "status": "error",
+            "error": "Not a git repository (or git unavailable) at project root",
+            "error_code": _ERROR_OTHER,
+            "content": "",
+        }
+    try:
+        branch = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo, capture_output=True, text=True, timeout=5,
+        )
+        short = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo, capture_output=True, text=True, timeout=5,
+        )
+        status = subprocess.run(
+            ["git", "status", "--porcelain=v1", "-b"],
+            cwd=repo, capture_output=True, text=True, timeout=8,
+        )
+        lines = [
+            "═══ READ-ONLY GIT STATUS ═══",
+            f"  repo:   {repo}",
+            f"  branch: {(branch.stdout or '').strip() or '?'}",
+            f"  HEAD:   {(short.stdout or '').strip() or '?'}",
+            "",
+            (status.stdout or status.stderr or "(empty)").rstrip(),
+        ]
+        content = "\n".join(lines)
+        return {"status": "ok", "content": content, "result": content}
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": f"read_git_status failed: {e}",
+            "error_code": _ERROR_OTHER,
+            "content": "",
+        }
+
+
+def _git_log_sync(max_count: int = 15, path: Optional[str] = None) -> Dict[str, Any]:
+    """Read-only git log — available in ASK/PLAN without shell tool."""
+    import subprocess
+
+    repo = _git_repo_root()
+    if not repo:
+        return {
+            "status": "error",
+            "error": "Not a git repository (or git unavailable) at project root",
+            "error_code": _ERROR_OTHER,
+            "content": "",
+        }
+    try:
+        n = max(1, min(int(max_count or 15), 40))
+    except (TypeError, ValueError):
+        n = 15
+    cmd = [
+        "git", "log", f"-n{n}",
+        "--pretty=format:%h %ad %an — %s",
+        "--date=short",
+    ]
+    if path:
+        clean = str(path).replace("\x00", "").lstrip("/")
+        if ".." in clean.split("/"):
+            return {
+                "status": "error",
+                "error": f"Path traversal blocked: {path}",
+                "error_code": _ERROR_PATH_TRAVERSAL,
+                "content": "",
+            }
+        cmd.extend(["--", clean])
+    try:
+        r = subprocess.run(cmd, cwd=repo, capture_output=True, text=True, timeout=10)
+        body = (r.stdout or r.stderr or "").rstrip()
+        if r.returncode != 0 and not body:
+            return {
+                "status": "error",
+                "error": f"git log failed (exit {r.returncode})",
+                "error_code": _ERROR_OTHER,
+                "content": "",
+            }
+        header = f"═══ READ-ONLY GIT LOG (n={n}"
+        if path:
+            header += f", path={path}"
+        header += ") ═══"
+        content = f"{header}\n{body or '(no commits)'}"
+        return {"status": "ok", "content": content, "result": content}
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": f"git_log failed: {e}",
+            "error_code": _ERROR_OTHER,
+            "content": "",
+        }
 
 
 # ── Phase 2: Debug Injection Tracker (per-session state) ──
@@ -2955,6 +3120,11 @@ _READ_TOOL_DISPATCH = {
         args.get("path"),
         args.get("pattern"),
     ),
+    "read_git_status": lambda args, **_: _read_git_status_sync(),
+    "git_log": lambda args, **_: _git_log_sync(
+        args.get("max_count", 15),
+        args.get("path"),
+    ),
 }
 
 _WRITE_TOOL_DISPATCH = {
@@ -3276,7 +3446,7 @@ async def execute_tool(
             workspace_router = None
     _WORKSPACE_ROUTABLE = {
         "read_file", "search_code", "list_directory", "glob_files",
-        "read_diagnostics", "read_git_status", "proposed_edit",
+        "read_diagnostics", "read_git_status", "git_log", "proposed_edit",
         "write_file", "create_file", "delete_file", "rename_file",
         "run_command", "read_open_editors",
     }
@@ -3922,7 +4092,7 @@ def get_tool_definitions(mode: str, cli_type: str) -> list:
     """Build the tools array for native function calling (Grok or Ollama).
 
     Tool distribution mirrors Cursor's mode capabilities:
-    - ASK/PLAN: read + search + grep + glob + read_lints + web_fetch + todo_write + switch_mode
+    - ASK/PLAN: read + search + grep + glob + read_lints + read_git_status + git_log + web_fetch + todo_write + switch_mode
     - LN-FAB:   all of the above + write_file + str_replace + delete_file + shell
     - DEBUG:    all of the above + write_file + str_replace + delete_file + shell + inject_log + debug_cleanup
     - CLI-Cloud LN-FAB: sandboxed writes + allowlisted shell + lints (no live promote/deploy)

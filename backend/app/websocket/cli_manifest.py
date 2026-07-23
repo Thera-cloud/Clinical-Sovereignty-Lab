@@ -306,6 +306,96 @@ def load_workspace_rules(
     return text
 
 
+_PLAN_PRIORITY_KEYWORDS = (
+    "agi", "narrow", "sovereign_ide", "agentic", "tier1", "tier_1", "tier2",
+    "neuro-symbolic", "phase_5", "ln-observer", "newsletter", "curriculum",
+)
+
+
+def generate_plan_index(
+    root: Optional[str] = None,
+    *,
+    max_chars: int = 6000,
+    query: str = "",
+) -> str:
+    """Compact index of .cursor/plans + AGI/agentic docs for CLI grounding.
+
+    Prefer priority / query-matching plans so roadmap answers cite real files.
+    """
+    root = root or _project_root()
+    lines: List[str] = []
+
+    plans_dir = os.path.join(root, ".cursor", "plans")
+    plan_files: List[str] = []
+    if os.path.isdir(plans_dir):
+        plan_files = sorted(
+            f for f in os.listdir(plans_dir)
+            if f.endswith(".plan.md") or f.endswith(".md")
+        )
+
+    q = (query or "").lower()
+    q_tokens = [t for t in re.findall(r"[a-z0-9_]{3,}", q) if t not in ("the", "and", "for", "what", "next")]
+
+    def _score(name: str) -> int:
+        nl = name.lower()
+        score = 0
+        for kw in _PLAN_PRIORITY_KEYWORDS:
+            if kw in nl:
+                score += 10
+        for tok in q_tokens:
+            if tok in nl:
+                score += 5
+        # Prefer newer-looking sovereign/agi plans first when tied via name boost
+        if "sovereign_ide" in nl or "narrow" in nl or "agi" in nl:
+            score += 3
+        return score
+
+    ranked = sorted(plan_files, key=lambda n: (-_score(n), n))
+    priority = [p for p in ranked if _score(p) > 0][:18]
+    others = [p for p in ranked if p not in priority][:12]
+
+    lines.append(
+        f"IMPLEMENTATION PLANS: {len(plan_files)} files in .cursor/plans/\n"
+        "  Read with: read_file('.cursor/plans/<name>.plan.md')\n"
+        "  Use git_log / read_git_status for what landed in git (not plan todos alone)."
+    )
+    if priority:
+        lines.append("  PRIORITY (AGI / IDE / agentic / tier — open these first):")
+        for p in priority:
+            lines.append(f"    - .cursor/plans/{p}")
+    if others:
+        lines.append(f"  Other sample plans ({len(others)} of {max(0, len(plan_files) - len(priority))}):")
+        for p in others[:8]:
+            lines.append(f"    - .cursor/plans/{p}")
+
+    docs_dir = os.path.join(root, "docs")
+    doc_hits: List[str] = []
+    if os.path.isdir(docs_dir):
+        for f in sorted(os.listdir(docs_dir)):
+            if not f.endswith(".md"):
+                continue
+            fl = f.lower()
+            if any(
+                k in fl
+                for k in (
+                    "agentic", "agi", "tier1", "tier_1", "asi", "neuro",
+                    "phase_5", "phase5",
+                )
+            ):
+                doc_hits.append(f)
+            elif q_tokens and any(t in fl for t in q_tokens):
+                doc_hits.append(f)
+    if doc_hits:
+        lines.append("AGI / AGENTIC / TIER DOCS (read before inventing a roadmap):")
+        for d in doc_hits[:16]:
+            lines.append(f"  - docs/{d}")
+
+    text = "\n".join(lines)
+    if len(text) > max_chars:
+        text = text[: max_chars - 20] + "\n... (truncated)"
+    return text
+
+
 def generate_manifest(root: Optional[str] = None, max_chars: int = 4000) -> str:
     root = root or _project_root()
 
@@ -440,20 +530,16 @@ def generate_manifest(root: Optional[str] = None, max_chars: int = 4000) -> str:
             f"  Read with: read_file('.cursor/rules/<name>.mdc')"
         )
 
-    plans_dir = os.path.join(root, ".cursor", "plans")
-    if os.path.isdir(plans_dir):
-        plans = sorted(f for f in os.listdir(plans_dir) if f.endswith(".md"))
-        plan_names = [f.replace(".plan.md", "") for f in plans[:10]]
-        sections.append(
-            f"IMPLEMENTATION PLANS: {len(plans)} plan files in .cursor/plans/\n"
-            f"  Read with: read_file('.cursor/plans/<name>.plan.md')\n"
-            f"  Recent: {', '.join(plan_names)}"
-        )
+    plan_idx = generate_plan_index(root=root, max_chars=1200)
+    if plan_idx:
+        sections.append(plan_idx)
 
     header = (
         "CODEBASE MANIFEST (auto-generated from file system):\n"
         "This is a MATURE codebase — do NOT create basic schema or starter services.\n"
         "Always check what exists before creating new files.\n"
+        "Roadmap/AGI/Tier questions: read .cursor/plans/ + docs/AGENTIC* / *AGI* before answering.\n"
+        "Clinical ENABLE_* flags ≠ Narrow AGI / Sovereign IDE phases.\n"
     )
 
     manifest = header + "\n" + "\n\n".join(sections)

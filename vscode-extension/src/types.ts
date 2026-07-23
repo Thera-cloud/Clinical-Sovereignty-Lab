@@ -145,7 +145,7 @@ export interface InboundCliChatDone {
 
 export type WorkspaceToolName =
   | 'read_file' | 'list_directory' | 'search_code' | 'glob_files' | 'proposed_edit'
-  | 'read_diagnostics' | 'read_git_status' | 'write_file' | 'create_file'
+  | 'read_diagnostics' | 'read_git_status' | 'git_log' | 'write_file' | 'create_file'
   | 'delete_file' | 'rename_file' | 'run_command' | 'read_open_editors';
 
 export type ToolCallErrorCode =

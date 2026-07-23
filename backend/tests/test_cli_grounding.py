@@ -55,6 +55,89 @@ def test_capability_question_detection():
     assert not is_capability_question("Read cli_tools.py and fix the timeout")
 
 
+def test_roadmap_question_detection():
+    from app.websocket.cli_grounding import is_roadmap_question, is_speculative_question
+
+    assert is_roadmap_question(
+        "What are the next steps to becoming a Narrow AGI in our Tier 2 development"
+    )
+    assert is_roadmap_question("Show me the Sovereign IDE roadmap")
+    assert is_roadmap_question("what has been developed for agentic phase?")
+    assert is_roadmap_question("What are the next steps for Narrow AGI?")
+    assert is_speculative_question("Show me the Sovereign IDE roadmap")  # contains "roadmap"
+    assert not is_roadmap_question("Read cli_tools.py line 100")
+
+
+def test_roadmap_validator_requires_plan_evidence():
+    from app.websocket.cli_grounding import validate_cli_response
+
+    bad = validate_cli_response(
+        "There is no Narrow AGI plan in the codebase.",
+        tool_call_log=[{"name": "grep", "status": "ok", "args": {"pattern": "AGI"}}],
+        user_message="What are the next steps for Narrow AGI Tier 2?",
+    )
+    assert bad["ok"] is False
+    assert any(v["type"] == "roadmap_without_plan_evidence" for v in bad["violations"])
+
+    good = validate_cli_response(
+        "[DESIGN PROPOSAL] Next: finish Part C. "
+        "[VERIFIED] See .cursor/plans/sovereign_ide_cursor_clone_3762c3a8.plan.md",
+        tool_call_log=[{
+            "name": "plan_index",
+            "status": "ok",
+            "injected": True,
+            "evidence_excerpt": "IMPLEMENTATION PLANS: sovereign_ide_cursor_clone",
+        }],
+        user_message="What are the next steps for Narrow AGI Tier 2?",
+    )
+    assert good["ok"] is True
+
+
+def test_plan_index_lists_priority_plans():
+    from app.websocket.cli_manifest import generate_plan_index
+
+    idx = generate_plan_index(query="Narrow AGI Tier 2", max_chars=8000)
+    assert "IMPLEMENTATION PLANS" in idx
+    assert ".cursor/plans/" in idx
+    # Prefer sovereign / agentic docs when present on disk
+    assert "PRIORITY" in idx or "AGI" in idx.upper() or "docs/" in idx
+
+
+def test_git_tools_in_ask_cloud():
+    from app.websocket.cli_tools import get_tool_definitions
+
+    names = {
+        t["function"]["name"]
+        for t in get_tool_definitions("ask", "cloud")
+        if "function" in t
+    }
+    assert "read_git_status" in names
+    assert "git_log" in names
+    assert "shell" not in names
+
+
+def test_read_git_status_and_log_sync():
+    from app.websocket.cli_tools import _git_log_sync, _read_git_status_sync
+
+    st = _read_git_status_sync()
+    assert st["status"] in ("ok", "error")
+    if st["status"] == "ok":
+        assert "READ-ONLY GIT STATUS" in (st.get("content") or "")
+    lg = _git_log_sync(max_count=5)
+    assert lg["status"] in ("ok", "error")
+    if lg["status"] == "ok":
+        assert "READ-ONLY GIT LOG" in (lg.get("content") or "")
+
+
+def test_accuracy_contract_mentions_category_separation():
+    from app.websocket.cli_chat_handler import _build_system_prompt
+
+    p = _build_system_prompt("ask", "cloud")
+    assert "CATEGORY SEPARATION" in p or "Clinical ENABLE_" in p
+    assert "read_git_status" in p or "git_log" in p
+    assert "IMPLEMENTATION PLANS" in p or ".cursor/plans" in p
+
+
 def test_validator_flags_ungrounded_claims():
     from app.websocket.cli_grounding import validate_cli_response
 

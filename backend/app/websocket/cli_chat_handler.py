@@ -242,6 +242,9 @@ def _build_system_prompt(mode: str, cli_type: str) -> str:
         "VERIFICATION: After writing files, check lint/test feedback in tool results and fix errors before finishing.\n"
         "Use repo_map for orientation before deep file reads on large tasks.\n"
         "Use self_capabilities before answering what you can do / Phase / neuro-symbolic / Mac vs Cloud.\n"
+        "Use generate_plan_index paths (.cursor/plans/, docs/AGENTIC*) for roadmap/AGI/Tier questions; "
+        "use read_git_status / git_log for what landed in git. "
+        "Clinical ENABLE_* flags are not the Narrow AGI roadmap.\n"
         "AGENTIC: For complex multi-step work, use todo_write to track tasks. "
         "Use spawn_subagent for scoped explore/test_fix child loops. "
         "When AUTO-PYTEST FAILED appears, fix and continue until tests pass or autonomy budget is exhausted."
@@ -261,13 +264,17 @@ def _queen_hive_prompt() -> str:
 _MODE_INSTRUCTIONS = {
     "ask": (
         "ASK MODE — Read-only exploration. You can read files, search code, grep, "
-        "and list directories. You CANNOT write, delete, or execute shell commands. "
+        "list directories, and use read_git_status / git_log (read-only git). "
+        "You CANNOT write, delete, or run arbitrary shell. "
+        "For roadmap/AGI/Tier questions: open .cursor/plans/ and docs/AGENTIC* first. "
         "Answer questions about the codebase accurately using tool calls to verify."
     ),
     "plan": (
-        "PLAN MODE — Read-only planning. You can read and search the codebase. "
-        "You CANNOT write or execute. Create detailed plans with specific file paths, "
-        "line numbers, and code snippets. Structure plans with numbered steps."
+        "PLAN MODE — Read-only planning. You can read and search the codebase and "
+        "use read_git_status / git_log. You CANNOT write or execute arbitrary shell. "
+        "Start from existing .cursor/plans/ and docs/AGENTIC* before proposing net-new work. "
+        "Create detailed plans with specific file paths, line numbers, and code snippets. "
+        "Structure plans with numbered steps."
     ),
     "debug": (
         "DEBUG MODE — Diagnostic investigation. You can read files, search code, "
@@ -544,14 +551,17 @@ async def run_agentic_loop(
         conversation.append({"role": "user", "content": todos_block})
     conversation.append({"role": "user", "content": user_message})
 
-    # Sol 1–5 + extra: force capability/speculative grounding before first model turn
+    # Sol 1–5 + extra: force capability/speculative/roadmap grounding before first model turn
     grounding_temp: Optional[float] = None
     sess_key = _session_key(admin_username or "admin", cli_type, mode, session_id or plan_id or "default")
+    tool_call_log_seed: List[Dict[str, Any]] = []
     try:
         from app.websocket.cli_grounding import (
             capability_nudge_message,
             is_capability_question,
+            is_roadmap_question,
             is_speculative_question,
+            roadmap_nudge_message,
             speculative_nudge_message,
         )
         from app.websocket.cli_tools import execute_tool as _exec_ground_tool
@@ -571,19 +581,74 @@ async def run_agentic_loop(
                     f"[INJECTED self_capabilities OUTPUT — answer from this only]\n{caps_body}"
                 ),
             })
-            tool_call_log_seed = [{
+            tool_call_log_seed.append({
                 "name": "self_capabilities",
                 "args": {},
                 "status": (caps or {}).get("status", "ok") if isinstance(caps, dict) else "ok",
                 "duration_ms": 0,
                 "injected": True,
                 "evidence_excerpt": (caps_body or "")[:6000],
-            }]
+            })
             grounding_temp = 0.15
-        else:
-            tool_call_log_seed = []
-            if not is_subagent and is_speculative_question(user_message):
-                conversation.append({"role": "user", "content": speculative_nudge_message()})
+        elif not is_subagent and is_speculative_question(user_message):
+            conversation.append({"role": "user", "content": speculative_nudge_message()})
+            grounding_temp = 0.2 if mode in ("ask", "plan") else None
+
+        # QUANTUM-CRYSTAL-ARCH — roadmap/AGI/Tier: inject plan index so ASK cannot miss plans
+        if not is_subagent and is_roadmap_question(user_message) and mode in ("ask", "plan", "ln_fab", "debug"):
+            try:
+                from app.websocket.cli_manifest import generate_plan_index
+
+                plan_idx = generate_plan_index(query=user_message, max_chars=5500)
+            except Exception:
+                plan_idx = ""
+            # Prefetch top priority plan header when present on disk
+            prefetch = ""
+            try:
+                from app.websocket.cli_tools import _read_file_sync
+
+                for cand in (
+                    ".cursor/plans/sovereign_ide_cursor_clone_3762c3a8.plan.md",
+                    ".cursor/plans/sovereign_ide_merged_plan_08beb363.plan.md",
+                    "docs/AGENTIC_ROLLOUT_CHECKLIST.md",
+                    "docs/CLINICAL_AGI_ASI_JOURNEY.md",
+                ):
+                    r = _read_file_sync(cand, 1, 80)
+                    if isinstance(r, dict) and r.get("status") == "ok":
+                        body = r.get("content") or r.get("result") or ""
+                        if body:
+                            prefetch += f"\n\n--- PREFETCH {cand} (lines 1–80) ---\n{body}"
+                            tool_call_log_seed.append({
+                                "name": "read_file",
+                                "args": {"path": cand, "start_line": 1, "end_line": 80},
+                                "status": "ok",
+                                "duration_ms": 0,
+                                "injected": True,
+                                "evidence_excerpt": str(body)[:4000],
+                            })
+                            if len(prefetch) > 12000:
+                                break
+            except Exception as _pf_err:
+                logger.debug("CLI plan prefetch skipped: %s", _pf_err)
+
+            conversation.append({
+                "role": "user",
+                "content": (
+                    f"{roadmap_nudge_message()}\n\n"
+                    f"[INJECTED PLAN INDEX — cite these paths; do not invent 'no plan']\n"
+                    f"{plan_idx or '(no plan files found on this workspace root)'}"
+                    f"{prefetch}"
+                ),
+            })
+            tool_call_log_seed.append({
+                "name": "plan_index",
+                "args": {"query": user_message[:200]},
+                "status": "ok",
+                "duration_ms": 0,
+                "injected": True,
+                "evidence_excerpt": (plan_idx or "")[:6000],
+            })
+            if grounding_temp is None:
                 grounding_temp = 0.2 if mode in ("ask", "plan") else None
     except Exception as _g_err:
         logger.debug("CLI grounding inject skipped: %s", _g_err)

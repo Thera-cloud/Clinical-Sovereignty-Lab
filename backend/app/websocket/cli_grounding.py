@@ -34,6 +34,8 @@ _EVIDENCE_TOOLS = frozenset({
     "sandbox_diff",
     "build_status",
     "build_test",
+    "read_git_status",
+    "git_log",
 })
 
 _CAPABILITY_QUESTION_RE = re.compile(
@@ -63,6 +65,26 @@ _SPECULATIVE_QUESTION_RE = re.compile(
     r"roadmap|"
     r"future|"
     r"aspirational"
+    r")\b",
+    re.I,
+)
+
+# Roadmap / AGI / Tier development — must open plans+docs, not invent from flags
+_ROADMAP_QUESTION_RE = re.compile(
+    r"\b("
+    r"narrow\s*agi|"
+    r"clinical\s*agi|"
+    r"tier\s*[12]|"
+    r"tier\s*one|tier\s*two|"
+    r"next\s+steps|"
+    r"roadmap|"
+    r"what('s| is)\s+(been\s+)?(built|developed|implemented)|"
+    r"what\s+has\s+been\s+(built|developed|implemented)|"
+    r"development\s+(plan|roadmap|tier)|"
+    r"agentic\s+(phase|roadmap|rollout)|"
+    r"sovereign\s+ide|"
+    r"\.cursor/plans|"
+    r"implementation\s+plans?"
     r")\b",
     re.I,
 )
@@ -103,6 +125,8 @@ YOUR ACCURACY RULES (MANDATORY — violation = falsehood):
 6. Completion claims (done/fixed/deployed/implemented): Require a commit hash in the same answer OR say "pending commit (uncommitted)". Tool test exit codes count as evidence for "tests pass" only.
 7. Untagged capability assertions are forbidden. If unsure, say "I don't have verified evidence" and call a tool.
 8. Honest citations only: [VERIFIED tool=name] / [VERIFIED path:line] must match a tool you actually called and content present in that tool's output. Dishonest citations are rejected by a post-response auditor.
+9. Roadmap / Narrow AGI / Tier / "next steps" / "what was developed": MUST use the injected plan index and/or read_file on .cursor/plans/*.plan.md and docs/AGENTIC* / *AGI* / *TIER*. Never claim "no plan exists" after a noisy grep. Use git_log / read_git_status for git reality.
+10. CATEGORY SEPARATION: Clinical ENABLE_* flags (ENABLE_THERAPEUTIC_PLANS, ENABLE_NATE_TOOL_EXECUTOR, ENABLE_SYMBOLIC_EXTRACTION, ENABLE_FORWARD_REASONING, ENABLE_PROACTIVE_TOUCH_POLICY) are therapy/agentic seams — NOT the Narrow AGI / Sovereign IDE / Tier development roadmap. Do not equate flag-off with "no AGI plan".
 """.strip()
 
 VERIFICATION_BEFORE_CLAIM = """
@@ -111,12 +135,14 @@ VERIFICATION-BEFORE-CLAIM:
 - "Flag is on" → self_capabilities or env evidence required.
 - "Deployed / on GREEN" → shell or verified hash evidence required; else "not verified on GREEN".
 - "Tests pass" → pytest/build_test tool result with exit_code 0 in this conversation.
+- "Roadmap / what was built" → plan index + plan/doc reads; git_log for commits. Grep-only is insufficient.
 Where a tool can answer, you MUST use the tool; answering from memory alone is forbidden.
 """.strip()
 
 DESIGN_DISCIPLINE = """
 SPECULATION DISCIPLINE:
-- Questions with "what would / how could / propose / design / roadmap / future" → answer as [DESIGN PROPOSAL] only.
+- Questions with "what would / how could / propose / design / roadmap / future" → answer as [DESIGN PROPOSAL] only for unbuilt work.
+- For roadmap/AGI/Tier questions: first cite existing .cursor/plans/ and docs/AGENTIC* (injected index or read_file). Mark unfinished plan todos [PLANNED]; only invent net-new steps as [DESIGN PROPOSAL].
 - Do not blend design proposals into present-tense capability lists.
 - Temperature of confidence: never use "clearly/obviously/definitely" for unverified claims.
 """.strip()
@@ -128,6 +154,10 @@ def is_capability_question(text: str) -> bool:
 
 def is_speculative_question(text: str) -> bool:
     return bool(text and _SPECULATIVE_QUESTION_RE.search(text))
+
+
+def is_roadmap_question(text: str) -> bool:
+    return bool(text and _ROADMAP_QUESTION_RE.search(text))
 
 
 def _env_on(name: str, default: str = "false") -> bool:
@@ -379,6 +409,25 @@ def validate_cli_response(
                 "detail": "Speculative question answered with capability claims without [DESIGN PROPOSAL]",
             })
 
+    # Roadmap/AGI/Tier answers must show plan/doc/git evidence (injected index counts)
+    if is_roadmap_question(user_message) and not plan_evidence_in_tools(tool_call_log):
+        # Soft pass if body already cites plan paths (injected index may be in user turns only)
+        cites_plans = bool(
+            re.search(
+                r"(?i)\.cursor/plans/|docs/AGENTIC|docs/CLINICAL_AGI|docs/TIER1|"
+                r"sovereign_ide_cursor|AGENTIC_ROLLOUT",
+                text,
+            )
+        )
+        if not cites_plans:
+            violations.append({
+                "type": "roadmap_without_plan_evidence",
+                "detail": (
+                    "Roadmap/AGI/Tier question answered without plan index, "
+                    ".cursor/plans read, AGI docs, or git_log/read_git_status"
+                ),
+            })
+
     # Present-tense claims without evidence tags or evidence tools
     for m in _CAPABILITY_CLAIM_RE.finditer(text):
         start = max(0, m.start() - 80)
@@ -469,6 +518,47 @@ def speculative_nudge_message() -> str:
         f"[GROUNDING REQUIRED] Speculative/design question. Prefix the answer with "
         f"{DESIGN_PROPOSAL_TAG}. Do not describe proposals as current production behavior."
     )
+
+
+def roadmap_nudge_message() -> str:
+    return (
+        "[GROUNDING REQUIRED] Roadmap / AGI / Tier / development question.\n"
+        "1. Use the INJECTED PLAN INDEX below (and read_file priority plans/docs if needed).\n"
+        "2. Separate [VERIFIED] existing plans/code from [PLANNED] todos and "
+        f"{DESIGN_PROPOSAL_TAG} net-new ideas.\n"
+        "3. Clinical ENABLE_* flags ≠ Narrow AGI / Sovereign IDE roadmap.\n"
+        "4. Never say 'no plan exists' when .cursor/plans/ or docs/AGENTIC* match the topic.\n"
+        "5. Prefer git_log / read_git_status for what landed in git."
+    )
+
+
+def plan_evidence_in_tools(tool_call_log: Optional[List[Dict[str, Any]]]) -> bool:
+    """True if this turn touched plans, AGI docs, git tools, or injected plan index."""
+    for t in tool_call_log or []:
+        name = str(t.get("name") or "")
+        if name in ("read_git_status", "git_log", "plan_index"):
+            return True
+        if t.get("injected") and name in ("plan_index", "read_file"):
+            return True
+        args = t.get("args") or {}
+        args_s = str(args).lower() if not isinstance(args, dict) else " ".join(
+            str(v) for v in args.values()
+        ).lower()
+        blob = f"{name} {args_s} {str(t.get('evidence_excerpt') or '')}".lower()
+        if any(
+            needle in blob
+            for needle in (
+                ".cursor/plans",
+                "docs/agentic",
+                "docs/clinical_agi",
+                "docs/tier1",
+                "narrow agi",
+                "sovereign_ide",
+                "implementation plans",
+            )
+        ):
+            return True
+    return False
 
 
 def format_manifest_for_tool(manifest: Dict[str, Any]) -> str:

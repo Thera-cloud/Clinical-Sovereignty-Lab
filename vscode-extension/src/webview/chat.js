@@ -791,7 +791,7 @@
       'inject_log': '💉', 'debug_cleanup': '🧹',
       'delete_file': '🗑️', 'rename_file': '📎',
       'run_command': '⚡', 'read_diagnostics': '🔬',
-      'read_git_status': '📊', 'read_open_editors': '📑',
+      'read_git_status': '📊', 'git_log': '📜', 'read_open_editors': '📑', 'plan_index': '🗺️',
       'web_fetch': '🌐', 'web_search_local': '🌐',
       'todo_write': '📋', 'switch_mode': '🔄',
       'provider_stats': '📊',

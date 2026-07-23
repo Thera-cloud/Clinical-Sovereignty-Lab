@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { BridgeClient } from './bridgeClient';
 import { DiffApplicator } from './diffApplicator';
 import type {
@@ -12,9 +14,11 @@ import type {
   ToolCallErrorCode,
 } from './types';
 
+const execFileAsync = promisify(execFile);
+
 const ALL_CAPABILITIES: WorkspaceToolName[] = [
   'read_file', 'list_directory', 'search_code', 'glob_files', 'proposed_edit',
-  'read_diagnostics', 'read_git_status', 'write_file', 'create_file',
+  'read_diagnostics', 'read_git_status', 'git_log', 'write_file', 'create_file',
   'delete_file', 'rename_file', 'run_command', 'read_open_editors',
 ];
 
@@ -131,6 +135,7 @@ export class WorkspaceToolProvider implements vscode.Disposable {
       case 'proposed_edit':     return this.handleProposedEdit(params, requestId);
       case 'read_diagnostics':  return this.handleReadDiagnostics(params);
       case 'read_git_status':   return this.handleReadGitStatus();
+      case 'git_log':           return this.handleGitLog(params);
       case 'write_file':        return this.handleWriteFile(params);
       case 'create_file':       return this.handleCreateFile(params);
       case 'delete_file':       return this.handleDeleteFile(params);
@@ -509,6 +514,41 @@ export class WorkspaceToolProvider implements vscode.Disposable {
     }
 
     return { success: true, content: lines.join('\n'), metadata: { staged: staged.length, modified: changes.length } };
+  }
+
+  private async handleGitLog(params: Record<string, unknown>): Promise<ToolResult> {
+    if (!this.workspaceRoot) {
+      return { success: false, error: 'No workspace folder open', error_code: 'UNKNOWN' };
+    }
+    const maxCount = Math.max(1, Math.min(Number(params.max_count || 15), 40));
+    const filterPath = params.path ? String(params.path).replace(/\0/g, '') : '';
+    if (filterPath.includes('..')) {
+      return { success: false, error: `Path traversal blocked: ${filterPath}`, error_code: 'PATH_TRAVERSAL' };
+    }
+    const args = [
+      'log', `-n${maxCount}`,
+      '--pretty=format:%h %ad %an — %s',
+      '--date=short',
+    ];
+    if (filterPath) {
+      args.push('--', filterPath);
+    }
+    try {
+      const { stdout, stderr } = await execFileAsync('git', args, {
+        cwd: this.workspaceRoot.fsPath,
+        timeout: 10000,
+        maxBuffer: 512 * 1024,
+      });
+      const body = (stdout || stderr || '').trim() || '(no commits)';
+      return {
+        success: true,
+        content: `═══ READ-ONLY GIT LOG (n=${maxCount}${filterPath ? `, path=${filterPath}` : ''}) ═══\n${body}`,
+        metadata: { max_count: maxCount, path: filterPath || null },
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { success: false, error: `git_log failed: ${msg}`, error_code: 'UNKNOWN' };
+    }
   }
 
   private async handleWriteFile(params: Record<string, unknown>): Promise<ToolResult> {
