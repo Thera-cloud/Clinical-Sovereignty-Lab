@@ -30,8 +30,12 @@ services:
       # Staging must never publish to live LinkedIn/X (shares OAuth tokens from .env)
       - ENABLE_SKYEYE_SESSIONS=false
       - ENABLE_SKYEYE=false
+      - ENABLE_LINKEDIN_COACH_PORTAL_CAMPAIGN=false
+      - ENABLE_SKYEYE_LINKEDIN_IMAGES=false
       # Staging shares SendGrid with prod — never email support@ / CEO from bake traffic
       - ENABLE_CEO_INBOX_EXTERNAL_NOTIFY=false
+      # Digest / marketing outbound also off on bake (prod owns those)
+      - ENABLE_PUBLIC_TRIAL_DIGEST=false
       - DEBUG=false
       - WEB_CONCURRENCY=1
       - NODE_COLOR=green
