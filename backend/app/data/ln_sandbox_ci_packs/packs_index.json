@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "description": "Disposable micro-repos for LN Sandbox Engineering CI DOJO. Never mutates GREEN prod tree.",
+  "packs": [
+    "asyncpg_cast",
+    "catch_all_routes",
+    "env_redis_prefix"
+  ]
+}

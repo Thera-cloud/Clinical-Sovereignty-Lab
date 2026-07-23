@@ -1,0 +1,8 @@
+{
+  "task_key": "ci_catch_all_routes",
+  "title": "Order FastAPI health before catch-all",
+  "prompt": "broken/routes.py registers a catch-all /{assessment_id} before /health. Reorder so health is defined first. Return ONLY a unified diff for broken/routes.py. No markdown fences.",
+  "test_path": "tests/test_routes.py",
+  "target_files": ["broken/routes.py"],
+  "domain": "coding"
+}

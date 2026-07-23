@@ -10,6 +10,7 @@ Flags:
   ENABLE_LN_SANDBOX=true
   LN_SANDBOX_CLINICAL=true (default when master on)
   LN_SANDBOX_ENGINEERING=true (default when master on)
+  LN_SANDBOX_ENGINEERING_CI=true — disposable pack→patch→pytest (not GREEN tree)
   LN_SANDBOX_CLIENT_PREP=true (default when master on)
 """
 from __future__ import annotations
@@ -298,6 +299,19 @@ class LNSandboxEngine:
         )
 
     async def _run_engineering(self) -> Dict[str, Any]:
+        # Prefer disposable CI packs when flagged (never mutates GREEN prod tree)
+        try:
+            from app.services.ln_sandbox_engineering_ci import (
+                ci_mode_on,
+                list_pack_names,
+                run_ci_pack_cycle,
+            )
+
+            if ci_mode_on() and list_pack_names():
+                return await run_ci_pack_cycle(self)
+        except Exception as e:
+            logger.warning("ln_sandbox engineering CI unavailable (%s) — fixture fallback", e)
+
         tasks = self._eng_tasks or []
         if not tasks:
             return {"ok": False, "error": "no_engineering_tasks"}
@@ -819,6 +833,15 @@ class LNSandboxEngine:
             return None
 
     def get_status(self) -> Dict[str, Any]:
+        ci_on = False
+        ci_packs = 0
+        try:
+            from app.services.ln_sandbox_engineering_ci import ci_mode_on, list_pack_names
+
+            ci_on = ci_mode_on()
+            ci_packs = len(list_pack_names())
+        except Exception:
+            pass
         return {
             "agent": "LNSandboxEngine",
             "running": self._running,
@@ -826,4 +849,6 @@ class LNSandboxEngine:
             "cycle_count": self._cycle_count,
             "last_result": self.last_result,
             "eng_tasks_loaded": len(self._eng_tasks or []),
+            "engineering_ci": ci_on,
+            "ci_packs_loaded": ci_packs,
         }

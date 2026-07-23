@@ -16,6 +16,8 @@ Unsupervised practice loop so Little Nate learns while humans sleep. Two tracks 
 | Admin UI | `dashboard/ln_sandbox.html` |
 | Migration | `backend/migrations/267_ln_sandbox.sql` + `268_ln_sandbox_auditor_baseline.sql` |
 | Eng fixtures | `backend/app/data/ln_sandbox_engineering_tasks.json` |
+| Eng CI packs | `backend/app/data/ln_sandbox_ci_packs/` |
+| Eng CI runner | `backend/app/services/ln_sandbox_engineering_ci.py` |
 
 ## Flags
 
@@ -23,7 +25,10 @@ Unsupervised practice loop so Little Nate learns while humans sleep. Two tracks 
 |---|---|---|
 | `ENABLE_LN_SANDBOX` | false | Master switch |
 | `LN_SANDBOX_CLINICAL` | true | Clinical strategy practice |
-| `LN_SANDBOX_ENGINEERING` | true | Engineering fixture practice |
+| `LN_SANDBOX_ENGINEERING` | true | Engineering fixture practice (JSON Q&A judge) |
+| `LN_SANDBOX_ENGINEERING_CI` | false | Disposable pack→patch→pytest (alias: `ENABLE_ENGINEERING_DOJO`) |
+| `LN_SANDBOX_CI_USE_GOLDEN` | false | Apply `golden.patch` instead of LLM (smoke/offline) |
+| `LN_SANDBOX_CI_WORKDIR` | `/tmp/ln_sandbox_ci` | Materialize packs here only |
 | `LN_SANDBOX_CLIENT_PREP` | true | Idle-client candidate drafts |
 | `LN_SANDBOX_GENERATE_TIMEOUT_S` | 25 | Router wait budget (seconds) |
 | `LN_SANDBOX_SKIP_LNI` | true | Skip heavy LittleNateInference (prevents 90s hangs) |
@@ -35,7 +40,7 @@ Unsupervised practice loop so Little Nate learns while humans sleep. Two tracks 
 3. **Clinical promoted crystals** use `scope=admin_only` (or `user:{id}` for client_prep) — never widen to `global` from sandbox.
 4. **origin_surface** for promoted rows: `ln_sandbox_promoted`. Drafts stay in `ln_sandbox_practice_corpus`.
 5. **Restraints win** — seeded `restraint_ref` rows + Predictive Restraint / crisis / Sensitive Bridge on live turns. Sandbox score never bypasses live gates.
-6. **No GREEN code mutation** — engineering track uses JSON fixtures + text judge, not repo edits on production.
+6. **No GREEN / vault mutation** — fixture track = JSON Q&A judge. CI track copies packs to `/tmp/ln_sandbox_ci/` only, applies diffs there, runs pack pytest. Never edits `/opt/clinical-sovereignty-lab` source, vaults, or `safe_deploy`.
 7. **Live inject is candidate-only** — labeled CANDIDATE. When `ENABLE_CLINICAL_TECHNIQUE_DIRECTORY` is on, inject rides inside `directory_context_for_surface`. When directory is off but `ENABLE_LN_SANDBOX` is on, chat + voice (call-start + mid-call) call `get_sandbox_candidates_for_user` directly. Sanctuary inject prefers the speaking member, not HOH-only.
 8. **Inject quality gate** — kinds `success_pattern` / `client_prep` / `technique_pattern` only; never `failure_lesson`. Drafts need `score >= 0.67` unless status is `queued`/`promoted`.
 9. **Fallback-only cycles** — if every attempt is `[SANDBOX_FALLBACK]`, skip corpus write and do not auto-queue.

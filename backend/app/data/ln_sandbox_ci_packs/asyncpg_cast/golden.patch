@@ -1,0 +1,15 @@
+--- a/broken/handler.py	2026-07-23 02:30:48
++++ b/broken/handler.py	2026-07-23 02:30:48
+@@ -2,10 +2,10 @@
+ 
+ 
+ def build_token_balance_sql() -> str:
+-    # BUG: asyncpg cannot infer polymorphic type for to_jsonb($1)
++    # Fixed: explicit cast for asyncpg polymorphic to_jsonb
+     return (
+         "UPDATE users SET profile_data = jsonb_set("
+-        "profile_data, '{token_balance}', to_jsonb($1))"
++        "profile_data, '{token_balance}', to_jsonb($1::int))"
+     )
+ 
+ 

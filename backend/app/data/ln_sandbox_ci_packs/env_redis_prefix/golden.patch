@@ -1,0 +1,13 @@
+--- a/broken/auth_keys.py	2026-07-23 02:31:04
++++ b/broken/auth_keys.py	2026-07-23 02:31:04
+@@ -1,8 +1,8 @@
+ """Broken on purpose — ENVIRONMENT mismatch breaks REST auth."""
+ from typing import Optional
+ 
+-# BUG: local-dev default leaks into Docker "production" containers
+-DEFAULT_ENVIRONMENT = "development"
++# Production containers must agree on Redis auth prefix
++DEFAULT_ENVIRONMENT = "production"
+ 
+ 
+ def redis_auth_key(token: str, environment: Optional[str] = None) -> str:

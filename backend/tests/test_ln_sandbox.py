@@ -226,5 +226,93 @@ class TestGenerateSkipsLniByDefault(unittest.IsolatedAsyncioTestCase):
         eng.app_state.littlenate_inference.generate.assert_not_called()
 
 
+_ci = _load(
+    "app.services.ln_sandbox_engineering_ci",
+    APP / "services" / "ln_sandbox_engineering_ci.py",
+)
+
+
+class TestEngineeringCIPacks(unittest.TestCase):
+    def test_packs_indexed(self):
+        names = _ci.list_pack_names()
+        self.assertGreaterEqual(len(names), 3)
+        self.assertIn("asyncpg_cast", names)
+
+    def test_golden_patch_passes_pytest(self):
+        import shutil
+        import tempfile
+
+        root = Path(tempfile.mkdtemp(prefix="ln_ci_test_"))
+        try:
+            for name in _ci.list_pack_names():
+                wd, task, note = _ci.materialize_pack(name, root)
+                self.assertIsNotNone(wd, note)
+                broken = _ci.run_pytest(wd, task["test_path"])
+                self.assertFalse(broken["passed"], name)
+                ok, apply_notes = _ci.apply_unified_diff(
+                    wd, (wd / "golden.patch").read_text(encoding="utf-8")
+                )
+                self.assertTrue(ok, f"{name}: {apply_notes}")
+                fixed = _ci.run_pytest(wd, task["test_path"])
+                self.assertTrue(fixed["passed"], f"{name}: {fixed.get('log')}")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_path_escape_rejected(self):
+        import tempfile
+
+        root = Path(tempfile.mkdtemp(prefix="ln_ci_esc_"))
+        try:
+            wd, task, _ = _ci.materialize_pack("asyncpg_cast", root)
+            evil = (
+                "--- a/../../etc/passwd\n"
+                "+++ b/../../etc/passwd\n"
+                "@@ -1,1 +1,1 @@\n"
+                "-x\n"
+                "+y\n"
+            )
+            ok, notes = _ci.apply_unified_diff(wd, evil)
+            self.assertFalse(ok)
+            self.assertTrue("escape" in notes or "missing" in notes)
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
+
+class TestEngineeringCIFlagRouting(unittest.IsolatedAsyncioTestCase):
+    async def test_ci_flag_routes_to_ci_runner(self):
+        import os
+
+        eng = _engine.LNSandboxEngine(db_pool=MagicMock(), app_state=None)
+        eng._open_session = AsyncMock(return_value="sess-ci")
+        eng._close_session = AsyncMock()
+        eng._record_attempt = AsyncMock()
+        eng._write_corpus = AsyncMock(return_value="corp-ci")
+        eng._generate = AsyncMock(return_value="should-not-matter-with-golden")
+
+        prev_ci = os.environ.get("LN_SANDBOX_ENGINEERING_CI")
+        prev_g = os.environ.get("LN_SANDBOX_CI_USE_GOLDEN")
+        os.environ["LN_SANDBOX_ENGINEERING_CI"] = "true"
+        os.environ["LN_SANDBOX_CI_USE_GOLDEN"] = "true"
+        try:
+            out = await eng._run_engineering()
+        finally:
+            if prev_ci is None:
+                os.environ.pop("LN_SANDBOX_ENGINEERING_CI", None)
+            else:
+                os.environ["LN_SANDBOX_ENGINEERING_CI"] = prev_ci
+            if prev_g is None:
+                os.environ.pop("LN_SANDBOX_CI_USE_GOLDEN", None)
+            else:
+                os.environ["LN_SANDBOX_CI_USE_GOLDEN"] = prev_g
+
+        self.assertTrue(out.get("ok"))
+        self.assertEqual(out.get("mode"), "engineering_ci")
+        self.assertTrue(out.get("passed"))
+        self.assertEqual(out.get("best_score"), 1.0)
+        eng._write_corpus.assert_called()
+
+
 if __name__ == "__main__":
     unittest.main()

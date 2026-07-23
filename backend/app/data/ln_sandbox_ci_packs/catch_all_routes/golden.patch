@@ -1,0 +1,12 @@
+--- a/broken/routes.py	2026-07-23 02:30:48
++++ b/broken/routes.py	2026-07-23 02:30:48
+@@ -1,8 +1,8 @@
+ """Broken on purpose — catch-all swallows /health."""
+ 
+ ROUTE_ORDER = [
+-    ("GET", "/{assessment_id}"),  # catch-all first — BUG
+     ("GET", "/health"),
++    ("GET", "/{assessment_id}"),
+ ]
+ 
+ 

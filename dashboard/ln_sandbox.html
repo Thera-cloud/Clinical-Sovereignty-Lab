@@ -98,7 +98,12 @@ async function loadStatus(){
   var s=j.stats||{};
   var el=document.getElementById('stats');
   var bits=[];
-  if(j.engine) bits.push('<span class="chip"><b>engine</b> '+(j.engine.running?'running':'idle')+'</span>');
+  if(j.engine){
+    bits.push('<span class="chip"><b>engine</b> '+(j.engine.running?'running':'idle')+'</span>');
+    bits.push('<span class="chip"><b>eng CI</b> '+(j.engine.engineering_ci?'on':'off')+
+      (j.engine.ci_packs_loaded!=null?' ('+j.engine.ci_packs_loaded+' packs)':'')+'</span>');
+    bits.push('<span class="chip"><b>eng fixtures</b> '+(j.engine.eng_tasks_loaded!=null?j.engine.eng_tasks_loaded:'—')+'</span>');
+  }
   bits.push('<span class="chip"><b>pending promote</b> '+(s.promotion_pending!=null?s.promotion_pending:'—')+'</span>');
   bits.push('<span class="chip"><b>corpus queued</b> '+(s.corpus_queued!=null?s.corpus_queued:'—')+'</span>');
   (s.by_track_status||[]).slice(0,8).forEach(function(row){
