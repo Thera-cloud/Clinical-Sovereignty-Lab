@@ -84,13 +84,20 @@ class LiveSession:
         self.chat: List[dict] = []
         self.chat_compact: str = ""
         self.chat_turns_since_compact = 0
-        self.lock = asyncio.Lock()
+        # Lazy: asyncio.Lock() needs a running loop on Python 3.9
+        self._lock: Optional[asyncio.Lock] = None
         self.last_observe_at = 0.0
         self.last_ln_reply = ""
         self.pending_crystallize_coach = ""
         self.pending_crystallize_at = 0.0
         self.started_at = time.time()
         self.warn_245_sent = False
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     def add_frame(self, b64jpeg: str):
         self.frames.append(b64jpeg)
