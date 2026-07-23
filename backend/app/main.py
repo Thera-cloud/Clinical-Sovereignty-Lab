@@ -2864,6 +2864,17 @@ async def lifespan(app: FastAPI):
     except Exception as _sqsd_err:
         print(f"   ⚠️  SixQuotientSelfDevelopmentAgent init failed: {_sqsd_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — LN Sandbox DOJO (clinical + engineering practice; no auto-promote)
+    _ln_sandbox_engine = None
+    try:
+        from app.services.ln_sandbox_engine import LNSandboxEngine
+        _ln_sandbox_engine = LNSandboxEngine(db_pool, app_state=app.state)
+        await _ln_sandbox_engine.start()
+        app.state.ln_sandbox_engine = _ln_sandbox_engine
+        print("   ✅ LNSandboxEngine started (ENABLE_LN_SANDBOX)")
+    except Exception as _ln_sb_err:
+        print(f"   ⚠️  LNSandboxEngine init failed: {_ln_sb_err}")
+
     # ── Nate Check-In Agent — 72h inactivity outreach for clients + coaches ──
     _nate_checkin_agent = None
     try:
@@ -3363,6 +3374,7 @@ async def lifespan(app: FastAPI):
         ("six_quotient_standards_index", _six_q_standards is not None),  # QUANTUM-CRYSTAL-ARCH
         ("six_quotient_battery_auditor", _six_q_battery_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("six_quotient_self_dev_agent", _six_q_self_dev_agent is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("ln_sandbox_engine", _ln_sandbox_engine is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", _nate_checkin_agent is not None),
         ("nate_commitment_agent", _nate_commitment_agent is not None),
         ("nate_self_monitor_agent", _nate_self_monitor_agent is not None),
@@ -3539,6 +3551,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ SixQuotientSelfDevelopmentAgent stopped")
         except Exception as _sqsd_stop:
             print(f"   ⚠️  SixQuotientSelfDevelopmentAgent shutdown: {_sqsd_stop}")
+    _ln_sandbox_h = getattr(app.state, "ln_sandbox_engine", None)  # QUANTUM-CRYSTAL-ARCH
+    if _ln_sandbox_h:
+        try:
+            await _ln_sandbox_h.stop()
+            print("   ✅ LNSandboxEngine stopped")
+        except Exception as _ln_sb_stop:
+            print(f"   ⚠️  LNSandboxEngine shutdown: {_ln_sb_stop}")
     if _sse_orchestrator:
         try:
             await _sse_orchestrator.stop()
@@ -4020,6 +4039,13 @@ if settings.ENABLE_SKYEYE:
 if getattr(settings, "ENABLE_LN_OBSERVER", False):
     from app.routers.ln_observer_api import router as ln_observer_router
     app.include_router(ln_observer_router)
+
+# QUANTUM-CRYSTAL-ARCH — LN Sandbox DOJO (always register; engine flag-gates work)
+try:
+    from app.routers.ln_sandbox_api import router as ln_sandbox_router
+    app.include_router(ln_sandbox_router)
+except Exception as _ln_sb_rerr:
+    print(f"   ⚠️  LN Sandbox router failed: {_ln_sb_rerr}")
 
 # Coherence Engine (Sovereign Swarm)
 app.include_router(coherence_api.router)

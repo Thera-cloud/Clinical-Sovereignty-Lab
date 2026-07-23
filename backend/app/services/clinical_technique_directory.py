@@ -671,26 +671,46 @@ async def directory_context_for_surface(
 ) -> str:
     """
     QUANTUM-CRYSTAL-ARCH: shared injector for chat / sanctuary / coaching / voice surfaces.
+    Also appends LN Sandbox candidate approaches when ENABLE_LN_SANDBOX (drafts only).
     """
-    if not clinical_directory_enabled():
-        return ""
-    try:
-        if suggest_plan and db_pool and user_id:
-            await maybe_create_suggested_care_plan(
-                db_pool, user_id=user_id, user_text=user_text or ""
+    parts: List[str] = []
+    if clinical_directory_enabled():
+        try:
+            if suggest_plan and db_pool and user_id:
+                await maybe_create_suggested_care_plan(
+                    db_pool, user_id=user_id, user_text=user_text or ""
+                )
+            block = await build_directory_context_for_turn(
+                user_text or "",
+                db_pool=db_pool,
+                user_id=user_id,
+                search_proxy=search_proxy,
+                active_plan_theme=active_plan_theme,
+                max_techniques=max_techniques,
+                allow_web=allow_web,
             )
-        return await build_directory_context_for_turn(
-            user_text or "",
-            db_pool=db_pool,
-            user_id=user_id,
-            search_proxy=search_proxy,
-            active_plan_theme=active_plan_theme,
-            max_techniques=max_techniques,
-            allow_web=allow_web,
-        )
-    except Exception as e:
-        logger.warning("clinical_directory: surface context failed: %s", e)
-        return ""
+            if block:
+                parts.append(block)
+        except Exception as e:
+            logger.warning("clinical_directory: surface context failed: %s", e)
+
+    # QUANTUM-CRYSTAL-ARCH — LN Sandbox DOJO candidate inject (never authoritative)
+    if (
+        db_pool
+        and user_id
+        and os.getenv("ENABLE_LN_SANDBOX", "false").strip().lower()
+        in ("1", "true", "yes", "on")
+    ):
+        try:
+            from app.services.ln_sandbox_context import get_sandbox_candidates_for_user
+
+            sb = await get_sandbox_candidates_for_user(db_pool, user_id, max_items=3)
+            if sb:
+                parts.append(sb)
+        except Exception as e:
+            logger.warning("clinical_directory: sandbox candidate inject failed: %s", e)
+
+    return "\n\n".join(parts)
 
 
 def extract_plan_focus_theme(plan_context_block: str) -> str:

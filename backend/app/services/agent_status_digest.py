@@ -193,6 +193,7 @@ class AgentStatusDigest:
             ("Six-Quotient Standards Index", "six_quotient_standards_index"),  # QUANTUM-CRYSTAL-ARCH
             ("Six-Quotient Growth Engine", "six_quotient_growth_engine"),  # QUANTUM-CRYSTAL-ARCH
             ("Six-Quotient Self-Dev", "six_quotient_self_dev_agent"),  # QUANTUM-CRYSTAL-ARCH
+            ("LN Sandbox DOJO", "ln_sandbox_engine"),  # QUANTUM-CRYSTAL-ARCH
         ]:
             agent = getattr(self.app, attr, None)
             status, detail = self._check_agent(agent, name)

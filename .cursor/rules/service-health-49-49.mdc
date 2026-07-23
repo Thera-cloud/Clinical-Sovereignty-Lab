@@ -3,9 +3,9 @@ description: All 117 services must remain healthy at startup. Never introduce ch
 alwaysApply: true
 ---
 
-# 133/133 Service Health Requirement
+# 134/134 Service Health Requirement
 
-The backend reports `STARTUP COMPLETE: N/133 services healthy` on boot. The target is **133/133 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
+The backend reports `STARTUP COMPLETE: N/134 services healthy` on boot. The target is **134/134 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
 
 > Service #117 is `account_event_reconciler` (added 2026-05-17 as part of the user creation audit hook). It runs on every boot regardless of `ENABLE_USER_CREATION_HOOK`; when the flag is off it is a silent no-op so the count stays stable.
 
@@ -117,7 +117,7 @@ webhook_fortress, guardian_fibre, sentinel_mesh, pipeline_drum, hepa_filter, bil
 
 3. **Singletons require constructor args** — `SessionMemoryStore(storage_root)`, `NotificationSystem(data_dir, api_key)`, etc. Never instantiate these bare. Reuse the instance from `app.state` when available.
 
-4. **After any `main.py` change, verify health** — deploy, restart, and confirm the startup log shows `133/133 services healthy` and `ALL SYSTEMS NOMINAL`. If degraded, fix before considering the deploy complete.
+4. **After any `main.py` change, verify health** — deploy, restart, and confirm the startup log shows `134/134 services healthy` and `ALL SYSTEMS NOMINAL`. If degraded, fix before considering the deploy complete.
 
 5. **Agent Status Digest emails 3x daily** to `support@sovereignsanctuary.net`. If the digest reports any agent as FAILED or WARNING, investigate — it means a live process is not running as expected.
 

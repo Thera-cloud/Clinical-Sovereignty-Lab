@@ -1,0 +1,54 @@
+# LN Sandbox DOJO
+
+## Purpose
+
+Unsupervised practice loop so Little Nate learns while humans sleep. Two tracks + idle client prep. **Failure is free inside the sandbox; live clients stay restrained.**
+
+## Architecture
+
+| Component | File |
+|---|---|
+| Engine | `backend/app/services/ln_sandbox_engine.py` |
+| Promotion gate | `backend/app/services/ln_sandbox_promotion.py` |
+| Context inject | `backend/app/services/ln_sandbox_context.py` |
+| API | `backend/app/routers/ln_sandbox_api.py` |
+| Migration | `backend/migrations/267_ln_sandbox.sql` |
+| Eng fixtures | `backend/app/data/ln_sandbox_engineering_tasks.json` |
+
+## Flags
+
+| Var | Default | Role |
+|---|---|---|
+| `ENABLE_LN_SANDBOX` | false | Master switch |
+| `LN_SANDBOX_CLINICAL` | true | Clinical strategy practice |
+| `LN_SANDBOX_ENGINEERING` | true | Engineering fixture practice |
+| `LN_SANDBOX_CLIENT_PREP` | true | Idle-client candidate drafts |
+
+## Hard rules
+
+1. **Never auto-promote** practice corpus into production crystals. Strong passes may auto-**queue**; human must `POST /api/ln-sandbox/promote/decide`.
+2. **Validator required** on approve (`NateResponseValidator`; high severity blocks).
+3. **Clinical promoted crystals** use `scope=admin_only` (or `user:{id}` for client_prep) — never widen to `global` from sandbox.
+4. **origin_surface** for promoted rows: `ln_sandbox_promoted`. Drafts stay in `ln_sandbox_practice_corpus`.
+5. **Restraints win** — seeded `restraint_ref` rows + Predictive Restraint / crisis / Sensitive Bridge on live turns. Sandbox score never bypasses live gates.
+6. **No GREEN code mutation** — engineering track uses JSON fixtures + text judge, not repo edits on production.
+7. **Live inject is candidate-only** — `directory_context_for_surface` appends sandbox drafts labeled CANDIDATE when flag on.
+
+## Cycle
+
+Default 30 minutes (`LN_SANDBOX_CYCLE_SECONDS`). Stagger 195s. Idle prep threshold: `LN_SANDBOX_IDLE_HOURS` (default 6).
+
+## Verification
+
+```bash
+# Migration applied
+docker exec nate_postgres psql -U nate_admin -d little_nate -c '\d ln_sandbox_practice_corpus'
+
+# Health
+curl -s http://localhost:8000/api/ln-sandbox/health
+
+# Manual cycle (admin token)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"tracks":["clinical_strategy","engineering"]}' \
+  http://localhost:8000/api/ln-sandbox/run-cycle
+```
