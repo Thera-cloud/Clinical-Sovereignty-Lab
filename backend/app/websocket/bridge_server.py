@@ -9160,13 +9160,13 @@ class AzureCortex:
                 except Exception:
                     pass
             # QUANTUM-CRYSTAL-ARCH: clinical technique directory + care-plan assist + web enrich
+            _uid = _uname or _hw_id
             if os.environ.get("ENABLE_CLINICAL_TECHNIQUE_DIRECTORY", "").lower() in ("true", "1", "yes"):
                 try:
                     from app.services.clinical_technique_directory import (
                         directory_context_for_surface,
                         extract_plan_focus_theme,
                     )
-                    _uid = _uname or _hw_id
                     _theme = extract_plan_focus_theme("\n".join(blocks))
                     _dc = await directory_context_for_surface(
                         user_text or "",
@@ -9178,8 +9178,18 @@ class AzureCortex:
                     )
                     if _dc:
                         blocks.append(_dc)
-                except Exception:
-                    pass
+                except Exception as _cde:
+                    print(f"[CLINICAL-DIR] surface inject failed: {_cde}")
+            # QUANTUM-CRYSTAL-ARCH — sandbox inject when directory flag off
+            # (directory_context_for_surface already embeds sandbox when directory on)
+            elif os.environ.get("ENABLE_LN_SANDBOX", "").lower() in ("true", "1", "yes", "on"):
+                try:
+                    from app.services.ln_sandbox_context import get_sandbox_candidates_for_user
+                    _sb = await get_sandbox_candidates_for_user(_cpool, _uid)
+                    if _sb:
+                        blocks.append(_sb)
+                except Exception as _sbe:
+                    print(f"[LN_SANDBOX] chat inject failed: {_sbe}")
             return "\n\n".join(blocks)
 
         async def _recall_with_skill_bias(_pool, _hid, _q, _un):

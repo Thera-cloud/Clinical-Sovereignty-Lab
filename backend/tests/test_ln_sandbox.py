@@ -82,12 +82,25 @@ class TestSandboxEngineOffline(unittest.IsolatedAsyncioTestCase):
     async def test_generate_fallback_without_lni(self):
         eng = _engine.LNSandboxEngine(db_pool=None, app_state=None)
         text = await eng._generate("practice", domain="clinical")
+        self.assertIn("[SANDBOX_FALLBACK]", text)
         self.assertGreater(len(text), 40)
+
+    async def test_cycle_lock_rejects_overlap(self):
+        eng = _engine.LNSandboxEngine(db_pool=None, app_state=None)
+
+        async def _hold():
+            async with eng._cycle_lock:
+                await asyncio.sleep(0.15)
+
+        t = asyncio.create_task(_hold())
+        await asyncio.sleep(0.02)
+        out = await eng.run_cycle(force_tracks=["engineering"])
+        self.assertFalse(out["ok"])
+        self.assertEqual(out.get("error"), "cycle_in_progress")
+        await t
 
     async def test_run_cycle_noop_without_db(self):
         eng = _engine.LNSandboxEngine(db_pool=None, app_state=None)
-        # flag off path: caller gates; run_cycle itself needs db
-        # Simulate track method score only
         j = _engine.score_response(
             "Use to_jsonb($1::int) under asyncpg for polymorphic casts.",
             must_include=["::int", "to_jsonb", "asyncpg"],

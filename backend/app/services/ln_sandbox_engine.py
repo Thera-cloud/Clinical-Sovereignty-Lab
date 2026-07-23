@@ -140,6 +140,13 @@ def score_response(
     }
 
 
+_PRACTICE_FALLBACK = (
+    "I hear you. Right now I'm staying with what you brought — "
+    "I'm here with you in this, and we can look at what your body "
+    "is doing in this moment without rushing a plan."
+)
+
+
 class LNSandboxEngine:
     """Background practice agent — clinical strategy + engineering + idle prep."""
 
@@ -149,6 +156,7 @@ class LNSandboxEngine:
         self._running = False
         self._task: Optional[asyncio.Task] = None
         self._cycle_count = 0
+        self._cycle_lock = asyncio.Lock()
         self.last_result: Dict[str, Any] = {}
         self._eng_tasks = _load_engineering_tasks()
 
@@ -187,11 +195,21 @@ class LNSandboxEngine:
             await asyncio.sleep(CYCLE_SECONDS)
 
     async def run_cycle(self, *, force_tracks: Optional[List[str]] = None) -> Dict[str, Any]:
+        if self._cycle_lock.locked():
+            return {"ok": False, "error": "cycle_in_progress", "tracks": {}}
+        async with self._cycle_lock:
+            return await self._run_cycle_inner(force_tracks=force_tracks)
+
+    async def _run_cycle_inner(
+        self, *, force_tracks: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         out: Dict[str, Any] = {
             "ok": True,
             "at": datetime.now(timezone.utc).isoformat(),
             "tracks": {},
         }
+        if self.db_pool:
+            await self._abort_stale_sessions()
         tracks = force_tracks or []
         if not tracks:
             if _track_on("LN_SANDBOX_CLINICAL"):
@@ -213,17 +231,43 @@ class LNSandboxEngine:
                 logger.warning("LNSandboxEngine track %s failed: %s", track, e)
                 out["tracks"][track] = {"ok": False, "error": str(e)[:200]}
 
+        if self.db_pool:
+            try:
+                async with self.db_pool.acquire() as conn:
+                    await conn.execute(
+                        """INSERT INTO skyeye_activity
+                           (platform, type, content, severity, metadata)
+                           VALUES ('system', 'ln_sandbox_cycle', $1, 'info', $2::jsonb)""",
+                        f"LN sandbox cycle tracks={list(out['tracks'].keys())}",
+                        json.dumps(
+                            {k: v.get("ok") for k, v in out["tracks"].items()}
+                        ),
+                    )
+            except Exception as e:
+                logger.warning("LNSandboxEngine activity log failed: %s", e)
+        return out
+
+    async def _abort_stale_sessions(self, *, older_minutes: int = 15) -> int:
+        """QUANTUM-CRYSTAL-ARCH — clear hung running sessions from prior cycles."""
         try:
             async with self.db_pool.acquire() as conn:
-                await conn.execute(
-                    """INSERT INTO skyeye_activity (platform, type, content, severity, metadata)
-                       VALUES ('system', 'ln_sandbox_cycle', $1, 'info', $2::jsonb)""",
-                    f"LN sandbox cycle tracks={list(out['tracks'].keys())}",
-                    json.dumps({k: v.get("ok") for k, v in out["tracks"].items()}),
+                rows = await conn.fetch(
+                    """UPDATE ln_sandbox_sessions
+                       SET status = 'aborted', completed_at = NOW(),
+                           metadata = COALESCE(metadata, '{}'::jsonb)
+                             || jsonb_build_object('abort_reason', 'stale_running')
+                       WHERE status = 'running'
+                         AND started_at < NOW() - ($1::int * INTERVAL '1 minute')
+                       RETURNING id""",
+                    max(5, int(older_minutes)),
                 )
+            n = len(rows or [])
+            if n:
+                logger.warning("ln_sandbox aborted %s stale running session(s)", n)
+            return n
         except Exception as e:
-            logger.warning("LNSandboxEngine activity log failed: %s", e)
-        return out
+            logger.warning("ln_sandbox stale abort failed: %s", e)
+            return 0
 
     async def _run_clinical(self) -> Dict[str, Any]:
         task = await self._pick_clinical_task()
@@ -294,39 +338,60 @@ class LNSandboxEngine:
         last_text = ""
         last_notes = ""
         critique = ""
+        n = 0
+        used_fallback = False
 
-        for n in range(1, MAX_ATTEMPTS + 1):
-            prompt = task.get("prompt") or ""
-            if critique:
-                prompt = (
-                    f"{prompt}\n\nPrior attempt failed judge notes: {critique}. "
-                    "Retry with those failures corrected."
+        try:
+            for n in range(1, MAX_ATTEMPTS + 1):
+                prompt = task.get("prompt") or ""
+                if critique:
+                    prompt = (
+                        f"{prompt}\n\nPrior attempt failed judge notes: {critique}. "
+                        "Retry with those failures corrected."
+                    )
+                text = await self._generate(
+                    prompt, domain=task.get("domain") or "clinical"
                 )
-            text = await self._generate(prompt, domain=task.get("domain") or "clinical")
-            last_text = text
-            judged = score_response(
-                text,
-                must_include=task.get("must_include"),
-                must_not_include=task.get("must_not_include"),
-            )
-            best_score = max(best_score, float(judged["score"]))
-            last_notes = judged.get("notes") or ""
-            await self._record_attempt(
-                session_id,
-                attempt_n=n,
-                prompt_excerpt=prompt[:500],
-                response_text=text,
-                score=judged["score"],
-                passed=bool(judged["passed"]),
-                failure_notes=last_notes,
-                judge_meta=judged,
-            )
-            if judged["passed"]:
-                passed = True
-                break
-            critique = last_notes
-
-        await self._close_session(session_id, attempts=n, best_score=best_score, ok=passed)
+                if text.startswith("[SANDBOX_FALLBACK]"):
+                    used_fallback = True
+                    text = text.replace("[SANDBOX_FALLBACK]", "", 1).strip()
+                last_text = text
+                judged = score_response(
+                    text,
+                    must_include=task.get("must_include"),
+                    must_not_include=task.get("must_not_include"),
+                )
+                # Never auto-pass / auto-queue canned fallback as real learning
+                if used_fallback:
+                    judged = {
+                        **judged,
+                        "passed": False,
+                        "score": min(float(judged["score"]), 0.4),
+                        "notes": (judged.get("notes") or "") + ";fallback_template",
+                    }
+                best_score = max(best_score, float(judged["score"]))
+                last_notes = judged.get("notes") or ""
+                await self._record_attempt(
+                    session_id,
+                    attempt_n=n,
+                    prompt_excerpt=prompt[:500],
+                    response_text=text,
+                    score=judged["score"],
+                    passed=bool(judged["passed"]),
+                    failure_notes=last_notes,
+                    judge_meta=judged,
+                )
+                if judged["passed"]:
+                    passed = True
+                    break
+                critique = last_notes
+        finally:
+            try:
+                await self._close_session(
+                    session_id, attempts=n, best_score=best_score, ok=passed
+                )
+            except Exception as e:
+                logger.warning("ln_sandbox close session failed: %s", e)
 
         kind = "success_pattern" if passed else "failure_lesson"
         title = task.get("title") or task.get("task_key") or track
@@ -348,11 +413,15 @@ class LNSandboxEngine:
             session_id=session_id,
             scope=f"user:{target_user_id}" if target_user_id else "admin_only",
             tags=[track, kind, task.get("task_key") or ""],
-            metadata={"task_key": task.get("task_key"), "passed": passed},
+            metadata={
+                "task_key": task.get("task_key"),
+                "passed": passed,
+                "used_fallback": used_fallback,
+            },
         )
 
         # Auto-queue strong passes for human review (still not production)
-        if passed and best_score >= 0.85 and corpus_id:
+        if passed and best_score >= 0.85 and corpus_id and not used_fallback:
             try:
                 from app.services.ln_sandbox_promotion import enqueue_promotion
 
@@ -417,13 +486,17 @@ class LNSandboxEngine:
                     SELECT u.username,
                            EXTRACT(EPOCH FROM (NOW() - COALESCE(
                                (SELECT MAX(ch.created_at) FROM conversation_history ch
-                                WHERE ch.user_id = u.username),
+                                WHERE ch.user_id = u.username
+                                   OR ch.user_id = COALESCE(u.hardware_id, '')
+                                   OR ch.user_id = COALESCE(
+                                        u.profile_data->>'hardware_id', '')),
                                u.created_at
                            ))) / 3600.0 AS hours_idle
                     FROM users u
                     WHERE u.role = 'CLIENT'
                       AND COALESCE(u.subscription_status, '') IN ('ACTIVE', 'TRIAL_ACTIVE')
-                      AND COALESCE(u.profile_data->>'account_status', '') NOT IN ('FROZEN', 'DELETED')
+                      AND COALESCE(u.profile_data->>'account_status', '')
+                          NOT IN ('FROZEN', 'DELETED')
                     ORDER BY hours_idle DESC NULLS LAST
                     LIMIT 40
                     """
@@ -432,7 +505,9 @@ class LNSandboxEngine:
             for r in rows:
                 hrs = float(r["hours_idle"] or 0)
                 if hrs >= IDLE_HOURS:
-                    out.append({"username": r["username"], "hours_idle": round(hrs, 1)})
+                    out.append(
+                        {"username": r["username"], "hours_idle": round(hrs, 1)}
+                    )
                 if len(out) >= limit:
                     break
             return out
@@ -444,20 +519,28 @@ class LNSandboxEngine:
         bits: List[str] = []
         try:
             async with self.db_pool.acquire() as conn:
+                hw = await conn.fetchval(
+                    """SELECT COALESCE(hardware_id, profile_data->>'hardware_id')
+                       FROM users WHERE username = $1 LIMIT 1""",
+                    username,
+                )
                 last = await conn.fetchrow(
                     """SELECT LEFT(user_text, 120) AS t, created_at
                        FROM conversation_history
-                       WHERE user_id = $1 AND LENGTH(user_text) > 15
+                       WHERE (user_id = $1 OR user_id = $2)
+                         AND LENGTH(user_text) > 15
                        ORDER BY created_at DESC LIMIT 1""",
                     username,
+                    hw or "",
                 )
                 if last and last["t"]:
                     bits.append(f"last_turn_excerpt={last['t']}")
                 cyc = await conn.fetchval(
                     """SELECT predicted_event FROM cycle_predictions
-                       WHERE user_id = $1
+                       WHERE user_id = $1 OR user_id = $2
                        ORDER BY created_at DESC LIMIT 1""",
                     username,
+                    hw or username,
                 )
                 if cyc:
                     bits.append(f"recent_cycle={cyc}")
@@ -466,50 +549,107 @@ class LNSandboxEngine:
         return "; ".join(bits) if bits else "no_recent_cues"
 
     async def _generate(self, prompt: str, *, domain: str) -> str:
-        lni = getattr(self.app_state, "littlenate_inference", None) if self.app_state else None
-        if lni is None:
-            # Offline / test fallback — still produces scorable text
-            return (
-                "I hear you. Right now I'm staying with what you brought — "
-                "I'm here with you in this, and we can look at what your body "
-                "is doing in this moment without rushing a plan."
-            )
-        timeout_s = float(os.getenv("LN_SANDBOX_GENERATE_TIMEOUT_S", "90"))
-        try:
-            result = await asyncio.wait_for(
-                lni.generate(
-                    prompt,
-                    system=(
-                        "You are Little Nate in SANDBOX practice mode. "
-                        "This is a simulated client — practice freely, but stay "
-                        "clinically disciplined. Restraints still apply to phrasing."
+        """Prefer fast inference router; LNI secondary; marked fallback last."""
+        timeout_s = float(os.getenv("LN_SANDBOX_GENERATE_TIMEOUT_S", "45"))
+        system = (
+            "You are Little Nate in SANDBOX practice mode. "
+            "This is a simulated client — practice freely, but stay "
+            "clinically disciplined. Restraints still apply to phrasing."
+        )
+        dom = domain if domain in (
+            "clinical", "coaching", "research", "defense", "general"
+        ) else "clinical"
+
+        # 1) NateInferenceRouter — Workers AI / utility path (fast)
+        text = await self._generate_via_router(
+            prompt, system=system, domain=dom, timeout_s=timeout_s
+        )
+        if text:
+            return text
+
+        # 2) LittleNateInference (heavier; often times out under load)
+        lni = (
+            getattr(self.app_state, "littlenate_inference", None)
+            if self.app_state
+            else None
+        )
+        if lni is not None:
+            try:
+                result = await asyncio.wait_for(
+                    lni.generate(
+                        prompt,
+                        system=system,
+                        user_id="sandbox_practice",
+                        domain=dom,
+                        tier="utility" if dom != "clinical" else "clinical",
+                        temperature=0.35 if dom == "clinical" else 0.25,
+                        max_tokens=320,
+                        include_crystals=False,
+                        include_helix=False,
+                        include_quantum=False,
+                        is_realtime=False,
+                        allow_deep=False,
+                        attach_wisdom=False,
                     ),
-                    user_id="sandbox_practice",
-                    domain=domain if domain in (
-                        "clinical", "coaching", "research", "defense", "general"
-                    ) else "clinical",
-                    tier="clinical" if domain == "clinical" else "utility",
+                    timeout=timeout_s,
+                )
+                if hasattr(result, "text"):
+                    text = (result.text or "").strip()
+                elif isinstance(result, dict):
+                    text = (result.get("text") or "").strip()
+                else:
+                    text = str(result)[:2000]
+                if text:
+                    return text
+            except asyncio.TimeoutError:
+                logger.warning("ln_sandbox LNI timeout after %ss", timeout_s)
+            except Exception as e:
+                logger.warning("ln_sandbox LNI generate failed: %s", e)
+
+        # 3) Offline / degraded — marked so judge never auto-promotes
+        return f"[SANDBOX_FALLBACK] {_PRACTICE_FALLBACK}"
+
+    async def _generate_via_router(
+        self,
+        prompt: str,
+        *,
+        system: str,
+        domain: str,
+        timeout_s: float,
+    ) -> str:
+        try:
+            from app.services.nate_inference_router import NateInferenceRouter
+
+            router = NateInferenceRouter(app_state=self.app_state)
+            # LOCKED → utility/Workers AI — sandbox practice does not need deep clinical tier
+            result = await asyncio.wait_for(
+                router.generate(
+                    prompt,
+                    system=system,
+                    tier="utility",
                     temperature=0.35 if domain == "clinical" else 0.25,
-                    max_tokens=400,
-                    include_crystals=False,
-                    include_helix=False,
-                    include_quantum=False,
-                    is_realtime=False,
+                    max_tokens=320,
+                    domain=domain,
+                    odpe_signal="LOCKED",
                     allow_deep=False,
-                    attach_wisdom=False,
                 ),
                 timeout=timeout_s,
             )
-            if hasattr(result, "text"):
-                return (result.text or "").strip()
+            text = ""
             if isinstance(result, dict):
-                return (result.get("text") or "").strip()
-            return str(result)[:2000]
+                text = (result.get("text") or "").strip()
+            elif hasattr(result, "text"):
+                text = (result.text or "").strip()
+            # Soft provider errors are not practice attempts
+            low = text.lower()
+            if len(text) < 40 or "unable to process" in low or "temporarily unavailable" in low:
+                return ""
+            return text
         except asyncio.TimeoutError:
-            logger.warning("ln_sandbox generate timeout after %ss", timeout_s)
+            logger.warning("ln_sandbox router timeout after %ss", timeout_s)
             return ""
         except Exception as e:
-            logger.warning("ln_sandbox generate failed: %s", e)
+            logger.info("ln_sandbox router path skipped: %s", e)
             return ""
 
     async def _open_session(

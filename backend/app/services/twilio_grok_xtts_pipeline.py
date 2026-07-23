@@ -241,6 +241,21 @@ async def _build_grounded_voice_prompt(username: str, db_pool):
                     + (_dc or "")
                     + "\n=== END CLINICAL DIRECTORY ===\n\n"
                 )
+        # QUANTUM-CRYSTAL-ARCH — sandbox inject when directory flag off
+        elif (
+            os.getenv("ENABLE_LN_SANDBOX", "").lower() in ("true", "1", "yes", "on")
+            and db_pool
+            and username
+        ):
+            from app.services.ln_sandbox_context import get_sandbox_candidates_for_user
+
+            _sb = await get_sandbox_candidates_for_user(db_pool, username, max_items=3)
+            if _sb:
+                directory_block = (
+                    "=== LN SANDBOX CANDIDATES (plain language only on call) ===\n"
+                    + _sb
+                    + "\n=== END LN SANDBOX ===\n\n"
+                )
     except Exception:
         directory_block = ""
 

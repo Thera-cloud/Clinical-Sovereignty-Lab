@@ -22,6 +22,15 @@ async def get_sandbox_candidates_for_user(
         return ""
     try:
         async with db_pool.acquire() as conn:
+            # Match drafts keyed by username or hardware_id
+            hw = await conn.fetchval(
+                """SELECT COALESCE(hardware_id, profile_data->>'hardware_id')
+                   FROM users
+                   WHERE username = $1 OR hardware_id = $1
+                      OR profile_data->>'hardware_id' = $1
+                   LIMIT 1""",
+                username,
+            )
             restraints = await conn.fetch(
                 """SELECT title, body FROM ln_sandbox_practice_corpus
                    WHERE track = 'restraint_ref' AND status = 'promoted'
@@ -30,14 +39,15 @@ async def get_sandbox_candidates_for_user(
             drafts = await conn.fetch(
                 """SELECT title, body, kind, score, status
                    FROM ln_sandbox_practice_corpus
-                   WHERE target_user_id = $1
+                   WHERE target_user_id IN ($1, $2)
                      AND track IN ('client_prep', 'clinical_strategy')
                      AND status IN ('draft', 'queued', 'promoted')
                    ORDER BY
                      CASE status WHEN 'promoted' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,
                      created_at DESC
-                   LIMIT $2""",
+                   LIMIT $3""",
                 username,
+                hw or username,
                 max(1, min(int(max_items), 8)),
             )
     except Exception as e:
