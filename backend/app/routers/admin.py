@@ -5231,6 +5231,8 @@ async def webauthn_auth_options(request: Request, user: dict = Depends(require_a
 
 class WebAuthnAuthVerifyRequest(BaseModel):
     credential: dict
+    # When True, mint short-lived IDE cookie/token (requires successful YubiKey).
+    issue_ide_session: bool = False
 
 @router.post("/webauthn/auth-verify")
 async def webauthn_auth_verify(
@@ -5363,12 +5365,116 @@ async def webauthn_auth_verify(
         )
 
     logger.info(f"[WEBAUTHN] Key '{matched_label}' verified present for {hw_id[:16]} -- Sentinel upgraded to yubikey")
-    return {
+    resp_body = {
         "verified": True,
         "active_key": matched_label,
         "credential_id_prefix": matched_cred.get("credential_id", "")[:16],
         "verified_at": verified_at,
         "sentinel_upgraded": True,
+    }
+
+    # QUANTUM-CRYSTAL-ARCH: IDE hard gate — mint session only after live YubiKey verify
+    if body.issue_ide_session:
+        try:
+            from app.services.ide_session_gate import cookie_header_value, mint_ide_session
+
+            session = mint_ide_session(
+                hardware_id=hw_id,
+                username=str(user.get("username") or ""),
+                active_key=matched_label,
+            )
+            resp_body["ide_session"] = session
+            from fastapi.responses import JSONResponse
+
+            out = JSONResponse(content=resp_body)
+            out.headers["Set-Cookie"] = cookie_header_value(
+                session["token"], int(session["max_age"])
+            )
+            return out
+        except Exception as e:
+            logger.warning("webauthn_auth_verify: IDE session mint failed: %s", e)
+            resp_body["ide_session_error"] = "mint_failed"
+
+    return resp_body
+
+
+@router.post("/ide/issue-session")
+async def ide_issue_session(request: Request, user: dict = Depends(require_admin)):
+    """
+    Mint IDE access cookie. Requires webauthn_last_verified within IDE_YK_FRESH_SECONDS.
+    Direct hits to ide.* without this cookie are rejected by the edge Worker / Mac proxy.
+    """
+    from app.services.ide_session_gate import (
+        cookie_header_value,
+        mint_ide_session,
+        yubikey_verified_recently,
+        fresh_yubikey_window_seconds,
+    )
+    from fastapi.responses import JSONResponse
+
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+    hw_id = user.get("hardware_id", "")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT profile_data FROM users WHERE hardware_id = $1", hw_id
+        )
+    if not row or not row["profile_data"]:
+        raise HTTPException(400, "Profile not found")
+    pd = row["profile_data"] if isinstance(row["profile_data"], dict) else json.loads(row["profile_data"])
+    last = pd.get("webauthn_last_verified")
+    if not yubikey_verified_recently(last):
+        raise HTTPException(
+            403,
+            f"YubiKey required. Tap key first (freshness {fresh_yubikey_window_seconds()}s).",
+        )
+    try:
+        session = mint_ide_session(
+            hardware_id=hw_id,
+            username=str(user.get("username") or ""),
+            active_key=str(pd.get("webauthn_active_key") or ""),
+        )
+    except Exception as e:
+        logger.error("ide_issue_session: mint failed: %s", e)
+        raise HTTPException(503, "IDE session mint unavailable")
+    out = JSONResponse(
+        content={"ok": True, "ide_session": session, "active_key": pd.get("webauthn_active_key")}
+    )
+    out.headers["Set-Cookie"] = cookie_header_value(session["token"], int(session["max_age"]))
+    return out
+
+
+@router.get("/ide/validate-session")
+async def ide_validate_session(request: Request):
+    """
+    Validate IDE cookie/token for Mac proxy or Worker (no admin bearer required).
+    Accepts Cookie ss_ide_session or Authorization: Bearer <token> or ?token=.
+    """
+    from app.services.ide_session_gate import COOKIE_NAME, verify_ide_session
+
+    token = ""
+    auth = request.headers.get("Authorization") or ""
+    if auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+    if not token:
+        token = (request.query_params.get("token") or "").strip()
+    if not token:
+        cookie_header = request.headers.get("cookie") or request.headers.get("Cookie") or ""
+        for part in cookie_header.split(";"):
+            part = part.strip()
+            if part.startswith(COOKIE_NAME + "="):
+                token = part[len(COOKIE_NAME) + 1 :].strip()
+                break
+    ok, payload, reason = verify_ide_session(token)
+    if not ok:
+        raise HTTPException(401, f"IDE session invalid: {reason}")
+    return {
+        "valid": True,
+        "sub": payload.get("sub"),
+        "usr": payload.get("usr"),
+        "exp": payload.get("exp"),
+        "jti": payload.get("jti"),
     }
 
 

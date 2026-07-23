@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sovereign IDE | Gateway</title>
+    <title>Sovereign IDE | YubiKey Required</title>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -12,6 +12,7 @@
             --gold-bright: #E8D5A3;
             --muted: #5a5850;
             --red: #EF4444;
+            --green: #22C55E;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -25,7 +26,7 @@
         }
         .gate {
             text-align: center;
-            max-width: 420px;
+            max-width: 440px;
             padding: 40px 28px;
         }
         .brand {
@@ -64,18 +65,25 @@
             text-decoration: none;
         }
         .back:hover { color: var(--gold); }
+        .warn {
+            margin-top: 16px;
+            font-size: 11px;
+            color: var(--muted);
+            line-height: 1.4;
+        }
     </style>
 </head>
 <body>
     <div class="gate">
         <div class="brand">SOVEREIGN IDE</div>
-        <p class="sub">Admin gateway. Tap YubiKey, then open the Mac code-server at ide.sovereignsanctuary.net. Cloudflare Access still applies on the IDE host.</p>
+        <p class="sub">Physical YubiKey is required every time. After verification, a short-lived session cookie unlocks ide.sovereignsanctuary.net (edge gate + Cloudflare).</p>
         <button id="ykBtn" type="button">Tap YubiKey to Open IDE</button>
         <div id="status"></div>
+        <p class="warn">SessionStorage shortcuts are disabled. Direct IDE URLs without a fresh key are blocked.</p>
         <a class="back" href="command.html">← Sovereign Command</a>
     </div>
     <script>
-        // Same-origin /api via command nginx (matches command.html). Do NOT use api.* here — CORS → Failed to fetch.
+        // Same-origin /api via command nginx. Do NOT use api.* — CORS.
         var IDE_URL = 'https://ide.sovereignsanctuary.net';
 
         function _cookie(name) {
@@ -135,6 +143,7 @@
             try {
                 var resp = await fetch(path, {
                     method: 'POST',
+                    credentials: 'include',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': 'Bearer ' + t,
@@ -167,7 +176,7 @@
             _recoverAuth();
 
             if (!_token()) {
-                status.textContent = 'No admin session. Open Command, log in, then use the IDE tab.';
+                status.textContent = 'No admin session. Open Command, log in, then return here.';
                 status.style.color = 'var(--red)';
                 return;
             }
@@ -177,16 +186,7 @@
                 return;
             }
 
-            // Already verified this browser session (Command gate) — open IDE.
-            try {
-                if (sessionStorage.getItem('sc_yubikey_verified') === 'true') {
-                    status.textContent = 'Already verified. Opening IDE...';
-                    status.style.color = '#22C55E';
-                    _openIde();
-                    return;
-                }
-            } catch (e) {}
-
+            // No sessionStorage bypass — every IDE open requires a live YubiKey tap.
             btn.disabled = true;
             status.textContent = 'Requesting challenge...';
             status.style.color = 'var(--gold)';
@@ -197,9 +197,6 @@
                     var msg = 'Failed to get auth challenge.';
                     if (optionsResp && optionsResp._error) {
                         msg += ' (' + optionsResp.status + ': ' + (optionsResp.detail || 'unknown') + ')';
-                        if (optionsResp.status === 0) {
-                            msg += ' — use Command IDE tab (same-origin /api), not a direct file open.';
-                        }
                     }
                     status.textContent = msg;
                     status.style.color = 'var(--red)';
@@ -230,13 +227,20 @@
                     },
                 };
 
-                status.textContent = 'Verifying...';
-                var result = await _scApiPost('/api/admin/webauthn/auth-verify', { credential: assertion });
-                if (result && !result._error && result.verified) {
-                    try { sessionStorage.setItem('sc_yubikey_verified', 'true'); } catch (e) {}
+                status.textContent = 'Verifying key + minting IDE session...';
+                var result = await _scApiPost('/api/admin/webauthn/auth-verify', {
+                    credential: assertion,
+                    issue_ide_session: true,
+                });
+                if (result && !result._error && result.verified && result.ide_session && result.ide_session.token) {
                     status.textContent = 'Verified. Opening IDE...';
-                    status.style.color = '#22C55E';
-                    setTimeout(_openIde, 400);
+                    status.style.color = 'var(--green)';
+                    setTimeout(_openIde, 350);
+                } else if (result && !result._error && result.verified && !result.ide_session) {
+                    status.textContent = 'Key OK but IDE session mint failed. Check IDE_GATE_SECRET on API.';
+                    status.style.color = 'var(--red)';
+                    btn.disabled = false;
+                    btn.textContent = 'Tap YubiKey to Open IDE';
                 } else {
                     var vmsg = 'Key verification failed.';
                     if (result && result._error) {
@@ -263,13 +267,12 @@
         _recoverAuth();
         document.getElementById('ykBtn').addEventListener('click', verifyAndRedirect);
 
-        // Auto-open if already YubiKey-verified in this Command session
         try {
-            if (_token() && sessionStorage.getItem('sc_yubikey_verified') === 'true') {
-                document.getElementById('status').textContent = 'Session verified. Tap to open IDE, or wait…';
-                setTimeout(function () {
-                    if (sessionStorage.getItem('sc_yubikey_verified') === 'true') _openIde();
-                }, 1200);
+            var qs = new URLSearchParams(location.search || '');
+            if (qs.get('need_yk') === '1') {
+                document.getElementById('status').textContent =
+                    'IDE blocked — YubiKey session missing or expired. Tap your key.';
+                document.getElementById('status').style.color = 'var(--red)';
             }
         } catch (e) {}
     </script>

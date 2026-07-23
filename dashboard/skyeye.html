@@ -2507,6 +2507,8 @@ function switchTab(tabId, el) {
   if (tabId !== 'command-terminal') {
     if (_ctWs) { _ctWs.close(); _ctWs = null; }
     _ctYubiKeyVerified = false;
+    // Leaving the tab clears terminal privilege; next entry requires YubiKey again.
+    try { sessionStorage.removeItem('last_yubikey_admin_terminal_at'); } catch (e) {}
   }
 }
 
@@ -6594,6 +6596,7 @@ var _ctBusyTimeout = null;
 var _ctActivePlanId = null;
 var _ctInitialized = false;
 var _ctYubiKeyVerified = false;
+var _CT_YK_TTL_MS = 30 * 60 * 1000; // second gate TTL — Command login YubiKey does NOT skip this
 
 var _CT_PLACEHOLDERS = {
   ask: 'Ask Little Nate...',
@@ -6634,10 +6637,21 @@ async function ctCheckMacAgent() {
   }
 }
 
+function ctYubiKeyStillFresh() {
+  try {
+    var at = parseInt(sessionStorage.getItem('last_yubikey_admin_terminal_at') || '0', 10);
+    if (!at || (Date.now() - at) > _CT_YK_TTL_MS) return false;
+    return true;
+  } catch (e) { return false; }
+}
+
 function ctInit() {
   var gate = document.getElementById('ctYubiKeyGate');
+  // Hard requirement: second YubiKey for Command Terminal (not Command login alone).
+  _ctYubiKeyVerified = ctYubiKeyStillFresh();
   if (!_ctYubiKeyVerified) {
     if (gate) gate.style.display = 'flex';
+    if (_ctWs) { try { _ctWs.close(); } catch (e) {} _ctWs = null; }
     return;
   }
   if (gate) gate.style.display = 'none';
@@ -6708,6 +6722,7 @@ async function ctYubiKeyGateVerify() {
     var result = await apiPost('/api/admin/webauthn/auth-verify', { credential: assertion });
     if (result && result.verified) {
       _ctYubiKeyVerified = true;
+      try { sessionStorage.setItem('last_yubikey_admin_terminal_at', String(Date.now())); } catch (e) {}
       statusEl.textContent = '\u2713 Key verified — entering terminal...';
       statusEl.style.color = 'var(--green, #22C55E)';
       setTimeout(function() { ctInit(); }, 600);
@@ -6731,6 +6746,12 @@ async function ctYubiKeyGateVerify() {
 }
 
 function ctConnectWs() {
+  if (!ctYubiKeyStillFresh()) {
+    _ctYubiKeyVerified = false;
+    var gate = document.getElementById('ctYubiKeyGate');
+    if (gate) gate.style.display = 'flex';
+    return;
+  }
   if (_ctWs && (_ctWs.readyState === 0 || _ctWs.readyState === 1)) return;
   var dot = document.getElementById('ctStatusDot');
   var txt = document.getElementById('ctStatusText');
@@ -6845,6 +6866,13 @@ function ctHandleMessage(msg) {
 
 // ── Send Message ──
 function ctSendMessage() {
+  if (!ctYubiKeyStillFresh()) {
+    _ctYubiKeyVerified = false;
+    ctAppendStatus('YubiKey required — tap key to re-enter Command Terminal.');
+    var gate = document.getElementById('ctYubiKeyGate');
+    if (gate) gate.style.display = 'flex';
+    return;
+  }
   var inp = document.getElementById('ctChatInput');
   var text = (inp.value || '').trim();
   if (!text || _ctBusy) return;

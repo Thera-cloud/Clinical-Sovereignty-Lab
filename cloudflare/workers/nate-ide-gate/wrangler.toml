@@ -1,0 +1,13 @@
+name = "nate-ide-gate"
+main = "worker.js"
+compatibility_date = "2026-03-01"
+
+# Routes this Worker in front of the Twin Engine tunnel for code-server.
+# After deploy: wrangler secret put IDE_GATE_SECRET  (same value as GREEN IDE_GATE_SECRET or JWT_SECRET)
+routes = [
+  { pattern = "ide.sovereignsanctuary.net/*", zone_name = "sovereignsanctuary.net" }
+]
+
+[vars]
+# Prefer secret; JWT_SECRET secret can be used as fallback by worker.js
+GATEWAY_URL = "https://command.sovereignsanctuary.net/ide.html"
