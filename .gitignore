@@ -35,6 +35,7 @@ venv/
 ENV/
 env/
 .venv/
+.venv*/
 pip-wheel-metadata/
 *.egg-info/
 .eggs/
@@ -122,6 +123,17 @@ docker-compose.override.yml
 coverage/
 .nyc_output/
 test-results/
+backend/test_results/
+test_vault/
+
+# -----------------------------------------------------------------------------
+# Local scratch / bundles (never commit)
+# -----------------------------------------------------------------------------
+avatar_mode_trace_bundle/
+avatar_mode_trace_bundle.zip
+trial_context_digest
+*.vsix
+.sovereign/chat-history/
 
 # -----------------------------------------------------------------------------
 # Build outputs
