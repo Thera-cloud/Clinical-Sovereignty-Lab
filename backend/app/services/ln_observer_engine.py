@@ -29,7 +29,8 @@ WARN_SESSION_S = int(2.75 * 3600)  # 2:45 warn before 3h cap
 OBSERVE_DEBOUNCE_S = 20
 CHAT_COMPACT_EVERY = 20
 # QUANTUM-CRYSTAL-ARCH — same-brain enrichment (non-lean only; bounded)
-SAME_BRAIN_RECALL_TIMEOUT_S = 2.5
+# Vectorize can take 2–4s; keep headroom for PG keyword fallback. # QUANTUM-CRYSTAL-ARCH
+SAME_BRAIN_RECALL_TIMEOUT_S = 6.0
 SAME_BRAIN_LNI_TIMEOUT_S = 12.0
 SAME_BRAIN_CACHE_TTL_S = 15.0
 # QUANTUM-CRYSTAL-ARCH — max gap to claim A/V "aligned" for forensics
@@ -698,22 +699,40 @@ class LNObserverEngine:
             logger.warning("LNObserverEngine same-brain wisdom: %s", e)
 
         try:
-            from app.services.ln_observer_lni_support import retrieve_crystals_multi
+            from app.services.ln_observer_lni_support import (
+                retrieve_crystals_multi,
+                _pg_keyword_crystal_fallback,
+                resolve_user_uuid,
+                resolve_user_uuids,
+            )
 
             rq = self.build_recall_query(sess, coach_message)
             also = self.match_client_ids(
                 sess, self.live_haystack(sess, coach_message)
             )
-            crystals = await asyncio.wait_for(
-                retrieve_crystals_multi(
-                    rq,
-                    sess.coach_id,
-                    also,
-                    top_k=8,
-                    db_pool=self._db_pool,
-                ),
-                timeout=SAME_BRAIN_RECALL_TIMEOUT_S,
-            )
+            crystals: List[Dict[str, Any]] = []
+            try:
+                crystals = await asyncio.wait_for(
+                    retrieve_crystals_multi(
+                        rq,
+                        sess.coach_id,
+                        also,
+                        top_k=8,
+                        db_pool=self._db_pool,
+                    ),
+                    timeout=SAME_BRAIN_RECALL_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "LNObserverEngine same-brain Vectorize timeout — PG fallback"
+                )
+            if not crystals and self._db_pool:
+                # QUANTUM-CRYSTAL-ARCH — guarantee RELEVANT MEMORY when Vectorize cold/slow
+                primary = await resolve_user_uuid(self._db_pool, sess.coach_id) or sess.coach_id
+                also_ids = await resolve_user_uuids(self._db_pool, also)
+                crystals = await _pg_keyword_crystal_fallback(
+                    self._db_pool, rq, primary, also_ids, limit=8
+                )
             mem = self.format_relevant_memory(crystals, cap=8)
             if mem:
                 parts.append(mem.rstrip())
@@ -723,8 +742,6 @@ class LNObserverEngine:
                 len(also),
                 len(rq),
             )
-        except asyncio.TimeoutError:
-            logger.warning("LNObserverEngine same-brain recall timeout")
         except Exception as e:
             logger.warning("LNObserverEngine same-brain recall: %s", e)
 
@@ -1660,14 +1677,22 @@ class LNObserverEngine:
                 )
             result["ns_queued"] = int(queued or 0)
             result["ns_drained"] = await self.drain_ns_ingest(limit=20)
+            # Prefer Clinical-AGI evidence: wisdom + relevant memory + summary + chat
             result["ok"] = bool(
                 result["summary_set"]
                 and result["reply_len"] > 20
-                and (result["wisdom_block"] or result["same_brain_len"] >= 0)
+                and result["wisdom_block"]
+                and result["relevant_memory"]
             )
-            # Wisdom file may be empty on some nodes — still pass if chat+summary work
-            if result["summary_set"] and result["reply_len"] > 20:
+            # Soft pass if wisdom+chat+summary work but Vectorize/PG still cold
+            if (
+                not result["ok"]
+                and result["summary_set"]
+                and result["reply_len"] > 20
+                and result["wisdom_block"]
+            ):
                 result["ok"] = True
+                result["errors"].append("relevant_memory_missing")
             result["session_id"] = session_id
         except Exception as e:
             result["errors"].append(str(e)[:200])

@@ -247,6 +247,12 @@ async def _pg_keyword_crystal_fallback(
             "school", "wisdom", "relevant", "memory", "observe",
         }
     ][:6]
+    # Therapeutic anchors when STT/smoke query is short after stopword filter
+    for anchor in ("attachment", "rupture", "pursue", "withdraw", "coaching"):
+        if anchor not in {t.lower() for t in tokens}:
+            tokens.append(anchor)
+        if len(tokens) >= 8:
+            break
     if not tokens:
         return []
     try:
@@ -256,31 +262,50 @@ async def _pg_keyword_crystal_fallback(
                 ids.append(uuid_mod.UUID(str(u)))
             except Exception:
                 continue
-        if not ids:
-            return []
-        like_patterns = [f"%{t}%" for t in tokens[:4]]
+        like_patterns = [f"%{t}%" for t in tokens[:6]]
         async with db_pool.acquire() as conn:
-            rows = await conn.fetch(
-                """SELECT crystal_text, content_hash, confidence, domain
-                   FROM nate_intelligence_crystals
-                   WHERE superseded_by IS NULL
-                     AND COALESCE(confidence, 0) >= 0.30
-                     AND (
-                       (user_id = ANY($1::uuid[]) AND scope != 'archived')
-                       OR (user_id IS NULL AND scope = 'global')
-                     )
-                     AND (
-                       crystal_text ILIKE ANY($2::text[])
-                     )
-                   ORDER BY
-                     CASE WHEN user_id = ANY($1::uuid[]) THEN 0 ELSE 1 END,
-                     confidence DESC NULLS LAST,
-                     created_at DESC
-                   LIMIT $3""",
-                ids,
-                like_patterns,
-                limit,
-            )
+            # Prefer owned user/user:* scopes; global allowlist for ownerless.
+            if ids:
+                rows = await conn.fetch(
+                    """SELECT crystal_text, content_hash, confidence, domain
+                       FROM nate_intelligence_crystals
+                       WHERE superseded_by IS NULL
+                         AND COALESCE(confidence, 0) >= 0.30
+                         AND (
+                           (
+                             user_id = ANY($1::uuid[])
+                             AND (
+                               scope = 'user'
+                               OR scope LIKE 'user:%'
+                               OR scope IS NULL
+                               OR scope != 'archived'
+                             )
+                           )
+                           OR (user_id IS NULL AND scope = 'global')
+                         )
+                         AND crystal_text ILIKE ANY($2::text[])
+                       ORDER BY
+                         CASE WHEN user_id = ANY($1::uuid[]) THEN 0 ELSE 1 END,
+                         confidence DESC NULLS LAST,
+                         created_at DESC
+                       LIMIT $3""",
+                    ids,
+                    like_patterns,
+                    limit,
+                )
+            else:
+                rows = await conn.fetch(
+                    """SELECT crystal_text, content_hash, confidence, domain
+                       FROM nate_intelligence_crystals
+                       WHERE superseded_by IS NULL
+                         AND COALESCE(confidence, 0) >= 0.30
+                         AND user_id IS NULL AND scope = 'global'
+                         AND crystal_text ILIKE ANY($1::text[])
+                       ORDER BY confidence DESC NULLS LAST, created_at DESC
+                       LIMIT $2""",
+                    like_patterns,
+                    limit,
+                )
         out: List[Dict[str, Any]] = []
         for r in rows or []:
             text = (r["crystal_text"] or "").strip()
