@@ -2004,7 +2004,8 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
     _wsSend(jsonEncode({
       "type": "nate_query", 
       "nate_query": text,
-      "modality": "General" 
+      "modality": "General",
+      "depth_mode": "faster",
     }));
 
     setState(() {

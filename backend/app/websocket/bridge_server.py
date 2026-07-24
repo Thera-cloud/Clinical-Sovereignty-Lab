@@ -8935,7 +8935,7 @@ class AzureCortex:
             print(f">>> [CLASSROOM CONTEXT ERROR] {e}")
             return ""
 
-    async def process_interaction(self, profile: dict, user_text: str, dojo_type: Optional[str] = None, client_context: Optional[str] = None):
+    async def process_interaction(self, profile: dict, user_text: str, dojo_type: Optional[str] = None, client_context: Optional[str] = None, depth_mode: Optional[str] = None):
         uid = profile.get("hardware_id", "UNKNOWN")
         self._last_avatar_user_text[uid] = user_text  # SOVEREIGN-VOICE
         # QUANTUM-CRYSTAL-ARCH: scope all _send() emissions to the originating
@@ -8943,7 +8943,33 @@ class AzureCortex:
         # iframe sockets receive the response and the iframe shows duplicates.
         _ctx = client_context  # local alias used in every _send below
         _turn_id = str(uuid.uuid4())  # QUANTUM-CRYSTAL-ARCH: merge stream + finalize into one client bubble per turn
-        print(f">>> [AI] Cortex Active for {profile.get('name')} ctx={_ctx}")
+        # QUANTUM-CRYSTAL-ARCH — Faster/Extra chat depth (client toggle)
+        try:
+            from app.websocket.chat_depth_mode import (
+                normalize_depth_mode as _norm_depth,
+                is_faster as _is_faster_depth,
+                crystal_max_results as _crystal_max,
+                pg_history_limit as _pg_hist_lim,
+                allow_enrichment as _allow_enrich,
+                allow_plan_heavy as _allow_plan_heavy,
+                allow_fsf as _allow_fsf,
+                allow_newsletter_library as _allow_lib,
+                allow_deep_memory_search as _allow_deep_mem,
+                build_extra_quotient_directive as _extra_sq_dir,
+            )
+            _depth = _norm_depth(depth_mode)
+        except Exception:
+            _depth = "extra"
+            _is_faster_depth = lambda m: False  # noqa: E731
+            _crystal_max = lambda m: 8  # noqa: E731
+            _pg_hist_lim = lambda m: 15  # noqa: E731
+            _allow_enrich = lambda m: True  # noqa: E731
+            _allow_plan_heavy = lambda m: True  # noqa: E731
+            _allow_fsf = lambda m: True  # noqa: E731
+            _allow_lib = lambda m: True  # noqa: E731
+            _allow_deep_mem = lambda m: True  # noqa: E731
+            _extra_sq_dir = lambda t: ""  # noqa: E731
+        print(f">>> [AI] Cortex Active for {profile.get('name')} ctx={_ctx} depth={_depth}")
         # QUANTUM-CRYSTAL-ARCH: resolve DOJO per-type model-tier override (skips ODPE)
         _dojo_tier = _DOJO_TYPE_MODEL_TIER.get((dojo_type or "").lower()) if dojo_type else None
         _dojo_signal = _DOJO_TIER_TO_SIGNAL.get(_dojo_tier) if _dojo_tier else None
@@ -9083,7 +9109,7 @@ class AzureCortex:
                 return await _get_section1_for_nate(_iconn, _uname)
 
         async def _fetch_fsf_context():
-            if not _cpool or _role != "CLIENT":
+            if not _cpool or _role != "CLIENT" or not _allow_fsf(_depth):
                 return ""
             try:
                 from app.services.family_system_field import build_fsf_chat_context
@@ -9105,7 +9131,7 @@ class AzureCortex:
 
         async def _fetch_enrichment_addendum():
             # QUANTUM-CRYSTAL-ARCH — LN Enrichment Tier 2/4: per-turn synthesis directive (flag-gated)
-            if _enrich is None or not _enrich.enrichment_enabled() or _role != "CLIENT":
+            if _enrich is None or not _enrich.enrichment_enabled() or _role != "CLIENT" or not _allow_enrich(_depth):
                 return ""
             try:
                 _prior_user = [
@@ -9161,7 +9187,7 @@ class AzureCortex:
                     pass
             # QUANTUM-CRYSTAL-ARCH: clinical technique directory + care-plan assist + web enrich
             _uid = _uname or _hw_id
-            if os.environ.get("ENABLE_CLINICAL_TECHNIQUE_DIRECTORY", "").lower() in ("true", "1", "yes"):
+            if _allow_plan_heavy(_depth) and os.environ.get("ENABLE_CLINICAL_TECHNIQUE_DIRECTORY", "").lower() in ("true", "1", "yes"):
                 try:
                     from app.services.clinical_technique_directory import (
                         directory_context_for_surface,
@@ -9182,7 +9208,7 @@ class AzureCortex:
                     print(f"[CLINICAL-DIR] surface inject failed: {_cde}")
             # QUANTUM-CRYSTAL-ARCH — sandbox inject when directory flag off
             # (directory_context_for_surface already embeds sandbox when directory on)
-            elif os.environ.get("ENABLE_LN_SANDBOX", "").lower() in ("true", "1", "yes", "on"):
+            elif _allow_plan_heavy(_depth) and os.environ.get("ENABLE_LN_SANDBOX", "").lower() in ("true", "1", "yes", "on"):
                 try:
                     from app.services.ln_sandbox_context import get_sandbox_candidates_for_user
                     _sb = await get_sandbox_candidates_for_user(_cpool, _uid)
@@ -9196,20 +9222,20 @@ class AzureCortex:
             # QUANTUM-CRYSTAL-ARCH: bias recall toward active cycle skill practice
             _qq = _q or ""
             try:
-                if _pool and os.environ.get("ENABLE_CYCLE_SKILL_PLANS", "").lower() in ("true", "1", "yes"):
+                if _pool and (not _is_faster_depth(_depth)) and os.environ.get("ENABLE_CYCLE_SKILL_PLANS", "").lower() in ("true", "1", "yes"):
                     from app.services.cycle_skill_plan_service import augment_recall_query_for_skill_plan
                     _qq = await augment_recall_query_for_skill_plan(_pool, _un or _hid, _qq)
             except Exception:
                 pass
             return await recall_crystals_for_context(
-                _pool, _hid, max_results=8, source="bridge_chat", query_text=_qq or _q,
+                _pool, _hid, max_results=_crystal_max(_depth), source="bridge_chat", query_text=_qq or _q,
             )
 
         relational_context, checkin_context, crystal_context, pg_history_context, intake_context, fsf_context, reconnect_context, _enrich_addendum, trial_context_block, plan_context_block = await asyncio.gather(
             _timed("relational", self._get_relational_context(profile)),
             _timed("checkin", self._get_checkin_context(profile)),
             _timed("crystals", _recall_with_skill_bias(_cpool, _hw_id, user_text, _uname)),
-            _timed("pg_history", _fetch_pg_history_for_chat(_cpool, _uname, _hw_id, limit=15)),
+            _timed("pg_history", _fetch_pg_history_for_chat(_cpool, _uname, _hw_id, limit=_pg_hist_lim(_depth))),
             _timed("intake_s1", _fetch_intake_context()),
             _timed("fsf", _fetch_fsf_context()),
             _timed("reconnect", _fetch_reconnect_context()),
@@ -9229,18 +9255,27 @@ class AzureCortex:
             crystal_context = f"{crystal_context}\n\n{_enrich_addendum}" if crystal_context else _enrich_addendum
         # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch Story Library (explicit cite only)
         try:
-            from app.services.newsletter_library_recall import recall_newsletter_library_context
-            _lib_ctx = await recall_newsletter_library_context(
-                _cpool, user_text or "", max_issues=2, surface="bridge_chat",
-            )
-            if _lib_ctx:
-                crystal_context = f"{crystal_context}\n\n{_lib_ctx}" if crystal_context else _lib_ctx
+            if _allow_lib(_depth):
+                from app.services.newsletter_library_recall import recall_newsletter_library_context
+                _lib_ctx = await recall_newsletter_library_context(
+                    _cpool, user_text or "", max_issues=2, surface="bridge_chat",
+                )
+                if _lib_ctx:
+                    crystal_context = f"{crystal_context}\n\n{_lib_ctx}" if crystal_context else _lib_ctx
+        except Exception:
+            pass
+        # QUANTUM-CRYSTAL-ARCH — Extra mode: six-quotient depth directive
+        try:
+            if not _is_faster_depth(_depth):
+                _sq_dir = _extra_sq_dir(user_text or "")
+                if _sq_dir:
+                    crystal_context = f"{crystal_context}\n\n{_sq_dir}" if crystal_context else _sq_dir
         except Exception:
             pass
         _live_turn_context = _format_live_turn_context(uid)
         _critical_recall_context = _format_critical_recall_facts(uid)
         _pre_ms = int((_time_ctx.monotonic() - _t_pre) * 1000)
-        print(f">>> [RELATIONAL CONTEXT LENGTH]: {len(relational_context)} chars (parallel pre-fetch: {_pre_ms}ms)")
+        print(f">>> [RELATIONAL CONTEXT LENGTH]: {len(relational_context)} chars (parallel pre-fetch: {_pre_ms}ms) depth={_depth}")
         
         # === WEB SEARCH INJECTION (Security-hardened) ===
         web_search_context = ""
@@ -9259,13 +9294,14 @@ class AzureCortex:
                     "search about ", "get info on ", "get information on ",
                 ]
                 _search_intent = any(_lower.startswith(t) or f" {t}" in f" {_lower}" for t in _search_triggers)
-                if not _search_intent:
+                # QUANTUM-CRYSTAL-ARCH — Faster: explicit search only (skip soft auto-triggers)
+                if not _search_intent and not _is_faster_depth(_depth):
                     _internet_keywords = ("internet", "online", "web", "search", "look up", "google")
                     _asks_to_search = any(k in _lower for k in _internet_keywords)
                     _is_request = _lower.startswith(("can you ", "could you ", "would you ", "please ", "search ", "tell me what "))
                     if _asks_to_search and _is_request:
                         _search_intent = True
-                if not _search_intent:
+                if not _search_intent and not _is_faster_depth(_depth):
                     _question_search = (
                         _lower.startswith(("what is ", "what are ", "who is ", "who are ",
                                           "how do you ", "how does ", "how to ", "what causes "))
@@ -9345,13 +9381,20 @@ class AzureCortex:
             if _persisted:
                 web_search_context = _persisted
 
-        # SOVEREIGN-VOICE — Deep memory search for "do you remember" in text chat
+        # SOVEREIGN-VOICE — Deep memory search for "do you remember" in text chat (Extra only)
         deep_memory_context = ""
         try:
-            if not is_dojo_simulation and not _is_search_synthesis and _chat_memory_trigger.should_trigger(user_text):
+            if (
+                _allow_deep_mem(_depth)
+                and not is_dojo_simulation
+                and not _is_search_synthesis
+                and _chat_memory_trigger.should_trigger(user_text)
+            ):
                 _dm_username = profile.get("username", uid)
                 print(f">>> [CHAT-DEEP-SEARCH] Memory query detected for {profile.get('name')}: '{user_text[:80]}'")
                 deep_memory_context = await _deep_memory_search_chat(_dm_username, user_text, db_pool, hardware_id=uid)
+            elif _is_faster_depth(_depth) and _chat_memory_trigger.should_trigger(user_text):
+                print(f">>> [CHAT-DEEP-SEARCH] Skipped (faster mode) for {profile.get('name')}")
         except Exception as _dms_err:
             print(f">>> [CHAT-DEEP-SEARCH] Error (non-fatal): {_dms_err}")
 
@@ -14267,9 +14310,10 @@ async def handle_client(websocket, path=None):
                         }))
                     else:
                         text = d.get("nate_query", d.get("text", ""))
+                        _depth_mode = d.get("depth_mode") or d.get("chat_depth") or "extra"  # QUANTUM-CRYSTAL-ARCH
                         # #region agent log
                         _dbg_ts = datetime.datetime.now().isoformat()
-                        print(f">>> [DBG-H1] nate_query received uid={uid} len={len(text)} sockets={len(cortex.sockets.get(uid, set()))} ts={_dbg_ts}")
+                        print(f">>> [DBG-H1] nate_query received uid={uid} len={len(text)} depth={_depth_mode} sockets={len(cortex.sockets.get(uid, set()))} ts={_dbg_ts}")
                         # #endregion
 
                         # CHAT-SCHEDULING: feature-flagged hook. On clear scheduling intent,
@@ -14353,7 +14397,7 @@ async def handle_client(websocket, path=None):
                                 # Don't know what content type — store pending, let Nate ask
                                 export_intent_detector.set_pending(uid, export_intent)
                                 print(f">>> [EXPORT] needs content type clarification, stored pending for uid={uid}")
-                                await cortex.process_interaction(current_profile, text, dojo_type=d.get("dojo_type"), client_context=getattr(websocket, "_eviction_context", "main"))
+                                await cortex.process_interaction(current_profile, text, dojo_type=d.get("dojo_type"), client_context=getattr(websocket, "_eviction_context", "main"), depth_mode=_depth_mode)
                             else:
                                 # Content type is known — generate the export
                                 try:
@@ -14404,10 +14448,10 @@ async def handle_client(websocket, path=None):
                                     print(f">>> [EXPORT] export_ready sent to uid={uid} file={export_result['filename']}")
                                 except Exception as ex:
                                     print(f">>> [EXPORT] generation error for uid={uid}: {ex}")
-                                    await cortex.process_interaction(current_profile, text, dojo_type=d.get("dojo_type"), client_context=getattr(websocket, "_eviction_context", "main"))
+                                    await cortex.process_interaction(current_profile, text, dojo_type=d.get("dojo_type"), client_context=getattr(websocket, "_eviction_context", "main"), depth_mode=_depth_mode)
                         else:
                             # Normal Nate conversation — QUANTUM-CRYSTAL-ARCH: forward optional dojo_type
-                            await cortex.process_interaction(current_profile, text, dojo_type=d.get("dojo_type"), client_context=getattr(websocket, "_eviction_context", "main"))
+                            await cortex.process_interaction(current_profile, text, dojo_type=d.get("dojo_type"), client_context=getattr(websocket, "_eviction_context", "main"), depth_mode=_depth_mode)
 
                         # #region agent log
                         print(f">>> [DBG-H1] nate_query DONE uid={uid} sockets_after={list(cortex.sockets.get(uid, set()))} ts={datetime.datetime.now().isoformat()}")

@@ -1600,10 +1600,13 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
 
   // ── Adjustable chat text size (persisted; applies to chat message list only) ──
   static const String _prefsChatTextScaleKey = 'chat_text_scale';
+  static const String _prefsChatDepthModeKey = 'chat_depth_mode';
   static const double _chatTextScaleMin = 0.85;
   static const double _chatTextScaleMax = 1.6;
   static const double _chatTextScaleStep = 0.1;
   double _chatTextScale = 1.0;
+  /// `faster` = quick reply; `extra` = deep memory + six-quotient depth.
+  String _chatDepthMode = 'faster';
 
   // ── Nate Nudge state ──
   List<Map<String, dynamic>> _pendingNudges = [];
@@ -1766,6 +1769,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     _initSpeechToText();
     _loadCustomVocabulary();
     _loadChatTextScale();
+    _loadChatDepthMode();
     _initTts();
     _chatController.addListener(_onDraftChanged);
     _fetchRecap();
@@ -3132,6 +3136,88 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   // ADJUSTABLE CHAT TEXT SIZE (ACCESSIBILITY)
   // ===========================================================================
 
+  Future<void> _loadChatDepthMode() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getString(_prefsChatDepthModeKey);
+      if (stored == 'faster' || stored == 'extra') {
+        if (mounted) setState(() => _chatDepthMode = stored!);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _setChatDepthMode(String mode) async {
+    if (mode != 'faster' && mode != 'extra') return;
+    if (_chatDepthMode == mode) return;
+    setState(() => _chatDepthMode = mode);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefsChatDepthModeKey, mode);
+    } catch (_) {}
+  }
+
+  Widget _buildChatDepthToggle() {
+    Widget segment(String mode, String label) {
+      final selected = _chatDepthMode == mode;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => _setChatDepthMode(mode),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.symmetric(vertical: 7),
+            decoration: BoxDecoration(
+              color: selected
+                  ? (mode == 'extra'
+                      ? const Color(0xFFC9A962).withOpacity(0.22)
+                      : const Color(0xFF4ECDC4).withOpacity(0.18))
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: selected
+                    ? (mode == 'extra'
+                        ? const Color(0xFFC9A962)
+                        : const Color(0xFF4ECDC4))
+                    : const Color(0xFF333333),
+                width: selected ? 1.2 : 0.8,
+              ),
+            ),
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: selected
+                    ? (mode == 'extra'
+                        ? const Color(0xFFE8D5A3)
+                        : const Color(0xFF4ECDC4))
+                    : const Color(0xFF888888),
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                fontFamily: 'DM Sans',
+                letterSpacing: 0.3,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF222222)),
+      ),
+      child: Row(
+        children: [
+          segment('faster', 'Faster'),
+          const SizedBox(width: 4),
+          segment('extra', 'Extra'),
+        ],
+      ),
+    );
+  }
+
   Future<void> _loadChatTextScale() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -4280,7 +4366,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
       // FIX-H
       "type": "nate_query",
       "nate_query": text,
-      "modality": "General"
+      "modality": "General",
+      "depth_mode": _chatDepthMode,
     }));
 
     setState(() {
@@ -5538,89 +5625,124 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
           // Input bar - always at bottom, never overlapped
           Container(
             color: const Color(0xFF050505),
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-            child: Row(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                IconButton(
-                  icon: Icon(
-                    (_dictationArmed || _isListening)
-                        ? Icons.mic
-                        : Icons.mic_none,
-                    color: _isListening
-                        ? Colors.red
-                        : (_dictationArmed
-                            ? Colors.amber
-                            : (_speechAvailable ? Colors.white : Colors.grey)),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _buildChatDepthToggle(),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _chatDepthMode == 'faster'
+                            ? 'Quick reply'
+                            : 'Deep dive',
+                        style: TextStyle(
+                          color: _chatDepthMode == 'extra'
+                              ? const Color(0xFFE8D5A3)
+                              : const Color(0xFF8B7355),
+                          fontSize: 11,
+                          fontFamily: 'DM Sans',
+                        ),
+                      ),
+                    ],
                   ),
-                  onPressed: _speechAvailable
-                      ? () async {
-                          await _unlockTtsOnce();
-                          _toggleListening();
-                        }
-                      : null,
-                  tooltip: !_speechAvailable
-                      ? 'Speech not available'
-                      : (_dictationArmed
-                          ? 'Stop dictation'
-                          : 'Speak your message'),
                 ),
-                if (AppConfig.ENABLE_SOVEREIGN_VAULT && _canUseVault()) ...[
-                  const SizedBox(width: 4),
-                  VaultAttachmentButton(
-                    profile: widget.currentUserProfile,
-                    socket: _wsCh,
-                    onVaultItemSelected: (itemId) {
-                      if (itemId != null && itemId.isNotEmpty) {
-                        final attach = itemId.startsWith('[SSE Panel:') ||
-                                itemId.startsWith('[Story Panel:')
-                            ? itemId
-                            : '[Vault:$itemId] ';
-                        _chatController.text =
-                            '${_chatController.text}$attach'.trim();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Vault item attached. Tap Send to ask Nate.',
-                            ),
-                            backgroundColor: Color(0xFFC9A962),
-                            duration: Duration(seconds: 4),
-                          ),
-                        );
-                      }
-                    },
-                    onUploadProgress: (s) =>
-                        setState(() => _uploadProgressState = s),
-                  ),
-                ],
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextField(
-                    controller: _chatController,
-                    style: const TextStyle(
-                        color: Colors.white, fontFamily: "Courier"),
-                    decoration: InputDecoration(
-                        hintText: _isListening
-                            ? "Listening..."
+                Row(
+                  children: [
+                    IconButton(
+                      icon: Icon(
+                        (_dictationArmed || _isListening)
+                            ? Icons.mic
+                            : Icons.mic_none,
+                        color: _isListening
+                            ? Colors.red
                             : (_dictationArmed
-                                ? "Listening (paused)..."
-                                : "Input..."),
-                        filled: true,
-                        fillColor: Colors.white10,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(30))),
-                    readOnly: _isListening,
-                    keyboardType: TextInputType.multiline,
-                    minLines: 1,
-                    maxLines: 4,
-                    onSubmitted: (_) => _sendMessage(),
-                  ),
+                                ? Colors.amber
+                                : (_speechAvailable
+                                    ? Colors.white
+                                    : Colors.grey)),
+                      ),
+                      onPressed: _speechAvailable
+                          ? () async {
+                              await _unlockTtsOnce();
+                              _toggleListening();
+                            }
+                          : null,
+                      tooltip: !_speechAvailable
+                          ? 'Speech not available'
+                          : (_dictationArmed
+                              ? 'Stop dictation'
+                              : 'Speak your message'),
+                    ),
+                    if (AppConfig.ENABLE_SOVEREIGN_VAULT &&
+                        _canUseVault()) ...[
+                      const SizedBox(width: 4),
+                      VaultAttachmentButton(
+                        profile: widget.currentUserProfile,
+                        socket: _wsCh,
+                        onVaultItemSelected: (itemId) {
+                          if (itemId != null && itemId.isNotEmpty) {
+                            final attach =
+                                itemId.startsWith('[SSE Panel:') ||
+                                        itemId.startsWith('[Story Panel:')
+                                    ? itemId
+                                    : '[Vault:$itemId] ';
+                            _chatController.text =
+                                '${_chatController.text}$attach'.trim();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Vault item attached. Tap Send to ask Nate.',
+                                ),
+                                backgroundColor: Color(0xFFC9A962),
+                                duration: Duration(seconds: 4),
+                              ),
+                            );
+                          }
+                        },
+                        onUploadProgress: (s) =>
+                            setState(() => _uploadProgressState = s),
+                      ),
+                    ],
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: _chatController,
+                        style: const TextStyle(
+                            color: Colors.white, fontFamily: "Courier"),
+                        decoration: InputDecoration(
+                            hintText: _isListening
+                                ? "Listening..."
+                                : (_dictationArmed
+                                    ? "Listening (paused)..."
+                                    : (_chatDepthMode == 'extra'
+                                        ? "Ask Nate (Extra)..."
+                                        : "Ask Nate (Faster)...")),
+                            filled: true,
+                            fillColor: Colors.white10,
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(30))),
+                        readOnly: _isListening,
+                        keyboardType: TextInputType.multiline,
+                        minLines: 1,
+                        maxLines: 4,
+                        onSubmitted: (_) => _sendMessage(),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    FloatingActionButton(
+                        mini: true,
+                        backgroundColor: Colors.cyan,
+                        onPressed: _sendMessage,
+                        child: const Icon(Icons.send, color: Colors.black))
+                  ],
                 ),
-                const SizedBox(width: 10),
-                FloatingActionButton(
-                    mini: true,
-                    backgroundColor: Colors.cyan,
-                    onPressed: _sendMessage,
-                    child: const Icon(Icons.send, color: Colors.black))
               ],
             ),
           ),
