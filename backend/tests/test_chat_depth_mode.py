@@ -5,7 +5,9 @@ from app.websocket.chat_depth_mode import (
     allow_deep_memory_search,
     allow_enrichment,
     allow_plan_heavy,
+    build_depth_richness_directive,
     build_extra_quotient_directive,
+    build_faster_richness_directive,
     crystal_max_results,
     normalize_depth_mode,
     pg_history_limit,
@@ -21,7 +23,7 @@ def test_normalize_aliases():
 
 
 def test_faster_budgets():
-    assert crystal_max_results("faster") == 4
+    assert crystal_max_results("faster") == 6
     assert pg_history_limit("faster") == 8
     assert allow_enrichment("faster") is False
     assert allow_plan_heavy("faster") is False
@@ -43,3 +45,16 @@ def test_extra_quotient_directive_mentions_levels():
     assert "SIX QUOTIENT" in block
     assert "EQ" in block
     assert "SQ" in block or "CQ" in block
+
+
+def test_faster_richness_hybrid():
+    text = "I feel sad talking with my son about church"
+    fast = build_faster_richness_directive(text)
+    assert "FASTER" in fast
+    assert "RICH CLINICAL" in fast
+    assert "EQ" in fast
+    # Router picks compact vs full by mode
+    assert "FASTER" in build_depth_richness_directive("faster", text)
+    assert "EXTRA" in build_depth_richness_directive("extra", text)
+    # Faster directive stays shorter than Extra
+    assert len(fast) < len(build_extra_quotient_directive(text))

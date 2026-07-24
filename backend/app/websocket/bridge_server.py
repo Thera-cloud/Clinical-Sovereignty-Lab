@@ -8955,7 +8955,7 @@ class AzureCortex:
                 allow_fsf as _allow_fsf,
                 allow_newsletter_library as _allow_lib,
                 allow_deep_memory_search as _allow_deep_mem,
-                build_extra_quotient_directive as _extra_sq_dir,
+                build_depth_richness_directive as _depth_rich_dir,
             )
             _depth = _norm_depth(depth_mode)
         except Exception:
@@ -8968,7 +8968,7 @@ class AzureCortex:
             _allow_fsf = lambda m: True  # noqa: E731
             _allow_lib = lambda m: True  # noqa: E731
             _allow_deep_mem = lambda m: True  # noqa: E731
-            _extra_sq_dir = lambda t: ""  # noqa: E731
+            _depth_rich_dir = lambda m, t: ""  # noqa: E731
         print(f">>> [AI] Cortex Active for {profile.get('name')} ctx={_ctx} depth={_depth}")
         # QUANTUM-CRYSTAL-ARCH: resolve DOJO per-type model-tier override (skips ODPE)
         _dojo_tier = _DOJO_TYPE_MODEL_TIER.get((dojo_type or "").lower()) if dojo_type else None
@@ -9264,12 +9264,11 @@ class AzureCortex:
                     crystal_context = f"{crystal_context}\n\n{_lib_ctx}" if crystal_context else _lib_ctx
         except Exception:
             pass
-        # QUANTUM-CRYSTAL-ARCH — Extra mode: six-quotient depth directive
+        # QUANTUM-CRYSTAL-ARCH — Faster compact / Extra full richness directive
         try:
-            if not _is_faster_depth(_depth):
-                _sq_dir = _extra_sq_dir(user_text or "")
-                if _sq_dir:
-                    crystal_context = f"{crystal_context}\n\n{_sq_dir}" if crystal_context else _sq_dir
+            _sq_dir = _depth_rich_dir(_depth, user_text or "")
+            if _sq_dir:
+                crystal_context = f"{crystal_context}\n\n{_sq_dir}" if crystal_context else _sq_dir
         except Exception:
             pass
         _live_turn_context = _format_live_turn_context(uid)
