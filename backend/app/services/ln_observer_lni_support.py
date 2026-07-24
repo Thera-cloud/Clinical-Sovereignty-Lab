@@ -238,23 +238,13 @@ async def _pg_keyword_crystal_fallback(
     also_uuids: List[str],
     limit: int = 8,
 ) -> List[Dict[str, Any]]:
-    """ILIKE fallback for Observer same-brain when Vectorize returns 0 hits."""
-    tokens = [
-        t for t in re.findall(r"[A-Za-z]{4,}", query or "")
-        if t.lower() not in {
-            "what", "which", "with", "that", "this", "about", "from",
-            "have", "your", "their", "modality", "surface", "night",
-            "school", "wisdom", "relevant", "memory", "observe",
-        }
-    ][:6]
-    # Therapeutic anchors when STT/smoke query is short after stopword filter
-    for anchor in ("attachment", "rupture", "pursue", "withdraw"):
-        if anchor not in {t.lower() for t in tokens}:
-            tokens.append(anchor)
-        if len(tokens) >= 6:
-            break
-    if not tokens:
-        return []
+    """
+    Fast PG fallback when Vectorize is empty/slow.
+    No ILIKE on the global pool (unindexed — can take minutes). Prefer
+    user-scoped rows by confidence, then high-confidence scope=global.
+    # QUANTUM-CRYSTAL-ARCH
+    """
+    _ = query  # reserved for future FTS once indexed
     try:
         ids = []
         for u in [primary_uuid] + list(also_uuids or []):
@@ -262,53 +252,35 @@ async def _pg_keyword_crystal_fallback(
                 ids.append(uuid_mod.UUID(str(u)))
             except Exception:
                 continue
-        # Prefer clinical anchors over incidental tokens ("fits", proper nouns).
-        low = {t.lower() for t in tokens}
-        try_tokens = [
-            a for a in ("attachment", "rupture", "pursue", "withdraw", "alliance")
-            if a in low
-        ] or ["attachment", "rupture"]
         rows: List[Any] = []
-        used_token = try_tokens[0]
         async with db_pool.acquire() as conn:
-            for tok in try_tokens[:3]:
-                like_pat = f"%{tok}%"
-                used_token = tok
-                batch: List[Any] = []
-                if ids:
-                    batch = await conn.fetch(
-                        """SELECT crystal_text, content_hash, confidence, domain
-                           FROM nate_intelligence_crystals
-                           WHERE user_id = ANY($1::uuid[])
-                             AND superseded_by IS NULL
-                             AND COALESCE(confidence, 0) >= 0.30
-                             AND (scope = 'user' OR scope LIKE 'user:%')
-                             AND crystal_text ILIKE $2
-                           ORDER BY confidence DESC NULLS LAST, created_at DESC
-                           LIMIT $3""",
-                        ids,
-                        like_pat,
-                        limit,
-                    )
-                if len(batch or []) < limit:
-                    need = limit - len(batch or [])
-                    grows = await conn.fetch(
-                        """SELECT crystal_text, content_hash, confidence, domain
-                           FROM nate_intelligence_crystals
-                           WHERE user_id IS NULL
-                             AND scope = 'global'
-                             AND superseded_by IS NULL
-                             AND COALESCE(confidence, 0) >= 0.55
-                             AND crystal_text ILIKE $1
-                           ORDER BY confidence DESC NULLS LAST, created_at DESC
-                           LIMIT $2""",
-                        like_pat,
-                        need,
-                    )
-                    batch = list(batch or []) + list(grows or [])
-                rows = batch
-                if rows:
-                    break
+            if ids:
+                rows = await conn.fetch(
+                    """SELECT crystal_text, content_hash, confidence, domain
+                       FROM nate_intelligence_crystals
+                       WHERE user_id = ANY($1::uuid[])
+                         AND superseded_by IS NULL
+                         AND COALESCE(confidence, 0) >= 0.30
+                         AND (scope = 'user' OR scope LIKE 'user:%')
+                       ORDER BY confidence DESC NULLS LAST, created_at DESC
+                       LIMIT $2""",
+                    ids,
+                    limit,
+                )
+            if len(rows or []) < limit:
+                need = limit - len(rows or [])
+                grows = await conn.fetch(
+                    """SELECT crystal_text, content_hash, confidence, domain
+                       FROM nate_intelligence_crystals
+                       WHERE user_id IS NULL
+                         AND scope = 'global'
+                         AND superseded_by IS NULL
+                         AND COALESCE(confidence, 0) >= 0.85
+                       ORDER BY confidence DESC NULLS LAST, created_at DESC
+                       LIMIT $1""",
+                    need,
+                )
+                rows = list(rows or []) + list(grows or [])
         out: List[Dict[str, Any]] = []
         seen = set()
         for r in rows or []:
@@ -333,9 +305,8 @@ async def _pg_keyword_crystal_fallback(
             )
         if out:
             logger.warning(
-                "LN-Observer PG crystal fallback hits=%s token=%s",
+                "LN-Observer PG crystal fallback hits=%s (no-ILIKE)",
                 len(out),
-                used_token,
             )
         return out
     except Exception as e:
