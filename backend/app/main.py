@@ -4527,6 +4527,7 @@ for _rmod, _ralias in [
     ("app.routers.cli_analytics_api", "cli_analytics_router"),
     ("app.routers.ceo_dual_coo_api", "ceo_dual_coo_router"),  # QUANTUM-CRYSTAL-ARCH
     ("app.routers.six_quotient_api", "six_quotient_router"),  # QUANTUM-CRYSTAL-ARCH
+    ("app.routers.principal_review_api", "principal_review_router"),  # QUANTUM-CRYSTAL-ARCH
     ("app.routers.oauth_api", "oauth_router"),
     ("app.routers.nightly_audit_api", "nightly_audit_router"),
     ("app.routers.cloudflare_realtime_api", "cf_realtime_router"),

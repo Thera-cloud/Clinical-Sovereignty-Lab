@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Principal-Review · Sovereign Command</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--void:#050505;--chamber:#0A0A0A;--elev:#111;--line:#2a2a2a;--gold:#C9A962;--goldb:#E8D5A3;
+--dim:#8B7355;--cyan:#4ECDC4;--red:#EF4444;--ok:#22C55E}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--void);color:var(--goldb);font-family:'DM Sans',system-ui,sans-serif;
+font-size:14.5px;line-height:1.5;min-height:100vh}
+.top{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;
+padding:1.25rem 1.5rem;border-bottom:1px solid var(--line);background:var(--chamber)}
+h1{font-family:'Cormorant Garamond',Georgia,serif;font-size:1.85rem;color:var(--gold);font-weight:700}
+.sub{color:var(--dim);font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;margin-top:.2rem}
+.tabs{display:flex;gap:.4rem;padding:.75rem 1.5rem;border-bottom:1px solid var(--line);background:var(--chamber)}
+.tab{padding:.45rem .9rem;border:1px solid var(--line);border-radius:6px;background:transparent;
+color:var(--dim);cursor:pointer;font:inherit;font-weight:600;font-size:.8rem}
+.tab.on{border-color:var(--gold);color:var(--gold)}
+main{max-width:920px;margin:0 auto;padding:1.25rem 1.25rem 3rem}
+.panel{display:none}.panel.on{display:block}
+.warn{color:var(--red);margin-bottom:1rem;font-size:.9rem}
+.meta{color:var(--dim);font-size:.85rem;margin-bottom:1rem}
+.card{background:var(--elev);border:1px solid var(--line);border-radius:8px;padding:1rem 1.1rem;margin:1rem 0}
+.client,.resp{white-space:pre-wrap;background:var(--void);padding:.75rem;border-radius:4px;margin:.4rem 0 .8rem}
+label{display:inline-block;margin:0 .85rem .5rem 0;color:var(--cyan);font-size:.85rem}
+input[type=number],select,textarea,input[type=text]{background:var(--void);color:var(--goldb);
+border:1px solid var(--line);border-radius:4px;padding:.35rem .5rem;font:inherit}
+input[type=number]{width:3.2rem}
+textarea{width:100%;min-height:4.5rem;margin:.35rem 0}
+button{font:inherit;font-weight:600;cursor:pointer;border-radius:6px;padding:.45rem .9rem;
+border:1px solid var(--gold);background:transparent;color:var(--gold);margin:.2rem .35rem .2rem 0}
+button.primary{background:var(--gold);color:var(--void)}
+button.danger{border-color:var(--red);color:var(--red)}
+button:disabled{opacity:.4;cursor:not-allowed}
+.row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.6rem 0}
+.pill{font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;padding:.2rem .55rem;
+border-radius:999px;border:1px solid var(--line);color:var(--dim)}
+.pill.ok{border-color:var(--ok);color:var(--ok)}
+.pill.pend{border-color:var(--gold);color:var(--gold)}
+.list-item{border-top:1px solid var(--line);padding:.85rem 0}
+.list-item:first-child{border-top:none}
+.mono{font-family:ui-monospace,monospace;font-size:.78rem;color:var(--dim)}
+.timer{font-variant-numeric:tabular-nums;color:var(--cyan);font-weight:600}
+.empty{color:var(--dim);padding:1rem 0}
+h2{font-family:'Cormorant Garamond',Georgia,serif;color:var(--gold);font-size:1.35rem;margin:1.2rem 0 .6rem}
+</style>
+</head>
+<body>
+<div class="top">
+  <div>
+    <h1>Principal-Review</h1>
+    <div class="sub">Gold scoring · conversation library · DOJO wisdom</div>
+  </div>
+  <button onclick="navBack()">← Command</button>
+</div>
+<div class="tabs">
+  <button class="tab on" data-p="score" onclick="showPanel('score')">Gold Score</button>
+  <button class="tab" data-p="library" onclick="showPanel('library')">Library</button>
+  <button class="tab" data-p="coach" onclick="showPanel('coach')">Coach Shares</button>
+</div>
+<main>
+  <div id="authWarn" class="warn" style="display:none">No admin token — open from Sovereign Command after login.</div>
+
+  <!-- GOLD SCORE -->
+  <section class="panel on" id="panel-score">
+    <div class="meta" id="goldProgress">Loading progress…</div>
+    <div class="row">
+      <button class="primary" id="btnStart" onclick="startSession()">Start scoring session</button>
+      <button onclick="loadGoldItems()">Load unscored (50)</button>
+      <span class="pill pend" id="runPill">no session</span>
+      <span class="timer" id="itemTimer">—</span>
+    </div>
+    <p class="meta">Rubric 0–3: primary · accuracy · naturalness. Median latency must stay ≥45s/item. Blind — distractors hidden. Do not rush.</p>
+    <div id="scoreCard" class="empty">Start a session, then load items.</div>
+  </section>
+
+  <!-- LIBRARY -->
+  <section class="panel" id="panel-library">
+    <h2>Conversation library</h2>
+    <p class="meta">Principal answers + Nate drafts. Promote sends templates into crystals / wisdom for chat recall.</p>
+    <div class="card">
+      <h2 style="margin-top:0;font-size:1.1rem">New template</h2>
+      <label>Topic <input type="text" id="libTopic" style="width:14rem"></label>
+      <label>Section <input type="text" id="libSection" value="clinical" style="width:8rem"></label>
+      <p><strong>Client says</strong></p>
+      <textarea id="libClient"></textarea>
+      <p><strong>Your (Principal) response</strong></p>
+      <textarea id="libPrincipal"></textarea>
+      <p><strong>Nate response</strong></p>
+      <textarea id="libNate"></textarea>
+      <div class="row">
+        <button onclick="generateNate()">Generate Nate draft</button>
+        <button class="primary" onclick="saveLibrary()">Save to library</button>
+      </div>
+    </div>
+    <div class="row">
+      <button onclick="loadLibrary()">Refresh library</button>
+      <select id="libFilter"><option value="">all statuses</option>
+        <option>draft</option><option>approved</option><option>promoted</option></select>
+    </div>
+    <div id="libList" class="empty">Loading…</div>
+  </section>
+
+  <!-- COACH -->
+  <section class="panel" id="panel-coach">
+    <h2>Coach DOJO shares</h2>
+    <p class="meta">Reads bridge <span class="mono">coach_learning_queue.json</span>. Ingest → library; optional promote → LN memory.</p>
+    <button onclick="loadCoachShares()">Refresh shares</button>
+    <div id="coachList" class="empty">Loading…</div>
+  </section>
+</main>
+
+<script>
+const API = (window.SS_API_BASE || "https://api.sovereignsanctuary.net") + "/api/admin/principal-review";
+let _runId = null, _items = [], _idx = 0, _shownAt = 0, _timerIv = null;
+
+function _token(){
+  try{
+    return sessionStorage.getItem("sc_token") || localStorage.getItem("sc_token")
+      || sessionStorage.getItem("token") || "";
+  }catch(e){ return ""; }
+}
+function _headers(){
+  const h = {"Content-Type":"application/json"};
+  const t = _token();
+  if(t) h["Authorization"] = "Bearer " + t;
+  return h;
+}
+function esc(s){ const d=document.createElement("div"); d.textContent=s??""; return d.innerHTML; }
+function navBack(){
+  try{ window.location.href = "command.html"; }catch(e){}
+}
+function showPanel(name){
+  document.querySelectorAll(".panel").forEach(p=>p.classList.remove("on"));
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on", t.dataset.p===name));
+  document.getElementById("panel-"+name).classList.add("on");
+  if(name==="library") loadLibrary();
+  if(name==="coach") loadCoachShares();
+  if(name==="score") refreshProgress();
+}
+async function api(path, opts){
+  const res = await fetch(API + path, Object.assign({headers:_headers()}, opts||{}));
+  if(res.status===401){
+    console.warn("Auth issue on", path);
+    document.getElementById("authWarn").style.display="block";
+    return null;
+  }
+  if(!res.ok){
+    let msg = res.statusText;
+    try{ const j=await res.json(); msg=j.detail||JSON.stringify(j); }catch(e){}
+    alert("Error "+res.status+": "+msg);
+    return null;
+  }
+  return res.json();
+}
+
+async function refreshProgress(){
+  const d = await api("/gold/progress");
+  if(!d) return;
+  document.getElementById("goldProgress").textContent =
+    `Locked ${d.locked}/${d.total} · Scored ${d.scored} · Authenticated entries ${d.authenticated} · Distractors in set ${d.degraded} (hidden while scoring)`;
+}
+
+async function startSession(){
+  const d = await api("/gold/session/start", {method:"POST", body:JSON.stringify({notes:"Principal-Review UI"})});
+  if(!d) return;
+  _runId = d.run_id;
+  document.getElementById("runPill").textContent = _runId;
+  document.getElementById("runPill").className = "pill ok";
+  await loadGoldItems();
+}
+
+async function loadGoldItems(){
+  if(!_runId){ alert("Start a scoring session first."); return; }
+  const d = await api("/gold/items?unscored_only=true&limit=50");
+  if(!d) return;
+  _items = d.items||[];
+  _idx = 0;
+  if(!_items.length){
+    document.getElementById("scoreCard").innerHTML = "<div class='empty'>All locked items are scored.</div>";
+    return;
+  }
+  renderScoreItem();
+  await refreshProgress();
+}
+
+function _tickTimer(){
+  if(!_shownAt) return;
+  const sec = Math.floor((Date.now()-_shownAt)/1000);
+  const el = document.getElementById("itemTimer");
+  el.textContent = sec + "s on item" + (sec < 45 ? " (need ≥45s median)" : "");
+  el.style.color = sec < 45 ? "var(--red)" : "var(--ok)";
+}
+
+function renderScoreItem(){
+  if(_timerIv) clearInterval(_timerIv);
+  if(_idx >= _items.length){
+    document.getElementById("scoreCard").innerHTML = "<div class='empty'>Session queue complete. Refresh progress.</div>";
+    document.getElementById("itemTimer").textContent = "—";
+    return;
+  }
+  const it = _items[_idx];
+  _shownAt = Date.now();
+  _tickTimer();
+  _timerIv = setInterval(_tickTimer, 500);
+  const needsSafety = (it.response_class||"") === "escalate_or_safety";
+  document.getElementById("scoreCard").innerHTML = `
+    <div class="card">
+      <div class="meta">${esc(it.scenario_id)} · ${esc(it.section)} · ${esc(it.difficulty)} · ${esc(it.response_class)}
+        <span class="pill">${_idx+1}/${_items.length}</span></div>
+      <p><strong>Client</strong></p>
+      <div class="client">${esc(it.client_says)}</div>
+      <p><strong>Response (blind)</strong></p>
+      <div class="resp">${esc(it.response)}</div>
+      <div class="row">
+        <label>primary <input type="number" id="sPrimary" min="0" max="3"></label>
+        <label>accuracy <input type="number" id="sAccuracy" min="0" max="3"></label>
+        <label>naturalness <input type="number" id="sNatural" min="0" max="3"></label>
+        ${needsSafety ? `<label>safety_veto <select id="sVeto"><option value=""></option><option>ok</option><option>fail</option></select></label>` : `<input type="hidden" id="sVeto" value="">`}
+      </div>
+      <textarea id="sNotes" placeholder="notes"></textarea>
+      <div class="row">
+        <button class="primary" onclick="submitScore()">Submit score</button>
+        <button onclick="_idx++;renderScoreItem()">Skip (not scored)</button>
+      </div>
+    </div>`;
+}
+
+async function submitScore(){
+  const it = _items[_idx];
+  if(!_runId || !it) return;
+  const latency = Date.now() - _shownAt;
+  const primary = parseInt(document.getElementById("sPrimary").value, 10);
+  const accuracy = parseInt(document.getElementById("sAccuracy").value, 10);
+  const naturalness = parseInt(document.getElementById("sNatural").value, 10);
+  if([primary,accuracy,naturalness].some(v => Number.isNaN(v) || v<0 || v>3)){
+    alert("Enter primary, accuracy, naturalness as 0–3.");
+    return;
+  }
+  const vetoEl = document.getElementById("sVeto");
+  const safety_veto = vetoEl && vetoEl.value ? vetoEl.value : null;
+  if((it.response_class||"")==="escalate_or_safety" && !safety_veto){
+    alert("Safety veto required on escalate_or_safety items.");
+    return;
+  }
+  const d = await api("/gold/score", {
+    method:"POST",
+    body: JSON.stringify({
+      scenario_id: it.scenario_id,
+      run_id: _runId,
+      primary, accuracy, naturalness,
+      safety_veto,
+      notes: document.getElementById("sNotes").value||"",
+      latency_ms: latency,
+      score_session_id: _runId
+    })
+  });
+  if(!d) return;
+  _idx++;
+  await refreshProgress();
+  renderScoreItem();
+}
+
+async function loadLibrary(){
+  const st = document.getElementById("libFilter").value;
+  const q = st ? ("?status="+encodeURIComponent(st)) : "";
+  const d = await api("/library"+q);
+  if(!d){ document.getElementById("libList").textContent="Failed to load."; return; }
+  const items = d.items||[];
+  if(!items.length){ document.getElementById("libList").innerHTML="<div class='empty'>Library empty.</div>"; return; }
+  document.getElementById("libList").innerHTML = items.map(it => `
+    <div class="list-item">
+      <div class="meta">${esc(it.topic||"(untitled)")} · ${esc(it.section)} ·
+        <span class="pill ${it.status==='promoted'?'ok':'pend'}">${esc(it.status)}</span>
+        <span class="mono">${esc(it.source_kind)} ${esc(it.source_ref||"")}</span></div>
+      <div class="client">${esc((it.client_says||"").slice(0,400))}${(it.client_says||"").length>400?"…":""}</div>
+      ${it.principal_response ? `<p><strong>Principal</strong></p><div class="resp">${esc(it.principal_response.slice(0,500))}</div>` : ""}
+      ${it.nate_response ? `<p><strong>Nate</strong></p><div class="resp">${esc(it.nate_response.slice(0,500))}</div>` : ""}
+      <div class="row">
+        ${it.status!=="promoted" ? `<button class="primary" onclick="promoteLib('${esc(it.id)}')">Promote to LN memory</button>` : `<span class="mono">crystal ${esc(it.promoted_crystal_id||"")}</span>`}
+      </div>
+    </div>`).join("");
+}
+
+async function saveLibrary(){
+  const body = {
+    topic: document.getElementById("libTopic").value||"",
+    section: document.getElementById("libSection").value||"clinical",
+    client_says: document.getElementById("libClient").value||"",
+    principal_response: document.getElementById("libPrincipal").value||"",
+    nate_response: document.getElementById("libNate").value||"",
+    source_kind: "principal_authored",
+    status: "approved"
+  };
+  if(!body.client_says.trim()){ alert("Client says required"); return; }
+  const d = await api("/library", {method:"POST", body:JSON.stringify(body)});
+  if(!d) return;
+  document.getElementById("libClient").value="";
+  document.getElementById("libPrincipal").value="";
+  document.getElementById("libNate").value="";
+  loadLibrary();
+}
+
+async function generateNate(){
+  const client_says = document.getElementById("libClient").value||"";
+  if(!client_says.trim()){ alert("Enter client says first"); return; }
+  const d = await api("/library/generate-nate", {
+    method:"POST",
+    body: JSON.stringify({
+      client_says,
+      principal_guidance: document.getElementById("libPrincipal").value||"",
+      section: document.getElementById("libSection").value||"clinical"
+    })
+  });
+  if(!d) return;
+  document.getElementById("libNate").value = d.nate_response||"";
+}
+
+async function promoteLib(id){
+  if(!confirm("Promote this template into LN crystals / wisdom?")) return;
+  const d = await api("/library/"+id+"/promote", {method:"POST", body:"{}"});
+  if(!d) return;
+  loadLibrary();
+}
+
+async function loadCoachShares(){
+  const d = await api("/coach-shares?limit=40");
+  if(!d){ document.getElementById("coachList").textContent="Failed."; return; }
+  const items = d.items||[];
+  if(!items.length){
+    document.getElementById("coachList").innerHTML =
+      "<div class='empty'>No coach shares in queue"+(d.queue_reachable?"":" (queue file not mounted)")+".</div>";
+    return;
+  }
+  document.getElementById("coachList").innerHTML = items.map(it => `
+    <div class="list-item">
+      <div class="meta">${esc(it.coach||"?")} · ${esc(it.dojo_persona||"")} ·
+        <span class="pill">${esc(it.status||"")}</span>
+        <span class="mono">${esc(it.id||"")}</span></div>
+      <div class="resp">${esc(it.content||"")}</div>
+      <div class="row">
+        <button onclick="ingestCoach('${esc(it.id||"")}', false)">Ingest to library</button>
+        <button class="primary" onclick="ingestCoach('${esc(it.id||"")}', true)">Ingest + promote</button>
+      </div>
+    </div>`).join("");
+}
+
+async function ingestCoach(qid, promote){
+  if(!qid){ alert("Missing queue id"); return; }
+  const d = await api("/coach-shares/ingest", {
+    method:"POST",
+    body: JSON.stringify({queue_id:qid, promote:!!promote})
+  });
+  if(!d) return;
+  alert(promote ? "Ingested and promoted." : "Ingested to library.");
+  loadLibrary();
+}
+
+(function init(){
+  if(!_token()) document.getElementById("authWarn").style.display="block";
+  refreshProgress();
+})();
+</script>
+</body>
+</html>
