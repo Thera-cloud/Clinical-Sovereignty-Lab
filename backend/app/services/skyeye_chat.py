@@ -559,9 +559,16 @@ YOUR COACHING CHAT CAPABILITIES:
 9. FOLDER CONTENTS — You can discuss topics and notes referenced in the coach's Folder tab.
 10. AI MODES — You accept AI mode instructions for this chat to help with coaching-specific topics.
 
+SUBJECT DISCIPLINE (CRITICAL):
+- Do NOT assume the Therapeutic Override dropdown client is the person being discussed unless context includes [FOCUSED CLIENT] with override_active/subject locked, or the coach named them.
+- If no [FOCUSED CLIENT] / [INSIGHTS SUBJECT] is present and the coach's question is about a person, ASK who they mean (one short clarifying question). Do not invent a name from the roster.
+- If the coach names someone (in-roster or not), treat that name as the subject. Non-clients are OK — remember notes about them for later under that name; do not refuse because they are not in the roster yet.
+- Never silently re-center the conversation on a previously listed override/dropdown client after the coach changes subject.
+
 YOUR BOUNDARIES (enforced):
-- You ONLY discuss clients assigned to this coach (or their assistant coaches' clients if master coach).
-- You do NOT discuss clients assigned to other coaches.
+- Prefer discussing clients assigned to this coach (or their assistant coaches' clients if master coach).
+- You MAY discuss people the coach names who are not yet in the system; store/recall them by spoken name only (no fabricated PHI).
+- You do NOT discuss other coaches' clients unless the coach is a master reviewing an assistant's caseload.
 - You do NOT have access to: social media posting, marketing campaigns, funnel data, Hive Defense, admin operations, billing management, platform analytics, or any SkyEye Command Center features.
 - You do NOT execute commands. You provide insights, analysis, and recommendations.
 
@@ -1145,7 +1152,18 @@ RULES:
         detected_mode = mode_override or "inquiry"
         ctx = context or {}
 
-        # Store coach's message in dedicated table
+        mentioned_subjects = []
+        raw_mentioned = ctx.get("mentioned_subjects") or []
+        if isinstance(raw_mentioned, list):
+            for item in raw_mentioned:
+                name = str(item or "").strip()
+                if name and name not in mentioned_subjects:
+                    mentioned_subjects.append(name)
+        insights_subject = (ctx.get("insights_subject_name") or "").strip()
+        if insights_subject and insights_subject not in mentioned_subjects:
+            mentioned_subjects.insert(0, insights_subject)
+
+        # Store coach's message in dedicated table (persist subjects for later recall)
         try:
             async with self.db_pool.acquire() as conn:
                 await conn.execute(
@@ -1153,7 +1171,13 @@ RULES:
                        (coach_username, role, message, mode, context_snapshot)
                        VALUES ($1, 'user', $2, $3, $4)""",
                     coach_username, user_message, detected_mode,
-                    json.dumps({"context_keys": list(ctx.keys())}),
+                    json.dumps({
+                        "context_keys": list(ctx.keys()),
+                        "mentioned_subjects": mentioned_subjects[:12],
+                        "insights_subject_name": insights_subject,
+                        "override_active": bool(ctx.get("override_active")),
+                        "focused_client_id": ctx.get("focused_client_id") or ctx.get("client_id"),
+                    }),
                 )
         except Exception as e:
             logger.warning("Coach chat history insert failed: %s", e)
@@ -1200,12 +1224,76 @@ RULES:
             )
 
         focused_cid = ctx.get("client_id") or ctx.get("focused_client_id")
-        focused_name = ctx.get("focused_client_name")
+        focused_name = ctx.get("focused_client_name") or insights_subject
+        override_active = bool(ctx.get("override_active"))
+
         if focused_cid:
             focus_line = f"[FOCUSED CLIENT]\nID: {focused_cid}"
             if focused_name:
                 focus_line += f" | Name: {focused_name}"
+            if override_active:
+                focus_line += "\nSource: therapeutic override (actively set)"
+            else:
+                focus_line += "\nSource: coach-named or explicitly selected subject"
             context_blocks.append(focus_line)
+        elif insights_subject or mentioned_subjects:
+            subj = insights_subject or mentioned_subjects[0]
+            block = (
+                f"[INSIGHTS SUBJECT]\nName: {subj}\n"
+                "This person may or may not be a registered client. "
+                "Use this name as the focus. Remember notes under this name for later."
+            )
+            if len(mentioned_subjects) > 1:
+                block += "\nAlso mentioned: " + ", ".join(mentioned_subjects[1:8])
+            context_blocks.append(block)
+        else:
+            context_blocks.append(
+                "[SUBJECT UNRESOLVED]\n"
+                "No therapeutic override is active and the coach has not named a subject. "
+                "Do NOT assume any roster name. If the question is about a specific person, "
+                "ask who they are talking about. Population/roster questions may proceed without a name."
+            )
+
+        # Recall free-text subjects from recent coach chat (non-client memory)
+        try:
+            remembered = []
+            async with self.db_pool.acquire() as conn:
+                snap_rows = await conn.fetch(
+                    """SELECT context_snapshot FROM coach_nate_chat_history
+                       WHERE coach_username = $1 AND role = 'user'
+                         AND context_snapshot IS NOT NULL
+                       ORDER BY created_at DESC LIMIT 30""",
+                    coach_username,
+                )
+            seen_names = {n.lower() for n in mentioned_subjects}
+            for row in snap_rows:
+                snap = row["context_snapshot"]
+                if isinstance(snap, str):
+                    try:
+                        snap = json.loads(snap)
+                    except Exception:
+                        continue
+                if not isinstance(snap, dict):
+                    continue
+                for n in snap.get("mentioned_subjects") or []:
+                    name = str(n or "").strip()
+                    key = name.lower()
+                    if name and key not in seen_names:
+                        seen_names.add(key)
+                        remembered.append(name)
+                isn = str(snap.get("insights_subject_name") or "").strip()
+                if isn and isn.lower() not in seen_names:
+                    seen_names.add(isn.lower())
+                    remembered.append(isn)
+            if remembered:
+                context_blocks.append(
+                    "[REMEMBERED SUBJECTS — prior Insights chat]\n"
+                    + ", ".join(remembered[:12])
+                    + "\nThese may include people not yet in the client roster. "
+                    "Recall notes by name when the coach refers to them."
+                )
+        except Exception as e:
+            logger.debug("Coach remembered subjects load failed: %s", e)
 
         # Session stats
         sessions_today = ctx.get("sessions_today")

@@ -6166,6 +6166,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   String _coachOverrideClientId = '';
   /// Shared focus client for Insights, Nevedal, Classroom, Briefings → Nate context
   String _focusedClientId = '';
+  /// Sticky Insights subject from names the coach said (roster or free-text).
+  String _insightsSubjectName = '';
+  String _insightsSubjectClientId = '';
   Map<String, dynamic> _coachOverrideRow = {};
   List<Map<String, dynamic>> _coachOverrideHistory = [];
   List<String> _coachOverrideAllowedDomains = const [
@@ -8041,13 +8044,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             ids.contains(_coachOverrideClientId))
         ? _coachOverrideClientId
         : (ids.isNotEmpty ? ids.first : '');
+    // Dropdown selection only prepares override UI — does NOT lock Insights focus.
     if (ddVal.isNotEmpty && ddVal != _coachOverrideClientId) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         if (ddVal != _coachOverrideClientId) {
           setState(() {
             _coachOverrideClientId = ddVal;
-            _focusedClientId = ddVal;
           });
           _refreshCoachOverridePanel();
         }
@@ -8094,7 +8097,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             }).toList(),
             onChanged: (v) {
               if (v == null) return;
-              _setFocusedClient(v);
+              // Override dropdown only — does not lock Insights subject.
+              setState(() => _coachOverrideClientId = v);
               _refreshCoachOverridePanel();
             },
           ),
@@ -8406,6 +8410,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           setState(() {
             _clients = data['clients'] ?? [];
             _isLoading = false;
+            // Prefill override dropdown only — do not assume Insights subject.
             if (_coachOverrideClientId.isEmpty && _clients.isNotEmpty) {
               final c0 = _clients.first;
               if (c0 is Map) {
@@ -8413,7 +8418,6 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                 _coachOverrideClientId =
                     (m['hardware_id'] ?? m['client_id'] ?? m['id'] ?? '')
                         .toString();
-                _focusedClientId = _coachOverrideClientId;
               }
             }
           });
@@ -8460,6 +8464,23 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               _coachOverrideAllowedDomains =
                   ad.map((e) => e.toString()).toList();
             }
+            // Insights may assume this client only after an override is saved.
+            if (_coachOverrideRow.isNotEmpty &&
+                _coachOverrideClientId.isNotEmpty) {
+              _focusedClientId = _coachOverrideClientId;
+              _insightsSubjectClientId = _coachOverrideClientId;
+              var ovName = '';
+              for (final c in _clients) {
+                if (c is! Map) continue;
+                final m = Map<String, dynamic>.from(c);
+                if (_clientIdFromMap(m) == _coachOverrideClientId) {
+                  ovName = _clientNameFromMap(m);
+                  break;
+                }
+              }
+              _insightsSubjectName =
+                  ovName.isNotEmpty ? ovName : _coachOverrideClientId;
+            }
           });
         }
       } else if (data['type'] == 'coach_override_history') {
@@ -8476,7 +8497,17 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       } else if (data['type'] == 'coach_client_override_cleared') {
         if (mounted) {
           setState(() {
+            final wasOverrideFocus =
+                _focusedClientId.isNotEmpty &&
+                    _focusedClientId == _coachOverrideClientId;
             _coachOverrideRow = {};
+            if (wasOverrideFocus) {
+              _focusedClientId = '';
+              if (_insightsSubjectClientId == _coachOverrideClientId) {
+                _insightsSubjectClientId = '';
+                _insightsSubjectName = '';
+              }
+            }
           });
         }
         _refreshCoachOverridePanel();
@@ -13292,12 +13323,20 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     _scrollInsightsChat();
     try {
       final token = widget.currentUserProfile['token'] ?? '';
+      _captureInsightsSubjectsFromMessage(message);
       final contextPayload = _buildCoachNateContextPayload(messageHint: message);
       final resolvedId = (contextPayload['client_id'] ?? '').toString();
-      if (resolvedId.isNotEmpty && resolvedId != _focusedClientId) {
+      final subjectName =
+          (contextPayload['insights_subject_name'] ?? '').toString();
+      if (resolvedId.isNotEmpty || subjectName.isNotEmpty) {
         setState(() {
-          _focusedClientId = resolvedId;
-          _coachOverrideClientId = resolvedId;
+          if (resolvedId.isNotEmpty) {
+            _focusedClientId = resolvedId;
+            _insightsSubjectClientId = resolvedId;
+          }
+          if (subjectName.isNotEmpty) {
+            _insightsSubjectName = subjectName;
+          }
         });
       }
 
@@ -13417,7 +13456,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                         child: Padding(
                           padding: const EdgeInsets.all(24),
                           child: Text(
-                            'Ask about client patterns, coherence trends, risk indicators, or session insights...',
+                            'Name who you are talking about, or ask about patterns across your roster. Insights will not assume the Therapeutic Override client unless an override is set.',
                             style: TextStyle(
                                 color: Colors.white.withOpacity(0.35),
                                 fontSize: 14,
@@ -15037,12 +15076,29 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     return (c['name'] ?? c['username'] ?? 'Unknown').toString();
   }
 
+  bool get _hasActiveTherapeuticOverride => _coachOverrideRow.isNotEmpty;
+
   void _setFocusedClient(String clientId) {
     final id = clientId.trim();
     if (id.isEmpty) return;
-    if (_focusedClientId == id && _coachOverrideClientId == id) return;
+    if (_focusedClientId == id &&
+        _insightsSubjectClientId == id &&
+        _coachOverrideClientId == id) {
+      return;
+    }
     setState(() {
       _focusedClientId = id;
+      _insightsSubjectClientId = id;
+      _insightsSubjectName = '';
+      for (final c in _clients) {
+        if (c is! Map) continue;
+        final m = Map<String, dynamic>.from(c);
+        if (_clientIdFromMap(m) == id) {
+          _insightsSubjectName = _clientNameFromMap(m);
+          break;
+        }
+      }
+      // Prefill override dropdown for convenience; does not save an override.
       _coachOverrideClientId = id;
     });
     _refreshCoachOverridePanel();
@@ -15069,17 +15125,95 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     return null;
   }
 
+  static final RegExp _insightsNamePattern = RegExp(
+    r"\b(?:about|regarding|for|with|re:?|client)\s+([A-Z][a-zA-Z'’-]{1,}(?:\s+[A-Z][a-zA-Z'’-]{1,}){0,2})"
+    r"|\b([A-Z][a-zA-Z'’-]{2,}(?:\s+[A-Z][a-zA-Z'’-]{1,}){0,2})\b",
+  );
+
+  static const Set<String> _insightsNameStopwords = {
+    'I',
+    'I\'m',
+    'Im',
+    'The',
+    'This',
+    'That',
+    'What',
+    'When',
+    'Where',
+    'Who',
+    'Why',
+    'How',
+    'Can',
+    'Could',
+    'Would',
+    'Should',
+    'Please',
+    'Today',
+    'Yesterday',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+    'Nate',
+    'Little',
+    'Coach',
+    'Client',
+    'Session',
+    'Nevedal',
+    'Sanctuary',
+  };
+
+  List<String> _extractMentionedSubjectNames(String message) {
+    final found = <String>[];
+    final seen = <String>{};
+    for (final m in _insightsNamePattern.allMatches(message)) {
+      final raw = (m.group(1) ?? m.group(2) ?? '').trim();
+      if (raw.isEmpty) continue;
+      final first = raw.split(RegExp(r'\s+')).first;
+      if (_insightsNameStopwords.contains(first)) continue;
+      final key = raw.toLowerCase();
+      if (seen.add(key)) found.add(raw);
+    }
+    return found;
+  }
+
+  void _captureInsightsSubjectsFromMessage(String message) {
+    final rosterId = _resolveClientIdFromMessage(message);
+    if (rosterId != null) {
+      String name = '';
+      for (final c in _clients) {
+        if (c is! Map) continue;
+        final m = Map<String, dynamic>.from(c);
+        if (_clientIdFromMap(m) == rosterId) {
+          name = _clientNameFromMap(m);
+          break;
+        }
+      }
+      _insightsSubjectClientId = rosterId;
+      _insightsSubjectName = name.isNotEmpty ? name : rosterId;
+      return;
+    }
+    final names = _extractMentionedSubjectNames(message);
+    if (names.isNotEmpty) {
+      _insightsSubjectClientId = '';
+      _insightsSubjectName = names.first;
+    }
+  }
+
   String _resolveFocusedClientId({String? messageHint}) {
     if (messageHint != null && messageHint.trim().isNotEmpty) {
       final fromMsg = _resolveClientIdFromMessage(messageHint);
       if (fromMsg != null) return fromMsg;
     }
-    if (_focusedClientId.isNotEmpty) return _focusedClientId;
-    if (_coachOverrideClientId.isNotEmpty) return _coachOverrideClientId;
-    final filtered = _getFilteredClients();
-    if (filtered.length == 1) {
-      return _clientIdFromMap(filtered.first);
+    // Therapeutic override only locks Insights when a row is actually saved.
+    if (_hasActiveTherapeuticOverride && _coachOverrideClientId.isNotEmpty) {
+      return _coachOverrideClientId;
     }
+    // Sticky subject from explicit Insights tap or a prior named mention.
+    if (_insightsSubjectClientId.isNotEmpty) return _insightsSubjectClientId;
     return '';
   }
 
@@ -15110,16 +15244,20 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     }).toList();
 
     var clientId = _resolveFocusedClientId(messageHint: messageHint);
-    if (clientId.isEmpty && _classroomSelectedSessionId != null) {
-      for (final s in _classroomSessions) {
-        final sid = (s['session_id'] ?? s['id'] ?? '').toString();
-        if (sid == _classroomSelectedSessionId) {
-          final scid = (s['client_id'] ?? '').toString();
-          if (scid.isNotEmpty) clientId = scid;
-          break;
-        }
-      }
+    final mentioned = <String>[];
+    if (messageHint != null && messageHint.trim().isNotEmpty) {
+      mentioned.addAll(_extractMentionedSubjectNames(messageHint));
     }
+    if (_insightsSubjectName.isNotEmpty &&
+        !mentioned.any(
+            (n) => n.toLowerCase() == _insightsSubjectName.toLowerCase())) {
+      mentioned.insert(0, _insightsSubjectName);
+    }
+
+    final overrideActive = _hasActiveTherapeuticOverride;
+    final subjectLocked = overrideActive ||
+        clientId.isNotEmpty ||
+        _insightsSubjectName.isNotEmpty;
 
     final payload = <String, dynamic>{
       'coach_username': coachUsername,
@@ -15127,18 +15265,32 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       'total_clients': _clients.length,
       'client_names': clientDetails,
       'is_master_coach': widget.currentUserProfile['is_master_coach'] == true,
+      'override_active': overrideActive,
+      'subject_locked': subjectLocked,
+      'mentioned_subjects': mentioned,
     };
 
+    var subjectName = _insightsSubjectName;
     if (clientId.isNotEmpty) {
-      payload['client_id'] = clientId;
-      payload['focused_client_id'] = clientId;
       for (final c in _clients) {
         if (c is! Map) continue;
         final m = Map<String, dynamic>.from(c);
         if (_clientIdFromMap(m) == clientId) {
-          payload['focused_client_name'] = _clientNameFromMap(m);
+          subjectName = _clientNameFromMap(m);
           break;
         }
+      }
+    }
+
+    if (subjectName.isNotEmpty) {
+      payload['insights_subject_name'] = subjectName;
+    }
+
+    if (clientId.isNotEmpty) {
+      payload['client_id'] = clientId;
+      payload['focused_client_id'] = clientId;
+      if (subjectName.isNotEmpty) {
+        payload['focused_client_name'] = subjectName;
       }
     }
 
@@ -15150,7 +15302,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       }
     }
 
-    if (_selectedClientBrief != null) {
+    // Only inject briefing when subject is locked to a roster client.
+    if (_selectedClientBrief != null && clientId.isNotEmpty) {
       payload['briefing_data'] =
           _normalizeBriefForNate(Map<String, dynamic>.from(_selectedClientBrief!));
     } else if (clientId.isNotEmpty) {
@@ -15188,9 +15341,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   String? _focusedClientDisplayName() {
-    final id = _focusedClientId.isNotEmpty
-        ? _focusedClientId
-        : _coachOverrideClientId;
+    if (_insightsSubjectName.isNotEmpty) return _insightsSubjectName;
+    final id = _insightsSubjectClientId.isNotEmpty
+        ? _insightsSubjectClientId
+        : (_hasActiveTherapeuticOverride
+            ? _coachOverrideClientId
+            : _focusedClientId);
     if (id.isEmpty) return null;
     for (final c in _clients) {
       if (c is! Map) continue;
