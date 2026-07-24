@@ -10,6 +10,8 @@ void notifyLnObserverIframeAuth({
   required String ws,
 }) {}
 
+void requestLnObserverIframeEnd() {}
+
 void disposeLnObserverIframe() {}
 
 void reloadLnObserverIframe() {}

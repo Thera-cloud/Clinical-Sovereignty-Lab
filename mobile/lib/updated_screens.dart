@@ -17396,7 +17396,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
     // Observation deck (screen share) — web iframe only after coach opens it.
     if (kIsWeb && _lnObserverShowDeck) {
-      _pushLnObserverIframeAuthIfNeeded();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_lnObserverShowDeck) return;
+        setLnObserverIframePointerEvents(true);
+        _pushLnObserverIframeAuthIfNeeded();
+      });
       return Stack(
         fit: StackFit.expand,
         children: [
@@ -17409,7 +17413,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             top: 8,
             left: 8,
             child: TextButton.icon(
-              onPressed: () => setState(() => _lnObserverShowDeck = false),
+              onPressed: () {
+                // Close Look/session before hiding deck (closing synthesis).
+                requestLnObserverIframeEnd();
+                setLnObserverIframePointerEvents(false);
+                setState(() => _lnObserverShowDeck = false);
+              },
               icon: const Icon(Icons.arrow_back, size: 18, color: Color(0xFFE8A24C)),
               label: const Text('Access',
                   style: TextStyle(color: Color(0xFFE8A24C))),
@@ -17508,9 +17517,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                     ElevatedButton(
                       onPressed: kIsWeb
                           ? () {
+                              // Do not reload iframe here — races auth and
+                              // kills an in-progress observation session.
                               setState(() => _lnObserverShowDeck = true);
-                              _pushLnObserverIframeAuthIfNeeded();
-                              reloadLnObserverIframe();
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (!mounted) return;
+                                setLnObserverIframePointerEvents(true);
+                                _pushLnObserverIframeAuthIfNeeded();
+                              });
                             }
                           : null,
                       style: ElevatedButton.styleFrom(

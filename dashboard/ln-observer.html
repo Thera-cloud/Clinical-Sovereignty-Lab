@@ -257,8 +257,12 @@ function _authHeaders(ct){
 }
 
 window.addEventListener("message", (e) => {
-  if(!ORIGIN_ALLOW.has(e.origin)) return;
+  if(!ORIGIN_ALLOW.has(e.origin) && e.origin !== window.location.origin) return;
   const d = e.data || {};
+  if(d.type === "ln_observer_end"){
+    if(sessionId && !_ending) endSession();
+    return;
+  }
   if(d.type !== "ln_observer_auth") return;
   AUTH_TOKEN = (d.token || "").trim();
   COACH_ID = (d.hw || d.username || COACH_ID || "").trim();
@@ -269,6 +273,12 @@ window.addEventListener("message", (e) => {
   if(_authReady) checkAccess();
   else badge.textContent = "Waiting for auth…";
 });
+/* Ask parent (Flutter HtmlElementView) to re-push auth if still waiting */
+try{
+  if(window.parent && window.parent !== window){
+    window.parent.postMessage({type:"ln_observer_need_auth"}, window.location.origin);
+  }
+}catch(e){}
 
 async function checkAccess(){
   if(!_authReady){ badge.textContent = "Waiting for auth…"; return; }
@@ -327,13 +337,37 @@ async function acquireDisplay(){
 async function startSession(){
   if(_ending) return;
   try{ stream = await acquireDisplay(); }
-  catch(e){ addTicker("SYS","Screen share was cancelled."); return; }
+  catch(e){
+    const msg = (e && e.name === "NotAllowedError")
+      ? "Screen share blocked (permission / iframe policy). Reload Coach Command web and retry."
+      : "Screen share was cancelled.";
+    addTicker("SYS", msg);
+    return;
+  }
   if(!stream.getAudioTracks().length){
     addTicker("SYS","No tab audio — enable 'Share audio' for transcription. Safari may not support tab audio.");
   }
-  const r = await fetch(`${API_BASE}/activate`,{method:"POST",
-    headers:_authHeaders("application/json"),
-    body:JSON.stringify({coach_id:COACH_ID, coach_name:COACH_NAME, responsibility_ack:true})});
+  /* Show local preview immediately — activate prefetch can take 30–70s */
+  wireLiveUi({ connecting: true });
+  $("btnLook").disabled = true;
+  $("input").disabled = true;
+  $("btnSend").disabled = true;
+  badge.textContent = "Starting session…";
+  addTicker("SYS","Screen live — waiting for LN session (memory prefetch)…");
+  let r;
+  try{
+    r = await fetch(`${API_BASE}/activate`,{method:"POST",
+      headers:_authHeaders("application/json"),
+      body:JSON.stringify({coach_id:COACH_ID, coach_name:COACH_NAME, responsibility_ack:true})});
+  }catch(e){
+    addTicker("SYS","Activation network error.");
+    stopMedia(false);
+    resetToReady({
+      title: "Could not start — still approved.",
+      body: "Network error during activate. Try Start new observation again."
+    });
+    return;
+  }
   if(!r.ok){
     addTicker("SYS","Activation refused ("+r.status+").");
     stopMedia(false);
@@ -348,11 +382,16 @@ async function startSession(){
   WS_TICKET = data.ws_ticket || "";
   _ackAcceptedThisPage = true;
   addTicker("SYS","New observation started — prior sessions loaded into LN context.");
-  wireLiveUi();
+  badge.textContent = "Session live";
+  badge.classList.add("live");
+  $("btnLook").disabled = false;
+  $("input").disabled = false;
+  $("btnSend").disabled = false;
   connectWs();
 }
 
-function wireLiveUi(){
+function wireLiveUi(opts){
+  opts = opts || {};
   $("preview").srcObject = stream;
   $("preview").classList.remove("hidden");
   $("emptyState").classList.add("hidden");
@@ -360,12 +399,17 @@ function wireLiveUi(){
   $("btnEnd").classList.remove("hidden");
   $("btnSwitch").classList.remove("hidden");
   $("btnSwitch").disabled = false;
-  $("btnLook").disabled = false;
-  $("input").disabled = false; $("btnSend").disabled = false;
-  badge.textContent = "Session live"; badge.classList.add("live");
+  if(!opts.connecting){
+    $("btnLook").disabled = false;
+    $("input").disabled = false;
+    $("btnSend").disabled = false;
+    badge.textContent = "Session live";
+    badge.classList.add("live");
+  }
   feedBadge.textContent = "Feed live"; feedBadge.classList.add("live");
   setIris("watching");
-  stream.getVideoTracks()[0].addEventListener("ended", () => { if(!_ending) endSession(); });
+  const vt = stream && stream.getVideoTracks()[0];
+  if(vt) vt.addEventListener("ended", () => { if(!_ending) endSession(); });
 }
 
 function connectWs(){
@@ -420,7 +464,9 @@ function resetToReady(opts){
 }
 
 function onWsMessage(ev){
-  const m = JSON.parse(ev.data);
+  if(typeof ev.data !== "string") return; /* ignore unexpected binary */
+  let m;
+  try{ m = JSON.parse(ev.data); }catch(e){ return; }
   if(m.type === "ready"){
     startFrames();
     startAudio();
@@ -440,7 +486,8 @@ function onWsMessage(ev){
   }
   else if(m.type === "observation"){
     const fid = m.frame_id || "";
-    addMsg("obs", "LN noticed"+(fid?(" ["+fid+"]"):""), m.text);
+    const body = m.text || m.observation || "";
+    addMsg("obs", "LN noticed"+(fid?(" ["+fid+"]"):""), body);
     if(fid) showForensic(fid, "LN looked");
     setIris("watching");
   }
@@ -584,7 +631,12 @@ function sendChat(){
 }
 $("btnSend").onclick = sendChat;
 $("input").addEventListener("keydown", e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); sendChat(); }});
-$("btnLook").onclick = ()=>{ if(ws && ws.readyState===1){ ws.send(JSON.stringify({type:"look_now"})); addTicker("SYS","Asked LN to look closely…"); }};
+$("btnLook").onclick = ()=>{
+  if(!sessionId){ addTicker("SYS","Session still starting — wait for Session live."); return; }
+  if(!ws || ws.readyState!==1){ addTicker("SYS","LN link not ready — wait a moment, then Look again."); return; }
+  ws.send(JSON.stringify({type:"look_now"}));
+  addTicker("SYS","Asked LN to look closely…");
+};
 
 $("btnEnd").onclick = endSession;
 async function endSession(){

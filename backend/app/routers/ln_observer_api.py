@@ -222,9 +222,14 @@ async def activate(
     prior = await eng.load_prior_summaries(coach_id, limit=5)
     clients = await eng.load_assigned_clients(coach_id)
     profile = await eng.load_coach_profile(coach_id)
-    activation_memory = await eng.build_activation_prefetch(
-        coach_id, clients, prior, profile,
-    )
+    # Hard cap — Vectorize stalls must not block activate 60s+ (screen UI).
+    try:
+        activation_memory = await asyncio.wait_for(
+            eng.build_activation_prefetch(coach_id, clients, prior, profile),
+            timeout=8.0,
+        )
+    except Exception:
+        activation_memory = ""
     session_id = str(uuid.uuid4())
     ticket = mint_ws_ticket(session_id, coach_id)
 
