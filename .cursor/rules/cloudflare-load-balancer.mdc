@@ -56,7 +56,7 @@ All monitors: Interval 60s, Retries 2, Expected Code 200, Follow Redirects off.
 
 | Field | Value |
 |---|---|
-| Condition | `starts_with(http.request.uri.path, "/ws") or starts_with(http.request.uri.path, "/api/ln-observer")` |
+| Condition | `(starts_with(http.request.uri.path, "/ws") or starts_with(http.request.uri.path, "/api/ln-observer"))` — **live Jul 24 2026** (zone PUT) |
 | Override: Terminates | On |
 | Override: Fallback Pool | `ws-primary` |
 | Override: Session Affinity | By Cloudflare cookie and Client IP fallback |
