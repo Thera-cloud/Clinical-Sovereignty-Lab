@@ -35,6 +35,9 @@ SAME_BRAIN_LNI_TIMEOUT_S = 12.0
 SAME_BRAIN_CACHE_TTL_S = 15.0
 # QUANTUM-CRYSTAL-ARCH — max gap to claim A/V "aligned" for forensics
 AV_ALIGN_MAX_MS = 4000
+# Learning forge cadence — stop flooding thin A/V pair crystals
+AV_CRYSTAL_MIN_INTERVAL_S = 45.0
+SEEN_CRYSTAL_MIN_INTERVAL_S = 90.0
 # QUANTUM-CRYSTAL-ARCH — detail/OCR questions that need a fresh frame (not stale notes)
 _DETAIL_RE = re.compile(
     r"\b("
@@ -125,6 +128,9 @@ class LiveSession:
         # QUANTUM-CRYSTAL-ARCH — cached same-brain blocks (wisdom + RELEVANT MEMORY)
         self.same_brain_prefix: str = ""
         self.same_brain_at: float = 0.0
+        self.last_av_crystal_at: float = 0.0
+        self.last_seen_crystal_at: float = 0.0
+        self.audio_seconds_accum: float = 0.0
 
     @property
     def lock(self) -> asyncio.Lock:
@@ -829,14 +835,58 @@ class LNObserverEngine:
         nate_response: str,
         coach_name: str = "",
         min_score: int = 3,
+        *,
+        kind: str = "insight",
+        confidence: float = 0.58,
+        session_id: str = "",
+        frame_id: str = "",
+        domain: str = "coaching",
     ) -> Optional[str]:
-        text = (nate_response or "").strip()
-        if len(text) < 40:
-            return None
+        """Forge coach-scoped Observer crystals (clean text, not chat wrapper)."""
+        from app.services.ln_observer_lni_support import (
+            forge_observer_crystal,
+            observer_note_is_substantive,
+        )
+
+        # Prefer LN note; fall back to user_text for close themes
+        primary = (nate_response or "").strip()
+        secondary = (user_text or "").strip()
+        if kind == "session_close":
+            body = primary if observer_note_is_substantive(primary) else ""
+            if not body and observer_note_is_substantive(secondary):
+                body = secondary
+            if not body:
+                return None
+            crystal_text = (
+                f"[LN-Observer session close — {coach_name or coach_id}]\n{body}"
+            )
+            conf = max(confidence, 0.60)
+        elif kind in ("look_now", "seen", "av_pair", "chat_exchange"):
+            note = primary if len(primary) >= len(secondary) else secondary
+            if not observer_note_is_substantive(note) and len(primary) < 80:
+                return None
+            label = {
+                "look_now": "Look closely",
+                "seen": "Screen observation",
+                "av_pair": "Aligned A/V moment",
+                "chat_exchange": "Coach↔LN observation",
+            }.get(kind, "Observation")
+            crystal_text = f"[LN-Observer {label}]\n{primary or secondary}"
+            if kind == "av_pair" and secondary and secondary != primary:
+                # Keep audio/visual context without chat-wrapper noise
+                crystal_text = f"[LN-Observer {label}]\n{secondary[:900]}\nLN: {(primary or '')[:700]}"
+            conf = confidence
+        else:
+            text = primary or secondary
+            if not observer_note_is_substantive(text):
+                return None
+            crystal_text = f"[LN-Observer]\n{text}"
+            conf = confidence
+
         validator = self._validator()
         if validator:
             try:
-                _, warnings = await validator.validate(text, {})
+                _, warnings = await validator.validate(crystal_text, {})
                 if validator.is_high_severity(warnings):
                     logger.warning(
                         "LNObserverEngine: crystallize blocked by validator: %s",
@@ -846,20 +896,53 @@ class LNObserverEngine:
             except Exception as e:
                 logger.warning("LNObserverEngine validator error: %s", e)
         try:
-            from app.websocket.crystal_recall_bridge import crystallize_from_conversation
-            return await crystallize_from_conversation(
+            return await forge_observer_crystal(
                 self._db_pool,
                 coach_id,
-                user_text or text[:200],
-                text,
-                user_name=coach_name,
-                domain="coaching",
-                min_score=min_score,
-                origin_surface="ln_observer",
+                crystal_text,
+                domain=domain,
+                confidence=conf,
+                kind=kind,
+                session_id=session_id,
+                frame_id=frame_id,
+                metadata={"coach_name": coach_name or ""},
             )
         except Exception as e:
             logger.warning("LNObserverEngine crystallize failed: %s", e)
             return None
+
+    async def maybe_crystallize_seen(
+        self, sess: "LiveSession", note: str, frame_id: str = ""
+    ) -> None:
+        """Rate-limited forge from lean SEEN notes with clinical substance."""
+        from app.services.ln_observer_lni_support import observer_note_is_substantive
+
+        if not observer_note_is_substantive(note):
+            return
+        now = time.time()
+        if (now - sess.last_seen_crystal_at) < SEEN_CRYSTAL_MIN_INTERVAL_S:
+            return
+        # Prefer notes that look like real UI/clinical reads
+        low = note.lower()
+        if not any(
+            k in low
+            for k in (
+                "client", "session", "clinical", "cue", "title", "notes",
+                "attachment", "trauma", "coach", "window", "app/",
+            )
+        ):
+            return
+        sess.last_seen_crystal_at = now
+        await self._crystallize_safe(
+            sess.coach_id,
+            note,
+            note,
+            coach_name=sess.coach_name,
+            kind="seen",
+            confidence=0.56,
+            session_id=sess.session_id,
+            frame_id=frame_id or sess.last_frame_id or "",
+        )
 
     async def generate_chat(
         self,
@@ -1818,17 +1901,22 @@ class LNObserverEngine:
             await self.hydrate_transcript_into(sess)
             coach_id = sess.coach_id
             summary = await self.close_summary(sess)
-            if summary:
-                close_user = (
-                    f"LN-Observer session close with {sess.coach_name}. "
-                    f"Themes from session: {self.context_block(sess, n=20)[:500]}"
-                )
+            # Skip thin closes (no A/V banked) — avoids junk "limited transcript" crystals
+            has_signal = bool(
+                sess.transcript
+                or sess.av_bundles
+                or sess.last_frame_observation
+                or sess.audio_seconds_accum >= 8
+            )
+            if summary and has_signal:
                 await self._crystallize_safe(
                     sess.coach_id,
-                    close_user,
+                    self.context_block(sess, n=16)[:700],
                     summary,
                     coach_name=sess.coach_name,
-                    min_score=2,
+                    kind="session_close",
+                    confidence=0.62,
+                    session_id=sess.session_id,
                 )
         elif self._db_pool:
             async with self._db_pool.acquire() as conn:
@@ -1997,28 +2085,54 @@ class LNObserverEngine:
             storage_key=storage_key,
             payload=bundle,
         )
-        # Align durable learning: crystallize ALIGNED pairs with enough substance
-        if bundle.get("aligned") and len(audio_text) >= 40:
-            forge_user = (
-                f"LN-Observer forensic A/V pair ({bundle.get('t_audio_start_iso')}–"
-                f"{bundle.get('t_audio_end_iso')}) frame={bundle.get('frame_id')} "
-                f"Δ{bundle.get('frame_delta_ms')}ms ALIGNED "
-                f"storage={storage_key or 'none'}.\n"
-                f"Audio: {audio_text}\n"
-                f"Visual note: {bundle.get('seen_text') or '(pixels archived; no OCR yet)'}"
+        # Durable learning: rate-limited ALIGNED pairs with audio + optional SEEN
+        now = time.time()
+        seen = (bundle.get("seen_text") or "").strip()
+        if (
+            bundle.get("aligned")
+            and len(audio_text) >= 60
+            and (now - sess.last_av_crystal_at) >= AV_CRYSTAL_MIN_INTERVAL_S
+        ):
+            sess.last_av_crystal_at = now
+            forge_ctx = (
+                f"frame={bundle.get('frame_id')} Δ{bundle.get('frame_delta_ms')}ms "
+                f"ALIGNED @ {bundle.get('t_audio_start_iso')}\n"
+                f"Audio: {audio_text[:500]}\n"
+                f"Visual: {seen[:400] if seen else '(no vision note yet)'}"
             )
-            forge_resp = (
-                f"Unified observation: frame {bundle.get('frame_id')} "
-                f"({(bundle.get('seen_text') or 'live screen')[:280]}); "
-                f"session audio said: {audio_text[:400]}"
+            forge_note = (
+                f"Aligned coaching observation — audio and screen paired. "
+                f"Said: {audio_text[:320]}"
+                + (f" Seen: {seen[:280]}" if len(seen) >= 40 else "")
             )
             await self._crystallize_safe(
                 sess.coach_id,
-                forge_user,
-                forge_resp,
+                forge_ctx,
+                forge_note,
                 coach_name=sess.coach_name,
-                min_score=2,
+                kind="av_pair",
+                confidence=0.58 if len(seen) >= 40 else 0.54,
+                session_id=session_id,
+                frame_id=bundle.get("frame_id") or "",
             )
+        # Track audio duration for session metrics + close gates
+        try:
+            t0 = float(bundle.get("t_audio_start_ms") or 0)
+            t1 = float(bundle.get("t_audio_end_ms") or 0)
+            dur = max(0.0, (t1 - t0) / 1000.0) if t1 > t0 else 8.0
+            dur = min(dur, 30.0)
+            sess.audio_seconds_accum += dur
+            if self._db_pool:
+                async with self._db_pool.acquire() as conn:
+                    await conn.execute(
+                        """UPDATE ln_observer_sessions
+                           SET audio_seconds = COALESCE(audio_seconds, 0) + $2
+                           WHERE session_id=$1""",
+                        uuid.UUID(session_id),
+                        dur,
+                    )
+        except Exception as e:
+            logger.debug("LNObserverEngine audio_seconds update: %s", e)
         return bundle
 
 

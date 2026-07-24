@@ -418,8 +418,13 @@ function connectWs(){
   ws = new WebSocket(`${WS_BASE}/${sessionId}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = onWsMessage;
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
     if(!sessionId || _ending) return;
+    const code = ev && ev.code;
+    if(code === 4401 || code === 4403 || code === 4404){
+      addTicker("SYS","LN session auth failed ("+code+") — End and Start new observation.");
+      return;
+    }
     addTicker("SYS","Connection blip — reconnecting…");
     const attempt = Math.min(_wsRetry, 8);
     const base = Math.min(1000 * Math.pow(2, attempt), 15000);

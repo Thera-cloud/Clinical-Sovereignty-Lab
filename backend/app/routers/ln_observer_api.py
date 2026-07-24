@@ -388,6 +388,10 @@ async def _bg_frame_observe(ws: WebSocket, eng, sess, session_id: str) -> None:
                 storage_key=storage_key,
                 payload=meta,
             )
+            # Rate-limited durable SEEN crystals (clinical UI cues)
+            asyncio.create_task(
+                eng.maybe_crystallize_seen(sess, note, frame_id=fid)
+            )
             try:
                 await ws.send_json({
                     "type": "observation",
@@ -585,6 +589,10 @@ async def observer_ws(ws: WebSocket, session_id: str):
                         sess.pending_crystallize_coach,
                         reply,
                         coach_name=sess.coach_name,
+                        kind="chat_exchange",
+                        confidence=0.58,
+                        session_id=session_id,
+                        frame_id=sess.last_frame_id or "",
                     )
                     sess.pending_crystallize_coach = ""
                 elif len(reply) >= 200:
@@ -637,9 +645,9 @@ async def observer_ws(ws: WebSocket, session_id: str):
                         storage_key=storage_key,
                         payload={"prompt": look_prompt[:200]},
                     )
-                    # Gap 4 — forge with forensic A/V bundle
+                    # Always forge look_now when note is substantive
                     crystallize_user = (
-                        f"LN-Observer look_now frame={fid}: {look_prompt}\n"
+                        f"frame={fid}\n"
                         f"Forensic A/V:\n{eng.forensic_timeline(sess, n=4)}\n"
                         f"Context: {eng.context_block(sess, n=6)[:400]}"
                     )
@@ -648,7 +656,10 @@ async def observer_ws(ws: WebSocket, session_id: str):
                         crystallize_user,
                         note,
                         coach_name=sess.coach_name,
-                        min_score=2,
+                        kind="look_now",
+                        confidence=0.64,
+                        session_id=session_id,
+                        frame_id=fid,
                     )
                     await ws.send_json({"type": "ln_reply", "text": note})
                     await ws.send_json({

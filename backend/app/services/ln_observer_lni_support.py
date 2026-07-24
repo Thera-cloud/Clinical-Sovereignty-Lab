@@ -255,6 +255,7 @@ async def _pg_keyword_crystal_fallback(
         rows: List[Any] = []
         async with db_pool.acquire() as conn:
             if ids:
+                # Prefer recent LN-Observer crystals so session memory resurfaces
                 rows = await conn.fetch(
                     """SELECT crystal_text, content_hash, confidence, domain
                        FROM nate_intelligence_crystals
@@ -262,7 +263,10 @@ async def _pg_keyword_crystal_fallback(
                          AND superseded_by IS NULL
                          AND COALESCE(confidence, 0) >= 0.30
                          AND (scope = 'user' OR scope LIKE 'user:%')
-                       ORDER BY confidence DESC NULLS LAST, created_at DESC
+                       ORDER BY
+                         CASE WHEN origin_surface = 'ln_observer' THEN 0 ELSE 1 END,
+                         confidence DESC NULLS LAST,
+                         created_at DESC
                        LIMIT $2""",
                     ids,
                     limit,
@@ -312,3 +316,119 @@ async def _pg_keyword_crystal_fallback(
     except Exception as e:
         logger.warning("LN-Observer PG crystal fallback failed: %s", e)
         return []
+
+
+async def forge_observer_crystal(
+    db_pool,
+    coach_id: str,
+    crystal_text: str,
+    *,
+    domain: str = "coaching",
+    confidence: float = 0.58,
+    kind: str = "insight",
+    session_id: str = "",
+    frame_id: str = "",
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """
+    Write a coach-scoped LN-Observer crystal without the conversation
+    "expressed / reflected" wrapper (that shape hurts semantic recall).
+    # QUANTUM-CRYSTAL-ARCH
+    """
+    import hashlib
+
+    text = (crystal_text or "").strip()
+    if not db_pool or not coach_id or len(text) < 60:
+        return None
+    conf = max(0.50, min(0.85, float(confidence)))
+    meta: Dict[str, Any] = {
+        "kind": (kind or "insight")[:40],
+        "origin": "ln_observer",
+    }
+    if session_id:
+        meta["session_id"] = session_id
+    if frame_id:
+        meta["frame_id"] = frame_id
+    if metadata:
+        meta.update(metadata)
+    # Stable hash: kind + coach + body (dedupe repeats)
+    content_hash = hashlib.sha256(
+        f"ln_observer|{coach_id}|{kind}|{text[:1200]}".encode()
+    ).hexdigest()
+    try:
+        async with db_pool.acquire() as conn:
+            user_uuid = await conn.fetchval(
+                "SELECT id FROM users WHERE hardware_id=$1 OR username=$1 "
+                "OR id::text=$1 LIMIT 1",
+                coach_id,
+            )
+            if not user_uuid:
+                logger.warning(
+                    "forge_observer_crystal: coach_id %r unresolved — skip",
+                    (coach_id or "")[:40],
+                )
+                return None
+            row = await conn.fetchrow(
+                """
+                INSERT INTO nate_intelligence_crystals
+                    (crystal_text, domain, scope, topics, source_count,
+                     generation, confidence, content_hash, user_id,
+                     origin_surface, metadata)
+                VALUES ($1,$2,'user','{}'::text[],1,0,$3,$4,$5,
+                        'ln_observer',$6::jsonb)
+                ON CONFLICT (content_hash) DO NOTHING
+                RETURNING content_hash
+                """,
+                text[:4000],
+                (domain or "coaching")[:50],
+                conf,
+                content_hash,
+                user_uuid,
+                json.dumps(meta),
+            )
+        if not row:
+            return None
+        try:
+            from app.services.vectorize_service import (
+                index_wisdom,
+                is_vectorize_configured,
+            )
+
+            if is_vectorize_configured():
+                await index_wisdom(
+                    user_id=str(user_uuid),
+                    wisdom_id=f"crystal_{content_hash[:16]}",
+                    insight_type=f"crystal_{domain}_ln_observer",
+                    content=text[:4000],
+                    source="ln_observer",
+                    domain=domain or "coaching",
+                )
+        except Exception as ve:
+            logger.debug("forge_observer_crystal vectorize: %s", ve)
+        return content_hash
+    except Exception as e:
+        logger.warning("forge_observer_crystal failed: %s", e)
+        return None
+
+
+def observer_note_is_substantive(text: str) -> bool:
+    """Reject thin / timeout / system stubs before forging."""
+    t = (text or "").strip()
+    if len(t) < 80:
+        return False
+    low = t.lower()
+    stubs = (
+        "limited transcript",
+        "timed out",
+        "vision pass timed out",
+        "lost the thread",
+        "could not complete",
+        "cannot see the screen yet",
+        "no frames have arrived",
+        "unable to process",
+        "pixels archived; no ocr",
+        "(ln-observer",
+    )
+    if any(s in low for s in stubs):
+        return False
+    return True
