@@ -2115,25 +2115,39 @@ class LNObserverEngine:
                 session_id=session_id,
                 frame_id=bundle.get("frame_id") or "",
             )
-        # Track audio duration for session metrics + close gates
-        try:
-            t0 = float(bundle.get("t_audio_start_ms") or 0)
-            t1 = float(bundle.get("t_audio_end_ms") or 0)
-            dur = max(0.0, (t1 - t0) / 1000.0) if t1 > t0 else 8.0
-            dur = min(dur, 30.0)
-            sess.audio_seconds_accum += dur
-            if self._db_pool:
-                async with self._db_pool.acquire() as conn:
-                    await conn.execute(
-                        """UPDATE ln_observer_sessions
-                           SET audio_seconds = COALESCE(audio_seconds, 0) + $2
-                           WHERE session_id=$1""",
-                        uuid.UUID(session_id),
-                        dur,
-                    )
-        except Exception as e:
-            logger.debug("LNObserverEngine audio_seconds update: %s", e)
+        # audio_seconds credited in credit_audio_chunk_seconds() on binary receipt
         return bundle
+
+    async def credit_audio_chunk_seconds(
+        self, sess: "LiveSession", session_id: str
+    ) -> float:
+        """Bank capture duration from pending audio_window (STT-independent).
+
+        # QUANTUM-CRYSTAL-ARCH
+        """
+        win = sess.pending_audio_window or {}
+        try:
+            t0 = float(win.get("t_start_ms") or 0)
+            t1 = float(win.get("t_end_ms") or 0)
+            dur = max(0.0, (t1 - t0) / 1000.0) if t1 > t0 else 8.0
+            dur = min(max(dur, 1.0), 30.0)
+        except Exception:
+            dur = 8.0
+        sess.audio_seconds_accum += dur
+        if not self._db_pool:
+            return dur
+        try:
+            async with self._db_pool.acquire() as conn:
+                await conn.execute(
+                    """UPDATE ln_observer_sessions
+                       SET audio_seconds = COALESCE(audio_seconds, 0) + $2
+                       WHERE session_id=$1""",
+                    uuid.UUID(session_id),
+                    int(round(dur)),
+                )
+        except Exception as e:
+            logger.warning("LNObserverEngine audio_seconds credit: %s", e)
+        return dur
 
 
 # Module singleton wired from main.py

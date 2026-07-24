@@ -56,12 +56,22 @@ All monitors: Interval 60s, Retries 2, Expected Code 200, Follow Redirects off.
 
 | Field | Value |
 |---|---|
-| Condition | `starts_with(http.request.uri.path, "/ws")` |
+| Condition | `starts_with(http.request.uri.path, "/ws") or starts_with(http.request.uri.path, "/api/ln-observer")` |
 | Override: Terminates | On |
 | Override: Fallback Pool | `ws-primary` |
 | Override: Session Affinity | By Cloudflare cookie and Client IP fallback |
 
-All paths starting with `/ws` route exclusively to the primary VPS. This covers both `/ws` (bridge WebSocket) and `/ws/nate-media-stream` (Twilio voice media stream). The clone has no bridge and returns 503 for WebSocket connections.
+Paths starting with `/ws` route exclusively to the primary VPS. This covers both `/ws` (bridge WebSocket) and `/ws/nate-media-stream` (Twilio voice media stream). The clone has no bridge and returns 503 for WebSocket connections.
+
+**LN-Observer (REQUIRED Jul 24, 2026):** `/api/ln-observer/*` (REST activate + `/api/ln-observer/ws/{id}`) must also pin to primary **or** the clone must run the same Observer router. Clone without Observer returns **404** on WS → sessions activate but `frame_count` stays 0 (no `ready`, no frames). Prefer both: LB pin + clone code sync.
+
+**Dashboard pin (when API token lacks Load Balancing:Edit):**
+1. Cloudflare → Traffic → Load Balancing → `api.sovereignsanctuary.net`
+2. Custom Rules → edit **WebSocket to Primary**
+3. Condition →  
+   `(starts_with(http.request.uri.path, "/ws") or starts_with(http.request.uri.path, "/api/ln-observer"))`
+4. Keep Terminates + Fallback Pool `ws-primary`
+5. Or run `bash scripts/cf_pin_ln_observer_lb.sh` with `CLOUDFLARE_LB_TOKEN` (Account Load Balancing Edit)
 
 ### Twilio Media Stream path (FIXED Mar 30, 2026)
 

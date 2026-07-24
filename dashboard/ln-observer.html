@@ -392,8 +392,11 @@ async function startSession(){
 
 function wireLiveUi(opts){
   opts = opts || {};
-  $("preview").srcObject = stream;
-  $("preview").classList.remove("hidden");
+  const preview = $("preview");
+  preview.srcObject = stream;
+  preview.classList.remove("hidden");
+  /* Autoplay policies: muted+playsinline required for videoWidth > 0 (frames). */
+  try{ preview.muted = true; preview.playsInline = true; preview.play().catch(function(){}); }catch(e){}
   $("emptyState").classList.add("hidden");
   $("btnActivate").classList.add("hidden");
   $("btnEnd").classList.remove("hidden");
@@ -412,17 +415,27 @@ function wireLiveUi(opts){
   if(vt) vt.addEventListener("ended", () => { if(!_ending) endSession(); });
 }
 
+let _wsReadyTimer = null;
+let _framesStarted = false;
+let _videoWaitTicker = false;
+
 function connectWs(){
   if(!sessionId || _ending) return;
   if(_reconnectTimer){ clearTimeout(_reconnectTimer); _reconnectTimer=null; }
+  if(_wsReadyTimer){ clearTimeout(_wsReadyTimer); _wsReadyTimer=null; }
   ws = new WebSocket(`${WS_BASE}/${sessionId}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = onWsMessage;
+  ws.onerror = () => {
+    if(!sessionId || _ending) return;
+    addTicker("SYS","LN WebSocket error — will retry. If this repeats, End and Start new observation.");
+  };
   ws.onclose = (ev) => {
     if(!sessionId || _ending) return;
     const code = ev && ev.code;
     if(code === 4401 || code === 4403 || code === 4404){
       addTicker("SYS","LN session auth failed ("+code+") — End and Start new observation.");
+      if(_wsReadyTimer){ clearTimeout(_wsReadyTimer); _wsReadyTimer=null; }
       return;
     }
     addTicker("SYS","Connection blip — reconnecting…");
@@ -435,13 +448,22 @@ function connectWs(){
   ws.onopen = () => {
     _wsRetry = 0;
     ws.send(JSON.stringify({type:"auth", token: WS_TICKET}));
+    /* If ready never arrives (clone 404 / LB miss), surface it — do not silent-spin. */
+    _wsReadyTimer = setTimeout(() => {
+      if(_ending || !sessionId || _framesStarted) return;
+      addTicker("SYS","LN link not ready after 12s — End session and Start new observation (routing).");
+      badge.textContent = "LN link stalled";
+    }, 12000);
   };
 }
 
 function resetToReady(opts){
   opts = opts || {};
   if(_reconnectTimer){ clearTimeout(_reconnectTimer); _reconnectTimer=null; }
+  if(_wsReadyTimer){ clearTimeout(_wsReadyTimer); _wsReadyTimer=null; }
   _wsRetry = 0;
+  _framesStarted = false;
+  _videoWaitTicker = false;
   WS_TICKET = "";
   sessionId = null;
   stopMedia(true);
@@ -473,6 +495,8 @@ function onWsMessage(ev){
   let m;
   try{ m = JSON.parse(ev.data); }catch(e){ return; }
   if(m.type === "ready"){
+    if(_wsReadyTimer){ clearTimeout(_wsReadyTimer); _wsReadyTimer=null; }
+    _framesStarted = true;
     startFrames();
     startAudio();
     addTicker("SYS","LN-Observer is live. Little Nate is watching with you.");
@@ -522,8 +546,18 @@ function startFrames(){
   if(frameTimer) clearInterval(frameTimer);
   const video = $("preview"), canvas = document.createElement("canvas");
   let _lastForced = 0;
+  _videoWaitTicker = false;
+  try{ video.muted = true; video.playsInline = true; video.play().catch(function(){}); }catch(e){}
   frameTimer = setInterval(()=>{
-    if(!ws || ws.readyState !== 1 || !video.videoWidth) return;
+    if(!ws || ws.readyState !== 1) return;
+    if(!video.videoWidth){
+      if(!_videoWaitTicker){
+        _videoWaitTicker = true;
+        addTicker("SYS","Waiting for screen pixels (play preview)…");
+        try{ video.play().catch(function(){}); }catch(e){}
+      }
+      return;
+    }
     const scale = Math.min(1, FRAME_MAX_W / video.videoWidth);
     canvas.width = Math.max(1, Math.floor(video.videoWidth * scale));
     canvas.height = Math.max(1, Math.floor(video.videoHeight * scale));
@@ -573,9 +607,11 @@ function startAudio(){
   if(recorder){ try{ recorder.onstop=null; recorder.stop(); }catch(e){} recorder=null; }
   const audioTracks = stream.getAudioTracks();
   if(!audioTracks.length){
-    addTicker("SYS","No audio track — transcription off. Share a tab with audio.");
+    addTicker("SYS","No tab audio — enable Share audio in the picker (Safari often cannot). Frames still bank.");
+    feedBadge.textContent = "Video only";
     return;
   }
+  addTicker("SYS","Tab audio armed — transcription + audio_seconds banking on.");
   const audioStream = new MediaStream(audioTracks);
   const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
     ? "audio/webm;codecs=opus" : "audio/webm";

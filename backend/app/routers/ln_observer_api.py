@@ -219,17 +219,30 @@ async def activate(
     if not eng._db_pool:
         raise HTTPException(503, "Database unavailable")
 
-    prior = await eng.load_prior_summaries(coach_id, limit=5)
-    clients = await eng.load_assigned_clients(coach_id)
-    profile = await eng.load_coach_profile(coach_id)
-    # Hard cap — Vectorize stalls must not block activate 60s+ (screen UI).
+    # Hard wall — load_* + Vectorize must never stall activate (screen UI).
+    # QUANTUM-CRYSTAL-ARCH
+    async def _activation_context():
+        prior_l = await eng.load_prior_summaries(coach_id, limit=5)
+        clients_l = await eng.load_assigned_clients(coach_id)
+        profile_l = await eng.load_coach_profile(coach_id)
+        try:
+            mem = await asyncio.wait_for(
+                eng.build_activation_prefetch(
+                    coach_id, clients_l, prior_l, profile_l
+                ),
+                timeout=6.0,
+            )
+        except Exception:
+            mem = ""
+        return prior_l, clients_l, profile_l, mem
+
     try:
-        activation_memory = await asyncio.wait_for(
-            eng.build_activation_prefetch(coach_id, clients, prior, profile),
-            timeout=8.0,
+        prior, clients, profile, activation_memory = await asyncio.wait_for(
+            _activation_context(),
+            timeout=10.0,
         )
     except Exception:
-        activation_memory = ""
+        prior, clients, profile, activation_memory = "", [], {}, ""
     session_id = str(uuid.uuid4())
     ticket = mint_ws_ticket(session_id, coach_id)
 
@@ -469,19 +482,15 @@ async def observer_ws(ws: WebSocket, session_id: str):
             raw_msg = await ws.receive()
 
             if raw_msg.get("bytes") is not None:
+                # Credit capture duration even when STT is empty (silence / STT miss).
+                # QUANTUM-CRYSTAL-ARCH
+                await eng.credit_audio_chunk_seconds(sess, session_id)
                 text = await eng.transcribe_audio(raw_msg["bytes"])
                 if text:
                     # QUANTUM-CRYSTAL-ARCH — pair STT window to nearest visual frame
                     bundle = await eng.ingest_audio_transcript(
                         sess, session_id, text
                     )
-                    if eng._db_pool:
-                        async with eng._db_pool.acquire() as conn:
-                            await conn.execute(
-                                "UPDATE ln_observer_sessions SET audio_seconds = audio_seconds + 8 "
-                                "WHERE session_id=$1",
-                                uuid.UUID(session_id),
-                            )
                     await ws.send_json({
                         "type": "transcript",
                         "text": text,
