@@ -95,9 +95,15 @@ def test_acceptance_3_modality_wisdom_injected_non_lean():
 
 
 def test_acceptance_4_write_path_origin_surface_kwarg():
-    """Test 4: crystallize path tags origin_surface=ln_observer (PG proof contract)."""
-    import types
+    """Test 4: forge path tags origin_surface=ln_observer (PG proof contract)."""
+    support_src = (_SERVICES / "ln_observer_lni_support.py").read_text(encoding="utf-8")
+    assert "origin_surface" in support_src
+    assert "'ln_observer'" in support_src or '"ln_observer"' in support_src
 
+    support = _load(
+        "app.services.ln_observer_lni_support",
+        _SERVICES / "ln_observer_lni_support.py",
+    )
     eng_mod = _load(
         "app.services.ln_observer_engine", _SERVICES / "ln_observer_engine.py"
     )
@@ -105,36 +111,35 @@ def test_acceptance_4_write_path_origin_surface_kwarg():
     engine._validator = lambda: None  # type: ignore
     called = {}
 
-    async def fake_crystallize(*args, **kwargs):
+    async def fake_forge(db_pool, coach_id, crystal_text, **kwargs):
+        called["coach_id"] = coach_id
+        called["crystal_text"] = crystal_text
         called.update(kwargs)
-        return "crystal-id"
+        return "crystal-hash"
 
-    # Isolate stub — restore so later suites can import the real bridge
-    saved = {
-        k: sys.modules.get(k)
-        for k in ("app.websocket", "app.websocket.crystal_recall_bridge")
-    }
+    note = (
+        "Aligned visual note about attachment repair, safety cues, and "
+        "coach pacing — clinically relevant screen observation for recall."
+    )
+    saved_forge = support.forge_observer_crystal
+    support.forge_observer_crystal = fake_forge  # type: ignore
     try:
-        bridge = types.ModuleType("app.websocket.crystal_recall_bridge")
-        bridge.crystallize_from_conversation = fake_crystallize
-        sys.modules["app.websocket"] = types.ModuleType("app.websocket")
-        sys.modules["app.websocket.crystal_recall_bridge"] = bridge
-        asyncio.run(
+        out = asyncio.run(
             engine._crystallize_safe(
                 "CoachN",
                 "LN-Observer look_now frame=x: clinically relevant cues for coach.",
-                "Aligned visual note about attachment repair and safety.",
+                note,
                 coach_name="Coach N",
                 min_score=2,
+                kind="look_now",
             )
         )
     finally:
-        for k, prev in saved.items():
-            if prev is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = prev
-    assert called.get("origin_surface") == "ln_observer"
+        support.forge_observer_crystal = saved_forge
+    assert out == "crystal-hash"
+    assert called.get("coach_id") == "CoachN"
+    assert called.get("kind") == "look_now"
+    assert "[LN-Observer" in (called.get("crystal_text") or "")
 
 
 def test_close_summary_falls_back_when_inference_missing():
