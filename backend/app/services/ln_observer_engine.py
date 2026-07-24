@@ -29,8 +29,8 @@ WARN_SESSION_S = int(2.75 * 3600)  # 2:45 warn before 3h cap
 OBSERVE_DEBOUNCE_S = 20
 CHAT_COMPACT_EVERY = 20
 # QUANTUM-CRYSTAL-ARCH — same-brain enrichment (non-lean only; bounded)
-# Vectorize can take 2–4s; keep headroom for PG keyword fallback. # QUANTUM-CRYSTAL-ARCH
-SAME_BRAIN_RECALL_TIMEOUT_S = 6.0
+# Short Vectorize budget; PG keyword fallback runs separately (≤3s). # QUANTUM-CRYSTAL-ARCH
+SAME_BRAIN_RECALL_TIMEOUT_S = 2.5
 SAME_BRAIN_LNI_TIMEOUT_S = 12.0
 SAME_BRAIN_CACHE_TTL_S = 15.0
 # QUANTUM-CRYSTAL-ARCH — max gap to claim A/V "aligned" for forensics
@@ -730,9 +730,16 @@ class LNObserverEngine:
                 # QUANTUM-CRYSTAL-ARCH — guarantee RELEVANT MEMORY when Vectorize cold/slow
                 primary = await resolve_user_uuid(self._db_pool, sess.coach_id) or sess.coach_id
                 also_ids = await resolve_user_uuids(self._db_pool, also)
-                crystals = await _pg_keyword_crystal_fallback(
-                    self._db_pool, rq, primary, also_ids, limit=8
-                )
+                try:
+                    crystals = await asyncio.wait_for(
+                        _pg_keyword_crystal_fallback(
+                            self._db_pool, rq, primary, also_ids, limit=8
+                        ),
+                        timeout=3.0,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("LNObserverEngine PG crystal fallback timeout")
+                    crystals = []
             mem = self.format_relevant_memory(crystals, cap=8)
             if mem:
                 parts.append(mem.rstrip())
