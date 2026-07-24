@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
 <style>
-:root{--void:#050505;--gold:#C9A962;--gold-dim:#8B7355;--cyan:#4ECDC4;--text:#E8D5A3}
+:root{--void:#050505;--gold:#C9A962;--gold-dim:#8B7355;--cyan:#4ECDC4;--text:#E8D5A3;--bad:#EF4444}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 20% 0%,#111 0%,var(--void) 55%);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh}
 header{padding:48px 24px 24px;max-width:800px;margin:0 auto}
 h1{font-family:'Cormorant Garamond',Georgia,serif;font-size:clamp(2.2rem,5vw,3.4rem);color:var(--gold);margin:0 0 8px;font-weight:600}
@@ -22,15 +22,17 @@ main{max-width:800px;margin:0 auto;padding:0 24px 64px}
 .meta{font-size:.85rem;color:var(--gold-dim);margin-top:6px}
 footer{max-width:800px;margin:0 auto;padding:24px;font-size:.8rem;color:#666;border-top:1px solid #1a1a1a}
 footer a{color:var(--gold-dim)}
-.err{color:#EF4444}
+.err{color:var(--bad)}
 .subbox{margin:24px 0;padding:16px 0;border-top:1px solid #222;border-bottom:1px solid #222}
 .subbox label{display:block;font-size:.8rem;color:var(--gold-dim);margin-bottom:6px}
 .subbox input{width:100%;max-width:320px;background:#111;border:1px solid #333;color:var(--text);padding:10px 12px;font:inherit;border-radius:2px}
 .subbox button{margin-top:10px;background:var(--gold);color:#050505;border:0;padding:10px 18px;font:inherit;cursor:pointer;font-weight:500}
 .subbox button:disabled{opacity:.5;cursor:default}
+.turnstile-wrap{margin-top:12px;min-height:65px}
 .share a{color:var(--gold-dim);font-size:.8rem;margin-right:10px;text-decoration:none}
 .share a:hover{color:var(--cyan)}
 #subMsg{font-size:.85rem;margin-top:8px;color:var(--cyan)}
+#subMsg.err{color:var(--bad)}
 </style>
 </head>
 <body>
@@ -40,6 +42,7 @@ footer a{color:var(--gold-dim)}
   <div class="subbox" id="subscribeBox">
     <label for="subEmail">Get the next Dispatch by email</label>
     <input id="subEmail" type="email" placeholder="you@example.com" autocomplete="email">
+    <div class="turnstile-wrap" id="turnstileWrap"></div>
     <button type="button" id="subBtn" onclick="doSubscribe()">Subscribe</button>
     <div id="subMsg"></div>
   </div>
@@ -49,72 +52,131 @@ footer a{color:var(--gold-dim)}
   Little Nate is an AI companion. Crisis support: <a href="https://988lifeline.org">988 Lifeline</a> ·
   Veterans: 988 then press 1 ·
   <a href="https://findahelpline.com">findahelpline.com</a> ·
-  <a href="/api/newsletter/rss">RSS</a>
+  <a id="rssLink" href="#">RSS</a>
 </footer>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad" async defer></script>
 <script>
-var API=(location.hostname.indexOf('sovereignsanctuary')>=0)
-  ? 'https://api.sovereignsanctuary.net' : '';
+var API = (function(){
+  var h = location.hostname;
+  if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8000';
+  if (h === 'command.sovereignsanctuary.net' ||
+      h === 'app.sovereignsanctuary.net' ||
+      h === 'coach.sovereignsanctuary.net') return '';
+  if (h.indexOf('sovereignsanctuary') >= 0) return 'https://api.sovereignsanctuary.net';
+  return '';
+})();
+var TURNSTILE_SITE_KEY = '0x4AAAAAADyMnpRrA8SSCcIS';
+var turnstileToken = '';
+var turnstileWidgetId = null;
+
 function qs(name){
   try{return new URLSearchParams(location.search).get(name)||'';}catch(e){return '';}
 }
+function setSubMsg(text, isErr){
+  var msg = document.getElementById('subMsg');
+  msg.textContent = text || '';
+  msg.className = isErr ? 'err' : '';
+}
+function onTurnstileLoad(){
+  if (!TURNSTILE_SITE_KEY || typeof turnstile === 'undefined') return;
+  if (turnstileWidgetId !== null) return;
+  turnstileWidgetId = turnstile.render('#turnstileWrap', {
+    sitekey: TURNSTILE_SITE_KEY,
+    appearance: 'interaction-only',
+    callback: function(token){ turnstileToken = token || ''; },
+    'expired-callback': function(){ turnstileToken = ''; },
+    'error-callback': function(){ turnstileToken = ''; }
+  });
+}
+window.onTurnstileLoad = onTurnstileLoad;
+
 async function doSubscribe(){
-  var email=(document.getElementById('subEmail').value||'').trim();
-  var msg=document.getElementById('subMsg');
-  var btn=document.getElementById('subBtn');
-  if(!email||email.indexOf('@')<0){msg.textContent='Enter a valid email.';return;}
-  btn.disabled=true;msg.textContent='Sending confirmation…';
+  var email = (document.getElementById('subEmail').value || '').trim();
+  var btn = document.getElementById('subBtn');
+  if (!email || email.indexOf('@') < 0){ setSubMsg('Enter a valid email.', true); return; }
+  if (!turnstileToken){
+    setSubMsg('Complete the verification check, then try again.', true);
+    if (typeof turnstile !== 'undefined' && turnstileWidgetId !== null){
+      try { turnstile.execute(turnstileWidgetId); } catch(e) {}
+    }
+    return;
+  }
+  btn.disabled = true;
+  setSubMsg('Sending confirmation…');
   try{
-    var r=await fetch(API+'/api/newsletter/subscribe',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        email:email,
-        source:'story_library',
-        utm_source:qs('utm_source')||'library',
-        utm_medium:qs('utm_medium')||'web',
-        utm_campaign:qs('utm_campaign')||'dispatch',
-        ref:qs('ref')||null
+    var r = await fetch(API + '/api/newsletter/subscribe', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        email: email,
+        turnstile_token: turnstileToken,
+        source: 'story_library',
+        utm_source: qs('utm_source') || 'library',
+        utm_medium: qs('utm_medium') || 'web',
+        utm_campaign: qs('utm_campaign') || 'dispatch',
+        ref: qs('ref') || null
       })
     });
-    var d=await r.json().catch(function(){return {};});
-    msg.textContent=(d.message||'If eligible, a confirmation was sent.');
-  }catch(e){
-    msg.textContent='Could not subscribe right now.';
+    var d = await r.json().catch(function(){ return {}; });
+    if (!r.ok){
+      var detail = d.detail;
+      if (typeof detail !== 'string') detail = (detail && detail.msg) || JSON.stringify(detail || d);
+      setSubMsg(detail || ('Subscribe failed (' + r.status + ')'), true);
+      turnstileToken = '';
+      if (typeof turnstile !== 'undefined' && turnstileWidgetId !== null){
+        try { turnstile.reset(turnstileWidgetId); } catch(e) {}
+      }
+    } else {
+      setSubMsg(d.message || 'If eligible, a confirmation was sent.');
+      turnstileToken = '';
+      if (typeof turnstile !== 'undefined' && turnstileWidgetId !== null){
+        try { turnstile.reset(turnstileWidgetId); } catch(e) {}
+      }
+    }
+  } catch(e){
+    setSubMsg('Could not subscribe right now.', true);
   }
-  btn.disabled=false;
+  btn.disabled = false;
 }
+
+(function(){
+  var rss = document.getElementById('rssLink');
+  if (rss) rss.href = (API || 'https://api.sovereignsanctuary.net') + '/api/newsletter/rss';
+})();
+
 (async function(){
-  if(qs('subscribe')==='1'){
-    try{document.getElementById('subscribeBox').scrollIntoView({behavior:'smooth'});}catch(e){}
+  if (qs('subscribe') === '1'){
+    try{ document.getElementById('subscribeBox').scrollIntoView({behavior:'smooth'}); }catch(e){}
   }
-  var el=document.getElementById('list');
+  var el = document.getElementById('list');
   try{
-    var r=await fetch(API+'/api/newsletter/library?limit=40');
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    var d=await r.json();
-    var issues=d.issues||d||[];
-    if(!issues.length){el.innerHTML='<p class="meta">No published issues yet.</p>';return;}
-    el.innerHTML=issues.map(function(i){
-      var slug=i.slug||'';
-      var title=i.subject_line||i.topic||slug;
-      var when=i.sent_at||i.created_at||'';
-      var href=API+'/api/newsletter/library/'+encodeURIComponent(slug)+'/page';
-      var shareBase=API+'/api/newsletter/share?slug='+encodeURIComponent(slug)+'&channel=';
-      var thumb=i.hero_image_url
-        ? '<img src="'+i.hero_image_url+'" alt="" loading="lazy">'
+    var r = await fetch(API + '/api/newsletter/library?limit=40');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    var d = await r.json();
+    var issues = d.issues || d || [];
+    if (!issues.length){ el.innerHTML = '<p class="meta">No published issues yet.</p>'; return; }
+    var apiHost = API || 'https://api.sovereignsanctuary.net';
+    el.innerHTML = issues.map(function(i){
+      var slug = i.slug || '';
+      var title = i.subject_line || i.topic || slug;
+      var when = i.sent_at || i.created_at || '';
+      var href = apiHost + '/api/newsletter/library/' + encodeURIComponent(slug) + '/page';
+      var shareBase = apiHost + '/api/newsletter/share?slug=' + encodeURIComponent(slug) + '&channel=';
+      var thumb = i.hero_image_url
+        ? '<img src="' + i.hero_image_url + '" alt="" loading="lazy">'
         : '';
-      return '<article class="issue">'+thumb+'<div class="copy"><a href="'+href+'">'+title.replace(/</g,'&lt;')+'</a>'
-        +'<div class="meta">'+(when?String(when).slice(0,10):'')+(i.topic?' · '+String(i.topic).replace(/</g,'&lt;'):'')+'</div>'
-        +'<div class="share">'
-        +'<a href="'+shareBase+'x">X</a>'
-        +'<a href="'+shareBase+'facebook">Facebook</a>'
-        +'<a href="'+shareBase+'linkedin">LinkedIn</a>'
-        +'<a href="'+shareBase+'whatsapp">WhatsApp</a>'
-        +'<a href="'+shareBase+'email">Email</a>'
-        +'</div></div></article>';
+      return '<article class="issue">' + thumb + '<div class="copy"><a href="' + href + '">' + title.replace(/</g,'&lt;') + '</a>'
+        + '<div class="meta">' + (when ? String(when).slice(0,10) : '') + (i.topic ? ' · ' + String(i.topic).replace(/</g,'&lt;') : '') + '</div>'
+        + '<div class="share">'
+        + '<a href="' + shareBase + 'x">X</a>'
+        + '<a href="' + shareBase + 'facebook">Facebook</a>'
+        + '<a href="' + shareBase + 'linkedin">LinkedIn</a>'
+        + '<a href="' + shareBase + 'whatsapp">WhatsApp</a>'
+        + '<a href="' + shareBase + 'email">Email</a>'
+        + '</div></div></article>';
     }).join('');
-  }catch(e){
-    el.innerHTML='<p class="err">Library unavailable right now.</p>';
+  } catch(e){
+    el.innerHTML = '<p class="err">Library unavailable right now.</p>';
   }
 })();
 </script>

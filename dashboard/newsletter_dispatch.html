@@ -44,6 +44,7 @@ textarea.notes{min-height:80px}
 iframe.preview{width:100%;min-height:70vh;border:1px solid var(--line);background:#050505;border-radius:2px}
 .stats{font-size:.8rem;color:var(--dim)}
 .hint{font-size:.8rem;color:var(--dim);margin-top:6px}
+.status-hint{font-size:.8rem;color:var(--dim);margin:0 20px 8px;min-height:1.2em}
 </style>
 </head>
 <body>
@@ -61,6 +62,7 @@ iframe.preview{width:100%;min-height:70vh;border:1px solid var(--line);backgroun
   </div>
 </header>
 <p id="msg" class="msg"></p>
+<p id="statusHint" class="status-hint"></p>
 <div class="layout">
   <aside class="list" id="list"><div class="empty">Loading…</div></aside>
   <section class="editor" id="editor">
@@ -141,12 +143,35 @@ var issues = [];
 var current = null;
 var dirty = false;
 
+function _recoverAuth(){
+  function _ck(n){var m=document.cookie.match(new RegExp('(^| )'+n+'=([^;]+)'));return m?decodeURIComponent(m[2]):'';}
+  var hp=new URLSearchParams(location.hash.slice(1));
+  var ht=hp.get('t'), hu=hp.get('u'), hpf=hp.get('p');
+  if(ht){try{sessionStorage.setItem('token',decodeURIComponent(ht));}catch(e){} try{localStorage.setItem('sc_token',decodeURIComponent(ht));}catch(e){}}
+  if(hu){try{sessionStorage.setItem('username',decodeURIComponent(hu));}catch(e){} try{localStorage.setItem('sc_username',decodeURIComponent(hu));}catch(e){}}
+  if(hpf){try{sessionStorage.setItem('profile',decodeURIComponent(hpf));}catch(e){} try{localStorage.setItem('sc_profile',decodeURIComponent(hpf));}catch(e){}}
+  if(location.hash) try{history.replaceState(null,'',location.pathname+location.search);}catch(e){}
+  if(!sessionStorage.getItem('token')){var ct=_ck('sc_token')||localStorage.getItem('sc_token'); if(ct){try{sessionStorage.setItem('token',ct);}catch(e){}}}
+  if(!sessionStorage.getItem('username')){var cu=_ck('sc_username')||localStorage.getItem('sc_username'); if(cu){try{sessionStorage.setItem('username',cu);}catch(e){}}}
+  if(!sessionStorage.getItem('profile')){var cp=_ck('sc_profile')||localStorage.getItem('sc_profile'); if(cp){try{sessionStorage.setItem('profile',cp);}catch(e){}}}
+}
+_recoverAuth();
+
 function token(){return sessionStorage.getItem('token')||localStorage.getItem('sc_token')||'';}
-function apiBase(){return (location.hostname.indexOf('sovereignsanctuary')>=0)?'https://api.sovereignsanctuary.net':'';}
+function apiBase(){
+  var h=location.hostname;
+  if(h==='localhost'||h==='127.0.0.1') return 'http://localhost:8000';
+  // Same-origin on Command/app so Bearer auth matches nginx /api proxy (avoids cross-origin 401).
+  if(h==='command.sovereignsanctuary.net'||h==='app.sovereignsanctuary.net'||h==='coach.sovereignsanctuary.net') return '';
+  if(h.indexOf('sovereignsanctuary')>=0) return 'https://api.sovereignsanctuary.net';
+  return '';
+}
 function headers(){return {'Authorization':'Bearer '+token(),'Content-Type':'application/json'};}
 function setMsg(t, err){var el=document.getElementById('msg');el.textContent=t||'';el.className=err?'msg err':'msg';}
+function setStatusHint(t){var el=document.getElementById('statusHint'); if(el) el.textContent=t||'';}
 
 async function api(path, opts){
+  if(!token()){setMsg('Not signed in — open Command, log in, then return here.', true);return null;}
   var r = await fetch(apiBase()+path, Object.assign({headers:headers()}, opts||{}));
   if(r.status===401){setMsg('Auth issue — open Command, then return (token may still be propagating)', true);return null;}
   return r;
@@ -342,6 +367,13 @@ async function selectIssue(id){
   document.getElementById('btnSend').style.display = current.status==='approved' ? '' : 'none';
   document.getElementById('btnSend').disabled = current.status!=='approved';
   document.getElementById('btnHero').disabled = false;
+  var st = current.status || '';
+  if(st==='in_review') setStatusHint('Ready for review — edit if needed, then Approve. Send unlocks after approval.');
+  else if(st==='approved') setStatusHint('Approved — click Send to subscribers when ready. Edits are locked until reject.');
+  else if(st==='sent') setStatusHint('Already sent — use Insights for metrics/learning. Run pipeline for a new draft.');
+  else if(st==='rejected') setStatusHint('Rejected — edit and Save to return to in_review, or Request rewrite.');
+  else if(st==='draft') setStatusHint('Draft — finish via pipeline/rewrite, then Approve when in_review.');
+  else setStatusHint('Status: '+st);
   fillHeroPrompt();
   renderList();
   switchTab('preview');
@@ -453,7 +485,7 @@ async function requestRewrite(){
   if(!current)return;
   if(!confirm('Regenerate this draft? Your current body will be replaced.'))return;
   document.getElementById('btnRewrite').disabled = true;
-  setMsg('Rewriting…');
+  setMsg('Rewriting (may take ~20–40s)…');
   var r = await api('/api/newsletter/admin/issues/'+current.id+'/rewrite', {
     method:'POST',
     body: JSON.stringify({notes: document.getElementById('fNotes').value})
@@ -495,7 +527,7 @@ async function approveIssue(){
 async function sendIssue(){
   if(!current)return;
   if(!confirm('Send to all ACTIVE subscribers now?'))return;
-  setMsg('Sending…');
+  setMsg('Sending to subscribers (may take ~20–40s)…');
   var r = await api('/api/newsletter/admin/issues/'+current.id+'/send', {method:'POST', body:'{}'});
   if(!r)return;
   var d = await r.json();
@@ -518,16 +550,21 @@ async function rejectIssue(){
 
 async function runPipeline(){
   document.getElementById('btnPipe').disabled = true;
-  setMsg('Running pipeline…');
+  setMsg('Running pipeline (may take ~10–30s)…');
   var r = await api('/api/newsletter/admin/pipeline/run', {method:'POST', body:'{}'});
   document.getElementById('btnPipe').disabled = false;
   if(!r)return;
   var d = await r.json();
-  if(d.ok){setMsg('Draft ready: '+(d.slug||d.issue_id)); loadIssues(d.issue_id);}
+  if(d.ok || d.status==='ok'){setMsg('Draft ready: '+(d.slug||d.issue_id)); loadIssues(d.issue_id);}
   else setMsg('Failed: '+(d.error||JSON.stringify(d.errors||d)), true);
 }
 
-loadIssues();
+if(!token()){
+  setMsg('Not signed in — open Command, log in as admin, then open Dispatch again.', true);
+  document.getElementById('list').innerHTML='<div class="empty">Sign in via Command first.</div>';
+}else{
+  loadIssues();
+}
 </script>
 </body>
 </html>
