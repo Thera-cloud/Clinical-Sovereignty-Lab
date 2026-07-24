@@ -2077,30 +2077,46 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
           }
         }
       } else if (data['type'] == 'cycle_skill_plan_update') {
-        final title = (data['title'] as String?)?.trim().isNotEmpty == true
-            ? data['title'] as String
-            : 'Skills practice';
         final status = (data['status'] as String?)?.trim() ?? '';
-        final step = data['current_step'];
-        final total = data['total_steps'];
-        final practice = (data['practice'] as String?)?.trim() ?? '';
-        final stepBit = (step != null && total != null) ? ' — step $step/$total' : '';
-        final practiceBit = practice.isNotEmpty ? ': $practice' : '';
-        final line =
-            'System: [Skill plan${status.isNotEmpty ? ' $status' : ''}] $title$stepBit$practiceBit';
-        if (mounted) {
-          setState(() {
-            _skillPlanStatus = Map<String, dynamic>.from(data);
-            _chatHistory.add(line);
-            _scrollToBottom();
-          });
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(
-                line.replaceFirst('System: ', ''),
-                style: const TextStyle(color: Colors.white)),
-            backgroundColor: const Color(0xFF1A1A2E),
-            duration: const Duration(seconds: 5),
-          ));
+        final cleared = data['cleared'] == true ||
+            status == 'cleared' ||
+            status == 'abandoned' ||
+            status == 'declined' ||
+            status == 'completed';
+        if (cleared) {
+          if (mounted) {
+            setState(() {
+              _skillPlanStatus = null;
+              _chatHistory.add('System: [Skill plan cleared]');
+              _scrollToBottom();
+            });
+          }
+        } else {
+          final title = (data['title'] as String?)?.trim().isNotEmpty == true
+              ? data['title'] as String
+              : 'Skills practice';
+          final step = data['current_step'];
+          final total = data['total_steps'];
+          final practice = (data['practice'] as String?)?.trim() ?? '';
+          final stepBit =
+              (step != null && total != null) ? ' — step $step/$total' : '';
+          final practiceBit = practice.isNotEmpty ? ': $practice' : '';
+          final line =
+              'System: [Skill plan${status.isNotEmpty ? ' $status' : ''}] $title$stepBit$practiceBit';
+          if (mounted) {
+            setState(() {
+              _skillPlanStatus = Map<String, dynamic>.from(data);
+              _chatHistory.add(line);
+              _scrollToBottom();
+            });
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(
+                  line.replaceFirst('System: ', ''),
+                  style: const TextStyle(color: Colors.white)),
+              backgroundColor: const Color(0xFF1A1A2E),
+              duration: const Duration(seconds: 5),
+            ));
+          }
         }
       } else if (data['type'] == 'offer_coach_handoff') {
         final coachName = (data['coach_name'] as String?)?.trim().isNotEmpty == true

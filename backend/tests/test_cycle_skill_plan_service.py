@@ -183,6 +183,26 @@ def test_accept_advance_decline_patterns():
     assert csp._DECLINE_RE.search("no thanks")
     # Mid-story "no" must not false-decline
     assert not csp._DECLINE_RE.search("I said no to the promotion at work")
+    # Explicit plan dismiss (not DBT Clear Ask skill name alone)
+    assert csp._PLAN_DISMISS_RE.search("clear the skill plan")
+    assert csp._PLAN_DISMISS_RE.search("dismiss this plan")
+    assert csp._PLAN_DISMISS_RE.search("I'm done with this plan")
+    assert csp._client_declines_plan("clear the skill plan")
+    active_dear = {
+        "status": "active",
+        "title": "Clear ask practice (DBT interpersonal)",
+    }
+    # Title echo while plan is active = dismiss sticky banner
+    assert csp._client_declines_plan("clear ask practice for DBT", active_dear)
+    # Suggested offer: title echo must NOT auto-decline (may be choosing the skill)
+    assert not csp._client_declines_plan(
+        "clear ask practice for DBT",
+        {"status": "suggested", "title": "Clear ask practice (DBT interpersonal)"},
+    )
+    # Practice evidence still advances, not declines
+    assert not csp._client_declines_plan(
+        "I practiced the clear ask step today", active_dear
+    )
 
 
 def test_step_payload_extracts_practice():

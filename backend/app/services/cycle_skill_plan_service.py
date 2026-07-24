@@ -136,6 +136,18 @@ _DECLINE_RE = re.compile(
     r"\b(no|nah)[,!]?\s+(thanks|thank you|not now|i don'?t|i do not)\b",
     re.I,
 )
+# QUANTUM-CRYSTAL-ARCH: explicit dismiss of the skill-plan UI (not DBT "Clear Ask")
+_PLAN_DISMISS_RE = re.compile(
+    r"\b(clear|dismiss|cancel|end|stop|quit|drop)\s+"
+    r"(the\s+|this\s+|my\s+)?"
+    r"(skill\s+|practice\s+|treatment\s+)?"
+    r"plan\b|"
+    r"\b(clear|dismiss)\s+(this|it)\b|"
+    r"\bi(?:'?m| am)\s+done\s+with\s+(this|the)\s+(plan|practice|skill)\b|"
+    r"\bstop\s+(practicing|the\s+practice|this\s+practice)\b|"
+    r"\b(please\s+)?(clear|remove|hide)\s+(the\s+|this\s+)?(banner|skill\s+banner)\b",
+    re.I,
+)
 # Skip forced skill teach when client is on imagery/tech meta, not practice
 _SKILL_META_SKIP_RE = re.compile(
     r"\b(glitch(?:ing)?|buggy|bug\b|broken|not working|big nate|"
@@ -157,6 +169,38 @@ def _client_accepts_plan(text: str) -> bool:
 
 def _client_advances_plan(text: str) -> bool:
     return bool(_ADVANCE_RE.search(text or ""))
+
+
+def _title_core(title: str) -> str:
+    t = re.sub(r"\([^)]*\)", "", (title or "").lower())
+    return re.sub(r"\s+", " ", t).strip(" -–—")
+
+
+def _client_declines_plan(text: str, plan: Optional[Dict[str, Any]] = None) -> bool:
+    """Decline/dismiss skill plan — avoids treating DBT 'Clear Ask' practice as dismiss."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if _DECLINE_RE.search(t) or _PLAN_DISMISS_RE.search(t):
+        return True
+    # Active plan only: short echo of the plan title (e.g. "clear ask practice for DBT")
+    # means dismiss the banner/plan, not start DEAR MAN "Clear Ask" again.
+    if not plan or str(plan.get("status") or "") != "active":
+        return False
+    if _client_advances_plan(t) or _client_accepts_plan(t):
+        return False
+    core = _title_core(str(plan.get("title") or ""))
+    if not core or len(t) > 100:
+        return False
+    tl = re.sub(r"\s+", " ", t.lower()).strip()
+    if core in tl:
+        return True
+    # Token overlap when modality suffix differs ("for DBT" vs "(DBT interpersonal)")
+    core_tokens = {w for w in re.findall(r"[a-z0-9]+", core) if len(w) > 2}
+    msg_tokens = {w for w in re.findall(r"[a-z0-9]+", tl) if len(w) > 2}
+    if len(core_tokens) >= 2 and core_tokens.issubset(msg_tokens):
+        return True
+    return False
 
 _MIN_CONFIDENCE = float(os.getenv("CYCLE_SKILL_MIN_CONFIDENCE", "0.55"))
 _CHECKIN_HOURS = int(os.getenv("CYCLE_SKILL_CHECKIN_HOURS", "48"))
@@ -1759,7 +1803,7 @@ async def maybe_tick_cycle_skill_plan(
     username = await _resolve_username(db_pool, user_id)
     plan = await _get_plan_row(db_pool, username)
 
-    if plan and _DECLINE_RE.search(text):
+    if plan and _client_declines_plan(text, plan):
         await _decline_plan(db_pool, str(plan["id"]))
         await _log_skill_learning(
             db_pool, user_id=username, plan=plan, event="declined", detail=text[:120]
@@ -1907,15 +1951,28 @@ async def push_skill_plan_ws_update(
     user_id: str,
     ctx: Any = None,
 ) -> None:
-    """Send cycle_skill_plan_update to open sockets for uid."""
-    st = await build_client_skill_plan_status(db_pool, user_id)
-    if not st or not sockets or uid not in sockets:
+    """Send cycle_skill_plan_update to open sockets for uid.
+
+    QUANTUM-CRYSTAL-ARCH: when no suggested/active plan remains, still push
+    cleared=true so Flutter drops the sticky skill-plan banner.
+    """
+    if not sockets or uid not in sockets:
         return
+    st = await build_client_skill_plan_status(db_pool, user_id)
+    payload = (
+        {"type": "cycle_skill_plan_update", **st}
+        if st
+        else {
+            "type": "cycle_skill_plan_update",
+            "cleared": True,
+            "status": "cleared",
+        }
+    )
     for _ws in list(sockets.get(uid, [])):
         if ctx is not None and getattr(_ws, "_eviction_context", "main") != ctx:
             continue
         try:
-            await _ws.send(json.dumps({"type": "cycle_skill_plan_update", **st}))
+            await _ws.send(json.dumps(payload))
         except Exception:
             try:
                 sockets[uid].discard(_ws)
