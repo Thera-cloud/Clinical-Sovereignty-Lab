@@ -111,7 +111,11 @@ async def gold_progress(request: Request):
                  COUNT(*) FILTER (
                    WHERE score_entry_source = 'authenticated_scoring_surface'
                  )::int AS authenticated,
-                 COUNT(*) FILTER (WHERE is_degraded_distractor)::int AS degraded
+                 COUNT(*) FILTER (WHERE is_degraded_distractor)::int AS degraded,
+                 COUNT(*) FILTER (
+                   WHERE nate_response ILIKE '%DRY-RUN%'
+                      OR nate_response ILIKE '%Placeholder Nate reply%'
+                 )::int AS dry_run_placeholders
                FROM six_quotient_human_gold"""
         )
     return {"status": "ok", **dict(row or {})}
@@ -127,12 +131,16 @@ async def gold_items(
     pool = _pool(request)
     limit = max(1, min(int(limit or 50), 100))
     async with pool.acquire() as conn:
+        # Exclude DRY-RUN battery placeholders — not scoreable gold.
         rows = await conn.fetch(
             f"""SELECT scenario_id, section, client_says, nate_response,
                        response_class, difficulty, human_scored, blinded
                 FROM six_quotient_human_gold
                 WHERE pairs_locked = true
                   AND COALESCE(nate_response, '') <> ''
+                  AND nate_response NOT ILIKE '%DRY-RUN%'
+                  AND nate_response NOT ILIKE '%Placeholder Nate reply%'
+                  AND nate_response NOT ILIKE '%External scoring required%'
                   {"AND human_scored = false" if unscored_only else ""}
                 ORDER BY md5(scenario_id || COALESCE(client_says,''))
                 LIMIT $1""",
@@ -206,7 +214,7 @@ async def gold_score(
         if (run["rater_id"] or "") != rater:
             raise HTTPException(403, "run belongs to a different rater")
         locked = await conn.fetchrow(
-            """SELECT scenario_id, pairs_locked, human_scored
+            """SELECT scenario_id, pairs_locked, human_scored, nate_response
                FROM six_quotient_human_gold WHERE scenario_id = $1""",
             body.scenario_id,
         )
@@ -214,6 +222,16 @@ async def gold_score(
             raise HTTPException(404, "scenario not in gold set")
         if not locked["pairs_locked"]:
             raise HTTPException(409, "pairs not locked — freeze gold before scoring")
+        nr = locked["nate_response"] or ""
+        if (
+            "DRY-RUN" in nr
+            or "Placeholder Nate reply" in nr
+            or "External scoring required" in nr
+        ):
+            raise HTTPException(
+                409,
+                "nate_response is a DRY-RUN placeholder — replace before scoring",
+            )
         await conn.execute(
             """UPDATE six_quotient_human_gold SET
                  primary_score = $2,

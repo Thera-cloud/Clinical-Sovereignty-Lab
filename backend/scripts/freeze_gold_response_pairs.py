@@ -36,6 +36,15 @@ async def _main() -> int:
             )
             or 0
         )
+        dry = int(
+            await conn.fetchval(
+                """SELECT COUNT(*) FROM six_quotient_human_gold
+                   WHERE nate_response ILIKE '%DRY-RUN%'
+                      OR nate_response ILIKE '%Placeholder Nate reply%'
+                      OR nate_response ILIKE '%External scoring required%'"""
+            )
+            or 0
+        )
         deg = int(
             await conn.fetchval(
                 "SELECT COUNT(*) FROM six_quotient_human_gold WHERE is_degraded_distractor"
@@ -47,6 +56,12 @@ async def _main() -> int:
             return 1
         if empty:
             print(f"FAIL: {empty} rows still missing nate_response")
+            return 1
+        if dry:
+            print(
+                f"FAIL: {dry} rows still have DRY-RUN/placeholder nate_response — "
+                "run fill_human_gold_nate_responses.py --replace-placeholders --infer-missing"
+            )
             return 1
         if deg < 8:
             print(f"FAIL: degraded distractors {deg}<8 — seed before freeze")

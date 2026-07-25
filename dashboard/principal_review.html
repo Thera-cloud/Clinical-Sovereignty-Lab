@@ -160,8 +160,10 @@ async function api(path, opts){
 async function refreshProgress(){
   const d = await api("/gold/progress");
   if(!d) return;
+  const dry = d.dry_run_placeholders || 0;
   document.getElementById("goldProgress").textContent =
-    `Locked ${d.locked}/${d.total} · Scored ${d.scored} · Authenticated entries ${d.authenticated} · Distractors in set ${d.degraded} (hidden while scoring)`;
+    `Locked ${d.locked}/${d.total} · Scored ${d.scored} · Authenticated entries ${d.authenticated} · Distractors in set ${d.degraded} (hidden while scoring)`
+    + (dry ? ` · ⚠ ${dry} DRY-RUN placeholders (excluded from queue — repair fill)` : "");
 }
 
 async function startSession(){
