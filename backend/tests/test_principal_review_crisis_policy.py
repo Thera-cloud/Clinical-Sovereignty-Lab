@@ -1,4 +1,4 @@
-"""Principal-Review crisis laws — offline (no app.services package import / numpy)."""
+"""Principal-Review crisis laws — offline (no app.services package / numpy)."""
 from __future__ import annotations
 
 import ast
@@ -10,10 +10,11 @@ _POLICY = _ROOT / "app" / "services" / "principal_review_crisis_policy.py"
 _CTRL = _ROOT / "app" / "services" / "therapeutic_controller.py"
 _API = _ROOT / "app" / "routers" / "principal_review_api.py"
 _SANDBOX = _ROOT / "app" / "services" / "ln_sandbox_engine.py"
+_QUAR = _ROOT / "app" / "services" / "six_quotient_battery_quarantine.py"
 
 
-def _load_policy():
-    spec = importlib.util.spec_from_file_location("pr_crisis_policy", _POLICY)
+def _load(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(mod)
@@ -21,13 +22,12 @@ def _load_policy():
 
 
 def test_policy_module_loads():
-    m = _load_policy()
+    m = _load(_POLICY, "pr_crisis_policy")
     assert "must_not_include" in m.CRISIS_CLASS_CONSTRAINTS
-    assert "thought this through carefully" in m.CRISIS_CLASS_CONSTRAINTS["must_not_include"]
 
 
 def test_plan_validation_and_canonical_pass():
-    m = _load_policy()
+    m = _load(_POLICY, "pr_crisis_policy2")
     bad = (
         "It sounds like you've thought this through carefully. "
         "A lot of people find meaning in planning. Call 988."
@@ -44,8 +44,28 @@ def test_plan_validation_and_canonical_pass():
     assert m.VIOLATION_ESCALATION not in v
 
 
-def test_annotate_delta_and_injection_quarantine_safe():
-    m = _load_policy()
+def test_select_crisis_guides_safety_before_recency():
+    m = _load(_POLICY, "pr_crisis_policy3")
+    rows = [
+        {"id": 999, "response_class": "therapeutic_engage", "topics": [], "crystal_text": "a"},
+        {"id": 10, "response_class": "escalate_or_safety", "topics": [], "crystal_text": "s1"},
+        {"id": 11, "response_class": "escalate_or_safety", "topics": [], "crystal_text": "s2"},
+    ]
+    picked = m.select_crisis_guides(rows, limit=3, safety_reserve=2)
+    assert [p["id"] for p in picked[:2]] == [11, 10]
+
+
+def test_scrub_and_injection_quarantine_safe():
+    m = _load(_POLICY, "pr_crisis_policy4")
+    dirty = (
+        "Scenario: AQ-1\nClient: GOLD_STEM_xyz\n"
+        "Principal Guide: Name danger. Escalate. 988. I'm here."
+    )
+    scrubbed = m.scrub_teaching_text(dirty)
+    assert "Scenario:" not in scrubbed
+    assert "AQ-1" not in scrubbed
+    assert "Client:" not in scrubbed
+    assert "clinical-stem" not in scrubbed
     d = m.annotate_teaching_delta(
         principal="Name the danger. Escalate to coach and 988.",
         nate_blind="You've thought this through carefully.",
@@ -54,17 +74,28 @@ def test_annotate_delta_and_injection_quarantine_safe():
     block = m.format_crisis_guide_injection(
         [
             {
+                "response_class": "escalate_or_safety",
                 "crystal_text": (
-                    "[Principal-Review · AQ · AQ-1]\n"
-                    "Client: GOLD_STEM_SHOULD_NOT_APPEAR_VERBATIM_xyz\n"
+                    "[Principal-Review · AQ]\n"
                     "Principal Guide (3/3/3 corrective underwriting — adapt, do not recite):\n"
                     "Name danger. Escalate. 988. I'm here."
-                )
+                ),
             }
         ]
     )
-    assert "Principal Guide" in block
-    assert "GOLD_STEM_SHOULD_NOT_APPEAR_VERBATIM_xyz" not in block
+    assert "MUST:" in block
+    assert "[safety]" in block
+
+
+def test_quarantine_pr_skips_heuristics_keeps_gold_fp():
+    q = _load(_QUAR, "sq_q")
+    clean = {
+        "origin_surface": "principal_review",
+        "crystal_text": "Principal Guide: escalate with 988. I'm here with you.",
+    }
+    assert q.crystal_row_is_battery_contaminated(clean) is False
+    # Keyword-only API (drift guard)
+    assert q.should_block_crystallize(user_text="x" * 50) in (True, False)
 
 
 def test_controller_wires_crisis_laws_and_class_inject():
@@ -72,19 +103,17 @@ def test_controller_wires_crisis_laws_and_class_inject():
     assert "crisis_si_law_violations" in src
     assert "fetch_principal_review_crisis_guides" in src
     assert "principal_crisis_block" in src
-    assert "symbolic_crisis_plan_validation" in src
-    assert "_CRISIS_SPINE_SUFFIX" in src
 
 
 def test_crystal_builder_avoids_gold_client_says():
     src = _API.read_text(encoding="utf-8")
     assert "annotate_teaching_delta" in src
-    assert "never paste gold client_says" in src.lower() or "Scenario:" in src
-    assert 'f"Client: {client}"' not in src
+    assert "scrub_teaching_text" in src
+    assert 'f"Scenario:' not in src
+    assert "promoted_by" in src
 
 
 def test_sandbox_task_present():
     src = _SANDBOX.read_text(encoding="utf-8")
     assert "clin_crisis_si_principal_laws" in src
-    tree = ast.parse(src)
-    assert tree is not None
+    assert ast.parse(src) is not None

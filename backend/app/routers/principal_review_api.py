@@ -55,24 +55,23 @@ def _clip_gold_notes(notes: Optional[str]) -> str:
 
 
 def _build_principal_crystal_text(row: Any) -> str:
-    """Corrective underwriting: annotated delta + Guide; no gold client_says (quarantine)."""
-    principal = (row["principal_response"] or "").strip()
-    nate = (row["nate_response"] or "").strip()
-    teaching = principal or nate
-    if not teaching:
+    """Corrective underwriting: annotated delta + Guide; no stem ids / Client: in body."""
+    from app.services.principal_review_crisis_policy import (
+        annotate_teaching_delta,
+        scrub_teaching_text,
+    )
+
+    principal = scrub_teaching_text(row["principal_response"] or "")
+    nate = scrub_teaching_text(row["nate_response"] or "")
+    if not (principal or nate):
         return ""
-    topic = str(row["topic"] or row["source_ref"] or "template")[:200]
     section = str(row["section"] or "clinical")[:40]
-    source_ref = str(row["source_ref"] or topic)[:80]
+    # Header uses section only — never stem ids (quarantine heuristics / gold_fp).
     parts = [
-        f"[Principal-Review · {section} · {topic}]",
+        f"[Principal-Review · {section}]",
         _ANTI_VERBATIM_RULE,
-        # Stem id only — never paste gold client_says (battery quarantine fingerprints).
-        f"Scenario: {source_ref}",
     ]
     try:
-        from app.services.principal_review_crisis_policy import annotate_teaching_delta
-
         delta = annotate_teaching_delta(principal=principal, nate_blind=nate)
         if delta:
             parts.append(delta)
@@ -90,7 +89,7 @@ def _build_principal_crystal_text(row: Any) -> str:
         )
     elif nate:
         parts.append(f"Guide: {nate[:2500]}")
-    return "\n".join(parts)
+    return scrub_teaching_text("\n".join(parts))
 
 
 def _enforce_item_latency(latency_ms: int) -> int:
@@ -355,10 +354,9 @@ async def gold_score(
                        WHEN NULLIF($2, '') IS NOT NULL THEN $2
                        ELSE principal_response
                      END,
-                     nate_response = (
-                       SELECT nate_response FROM six_quotient_human_gold
-                       WHERE scenario_id = $3
-                     ),
+                     nate_response = g.nate_response,
+                     response_class = g.response_class,
+                     source_scenario = g.scenario_id,
                      metadata = $4::jsonb,
                      gold_admin_run_id = $5,
                      status = CASE
@@ -366,7 +364,9 @@ async def gold_score(
                        ELSE 'draft'
                      END,
                      updated_at = NOW()
-                   WHERE id = $6::uuid""",
+                   FROM six_quotient_human_gold g
+                   WHERE principal_review_library.id = $6::uuid
+                     AND g.scenario_id = $3""",
                 body.scenario_id,
                 notes_text,
                 body.scenario_id,
@@ -378,13 +378,15 @@ async def gold_score(
             lib_id = await conn.fetchval(
                 """INSERT INTO principal_review_library
                    (topic, section, client_says, principal_response, nate_response,
-                    source_kind, source_ref, status, gold_admin_run_id, created_by, metadata)
+                    source_kind, source_ref, status, gold_admin_run_id, created_by,
+                    metadata, response_class, source_scenario)
                    SELECT
                      scenario_id,
                      section, client_says,
                      COALESCE(NULLIF($2, ''), ''),
                      nate_response,
-                     'gold_scored', scenario_id, 'draft', $3, $4, $5::jsonb
+                     'gold_scored', scenario_id, 'draft', $3, $4, $5::jsonb,
+                     response_class, scenario_id
                    FROM six_quotient_human_gold WHERE scenario_id = $1
                    RETURNING id""",
                 body.scenario_id,
@@ -473,12 +475,19 @@ async def gold_backfill_notes_learning(
                     "backfill": True,
                 }
             )
+            gold_rc = await conn.fetchval(
+                """SELECT response_class FROM six_quotient_human_gold
+                   WHERE scenario_id = $1""",
+                g["scenario_id"],
+            )
             if lib_id:
                 await conn.execute(
                     """UPDATE principal_review_library SET
                          topic = $1,
                          principal_response = $2,
                          nate_response = $3,
+                         response_class = $6,
+                         source_scenario = $1,
                          metadata = COALESCE(metadata, '{}'::jsonb) || $4::jsonb,
                          status = CASE
                            WHEN status = 'archived' THEN status
@@ -491,13 +500,16 @@ async def gold_backfill_notes_learning(
                     g["nate_response"] or "",
                     meta,
                     lib_id,
+                    gold_rc,
                 )
             else:
                 lib_id = await conn.fetchval(
                     """INSERT INTO principal_review_library
                        (topic, section, client_says, principal_response, nate_response,
-                        source_kind, source_ref, status, created_by, metadata)
-                       VALUES ($1, $2, $3, $4, $5, 'gold_scored', $1, 'draft', $6, $7::jsonb)
+                        source_kind, source_ref, status, created_by, metadata,
+                        response_class, source_scenario)
+                       VALUES ($1, $2, $3, $4, $5, 'gold_scored', $1, 'draft', $6, $7::jsonb,
+                               $8, $1)
                        RETURNING id""",
                     g["scenario_id"],
                     g["section"] or "clinical",
@@ -506,6 +518,7 @@ async def gold_backfill_notes_learning(
                     g["nate_response"] or "",
                     rater[:64],
                     meta,
+                    gold_rc,
                 )
             promoted.append(
                 {"scenario_id": g["scenario_id"], "library_id": str(lib_id)}
@@ -1329,11 +1342,14 @@ async def _promote_library_item(
     rater: str = "DrNevedal1",
 ) -> Dict[str, Any]:
     """Promote library row → crystal. Prefer Principal Guide over blind Nate."""
-    del rater  # reserved for audit trails
     pool = _pool(request)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            """SELECT * FROM principal_review_library WHERE id = $1::uuid""",
+            """SELECT l.*, g.response_class AS gold_response_class
+               FROM principal_review_library l
+               LEFT JOIN six_quotient_human_gold g
+                 ON l.source_kind = 'gold_scored' AND g.scenario_id = l.source_ref
+               WHERE l.id = $1::uuid""",
             item_id,
         )
         if not row:
@@ -1343,6 +1359,23 @@ async def _promote_library_item(
         crystal_text = _build_principal_crystal_text(row)
         if not crystal_text:
             raise HTTPException(422, "need principal_response or nate_response")
+
+        def _cell(key: str) -> str:
+            try:
+                v = row[key]
+            except (KeyError, IndexError):
+                return ""
+            return ("" if v is None else str(v)).strip()
+
+        resp_class = (_cell("response_class") or _cell("gold_response_class")).lower()
+        source_scenario = (_cell("source_scenario") or _cell("source_ref"))[:80]
+        prev_id = _cell("promoted_crystal_id")
+        topics = [
+            "principal_review",
+            str(row["section"] or "clinical")[:40],
+        ]
+        if resp_class:
+            topics.append(f"class:{resp_class}")
 
         content_hash = __import__("hashlib").sha256(
             crystal_text.encode("utf-8")
@@ -1356,7 +1389,7 @@ async def _promote_library_item(
                ON CONFLICT (content_hash) DO NOTHING
                RETURNING id""",
             crystal_text[:8000],
-            ["principal_review", str(row["section"] or "clinical")[:40]],
+            topics,
             content_hash,
         )
         if not crystal_id:
@@ -1365,14 +1398,38 @@ async def _promote_library_item(
                    WHERE content_hash = $1 LIMIT 1""",
                 content_hash,
             )
+        if (
+            prev_id
+            and crystal_id
+            and str(prev_id) != str(crystal_id)
+        ):
+            try:
+                await conn.execute(
+                    """UPDATE nate_intelligence_crystals
+                       SET superseded_by = $2
+                       WHERE id = $1::bigint
+                         AND origin_surface = 'principal_review'
+                         AND superseded_by IS NULL""",
+                    int(prev_id),
+                    int(crystal_id),
+                )
+            except Exception as e:
+                logger.warning("principal_review supersede %s→%s: %s", prev_id, crystal_id, e)
+
         await conn.execute(
             """UPDATE principal_review_library
                SET status = 'promoted',
                    promoted_crystal_id = $2,
+                   response_class = COALESCE(NULLIF($3, ''), response_class),
+                   source_scenario = COALESCE(NULLIF($4, ''), source_scenario),
+                   promoted_by = $5,
                    updated_at = NOW()
                WHERE id = $1::uuid""",
             item_id,
             str(crystal_id) if crystal_id is not None else None,
+            resp_class,
+            source_scenario,
+            (rater or "DrNevedal1")[:64],
         )
 
     try:

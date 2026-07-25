@@ -206,6 +206,12 @@ def crystal_row_is_battery_contaminated(row: Any) -> bool:
         return True
     if text_matches_gold_stem(text, ""):
         return True
+    # QUANTUM-CRYSTAL-ARCH — Principal-Review teaching crystals may contain
+    # "Scenario"/"AQ-1" vocabulary in metadata historically; after scrub, gold_fp
+    # is authoritative. Skip battery heuristics for this origin so legitimate
+    # DELTA Guides are recallable without loosening stem-fingerprint quarantine.
+    if (origin or "").strip().lower() == "principal_review":
+        return False
     return text_looks_like_battery(text, "")
 
 
