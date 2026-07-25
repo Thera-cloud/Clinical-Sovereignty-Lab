@@ -66,9 +66,19 @@ def _build_principal_crystal_text(row: Any) -> str:
     if not (principal or nate):
         return ""
     section = str(row["section"] or "clinical")[:40]
-    # Header uses section only — never stem ids (quarantine heuristics / gold_fp).
+    # Unique lib-id prefix so LEFT(text,80) never collides across scenarios
+    # (factory also exempts origin_surface=principal_review). Never stem ids.
+    try:
+        lib_tag = str(row["id"] or "").replace("-", "")[:12]
+    except (KeyError, IndexError, TypeError):
+        lib_tag = ""
+    header = (
+        f"[Principal-Review · {section} · lib:{lib_tag}]"
+        if lib_tag
+        else f"[Principal-Review · {section}]"
+    )
     parts = [
-        f"[Principal-Review · {section}]",
+        header,
         _ANTI_VERBATIM_RULE,
     ]
     try:
@@ -1648,7 +1658,7 @@ async def _promote_library_item(
             try:
                 await conn.execute(
                     """UPDATE nate_intelligence_crystals
-                       SET superseded_by = $2
+                       SET superseded_by = $2, scope = 'archived', updated_at = NOW()
                        WHERE id = $1::bigint
                          AND origin_surface = 'principal_review'
                          AND superseded_by IS NULL""",
@@ -1707,16 +1717,28 @@ async def _promote_library_item(
 
     ns_id = None
     try:
+        from app.services.night_school_director import WisdomCategory
+
         ns = getattr(request.app.state, "night_school", None) or getattr(
             request.app.state, "night_school_director", None
         )
         if ns and hasattr(ns, "add_wisdom_entry"):
-            ns_id = await ns.add_wisdom_entry(
-                content=crystal_text[:4000],
-                source="principal_review",
-                category="principal_guide",
-                approved=True,
+            cat = (
+                WisdomCategory.CRISIS_INTERVENTION
+                if resp_class == "escalate_or_safety"
+                else WisdomCategory.GENERAL
             )
+            entry = ns.add_wisdom_entry(
+                crystal_text[:4000],
+                cat,
+                "principal_review",
+                source_file=f"pr_lib_{item_id}",
+                confidence=0.72,
+                auto_approve=True,
+                approved_by=(rater or "DrNevedal1")[:64],
+                tags=["principal_review", "principal_guide"],
+            )
+            ns_id = getattr(entry, "id", None)
     except Exception as e:
         logger.warning("principal_review night_school: %s", e)
 

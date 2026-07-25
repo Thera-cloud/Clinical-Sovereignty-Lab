@@ -621,6 +621,9 @@ class CrystalDB:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
                     await conn.execute("SET LOCAL statement_timeout = '30s'")
+                    # PRINCIPAL-REVIEW: never near-dup-merge these. All PR crystals
+                    # share the same teaching-rule boilerplate in LEFT(text,80), so
+                    # prefix match wrongly collapses distinct scenarios (AQ-G07→AQ-1).
                     rows = await conn.fetch("""
                 SELECT a.id AS a_id, b.id AS b_id,
                        a.confidence AS a_conf, b.confidence AS b_conf,
@@ -634,6 +637,8 @@ class CrystalDB:
                     AND b.superseded_by IS NULL
                     AND LEFT(a.crystal_text, 80) = LEFT(b.crystal_text, 80)
                 WHERE a.scope != 'archived' AND b.scope != 'archived'
+                  AND COALESCE(a.origin_surface, '') <> 'principal_review'
+                  AND COALESCE(b.origin_surface, '') <> 'principal_review'
                 LIMIT $1
             """, limit)
                     return [(r["a_id"], r["b_id"], r["a_conf"], r["b_conf"],

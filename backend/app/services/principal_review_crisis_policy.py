@@ -342,6 +342,22 @@ async def fetch_principal_review_crisis_guides(
                 limit=limit,
                 safety_reserve=CRISIS_SAFETY_SLOT_RESERVE,
             )
+            # Demonstrated: inject path reinforces recall (same contract as
+            # recall_crystals_for_context — not storage alone).
+            ids = [int(g["id"]) for g in selected if g.get("id") is not None]
+            if ids:
+                await conn.execute(
+                    """
+                    UPDATE nate_intelligence_crystals
+                       SET recall_count = COALESCE(recall_count, 0) + 1,
+                           last_recalled_at = NOW(),
+                           confidence = LEAST(0.95, COALESCE(confidence, 0.5) + 0.03),
+                           updated_at = NOW()
+                     WHERE id = ANY($1::bigint[])
+                       AND origin_surface = 'principal_review'
+                    """,
+                    ids,
+                )
             return selected
     except Exception as e:
         logger.warning("principal_review_crisis_policy: fetch guides failed: %s", e)

@@ -118,6 +118,27 @@ def test_crystal_builder_avoids_gold_client_says():
     assert "scrub_teaching_text" in src
     assert 'f"Scenario:' not in src
     assert "promoted_by" in src
+    assert "lib_tag" in src and "lib:" in src
+    assert "auto_approve=True" in src
+    assert 'category="principal_guide"' not in src
+
+
+def test_factory_exempts_principal_review_near_dup():
+    factory = Path(__file__).resolve().parents[1] / "crystal_factory.py"
+    src = factory.read_text(encoding="utf-8")
+    assert "<> 'principal_review'" in src
+    assert "find_near_duplicates" in src
+
+
+def test_crisis_fetch_reinforces_recall():
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "app"
+        / "services"
+        / "principal_review_crisis_policy.py"
+    ).read_text(encoding="utf-8")
+    assert "recall_count = COALESCE(recall_count, 0) + 1" in src
+    assert "last_recalled_at = NOW()" in src
 
 
 def test_sandbox_task_present():
