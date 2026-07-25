@@ -35,6 +35,7 @@ async def _judge_all(app_state, items, limit: int):
             rubric_focus=str(g.get("response_class") or ""),
             client_says=str(g.get("client_says") or ""),
             response=str(g.get("nate_response") or ""),
+            degraded_distractor=bool(g.get("is_degraded_distractor")),
         )
         if not judged:
             print(f"FAIL judge: {sid}")

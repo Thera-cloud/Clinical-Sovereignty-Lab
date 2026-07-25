@@ -131,6 +131,7 @@ async def _run_kappa_job(
                     rubric_focus=str(g.get("response_class") or ""),
                     client_says=str(g.get("client_says") or ""),
                     response=str(g.get("nate_response") or ""),
+                    degraded_distractor=bool(g.get("is_degraded_distractor")),
                 )
                 if not judged:
                     raise RuntimeError(f"judge failed for {sid}")

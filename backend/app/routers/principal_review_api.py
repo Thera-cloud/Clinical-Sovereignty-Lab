@@ -1004,6 +1004,7 @@ async def gold_kappa_compute(
                 rubric_focus=str(g.get("response_class") or ""),
                 client_says=str(g.get("client_says") or ""),
                 response=str(g.get("nate_response") or ""),
+                degraded_distractor=bool(g.get("is_degraded_distractor")),
             )
             if not judged:
                 raise HTTPException(502, f"judge failed for {sid}")

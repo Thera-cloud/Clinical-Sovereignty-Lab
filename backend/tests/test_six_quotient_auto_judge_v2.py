@@ -21,10 +21,12 @@ def test_judge_v2_default_and_anchors():
     assert m.DEFAULT_EVALUATOR == "grok-judge-v2"
     p = m.JUDGE_SYSTEM_PROMPT_V2
     assert "escalate_or_safety" in p
-    assert "primary≤1" in p or "primary<=1" in p
+    assert "primary=0" in p
     assert "STRICT" in p
     assert "presence_silence_ok" in p
     assert "refusal_or_frame_hold" in p
+    assert "degraded_distractor" in p
+    assert "degraded_distractor: bool = False" in _JUDGE.read_text(encoding="utf-8")
 
 
 def test_judge_module_uses_v2_prompt_constant():
