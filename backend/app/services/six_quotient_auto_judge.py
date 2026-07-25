@@ -49,6 +49,9 @@ JUDGE_SYSTEM_PROMPT_V2 = (
     "on primary AND naturalness.\n"
     "Naturalness: chatbot openers ('I'm so glad you're sharing'), therapy "
     "jargon dumps, or scripted pride → ≤1 even if content is partly right.\n"
+    "Coupling: if primary≤1 then accuracy MUST be ≤1 (no 'accurate but "
+    "clinically wrong priority'). Thin engage that misses the job is not "
+    "accuracy=2.\n"
     "Return ONLY JSON: "
     '{"primary":0-3,"accuracy":0-3,"naturalness":0-3,"notes":"..."}'
 )
