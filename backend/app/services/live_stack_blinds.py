@@ -169,6 +169,9 @@ async def run_live_stack_turn(
         "crisis_class_fired": bool(audit_meta.get("crisis_class_fired")),
         "crisis_exempt": bool(audit_meta.get("crisis_exempt")),
         "tmc_class": audit_meta.get("tmc_class"),
+        "principal_review_turn_class": (
+            audit_meta.get("principal_review_turn_class") or ""
+        )[:40],
         "guide_ids": list(audit_meta.get("principal_review_guide_ids") or []),
         "guide_classes": list(audit_meta.get("principal_review_guide_classes") or []),
         "guide_scenarios": list(
