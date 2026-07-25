@@ -81,11 +81,24 @@ def test_turn_class_hi_prefers_hi_affinity_guides():
     hi = m.select_crisis_guides(
         rows, limit=2, safety_reserve=2, turn_class=m.TURN_CLASS_HI
     )
-    assert hi[0]["id"] == 2
+    assert hi[0]["id"] == 2  # AQ-2
     si = m.select_crisis_guides(
         rows, limit=2, safety_reserve=2, turn_class=m.TURN_CLASS_SI
     )
-    assert si[0]["id"] == 1
+    assert si[0]["id"] == 1  # AQ-1 over AQ-2 / generic
+    # AQ-G07 (means/quiet) must not outrank AQ-1 on SI turns
+    rows2 = rows + [
+        {
+            "id": 99,
+            "response_class": "escalate_or_safety",
+            "source_scenario": "AQ-G07",
+            "crystal_text": "Principal Guide: gun nightstand quiet 988",
+        }
+    ]
+    si2 = m.select_crisis_guides(
+        rows2, limit=3, safety_reserve=2, turn_class=m.TURN_CLASS_SI
+    )
+    assert si2[0]["source_scenario"] == "AQ-1"
     block = m.format_crisis_guide_injection(hi, turn_class=m.TURN_CLASS_HI)
     assert "crisis_hi" in block
 

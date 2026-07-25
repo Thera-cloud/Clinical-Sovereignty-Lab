@@ -321,20 +321,26 @@ def classify_crisis_turn_class(user_text: str) -> Optional[str]:
 
 
 def _turn_class_affinity(row: Dict[str, Any], turn_class: str) -> int:
+    scen = str(row.get("source_scenario") or "")
     blob = " ".join(
         [
-            str(row.get("source_scenario") or ""),
+            scen,
             str(row.get("response_class") or ""),
             str(row.get("crystal_text") or "")[:400],
         ]
     )
     if turn_class == TURN_CLASS_HI:
+        # Canonical HI vigil teaching outranks generic gun/SI-adjacent safety.
+        if re.search(r"\bAQ-2\b", scen, re.I):
+            return 3
         if _HI_AFFINITY.search(blob):
             return 2
         if re.search(r"\bgun\b", blob, re.I) and not _SI_AFFINITY.search(blob):
             return 1
         return 0
-    # crisis_si default
+    # crisis_si — AQ-1 canonical before AQ-G07 (means/quiet) or HI vigil.
+    if re.search(r"\bAQ-1\b", scen, re.I):
+        return 3
     if _SI_AFFINITY.search(blob):
         return 2
     return 0

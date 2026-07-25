@@ -61,6 +61,10 @@ def test_crisis_intent_covers_end_a_life():
     assert "live_inject_meta" in live
     assert "inject_meta" in live
     assert "used_stem_not_paraphrase" in live
+    # Paraphrase can keep weak crisis keywords but strip HI/SI class markers
+    assert "classify_crisis_turn_class" in live
+    assert "_stem_tc" in live
+    assert "_stem_tc != _para_tc" in live
 
 
 def test_live_stack_addressee_integrity_wrapper():

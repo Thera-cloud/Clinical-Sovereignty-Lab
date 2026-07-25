@@ -337,17 +337,25 @@ async def generate_live_stack_batch(
         paraphrase = (r["live_paraphrase_used"] or "").strip() or await paraphrase_stem_for_live(
             stem, router
         )
-        # QUANTUM-CRYSTAL-ARCH — paraphraser can strip SI/HI markers; if stem
-        # still implies crisis and paraphrase does not, drive the live turn
-        # from the original stem so inject/audit see the real safety surface.
+        # QUANTUM-CRYSTAL-ARCH — paraphraser can strip SI/HI markers while
+        # keeping weak crisis keywords (_USER_CRISIS_INTENT). Prefer stem when
+        # classify(stem) is set and classify(paraphrase) is None/mismatched.
         try:
             from app.services.therapeutic_controller import _USER_CRISIS_INTENT
+            from app.services.principal_review_crisis_policy import (
+                classify_crisis_turn_class as _pr_tc,
+            )
 
             _para_crisis = bool(_USER_CRISIS_INTENT.search(paraphrase or ""))
             _stem_crisis = bool(_USER_CRISIS_INTENT.search(stem or ""))
-            user_text = (
-                stem if (_stem_crisis and not _para_crisis) else paraphrase
-            )
+            _stem_tc = _pr_tc(stem)
+            _para_tc = _pr_tc(paraphrase)
+            if _stem_tc and _stem_tc != _para_tc:
+                user_text = stem
+            elif _stem_crisis and not _para_crisis:
+                user_text = stem
+            else:
+                user_text = paraphrase
         except Exception:
             user_text = paraphrase
             _para_crisis = None
