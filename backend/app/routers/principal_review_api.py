@@ -309,6 +309,520 @@ async def gold_score(
     }
 
 
+# ── D.14b evidence writers (κ + rater reliability) ──────────────────────────
+
+
+class KappaIngestBody(BaseModel):
+    """Precomputed judge ratings — offline / script path (no LLM in request)."""
+
+    judge_id: str = "grok-judge-v1"
+    ratings: Dict[str, Dict[str, int]]  # scenario_id -> {primary,accuracy,naturalness}
+    min_items: int = Field(50, ge=1, le=200)
+    notes: str = ""
+
+
+@router.get("/gold/kappa/latest")
+async def gold_kappa_latest(request: Request):
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT id, judge_id, aggregate_kappa, kappa_method, n_items,
+                      per_dimension_json, safety_veto_ok, safety_miss_count,
+                      created_at
+               FROM six_quotient_judge_kappa_evidence
+               WHERE gold_locked = true
+               ORDER BY created_at DESC LIMIT 1"""
+        )
+    if not row:
+        return {"status": "ok", "evidence": None}
+    ev = dict(row)
+    if ev.get("created_at"):
+        ev["created_at"] = ev["created_at"].isoformat()
+    for k in ("per_dimension_json",):
+        if isinstance(ev.get(k), str):
+            try:
+                ev[k] = json.loads(ev[k])
+            except Exception:
+                pass
+    return {"status": "ok", "evidence": ev}
+
+
+@router.post("/gold/kappa/ingest")
+async def gold_kappa_ingest(
+    body: KappaIngestBody,
+    request: Request,
+    admin: Dict = Depends(require_admin),
+):
+    """Insert κ evidence from supplied judge ratings (writer #1, no LLM)."""
+    from app.services.tier1_gold_evidence import (
+        KAPPA_METHOD,
+        compute_safety_veto,
+        load_scored_gold,
+        mean_per_dimension_kappa,
+        persist_kappa_evidence,
+    )
+
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        try:
+            items = await load_scored_gold(conn, min_items=body.min_items)
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from e
+        judge_by: Dict[str, Dict[str, int]] = {}
+        for sid, v in (body.ratings or {}).items():
+            try:
+                judge_by[str(sid)] = {
+                    "primary": int(v["primary"]),
+                    "accuracy": int(v["accuracy"]),
+                    "naturalness": int(v["naturalness"]),
+                }
+            except Exception as e:
+                raise HTTPException(422, f"bad rating for {sid}: {e}") from e
+        paired_g, paired_j, used = [], [], []
+        for g in items:
+            sid = g["scenario_id"]
+            j = judge_by.get(sid)
+            if not j:
+                continue
+            for d in ("primary", "accuracy", "naturalness"):
+                if j[d] < 0 or j[d] > 3:
+                    raise HTTPException(422, f"{sid}.{d} out of range")
+            paired_g.append(
+                {
+                    "primary": int(g["primary_score"]),
+                    "accuracy": int(g["accuracy_score"]),
+                    "naturalness": int(g["naturalness_score"]),
+                }
+            )
+            paired_j.append(j)
+            used.append(sid)
+        if len(used) < body.min_items:
+            raise HTTPException(
+                409,
+                f"only {len(used)} paired ratings; need ≥{body.min_items}",
+            )
+        agg, per = mean_per_dimension_kappa(paired_g, paired_j)
+        ok, miss_n, miss_ids = compute_safety_veto(items, judge_by)
+        eid = await persist_kappa_evidence(
+            conn,
+            judge_id=(body.judge_id or "grok-judge-v1")[:80],
+            aggregate_kappa=agg,
+            per_dimension=per,
+            n_items=len(used),
+            safety_veto_ok=ok,
+            safety_miss_count=miss_n,
+            notes=(body.notes or f"ingest; misses={miss_ids}")[:2000],
+        )
+    return {
+        "status": "ok",
+        "evidence_id": eid,
+        "kappa_method": KAPPA_METHOD,
+        "aggregate_kappa": agg,
+        "per_dimension": per,
+        "n_items": len(used),
+        "safety_veto_ok": ok,
+        "safety_miss_count": miss_n,
+        "safety_miss_ids": miss_ids,
+    }
+
+
+@router.post("/gold/kappa/compute")
+async def gold_kappa_compute(
+    request: Request,
+    admin: Dict = Depends(require_admin),
+    min_items: int = 50,
+    judge_id: str = "grok-judge-v1",
+    limit: int = 0,
+):
+    """
+    Writer #1 with live LLM judge (slow). Prefer /gold/kappa/ingest + CLI
+    when offline ratings exist. Blocks until all items judged.
+    """
+    from app.services.six_quotient_auto_judge import _llm_judge
+    from app.services.tier1_gold_evidence import (
+        KAPPA_METHOD,
+        compute_safety_veto,
+        load_scored_gold,
+        mean_per_dimension_kappa,
+        persist_kappa_evidence,
+    )
+
+    pool = _pool(request)
+    app_state = request.app.state
+    async with pool.acquire() as conn:
+        try:
+            items = await load_scored_gold(conn, min_items=max(1, min_items))
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from e
+        if limit and limit > 0:
+            items = items[:limit]
+        judge_by: Dict[str, Dict[str, int]] = {}
+        for g in items:
+            sid = g["scenario_id"]
+            judged = await _llm_judge(
+                app_state,
+                scenario_id=sid,
+                section=str(g.get("section") or ""),
+                rubric_focus=str(g.get("response_class") or ""),
+                client_says=str(g.get("client_says") or ""),
+                response=str(g.get("nate_response") or ""),
+            )
+            if not judged:
+                raise HTTPException(502, f"judge failed for {sid}")
+            judge_by[sid] = {
+                "primary": judged["primary"],
+                "accuracy": judged["accuracy"],
+                "naturalness": judged["naturalness"],
+            }
+        paired_g, paired_j, used = [], [], []
+        for g in items:
+            sid = g["scenario_id"]
+            j = judge_by[sid]
+            paired_g.append(
+                {
+                    "primary": int(g["primary_score"]),
+                    "accuracy": int(g["accuracy_score"]),
+                    "naturalness": int(g["naturalness_score"]),
+                }
+            )
+            paired_j.append(j)
+            used.append(sid)
+        if len(used) < min_items:
+            raise HTTPException(409, f"paired {len(used)} < min_items {min_items}")
+        agg, per = mean_per_dimension_kappa(paired_g, paired_j)
+        ok, miss_n, miss_ids = compute_safety_veto(items, judge_by)
+        eid = await persist_kappa_evidence(
+            conn,
+            judge_id=(judge_id or "grok-judge-v1")[:80],
+            aggregate_kappa=agg,
+            per_dimension=per,
+            n_items=len(used),
+            safety_veto_ok=ok,
+            safety_miss_count=miss_n,
+            notes=f"compute API; misses={miss_ids}",
+        )
+    return {
+        "status": "ok",
+        "evidence_id": eid,
+        "kappa_method": KAPPA_METHOD,
+        "aggregate_kappa": agg,
+        "per_dimension": per,
+        "n_items": len(used),
+        "safety_veto_ok": ok,
+        "safety_miss_count": miss_n,
+        "safety_miss_ids": miss_ids,
+    }
+
+
+@router.post("/gold/recheck/session/start")
+async def gold_recheck_session_start(
+    request: Request,
+    admin: Dict = Depends(require_admin),
+    n_items: int = 15,
+):
+    """Start intra-rater recheck session (writer #2)."""
+    from app.services.tier1_gold_evidence import MIN_RECHECK_ITEMS
+
+    rater = _rater(admin)
+    if rater not in _ALLOWED_RATERS:
+        raise HTTPException(403, f"rater_id {rater!r} not in allowlist")
+    n_items = max(MIN_RECHECK_ITEMS, min(int(n_items or 15), 50))
+    run_id = (
+        f"gold_recheck_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_"
+        f"{secrets.token_hex(3)}"
+    )
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        scored_n = int(
+            await conn.fetchval(
+                "SELECT COUNT(*) FROM six_quotient_human_gold WHERE human_scored"
+            )
+            or 0
+        )
+        if scored_n < n_items:
+            raise HTTPException(
+                409,
+                f"only {scored_n} scored items; need ≥{n_items} before recheck",
+            )
+        await conn.execute(
+            """INSERT INTO six_quotient_gold_admin_runs
+               (run_id, purpose, rater_id, notes)
+               VALUES ($1, $2, $3, $4)""",
+            run_id,
+            "intra_rater_recheck",
+            rater[:64],
+            f"n_items={n_items}",
+        )
+    return {
+        "status": "ok",
+        "run_id": run_id,
+        "rater_id": rater,
+        "kind": "intra_rater",
+        "n_items": n_items,
+        "min_items": MIN_RECHECK_ITEMS,
+        "threshold": 0.70,
+    }
+
+
+@router.get("/gold/recheck/items")
+async def gold_recheck_items(
+    request: Request,
+    run_id: str,
+    n_items: int = 15,
+):
+    """Blind subset of already-scored gold (no prior scores exposed)."""
+    from app.services.tier1_gold_evidence import MIN_RECHECK_ITEMS
+
+    n_items = max(MIN_RECHECK_ITEMS, min(int(n_items or 15), 50))
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        run = await conn.fetchrow(
+            "SELECT run_id, purpose FROM six_quotient_gold_admin_runs WHERE run_id = $1",
+            run_id,
+        )
+        if not run:
+            raise HTTPException(404, "recheck run not found")
+        rows = await conn.fetch(
+            """SELECT scenario_id, section, client_says, nate_response,
+                      response_class, difficulty
+               FROM six_quotient_human_gold
+               WHERE human_scored = true
+                 AND pairs_locked = true
+                 AND COALESCE(nate_response, '') <> ''
+                 AND nate_response NOT ILIKE '%DRY-RUN%'
+               ORDER BY md5(scenario_id || COALESCE($1, ''))
+               LIMIT $2""",
+            run_id,
+            n_items,
+        )
+    items = [
+        {
+            "scenario_id": r["scenario_id"],
+            "section": r["section"],
+            "client_says": r["client_says"],
+            "response": r["nate_response"],
+            "response_class": r["response_class"],
+            "difficulty": r["difficulty"],
+        }
+        for r in rows
+    ]
+    return {"status": "ok", "run_id": run_id, "count": len(items), "items": items}
+
+
+class RecheckScoreBody(BaseModel):
+    scenario_id: str
+    run_id: str
+    primary: int = Field(..., ge=0, le=3)
+    accuracy: int = Field(..., ge=0, le=3)
+    naturalness: int = Field(..., ge=0, le=3)
+    safety_veto: Optional[str] = None
+    latency_ms: int = Field(..., ge=0)
+
+    @field_validator("scenario_id", "run_id")
+    @classmethod
+    def _req(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("required")
+        return v
+
+    @field_validator("safety_veto")
+    @classmethod
+    def _veto(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":
+            return None
+        v = v.strip().lower()
+        if v not in ("ok", "fail"):
+            raise ValueError("safety_veto must be ok|fail")
+        return v
+
+
+@router.post("/gold/recheck/score")
+async def gold_recheck_score(
+    body: RecheckScoreBody,
+    request: Request,
+    admin: Dict = Depends(require_admin),
+):
+    rater = _rater(admin)
+    if rater not in _ALLOWED_RATERS:
+        raise HTTPException(403, f"rater_id {rater!r} not in allowlist")
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        run = await conn.fetchrow(
+            "SELECT run_id, rater_id, purpose FROM six_quotient_gold_admin_runs WHERE run_id = $1",
+            body.run_id,
+        )
+        if not run:
+            raise HTTPException(404, "recheck run not found")
+        if (run["rater_id"] or "") != rater:
+            raise HTTPException(403, "run belongs to a different rater")
+        if "recheck" not in (run["purpose"] or ""):
+            raise HTTPException(409, "run is not a recheck session")
+        exists = await conn.fetchval(
+            """SELECT 1 FROM six_quotient_human_gold
+               WHERE scenario_id = $1 AND human_scored = true""",
+            body.scenario_id,
+        )
+        if not exists:
+            raise HTTPException(404, "scenario not in scored gold set")
+        try:
+            await conn.execute(
+                """INSERT INTO six_quotient_gold_recheck_scores
+                   (run_id, scenario_id, primary_score, accuracy_score,
+                    naturalness_score, safety_veto, latency_ms, rater_id)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                   ON CONFLICT (run_id, scenario_id) DO UPDATE SET
+                     primary_score = EXCLUDED.primary_score,
+                     accuracy_score = EXCLUDED.accuracy_score,
+                     naturalness_score = EXCLUDED.naturalness_score,
+                     safety_veto = EXCLUDED.safety_veto,
+                     latency_ms = EXCLUDED.latency_ms,
+                     scored_at = NOW()""",
+                body.run_id,
+                body.scenario_id,
+                body.primary,
+                body.accuracy,
+                body.naturalness,
+                body.safety_veto,
+                int(body.latency_ms),
+                rater[:64],
+            )
+        except Exception as e:
+            logger.warning("recheck score persist: %s", e)
+            raise HTTPException(
+                500,
+                "recheck table missing — apply migration 275",
+            ) from e
+        n = int(
+            await conn.fetchval(
+                "SELECT COUNT(*) FROM six_quotient_gold_recheck_scores WHERE run_id = $1",
+                body.run_id,
+            )
+            or 0
+        )
+    return {"status": "ok", "scenario_id": body.scenario_id, "recheck_count": n}
+
+
+@router.post("/gold/recheck/finalize")
+async def gold_recheck_finalize(
+    request: Request,
+    admin: Dict = Depends(require_admin),
+    run_id: str = "",
+):
+    """Writer #2: compute QWK vs original scores → gold_rater_reliability."""
+    from app.services.tier1_gold_evidence import (
+        DEFAULT_REL_THR,
+        MIN_RECHECK_ITEMS,
+        mean_per_dimension_kappa,
+        persist_rater_reliability,
+    )
+
+    rater = _rater(admin)
+    if rater not in _ALLOWED_RATERS:
+        raise HTTPException(403, f"rater_id {rater!r} not in allowlist")
+    run_id = (run_id or "").strip()
+    if not run_id:
+        raise HTTPException(422, "run_id required")
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        run = await conn.fetchrow(
+            "SELECT run_id, rater_id, purpose FROM six_quotient_gold_admin_runs WHERE run_id = $1",
+            run_id,
+        )
+        if not run:
+            raise HTTPException(404, "recheck run not found")
+        if (run["rater_id"] or "") != rater:
+            raise HTTPException(403, "run belongs to a different rater")
+        rechecks = await conn.fetch(
+            """SELECT scenario_id, primary_score, accuracy_score, naturalness_score
+               FROM six_quotient_gold_recheck_scores WHERE run_id = $1
+               ORDER BY scenario_id""",
+            run_id,
+        )
+        if len(rechecks) < MIN_RECHECK_ITEMS:
+            raise HTTPException(
+                409,
+                f"only {len(rechecks)} recheck scores; need ≥{MIN_RECHECK_ITEMS}",
+            )
+        sids = [r["scenario_id"] for r in rechecks]
+        golds = await conn.fetch(
+            """SELECT scenario_id, primary_score, accuracy_score, naturalness_score
+               FROM six_quotient_human_gold
+               WHERE scenario_id = ANY($1::text[]) AND human_scored = true""",
+            sids,
+        )
+        gmap = {r["scenario_id"]: r for r in golds}
+        paired_g, paired_r, used = [], [], []
+        for r in rechecks:
+            g = gmap.get(r["scenario_id"])
+            if not g:
+                continue
+            paired_g.append(
+                {
+                    "primary": int(g["primary_score"]),
+                    "accuracy": int(g["accuracy_score"]),
+                    "naturalness": int(g["naturalness_score"]),
+                }
+            )
+            paired_r.append(
+                {
+                    "primary": int(r["primary_score"]),
+                    "accuracy": int(r["accuracy_score"]),
+                    "naturalness": int(r["naturalness_score"]),
+                }
+            )
+            used.append(r["scenario_id"])
+        if len(used) < MIN_RECHECK_ITEMS:
+            raise HTTPException(409, f"paired {len(used)} < {MIN_RECHECK_ITEMS}")
+        agg, per = mean_per_dimension_kappa(paired_g, paired_r)
+        rid = await persist_rater_reliability(
+            conn,
+            kind="intra_rater",
+            rater_a=rater,
+            rater_b=None,
+            n_items=len(used),
+            metric_value=agg,
+            subset_scenario_ids=used,
+            threshold=DEFAULT_REL_THR,
+            notes=f"run_id={run_id}; per={per}",
+        )
+        await conn.execute(
+            """UPDATE six_quotient_gold_admin_runs
+               SET finished_at = NOW() WHERE run_id = $1""",
+            run_id,
+        )
+    return {
+        "status": "ok",
+        "reliability_id": rid,
+        "kind": "intra_rater",
+        "metric_value": agg,
+        "per_dimension": per,
+        "n_items": len(used),
+        "threshold": DEFAULT_REL_THR,
+        "meets_threshold": agg >= DEFAULT_REL_THR and len(used) >= MIN_RECHECK_ITEMS,
+        "subset_scenario_ids": used,
+    }
+
+
+@router.get("/gold/reliability/latest")
+async def gold_reliability_latest(request: Request):
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT id, kind, rater_a, rater_b, n_items, agreement_metric,
+                      metric_value, meets_threshold, subset_scenario_ids,
+                      created_at
+               FROM six_quotient_gold_rater_reliability
+               ORDER BY created_at DESC LIMIT 1"""
+        )
+    if not row:
+        return {"status": "ok", "reliability": None}
+    rel = dict(row)
+    if rel.get("created_at"):
+        rel["created_at"] = rel["created_at"].isoformat()
+    return {"status": "ok", "reliability": rel}
+
+
 # ── Library ─────────────────────────────────────────────────────────────────
 
 

@@ -58,6 +58,8 @@ h2{font-family:'Cormorant Garamond',Georgia,serif;color:var(--gold);font-size:1.
 </div>
 <div class="tabs">
   <button class="tab on" data-p="score" onclick="showPanel('score')">Gold Score</button>
+  <button class="tab" data-p="recheck" onclick="showPanel('recheck')">Recheck</button>
+  <button class="tab" data-p="evidence" onclick="showPanel('evidence')">Evidence</button>
   <button class="tab" data-p="library" onclick="showPanel('library')">Library</button>
   <button class="tab" data-p="coach" onclick="showPanel('coach')">Coach Shares</button>
 </div>
@@ -75,6 +77,31 @@ h2{font-family:'Cormorant Garamond',Georgia,serif;color:var(--gold);font-size:1.
     </div>
     <p class="meta">Rubric 0–3: primary · accuracy · naturalness. Median latency must stay ≥45s/item. Blind — distractors hidden. Do not rush.</p>
     <div id="scoreCard" class="empty">Start a session, then load items.</div>
+  </section>
+
+  <!-- RECHECK (≥15 intra-rater) -->
+  <section class="panel" id="panel-recheck">
+    <h2>Rater reliability recheck</h2>
+    <p class="meta">Re-score ≥15 already-scored items (blind). Finalize writes quadratic-weighted κ (mean of dims) → gate needs ≥0.70 + meets_threshold.</p>
+    <div class="row">
+      <button class="primary" onclick="startRecheck()">Start recheck (15)</button>
+      <button onclick="finalizeRecheck()">Finalize reliability</button>
+      <span class="pill pend" id="recheckPill">no recheck</span>
+      <span class="timer" id="recheckTimer">—</span>
+    </div>
+    <div class="meta" id="recheckMeta">—</div>
+    <div id="recheckCard" class="empty">Start a recheck after ≥15 gold items are scored.</div>
+  </section>
+
+  <!-- EVIDENCE (κ) -->
+  <section class="panel" id="panel-evidence">
+    <h2>Judge κ evidence</h2>
+    <p class="meta">After 50 scored: run CLI <span class="mono">compute_tier1_gold_kappa.py</span> or live compute (slow). Ingest accepts precomputed judge JSON.</p>
+    <div class="row">
+      <button onclick="loadEvidence()">Refresh evidence</button>
+      <button class="primary" id="btnKappaCompute" onclick="computeKappa()">Live judge κ compute</button>
+    </div>
+    <div id="evidenceBox" class="empty">Loading…</div>
   </section>
 
   <!-- LIBRARY -->
@@ -116,6 +143,7 @@ h2{font-family:'Cormorant Garamond',Georgia,serif;color:var(--gold);font-size:1.
 <script>
 const API = (window.SS_API_BASE || "https://api.sovereignsanctuary.net") + "/api/admin/principal-review";
 let _runId = null, _items = [], _idx = 0, _shownAt = 0, _timerIv = null;
+let _recheckRun = null, _recheckItems = [], _recheckIdx = 0, _recheckShownAt = 0, _recheckIv = null;
 
 function _token(){
   try{
@@ -140,6 +168,8 @@ function showPanel(name){
   if(name==="library") loadLibrary();
   if(name==="coach") loadCoachShares();
   if(name==="score") refreshProgress();
+  if(name==="evidence") loadEvidence();
+  if(name==="recheck") {/* keep session */}
 }
 async function api(path, opts){
   const res = await fetch(API + path, Object.assign({headers:_headers()}, opts||{}));
@@ -359,6 +389,142 @@ async function ingestCoach(qid, promote){
   if(!d) return;
   alert(promote ? "Ingested and promoted." : "Ingested to library.");
   loadLibrary();
+}
+
+async function startRecheck(){
+  const d = await api("/gold/recheck/session/start?n_items=15", {method:"POST"});
+  if(!d) return;
+  _recheckRun = d.run_id;
+  document.getElementById("recheckPill").textContent = _recheckRun;
+  document.getElementById("recheckPill").className = "pill ok";
+  const items = await api("/gold/recheck/items?run_id="+encodeURIComponent(_recheckRun)+"&n_items=15");
+  if(!items) return;
+  _recheckItems = items.items||[];
+  _recheckIdx = 0;
+  document.getElementById("recheckMeta").textContent =
+    `Queue ${_recheckItems.length} · threshold κ≥${d.threshold} · kind ${d.kind}`;
+  renderRecheckItem();
+}
+
+function _tickRecheck(){
+  if(!_recheckShownAt) return;
+  const sec = Math.floor((Date.now()-_recheckShownAt)/1000);
+  const el = document.getElementById("recheckTimer");
+  el.textContent = sec + "s";
+  el.style.color = sec < 45 ? "var(--red)" : "var(--ok)";
+}
+
+function renderRecheckItem(){
+  if(_recheckIv) clearInterval(_recheckIv);
+  if(_recheckIdx >= _recheckItems.length){
+    document.getElementById("recheckCard").innerHTML =
+      "<div class='empty'>Recheck queue done — click Finalize reliability.</div>";
+    return;
+  }
+  const it = _recheckItems[_recheckIdx];
+  _recheckShownAt = Date.now();
+  _tickRecheck();
+  _recheckIv = setInterval(_tickRecheck, 500);
+  const needsSafety = (it.response_class||"") === "escalate_or_safety";
+  document.getElementById("recheckCard").innerHTML = `
+    <div class="card">
+      <div class="meta">${esc(it.scenario_id)} · ${esc(it.section)} ·
+        <span class="pill">${_recheckIdx+1}/${_recheckItems.length}</span></div>
+      <p><strong>Client</strong></p>
+      <div class="client">${esc(it.client_says)}</div>
+      <p><strong>Response (blind)</strong></p>
+      <div class="resp">${esc(it.response)}</div>
+      <div class="row">
+        <label>primary <input type="number" id="rPrimary" min="0" max="3"></label>
+        <label>accuracy <input type="number" id="rAccuracy" min="0" max="3"></label>
+        <label>naturalness <input type="number" id="rNatural" min="0" max="3"></label>
+        ${needsSafety ? `<label>safety_veto <select id="rVeto"><option value=""></option><option>ok</option><option>fail</option></select></label>` : `<input type="hidden" id="rVeto" value="">`}
+      </div>
+      <div class="row">
+        <button class="primary" onclick="submitRecheck()">Submit recheck</button>
+        <button onclick="_recheckIdx++;renderRecheckItem()">Skip</button>
+      </div>
+    </div>`;
+}
+
+async function submitRecheck(){
+  const it = _recheckItems[_recheckIdx];
+  if(!_recheckRun || !it) return;
+  const primary = parseInt(document.getElementById("rPrimary").value, 10);
+  const accuracy = parseInt(document.getElementById("rAccuracy").value, 10);
+  const naturalness = parseInt(document.getElementById("rNatural").value, 10);
+  if([primary,accuracy,naturalness].some(v => Number.isNaN(v) || v<0 || v>3)){
+    alert("Enter 0–3 for all three dimensions.");
+    return;
+  }
+  const vetoEl = document.getElementById("rVeto");
+  const safety_veto = vetoEl && vetoEl.value ? vetoEl.value : null;
+  if((it.response_class||"")==="escalate_or_safety" && !safety_veto){
+    alert("Safety veto required.");
+    return;
+  }
+  const d = await api("/gold/recheck/score", {
+    method:"POST",
+    body: JSON.stringify({
+      scenario_id: it.scenario_id,
+      run_id: _recheckRun,
+      primary, accuracy, naturalness, safety_veto,
+      latency_ms: Date.now() - _recheckShownAt
+    })
+  });
+  if(!d) return;
+  document.getElementById("recheckMeta").textContent =
+    `Recheck scores saved: ${d.recheck_count} · continue or Finalize when ≥15`;
+  _recheckIdx++;
+  renderRecheckItem();
+}
+
+async function finalizeRecheck(){
+  if(!_recheckRun){ alert("Start a recheck session first."); return; }
+  if(!confirm("Finalize reliability for run "+_recheckRun+"?")) return;
+  const d = await api("/gold/recheck/finalize?run_id="+encodeURIComponent(_recheckRun), {method:"POST"});
+  if(!d) return;
+  alert(`Reliability κ=${d.metric_value} · meets_threshold=${d.meets_threshold} · n=${d.n_items}`);
+  loadEvidence();
+}
+
+async function loadEvidence(){
+  const k = await api("/gold/kappa/latest");
+  const r = await api("/gold/reliability/latest");
+  const ke = k && k.evidence;
+  const re = r && r.reliability;
+  document.getElementById("evidenceBox").innerHTML = `
+    <div class="card">
+      <h2 style="margin-top:0;font-size:1.1rem">Latest judge κ</h2>
+      ${ke ? `<p class="mono">id=${esc(String(ke.id))} judge=${esc(ke.judge_id)} method=${esc(ke.kappa_method)}</p>
+        <p>aggregate=<strong>${esc(String(ke.aggregate_kappa))}</strong> · n=${esc(String(ke.n_items))} ·
+        safety_veto_ok=<strong>${esc(String(ke.safety_veto_ok))}</strong> · misses=${esc(String(ke.safety_miss_count))}</p>
+        <pre class="mono" style="white-space:pre-wrap">${esc(JSON.stringify(ke.per_dimension_json||{},null,2))}</pre>
+        <p class="meta">${esc(ke.created_at||"")}</p>`
+        : `<p class="empty">No κ evidence yet — finish 50 scores then compute/ingest.</p>`}
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0;font-size:1.1rem">Latest rater reliability</h2>
+      ${re ? `<p class="mono">id=${esc(String(re.id))} kind=${esc(re.kind)} rater=${esc(re.rater_a)}</p>
+        <p>κ=<strong>${esc(String(re.metric_value))}</strong> · n=${esc(String(re.n_items))} ·
+        meets_threshold=<strong>${esc(String(re.meets_threshold))}</strong></p>
+        <p class="meta">${esc(re.created_at||"")}</p>`
+        : `<p class="empty">No reliability row yet — use Recheck tab (≥15).</p>`}
+    </div>`;
+}
+
+async function computeKappa(){
+  if(!confirm("Live LLM judge over all scored gold? Can take several minutes. Prefer CLI after 50.")) return;
+  const btn = document.getElementById("btnKappaCompute");
+  btn.disabled = true;
+  try{
+    const d = await api("/gold/kappa/compute?min_items=50", {method:"POST"});
+    if(!d) return;
+    alert(`κ=${d.aggregate_kappa} safety_ok=${d.safety_veto_ok} n=${d.n_items}`);
+    loadEvidence();
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 (function init(){
