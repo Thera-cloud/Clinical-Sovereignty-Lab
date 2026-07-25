@@ -393,6 +393,8 @@ YOUR PLATFORM CAPABILITIES:
 - Little Nate Dispatch / Story Library: You can discuss published Dispatch issues when Story Library context is injected in chat. If a DISPATCH LEARNING block appears, treat it as editorial pattern notes — not the user's personal history. You cannot send the newsletter yourself — admin approves and sends via `/api/newsletter/admin`. Never invent a Dispatch issue title that is not in context.
 - NONE of your platforms currently support "releasing articles in sections" or threaded multi-part posting. That feature does not exist.
 - You CANNOT generate documents, PDFs, spreadsheets, or other files for download. Client conversations are automatically saved and accessible via Settings > Memory Search in the app.
+- SCREENSHOTS: Big Nate can attach/paste screenshots in this chat. When [SCREENSHOT N] blocks appear in context, treat the vision transcript as ground truth — read UI text, drafts, and errors from them. Do not claim you cannot see images when a SCREENSHOT block is present.
+- ILLUSTRATIONS: When Big Nate asks you to generate/create an illustration for a LinkedIn post, the system executes image generation and stages it. After [SYSTEM EXECUTION — VERIFIED] for an illustration, tell Big Nate it is staged and that "post it now" will publish text + image together. Never invent a LinkedIn URL for an image-only step.
 - COMMENT REPLIES — EXECUTION PROTOCOL:
   When Big Nate asks you to reply to a comment, follow this EXACT sequence:
   1. Check your [RECENT COMMENTS ON YOUR POSTS] context for the comment.
@@ -869,10 +871,16 @@ RULES:
 
     # ─── Main Send ───
 
-    async def send_message(self, user_message: str, mode_override: str = None) -> Dict[str, Any]:
+    async def send_message(
+        self,
+        user_message: str,
+        mode_override: str = None,
+        images: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         """
         Send a message from Big Nate and get Little Nate's response.
         Auto-detects mode unless mode_override is provided.
+        Optional `images` = [{data, mime_type, filename}] screenshots for vision.
         """
         # Use explicit mode if valid, otherwise auto-detect
         if mode_override and mode_override.lower() in ChatMode.ALL:
@@ -881,13 +889,64 @@ RULES:
             detected_mode = self._detect_mode(user_message)
         self.current_mode = detected_mode
 
+        screenshot_context = ""
+        attachment_metas: List[Dict[str, Any]] = []
+        if images:
+            try:
+                from app.services.skyeye_chat_media import process_chat_images
+
+                screenshot_context, attachment_metas = await process_chat_images(images)
+            except Exception as e:
+                print(f">>> [SKYEYE CHAT] Screenshot processing failed: {e}")
+                screenshot_context = f"\n\n[SCREENSHOT ERROR: {e}]\n"
+
+        # Standalone image-generation command (no immediate publish required)
+        image_gen_context = ""
+        try:
+            from app.services.skyeye_chat_media import (
+                extract_image_prompt,
+                generate_linkedin_image_for_chat,
+                wants_image_generation,
+            )
+            from app.services.skyeye_post_intent import (
+                extract_draft_from_history,
+                has_publish_intent,
+            )
+
+            if wants_image_generation(user_message) and not has_publish_intent(user_message.lower()):
+                history_for_draft = await self.get_chat_history(limit=8)
+                draft = extract_draft_from_history(history_for_draft) or ""
+                prompt = extract_image_prompt(user_message)
+                gen_meta = await generate_linkedin_image_for_chat(draft, image_prompt=prompt)
+                if gen_meta:
+                    attachment_metas.append(gen_meta)
+                    image_gen_context = (
+                        f"\n\n[SYSTEM EXECUTION — VERIFIED]\n"
+                        f"Illustration generated and staged for the next LinkedIn publish "
+                        f"(attachment_id={gen_meta.get('id')}, {gen_meta.get('byte_len', 0)} bytes). "
+                        f"Say 'post it now' to publish text + image together.\n"
+                    )
+                else:
+                    image_gen_context = (
+                        "\n\n[SYSTEM EXECUTION — FAILED]\n"
+                        "Image generation failed (check GEMINI_API_KEY / Gemini image API).\n"
+                    )
+        except Exception as e:
+            print(f">>> [SKYEYE CHAT] Image generation path error: {e}")
+
         # Store Big Nate's message
         async with self.db_pool.acquire() as conn:
             await conn.execute(
                 """INSERT INTO skyeye_chat (sender, message, metadata)
                    VALUES ('big_nate', $1, $2)""",
                 user_message,
-                json.dumps({"mode": detected_mode})
+                json.dumps({
+                    "mode": detected_mode,
+                    "attachments": [
+                        {"id": a.get("id"), "filename": a.get("filename"), "mime_type": a.get("mime_type")}
+                        for a in attachment_metas
+                    ],
+                }),
             )
 
         # Synchronous URL-based reply: execute BEFORE AI call so the result
@@ -1018,6 +1077,7 @@ RULES:
             + unified_insights + posting_history + campaign_recall + activity_timeline
             + liminal_presence + recent_comments + url_reply_context
             + command_execution_context + web_search_context
+            + screenshot_context + image_gen_context
         )
 
         # QUANTUM-CRYSTAL-ARCH — Layer 9: sanitize admin input before LLM

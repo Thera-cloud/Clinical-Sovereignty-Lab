@@ -96,9 +96,15 @@ class ActivityEntry(BaseModel):
 class ApprovalAction(BaseModel):
     action: str  # approve/review/reject
 
+class ChatImageAttachment(BaseModel):
+    data: str  # base64 or data-URL
+    mime_type: Optional[str] = "image/jpeg"
+    filename: Optional[str] = None
+
 class ChatMessage(BaseModel):
     message: str
     mode: Optional[str] = None
+    images: Optional[List[ChatImageAttachment]] = None
 
 class ChatActionExecute(BaseModel):
     action_id: str
@@ -704,7 +710,14 @@ async def send_chat(body: ChatMessage, request: Request):
     """Send a message from Big Nate and get Little Nate's AI response."""
     from app.services.skyeye_chat import SkyEyeChatService
     service = SkyEyeChatService(request.app.state.db_pool)
-    return await service.send_message(body.message, mode_override=body.mode)
+    images = None
+    if body.images:
+        images = [img.model_dump() if hasattr(img, "model_dump") else img.dict() for img in body.images]
+    return await service.send_message(
+        body.message,
+        mode_override=body.mode,
+        images=images,
+    )
 
 
 @router.post("/chat/execute")

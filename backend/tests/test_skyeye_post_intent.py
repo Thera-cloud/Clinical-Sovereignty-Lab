@@ -1,14 +1,18 @@
 """Offline tests for Big Nate post-intent resolver."""
 from app.services.skyeye_post_intent import (
     build_numbered_list_from_history,
+    extract_draft_from_history,
     has_publish_intent,
     is_campaign_schedule_intent,
     is_immediate_publish,
+    looks_like_publishable_post,
+    parse_inline_content,
     parse_list_index,
     phrase_in_message,
     resolve_post_intent,
 )
 from app.services.linkedin_campaign_executor import parse_campaign_config
+from app.services.skyeye_chat_media import wants_image_generation
 
 
 def test_phrase_no_does_not_match_now():
@@ -86,3 +90,38 @@ def test_parse_campaign_config_5_3_2_mix():
     assert abs(cfg.cur_pct - 0.5) < 0.01
     assert abs(cfg.orig_pct - 0.3) < 0.01
     assert abs(cfg.pers_pct - 0.2) < 0.01
+
+
+def test_rejects_meta_topic_as_inline_post():
+    bad = (
+        "approved to post now: the topic of the post is how we principally test "
+        "the responses with Little Nate and have done clinical assessments"
+    )
+    assert parse_inline_content(bad) is None
+    assert not looks_like_publishable_post(
+        "the topic of the post is how we principally test the responses"
+    )
+
+
+def test_extract_draft_from_history_prefers_final_draft():
+    body = (
+        "There’s a lot being said right now about AI’s place in emotional wellness "
+        "and mental health. Waiting rooms used to be quiet — now they glow with "
+        "feeds. Little Nate sits with the other bots and listens first."
+    )
+    history = [
+        {
+            "sender": "little_nate",
+            "message": f"Final draft:\n{body}\n\nShall I post this?",
+        }
+    ]
+    draft = extract_draft_from_history(history)
+    assert draft is not None
+    assert "Waiting rooms" in draft
+
+
+def test_wants_image_generation():
+    assert wants_image_generation(
+        "Generate the custom Little Nate AI counseling the other bots illustration"
+    )
+    assert not wants_image_generation("What should our next campaign focus on?")

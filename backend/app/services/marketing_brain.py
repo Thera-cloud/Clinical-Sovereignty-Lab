@@ -1016,6 +1016,7 @@ class MarketingBrain:
         generated_by: str = "marketing_brain",
         media_url: Optional[str] = None,
         post_as: str = "person",
+        image_bytes: Optional[bytes] = None,
     ) -> Dict[str, Any]:
         """Queue content and publish immediately via the platform adapter."""
         import json as _json
@@ -1028,7 +1029,7 @@ class MarketingBrain:
             platform=platform,
             content=content_text,
             content_type=content_type,
-            emotion_context=_json.dumps({"post_as": post_as}),
+            emotion_context=_json.dumps({"post_as": post_as, "had_image": bool(image_bytes)}),
             generated_by=generated_by,
             media_url=media_url,
         )
@@ -1050,9 +1051,10 @@ class MarketingBrain:
         post_ct = ContentType.ARTICLE if content_type == "article" else ContentType.POST
         publish = await adapter.post_content(
             text=content_text,
-            media_url=media_url,
+            media_url=None if image_bytes else media_url,
             content_type=post_ct,
             post_as=post_as,
+            image_bytes=image_bytes,
         )
         if publish and publish.success:
             await gen.update_queue_status(
@@ -1071,6 +1073,7 @@ class MarketingBrain:
                 "post_url": publish.post_url,
                 "action_id": action_id,
                 "content_preview": content_text[:120],
+                "had_image": bool(image_bytes),
             }
 
         err = (publish.error if publish else "adapter returned None")
@@ -1088,6 +1091,7 @@ class MarketingBrain:
         queue_id: int,
         approved_by: str = "big_nate",
         post_as: Optional[str] = None,
+        image_bytes: Optional[bytes] = None,
     ) -> Dict[str, Any]:
         """Publish an existing approved queue row immediately (no duplicate queue insert)."""
         import json as _json
@@ -1146,9 +1150,10 @@ class MarketingBrain:
         post_ct = ContentType.ARTICLE if content_type == "article" else ContentType.POST
         publish = await adapter.post_content(
             text=content_text,
-            media_url=row["media_url"],
+            media_url=None if image_bytes else row["media_url"],
             content_type=post_ct,
             post_as=effective_post_as,
+            image_bytes=image_bytes,
         )
         if publish and publish.success:
             await gen.update_queue_status(
@@ -1166,6 +1171,7 @@ class MarketingBrain:
                 "post_id": publish.post_id,
                 "post_url": publish.post_url,
                 "content_preview": content_text[:120],
+                "had_image": bool(image_bytes),
             }
 
         err = (publish.error if publish else "adapter returned None")

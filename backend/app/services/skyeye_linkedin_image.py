@@ -81,37 +81,69 @@ async def try_generate_linkedin_image(
     force_image: bool = False,
     image_prompt: Optional[str] = None,
 ) -> Optional[bytes]:
-    """Return JPEG bytes or None on any failure (caller posts text-only)."""
+    """Return JPEG bytes or None on any failure (caller posts text-only).
+
+    Ladder: Gemini (brand refs when available) → xAI Grok Imagine backup.
+    """
     if not should_attach_image_for_lane(lane, force_image=force_image):
         return None
-    if not os.getenv("GEMINI_API_KEY", "").strip():
-        logger.warning("SkyEye LinkedIn image: GEMINI_API_KEY missing — text-only post")
-        return None
-    try:
-        from app.services.skyeye_gemini_image import generate_image
-
-        prompt = build_image_prompt(
-            post_text,
-            lane=lane,
-            slot_key=slot_key,
-            image_prompt=image_prompt,
-        )
-        refs = None
-        if _use_brand_system():
-            from app.services.skyeye_linkedin_brand import load_brand_reference_images
-
-            refs = load_brand_reference_images()
-            if not refs:
-                logger.warning(
-                    "SkyEye LinkedIn brand refs missing in %s — prompt-only generation",
-                    os.getenv("SKYEYE_LINKEDIN_BRAND_DIR", "default brand dir"),
-                )
-        return await generate_image(prompt, reference_images=refs or None)
-    except Exception as e:
+    prompt = build_image_prompt(
+        post_text,
+        lane=lane,
+        slot_key=slot_key,
+        image_prompt=image_prompt,
+    )
+    has_gemini = bool(os.getenv("GEMINI_API_KEY", "").strip())
+    has_xai = bool(
+        os.getenv("XAI_SSE_KEY", "").strip() or os.getenv("XAI_API_KEY", "").strip()
+    )
+    if not has_gemini and not has_xai:
         logger.warning(
-            "SkyEye LinkedIn image skipped (lane=%s slot=%s): %s",
-            lane,
-            slot_key,
-            e,
+            "SkyEye LinkedIn image: GEMINI_API_KEY and XAI_API_KEY missing — text-only"
         )
         return None
+
+    if has_gemini:
+        try:
+            from app.services.skyeye_gemini_image import generate_image
+
+            refs = None
+            if _use_brand_system():
+                from app.services.skyeye_linkedin_brand import load_brand_reference_images
+
+                refs = load_brand_reference_images()
+                if not refs:
+                    logger.warning(
+                        "SkyEye LinkedIn brand refs missing in %s — prompt-only generation",
+                        os.getenv("SKYEYE_LINKEDIN_BRAND_DIR", "default brand dir"),
+                    )
+            blob = await generate_image(prompt, reference_images=refs or None)
+            if blob and len(blob) >= 500:
+                return blob
+        except Exception as e:
+            logger.warning(
+                "SkyEye LinkedIn Gemini failed (lane=%s slot=%s) — trying xAI: %s",
+                lane,
+                slot_key,
+                e,
+            )
+
+    if has_xai:
+        try:
+            from app.sse.infrastructure.grok_imagine_client import (
+                GROK_IMAGINE_LOCK,
+                generate_image as grok_generate,
+            )
+
+            async with GROK_IMAGINE_LOCK:
+                blob = await grok_generate(prompt)
+            if blob and len(blob) >= 500:
+                return blob
+        except Exception as e:
+            logger.warning(
+                "SkyEye LinkedIn xAI backup failed (lane=%s slot=%s): %s",
+                lane,
+                slot_key,
+                e,
+            )
+    return None

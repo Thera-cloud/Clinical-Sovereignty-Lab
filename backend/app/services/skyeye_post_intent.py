@@ -159,12 +159,32 @@ def parse_list_index(msg_lower: str) -> Optional[int]:
     return None
 
 
+_META_POST_PREFIX = re.compile(
+    r"^(?:the topic of(?: the post)?|topic of the post|please (?:write|draft|create)|"
+    r"generate (?:a |an )?(?:post|draft)|post (?:should|about)|here(?:'s| is) (?:the )?topic)\b",
+    re.IGNORECASE,
+)
+
+
+def looks_like_publishable_post(text: str) -> bool:
+    """Reject meta-instructions that are not LinkedIn-ready copy."""
+    t = (text or "").strip()
+    if len(t) < 40:
+        return False
+    if _META_POST_PREFIX.match(t):
+        return False
+    # Prefer posts that look like feed copy (sentences / paragraphs)
+    if t.count(" ") < 6:
+        return False
+    return True
+
+
 def parse_inline_content(message: str) -> Optional[str]:
     for sep in (":", "—", "–"):
         if sep in message:
             idx = message.find(sep)
             tail = message[idx + 1 :].strip()
-            if len(tail) >= 20:
+            if len(tail) >= 40 and looks_like_publishable_post(tail):
                 return tail
     return None
 
@@ -220,6 +240,43 @@ async def fetch_approved_linkedin(db_pool, post_as: Optional[str] = None, limit:
         return []
 
 
+def extract_draft_from_history(chat_history: List[Dict]) -> Optional[str]:
+    """Pull a publishable LinkedIn draft from recent Little Nate messages."""
+    for msg in reversed(chat_history or []):
+        if str(msg.get("sender", "")).lower() not in ("little_nate", "nate"):
+            continue
+        text = str(msg.get("message", "") or "")
+        if len(text) < 80:
+            continue
+        for m in re.finditer(r"```(?:linkedin|post)?\s*\n([\s\S]{80,}?)```", text, re.I):
+            draft = m.group(1).strip()
+            if looks_like_publishable_post(draft):
+                return draft[:4000]
+        for sep in (
+            "final draft:",
+            "approved draft:",
+            "post text:",
+            "here's the post:",
+            "here is the post:",
+            "full post:",
+            "linkedin post:",
+        ):
+            low = text.lower()
+            if sep in low:
+                tail = text[low.rfind(sep) + len(sep) :].strip()
+                # Strip trailing system-ish lines
+                cut = re.split(r"\n(?:Shall I|Ready to|\[SYSTEM|\*\*Next)", tail, maxsplit=1)
+                draft = cut[0].strip().strip('"')
+                if looks_like_publishable_post(draft):
+                    return draft[:4000]
+        # Long double-quoted body (common Nate draft format)
+        for m in re.finditer(r'"([^"]{120,})"', text, re.DOTALL):
+            draft = re.sub(r"\s+", " ", m.group(1)).strip()
+            if looks_like_publishable_post(draft) and len(draft) >= 120:
+                return draft[:4000]
+    return None
+
+
 async def resolve_queue_id(
     db_pool,
     message: str,
@@ -254,6 +311,13 @@ async def resolve_queue_id(
     if m:
         return int(m.group(1))
 
+    # Explicit queue language without an index → first approved
+    if approved and re.search(
+        r"\b(?:approved\s+queue|queue\s+item|from\s+the\s+queue|post\s+from\s+queue)\b",
+        msg_lower,
+    ):
+        return approved[0]["id"]
+
     return None
 
 
@@ -277,12 +341,14 @@ def resolve_post_intent(message: str, chat_history: List[Dict]) -> PostIntent:
         if short_approval:
             blob = history_blob.lower()
             if any(p in blob for p in ("post #", "ready to send", "approved and ready", "publish")):
+                # Prefer chat draft fallback over blindly taking approved[0]
+                # (coach-portal queue rows are often unrelated to the live draft).
                 return PostIntent(
                     action="publish_queue",
                     platform=detect_platform(blob, history_blob),
                     post_as=detect_post_as(history_blob + " " + message),
                     queue_pick="first",
-                    list_index=1,
+                    list_index=parse_list_index(blob) or parse_list_index(msg_lower),
                     confidence=0.75,
                 )
         return PostIntent(action="none")
@@ -325,6 +391,27 @@ def resolve_post_intent(message: str, chat_history: List[Dict]) -> PostIntent:
     return PostIntent(action="none")
 
 
+async def _resolve_publish_image(
+    message: str,
+    content_text: str,
+) -> Optional[bytes]:
+    """Attach latest screenshot/generated image, or generate when requested."""
+    from app.services.skyeye_chat_media import (
+        extract_image_prompt,
+        generate_linkedin_image_for_chat,
+        load_image_bytes_for_publish,
+        wants_image_generation,
+    )
+
+    existing = load_image_bytes_for_publish(prefer_latest=True)
+    if wants_image_generation(message) or (existing is None and "illustration" in message.lower()):
+        prompt = extract_image_prompt(message)
+        gen = await generate_linkedin_image_for_chat(content_text, image_prompt=prompt)
+        if gen:
+            return load_image_bytes_for_publish(attachment_id=gen.get("id"), prefer_latest=False)
+    return existing
+
+
 async def execute_post_intent(
     chat: SkyEyeChatService,
     intent: PostIntent,
@@ -342,12 +429,25 @@ async def execute_post_intent(
     history = await chat.get_chat_history(limit=12)
 
     if intent.action == "publish_inline" and intent.inline_text:
+        if not looks_like_publishable_post(intent.inline_text):
+            return await chat._finalize_command_verification(
+                {"action_type": "post_linkedin", "title": "Direct chat post", "id": None},
+                {
+                    "error": (
+                        "Refused to publish meta/instructions text. Paste the full LinkedIn "
+                        "post body after a colon, or approve a Final draft from chat history."
+                    ),
+                    "posted": False,
+                },
+            )
+        image_bytes = await _resolve_publish_image(message, intent.inline_text)
         result = await brain.publish_content_inline(
             platform=intent.platform,
             content_text=intent.inline_text,
             approved_by="direct_chat_command",
             generated_by="direct_chat_command",
             post_as=intent.post_as,
+            image_bytes=image_bytes,
         )
         stub = {
             "action_type": f"post_{intent.platform}",
@@ -362,18 +462,56 @@ async def execute_post_intent(
             chat.db_pool, message, history, post_as=intent.post_as,
         )
         if not queue_id:
+            # Custom drafts often never land as status=approved — publish from chat draft.
+            draft = (
+                intent.inline_text
+                or parse_inline_content(message)
+                or extract_draft_from_history(history)
+            )
+            if draft and looks_like_publishable_post(draft):
+                image_bytes = await _resolve_publish_image(message, draft)
+                result = await brain.publish_content_inline(
+                    platform=intent.platform,
+                    content_text=draft,
+                    approved_by="direct_chat_command",
+                    generated_by="direct_chat_draft_fallback",
+                    post_as=intent.post_as,
+                    image_bytes=image_bytes,
+                )
+                stub = {
+                    "action_type": f"post_{intent.platform}",
+                    "title": "Chat draft publish",
+                    "description": draft[:200],
+                    "id": None,
+                }
+                return await chat._finalize_command_verification(stub, result)
             err = (
-                "No approved LinkedIn queue item matched. "
-                f"Searched for index={intent.list_index}, pick={intent.queue_pick}."
+                "No approved LinkedIn queue item matched and no chat draft found. "
+                f"Searched for index={intent.list_index}, pick={intent.queue_pick}. "
+                "Attach the full post text after a colon, or say 'post #N now' for an "
+                "approved queue item."
             )
             return await chat._finalize_command_verification(
                 {"action_type": "post_linkedin", "title": "Publish queue item", "id": None},
                 {"error": err, "posted": False},
             )
+        # Prefer chat draft image / generation over bare text queue publish
+        preview_row = None
+        try:
+            async with chat.db_pool.acquire() as conn:
+                preview_row = await conn.fetchrow(
+                    "SELECT content_text FROM skyeye_content_queue WHERE id = $1",
+                    queue_id,
+                )
+        except Exception:
+            preview_row = None
+        content_for_image = (preview_row["content_text"] if preview_row else "") or ""
+        image_bytes = await _resolve_publish_image(message, content_for_image)
         result = await brain.publish_queue_item(
             queue_id,
             approved_by="big_nate",
             post_as=intent.post_as,
+            image_bytes=image_bytes,
         )
         stub = {
             "action_type": "post_linkedin",
