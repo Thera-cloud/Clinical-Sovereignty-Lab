@@ -84,12 +84,21 @@ CRISIS_CLASS_CONSTRAINTS: Dict[str, Any] = {
 }
 
 SAFETY_RESPONSE_CLASSES = frozenset({"escalate_or_safety"})
+# Non-crisis teaching classes — class-matched inject (not crisis SI/HI path).
+TEACHING_RESPONSE_CLASSES = frozenset(
+    {
+        "therapeutic_engage",
+        "presence_silence_ok",
+        "refusal_or_frame_hold",
+    }
+)
 TURN_CLASS_SI = "crisis_si"
 TURN_CLASS_HI = "crisis_hi"
 # Inject budget: digests + max guides (safety slots reserved first)
 CRISIS_INJECT_LIMIT = 3
 CRISIS_SAFETY_SLOT_RESERVE = 2
 CRISIS_GUIDE_CHARS = 600
+CLASS_INJECT_LIMIT = 3
 
 # Scenario / text affinity for HI vs SI slot fill (not stem emission into prompts).
 _HI_AFFINITY = re.compile(
@@ -202,6 +211,130 @@ def response_class_from_topics(topics: Optional[Sequence[str]]) -> str:
 
 def is_safety_class(response_class: str) -> bool:
     return (response_class or "").strip().lower() in SAFETY_RESPONSE_CLASSES
+
+
+def normalize_teaching_response_class(response_class: Optional[str]) -> str:
+    rc = (response_class or "").strip().lower()
+    if rc in TEACHING_RESPONSE_CLASSES:
+        return rc
+    if rc in SAFETY_RESPONSE_CLASSES:
+        return ""
+    return ""
+
+
+def infer_teaching_response_class(user_text: str) -> Optional[str]:
+    """Conservative class hint for live chat when gold label is absent."""
+    text = (user_text or "").strip()
+    if not text or classify_crisis_turn_class(text):
+        return None
+    if re.search(
+        r"(?:don'?t (?:say|speak|talk)|just sit|sit with (?:me|this)|"
+        r"don'?t fill the silence|no advice|say nothing)",
+        text,
+        re.I,
+    ):
+        return "presence_silence_ok"
+    if re.search(
+        r"(?:don'?t (?:congratulate|tell me (?:to|how)|give me (?:a )?script|"
+        r"read me)|do not (?:congratulate|tell me)|hotline script|"
+        r"one conversation)",
+        text,
+        re.I,
+    ):
+        return "refusal_or_frame_hold"
+    return None
+
+
+def _token_overlap_score(user_text: str, blob: str) -> int:
+    """Cheap lexical affinity for class-matched slot fill (not embeddings)."""
+    def _toks(s: str) -> set:
+        return {
+            w
+            for w in re.findall(r"[a-z0-9']{4,}", (s or "").lower())
+            if w
+            not in {
+                "that",
+                "this",
+                "with",
+                "have",
+                "from",
+                "your",
+                "what",
+                "when",
+                "they",
+                "them",
+                "were",
+                "been",
+                "about",
+                "just",
+                "like",
+                "really",
+                "would",
+                "could",
+                "should",
+            }
+        }
+
+    u, b = _toks(user_text), _toks(blob)
+    if not u or not b:
+        return 0
+    return len(u & b)
+
+
+def select_class_guides(
+    rows: Sequence[Dict[str, Any]],
+    *,
+    response_class: str,
+    user_text: str = "",
+    limit: int = CLASS_INJECT_LIMIT,
+) -> List[Dict[str, Any]]:
+    """Prefer exact response_class match, then lexical overlap, then recency."""
+    rc = normalize_teaching_response_class(response_class)
+    if not rc:
+        return []
+    lim = max(1, min(int(limit), 6))
+    enriched: List[Dict[str, Any]] = []
+    for r in rows:
+        d = dict(r)
+        row_rc = (d.get("response_class") or "").strip().lower()
+        if not row_rc:
+            row_rc = response_class_from_topics(d.get("topics"))
+        d["response_class"] = row_rc
+        class_hit = 1 if row_rc == rc else 0
+        if not class_hit:
+            continue
+        blob = " ".join(
+            [
+                str(d.get("source_scenario") or ""),
+                str(d.get("crystal_text") or "")[:800],
+            ]
+        )
+        d["_overlap"] = _token_overlap_score(user_text, blob)
+        enriched.append(d)
+    enriched.sort(
+        key=lambda x: (x["_overlap"], int(x.get("id") or 0)),
+        reverse=True,
+    )
+    return enriched[:lim]
+
+
+async def _reinforce_pr_guide_recalls(conn, ids: Sequence[int]) -> None:
+    """Demonstrated path — same reinforcement contract as crisis inject."""
+    clean = [int(i) for i in ids if i is not None]
+    if not clean:
+        return
+    await conn.execute(
+        """
+        UPDATE nate_intelligence_crystals
+           SET recall_count = COALESCE(recall_count, 0) + 1,
+               last_recalled_at = NOW(),
+               confidence = LEAST(0.95, COALESCE(confidence, 0.5) + 0.03),
+               updated_at = NOW()
+         WHERE id = ANY($1::bigint[])
+           AND origin_surface = 'principal_review'
+        """,
+        clean,
+    )
 
 
 def score_crisis_class_response(text: str) -> Dict[str, Any]:
@@ -439,24 +572,126 @@ async def fetch_principal_review_crisis_guides(
             )
             # Demonstrated: inject path reinforces recall (same contract as
             # recall_crystals_for_context — not storage alone).
-            ids = [int(g["id"]) for g in selected if g.get("id") is not None]
-            if ids:
-                await conn.execute(
-                    """
-                    UPDATE nate_intelligence_crystals
-                       SET recall_count = COALESCE(recall_count, 0) + 1,
-                           last_recalled_at = NOW(),
-                           confidence = LEAST(0.95, COALESCE(confidence, 0.5) + 0.03),
-                           updated_at = NOW()
-                     WHERE id = ANY($1::bigint[])
-                       AND origin_surface = 'principal_review'
-                    """,
-                    ids,
-                )
+            await _reinforce_pr_guide_recalls(
+                conn, [int(g["id"]) for g in selected if g.get("id") is not None]
+            )
             return selected
     except Exception as e:
         logger.warning("principal_review_crisis_policy: fetch guides failed: %s", e)
         return []
+
+
+async def fetch_principal_review_class_guides(
+    db_pool,
+    *,
+    response_class: str,
+    user_text: str = "",
+    limit: int = CLASS_INJECT_LIMIT,
+) -> List[Dict[str, Any]]:
+    """Non-crisis teaching Guides matched by response_class + lexical affinity."""
+    if not db_pool:
+        return []
+    rc = normalize_teaching_response_class(response_class)
+    if not rc:
+        return []
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT c.id, c.crystal_text, c.confidence, c.topics, c.origin_surface,
+                       COALESCE(NULLIF(BTRIM(l.response_class), ''), '') AS response_class,
+                       COALESCE(
+                         NULLIF(BTRIM(l.source_scenario), ''),
+                         NULLIF(BTRIM(l.source_ref), ''),
+                         ''
+                       ) AS source_scenario
+                FROM nate_intelligence_crystals c
+                LEFT JOIN principal_review_library l
+                  ON l.promoted_crystal_id = c.id::text
+                 AND l.source_kind = 'gold_scored'
+                WHERE c.origin_surface = 'principal_review'
+                  AND c.scope = 'global'
+                  AND c.superseded_by IS NULL
+                  AND (c.crystal_status IS NULL OR c.crystal_status = 'production')
+                  AND COALESCE(NULLIF(BTRIM(l.response_class), ''), '') = $1
+                ORDER BY c.id DESC
+                LIMIT 80
+                """,
+                rc,
+            )
+            selected = select_class_guides(
+                [dict(r) for r in rows],
+                response_class=rc,
+                user_text=user_text or "",
+                limit=limit,
+            )
+            await _reinforce_pr_guide_recalls(
+                conn, [int(g["id"]) for g in selected if g.get("id") is not None]
+            )
+            return selected
+    except Exception as e:
+        logger.warning(
+            "principal_review_crisis_policy: fetch class guides failed: %s", e
+        )
+        return []
+
+
+def format_class_guide_injection(
+    guides: Sequence[Dict[str, Any]],
+    *,
+    response_class: str,
+) -> str:
+    """Budgeted non-crisis Principal-Review teaching block."""
+    if not guides:
+        return ""
+    rc = normalize_teaching_response_class(response_class) or "therapeutic_engage"
+    must_by_class = {
+        "therapeutic_engage": (
+            "MUST: stay in first person as Nate ∧ address THIS disclosure "
+            "directly ∧ keep clinical accuracy without inventing facts."
+        ),
+        "presence_silence_ok": (
+            "MUST: allow silence / sparse presence ∧ do not fill space with "
+            "advice scripts ∧ stay with the client's pacing."
+        ),
+        "refusal_or_frame_hold": (
+            "MUST: honor stated frame boundaries ∧ refuse prohibited moves "
+            "plainly ∧ stay present without congratulatory or scripted detours."
+        ),
+    }
+    must_not_by_class = {
+        "therapeutic_engage": (
+            "MUST NOT: third-person self-narration; recite Guide verbatim; "
+            "fabricate biography."
+        ),
+        "presence_silence_ok": (
+            "MUST NOT: lecture; pile coping tips; congratulate survival as the move."
+        ),
+        "refusal_or_frame_hold": (
+            "MUST NOT: violate the client's named prohibitions; hotline-script "
+            "recitation as the first move when they forbade it."
+        ),
+    }
+    chunks = [
+        "## PRINCIPAL-REVIEW CLASS POLICY (deterministic — not ranked recall)",
+        f"Class: {rc}.",
+        must_by_class.get(rc, must_by_class["therapeutic_engage"]),
+        must_not_by_class.get(rc, must_not_by_class["therapeutic_engage"]),
+        "Adapt principles for THIS moment — never recite Guide text verbatim.",
+    ]
+    for i, g in enumerate(guides[:CLASS_INJECT_LIMIT], 1):
+        row_rc = g.get("response_class") or response_class_from_topics(g.get("topics"))
+        txt = scrub_teaching_text(g.get("crystal_text") or "")
+        if "Principal Guide" in txt:
+            start = txt.find("Principal Guide")
+            txt = txt[start : start + CRISIS_GUIDE_CHARS]
+        elif "DELTA" in txt:
+            start = txt.find("DELTA")
+            txt = txt[start : start + CRISIS_GUIDE_CHARS]
+        else:
+            txt = txt[:CRISIS_GUIDE_CHARS]
+        chunks.append(f"### Guide {i} [{row_rc or rc}]\n{txt}")
+    return "\n".join(chunks) + "\n"
 
 
 def format_crisis_guide_injection(

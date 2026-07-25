@@ -57,6 +57,9 @@ def test_crisis_intent_covers_end_a_life():
     src = _CTRL.read_text(encoding="utf-8")
     assert "end(?:ing)? (?:my |one'?s |their |your |a )?life" in src
     assert "crisis_class_fired" in src
+    assert "preferred_response_class" in src
+    assert "principal_review_class_fired" in src
+    assert "fetch_principal_review_class_guides" in src
     live = _LIVE.read_text(encoding="utf-8")
     assert "live_inject_meta" in live
     assert "inject_meta" in live
@@ -65,6 +68,8 @@ def test_crisis_intent_covers_end_a_life():
     assert "classify_crisis_turn_class" in live
     assert "_stem_tc" in live
     assert "_stem_tc != _para_tc" in live
+    assert "preferred_response_class" in live
+    assert "principal_review_class_fired" in live
 
 
 def test_live_stack_addressee_integrity_wrapper():

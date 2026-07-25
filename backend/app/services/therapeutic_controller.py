@@ -720,6 +720,8 @@ async def prepare_therapeutic_context(
     coach_id: Optional[str] = None,
     # QUANTUM-CRYSTAL-ARCH — Phase 5c: profile for trial exclusion in forward reasoning
     profile: Optional[dict] = None,
+    # QUANTUM-CRYSTAL-ARCH — gold/live-stack teaching class for non-crisis PR inject
+    preferred_response_class: Optional[str] = None,
 ) -> dict:
     """Classify state, assemble context, shape prompt + cap. Always returns
     a dict; on partial failure, fields default to the original prompt/cap.
@@ -983,18 +985,34 @@ async def prepare_therapeutic_context(
     except Exception as _sq_exc:
         logger.warning("therapeutic_controller: six-quotient live context skipped: %s", _sq_exc)
 
-    # QUANTUM-CRYSTAL-ARCH — Principal-Review Guides by crisis class (not global pin)
+    # QUANTUM-CRYSTAL-ARCH — Principal-Review Guides (crisis OR class-matched)
     principal_crisis_block = ""
+    principal_class_block = ""
     _pr_guides = []
     _pr_turn_class = None
+    _pr_teach_class = ""
     try:
         from app.services.principal_review_crisis_policy import (
             classify_crisis_turn_class as _pr_classify_turn,
+            infer_teaching_response_class as _pr_infer_teach,
+            normalize_teaching_response_class as _pr_norm_teach,
         )
 
         _pr_turn_class = _pr_classify_turn(user_text or "")
+        _pr_teach_class = _pr_norm_teach(preferred_response_class) or (
+            _pr_infer_teach(user_text or "") or ""
+        )
+        # Substantial non-crisis disclosures default to therapeutic_engage so
+        # the 40 engage Guides can demonstrate recall outside live-stack labels.
+        if (
+            not _pr_turn_class
+            and not _pr_teach_class
+            and len((user_text or "").strip()) >= 80
+        ):
+            _pr_teach_class = "therapeutic_engage"
     except Exception:
         _pr_turn_class = None
+        _pr_teach_class = ""
     _crisis_class = (
         (tmc_class or "").lower() in ("crisis", "suicide_ideation")
         or bool(_USER_CRISIS_INTENT.search(user_text or ""))
@@ -1026,6 +1044,33 @@ async def prepare_therapeutic_context(
                 "therapeutic_controller: principal_review crisis inject skipped: %s",
                 _pr_exc,
             )
+    elif (not _crisis_class) and _pr_teach_class and db_pool:
+        try:
+            from app.services.principal_review_crisis_policy import (
+                fetch_principal_review_class_guides,
+                format_class_guide_injection,
+            )
+
+            _pr_guides = await fetch_principal_review_class_guides(
+                db_pool,
+                response_class=_pr_teach_class,
+                user_text=user_text or "",
+                limit=3,
+            )
+            principal_class_block = format_class_guide_injection(
+                _pr_guides, response_class=_pr_teach_class
+            )
+            if principal_class_block:
+                _gids = [str(g.get("id") or "") for g in (_pr_guides or [])]
+                print(
+                    f">>> [THERAPEUTIC-CTRL] principal_review class guides n="
+                    f"{len(_pr_guides)} class={_pr_teach_class} ids={_gids}"
+                )
+        except Exception as _pr_cls_exc:
+            logger.warning(
+                "therapeutic_controller: principal_review class inject skipped: %s",
+                _pr_cls_exc,
+            )
 
     enriched = (
         f"## DNA — NEUROSCIENCE BEDROCK\n{_DNA_PREFIX}\n\n"
@@ -1040,6 +1085,7 @@ async def prepare_therapeutic_context(
         f"{forward_reasoning_block}\n"
         f"{six_q_live_block}"
         f"{principal_crisis_block}"
+        f"{principal_class_block}"
         f"{book_context_block}\n"
         f"{neuroscience_ctx}\n"
         f"{_anti_repeat_block(recent_narratives)}\n\n"
@@ -1086,6 +1132,10 @@ async def prepare_therapeutic_context(
             "crisis_exempt": bool(_crisis_class),
             "crisis_class_fired": bool(_crisis_class),
             "principal_review_turn_class": (_pr_turn_class or "")[:40],
+            "principal_review_teach_class": (_pr_teach_class or "")[:40],
+            "principal_review_class_fired": bool(
+                (not _crisis_class) and _pr_teach_class and _pr_guides
+            ),
             "principal_review_guide_ids": [
                 str(g.get("id") or "") for g in (_pr_guides or []) if g.get("id")
             ],

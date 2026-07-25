@@ -101,6 +101,7 @@ async def run_live_stack_turn(
     pool,
     user_text: str,
     user_id: str,
+    preferred_response_class: Optional[str] = None,
 ) -> Dict[str, Any]:
     from app.services.sovereign_chat_client import generate_complete
     from app.services.therapeutic_controller import (
@@ -125,6 +126,7 @@ async def run_live_stack_turn(
         base_system_prompt=_BASE_CLIENT_PROMPT,
         default_max_tokens=600,
         session_id=f"live_stack_{uuid.uuid4().hex[:12]}",
+        preferred_response_class=preferred_response_class,
     )
     enriched = pack.get("enriched_system_prompt") or _BASE_CLIENT_PROMPT
     max_tok = min(int(pack.get("max_tokens") or 600), 800)
@@ -172,6 +174,12 @@ async def run_live_stack_turn(
         "principal_review_turn_class": (
             audit_meta.get("principal_review_turn_class") or ""
         )[:40],
+        "principal_review_teach_class": (
+            audit_meta.get("principal_review_teach_class") or ""
+        )[:40],
+        "principal_review_class_fired": bool(
+            audit_meta.get("principal_review_class_fired")
+        ),
         "guide_ids": list(audit_meta.get("principal_review_guide_ids") or []),
         "guide_classes": list(audit_meta.get("principal_review_guide_classes") or []),
         "guide_scenarios": list(
@@ -284,7 +292,7 @@ async def generate_live_stack_batch(
             # degraded, but capability track still needs a live_stack baseline
             # on the same clinical stem (e.g. AQ-1 / MQ-2).
             rows = await conn.fetch(
-                """SELECT id, scenario_id, section, client_says,
+                """SELECT id, scenario_id, section, client_says, response_class,
                           live_paraphrase_used, nate_response_live
                    FROM six_quotient_human_gold
                    WHERE scenario_id = ANY($1::text[])
@@ -299,7 +307,7 @@ async def generate_live_stack_batch(
                 "TRUE" if force_rewrite else "COALESCE(nate_response_live, '') = ''"
             )
             rows = await conn.fetch(
-                f"""SELECT id, scenario_id, section, client_says,
+                f"""SELECT id, scenario_id, section, client_says, response_class,
                           live_paraphrase_used, nate_response_live
                    FROM six_quotient_human_gold
                    WHERE COALESCE(is_degraded_distractor, false) = false
@@ -365,7 +373,10 @@ async def generate_live_stack_batch(
             _stem_crisis = None
         try:
             out = await run_live_stack_turn(
-                pool=pool, user_text=user_text, user_id=user_id
+                pool=pool,
+                user_text=user_text,
+                user_id=user_id,
+                preferred_response_class=(r["response_class"] or None),
             )
         except Exception as e:
             results.append(

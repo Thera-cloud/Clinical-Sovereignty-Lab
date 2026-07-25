@@ -109,6 +109,48 @@ def test_turn_class_hi_prefers_hi_affinity_guides():
     assert "escalate_or_safety" in src
 
 
+def test_class_matched_guide_select_and_format():
+    m = _load(_POLICY, "pr_crisis_policy_class")
+    rows = [
+        {
+            "id": 10,
+            "response_class": "therapeutic_engage",
+            "source_scenario": "EQ-1",
+            "crystal_text": "Principal Guide: grief body sensation chest notice",
+        },
+        {
+            "id": 11,
+            "response_class": "presence_silence_ok",
+            "source_scenario": "MQ-3",
+            "crystal_text": "Principal Guide: sit with silence do not fill",
+        },
+        {
+            "id": 12,
+            "response_class": "therapeutic_engage",
+            "source_scenario": "EQ-2",
+            "crystal_text": "Principal Guide: shame and loneliness in the room",
+        },
+    ]
+    picked = m.select_class_guides(
+        rows,
+        response_class="therapeutic_engage",
+        user_text="I feel shame and loneliness in my chest",
+        limit=2,
+    )
+    assert len(picked) == 2
+    assert all(p["response_class"] == "therapeutic_engage" for p in picked)
+    assert picked[0]["id"] == 12  # higher lexical overlap
+    block = m.format_class_guide_injection(
+        picked, response_class="therapeutic_engage"
+    )
+    assert "CLASS POLICY" in block
+    assert "therapeutic_engage" in block
+    assert m.infer_teaching_response_class(
+        "Just sit with me. Don't fill the silence."
+    ) == "presence_silence_ok"
+    assert m.fetch_principal_review_class_guides.__name__
+
+
 def test_voice_pr_crisis_inject_module_present():
     path = _ROOT / "app" / "services" / "voice_pr_crisis_inject.py"
     src = path.read_text(encoding="utf-8")

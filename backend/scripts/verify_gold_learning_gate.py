@@ -214,6 +214,19 @@ def check_offline() -> List[Tuple[str, bool, str]]:
             "voice mid-call inject",
         )
     )
+    ctrl_src = (_ROOT / "app" / "services" / "therapeutic_controller.py").read_text(
+        encoding="utf-8"
+    )
+    results.append(
+        (
+            "pr_class_matched_inject",
+            "fetch_principal_review_class_guides" in policy_src
+            and "TEACHING_RESPONSE_CLASSES" in policy_src
+            and "preferred_response_class" in ctrl_src
+            and "principal_review_class_fired" in ctrl_src,
+            "non-crisis class inject",
+        )
+    )
     return results
 
 
