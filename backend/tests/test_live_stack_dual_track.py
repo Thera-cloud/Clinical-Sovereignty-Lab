@@ -37,6 +37,15 @@ def test_live_stack_service_and_api():
     api = _API.read_text(encoding="utf-8")
     assert "/gold/live-stack/generate" in api
     assert "classify_failure_class" in api
+    assert 'track_norm == "live"' in api
+    assert "live_human_scored" in api
+    assert "/gold/live-stack/compare" in api
+
+
+def test_migration_279_live_scores():
+    mig = (_ROOT / "migrations" / "279_live_track_scores.sql").read_text(encoding="utf-8")
+    assert "live_primary_score" in mig
+    assert "live_human_scored" in mig
 
 
 def test_controller_rp_symbolic_law():

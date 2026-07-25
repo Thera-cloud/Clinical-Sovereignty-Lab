@@ -70,12 +70,18 @@ h2{font-family:'Cormorant Garamond',Georgia,serif;color:var(--gold);font-size:1.
   <section class="panel on" id="panel-score">
     <div class="meta" id="goldProgress">Loading progress…</div>
     <div class="row">
+      <label>Track
+        <select id="scoreTrack" onchange="onTrackChange()">
+          <option value="judge">Judge (κ) — harness blinds</option>
+          <option value="live" selected>Capability — live-stack blinds</option>
+        </select>
+      </label>
       <button class="primary" id="btnStart" onclick="startSession()">Start scoring session</button>
       <button onclick="loadGoldItems()">Load unscored (50)</button>
       <span class="pill pend" id="runPill">no session</span>
       <span class="timer" id="itemTimer">—</span>
     </div>
-    <p class="meta">Rubric 0–3: primary · accuracy · naturalness. Median latency must stay ≥45s/item. Blind — distractors hidden. Do not rush.</p>
+    <p class="meta" id="scoreTrackHint">Capability track scores nate_response_live only. Does not teach crystals or change judge κ scores. ≥45s/item.</p>
     <div id="scoreCard" class="empty">Start a session, then load items.</div>
   </section>
 
@@ -145,6 +151,22 @@ h2{font-family:'Cormorant Garamond',Georgia,serif;color:var(--gold);font-size:1.
 const API = (window.SS_API_BASE || "https://api.sovereignsanctuary.net") + "/api/admin/principal-review";
 let _runId = null, _items = [], _idx = 0, _shownAt = 0, _timerIv = null;
 let _recheckRun = null, _recheckItems = [], _recheckIdx = 0, _recheckShownAt = 0, _recheckIv = null;
+let _scoreTrack = "live";
+
+function onTrackChange(){
+  const el = document.getElementById("scoreTrack");
+  _scoreTrack = (el && el.value) || "live";
+  const hint = document.getElementById("scoreTrackHint");
+  if(hint){
+    hint.textContent = _scoreTrack === "live"
+      ? "Capability track scores nate_response_live only. Does not teach crystals or change judge κ scores. ≥45s/item."
+      : "Judge track scores harness/distractor blinds for κ. Notes → Principal Guide → crystals. ≥45s/item. Blind.";
+  }
+  _items = []; _idx = 0;
+  document.getElementById("scoreCard").innerHTML =
+    "<div class='empty'>Track switched to "+esc(_scoreTrack)+". Load unscored.</div>";
+  refreshProgress();
+}
 
 function _token(){
   try{
@@ -192,28 +214,43 @@ async function refreshProgress(){
   const d = await api("/gold/progress");
   if(!d) return;
   const dry = d.dry_run_placeholders || 0;
+  const liveF = d.live_filled || 0;
+  const liveS = d.live_scored || 0;
   document.getElementById("goldProgress").textContent =
-    `Locked ${d.locked}/${d.total} · Scored ${d.scored} · Authenticated entries ${d.authenticated} · Distractors in set ${d.degraded} (hidden while scoring)`
-    + (dry ? ` · ⚠ ${dry} DRY-RUN placeholders (excluded from queue — repair fill)` : "");
+    `Judge: locked ${d.locked}/${d.total} · scored ${d.scored} · auth ${d.authenticated} · distractors ${d.degraded}`
+    + ` · Capability live: ${liveS}/${liveF} scored`
+    + (dry ? ` · ⚠ ${dry} DRY-RUN placeholders` : "");
+}
+
+function _syncTrack(){
+  const el = document.getElementById("scoreTrack");
+  _scoreTrack = (el && el.value) || "live";
 }
 
 async function startSession(){
-  const d = await api("/gold/session/start", {method:"POST", body:JSON.stringify({notes:"Principal-Review UI"})});
+  _syncTrack();
+  const purpose = _scoreTrack === "live" ? "live_capability_scoring" : "human_gold_scoring";
+  const d = await api("/gold/session/start", {
+    method:"POST",
+    body:JSON.stringify({purpose, notes:"Principal-Review UI · track="+_scoreTrack})
+  });
   if(!d) return;
   _runId = d.run_id;
-  document.getElementById("runPill").textContent = _runId;
+  document.getElementById("runPill").textContent = _runId + " · " + _scoreTrack;
   document.getElementById("runPill").className = "pill ok";
   await loadGoldItems();
 }
 
 async function loadGoldItems(){
   if(!_runId){ alert("Start a scoring session first."); return; }
-  const d = await api("/gold/items?unscored_only=true&limit=50");
+  _syncTrack();
+  const d = await api("/gold/items?unscored_only=true&limit=50&track="+encodeURIComponent(_scoreTrack));
   if(!d) return;
   _items = d.items||[];
   _idx = 0;
   if(!_items.length){
-    document.getElementById("scoreCard").innerHTML = "<div class='empty'>All locked items are scored.</div>";
+    document.getElementById("scoreCard").innerHTML =
+      "<div class='empty'>No unscored items on track "+esc(_scoreTrack)+".</div>";
     return;
   }
   renderScoreItem();
@@ -240,9 +277,18 @@ function renderScoreItem(){
   _tickTimer();
   _timerIv = setInterval(_tickTimer, 500);
   const needsSafety = (it.response_class||"") === "escalate_or_safety";
+  const liveMode = (_scoreTrack === "live") || (it.track === "live");
+  const notesHint = liveMode
+    ? "Optional diagnostic notes only (capability baseline). Will NOT promote crystals or change judge-track teaching."
+    : "Notes = learning corrective (what primary=3 / accuracy=3 / naturalness=3 would say). Stored as Principal Guide.";
+  const notesPh = liveMode
+    ? "Optional: what the live stack still missed vs masterful criteria."
+    : "Critique the blind reply, then write the ideal 3/3/3 response Nate should learn from (adapt, not recite).";
+  const submitLabel = liveMode ? "Submit live-track score" : "Submit score + teach";
   document.getElementById("scoreCard").innerHTML = `
     <div class="card">
       <div class="meta">${esc(it.scenario_id)} · ${esc(it.section)} · ${esc(it.difficulty)} · ${esc(it.response_class)}
+        <span class="pill">${liveMode ? "capability" : "judge"}</span>
         <span class="pill">${_idx+1}/${_items.length}</span></div>
       <p><strong>Client</strong></p>
       <div class="client">${esc(it.client_says)}</div>
@@ -254,13 +300,10 @@ function renderScoreItem(){
         <label>naturalness <input type="number" id="sNatural" min="0" max="3"></label>
         ${needsSafety ? `<label>safety_veto <select id="sVeto"><option value=""></option><option>ok</option><option>fail</option></select></label>` : `<input type="hidden" id="sVeto" value="">`}
       </div>
-      <label style="display:block;margin:10px 0 4px;font-size:13px;opacity:.85">
-        Notes = learning corrective (what primary=3 / accuracy=3 / naturalness=3 would say).
-        Stored as Principal Guide vs the blind response above. Nate learns principles — not verbatim copy.
-      </label>
-      <textarea id="sNotes" placeholder="Critique the blind reply, then write the ideal 3/3/3 response Nate should learn from (adapt, not recite)."></textarea>
+      <label style="display:block;margin:10px 0 4px;font-size:13px;opacity:.85">${esc(notesHint)}</label>
+      <textarea id="sNotes" placeholder="${esc(notesPh)}"></textarea>
       <div class="row">
-        <button class="primary" onclick="submitScore()">Submit score + teach</button>
+        <button class="primary" onclick="submitScore()">${esc(submitLabel)}</button>
         <button onclick="_idx++;renderScoreItem()">Skip (not scored)</button>
       </div>
     </div>`;
@@ -296,7 +339,8 @@ async function submitScore(){
       safety_veto,
       notes: document.getElementById("sNotes").value||"",
       latency_ms: latency,
-      score_session_id: _runId
+      score_session_id: _runId,
+      track: _scoreTrack || it.track || "judge"
     })
   });
   if(!d) return;

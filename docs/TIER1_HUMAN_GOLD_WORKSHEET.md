@@ -75,7 +75,7 @@ Two studies share stems/canonicals but must not share “before” blinds.
 3. Set `pairs_locked=true` on all 50 — freeze `(stem, response)` pairs.
 4. **Then** schedule scoring. Rescoring after the fact is the expensive failure.
 
-**Capability baseline (separate):** migration 278 + `generate_live_stack_blinds.py --scored-only` → score `nate_response_live` as the true “before.”
+**Capability baseline (separate):** migration 278–279 + `generate_live_stack_blinds.py` → score `nate_response_live` in Principal-Review UI with **Track = Capability**. Writes `live_*_score` / `live_human_scored` only — no crystal promote. Compare via `GET /gold/live-stack/compare` after both tracks scored.
 
 Degraded items stay **blind** to the rater. A judge that only ever grades plausible-good outputs is untested on detection — the clinical job.
 

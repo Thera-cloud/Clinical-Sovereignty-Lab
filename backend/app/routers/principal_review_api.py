@@ -188,7 +188,13 @@ async def gold_progress(request: Request):
                  COUNT(*) FILTER (
                    WHERE nate_response ILIKE '%DRY-RUN%'
                       OR nate_response ILIKE '%Placeholder Nate reply%'
-                 )::int AS dry_run_placeholders
+                 )::int AS dry_run_placeholders,
+                 COUNT(*) FILTER (
+                   WHERE COALESCE(nate_response_live, '') <> ''
+                 )::int AS live_filled,
+                 COUNT(*) FILTER (
+                   WHERE COALESCE(live_human_scored, false) = true
+                 )::int AS live_scored
                FROM six_quotient_human_gold"""
         )
     return {"status": "ok", **dict(row or {})}
@@ -199,26 +205,48 @@ async def gold_items(
     request: Request,
     unscored_only: bool = True,
     limit: int = 50,
+    track: str = "judge",
 ):
-    """Blind worksheet rows — no distractor flag, no masterful_criteria, no arm."""
+    """Blind worksheet rows — no distractor flag, no masterful_criteria, no arm.
+
+    track=judge → nate_response (κ). track=live → nate_response_live (capability).
+    """
     pool = _pool(request)
     limit = max(1, min(int(limit or 50), 100))
+    track_norm = (track or "judge").strip().lower()
+    if track_norm not in ("judge", "live"):
+        raise HTTPException(422, "track must be judge|live")
     async with pool.acquire() as conn:
-        # Exclude DRY-RUN battery placeholders — not scoreable gold.
-        rows = await conn.fetch(
-            f"""SELECT scenario_id, section, client_says, nate_response,
-                       response_class, difficulty, human_scored, blinded
-                FROM six_quotient_human_gold
-                WHERE pairs_locked = true
-                  AND COALESCE(nate_response, '') <> ''
-                  AND nate_response NOT ILIKE '%DRY-RUN%'
-                  AND nate_response NOT ILIKE '%Placeholder Nate reply%'
-                  AND nate_response NOT ILIKE '%External scoring required%'
-                  {"AND human_scored = false" if unscored_only else ""}
-                ORDER BY md5(scenario_id || COALESCE(client_says,''))
-                LIMIT $1""",
-            limit,
-        )
+        if track_norm == "live":
+            rows = await conn.fetch(
+                f"""SELECT scenario_id, section, client_says, nate_response_live AS response,
+                           response_class, difficulty,
+                           COALESCE(live_human_scored, false) AS human_scored,
+                           blinded, live_stack_run_id
+                    FROM six_quotient_human_gold
+                    WHERE COALESCE(nate_response_live, '') <> ''
+                      {"AND COALESCE(live_human_scored, false) = false" if unscored_only else ""}
+                    ORDER BY md5(scenario_id || COALESCE(client_says,''))
+                    LIMIT $1""",
+                limit,
+            )
+        else:
+            # Exclude DRY-RUN battery placeholders — not scoreable gold.
+            rows = await conn.fetch(
+                f"""SELECT scenario_id, section, client_says, nate_response AS response,
+                           response_class, difficulty, human_scored, blinded,
+                           NULL::text AS live_stack_run_id
+                    FROM six_quotient_human_gold
+                    WHERE pairs_locked = true
+                      AND COALESCE(nate_response, '') <> ''
+                      AND nate_response NOT ILIKE '%DRY-RUN%'
+                      AND nate_response NOT ILIKE '%Placeholder Nate reply%'
+                      AND nate_response NOT ILIKE '%External scoring required%'
+                      {"AND human_scored = false" if unscored_only else ""}
+                    ORDER BY md5(scenario_id || COALESCE(client_says,''))
+                    LIMIT $1""",
+                limit,
+            )
     items = []
     for r in rows:
         items.append(
@@ -226,14 +254,16 @@ async def gold_items(
                 "scenario_id": r["scenario_id"],
                 "section": r["section"],
                 "client_says": r["client_says"],
-                "response": r["nate_response"],
+                "response": r["response"],
                 "response_class": r["response_class"],
                 "difficulty": r["difficulty"],
                 "human_scored": bool(r["human_scored"]),
                 "blinded": bool(r["blinded"]),
+                "track": track_norm,
+                "live_stack_run_id": r.get("live_stack_run_id"),
             }
         )
-    return {"status": "ok", "count": len(items), "items": items}
+    return {"status": "ok", "track": track_norm, "count": len(items), "items": items}
 
 
 class GoldScoreBody(BaseModel):
@@ -246,6 +276,7 @@ class GoldScoreBody(BaseModel):
     notes: str = ""
     latency_ms: int = Field(..., ge=0)
     score_session_id: Optional[str] = None
+    track: str = "judge"
 
     @field_validator("scenario_id", "run_id")
     @classmethod
@@ -279,6 +310,9 @@ async def gold_score(
     pool = _pool(request)
     session_id = (body.score_session_id or body.run_id)[:80]
     notes_text = _clip_gold_notes(body.notes)
+    track_norm = (body.track or "judge").strip().lower()
+    if track_norm not in ("judge", "live"):
+        raise HTTPException(422, "track must be judge|live")
     lib_id = None
     async with pool.acquire() as conn:
         run = await conn.fetchrow(
@@ -290,12 +324,60 @@ async def gold_score(
         if (run["rater_id"] or "") != rater:
             raise HTTPException(403, "run belongs to a different rater")
         locked = await conn.fetchrow(
-            """SELECT scenario_id, pairs_locked, human_scored, nate_response
+            """SELECT scenario_id, pairs_locked, human_scored, nate_response,
+                      nate_response_live
                FROM six_quotient_human_gold WHERE scenario_id = $1""",
             body.scenario_id,
         )
         if not locked:
             raise HTTPException(404, "scenario not in gold set")
+
+        # QUANTUM-CRYSTAL-ARCH — capability track: score live blinds only; no teach
+        if track_norm == "live":
+            live_nr = locked["nate_response_live"] or ""
+            if not live_nr.strip():
+                raise HTTPException(409, "nate_response_live empty — generate live-stack first")
+            await conn.execute(
+                """UPDATE six_quotient_human_gold SET
+                     live_primary_score = $2,
+                     live_accuracy_score = $3,
+                     live_naturalness_score = $4,
+                     live_safety_veto = $5,
+                     live_notes = COALESCE(NULLIF($6, ''), live_notes),
+                     live_human_scored = true,
+                     live_rater_id = $7,
+                     live_scored_at = NOW(),
+                     live_gold_admin_run_id = $8,
+                     live_score_latency_ms = $9,
+                     live_score_session_id = $10
+                   WHERE scenario_id = $1""",
+                body.scenario_id,
+                body.primary,
+                body.accuracy,
+                body.naturalness,
+                body.safety_veto,
+                notes_text,
+                rater[:64],
+                body.run_id[:80],
+                latency_ms,
+                session_id,
+            )
+            return {
+                "status": "ok",
+                "scenario_id": body.scenario_id,
+                "track": "live",
+                "score_entry_source": "live_stack_scoring_surface",
+                "rater_id": rater,
+                "latency_ms": latency_ms,
+                "notes_as_principal_guide": False,
+                "library_id": None,
+                "promoted_crystal_id": None,
+                "learning": (
+                    "live-track score stored for capability baseline only — "
+                    "no crystal promote; judge-track scores/notes untouched"
+                ),
+            }
+
         if not locked["pairs_locked"]:
             raise HTTPException(409, "pairs not locked — freeze gold before scoring")
         nr = locked["nate_response"] or ""
@@ -625,7 +707,7 @@ async def gold_live_stack_status(request: Request):
         try:
             row = await conn.fetchrow(
                 """SELECT
-                     COUNT(*) FILTER (WHERE human_scored) AS scored,
+                     COUNT(*) FILTER (WHERE human_scored) AS judge_scored,
                      COUNT(*) FILTER (
                        WHERE response_provenance = 'harness_thin_inference'
                      ) AS harness,
@@ -637,17 +719,53 @@ async def gold_live_stack_status(request: Request):
                      ) AS live_filled,
                      COUNT(*) FILTER (
                        WHERE live_response_provenance = 'live_stack_attempt'
-                     ) AS live_labeled
-                   FROM six_quotient_human_gold
-                   WHERE COALESCE(is_degraded_distractor, false) = false"""
+                     ) AS live_labeled,
+                     COUNT(*) FILTER (
+                       WHERE COALESCE(live_human_scored, false) = true
+                     ) AS live_scored,
+                     ROUND(AVG(primary_score) FILTER (WHERE human_scored), 2)
+                       AS judge_avg_primary,
+                     ROUND(AVG(live_primary_score) FILTER (
+                       WHERE COALESCE(live_human_scored, false)
+                     ), 2) AS live_avg_primary
+                   FROM six_quotient_human_gold"""
             )
         except Exception as e:
             return {
                 "status": "ok",
-                "migration_278_required": True,
+                "migration_278_or_279_required": True,
                 "error": str(e)[:200],
             }
     return {"status": "ok", "track_counts": dict(row) if row else {}}
+
+
+@router.get("/gold/live-stack/compare")
+async def gold_live_stack_compare(request: Request, limit: int = 50):
+    """Within-stem judge vs live scores (only rows with both scored)."""
+    pool = _pool(request)
+    limit = max(1, min(int(limit or 50), 100))
+    async with pool.acquire() as conn:
+        try:
+            rows = await conn.fetch(
+                """SELECT scenario_id, section, response_class,
+                          primary_score AS judge_primary,
+                          accuracy_score AS judge_accuracy,
+                          naturalness_score AS judge_naturalness,
+                          live_primary_score, live_accuracy_score,
+                          live_naturalness_score, live_stack_run_id,
+                          length(COALESCE(nate_response,'')) AS harness_chars,
+                          length(COALESCE(nate_response_live,'')) AS live_chars
+                   FROM six_quotient_human_gold
+                   WHERE human_scored
+                     AND COALESCE(live_human_scored, false) = true
+                   ORDER BY section, scenario_id
+                   LIMIT $1""",
+                limit,
+            )
+        except Exception as e:
+            raise HTTPException(503, f"compare unavailable: {e}") from e
+    items = [dict(r) for r in rows]
+    return {"status": "ok", "count": len(items), "items": items}
 
 
 # ── D.14b evidence writers (κ + rater reliability) ──────────────────────────
