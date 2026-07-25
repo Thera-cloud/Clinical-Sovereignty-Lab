@@ -29,6 +29,7 @@ _BATTERY_MARKERS = (
     "[SIX_QUOTIENT_BATTERY]",
     "six_quotient_battery",
     "grok-judge-v1",
+    "grok-judge-v2",
     "rubric_focus:",
     "battery-validated weakness",
     "battery_validated_weakness",

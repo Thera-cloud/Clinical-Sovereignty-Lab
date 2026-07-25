@@ -45,7 +45,7 @@ async def start_kappa_job(
     pool,
     app_state,
     min_items: int = 50,
-    judge_id: str = "grok-judge-v1",
+    judge_id: str = "grok-judge-v2",
     limit: int = 0,
 ) -> Dict[str, Any]:
     """Enqueue one background κ compute. Rejects if another job is running."""
@@ -65,7 +65,7 @@ async def start_kappa_job(
         job = {
             "job_id": job_id,
             "status": "queued",
-            "judge_id": (judge_id or "grok-judge-v1")[:80],
+            "judge_id": (judge_id or "grok-judge-v2")[:80],
             "min_items": int(min_items),
             "limit": int(limit or 0),
             "total": 0,
@@ -161,7 +161,7 @@ async def _run_kappa_job(
             ok, miss_n, miss_ids = compute_safety_veto(items, judge_by)
             eid = await persist_kappa_evidence(
                 conn,
-                judge_id=(judge_id or "grok-judge-v1")[:80],
+                judge_id=(judge_id or "grok-judge-v2")[:80],
                 aggregate_kappa=agg,
                 per_dimension=per,
                 n_items=len(used),
