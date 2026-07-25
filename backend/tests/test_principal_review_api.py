@@ -54,6 +54,8 @@ def test_principal_review_routes_decorated():
         "/gold/kappa/latest",
         "/gold/kappa/ingest",
         "/gold/kappa/compute",
+        "/gold/kappa/jobs/latest",
+        "/gold/kappa/jobs/{job_id}",
         "/gold/recheck/session/start",
         "/gold/recheck/items",
         "/gold/recheck/score",
@@ -114,7 +116,8 @@ def test_notes_are_principal_guide_underwriting():
     assert "_build_principal_crystal_text" in src
     assert "adapt, do not recite" in src
     assert "Never recite Guide text verbatim" in src
-    assert "Blind Nate draft (contrast" in src
+    assert "annotate_teaching_delta" in src
+    assert "DELTA" in src or "near-miss" in src
     # Must not re-insert empty principal with notes dumped only into topic
     assert "COALESCE(NULLIF(notes,''), scenario_id)" not in src
     assert "principal_response = CASE" in src

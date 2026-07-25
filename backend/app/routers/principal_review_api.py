@@ -55,7 +55,7 @@ def _clip_gold_notes(notes: Optional[str]) -> str:
 
 
 def _build_principal_crystal_text(row: Any) -> str:
-    """Corrective underwriting crystal: Guide vs blind draft + anti-verbatim."""
+    """Corrective underwriting: annotated delta + Guide; no gold client_says (quarantine)."""
     principal = (row["principal_response"] or "").strip()
     nate = (row["nate_response"] or "").strip()
     teaching = principal or nate
@@ -63,23 +63,32 @@ def _build_principal_crystal_text(row: Any) -> str:
         return ""
     topic = str(row["topic"] or row["source_ref"] or "template")[:200]
     section = str(row["section"] or "clinical")[:40]
-    client = (row["client_says"] or "")[:1200]
+    source_ref = str(row["source_ref"] or topic)[:80]
     parts = [
         f"[Principal-Review · {section} · {topic}]",
         _ANTI_VERBATIM_RULE,
-        f"Client: {client}",
+        # Stem id only — never paste gold client_says (battery quarantine fingerprints).
+        f"Scenario: {source_ref}",
     ]
+    try:
+        from app.services.principal_review_crisis_policy import annotate_teaching_delta
+
+        delta = annotate_teaching_delta(principal=principal, nate_blind=nate)
+        if delta:
+            parts.append(delta)
+    except Exception:
+        if principal and nate:
+            parts.append(
+                "DELTA (near-miss → correction):\n"
+                f"- Failed move: {nate[:900]}\n"
+                f"- Corrected move: {principal[:1200]}"
+            )
     if principal:
         parts.append(
             "Principal Guide (3/3/3 corrective underwriting — adapt, do not recite):\n"
             f"{principal[:2500]}"
         )
-        if nate:
-            parts.append(
-                "Blind Nate draft (contrast — do not imitate failures):\n"
-                f"{nate[:1200]}"
-            )
-    else:
+    elif nate:
         parts.append(f"Guide: {nate[:2500]}")
     return "\n".join(parts)
 
@@ -645,6 +654,24 @@ async def gold_kappa_ingest(
     }
 
 
+@router.get("/gold/kappa/jobs/latest")
+async def gold_kappa_job_latest(request: Request):
+    from app.services.tier1_kappa_job import latest_job
+
+    job = latest_job()
+    return {"status": "ok", "job": job}
+
+
+@router.get("/gold/kappa/jobs/{job_id}")
+async def gold_kappa_job_status(job_id: str, request: Request):
+    from app.services.tier1_kappa_job import get_job
+
+    job = get_job((job_id or "").strip())
+    if not job:
+        raise HTTPException(404, "kappa job not found (in-memory; lost on restart)")
+    return {"status": "ok", "job": job}
+
+
 @router.post("/gold/kappa/compute")
 async def gold_kappa_compute(
     request: Request,
@@ -652,11 +679,43 @@ async def gold_kappa_compute(
     min_items: int = 50,
     judge_id: str = "grok-judge-v1",
     limit: int = 0,
+    async_mode: bool = True,
 ):
     """
-    Writer #1 with live LLM judge (slow). Prefer /gold/kappa/ingest + CLI
-    when offline ratings exist. Blocks until all items judged.
+    Writer #1 with live LLM judge (slow).
+    Default async_mode=true → returns job_id; poll /gold/kappa/jobs/{id}.
+    async_mode=false blocks (legacy / scripts). Prefer ingest + CLI for durability.
     """
+    from app.services.tier1_kappa_job import start_kappa_job
+
+    pool = _pool(request)
+    app_state = request.app.state
+    min_items = max(1, int(min_items or 50))
+
+    if async_mode:
+        # Preflight scored count so we fail fast before queueing.
+        from app.services.tier1_gold_evidence import load_scored_gold
+
+        async with pool.acquire() as conn:
+            try:
+                await load_scored_gold(conn, min_items=min_items)
+            except ValueError as e:
+                raise HTTPException(409, str(e)) from e
+        out = await start_kappa_job(
+            pool=pool,
+            app_state=app_state,
+            min_items=min_items,
+            judge_id=judge_id,
+            limit=limit,
+        )
+        if out.get("status") == "busy":
+            raise HTTPException(
+                409,
+                f"kappa job already running: {out.get('job_id')}",
+            )
+        return out
+
+    # Sync path (blocks request until all items judged)
     from app.services.six_quotient_auto_judge import _llm_judge
     from app.services.tier1_gold_evidence import (
         KAPPA_METHOD,
@@ -666,11 +725,9 @@ async def gold_kappa_compute(
         persist_kappa_evidence,
     )
 
-    pool = _pool(request)
-    app_state = request.app.state
     async with pool.acquire() as conn:
         try:
-            items = await load_scored_gold(conn, min_items=max(1, min_items))
+            items = await load_scored_gold(conn, min_items=min_items)
         except ValueError as e:
             raise HTTPException(409, str(e)) from e
         if limit and limit > 0:
@@ -718,10 +775,11 @@ async def gold_kappa_compute(
             n_items=len(used),
             safety_veto_ok=ok,
             safety_miss_count=miss_n,
-            notes=f"compute API; misses={miss_ids}",
+            notes=f"compute API sync; misses={miss_ids}",
         )
     return {
         "status": "ok",
+        "mode": "sync",
         "evidence_id": eid,
         "kappa_method": KAPPA_METHOD,
         "aggregate_kappa": agg,

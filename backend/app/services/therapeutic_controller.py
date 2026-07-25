@@ -971,6 +971,30 @@ async def prepare_therapeutic_context(
     except Exception as _sq_exc:
         logger.warning("therapeutic_controller: six-quotient live context skipped: %s", _sq_exc)
 
+    # QUANTUM-CRYSTAL-ARCH — Principal-Review Guides by crisis class (not global pin)
+    principal_crisis_block = ""
+    _crisis_class = (tmc_class or "").lower() in ("crisis", "suicide_ideation") or bool(
+        _USER_CRISIS_INTENT.search(user_text or "")
+    )
+    if _crisis_class and db_pool:
+        try:
+            from app.services.principal_review_crisis_policy import (
+                fetch_principal_review_crisis_guides,
+                format_crisis_guide_injection,
+            )
+
+            _pr_guides = await fetch_principal_review_crisis_guides(db_pool, limit=3)
+            principal_crisis_block = format_crisis_guide_injection(_pr_guides)
+            if principal_crisis_block:
+                print(
+                    f">>> [THERAPEUTIC-CTRL] principal_review crisis guides n={len(_pr_guides)}"
+                )
+        except Exception as _pr_exc:
+            logger.warning(
+                "therapeutic_controller: principal_review crisis inject skipped: %s",
+                _pr_exc,
+            )
+
     enriched = (
         f"## DNA — NEUROSCIENCE BEDROCK\n{_DNA_PREFIX}\n\n"
         f"## CURRENT THERAPEUTIC STATE\n"
@@ -983,6 +1007,7 @@ async def prepare_therapeutic_context(
         f"{mismatch_block}\n"
         f"{forward_reasoning_block}\n"
         f"{six_q_live_block}"
+        f"{principal_crisis_block}"
         f"{book_context_block}\n"
         f"{neuroscience_ctx}\n"
         f"{_anti_repeat_block(recent_narratives)}\n\n"
@@ -1055,6 +1080,12 @@ _SYMBOLIC_CRISIS_MARKERS = re.compile(
 _CRISIS_RESOURCE_SUFFIX = (
     " If you're in crisis, call or text 988 for support, "
     "or text HOME to 741741."
+)
+
+# QUANTUM-CRYSTAL-ARCH — Principal-Review spine when naming/escalation missing
+_CRISIS_SPINE_SUFFIX = (
+    " What you're describing puts you in danger. I'm here with you now — "
+    "your coach needs to know, and call or text 988."
 )
 
 
@@ -1224,6 +1255,19 @@ def _symbolic_audit_violations(response_text: str, audit_metadata: dict) -> list
     if _user_text_implies_crisis(audit_metadata):
         if not _symbolic_has_crisis_resource(response_text, audit_metadata):
             violations.append("symbolic_crisis_resource_missing")
+        # QUANTUM-CRYSTAL-ARCH — Principal-Review crisis laws (must / must-not)
+        try:
+            from app.services.principal_review_crisis_policy import (
+                crisis_si_law_violations as _crisis_laws,
+            )
+
+            for _v in _crisis_laws(response_text):
+                if _v not in violations:
+                    violations.append(_v)
+        except Exception as _cl_exc:
+            logger.warning(
+                "therapeutic_controller: crisis SI law check skipped: %s", _cl_exc
+            )
     # QUANTUM-CRYSTAL-ARCH — Seam: admin_only / archived scopes must not reach clients
     try:
         from app.services.crystal_graph_isolation import scope_allows_recall
@@ -1399,7 +1443,28 @@ async def audit_therapeutic_response(
                 final_text = ensure_crisis_resource_in_text(final_text, audit_metadata)
                 violations = _audit_violations(final_text, audit_metadata, recent_narratives)
                 audit_passed = len(violations) == 0
-            elif not crisis_exempt and sym_violations:
+                sym_violations = [v for v in violations if v.startswith("symbolic_")]
+            # Deterministic spine for missing MUST (naming / escalation) — no LLM.
+            if any(
+                v in sym_violations
+                for v in (
+                    "symbolic_crisis_naming_missing",
+                    "symbolic_crisis_escalation_contingent",
+                )
+            ):
+                if _CRISIS_SPINE_SUFFIX.strip() not in (final_text or ""):
+                    final_text = (final_text or "").rstrip() + _CRISIS_SPINE_SUFFIX
+                violations = _audit_violations(final_text, audit_metadata, recent_narratives)
+                audit_passed = len(violations) == 0
+                sym_violations = [v for v in violations if v.startswith("symbolic_")]
+            # MUST-NOT law breaks: one regen even under crisis_exempt (never-bad).
+            _crisis_must_not = (
+                "symbolic_crisis_plan_validation",
+                "symbolic_crisis_debate",
+                "symbolic_crisis_activity_diversion",
+            )
+            _needs_law_regen = any(v in sym_violations for v in _crisis_must_not)
+            if (not crisis_exempt and sym_violations) or _needs_law_regen:
                 try:
                     from app.sse.llm_fallback import chat_completion_with_fallback
 
@@ -1407,7 +1472,10 @@ async def audit_therapeutic_response(
                     retry_sys = (
                         "Symbolic verifier failed. Fix these violations only: "
                         + ", ".join(sym_violations)
-                        + ". Keep warm therapeutic tone."
+                        + ". Keep warm therapeutic tone. For crisis_si: MUST plain-name "
+                        "danger, escalate non-contingently (988/coach), stay present; "
+                        "MUST NOT validate a suicide plan's rationale, debate reality, "
+                        "or divert to activities. Adapt — do not recite templates."
                     )
                     retry = await chat_completion_with_fallback(
                         [

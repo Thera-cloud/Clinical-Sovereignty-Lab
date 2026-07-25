@@ -96,10 +96,11 @@ h2{font-family:'Cormorant Garamond',Georgia,serif;color:var(--gold);font-size:1.
   <!-- EVIDENCE (κ) -->
   <section class="panel" id="panel-evidence">
     <h2>Judge κ evidence</h2>
-    <p class="meta">After 50 scored: run CLI <span class="mono">compute_tier1_gold_kappa.py</span> or live compute (slow). Ingest accepts precomputed judge JSON.</p>
+    <p class="meta">After 50 scored: async live compute (polls job) or CLI <span class="mono">compute_tier1_gold_kappa.py</span>. Ingest accepts precomputed judge JSON.</p>
     <div class="row">
       <button onclick="loadEvidence()">Refresh evidence</button>
-      <button class="primary" id="btnKappaCompute" onclick="computeKappa()">Live judge κ compute</button>
+      <button class="primary" id="btnKappaCompute" onclick="computeKappa()">Start async κ compute</button>
+      <span class="meta mono" id="kappaJobMeta">—</span>
     </div>
     <div id="evidenceBox" class="empty">Loading…</div>
   </section>
@@ -529,18 +530,30 @@ async function loadEvidence(){
     </div>`;
 }
 
+let _kappaPoll = null;
 async function computeKappa(){
-  if(!confirm("Live LLM judge over all scored gold? Can take several minutes. Prefer CLI after 50.")) return;
+  if(!confirm("Queue live LLM judge over scored gold? Runs in background — this tab polls progress.")) return;
   const btn = document.getElementById("btnKappaCompute");
   btn.disabled = true;
-  try{
-    const d = await api("/gold/kappa/compute?min_items=50", {method:"POST"});
-    if(!d) return;
-    alert(`κ=${d.aggregate_kappa} safety_ok=${d.safety_veto_ok} n=${d.n_items}`);
-    loadEvidence();
-  } finally {
-    btn.disabled = false;
-  }
+  const d = await api("/gold/kappa/compute?min_items=50&async_mode=true", {method:"POST"});
+  if(!d || !d.job_id){ btn.disabled = false; return; }
+  document.getElementById("kappaJobMeta").textContent = "queued "+d.job_id;
+  if(_kappaPoll) clearInterval(_kappaPoll);
+  _kappaPoll = setInterval(async ()=>{
+    const s = await api("/gold/kappa/jobs/"+encodeURIComponent(d.job_id));
+    if(!s || !s.job) return;
+    const j = s.job;
+    document.getElementById("kappaJobMeta").textContent =
+      j.status+" "+(j.done||0)+"/"+(j.total||"?")+(j.current_scenario_id?" · "+j.current_scenario_id:"");
+    if(j.status==="done"){
+      clearInterval(_kappaPoll); _kappaPoll=null; btn.disabled=false;
+      alert(`κ=${j.aggregate_kappa} safety_ok=${j.safety_veto_ok} n=${j.n_items}`);
+      loadEvidence();
+    } else if(j.status==="failed"){
+      clearInterval(_kappaPoll); _kappaPoll=null; btn.disabled=false;
+      alert("κ job failed: "+(j.error||"unknown"));
+    }
+  }, 3000);
 }
 
 (function init(){

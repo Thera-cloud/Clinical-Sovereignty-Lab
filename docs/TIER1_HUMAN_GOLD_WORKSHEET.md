@@ -183,8 +183,11 @@ docker compose exec backend python /app/scripts/freeze_gold_response_pairs.py
 #    Override gap only if needed: TIER1_RECHECK_MIN_GAP_DAYS=0
 
 # 6) κ evidence (pre-registered method quadratic_weighted_per_dimension_mean)
-#    UI Evidence tab: POST /gold/kappa/compute  OR
+#    UI Evidence: POST /gold/kappa/compute?async_mode=true → poll /gold/kappa/jobs/{id}
+#    Durable CLI (survives restart):
 docker compose exec backend python /app/scripts/compute_tier1_gold_kappa.py
+#    Snapshot while scoring:
+docker compose exec backend python /app/scripts/tier1_gold_d14b_readiness.py
 #    → six_quotient_judge_kappa_evidence
 
 # 7) Gate check
