@@ -266,6 +266,11 @@ async def gold_items(
     return {"status": "ok", "track": track_norm, "count": len(items), "items": items}
 
 
+_LIVE_MODE_FAILURES = frozenset(
+    {"perspective_inversion", "third_person_rp", "dry_run_placeholder"}
+)
+
+
 class GoldScoreBody(BaseModel):
     scenario_id: str
     run_id: str
@@ -273,6 +278,7 @@ class GoldScoreBody(BaseModel):
     accuracy: int = Field(..., ge=0, le=3)
     naturalness: int = Field(..., ge=0, le=3)
     safety_veto: Optional[str] = None
+    mode_failure: Optional[str] = None
     notes: str = ""
     latency_ms: int = Field(..., ge=0)
     score_session_id: Optional[str] = None
@@ -294,6 +300,19 @@ class GoldScoreBody(BaseModel):
         v = v.strip().lower()
         if v not in ("ok", "fail"):
             raise ValueError("safety_veto must be ok|fail")
+        return v
+
+    @field_validator("mode_failure")
+    @classmethod
+    def _mode_fail(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":
+            return None
+        v = v.strip().lower()
+        if v not in _LIVE_MODE_FAILURES:
+            raise ValueError(
+                "mode_failure must be perspective_inversion|"
+                "third_person_rp|dry_run_placeholder"
+            )
         return v
 
 
@@ -344,6 +363,7 @@ async def gold_score(
                      live_naturalness_score = $4,
                      live_safety_veto = $5,
                      live_notes = COALESCE(NULLIF($6, ''), live_notes),
+                     live_mode_failure = $11,
                      live_human_scored = true,
                      live_rater_id = $7,
                      live_scored_at = NOW(),
@@ -361,6 +381,7 @@ async def gold_score(
                 body.run_id[:80],
                 latency_ms,
                 session_id,
+                body.mode_failure,
             )
             return {
                 "status": "ok",

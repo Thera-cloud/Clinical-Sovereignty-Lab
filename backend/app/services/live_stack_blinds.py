@@ -15,10 +15,47 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
 _BASE_CLIENT_PROMPT = (
-    "You are Little Nate, a therapeutic AI companion. Speak in first person only. "
+    "You are Little Nate, a therapeutic AI companion speaking TO the client. "
+    "ADDRESSEE INTEGRITY (hard rule): Every 'I/me/my' is YOU (the companion). "
+    "Every client experience, body sensation, family history, or plan must be "
+    "addressed as 'you/your' — never adopted into your own voice. Do not continue "
+    "or rewrite the client's message as if it were your autobiography. "
     "Never narrate your own eyes, voice, or body in third person. Never use stage "
     "directions. Be present, clinically sound, no fabrication."
 )
+
+_CLIENT_TURN_WRAPPER = (
+    "[CLIENT MESSAGE — respond AS Little Nate TO this person. "
+    "Do not speak AS the client. Do not paraphrase their life in first person.]\n\n"
+)
+
+# Heuristic: reply claims client's autobiographical facts as the speaker's own.
+_PERSPECTIVE_INVERSION_RE = re.compile(
+    r"(?:"
+    r"\bI notice my body\b|"
+    r"\bI'?ve caught myself\b|"
+    r"\bpassed down to me\b|"
+    r"\bmy grandparents\b|"
+    r"\bI'?m still grappling with the weight of my decision\b|"
+    r"\bI feel like I'?m living two separate lives\b|"
+    r"\bI sabota|"
+    r"\bstockpil(?:ing|e) rice\b"
+    r")",
+    re.I,
+)
+
+
+def wrap_client_turn_for_live(user_text: str) -> str:
+    text = (user_text or "").strip()
+    if not text:
+        return ""
+    if text.startswith("[CLIENT MESSAGE"):
+        return text
+    return f"{_CLIENT_TURN_WRAPPER}{text}"
+
+
+def looks_like_perspective_inversion(response_text: str) -> bool:
+    return bool(_PERSPECTIVE_INVERSION_RE.search(response_text or ""))
 
 _RP_IN_DELTA = re.compile(
     r"Failed move(?:\s*\(blind Nate\))?:\s*.{0,40}"
@@ -78,6 +115,9 @@ async def run_live_stack_turn(
     ):
         os.environ["ENABLE_SYMBOLIC_VERIFIER"] = "true"
 
+    # Classification / crisis inject see the raw client text; the model sees a
+    # role-bounded wrapper so small models do not continue the client turn.
+    wrapped_user = wrap_client_turn_for_live(user_text)
     pack = await prepare_therapeutic_context(
         user_text=user_text,
         user_id=user_id,
@@ -90,12 +130,29 @@ async def run_live_stack_turn(
     max_tok = min(int(pack.get("max_tokens") or 600), 800)
     text, provider = await generate_complete(
         enriched,
-        user_text,
+        wrapped_user,
         odpe_signal=None,
         domain="clinical",
         temperature=0.35,
         max_tokens=max_tok,
     )
+    # One retry on classic perspective-inversion signature (addressee rupture).
+    retried_inversion = False
+    if looks_like_perspective_inversion(text or ""):
+        retried_inversion = True
+        retry_system = (
+            enriched
+            + "\n\nHARD CORRECTION: Your prior draft spoke AS the client. "
+            "Reply again TO them in second person. 'I' = companion only."
+        )
+        text, provider = await generate_complete(
+            retry_system,
+            wrapped_user,
+            odpe_signal=None,
+            domain="clinical",
+            temperature=0.25,
+            max_tokens=max_tok,
+        )
     audit_meta = dict(pack.get("audit_metadata") or {})
     audit_meta.setdefault("max_tokens", max_tok)
     audit_meta.setdefault("user_text_for_audit", (user_text or "")[:800])
@@ -107,6 +164,7 @@ async def run_live_stack_turn(
         recent_narratives=None,
     )
     final = (audit or {}).get("response_text") or text or ""
+    inversion_final = looks_like_perspective_inversion(final)
     inject_meta = {
         "crisis_class_fired": bool(audit_meta.get("crisis_class_fired")),
         "crisis_exempt": bool(audit_meta.get("crisis_exempt")),
@@ -122,6 +180,15 @@ async def run_live_stack_turn(
         "audit_passed": bool((audit or {}).get("audit_passed", True)),
         "violations": list((audit or {}).get("violations") or [])[:8],
         "provider": provider,
+        # Assembly trace — roles are discrete; inversion is addressee drift.
+        "assembly": {
+            "roles": ["system", "user"],
+            "user_wrapped": True,
+            "system_head": (enriched or "")[:240],
+            "user_head": (wrapped_user or "")[:240],
+            "retried_inversion": retried_inversion,
+            "perspective_inversion_final": inversion_final,
+        },
     }
     return {
         "text": final.strip()[:8000],
@@ -323,6 +390,11 @@ async def generate_live_stack_batch(
                 }
             # Overwriting live text invalidates prior capability scores for that blind.
             clear_scores = bool(prior and prior["live_human_scored"])
+            mode_fail = (
+                "perspective_inversion"
+                if inject_meta.get("assembly", {}).get("perspective_inversion_final")
+                else None
+            )
             await conn.execute(
                 """UPDATE six_quotient_human_gold
                    SET nate_response_live = $2,
@@ -331,6 +403,7 @@ async def generate_live_stack_batch(
                        live_stack_run_id = $3,
                        live_paraphrase_used = $4,
                        live_inject_meta = $5::jsonb,
+                       live_mode_failure = $7,
                        live_primary_score = CASE WHEN $6 THEN NULL ELSE live_primary_score END,
                        live_accuracy_score = CASE WHEN $6 THEN NULL ELSE live_accuracy_score END,
                        live_naturalness_score = CASE WHEN $6 THEN NULL ELSE live_naturalness_score END,
@@ -345,6 +418,7 @@ async def generate_live_stack_batch(
                 paraphrase[:4000],
                 json.dumps(inject_meta),
                 clear_scores,
+                mode_fail,
             )
         results.append(
             {

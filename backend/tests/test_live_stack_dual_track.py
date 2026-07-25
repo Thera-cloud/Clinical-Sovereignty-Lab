@@ -63,6 +63,20 @@ def test_crisis_intent_covers_end_a_life():
     assert "used_stem_not_paraphrase" in live
 
 
+def test_live_stack_addressee_integrity_wrapper():
+    live = _LIVE.read_text(encoding="utf-8")
+    assert "ADDRESSEE INTEGRITY" in live
+    assert "wrap_client_turn_for_live" in live
+    assert "looks_like_perspective_inversion" in live
+    assert "[CLIENT MESSAGE" in live
+    assert "assembly" in live
+
+
+def test_migration_281_live_mode_failure():
+    mig = (_ROOT / "migrations" / "281_live_mode_failure.sql").read_text(encoding="utf-8")
+    assert "live_mode_failure" in mig
+
+
 def test_controller_rp_symbolic_law():
     src = _CTRL.read_text(encoding="utf-8")
     assert "symbolic_third_person_rp" in src
