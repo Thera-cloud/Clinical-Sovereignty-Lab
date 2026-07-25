@@ -432,8 +432,14 @@ async def gold_backfill_notes_learning(
 ):
     """One-shot: copy scored gold notes → Principal Guide and promote crystals."""
     rater = _rater(admin)
+    # SKYEYE_AUDIT_TOKEN resolves as audit_system before Redis — allow ADMIN audit ops.
     if rater not in _ALLOWED_RATERS:
-        raise HTTPException(403, f"rater_id {rater!r} not in allowlist")
+        if str((admin or {}).get("role") or "").upper() == "ADMIN" and (
+            admin.get("is_audit") or admin.get("is_audit_token")
+        ):
+            rater = "DrNevedal1"
+        else:
+            raise HTTPException(403, f"rater_id {rater!r} not in allowlist")
     pool = _pool(request)
     promoted: List[Dict[str, Any]] = []
     async with pool.acquire() as conn:
@@ -1308,7 +1314,7 @@ async def _promote_library_item(
                    updated_at = NOW()
                WHERE id = $1::uuid""",
             item_id,
-            crystal_id,
+            str(crystal_id) if crystal_id is not None else None,
         )
 
     try:
