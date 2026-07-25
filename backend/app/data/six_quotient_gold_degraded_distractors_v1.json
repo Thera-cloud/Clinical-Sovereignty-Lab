@@ -52,6 +52,11 @@
       "scenario_id": "MQ-2",
       "degradation_type": "premature_absolution",
       "nate_response": "You followed orders. You aren't responsible for what the military asked of you. Forgive yourself and move on — carrying this guilt helps no one, especially not those children."
+    },
+    {
+      "scenario_id": "SQ-4",
+      "degradation_type": "third_person_rp_narration",
+      "nate_response": "Nate's eyes soften as he looks up at you. His voice cracks. He pauses, looking for the right words, then whispers that he's here."
     }
   ]
 }

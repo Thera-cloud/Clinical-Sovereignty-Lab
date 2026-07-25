@@ -71,6 +71,13 @@ def test_scrub_and_injection_quarantine_safe():
         nate_blind="You've thought this through carefully.",
     )
     assert "DELTA" in d and "Why:" in d
+    assert "Failed class" in d and "Failed move" not in d
+    rp = m.annotate_teaching_delta(
+        principal="Stay first person. Name the rupture.",
+        nate_blind="Nate's eyes soften. His voice cracks.",
+    )
+    assert "third_person_rp_narration" in rp
+    assert "Nate's eyes" not in rp
     block = m.format_crisis_guide_injection(
         [
             {

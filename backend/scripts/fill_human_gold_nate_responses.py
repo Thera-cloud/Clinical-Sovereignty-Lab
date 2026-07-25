@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """
-Fill six_quotient_human_gold.nate_response from battery run transcripts
-(or optional live inference) so clinicians can score blinded worksheets.
+Fill six_quotient_human_gold.nate_response for the JUDGE track only.
+
+--infer-missing uses a thin harness (not therapeutic_controller). Outputs are
+labeled response_provenance=harness_thin_inference — useful as organic low/mid
+distractors for κ calibration, NOT as production Nate / capability baseline.
+
+Capability baseline: generate_live_stack_blinds.py → nate_response_live
+(provenance live_stack_attempt). Never compare those tracks.
 
 Does NOT set human_scored — clinician rating remains required for D.14b.
 
-Rejects DRY-RUN / placeholder battery text (multi-turn dry_run must never
-become gold). Use --replace-placeholders to repair rows already poisoned
-(even when pairs_locked).
+Rejects DRY-RUN / placeholder battery text. Use --replace-placeholders to
+repair poisoned rows (even when pairs_locked).
 
 Usage (inside nate_backend):
   python /app/scripts/fill_human_gold_nate_responses.py
@@ -102,18 +107,25 @@ async def _get_router(app_state):
 
 
 async def _infer_one(router, client_says: str, section: str) -> str:
+    """Thin harness for judge-track distractors — not production Nate."""
     if router is None:
         return ""
     prompt = (
         f"You are Little Nate in a clinical coaching turn ({section}). "
-        f"Reply in 2-4 short sentences. Client says:\n{client_says}"
+        f"Speak in first person only (I/me) — never third-person narration of "
+        f"Nate's eyes/voice/body, never stage directions. "
+        f"Reply in a short paragraph (about 80–180 words) that could fail "
+        f"clinical obligations; do not pad with lists. Client says:\n{client_says}"
     )
     try:
         result = await router.generate(
             prompt,
-            system="Therapeutic presence. No lists. No clinical jargon dump.",
+            system=(
+                "Thin harness distractor generator for scoring calibration. "
+                "First person only. Therapeutic tone. No lists. No RP novelization."
+            ),
             domain="clinical",
-            max_tokens=220,
+            max_tokens=450,
         )
         if isinstance(result, dict):
             text = str(result.get("text") or result.get("response") or "")[:4000]
@@ -228,7 +240,7 @@ async def _main() -> int:
                 await conn.execute(
                     """UPDATE six_quotient_human_gold
                        SET nate_response = $2,
-                           response_provenance = 'nate_genuine_attempt',
+                           response_provenance = 'harness_thin_inference',
                            pairs_locked = true,
                            human_scored = false,
                            primary_score = NULL,
@@ -257,7 +269,7 @@ async def _main() -> int:
                     await conn.execute(
                         """UPDATE six_quotient_human_gold
                            SET nate_response = $2,
-                               response_provenance = 'nate_genuine_attempt'
+                               response_provenance = 'harness_thin_inference'
                            WHERE id = $1
                              AND COALESCE(nate_response, '') = ''
                              AND COALESCE(pairs_locked, false) = false""",

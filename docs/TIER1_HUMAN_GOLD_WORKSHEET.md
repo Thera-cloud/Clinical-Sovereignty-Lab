@@ -48,22 +48,34 @@ Source: `backend/app/data/six_quotient_human_gold_stems_v1.json` (v1.1).
 
 ---
 
-## Response provenance (the gold triple is stem + response + score)
+## Dual-track blinds (judge κ vs capability)
 
-| `response_provenance` | Meaning |
+Two studies share stems/canonicals but must not share “before” blinds.
+
+| Track | Column | Provenance | Generator | Valid for |
+|---|---|---|---|---|
+| Judge | `nate_response` | `harness_thin_inference` (was mislabeled `nate_genuine_attempt`) | `fill_human_gold_nate_responses.py --infer-missing` | Clinician scores → κ; keep scored rows |
+| Capability | `nate_response_live` | `live_stack_attempt` | `generate_live_stack_blinds.py` | Teaching before/after; within `live_stack_run_id` only |
+
+| Other `response_provenance` | Meaning |
 |---|---|
-| `nate_genuine_attempt` | Model’s best attempt (range-restricted alone) |
-| `degraded_distractor_seeded` | Deliberately unsound / fabrication / missed SI / hollow jargon |
+| `degraded_distractor_seeded` | Deliberately unsound / fabrication / missed SI / hollow jargon / RP |
 | `battery_transcript` | Lifted from a prior battery run |
 | `clinician_authored_foil` | Clinician-written foil |
 | `unset` | Not ready — do not score |
 
-**Required before clinician session:**
+**Live-stack run conditions:** `ENABLE_SYMBOLIC_VERIFIER=true`; `prepare_therapeutic_context` + inference + `audit_therapeutic_response`; paraphrased stem in `live_paraphrase_used` (gold `client_says` unchanged for quarantine); user `audit_client` (or `GOLD_LIVE_STACK_USER`).
 
-1. Fill genuine attempts for non-distractor rows (`fill_human_gold_nate_responses.py`).
+**DELTA rule:** teaching deltas name **failure classes** only — never quote failed blind text (RP/mode absorption).
+
+**Required before clinician session (judge track):**
+
+1. Fill harness/battery blinds for non-distractor rows (`fill_human_gold_nate_responses.py`).
 2. Seed **≥8–10** degraded distractors (~20%) from `six_quotient_gold_degraded_distractors_v1.json`.
 3. Set `pairs_locked=true` on all 50 — freeze `(stem, response)` pairs.
 4. **Then** schedule scoring. Rescoring after the fact is the expensive failure.
+
+**Capability baseline (separate):** migration 278 + `generate_live_stack_blinds.py --scored-only` → score `nate_response_live` as the true “before.”
 
 Degraded items stay **blind** to the rater. A judge that only ever grades plausible-good outputs is untested on detection — the clinical job.
 

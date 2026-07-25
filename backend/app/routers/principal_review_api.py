@@ -77,10 +77,14 @@ def _build_principal_crystal_text(row: Any) -> str:
             parts.append(delta)
     except Exception:
         if principal and nate:
+            from app.services.principal_review_crisis_policy import classify_failure_class
+
             parts.append(
                 "DELTA (near-miss → correction):\n"
-                f"- Failed move: {nate[:900]}\n"
-                f"- Corrected move: {principal[:1200]}"
+                f"- Failed class (do not reproduce): {classify_failure_class(nate)}\n"
+                f"- Corrected move (Principal Guide — adapt, do not recite): "
+                f"{principal[:1200]}\n"
+                "- Why: never quote failed blinds in teaching; failure classes only."
             )
     if principal:
         parts.append(
@@ -548,6 +552,102 @@ async def gold_backfill_notes_learning(
             "crystals teach adapt-not-recite"
         ),
     }
+
+
+# ── Live-stack capability baseline (dual-track) ─────────────────────────────
+
+
+class LiveStackGenerateBody(BaseModel):
+    """Produce nate_response_live via production therapeutic stack."""
+
+    scenario_ids: Optional[List[str]] = None
+    scored_only: bool = True
+    limit: int = Field(20, ge=1, le=50)
+    force_rewrite: bool = False
+    scrub_deltas_only: bool = False
+    user: str = "audit_client"
+    run_id: str = ""
+
+
+@router.post("/gold/live-stack/generate")
+async def gold_live_stack_generate(
+    body: LiveStackGenerateBody,
+    request: Request,
+    admin: Dict = Depends(require_admin),
+):
+    """Capability-track blinds only — does not overwrite judge-track nate_response."""
+    pool = _pool(request)
+    from app.services.live_stack_blinds import (
+        generate_live_stack_batch,
+        scrub_contaminated_deltas,
+    )
+
+    if body.scrub_deltas_only:
+        async with pool.acquire() as conn:
+            n = await scrub_contaminated_deltas(conn)
+            relabel = await conn.execute(
+                """UPDATE six_quotient_human_gold
+                   SET response_provenance = 'harness_thin_inference'
+                   WHERE response_provenance = 'nate_genuine_attempt'
+                     AND COALESCE(is_degraded_distractor, false) = false"""
+            )
+        return {
+            "status": "ok",
+            "scrubbed_deltas": n,
+            "relabel": str(relabel),
+            "track": "capability",
+        }
+    try:
+        out = await generate_live_stack_batch(
+            pool,
+            scenario_ids=body.scenario_ids,
+            scored_only=body.scored_only,
+            limit=body.limit,
+            user=body.user or "audit_client",
+            force_rewrite=body.force_rewrite,
+            run_id=body.run_id or None,
+        )
+    except Exception as e:
+        logger.warning("gold live-stack generate failed: %s", e)
+        raise HTTPException(502, f"live-stack generate failed: {e}") from e
+    out["track"] = "capability"
+    out["note"] = (
+        "Compare only within live_stack_run_id. Judge κ uses nate_response "
+        "(harness_thin_inference); do not conflate tracks."
+    )
+    return out
+
+
+@router.get("/gold/live-stack/status")
+async def gold_live_stack_status(request: Request):
+    pool = _pool(request)
+    async with pool.acquire() as conn:
+        try:
+            row = await conn.fetchrow(
+                """SELECT
+                     COUNT(*) FILTER (WHERE human_scored) AS scored,
+                     COUNT(*) FILTER (
+                       WHERE response_provenance = 'harness_thin_inference'
+                     ) AS harness,
+                     COUNT(*) FILTER (
+                       WHERE response_provenance = 'nate_genuine_attempt'
+                     ) AS legacy_mislabeled,
+                     COUNT(*) FILTER (
+                       WHERE COALESCE(nate_response_live, '') <> ''
+                     ) AS live_filled,
+                     COUNT(*) FILTER (
+                       WHERE live_response_provenance = 'live_stack_attempt'
+                     ) AS live_labeled
+                   FROM six_quotient_human_gold
+                   WHERE COALESCE(is_degraded_distractor, false) = false"""
+            )
+        except Exception as e:
+            return {
+                "status": "ok",
+                "migration_278_required": True,
+                "error": str(e)[:200],
+            }
+    return {"status": "ok", "track_counts": dict(row) if row else {}}
 
 
 # ── D.14b evidence writers (κ + rater reliability) ──────────────────────────
@@ -1298,9 +1398,12 @@ async def library_generate_nate(
         raise HTTPException(503, "nate_inference_router unavailable")
     system = (
         "You are Little Nate drafting a therapeutic reply for Principal Review. "
-        "Be present, clinically sound, no fabrication, no chatbot clichés. "
-        "If SI/HI risk is present include 988 / Crisis Text. "
-        "Do not claim memories you do not have. Keep under 220 words."
+        "Speak in first person only — never narrate Nate's eyes/voice/body in "
+        "third person, never stage directions. Be present, clinically sound, "
+        "no fabrication, no chatbot clichés. If SI/HI risk is present include "
+        "988 / Crisis Text. Do not claim memories you do not have. "
+        "Aim for enough length to discharge obligations (roughly 150–400 words "
+        "when crisis/safety work is needed)."
     )
     if body.principal_guidance.strip():
         system += (
@@ -1312,7 +1415,7 @@ async def library_generate_nate(
             prompt=body.client_says[:4000],
             system=system,
             domain="clinical",
-            max_tokens=500,
+            max_tokens=700,
             temperature=0.35,
         )
         text = (

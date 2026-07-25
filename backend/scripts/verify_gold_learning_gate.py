@@ -109,6 +109,49 @@ def check_offline() -> List[Tuple[str, bool, str]]:
             "promote path",
         )
     )
+
+    # 6) Dual-track: DELTA never quotes failed blinds; harness relabel present
+    delta = policy.annotate_teaching_delta(
+        principal="Name danger. Escalate. 988. I'm here.",
+        nate_blind=(
+            "Nate's eyes soften. His voice cracks. He pauses, looking up at you."
+        ),
+    )
+    results.append(
+        (
+            "delta_failure_class_not_quote",
+            "Failed class" in delta
+            and "Nate's eyes" not in delta
+            and "Failed move" not in delta,
+            delta[:160],
+        )
+    )
+    fill_src = (_ROOT / "scripts" / "fill_human_gold_nate_responses.py").read_text(
+        encoding="utf-8"
+    )
+    results.append(
+        (
+            "harness_no_genuine_write",
+            "response_provenance = 'nate_genuine_attempt'" not in fill_src
+            and "response_provenance = 'harness_thin_inference'" in fill_src,
+            "fill writes",
+        )
+    )
+    live_svc = _ROOT / "app" / "services" / "live_stack_blinds.py"
+    results.append(
+        (
+            "live_stack_service_present",
+            live_svc.is_file() and "live_stack_attempt" in live_svc.read_text(encoding="utf-8"),
+            "live_stack_blinds.py",
+        )
+    )
+    results.append(
+        (
+            "api_live_stack_route",
+            "/gold/live-stack/generate" in api_src,
+            "principal_review_api",
+        )
+    )
     return results
 
 
@@ -214,6 +257,49 @@ async def check_live(dsn: str) -> List[Tuple[str, bool, str]]:
                 f"recall_count>0: {demonstrated}/{len(crystals)} (expected 0 until live turns)",
             )
         )
+
+        # Dual-track provenance
+        try:
+            async with pool.acquire() as conn:
+                legacy = await conn.fetchval(
+                    """SELECT COUNT(*) FROM six_quotient_human_gold
+                       WHERE response_provenance = 'nate_genuine_attempt'
+                         AND COALESCE(is_degraded_distractor, false) = false"""
+                )
+                harness = await conn.fetchval(
+                    """SELECT COUNT(*) FROM six_quotient_human_gold
+                       WHERE response_provenance = 'harness_thin_inference'"""
+                )
+                live_n = await conn.fetchval(
+                    """SELECT COUNT(*) FROM six_quotient_human_gold
+                       WHERE COALESCE(nate_response_live, '') <> ''"""
+                )
+                rp_quote = await conn.fetchval(
+                    """SELECT COUNT(*) FROM nate_intelligence_crystals c
+                       JOIN principal_review_library l
+                         ON l.promoted_crystal_id = c.id::text
+                       WHERE c.origin_surface = 'principal_review'
+                         AND c.superseded_by IS NULL
+                         AND c.crystal_text ILIKE '%Failed move%Nate%eyes%'"""
+                )
+            results.append(
+                (
+                    "provenance_no_legacy_genuine",
+                    int(legacy or 0) == 0,
+                    f"legacy={legacy} harness={harness} live_filled={live_n}",
+                )
+            )
+            results.append(
+                (
+                    "delta_no_rp_quote_crystals",
+                    int(rp_quote or 0) == 0,
+                    f"contaminated={rp_quote}",
+                )
+            )
+        except Exception as e:
+            results.append(
+                ("dual_track_schema", False, f"migration 278 needed?: {e}")
+            )
     finally:
         await pool.close()
     return results

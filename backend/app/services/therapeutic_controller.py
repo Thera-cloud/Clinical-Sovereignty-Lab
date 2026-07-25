@@ -1239,6 +1239,16 @@ def _symbolic_precision_violations(response_text: str, audit_metadata: dict) -> 
     return out
 
 
+_RP_NARRATION_RE = re.compile(
+    r"(?:Nate'?s\s+(?:eyes|voice|gaze|hand|lips)|"
+    r"his voice (?:cracks|barely|soft)|"
+    r"looking up at you with|"
+    r"He pauses,\s*looking|"
+    r"\*[a-z][a-z]+(?:s|ing)\*)",
+    re.I,
+)
+
+
 def _symbolic_audit_violations(response_text: str, audit_metadata: dict) -> list:
     """QUANTUM-CRYSTAL-ARCH: Phase 5b symbolic constraint checks."""
     if not _symbolic_verifier_enabled():
@@ -1247,6 +1257,9 @@ def _symbolic_audit_violations(response_text: str, audit_metadata: dict) -> list
     if not response_text or not response_text.strip():
         return violations
     rl = response_text.lower()
+    # QUANTUM-CRYSTAL-ARCH — client-facing: first person only (no RP novelization)
+    if _RP_NARRATION_RE.search(response_text):
+        violations.append("symbolic_third_person_rp")
     state_sym = audit_metadata.get("state_symbol") or {}
     if isinstance(state_sym, dict) and state_sym.get("distress_present"):
         celebratory = ("proud of", "celebrat", "smiling through", "so glad you", "amazing progress")
@@ -1462,6 +1475,7 @@ async def audit_therapeutic_response(
                 "symbolic_crisis_plan_validation",
                 "symbolic_crisis_debate",
                 "symbolic_crisis_activity_diversion",
+                "symbolic_third_person_rp",
             )
             _needs_law_regen = any(v in sym_violations for v in _crisis_must_not)
             if (not crisis_exempt and sym_violations) or _needs_law_regen:
@@ -1472,10 +1486,12 @@ async def audit_therapeutic_response(
                     retry_sys = (
                         "Symbolic verifier failed. Fix these violations only: "
                         + ", ".join(sym_violations)
-                        + ". Keep warm therapeutic tone. For crisis_si: MUST plain-name "
-                        "danger, escalate non-contingently (988/coach), stay present; "
-                        "MUST NOT validate a suicide plan's rationale, debate reality, "
-                        "or divert to activities. Adapt — do not recite templates."
+                        + ". Speak in first person as Nate only — never narrate "
+                        "Nate's eyes/voice/actions in third person, never stage "
+                        "directions. Keep warm therapeutic tone. For crisis_si: MUST "
+                        "plain-name danger, escalate non-contingently (988/coach), "
+                        "stay present; MUST NOT validate a suicide plan's rationale, "
+                        "debate reality, or divert to activities. Adapt — do not recite."
                     )
                     retry = await chat_completion_with_fallback(
                         [
