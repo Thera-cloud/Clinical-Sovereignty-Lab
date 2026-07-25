@@ -193,12 +193,14 @@ async def generate_live_stack_batch(
     results: List[Dict[str, Any]] = []
     async with pool.acquire() as conn:
         if scenario_ids:
+            # Explicit IDs include distractor stems: judge-track response may be
+            # degraded, but capability track still needs a live_stack baseline
+            # on the same clinical stem (e.g. AQ-1 / MQ-2).
             rows = await conn.fetch(
                 """SELECT id, scenario_id, section, client_says,
                           live_paraphrase_used, nate_response_live
                    FROM six_quotient_human_gold
                    WHERE scenario_id = ANY($1::text[])
-                     AND COALESCE(is_degraded_distractor, false) = false
                    ORDER BY section, scenario_id
                    LIMIT $2""",
                 list(scenario_ids),
