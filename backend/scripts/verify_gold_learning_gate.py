@@ -192,6 +192,28 @@ def check_offline() -> List[Tuple[str, bool, str]]:
             "night_school handoff",
         )
     )
+    policy_src = _POLICY.read_text(encoding="utf-8")
+    results.append(
+        (
+            "turn_class_hi_si_routing",
+            "classify_crisis_turn_class" in policy_src
+            and "TURN_CLASS_HI" in policy_src
+            and "turn_class" in policy_src,
+            "principal_review_crisis_policy",
+        )
+    )
+    voice_inj = _ROOT / "app" / "services" / "voice_pr_crisis_inject.py"
+    voice_pipe = (_ROOT / "app" / "services" / "twilio_grok_xtts_pipeline.py").read_text(
+        encoding="utf-8"
+    )
+    results.append(
+        (
+            "voice_pr_crisis_inject_wired",
+            voice_inj.is_file()
+            and "schedule_voice_pr_crisis_inject" in voice_pipe,
+            "voice mid-call inject",
+        )
+    )
     return results
 
 

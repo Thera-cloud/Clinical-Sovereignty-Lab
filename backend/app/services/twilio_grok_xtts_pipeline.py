@@ -1454,6 +1454,17 @@ async def run_twilio_grok_xtts_bridge(
                             )
                         except Exception as _si_v_e:
                             print(f"[VOICE-SI] skipped (non-fatal): {_si_v_e}")
+                        # QUANTUM-CRYSTAL-ARCH — Principal-Review crisis Guides (SI/HI turn_class)
+                        try:
+                            from app.services.voice_pr_crisis_inject import (
+                                schedule_voice_pr_crisis_inject,
+                            )
+                            schedule_voice_pr_crisis_inject(
+                                grok_ws, ctx["db_pool"], user_txt,
+                                username=session_username,
+                            )
+                        except Exception as _pr_v_e:
+                            print(f"[VOICE-PR-CRISIS] skipped (non-fatal): {_pr_v_e}")
                     if _bc_engine and not _bc_engine._enabled and _greeting_spoken:
                         _bc_engine.enable()
                         print("[BACKCHANNEL] enabled after first user speech")

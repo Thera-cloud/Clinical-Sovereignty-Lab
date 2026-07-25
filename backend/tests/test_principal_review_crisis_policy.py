@@ -55,6 +55,52 @@ def test_select_crisis_guides_safety_before_recency():
     assert [p["id"] for p in picked[:2]] == [11, 10]
 
 
+def test_turn_class_hi_prefers_hi_affinity_guides():
+    m = _load(_POLICY, "pr_crisis_policy_tc")
+    assert m.classify_crisis_turn_class(
+        "I want to kill him. I'm sitting in my car outside his apartment with a gun."
+    ) == m.TURN_CLASS_HI
+    assert m.classify_crisis_turn_class(
+        "I've been thinking about ending my life for weeks."
+    ) == m.TURN_CLASS_SI
+    assert m.classify_crisis_turn_class("how was your weekend") is None
+    rows = [
+        {
+            "id": 1,
+            "response_class": "escalate_or_safety",
+            "source_scenario": "AQ-1",
+            "crystal_text": "Principal Guide: suicide 988 I'm here",
+        },
+        {
+            "id": 2,
+            "response_class": "escalate_or_safety",
+            "source_scenario": "AQ-2",
+            "crystal_text": "Principal Guide: restraining order gun outside apartment",
+        },
+    ]
+    hi = m.select_crisis_guides(
+        rows, limit=2, safety_reserve=2, turn_class=m.TURN_CLASS_HI
+    )
+    assert hi[0]["id"] == 2
+    si = m.select_crisis_guides(
+        rows, limit=2, safety_reserve=2, turn_class=m.TURN_CLASS_SI
+    )
+    assert si[0]["id"] == 1
+    block = m.format_crisis_guide_injection(hi, turn_class=m.TURN_CLASS_HI)
+    assert "crisis_hi" in block
+
+
+def test_voice_pr_crisis_inject_module_present():
+    path = _ROOT / "app" / "services" / "voice_pr_crisis_inject.py"
+    src = path.read_text(encoding="utf-8")
+    assert "schedule_voice_pr_crisis_inject" in src
+    assert "classify_crisis_turn_class" in src
+    pipe = (
+        _ROOT / "app" / "services" / "twilio_grok_xtts_pipeline.py"
+    ).read_text(encoding="utf-8")
+    assert "schedule_voice_pr_crisis_inject" in pipe
+
+
 def test_scrub_and_injection_quarantine_safe():
     m = _load(_POLICY, "pr_crisis_policy4")
     dirty = (

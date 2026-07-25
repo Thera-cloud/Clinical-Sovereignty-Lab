@@ -84,10 +84,35 @@ CRISIS_CLASS_CONSTRAINTS: Dict[str, Any] = {
 }
 
 SAFETY_RESPONSE_CLASSES = frozenset({"escalate_or_safety"})
+TURN_CLASS_SI = "crisis_si"
+TURN_CLASS_HI = "crisis_hi"
 # Inject budget: digests + max guides (safety slots reserved first)
 CRISIS_INJECT_LIMIT = 3
 CRISIS_SAFETY_SLOT_RESERVE = 2
 CRISIS_GUIDE_CHARS = 600
+
+# Scenario / text affinity for HI vs SI slot fill (not stem emission into prompts).
+_HI_AFFINITY = re.compile(
+    r"(?:AQ-2|homicid|restraining|outside (?:his|her|their)|"
+    r"hurt (?:him|her|them|my)|talk me out of it|"
+    r"if the system won'?t protect|sitting in (?:my )?car|"
+    r"bought a gun|gun in (?:my |the )?nightstand)",
+    re.I,
+)
+_SI_AFFINITY = re.compile(
+    r"(?:AQ-1|AQ-G07|AQ-G08|suicid|end (?:my|a|their) life|"
+    r"want to die|kill myself|988)",
+    re.I,
+)
+_SI_USER = re.compile(
+    r"(?:"
+    r"\b(?:kill myself|suicide|suicidality|want to die|end it all|"
+    r"not want to (?:be )?alive|take my (?:own )?life)\b|"
+    r"\bend(?:ing)? (?:my |one'?s |their |your |a )?life\b|"
+    r"\b(?:i (?:did not|didn't) decide to live)\b"
+    r")",
+    re.I,
+)
 
 VIOLATION_PLAN_VALIDATION = "symbolic_crisis_plan_validation"
 VIOLATION_DEBATE = "symbolic_crisis_debate"
@@ -270,15 +295,64 @@ def annotate_teaching_delta(
     return "\n".join(parts)
 
 
+def classify_crisis_turn_class(user_text: str) -> Optional[str]:
+    """Return crisis_si / crisis_hi / None from caller language (lexicon + SI regex)."""
+    text = (user_text or "").strip()
+    if not text:
+        return None
+    vi: List[str] = []
+    si_lex: List[str] = []
+    try:
+        from app.services.suicide_ideation_lexicon import (
+            match_si_user_text,
+            match_violence_user_text,
+        )
+
+        vi = match_violence_user_text(text)
+        si_lex = match_si_user_text(text)
+    except Exception:
+        pass
+    si = bool(si_lex) or bool(_SI_USER.search(text))
+    if vi:
+        return TURN_CLASS_HI
+    if si:
+        return TURN_CLASS_SI
+    return None
+
+
+def _turn_class_affinity(row: Dict[str, Any], turn_class: str) -> int:
+    blob = " ".join(
+        [
+            str(row.get("source_scenario") or ""),
+            str(row.get("response_class") or ""),
+            str(row.get("crystal_text") or "")[:400],
+        ]
+    )
+    if turn_class == TURN_CLASS_HI:
+        if _HI_AFFINITY.search(blob):
+            return 2
+        if re.search(r"\bgun\b", blob, re.I) and not _SI_AFFINITY.search(blob):
+            return 1
+        return 0
+    # crisis_si default
+    if _SI_AFFINITY.search(blob):
+        return 2
+    return 0
+
+
 def select_crisis_guides(
     rows: Sequence[Dict[str, Any]],
     *,
     limit: int = CRISIS_INJECT_LIMIT,
     safety_reserve: int = CRISIS_SAFETY_SLOT_RESERVE,
+    turn_class: str = TURN_CLASS_SI,
 ) -> List[Dict[str, Any]]:
-    """Class-aware slot fill: escalate_or_safety first, recency only as tiebreaker."""
+    """Class-aware slot fill: escalate_or_safety first, turn_class affinity, then recency."""
     lim = max(1, min(int(limit), 6))
     reserve = max(0, min(int(safety_reserve), lim))
+    tc = (turn_class or TURN_CLASS_SI).strip().lower()
+    if tc not in (TURN_CLASS_SI, TURN_CLASS_HI):
+        tc = TURN_CLASS_SI
     enriched: List[Dict[str, Any]] = []
     for r in rows:
         d = dict(r)
@@ -287,9 +361,13 @@ def select_crisis_guides(
             rc = response_class_from_topics(d.get("topics"))
         d["response_class"] = rc
         d["_safety"] = 1 if is_safety_class(rc) else 0
+        d["_affinity"] = _turn_class_affinity(d, tc)
         enriched.append(d)
-    # Tiebreaker: higher id = newer promote
-    enriched.sort(key=lambda x: (x["_safety"], int(x.get("id") or 0)), reverse=True)
+    # Safety first, then HI/SI affinity, then newer id
+    enriched.sort(
+        key=lambda x: (x["_safety"], x["_affinity"], int(x.get("id") or 0)),
+        reverse=True,
+    )
     safety = [x for x in enriched if x["_safety"]]
     other = [x for x in enriched if not x["_safety"]]
     out: List[Dict[str, Any]] = []
@@ -308,12 +386,14 @@ async def fetch_principal_review_crisis_guides(
     db_pool,
     *,
     limit: int = CRISIS_INJECT_LIMIT,
-    turn_class: str = "crisis_si",
+    turn_class: str = TURN_CLASS_SI,
 ) -> List[Dict[str, Any]]:
-    """Deterministic crisis Guides — class match over newest-id ranking."""
-    del turn_class  # reserved for non-SI class routers
+    """Deterministic crisis Guides — turn_class + safety class over newest-id ranking."""
     if not db_pool:
         return []
+    tc = (turn_class or TURN_CLASS_SI).strip().lower()
+    if tc not in (TURN_CLASS_SI, TURN_CLASS_HI):
+        tc = TURN_CLASS_SI
     try:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(
@@ -341,6 +421,7 @@ async def fetch_principal_review_crisis_guides(
                 [dict(r) for r in rows],
                 limit=limit,
                 safety_reserve=CRISIS_SAFETY_SLOT_RESERVE,
+                turn_class=tc,
             )
             # Demonstrated: inject path reinforces recall (same contract as
             # recall_crystals_for_context — not storage alone).
@@ -364,17 +445,42 @@ async def fetch_principal_review_crisis_guides(
         return []
 
 
-def format_crisis_guide_injection(guides: Sequence[Dict[str, Any]]) -> str:
+def format_crisis_guide_injection(
+    guides: Sequence[Dict[str, Any]],
+    *,
+    turn_class: str = TURN_CLASS_SI,
+) -> str:
     """Budgeted prompt block: MUST digest + short Guide slices (not full 8k notes)."""
     if not guides:
         return ""
+    tc = (turn_class or TURN_CLASS_SI).strip().lower()
+    if tc == TURN_CLASS_HI:
+        class_line = "Class: crisis_hi (other-directed harm / homicide risk)."
+        must = (
+            "MUST: name the danger to the other person plainly ∧ non-contingent "
+            "escalation (coach / emergency when imminent) ∧ means-distance ∧ "
+            "present-tense presence with THIS caller."
+        )
+        must_not = (
+            "MUST NOT: debate whether the plan is justified; collude with "
+            "vigilante framing; lead with coping diversions before safety; "
+            "third-person self-narration."
+        )
+    else:
+        class_line = "Class: crisis_si. These are policy constraints, not optional style tips."
+        must = (
+            "MUST: plain naming of danger ∧ non-contingent escalation ∧ crisis resource "
+            "(988 / coach) ∧ present-tense presence."
+        )
+        must_not = (
+            "MUST NOT: validate suicide-plan rationale; debate the client out of stated "
+            "reality; lead with activity/coping diversions."
+        )
     chunks = [
         "## PRINCIPAL-REVIEW CRISIS POLICY (deterministic — not ranked recall)",
-        "Class: crisis_si. These are policy constraints, not optional style tips.",
-        "MUST: plain naming of danger ∧ non-contingent escalation ∧ crisis resource "
-        "(988 / coach) ∧ present-tense presence.",
-        "MUST NOT: validate suicide-plan rationale; debate the client out of stated "
-        "reality; lead with activity/coping diversions.",
+        class_line,
+        must,
+        must_not,
         "Adapt principles for THIS moment — never recite Guide text verbatim.",
     ]
     for i, g in enumerate(guides[:CRISIS_INJECT_LIMIT], 1):

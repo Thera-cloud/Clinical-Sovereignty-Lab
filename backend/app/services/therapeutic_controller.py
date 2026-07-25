@@ -986,23 +986,40 @@ async def prepare_therapeutic_context(
     # QUANTUM-CRYSTAL-ARCH — Principal-Review Guides by crisis class (not global pin)
     principal_crisis_block = ""
     _pr_guides = []
-    _crisis_class = (tmc_class or "").lower() in ("crisis", "suicide_ideation") or bool(
-        _USER_CRISIS_INTENT.search(user_text or "")
+    _pr_turn_class = None
+    try:
+        from app.services.principal_review_crisis_policy import (
+            classify_crisis_turn_class as _pr_classify_turn,
+        )
+
+        _pr_turn_class = _pr_classify_turn(user_text or "")
+    except Exception:
+        _pr_turn_class = None
+    _crisis_class = (
+        (tmc_class or "").lower() in ("crisis", "suicide_ideation")
+        or bool(_USER_CRISIS_INTENT.search(user_text or ""))
+        or bool(_pr_turn_class)
     )
     if _crisis_class and db_pool:
         try:
             from app.services.principal_review_crisis_policy import (
+                TURN_CLASS_SI,
                 fetch_principal_review_crisis_guides,
                 format_crisis_guide_injection,
             )
 
-            _pr_guides = await fetch_principal_review_crisis_guides(db_pool, limit=3)
-            principal_crisis_block = format_crisis_guide_injection(_pr_guides)
+            _tc = _pr_turn_class or TURN_CLASS_SI
+            _pr_guides = await fetch_principal_review_crisis_guides(
+                db_pool, limit=3, turn_class=_tc
+            )
+            principal_crisis_block = format_crisis_guide_injection(
+                _pr_guides, turn_class=_tc
+            )
             if principal_crisis_block:
                 _gids = [str(g.get("id") or "") for g in (_pr_guides or [])]
                 print(
                     f">>> [THERAPEUTIC-CTRL] principal_review crisis guides n="
-                    f"{len(_pr_guides)} ids={_gids}"
+                    f"{len(_pr_guides)} turn_class={_tc} ids={_gids}"
                 )
         except Exception as _pr_exc:
             logger.warning(
@@ -1068,6 +1085,7 @@ async def prepare_therapeutic_context(
             "state_symbol": _state_sym,
             "crisis_exempt": bool(_crisis_class),
             "crisis_class_fired": bool(_crisis_class),
+            "principal_review_turn_class": (_pr_turn_class or "")[:40],
             "principal_review_guide_ids": [
                 str(g.get("id") or "") for g in (_pr_guides or []) if g.get("id")
             ],
