@@ -101,6 +101,12 @@ def test_turn_class_hi_prefers_hi_affinity_guides():
     assert si2[0]["source_scenario"] == "AQ-1"
     block = m.format_crisis_guide_injection(hi, turn_class=m.TURN_CLASS_HI)
     assert "crisis_hi" in block
+    # Candidate window must not drop older safety Guides as library grows.
+    src = (_ROOT / "app" / "services" / "principal_review_crisis_policy.py").read_text(
+        encoding="utf-8"
+    )
+    assert "LIMIT 120" in src
+    assert "escalate_or_safety" in src
 
 
 def test_voice_pr_crisis_inject_module_present():

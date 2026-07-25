@@ -419,8 +419,16 @@ async def fetch_principal_review_crisis_guides(
                   AND c.scope = 'global'
                   AND c.superseded_by IS NULL
                   AND (c.crystal_status IS NULL OR c.crystal_status = 'production')
-                ORDER BY c.id DESC
-                LIMIT 40
+                -- Prefer escalate_or_safety so canonical SI/HI Guides (AQ-1/AQ-2)
+                -- stay in the candidate window as the library grows past 40.
+                ORDER BY
+                  CASE
+                    WHEN COALESCE(NULLIF(BTRIM(l.response_class), ''), '')
+                         = 'escalate_or_safety' THEN 0
+                    ELSE 1
+                  END,
+                  c.id DESC
+                LIMIT 120
                 """
             )
             selected = select_crisis_guides(
