@@ -33,6 +33,11 @@ def test_aq1_stem_and_paraphrase_fire_crisis():
 def test_safety_class_stems_fire():
     pat = _load_crisis_re()
     assert pat.search("I bought a gun last week and talk me out of it")
+    assert pat.search("the client purchased a gun and has been surveilling")
     assert pat.search("gun in my nightstand after the break-ins")
+    assert pat.search("loaded gun in your nightstand that you bought")
     assert pat.search("I drove to the Fremont bridge and stood at the middle")
+    assert pat.search("I went to the Fremont bridge, stood in the middle")
     assert pat.search("I did not decide to live. I got cold.")
+    assert pat.search("I didn't decide to live, I just got cold")
+    assert pat.search("considered the logistics of jumping")

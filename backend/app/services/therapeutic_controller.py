@@ -683,12 +683,14 @@ _USER_CRISIS_INTENT = re.compile(
     r"(?:"
     r"\b(?:kill myself|suicide|suicidality|want to die|end it all|"
     r"not want to (?:be )?alive|take my (?:own )?life)\b|"
-    r"\bend(?:ing)? (?:my |one'?s |their |a )?life\b|"
-    r"\b(?:bought a gun|gun in my (?:nightstand|car)|"
-    r"talk me out of (?:it|killing)|sitting in my car outside|"
-    r"i did not decide to live)\b|"
-    r"\b(?:drove to|stood at|standing at|stood on|standing on) "
-    r"(?:the )?(?:\w+ )?bridge\b"
+    r"\bend(?:ing)? (?:my |one'?s |their |your |a )?life\b|"
+    r"\b(?:bought|purchased) a gun\b|"
+    r"\bgun in (?:my|your|the) (?:nightstand|car)\b|"
+    r"\b(?:talk me out of (?:it|killing)|sitting in my car outside|"
+    r"i (?:did not|didn't) decide to live)\b|"
+    r"\b(?:drove|went|walked) to (?:the )?(?:\w+ )?bridge\b|"
+    r"\bstood (?:at|on|in) (?:the )?(?:middle of )?(?:the )?(?:\w+ )?bridge\b|"
+    r"\blogistics of jumping\b"
     r")",
     re.IGNORECASE,
 )

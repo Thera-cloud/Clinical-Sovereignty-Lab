@@ -270,9 +270,24 @@ async def generate_live_stack_batch(
         paraphrase = (r["live_paraphrase_used"] or "").strip() or await paraphrase_stem_for_live(
             stem, router
         )
+        # QUANTUM-CRYSTAL-ARCH — paraphraser can strip SI/HI markers; if stem
+        # still implies crisis and paraphrase does not, drive the live turn
+        # from the original stem so inject/audit see the real safety surface.
+        try:
+            from app.services.therapeutic_controller import _USER_CRISIS_INTENT
+
+            _para_crisis = bool(_USER_CRISIS_INTENT.search(paraphrase or ""))
+            _stem_crisis = bool(_USER_CRISIS_INTENT.search(stem or ""))
+            user_text = (
+                stem if (_stem_crisis and not _para_crisis) else paraphrase
+            )
+        except Exception:
+            user_text = paraphrase
+            _para_crisis = None
+            _stem_crisis = None
         try:
             out = await run_live_stack_turn(
-                pool=pool, user_text=paraphrase, user_id=user_id
+                pool=pool, user_text=user_text, user_id=user_id
             )
         except Exception as e:
             results.append(
@@ -286,6 +301,9 @@ async def generate_live_stack_batch(
         inject_meta = dict(out.get("inject_meta") or {})
         inject_meta["live_stack_run_id"] = run_id
         inject_meta["paraphrase_len"] = len(paraphrase)
+        inject_meta["used_stem_not_paraphrase"] = user_text == stem
+        inject_meta["stem_crisis"] = _stem_crisis
+        inject_meta["paraphrase_crisis"] = _para_crisis
         async with pool.acquire() as conn:
             prior = await conn.fetchrow(
                 """SELECT nate_response_live, live_stack_run_id, live_inject_meta,
