@@ -7,6 +7,7 @@ nate_response / harness_thin_inference scores.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import uuid
@@ -106,13 +107,29 @@ async def run_live_stack_turn(
         recent_narratives=None,
     )
     final = (audit or {}).get("response_text") or text or ""
+    inject_meta = {
+        "crisis_class_fired": bool(audit_meta.get("crisis_class_fired")),
+        "crisis_exempt": bool(audit_meta.get("crisis_exempt")),
+        "tmc_class": audit_meta.get("tmc_class"),
+        "guide_ids": list(audit_meta.get("principal_review_guide_ids") or []),
+        "guide_classes": list(audit_meta.get("principal_review_guide_classes") or []),
+        "guide_scenarios": list(
+            audit_meta.get("principal_review_guide_scenarios") or []
+        ),
+        "crisis_inject_block": (
+            "Principal-Review" in (enriched or "") or "MUST:" in (enriched or "")
+        ),
+        "audit_passed": bool((audit or {}).get("audit_passed", True)),
+        "violations": list((audit or {}).get("violations") or [])[:8],
+        "provider": provider,
+    }
     return {
         "text": final.strip()[:8000],
         "provider": provider,
         "audit_passed": bool((audit or {}).get("audit_passed", True)),
         "violations": (audit or {}).get("violations") or [],
-        "crisis_inject": "Principal-Review" in (enriched or "")
-        or "MUST:" in (enriched or ""),
+        "crisis_inject": bool(inject_meta["crisis_inject_block"]),
+        "inject_meta": inject_meta,
         "max_tokens": max_tok,
     }
 
@@ -266,19 +283,50 @@ async def generate_live_stack_batch(
         if not text:
             results.append({"scenario_id": r["scenario_id"], "status": "skip_empty_out"})
             continue
+        inject_meta = dict(out.get("inject_meta") or {})
+        inject_meta["live_stack_run_id"] = run_id
+        inject_meta["paraphrase_len"] = len(paraphrase)
         async with pool.acquire() as conn:
+            prior = await conn.fetchrow(
+                """SELECT nate_response_live, live_stack_run_id, live_inject_meta,
+                          live_primary_score, live_safety_veto, live_human_scored
+                   FROM six_quotient_human_gold WHERE id = $1""",
+                r["id"],
+            )
+            if prior and (prior["nate_response_live"] or "").strip():
+                inject_meta["pre_regenerate"] = {
+                    "run_id": prior["live_stack_run_id"],
+                    "text_chars": len(prior["nate_response_live"] or ""),
+                    "text_head": (prior["nate_response_live"] or "")[:400],
+                    "human_scored": bool(prior["live_human_scored"]),
+                    "primary": prior["live_primary_score"],
+                    "safety_veto": prior["live_safety_veto"],
+                    "prior_meta": prior["live_inject_meta"],
+                }
+            # Overwriting live text invalidates prior capability scores for that blind.
+            clear_scores = bool(prior and prior["live_human_scored"])
             await conn.execute(
                 """UPDATE six_quotient_human_gold
                    SET nate_response_live = $2,
                        live_response_provenance = 'live_stack_attempt',
                        live_generated_at = NOW(),
                        live_stack_run_id = $3,
-                       live_paraphrase_used = $4
+                       live_paraphrase_used = $4,
+                       live_inject_meta = $5::jsonb,
+                       live_primary_score = CASE WHEN $6 THEN NULL ELSE live_primary_score END,
+                       live_accuracy_score = CASE WHEN $6 THEN NULL ELSE live_accuracy_score END,
+                       live_naturalness_score = CASE WHEN $6 THEN NULL ELSE live_naturalness_score END,
+                       live_safety_veto = CASE WHEN $6 THEN NULL ELSE live_safety_veto END,
+                       live_notes = CASE WHEN $6 THEN NULL ELSE live_notes END,
+                       live_human_scored = CASE WHEN $6 THEN false ELSE live_human_scored END,
+                       live_scored_at = CASE WHEN $6 THEN NULL ELSE live_scored_at END
                    WHERE id = $1""",
                 r["id"],
                 text,
                 run_id,
                 paraphrase[:4000],
+                json.dumps(inject_meta),
+                clear_scores,
             )
         results.append(
             {
@@ -287,6 +335,8 @@ async def generate_live_stack_batch(
                 "chars": len(text),
                 "provider": out.get("provider"),
                 "audit_passed": out.get("audit_passed"),
+                "crisis_class_fired": inject_meta.get("crisis_class_fired"),
+                "guide_scenarios": inject_meta.get("guide_scenarios"),
                 "violations": (out.get("violations") or [])[:5],
             }
         )

@@ -48,6 +48,20 @@ def test_migration_279_live_scores():
     assert "live_human_scored" in mig
 
 
+def test_migration_280_live_inject_meta():
+    mig = (_ROOT / "migrations" / "280_live_inject_meta.sql").read_text(encoding="utf-8")
+    assert "live_inject_meta" in mig
+
+
+def test_crisis_intent_covers_end_a_life():
+    src = _CTRL.read_text(encoding="utf-8")
+    assert "end(?:ing)? (?:my |one'?s |their |a )?life" in src
+    assert "crisis_class_fired" in src
+    live = _LIVE.read_text(encoding="utf-8")
+    assert "live_inject_meta" in live
+    assert "inject_meta" in live
+
+
 def test_controller_rp_symbolic_law():
     src = _CTRL.read_text(encoding="utf-8")
     assert "symbolic_third_person_rp" in src

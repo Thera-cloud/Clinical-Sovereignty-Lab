@@ -676,10 +676,20 @@ def _apply_sensitive_bridge_decision(bridge_decision, fallback_register: Optiona
 
 from app.services.sovereign_standard_gate import therapeutic_module
 
-# QUANTUM-CRYSTAL-ARCH — user-text crisis when TMC mislabels (e.g. REST on SI)
+# QUANTUM-CRYSTAL-ARCH — user-text crisis when TMC mislabels (e.g. REST on SI).
+# Includes third-person / paraphrased SI ("end a life", "ending their life") and
+# high-risk HI / means stems that omit first-person "end my life".
 _USER_CRISIS_INTENT = re.compile(
-    r"\b(?:kill myself|suicide|end my life|want to die|end it all|"
-    r"not want to (?:be )?alive|take my (?:own )?life)\b",
+    r"(?:"
+    r"\b(?:kill myself|suicide|suicidality|want to die|end it all|"
+    r"not want to (?:be )?alive|take my (?:own )?life)\b|"
+    r"\bend(?:ing)? (?:my |one'?s |their |a )?life\b|"
+    r"\b(?:bought a gun|gun in my (?:nightstand|car)|"
+    r"talk me out of (?:it|killing)|sitting in my car outside|"
+    r"i did not decide to live)\b|"
+    r"\b(?:drove to|stood at|standing at|stood on|standing on) "
+    r"(?:the )?(?:\w+ )?bridge\b"
+    r")",
     re.IGNORECASE,
 )
 
@@ -973,6 +983,7 @@ async def prepare_therapeutic_context(
 
     # QUANTUM-CRYSTAL-ARCH — Principal-Review Guides by crisis class (not global pin)
     principal_crisis_block = ""
+    _pr_guides = []
     _crisis_class = (tmc_class or "").lower() in ("crisis", "suicide_ideation") or bool(
         _USER_CRISIS_INTENT.search(user_text or "")
     )
@@ -986,8 +997,10 @@ async def prepare_therapeutic_context(
             _pr_guides = await fetch_principal_review_crisis_guides(db_pool, limit=3)
             principal_crisis_block = format_crisis_guide_injection(_pr_guides)
             if principal_crisis_block:
+                _gids = [str(g.get("id") or "") for g in (_pr_guides or [])]
                 print(
-                    f">>> [THERAPEUTIC-CTRL] principal_review crisis guides n={len(_pr_guides)}"
+                    f">>> [THERAPEUTIC-CTRL] principal_review crisis guides n="
+                    f"{len(_pr_guides)} ids={_gids}"
                 )
         except Exception as _pr_exc:
             logger.warning(
@@ -1051,9 +1064,22 @@ async def prepare_therapeutic_context(
             "direct_action_request_kind": direct_action_kind,
             # QUANTUM-CRYSTAL-ARCH — Phase 5b Key + Surface gates
             "state_symbol": _state_sym,
-            "crisis_exempt": (tmc_class or "").lower()
-            in ("crisis", "suicide_ideation")
-            or bool(_USER_CRISIS_INTENT.search(user_text or "")),
+            "crisis_exempt": bool(_crisis_class),
+            "crisis_class_fired": bool(_crisis_class),
+            "principal_review_guide_ids": [
+                str(g.get("id") or "") for g in (_pr_guides or []) if g.get("id")
+            ],
+            "principal_review_guide_classes": [
+                str(
+                    g.get("response_class")
+                    or g.get("source_scenario")
+                    or ""
+                )[:80]
+                for g in (_pr_guides or [])
+            ],
+            "principal_review_guide_scenarios": [
+                str(g.get("source_scenario") or "")[:40] for g in (_pr_guides or [])
+            ],
             "requester_user_id": canonical_user_id or user_id,
         },
     }
@@ -1129,12 +1155,8 @@ async def light_symbolic_post_audit(
 
         _st = _asdict(_bss(user_text or "", audit_metadata=None))
         _distress = bool(_st.get("distress_present"))
-        _crisis_kw = bool(
-            re.search(
-                r"\b(?:kill myself|suicide|end my life|want to die|988)\b",
-                (user_text or ""),
-                re.I,
-            )
+        _crisis_kw = bool(_USER_CRISIS_INTENT.search(user_text or "")) or bool(
+            re.search(r"\b988\b", (user_text or ""), re.I)
         )
         tmc = "crisis" if _crisis_kw else ("distress" if _distress else "coaching")
         requester = (
