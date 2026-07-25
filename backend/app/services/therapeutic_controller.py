@@ -1363,7 +1363,10 @@ def _audit_violations(response_text: str, audit_metadata: dict, recent_narrative
         if phrase in rl:
             violations.append(f"banned_phrase:{phrase}")
 
-    if state == "activated":
+    # QUANTUM-CRYSTAL-ARCH — crisis_exempt: skip somatic invitation. Safety
+    # spines (988 / means-distance / plain naming) must not be replaced by
+    # transparent_fallback for missing body-scan language.
+    if state == "activated" and not bool(audit_metadata.get("crisis_exempt")):
         # Workers AI / common models often use heart, grounding, "sit with", "I sense" without
         # the original minimal list — expand markers to reduce transparent_fallback on good prose.
         somatic_markers = [

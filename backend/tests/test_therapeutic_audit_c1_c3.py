@@ -33,6 +33,27 @@ def base_audit_meta() -> dict:
 
 
 @pytest.mark.asyncio
+async def test_crisis_exempt_skips_somatic_invitation(base_audit_meta: dict) -> None:
+    """Activated + crisis must not fail solely for missing body-scan language."""
+    from app.services.therapeutic_controller import _audit_violations
+
+    meta = {
+        **base_audit_meta,
+        "autonomic_state": "activated",
+        "crisis_exempt": True,
+        "user_text_for_audit": "I've been thinking about ending my life.",
+    }
+    text = (
+        "I'm taking this seriously — this is danger. Stay with me. "
+        "Call or text 988 now, and we get your coach in the loop. "
+        "I'm here with you in this exact moment."
+    )
+    assert "missing_somatic_invitation" not in _audit_violations(text, meta, [])
+    meta_no = {**meta, "crisis_exempt": False}
+    assert "missing_somatic_invitation" in _audit_violations(text, meta_no, [])
+
+
+@pytest.mark.asyncio
 async def test_audit_failure_emits_transparent_message(base_audit_meta: dict) -> None:
     out = await audit_therapeutic_response(
         response_text="You'll get over this — many people feel that way.",
