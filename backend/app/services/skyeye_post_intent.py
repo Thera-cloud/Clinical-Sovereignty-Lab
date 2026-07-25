@@ -35,6 +35,7 @@ APPROVAL_PHRASES = (
     "ship it", "launch it", "make it happen", "post it", "send it",
     "execute it", "go ahead", "post it now", "send it now", "publish it",
     "publish it now", "approved to post", "approved to publish",
+    "publish", "post", "execute",
 )
 REJECTION_PHRASES = (
     "reject", "cancel", "don't do that", "nope", "hold", "wait",
@@ -95,10 +96,29 @@ def is_approval_execute(msg_lower: str) -> bool:
         m,
     ):
         return True
-    if re.search(r"\bretry\s+now\b|^(?:please\s+)?retry\b", m):
+    # retry now | retry to post | retry posting …
+    if re.search(
+        r"\bretry(?:\s+now|\s+to\s+(?:post|publish)|\s+posting)\b",
+        m,
+    ):
+        return True
+    if re.search(r"^(?:please\s+)?retry\b", m):
         return True
     if re.search(
         r"\b(?:go\s+ahead\s+and\s+)?(?:post|publish|send)\s+(?:it|this|that)(?:\s+now)?\b",
+        m,
+    ):
+        return True
+    # "publish the post", "post the draft", "post what we discussed"
+    if re.search(
+        r"\b(?:publish|post)\s+the\s+(?:post|draft|approved(?:\s+draft)?|imagery|image)\b",
+        m,
+    ):
+        return True
+    if re.search(r"\b(?:post|publish)\s+what\s+we\s+discussed\b", m):
+        return True
+    if re.search(
+        r"\b(?:publish|post)\b.{0,40}\b(?:imagery|illustration|image)\b",
         m,
     ):
         return True
@@ -302,13 +322,29 @@ def extract_draft_from_history(chat_history: List[Dict]) -> Optional[str]:
             "linkedin post:",
             "draft for linkedin:",
             "hybrid draft:",
+            "today's draft linkedin post",
+            "today’s draft linkedin post",
+            "here's a draft linkedin post",
+            "here’s a draft linkedin post",
+            "draft linkedin post",
         ):
             low = text.lower()
             if sep in low:
                 tail = text[low.rfind(sep) + len(sep) :].strip()
+                # Drop tone/meta lines before body
+                tail = re.sub(
+                    r"^(?:\*\*[^*]+\*\*|---|\(Tone:[^\)]*\)|\s)+",
+                    "",
+                    tail,
+                    flags=re.I,
+                )
                 # Strip trailing system-ish lines
-                cut = re.split(r"\n(?:Shall I|Ready to|\[SYSTEM|\*\*Next)", tail, maxsplit=1)
-                draft = cut[0].strip().strip('"')
+                cut = re.split(
+                    r"\n(?:Shall I|Ready to|\[SYSTEM|\*\*Next|What You’ll Get|ACTION SEQUENCE)",
+                    tail,
+                    maxsplit=1,
+                )
+                draft = cut[0].strip().strip('"').strip("-").strip()
                 if looks_like_publishable_post(draft) and not _STATUS_ESSAY_RE.search(draft):
                     return draft[:4000]
         # Long double-quoted body (common Nate draft format)
@@ -463,7 +499,11 @@ async def _resolve_publish_image(
     )
 
     existing = load_image_bytes_for_publish(prefer_latest=True)
-    if wants_image_generation(message) or (existing is None and "illustration" in message.lower()):
+    msg_l = (message or "").lower()
+    wants_img = wants_image_generation(message) or any(
+        k in msg_l for k in ("illustration", "imagery", "image", "graphic", "visual")
+    )
+    if wants_img and (existing is None or wants_image_generation(message)):
         prompt = extract_image_prompt(message)
         gen = await generate_linkedin_image_for_chat(content_text, image_prompt=prompt)
         if gen:

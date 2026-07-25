@@ -132,11 +132,24 @@ def test_approved_to_post_is_publish_queue():
     assert is_approval_execute("approved to post")
     assert is_approval_execute("retry now")
     assert is_approval_execute("I made some tweaks to the code. Retry now")
+    assert is_approval_execute("publish")
+    assert is_approval_execute(
+        "I would like you to retry to post what we discussed. "
+        "Publish the post and the imagery behind it"
+    )
     intent = resolve_post_intent("approved to post", [])
     assert intent.action == "publish_queue"
     assert intent.list_index is None
     intent2 = resolve_post_intent("post it now", [])
     assert intent2.action == "publish_queue"
+    intent3 = resolve_post_intent("publish", [])
+    assert intent3.action == "publish_queue"
+    intent4 = resolve_post_intent(
+        "I would like you to retry to post what we discussed. "
+        "Publish the post and the imagery behind it",
+        [],
+    )
+    assert intent4.action == "publish_queue"
 
 
 def test_extract_draft_skips_status_essays():
