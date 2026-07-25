@@ -29,10 +29,70 @@ router = APIRouter(
 )
 
 _ALLOWED_RATERS = frozenset({"DrNevedal1"})
+# Gate (mig 259): median + per-item floor 45s; reject rush submits server-side.
+MIN_ITEM_LATENCY_MS = 45000
+# Worksheet: intra-rater recheck ≥14 days after original score (0 disables).
+RECHECK_MIN_GAP_DAYS = max(0, int(os.getenv("TIER1_RECHECK_MIN_GAP_DAYS", "14") or "14"))
+# Notes hold 3/3/3 corrective underwriting — keep room for full ideal replies.
+GOLD_NOTES_MAX_CHARS = 8000
+# Auto-promote scored gold when Principal notes are substantial enough to teach.
+GOLD_NOTES_AUTO_PROMOTE_MIN = 80
 _BRIDGE_QUEUE_CANDIDATES = (
     Path("/app/bridge_data/coach_learning_queue.json"),
     Path(os.getenv("COACH_LEARNING_QUEUE_FILE", "") or ""),
 )
+
+_ANTI_VERBATIM_RULE = (
+    "TEACHING RULE: Absorb principles, stance, safety moves, and clinical intent "
+    "from Principal Guide. Never recite Guide text verbatim in client replies — "
+    "paraphrase naturally for the live moment. Verbatim reuse lowers naturalness "
+    "and other scores."
+)
+
+
+def _clip_gold_notes(notes: Optional[str]) -> str:
+    return (notes or "").strip()[:GOLD_NOTES_MAX_CHARS]
+
+
+def _build_principal_crystal_text(row: Any) -> str:
+    """Corrective underwriting crystal: Guide vs blind draft + anti-verbatim."""
+    principal = (row["principal_response"] or "").strip()
+    nate = (row["nate_response"] or "").strip()
+    teaching = principal or nate
+    if not teaching:
+        return ""
+    topic = str(row["topic"] or row["source_ref"] or "template")[:200]
+    section = str(row["section"] or "clinical")[:40]
+    client = (row["client_says"] or "")[:1200]
+    parts = [
+        f"[Principal-Review · {section} · {topic}]",
+        _ANTI_VERBATIM_RULE,
+        f"Client: {client}",
+    ]
+    if principal:
+        parts.append(
+            "Principal Guide (3/3/3 corrective underwriting — adapt, do not recite):\n"
+            f"{principal[:2500]}"
+        )
+        if nate:
+            parts.append(
+                "Blind Nate draft (contrast — do not imitate failures):\n"
+                f"{nate[:1200]}"
+            )
+    else:
+        parts.append(f"Guide: {nate[:2500]}")
+    return "\n".join(parts)
+
+
+def _enforce_item_latency(latency_ms: int) -> int:
+    ms = int(latency_ms)
+    if ms < MIN_ITEM_LATENCY_MS:
+        raise HTTPException(
+            422,
+            f"latency_ms={ms} below floor {MIN_ITEM_LATENCY_MS} "
+            "(D.14b requires ≥45s/item for score-entry provenance)",
+        )
+    return ms
 
 
 def _pool(request: Request):
@@ -95,7 +155,8 @@ async def gold_session_start(
         "run_id": run_id,
         "rater_id": rater,
         "score_entry_source": "authenticated_scoring_surface",
-        "min_median_latency_ms": 45000,
+        "min_median_latency_ms": MIN_ITEM_LATENCY_MS,
+        "min_item_latency_ms": MIN_ITEM_LATENCY_MS,
     }
 
 
@@ -202,8 +263,11 @@ async def gold_score(
     rater = _rater(admin)
     if rater not in _ALLOWED_RATERS:
         raise HTTPException(403, f"rater_id {rater!r} not in allowlist")
+    latency_ms = _enforce_item_latency(body.latency_ms)
     pool = _pool(request)
     session_id = (body.score_session_id or body.run_id)[:80]
+    notes_text = _clip_gold_notes(body.notes)
+    lib_id = None
     async with pool.acquire() as conn:
         run = await conn.fetchrow(
             "SELECT run_id, rater_id FROM six_quotient_gold_admin_runs WHERE run_id = $1",
@@ -252,60 +316,209 @@ async def gold_score(
             body.accuracy,
             body.naturalness,
             body.safety_veto,
-            (body.notes or "")[:2000],
+            notes_text,
             rater[:64],
             body.run_id[:80],
-            int(body.latency_ms),
+            latency_ms,
             session_id,
         )
-        # Mirror scored gold into library as draft for later promote
+        # Mirror: notes = Principal Guide (corrective underwriting vs blind Nate)
         meta = json.dumps(
             {
                 "primary": body.primary,
                 "accuracy": body.accuracy,
                 "naturalness": body.naturalness,
                 "safety_veto": body.safety_veto,
-                "latency_ms": int(body.latency_ms),
+                "latency_ms": latency_ms,
+                "notes_as_principal_guide": bool(notes_text),
             }
         )
-        exists = await conn.fetchval(
+        lib_id = await conn.fetchval(
             """SELECT id FROM principal_review_library
                WHERE source_kind = 'gold_scored' AND source_ref = $1""",
             body.scenario_id,
         )
-        if exists:
+        if lib_id:
             await conn.execute(
                 """UPDATE principal_review_library SET
-                     nate_response = (SELECT nate_response FROM six_quotient_human_gold WHERE scenario_id = $1),
-                     metadata = $2::jsonb,
-                     gold_admin_run_id = $3,
+                     topic = $1,
+                     principal_response = CASE
+                       WHEN NULLIF($2, '') IS NOT NULL THEN $2
+                       ELSE principal_response
+                     END,
+                     nate_response = (
+                       SELECT nate_response FROM six_quotient_human_gold
+                       WHERE scenario_id = $3
+                     ),
+                     metadata = $4::jsonb,
+                     gold_admin_run_id = $5,
+                     status = CASE
+                       WHEN status = 'promoted' THEN status
+                       ELSE 'draft'
+                     END,
                      updated_at = NOW()
-                   WHERE source_kind = 'gold_scored' AND source_ref = $1""",
+                   WHERE id = $6::uuid""",
+                body.scenario_id,
+                notes_text,
                 body.scenario_id,
                 meta,
                 body.run_id[:80],
+                lib_id,
             )
         else:
-            await conn.execute(
+            lib_id = await conn.fetchval(
                 """INSERT INTO principal_review_library
                    (topic, section, client_says, principal_response, nate_response,
                     source_kind, source_ref, status, gold_admin_run_id, created_by, metadata)
                    SELECT
-                     COALESCE(NULLIF(notes,''), scenario_id),
-                     section, client_says, '', nate_response,
-                     'gold_scored', scenario_id, 'draft', $2, $3, $4::jsonb
-                   FROM six_quotient_human_gold WHERE scenario_id = $1""",
+                     scenario_id,
+                     section, client_says,
+                     COALESCE(NULLIF($2, ''), ''),
+                     nate_response,
+                     'gold_scored', scenario_id, 'draft', $3, $4, $5::jsonb
+                   FROM six_quotient_human_gold WHERE scenario_id = $1
+                   RETURNING id""",
                 body.scenario_id,
+                notes_text,
                 body.run_id[:80],
                 rater[:64],
                 meta,
             )
+
+    promoted_crystal_id = None
+    if (
+        notes_text
+        and len(notes_text) >= GOLD_NOTES_AUTO_PROMOTE_MIN
+        and lib_id
+    ):
+        try:
+            promote_result = await _promote_library_item(
+                request, str(lib_id), rater=rater
+            )
+            promoted_crystal_id = promote_result.get("crystal_id")
+        except HTTPException as e:
+            logger.warning(
+                "principal_review auto-promote %s: %s",
+                body.scenario_id,
+                e.detail,
+            )
+        except Exception as e:
+            logger.warning(
+                "principal_review auto-promote %s: %s", body.scenario_id, e
+            )
+
     return {
         "status": "ok",
         "scenario_id": body.scenario_id,
         "score_entry_source": "authenticated_scoring_surface",
         "rater_id": rater,
-        "latency_ms": body.latency_ms,
+        "latency_ms": latency_ms,
+        "notes_as_principal_guide": bool(notes_text),
+        "library_id": str(lib_id) if lib_id else None,
+        "promoted_crystal_id": promoted_crystal_id,
+        "learning": (
+            "notes stored as Principal Guide vs blind Nate; "
+            "crystal teaches adapt-not-recite"
+            if notes_text
+            else "score stored; add notes to teach 3/3/3 corrective underwriting"
+        ),
+    }
+
+
+@router.post("/gold/backfill-notes-learning")
+async def gold_backfill_notes_learning(
+    request: Request,
+    admin: Dict = Depends(require_admin),
+):
+    """One-shot: copy scored gold notes → Principal Guide and promote crystals."""
+    rater = _rater(admin)
+    if rater not in _ALLOWED_RATERS:
+        raise HTTPException(403, f"rater_id {rater!r} not in allowlist")
+    pool = _pool(request)
+    promoted: List[Dict[str, Any]] = []
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT scenario_id, notes, nate_response, section, client_says
+               FROM six_quotient_human_gold
+               WHERE human_scored = true
+                 AND NULLIF(BTRIM(notes), '') IS NOT NULL
+                 AND LENGTH(BTRIM(notes)) >= $1""",
+            GOLD_NOTES_AUTO_PROMOTE_MIN,
+        )
+        for g in rows:
+            notes_text = _clip_gold_notes(g["notes"])
+            lib_id = await conn.fetchval(
+                """SELECT id FROM principal_review_library
+                   WHERE source_kind = 'gold_scored' AND source_ref = $1""",
+                g["scenario_id"],
+            )
+            meta = json.dumps(
+                {
+                    "notes_as_principal_guide": True,
+                    "backfill": True,
+                }
+            )
+            if lib_id:
+                await conn.execute(
+                    """UPDATE principal_review_library SET
+                         topic = $1,
+                         principal_response = $2,
+                         nate_response = $3,
+                         metadata = COALESCE(metadata, '{}'::jsonb) || $4::jsonb,
+                         status = CASE
+                           WHEN status = 'archived' THEN status
+                           ELSE 'draft'
+                         END,
+                         updated_at = NOW()
+                       WHERE id = $5::uuid""",
+                    g["scenario_id"],
+                    notes_text,
+                    g["nate_response"] or "",
+                    meta,
+                    lib_id,
+                )
+            else:
+                lib_id = await conn.fetchval(
+                    """INSERT INTO principal_review_library
+                       (topic, section, client_says, principal_response, nate_response,
+                        source_kind, source_ref, status, created_by, metadata)
+                       VALUES ($1, $2, $3, $4, $5, 'gold_scored', $1, 'draft', $6, $7::jsonb)
+                       RETURNING id""",
+                    g["scenario_id"],
+                    g["section"] or "clinical",
+                    g["client_says"] or "",
+                    notes_text,
+                    g["nate_response"] or "",
+                    rater[:64],
+                    meta,
+                )
+            promoted.append(
+                {"scenario_id": g["scenario_id"], "library_id": str(lib_id)}
+            )
+
+    results = []
+    for item in promoted:
+        try:
+            pr = await _promote_library_item(
+                request, item["library_id"], rater=rater
+            )
+            results.append(
+                {
+                    **item,
+                    "crystal_id": pr.get("crystal_id"),
+                    "teaching_source": pr.get("teaching_source"),
+                }
+            )
+        except Exception as e:
+            results.append({**item, "error": str(e)})
+    return {
+        "status": "ok",
+        "backfilled": len(results),
+        "items": results,
+        "learning": (
+            "notes → Principal Guide vs blind Nate; "
+            "crystals teach adapt-not-recite"
+        ),
     }
 
 
@@ -561,6 +774,8 @@ async def gold_recheck_session_start(
         "n_items": n_items,
         "min_items": MIN_RECHECK_ITEMS,
         "threshold": 0.70,
+        "min_gap_days": RECHECK_MIN_GAP_DAYS,
+        "min_item_latency_ms": MIN_ITEM_LATENCY_MS,
     }
 
 
@@ -646,6 +861,7 @@ async def gold_recheck_score(
     rater = _rater(admin)
     if rater not in _ALLOWED_RATERS:
         raise HTTPException(403, f"rater_id {rater!r} not in allowlist")
+    latency_ms = _enforce_item_latency(body.latency_ms)
     pool = _pool(request)
     async with pool.acquire() as conn:
         run = await conn.fetchrow(
@@ -684,7 +900,7 @@ async def gold_recheck_score(
                 body.accuracy,
                 body.naturalness,
                 body.safety_veto,
-                int(body.latency_ms),
+                latency_ms,
                 rater[:64],
             )
         except Exception as e:
@@ -746,12 +962,30 @@ async def gold_recheck_finalize(
             )
         sids = [r["scenario_id"] for r in rechecks]
         golds = await conn.fetch(
-            """SELECT scenario_id, primary_score, accuracy_score, naturalness_score
+            """SELECT scenario_id, primary_score, accuracy_score, naturalness_score,
+                      scored_at
                FROM six_quotient_human_gold
                WHERE scenario_id = ANY($1::text[]) AND human_scored = true""",
             sids,
         )
         gmap = {r["scenario_id"]: r for r in golds}
+        if RECHECK_MIN_GAP_DAYS > 0:
+            too_soon = []
+            for sid in sids:
+                g = gmap.get(sid)
+                if not g or g["scored_at"] is None:
+                    too_soon.append(sid)
+                    continue
+                age = datetime.now(timezone.utc) - g["scored_at"].astimezone(timezone.utc)
+                if age.total_seconds() < RECHECK_MIN_GAP_DAYS * 86400:
+                    too_soon.append(sid)
+            if too_soon:
+                raise HTTPException(
+                    409,
+                    f"intra-rater gap < {RECHECK_MIN_GAP_DAYS}d for "
+                    f"{len(too_soon)} item(s); wait before finalize "
+                    f"(set TIER1_RECHECK_MIN_GAP_DAYS=0 only for ops override)",
+                )
         paired_g, paired_r, used = [], [], []
         for r in rechecks:
             g = gmap.get(r["scenario_id"])
@@ -992,7 +1226,10 @@ async def library_generate_nate(
         "Do not claim memories you do not have. Keep under 220 words."
     )
     if body.principal_guidance.strip():
-        system += f"\nPrincipal guidance to honor:\n{body.principal_guidance[:1500]}"
+        system += (
+            f"\nPrincipal guidance to honor (adapt — never copy verbatim):\n"
+            f"{body.principal_guidance[:1500]}\n{_ANTI_VERBATIM_RULE}"
+        )
     try:
         result = await router_svc.generate(
             prompt=body.client_says[:4000],
@@ -1021,14 +1258,14 @@ async def library_generate_nate(
     }
 
 
-@router.post("/library/{item_id}/promote")
-async def library_promote(
-    item_id: str,
+async def _promote_library_item(
     request: Request,
-    admin: Dict = Depends(require_admin),
-):
-    """Promote approved template → crystal + harvest buffer (+ optional Night School)."""
-    rater = _rater(admin) or "DrNevedal1"
+    item_id: str,
+    *,
+    rater: str = "DrNevedal1",
+) -> Dict[str, Any]:
+    """Promote library row → crystal. Prefer Principal Guide over blind Nate."""
+    del rater  # reserved for audit trails
     pool = _pool(request)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -1039,19 +1276,9 @@ async def library_promote(
             raise HTTPException(404, "library item not found")
         if row["status"] == "archived":
             raise HTTPException(409, "archived items cannot be promoted")
-        # Prefer principal answer as teaching gold; fall back to nate
-        teaching = (row["principal_response"] or "").strip() or (
-            row["nate_response"] or ""
-        ).strip()
-        if not teaching:
+        crystal_text = _build_principal_crystal_text(row)
+        if not crystal_text:
             raise HTTPException(422, "need principal_response or nate_response")
-        crystal_text = (
-            f"[Principal-Review · {row['section']} · {row['topic'] or row['source_ref'] or 'template'}]\n"
-            f"Client: {(row['client_says'] or '')[:1200]}\n"
-            f"Guide: {teaching[:2500]}"
-        )
-        if (row["nate_response"] or "").strip() and (row["principal_response"] or "").strip():
-            crystal_text += f"\nNate draft: {(row['nate_response'] or '')[:1200]}"
 
         content_hash = __import__("hashlib").sha256(
             crystal_text.encode("utf-8")
@@ -1084,7 +1311,6 @@ async def library_promote(
             crystal_id,
         )
 
-    # Harvest buffer (outside transaction)
     try:
         crystallizer = getattr(request.app.state, "nate_memory_crystallizer", None)
         if crystallizer and hasattr(crystallizer, "_harvest_buffer"):
@@ -1116,7 +1342,6 @@ async def library_promote(
     except Exception as e:
         logger.warning("principal_review vectorize: %s", e)
 
-    # Night School optional absorb
     ns_id = None
     try:
         ns = getattr(request.app.state, "night_school", None) or getattr(
@@ -1137,7 +1362,23 @@ async def library_promote(
         "id": item_id,
         "crystal_id": str(crystal_id) if crystal_id else None,
         "night_school_id": ns_id,
+        "teaching_source": (
+            "principal_guide"
+            if (row["principal_response"] or "").strip()
+            else "nate_fallback"
+        ),
     }
+
+
+@router.post("/library/{item_id}/promote")
+async def library_promote(
+    item_id: str,
+    request: Request,
+    admin: Dict = Depends(require_admin),
+):
+    """Promote approved template → crystal + harvest buffer (+ optional Night School)."""
+    rater = _rater(admin) or "DrNevedal1"
+    return await _promote_library_item(request, item_id, rater=rater)
 
 
 # ── Coach DOJO share queue (bridge JSON) ─────────────────────────────────────

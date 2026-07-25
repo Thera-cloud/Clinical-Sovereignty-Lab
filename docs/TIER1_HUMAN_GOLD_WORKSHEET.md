@@ -160,19 +160,33 @@ Then: `clinical_tier1_competence_gate_check.py` → GREEN only if hard gates + b
 ## Ops order (do not reverse)
 
 ```bash
-# 1) Migrate
+# 1) Migrate (259 provenance + 274 Principal-Review + 275 recheck scores)
 psql … -f backend/migrations/259_tier1_gold_kappa_response_provenance.sql
+psql … -f backend/migrations/274_principal_review_library.sql
+psql … -f backend/migrations/275_tier1_gold_recheck_scores.sql
 
 # 2) Stem provenance sync + clinician revise 26 G-stems (human)
 docker compose exec backend python /app/scripts/seed_human_gold_worksheet.py
 
 # 3) Genuine responses, then degraded distractors, then lock pairs
+#    Reject DRY-RUN placeholders; use --replace-placeholders --infer-missing if needed
 docker compose exec backend python /app/scripts/fill_human_gold_nate_responses.py --infer-missing
 docker compose exec backend python /app/scripts/seed_gold_degraded_distractors.py
 docker compose exec backend python /app/scripts/freeze_gold_response_pairs.py
 
-# 4) Register gold_admin_run_id; score via authenticated surface only
-# 5) Reliability recheck; compute κ with pre-registered method; insert evidence
-# 6) Gate check
+# 4) Score via Principal-Review (command.sovereignsanctuary.net → Principal-Review)
+#    API: POST /api/admin/principal-review/gold/session/start → /gold/items → /gold/score
+#    Server + UI enforce ≥45s/item (score_entry_latency_ms); rater allowlist DrNevedal1
+
+# 5) Intra-rater recheck (≥15 items, ≥14 days after original scored_at)
+#    UI tabs Recheck → Finalize → writes six_quotient_gold_rater_reliability
+#    Override gap only if needed: TIER1_RECHECK_MIN_GAP_DAYS=0
+
+# 6) κ evidence (pre-registered method quadratic_weighted_per_dimension_mean)
+#    UI Evidence tab: POST /gold/kappa/compute  OR
+docker compose exec backend python /app/scripts/compute_tier1_gold_kappa.py
+#    → six_quotient_judge_kappa_evidence
+
+# 7) Gate check
 docker compose exec backend python /app/scripts/clinical_tier1_competence_gate_check.py
 ```

@@ -50,6 +50,7 @@ def test_principal_review_routes_decorated():
         "/gold/progress",
         "/gold/items",
         "/gold/score",
+        "/gold/backfill-notes-learning",
         "/gold/kappa/latest",
         "/gold/kappa/ingest",
         "/gold/kappa/compute",
@@ -70,6 +71,14 @@ def test_principal_review_routes_decorated():
 
 def test_allowed_raters_include_drnevedal1():
     assert '"DrNevedal1"' in _src()
+
+
+def test_latency_floor_and_recheck_gap_in_source():
+    src = _src()
+    assert "MIN_ITEM_LATENCY_MS = 45000" in src
+    assert "_enforce_item_latency" in src
+    assert "RECHECK_MIN_GAP_DAYS" in src
+    assert "TIER1_RECHECK_MIN_GAP_DAYS" in src
 
 
 def test_migration_274_present():
@@ -94,3 +103,24 @@ def test_dashboard_page_present():
     html = page.read_text(encoding="utf-8")
     assert "Principal-Review" in html
     assert "/api/admin/principal-review" in html
+    assert "learning corrective" in html
+
+
+def test_notes_are_principal_guide_underwriting():
+    """Gold notes must become Principal Guide, not empty principal_response."""
+    src = _src()
+    assert "notes_as_principal_guide" in src
+    assert "GOLD_NOTES_AUTO_PROMOTE_MIN" in src
+    assert "_build_principal_crystal_text" in src
+    assert "adapt, do not recite" in src
+    assert "Never recite Guide text verbatim" in src
+    assert "Blind Nate draft (contrast" in src
+    # Must not re-insert empty principal with notes dumped only into topic
+    assert "COALESCE(NULLIF(notes,''), scenario_id)" not in src
+    assert "principal_response = CASE" in src
+
+
+def test_anti_verbatim_in_generate_nate():
+    src = _src()
+    assert "adapt — never copy verbatim" in src
+    assert "_ANTI_VERBATIM_RULE" in src

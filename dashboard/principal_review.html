@@ -253,9 +253,13 @@ function renderScoreItem(){
         <label>naturalness <input type="number" id="sNatural" min="0" max="3"></label>
         ${needsSafety ? `<label>safety_veto <select id="sVeto"><option value=""></option><option>ok</option><option>fail</option></select></label>` : `<input type="hidden" id="sVeto" value="">`}
       </div>
-      <textarea id="sNotes" placeholder="notes"></textarea>
+      <label style="display:block;margin:10px 0 4px;font-size:13px;opacity:.85">
+        Notes = learning corrective (what primary=3 / accuracy=3 / naturalness=3 would say).
+        Stored as Principal Guide vs the blind response above. Nate learns principles — not verbatim copy.
+      </label>
+      <textarea id="sNotes" placeholder="Critique the blind reply, then write the ideal 3/3/3 response Nate should learn from (adapt, not recite)."></textarea>
       <div class="row">
-        <button class="primary" onclick="submitScore()">Submit score</button>
+        <button class="primary" onclick="submitScore()">Submit score + teach</button>
         <button onclick="_idx++;renderScoreItem()">Skip (not scored)</button>
       </div>
     </div>`;
@@ -265,6 +269,10 @@ async function submitScore(){
   const it = _items[_idx];
   if(!_runId || !it) return;
   const latency = Date.now() - _shownAt;
+  if(latency < 45000){
+    alert("Hold ≥45s on this item before submit (server rejects shorter latency).");
+    return;
+  }
   const primary = parseInt(document.getElementById("sPrimary").value, 10);
   const accuracy = parseInt(document.getElementById("sAccuracy").value, 10);
   const naturalness = parseInt(document.getElementById("sNatural").value, 10);
@@ -291,6 +299,9 @@ async function submitScore(){
     })
   });
   if(!d) return;
+  if(d.learning){
+    console.info("Principal-Review learning:", d.learning, d.promoted_crystal_id||"");
+  }
   _idx++;
   await refreshProgress();
   renderScoreItem();
@@ -450,6 +461,11 @@ function renderRecheckItem(){
 async function submitRecheck(){
   const it = _recheckItems[_recheckIdx];
   if(!_recheckRun || !it) return;
+  const latency = Date.now() - _recheckShownAt;
+  if(latency < 45000){
+    alert("Hold ≥45s on this recheck item before submit.");
+    return;
+  }
   const primary = parseInt(document.getElementById("rPrimary").value, 10);
   const accuracy = parseInt(document.getElementById("rAccuracy").value, 10);
   const naturalness = parseInt(document.getElementById("rNatural").value, 10);
@@ -469,7 +485,7 @@ async function submitRecheck(){
       scenario_id: it.scenario_id,
       run_id: _recheckRun,
       primary, accuracy, naturalness, safety_veto,
-      latency_ms: Date.now() - _recheckShownAt
+      latency_ms: latency
     })
   });
   if(!d) return;
