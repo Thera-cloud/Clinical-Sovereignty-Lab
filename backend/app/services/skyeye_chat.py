@@ -2751,26 +2751,29 @@ RULES:
     async def _handle_command_protocol(self, message: str) -> Optional[Dict[str, Any]]:
         """Execute approval/rejection/direct-post commands; return verification payload."""
         from app.services.skyeye_post_intent import (
+            APPROVAL_PHRASES,
             execute_post_intent,
+            is_approval_execute,
             phrase_in_message,
             resolve_post_intent,
         )
 
         msg_lower = message.lower().strip()
-        approval_phrases = ["approved", "go for it", "do it", "yes", "proceed",
-                            "looks good", "ship it", "launch it", "make it happen",
-                            "post it", "send it", "execute it", "go ahead"]
+        approval_phrases = list(APPROVAL_PHRASES)
         rejection_phrases = ["reject", "cancel", "don't do that", "nope", "hold", "wait"]
 
-        def _matches_any(phrases: tuple) -> bool:
+        def _matches_any(phrases) -> bool:
             for phrase in phrases:
                 if phrase_in_message(phrase, msg_lower):
                     return True
             return False
 
         try:
-            history = await self.get_chat_history(limit=12)
+            history = await self.get_chat_history(limit=30)
             intent = resolve_post_intent(message, history)
+            # Retry / "approved to post" must not fall through to status essays
+            if intent.action == "none" and is_approval_execute(msg_lower):
+                intent = resolve_post_intent("post it now", history)
             if intent.action in ("publish_inline", "publish_queue"):
                 post_result = await execute_post_intent(self, intent, message)
                 if post_result:

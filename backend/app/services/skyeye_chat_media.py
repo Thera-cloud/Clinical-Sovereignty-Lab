@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 import re
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 _MAX_IMAGE_BYTES = 5 * 1024 * 1024
 _ATTACH_TTL_S = 6 * 3600
 _RECENT: Dict[str, Dict[str, Any]] = {}
+_DISK_INDEX_LOADED = False
 
 _IMAGE_GEN_RE = re.compile(
     r"\b(?:generate|create|make|draw|render)\b.{0,90}\b(?:image|illustration|graphic|visual|artwork)\b"
@@ -36,14 +38,86 @@ def _purge_stale() -> None:
     dead = [k for k, v in _RECENT.items() if now - float(v.get("ts", 0)) > _ATTACH_TTL_S]
     for k in dead:
         _RECENT.pop(k, None)
+        try:
+            meta = _local_media_dir() / f"{k}.meta.json"
+            if meta.is_file():
+                meta.unlink()
+        except Exception:
+            pass
+
+
+def _write_disk_meta(rec: Dict[str, Any]) -> None:
+    """Sidecar index so attachments survive backend restarts."""
+    try:
+        att_id = rec["id"]
+        meta_path = _local_media_dir() / f"{att_id}.meta.json"
+        payload = {
+            "id": att_id,
+            "mime_type": rec.get("mime_type", "image/jpeg"),
+            "description": rec.get("description", ""),
+            "media_url": rec.get("media_url", ""),
+            "local_path": rec.get("local_path", ""),
+            "storage_kind": rec.get("storage_kind", "local"),
+            "source": rec.get("source", "upload"),
+            "ts": rec.get("ts", time.time()),
+        }
+        meta_path.write_text(json.dumps(payload), encoding="utf-8")
+    except Exception as e:
+        logger.warning("SkyEye chat media meta write failed: %s", e)
+
+
+def _load_disk_index() -> None:
+    global _DISK_INDEX_LOADED
+    if _DISK_INDEX_LOADED:
+        return
+    _DISK_INDEX_LOADED = True
+    try:
+        root = _local_media_dir()
+        now = time.time()
+        for meta_path in root.glob("*.meta.json"):
+            try:
+                payload = json.loads(meta_path.read_text(encoding="utf-8"))
+                name = meta_path.name
+                fallback_id = (
+                    name[: -len(".meta.json")]
+                    if name.endswith(".meta.json")
+                    else meta_path.stem
+                )
+                att_id = str(payload.get("id") or fallback_id)
+                ts = float(payload.get("ts", 0))
+                if now - ts > _ATTACH_TTL_S:
+                    meta_path.unlink(missing_ok=True)
+                    continue
+                local_path = payload.get("local_path") or ""
+                if not local_path or not Path(local_path).is_file():
+                    # Recover path from sibling image file
+                    for ext in ("jpg", "png", "webp"):
+                        cand = root / f"{att_id}.{ext}"
+                        if cand.is_file():
+                            local_path = str(cand)
+                            break
+                if not local_path or not Path(local_path).is_file():
+                    continue
+                if att_id not in _RECENT:
+                    _RECENT[att_id] = {
+                        **payload,
+                        "local_path": local_path,
+                        "bytes": None,  # lazy-load from disk
+                    }
+            except Exception:
+                continue
+    except Exception as e:
+        logger.warning("SkyEye chat media disk index load failed: %s", e)
 
 
 def get_attachment(attachment_id: str) -> Optional[Dict[str, Any]]:
+    _load_disk_index()
     _purge_stale()
     return _RECENT.get(attachment_id)
 
 
 def latest_attachment() -> Optional[Dict[str, Any]]:
+    _load_disk_index()
     _purge_stale()
     if not _RECENT:
         return None
@@ -134,6 +208,7 @@ def store_attachment_bytes(
         "ts": time.time(),
     }
     _RECENT[att_id] = rec
+    _write_disk_meta(rec)
     return {
         "id": att_id,
         "description": rec["description"],

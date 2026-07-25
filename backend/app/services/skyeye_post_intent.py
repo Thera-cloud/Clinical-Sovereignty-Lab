@@ -33,7 +33,8 @@ PLATFORM_ALIASES = {
 APPROVAL_PHRASES = (
     "approved", "go for it", "do it", "yes", "proceed", "looks good",
     "ship it", "launch it", "make it happen", "post it", "send it",
-    "execute it", "go ahead",
+    "execute it", "go ahead", "post it now", "send it now", "publish it",
+    "publish it now", "approved to post", "approved to publish",
 )
 REJECTION_PHRASES = (
     "reject", "cancel", "don't do that", "nope", "hold", "wait",
@@ -62,8 +63,15 @@ def phrase_in_message(phrase: str, msg_lower: str) -> bool:
 
 
 def has_publish_intent(msg_lower: str) -> bool:
-    if any(v in msg_lower for v in PUBLISH_VERBS):
+    if is_approval_execute(msg_lower):
         return True
+    # Word-bound multi-word verbs first; single tokens need boundaries
+    for v in PUBLISH_VERBS:
+        if " " in v:
+            if v in msg_lower:
+                return True
+        elif re.search(rf"\b{re.escape(v)}\b", msg_lower):
+            return True
     if re.search(r"\bpost\s*#\s*\d+\b", msg_lower):
         return True
     if re.search(r"\bpost\s+(?:number|item|no\.?)\s*\d+\b", msg_lower):
@@ -75,7 +83,31 @@ def has_publish_intent(msg_lower: str) -> bool:
     return False
 
 
+def is_approval_execute(msg_lower: str) -> bool:
+    """Short go-ahead / retry phrases that should publish (queue or chat draft)."""
+    m = (msg_lower or "").lower().strip().rstrip(".!").strip()
+    if not m:
+        return False
+    if m in APPROVAL_PHRASES:
+        return True
+    if re.search(
+        r"\bapproved\s+to\s+(?:post|publish|send|go)(?:\s+it)?\b",
+        m,
+    ):
+        return True
+    if re.search(r"\bretry\s+now\b|^(?:please\s+)?retry\b", m):
+        return True
+    if re.search(
+        r"\b(?:go\s+ahead\s+and\s+)?(?:post|publish|send)\s+(?:it|this|that)(?:\s+now)?\b",
+        m,
+    ):
+        return True
+    return False
+
+
 def is_immediate_publish(msg_lower: str) -> bool:
+    if is_approval_execute(msg_lower):
+        return True
     if re.search(r"\b(?:now|immediately|right now|asap|today)\b", msg_lower):
         return True
     if re.search(r"\bpost\s*#\s*\d+", msg_lower):
@@ -240,6 +272,14 @@ async def fetch_approved_linkedin(db_pool, post_as: Optional[str] = None, limit:
         return []
 
 
+_STATUS_ESSAY_RE = re.compile(
+    r"(?:CURRENT STATE|Verified Execution|FULL EXECUTION|POSTING HISTORY|"
+    r"has NOT yet published|No published LinkedIn|RESOLUTION PROTOCOL|"
+    r"execution analysis|status update)",
+    re.IGNORECASE,
+)
+
+
 def extract_draft_from_history(chat_history: List[Dict]) -> Optional[str]:
     """Pull a publishable LinkedIn draft from recent Little Nate messages."""
     for msg in reversed(chat_history or []):
@@ -250,7 +290,7 @@ def extract_draft_from_history(chat_history: List[Dict]) -> Optional[str]:
             continue
         for m in re.finditer(r"```(?:linkedin|post)?\s*\n([\s\S]{80,}?)```", text, re.I):
             draft = m.group(1).strip()
-            if looks_like_publishable_post(draft):
+            if looks_like_publishable_post(draft) and not _STATUS_ESSAY_RE.search(draft):
                 return draft[:4000]
         for sep in (
             "final draft:",
@@ -260,6 +300,8 @@ def extract_draft_from_history(chat_history: List[Dict]) -> Optional[str]:
             "here is the post:",
             "full post:",
             "linkedin post:",
+            "draft for linkedin:",
+            "hybrid draft:",
         ):
             low = text.lower()
             if sep in low:
@@ -267,13 +309,32 @@ def extract_draft_from_history(chat_history: List[Dict]) -> Optional[str]:
                 # Strip trailing system-ish lines
                 cut = re.split(r"\n(?:Shall I|Ready to|\[SYSTEM|\*\*Next)", tail, maxsplit=1)
                 draft = cut[0].strip().strip('"')
-                if looks_like_publishable_post(draft):
+                if looks_like_publishable_post(draft) and not _STATUS_ESSAY_RE.search(draft):
                     return draft[:4000]
         # Long double-quoted body (common Nate draft format)
         for m in re.finditer(r'"([^"]{120,})"', text, re.DOTALL):
             draft = re.sub(r"\s+", " ", m.group(1)).strip()
-            if looks_like_publishable_post(draft) and len(draft) >= 120:
+            if (
+                looks_like_publishable_post(draft)
+                and len(draft) >= 120
+                and not _STATUS_ESSAY_RE.search(draft)
+            ):
                 return draft[:4000]
+        # Paragraph fallback: skip status essays; take longest publishable block
+        if _STATUS_ESSAY_RE.search(text):
+            continue
+        blocks = re.split(r"\n\s*\n", text)
+        candidates = []
+        for block in blocks:
+            draft = block.strip().strip('"')
+            if len(draft) < 160:
+                continue
+            if _STATUS_ESSAY_RE.search(draft):
+                continue
+            if looks_like_publishable_post(draft):
+                candidates.append(draft)
+        if candidates:
+            return max(candidates, key=len)[:4000]
     return None
 
 
@@ -336,21 +397,19 @@ def resolve_post_intent(message: str, chat_history: List[Dict]) -> PostIntent:
             confidence=0.85,
         )
 
+    # Explicit go-ahead / retry — publish queue or chat Final draft (not status talk)
+    if is_approval_execute(msg_lower):
+        # Only honor post #N from the *current* message (not stale history #1)
+        return PostIntent(
+            action="publish_queue",
+            platform=detect_platform(msg_lower, history_blob),
+            post_as=detect_post_as(history_blob + " " + message),
+            queue_pick="first",
+            list_index=parse_list_index(msg_lower),
+            confidence=0.86,
+        )
+
     if not has_publish_intent(msg_lower):
-        short_approval = msg_lower in {"proceed", "yes", "approved", "do it", "go ahead", "execute it", "post it", "send it"}
-        if short_approval:
-            blob = history_blob.lower()
-            if any(p in blob for p in ("post #", "ready to send", "approved and ready", "publish")):
-                # Prefer chat draft fallback over blindly taking approved[0]
-                # (coach-portal queue rows are often unrelated to the live draft).
-                return PostIntent(
-                    action="publish_queue",
-                    platform=detect_platform(blob, history_blob),
-                    post_as=detect_post_as(history_blob + " " + message),
-                    queue_pick="first",
-                    list_index=parse_list_index(blob) or parse_list_index(msg_lower),
-                    confidence=0.75,
-                )
         return PostIntent(action="none")
 
     platform = detect_platform(msg_lower, history_blob)
@@ -426,7 +485,7 @@ async def execute_post_intent(
         return None  # caller runs existing campaign queue path
 
     brain = MarketingBrain(chat.db_pool)
-    history = await chat.get_chat_history(limit=12)
+    history = await chat.get_chat_history(limit=30)
 
     if intent.action == "publish_inline" and intent.inline_text:
         if not looks_like_publishable_post(intent.inline_text):
@@ -458,38 +517,45 @@ async def execute_post_intent(
         return await chat._finalize_command_verification(stub, result)
 
     if intent.action == "publish_queue":
+        msg_l = message.lower()
+        explicit_queue = (
+            parse_list_index(msg_l) is not None
+            or bool(re.search(r"\bqueue\s*(?:id|#)\s*\d+\b", msg_l))
+            or bool(re.search(r"\b(?:from\s+the\s+queue|approved\s+queue)\b", msg_l))
+        )
+        draft = (
+            intent.inline_text
+            or parse_inline_content(message)
+            or extract_draft_from_history(history)
+        )
+        # Chat Final draft wins over unrelated coach-portal approved[0]
+        if draft and looks_like_publishable_post(draft) and not explicit_queue:
+            image_bytes = await _resolve_publish_image(message, draft)
+            result = await brain.publish_content_inline(
+                platform=intent.platform,
+                content_text=draft,
+                approved_by="direct_chat_command",
+                generated_by="direct_chat_draft_fallback",
+                post_as=intent.post_as,
+                image_bytes=image_bytes,
+            )
+            stub = {
+                "action_type": f"post_{intent.platform}",
+                "title": "Chat draft publish",
+                "description": draft[:200],
+                "id": None,
+            }
+            return await chat._finalize_command_verification(stub, result)
+
         queue_id = intent.queue_id or await resolve_queue_id(
             chat.db_pool, message, history, post_as=intent.post_as,
         )
         if not queue_id:
-            # Custom drafts often never land as status=approved — publish from chat draft.
-            draft = (
-                intent.inline_text
-                or parse_inline_content(message)
-                or extract_draft_from_history(history)
-            )
-            if draft and looks_like_publishable_post(draft):
-                image_bytes = await _resolve_publish_image(message, draft)
-                result = await brain.publish_content_inline(
-                    platform=intent.platform,
-                    content_text=draft,
-                    approved_by="direct_chat_command",
-                    generated_by="direct_chat_draft_fallback",
-                    post_as=intent.post_as,
-                    image_bytes=image_bytes,
-                )
-                stub = {
-                    "action_type": f"post_{intent.platform}",
-                    "title": "Chat draft publish",
-                    "description": draft[:200],
-                    "id": None,
-                }
-                return await chat._finalize_command_verification(stub, result)
             err = (
                 "No approved LinkedIn queue item matched and no chat draft found. "
                 f"Searched for index={intent.list_index}, pick={intent.queue_pick}. "
-                "Attach the full post text after a colon, or say 'post #N now' for an "
-                "approved queue item."
+                "Paste the full Final draft in chat (or after a colon), then say "
+                "'approved to post' / 'post it now', or 'post #N now' for a queue item."
             )
             return await chat._finalize_command_verification(
                 {"action_type": "post_linkedin", "title": "Publish queue item", "id": None},

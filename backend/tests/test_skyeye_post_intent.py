@@ -3,6 +3,7 @@ from app.services.skyeye_post_intent import (
     build_numbered_list_from_history,
     extract_draft_from_history,
     has_publish_intent,
+    is_approval_execute,
     is_campaign_schedule_intent,
     is_immediate_publish,
     looks_like_publishable_post,
@@ -125,3 +126,47 @@ def test_wants_image_generation():
         "Generate the custom Little Nate AI counseling the other bots illustration"
     )
     assert not wants_image_generation("What should our next campaign focus on?")
+
+
+def test_approved_to_post_is_publish_queue():
+    assert is_approval_execute("approved to post")
+    assert is_approval_execute("retry now")
+    assert is_approval_execute("I made some tweaks to the code. Retry now")
+    intent = resolve_post_intent("approved to post", [])
+    assert intent.action == "publish_queue"
+    assert intent.list_index is None
+    intent2 = resolve_post_intent("post it now", [])
+    assert intent2.action == "publish_queue"
+
+
+def test_extract_draft_skips_status_essays():
+    body = (
+        "There’s a lot being said right now about AI’s place in emotional wellness "
+        "and mental health. Waiting rooms used to be quiet — now they glow with "
+        "feeds. Little Nate sits with the other bots and listens first. Presence "
+        "beats polish when the room is anxious."
+    )
+    history = [
+        {
+            "sender": "little_nate",
+            "message": (
+                "CURRENT STATE: the approved hybrid LinkedIn post has NOT yet published. "
+                "My last POSTING HISTORY shows a truncated placeholder."
+            ),
+        },
+        {
+            "sender": "little_nate",
+            "message": f"Final draft:\n{body}\n\nReady to send?",
+        },
+        {
+            "sender": "little_nate",
+            "message": (
+                "**Verified Execution Status** — No published LinkedIn post yet matches "
+                "your fully-approved draft. FULL EXECUTION mode standing by."
+            ),
+        },
+    ]
+    draft = extract_draft_from_history(history)
+    assert draft is not None
+    assert "Waiting rooms" in draft
+    assert "CURRENT STATE" not in draft
