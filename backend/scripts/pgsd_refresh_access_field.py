@@ -5,7 +5,8 @@ Refresh PGSD ACCESS/FIELD tables for users who already have snapshots.  # QUANTU
 Requires PGSD_ENABLED + ENABLE_PGSD_ACCESS (FIELD optional).
 Run inside nate_backend after flag ladder enable:
 
-  docker compose -f docker-compose.prod.yml exec -T backend \\
+  docker compose -f docker-compose.prod.yml exec -T \\
+    -e PYTHONPATH=/app backend \\
     python /app/scripts/pgsd_refresh_access_field.py
 """
 
@@ -60,7 +61,10 @@ async def main() -> int:
             hw = r["user_id"]
             sid = int(r["snapshot_id"])
             try:
-                await correlate_recent_chat(pool, hw, sid, "refresh_script")
+                # Wider window than live path — backfill timeline for existing snaps
+                await correlate_recent_chat(
+                    pool, hw, sid, "refresh_script", window_minutes=90 * 24 * 60
+                )
                 out = await scorer.score_user(hw)
                 await compute_cross_domain_series(pool, hw)
                 scored += 1
