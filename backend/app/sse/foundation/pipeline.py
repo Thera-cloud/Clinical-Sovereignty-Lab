@@ -27,6 +27,7 @@ async def run_pipeline(
     filename: str,
     uploader_id: str,
     db_pool=None,
+    preset_id: str | None = None,
 ) -> dict[str, Any]:
     source_hash = hashlib.sha256(file_bytes).hexdigest()
 
@@ -51,7 +52,7 @@ async def run_pipeline(
         filename,
     )
 
-    output = await story_plot_generator.generate(narrative)
+    output = await story_plot_generator.generate(narrative, preset_id=preset_id)
 
     story_plot_id = output["story_plot"].get("id", "")
     await ip_provenance.update_status(

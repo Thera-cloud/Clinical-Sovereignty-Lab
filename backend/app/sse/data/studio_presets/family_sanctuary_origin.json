@@ -1,6 +1,7 @@
 {
   "id": "family_sanctuary_origin",
   "preset_id": "family_sanctuary_origin",
+  "subset_kind": "family_sanctuary",
   "title": "Family Sanctuary — Thera-World Hero (Four Acts, 25s)",
   "description": "Cinematic landing hero: African American family of four, mirror chamber → father's resolve → falling together → sanctuary vista → golden fire title. Distinct from thera_world_origin narrative. Use interpolated Studio pipeline; cel-animation composite plates encouraged.",
   "output": {

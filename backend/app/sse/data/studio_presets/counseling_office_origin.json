@@ -1,6 +1,7 @@
 {
   "id": "counseling_office_origin",
   "preset_id": "counseling_office_origin",
+  "subset_kind": "counseling_office",
   "title": "Counseling Office — Little Nate AI Companion (Cartoon LoRA Pack)",
   "description": "Playful modern futuristic counseling office for LoRA character locks and story development. Same cartoon illustration language as the LinkedIn Thera-World creative: Little Nate on Call Coach phone, Ask Little Nate client, penguin chatbot, hallway AI queue. Warm fun professional — not Ghibli, not photoreal.",
   "output": {

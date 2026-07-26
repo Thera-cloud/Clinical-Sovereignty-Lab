@@ -1,4 +1,8 @@
-"""Thera-World Studio — admin-only REST endpoints for script/scene/library/project management."""
+"""SSE Studio — admin REST for subset generators, script/scene/library/project management.
+
+Thera-World is one subset (thera_world_origin); other subsets are JSON presets under
+studio_presets/ with their own casting_locksheet + visual_style_anchor + LoRAs.
+"""
 from __future__ import annotations
 
 import json
@@ -52,6 +56,20 @@ def _serialize_recap_job_row(row: dict[str, Any]) -> dict[str, Any]:
 class GenerateScriptRequest(BaseModel):
     prompt: str
     content_sources: list[str] | None = None
+    preset_id: str | None = None
+
+
+class CreatePresetRequest(BaseModel):
+    title: str
+    id: str | None = None
+    description: str | None = None
+    subset_kind: str | None = "custom"
+    visual_style_anchor: dict | str | None = None
+    casting_locksheet: dict | None = None
+    characters: dict | None = None
+    scenes: list[dict] | None = None
+    default_color_preset: str | None = None
+    append_origin_suffix: bool = True
 
 class BreakScenesRequest(BaseModel):
     script: str
@@ -128,7 +146,7 @@ async def content_sources():
 @studio_router.post("/generate-script")
 async def generate_script(body: GenerateScriptRequest):
     from app.sse.studio_service import generate_script as _gen
-    return await _gen(body.prompt, body.content_sources)
+    return await _gen(body.prompt, body.content_sources, preset_id=body.preset_id)
 
 
 @studio_router.post("/break-scenes")
@@ -215,6 +233,26 @@ async def preset_detail(name: str):
         return get_preset(name)
     except FileNotFoundError:
         raise HTTPException(404, f"Preset '{name}' not found")
+
+
+@studio_router.post("/presets")
+async def create_preset(body: CreatePresetRequest):
+    """Create or update an imagery/story subset generator (JSON preset)."""
+    from app.sse.studio_service import create_or_update_preset
+    try:
+        return create_or_update_preset(body.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.exception("create_preset failed")
+        raise HTTPException(status_code=500, detail=str(e)[:300])
+
+
+@studio_router.get("/projects/{project_id}/trained-loras")
+async def project_trained_loras(project_id: str):
+    from app.sse.studio_service import get_trained_loras_for_project
+    loras = await get_trained_loras_for_project(project_id)
+    return {"project_id": project_id, "trained_loras": loras, "characters": list(loras.keys())}
 
 
 @studio_router.post("/projects")

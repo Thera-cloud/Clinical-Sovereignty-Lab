@@ -21,14 +21,30 @@ _BATCH_DELAY_S = 2.0
 _COST_PER_IMAGE = 0.05
 
 
+def _style_anchor_text(preset_id: str | None) -> str:
+    if not preset_id:
+        return ""
+    try:
+        from app.sse.trailer_generator import _fuse_visual_style_anchor, _load_preset_document
+
+        doc = _load_preset_document(preset_id)
+        return _fuse_visual_style_anchor(doc)
+    except Exception as e:
+        logger.warning("imagination_engine: style anchor load failed for %s: %s", preset_id, e)
+        return ""
+
+
 async def _process_panel(
-    panel: dict[str, Any], storyboard_id: str
+    panel: dict[str, Any],
+    storyboard_id: str,
+    style_anchor: str = "",
 ) -> dict[str, Any]:
     """Generate and store image for a single panel."""
     phase_id = panel.get("phase_id", "unknown")
     suffix = panel.get("core_character_suffix", "")
 
-    if not suffix:
+    # Thera-World bedrock: require manifestation suffix. Custom subsets may use style anchor only.
+    if not suffix and not style_anchor:
         logger.warning(
             "imagination_engine: panel %s missing core_character_suffix — skipping (bedrock rule)",
             phase_id,
@@ -38,6 +54,9 @@ async def _process_panel(
     prompt = panel.get("grok_imagine_prompt", "")
     if not prompt:
         return {"phase_id": phase_id, "error": "empty grok_imagine_prompt"}
+
+    if style_anchor and style_anchor not in prompt:
+        prompt = f"{prompt}, {style_anchor}"
 
     _NO_TEXT = "no text, no words, no lettering, no calligraphy, no writing on image"
     if _NO_TEXT not in prompt:
@@ -58,15 +77,23 @@ async def _process_panel(
     }
 
 
-async def generate_story_imagery(story_plot: dict[str, Any]) -> dict[str, Any]:
+async def generate_story_imagery(
+    story_plot: dict[str, Any],
+    preset_id: str | None = None,
+) -> dict[str, Any]:
     """Generate images for all panels in a story plot.
 
     Processes panels in batches of 5 with rate-limiting between batches.
     Failures on individual panels are logged and included in results
     without halting the pipeline.
+
+    preset_id selects a Studio subset generator (visual_style_anchor). Thera-World
+    is the default bedrock subset when unset and story_plot has no preset_id.
     """
     storyboard_id = story_plot.get("id", "unknown")
     panels = story_plot.get("panels", [])
+    pid = preset_id or story_plot.get("preset_id")
+    style_anchor = _style_anchor_text(pid if isinstance(pid, str) else None)
 
     results: list[dict[str, Any]] = []
     generated = 0
@@ -74,7 +101,7 @@ async def generate_story_imagery(story_plot: dict[str, Any]) -> dict[str, Any]:
 
     for batch_start in range(0, len(panels), _BATCH_SIZE):
         batch = panels[batch_start : batch_start + _BATCH_SIZE]
-        tasks = [_process_panel(p, storyboard_id) for p in batch]
+        tasks = [_process_panel(p, storyboard_id, style_anchor=style_anchor) for p in batch]
         batch_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for i, result in enumerate(batch_results):
@@ -97,6 +124,7 @@ async def generate_story_imagery(story_plot: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "storyboard_id": storyboard_id,
+        "preset_id": pid,
         "panels_generated": generated,
         "panels_failed": failed,
         "estimated_cost": f"${generated * _COST_PER_IMAGE:.2f}",

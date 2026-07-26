@@ -299,16 +299,17 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
   <div id="sseTabLora" class="sse-tab-panel">
     <div class="glass mb-24">
       <div class="glass-header">
-        <div class="glass-title">🎯 Counseling Office LoRA Train</div>
+        <div class="glass-title">🎯 Subset LoRA Train Monitor</div>
         <div style="display:flex;gap:8px;align-items:center">
+          <select id="loraProjectSelect" style="font-size:11px;padding:4px 8px;max-width:280px" onchange="loraOnProjectChange()"></select>
           <span id="loraPollHint" style="font-size:11px;color:var(--t3)">Live poll 5s</span>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="loraPollNow()">↻ Refresh</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="loraDiscover();loraPollNow()">↻ Refresh</button>
+          <a class="btn btn-blue btn-sm" href="studio.html">Open Studio</a>
         </div>
       </div>
       <div class="glass-body">
-        <p style="font-size:12px;color:var(--t3);margin-bottom:16px">
-          Watches Replicate Flux LoRA jobs for the Counseling Office pack. Project
-          <span style="font-family:var(--mono);color:var(--t2)">5c712188-7d01-4d0a-b7f4-40b49eaa14b3</span>
+        <p style="font-size:12px;color:var(--t3);margin-bottom:16px" id="loraHelpText">
+          Discovers trained LoRAs from Studio projects (any subset — Thera-World, Counseling Office, custom). Select a project to poll Replicate status.
         </p>
         <div class="lora-grid" id="loraCards"></div>
       </div>
@@ -791,14 +792,12 @@ async function sseFamilyLoad() {
   } catch(e) { console.warn('sseFamilyLoad:', e); }
 }
 
-var LORA_PROJECT_ID = '5c712188-7d01-4d0a-b7f4-40b49eaa14b3';
-var LORA_JOBS = [
-  { key: 'little_nate', label: 'Little Nate', training_id: 'zjbzra7fh9rmr0czktwvc8c17w', started_at: '2026-07-26T14:00:41.389Z' },
-  { key: 'ask_client', label: 'Ask Client', training_id: '5beezdg8rdrmt0czkty92fhdp0', started_at: '2026-07-26T14:02:59.357Z' }
-];
+var LORA_PROJECT_ID = '';
+var LORA_JOBS = [];
 var _loraPollTimer = null;
 var _loraTickTimer = null;
 var _loraState = {};
+var _loraProjects = [];
 
 function sseSwitchTab(name) {
   document.querySelectorAll('.sse-tab').forEach(function(b) {
@@ -807,7 +806,7 @@ function sseSwitchTab(name) {
   document.getElementById('sseTabOverview').classList.toggle('active', name === 'overview');
   document.getElementById('sseTabLora').classList.toggle('active', name === 'lora');
   if (name === 'lora') {
-    loraPollNow();
+    loraDiscover().then(function() { loraPollNow(); });
     if (!_loraPollTimer) _loraPollTimer = setInterval(loraPollNow, 5000);
     if (!_loraTickTimer) _loraTickTimer = setInterval(loraRenderCards, 1000);
   } else {
@@ -815,6 +814,78 @@ function sseSwitchTab(name) {
     if (_loraTickTimer) { clearInterval(_loraTickTimer); _loraTickTimer = null; }
   }
   try { history.replaceState(null, '', '#' + name); } catch (e) {}
+}
+
+async function loraDiscover() {
+  try {
+    var r = await fetch(API + '/api/sse/admin/studio/projects', { headers: _authHeaders() });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    _loraProjects = await r.json();
+    if (!Array.isArray(_loraProjects)) _loraProjects = [];
+  } catch (e) {
+    console.warn('loraDiscover projects', e);
+    _loraProjects = [];
+  }
+  var sel = document.getElementById('loraProjectSelect');
+  if (sel) {
+    var prev = LORA_PROJECT_ID || sel.value;
+    sel.innerHTML = _loraProjects.length
+      ? _loraProjects.map(function(p) {
+          var mid = (p.manifest && (p.manifest.preset_id || p.manifest.id)) || '';
+          var label = (p.title || p.project_id.slice(0, 8)) + (mid ? ' · ' + mid : '');
+          return '<option value="' + p.project_id + '">' + label + '</option>';
+        }).join('')
+      : '<option value="">No studio projects</option>';
+    if (prev && _loraProjects.some(function(p) { return p.project_id === prev; })) sel.value = prev;
+    else if (_loraProjects[0]) sel.value = _loraProjects[0].project_id;
+    LORA_PROJECT_ID = sel.value || '';
+  }
+  await loraLoadJobsForProject(LORA_PROJECT_ID);
+}
+
+async function loraLoadJobsForProject(projectId) {
+  LORA_JOBS = [];
+  _loraState = {};
+  if (!projectId) { loraRenderCards(); return; }
+  try {
+    var r = await fetch(API + '/api/sse/admin/studio/projects/' + projectId + '/trained-loras', { headers: _authHeaders() });
+    var d = r.ok ? await r.json() : { trained_loras: {} };
+    var map = d.trained_loras || {};
+    LORA_JOBS = Object.keys(map).map(function(key) {
+      var meta = map[key] || {};
+      var tid = meta.training_id || meta.replicate_training_id || '';
+      return {
+        key: key,
+        label: key.replace(/_/g, ' '),
+        training_id: tid,
+        started_at: meta.trained_at || meta.started_at || new Date().toISOString(),
+        weights: meta.lora_url || meta.weights_url || meta.url || (typeof meta === 'string' ? meta : ''),
+        status_hint: tid ? null : 'succeeded'
+      };
+    });
+    // Fallback seed for known counseling pack if empty
+    if (!LORA_JOBS.length && projectId === '5c712188-7d01-4d0a-b7f4-40b49eaa14b3') {
+      LORA_JOBS = [
+        { key: 'little_nate', label: 'Little Nate', training_id: 'zjbzra7fh9rmr0czktwvc8c17w', started_at: '2026-07-26T14:00:41.389Z' },
+        { key: 'ask_client', label: 'Ask Client', training_id: '5beezdg8rdrmt0czkty92fhdp0', started_at: '2026-07-26T14:02:59.357Z' }
+      ];
+    }
+  } catch (e) {
+    console.warn('loraLoadJobs', e);
+  }
+  var help = document.getElementById('loraHelpText');
+  if (help) {
+    help.innerHTML = LORA_JOBS.length
+      ? ('Project <span style="font-family:var(--mono);color:var(--t2)">' + projectId + '</span> — ' + LORA_JOBS.length + ' character LoRA(s)')
+      : ('No trained LoRAs on this project yet — train in Studio Character Lab.');
+  }
+  loraRenderCards();
+}
+
+function loraOnProjectChange() {
+  var sel = document.getElementById('loraProjectSelect');
+  LORA_PROJECT_ID = (sel && sel.value) || '';
+  loraLoadJobsForProject(LORA_PROJECT_ID).then(function() { loraPollNow(); });
 }
 
 function _loraFmt(ms) {
@@ -838,10 +909,15 @@ function _loraStatusBadge(st) {
 function loraRenderCards() {
   var root = document.getElementById('loraCards');
   if (!root) return;
+  if (!LORA_JOBS.length) {
+    root.innerHTML = '<div class="empty"><div class="empty-text">No LoRA jobs for this project</div></div>';
+    return;
+  }
   var now = Date.now();
   root.innerHTML = LORA_JOBS.map(function(job) {
     var st = _loraState[job.key] || {};
-    var started = new Date(st.started_at || job.started_at).getTime();
+    if (!st.status && job.status_hint) st = Object.assign({ status: job.status_hint, output: job.weights }, st);
+    var started = new Date(st.started_at || job.started_at || now).getTime();
     var elapsed = (st.completed_at ? new Date(st.completed_at).getTime() : now) - started;
     var step = st.step != null ? st.step : null;
     var total = st.total_steps || 1000;
@@ -849,25 +925,27 @@ function loraRenderCards() {
     var remain = '';
     if (st.status === 'succeeded') remain = 'Complete — weights ready';
     else if (st.status === 'failed') remain = 'Failed — check Replicate log';
+    else if (!job.training_id) remain = 'Weights on project (no live training id)';
     else if (step != null && step < total) {
       var left = ((total - step) / 1.82) * 1000;
       remain = 'ETA ~ ' + _loraFmt(left) + ' remaining';
     } else remain = 'Waiting for step progress…';
-    var web = st.web_url || ('https://replicate.com/p/' + job.training_id);
+    var web = st.web_url || (job.training_id ? ('https://replicate.com/p/' + job.training_id) : '');
     var out = '';
-    if (st.output) {
-      var o = typeof st.output === 'string' ? st.output : (st.output.weights || JSON.stringify(st.output));
+    var output = st.output || job.weights;
+    if (output) {
+      var o = typeof output === 'string' ? output : (output.weights || JSON.stringify(output));
       out = '<div class="lora-steps" style="color:var(--green);word-break:break-all">Output: ' + o + '</div>';
     }
     return '<div class="profile-card">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
-      + '<h4 style="margin:0">' + job.label + '</h4>' + _loraStatusBadge(st.status)
+      + '<h4 style="margin:0">' + job.label + '</h4>' + _loraStatusBadge(st.status || '…')
       + '</div>'
-      + '<div class="lora-clock">' + _loraFmt(elapsed) + '</div>'
+      + '<div class="lora-clock">' + (job.training_id ? _loraFmt(elapsed) : '—') + '</div>'
       + '<div class="lora-eta">' + remain + '</div>'
       + '<div class="progress-bar" style="margin-top:12px"><div class="progress-fill green" style="width:' + pct.toFixed(1) + '%"></div></div>'
-      + '<div class="lora-steps">' + (step != null ? step + ' / ' + total + ' steps (' + pct.toFixed(0) + '%)' : '— / ' + total + ' steps') + '</div>'
-      + '<div style="margin-top:10px"><a class="btn btn-blue btn-sm" href="' + web + '" target="_blank" rel="noopener">Replicate log ↗</a></div>'
+      + '<div class="lora-steps">' + (step != null ? step + ' / ' + total + ' steps (' + pct.toFixed(0) + '%)' : (st.status === 'succeeded' ? '1000 / 1000 steps' : '— / ' + total + ' steps')) + '</div>'
+      + (web ? '<div style="margin-top:10px"><a class="btn btn-blue btn-sm" href="' + web + '" target="_blank" rel="noopener">Replicate log ↗</a></div>' : '')
       + (st.logs_tail ? '<div class="lora-log">' + String(st.logs_tail).replace(/</g, '&lt;') + '</div>' : '')
       + out
       + '</div>';
@@ -877,7 +955,16 @@ function loraRenderCards() {
 async function loraPollNow() {
   var hint = document.getElementById('loraPollHint');
   if (hint) hint.textContent = 'Polling…';
+  if (!LORA_PROJECT_ID) {
+    if (hint) hint.textContent = 'Select a project';
+    loraRenderCards();
+    return;
+  }
   await Promise.all(LORA_JOBS.map(async function(job) {
+    if (!job.training_id) {
+      _loraState[job.key] = { status: 'succeeded', output: job.weights, started_at: job.started_at };
+      return;
+    }
     try {
       var q = '?project_id=' + encodeURIComponent(LORA_PROJECT_ID) + '&character_key=' + encodeURIComponent(job.key);
       var r = await fetch(API + '/api/sse/admin/studio/lora/status/' + job.training_id + q, { headers: _authHeaders() });
@@ -893,7 +980,7 @@ async function loraPollNow() {
         logs_tail: d.logs_tail,
         started_at: d.started_at || job.started_at,
         completed_at: d.completed_at,
-        output: d.output,
+        output: d.output || job.weights,
         web_url: d.web_url
       };
     } catch (e) {
@@ -912,7 +999,7 @@ setInterval(function() { loadGenerationLog(); loadStoryboards(); loadCircuitBrea
 (function bootLoraTab() {
   var hash = (location.hash || '').replace('#', '');
   if (hash === 'lora') sseSwitchTab('lora');
-  else loraRenderCards();
+  else loraDiscover().then(function() { loraRenderCards(); });
 })();
 </script>
 </body>

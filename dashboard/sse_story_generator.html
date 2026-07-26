@@ -173,10 +173,17 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
   <div class="glass mb-24">
     <div class="glass-header"><div class="glass-title">📄 Upload Source Document</div></div>
     <div class="glass-body">
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+        <label style="font-size:12px;color:var(--t3)">Subset generator</label>
+        <select id="subsetSelect" style="flex:1;min-width:220px;padding:8px 12px;border-radius:8px;background:var(--panel);color:var(--t1);border:1px solid var(--bdr);font-size:12px">
+          <option value="thera_world_origin">Thera-World (mythology bedrock)</option>
+        </select>
+        <a class="btn btn-ghost btn-sm" href="studio.html">Manage subsets in Studio</a>
+      </div>
       <div class="upload-zone" id="dropZone">
         <div class="upload-zone-icon">📥</div>
         <div class="upload-zone-text">Drop story document here or click to browse</div>
-        <div class="upload-zone-sub">Supported: PDF, TXT, MD, DOCX</div>
+        <div class="upload-zone-sub">Supported: PDF, TXT, MD, DOCX — imagery follows the selected subset style + cast</div>
         <input type="file" id="fileInput" accept=".pdf,.txt,.md,.docx">
         <div class="file-info hidden" id="fileInfo"></div>
       </div>
@@ -271,6 +278,7 @@ var _currentProvId = null;
 var _currentPlot = null;
 var _pollTimer = null;
 var _editPhaseId = null;
+var _activePresetId = 'thera_world_origin';
 
 function _authHeaders(ct) {
   var t = sessionStorage.getItem('sc_token') || localStorage.getItem('sc_token') || '';
@@ -278,6 +286,31 @@ function _authHeaders(ct) {
   if (ct) h['Content-Type'] = ct;
   return h;
 }
+
+function _selectedPreset() {
+  var sel = document.getElementById('subsetSelect');
+  _activePresetId = (sel && sel.value) || _activePresetId || 'thera_world_origin';
+  return _activePresetId;
+}
+
+function loadSubsets() {
+  fetch(API + '/api/sse/admin/studio/presets', { headers: _authHeaders() })
+    .then(function(r) { return r.ok ? r.json() : []; })
+    .then(function(list) {
+      var sel = document.getElementById('subsetSelect');
+      if (!sel || !Array.isArray(list) || !list.length) return;
+      var prev = sel.value || _activePresetId;
+      sel.innerHTML = list.map(function(p) {
+        var kind = p.subset_kind || 'custom';
+        var label = (p.title || p.id) + ' · ' + kind;
+        return '<option value="' + p.id + '">' + label + '</option>';
+      }).join('');
+      if (list.some(function(p) { return p.id === prev; })) sel.value = prev;
+      _activePresetId = sel.value;
+    })
+    .catch(function() {});
+}
+loadSubsets();
 
 /* --- UPLOAD --- */
 var dropZone = document.getElementById('dropZone');
@@ -311,12 +344,14 @@ function uploadFile() {
 
   var fd = new FormData();
   fd.append('file', _selectedFile);
+  fd.append('preset_id', _selectedPreset());
 
   fetch(API + '/api/sse/pipeline/run', { method: 'POST', headers: { 'Authorization': _authHeaders()['Authorization'] }, body: fd })
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (d.error) { pipelineFail(d.error); return; }
       _currentProvId = d.provenance_id;
+      if (d.preset_id) _activePresetId = d.preset_id;
       setStep(0, 'complete');
       setStep(1, 'active');
       document.getElementById('stepStatusText').textContent = 'Extracting narrative…';
@@ -475,7 +510,12 @@ function generateImagery() {
   fetch(API + '/api/sse/imagery/generate', {
     method: 'POST',
     headers: _authHeaders('application/json'),
-    body: JSON.stringify({ storyboard_id: _currentPlot.id, story_plot: _currentPlot, provenance_id: _currentProvId })
+    body: JSON.stringify({
+      storyboard_id: _currentPlot.id,
+      story_plot: _currentPlot,
+      provenance_id: _currentProvId,
+      preset_id: _currentPlot.preset_id || _selectedPreset()
+    })
   })
   .then(function(r) { return r.json(); })
   .then(function(d) {
@@ -540,7 +580,12 @@ function regeneratePanel() {
   document.getElementById('modalError').style.display = 'none';
   fetch(API + '/api/sse/imagery/regenerate-panel', {
     method: 'POST', headers: _authHeaders('application/json'),
-    body: JSON.stringify({ provenance_id: _currentProvId, phase_id: _editPhaseId, custom_prompt: prompt })
+    body: JSON.stringify({
+      provenance_id: _currentProvId,
+      phase_id: _editPhaseId,
+      custom_prompt: prompt,
+      preset_id: (_currentPlot && _currentPlot.preset_id) || _selectedPreset()
+    })
   })
   .then(function(r) { if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Request failed'); }); return r.json(); })
   .then(function(d) {

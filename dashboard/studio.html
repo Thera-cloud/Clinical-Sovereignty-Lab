@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Thera-World Studio — Sovereign Sanctuary</title>
+<title>SSE Studio — Subset Generators — Sovereign Sanctuary</title>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -211,7 +211,7 @@ function dVoice(d) {
 // ═══════════════════════════════════════════════════════════════════
 //  SCRIPT TAB
 // ═══════════════════════════════════════════════════════════════════
-function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype, recapJobId, setRecapOutputUrl, activePresetId, setActivePresetId }) {
+function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype, recapJobId, setRecapOutputUrl, activePresetId, setActivePresetId, onPresetsChanged }) {
   const [script, setScript] = useState('');
   const [prompt, setPrompt] = useState('');
   const [clientUser, setClientUser] = useState(() => {
@@ -229,10 +229,50 @@ function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype
     try { return sessionStorage.getItem('studio_video_ingest_mode') || 'audio_driven'; }
     catch (e) { return 'audio_driven'; }
   });
+  const [showCreateSubset, setShowCreateSubset] = useState(false);
+  const [newSubset, setNewSubset] = useState({
+    title: '', description: '', subset_kind: 'custom',
+    visual_style: '', characters: '', color_preset: 'counseling_neon',
+  });
 
   const setVideoIngestModePersist = (mode) => {
     setVideoIngestMode(mode);
     try { sessionStorage.setItem('studio_video_ingest_mode', mode); } catch (e) {}
+  };
+
+  const createSubset = async () => {
+    if (!newSubset.title.trim()) return alert('Subset title required');
+    const casting = {};
+    (newSubset.characters || '').split(/[,;\n]/).map(s => s.trim()).filter(Boolean).forEach(k => {
+      const key = k.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+      if (key) casting[key] = k;
+    });
+    setLoading('subset');
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/presets', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({
+          title: newSubset.title.trim(),
+          description: newSubset.description || undefined,
+          subset_kind: newSubset.subset_kind || 'custom',
+          visual_style_anchor: newSubset.visual_style ? { look: newSubset.visual_style } : undefined,
+          casting_locksheet: casting,
+          default_color_preset: newSubset.color_preset || 'counseling_neon',
+          scenes: [],
+        })
+      });
+      const list = await apiFetch('/api/sse/admin/studio/presets');
+      setPresets(list);
+      if (onPresetsChanged) onPresetsChanged(list);
+      if (d.id) {
+        setActivePresetId && setActivePresetId(d.id);
+        try { sessionStorage.setItem('studio_active_preset_id', d.id); } catch (e) {}
+      }
+      setShowCreateSubset(false);
+      setNewSubset({ title: '', description: '', subset_kind: 'custom', visual_style: '', characters: '', color_preset: 'counseling_neon' });
+      alert('Subset generator created: ' + (d.title || d.id) + '\nTrain LoRAs in Character Lab for this cast.');
+    } catch (e) { alert('Create subset failed: ' + e.message); }
+    setLoading('');
   };
 
   const persistRecapJob = (jobId, archetype) => {
@@ -266,7 +306,11 @@ function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype
     try {
       const d = await apiFetch('/api/sse/admin/studio/generate-script', {
         method: 'POST', ct: 'application/json',
-        body: JSON.stringify({ prompt, content_sources: selectedSources })
+        body: JSON.stringify({
+          prompt,
+          content_sources: selectedSources,
+          preset_id: activePresetId || undefined,
+        })
       });
       setScenes(d.scenes || []);
       if (d.scenes?.length) {
@@ -504,16 +548,48 @@ function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype
               Use journey panels (30s, 4 scenes)
             </label>
           </div>
-          <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap'}}>
+          <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
             <input type="text" placeholder="Describe what to create..." value={prompt} onChange={e => setPrompt(e.target.value)} style={{flex:1,minWidth:200}} />
             <button className="btn" onClick={generateScript} disabled={!!loading}>{loading==='script' ? <span className="spinner"/> : 'Generate Script'}</button>
-            {presets.length > 0 && (
-              <select value={activePresetId || ''} onChange={e => e.target.value && loadPreset(e.target.value)} style={{width:'auto',minWidth:180}}>
-                <option value="">Load Preset...</option>
-                {presets.map(p => <option key={p.id} value={p.id}>{p.title} ({p.scene_count} scenes)</option>)}
-              </select>
-            )}
+            <select value={activePresetId || ''} onChange={e => e.target.value && loadPreset(e.target.value)} style={{width:'auto',minWidth:200}}>
+              <option value="">Subset generator…</option>
+              {presets.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.title} · {p.subset_kind || 'custom'}{p.scene_count ? ` (${p.scene_count} scenes)` : ''}
+                </option>
+              ))}
+            </select>
+            <button className="btn btn-sm" type="button" onClick={() => setShowCreateSubset(v => !v)}>
+              {showCreateSubset ? 'Cancel' : '+ New Subset'}
+            </button>
           </div>
+          {activePresetId && (
+            <p style={{fontSize:11,color:'var(--t3)',marginBottom:10}}>
+              Active subset: <span style={{fontFamily:'var(--mono)',color:'var(--gold)'}}>{activePresetId}</span>
+              {' '}— LoRAs, casting, and visual style lock to this generator. Thera-World is one subset among many.
+            </p>
+          )}
+          {showCreateSubset && (
+            <div style={{padding:12,marginBottom:12,background:'var(--raised)',borderRadius:8,border:'1px solid var(--border)'}}>
+              <div style={{fontSize:13,color:'var(--gold-b)',marginBottom:8}}>Create imagery / story subset generator</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+                <input placeholder="Title (e.g. Neon Clinic)" value={newSubset.title}
+                  onChange={e => setNewSubset(s => ({...s, title: e.target.value}))} />
+                <input placeholder="Kind (custom / thera_world / counseling…)" value={newSubset.subset_kind}
+                  onChange={e => setNewSubset(s => ({...s, subset_kind: e.target.value}))} />
+              </div>
+              <textarea rows={2} placeholder="Visual style anchor (art direction LoRAs must obey)"
+                value={newSubset.visual_style} onChange={e => setNewSubset(s => ({...s, visual_style: e.target.value}))}
+                style={{width:'100%',marginBottom:8}} />
+              <input placeholder="Cast keys comma-separated (e.g. hero, mentor, rival)" value={newSubset.characters}
+                onChange={e => setNewSubset(s => ({...s, characters: e.target.value}))} style={{width:'100%',marginBottom:8}} />
+              <input placeholder="Short description" value={newSubset.description}
+                onChange={e => setNewSubset(s => ({...s, description: e.target.value}))} style={{width:'100%',marginBottom:8}} />
+              <button className="btn" onClick={createSubset} disabled={loading==='subset'}>
+                {loading==='subset' ? <span className="spinner"/> : 'Save Subset Generator'}
+              </button>
+            </div>
+          )}
           <div
             onDragOver={onDragOver}
             onDragLeave={() => setDragOver(false)}
@@ -549,7 +625,7 @@ function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype
               rows={16}
               value={script}
               onChange={e => setScript(e.target.value)}
-              placeholder="Paste client transcript — or drop / upload any-length client video. Audio-driven mode builds a ≤2 min Thera-World anime trailer (chunked STT → arc summary → render → stitch). Source length does not matter."
+              placeholder="Paste client transcript — or drop / upload any-length client video. Audio-driven mode builds a ≤2 min silent trailer for the active subset (chunked STT → arc summary → render → stitch). Source length does not matter."
               style={{border:'none', background:'var(--bg)', width:'100%', boxSizing:'border-box', minHeight:280}}
             />
           </div>
@@ -934,7 +1010,7 @@ function LibraryTab({ onLoadProject }) {
 // ═══════════════════════════════════════════════════════════════════
 //  PIPELINE TAB (Phase 2 — character refs, batch video, stitching)
 // ═══════════════════════════════════════════════════════════════════
-function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost, recapJobId, recapArchetype, recapOutputUrl, setRecapOutputUrl }) {
+function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost, recapJobId, recapArchetype, recapOutputUrl, setRecapOutputUrl, activePresetId, presets }) {
   const [charRefs, setCharRefs] = useState(null);
   const [refsLoading, setRefsLoading] = useState(false);
   const [videoStatus, setVideoStatus] = useState(null);
@@ -1134,14 +1210,16 @@ function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost, 
 
   if (!scenes.length) return <div className="empty-state">Load scenes in the Script tab first.</div>;
 
-  const charNames = (() => {
-    try {
-      const pid = sessionStorage.getItem('studio_active_preset_id') || '';
-      if (pid === 'counseling_office_origin') return ['little_nate','ask_client','penguin_bot','hallway_bot'];
-      if (pid === 'family_sanctuary_origin') return ['mother','daughter','son','father'];
-    } catch (e) {}
-    return ['boy','serpent','dragon','girl','watcher','glowing_woman','knight'];
-  })();
+  const pid = activePresetId || (() => { try { return sessionStorage.getItem('studio_active_preset_id') || ''; } catch (e) { return ''; } })();
+  const presetChars = (presets || []).find(p => p.id === pid)?.character_keys;
+  const charNames = (presetChars && presetChars.length)
+    ? presetChars
+    : (pid === 'counseling_office_origin'
+        ? ['little_nate','ask_client','penguin_bot','hallway_bot']
+        : pid === 'family_sanctuary_origin'
+          ? ['mother','daughter','son','father']
+          : ['boy','serpent','dragon','girl','watcher','glowing_woman','knight']);
+  const nChars = charNames.length;
 
   return (
     <div>
@@ -1199,10 +1277,14 @@ function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost, 
       <div className="panel">
         <h2>Character References</h2>
         <p style={{fontSize:12,color:'var(--t2)',marginBottom:12}}>
-          Generate reference images for all 7 characters to ensure visual consistency across scenes.
+          Generate reference images for all {nChars} cast members in this subset
+          {pid ? <> (<span style={{fontFamily:'var(--mono)',color:'var(--gold)'}}>{pid}</span>)</> : null}
+          {' '}to lock visual consistency across scenes.
         </p>
         <button className="btn" onClick={generateRefs} disabled={refsLoading}>
-          {refsLoading ? <><span className="spinner"/> Generating 7 refs (~40s)...</> : 'Generate Character Refs (~$0.49)'}
+          {refsLoading
+            ? <><span className="spinner"/> Generating {nChars} refs…</>
+            : `Generate Character Refs (~$${(nChars * 0.07).toFixed(2)})`}
         </button>
         {charRefs && (
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))',gap:12,marginTop:16}}>
@@ -1403,35 +1485,48 @@ function VoiceMappingPanel({ projectId, ensureProject }) {
     setSaving(null);
   };
 
-  if (!voiceCfg) return e('div', {className:'panel'}, e('p',{style:{color:'var(--t2)',fontSize:12}},'Load a project to configure voices.'));
+  if (!projectId || !voiceCfg) {
+    return (
+      <div className="panel">
+        <h2>Voice Mapping</h2>
+        <p style={{color:'var(--t2)',fontSize:12}}>Load or create a project to configure subset character voices.</p>
+      </div>
+    );
+  }
 
   const chars = Object.entries(voiceCfg);
-  return e('div', {className:'panel'},
-    e('h2', null, 'Voice Mapping'),
-    e('p', {style:{fontSize:12,color:'var(--t2)',marginBottom:12}}, 'Assign TTS voices to each character for narration generation.'),
-    e('div', {style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:12}},
-      chars.map(([key, cfg]) =>
-        e('div', {key, style:{padding:12,background:'var(--raised)',borderRadius:6,border:'1px solid var(--border)'}},
-          e('div', {style:{fontSize:13,color:'var(--gold-b)',marginBottom:6}}, key.replace(/_/g,' ')),
-          e('div', {style:{display:'flex',gap:6,alignItems:'center',marginBottom:6}},
-            e('select', {
-              value: cfg.voice || 'shimmer',
-              onChange: ev => saveVoice(key, ev.target.value, cfg.instructions),
-              style:{flex:1,fontSize:12,padding:'4px 8px'},
-              disabled: saving === key,
-            }, availVoices.map(v => e('option', {key:v, value:v}, v))),
-            saving === key && e('span', {className:'spinner',style:{width:14,height:14}}),
-          ),
-          e('input', {
-            type:'text',
-            placeholder:'Voice instructions (e.g., "gentle, wise tone")',
-            defaultValue: cfg.instructions || '',
-            onBlur: ev => { if (ev.target.value !== (cfg.instructions || '')) saveVoice(key, cfg.voice, ev.target.value); },
-            style:{fontSize:11,width:'100%'},
-          })
-        )
-      )
-    )
+  return (
+    <div className="panel">
+      <h2>Voice Mapping</h2>
+      <p style={{fontSize:12,color:'var(--t2)',marginBottom:12}}>Assign TTS voices to each character for narration generation.</p>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:12}}>
+        {chars.map(([key, cfg]) => (
+          <div key={key} style={{padding:12,background:'var(--raised)',borderRadius:6,border:'1px solid var(--border)'}}>
+            <div style={{fontSize:13,color:'var(--gold-b)',marginBottom:6}}>{key.replace(/_/g,' ')}</div>
+            <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:6}}>
+              <select
+                value={cfg.voice || 'shimmer'}
+                onChange={ev => saveVoice(key, ev.target.value, cfg.instructions)}
+                style={{flex:1,fontSize:12,padding:'4px 8px'}}
+                disabled={saving === key}
+              >
+                {(availVoices.length ? availVoices : ['shimmer','onyx','nova','echo','fable','alloy','ash']).map(v => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+              {saving === key && <span className="spinner" style={{width:14,height:14}} />}
+            </div>
+            <input
+              type="text"
+              placeholder='Voice instructions (e.g., "gentle, wise tone")'
+              defaultValue={cfg.instructions || ''}
+              onBlur={ev => { if (ev.target.value !== (cfg.instructions || '')) saveVoice(key, cfg.voice, ev.target.value); }}
+              style={{fontSize:11,width:'100%'}}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1455,12 +1550,23 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost, active
   const [testImages, setTestImages] = useState([]);
   const [testPrompt, setTestPrompt] = useState('');
   const [loading, setLoading] = useState('');
+  const [trainedLoras, setTrainedLoras] = useState({});
 
   useEffect(() => {
     if (charNames.length && !charNames.includes(selectedChar)) {
       setSelectedChar(charNames[0]);
     }
   }, [activePresetId, charNames.join('|')]);
+
+  const refreshTrained = useCallback(async () => {
+    if (!projectId) { setTrainedLoras({}); return; }
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/projects/' + projectId + '/trained-loras');
+      setTrainedLoras(d.trained_loras || {});
+    } catch (e) { console.warn('trained-loras load failed', e); }
+  }, [projectId]);
+
+  useEffect(() => { refreshTrained(); }, [refreshTrained]);
 
   const generateTrainingSet = async () => {
     const pid = await ensureProject(scenes);
@@ -1470,7 +1576,11 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost, active
     try {
       await apiFetch('/api/sse/admin/studio/lora/training-images', {
         method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ character_key: selectedChar, project_id: pid })
+        body: JSON.stringify({
+          character_key: selectedChar,
+          project_id: pid,
+          preset_id: activePresetId || undefined,
+        })
       });
       alert('Training image generation started — check Library tab in ~2 minutes.\nOnce done, click "Auto-Zip" to prepare for training.');
       refreshCost();
@@ -1516,43 +1626,60 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost, active
       const pid = await ensureProject();
       const d = await apiFetch('/api/sse/admin/studio/lora/status/' + trainingId + '?project_id=' + encodeURIComponent(pid) + '&character_key=' + encodeURIComponent(selectedChar));
       setTrainingStatus(d);
-      if (d.status === 'succeeded') alert('LoRA training complete! Character lock saved to project. All scene generation will now use this LoRA.');
+      if (d.status === 'succeeded') {
+        alert('LoRA training complete! Character lock saved to project. All scene generation will now use this LoRA.');
+        refreshTrained();
+      }
     } catch (e) { alert('Poll failed: ' + e.message); }
     setLoading('');
   };
 
   const testLora = async () => {
     if (!testPrompt.trim()) return alert('Enter a test prompt');
-    const urls = loraUrl ? [loraUrl] : (trainingStatus?.output ? [trainingStatus.output] : []);
-    if (!urls.length) return alert('No LoRA weights URL available — train first or paste URL');
+    const saved = trainedLoras[selectedChar];
+    const savedUrl = typeof saved === 'string' ? saved : (saved?.lora_url || saved?.weights_url || saved?.url || '');
+    const urls = loraUrl ? [loraUrl] : (trainingStatus?.output ? [typeof trainingStatus.output === 'string' ? trainingStatus.output : (trainingStatus.output.weights || '')] : (savedUrl ? [savedUrl] : []));
+    if (!urls.length || !urls[0]) return alert('No LoRA weights URL available — train first or paste URL');
     setLoading('test');
     try {
       const d = await apiFetch('/api/sse/admin/studio/lora/test', {
         method: 'POST', ct: 'application/json',
-        body: JSON.stringify({ prompt: testPrompt, lora_urls: urls })
+        body: JSON.stringify({ prompt: testPrompt, lora_urls: urls.filter(Boolean) })
       });
       setTestImages(d.test_images || []);
     } catch (e) { alert('Test failed: ' + e.message); }
     setLoading('');
   };
 
+  const selectedTrained = trainedLoras[selectedChar];
+
   return (
     <div>
       <div className="panel">
         <h2>Character Lab — LoRA Training</h2>
         <p style={{fontSize:12,color:'var(--t2)',marginBottom:16}}>
-          Train character-specific LoRA weights to ensure identical character appearance across all scenes.
+          Train character-specific LoRA weights for the active subset so cast likeness holds across scenes.
           Requires <span style={{fontFamily:'var(--mono)',color:'var(--gold)'}}>REPLICATE_API_TOKEN</span> env var.
-          {activePresetId ? <> Active preset: <span style={{fontFamily:'var(--mono)',color:'var(--gold)'}}>{activePresetId}</span></> : null}
+          {activePresetId ? <> Subset: <span style={{fontFamily:'var(--mono)',color:'var(--gold)'}}>{activePresetId}</span></> : <> Select a subset on the Script tab first.</>}
+          {!projectId ? <> · Create/load a project to persist trained weights.</> : null}
         </p>
 
         <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
-          {charNames.map(c => (
-            <button key={c} className={'filter-tab' + (selectedChar===c?' active':'')} onClick={() => setSelectedChar(c)}>
-              {c.replace(/_/g,' ')}
-            </button>
-          ))}
+          {charNames.map(c => {
+            const trained = !!trainedLoras[c];
+            return (
+              <button key={c} className={'filter-tab' + (selectedChar===c?' active':'')} onClick={() => setSelectedChar(c)}>
+                {c.replace(/_/g,' ')}
+                {trained ? <span className="badge badge-green" style={{marginLeft:6}}>LoRA</span> : null}
+              </button>
+            );
+          })}
         </div>
+        {selectedTrained && (
+          <div style={{fontSize:11,color:'var(--green)',marginBottom:12,wordBreak:'break-all'}}>
+            Trained weights on project: {typeof selectedTrained === 'string' ? selectedTrained.slice(0, 80) : JSON.stringify(selectedTrained).slice(0, 100)}…
+          </div>
+        )}
 
         <div style={{display:'flex',gap:16,marginBottom:16,flexWrap:'wrap'}}>
           <div style={{flex:1,minWidth:300}}>
@@ -1724,7 +1851,7 @@ function App() {
     <div>
       <div className="topbar">
         <a className="nav-link" href="javascript:void(0)" onClick={() => navTo('sse_monitoring.html')}>&larr; SSE Monitor</a>
-        <h1>Thera-World Studio</h1>
+        <h1>SSE Studio <span style={{fontSize:14,fontWeight:400,color:'var(--t2)'}}>— Subset Generators</span></h1>
         <a className="nav-link" href="javascript:void(0)" onClick={() => navTo('command.html')}>&larr; Command</a>
         {costInfo && (
           <div className="cost-banner">
@@ -1741,9 +1868,9 @@ function App() {
         ))}
       </div>
       <div className="main">
-        {tab === 'script' && <ScriptTab scenes={scenes} setScenes={setScenes} setTab={setTab} setRecapJobId={setRecapJobIdPersist} setRecapArchetype={setRecapArchetypePersist} recapJobId={recapJobId} setRecapOutputUrl={setRecapOutputUrl} activePresetId={activePresetId} setActivePresetId={setActivePresetIdPersist} />}
+        {tab === 'script' && <ScriptTab scenes={scenes} setScenes={setScenes} setTab={setTab} setRecapJobId={setRecapJobIdPersist} setRecapArchetype={setRecapArchetypePersist} recapJobId={recapJobId} setRecapOutputUrl={setRecapOutputUrl} activePresetId={activePresetId} setActivePresetId={setActivePresetIdPersist} onPresetsChanged={setPresetsGlobal} />}
         {tab === 'scenes' && <ScenesTab scenes={scenes} setScenes={setScenes} projectId={projectId} ensureProject={ensureProjectGlobal} costInfo={costInfo} refreshCost={refreshCost} recapJobId={recapJobId} />}
-        {tab === 'pipeline' && <PipelineTab projectId={projectId} ensureProject={ensureProjectGlobal} scenes={scenes} costInfo={costInfo} refreshCost={refreshCost} recapJobId={recapJobId} recapArchetype={recapArchetype} recapOutputUrl={recapOutputUrl} setRecapOutputUrl={setRecapOutputUrl} />}
+        {tab === 'pipeline' && <PipelineTab projectId={projectId} ensureProject={ensureProjectGlobal} scenes={scenes} costInfo={costInfo} refreshCost={refreshCost} recapJobId={recapJobId} recapArchetype={recapArchetype} recapOutputUrl={recapOutputUrl} setRecapOutputUrl={setRecapOutputUrl} activePresetId={activePresetId} presets={presetsGlobal} />}
         {tab === 'charlab' && <CharacterLabTab projectId={projectId} ensureProject={ensureProjectGlobal} scenes={scenes} refreshCost={refreshCost} activePresetId={activePresetId} presets={presetsGlobal} />}
         {tab === 'library' && <LibraryTab onLoadProject={loadProject} />}
       </div>

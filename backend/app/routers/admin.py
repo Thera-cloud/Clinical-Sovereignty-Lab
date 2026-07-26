@@ -5578,7 +5578,7 @@ async def admin_add_dojo(request: Request, user: dict = Depends(require_admin)):
 
 
 # ── SSE Story Generator endpoints ─────────────────────────────────────
-from fastapi import UploadFile, File as FastFile
+from fastapi import UploadFile, File as FastFile, Form
 from app.services.api_server import get_current_user as _sse_auth
 
 sse_router = APIRouter(prefix="/api/sse", tags=["sse"], dependencies=[Depends(require_admin)])
@@ -5930,11 +5930,26 @@ def _parse_json_col(val):
     return json.loads(val) if isinstance(val, str) else val
 
 @sse_router.post("/pipeline/run")
-async def sse_pipeline_run(request: Request, file: UploadFile = FastFile(...)):
+async def sse_pipeline_run(
+    request: Request,
+    file: UploadFile = FastFile(...),
+    preset_id: str | None = Form(None),
+):
     from app.sse.foundation import pipeline
-    result = await pipeline.run_pipeline(await file.read(), file.content_type or "", file.filename or "upload", uploader_id="admin", db_pool=getattr(request.app.state, "db_pool", None))
+    result = await pipeline.run_pipeline(
+        await file.read(),
+        file.content_type or "",
+        file.filename or "upload",
+        uploader_id="admin",
+        db_pool=getattr(request.app.state, "db_pool", None),
+        preset_id=preset_id or None,
+    )
     status = "failed" if "error" in result else "processing"
-    return {"provenance_id": result.get("provenance_id"), "status": status}
+    return {
+        "provenance_id": result.get("provenance_id"),
+        "status": status,
+        "preset_id": preset_id or (result.get("story_plot") or {}).get("preset_id"),
+    }
 
 @sse_router.get("/pipeline/status/{provenance_id}")
 async def sse_pipeline_status(provenance_id: str, request: Request):
@@ -6144,8 +6159,9 @@ async def sse_imagery_generate(request: Request):
     body = await request.json()
     story_plot = body.get("story_plot")
     if not story_plot: raise HTTPException(422, "story_plot required in body")
+    preset_id = body.get("preset_id") or story_plot.get("preset_id")
     from app.sse.layer6_imagination_engine import generate_story_imagery
-    result = await generate_story_imagery(story_plot)
+    result = await generate_story_imagery(story_plot, preset_id=preset_id)
     pool = getattr(request.app.state, "db_pool", None)
     prov_id = body.get("provenance_id")
     if pool and prov_id and result.get("results"):
@@ -6177,7 +6193,20 @@ async def sse_imagery_regenerate_panel(request: Request):
         panel = next((p for p in sp.get("panels", []) if p.get("phase_id") == phase_id), None)
         if not panel: raise HTTPException(404, f"panel {phase_id} not found")
         suffix = panel.get("core_character_suffix", "")
-        full_prompt = custom_prompt + (" " + suffix if suffix else "") + " --no text, watermark, logo"
+        preset_id = body.get("preset_id") or sp.get("preset_id")
+        style_extra = ""
+        if preset_id:
+            try:
+                from app.sse.trailer_generator import _fuse_visual_style_anchor, _load_preset_document
+                style_extra = _fuse_visual_style_anchor(_load_preset_document(preset_id))
+            except Exception:
+                style_extra = ""
+        full_prompt = custom_prompt
+        if suffix and suffix not in full_prompt:
+            full_prompt += " " + suffix
+        if style_extra and style_extra not in full_prompt:
+            full_prompt += " " + style_extra
+        full_prompt += " --no text, watermark, logo"
         from app.sse.infrastructure.grok_imagine_client import generate_image
         from app.sse.infrastructure.r2_storage import store_image
         image_bytes = await generate_image(full_prompt)

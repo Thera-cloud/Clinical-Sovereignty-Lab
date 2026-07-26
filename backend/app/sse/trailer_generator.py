@@ -306,14 +306,52 @@ CHARACTER_REFERENCES_BY_PRESET: dict[str, dict[str, dict]] = {
 }
 
 
+def _char_refs_from_preset_doc(doc: dict) -> dict[str, dict]:
+    """Build LoRA/ref maps from preset JSON casting_locksheet (subset-portable)."""
+    casting = doc.get("casting_locksheet") or doc.get("characters") or {}
+    if not isinstance(casting, dict) or not casting:
+        return {}
+    anchor = doc.get("visual_style_anchor") or {}
+    look = ""
+    if isinstance(anchor, dict):
+        look = (anchor.get("look") or "").strip()
+    style_base = (look + " ") if look else "High-quality character reference sheet, widescreen 16:9, "
+    refs: dict[str, dict] = {}
+    for key, desc in casting.items():
+        if not key:
+            continue
+        if isinstance(desc, dict):
+            inline = (desc.get("inline_desc") or desc.get("description") or key).strip()
+            ref_prompt = (desc.get("ref_prompt") or f"{style_base}character reference sheet, {inline}").strip()
+            refs[str(key)] = {"ref_prompt": ref_prompt, "inline_desc": inline}
+        else:
+            inline = str(desc).strip()
+            refs[str(key)] = {
+                "ref_prompt": f"{style_base}character reference sheet, {inline}",
+                "inline_desc": inline[:500],
+            }
+    return refs
+
+
 def _char_refs(preset_id: str | None = None) -> dict[str, dict]:
-    """Return CHARACTER_REFERENCES for a preset bundle (backward compat defaults to Thera World)."""
+    """Character refs for a subset: JSON casting_locksheet first, then Python packs."""
     pid = preset_id or DEFAULT_PRESET_ID
+    try:
+        doc = _load_preset_document(pid)
+        from_doc = _char_refs_from_preset_doc(doc)
+        if from_doc:
+            return from_doc
+    except FileNotFoundError:
+        pass
     return CHARACTER_REFERENCES_BY_PRESET.get(pid, THERA_WORLD_CHARACTER_REFERENCES)
 
 
 # Backward-compat export: canonical Thera-World character map (historic import sites / LoRA tooling).
 CHARACTER_REFERENCES = THERA_WORLD_CHARACTER_REFERENCES
+
+
+def preset_json_exists(preset_id: str) -> bool:
+    return (_PRESETS_DIR / f"{preset_id}.json").exists()
 
 STYLE_PREFIX_WARM = (
     "Studio Ghibli anime art style, Makoto Shinkai inspired, "
@@ -432,16 +470,10 @@ def _load_preset(preset_id: str | None = None) -> list[dict]:
 def _manifest_preset_id(manifest: dict | None, fallback_preset: str | None = None) -> str:
     if not manifest:
         return fallback_preset or DEFAULT_PRESET_ID
-    raw = manifest.get("preset_id")
-    if isinstance(raw, str) and raw in CHARACTER_REFERENCES_BY_PRESET:
-        return raw
-    doc_id = manifest.get("preset_bundle_id")  # optional explicit bundle id if ever needed
-    if isinstance(doc_id, str) and doc_id in CHARACTER_REFERENCES_BY_PRESET:
-        return doc_id
-    # Merged preset root (id matches filename bundle) — never treat arbitrary UUIDs as presets
-    root_id = manifest.get("id")
-    if isinstance(root_id, str) and root_id in CHARACTER_REFERENCES_BY_PRESET:
-        return root_id
+    for key in ("preset_id", "preset_bundle_id", "id"):
+        raw = manifest.get(key)
+        if isinstance(raw, str) and raw and preset_json_exists(raw):
+            return raw
     return fallback_preset or DEFAULT_PRESET_ID
 
 

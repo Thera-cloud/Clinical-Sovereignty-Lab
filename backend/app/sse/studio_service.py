@@ -181,9 +181,31 @@ async def _call_workers_ai(system: str, user: str) -> str:
     return str(result)
 
 
-async def generate_script(prompt: str, content_sources: list[str] | None = None) -> dict:
-    """Use Workers AI to compose a script from a prompt + selected SSE content."""
+async def generate_script(
+    prompt: str,
+    content_sources: list[str] | None = None,
+    preset_id: str | None = None,
+) -> dict:
+    """Use Workers AI to compose a script for the active subset (or open cinematic)."""
     context_parts: list[str] = []
+    subset_label = "an open cinematic therapeutic universe"
+    style_lock = ""
+    cast_lock = ""
+    if preset_id:
+        try:
+            pdata = get_preset(preset_id)
+            subset_label = pdata.get("title") or preset_id
+            anchor = pdata.get("visual_style_anchor") or {}
+            if isinstance(anchor, dict) and anchor.get("look"):
+                style_lock = f"\nVISUAL STYLE LOCK (must honor): {anchor.get('look')}\n"
+            casting = pdata.get("casting_locksheet") or {}
+            if isinstance(casting, dict) and casting:
+                cast_lock = "\nCHARACTER CAST (use these keys in descriptions):\n" + "\n".join(
+                    f"- {k}: {v if isinstance(v, str) else (v.get('inline_desc') or k)}"
+                    for k, v in casting.items()
+                ) + "\n"
+        except Exception:
+            subset_label = preset_id
     if content_sources:
         sources = get_content_sources()
         if "plots" in content_sources and sources["plots"]:
@@ -198,12 +220,14 @@ async def generate_script(prompt: str, content_sources: list[str] | None = None)
             context_parts.append("NPC TEMPLATES:\n" + "\n".join(f"- {n['name']}: {n['description']}" for n in sources["npcs"]))
 
     system = (
-        "You are a cinematic script writer for Thera-World, a therapeutic fantasy universe.\n"
+        f"You are a cinematic script writer for the subset generator: {subset_label}.\n"
+        "Thera-World is one possible subset — honor THIS subset's style and cast when provided.\n"
         "Write vivid, cinematic scene descriptions suitable for AI image/video generation.\n"
         "Return ONLY valid JSON: {\"scenes\": [{\"scene\": 1, \"title\": \"snake_case\", "
         "\"description\": \"visual description for image gen\", \"dialogue\": \"optional narration\", "
-        "\"duration\": 5, \"mood\": \"one word\"}]}\n"
-        "Keep descriptions visual and detailed — they will be used as image generation prompts.\n\n"
+        "\"duration\": 5, \"mood\": \"one word\", \"characters\": [\"key\"]}]}\n"
+        "Keep descriptions visual and detailed — they will be used as image generation prompts.\n"
+        f"{style_lock}{cast_lock}\n"
         + ("\n\n".join(context_parts) if context_parts else "")
     )
     raw = await _call_workers_ai(system, prompt)
@@ -276,7 +300,7 @@ async def generate_scene_image(
             )
         if description:
             prompt_parts.append(description[:400])
-        prompt_parts.append("No text overlays, no logos. Match Thera-World daily panel art style.")
+        prompt_parts.append("No text overlays, no logos. Match the active subset visual style.")
         gen_prompt = " ".join(prompt_parts)
         async with GROK_IMAGINE_LOCK:
             image_bytes = await generate_image(gen_prompt, source_image_url=source)
@@ -446,7 +470,7 @@ async def delete_library_object(r2_key: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def list_presets() -> list[dict]:
-    """List available scene presets."""
+    """List imagery/story subsets (JSON presets). Thera-World is one subset among many."""
     from app.sse.trailer_generator import preset_character_keys
 
     presets: list[dict] = []
@@ -456,11 +480,20 @@ def list_presets() -> list[dict]:
         try:
             data = json.loads(p.read_text())
             pid = data.get("id", p.stem)
+            casting = data.get("casting_locksheet") or {}
             presets.append({
                 "id": pid,
                 "title": data.get("title", p.stem),
+                "description": (data.get("description") or "")[:280],
+                "subset_kind": data.get("subset_kind") or (
+                    "thera_world" if "thera_world" in pid else "custom"
+                ),
                 "scene_count": len(data.get("scenes", [])),
                 "character_keys": preset_character_keys(pid),
+                "character_count": len(casting) if isinstance(casting, dict) else 0,
+                "has_style_anchor": bool(data.get("visual_style_anchor")),
+                "color_preset": (data.get("color_grade") or {}).get("preset")
+                or data.get("default_color_preset"),
             })
         except Exception:
             pass
@@ -468,7 +501,7 @@ def list_presets() -> list[dict]:
 
 
 def get_preset(name: str) -> dict:
-    """Load a preset by name."""
+    """Load a subset preset by name."""
     from app.sse.trailer_generator import preset_character_keys
 
     path = _PRESETS_DIR / f"{name}.json"
@@ -477,6 +510,86 @@ def get_preset(name: str) -> dict:
     data = json.loads(path.read_text())
     data["character_keys"] = preset_character_keys(data.get("id") or name)
     return data
+
+
+def _slug_preset_id(raw: str) -> str:
+    import re
+    s = (raw or "").strip().lower().replace(" ", "_").replace("-", "_")
+    s = re.sub(r"[^a-z0-9_]", "", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s or "custom_subset"
+
+
+def create_or_update_preset(body: dict) -> dict:
+    """Create/update a subset generator JSON under studio_presets/.
+
+    Required: title. Optional: id, description, subset_kind, visual_style_anchor,
+    casting_locksheet (dict key→description), scenes, default_color_preset.
+    """
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise ValueError("title required")
+    pid = _slug_preset_id(body.get("id") or title)
+    if body.get("append_origin_suffix", True) and not pid.endswith("_origin"):
+        pid = f"{pid}_origin"
+
+    path = _PRESETS_DIR / f"{pid}.json"
+    existing: dict = {}
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            existing = {}
+
+    casting = body.get("casting_locksheet") or body.get("characters") or existing.get("casting_locksheet") or {}
+    if isinstance(casting, list):
+        casting = {str(c): str(c) for c in casting if c}
+
+    style = body.get("visual_style_anchor") or existing.get("visual_style_anchor") or {}
+    if isinstance(style, str) and style.strip():
+        style = {"look": style.strip()}
+
+    scenes = body.get("scenes")
+    if scenes is None:
+        scenes = existing.get("scenes") or []
+
+    doc = {
+        **existing,
+        "id": pid,
+        "preset_id": pid,
+        "title": title,
+        "description": (body.get("description") or existing.get("description") or title).strip(),
+        "subset_kind": body.get("subset_kind") or existing.get("subset_kind") or "custom",
+        "visual_style_anchor": style if isinstance(style, dict) else {"look": str(style)},
+        "casting_locksheet": casting if isinstance(casting, dict) else {},
+        "default_color_preset": body.get("default_color_preset")
+        or existing.get("default_color_preset")
+        or "counseling_neon",
+        "branch_points": body.get("branch_points") or existing.get("branch_points") or [1],
+        "scenes": scenes,
+        "output": existing.get("output") or {
+            "filename": f"{pid}.mp4",
+            "duration_target_seconds": 24,
+            "aspect": "16:9",
+            "resolution": "1920x1080",
+            "r2_character_prefix": f"sse/trailer/{pid}/characters/",
+        },
+    }
+    if body.get("music_brief"):
+        doc["music_brief"] = body["music_brief"]
+    if body.get("narration_voice"):
+        doc["narration_voice"] = body["narration_voice"]
+
+    _PRESETS_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return get_preset(pid)
+
+
+async def get_trained_loras_for_project(project_id: str) -> dict:
+    """Return trained_loras map from R2 project manifest."""
+    from app.sse.trailer_generator import _load_trained_loras
+
+    return await _load_trained_loras(project_id)
 
 
 # ---------------------------------------------------------------------------

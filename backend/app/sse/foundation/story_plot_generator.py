@@ -81,12 +81,36 @@ def _slugify(name: str) -> str:
     return slug
 
 
-async def generate(narrative: dict[str, Any], user_id: str = None, db_pool=None) -> dict[str, Any]:
+async def generate(
+    narrative: dict[str, Any],
+    user_id: str = None,
+    db_pool=None,
+    preset_id: str | None = None,
+) -> dict[str, Any]:
     doc_type = narrative.get("document_type", "narrative_arc")
     phases = narrative.get("phases_detected", [])
     story_name = narrative.get("story_name", "untitled")
     story_id = narrative.get("story_id") or f"storyboard_{_slugify(story_name)}_v1.0"
     audience = narrative.get("audience", "general")
+    # Default subset = Thera-World mythology; other Studio presets override style/cast locks.
+    pid = (preset_id or narrative.get("preset_id") or "thera_world_origin").strip()
+    style_anchor = ""
+    casting_hint = ""
+    try:
+        from app.sse.trailer_generator import (
+            _fuse_visual_style_anchor,
+            _load_preset_document,
+            preset_character_keys,
+        )
+
+        doc = _load_preset_document(pid)
+        style_anchor = _fuse_visual_style_anchor(doc)
+        keys = preset_character_keys(pid)
+        if keys:
+            casting_hint = "characters: " + ", ".join(keys[:8])
+    except Exception:
+        if pid != "thera_world_origin":
+            pid = "thera_world_origin"
 
     char_vis, cult_ctx = "figure, indeterminate presentation", ""
     if user_id and db_pool:
@@ -101,11 +125,12 @@ async def generate(narrative: dict[str, Any], user_id: str = None, db_pool=None)
 
     panels: list[dict[str, Any]] = []
     new_spaces = 0
+    use_thera_bedrock = pid == "thera_world_origin" or "thera_world" in pid
 
     for phase in phases:
         mapping = phase.get("sse_phase_mapping", "the_becoming")
-        manifestation = PHASE_MANIFESTATION.get(mapping, "Glimmer")
-        suffix = IMAGINE_SUFFIXES.get(manifestation, IMAGINE_SUFFIXES["Glimmer"])
+        manifestation = PHASE_MANIFESTATION.get(mapping, "Glimmer") if use_thera_bedrock else ""
+        suffix = IMAGINE_SUFFIXES.get(manifestation, "") if manifestation else ""
         biome = phase.get("biome", "")
         sacred_space = phase.get("sacred_space", "")
         key_visual = phase.get("key_visual", "")
@@ -113,7 +138,9 @@ async def generate(narrative: dict[str, Any], user_id: str = None, db_pool=None)
 
         scene_desc = f"{phase.get('description', '')} — {key_visual}".strip(" —")
         biome_vis = f"environment: {biome}" if biome else ""
-        grok_prompt = f"{scene_desc}, character: {char_vis}, {biome_vis}, {suffix}, no text, no words, no lettering, no calligraphy, no writing on image".replace(", ,", ",")
+        parts = [scene_desc, f"character: {char_vis}", biome_vis, casting_hint, style_anchor, suffix,
+                 "no text, no words, no lettering, no calligraphy, no writing on image"]
+        grok_prompt = ", ".join(p for p in parts if p).replace(", ,", ",")
         audio = _build_audio_profile(biome, panel_tone)
 
         panels.append({
@@ -121,7 +148,7 @@ async def generate(narrative: dict[str, Any], user_id: str = None, db_pool=None)
             "panel_tone": panel_tone,
             "scene_description": scene_desc,
             "grok_imagine_prompt": grok_prompt,
-            "core_character_suffix": manifestation,
+            "core_character_suffix": manifestation or (style_anchor[:80] if style_anchor else "subset_style"),
             "biome": biome,
             "sacred_space": sacred_space,
             "audio_profile": f"{audio} [{cult_ctx}]" if cult_ctx else audio,
@@ -170,6 +197,7 @@ async def generate(narrative: dict[str, Any], user_id: str = None, db_pool=None)
         "name": story_name,
         "audience": audience,
         "document_type": doc_type,
+        "preset_id": pid,
         "panels": panels,
     }
 

@@ -1,7 +1,9 @@
 {
   "id": "thera_world_origin",
+  "preset_id": "thera_world_origin",
+  "subset_kind": "thera_world",
   "title": "Thera-World: A Journey of Two Worlds",
-  "description": "19-scene origin trailer for Sovereign Sanctuary — the boy, the serpent, the dragon, and the girl.",
+  "description": "19-scene origin trailer for Sovereign Sanctuary — the boy, the serpent, the dragon, and the girl. One imagery/story subset among many.",
   "scenes": [
     {
       "scene": 1,
