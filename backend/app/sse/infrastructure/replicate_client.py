@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 _API_BASE = "https://api.replicate.com/v1"
 _FLUX_MODEL = "black-forest-labs/flux-1.1-pro"
 _LORA_TRAIN_MODEL = "ostris/flux-dev-lora-trainer"
-_LORA_TRAIN_VERSION = "d995297071a44dcb72244e6c19462111649ec86a9646c96b64f20f894c8c2e94"
+# ostris/flux-dev-lora-trainer — pin checked 2026-07-26 (older IDs 404)
+_LORA_TRAIN_VERSION = "26dce37af90b9d997eeb970d92e47de3064d46c300504ae376c75bef6a9022d2"
 
 
 def _get_token() -> str:
@@ -84,7 +85,9 @@ async def ensure_destination_model(destination: str) -> None:
                 return
             body = await resp.text()
             # Already exists / race
-            if resp.status in (409, 422) and "already" in body.lower():
+            if resp.status == 409 or (
+                resp.status == 422 and "already" in body.lower()
+            ):
                 return
             raise RuntimeError(
                 f"Replicate create model {resp.status}: {body[:300]}. "
