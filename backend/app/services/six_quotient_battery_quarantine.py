@@ -31,6 +31,7 @@ _BATTERY_MARKERS = (
     "grok-judge-v1",
     "grok-judge-v2",
     "grok-judge-v3",
+    "grok-judge-v4",
     "rubric_focus:",
     "battery-validated weakness",
     "battery_validated_weakness",
