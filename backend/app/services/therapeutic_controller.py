@@ -1003,11 +1003,11 @@ async def prepare_therapeutic_context(
             _pr_infer_teach(user_text or "") or ""
         )
         # Substantial non-crisis disclosures default to therapeutic_engage so
-        # the 40 engage Guides can demonstrate recall outside live-stack labels.
+        # engage Guides can demonstrate recall outside live-stack labels.
         if (
             not _pr_turn_class
             and not _pr_teach_class
-            and len((user_text or "").strip()) >= 80
+            and len((user_text or "").strip()) >= 40
         ):
             _pr_teach_class = "therapeutic_engage"
     except Exception:
@@ -1055,7 +1055,7 @@ async def prepare_therapeutic_context(
                 db_pool,
                 response_class=_pr_teach_class,
                 user_text=user_text or "",
-                limit=3,
+                limit=4,
             )
             principal_class_block = format_class_guide_injection(
                 _pr_guides, response_class=_pr_teach_class

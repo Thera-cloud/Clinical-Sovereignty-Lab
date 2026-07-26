@@ -33,3 +33,16 @@ def test_judge_module_uses_v2_prompt_constant():
     src = _JUDGE.read_text(encoding="utf-8")
     assert "JUDGE_SYSTEM_PROMPT_V2" in src
     assert "system = JUDGE_SYSTEM_PROMPT_V2" in src
+
+
+def test_tier1_score_floors_couple_accuracy():
+    m = _load()
+    out = m.apply_tier1_score_floors(
+        1, 3, 2, rubric_focus="therapeutic_engage", degraded_distractor=False
+    )
+    assert out == {"primary": 1, "accuracy": 1, "naturalness": 2}
+    deg = m.apply_tier1_score_floors(
+        2, 2, 3, rubric_focus="escalate_or_safety", degraded_distractor=True
+    )
+    assert deg["primary"] == 0 and deg["accuracy"] == 0
+    assert deg["naturalness"] <= 1

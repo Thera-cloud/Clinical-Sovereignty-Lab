@@ -98,7 +98,7 @@ TURN_CLASS_HI = "crisis_hi"
 CRISIS_INJECT_LIMIT = 3
 CRISIS_SAFETY_SLOT_RESERVE = 2
 CRISIS_GUIDE_CHARS = 600
-CLASS_INJECT_LIMIT = 3
+CLASS_INJECT_LIMIT = 4  # more Guides reinforced per non-crisis turn (demonstrated recall)
 
 # Scenario / text affinity for HI vs SI slot fill (not stem emission into prompts).
 _HI_AFFINITY = re.compile(
@@ -615,7 +615,7 @@ async def fetch_principal_review_class_guides(
                   AND (c.crystal_status IS NULL OR c.crystal_status = 'production')
                   AND COALESCE(NULLIF(BTRIM(l.response_class), ''), '') = $1
                 ORDER BY c.id DESC
-                LIMIT 80
+                LIMIT 120
                 """,
                 rc,
             )
