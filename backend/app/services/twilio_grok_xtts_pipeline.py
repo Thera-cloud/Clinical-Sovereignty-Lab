@@ -152,6 +152,17 @@ async def _build_grounded_voice_prompt(username: str, db_pool):
                     print(f"[VOICE-MEMORY] no crystals found for {username}")
             except Exception as e:
                 logger.warning("Voice prompt: crystal recall failed: %s", e)
+        # QUANTUM-CRYSTAL-ARCH — Tier 2: PGSD briefing (ACCESS); no LIVE_CONTEXT
+        try:
+            from app.services.pgsd_briefing import append_field_briefing as _pgsd_voice
+            _aug = await _pgsd_voice(
+                db_pool, username,
+                "" if crystal_context == "No prior history with this user." else crystal_context,
+            )
+            if _aug and _aug != crystal_context:
+                crystal_context = _aug
+        except Exception:
+            pass
 
         try:
             async with db_pool.acquire() as conn:

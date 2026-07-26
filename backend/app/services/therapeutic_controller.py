@@ -979,7 +979,7 @@ async def prepare_therapeutic_context(
     try:
         from app.services.six_quotient_live_context import get_live_addendum
 
-        _sq_add = await get_live_addendum(db_pool)
+        _sq_add = await get_live_addendum(db_pool, surface="bridge_chat")
         if _sq_add:
             six_q_live_block = "\n" + _sq_add + "\n"
     except Exception as _sq_exc:

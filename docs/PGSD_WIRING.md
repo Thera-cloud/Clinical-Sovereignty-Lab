@@ -144,7 +144,7 @@ After each successful auto-trigger snapshot save, `_bg_compute` fires
 | `pgsd_crisis_regions` | `pgsd_pmb_bridge.seed_region_from_crisis_event` |
 | `pgsd_chat_correlation` | `pgsd_correlation.correlate_recent_chat` |
 | `pgsd_discernment_scores` | `PGSDDiscernmentScorer.score_user` |
-| `pgsd_cross_domain_agreement` | (future — cross-surface agreement) |
+| `pgsd_cross_domain_agreement` | Cross-surface agreement (written by `pgsd_correlation.compute_cross_domain_series` when ACCESS on) |
 | `pgsd_trauma_wells` | `TraumaWellEngine.refresh_wells` / `collapse_well` |
 | `pgsd_forecasts` | (future — forecast + Brier) |
 | `pgsd_field_couplings` | (future — pairwise J, h) |

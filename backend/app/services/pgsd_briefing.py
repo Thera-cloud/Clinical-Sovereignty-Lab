@@ -126,3 +126,22 @@ async def build_field_briefing(
     except Exception as e:
         logger.debug("build_field_briefing failed (non-fatal): %s", e)
         return ""
+
+
+async def append_field_briefing(
+    db_pool: Any,
+    raw_id: str,
+    existing_ctx: str = "",
+    *,
+    max_chars: int = 400,
+) -> str:
+    """QUANTUM-CRYSTAL-ARCH — ACCESS-gated briefing append; never raises."""
+    try:
+        brief = await build_field_briefing(db_pool, raw_id or "", max_chars=max_chars)
+        if not brief:
+            return existing_ctx or ""
+        base = (existing_ctx or "").strip()
+        block = f"[PGSD FIELD BRIEFING]\n{brief}"
+        return f"{base}\n\n{block}".strip() if base else block
+    except Exception:
+        return existing_ctx or ""

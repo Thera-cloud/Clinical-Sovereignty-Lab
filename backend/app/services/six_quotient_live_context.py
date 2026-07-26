@@ -57,13 +57,20 @@ def _focus_is_smoke(focus: Dict[str, Any]) -> bool:
     return False
 
 
+# QUANTUM-CRYSTAL-ARCH — Tier 2: therapy-only surfaces; no family/DOJO/voice bleed
+_LIVE_CONTEXT_SURFACES = frozenset({"bridge_chat", "therapy"})
+
+
 async def get_live_addendum(
     db_pool,
     *,
     environment: Optional[str] = None,
+    surface: str = "bridge_chat",
 ) -> str:
-    """Return prompt block or empty string when flag off / no signal."""
+    """Return prompt block or empty string when flag off / wrong surface / no signal."""
     if not _flag_on() or not db_pool:
+        return ""
+    if (surface or "").strip().lower() not in _LIVE_CONTEXT_SURFACES:
         return ""
     env = environment or _env_name()
     try:

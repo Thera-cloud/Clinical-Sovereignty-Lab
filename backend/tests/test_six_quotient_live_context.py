@@ -71,3 +71,17 @@ def test_focus_is_smoke_rejects_lab_stamps():
             "focus_quotient": "AQ",
         }
     )
+
+
+def test_live_addendum_surface_gate(monkeypatch):
+    """Tier 2: non-therapy surfaces must not inherit AQ live_focus cues."""
+    import asyncio
+
+    monkeypatch.setenv("ENABLE_SIX_QUOTIENT_LIVE_CONTEXT", "true")
+
+    async def _empty(surface: str) -> str:
+        return await _mod.get_live_addendum(object(), surface=surface)
+
+    assert asyncio.run(_empty("family_sanctuary")) == ""
+    assert asyncio.run(_empty("voice_call")) == ""
+    assert "bridge_chat" in _mod._LIVE_CONTEXT_SURFACES

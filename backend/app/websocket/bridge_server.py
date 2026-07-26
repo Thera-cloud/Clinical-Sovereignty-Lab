@@ -11226,6 +11226,17 @@ class AzureCortex:
                         _member_crystal_parts.append(f"[{_fp_name}'s memory]:\n{_fp_ctx}")
                         _sanctuary_scopes.extend(scopes_from_recall_context(_fp_ctx))
             sanctuary_crystal_ctx = "\n\n".join(_member_crystal_parts) if _member_crystal_parts else ""
+            # QUANTUM-CRYSTAL-ARCH — Tier 2: PGSD briefing (ACCESS); no LIVE_CONTEXT
+            try:
+                from app.services.pgsd_briefing import append_field_briefing as _pgsd_ap
+                _pgsd_id = (
+                    sanctuary_data.get("head_of_household_id")
+                    or (family_profiles[0].get("hardware_id") if family_profiles else "")
+                    or ""
+                )
+                sanctuary_crystal_ctx = await _pgsd_ap(db_pool, _pgsd_id, sanctuary_crystal_ctx)
+            except Exception:
+                pass
             # QUANTUM-CRYSTAL-ARCH: per-member cycle skill plans
             try:
                 from app.services.cycle_skill_plan_service import build_family_skill_plan_context as _sk_fam
@@ -11685,6 +11696,14 @@ class AzureCortex:
                 source="group_coaching", query_text=conversation[:200],
             )
             _gc_scopes = scopes_from_recall_context(gc_crystal_ctx)  # QUANTUM-CRYSTAL-ARCH
+            # QUANTUM-CRYSTAL-ARCH — Tier 2: PGSD briefing (ACCESS); no LIVE_CONTEXT
+            try:
+                from app.services.pgsd_briefing import append_field_briefing as _pgsd_gc
+                gc_crystal_ctx = await _pgsd_gc(
+                    db_pool, target_member.get("hardware_id", ""), gc_crystal_ctx or "",
+                )
+            except Exception:
+                pass
             # QUANTUM-CRYSTAL-ARCH: clinical technique directory (group coaching)
             try:
                 from app.services.clinical_technique_directory import directory_context_for_surface as _cd_gc
@@ -11983,6 +12002,12 @@ class AzureCortex:
                 triggering_message = coaching_session.get("triggering_message", "")
                 pc_crystal_ctx = await recall_crystals_for_context(db_pool, member_id or "", max_results=5, source="private_coaching", query_text=triggering_message[:200])  # QUANTUM-CRYSTAL-ARCH
                 _pc_scopes = scopes_from_recall_context(pc_crystal_ctx)  # QUANTUM-CRYSTAL-ARCH
+                # QUANTUM-CRYSTAL-ARCH — Tier 2: PGSD briefing (ACCESS); no LIVE_CONTEXT
+                try:
+                    from app.services.pgsd_briefing import append_field_briefing as _pgsd_pc
+                    pc_crystal_ctx = await _pgsd_pc(db_pool, member_id or "", pc_crystal_ctx or "")
+                except Exception:
+                    pass
                 # QUANTUM-CRYSTAL-ARCH: skill plan in private coaching
                 try:
                     from app.services.cycle_skill_plan_service import build_cycle_skill_plan_context as _sk_pc

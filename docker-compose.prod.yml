@@ -250,6 +250,11 @@ services:
       - TIER1_SOAK_WAIVED=${TIER1_SOAK_WAIVED:-false}
       # QUANTUM-CRYSTAL-ARCH — D.13 cycle/PGSD/PMB acceleration (default off)
       - ENABLE_SIX_QUOTIENT_ACCELERATION=${ENABLE_SIX_QUOTIENT_ACCELERATION:-false}
+      # QUANTUM-CRYSTAL-ARCH — Tier 2 PGSD ladder (FIELD stays false until ACCESS smoke)
+      - PGSD_ENABLED=${PGSD_ENABLED:-false}
+      - ENABLE_PGSD_HEARTBEAT=${ENABLE_PGSD_HEARTBEAT:-false}
+      - ENABLE_PGSD_ACCESS=${ENABLE_PGSD_ACCESS:-false}
+      - ENABLE_PGSD_FIELD=${ENABLE_PGSD_FIELD:-false}
       - SIX_QUOTIENT_BRIDGE_WS_URL=${SIX_QUOTIENT_BRIDGE_WS_URL:-ws://bridge:8765/ws}
       - TEST_USERNAME=${TEST_USERNAME:-audit_client}
       - TEST_PASSWORD=${TEST_PASSWORD:-AuditClient2026!}
@@ -425,6 +430,11 @@ services:
       # QUANTUM-CRYSTAL-ARCH — D.14b: bridge therapy uses live_context + quarantine
       - ENABLE_SIX_QUOTIENT_LIVE_CONTEXT=${ENABLE_SIX_QUOTIENT_LIVE_CONTEXT:-false}
       - SIX_QUOTIENT_BATTERY_QUARANTINE=${SIX_QUOTIENT_BATTERY_QUARANTINE:-true}
+      # QUANTUM-CRYSTAL-ARCH — Tier 2 PGSD ladder (mirror backend; FIELD off)
+      - PGSD_ENABLED=${PGSD_ENABLED:-false}
+      - ENABLE_PGSD_HEARTBEAT=${ENABLE_PGSD_HEARTBEAT:-false}
+      - ENABLE_PGSD_ACCESS=${ENABLE_PGSD_ACCESS:-false}
+      - ENABLE_PGSD_FIELD=${ENABLE_PGSD_FIELD:-false}
       - CLI_TASK_BUS_ENABLED=${CLI_TASK_BUS_ENABLED:-true}
       # QUANTUM-CRYSTAL-ARCH — SI/violence coach alert default on (opt-out with =false)
       - ENABLE_UNIVERSAL_SI_COACH_ALERT=${ENABLE_UNIVERSAL_SI_COACH_ALERT:-true}

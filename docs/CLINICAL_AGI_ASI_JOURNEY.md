@@ -17,7 +17,7 @@
 | Rater reliability ≥0.70 on ≥15 | **PASS** (intra_rater id=2, QWK≈0.732, meets_threshold) |
 | Qualifying nights ≥7 | **WAIVED** 2026-07-26 (`TIER1_SOAK_WAIVED=true`; was 4/7 — calendar fuse, not skill). Nightly measure remains on. |
 | `WEEKLY_LIVE` | **ON** GREEN 2026-07-26 (CEO/self-dev reviewed; Sunday 06–07 UTC live WS; AQ live_focus until next CEO APPROVE) |
-| Tier 2 Narrow AGI | Blocked until Tier 1 certified — then family/DOJO/ops batteries + privacy walls |
+| Tier 2 Narrow AGI | **OPEN / kickoff (2026-07-26)** — Track E: PGSD ACCESS substrate + LIVE_CONTEXT surface gate + cross-domain battery design. **Substrate ≠ certification.** No “Narrow AGI completed” until family/DOJO/ops batteries + privacy walls pass. FIELD stays off until ACCESS smoke. |
 
 ## Honesty rule (Tier 0)
 

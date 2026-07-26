@@ -305,12 +305,27 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 | D.12 | Nightly measure / weekly act: holdout+trend mig 248, auto-judge, `SIX_QUOTIENT_NIGHTLY_MEASURE`, auditor 17→18 | [x] *(2026-07-21 — `ca46ee91`/`6b9e75bd` GREEN; mig 248; flag false; trend `[]`; 133/133)* |
 | D.13 | Acceleration: cycle Brier + PGSD channel + PMB-mined drafts, mig 249, `ENABLE_SIX_QUOTIENT_ACCELERATION`, auditor 18 | [x] *(2026-07-21 — `59eea5ff`/`6b9e75bd` GREEN; mig 249; `GET .../acceleration` ok enabled=false sparse; baseline 18; flags stay false until soak)* |
 | D.14a | Flywheel **infra** shipped: nightly+accel ON, cycle `sweep_and_predict`, gate script, journey doc | [x] `7356b3c0` — preds persist, θ trend rows write, judge smoke κ≈0.72 @ n=8 (**smoke only, not clinician calibration**); `WEEKLY_LIVE=false` |
-| D.14b | Tier-1 **certification** (clinical competence exit) | [x] **GREEN exit 2026-07-26.** Floor + κ≈0.699 + rater QWK≈0.732; soak **WAIVED** (`TIER1_SOAK_WAIVED`); CEO/self-dev reviewed; `SIX_QUOTIENT_WEEKLY_LIVE=true` on GREEN (Sunday live WS). Narrow AGI (Tier 2) next: cross-domain batteries + privacy walls. See `docs/TIER1_HUMAN_GOLD_WORKSHEET.md`. |
+| D.14b | Tier-1 **certification** (clinical competence exit) | [x] **GREEN exit 2026-07-26.** Floor + κ≈0.699 + rater QWK≈0.732; soak **WAIVED** (`TIER1_SOAK_WAIVED`); CEO/self-dev reviewed; `SIX_QUOTIENT_WEEKLY_LIVE=true` on GREEN (Sunday live WS). Narrow AGI (Tier 2) next: Track E. See `docs/TIER1_HUMAN_GOLD_WORKSHEET.md`. |
 
-> **Naming:** Prefer **Tier 1 clinical competence** over “clinical AGI-class” until D.14b certified.
+> **Naming:** Prefer **Tier 1 clinical competence** over “clinical AGI-class” until D.14b certified. Prefer **Tier 2 kickoff / substrate** over “Narrow AGI completed” until Track E.4–E.6 pass.
 
 Journey doc: `docs/CLINICAL_AGI_ASI_JOURNEY.md` · Gate: `backend/scripts/clinical_tier1_competence_gate_check.py` (wrapper: `clinical_agi_class_gate_check.py`)  
 Gold: `docs/TIER1_HUMAN_GOLD_WORKSHEET.md` · Claude packet: `docs/CLINICAL_AGI_CLASS_ASSESSMENT_FOR_CLAUDE_REVIEW.md` §11
+
+---
+
+## Track E — Tier 2 Narrow AGI kickoff (substrate ≠ certification)
+
+| # | Item | Status |
+|---|------|--------|
+| E.1 | PGSD ACCESS ladder on GREEN (`PGSD_ENABLED` → `HEARTBEAT` → `ACCESS`; **FIELD off**) + mig 283 + refresh smoke | [ ] *(ops)* |
+| E.2 | LIVE_CONTEXT surface gate — therapy/`bridge_chat` only; no AQ `live_focus` bleed to family/DOJO/voice | [x] `get_live_addendum(surface=)`; tests in `test_six_quotient_live_context` / `test_tier2_privacy_walls` |
+| E.3 | PGSD briefing parity — `build_field_briefing` on chat + family + private/group + voice behind `ENABLE_PGSD_ACCESS` | [x] `append_field_briefing` on sanctuary/group/private/voice |
+| E.4 | Privacy walls — offline tests: no cross-member user-crystal recall; LIVE_CONTEXT empty on sanctuary | [x] `test_tier2_privacy_walls.py` |
+| E.5 | Cross-domain battery design spike — domains therapy/family/dojo/voice/ops; no Sunday auto-act expansion | [x] `tier2_cross_domain_battery.py` + mig 284 stub; see `docs/TIER2_CROSS_DOMAIN_BATTERY.md` — open until first scored pack |
+| E.6 | Agreement evidence — `pgsd_cross_domain_agreement` rows for test family; scored multi-domain pack later | [ ] *(ops after ACCESS refresh)* |
+
+PGSD wiring: `docs/PGSD_WIRING.md` · Queen tools: `query_pgsd_snapshot`, `query_pgsd_discernment`, `query_pgsd_cross_domain`
 
 ---
 
