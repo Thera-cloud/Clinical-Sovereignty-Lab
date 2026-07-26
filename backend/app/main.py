@@ -3179,6 +3179,36 @@ async def lifespan(app: FastAPI):
         except Exception as _ir_err:
             print(f"   ⚠️  NateInferenceRouter init failed: {_ir_err}")
 
+    # QUANTUM-CRYSTAL-ARCH: Vectorize metadata indexes are required for native
+    # user_id filtering. Not retroactive — create indexes, then re-upsert a cap
+    # of crystals so nate-wisdom becomes filterable. Post-filter fallback covers
+    # the gap until reindex finishes (see DEFECT_MEMO_VECTORIZE_METADATA_FILTER).
+    try:
+        from app.services import vectorize_service as _vz_meta
+        if _vz_meta.is_vectorize_configured():
+            async def _vectorize_metadata_bootstrap():
+                try:
+                    report = await _vz_meta.ensure_metadata_indexes()
+                    missing = [k for k, v in report.items() if not v.get("ok")]
+                    ok_n = len(report) - len(missing)
+                    print(f"   ✅ Vectorize metadata indexes: {ok_n}/{len(report)} indexes ready")
+                    if missing:
+                        logger.warning("Vectorize metadata indexes incomplete: %s", missing)
+                    if db_pool:
+                        _lim = int(os.getenv("CRYSTAL_GRAPH_MAX_EDGE_NODES", "20000") or 20000)
+                        stats = await _vz_meta.reindex_wisdom_crystals(db_pool, limit=_lim)
+                        print(
+                            f"   ✅ Vectorize crystal reindex: "
+                            f"{stats.get('upserted', 0)}/{stats.get('selected', 0)} upserted"
+                        )
+                except Exception as _vz_boot_err:
+                    logger.warning("Vectorize metadata bootstrap failed: %s", _vz_boot_err)
+
+            asyncio.create_task(_vectorize_metadata_bootstrap())
+            print("   ✅ Vectorize metadata bootstrap scheduled")
+    except Exception as _vz_meta_err:
+        print(f"   ⚠️  Vectorize metadata bootstrap failed: {_vz_meta_err}")
+
     # QUANTUM-CRYSTAL-ARCH: CrystalGraph — relationship edges + meta-crystal synthesis
     _crystal_graph = None
     if db_pool and getattr(settings, "ENABLE_CRYSTAL_GRAPH", False):
@@ -3188,7 +3218,8 @@ async def lifespan(app: FastAPI):
             app.state.crystal_graph = _crystal_graph
 
             async def _crystal_graph_rebuild_loop():
-                await asyncio.sleep(120)
+                # Wait for metadata bootstrap + partial reindex before first rebuild.
+                await asyncio.sleep(300)
                 while True:
                     try:
                         await _crystal_graph.rebuild()

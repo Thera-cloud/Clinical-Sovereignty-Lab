@@ -64,6 +64,24 @@ INDEX_NAMES = {
     "code": "nate-code-search",
 }
 
+# Properties that semantic_search / scope narrowing filter on.
+# Cloudflare allows ≤10 metadata indexes per Vectorize index; these 6 stay under the cap.
+# Must be created before upsert for native filtering (not retroactive on existing vectors).
+METADATA_INDEX_PROPERTIES = (
+    ("user_id", "string"),
+    ("family_id", "string"),
+    ("group_id", "string"),
+    ("company_id", "string"),
+    ("wisdom_id", "string"),
+    ("content_hash", "string"),
+)
+
+# When True (default), empty native filter results fall back to unfiltered query +
+# Python post-filter. Required until the corpus is re-upserted after metadata indexes.
+_POST_FILTER_FALLBACK = os.getenv("VECTORIZE_POST_FILTER_FALLBACK", "true").lower() in (
+    "1", "true", "yes",
+)
+
 _MAX_TEXT_LENGTH = 2000
 _BATCH_SIZE = 100
 _session: Optional[aiohttp.ClientSession] = None
@@ -273,6 +291,123 @@ async def delete_vectors(index_name: str, ids: List[str]) -> bool:
         return False
 
 
+async def list_metadata_indexes(index_name: str) -> List[Dict]:
+    """List metadata indexes for a Vectorize index (empty list if none / error)."""
+    if not is_vectorize_configured():
+        return []
+    url = (
+        f"{_VECTORIZE_URL.format(account_id=_CF_ACCOUNT_ID, index_name=index_name)}"
+        "/metadata_index/list"
+    )
+    try:
+        session = await _get_session()
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                body = await resp.text()
+                logger.warning(
+                    "Vectorize metadata_index/list failed (%d) on %s: %s",
+                    resp.status, index_name, body[:200],
+                )
+                return []
+            data = await resp.json()
+            return list((data.get("result") or {}).get("metadataIndexes") or [])
+    except Exception as e:
+        logger.warning("Vectorize metadata_index/list error on %s: %s", index_name, e)
+        return []
+
+
+async def create_metadata_index(
+    index_name: str,
+    property_name: str,
+    index_type: str = "string",
+) -> bool:
+    """Create one metadata index. Idempotent: already-exists counts as success."""
+    if not is_vectorize_configured():
+        return False
+    url = (
+        f"{_VECTORIZE_URL.format(account_id=_CF_ACCOUNT_ID, index_name=index_name)}"
+        "/metadata_index/create"
+    )
+    try:
+        session = await _get_session()
+        async with session.post(
+            url,
+            json={"propertyName": property_name, "indexType": index_type},
+        ) as resp:
+            body = await resp.text()
+            if resp.status == 200:
+                return True
+            # Cloudflare returns 400/409-style when property already indexed.
+            if "already" in body.lower() or "exist" in body.lower():
+                return True
+            logger.warning(
+                "Vectorize metadata_index/create failed (%d) on %s.%s: %s",
+                resp.status, index_name, property_name, body[:200],
+            )
+            return False
+    except Exception as e:
+        logger.warning(
+            "Vectorize metadata_index/create error on %s.%s: %s",
+            index_name, property_name, e,
+        )
+        return False
+
+
+async def ensure_metadata_indexes(
+    index_names: Optional[List[str]] = None,
+) -> Dict[str, Dict]:
+    """Ensure METADATA_INDEX_PROPERTIES exist on each Vectorize index.
+
+    Returns {index_name: {"ok": bool, "created": [...], "present": [...], "missing": [...]}}.
+    Native filtering only applies to vectors upserted AFTER the metadata index exists.
+    """
+    targets = index_names or list(INDEX_NAMES.values())
+    report: Dict[str, Dict] = {}
+    for index_name in targets:
+        present = {
+            (m.get("propertyName") or m.get("property_name") or "")
+            for m in await list_metadata_indexes(index_name)
+        }
+        created: List[str] = []
+        missing: List[str] = []
+        for prop, ptype in METADATA_INDEX_PROPERTIES:
+            if prop in present:
+                continue
+            if await create_metadata_index(index_name, prop, ptype):
+                created.append(prop)
+                present.add(prop)
+            else:
+                missing.append(prop)
+        report[index_name] = {
+            "ok": not missing,
+            "created": created,
+            "present": sorted(present),
+            "missing": missing,
+        }
+    return report
+
+
+def _metadata_matches_filters(meta: Dict, filters: Dict) -> bool:
+    """Python-side equality match for post-filter fallback."""
+    if not filters:
+        return True
+    meta = meta or {}
+    for key, expected in filters.items():
+        actual = meta.get(key)
+        if expected is None or expected == "":
+            # Global / unscoped callers: accept empty, missing, or crystallizer sentinel.
+            if actual in (None, "", "nate_crystal"):
+                continue
+            return False
+        if str(actual) != str(expected):
+            # Crystallizer global crystals use user_id=nate_crystal; accept when caller
+            # asked for that sentinel or left user_id blank (handled above).
+            if key == "user_id" and str(expected) == "nate_crystal" and actual in (None, ""):
+                continue
+            return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # High-level helpers: embed + upsert for each content type
 # ---------------------------------------------------------------------------
@@ -394,14 +529,24 @@ async def index_wisdom(
         return
 
     vec_id = _make_vector_id("wisdom", wisdom_id)
+    # Never store empty user_id — empty strings are unfilterable / ambiguous.
+    # Global crystals from the crystallizer already pass user_id="nate_crystal".
+    _uid = (user_id or "").strip() or "nate_crystal"
     metadata = {
-        "user_id": user_id,
+        "user_id": _uid,
+        "wisdom_id": str(wisdom_id),
         "insight_type": insight_type,
         "session_id": session_id,
         "source": source,
         "timestamp": timestamp,
         "preview": _truncate(content)[:300],
     }
+    # content_hash: crystal_* wisdom ids carry the hash prefix used by CrystalGraph.
+    _wid = str(wisdom_id)
+    if _wid.startswith("crystal_"):
+        metadata["content_hash"] = _wid.replace("crystal_", "", 1)[:64]
+    elif len(_wid) >= 16 and all(c in "0123456789abcdef" for c in _wid[:16].lower()):
+        metadata["content_hash"] = _wid[:64]
     if family_id:
         metadata["family_id"] = family_id
     if group_id:
@@ -733,7 +878,7 @@ async def semantic_search(
     if not embeddings:
         return []
 
-    filter_meta = {"user_id": user_id}
+    filter_meta: Dict = {"user_id": user_id}
     if family_id:
         filter_meta["family_id"] = family_id
     if group_id:
@@ -743,12 +888,47 @@ async def semantic_search(
     if extra_filter:
         filter_meta.update(extra_filter)
 
+    # Omit empty-string filters from the native payload — Cloudflare metadata
+    # indexes do not usefully match "", and an empty filter object is rejected.
+    native_filter = {k: v for k, v in filter_meta.items() if v not in (None, "")}
+
     matches = await query_vectors(
         index_name=index_name,
         query_vector=embeddings[0],
         top_k=top_k,
-        filter_metadata=filter_meta,
+        filter_metadata=native_filter or None,
     )
+
+    # Post-filter fallback: metadata indexes are not retroactive. Until the
+    # corpus is re-upserted, native filters return []. Unfiltered + Python
+    # equality preserves privacy while restoring retrieval.
+    if (
+        _POST_FILTER_FALLBACK
+        and not matches
+        and native_filter
+    ):
+        raw = await query_vectors(
+            index_name=index_name,
+            query_vector=embeddings[0],
+            top_k=max(top_k * 5, 50),
+            filter_metadata=None,
+        )
+        matches = [
+            m for m in raw
+            if _metadata_matches_filters(m.get("metadata") or {}, filter_meta)
+        ][:top_k]
+        if matches:
+            logger.info(
+                "Vectorize post-filter fallback served %d hits on %s (native filter empty)",
+                len(matches), index_name,
+            )
+    elif matches and filter_meta:
+        # Defense in depth when native filter is absent/partial.
+        matches = [
+            m for m in matches
+            if _metadata_matches_filters(m.get("metadata") or {}, filter_meta)
+        ]
+
     return matches
 
 
@@ -864,6 +1044,88 @@ async def semantic_search_all(
             ] or results[source][:5]
 
     return results
+
+
+async def reindex_wisdom_crystals(
+    db_pool,
+    limit: int = 20000,
+) -> Dict[str, int]:
+    """Re-upsert high-confidence crystals into nate-wisdom with filterable metadata.
+
+    Required after creating metadata indexes (Cloudflare does not index metadata
+    retroactively). Caps at `limit` highest-confidence active crystals so a boot
+    task finishes inside minutes rather than hours.
+    """
+    if not is_vectorize_configured() or not db_pool:
+        return {"selected": 0, "upserted": 0}
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, crystal_text, domain, confidence, content_hash, scope, user_id
+                FROM nate_intelligence_crystals
+                WHERE scope IS DISTINCT FROM 'archived'
+                  AND superseded_by IS NULL
+                  AND content_hash IS NOT NULL
+                  AND length(crystal_text) > 40
+                ORDER BY confidence DESC NULLS LAST, recall_count DESC NULLS LAST
+                LIMIT $1
+                """,
+                limit,
+            )
+    except Exception as e:
+        logger.warning("reindex_wisdom_crystals: PG fetch failed: %s", e)
+        return {"selected": 0, "upserted": 0}
+
+    upserted = 0
+    batch: List[Dict] = []
+    texts: List[str] = []
+    metas: List[Dict] = []
+    ids: List[str] = []
+
+    for r in rows:
+        ch = str(r["content_hash"] or "")
+        if not ch:
+            continue
+        wid = f"crystal_{ch[:16]}"
+        domain = r["domain"] or "general"
+        scope = (r["scope"] or "global").lower()
+        if scope.startswith("user") and r["user_id"]:
+            uid = str(r["user_id"])
+        else:
+            uid = "nate_crystal"
+        ids.append(_make_vector_id("wisdom", wid))
+        texts.append(f"[crystal_{domain}] {(r['crystal_text'] or '')[:1500]}")
+        metas.append({
+            "user_id": uid,
+            "wisdom_id": wid,
+            "content_hash": ch[:64],
+            "insight_type": f"crystal_{domain}",
+            "source": "metadata_reindex",
+            "domain": domain,
+            "preview": (r["crystal_text"] or "")[:300],
+            "confidence": float(r["confidence"] or 0.5),
+        })
+
+    # Embed + upsert in chunks of 25 to stay under Workers AI payload limits.
+    _chunk = 25
+    for i in range(0, len(texts), _chunk):
+        emb = await generate_embeddings(texts[i:i + _chunk])
+        if not emb:
+            continue
+        batch = [
+            {"id": ids[i + j], "values": emb[j], "metadata": metas[i + j]}
+            for j in range(len(emb))
+        ]
+        if await upsert_vectors(INDEX_NAMES["wisdom"], batch):
+            upserted += len(batch)
+        await asyncio.sleep(0.15)
+
+    logger.info(
+        "reindex_wisdom_crystals: selected=%d upserted=%d",
+        len(texts), upserted,
+    )
+    return {"selected": len(texts), "upserted": upserted}
 
 
 # ---------------------------------------------------------------------------

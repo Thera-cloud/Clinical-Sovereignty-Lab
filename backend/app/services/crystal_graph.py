@@ -183,9 +183,17 @@ class CrystalGraph:
             batch = node_list[i:i + _batch_size]
             for node in batch:
                 try:
+                    # QUANTUM-CRYSTAL-ARCH: scope the Vectorize query to the node's
+                    # owner. Global/admin crystals use the crystallizer sentinel;
+                    # user crystals stay inside that user's namespace.
+                    _scope = (node.scope or "global").lower()
+                    if _scope.startswith("user") and node.user_id:
+                        _search_uid = str(node.user_id)
+                    else:
+                        _search_uid = "nate_crystal"
                     results = await semantic_search_all(
                         node.text[:200],
-                        user_id="",
+                        user_id=_search_uid,
                         top_k=10,
                         index_subset=["wisdom"],
                     )
@@ -201,8 +209,14 @@ class CrystalGraph:
                         if score < 0.55:
                             continue
                         meta = r.get("metadata") or {}
-                        wid = meta.get("wisdom_id", "")
-                        n_hash = wid.replace("crystal_", "", 1) if wid.startswith("crystal_") else ""
+                        # QUANTUM-CRYSTAL-ARCH: prefer content_hash / wisdom_id
+                        # (written by index_wisdom). Legacy vectors lack both.
+                        n_hash = (
+                            str(meta.get("content_hash") or "")
+                            or str(meta.get("wisdom_id") or "").replace("crystal_", "", 1)
+                        )
+                        if n_hash.startswith("crystal_"):
+                            n_hash = n_hash.replace("crystal_", "", 1)
                         if not n_hash:
                             continue
                         # QUANTUM-CRYSTAL-ARCH: prefix index instead of full scan
@@ -214,6 +228,12 @@ class CrystalGraph:
                                     break
                         if not neighbor or neighbor.id == node.id:
                             continue
+                        # Scope isolation: never edge global ↔ foreign user.
+                        if (node.scope or "global").startswith("user") or (
+                            neighbor.scope or "global"
+                        ).startswith("user"):
+                            if str(node.user_id or "") != str(neighbor.user_id or ""):
+                                continue
                         edge_weight = score * ((node.confidence * neighbor.confidence) ** 0.5)
                         if edge_weight >= EDGE_THRESHOLD:
                             self._adj[node.id][neighbor.id] = max(
@@ -224,7 +244,7 @@ class CrystalGraph:
                             )
                             self._edge_count += 1
                 except Exception as e:
-                    logger.debug("Vectorize edge query failed for node %s: %s", node.id, e)
+                    logger.warning("Vectorize edge query failed for node %s: %s", node.id, e)
                 _processed += 1
 
             if i > 0 and i % 500 == 0:
