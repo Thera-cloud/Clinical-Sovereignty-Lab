@@ -3168,6 +3168,17 @@ async def lifespan(app: FastAPI):
         except Exception as _qc_err:
             print(f"   ⚠️  QuantumCrystalOrchestrator init failed: {_qc_err}")
 
+    # QUANTUM-CRYSTAL-ARCH: inference router on app.state — CrystalGraph meta-crystal
+    # synthesis reads app.state.inference_router; without it synthesis silently falls
+    # back to a template instead of calling a model.
+    if not getattr(app.state, "inference_router", None):
+        try:
+            from app.services.nate_inference_router import NateInferenceRouter
+            app.state.inference_router = NateInferenceRouter(app_state=app.state)
+            print("   ✅ NateInferenceRouter on app.state")
+        except Exception as _ir_err:
+            print(f"   ⚠️  NateInferenceRouter init failed: {_ir_err}")
+
     # QUANTUM-CRYSTAL-ARCH: CrystalGraph — relationship edges + meta-crystal synthesis
     _crystal_graph = None
     if db_pool and getattr(settings, "ENABLE_CRYSTAL_GRAPH", False):

@@ -15,6 +15,8 @@ import hashlib
 import hmac
 import logging
 import math
+import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -22,6 +24,12 @@ from typing import Any, Dict, List, Optional
 from app.services.crystal_constants import PROMOTION_CAP, PROMOTION_INCREMENT
 
 logger = logging.getLogger(__name__)
+
+
+def _crystal_graph_enabled() -> bool:
+    """QUANTUM-CRYSTAL-ARCH: Phase 5d flag, read at call time (not import time)."""
+    return os.getenv("ENABLE_CRYSTAL_GRAPH", "false").lower() in ("1", "true", "yes")
+
 
 # Domain → Vectorize index subset for Lived Wisdom (Phase 5b)
 _DOMAIN_INDEX_MAP = {
@@ -367,7 +375,9 @@ class FederatedSearchCoordinator:
 
         # Graph tier: constellation retrieval (Phase 2 — neighbourhood search)
         # QUANTUM-CRYSTAL-ARCH: requester scope + Patent 6 ODPE depth via context_budget
-        if self._crystal_graph:
+        # QUANTUM-CRYSTAL-ARCH: db_pool path serves the bridge (no app.state there);
+        # still gated on ENABLE_CRYSTAL_GRAPH so the phase flag stays authoritative.
+        if self._crystal_graph or (self._db_pool and _crystal_graph_enabled()):
             tasks.append(self._search_constellation(
                 query, user_id=user_id, context_budget=context_budget,
             ))
@@ -637,7 +647,10 @@ class FederatedSearchCoordinator:
         capturing contextual depth that keyword or semantic search alone miss.
         """
         if not self._crystal_graph:
-            return []
+            # QUANTUM-CRYSTAL-ARCH: the bridge process has no app.state and therefore
+            # no in-memory graph. Traverse the persisted crystal_edges table instead so
+            # constellation retrieval is reachable from WebSocket chat.
+            return await self._search_constellation_db(query, user_id, context_budget)
         try:
             # QUANTUM-CRYSTAL-ARCH: Patent 6 ODPE depth + requester-scoped traversal
             from app.services.crystal_graph_isolation import constellation_depth_for_budget
@@ -650,6 +663,80 @@ class FederatedSearchCoordinator:
             return results
         except Exception as e:
             logger.warning("FederatedSearch constellation search failed: %s", e)
+            return []
+
+    async def _search_constellation_db(
+        self,
+        query: str,
+        user_id: Optional[str] = None,
+        context_budget: Optional[int] = None,
+    ) -> List[Dict]:
+        """Graph tier without an in-memory graph: one-hop traversal of crystal_edges.
+
+        Used by the bridge process. Scope is enforced in SQL — global crystals plus
+        the requester's own. Another user's crystals are never reachable.
+        """
+        if not self._db_pool:
+            return []
+        try:
+            from app.services.crystal_graph_isolation import constellation_depth_for_budget
+            _depth, max_r = constellation_depth_for_budget(context_budget)
+            terms = [t for t in re.findall(r"[a-z]{4,}", (query or "").lower())][:6]
+            if not terms:
+                return []
+            async with self._db_pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    WITH seed AS (
+                        SELECT id, content_hash, crystal_text, domain, confidence,
+                               recall_count, scope, user_id
+                        FROM nate_intelligence_crystals
+                        WHERE scope IS DISTINCT FROM 'archived'
+                          AND superseded_by IS NULL
+                          AND (scope = 'global' OR user_id::text = $2)
+                          AND crystal_text ILIKE ANY($1::text[])
+                        ORDER BY confidence DESC
+                        LIMIT 5
+                    ),
+                    nbr_hash AS (
+                        SELECT DISTINCT
+                            CASE WHEN e.crystal_a_hash = left(s.content_hash::text, 16)
+                                 THEN e.crystal_b_hash ELSE e.crystal_a_hash END AS h,
+                            e.similarity
+                        FROM seed s
+                        JOIN crystal_edges e
+                          ON e.crystal_a_hash = left(s.content_hash::text, 16)
+                          OR e.crystal_b_hash = left(s.content_hash::text, 16)
+                    )
+                    SELECT c.id, c.crystal_text, c.domain, c.confidence,
+                           c.recall_count, n.similarity
+                    FROM nbr_hash n
+                    JOIN nate_intelligence_crystals c
+                      ON left(c.content_hash::text, 16) = n.h
+                    WHERE c.scope IS DISTINCT FROM 'archived'
+                      AND c.superseded_by IS NULL
+                      AND (c.scope = 'global' OR c.user_id::text = $2)
+                    ORDER BY n.similarity DESC NULLS LAST, c.confidence DESC
+                    LIMIT $3
+                    """,
+                    [f"%{t}%" for t in terms],
+                    str(user_id or ""),
+                    max_r,
+                )
+            return [
+                {
+                    "text": r["crystal_text"],
+                    "score": float(r["similarity"] or 0.5),
+                    "confidence": float(r["confidence"] or 0.5),
+                    "recall_count": int(r["recall_count"] or 0),
+                    "domain": r["domain"] or "general",
+                    "source": "constellation",
+                    "crystal_id": str(r["id"]),
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.warning("FederatedSearch DB constellation failed: %s", e)
             return []
 
     async def _search_warm(self, query: str) -> List[Dict]:

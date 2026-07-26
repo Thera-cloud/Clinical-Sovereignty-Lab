@@ -27,6 +27,7 @@ Architecture:
 import asyncio
 import hashlib
 import logging
+import os
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -157,9 +158,26 @@ class CrystalGraph:
                 hash_to_node[node.content_hash] = node
             _offset += _page_size
 
+        # QUANTUM-CRYSTAL-ARCH: O(1) neighbour resolution — the previous full scan
+        # over hash_to_node made this pass O(n^2) and it never finished at 200k+.
+        hash16_to_node: Dict[str, Any] = {}
+        for _h, _n in hash_to_node.items():
+            hash16_to_node.setdefault(str(_h)[:16], _n)
+
         _processed = 0
         _batch_size = 50
         node_list = list(self._nodes.values())
+
+        # QUANTUM-CRYSTAL-ARCH: bound the Vectorize pass so a rebuild completes
+        # inside one interval. Highest-confidence crystals get edges first.
+        _max_nodes = int(os.getenv("CRYSTAL_GRAPH_MAX_EDGE_NODES", "20000") or 20000)
+        if len(node_list) > _max_nodes:
+            node_list.sort(key=lambda n: n.confidence, reverse=True)
+            node_list = node_list[:_max_nodes]
+            logger.info(
+                "CrystalGraph: capping edge pass at %d of %d nodes",
+                _max_nodes, len(self._nodes),
+            )
 
         for i in range(0, len(node_list), _batch_size):
             batch = node_list[i:i + _batch_size]
@@ -187,11 +205,13 @@ class CrystalGraph:
                         n_hash = wid.replace("crystal_", "", 1) if wid.startswith("crystal_") else ""
                         if not n_hash:
                             continue
-                        neighbor = None
-                        for nh, nn in hash_to_node.items():
-                            if nh.startswith(n_hash) or n_hash.startswith(nh[:16]):
-                                neighbor = nn
-                                break
+                        # QUANTUM-CRYSTAL-ARCH: prefix index instead of full scan
+                        neighbor = hash16_to_node.get(n_hash[:16])
+                        if neighbor is None and len(n_hash) < 16:
+                            for nh, nn in hash_to_node.items():
+                                if nh.startswith(n_hash):
+                                    neighbor = nn
+                                    break
                         if not neighbor or neighbor.id == node.id:
                             continue
                         edge_weight = score * ((node.confidence * neighbor.confidence) ** 0.5)
