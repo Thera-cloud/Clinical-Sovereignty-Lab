@@ -181,10 +181,18 @@ class PGSDWebSocketRouter:
         if not client_id:
             return self._err("pgsd_compute_snapshot", "client_id required")
 
-        prev = await self._load_latest_snapshot(client_id)
+        # QUANTUM-CRYSTAL-ARCH — resolve to hardware_id before persist + ACCESS/FIELD
+        resolved = await self.engine.resolve_pgsd_subject(client_id)
+        save_key = (resolved or {}).get("hardware_id") or client_id
+        username = (resolved or {}).get("username") or ""
+
+        prev = await self._load_latest_snapshot(save_key)
 
         pgsd = await self.engine.compute_full_pgsd(client_id)
         pgsd["computed_at"] = _utc_now_iso()
+        pgsd["_trigger_source"] = "admin_compute"
+        if username:
+            pgsd["_username"] = username
 
         evolution = None
         route = None
@@ -204,14 +212,16 @@ class PGSDWebSocketRouter:
                 evolution = None
                 route = None
 
-        snapshot_id = await self._save_snapshot(client_id, pgsd, evolution)
-        self._last_compute[client_id] = time.time()
+        snapshot_id = await self._save_snapshot(save_key, pgsd, evolution)
+        self._last_compute[save_key] = time.time()
+        # QUANTUM-CRYSTAL-ARCH — same ACCESS/FIELD follow-ups as auto-trigger path
+        self._kick_access_field_followups(save_key, snapshot_id, "admin_compute")
 
         return {
             "type": "pgsd_snapshot",
             "ok": True,
             "snapshot_id": snapshot_id,
-            "client_id": client_id,
+            "client_id": save_key,
             "pgsd": pgsd,
             "evolution_from_previous": evolution,
             "zero_time_route_from_previous": route,
@@ -588,77 +598,63 @@ class PGSDWebSocketRouter:
                 except Exception:
                     evolution = None
             snapshot_id = await self._save_snapshot(save_key, pgsd, evolution)
-            # QUANTUM-CRYSTAL-ARCH — ACCESS chat correlation after snapshot persist
-            try:
-                import asyncio
-                import os
-
-                from app.services.pgsd_correlation import correlate_recent_chat
-
-                if (
-                    os.environ.get("ENABLE_PGSD_ACCESS", "").strip().lower()
-                    in ("1", "true", "yes", "on")
-                    and os.environ.get("PGSD_ENABLED", "").strip().lower()
-                    in ("1", "true", "yes", "on")
-                    and snapshot_id
-                    and self.db
-                ):
-                    asyncio.create_task(
-                        correlate_recent_chat(
-                            self.db,
-                            save_key,
-                            snapshot_id,
-                            source,
-                        )
-                    )
-                    # QUANTUM-CRYSTAL-ARCH — ACCESS scorer + cross-domain refresh
-                    try:
-                        from app.services.pgsd_discernment_scorer import (
-                            PGSDDiscernmentScorer,
-                        )
-
-                        asyncio.create_task(
-                            PGSDDiscernmentScorer(db_pool=self.db).score_user(save_key)
-                        )
-                    except Exception:
-                        pass
-                    try:
-                        from app.services.pgsd_correlation import (
-                            compute_cross_domain_series,
-                        )
-
-                        asyncio.create_task(
-                            compute_cross_domain_series(self.db, save_key)
-                        )
-                    except Exception:
-                        pass
-                if (
-                    os.environ.get("ENABLE_PGSD_FIELD", "").strip().lower()
-                    in ("1", "true", "yes", "on")
-                    and os.environ.get("PGSD_ENABLED", "").strip().lower()
-                    in ("1", "true", "yes", "on")
-                    and self.db
-                    and snapshot_id
-                ):
-                    try:
-                        from app.services.pgsd_trauma_wells import TraumaWellEngine
-                        from app.services.pgsd_field_engine import PGSDFieldEngine
-
-                        asyncio.create_task(
-                            TraumaWellEngine(db_pool=self.db).refresh_wells(save_key)
-                        )
-                        asyncio.create_task(
-                            PGSDFieldEngine(db_pool=self.db).track_hamiltonian(
-                                save_key, snapshot_id
-                            )
-                        )
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            # QUANTUM-CRYSTAL-ARCH — ACCESS/FIELD follow-ups (shared with admin compute)
+            self._kick_access_field_followups(save_key, snapshot_id, source)
         except Exception:
             # Auto-triggers must NEVER surface errors.
             return
+
+    def _kick_access_field_followups(
+        self,
+        save_key: str,
+        snapshot_id: Optional[int],
+        source: str,
+    ) -> None:
+        """Fire-and-forget ACCESS + FIELD writers after a snapshot persist."""
+        if not snapshot_id or not self.db or not save_key:
+            return
+        try:
+            import os
+
+            access_on = os.environ.get("ENABLE_PGSD_ACCESS", "").strip().lower() in (
+                "1", "true", "yes", "on",
+            )
+            field_on = os.environ.get("ENABLE_PGSD_FIELD", "").strip().lower() in (
+                "1", "true", "yes", "on",
+            )
+            master = os.environ.get("PGSD_ENABLED", "").strip().lower() in (
+                "1", "true", "yes", "on",
+            )
+            if not master:
+                return
+            if access_on:
+                from app.services.pgsd_correlation import (
+                    compute_cross_domain_series,
+                    correlate_recent_chat,
+                )
+                from app.services.pgsd_discernment_scorer import PGSDDiscernmentScorer
+
+                asyncio.create_task(
+                    correlate_recent_chat(self.db, save_key, snapshot_id, source)
+                )
+                asyncio.create_task(
+                    PGSDDiscernmentScorer(db_pool=self.db).score_user(save_key)
+                )
+                asyncio.create_task(compute_cross_domain_series(self.db, save_key))
+            if field_on:
+                from app.services.pgsd_field_engine import PGSDFieldEngine
+                from app.services.pgsd_trauma_wells import TraumaWellEngine
+
+                asyncio.create_task(
+                    TraumaWellEngine(db_pool=self.db).refresh_wells(save_key)
+                )
+                asyncio.create_task(
+                    PGSDFieldEngine(db_pool=self.db).track_hamiltonian(
+                        save_key, snapshot_id
+                    )
+                )
+        except Exception:
+            pass
 
     # ─── Persistence (all guarded; never raise) ───────────────────────
 
