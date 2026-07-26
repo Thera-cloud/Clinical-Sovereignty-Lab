@@ -22,6 +22,36 @@ def _load(name: str, rel: str):
     return mod
 
 
+def _load_l5_adaptor():
+    """Load adaptor without importing app.services (avoids nevedal/numpy on macOS)."""
+    import types
+
+    pkg = "app.services.l5_sandbox"
+    for name in ("app", "app.services", pkg):
+        if name not in sys.modules:
+            m = types.ModuleType(name)
+            if name == pkg:
+                m.__path__ = [str(_SERVICES / "l5_sandbox")]
+            sys.modules[name] = m
+    gates_name = f"{pkg}.gates"
+    if gates_name not in sys.modules:
+        gpath = _SERVICES / "l5_sandbox" / "gates.py"
+        gspec = importlib.util.spec_from_file_location(gates_name, gpath)
+        gmod = importlib.util.module_from_spec(gspec)
+        assert gspec.loader is not None
+        sys.modules[gates_name] = gmod
+        gspec.loader.exec_module(gmod)
+    aname = f"{pkg}.adaptor"
+    apath = _SERVICES / "l5_sandbox" / "adaptor.py"
+    aspec = importlib.util.spec_from_file_location(aname, apath)
+    amod = importlib.util.module_from_spec(aspec)
+    assert aspec.loader is not None
+    amod.__package__ = pkg
+    sys.modules[aname] = amod
+    aspec.loader.exec_module(amod)
+    return amod
+
+
 class TestL4AutoDraftGates(unittest.TestCase):
     def test_auto_draft_respects_master_flag(self):
         os.environ["ENABLE_LN_RULE_LOOP"] = "false"
@@ -80,7 +110,7 @@ class TestL4DraftFromFP(unittest.IsolatedAsyncioTestCase):
 
         drafted = {"rid": 99, "sandbox": False}
 
-        async def _has(_pool, _key):
+        async def _pending(_pool, _key):
             return False
 
         async def _draft(_pool, **kwargs):
@@ -100,7 +130,7 @@ class TestL4DraftFromFP(unittest.IsolatedAsyncioTestCase):
         async def _l5(*_a, **_k):
             return None
 
-        mod._has_live_or_pending_rule = _has  # type: ignore
+        mod._has_pending_draft_or_sandbox = _pending  # type: ignore
         mod.draft_rule = _draft  # type: ignore
         mod._latest_version = _ver  # type: ignore
         mod.move_to_sandbox = _sandbox  # type: ignore
@@ -126,6 +156,35 @@ class TestL4DraftFromFP(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rid, 99)
         self.assertTrue(drafted["sandbox"])
 
+    async def test_fp_supersede_skips_when_sandbox_pending(self):
+        os.environ["ENABLE_LN_RULE_LOOP"] = "true"
+        os.environ["ENABLE_LN_RULE_AUTO_DRAFT"] = "true"
+        os.environ["LN_RULE_FP_DRAFT_MIN_N"] = "3"
+        os.environ["LN_RULE_FP_DRAFT_MAX_CONF"] = "0.45"
+        mod = _load("ln_rule_loop", "ln_rule_loop.py")
+
+        async def _pending(_pool, _key):
+            return True
+
+        mod._has_pending_draft_or_sandbox = _pending  # type: ignore
+        conn = AsyncMock()
+        conn.fetchrow = AsyncMock(
+            return_value={
+                "confidence": 0.20,
+                "sample_size": 10,
+                "negative_count": 6,
+                "positive_count": 4,
+            }
+        )
+        pool = MagicMock()
+        pool.acquire = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=conn),
+                __aexit__=AsyncMock(return_value=None),
+            )
+        )
+        self.assertIsNone(await mod.maybe_draft_from_false_positive(pool, "pharma_interaction"))
+
     async def test_cycle_evidence_complete(self):
         os.environ["ENABLE_LN_RULE_LOOP"] = "true"
         mod = _load("ln_rule_loop", "ln_rule_loop.py")
@@ -147,23 +206,62 @@ class TestL4DraftFromFP(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(ev["has_draft"])
         self.assertTrue(ev["has_promote"])
 
+    async def test_lifecycle_promotes_newer_sandbox_over_active(self):
+        os.environ["ENABLE_LN_RULE_LOOP"] = "true"
+        os.environ["LN_RULE_SHADOW_PROMOTE_MIN"] = "3"
+        mod = _load("ln_rule_loop", "ln_rule_loop.py")
+        promoted = {"ok": False}
+
+        async def _conf(_pool, _gc):
+            return 0.40, 2
+
+        async def _shadows(_pool, _key, _ver):
+            return 5
+
+        async def _promote(_pool, **kwargs):
+            self.assertEqual(kwargs["version"], 2)
+            promoted["ok"] = True
+            return True
+
+        async def _l5(*_a, **_k):
+            return None
+
+        mod._gate_confidence = _conf  # type: ignore
+        mod._shadow_fire_count = _shadows  # type: ignore
+        mod.promote_rule = _promote  # type: ignore
+        mod._notify_l5_observe = _l5  # type: ignore
+
+        conn = AsyncMock()
+        conn.fetchrow = AsyncMock(
+            side_effect=[
+                {"rule_key": "soft_gate.sleep_aid.followup_suppress", "version": 1},
+                {"rule_key": "soft_gate.sleep_aid.followup_suppress", "version": 2},
+            ]
+        )
+        pool = MagicMock()
+        pool.acquire = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=conn),
+                __aexit__=AsyncMock(return_value=None),
+            )
+        )
+        await mod.maybe_lifecycle_from_gate_confidence(pool, "sleep_aid")
+        self.assertTrue(promoted["ok"])
+
 
 class TestL5SandboxGates(unittest.TestCase):
     def test_never_writes_live(self):
-        from app.services.l5_sandbox import gates
-
+        gates = _load("l5_gates", "l5_sandbox/gates.py")
         self.assertFalse(gates.can_write_live_rules())
 
     def test_refuse_hard_class(self):
-        from app.services.l5_sandbox import gates
-
+        gates = _load("l5_gates", "l5_sandbox/gates.py")
         self.assertTrue(gates.refuse_hard_class("suicide_ideation"))
         self.assertTrue(gates.refuse_hard_class(""))
         self.assertFalse(gates.refuse_hard_class("pharma_interaction"))
 
     def test_adapt_requires_observe(self):
-        from app.services.l5_sandbox import gates
-
+        gates = _load("l5_gates", "l5_sandbox/gates.py")
         prev_o = os.environ.get("ENABLE_L5_OBSERVE")
         prev_a = os.environ.get("ENABLE_L5_ADAPT")
         try:
@@ -183,15 +281,13 @@ class TestL5SandboxGates(unittest.TestCase):
 
 class TestL5AdaptorIsolation(unittest.IsolatedAsyncioTestCase):
     async def test_propose_live_promotion_refused(self):
-        from app.services.l5_sandbox import adaptor
-
+        adaptor = _load_l5_adaptor()
         out = await adaptor.propose_live_promotion(AsyncMock(), hypothesis_key="x")
         self.assertFalse(out["allowed"])
         self.assertFalse(out["can_write_live_rules"])
 
     async def test_adapt_skips_hard_class(self):
-        from app.services.l5_sandbox import adaptor
-
+        adaptor = _load_l5_adaptor()
         prev_o = os.environ.get("ENABLE_L5_OBSERVE")
         prev_a = os.environ.get("ENABLE_L5_ADAPT")
         try:

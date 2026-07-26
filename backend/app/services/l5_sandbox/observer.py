@@ -47,7 +47,7 @@ async def ingest_l4_event(
                 (detail or "")[:500],
             )
     except Exception as e:
-        logger.debug("l5_observe_event insert skip: %s", e)
+        logger.warning("l5_observe_event insert skip: %s", e)
         return
 
     if adapt_enabled() and gate_class:
@@ -63,7 +63,7 @@ async def ingest_l4_event(
                 detail=detail,
             )
         except Exception as e:
-            logger.debug("l5 adapt skip: %s", e)
+            logger.warning("l5 adapt skip: %s", e)
 
 
 async def _audit_gate_refuse(

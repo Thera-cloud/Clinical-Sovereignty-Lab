@@ -125,8 +125,12 @@ async def list_active_rules(db_pool: Any) -> List[Dict[str, Any]]:
 
 
 async def list_eval_rules(db_pool: Any) -> List[Dict[str, Any]]:
-    """Active + sandbox (sandbox is shadow-only at apply time)."""
-    return await _list_rules(db_pool, statuses=("active", "sandbox"))
+    """Latest active AND latest sandbox per key (so supersede soak keeps live apply)."""
+    if not rule_loop_enabled() or not db_pool:
+        return []
+    active = await _list_rules(db_pool, statuses=("active",))
+    sandbox = await _list_rules(db_pool, statuses=("sandbox",))
+    return active + sandbox
 
 
 async def _list_rules(db_pool: Any, *, statuses: tuple) -> List[Dict[str, Any]]:
@@ -374,7 +378,27 @@ async def _gate_confidence(db_pool: Any, gate_class: str) -> tuple[float, int]:
     return float(conf), n
 
 
+async def _has_pending_draft_or_sandbox(db_pool: Any, rule_key: str) -> bool:
+    """True if a draft/sandbox already awaits lifecycle (block duplicate pending)."""
+    try:
+        async with db_pool.acquire() as conn:
+            return bool(
+                await conn.fetchval(
+                    """
+                    SELECT 1 FROM ln_rule_store
+                    WHERE rule_key = $1
+                      AND status IN ('draft', 'sandbox')
+                    LIMIT 1
+                    """,
+                    rule_key,
+                )
+            )
+    except Exception:
+        return True  # fail closed
+
+
 async def _has_live_or_pending_rule(db_pool: Any, rule_key: str) -> bool:
+    """True if draft/sandbox/active exists (scaffold path — no supersede)."""
     try:
         async with db_pool.acquire() as conn:
             return bool(
@@ -399,12 +423,20 @@ async def _draft_and_sandbox(
     created_by: str,
     notes: str,
     condition_extra: Optional[Dict[str, Any]] = None,
+    allow_active_supersede: bool = False,
 ) -> Optional[int]:
-    """L4 requirements 1–4: draft_rule → move_to_sandbox, soft-gate only."""
+    """L4 requirements 1–4: draft_rule → move_to_sandbox, soft-gate only.
+
+    allow_active_supersede=True (FP path): draft next version even when active
+    exists; still blocked if draft/sandbox pending.
+    """
     if not auto_draft_enabled() or not db_pool or not is_soft_gate_class(gate_class):
         return None
     key = _rule_key_for(gate_class)
-    if await _has_live_or_pending_rule(db_pool, key):
+    if allow_active_supersede:
+        if await _has_pending_draft_or_sandbox(db_pool, key):
+            return None
+    elif await _has_live_or_pending_rule(db_pool, key):
         return None
     cond: Dict[str, Any] = {
         "gate_class": gate_class,
@@ -427,11 +459,17 @@ async def _draft_and_sandbox(
         return rid
     ok = await move_to_sandbox(db_pool, rule_key=key, version=ver)
     if ok:
-        logger.info("L4 draft→sandbox %s v%s by=%s", key, ver, created_by)
+        logger.info(
+            "L4 draft→sandbox %s v%s by=%s supersede=%s",
+            key, ver, created_by, allow_active_supersede,
+        )
         await _notify_l5_observe(
             db_pool,
             event="draft_sandbox",
-            detail=f"key={key} v={ver} by={created_by} class={gate_class}",
+            detail=(
+                f"key={key} v={ver} by={created_by} class={gate_class} "
+                f"supersede={allow_active_supersede}"
+            ),
             gate_class=gate_class,
             rule_key=key,
             version=ver,
@@ -449,6 +487,7 @@ async def ensure_soft_rule_drafted(db_pool: Any, gate_class: str) -> None:
             gate_class=gate_class,
             created_by="ln_rule_loop",
             notes="auto-draft from soft-gate fire",
+            allow_active_supersede=False,
         )
     except Exception as e:
         logger.warning("ensure_soft_rule_drafted: %s", e)
@@ -458,7 +497,7 @@ async def maybe_draft_from_false_positive(
     db_pool: Any,
     gate_class: str,
 ) -> Optional[int]:
-    """L4 req 3 — measured FP/low-confidence outcome → draft→sandbox.
+    """L4 req 3 — measured FP/low-confidence → draft→sandbox (may supersede active).
 
     Called from clinical_gate_confidence.record_feedback(positive=False).
     Soft classes only. Never SI/violence.
@@ -493,6 +532,7 @@ async def maybe_draft_from_false_positive(
                 f"max_conf={_FP_DRAFT_MAX_CONF}"
             ),
             condition_extra={"max_confidence": round(min(conf + 0.10, 0.50), 2)},
+            allow_active_supersede=True,
         )
     except Exception as e:
         logger.warning("maybe_draft_from_false_positive: %s", e)
@@ -571,7 +611,7 @@ async def _notify_l5_observe(
             version=version,
         )
     except Exception as e:
-        logger.debug("l5 observe skip: %s", e)
+        logger.warning("l5 observe skip: %s", e)
 
 
 async def _latest_version(db_pool: Any, rule_key: str) -> Optional[int]:
@@ -651,33 +691,43 @@ async def maybe_lifecycle_from_gate_confidence(
                 version=int(active["version"]),
             )
             return
-        if sandbox and not active:
-            shadows = await _shadow_fire_count(
-                db_pool, sandbox["rule_key"], int(sandbox["version"]),
-            )
-            promote_ok = (
-                shadows >= _SHADOW_PROMOTE_MIN
-                or (n >= _PROMOTE_MIN_N and conf >= _PROMOTE_FLOOR)
-            )
-            if promote_ok:
-                ok = await promote_rule(
-                    db_pool,
-                    rule_key=sandbox["rule_key"],
-                    version=int(sandbox["version"]),
+        # Promote sandbox when none active, OR newer sandbox superseding active
+        if sandbox:
+            sand_ver = int(sandbox["version"])
+            active_ver = int(active["version"]) if active else 0
+            can_promote = (not active) or (sand_ver > active_ver)
+            if can_promote:
+                shadows = await _shadow_fire_count(
+                    db_pool, sandbox["rule_key"], sand_ver,
                 )
-                if ok:
-                    logger.info(
-                        "L4 promote %s v%s conf=%.2f n=%d shadows=%d",
-                        sandbox["rule_key"], sandbox["version"], conf, n, shadows,
-                    )
-                    await _notify_l5_observe(
+                promote_ok = (
+                    shadows >= _SHADOW_PROMOTE_MIN
+                    or (n >= _PROMOTE_MIN_N and conf >= _PROMOTE_FLOOR)
+                )
+                if promote_ok:
+                    ok = await promote_rule(
                         db_pool,
-                        event="promote",
-                        detail=f"conf={conf:.2f} n={n} shadows={shadows}",
-                        gate_class=gate_class,
                         rule_key=sandbox["rule_key"],
-                        version=int(sandbox["version"]),
+                        version=sand_ver,
                     )
+                    if ok:
+                        logger.info(
+                            "L4 promote %s v%s conf=%.2f n=%d shadows=%d "
+                            "(supersede_active_v=%s)",
+                            sandbox["rule_key"], sand_ver, conf, n, shadows,
+                            active_ver or None,
+                        )
+                        await _notify_l5_observe(
+                            db_pool,
+                            event="promote",
+                            detail=(
+                                f"conf={conf:.2f} n={n} shadows={shadows} "
+                                f"prev_active_v={active_ver}"
+                            ),
+                            gate_class=gate_class,
+                            rule_key=sandbox["rule_key"],
+                            version=sand_ver,
+                        )
     except Exception as e:
         logger.warning("maybe_lifecycle_from_gate_confidence: %s", e)
 
