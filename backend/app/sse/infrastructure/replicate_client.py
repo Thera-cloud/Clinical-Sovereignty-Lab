@@ -33,23 +33,89 @@ def _headers() -> dict[str, str]:
     }
 
 
+def resolve_lora_destination(
+    character_key: str | None = None,
+    destination: str | None = None,
+) -> str:
+    """Resolve Replicate destination as owner/model-name (must exist, empty).
+
+    Prefer explicit destination, else REPLICATE_LORA_DESTINATION, else
+    REPLICATE_USERNAME + thera-{character_key}.
+    """
+    dest = (destination or os.getenv("REPLICATE_LORA_DESTINATION", "")).strip()
+    if dest:
+        return dest
+    owner = os.getenv("REPLICATE_USERNAME", "").strip()
+    if not owner:
+        raise RuntimeError(
+            "REPLICATE_USERNAME (or REPLICATE_LORA_DESTINATION) required — "
+            "Replicate trainings need destination={owner}/{model}"
+        )
+    slug = (character_key or "character").strip().lower().replace("_", "-")
+    slug = "".join(c for c in slug if c.isalnum() or c == "-") or "character"
+    return f"{owner}/thera-{slug}"
+
+
+async def ensure_destination_model(destination: str) -> None:
+    """Create private empty destination model if missing (best-effort)."""
+    if "/" not in destination:
+        raise RuntimeError(f"Invalid Replicate destination: {destination}")
+    owner, name = destination.split("/", 1)
+    token = _get_token()
+    if not token:
+        raise RuntimeError("REPLICATE_API_TOKEN not set")
+
+    get_url = f"{_API_BASE}/models/{owner}/{name}"
+    create_url = f"{_API_BASE}/models"
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as sess:
+        async with sess.get(get_url, headers=_headers()) as resp:
+            if resp.status == 200:
+                return
+        payload = {
+            "owner": owner,
+            "name": name,
+            "description": f"SSE Thera-World LoRA destination ({name})",
+            "visibility": "private",
+            "hardware": "gpu-t4",
+        }
+        async with sess.post(create_url, json=payload, headers=_headers()) as resp:
+            if resp.status in (200, 201):
+                logger.info("[REPLICATE] Created destination model %s", destination)
+                return
+            body = await resp.text()
+            # Already exists / race
+            if resp.status in (409, 422) and "already" in body.lower():
+                return
+            raise RuntimeError(
+                f"Replicate create model {resp.status}: {body[:300]}. "
+                f"Create empty private model {destination} in the Replicate UI, then retry."
+            )
+
+
 async def train_lora(
     training_images_url: str,
     trigger_word: str = "THERACHAR",
     steps: int = 1000,
     lora_rank: int = 16,
+    destination: str | None = None,
+    character_key: str | None = None,
 ) -> dict:
     """Start a LoRA training job on Replicate.
 
     training_images_url: public URL to a .zip of training images.
+    destination: owner/model — required by Replicate (empty model to push weights into).
     Returns dict with training id and status.
     """
     token = _get_token()
     if not token:
         raise RuntimeError("REPLICATE_API_TOKEN not set")
 
+    dest = resolve_lora_destination(character_key=character_key, destination=destination)
+    await ensure_destination_model(dest)
+
     url = f"{_API_BASE}/models/{_LORA_TRAIN_MODEL}/versions/{_LORA_TRAIN_VERSION}/trainings"
     payload = {
+        "destination": dest,
         "input": {
             "input_images": training_images_url,
             "trigger_word": trigger_word,
@@ -72,6 +138,7 @@ async def train_lora(
     return {
         "training_id": data.get("id", ""),
         "status": data.get("status", "starting"),
+        "destination": dest,
         "urls": data.get("urls", {}),
     }
 

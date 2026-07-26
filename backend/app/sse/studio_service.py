@@ -841,6 +841,7 @@ async def start_lora_training(character_key: str, training_images_zip_url: str) 
     return await train_lora(
         training_images_url=training_images_zip_url,
         trigger_word=f"THERA_{character_key.upper()}",
+        character_key=character_key,
     )
 
 
