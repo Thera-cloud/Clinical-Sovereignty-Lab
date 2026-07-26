@@ -41,7 +41,7 @@ PGSD field physics (wells, TFIM, H(t), ground state) and Patent 12 are the **mea
 - **Primary goal = Narrow AGI growth access.** Physics without Queen/D.13/cross-domain APIs is incomplete.
 - **Dependency order:** multi-surface cadence (incl. DOJO) → series + measurement loop → field/Hamiltonian → **access surfaces (Nate + Queens + acceleration)** → patent/ops.
 - **Discernment is measurable only if chat↔PGSD↔tab stay correlated.** Without transcript ingest, crystal stamps, and a claim-vs-history scorer, Tier 2 cannot grow from evidence.
-- **Same-mind surfaces (mandatory producers):** `main_chat` | `family_sanctuary` | `dojo` / `dojo_coach` | `voice` | `call_coaching` | `private_coaching` | `group_coaching` | `live_activation` | `nightly`. Missing any one blocks Tier-2 substrate.
+- **Same-mind surfaces (mandatory producers):** `bridge_chat` | `family_sanctuary` | `dojo` / `dojo_coach` | `voice` | `call_coaching` | `private_coaching` | `group_coaching` | `live_activation` | `heartbeat` (`nightly` = legacy alias). Missing any one blocks Tier-2 substrate.
 - **Canonical PGSD subject key = `hardware_id`** (live `191` + admin tab). Username is additive for `conversation_history` joins. Do not rewrite historical `user_id` to username.
 - **Access contract (must ship — see Phase E):** cross-domain series API, discernment scores, Queen read tools, D.13 free-label enrichment, **admin** `pgsd.html` reflection (coach Flutter deferred R10). Write/mutate tools stay out of Queens.
 - **New physics lives outside protected files.** Heavy logic in new services; protected files get ≤50-line additive hooks behind flags with `# QUANTUM-CRYSTAL-ARCH` / `# SOVEREIGN-VOICE` markers.

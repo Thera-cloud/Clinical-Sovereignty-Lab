@@ -59,12 +59,21 @@ def _resolve_router() -> Any:
         return None
 
 
+def _normalize_source(source: Optional[str]) -> str:
+    s = (source or "auto")
+    if not isinstance(s, str):
+        return "auto"
+    s = s.strip()
+    return s or "auto"
+
+
 def notify_user(raw_id: str, source: str = "auto") -> bool:
     """
     Resolve subject → hardware_id, skip quarantine, schedule debounced snapshot.
     Returns True if a task was scheduled. Never raises.
     """
     try:
+        source = _normalize_source(source)
         if not _pgsd_master_enabled():
             return False
         if _is_quarantined(raw_id, source):
@@ -96,6 +105,7 @@ async def notify_user_async(
     with only a username still land on hardware_id debounce keys.
     """
     try:
+        source = _normalize_source(source)
         if not _pgsd_master_enabled():
             return False
         if _is_quarantined(raw_id, source):

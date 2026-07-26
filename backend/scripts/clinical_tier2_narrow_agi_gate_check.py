@@ -124,6 +124,21 @@ async def _check_db(dsn: str) -> List[str]:
                 lines.append(f"PASS: cross_domain_agreement rows={agr}")
             else:
                 lines.append("FAIL: no pgsd_cross_domain_agreement rows")
+
+            # Fidelity: new snapshots must carry non-null trigger_source
+            null_ts = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM pgsd_snapshots
+                WHERE computed_at > NOW() - INTERVAL '24 hours'
+                  AND (trigger_source IS NULL OR BTRIM(trigger_source) = '')
+                """
+            )
+            if int(null_ts or 0) == 0:
+                lines.append("PASS: 24h snapshots trigger_source non-null")
+            else:
+                lines.append(
+                    f"FAIL: {null_ts} snapshots in 24h with null/empty trigger_source"
+                )
     finally:
         await pool.close()
     return lines

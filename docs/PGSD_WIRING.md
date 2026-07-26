@@ -93,8 +93,8 @@ All producers call **`notify_user(raw_id, source=...)`** or
 ```python
 from app.services.pgsd_triggers import notify_user
 
-# After producer success path:
-notify_user(user_hardware_id_or_username, source="crystallizer")
+# After producer success path (tag matches Tier-2 domain hints):
+notify_user(user_hardware_id_or_username, source="bridge_chat")
 ```
 
 Behavior:
@@ -105,16 +105,23 @@ Behavior:
 - Debounced to **at most one snapshot per hour per user** (10-minute floor for
   `live_activation`, `sensitive_bridge_enroll`).
 - Returns `True` if scheduled; never raises.
+- Empty/`None` `source` normalizes to `auto` — persist path never writes NULL.
 
 Recommended `source` values (stored in `pgsd_snapshots.trigger_source`):
 
-| Producer | `source` |
-|---|---|
-| `nate_memory_crystallizer` | `crystallizer` |
-| Heartbeat agent | `heartbeat` |
-| Sensitive bridge enroll | `sensitive_bridge_enroll` |
-| Live activation | `live_activation` |
-| Multimodal fusion | `multimodal_fusion` |
+| Producer | `source` | Tier-2 domain |
+|---|---|---|
+| Bridge chat / crystallizer default | `bridge_chat` | therapy |
+| Legacy crystallizer tag | `crystallizer` | therapy (alias) |
+| Family sanctuary | `family_sanctuary` | family |
+| Private / group coaching | `private_coaching` / `group_coaching` | family |
+| DOJO / Night School | `dojo` / `night_school` | dojo |
+| Voice call / call coaching | `voice_call` / `call_coaching` | voice |
+| Heartbeat agent | `heartbeat` | ops (`nightly` = alias) |
+| Admin compute | `admin_compute` | ops |
+| Sensitive bridge enroll | `sensitive_bridge_enroll` | therapy (fast debounce) |
+| Live activation | `live_activation` | therapy |
+| Multimodal fusion | `multimodal_fusion` | (ops/therapy alias as needed) |
 
 ## 4. Heartbeat agent
 

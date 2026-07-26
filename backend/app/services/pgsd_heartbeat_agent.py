@@ -134,7 +134,8 @@ class PGSDHeartbeatAgent:
         scheduled = 0
         for row in rows:
             hw = row["hardware_id"]
-            if await notify_user_async(self.db_pool, hw, source="nightly"):
+            # Canonical ops tag = heartbeat (nightly kept as alias in Tier-2 hints)
+            if await notify_user_async(self.db_pool, hw, source="heartbeat"):
                 scheduled += 1
             await asyncio.sleep(0.05)  # soft rate limit
 

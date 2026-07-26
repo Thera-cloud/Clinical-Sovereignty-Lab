@@ -335,6 +335,7 @@ def build_capabilities_manifest(
         "CEO inbox UI + clinical apply + patent approve API",
         "Sovereign Standard therapeutic docstring gate",
         "Patent claim_map propose→CEO batch approve",
+        "Queen PGSD tools: query_pgsd_snapshot|discernment|cross_domain|wells|ground_state",
     ]
     not_implemented = [
         "Workers AI as CLI Queen / primary provider",

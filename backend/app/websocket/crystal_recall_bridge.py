@@ -1219,7 +1219,8 @@ async def crystallize_from_conversation(
         try:
             from app.services.pgsd_triggers import notify_user
 
-            _src = (origin_surface or "crystallizer").strip() or "crystallizer"
+            # Default bridge_chat so therapy domain surface_hits score without backfill
+            _src = (origin_surface or "bridge_chat").strip() or "bridge_chat"
             notify_user(hardware_id, source=_src)
         except Exception:
             pass

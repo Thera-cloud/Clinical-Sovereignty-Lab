@@ -31,13 +31,37 @@ MEMBER_SCOPED_SOURCES: FrozenSet[str] = frozenset(
     }
 )
 
-# Snapshot trigger_source / surface tokens that count toward each domain
+# Snapshot trigger_source / surface tokens that count toward each domain.
+# Must match notify_user / origin_surface producer tags (see docs/PGSD_WIRING.md).
 _DOMAIN_SURFACE_HINTS: Dict[str, Tuple[str, ...]] = {
-    "therapy": ("bridge_chat", "therapy", "chat", "live_activation", "auto"),
-    "family": ("family_sanctuary", "sanctuary", "family"),
+    "therapy": (
+        "bridge_chat",
+        "therapy",
+        "chat",
+        "live_activation",
+        "auto",
+        "crystallizer",
+        "coached_response",
+    ),
+    "family": (
+        "family_sanctuary",
+        "sanctuary",
+        "family",
+        "private_coaching",
+        "group_coaching",
+    ),
     "dojo": ("dojo", "dojo_coach", "night_school"),
-    "voice": ("voice_call", "voice", "twilio"),
-    "ops": ("heartbeat", "admin", "queen", "ops", "refresh_script"),
+    "voice": ("voice_call", "voice", "twilio", "call_coaching"),
+    "ops": (
+        "heartbeat",
+        "nightly",
+        "admin",
+        "admin_compute",
+        "queen",
+        "ops",
+        "refresh_script",
+        "refresh",
+    ),
 }
 
 

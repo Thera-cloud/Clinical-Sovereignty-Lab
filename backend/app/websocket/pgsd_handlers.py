@@ -152,6 +152,9 @@ class PGSDWebSocketRouter:
         """
         if not self.enabled or not user_id:
             return False
+        source = (source or "auto").strip() if isinstance(source, str) else "auto"
+        if not source:
+            source = "auto"
         now = time.time()
         last = self._last_compute.get(user_id, 0.0)
         floor = debounce_seconds if debounce_seconds is not None else _DEBOUNCE_SECONDS
@@ -675,7 +678,12 @@ class PGSDWebSocketRouter:
             partial = qt.get("partial_trace", {}) or {}
             evo = evolution or {}
             username = pgsd.get("_username") or ""
-            trigger_source = pgsd.get("_trigger_source")
+            # QUANTUM-CRYSTAL-ARCH — never persist NULL trigger_source (Tier-2 v2 packs)
+            trigger_source = (pgsd.get("_trigger_source") or "auto")
+            if isinstance(trigger_source, str):
+                trigger_source = trigger_source.strip() or "auto"
+            else:
+                trigger_source = "auto"
             # Resolve username if missing (additive col from migration 283)
             if not username and self.engine:
                 try:

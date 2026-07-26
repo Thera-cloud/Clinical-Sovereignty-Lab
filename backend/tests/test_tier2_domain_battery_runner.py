@@ -54,3 +54,11 @@ def test_filter_member_wall():
     assert len(_mod.filter_crystals_for_member(
         [{"user_id": "1"}, {"user_id": "2"}], "1"
     )) == 1
+
+
+def test_domain_surface_hint_aliases():
+    h = _mod._DOMAIN_SURFACE_HINTS
+    assert "nightly" in h["ops"] and "heartbeat" in h["ops"]
+    assert "crystallizer" in h["therapy"] and "bridge_chat" in h["therapy"]
+    assert "call_coaching" in h["voice"]
+    assert "private_coaching" in h["family"] and "group_coaching" in h["family"]
