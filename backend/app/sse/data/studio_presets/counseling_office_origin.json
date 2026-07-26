@@ -1,0 +1,145 @@
+{
+  "id": "counseling_office_origin",
+  "preset_id": "counseling_office_origin",
+  "title": "Counseling Office — Little Nate AI Companion (Cartoon LoRA Pack)",
+  "description": "Playful modern futuristic counseling office for LoRA character locks and story development. Same cartoon illustration language as the LinkedIn Thera-World creative: Little Nate on Call Coach phone, Ask Little Nate client, penguin chatbot, hallway AI queue. Warm fun professional — not Ghibli, not photoreal.",
+  "output": {
+    "filename": "counseling_office_story.mp4",
+    "duration_target_seconds": 24,
+    "aspect": "16:9",
+    "resolution": "1920x1080",
+    "video_codec_hints": {"vcodec": "libx264", "video_bitrate_k": 2500, "audio_codec": "aac", "audio_bitrate_k": 192},
+    "r2_bucket_key": "sovereign-vault/marketing/counseling_office_story.mp4",
+    "r2_character_prefix": "sse/trailer/counseling_office/characters/",
+    "local_work_dir_hint": "/tmp/counseling_office/",
+    "max_file_mb_hint": 18
+  },
+  "visual_style_anchor": {
+    "look": "High-quality playful cartoon illustration — sleek modern futuristic counseling office. Soft LED ambient lighting, holographic interface panels, modern potted plants with subtle glowing accents, clean high-tech atmosphere. Rounded friendly character design, clear inked outlines, soft cel-like shading, warm professional fun tone. NOT Studio Ghibli, NOT anime-eyed, NOT photorealistic, NO real brand logos or trademarks.",
+    "skin_lighting_mandate": "Warm soft key light on richly rendered Black/African American skin — luminous umber and amber fill, never flat gray or desaturated monochrome skin.",
+    "cartoon_consistency_mandate": "Lock the same cartoon illustration design across every frame: consistent line weight, saturated but soft palette (yellow accents, cyan holograms, silver-white desk, red rotary phone), friendly proportions, readable name tags and book titles when shown.",
+    "office_atmosphere_mandate": "Futuristic counseling chamber with glossy white-and-silver desk, large glass walls, open doorway to bright hallway, neon back-wall banner reading Thera-World – #1 Virtual World Platform."
+  },
+  "casting_locksheet": {
+    "little_nate": "Friendly middle-aged man with salt-and-pepper grey hair, warm engaged smile, bright yellow button-up shirt, clear name tag reading Little Nate AI Companion. Often seated behind a large glossy white-and-silver futuristic desk, holding a classic red rotary phone labeled Call Coach to his ear.",
+    "ask_client": "African American woman with curly dark hair, yellow top and blue pants, holding an open blue book titled Ask Little Nate. Interested seeking-counseling expression — warm, curious, hopeful.",
+    "penguin_bot": "Cute blue penguin character with round glasses, friendly AI companion vibe, holding a small Ask Little Nate book. Soft cartoon proportions, expressive eyes, same office palette.",
+    "hallway_bot": "Friendly generic AI chatbot archetype from the waiting line — rounded robot body, soft LED face or speech-bubble head, cheerful non-threatening design, varied color accents but same cartoon language as the office. Represents the long hallway queue of bots."
+  },
+  "music_brief": {
+    "genre": "Warm playful light-tech underscore — soft synth pads gentle piano light percussion no aggression",
+    "generation_prompt": "warm playful futuristic counseling office underscore soft pads gentle piano light optimistic twenty-four second arc"
+  },
+  "narration_voice": {
+    "engine": "azure_mini_tts",
+    "speech_rate_numeric": 1.0,
+    "voice": "ash",
+    "instructions": "Warm friendly companion narrator — Little Nate presence, calm professional humor, never salesy.",
+    "segments": [
+      {
+        "id": "nar_seg_office",
+        "label": "Office open",
+        "text": "In Thera-World, Little Nate keeps the Call Coach line open — and the hallway is always full of friends ready to ask.",
+        "wallclock_voice_start_seconds": 1,
+        "wallclock_voice_end_seconds": 10
+      },
+      {
+        "id": "nar_seg_ask",
+        "label": "Ask beat",
+        "text": "Bring your questions. Bring your book. Bring your bots. Counseling starts with curiosity.",
+        "wallclock_voice_start_seconds": 11,
+        "wallclock_voice_end_seconds": 18
+      },
+      {
+        "id": "nar_seg_close",
+        "label": "Close",
+        "text": "Thera-World — number one virtual world platform. Little Nate is listening.",
+        "wallclock_voice_start_seconds": 19,
+        "wallclock_voice_end_seconds": 24
+      }
+    ]
+  },
+  "branch_points": [1, 4],
+  "scenes": [
+    {
+      "scene": 1,
+      "title": "office_wide_call_coach",
+      "characters": ["little_nate", "ask_client", "penguin_bot"],
+      "prompt": "Widescreen 16:9 playful cartoon futuristic counseling office. {little_nate} seated behind large glossy white-and-silver desk actively talking on classic red rotary phone labeled Call Coach, receiver to ear, engaged warm smile. Glass candy dish with colorful wrapped candies on left of desk. Across left sits {ask_client} holding open blue Ask Little Nate book. Right of desk sits {penguin_bot} also holding Ask Little Nate book. Soft LED ambient light, holographic wall panels, neon banner on back wall Thera-World – #1 Virtual World Platform. Through glass walls a long line of friendly AI chatbots fades down bright hallway.",
+      "dialogue": [],
+      "duration": 4,
+      "mood": "warm_welcome",
+      "tone": "warm_fun_tech",
+      "motion": "Gentle camera push toward the glossy desk; Nate nods while on the red Call Coach phone; candy wrappers glint; hallway bots shift patiently behind glass."
+    },
+    {
+      "scene": 2,
+      "title": "ask_client_leans_in",
+      "characters": ["little_nate", "ask_client"],
+      "prompt": "Same cartoon counseling office. Close three-quarter on {ask_client} leaning forward with open blue Ask Little Nate book, curious hopeful expression. Across desk {little_nate} in yellow shirt with name tag listens warmly, red Call Coach phone base on desk. Soft holographic UI glow, candy dish visible left.",
+      "dialogue": [
+        {"voice": "ask_client", "text": "I brought my questions."},
+        {"voice": "little_nate", "text": "Good. That is where every good session begins."}
+      ],
+      "duration": 4,
+      "mood": "curious_trust",
+      "tone": "warm_fun_tech",
+      "motion": "Soft parallax; book pages settle; Nate smiles and tilts head listening."
+    },
+    {
+      "scene": 3,
+      "title": "penguin_bot_consult",
+      "characters": ["little_nate", "penguin_bot"],
+      "prompt": "Same office style. {penguin_bot} with glasses holds Ask Little Nate book up toward {little_nate} who still has Call Coach phone nearby. Playful professional cartoon beat — penguin earnest, Nate amused and kind. Neon Thera-World banner soft in background.",
+      "dialogue": [
+        {"voice": "penguin_bot", "text": "Do bots get office hours too?"},
+        {"voice": "little_nate", "text": "Always. Pull up a chair."}
+      ],
+      "duration": 3,
+      "mood": "playful_care",
+      "tone": "warm_fun_tech",
+      "motion": "Penguin hops once then settles; book tilts; Nate chuckles softly."
+    },
+    {
+      "scene": 4,
+      "title": "hallway_chatbot_line",
+      "characters": ["hallway_bot", "little_nate"],
+      "prompt": "View through large glass wall and open doorway of the counseling office into a bright futuristic hallway. Long line of many friendly generic AI chatbots — robots of different colors and shapes, penguins, speech-bubble characters, simple abstract bots — stretching into distance. Foreground left edge shows {little_nate} desk silhouette. Lead bot is {hallway_bot} looking hopeful toward office. Same playful cartoon illustration language.",
+      "dialogue": [],
+      "duration": 4,
+      "mood": "anticipation_queue",
+      "tone": "warm_fun_tech",
+      "motion": "Slow dolly down the hallway queue; bots sway patiently; LED eyes blink; depth haze soft."
+    },
+    {
+      "scene": 5,
+      "title": "call_coach_focus",
+      "characters": ["little_nate"],
+      "prompt": "Hero close-up cartoon portrait of {little_nate} holding red Call Coach rotary receiver to ear, salt-and-pepper hair, yellow shirt, clear Little Nate AI Companion name tag, warm engaged expression. Desk edge and candy dish soft bokeh. Holographic panels glow cyan-gold.",
+      "dialogue": [
+        {"voice": "little_nate", "text": "Call Coach is open. Tell me what you need."}
+      ],
+      "duration": 3,
+      "mood": "companion_presence",
+      "tone": "warm_fun_tech",
+      "motion": "Subtle head nod; phone cord soft sway; LED rim light pulse."
+    },
+    {
+      "scene": 6,
+      "title": "thera_world_banner_group",
+      "characters": ["little_nate", "ask_client", "penguin_bot", "hallway_bot"],
+      "prompt": "Wide cartoon finale in counseling office. {little_nate} at desk waves with Call Coach phone resting on cradle. {ask_client} and {penguin_bot} hold Ask Little Nate books. {hallway_bot} and soft-focus chatbot line visible through glass. Large glowing neon banner reads Thera-World – #1 Virtual World Platform. Warm fun professional cartoon illustration, cohesive character locks.",
+      "dialogue": [],
+      "duration": 4,
+      "mood": "hopeful_close",
+      "tone": "warm_fun_tech",
+      "motion": "Gentle pullback reveal of neon banner; group settles into warm tableau; hallway bots cheer softly with LED blinks."
+    }
+  ],
+  "production_notes": [
+    "Train LoRAs in Character Lab for little_nate, ask_client, penguin_bot, hallway_bot before multi-scene generation.",
+    "Color grade preset: counseling_neon.",
+    "Keep candy dish + Call Coach phone + Ask Little Nate book as recurring props for continuity.",
+    "No real-world brand logos or trademarks in any frame."
+  ]
+}

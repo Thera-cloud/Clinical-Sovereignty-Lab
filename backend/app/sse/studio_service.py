@@ -447,14 +447,21 @@ async def delete_library_object(r2_key: str) -> bool:
 
 def list_presets() -> list[dict]:
     """List available scene presets."""
+    from app.sse.trailer_generator import preset_character_keys
+
     presets: list[dict] = []
     if not _PRESETS_DIR.exists():
         return presets
     for p in sorted(_PRESETS_DIR.glob("*.json")):
         try:
             data = json.loads(p.read_text())
-            presets.append({"id": data.get("id", p.stem), "title": data.get("title", p.stem),
-                            "scene_count": len(data.get("scenes", []))})
+            pid = data.get("id", p.stem)
+            presets.append({
+                "id": pid,
+                "title": data.get("title", p.stem),
+                "scene_count": len(data.get("scenes", [])),
+                "character_keys": preset_character_keys(pid),
+            })
         except Exception:
             pass
     return presets
@@ -462,27 +469,40 @@ def list_presets() -> list[dict]:
 
 def get_preset(name: str) -> dict:
     """Load a preset by name."""
+    from app.sse.trailer_generator import preset_character_keys
+
     path = _PRESETS_DIR / f"{name}.json"
     if not path.exists():
         raise FileNotFoundError(f"Preset '{name}' not found")
-    return json.loads(path.read_text())
+    data = json.loads(path.read_text())
+    data["character_keys"] = preset_character_keys(data.get("id") or name)
+    return data
 
 
 # ---------------------------------------------------------------------------
 #  Project CRUD (PostgreSQL)
 # ---------------------------------------------------------------------------
 
-async def create_project(title: str, scenes: list[dict], db_pool) -> dict:
+async def create_project(
+    title: str,
+    scenes: list[dict],
+    db_pool,
+    preset_id: str | None = None,
+) -> dict:
     """Create a new studio project."""
     project_id = str(uuid.uuid4())
     estimated_cost = len(scenes) * (COST_PER_IMAGE_CENTS + COST_PER_VIDEO_CENTS + COST_PER_NARRATION_CENTS)
+    manifest: dict = {"scenes": scenes}
+    if preset_id:
+        manifest["preset_id"] = preset_id
+        manifest["id"] = preset_id
     async with db_pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO sse_studio_projects (project_id, title, scene_count, status, manifest, estimated_cost_cents) "
             "VALUES ($1, $2, $3, 'draft', $4::jsonb, $5)",
-            project_id, title, len(scenes), json.dumps({"scenes": scenes}), estimated_cost)
+            project_id, title, len(scenes), json.dumps(manifest), estimated_cost)
     return {"project_id": project_id, "title": title, "scene_count": len(scenes),
-            "estimated_cost_cents": estimated_cost}
+            "estimated_cost_cents": estimated_cost, "preset_id": preset_id}
 
 
 async def update_project(project_id: str, manifest: dict, status: str | None, actual_cost_cents: int | None, db_pool) -> None:
@@ -873,7 +893,8 @@ async def generate_lora_training_images(character_key: str, project_id: str, red
     from app.sse.trailer_generator import generate_lora_training_set
     num_images = 20
     await _check_cost_budget(COST_PER_IMAGE_CENTS * num_images, redis)
-    results = await generate_lora_training_set(character_key, project_id)
+    # project_id first — matches trailer_generator.generate_lora_training_set signature
+    results = await generate_lora_training_set(project_id, character_key)
     await _track_cost(COST_PER_IMAGE_CENTS * len(results), redis)
     return {"character": character_key, "images": results, "count": len(results)}
 

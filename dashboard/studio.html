@@ -211,7 +211,7 @@ function dVoice(d) {
 // ═══════════════════════════════════════════════════════════════════
 //  SCRIPT TAB
 // ═══════════════════════════════════════════════════════════════════
-function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype, recapJobId, setRecapOutputUrl }) {
+function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype, recapJobId, setRecapOutputUrl, activePresetId, setActivePresetId }) {
   const [script, setScript] = useState('');
   const [prompt, setPrompt] = useState('');
   const [clientUser, setClientUser] = useState(() => {
@@ -254,7 +254,9 @@ function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype
     try {
       const data = await apiFetch('/api/sse/admin/studio/presets/' + name);
       setScenes(data.scenes || []);
-      setScript(data.scenes.map(s => `Scene ${s.scene}: ${s.title}\n${s.prompt}\nMood: ${s.mood}\nDuration: ${s.duration}s\n`).join('\n'));
+      setActivePresetId && setActivePresetId(data.id || name);
+      try { sessionStorage.setItem('studio_active_preset_id', data.id || name); } catch (e) {}
+      setScript((data.scenes || []).map(s => `Scene ${s.scene}: ${s.title}\n${s.prompt}\nMood: ${s.mood}\nDuration: ${s.duration}s\n`).join('\n'));
     } catch (e) { alert('Failed to load preset: ' + e.message); }
   };
 
@@ -506,7 +508,7 @@ function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype
             <input type="text" placeholder="Describe what to create..." value={prompt} onChange={e => setPrompt(e.target.value)} style={{flex:1,minWidth:200}} />
             <button className="btn" onClick={generateScript} disabled={!!loading}>{loading==='script' ? <span className="spinner"/> : 'Generate Script'}</button>
             {presets.length > 0 && (
-              <select onChange={e => e.target.value && loadPreset(e.target.value)} style={{width:'auto',minWidth:140}}>
+              <select value={activePresetId || ''} onChange={e => e.target.value && loadPreset(e.target.value)} style={{width:'auto',minWidth:180}}>
                 <option value="">Load Preset...</option>
                 {presets.map(p => <option key={p.id} value={p.id}>{p.title} ({p.scene_count} scenes)</option>)}
               </select>
@@ -1132,7 +1134,14 @@ function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost, 
 
   if (!scenes.length) return <div className="empty-state">Load scenes in the Script tab first.</div>;
 
-  const charNames = ['boy','serpent','dragon','girl','watcher','glowing_woman','knight'];
+  const charNames = (() => {
+    try {
+      const pid = sessionStorage.getItem('studio_active_preset_id') || '';
+      if (pid === 'counseling_office_origin') return ['little_nate','ask_client','penguin_bot','hallway_bot'];
+      if (pid === 'family_sanctuary_origin') return ['mother','daughter','son','father'];
+    } catch (e) {}
+    return ['boy','serpent','dragon','girl','watcher','glowing_woman','knight'];
+  })();
 
   return (
     <div>
@@ -1429,8 +1438,16 @@ function VoiceMappingPanel({ projectId, ensureProject }) {
 // ═══════════════════════════════════════════════════════════════════
 //  CHARACTER LAB TAB (LoRA training + testing)
 // ═══════════════════════════════════════════════════════════════════
-function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost }) {
-  const [selectedChar, setSelectedChar] = useState('boy');
+function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost, activePresetId, presets }) {
+  const presetChars = (presets || []).find(p => p.id === activePresetId)?.character_keys;
+  const charNames = (presetChars && presetChars.length)
+    ? presetChars
+    : (activePresetId === 'counseling_office_origin'
+        ? ['little_nate','ask_client','penguin_bot','hallway_bot']
+        : activePresetId === 'family_sanctuary_origin'
+          ? ['mother','daughter','son','father']
+          : ['boy','serpent','dragon','girl','watcher','glowing_woman','knight']);
+  const [selectedChar, setSelectedChar] = useState(charNames[0] || 'boy');
   const [trainingImages, setTrainingImages] = useState([]);
   const [trainingId, setTrainingId] = useState(null);
   const [trainingStatus, setTrainingStatus] = useState(null);
@@ -1439,7 +1456,11 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost }) {
   const [testPrompt, setTestPrompt] = useState('');
   const [loading, setLoading] = useState('');
 
-  const charNames = ['boy','serpent','dragon','girl','watcher','glowing_woman','knight'];
+  useEffect(() => {
+    if (charNames.length && !charNames.includes(selectedChar)) {
+      setSelectedChar(charNames[0]);
+    }
+  }, [activePresetId, charNames.join('|')]);
 
   const generateTrainingSet = async () => {
     const pid = await ensureProject(scenes);
@@ -1522,12 +1543,13 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost }) {
         <p style={{fontSize:12,color:'var(--t2)',marginBottom:16}}>
           Train character-specific LoRA weights to ensure identical character appearance across all scenes.
           Requires <span style={{fontFamily:'var(--mono)',color:'var(--gold)'}}>REPLICATE_API_TOKEN</span> env var.
+          {activePresetId ? <> Active preset: <span style={{fontFamily:'var(--mono)',color:'var(--gold)'}}>{activePresetId}</span></> : null}
         </p>
 
         <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
           {charNames.map(c => (
             <button key={c} className={'filter-tab' + (selectedChar===c?' active':'')} onClick={() => setSelectedChar(c)}>
-              {c}
+              {c.replace(/_/g,' ')}
             </button>
           ))}
         </div>
@@ -1644,6 +1666,21 @@ function App() {
     setProjectId(id);
   }, []);
 
+  const [activePresetId, setActivePresetId] = useState(() => {
+    try { return sessionStorage.getItem('studio_active_preset_id') || ''; } catch (e) { return ''; }
+  });
+  const [presetsGlobal, setPresetsGlobal] = useState([]);
+  useEffect(() => {
+    apiFetch('/api/sse/admin/studio/presets').then(setPresetsGlobal).catch(() => {});
+  }, []);
+  const setActivePresetIdPersist = useCallback((id) => {
+    setActivePresetId(id || '');
+    try {
+      if (id) sessionStorage.setItem('studio_active_preset_id', id);
+      else sessionStorage.removeItem('studio_active_preset_id');
+    } catch (e) {}
+  }, []);
+
   const ensureProjectGlobal = useCallback(async (scenesForCreate) => {
     if (projectIdRef.current) return projectIdRef.current;
     if (projectPromiseRef.current) return projectPromiseRef.current;
@@ -1651,7 +1688,11 @@ function App() {
       try {
         const d = await apiFetch('/api/sse/admin/studio/projects', {
           method: 'POST', ct: 'application/json',
-          body: JSON.stringify({ title: 'Studio Project ' + new Date().toISOString().slice(0,16), scenes: scenesForCreate })
+          body: JSON.stringify({
+            title: 'Studio Project ' + new Date().toISOString().slice(0,16),
+            scenes: scenesForCreate,
+            preset_id: activePresetId || undefined,
+          })
         });
         setProjectIdSync(d.project_id);
         return d.project_id;
@@ -1659,7 +1700,7 @@ function App() {
       finally { projectPromiseRef.current = null; }
     })();
     return projectPromiseRef.current;
-  }, [setProjectIdSync]);
+  }, [setProjectIdSync, activePresetId]);
 
   const refreshCost = useCallback(async () => {
     try { setCostInfo(await apiFetch('/api/sse/admin/studio/cost-status')); } catch(e) {}
@@ -1673,10 +1714,11 @@ function App() {
       const manifest = proj.manifest || {};
       const sc = manifest.scenes || [];
       setScenes(sc);
+      if (manifest.preset_id) setActivePresetIdPersist(manifest.preset_id);
       setProjectIdSync(pid);
       setTab('scenes');
     } catch (e) { alert('Failed to load project: ' + e.message); }
-  }, [setProjectIdSync]);
+  }, [setProjectIdSync, setActivePresetIdPersist]);
 
   return (
     <div>
@@ -1699,10 +1741,10 @@ function App() {
         ))}
       </div>
       <div className="main">
-        {tab === 'script' && <ScriptTab scenes={scenes} setScenes={setScenes} setTab={setTab} setRecapJobId={setRecapJobIdPersist} setRecapArchetype={setRecapArchetypePersist} recapJobId={recapJobId} setRecapOutputUrl={setRecapOutputUrl} />}
+        {tab === 'script' && <ScriptTab scenes={scenes} setScenes={setScenes} setTab={setTab} setRecapJobId={setRecapJobIdPersist} setRecapArchetype={setRecapArchetypePersist} recapJobId={recapJobId} setRecapOutputUrl={setRecapOutputUrl} activePresetId={activePresetId} setActivePresetId={setActivePresetIdPersist} />}
         {tab === 'scenes' && <ScenesTab scenes={scenes} setScenes={setScenes} projectId={projectId} ensureProject={ensureProjectGlobal} costInfo={costInfo} refreshCost={refreshCost} recapJobId={recapJobId} />}
         {tab === 'pipeline' && <PipelineTab projectId={projectId} ensureProject={ensureProjectGlobal} scenes={scenes} costInfo={costInfo} refreshCost={refreshCost} recapJobId={recapJobId} recapArchetype={recapArchetype} recapOutputUrl={recapOutputUrl} setRecapOutputUrl={setRecapOutputUrl} />}
-        {tab === 'charlab' && <CharacterLabTab projectId={projectId} ensureProject={ensureProjectGlobal} scenes={scenes} refreshCost={refreshCost} />}
+        {tab === 'charlab' && <CharacterLabTab projectId={projectId} ensureProject={ensureProjectGlobal} scenes={scenes} refreshCost={refreshCost} activePresetId={activePresetId} presets={presetsGlobal} />}
         {tab === 'library' && <LibraryTab onLoadProject={loadProject} />}
       </div>
     </div>

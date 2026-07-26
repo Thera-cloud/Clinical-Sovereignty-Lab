@@ -85,6 +85,7 @@ class GenerateNarrationRequest(BaseModel):
 class CreateProjectRequest(BaseModel):
     title: str
     scenes: list[dict]
+    preset_id: str | None = None
 
 class CleanProjectRequest(BaseModel):
     project_id: str
@@ -222,7 +223,7 @@ async def create_project(body: CreateProjectRequest, request: Request):
     db = _get_db(request)
     if not db:
         raise HTTPException(503, "Database unavailable")
-    return await _create(body.title, body.scenes, db)
+    return await _create(body.title, body.scenes, db, preset_id=body.preset_id)
 
 
 @studio_router.get("/projects")

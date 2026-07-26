@@ -62,6 +62,14 @@ _PRESETS_DIR = Path(__file__).parent / "data" / "studio_presets"
 
 DEFAULT_PRESET_ID = "thera_world_origin"
 FAMILY_SANCTUARY_PRESET_ID = "family_sanctuary_origin"
+COUNSELING_OFFICE_PRESET_ID = "counseling_office_origin"
+
+_COUNSELING_OFFICE_REF_BASE = (
+    "High-quality playful cartoon character reference model sheet, widescreen 16:9, "
+    "sleek modern futuristic counseling office illustration language — soft LED ambient light, "
+    "clear inked outlines, soft cel-like shading, warm fun professional tone — "
+    "NOT Studio Ghibli, NOT photorealistic, NO real brand logos — "
+)
 # Locks marketing hero narration to hero_video_thera_world_NARRATED.mp4 pipeline:
 # backend/app/sse/hero_narration_mix.py → _generate_tts(..., voice=THERA_HERO_NARRATED_TTS_VOICE, ...)
 THERA_HERO_NARRATED_TTS_VOICE = "ash"
@@ -239,10 +247,62 @@ FAMILY_SANCTUARY_CHARACTER_REFERENCES = {
     },
 }
 
+COUNSELING_OFFICE_CHARACTER_REFERENCES = {
+    "little_nate": {
+        "ref_prompt": (
+            f"{_COUNSELING_OFFICE_REF_BASE}"
+            "character reference sheet, friendly middle-aged man salt-and-pepper grey hair warm smile, "
+            "bright yellow button-up shirt, clear rectangular name tag reading Little Nate AI Companion, "
+            "often holding classic red rotary phone labeled Call Coach, front three-quarter and profile "
+            "rotations, consistent proportions, soft LED studio rim light, white-to-soft-cyan background."
+        ),
+        "inline_desc": (
+            "friendly middle-aged Little Nate with salt-and-pepper grey hair, warm smile, bright yellow "
+            "button-up shirt, clear name tag reading Little Nate AI Companion, Call Coach red rotary phone"
+        ),
+    },
+    "ask_client": {
+        "ref_prompt": (
+            f"{_COUNSELING_OFFICE_REF_BASE}"
+            "character reference sheet, African American woman with curly dark hair, yellow top and blue "
+            "pants, holding open blue hardcover book titled Ask Little Nate, interested seeking-counseling "
+            "expression, warm luminous skin rendering, front three-quarter and profile rotations, "
+            "consistent cartoon proportions."
+        ),
+        "inline_desc": (
+            "African American woman with curly dark hair, yellow top and blue pants, holding open blue "
+            "Ask Little Nate book, interested seeking-counseling expression"
+        ),
+    },
+    "penguin_bot": {
+        "ref_prompt": (
+            f"{_COUNSELING_OFFICE_REF_BASE}"
+            "character reference sheet, cute blue penguin AI companion with round glasses, friendly "
+            "expressive eyes, holding small Ask Little Nate book, soft rounded cartoon proportions, "
+            "multiple angles front three-quarter profile, same counseling-office palette."
+        ),
+        "inline_desc": (
+            "cute blue penguin character with glasses holding an Ask Little Nate book, friendly AI companion"
+        ),
+    },
+    "hallway_bot": {
+        "ref_prompt": (
+            f"{_COUNSELING_OFFICE_REF_BASE}"
+            "character reference sheet, friendly generic AI chatbot robot — rounded soft body, cheerful "
+            "LED face panel or speech-bubble head accent, non-threatening colorful accents, waiting-line "
+            "pose, multiple angles, same playful cartoon counseling-office language as Little Nate pack."
+        ),
+        "inline_desc": (
+            "friendly generic AI chatbot robot with rounded soft body and cheerful LED face, hallway-queue vibe"
+        ),
+    },
+}
+
 
 CHARACTER_REFERENCES_BY_PRESET: dict[str, dict[str, dict]] = {
     DEFAULT_PRESET_ID: THERA_WORLD_CHARACTER_REFERENCES,
     FAMILY_SANCTUARY_PRESET_ID: FAMILY_SANCTUARY_CHARACTER_REFERENCES,
+    COUNSELING_OFFICE_PRESET_ID: COUNSELING_OFFICE_CHARACTER_REFERENCES,
 }
 
 
@@ -308,6 +368,22 @@ CHARACTER_VOICES = {
     "girl": {
         "voice": "shimmer",
         "instructions": "Speak as a young 6-year-old girl. Bright, laughing, teasing, full of joy. Higher pitch.",
+    },
+    "little_nate": {
+        "voice": "ash",
+        "instructions": "Speak as Little Nate — warm middle-aged companion, calm professional humor, gentle authority, never salesy.",
+    },
+    "ask_client": {
+        "voice": "nova",
+        "instructions": "Speak as a thoughtful adult seeking counseling — curious, hopeful, grounded, emotionally open.",
+    },
+    "penguin_bot": {
+        "voice": "shimmer",
+        "instructions": "Speak as a cute friendly AI penguin — bright, earnest, playful but sincere.",
+    },
+    "hallway_bot": {
+        "voice": "echo",
+        "instructions": "Speak as a cheerful generic chatbot in line — polite, upbeat, short phrases.",
     },
 }
 
@@ -512,6 +588,8 @@ def _get_style_prefix(scene_num: int, preset_id: str | None = None) -> str:
             anchor.get("look"),
             anchor.get("skin_lighting_mandate"),
             anchor.get("family_identity_mandate"),
+            anchor.get("cartoon_consistency_mandate"),
+            anchor.get("office_atmosphere_mandate"),
         )
         if isinstance(s, str) and s.strip()
     )
@@ -2818,17 +2896,22 @@ LORA_TRAINING_VARIATIONS = [
 
 async def generate_lora_training_set(
     project_id: str, character: str, count: int = 20,
+    preset_id: str | None = None,
 ) -> list[dict]:
     """Generate training images for LoRA fine-tuning of a specific character."""
-    ref = CHARACTER_REFERENCES.get(character)
+    manifest = await _load_manifest_from_r2(project_id) or {}
+    pid = preset_id or _manifest_preset_id(manifest)
+    refs = _char_refs(pid)
+    ref = refs.get(character)
     if not ref:
-        raise ValueError(f"Unknown character: {character}")
+        raise ValueError(f"Unknown character: {character} for preset {pid}")
 
+    style = _get_style_prefix(1, pid)
     results: list[dict] = []
     async with GROK_IMAGINE_LOCK:
         for i in range(min(count, len(LORA_TRAINING_VARIATIONS))):
             variation = LORA_TRAINING_VARIATIONS[i]
-            prompt = f"{STYLE_PREFIX}{ref['ref_prompt']}, {variation}"
+            prompt = f"{style}{ref['ref_prompt']}, {variation}"
             try:
                 img_bytes = await generate_image(prompt)
                 r2_key = f"sse/studio/projects/{project_id}/lora/{character}/train_{i:02d}.png"
@@ -3762,6 +3845,11 @@ COLOR_GRADE_PRESETS = {
         "colorbalance=rs=0.12:gs=0.05:bs=-0.10,"
         "eq=gamma=1.10:saturation=1.25:contrast=1.08,"
         "unsharp=5:5:0.6:5:5:0"
+    ),
+    "counseling_neon": (
+        "colorbalance=rs=0.04:gs=0.02:bs=0.06,"
+        "eq=gamma=1.03:saturation=1.18:contrast=1.06,"
+        "unsharp=5:5:0.45:5:5:0"
     ),
 }
 
