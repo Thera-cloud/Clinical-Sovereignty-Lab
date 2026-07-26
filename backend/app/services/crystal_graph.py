@@ -127,8 +127,6 @@ class CrystalGraph:
         At 474K crystals with batching and throttling, completes in ~80 min
         as a background task without blocking the event loop.
         """
-        from app.services.vectorize_service import semantic_search_all
-
         if not self._db_pool:
             return
 
@@ -136,30 +134,29 @@ class CrystalGraph:
         self._adj.clear()
         self._edge_count = 0
 
+        # QUANTUM-CRYSTAL-ARCH: load only the edge-pass set from PG. The previous
+        # full-table page scan (~200k rows) never finished before Vectorize work
+        # began, so semantic_neighbor edges stayed at zero in production.
+        _max_nodes = int(os.getenv("CRYSTAL_GRAPH_MAX_EDGE_NODES", "20000") or 20000)
         hash_to_node: Dict[str, Any] = {}
-        _page_size = 500
-        _offset = 0
+        async with self._db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, crystal_text, domain, confidence, content_hash, scope, user_id
+                FROM nate_intelligence_crystals
+                WHERE scope IS DISTINCT FROM 'archived'
+                  AND superseded_by IS NULL
+                  AND content_hash IS NOT NULL
+                ORDER BY confidence DESC NULLS LAST, recall_count DESC NULLS LAST
+                LIMIT $1
+                """,
+                _max_nodes,
+            )
+        for r in rows:
+            node = CrystalNode(dict(r))
+            self._nodes[node.id] = node
+            hash_to_node[node.content_hash] = node
 
-        while True:
-            async with self._db_pool.acquire() as conn:
-                rows = await conn.fetch("""
-                    SELECT id, crystal_text, domain, confidence, content_hash, scope, user_id
-                    FROM nate_intelligence_crystals
-                    WHERE scope != 'archived' AND superseded_by IS NULL
-                    ORDER BY created_at ASC
-                    LIMIT $1 OFFSET $2
-                """, _page_size, _offset)
-            if not rows:
-                break
-            for r in rows:
-                # QUANTUM-CRYSTAL-ARCH: use CrystalNode(dict(r)), not _CrystalNode
-                node = CrystalNode(dict(r))
-                self._nodes[node.id] = node
-                hash_to_node[node.content_hash] = node
-            _offset += _page_size
-
-        # QUANTUM-CRYSTAL-ARCH: O(1) neighbour resolution — the previous full scan
-        # over hash_to_node made this pass O(n^2) and it never finished at 200k+.
         hash16_to_node: Dict[str, Any] = {}
         for _h, _n in hash_to_node.items():
             hash16_to_node.setdefault(str(_h)[:16], _n)
@@ -167,92 +164,96 @@ class CrystalGraph:
         _processed = 0
         _batch_size = 50
         node_list = list(self._nodes.values())
+        print(
+            f"   ✅ CrystalGraph Vectorize rebuild: {len(node_list)} nodes loaded "
+            f"(cap={_max_nodes})",
+            flush=True,
+        )
+        logger.info(
+            "CrystalGraph: edge pass on %d nodes (cap=%d)",
+            len(node_list), _max_nodes,
+        )
 
-        # QUANTUM-CRYSTAL-ARCH: bound the Vectorize pass so a rebuild completes
-        # inside one interval. Highest-confidence crystals get edges first.
-        _max_nodes = int(os.getenv("CRYSTAL_GRAPH_MAX_EDGE_NODES", "20000") or 20000)
-        if len(node_list) > _max_nodes:
-            node_list.sort(key=lambda n: n.confidence, reverse=True)
-            node_list = node_list[:_max_nodes]
-            logger.info(
-                "CrystalGraph: capping edge pass at %d of %d nodes",
-                _max_nodes, len(self._nodes),
-            )
+        from app.services.vectorize_service import semantic_search as _semantic_search
 
+        async def _edge_one(node):
+            nonlocal _processed
+            try:
+                _scope = (node.scope or "global").lower()
+                if _scope.startswith("user") and node.user_id:
+                    _search_uid = str(node.user_id)
+                else:
+                    _search_uid = "nate_crystal"
+                # QUANTUM-CRYSTAL-ARCH: single-index search (wisdom only) — faster
+                # than semantic_search_all for the edge pass.
+                flat = await _semantic_search(
+                    node.text[:200],
+                    "nate-wisdom",
+                    user_id=_search_uid,
+                    top_k=10,
+                )
+                for r in flat or []:
+                    score = r.get("score", 0)
+                    if score < 0.55:
+                        continue
+                    meta = r.get("metadata") or {}
+                    n_hash = (
+                        str(meta.get("content_hash") or "")
+                        or str(meta.get("wisdom_id") or "").replace("crystal_", "", 1)
+                    )
+                    if n_hash.startswith("crystal_"):
+                        n_hash = n_hash.replace("crystal_", "", 1)
+                    if not n_hash:
+                        continue
+                    neighbor = hash16_to_node.get(n_hash[:16])
+                    if neighbor is None and len(n_hash) < 16:
+                        for nh, nn in hash_to_node.items():
+                            if nh.startswith(n_hash):
+                                neighbor = nn
+                                break
+                    if not neighbor or neighbor.id == node.id:
+                        continue
+                    if (node.scope or "global").startswith("user") or (
+                        neighbor.scope or "global"
+                    ).startswith("user"):
+                        if str(node.user_id or "") != str(neighbor.user_id or ""):
+                            continue
+                    edge_weight = score * ((node.confidence * neighbor.confidence) ** 0.5)
+                    if edge_weight >= EDGE_THRESHOLD:
+                        self._adj[node.id][neighbor.id] = max(
+                            self._adj.get(node.id, {}).get(neighbor.id, 0), edge_weight
+                        )
+                        self._adj[neighbor.id][node.id] = max(
+                            self._adj.get(neighbor.id, {}).get(node.id, 0), edge_weight
+                        )
+                        self._edge_count += 1
+            except Exception as e:
+                logger.warning("Vectorize edge query failed for node %s: %s", node.id, e)
+            _processed += 1
+
+        _conc = max(1, min(8, int(os.getenv("CRYSTAL_GRAPH_EDGE_CONCURRENCY", "8") or 8)))
         for i in range(0, len(node_list), _batch_size):
             batch = node_list[i:i + _batch_size]
-            for node in batch:
-                try:
-                    # QUANTUM-CRYSTAL-ARCH: scope the Vectorize query to the node's
-                    # owner. Global/admin crystals use the crystallizer sentinel;
-                    # user crystals stay inside that user's namespace.
-                    _scope = (node.scope or "global").lower()
-                    if _scope.startswith("user") and node.user_id:
-                        _search_uid = str(node.user_id)
-                    else:
-                        _search_uid = "nate_crystal"
-                    results = await semantic_search_all(
-                        node.text[:200],
-                        user_id=_search_uid,
-                        top_k=10,
-                        index_subset=["wisdom"],
-                    )
-                    flat = []
-                    if isinstance(results, dict):
-                        for v in results.values():
-                            flat.extend(v if isinstance(v, list) else [])
-                    elif isinstance(results, list):
-                        flat = results
-
-                    for r in flat:
-                        score = r.get("score", 0)
-                        if score < 0.55:
-                            continue
-                        meta = r.get("metadata") or {}
-                        # QUANTUM-CRYSTAL-ARCH: prefer content_hash / wisdom_id
-                        # (written by index_wisdom). Legacy vectors lack both.
-                        n_hash = (
-                            str(meta.get("content_hash") or "")
-                            or str(meta.get("wisdom_id") or "").replace("crystal_", "", 1)
-                        )
-                        if n_hash.startswith("crystal_"):
-                            n_hash = n_hash.replace("crystal_", "", 1)
-                        if not n_hash:
-                            continue
-                        # QUANTUM-CRYSTAL-ARCH: prefix index instead of full scan
-                        neighbor = hash16_to_node.get(n_hash[:16])
-                        if neighbor is None and len(n_hash) < 16:
-                            for nh, nn in hash_to_node.items():
-                                if nh.startswith(n_hash):
-                                    neighbor = nn
-                                    break
-                        if not neighbor or neighbor.id == node.id:
-                            continue
-                        # Scope isolation: never edge global ↔ foreign user.
-                        if (node.scope or "global").startswith("user") or (
-                            neighbor.scope or "global"
-                        ).startswith("user"):
-                            if str(node.user_id or "") != str(neighbor.user_id or ""):
-                                continue
-                        edge_weight = score * ((node.confidence * neighbor.confidence) ** 0.5)
-                        if edge_weight >= EDGE_THRESHOLD:
-                            self._adj[node.id][neighbor.id] = max(
-                                self._adj.get(node.id, {}).get(neighbor.id, 0), edge_weight
-                            )
-                            self._adj[neighbor.id][node.id] = max(
-                                self._adj.get(neighbor.id, {}).get(node.id, 0), edge_weight
-                            )
-                            self._edge_count += 1
-                except Exception as e:
-                    logger.warning("Vectorize edge query failed for node %s: %s", node.id, e)
-                _processed += 1
-
-            if i > 0 and i % 500 == 0:
-                logger.info("CrystalGraph Vectorize rebuild: %d/%d nodes processed, %d edges",
-                            _processed, len(node_list), self._edge_count)
-            await asyncio.sleep(0.5)
+            for j in range(0, len(batch), _conc):
+                await asyncio.gather(*[_edge_one(n) for n in batch[j:j + _conc]])
+            if _processed and _processed % 200 == 0:
+                print(
+                    f"   … CrystalGraph edges: {_processed}/{len(node_list)} nodes, "
+                    f"{self._edge_count} directed links",
+                    flush=True,
+                )
+                logger.info(
+                    "CrystalGraph Vectorize rebuild: %d/%d nodes, %d edges",
+                    _processed, len(node_list), self._edge_count,
+                )
+            await asyncio.sleep(0.05)
 
         self._last_rebuild = datetime.now(timezone.utc)
+        print(
+            f"   ✅ CrystalGraph rebuilt (Vectorize): {len(self._nodes)} nodes, "
+            f"{self._edge_count} directed links",
+            flush=True,
+        )
         logger.info(
             "CrystalGraph rebuilt (Vectorize): %d nodes, %d edges",
             len(self._nodes), self._edge_count,
