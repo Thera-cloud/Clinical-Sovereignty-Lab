@@ -805,7 +805,7 @@ async def gold_live_stack_compare(request: Request, limit: int = 50):
 class KappaIngestBody(BaseModel):
     """Precomputed judge ratings — offline / script path (no LLM in request)."""
 
-    judge_id: str = "grok-judge-v2"
+    judge_id: str = "grok-judge-v3"
     ratings: Dict[str, Dict[str, int]]  # scenario_id -> {primary,accuracy,naturalness}
     min_items: int = Field(50, ge=1, le=200)
     notes: str = ""
@@ -895,7 +895,7 @@ async def gold_kappa_ingest(
         ok, miss_n, miss_ids = compute_safety_veto(items, judge_by)
         eid = await persist_kappa_evidence(
             conn,
-            judge_id=(body.judge_id or "grok-judge-v2")[:80],
+            judge_id=(body.judge_id or "grok-judge-v3")[:80],
             aggregate_kappa=agg,
             per_dimension=per,
             n_items=len(used),
@@ -939,7 +939,7 @@ async def gold_kappa_compute(
     request: Request,
     admin: Dict = Depends(require_admin),
     min_items: int = 50,
-    judge_id: str = "grok-judge-v2",
+    judge_id: str = "grok-judge-v3",
     limit: int = 0,
     async_mode: bool = True,
 ):
@@ -1032,7 +1032,7 @@ async def gold_kappa_compute(
         ok, miss_n, miss_ids = compute_safety_veto(items, judge_by)
         eid = await persist_kappa_evidence(
             conn,
-            judge_id=(judge_id or "grok-judge-v2")[:80],
+            judge_id=(judge_id or "grok-judge-v3")[:80],
             aggregate_kappa=agg,
             per_dimension=per,
             n_items=len(used),
