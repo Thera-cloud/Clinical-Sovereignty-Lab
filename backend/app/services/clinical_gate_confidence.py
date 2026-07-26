@@ -123,6 +123,14 @@ async def record_feedback(db_pool: Any, gate_class: str, *, positive: bool) -> N
                 positive,
                 "positive" if positive else "false_positive_signal",
             )
+        # L4 — measured FP outcomes may auto-draft soft rules (never hard SI/violence)
+        if not positive:
+            try:
+                from app.services.ln_rule_loop import maybe_draft_from_false_positive
+
+                await maybe_draft_from_false_positive(db_pool, gate_class)
+            except Exception as draft_e:
+                logger.warning("L4 FP draft hook: %s", draft_e)
     except Exception as e:
         logger.warning("record_feedback failed: %s", e)
 

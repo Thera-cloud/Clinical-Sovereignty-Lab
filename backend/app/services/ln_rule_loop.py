@@ -37,6 +37,9 @@ _PROMOTE_MIN_N = int(os.getenv("LN_RULE_PROMOTE_MIN_N", "5"))
 _PROMOTE_FLOOR = float(os.getenv("LN_RULE_PROMOTE_CONFIDENCE", "0.55"))
 _ROLLBACK_FLOOR = float(os.getenv("LN_RULE_ROLLBACK_CONFIDENCE", "0.25"))
 _SHADOW_PROMOTE_MIN = int(os.getenv("LN_RULE_SHADOW_PROMOTE_MIN", "3"))
+# L4 outcome authoring: min negative (FP) samples before draft→sandbox
+_FP_DRAFT_MIN_N = int(os.getenv("LN_RULE_FP_DRAFT_MIN_N", "3"))
+_FP_DRAFT_MAX_CONF = float(os.getenv("LN_RULE_FP_DRAFT_MAX_CONF", "0.45"))
 
 _DEFAULT_SOFT_CONDITION = {"fired_new": False}
 _DEFAULT_SOFT_ACTION = {"type": "suppress_soft_followup"}
@@ -44,6 +47,15 @@ _DEFAULT_SOFT_ACTION = {"type": "suppress_soft_followup"}
 
 def _rule_key_for(gate_class: str) -> str:
     return f"soft_gate.{gate_class}.followup_suppress"
+
+
+def auto_draft_enabled() -> bool:
+    """Prod auto-author (fire scaffold + FP outcome). Default on with rule loop."""
+    if not rule_loop_enabled():
+        return False
+    return os.getenv("ENABLE_LN_RULE_AUTO_DRAFT", "true").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
 
 
 def rule_loop_enabled() -> bool:
@@ -362,40 +374,204 @@ async def _gate_confidence(db_pool: Any, gate_class: str) -> tuple[float, int]:
     return float(conf), n
 
 
-async def ensure_soft_rule_drafted(db_pool: Any, gate_class: str) -> None:
-    """Auto-draft+sandbox a default follow-up suppress rule if none exists."""
-    if not rule_loop_enabled() or not db_pool or not is_soft_gate_class(gate_class):
-        return
-    key = _rule_key_for(gate_class)
+async def _has_live_or_pending_rule(db_pool: Any, rule_key: str) -> bool:
     try:
         async with db_pool.acquire() as conn:
-            exists = await conn.fetchval(
-                """
-                SELECT 1 FROM ln_rule_store
-                WHERE rule_key = $1
-                  AND status IN ('draft', 'sandbox', 'active')
-                LIMIT 1
-                """,
-                key,
+            return bool(
+                await conn.fetchval(
+                    """
+                    SELECT 1 FROM ln_rule_store
+                    WHERE rule_key = $1
+                      AND status IN ('draft', 'sandbox', 'active')
+                    LIMIT 1
+                    """,
+                    rule_key,
+                )
             )
-        if exists:
-            return
-        rid = await draft_rule(
+    except Exception:
+        return True  # fail closed — do not draft on lookup error
+
+
+async def _draft_and_sandbox(
+    db_pool: Any,
+    *,
+    gate_class: str,
+    created_by: str,
+    notes: str,
+    condition_extra: Optional[Dict[str, Any]] = None,
+) -> Optional[int]:
+    """L4 requirements 1–4: draft_rule → move_to_sandbox, soft-gate only."""
+    if not auto_draft_enabled() or not db_pool or not is_soft_gate_class(gate_class):
+        return None
+    key = _rule_key_for(gate_class)
+    if await _has_live_or_pending_rule(db_pool, key):
+        return None
+    cond: Dict[str, Any] = {
+        "gate_class": gate_class,
+        **_DEFAULT_SOFT_CONDITION,
+    }
+    if condition_extra:
+        cond.update(condition_extra)
+    rid = await draft_rule(
+        db_pool,
+        rule_key=key,
+        condition=cond,
+        action=dict(_DEFAULT_SOFT_ACTION),
+        created_by=created_by,
+        notes=notes,
+    )
+    if rid is None:
+        return None
+    ver = await _latest_version(db_pool, key)
+    if ver is None:
+        return rid
+    ok = await move_to_sandbox(db_pool, rule_key=key, version=ver)
+    if ok:
+        logger.info("L4 draft→sandbox %s v%s by=%s", key, ver, created_by)
+        await _notify_l5_observe(
             db_pool,
+            event="draft_sandbox",
+            detail=f"key={key} v={ver} by={created_by} class={gate_class}",
+            gate_class=gate_class,
             rule_key=key,
-            condition={"gate_class": gate_class, **_DEFAULT_SOFT_CONDITION},
-            action=dict(_DEFAULT_SOFT_ACTION),
+            version=ver,
+        )
+    return rid
+
+
+async def ensure_soft_rule_drafted(db_pool: Any, gate_class: str) -> None:
+    """Scaffold draft→sandbox on first soft-gate fire if no rule exists."""
+    if not auto_draft_enabled() or not db_pool or not is_soft_gate_class(gate_class):
+        return
+    try:
+        await _draft_and_sandbox(
+            db_pool,
+            gate_class=gate_class,
             created_by="ln_rule_loop",
             notes="auto-draft from soft-gate fire",
         )
-        if rid is None:
-            return
-        ver = await _latest_version(db_pool, key)
-        if ver is not None:
-            await move_to_sandbox(db_pool, rule_key=key, version=ver)
-            logger.info("L4 auto-draft sandbox %s v%s", key, ver)
     except Exception as e:
         logger.warning("ensure_soft_rule_drafted: %s", e)
+
+
+async def maybe_draft_from_false_positive(
+    db_pool: Any,
+    gate_class: str,
+) -> Optional[int]:
+    """L4 req 3 — measured FP/low-confidence outcome → draft→sandbox.
+
+    Called from clinical_gate_confidence.record_feedback(positive=False).
+    Soft classes only. Never SI/violence.
+    """
+    if not auto_draft_enabled() or not db_pool or not is_soft_gate_class(gate_class):
+        return None
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT confidence, sample_size, negative_count, positive_count
+                FROM clinical_gate_confidence
+                WHERE gate_key = $1
+                """,
+                f"runtime_gate:{gate_class}",
+            )
+        if not row:
+            return None
+        conf = float(row["confidence"] or 0.70)
+        n = int(row["sample_size"] or 0)
+        neg = int(row["negative_count"] or 0)
+        if neg < _FP_DRAFT_MIN_N or n < _FP_DRAFT_MIN_N:
+            return None
+        if conf > _FP_DRAFT_MAX_CONF:
+            return None
+        return await _draft_and_sandbox(
+            db_pool,
+            gate_class=gate_class,
+            created_by="ln_gate_fp",
+            notes=(
+                f"FP outcome draft neg={neg} n={n} conf={conf:.2f} "
+                f"max_conf={_FP_DRAFT_MAX_CONF}"
+            ),
+            condition_extra={"max_confidence": round(min(conf + 0.10, 0.50), 2)},
+        )
+    except Exception as e:
+        logger.warning("maybe_draft_from_false_positive: %s", e)
+        return None
+
+
+async def cycle_evidence(
+    db_pool: Any,
+    rule_key: str,
+) -> Dict[str, Any]:
+    """L4 req 5 — auditable draft→sandbox→shadow/fire→promote(/rollback) trail."""
+    empty = {
+        "rule_key": rule_key,
+        "has_draft": False,
+        "has_sandbox_pass": False,
+        "has_shadow_or_fire": False,
+        "has_promote": False,
+        "has_rollback": False,
+        "l4_cycle_complete": False,
+        "actions": [],
+    }
+    if not db_pool or not rule_key:
+        return empty
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT action, version, detail, recorded_at
+                FROM ln_rule_audit
+                WHERE rule_key = $1
+                ORDER BY recorded_at ASC
+                """,
+                rule_key,
+            )
+        actions = [str(r["action"]) for r in rows]
+        out = {
+            "rule_key": rule_key,
+            "has_draft": "draft" in actions,
+            "has_sandbox_pass": "sandbox_pass" in actions,
+            "has_shadow_or_fire": ("shadow_fire" in actions) or ("fire" in actions),
+            "has_promote": "promote" in actions,
+            "has_rollback": "rollback" in actions,
+            "actions": actions,
+        }
+        out["l4_cycle_complete"] = bool(
+            out["has_draft"]
+            and out["has_sandbox_pass"]
+            and out["has_shadow_or_fire"]
+            and out["has_promote"]
+        )
+        return out
+    except Exception as e:
+        logger.warning("cycle_evidence: %s", e)
+        return empty
+
+
+async def _notify_l5_observe(
+    db_pool: Any,
+    *,
+    event: str,
+    detail: str,
+    gate_class: str = "",
+    rule_key: str = "",
+    version: int = 0,
+) -> None:
+    """Best-effort handoff to isolated L5 observe sandbox (never blocks L4)."""
+    try:
+        from app.services.l5_sandbox.observer import ingest_l4_event
+
+        await ingest_l4_event(
+            db_pool,
+            event=event,
+            detail=detail,
+            gate_class=gate_class,
+            rule_key=rule_key,
+            version=version,
+        )
+    except Exception as e:
+        logger.debug("l5 observe skip: %s", e)
 
 
 async def _latest_version(db_pool: Any, rule_key: str) -> Optional[int]:
@@ -466,6 +642,14 @@ async def maybe_lifecycle_from_gate_confidence(
                 "L4 rollback %s v%s conf=%.2f n=%d",
                 active["rule_key"], active["version"], conf, n,
             )
+            await _notify_l5_observe(
+                db_pool,
+                event="rollback",
+                detail=f"conf={conf:.2f} n={n}",
+                gate_class=gate_class,
+                rule_key=active["rule_key"],
+                version=int(active["version"]),
+            )
             return
         if sandbox and not active:
             shadows = await _shadow_fire_count(
@@ -485,6 +669,14 @@ async def maybe_lifecycle_from_gate_confidence(
                     logger.info(
                         "L4 promote %s v%s conf=%.2f n=%d shadows=%d",
                         sandbox["rule_key"], sandbox["version"], conf, n, shadows,
+                    )
+                    await _notify_l5_observe(
+                        db_pool,
+                        event="promote",
+                        detail=f"conf={conf:.2f} n={n} shadows={shadows}",
+                        gate_class=gate_class,
+                        rule_key=sandbox["rule_key"],
+                        version=int(sandbox["version"]),
                     )
     except Exception as e:
         logger.warning("maybe_lifecycle_from_gate_confidence: %s", e)
@@ -530,21 +722,45 @@ async def apply_soft_gate_rules(
         status = str(rule.get("status") or "")
         # Sandbox: always shadow. Active: apply only when LN_RULE_LOOP_APPLY.
         if status == "sandbox" or not apply_live:
+            detail = (
+                f"class={gate_class} fired_new={fired_new} "
+                f"conf={match_conf:.2f} would={atype}"
+            )
             await _audit(
                 db_pool,
                 rule_key=rule["rule_key"],
                 version=int(rule["version"]),
                 action="shadow_fire",
-                detail=f"class={gate_class} fired_new={fired_new} conf={match_conf:.2f} would={atype}",
+                detail=detail,
+            )
+            await _notify_l5_observe(
+                db_pool,
+                event="shadow_fire",
+                detail=detail,
+                gate_class=gate_class,
+                rule_key=rule["rule_key"],
+                version=int(rule["version"]),
             )
             await maybe_lifecycle_from_gate_confidence(db_pool, gate_class)
             continue
+        detail = (
+            f"class={gate_class} fired_new={fired_new} "
+            f"conf={match_conf:.2f} action={atype}"
+        )
         await _audit(
             db_pool,
             rule_key=rule["rule_key"],
             version=int(rule["version"]),
             action="fire",
-            detail=f"class={gate_class} fired_new={fired_new} conf={match_conf:.2f} action={atype}",
+            detail=detail,
+        )
+        await _notify_l5_observe(
+            db_pool,
+            event="fire",
+            detail=detail,
+            gate_class=gate_class,
+            rule_key=rule["rule_key"],
+            version=int(rule["version"]),
         )
         if atype == "suppress_soft_followup" and not fired_new:
             await maybe_lifecycle_from_gate_confidence(db_pool, gate_class)
