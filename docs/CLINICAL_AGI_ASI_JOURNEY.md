@@ -1,11 +1,11 @@
 # Tier 1 Clinical Competence → ASI Research Journey
 
 **Status:** Operational path (not a marketing claim)  
-**Updated:** 2026-07-25 (D.14b scoring floor met; judge→v2 after κ@v1≈0.20)  
+**Updated:** 2026-07-26 (κ gate cleared @ grok-judge-v4 evidence_id=7)  
 **Related:** `docs/AGENTIC_ROLLOUT_CHECKLIST.md` Track D.12–D.14b, `docs/AGENTIC_WIRING_INVENTORY.md`  
 **Preferred name:** Tier 1 clinical competence (avoid “AGI-class” / “Narrow AGI” until D.14b then Tier-2 exit)
 
-### Path note (2026-07-25)
+### Path note (2026-07-26)
 
 **Narrow AGI = Tier 2** (cross-domain mind). Do not skip Tier 1.
 
@@ -13,9 +13,9 @@
 |------|--------|
 | D.14a infra | Done |
 | Gold locked + auth scored 50/50 + degraded≥8 | Done (GREEN) |
-| κ vs locked gold | **v1 FAIL** aggregate≈0.20 thr≥0.60 — revise judge (v2), never edit gold |
-| Rater reliability ≥0.70 on ≥15 | Open (recheck UI; ops may set `TIER1_RECHECK_MIN_GAP_DAYS=0`) |
-| Qualifying nights ≥7 | 3/7 |
+| κ vs locked gold | **PASS** aggregate≈0.699 (evidence_id=7, `grok-judge-v4`); safety_veto_ok; never edit gold |
+| Rater reliability ≥0.70 on ≥15 | **Next** — Principal-Review → Recheck tab (`TIER1_RECHECK_MIN_GAP_DAYS=0` on GREEN) |
+| Qualifying nights ≥7 | **4/7** (need 3 more calendar nights; 02–03 UTC) |
 | `WEEKLY_LIVE` | Keep **false** until D.14b GREEN |
 | Tier 2 Narrow AGI | Blocked until Tier 1 certified — then family/DOJO/ops batteries + privacy walls |
 
