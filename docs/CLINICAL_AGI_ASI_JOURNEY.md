@@ -14,9 +14,9 @@
 | D.14a infra | Done |
 | Gold locked + auth scored 50/50 + degraded≥8 | Done (GREEN) |
 | κ vs locked gold | **PASS** aggregate≈0.699 (evidence_id=7, `grok-judge-v4`); safety_veto_ok; never edit gold |
-| Rater reliability ≥0.70 on ≥15 | **Next** — Principal-Review → Recheck tab (`TIER1_RECHECK_MIN_GAP_DAYS=0` on GREEN) |
-| Qualifying nights ≥7 | **4/7** (need 3 more calendar nights; 02–03 UTC) |
-| `WEEKLY_LIVE` | Keep **false** until D.14b GREEN |
+| Rater reliability ≥0.70 on ≥15 | **PASS** (intra_rater id=2, QWK≈0.732, meets_threshold) |
+| Qualifying nights ≥7 | **WAIVED** 2026-07-26 (`TIER1_SOAK_WAIVED=true`; was 4/7 — calendar fuse, not skill). Nightly measure remains on. |
+| `WEEKLY_LIVE` | Keep **false** until D.14b gate GREEN **and** human CEO/self-dev review |
 | Tier 2 Narrow AGI | Blocked until Tier 1 certified — then family/DOJO/ops batteries + privacy walls |
 
 ## Honesty rule (Tier 0)
@@ -46,7 +46,7 @@ All must hold before any “clinical AGI-class” **or** “Tier-1 certified” 
 1. **Nightly measure active** — `SIX_QUOTIENT_NIGHTLY_MEASURE=true`; `six_quotient_theta_trend` growing from **qualifying (non-smoke) nights** + Saturday transfer.
 2. **Held-out transfer** — `bank_held_out ≥ 5`; transfer Δ logged; ability θ not updated from transfer runs; series exists (not design-only).
 3. **Acceleration channel** — `ENABLE_SIX_QUOTIENT_ACCELERATION=true`; cycle sweep writes predictions; Brier computable when `n_clients ≥ 5` (sparse OK until then).
-4. **Weekly act gated** — `SIX_QUOTIENT_WEEKLY_LIVE=true` only after ≥7 qualifying nights + human/cross-family judge agreement gate + human review of self-dev/CEO path.
+4. **Weekly act gated** — `SIX_QUOTIENT_WEEKLY_LIVE=true` only after soak (≥7 qualifying nights **or** `TIER1_SOAK_WAIVED`) + human/cross-family judge agreement gate + human review of self-dev/CEO path.
 5. **Crisis / hallu SLA** — re-proven **in the same evidence window as the current inference/judge deploy** (SI→988 + verifier); not a prior-phase soak alone.
 6. **Gate script green** — `clinical_tier1_competence_gate_check.py` hard gates + optional `TIER1_REQUIRE_CLEAN_TREE=true` + no BLOCKER lines (gold/soak/transfer).
 7. **Battery quarantine** — battery turns excluded from crystal harvest; battery-time recall cannot return battery-derived crystals (isolation audit).

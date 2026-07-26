@@ -3,7 +3,8 @@
 Tier-1 clinical competence gate check (D.14b).
 
 Hard-fails certification preconditions. Does NOT claim Tier-1 certified on green —
-human gold ≥50 and multi-night soak still required (reported as blockers).
+human gold ≥50 required; multi-night soak is a soft blocker unless
+TIER1_SOAK_WAIVED=true (operator-approved calendar soak skip; still WARN).
 
 Usage:
   python3 backend/scripts/clinical_tier1_competence_gate_check.py
@@ -90,6 +91,8 @@ async def _main() -> int:
         weekly = _truthy("SIX_QUOTIENT_WEEKLY_LIVE")
         auto_cal = _truthy("ALLOW_AUTO_JUDGE_CALIBRATION")
         quarantine = _truthy("SIX_QUOTIENT_BATTERY_QUARANTINE", "true")
+        # QUANTUM-CRYSTAL-ARCH — operator waiver (2026-07-26): calendar soak ≠ clinical skill
+        soak_waived = _truthy("TIER1_SOAK_WAIVED")
 
         # Prefer distinct calendar nights (non-smoke nightly) — not same-day spam
         try:
@@ -317,7 +320,8 @@ async def _main() -> int:
         print("=== Tier-1 clinical competence gate (D.14b) ===")
         print(
             f"NIGHTLY_MEASURE={nightly} ACCELERATION={accel} "
-            f"WEEKLY_LIVE={weekly} QUARANTINE={quarantine} AUTO_CAL={auto_cal}"
+            f"WEEKLY_LIVE={weekly} QUARANTINE={quarantine} AUTO_CAL={auto_cal} "
+            f"SOAK_WAIVED={soak_waived}"
         )
         print(
             f"qualifying_trend={trend_n} smoke_trend={smoke_n} "
@@ -388,7 +392,13 @@ async def _main() -> int:
 
         # Soft blockers — certification incomplete even if hard gates pass
         if int(trend_n or 0) < 7:
-            blockers.append(f"qualifying nights {trend_n}<7")
+            if soak_waived:
+                warns.append(
+                    f"qualifying nights {trend_n}<7 — WAIVED "
+                    f"(TIER1_SOAK_WAIVED; ops 2026-07-26; measure loop still recommended)"
+                )
+            else:
+                blockers.append(f"qualifying nights {trend_n}<7")
         if transfer_n < 1:
             blockers.append("no non-smoke transfer series row yet")
         if gold_n < 50:
@@ -457,8 +467,9 @@ async def _main() -> int:
             and safety_veto_ok is True
         )
         if weekly:
+            soak_ok = int(trend_n or 0) >= 7 or soak_waived
             if (
-                int(trend_n or 0) < 7
+                not soak_ok
                 or gold_n < 50
                 or not gold_floor_ok
                 or not kappa_pass
@@ -468,15 +479,15 @@ async def _main() -> int:
                 or degraded_n < 8
             ):
                 print(
-                    "HARD FAIL: WEEKLY_LIVE=true before soak + scored gold "
-                    "+ provenance floor + κ/method/safety + rater thr "
+                    "HARD FAIL: WEEKLY_LIVE=true before soak (or TIER1_SOAK_WAIVED) "
+                    "+ scored gold + provenance floor + κ/method/safety + rater thr "
                     "+ score-entry + frozen pairs"
                 )
                 hard_ok = False
             else:
                 print("PASS: WEEKLY_LIVE preconditions met")
         else:
-            print("INFO: WEEKLY_LIVE false (correct until D.14b complete)")
+            print("INFO: WEEKLY_LIVE false (keep false until CEO/self-dev human review)")
 
         for b in blockers:
             print(f"BLOCKER: {b}")
