@@ -142,6 +142,19 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
 .modal-box .modal-btns{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
 .tbl tr.clickable{cursor:pointer}
 .tbl tr.clickable:hover td{background:rgba(0,229,160,0.05)}
+
+.sse-tabs{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}
+.sse-tab{padding:8px 16px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--bdr);background:rgba(255,255,255,0.03);color:var(--t2);transition:.2s}
+.sse-tab:hover{border-color:var(--bdr2);color:var(--t1)}
+.sse-tab.active{background:rgba(0,229,160,0.12);border-color:rgba(0,229,160,0.35);color:var(--green)}
+.sse-tab-panel{display:none}
+.sse-tab-panel.active{display:block}
+.lora-clock{font-family:var(--mono);font-size:32px;font-weight:500;color:var(--green);letter-spacing:.04em}
+.lora-eta{font-size:13px;color:var(--t2);margin-top:6px}
+.lora-steps{font-size:12px;color:var(--t3);margin-top:8px;font-family:var(--mono)}
+.lora-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:800px){.lora-grid{grid-template-columns:1fr}}
+.lora-log{margin-top:10px;padding:10px 12px;background:rgba(0,0,0,0.35);border-radius:var(--rs);font-family:var(--mono);font-size:10px;color:var(--t3);white-space:pre-wrap;max-height:90px;overflow:auto}
 </style>
 </head>
 <body>
@@ -158,6 +171,13 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
 </div>
 
 <div class="page">
+
+  <div class="sse-tabs" role="tablist">
+    <button type="button" class="sse-tab active" data-sse-tab="overview" onclick="sseSwitchTab('overview')">Overview</button>
+    <button type="button" class="sse-tab" data-sse-tab="lora" onclick="sseSwitchTab('lora')">LoRA Train</button>
+  </div>
+
+  <div id="sseTabOverview" class="sse-tab-panel active">
 
   <!-- PIPELINE HEALTH ROW -->
   <div class="metrics-grid mb-24">
@@ -273,6 +293,28 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
       </table>
     </div>
   </div>
+
+  </div><!-- /sseTabOverview -->
+
+  <div id="sseTabLora" class="sse-tab-panel">
+    <div class="glass mb-24">
+      <div class="glass-header">
+        <div class="glass-title">🎯 Counseling Office LoRA Train</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="loraPollHint" style="font-size:11px;color:var(--t3)">Live poll 5s</span>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="loraPollNow()">↻ Refresh</button>
+        </div>
+      </div>
+      <div class="glass-body">
+        <p style="font-size:12px;color:var(--t3);margin-bottom:16px">
+          Watches Replicate Flux LoRA jobs for the Counseling Office pack. Project
+          <span style="font-family:var(--mono);color:var(--t2)">5c712188-7d01-4d0a-b7f4-40b49eaa14b3</span>
+        </p>
+        <div class="lora-grid" id="loraCards"></div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -749,10 +791,129 @@ async function sseFamilyLoad() {
   } catch(e) { console.warn('sseFamilyLoad:', e); }
 }
 
+var LORA_PROJECT_ID = '5c712188-7d01-4d0a-b7f4-40b49eaa14b3';
+var LORA_JOBS = [
+  { key: 'little_nate', label: 'Little Nate', training_id: 'zjbzra7fh9rmr0czktwvc8c17w', started_at: '2026-07-26T14:00:41.389Z' },
+  { key: 'ask_client', label: 'Ask Client', training_id: '5beezdg8rdrmt0czkty92fhdp0', started_at: '2026-07-26T14:02:59.357Z' }
+];
+var _loraPollTimer = null;
+var _loraTickTimer = null;
+var _loraState = {};
+
+function sseSwitchTab(name) {
+  document.querySelectorAll('.sse-tab').forEach(function(b) {
+    b.classList.toggle('active', b.getAttribute('data-sse-tab') === name);
+  });
+  document.getElementById('sseTabOverview').classList.toggle('active', name === 'overview');
+  document.getElementById('sseTabLora').classList.toggle('active', name === 'lora');
+  if (name === 'lora') {
+    loraPollNow();
+    if (!_loraPollTimer) _loraPollTimer = setInterval(loraPollNow, 5000);
+    if (!_loraTickTimer) _loraTickTimer = setInterval(loraRenderCards, 1000);
+  } else {
+    if (_loraPollTimer) { clearInterval(_loraPollTimer); _loraPollTimer = null; }
+    if (_loraTickTimer) { clearInterval(_loraTickTimer); _loraTickTimer = null; }
+  }
+  try { history.replaceState(null, '', '#' + name); } catch (e) {}
+}
+
+function _loraFmt(ms) {
+  if (ms < 0) ms = 0;
+  var s = Math.floor(ms / 1000);
+  var h = Math.floor(s / 3600);
+  var m = Math.floor((s % 3600) / 60);
+  var sec = s % 60;
+  var pad = function(n) { return String(n).padStart(2, '0'); };
+  return h > 0 ? h + ':' + pad(m) + ':' + pad(sec) : pad(m) + ':' + pad(sec);
+}
+
+function _loraStatusBadge(st) {
+  if (st === 'succeeded') return '<span class="badge badge-green">succeeded</span>';
+  if (st === 'failed' || st === 'canceled') return '<span class="badge badge-red">' + st + '</span>';
+  if (st === 'processing') return '<span class="badge badge-blue">processing</span>';
+  if (st === 'starting') return '<span class="badge badge-amber">starting</span>';
+  return '<span class="badge badge-gray">' + (st || '…') + '</span>';
+}
+
+function loraRenderCards() {
+  var root = document.getElementById('loraCards');
+  if (!root) return;
+  var now = Date.now();
+  root.innerHTML = LORA_JOBS.map(function(job) {
+    var st = _loraState[job.key] || {};
+    var started = new Date(st.started_at || job.started_at).getTime();
+    var elapsed = (st.completed_at ? new Date(st.completed_at).getTime() : now) - started;
+    var step = st.step != null ? st.step : null;
+    var total = st.total_steps || 1000;
+    var pct = step != null ? Math.min(100, (step / total) * 100) : (st.status === 'succeeded' ? 100 : 0);
+    var remain = '';
+    if (st.status === 'succeeded') remain = 'Complete — weights ready';
+    else if (st.status === 'failed') remain = 'Failed — check Replicate log';
+    else if (step != null && step < total) {
+      var left = ((total - step) / 1.82) * 1000;
+      remain = 'ETA ~ ' + _loraFmt(left) + ' remaining';
+    } else remain = 'Waiting for step progress…';
+    var web = st.web_url || ('https://replicate.com/p/' + job.training_id);
+    var out = '';
+    if (st.output) {
+      var o = typeof st.output === 'string' ? st.output : (st.output.weights || JSON.stringify(st.output));
+      out = '<div class="lora-steps" style="color:var(--green);word-break:break-all">Output: ' + o + '</div>';
+    }
+    return '<div class="profile-card">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+      + '<h4 style="margin:0">' + job.label + '</h4>' + _loraStatusBadge(st.status)
+      + '</div>'
+      + '<div class="lora-clock">' + _loraFmt(elapsed) + '</div>'
+      + '<div class="lora-eta">' + remain + '</div>'
+      + '<div class="progress-bar" style="margin-top:12px"><div class="progress-fill green" style="width:' + pct.toFixed(1) + '%"></div></div>'
+      + '<div class="lora-steps">' + (step != null ? step + ' / ' + total + ' steps (' + pct.toFixed(0) + '%)' : '— / ' + total + ' steps') + '</div>'
+      + '<div style="margin-top:10px"><a class="btn btn-blue btn-sm" href="' + web + '" target="_blank" rel="noopener">Replicate log ↗</a></div>'
+      + (st.logs_tail ? '<div class="lora-log">' + String(st.logs_tail).replace(/</g, '&lt;') + '</div>' : '')
+      + out
+      + '</div>';
+  }).join('');
+}
+
+async function loraPollNow() {
+  var hint = document.getElementById('loraPollHint');
+  if (hint) hint.textContent = 'Polling…';
+  await Promise.all(LORA_JOBS.map(async function(job) {
+    try {
+      var q = '?project_id=' + encodeURIComponent(LORA_PROJECT_ID) + '&character_key=' + encodeURIComponent(job.key);
+      var r = await fetch(API + '/api/sse/admin/studio/lora/status/' + job.training_id + q, { headers: _authHeaders() });
+      if (!r.ok) {
+        _loraState[job.key] = Object.assign(_loraState[job.key] || {}, { status: 'error ' + r.status });
+        return;
+      }
+      var d = await r.json();
+      _loraState[job.key] = {
+        status: d.status,
+        step: d.step,
+        total_steps: d.total_steps || 1000,
+        logs_tail: d.logs_tail,
+        started_at: d.started_at || job.started_at,
+        completed_at: d.completed_at,
+        output: d.output,
+        web_url: d.web_url
+      };
+    } catch (e) {
+      console.warn('loraPoll', job.key, e);
+    }
+  }));
+  loraRenderCards();
+  if (hint) hint.textContent = 'Live poll 5s · ' + new Date().toLocaleTimeString();
+}
+
 function loadAll() { loadMetrics(); loadStoryboards(); loadGenerationLog(); loadCircuitBreaker(); loadHeartbeat(); sseLoadAlerts(); }
 loadAll();
 setInterval(function() { loadMetrics(); sseLoadAlerts(); }, 30000);
 setInterval(function() { loadGenerationLog(); loadStoryboards(); loadCircuitBreaker(); loadHeartbeat(); }, 60000);
+
+(function bootLoraTab() {
+  var hash = (location.hash || '').replace('#', '');
+  if (hash === 'lora') sseSwitchTab('lora');
+  else loraRenderCards();
+})();
 </script>
 </body>
 </html>

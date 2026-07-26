@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Optional
 
 import aiohttp
@@ -163,8 +164,17 @@ async def poll_training(training_id: str) -> dict:
                 raise RuntimeError(f"Replicate poll {resp.status}: {body[:300]}")
             data = await resp.json()
 
-    logs = data.get("logs", "")
+    logs = data.get("logs", "") or ""
     last_lines = "\n".join(logs.split("\n")[-5:]) if logs else ""
+    step = None
+    total_steps = 1000
+    matches = re.findall(r"(\d+)\s*/\s*(\d+)\s*\[", logs)
+    if matches:
+        try:
+            step = int(matches[-1][0])
+            total_steps = int(matches[-1][1])
+        except ValueError:
+            step = None
 
     return {
         "training_id": training_id,
@@ -173,6 +183,9 @@ async def poll_training(training_id: str) -> dict:
         "logs_tail": last_lines,
         "started_at": data.get("started_at"),
         "completed_at": data.get("completed_at"),
+        "step": step,
+        "total_steps": total_steps,
+        "web_url": f"https://replicate.com/p/{training_id}",
     }
 
 
