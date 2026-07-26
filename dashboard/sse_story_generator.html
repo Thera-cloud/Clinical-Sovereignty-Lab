@@ -175,8 +175,12 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
     <div class="glass-body">
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
         <label style="font-size:12px;color:var(--t3)">Subset generator</label>
-        <select id="subsetSelect" style="flex:1;min-width:220px;padding:8px 12px;border-radius:8px;background:var(--panel);color:var(--t1);border:1px solid var(--bdr);font-size:12px">
+        <select id="subsetSelect" style="flex:1;min-width:220px;padding:8px 12px;border-radius:8px;background:var(--panel);color:var(--t1);border:1px solid var(--bdr);font-size:12px" onchange="onSubsetChanged()">
           <option value="thera_world_origin">Thera-World (mythology bedrock)</option>
+        </select>
+        <label style="font-size:12px;color:var(--t3)">Studio project (LoRA)</label>
+        <select id="studioProjectSelect" style="flex:1;min-width:180px;padding:8px 12px;border-radius:8px;background:var(--panel);color:var(--t1);border:1px solid var(--bdr);font-size:12px">
+          <option value="">Auto (latest for subset)</option>
         </select>
         <a class="btn btn-ghost btn-sm" href="studio.html">Manage subsets in Studio</a>
       </div>
@@ -293,6 +297,44 @@ function _selectedPreset() {
   return _activePresetId;
 }
 
+function _selectedStudioProject() {
+  var sel = document.getElementById('studioProjectSelect');
+  var v = (sel && sel.value) || '';
+  if (v) {
+    try { sessionStorage.setItem('studio_project_id', v); } catch (e) {}
+    return v;
+  }
+  try { return sessionStorage.getItem('studio_project_id') || ''; } catch (e) { return ''; }
+}
+
+function onSubsetChanged() {
+  _selectedPreset();
+  resolveStudioProjectForPreset();
+}
+
+function resolveStudioProjectForPreset() {
+  var preset = _selectedPreset();
+  var sel = document.getElementById('studioProjectSelect');
+  if (!sel) return;
+  fetch(API + '/api/sse/admin/studio/projects/by-preset/' + encodeURIComponent(preset), { headers: _authHeaders() })
+    .then(function(r) { return r.ok ? r.json() : {}; })
+    .then(function(d) {
+      var cur = sel.value;
+      var opts = '<option value="">Auto (latest for subset)</option>';
+      if (d.project_id) {
+        var nLora = (d.characters || []).length;
+        opts += '<option value="' + d.project_id + '">' + d.project_id.slice(0, 8) + '… · ' + nLora + ' LoRA</option>';
+      }
+      sel.innerHTML = opts;
+      if (cur && Array.from(sel.options).some(function(o) { return o.value === cur; })) sel.value = cur;
+      else if (d.project_id) {
+        sel.value = d.project_id;
+        try { sessionStorage.setItem('studio_project_id', d.project_id); } catch (e) {}
+      }
+    })
+    .catch(function() {});
+}
+
 function loadSubsets() {
   fetch(API + '/api/sse/admin/studio/presets', { headers: _authHeaders() })
     .then(function(r) { return r.ok ? r.json() : []; })
@@ -307,6 +349,7 @@ function loadSubsets() {
       }).join('');
       if (list.some(function(p) { return p.id === prev; })) sel.value = prev;
       _activePresetId = sel.value;
+      resolveStudioProjectForPreset();
     })
     .catch(function() {});
 }
@@ -507,8 +550,7 @@ function generateImagery() {
   var btn = document.getElementById('genImgBtn');
   btn.disabled = true; btn.textContent = '⏳ Generating…';
 
-  var _studioPid = '';
-  try { _studioPid = sessionStorage.getItem('studio_project_id') || ''; } catch (e) {}
+  var _studioPid = _selectedStudioProject();
   fetch(API + '/api/sse/imagery/generate', {
     method: 'POST',
     headers: _authHeaders('application/json'),
@@ -539,7 +581,15 @@ function generateImagery() {
 /* --- APPROVE / DELETE --- */
 function approveStory() {
   if (!_currentProvId) return;
-  fetch(API + '/api/sse/pipeline/approve', { method: 'POST', headers: _authHeaders('application/json'), body: JSON.stringify({ provenance_id: _currentProvId }) })
+  fetch(API + '/api/sse/pipeline/approve', {
+    method: 'POST',
+    headers: _authHeaders('application/json'),
+    body: JSON.stringify({
+      provenance_id: _currentProvId,
+      preset_id: (_currentPlot && _currentPlot.preset_id) || _selectedPreset(),
+      project_id: _selectedStudioProject() || undefined
+    })
+  })
     .then(function(r) { return r.json(); })
     .then(function() { closeReview(); loadQueue(); })
     .catch(function(e) { alert('Approve failed: ' + e.message); });
@@ -587,7 +637,8 @@ function regeneratePanel() {
       provenance_id: _currentProvId,
       phase_id: _editPhaseId,
       custom_prompt: prompt,
-      preset_id: (_currentPlot && _currentPlot.preset_id) || _selectedPreset()
+      preset_id: (_currentPlot && _currentPlot.preset_id) || _selectedPreset(),
+      project_id: _selectedStudioProject() || undefined
     })
   })
   .then(function(r) { if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Request failed'); }); return r.json(); })

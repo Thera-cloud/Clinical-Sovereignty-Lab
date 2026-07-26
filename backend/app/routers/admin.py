@@ -6161,14 +6161,18 @@ async def sse_imagery_generate(request: Request):
     if not story_plot: raise HTTPException(422, "story_plot required in body")
     preset_id = body.get("preset_id") or story_plot.get("preset_id")
     project_id = body.get("project_id") or story_plot.get("studio_project_id") or story_plot.get("project_id")
-    from app.sse.layer6_imagination_engine import generate_story_imagery
-    result = await generate_story_imagery(story_plot, preset_id=preset_id, project_id=project_id)
     pool = getattr(request.app.state, "db_pool", None)
+    from app.sse.layer6_imagination_engine import generate_story_imagery
+    result = await generate_story_imagery(
+        story_plot, preset_id=preset_id, project_id=project_id, db_pool=pool,
+    )
+    if result.get("project_id") and isinstance(story_plot, dict):
+        story_plot["studio_project_id"] = result["project_id"]
     prov_id = body.get("provenance_id")
     if pool and prov_id and result.get("results"):
         import json as _json
         url_map = {r["phase_id"]: r["r2_url"] for r in result["results"] if r.get("r2_url")}
-        if url_map:
+        if url_map or result.get("project_id"):
             async with pool.acquire() as conn:
                 row = await conn.fetchval("SELECT story_plot_json FROM sse_ip_provenance WHERE provenance_id = $1", prov_id)
                 if row:
@@ -6176,6 +6180,10 @@ async def sse_imagery_generate(request: Request):
                     for p in sp.get("panels", []):
                         if p.get("phase_id") in url_map:
                             p["r2_url"] = url_map[p["phase_id"]]
+                    if result.get("project_id"):
+                        sp["studio_project_id"] = result["project_id"]
+                    if result.get("preset_id"):
+                        sp["preset_id"] = result["preset_id"]
                     await conn.execute("UPDATE sse_ip_provenance SET story_plot_json = $1 WHERE provenance_id = $2", _json.dumps(sp), prov_id)
     return result
 
@@ -6186,39 +6194,55 @@ async def sse_imagery_regenerate_panel(request: Request):
     if not prov_id or not phase_id or not custom_prompt:
         raise HTTPException(422, "provenance_id, phase_id, custom_prompt required")
     pool = request.app.state.db_pool
-    import json as _json, hashlib
+    import json as _json
     async with pool.acquire() as conn:
         row = await conn.fetchval("SELECT story_plot_json FROM sse_ip_provenance WHERE provenance_id = $1", prov_id)
         if not row: raise HTTPException(404, "provenance not found")
         sp = _json.loads(row) if isinstance(row, str) else dict(row)
         panel = next((p for p in sp.get("panels", []) if p.get("phase_id") == phase_id), None)
         if not panel: raise HTTPException(404, f"panel {phase_id} not found")
-        suffix = panel.get("core_character_suffix", "")
         preset_id = body.get("preset_id") or sp.get("preset_id")
-        style_extra = ""
-        if preset_id:
-            try:
-                from app.sse.trailer_generator import _fuse_visual_style_anchor, _load_preset_document
-                style_extra = _fuse_visual_style_anchor(_load_preset_document(preset_id))
-            except Exception:
-                style_extra = ""
-        full_prompt = custom_prompt
-        if suffix and suffix not in full_prompt:
-            full_prompt += " " + suffix
-        if style_extra and style_extra not in full_prompt:
-            full_prompt += " " + style_extra
-        full_prompt += " --no text, watermark, logo"
-        from app.sse.infrastructure.grok_imagine_client import generate_image
-        from app.sse.infrastructure.r2_storage import store_image
-        image_bytes = await generate_image(full_prompt)
-        content_hash = hashlib.sha256(image_bytes).hexdigest()[:12]
-        storyboard_id = sp.get("id", "unknown")
-        r2_key = f"sse/staging/{storyboard_id}/{phase_id}/{content_hash}.png"
-        r2_url = await store_image(image_bytes, r2_key)
+        project_id = (
+            body.get("project_id")
+            or sp.get("studio_project_id")
+            or sp.get("project_id")
+        )
+        panel = dict(panel)
         panel["grok_imagine_prompt"] = custom_prompt
-        panel["r2_url"] = r2_url
-        await conn.execute("UPDATE sse_ip_provenance SET story_plot_json = $1 WHERE provenance_id = $2", _json.dumps(sp), prov_id)
-    return {"phase_id": phase_id, "r2_url": r2_url, "prompt_used": full_prompt}
+        from app.sse.layer6_imagination_engine import generate_story_imagery
+        mini_plot = {
+            "id": sp.get("id", "unknown"),
+            "preset_id": preset_id,
+            "studio_project_id": project_id,
+            "panels": [panel],
+        }
+        result = await generate_story_imagery(
+            mini_plot, preset_id=preset_id, project_id=project_id, db_pool=pool,
+        )
+        one = (result.get("results") or [{}])[0]
+        if one.get("error"):
+            raise HTTPException(422, one["error"])
+        r2_url = one.get("r2_url")
+        prompt_used = one.get("prompt_used") or custom_prompt
+        for p in sp.get("panels", []):
+            if p.get("phase_id") == phase_id:
+                p["grok_imagine_prompt"] = custom_prompt
+                p["r2_url"] = r2_url
+                break
+        if result.get("project_id"):
+            sp["studio_project_id"] = result["project_id"]
+        await conn.execute(
+            "UPDATE sse_ip_provenance SET story_plot_json = $1 WHERE provenance_id = $2",
+            _json.dumps(sp), prov_id,
+        )
+    return {
+        "phase_id": phase_id,
+        "r2_url": r2_url,
+        "prompt_used": prompt_used,
+        "engine": one.get("engine"),
+        "project_id": result.get("project_id"),
+        "preset_id": result.get("preset_id") or preset_id,
+    }
 
 @sse_router.post("/pipeline/approve")
 async def sse_pipeline_approve(request: Request):
@@ -6234,7 +6258,34 @@ async def sse_pipeline_approve(request: Request):
         sp = _json.loads(r["story_plot_json"]) if isinstance(r["story_plot_json"], str) else dict(r["story_plot_json"] or {})
         dc = _json.loads(r["delivery_config_json"]) if isinstance(r["delivery_config_json"], str) else dict(r["delivery_config_json"] or {})
         storyboard_id = sp.get("id", "unknown")
-        delivery = dc or sp.get("delivery_config", {})
+        delivery = dict(dc or sp.get("delivery_config", {}) or {})
+        # Bind subset generator + Studio LoRA project into delivery config for runtime.
+        if sp.get("preset_id"):
+            delivery["preset_id"] = sp["preset_id"]
+        if body.get("preset_id"):
+            delivery["preset_id"] = body["preset_id"]
+        studio_pid = (
+            body.get("project_id")
+            or sp.get("studio_project_id")
+            or sp.get("project_id")
+            or delivery.get("studio_project_id")
+        )
+        if not studio_pid and delivery.get("preset_id"):
+            try:
+                from app.sse.studio_service import find_latest_project_for_preset
+                studio_pid = await find_latest_project_for_preset(delivery["preset_id"], pool)
+            except Exception:
+                studio_pid = None
+        if studio_pid:
+            delivery["studio_project_id"] = studio_pid
+            sp["studio_project_id"] = studio_pid
+        delivery["subset_kind"] = delivery.get("subset_kind") or (
+            "thera_world" if (delivery.get("preset_id") or "").find("thera_world") >= 0 else "custom"
+        )
+        await conn.execute(
+            "UPDATE sse_ip_provenance SET story_plot_json = $1, delivery_config_json = $2 WHERE provenance_id = $3",
+            _json.dumps(sp), _json.dumps(delivery), prov_id,
+        )
         await conn.execute(
             "INSERT INTO sse_cron_schedules (schedule_id, storyboard_id, schedule_type, cron_expression, enabled) "
             "VALUES (gen_random_uuid(), $1, 'daily_panel', '0 3 * * *', true) "
@@ -6259,7 +6310,12 @@ async def sse_pipeline_approve(request: Request):
             storyboard_id)
     orch = getattr(request.app.state, "sse_orchestrator", None)
     if orch: await orch.reload()
-    return {"status": "approved", "storyboard_id": storyboard_id}
+    return {
+        "status": "approved",
+        "storyboard_id": storyboard_id,
+        "preset_id": delivery.get("preset_id"),
+        "studio_project_id": delivery.get("studio_project_id"),
+    }
 
 @sse_router.get("/monitor/alerts")
 async def sse_monitor_alerts(request: Request, acknowledged: str = "all"):
@@ -6420,7 +6476,16 @@ async def sse_generate_trailer(request: Request, background_tasks: BackgroundTas
     except Exception:
         body = {}
     preset_id = (body.get("preset_id") or DEFAULT_PRESET_ID).strip()
-    project_id = (body.get("project_id") or "").strip() or str(_uuid.uuid4())
+    project_id = (body.get("project_id") or "").strip()
+    pool = getattr(request.app.state, "db_pool", None)
+    if not project_id and pool:
+        try:
+            from app.sse.studio_service import find_latest_project_for_preset
+            project_id = await find_latest_project_for_preset(preset_id, pool) or ""
+        except Exception:
+            project_id = ""
+    if not project_id:
+        project_id = str(_uuid.uuid4())
     scenes = None
     try:
         scenes = _load_preset(preset_id)
@@ -6433,17 +6498,43 @@ async def sse_generate_trailer(request: Request, background_tasks: BackgroundTas
         "preset_id": preset_id,
         "project_id": project_id,
         "scene_count": n,
-        "message": f"Generating {n or 'preset'} scenes for {preset_id} — poll trailer-status",
+        "message": f"Generating {n or 'preset'} scenes for {preset_id} — poll trailer-status?project_id=",
     }
 
 
 @sse_router.get("/admin/trailer-status")
-async def sse_trailer_status(request: Request):
+async def sse_trailer_status(request: Request, project_id: str | None = None):
+    pid = (project_id or "").strip()
+    if not pid:
+        last_path = "/tmp/trailer_scenes/last_run.json"
+        if os.path.exists(last_path):
+            try:
+                with open(last_path) as f:
+                    last = json.load(f)
+                pid = (last.get("project_id") or "").strip()
+            except Exception:
+                pid = ""
+    if pid:
+        from app.sse.trailer_generator import _load_manifest_from_r2
+        man = await _load_manifest_from_r2(pid)
+        if man and (man.get("scenes") is not None or man.get("total") is not None):
+            return {
+                "status": "ok",
+                "project_id": pid,
+                "preset_id": man.get("preset_id"),
+                "total": man.get("total") or len(man.get("scenes") or []),
+                "success": man.get("success"),
+                "scenes": man.get("scenes") or [],
+                "generated_at": man.get("generated_at"),
+            }
     manifest_path = "/tmp/trailer_scenes/manifest.json"
     if os.path.exists(manifest_path):
         with open(manifest_path) as f:
-            return json.load(f)
-    return {"status": "not_started"}
+            data = json.load(f)
+        if pid:
+            data["project_id"] = pid
+        return data
+    return {"status": "not_started", "project_id": pid or None}
 
 
 # ── UCD: Engagement tracking endpoint ─────────────────────────────

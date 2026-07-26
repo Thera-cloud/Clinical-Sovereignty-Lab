@@ -884,16 +884,46 @@ async def _load_manifest_from_r2(project_id: str) -> Optional[dict]:
         return None
 
 
-async def _load_trained_loras(project_id: str) -> dict[str, dict]:
+def normalize_trained_loras(
+    trained_loras: dict | None,
+    preset_id: str | None = None,
+) -> dict[str, dict]:
+    """Ensure trigger words match subset namespace (fix legacy THERA_* on non-Thera)."""
+    out: dict[str, dict] = {}
+    pid = preset_id
+    for key, raw in (trained_loras or {}).items():
+        if isinstance(raw, str):
+            entry = {"lora_url": raw, "trigger_word": subset_trigger_word(pid, key)}
+        elif isinstance(raw, dict):
+            entry = dict(raw)
+        else:
+            continue
+        if not entry.get("lora_url"):
+            continue
+        expected = subset_trigger_word(pid or entry.get("preset_id"), key)
+        tw = (entry.get("trigger_word") or "").strip()
+        non_thera = bool(pid) and pid != DEFAULT_PRESET_ID and "thera_world" not in pid
+        if not tw or (non_thera and tw.startswith("THERA_")):
+            entry["trigger_word"] = expected
+        entry.setdefault("preset_id", pid)
+        out[str(key)] = entry
+    return out
+
+
+async def _load_trained_loras(
+    project_id: str,
+    preset_id: str | None = None,
+) -> dict[str, dict]:
     """Load trained LoRA weights from the project manifest.
 
-    Returns {character_key: {"lora_url": "https://...", "trigger_word": "THERA_BOY"}}
-    or empty dict if none trained.
+    Returns {character_key: {"lora_url": "https://...", "trigger_word": "…"}}
+    or empty dict if none trained. Triggers normalized for the subset.
     """
     manifest = await _load_manifest_from_r2(project_id)
     if not manifest:
         return {}
-    return manifest.get("trained_loras", {})
+    pid = preset_id or _manifest_preset_id(manifest)
+    return normalize_trained_loras(manifest.get("trained_loras", {}), pid)
 
 
 async def save_trained_lora(
@@ -1127,7 +1157,7 @@ async def generate_all_scenes(
     logger.info("[TRAILER] Generating character references for project %s preset=%s", project_id, pid)
     refs = await generate_character_references(project_id, preset_id=pid)
 
-    trained_loras = await _load_trained_loras(project_id)
+    trained_loras = await _load_trained_loras(project_id, preset_id=pid)
     if trained_loras:
         logger.info("[TRAILER] Found trained LoRAs for: %s", list(trained_loras.keys()))
 
@@ -1164,6 +1194,17 @@ async def generate_all_scenes(
                 logger.warning("[TRAILER] Scene %d failed: %s", num, e)
 
             _write_manifest(results, total)
+            try:
+                with open(os.path.join(TRAILER_OUTPUT_DIR, "last_run.json"), "w") as f:
+                    json.dump({
+                        "project_id": project_id,
+                        "preset_id": pid,
+                        "total": total,
+                        "success": sum(1 for r in results if r.get("status") == "success"),
+                        "updated_at": datetime.utcnow().isoformat(),
+                    }, f)
+            except Exception:
+                pass
             await asyncio.sleep(5)
 
     manifest = {
@@ -1176,8 +1217,20 @@ async def generate_all_scenes(
         "success": sum(1 for r in results if r.get("status") == "success"),
         "total_cost": sum(r.get("cost", 0) for r in results),
         "style_prefix": STYLE_PREFIX if pid == DEFAULT_PRESET_ID else _get_style_prefix(1, pid),
+        "trained_loras": trained_loras,
     }
     await _save_manifest_to_r2(project_id, manifest)
+    try:
+        with open(os.path.join(TRAILER_OUTPUT_DIR, "last_run.json"), "w") as f:
+            json.dump({
+                "project_id": project_id,
+                "preset_id": pid,
+                "total": manifest["total"],
+                "success": manifest["success"],
+                "updated_at": manifest["generated_at"],
+            }, f)
+    except Exception:
+        pass
 
     logger.info("[TRAILER] Complete: %d/%d scenes, $%.2f",
                 manifest["success"], total, manifest["total_cost"])

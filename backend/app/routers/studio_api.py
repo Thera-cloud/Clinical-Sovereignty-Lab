@@ -236,16 +236,64 @@ async def preset_detail(name: str):
 
 
 @studio_router.post("/presets")
-async def create_preset(body: CreatePresetRequest):
-    """Create or update an imagery/story subset generator (JSON preset)."""
-    from app.sse.studio_service import create_or_update_preset
+async def create_preset(body: CreatePresetRequest, request: Request):
+    """Create or update an imagery/story subset generator (JSON preset).
+
+    Also seeds a Studio project bound to the preset so LoRA/imagery resolve
+    has a project_id immediately (Character Lab / Story Generator).
+    """
+    from app.sse.studio_service import (
+        create_or_update_preset,
+        create_project,
+        find_latest_project_for_preset,
+    )
     try:
-        return create_or_update_preset(body.model_dump(exclude_none=True))
+        doc = create_or_update_preset(body.model_dump(exclude_none=True))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.exception("create_preset failed")
         raise HTTPException(status_code=500, detail=str(e)[:300])
+    db = _get_db(request)
+    preset_id = doc.get("id") or doc.get("preset_id")
+    if db and preset_id:
+        try:
+            existing = await find_latest_project_for_preset(preset_id, db)
+            if not existing:
+                proj = await create_project(
+                    title=doc.get("title") or preset_id,
+                    scenes=doc.get("scenes") or [],
+                    db_pool=db,
+                    preset_id=preset_id,
+                )
+                doc["studio_project_id"] = proj.get("project_id")
+            else:
+                doc["studio_project_id"] = existing
+        except Exception as e:
+            logger.warning("create_preset: studio project seed failed: %s", e)
+    return doc
+
+
+@studio_router.get("/projects/by-preset/{preset_id}")
+async def project_by_preset(preset_id: str, request: Request):
+    """Latest Studio project for a subset generator (LoRA / imagery resolve).
+
+    Must be registered before /projects/{project_id} catch-alls.
+    """
+    from app.sse.studio_service import find_latest_project_for_preset, get_trained_loras_for_project
+    db = _get_db(request)
+    if not db:
+        raise HTTPException(503, "Database unavailable")
+    pid = await find_latest_project_for_preset(preset_id, db)
+    if not pid:
+        return {"preset_id": preset_id, "project_id": None, "trained_loras": {}, "characters": []}
+    loras = await get_trained_loras_for_project(pid)
+    return {
+        "preset_id": preset_id,
+        "project_id": pid,
+        "trained_loras": loras,
+        "characters": list(loras.keys()),
+    }
 
 
 @studio_router.get("/projects/{project_id}/trained-loras")

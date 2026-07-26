@@ -134,11 +134,13 @@ async def generate_story_imagery(
     story_plot: dict[str, Any],
     preset_id: str | None = None,
     project_id: str | None = None,
+    db_pool=None,
 ) -> dict[str, Any]:
     """Generate images for all panels in a story plot.
 
     When project_id is set (or story_plot.studio_project_id), uses trained LoRAs
-    from that Studio project when available.
+    from that Studio project when available. If unset, resolves latest Studio
+    project for the subset preset_id via db_pool.
     """
     storyboard_id = story_plot.get("id", "unknown")
     panels = story_plot.get("panels", [])
@@ -151,11 +153,17 @@ async def generate_story_imagery(
     cast_keys = _cast_keys(pid)
 
     proj = project_id or story_plot.get("studio_project_id") or story_plot.get("project_id")
+    if not proj and pid and db_pool:
+        try:
+            from app.sse.studio_service import find_latest_project_for_preset
+            proj = await find_latest_project_for_preset(pid, db_pool)
+        except Exception as e:
+            logger.warning("imagination_engine: preset→project resolve failed: %s", e)
     trained_loras: dict[str, Any] = {}
     if proj:
         try:
             from app.sse.trailer_generator import _load_trained_loras
-            trained_loras = await _load_trained_loras(str(proj)) or {}
+            trained_loras = await _load_trained_loras(str(proj), preset_id=pid) or {}
         except Exception as e:
             logger.warning("imagination_engine: trained LoRA load failed: %s", e)
 

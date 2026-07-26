@@ -266,10 +266,27 @@ function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype
       if (d.id) {
         setActivePresetId && setActivePresetId(d.id);
         try { sessionStorage.setItem('studio_active_preset_id', d.id); } catch (e) {}
+        if (d.studio_project_id) {
+          try { sessionStorage.setItem('studio_project_id', d.studio_project_id); } catch (e) {}
+        }
+        // Load seeded scenes into Studio state (JSON seed alone leaves Scenes/Pipeline empty).
+        let scenesLoaded = d.scenes || [];
+        try {
+          const full = await apiFetch('/api/sse/admin/studio/presets/' + d.id);
+          scenesLoaded = full.scenes || d.scenes || [];
+          setScenes(scenesLoaded);
+        } catch (e2) {
+          setScenes(scenesLoaded);
+        }
+        alert('Subset generator created: ' + (d.title || d.id)
+          + '\n' + scenesLoaded.length + ' scenes loaded.'
+          + (d.studio_project_id ? '\nStudio project: ' + d.studio_project_id.slice(0, 8) + '…' : '')
+          + '\nTrain LoRAs in Character Lab.');
+      } else {
+        alert('Subset generator created: ' + (d.title || d.id));
       }
       setShowCreateSubset(false);
       setNewSubset({ title: '', description: '', subset_kind: 'custom', visual_style: '', characters: '', color_preset: 'counseling_neon' });
-      alert('Subset generator created: ' + (d.title || d.id) + '\nTrain LoRAs in Character Lab for this cast.');
     } catch (e) { alert('Create subset failed: ' + e.message); }
     setLoading('');
   };

@@ -754,10 +754,17 @@ async function sseIngestWorkbooks() {
     var d = await r.json(); alert('Workbooks: ' + d.workbooks_processed + ', Crystals created: ' + d.crystals_created);
   } catch(e) { alert('Error: ' + e); }
 }
-function sseDoGenerateTrailer() {
+async function sseDoGenerateTrailer() {
   var preset = (document.getElementById('mdTrailerPreset') || {}).value || 'thera_world_origin';
   var projectId = ((document.getElementById('mdTrailerProject') || {}).value || '').trim();
-  if (!confirm('Generate trailer scenes for subset "' + preset + '"?')) return;
+  if (!projectId) {
+    try {
+      var pr = await fetch(API + '/api/sse/admin/studio/projects/by-preset/' + encodeURIComponent(preset), {headers:_authHeaders()});
+      var pd = await pr.json();
+      if (pd.project_id) projectId = pd.project_id;
+    } catch (e) {}
+  }
+  if (!confirm('Generate trailer scenes for subset "' + preset + '"' + (projectId ? ' (project ' + projectId.slice(0,8) + '…)' : ' — new project') + '?')) return;
   var body = {preset_id: preset};
   if (projectId) body.project_id = projectId;
   fetch(API + '/api/sse/admin/generate-trailer', {
@@ -768,9 +775,12 @@ function sseDoGenerateTrailer() {
     .then(function(r){return r.json()})
     .then(function(d){
       try { document.querySelector('.modal-overlay').remove(); } catch(e) {}
-      alert('Trailer started — ' + (d.scene_count || '?') + ' scenes for ' + (d.preset_id || preset));
+      var runPid = d.project_id || projectId || '';
+      alert('Trailer started — ' + (d.scene_count || '?') + ' scenes for ' + (d.preset_id || preset)
+        + (runPid ? '\nproject_id: ' + runPid : ''));
       var poll = setInterval(function(){
-        fetch(API + '/api/sse/admin/trailer-status', {headers:_authHeaders()})
+        var q = runPid ? ('?project_id=' + encodeURIComponent(runPid)) : '';
+        fetch(API + '/api/sse/admin/trailer-status' + q, {headers:_authHeaders()})
           .then(function(r){return r.json()})
           .then(function(s){
             if (s.total && s.success === s.total) { clearInterval(poll); alert('All ' + s.total + ' trailer scenes generated!'); }

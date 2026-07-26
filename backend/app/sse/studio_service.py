@@ -699,6 +699,28 @@ async def get_project(project_id: str, db_pool) -> dict | None:
     return _row_to_dict(row)
 
 
+async def find_latest_project_for_preset(preset_id: str, db_pool) -> str | None:
+    """Most recent Studio project bound to a subset generator (for LoRA resolve)."""
+    if not preset_id or not db_pool:
+        return None
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT project_id::text AS project_id
+                FROM sse_studio_projects
+                WHERE COALESCE(manifest->>'preset_id', manifest->>'id', '') = $1
+                ORDER BY created_at DESC NULLS LAST
+                LIMIT 1
+                """,
+                preset_id,
+            )
+        return str(row["project_id"]) if row and row.get("project_id") else None
+    except Exception as e:
+        logger.warning("[STUDIO] find_latest_project_for_preset(%s) failed: %s", preset_id, e)
+        return None
+
+
 async def get_project_hydrated(project_id: str, db_pool) -> dict | None:
     """Get project with scenes hydrated from R2 asset URLs."""
     proj = await get_project(project_id, db_pool)
