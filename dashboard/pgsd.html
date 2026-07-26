@@ -166,6 +166,13 @@
         <div class="meta">Fingerprint: <strong id="latestFp">—</strong></div>
     </div>
 
+    <div class="toolbar" style="margin-top:0;border-top:none;">
+        <div class="meta" id="pgsdAccessBanner">v1 = admin tab only · Coach Flutter deferred · ENABLE_PGSD_ACCESS for correlation/discernment</div>
+        <div class="spacer"></div>
+        <div class="meta">Series N: <strong id="seriesN">—</strong> <span id="seriesEmpty" style="color:#8B7355;"></span></div>
+        <div class="meta">Discernment: <strong id="discernComposite">—</strong></div>
+    </div>
+
     <div class="main">
         <!-- SECTION 1 — TDUFT METRICS -->
         <div class="section">
@@ -424,6 +431,39 @@
                 <div id="famCouplingsWrap" style="margin-top:18px;"></div>
             </div>
         </div>
+
+        <!-- SECTION 8 — ACCESS / FIELD (R11) -->
+        <div class="section">
+            <div class="section-header">
+                <div class="section-title">VIII. Access Substrate</div>
+                <div class="section-formula">chat timeline · discernment · cross-domain · wells · ground state</div>
+            </div>
+            <div class="grid cols-3" style="margin-bottom:14px;">
+                <div class="card">
+                    <div class="card-label">Discernment (past / present / future)</div>
+                    <div class="card-value small" id="disc_axes">—</div>
+                    <div class="card-sub" id="disc_claims">claims: —</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Cross-domain agreement</div>
+                    <div class="card-value small" id="xd_score">—</div>
+                    <div class="card-sub" id="xd_surfaces">surfaces: —</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Ground energy / relocation</div>
+                    <div class="card-value small" id="gs_energy">—</div>
+                    <div class="card-sub" id="gs_reloc">relocation: —</div>
+                </div>
+            </div>
+            <div class="card" style="margin-bottom:14px;">
+                <div class="card-label">Chat correlation timeline (redacted ≤32)</div>
+                <div id="chatTimeline" style="font-size:12px;color:var(--text-dim);max-height:180px;overflow:auto;"></div>
+            </div>
+            <div class="card">
+                <div class="card-label">Trauma wells</div>
+                <div id="wellsList" style="font-size:12px;color:var(--text-dim);max-height:180px;overflow:auto;"></div>
+            </div>
+        </div>
     </div>
 
     <div id="toast" class="toast">—</div>
@@ -534,6 +574,7 @@ function handleMessage(msg){
         // Refresh history + trajectory after a successful compute.
         send({ type: "pgsd_get_history", client_id: cid, limit: 20 });
         send({ type: "pgsd_get_trajectory", client_id: cid });
+        requestAccessPanels(cid);
         toast("PGSD snapshot computed.");
         return;
     }
@@ -560,10 +601,87 @@ function handleMessage(msg){
         renderFamily(msg);
         return;
     }
+    if (msg.type === "pgsd_chat_timeline"){
+        if (!msg.ok){ return; }
+        renderChatTimeline(msg.turns || []);
+        return;
+    }
+    if (msg.type === "pgsd_discernment"){
+        if (!msg.ok){ return; }
+        renderDiscernment(msg.scores || {});
+        return;
+    }
+    if (msg.type === "pgsd_cross_domain_series"){
+        if (!msg.ok){ return; }
+        renderCrossDomain(msg.series || {});
+        return;
+    }
+    if (msg.type === "pgsd_trauma_wells"){
+        if (!msg.ok){ return; }
+        renderWells(msg.wells || []);
+        return;
+    }
+    if (msg.type === "pgsd_ground_state"){
+        if (!msg.ok){ return; }
+        renderGroundState(msg.ground);
+        return;
+    }
     // Forbidden / generic error replies from the PGSD router
     if (typeof msg.type === "string" && msg.type.indexOf("pgsd_") === 0 && msg.ok === false){
         toast((msg.code === "forbidden" ? "Forbidden: " : "Error: ") + (msg.error || "unknown"), true);
     }
+}
+
+function requestAccessPanels(cid){
+    if (!cid) return;
+    send({ type: "pgsd_get_chat_timeline", client_id: cid, limit: 40 });
+    send({ type: "pgsd_get_discernment", client_id: cid });
+    send({ type: "pgsd_get_cross_domain_series", client_id: cid, days: 30 });
+    send({ type: "pgsd_get_trauma_wells", client_id: cid });
+    send({ type: "pgsd_get_ground_state", client_id: cid });
+}
+function renderChatTimeline(turns){
+    var el = $("chatTimeline");
+    if (!el) return;
+    if (!turns.length){ el.textContent = "No correlation rows yet (ENABLE_PGSD_ACCESS + auto-snapshots)."; return; }
+    el.innerHTML = turns.map(function(t){
+        var when = t.turn_created_at || t.created_at || "—";
+        return "<div style='margin:4px 0;'><span style='color:var(--gold-dim);'>" +
+            (t.surface || "?") + "</span> · " + when + " · <code>" +
+            (t.text_prefix || "") + "</code></div>";
+    }).join("");
+}
+function renderDiscernment(s){
+    var c = s.score_composite;
+    setText("discernComposite", c === null || c === undefined ? "—" : Number(c).toFixed(3));
+    setText("disc_axes",
+        "P " + fmt(s.score_past, 3) + " / N " + fmt(s.score_present, 3) +
+        " / F " + fmt(s.score_future, 3));
+    setText("disc_claims", "claims: " + (s.claim_count || 0));
+}
+function renderCrossDomain(series){
+    var a = series.agreement_score;
+    setText("xd_score", a === null || a === undefined ? "—" : Number(a).toFixed(3));
+    var surfs = series.detail && series.detail.surface_counts
+        ? Object.keys(series.detail.surface_counts).join(", ")
+        : (series.surfaces ? Object.keys(series.surfaces).join(", ") : "—");
+    setText("xd_surfaces", "surfaces: " + (surfs || "—"));
+}
+function renderWells(wells){
+    var el = $("wellsList");
+    if (!el) return;
+    if (!wells.length){ el.textContent = "No wells (ENABLE_PGSD_FIELD)."; return; }
+    el.innerHTML = wells.map(function(w){
+        return "<div style='margin:4px 0;'>" + (w.temporal_class || "?") +
+            " · depth " + fmt(w.depth, 3) +
+            (w.collapsed ? " · <span style='color:#EF4444;'>collapsed</span>" : "") +
+            " · " + (w.source_tag || "") + "</div>";
+    }).join("");
+}
+function renderGroundState(g){
+    if (!g){ setText("gs_energy","—"); setText("gs_reloc","relocation: —"); return; }
+    setText("gs_energy", fmt(g.ground_energy, 4));
+    setText("gs_reloc", "relocation: " + fmt(g.relocation, 4));
 }
 
 // ─── Client + family pickers ───────────────────────────────────────────────
@@ -612,6 +730,7 @@ function onClientChange(){
     if (selectedClient){
         send({ type: "pgsd_get_history", client_id: selectedClient, limit: 20 });
         send({ type: "pgsd_get_trajectory", client_id: selectedClient });
+        requestAccessPanels(selectedClient);
     } else {
         clearAll();
     }
@@ -622,6 +741,7 @@ function loadAll(){
     if (selectedClient){
         send({ type: "pgsd_get_history", client_id: selectedClient, limit: 20 });
         send({ type: "pgsd_get_trajectory", client_id: selectedClient });
+        requestAccessPanels(selectedClient);
     }
 }
 function computeNow(){
@@ -739,6 +859,16 @@ function renderEvolution(evo){
 
 function renderHistory(client_id, snaps){
     if (client_id !== selectedClient) return;
+    // QUANTUM-CRYSTAL-ARCH — series empty-state until N≥7
+    try {
+        setText("seriesN", String(snaps.length));
+        var emptyEl = $("seriesEmpty");
+        if (emptyEl) {
+            emptyEl.textContent = snaps.length < 7
+                ? "(need ≥7 snapshots for trajectory/discernment panels)"
+                : "";
+        }
+    } catch (e) {}
     if (snaps.length){
         renderSnapshot(reconstructFromSummary(snaps[0]));
         // Lindblad delta numbers aren't persisted as columns, so recompute

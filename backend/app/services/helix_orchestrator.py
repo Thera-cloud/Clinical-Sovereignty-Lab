@@ -97,6 +97,7 @@ class OrchestratorCycleResult:
     recommended_context_tokens: int = 500
     recommended_inference_tier: str = "domain_default"
     neural_mirror_context: Optional[str] = None
+    pgsd_field_hint: Optional[str] = None  # QUANTUM-CRYSTAL-ARCH — R7
     technique_weight_overrides: Optional[Dict[str, float]] = None
     spawns_proposed: int = 0
     spawns_approved: int = 0
@@ -177,6 +178,7 @@ class HelixOrchestrator:
         crystals: Optional[List[Dict[str, Any]]] = None,
         neural_mirror_context: Optional[str] = None,
         technique_weight_overrides: Optional[Dict[str, float]] = None,
+        user_id: Optional[str] = None,  # QUANTUM-CRYSTAL-ARCH — R7 helix hint
     ) -> OrchestratorCycleResult:
         """
         Execute a full cognitive cycle:
@@ -255,6 +257,48 @@ class HelixOrchestrator:
                 asyncio.create_task(self._persist_odpe_signal(odpe, result.cycle_id))
             except Exception as e:
                 logger.warning("HELIX_ORCH: ODPE evaluation failed (non-fatal): %s", e)
+
+        # QUANTUM-CRYSTAL-ARCH — R7 optional PGSD field hint (clinical/TENSION only)
+        try:
+            import os as _os_hx
+
+            if (
+                user_id
+                and self._db_pool
+                and _os_hx.environ.get("ENABLE_PGSD_HELIX_HINT", "").lower()
+                in ("1", "true", "yes", "on")
+                and _os_hx.environ.get("PGSD_ENABLED", "").lower()
+                in ("1", "true", "yes", "on")
+            ):
+                tier = (result.recommended_inference_tier or "").lower()
+                signal = ""
+                if result.odpe_result:
+                    signal = str(
+                        result.odpe_result.get("signal")
+                        or result.odpe_result.get("odpe_signal")
+                        or ""
+                    ).upper()
+                if tier in ("clinical",) or "TENSION" in signal:
+                    async with self._db_pool.acquire() as _hc:
+                        _pin = await _hc.fetchrow(
+                            """
+                            SELECT d1_valence, d5_integration, coherence,
+                                   emotional_fingerprint
+                            FROM pgsd_snapshots
+                            WHERE user_id = $1 OR username = $1
+                            ORDER BY computed_at DESC LIMIT 1
+                            """,
+                            user_id,
+                        )
+                    if _pin:
+                        result.pgsd_field_hint = (
+                            f"[PGSD field pin] valence={_pin['d1_valence']!s} "
+                            f"integration={_pin['d5_integration']!s} "
+                            f"coherence={_pin['coherence']!s} "
+                            f"fp={_pin.get('emotional_fingerprint') or 'n/a'}"
+                        )
+        except Exception:
+            pass
 
         # Step 5: Lifecycle governance
         promotions, prunes, merges = self._lifecycle_pass()

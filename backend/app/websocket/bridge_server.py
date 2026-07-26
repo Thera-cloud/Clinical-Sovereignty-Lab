@@ -6045,6 +6045,22 @@ class MetricsEngine:
             "last_pmb_update": str(datetime.datetime.now()),
             "pmb_version": pmb.get("pmb_version", 1)
         }
+        # QUANTUM-CRYSTAL-ARCH — PGSD crisis regions → PMB precursors (async refresh)
+        try:
+            import asyncio as _aio_pmb
+            from app.services.pgsd_pmb_bridge import append_crisis_precursor as _pgsd_pmb_append
+            _hw_pmb = (p.get("hardware_id") or "").strip()
+            _pool_pmb = getattr(self, "db_pool", None)
+            if _hw_pmb and _pool_pmb:
+                async def _pgsd_pmb_refresh(_p=p, _pmb=updated_pmb, _hw=_hw_pmb, _pool=_pool_pmb):
+                    try:
+                        await _pgsd_pmb_append(_pool, _pmb, _hw)
+                        self.update_metric(_p, "pmb", _pmb)
+                    except Exception:
+                        pass
+                _aio_pmb.get_running_loop().create_task(_pgsd_pmb_refresh())
+        except Exception:
+            pass
         self.update_metric(p, "pmb", updated_pmb)
         return updated_pmb
 
@@ -9253,6 +9269,20 @@ class AzureCortex:
         )[:50]
         if _enrich_addendum:  # QUANTUM-CRYSTAL-ARCH — Tier 2: fold directive into crystal context
             crystal_context = f"{crystal_context}\n\n{_enrich_addendum}" if crystal_context else _enrich_addendum
+        # QUANTUM-CRYSTAL-ARCH — PGSD field briefing inject (ACCESS-gated)
+        try:
+            if _cpool and os.environ.get("ENABLE_PGSD_ACCESS", "").lower() in (
+                "true", "1", "yes", "on",
+            ):
+                from app.services.pgsd_briefing import build_field_briefing
+                _pgsd_brief = await build_field_briefing(_cpool, _hw_id or _uname)
+                if _pgsd_brief:
+                    crystal_context = (
+                        f"{crystal_context}\n\n{_pgsd_brief}"
+                        if crystal_context else _pgsd_brief
+                    )
+        except Exception:
+            pass
         # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch Story Library (explicit cite only)
         try:
             if _allow_lib(_depth):
@@ -13088,6 +13118,9 @@ async def handle_client(websocket, path=None):
                 # --- PGSD WebSocket router --- # QUANTUM-CRYSTAL-ARCH
                 "pgsd_compute_snapshot", "pgsd_get_history", "pgsd_get_trajectory",
                 "pgsd_get_family_entanglement", "pgsd_get_zero_time_route",
+                "pgsd_get_chat_timeline", "pgsd_get_discernment",
+                "pgsd_get_cross_domain_series", "pgsd_get_trauma_wells",
+                "pgsd_get_ground_state",
                 # --- Training Ground ILM --- # QUANTUM-CRYSTAL-ARCH
                 "ilm_get_state", "ilm_consent_ack", "ilm_propose_member",
                 "ilm_set_relationship", "ilm_dialogue_turn", "ilm_self_alignment",

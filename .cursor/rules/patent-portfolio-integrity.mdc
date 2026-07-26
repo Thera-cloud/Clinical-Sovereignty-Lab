@@ -27,6 +27,7 @@ All patent documents live in `/patent/`. Never store patents in `docs/`, `legal/
 | 12 | `PATENT_PROVISIONAL_9_NEUROANATOMICAL_ARCHITECTURE.md` | Brain-Mapped Modules, Clinical Records, ExaFLOPS Growth | Mar 2026 |
 | 13 | `PATENT_PROVISIONAL_10_UNIFIED_GOVERNING_FUNCTION.md` | Nevedal Formula as Unified Governor Across All Subsystems | Mar 2026 |
 | 14 | `PATENT_PROVISIONAL_11_NEURAL_MIRROR.md` | Virtual EEG Fingerprinting, Emotional DNA, Neural Mirror Co-regulation | Mar 2026 |
+| 15 | `PATENT_PROVISIONAL_12_QUANTUM_EMOTIONAL_FIELD.md` | PGSD Quantum Emotional Field + Discernment + H(t) (16 claims) | Jul 2026 |
 
 Patent figures (32 PDFs + 32 PNGs, `patent_fig_1` through `patent_fig_32`) and 2 complete drawing compilations (`PATENT_DRAWINGS_COMPLETE.pdf`, `PATENT_DRAWINGS_4_COMPLETE.pdf`) are co-located in the same directory.
 

@@ -1848,6 +1848,12 @@ async def run_twilio_grok_xtts_bridge(
                                     domain="clinical",
                                     origin_surface="voice_call",
                                 )
+                                # QUANTUM-CRYSTAL-ARCH — PGSD voice finalize notify
+                                try:
+                                    from app.services.pgsd_triggers import notify_user as _pgsd_n
+                                    _pgsd_n(session_username, source="voice_call")
+                                except Exception:
+                                    pass
                                 # QUANTUM-CRYSTAL-ARCH: skill-plan tick (voice)
                                 try:
                                     from app.services.cycle_skill_plan_service import schedule_skill_plan_post_turn as _sk_tick

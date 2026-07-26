@@ -178,6 +178,20 @@ CYCLE_DOMAINS: Dict[str, CycleDomainConfig] = {
         sensitivity=0.4,
         description="Code intelligence growth cycles: C_emo oscillation, dual-brain disagreement frequency, knowledge density plateaus",
     ),
+    # QUANTUM-CRYSTAL-ARCH — PGSD field rhythm domain
+    "pgsd_field": CycleDomainConfig(
+        domain_id="pgsd_field",
+        display_name="PGSD Field Cycles",
+        data_sources=[
+            {"table": "pgsd_snapshots", "column": "coherence", "mode": "numeric"},
+            {"table": "pgsd_snapshots", "column": "d1_valence", "mode": "numeric"},
+            {"table": "pgsd_snapshots", "column": "d5_integration", "mode": "numeric"},
+        ],
+        peak_is_risk=False,
+        min_observations=7,
+        sensitivity=0.45,
+        description="PGSD emotional GPS rhythm: coherence and 5D coordinate oscillations",
+    ),
 }
 
 
@@ -537,6 +551,22 @@ class TimeSeriesExtractor:
                         WHERE (sanctuary_id = $1 OR family_id = $1)
                         AND created_at > NOW() - ($2 || ' days')::INTERVAL
                         GROUP BY DATE(created_at)
+                        ORDER BY day
+                    """, user_id, str(days))
+                elif table == "pgsd_snapshots":
+                    # QUANTUM-CRYSTAL-ARCH — user_id = hardware_id (canonical)
+                    _allowed = {
+                        "coherence", "d1_valence", "d2_arousal", "d3_relational",
+                        "d4_temporal_depth", "d5_integration", "purity",
+                    }
+                    if column not in _allowed:
+                        return []
+                    rows = await conn.fetch(f"""
+                        SELECT DATE(computed_at) as day, AVG({column}) as val
+                        FROM pgsd_snapshots
+                        WHERE (user_id = $1 OR username = $1)
+                        AND computed_at > NOW() - ($2 || ' days')::INTERVAL
+                        GROUP BY DATE(computed_at)
                         ORDER BY day
                     """, user_id, str(days))
                 else:

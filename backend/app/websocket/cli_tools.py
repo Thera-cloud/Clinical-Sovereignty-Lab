@@ -49,6 +49,9 @@ try:
             "query_sessions": 10,
             "query_coherence_data": 10,
             "query_user_profile": 5,
+            "query_pgsd_snapshot": 10,
+            "query_pgsd_discernment": 10,
+            "query_pgsd_cross_domain": 10,
             "build_start": 30,
             "build_test": 90,
             "build_promote": 10,
@@ -1232,6 +1235,51 @@ _DATA_TOOL_DEFS = [
             },
         },
     },
+    # QUANTUM-CRYSTAL-ARCH — PGSD Queen read tools (ops access v1)
+    {
+        "type": "function",
+        "function": {
+            "name": "query_pgsd_snapshot",
+            "description": "Read latest PGSD emotional GPS snapshot for a client (hardware_id or username). ADMIN only. Read-only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "client_id": {"type": "string", "description": "Client hardware_id or username"},
+                    "limit": {"type": "integer", "description": "History rows (default 5, max 20)"},
+                },
+                "required": ["client_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_pgsd_discernment",
+            "description": "Read latest PGSD discernment scores (past/present/future) for a client. ADMIN only. Read-only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "client_id": {"type": "string", "description": "Client hardware_id or username"},
+                },
+                "required": ["client_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_pgsd_cross_domain",
+            "description": "Read PGSD same-mind cross-domain surface agreement for a client. ADMIN only. Read-only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "client_id": {"type": "string", "description": "Client hardware_id or username"},
+                    "days": {"type": "integer", "description": "Lookback days (default 30, max 90)"},
+                },
+                "required": ["client_id"],
+            },
+        },
+    },
 ]
 
 _SENSITIVE_PROFILE_KEYS = frozenset({
@@ -1520,6 +1568,131 @@ async def _query_user_profile_async(args: Dict[str, Any], db_pool) -> Dict[str, 
         return {"status": "error", "error": f"Profile query failed: {e}"}
 
 
+async def _query_pgsd_snapshot_async(args: Dict[str, Any], db_pool) -> Dict[str, Any]:
+    """QUANTUM-CRYSTAL-ARCH — Queen read: latest PGSD snapshots."""
+    client_id = (args.get("client_id") or "").strip()
+    if not client_id:
+        return {"status": "error", "error": "client_id is required"}
+    limit = min(int(args.get("limit") or 5), 20)
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT user_id, username, computed_at, coherence, purity,
+                       d1_valence, d2_arousal, d3_relational,
+                       d4_temporal_depth, d5_integration,
+                       emotional_fingerprint, trigger_source, fidelity
+                FROM pgsd_snapshots
+                WHERE user_id = $1 OR username = $1
+                ORDER BY computed_at DESC
+                LIMIT $2
+                """,
+                client_id,
+                limit,
+            )
+        out = []
+        for r in rows:
+            out.append({
+                "user_id": r["user_id"],
+                "username": r.get("username"),
+                "computed_at": r["computed_at"].isoformat() if r.get("computed_at") else None,
+                "coherence": r.get("coherence"),
+                "purity": r.get("purity"),
+                "d1_valence": r.get("d1_valence"),
+                "d2_arousal": r.get("d2_arousal"),
+                "d3_relational": r.get("d3_relational"),
+                "d4_temporal_depth": r.get("d4_temporal_depth"),
+                "d5_integration": r.get("d5_integration"),
+                "emotional_fingerprint": r.get("emotional_fingerprint"),
+                "trigger_source": r.get("trigger_source"),
+                "fidelity": r.get("fidelity"),
+            })
+        return {
+            "status": "ok",
+            "result": out,
+            "row_count": len(out),
+            "query_scope": {"client_id": client_id},
+        }
+    except Exception as e:
+        logger.warning("query_pgsd_snapshot failed: %s", e)
+        return {"status": "error", "error": f"PGSD snapshot query failed: {e}"}
+
+
+async def _query_pgsd_discernment_async(args: Dict[str, Any], db_pool) -> Dict[str, Any]:
+    """QUANTUM-CRYSTAL-ARCH — Queen read: discernment scores."""
+    client_id = (args.get("client_id") or "").strip()
+    if not client_id:
+        return {"status": "error", "error": "client_id is required"}
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT user_id, username, score_past, score_present, score_future,
+                       score_composite, claim_count, computed_at
+                FROM pgsd_discernment_scores
+                WHERE user_id = $1 OR username = $1
+                ORDER BY computed_at DESC
+                LIMIT 1
+                """,
+                client_id,
+            )
+        if not row:
+            return {
+                "status": "ok",
+                "result": None,
+                "row_count": 0,
+                "query_scope": {"client_id": client_id},
+            }
+        return {
+            "status": "ok",
+            "result": {
+                "user_id": row["user_id"],
+                "username": row.get("username"),
+                "score_past": row.get("score_past"),
+                "score_present": row.get("score_present"),
+                "score_future": row.get("score_future"),
+                "score_composite": row.get("score_composite"),
+                "claim_count": row.get("claim_count"),
+                "computed_at": row["computed_at"].isoformat() if row.get("computed_at") else None,
+            },
+            "row_count": 1,
+            "query_scope": {"client_id": client_id},
+        }
+    except Exception as e:
+        logger.warning("query_pgsd_discernment failed: %s", e)
+        return {"status": "error", "error": f"PGSD discernment query failed: {e}"}
+
+
+async def _query_pgsd_cross_domain_async(args: Dict[str, Any], db_pool) -> Dict[str, Any]:
+    """QUANTUM-CRYSTAL-ARCH — Queen read: cross-domain agreement."""
+    client_id = (args.get("client_id") or "").strip()
+    if not client_id:
+        return {"status": "error", "error": "client_id is required"}
+    try:
+        from app.services.pgsd_correlation import compute_cross_domain_series
+
+        days = min(int(args.get("days") or 30), 90)
+        series = await compute_cross_domain_series(db_pool, client_id, days=days)
+        # Strip bulky per-snapshot lists for Queen payload
+        surfaces = series.get("surfaces") or {}
+        compact = {k: len(v) if isinstance(v, list) else v for k, v in surfaces.items()}
+        return {
+            "status": "ok",
+            "result": {
+                "user_id": series.get("user_id"),
+                "username": series.get("username"),
+                "agreement_score": series.get("agreement_score"),
+                "surface_counts": compact,
+                "detail": series.get("detail"),
+            },
+            "row_count": 1 if series.get("agreement_score") is not None or compact else 0,
+            "query_scope": {"client_id": client_id, "days": days},
+        }
+    except Exception as e:
+        logger.warning("query_pgsd_cross_domain failed: %s", e)
+        return {"status": "error", "error": f"PGSD cross-domain query failed: {e}"}
+
+
 async def _log_data_access(
     db_pool, plan_id: Optional[str], admin_username: Optional[str],
     tool_name: str, args: Dict[str, Any], result: Dict[str, Any],
@@ -1551,6 +1724,9 @@ _DATA_TOOL_DISPATCH = {
     "query_sessions": _query_sessions_async,
     "query_coherence_data": _query_coherence_data_async,
     "query_user_profile": _query_user_profile_async,
+    "query_pgsd_snapshot": _query_pgsd_snapshot_async,
+    "query_pgsd_discernment": _query_pgsd_discernment_async,
+    "query_pgsd_cross_domain": _query_pgsd_cross_domain_async,
 }
 
 GROK_TOOL_DEFINITIONS = list(_READ_TOOL_DEFS)
@@ -3102,7 +3278,14 @@ def _build_status_sync() -> Dict[str, Any]:
         return {"status": "error", "error": f"build_status failed: {e}", "error_code": _ERROR_OTHER}
 
 
-_DATA_TOOLS = {"query_sessions", "query_coherence_data", "query_user_profile"}
+_DATA_TOOLS = {
+    "query_sessions",
+    "query_coherence_data",
+    "query_user_profile",
+    "query_pgsd_snapshot",
+    "query_pgsd_discernment",
+    "query_pgsd_cross_domain",
+}
 
 _READ_TOOL_DISPATCH = {
     "read_file": lambda args, **_: _read_file_sync(

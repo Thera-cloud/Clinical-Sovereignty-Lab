@@ -332,6 +332,31 @@ class DojoMentorEngine:
             logger.error("end_session failed: %s", e)
             raise
         logger.info("dojo_mentor session ended: %s (interactions=%s)", session_id, count)
+        # QUANTUM-CRYSTAL-ARCH — PGSD notify (client subject if present, else dojo_coach)
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT coach_user_id, client_user_id
+                    FROM dojo_mentor_sessions WHERE session_id = $1
+                    """,
+                    session_id,
+                )
+            if row:
+                from app.services.pgsd_triggers import notify_user_async
+
+                client_uid = (row.get("client_user_id") or "").strip()
+                coach_uid = (row.get("coach_user_id") or "").strip()
+                if client_uid:
+                    await notify_user_async(
+                        self.db_pool, client_uid, source="dojo"
+                    )
+                elif coach_uid:
+                    await notify_user_async(
+                        self.db_pool, coach_uid, source="dojo_coach"
+                    )
+        except Exception as _pgsd_err:
+            logger.debug("dojo PGSD notify (non-fatal): %s", _pgsd_err)
 
     async def get_client_context(self, client_user_id: Optional[str]) -> Dict[str, Any]:
         """

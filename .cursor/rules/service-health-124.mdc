@@ -3,9 +3,9 @@ description: All 114 services must remain healthy at startup. Never introduce ch
 alwaysApply: true
 ---
 
-# 135/135 Service Health Requirement
+# 136+/136+ Service Health Requirement
 
-The backend reports `STARTUP COMPLETE: N/135 services healthy` on boot. The target is **135/135 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
+The backend reports `STARTUP COMPLETE: N/M services healthy` on boot (`M = len(_service_checks)` in `main.py`). Target is **all systems nominal** (currently includes `pgsd_heartbeat_agent` + optional PGSD ACCESS/FIELD handles). Any change that reduces the healthy count without updating checks is a regression.
 
 ## What Causes Service Count Drops
 

@@ -12,6 +12,11 @@ Handles:
     pgsd_get_trajectory            (COACH/ADMIN)
     pgsd_get_family_entanglement   (COACH/ADMIN)
     pgsd_get_zero_time_route       (COACH/ADMIN)
+    pgsd_get_chat_timeline         (COACH/ADMIN) — ACCESS
+    pgsd_get_discernment           (COACH/ADMIN) — ACCESS
+    pgsd_get_cross_domain_series   (COACH/ADMIN) — ACCESS
+    pgsd_get_trauma_wells          (COACH/ADMIN) — FIELD
+    pgsd_get_ground_state          (COACH/ADMIN) — FIELD
 
 Plus an auto-trigger entry point:
     schedule_for_user(user_id, source)
@@ -50,11 +55,17 @@ PGSD_MESSAGE_TYPES: frozenset = frozenset((
     "pgsd_get_trajectory",
     "pgsd_get_family_entanglement",
     "pgsd_get_zero_time_route",
+    "pgsd_get_chat_timeline",
+    "pgsd_get_discernment",
+    "pgsd_get_cross_domain_series",
+    "pgsd_get_trauma_wells",
+    "pgsd_get_ground_state",
 ))
 
 
 # Minimum seconds between auto-triggered snapshots for the same user.
 _DEBOUNCE_SECONDS: int = 3600  # one per hour
+_FAST_DEBOUNCE_SECONDS: int = 600  # live_activation / enroll
 
 
 def _is_coach_or_admin(profile: Optional[Dict]) -> bool:
@@ -114,11 +125,26 @@ class PGSDWebSocketRouter:
                 return await self._handle_get_family_entanglement(data)
             if t == "pgsd_get_zero_time_route":
                 return await self._handle_get_zero_time_route(data)
+            if t == "pgsd_get_chat_timeline":
+                return await self._handle_get_chat_timeline(data)
+            if t == "pgsd_get_discernment":
+                return await self._handle_get_discernment(data)
+            if t == "pgsd_get_cross_domain_series":
+                return await self._handle_get_cross_domain(data)
+            if t == "pgsd_get_trauma_wells":
+                return await self._handle_get_trauma_wells(data)
+            if t == "pgsd_get_ground_state":
+                return await self._handle_get_ground_state(data)
         except Exception as e:
             return self._err(t, f"internal: {e!s}")
         return None
 
-    def schedule_for_user(self, user_id: str, source: str = "auto") -> bool:
+    def schedule_for_user(
+        self,
+        user_id: str,
+        source: str = "auto",
+        debounce_seconds: Optional[int] = None,
+    ) -> bool:
         """
         Fire-and-forget background snapshot. Debounced per-user.
         Returns True if a task was scheduled, False if debounced/disabled.
@@ -128,7 +154,8 @@ class PGSDWebSocketRouter:
             return False
         now = time.time()
         last = self._last_compute.get(user_id, 0.0)
-        if (now - last) < _DEBOUNCE_SECONDS:
+        floor = debounce_seconds if debounce_seconds is not None else _DEBOUNCE_SECONDS
+        if (now - last) < floor:
             return False
         self._last_compute[user_id] = now
 
@@ -140,6 +167,12 @@ class PGSDWebSocketRouter:
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
         return True
+
+    def schedule_for_user_fast(self, user_id: str, source: str = "live_activation") -> bool:
+        """10-minute debounce path for enroll / live activation. # QUANTUM-CRYSTAL-ARCH"""
+        return self.schedule_for_user(
+            user_id, source=source, debounce_seconds=_FAST_DEBOUNCE_SECONDS
+        )
 
     # ─── Handlers ─────────────────────────────────────────────────────
 
@@ -353,16 +386,276 @@ class PGSDWebSocketRouter:
             "route": route,
         }
 
+    # ─── ACCESS / FIELD read handlers ─────────────────────────────────
+
+    async def _handle_get_chat_timeline(self, data: Dict) -> Dict:
+        client_id = (data.get("client_id") or "").strip()
+        if not client_id:
+            return self._err("pgsd_get_chat_timeline", "client_id required")
+        if not self.db:
+            return self._err("pgsd_get_chat_timeline", "db unavailable")
+        try:
+            resolved = await self.engine.resolve_pgsd_subject(client_id)
+            hw = (resolved or {}).get("hardware_id") or client_id
+            limit = min(int(data.get("limit") or 40), 100)
+            async with self.db.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, snapshot_id, surface, session_id,
+                           turn_created_at, text_prefix, created_at
+                    FROM pgsd_chat_correlation
+                    WHERE user_id = $1
+                    ORDER BY COALESCE(turn_created_at, created_at) DESC
+                    LIMIT $2
+                    """,
+                    hw,
+                    limit,
+                )
+            turns = []
+            for r in rows:
+                turns.append(
+                    {
+                        "id": r["id"],
+                        "snapshot_id": r["snapshot_id"],
+                        "surface": r["surface"],
+                        "session_id": r["session_id"],
+                        "turn_created_at": r["turn_created_at"].isoformat()
+                        if r.get("turn_created_at")
+                        else None,
+                        "text_prefix": r["text_prefix"],
+                        "created_at": r["created_at"].isoformat()
+                        if r.get("created_at")
+                        else None,
+                    }
+                )
+            return {
+                "type": "pgsd_chat_timeline",
+                "ok": True,
+                "client_id": hw,
+                "turns": turns,
+            }
+        except Exception as e:
+            return self._err("pgsd_get_chat_timeline", f"{e!s}")
+
+    async def _handle_get_discernment(self, data: Dict) -> Dict:
+        client_id = (data.get("client_id") or "").strip()
+        if not client_id:
+            return self._err("pgsd_get_discernment", "client_id required")
+        try:
+            from app.services.pgsd_discernment_scorer import PGSDDiscernmentScorer
+
+            scorer = PGSDDiscernmentScorer(db_pool=self.db)
+            result = await scorer.score_user(client_id)
+            return {
+                "type": "pgsd_discernment",
+                "ok": True,
+                "client_id": result.get("user_id") or client_id,
+                "scores": result,
+            }
+        except Exception as e:
+            return self._err("pgsd_get_discernment", f"{e!s}")
+
+    async def _handle_get_cross_domain(self, data: Dict) -> Dict:
+        client_id = (data.get("client_id") or "").strip()
+        if not client_id:
+            return self._err("pgsd_get_cross_domain_series", "client_id required")
+        try:
+            from app.services.pgsd_correlation import compute_cross_domain_series
+
+            days = min(int(data.get("days") or 30), 90)
+            series = await compute_cross_domain_series(self.db, client_id, days=days)
+            return {
+                "type": "pgsd_cross_domain_series",
+                "ok": True,
+                "client_id": series.get("user_id") or client_id,
+                "series": series,
+            }
+        except Exception as e:
+            return self._err("pgsd_get_cross_domain_series", f"{e!s}")
+
+    async def _handle_get_trauma_wells(self, data: Dict) -> Dict:
+        client_id = (data.get("client_id") or "").strip()
+        if not client_id:
+            return self._err("pgsd_get_trauma_wells", "client_id required")
+        if not self.db:
+            return self._err("pgsd_get_trauma_wells", "db unavailable")
+        try:
+            from app.services.pgsd_trauma_wells import TraumaWellEngine
+
+            eng = TraumaWellEngine(db_pool=self.db)
+            await eng.refresh_wells(client_id)
+            resolved = await self.engine.resolve_pgsd_subject(client_id)
+            hw = (resolved or {}).get("hardware_id") or client_id
+            async with self.db.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, temporal_class, depth, source_tag, collapsed,
+                           d1_valence, d2_arousal, d3_relational,
+                           d4_temporal, d5_integration, created_at
+                    FROM pgsd_trauma_wells
+                    WHERE user_id = $1
+                    ORDER BY created_at DESC
+                    LIMIT 40
+                    """,
+                    hw,
+                )
+            wells = [dict(r) for r in rows]
+            for w in wells:
+                if w.get("created_at"):
+                    w["created_at"] = w["created_at"].isoformat()
+            return {
+                "type": "pgsd_trauma_wells",
+                "ok": True,
+                "client_id": hw,
+                "wells": wells,
+            }
+        except Exception as e:
+            return self._err("pgsd_get_trauma_wells", f"{e!s}")
+
+    async def _handle_get_ground_state(self, data: Dict) -> Dict:
+        client_id = (data.get("client_id") or "").strip()
+        if not client_id:
+            return self._err("pgsd_get_ground_state", "client_id required")
+        try:
+            from app.services.pgsd_field_engine import PGSDFieldEngine
+
+            resolved = await self.engine.resolve_pgsd_subject(client_id)
+            hw = (resolved or {}).get("hardware_id") or client_id
+            field = PGSDFieldEngine(db_pool=self.db)
+            await field.compute_spectrum([hw])
+            ground = None
+            if self.db:
+                async with self.db.acquire() as conn:
+                    row = await conn.fetchrow(
+                        """
+                        SELECT ground_energy, ground_coords, prior_energy,
+                               relocation, computed_at
+                        FROM pgsd_ground_states
+                        WHERE user_id = $1
+                        ORDER BY computed_at DESC
+                        LIMIT 1
+                        """,
+                        hw,
+                    )
+                    if row:
+                        ground = dict(row)
+                        if ground.get("computed_at"):
+                            ground["computed_at"] = ground["computed_at"].isoformat()
+                        coords = ground.get("ground_coords")
+                        if isinstance(coords, str):
+                            try:
+                                ground["ground_coords"] = json.loads(coords)
+                            except Exception:
+                                pass
+            return {
+                "type": "pgsd_ground_state",
+                "ok": True,
+                "client_id": hw,
+                "ground": ground,
+            }
+        except Exception as e:
+            return self._err("pgsd_get_ground_state", f"{e!s}")
+
     # ─── Background auto-trigger ──────────────────────────────────────
 
     async def _bg_compute(self, user_id: str, source: str) -> None:
         try:
             resolved = await self.engine.resolve_pgsd_subject(user_id)
             save_key = (resolved or {}).get("hardware_id") or user_id
+            username = (resolved or {}).get("username") or ""
+            prev = await self._load_latest_snapshot(save_key)
             pgsd = await self.engine.compute_full_pgsd(user_id)
             pgsd["computed_at"] = _utc_now_iso()
             pgsd["_trigger_source"] = source
-            await self._save_snapshot(save_key, pgsd, evolution=None)
+            if username:
+                pgsd["_username"] = username
+            # QUANTUM-CRYSTAL-ARCH — Lindblad vs prior on auto-triggers too
+            evolution = None
+            if prev:
+                try:
+                    prev_density = (prev.get("full_pgsd") or {}).get(
+                        "quantum_trace", {}
+                    ).get("density_matrix", {})
+                    curr_density = pgsd.get("quantum_trace", {}).get(
+                        "density_matrix", {}
+                    )
+                    evolution = self.engine.trace.compute_lindblad_evolution(
+                        curr_density,
+                        prev_density,
+                        decoherence_events=0,
+                        therapeutic_interventions=1,
+                    )
+                except Exception:
+                    evolution = None
+            snapshot_id = await self._save_snapshot(save_key, pgsd, evolution)
+            # QUANTUM-CRYSTAL-ARCH — ACCESS chat correlation after snapshot persist
+            try:
+                import asyncio
+                import os
+
+                from app.services.pgsd_correlation import correlate_recent_chat
+
+                if (
+                    os.environ.get("ENABLE_PGSD_ACCESS", "").strip().lower()
+                    in ("1", "true", "yes", "on")
+                    and os.environ.get("PGSD_ENABLED", "").strip().lower()
+                    in ("1", "true", "yes", "on")
+                    and snapshot_id
+                    and self.db
+                ):
+                    asyncio.create_task(
+                        correlate_recent_chat(
+                            self.db,
+                            save_key,
+                            snapshot_id,
+                            source,
+                        )
+                    )
+                    # QUANTUM-CRYSTAL-ARCH — ACCESS scorer + cross-domain refresh
+                    try:
+                        from app.services.pgsd_discernment_scorer import (
+                            PGSDDiscernmentScorer,
+                        )
+
+                        asyncio.create_task(
+                            PGSDDiscernmentScorer(db_pool=self.db).score_user(save_key)
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        from app.services.pgsd_correlation import (
+                            compute_cross_domain_series,
+                        )
+
+                        asyncio.create_task(
+                            compute_cross_domain_series(self.db, save_key)
+                        )
+                    except Exception:
+                        pass
+                if (
+                    os.environ.get("ENABLE_PGSD_FIELD", "").strip().lower()
+                    in ("1", "true", "yes", "on")
+                    and os.environ.get("PGSD_ENABLED", "").strip().lower()
+                    in ("1", "true", "yes", "on")
+                    and self.db
+                    and snapshot_id
+                ):
+                    try:
+                        from app.services.pgsd_trauma_wells import TraumaWellEngine
+                        from app.services.pgsd_field_engine import PGSDFieldEngine
+
+                        asyncio.create_task(
+                            TraumaWellEngine(db_pool=self.db).refresh_wells(save_key)
+                        )
+                        asyncio.create_task(
+                            PGSDFieldEngine(db_pool=self.db).track_hamiltonian(
+                                save_key, snapshot_id
+                            )
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         except Exception:
             # Auto-triggers must NEVER surface errors.
             return
@@ -385,6 +678,15 @@ class PGSDWebSocketRouter:
             dens = qt.get("density_matrix", {}) or {}
             partial = qt.get("partial_trace", {}) or {}
             evo = evolution or {}
+            username = pgsd.get("_username") or ""
+            trigger_source = pgsd.get("_trigger_source")
+            # Resolve username if missing (additive col from migration 283)
+            if not username and self.engine:
+                try:
+                    resolved = await self.engine.resolve_pgsd_subject(user_id)
+                    username = (resolved or {}).get("username") or ""
+                except Exception:
+                    username = ""
             async with self.db.acquire() as conn:
                 row = await conn.fetchrow(
                     """
@@ -398,7 +700,8 @@ class PGSDWebSocketRouter:
                         d4_temporal_depth, d5_integration, coordinate_magnitude,
                         emotional_fingerprint,
                         evolution_state, fidelity,
-                        full_pgsd, source_metrics
+                        full_pgsd, source_metrics,
+                        username, trigger_source
                     ) VALUES (
                         $1, NOW(),
                         $2, $3, $4,
@@ -409,7 +712,8 @@ class PGSDWebSocketRouter:
                         $19, $20, $21,
                         $22,
                         $23, $24,
-                        $25::jsonb, $26::jsonb
+                        $25::jsonb, $26::jsonb,
+                        $27, $28
                     )
                     RETURNING id
                     """,
@@ -439,10 +743,66 @@ class PGSDWebSocketRouter:
                     evo.get("fidelity"),
                     json.dumps(pgsd, default=str),
                     json.dumps(pgsd.get("source_metrics", {}), default=str),
+                    username or None,
+                    trigger_source,
                 )
                 return int(row["id"]) if row else None
         except Exception:
-            return None
+            # Fallback without username cols if migration 283 not applied yet
+            try:
+                async with self.db.acquire() as conn:
+                    row = await conn.fetchrow(
+                        """
+                        INSERT INTO pgsd_snapshots (
+                            user_id, computed_at,
+                            therapeutic_mass, pattern_gravity, therapeutic_energy,
+                            velocity, time_density, noah_factor, active_dimensions,
+                            void_fraction, time_dilation, session_region,
+                            density_matrix, partial_trace, coherence, purity,
+                            d1_valence, d2_arousal, d3_relational,
+                            d4_temporal_depth, d5_integration, coordinate_magnitude,
+                            emotional_fingerprint,
+                            evolution_state, fidelity,
+                            full_pgsd, source_metrics
+                        ) VALUES (
+                            $1, NOW(),
+                            $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+                            $12::jsonb, $13::jsonb, $14, $15,
+                            $16, $17, $18, $19, $20, $21, $22, $23, $24,
+                            $25::jsonb, $26::jsonb
+                        )
+                        RETURNING id
+                        """,
+                        user_id,
+                        tduft.get("therapeutic_mass"),
+                        tduft.get("pattern_gravity"),
+                        tduft.get("therapeutic_energy"),
+                        tduft.get("velocity"),
+                        tduft.get("time_density"),
+                        tduft.get("noah_factor"),
+                        tduft.get("active_dimensions"),
+                        ts.get("void_fraction"),
+                        ts.get("time_dilation"),
+                        ts.get("session_region"),
+                        json.dumps(dens, default=str),
+                        json.dumps(partial, default=str),
+                        qt.get("coherence"),
+                        qt.get("purity"),
+                        coord.get("d1_valence"),
+                        coord.get("d2_arousal"),
+                        coord.get("d3_relational"),
+                        coord.get("d4_temporal_depth"),
+                        coord.get("d5_integration"),
+                        coord.get("magnitude"),
+                        pgsd.get("emotional_fingerprint"),
+                        evo.get("evolution"),
+                        evo.get("fidelity"),
+                        json.dumps(pgsd, default=str),
+                        json.dumps(pgsd.get("source_metrics", {}), default=str),
+                    )
+                    return int(row["id"]) if row else None
+            except Exception:
+                return None
 
     async def _save_trajectory(
         self,

@@ -160,10 +160,23 @@ class LittleNateInference:
             # Step 3: Helix orchestrator cognitive pre-processing
             if include_helix and self._helix:
                 try:
-                    helix_output = await self._helix.think(prompt, crystals=crystals if crystals else None)
+                    helix_output = await self._helix.think(
+                        prompt,
+                        crystals=crystals if crystals else None,
+                        user_id=user_id,  # QUANTUM-CRYSTAL-ARCH — R7
+                    )
                     result.helix_nodes = getattr(helix_output, "total_thought_nodes", 0)
                     if helix_output.synthesis and helix_output.synthesis.get("unified_understanding"):
                         synthesis_directive = helix_output.synthesis["unified_understanding"]
+                        result.synthesis_directive = synthesis_directive
+                    # QUANTUM-CRYSTAL-ARCH — R7 field hint into synthesis
+                    _pgsd_hint = getattr(helix_output, "pgsd_field_hint", None)
+                    if _pgsd_hint:
+                        synthesis_directive = (
+                            (synthesis_directive + "\n" + _pgsd_hint).strip()
+                            if synthesis_directive
+                            else _pgsd_hint
+                        )
                         result.synthesis_directive = synthesis_directive
                 except Exception as e:
                     logger.warning("LittleNateInference: Helix think failed: %s", e)

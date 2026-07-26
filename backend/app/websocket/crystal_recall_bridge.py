@@ -1128,6 +1128,50 @@ async def crystallize_from_conversation(
                 )
         except Exception as _wl_err:
             logger.debug("crystal_bridge: wisdom lifecycle extract (non-fatal): %s", _wl_err)
+        # QUANTUM-CRYSTAL-ARCH — stamp crystal with latest PGSD coords (non-blocking)
+        try:
+            async with db_pool.acquire() as _conn_pgsd:
+                _snap = await _conn_pgsd.fetchrow(
+                    """
+                    SELECT id, d1_valence, d2_arousal, d3_relational,
+                           d4_temporal_depth, d5_integration,
+                           emotional_fingerprint, coherence
+                    FROM pgsd_snapshots
+                    WHERE user_id = $1 OR username = $1
+                    ORDER BY computed_at DESC LIMIT 1
+                    """,
+                    hardware_id,
+                )
+                if _snap:
+                    await _conn_pgsd.execute(
+                        """
+                        UPDATE nate_intelligence_crystals SET
+                            pgsd_d1 = $2, pgsd_d2 = $3, pgsd_d3 = $4,
+                            pgsd_d4 = $5, pgsd_d5 = $6,
+                            pgsd_fingerprint = $7, pgsd_coherence = $8,
+                            pgsd_snapshot_id = $9
+                        WHERE content_hash = $1
+                        """,
+                        content_hash,
+                        _snap["d1_valence"],
+                        _snap["d2_arousal"],
+                        _snap["d3_relational"],
+                        _snap["d4_temporal_depth"],
+                        _snap["d5_integration"],
+                        _snap["emotional_fingerprint"],
+                        _snap["coherence"],
+                        _snap["id"],
+                    )
+        except Exception:
+            pass
+        # QUANTUM-CRYSTAL-ARCH — PGSD auto-snapshot after successful crystallize
+        try:
+            from app.services.pgsd_triggers import notify_user
+
+            _src = (origin_surface or "crystallizer").strip() or "crystallizer"
+            notify_user(hardware_id, source=_src)
+        except Exception:
+            pass
         return content_hash
     except Exception as e:
         logger.warning("crystallize_from_conversation: %s", e)

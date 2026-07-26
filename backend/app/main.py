@@ -2937,6 +2937,39 @@ async def lifespan(app: FastAPI):
     except Exception as nca_err:
         print(f"   ⚠️  NateCheckInAgent init failed: {nca_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — PGSDHeartbeatAgent (nightly baseline, primary-only)
+    _pgsd_heartbeat_agent = None
+    try:
+        from app.services.pgsd_heartbeat_agent import PGSDHeartbeatAgent
+
+        _pgsd_redis = getattr(app.state, "redis", None) or getattr(app.state, "redis_client", None)
+        _pgsd_heartbeat_agent = PGSDHeartbeatAgent(
+            db_pool=db_pool,
+            redis_client=_pgsd_redis,
+            app_state=app.state,
+        )
+        await _pgsd_heartbeat_agent.start()
+        app.state.pgsd_heartbeat_agent = _pgsd_heartbeat_agent
+        print("   ✅ PGSDHeartbeatAgent registered (ENABLE_PGSD_HEARTBEAT)")
+    except Exception as _pgsd_hb_err:
+        print(f"   ⚠️  PGSDHeartbeatAgent init failed: {_pgsd_hb_err}")
+
+    # QUANTUM-CRYSTAL-ARCH — PGSD ACCESS/FIELD service handles (optional constructs)
+    _pgsd_discernment_scorer = None
+    _pgsd_field_engine = None
+    try:
+        if os.environ.get("PGSD_ENABLED", "").strip().lower() in ("1", "true", "yes", "on"):
+            from app.services.pgsd_discernment_scorer import PGSDDiscernmentScorer
+            from app.services.pgsd_field_engine import PGSDFieldEngine
+
+            _pgsd_discernment_scorer = PGSDDiscernmentScorer(db_pool=db_pool)
+            _pgsd_field_engine = PGSDFieldEngine(db_pool=db_pool)
+            app.state.pgsd_discernment_scorer = _pgsd_discernment_scorer
+            app.state.pgsd_field_engine = _pgsd_field_engine
+            print("   ✅ PGSD discernment + field engines registered")
+    except Exception as _pgsd_svc_err:
+        print(f"   ⚠️  PGSD ACCESS/FIELD services init failed: {_pgsd_svc_err}")
+
     # QUANTUM-CRYSTAL-ARCH: Nate Commitment Agent — proactive commitment touches (Phase 1)
     _nate_commitment_agent = None
     try:
@@ -3417,6 +3450,9 @@ async def lifespan(app: FastAPI):
         ("ln_sandbox_auditor", _ln_sandbox_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln_observer_auditor", _ln_observer_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", _nate_checkin_agent is not None),
+        ("pgsd_heartbeat_agent", _pgsd_heartbeat_agent is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("pgsd_discernment_scorer", (os.environ.get("PGSD_ENABLED", "").strip().lower() not in ("1", "true", "yes", "on")) or (_pgsd_discernment_scorer is not None)),  # QUANTUM-CRYSTAL-ARCH
+        ("pgsd_field_engine", (os.environ.get("PGSD_ENABLED", "").strip().lower() not in ("1", "true", "yes", "on")) or (_pgsd_field_engine is not None)),  # QUANTUM-CRYSTAL-ARCH
         ("nate_commitment_agent", _nate_commitment_agent is not None),
         ("nate_self_monitor_agent", _nate_self_monitor_agent is not None),
         ("nate_checkin_auditor", _nate_checkin_auditor is not None),
@@ -3831,6 +3867,7 @@ async def lifespan(app: FastAPI):
         ("newsletter_agent", "NewsletterAgent"),  # QUANTUM-CRYSTAL-ARCH
         ("newsletter_auditor", "NewsletterAuditor"),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", "NateCheckInAgent"),
+        ("pgsd_heartbeat_agent", "PGSDHeartbeatAgent"),  # QUANTUM-CRYSTAL-ARCH
         ("nate_commitment_agent", "NateCommitmentAgent"),
         ("nate_self_monitor_agent", "NateSelfMonitorAgent"),
         ("nate_checkin_auditor", "NateCheckInAuditor"),

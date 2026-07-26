@@ -3318,6 +3318,14 @@ async def coach_initiated_enroll(
     except Exception:
         pass
 
+    # QUANTUM-CRYSTAL-ARCH — PGSD live_activation on enroll
+    try:
+        from app.services.pgsd_triggers import notify_user_async
+
+        await notify_user_async(db_pool, user_id, source="live_activation")
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "user_id": user_id,

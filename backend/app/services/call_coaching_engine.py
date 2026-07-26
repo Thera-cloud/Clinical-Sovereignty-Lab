@@ -269,6 +269,15 @@ class CallCoachingEngine:
             except Exception as e:
                 logger.warning("call coaching crystal forge failed: %s", e)
 
+        # QUANTUM-CRYSTAL-ARCH — PGSD notify if crystallize did not fire
+        try:
+            from app.services.pgsd_triggers import notify_user
+
+            if user_id:
+                notify_user(user_id, source="call_coaching")
+        except Exception:
+            pass
+
         logger.info(
             "Call finalized: sid=%s chunks=%d coaching_cards=%d",
             call_sid,
