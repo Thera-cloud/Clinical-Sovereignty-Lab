@@ -318,12 +318,12 @@ Gold: `docs/TIER1_HUMAN_GOLD_WORKSHEET.md` · Claude packet: `docs/CLINICAL_AGI_
 
 | # | Item | Status |
 |---|------|--------|
-| E.1 | PGSD ACCESS ladder on GREEN (`PGSD_ENABLED` → `HEARTBEAT` → `ACCESS`; **FIELD off**) + mig 283 + refresh smoke | [ ] *(ops)* |
+| E.1 | PGSD ACCESS ladder on GREEN (`PGSD_ENABLED` → `HEARTBEAT` → `ACCESS`; **FIELD off**) + mig 283 + refresh smoke | [x] 2026-07-26 GREEN: ACCESS on, FIELD=false; refresh scored=5; discernment/agreement/chat_corr rows |
 | E.2 | LIVE_CONTEXT surface gate — therapy/`bridge_chat` only; no AQ `live_focus` bleed to family/DOJO/voice | [x] `get_live_addendum(surface=)`; tests in `test_six_quotient_live_context` / `test_tier2_privacy_walls` |
 | E.3 | PGSD briefing parity — `build_field_briefing` on chat + family + private/group + voice behind `ENABLE_PGSD_ACCESS` | [x] `append_field_briefing` on sanctuary/group/private/voice |
 | E.4 | Privacy walls — offline tests: no cross-member user-crystal recall; LIVE_CONTEXT empty on sanctuary | [x] `test_tier2_privacy_walls.py` |
 | E.5 | Cross-domain battery design spike — domains therapy/family/dojo/voice/ops; no Sunday auto-act expansion | [x] `tier2_cross_domain_battery.py` + mig 284 stub; see `docs/TIER2_CROSS_DOMAIN_BATTERY.md` — open until first scored pack |
-| E.6 | Agreement evidence — `pgsd_cross_domain_agreement` rows for test family; scored multi-domain pack later | [ ] *(ops after ACCESS refresh)* |
+| E.6 | Agreement evidence — `pgsd_cross_domain_agreement` rows for test family; scored multi-domain pack later | [x] GREEN agreement=15 after refresh (multi-domain scored pack still open under E.5) |
 
 PGSD wiring: `docs/PGSD_WIRING.md` · Queen tools: `query_pgsd_snapshot`, `query_pgsd_discernment`, `query_pgsd_cross_domain`
 
