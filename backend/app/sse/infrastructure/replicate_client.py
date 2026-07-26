@@ -189,6 +189,29 @@ async def poll_training(training_id: str) -> dict:
     }
 
 
+# Official Flux Dev + LoRA (checked 2026-07-26). Old lucataco/hf_loras version 404s.
+_FLUX_LORA_VERSION = "ae0d7d645446924cf1871e3ca8796e8318f72465d2b5af9323a835df93bf0917"
+
+
+def _resolve_lora_weight_ref(ref: str, character_key: str | None = None) -> str:
+    """Use trained weights URL/tar when present; else owner/name destination.
+
+    Replicate's flux-dev-lora downloads replicate.delivery trained_model.tar
+    reliably. Destination `owner/name` → `/_weights` often fails (pget exit 1).
+    """
+    r = (ref or "").strip()
+    if r.startswith("http") and ("replicate.delivery" in r or r.endswith(".tar") or ".safetensors" in r):
+        return r
+    if r and "/" in r and not r.startswith("http"):
+        return r  # already owner/name
+    if character_key:
+        try:
+            return resolve_lora_destination(character_key=character_key)
+        except RuntimeError:
+            pass
+    return r
+
+
 async def generate_with_loras(
     prompt: str,
     lora_urls: list[str],
@@ -196,38 +219,62 @@ async def generate_with_loras(
     width: int = 1024,
     height: int = 576,
     num_outputs: int = 1,
+    character_keys: list[str] | None = None,
 ) -> list[str]:
-    """Generate images using Flux with LoRA weights applied.
+    """Generate images using black-forest-labs/flux-dev-lora + trained weights.
 
+    lora_urls[0] → lora_weights; lora_urls[1] → extra_lora (max 2).
+    Prefer Replicate destination refs (owner/name); tar URLs also accepted.
     Returns list of generated image URLs.
     """
+    import asyncio
+
     token = _get_token()
     if not token:
         raise RuntimeError("REPLICATE_API_TOKEN not set")
+    if not lora_urls:
+        raise RuntimeError("At least one LoRA weight URL/ref required")
 
     if not lora_scales:
-        lora_scales = [0.8] * len(lora_urls)
+        lora_scales = [0.9] * len(lora_urls)
 
-    hf_loras = lora_urls[:4]
-    scales = lora_scales[:4]
+    keys = character_keys or []
+    primary = _resolve_lora_weight_ref(lora_urls[0], keys[0] if keys else None)
+    secondary = None
+    if len(lora_urls) > 1:
+        secondary = _resolve_lora_weight_ref(
+            lora_urls[1], keys[1] if len(keys) > 1 else None
+        )
+
+    # Map WxH to closest supported aspect_ratio for BFL Flux LoRA.
+    aspect = "16:9" if width >= height else "9:16"
+    if abs(width - height) < 32:
+        aspect = "1:1"
+
+    inp: dict = {
+        "prompt": prompt,
+        "lora_weights": primary,
+        "lora_scale": float(lora_scales[0]),
+        "aspect_ratio": aspect,
+        "num_outputs": num_outputs,
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "output_format": "png",
+        "disable_safety_checker": True,
+        "go_fast": False,
+    }
+    if secondary:
+        inp["extra_lora"] = secondary
+        inp["extra_lora_scale"] = float(lora_scales[1] if len(lora_scales) > 1 else 0.85)
 
     url = f"{_API_BASE}/predictions"
-    payload = {
-        "version": "2389224e115448d9a77c07d7d45672b0f8e13b8f4c2710a1a857d5e7e2e649d3",
-        "input": {
-            "prompt": prompt,
-            "width": width,
-            "height": height,
-            "num_outputs": num_outputs,
-            "guidance_scale": 3.5,
-            "num_inference_steps": 28,
-            "hf_loras": hf_loras,
-            "lora_scales": scales,
-        },
-    }
+    payload = {"version": _FLUX_LORA_VERSION, "input": inp}
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as sess:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=180)) as sess:
         async with sess.post(url, json=payload, headers=_headers()) as resp:
+            if resp.status == 429:
+                body = await resp.text()
+                raise RuntimeError(f"Replicate predict 429 (throttled/credits): {body[:300]}")
             if resp.status not in (200, 201, 202):
                 body = await resp.text()
                 raise RuntimeError(f"Replicate predict {resp.status}: {body[:300]}")
@@ -236,8 +283,7 @@ async def generate_with_loras(
         prediction_id = data.get("id", "")
         get_url = data.get("urls", {}).get("get", f"{_API_BASE}/predictions/{prediction_id}")
 
-        for _ in range(60):
-            import asyncio
+        for _ in range(80):
             await asyncio.sleep(3)
             async with sess.get(get_url, headers=_headers()) as poll_resp:
                 if poll_resp.status != 200:
@@ -248,6 +294,8 @@ async def generate_with_loras(
                     output = poll_data.get("output", [])
                     return output if isinstance(output, list) else [output]
                 if status in ("failed", "canceled"):
-                    raise RuntimeError(f"Replicate prediction {status}: {poll_data.get('error', '')}")
+                    raise RuntimeError(
+                        f"Replicate prediction {status}: {poll_data.get('error', '')}"
+                    )
 
     raise RuntimeError("Replicate prediction timed out")

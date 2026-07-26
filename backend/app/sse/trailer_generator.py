@@ -781,8 +781,11 @@ async def _generate_image_with_lora_or_grok(
                 scene_num=scene_num,
                 preset_id=preset_id,
             )
-            logger.info("[LORA-GEN] Using %d LoRA(s) for characters: %s", len(lora_urls), list(relevant_loras.keys()))
-            image_urls = await generate_with_loras(lora_prompt, lora_urls, width=1024, height=576)
+            char_keys = list(relevant_loras.keys())
+            logger.info("[LORA-GEN] Using %d LoRA(s) for characters: %s", len(lora_urls), char_keys)
+            image_urls = await generate_with_loras(
+                lora_prompt, lora_urls, width=1024, height=576, character_keys=char_keys,
+            )
             if image_urls:
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as sess:
                     async with sess.get(image_urls[0]) as resp:

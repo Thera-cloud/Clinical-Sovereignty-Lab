@@ -9,6 +9,7 @@ storage continues to work while this DB table becomes the canonical source.
 """
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -31,6 +32,7 @@ async def register_lora(
     model_id = str(uuid.uuid4())
     tw = trigger_word or f"THERA_{user_id.upper()}"
     now = datetime.now(timezone.utc)
+    meta_json = json.dumps(metadata or {})
 
     async with db_pool.acquire() as conn:
         existing = await conn.fetchval(
@@ -42,10 +44,10 @@ async def register_lora(
             await conn.execute(
                 "UPDATE character_lora_models SET "
                 "replicate_model_ref = $1, trigger_word = $2, "
-                "metadata = $3, updated_at = $4 "
+                "metadata = $3::jsonb, updated_at = $4 "
                 "WHERE model_id = $5",
                 replicate_model_ref, tw,
-                metadata or {}, now, existing,
+                meta_json, now, existing,
             )
             logger.info("LoRA registry: updated %s → %s", user_id, existing)
             return str(existing)
@@ -54,9 +56,9 @@ async def register_lora(
             "INSERT INTO character_lora_models "
             "(model_id, user_id, project_id, replicate_model_ref, "
             " trigger_word, base_model, status, metadata, created_at, updated_at) "
-            "VALUES ($1,$2,$3,$4,$5,$6,'active',$7,$8,$8)",
+            "VALUES ($1,$2,$3,$4,$5,$6,'active',$7::jsonb,$8,$8)",
             model_id, user_id, project_id, replicate_model_ref,
-            tw, base_model, metadata or {}, now,
+            tw, base_model, meta_json, now,
         )
         logger.info("LoRA registry: registered %s → %s", user_id, model_id)
         return model_id
