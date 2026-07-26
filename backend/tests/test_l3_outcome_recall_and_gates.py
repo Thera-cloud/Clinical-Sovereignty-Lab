@@ -193,10 +193,14 @@ class TestL4ApplySoftGate(unittest.IsolatedAsyncioTestCase):
         async def _life(*_a, **_k):
             return None
 
+        async def _ensure(*_a, **_k):
+            return None
+
         mod.list_eval_rules = _list  # type: ignore
         mod._gate_confidence = _conf  # type: ignore
         mod._audit = _audit  # type: ignore
         mod.maybe_lifecycle_from_gate_confidence = _life  # type: ignore
+        mod.ensure_soft_rule_drafted = _ensure  # type: ignore
 
         out = await mod.apply_soft_gate_rules(
             object(),
@@ -221,7 +225,6 @@ class TestL4ApplySoftGate(unittest.IsolatedAsyncioTestCase):
                 "condition": {
                     "gate_class": "diagnosis_request",
                     "fired_new": False,
-                    "max_confidence": 0.30,
                 },
                 "action": {"type": "suppress_soft_followup"},
             }
@@ -239,16 +242,79 @@ class TestL4ApplySoftGate(unittest.IsolatedAsyncioTestCase):
         async def _life(*_a, **_k):
             return None
 
+        async def _ensure(*_a, **_k):
+            return None
+
         mod.list_eval_rules = _list  # type: ignore
         mod._gate_confidence = _conf  # type: ignore
         mod._audit = _audit  # type: ignore
         mod.maybe_lifecycle_from_gate_confidence = _life  # type: ignore
+        mod.ensure_soft_rule_drafted = _ensure  # type: ignore
 
         gate = {
             "class": "diagnosis_request",
             "fired_new": "false",
             "response": {"type": "clinical_gate"},
         }
+        out = await mod.apply_soft_gate_rules(object(), gate)
+        self.assertIs(out, gate)
+
+    async def test_active_suppress_with_zero_samples(self):
+        """Empty confidence table must not block first soft follow-up suppress."""
+        os.environ["ENABLE_LN_RULE_LOOP"] = "true"
+        os.environ["LN_RULE_LOOP_APPLY"] = "true"
+        mod = _load("ln_rule_loop", "ln_rule_loop.py")
+
+        rules = [
+            {
+                "rule_key": "soft_gate.pharma_interaction.followup_suppress",
+                "version": 1,
+                "status": "active",
+                "condition": {
+                    "gate_class": "pharma_interaction",
+                    "fired_new": False,
+                    "max_confidence": 0.30,
+                },
+                "action": {"type": "suppress_soft_followup"},
+            }
+        ]
+
+        async def _list(_pool):
+            return rules
+
+        async def _conf(_pool, _cls):
+            return 0.70, 0  # default conf, no samples
+
+        async def _audit(*_a, **_k):
+            return None
+
+        async def _life(*_a, **_k):
+            return None
+
+        async def _ensure(*_a, **_k):
+            return None
+
+        mod.list_eval_rules = _list  # type: ignore
+        mod._gate_confidence = _conf  # type: ignore
+        mod._audit = _audit  # type: ignore
+        mod.maybe_lifecycle_from_gate_confidence = _life  # type: ignore
+        mod.ensure_soft_rule_drafted = _ensure  # type: ignore
+
+        out = await mod.apply_soft_gate_rules(
+            object(),
+            {
+                "class": "pharma_interaction",
+                "fired_new": "false",
+                "response": {"type": "clinical_gate"},
+            },
+        )
+        self.assertIsNone(out)
+
+    async def test_si_class_passthrough(self):
+        os.environ["ENABLE_LN_RULE_LOOP"] = "true"
+        os.environ["LN_RULE_LOOP_APPLY"] = "true"
+        mod = _load("ln_rule_loop", "ln_rule_loop.py")
+        gate = {"class": "suicide_ideation", "fired_new": "true", "response": {}}
         out = await mod.apply_soft_gate_rules(object(), gate)
         self.assertIs(out, gate)
 

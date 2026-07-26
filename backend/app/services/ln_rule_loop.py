@@ -36,6 +36,14 @@ _ALLOWED_ACTIONS = frozenset({"suppress_soft_followup", "noop"})
 _PROMOTE_MIN_N = int(os.getenv("LN_RULE_PROMOTE_MIN_N", "5"))
 _PROMOTE_FLOOR = float(os.getenv("LN_RULE_PROMOTE_CONFIDENCE", "0.55"))
 _ROLLBACK_FLOOR = float(os.getenv("LN_RULE_ROLLBACK_CONFIDENCE", "0.25"))
+_SHADOW_PROMOTE_MIN = int(os.getenv("LN_RULE_SHADOW_PROMOTE_MIN", "3"))
+
+_DEFAULT_SOFT_CONDITION = {"fired_new": False}
+_DEFAULT_SOFT_ACTION = {"type": "suppress_soft_followup"}
+
+
+def _rule_key_for(gate_class: str) -> str:
+    return f"soft_gate.{gate_class}.followup_suppress"
 
 
 def rule_loop_enabled() -> bool:
@@ -354,11 +362,75 @@ async def _gate_confidence(db_pool: Any, gate_class: str) -> tuple[float, int]:
     return float(conf), n
 
 
+async def ensure_soft_rule_drafted(db_pool: Any, gate_class: str) -> None:
+    """Auto-draft+sandbox a default follow-up suppress rule if none exists."""
+    if not rule_loop_enabled() or not db_pool or not is_soft_gate_class(gate_class):
+        return
+    key = _rule_key_for(gate_class)
+    try:
+        async with db_pool.acquire() as conn:
+            exists = await conn.fetchval(
+                """
+                SELECT 1 FROM ln_rule_store
+                WHERE rule_key = $1
+                  AND status IN ('draft', 'sandbox', 'active')
+                LIMIT 1
+                """,
+                key,
+            )
+        if exists:
+            return
+        rid = await draft_rule(
+            db_pool,
+            rule_key=key,
+            condition={"gate_class": gate_class, **_DEFAULT_SOFT_CONDITION},
+            action=dict(_DEFAULT_SOFT_ACTION),
+            created_by="ln_rule_loop",
+            notes="auto-draft from soft-gate fire",
+        )
+        if rid is None:
+            return
+        ver = await _latest_version(db_pool, key)
+        if ver is not None:
+            await move_to_sandbox(db_pool, rule_key=key, version=ver)
+            logger.info("L4 auto-draft sandbox %s v%s", key, ver)
+    except Exception as e:
+        logger.warning("ensure_soft_rule_drafted: %s", e)
+
+
+async def _latest_version(db_pool: Any, rule_key: str) -> Optional[int]:
+    try:
+        async with db_pool.acquire() as conn:
+            v = await conn.fetchval(
+                "SELECT MAX(version) FROM ln_rule_store WHERE rule_key = $1",
+                rule_key,
+            )
+        return int(v) if v is not None else None
+    except Exception:
+        return None
+
+
+async def _shadow_fire_count(db_pool: Any, rule_key: str, version: int) -> int:
+    try:
+        async with db_pool.acquire() as conn:
+            n = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM ln_rule_audit
+                WHERE rule_key = $1 AND version = $2 AND action = 'shadow_fire'
+                """,
+                rule_key,
+                int(version),
+            )
+        return int(n or 0)
+    except Exception:
+        return 0
+
+
 async def maybe_lifecycle_from_gate_confidence(
     db_pool: Any,
     gate_class: str,
 ) -> None:
-    """Auto promote sandbox→active or rollback active from L3b confidence."""
+    """Promote sandbox→active (shadow count or confidence) / rollback on low conf."""
     if not rule_loop_enabled() or not db_pool or not is_soft_gate_class(gate_class):
         return
     conf, n = await _gate_confidence(db_pool, gate_class)
@@ -366,7 +438,7 @@ async def maybe_lifecycle_from_gate_confidence(
         async with db_pool.acquire() as conn:
             active = await conn.fetchrow(
                 """
-                SELECT rule_key, version, condition_json
+                SELECT rule_key, version
                 FROM ln_rule_store
                 WHERE status = 'active'
                   AND condition_json->>'gate_class' = $1
@@ -394,22 +466,26 @@ async def maybe_lifecycle_from_gate_confidence(
                 "L4 rollback %s v%s conf=%.2f n=%d",
                 active["rule_key"], active["version"], conf, n,
             )
-        elif (
-            sandbox
-            and not active
-            and n >= _PROMOTE_MIN_N
-            and conf >= _PROMOTE_FLOOR
-        ):
-            ok = await promote_rule(
-                db_pool,
-                rule_key=sandbox["rule_key"],
-                version=int(sandbox["version"]),
+            return
+        if sandbox and not active:
+            shadows = await _shadow_fire_count(
+                db_pool, sandbox["rule_key"], int(sandbox["version"]),
             )
-            if ok:
-                logger.info(
-                    "L4 promote %s v%s conf=%.2f n=%d",
-                    sandbox["rule_key"], sandbox["version"], conf, n,
+            promote_ok = (
+                shadows >= _SHADOW_PROMOTE_MIN
+                or (n >= _PROMOTE_MIN_N and conf >= _PROMOTE_FLOOR)
+            )
+            if promote_ok:
+                ok = await promote_rule(
+                    db_pool,
+                    rule_key=sandbox["rule_key"],
+                    version=int(sandbox["version"]),
                 )
+                if ok:
+                    logger.info(
+                        "L4 promote %s v%s conf=%.2f n=%d shadows=%d",
+                        sandbox["rule_key"], sandbox["version"], conf, n, shadows,
+                    )
     except Exception as e:
         logger.warning("maybe_lifecycle_from_gate_confidence: %s", e)
 
@@ -429,8 +505,14 @@ async def apply_soft_gate_rules(
     gate_class = str(gate_result.get("class") or "")
     if not is_soft_gate_class(gate_class):
         return gate_result
+
+    await ensure_soft_rule_drafted(db_pool, gate_class)
+
     fired_new = str(gate_result.get("fired_new", "")).lower() == "true"
-    conf, _n = await _gate_confidence(db_pool, gate_class)
+    conf, sample_n = await _gate_confidence(db_pool, gate_class)
+    # No samples yet → treat as low conf so suppress follow-up rules can bind
+    # (avoids default 0.70 blocking first-ever soft-gate learning).
+    match_conf = 0.0 if sample_n <= 0 else conf
     rules = await list_eval_rules(db_pool)
     apply_live = rule_loop_apply_enabled()
     for rule in rules:
@@ -438,7 +520,7 @@ async def apply_soft_gate_rules(
             rule.get("condition") or {},
             gate_class=gate_class,
             fired_new=fired_new,
-            confidence=conf,
+            confidence=match_conf,
         ):
             continue
         action = rule.get("action") or {}
@@ -453,15 +535,16 @@ async def apply_soft_gate_rules(
                 rule_key=rule["rule_key"],
                 version=int(rule["version"]),
                 action="shadow_fire",
-                detail=f"class={gate_class} fired_new={fired_new} conf={conf:.2f} would={atype}",
+                detail=f"class={gate_class} fired_new={fired_new} conf={match_conf:.2f} would={atype}",
             )
+            await maybe_lifecycle_from_gate_confidence(db_pool, gate_class)
             continue
         await _audit(
             db_pool,
             rule_key=rule["rule_key"],
             version=int(rule["version"]),
             action="fire",
-            detail=f"class={gate_class} fired_new={fired_new} conf={conf:.2f} action={atype}",
+            detail=f"class={gate_class} fired_new={fired_new} conf={match_conf:.2f} action={atype}",
         )
         if atype == "suppress_soft_followup" and not fired_new:
             await maybe_lifecycle_from_gate_confidence(db_pool, gate_class)
