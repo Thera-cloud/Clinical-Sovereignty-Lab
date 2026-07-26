@@ -3220,6 +3220,33 @@ async def lifespan(app: FastAPI):
         from app.services.quantum_knowledge_field import FederatedSearchCoordinator
         app.state.federated_search = FederatedSearchCoordinator(db_pool=db_pool, app_state=app.state)
         print("   ✅ NateMemoryCrystallizer + HelixOrchestrator + LittleNateInference + FederatedSearch wired")
+        # QUANTUM-CRYSTAL-ARCH — crystallizer background loop: harvest 30m,
+        # cluster+synthesize+supersede on cadence, decay 6h. Backend only, so the
+        # bridge's own instance never double-harvests. Flag-off by default.
+        if (os.environ.get("ENABLE_CRYSTALLIZER_LOOP", "false") or "").strip().lower() in ("1", "true", "yes", "on"):
+            try:
+                await app.state.nate_memory_crystallizer.start()
+                print("   ✅ Crystallizer loop started (harvest 30m, cluster/decay on cadence)")
+            except Exception as _cz_err:
+                print(f"   ⚠️  Crystallizer loop start failed: {_cz_err}")
+        # QUANTUM-CRYSTAL-ARCH — 6 self-learning domain agents. Temperatures and
+        # domain scoping are governed by nate_agent_template.DOMAIN_TEMPERATURES.
+        app.state.nate_domain_agents = {}
+        if (os.environ.get("ENABLE_DOMAIN_AGENTS", "false") or "").strip().lower() in ("1", "true", "yes", "on"):
+            try:
+                from app.services.nate_agent_template import (
+                    MarketingIntelligenceAgent, ClinicalPatternAgent, CoachDiscoveryAgent,
+                    ThreatIntelligenceAgent, CulturalIntelligenceAgent, ResearchSynthesisAgent,
+                )
+                for _AgentCls in (MarketingIntelligenceAgent, ClinicalPatternAgent,
+                                  CoachDiscoveryAgent, ThreatIntelligenceAgent,
+                                  CulturalIntelligenceAgent, ResearchSynthesisAgent):
+                    _a = _AgentCls(db_pool=db_pool, app_state=app.state)
+                    await _a.start()
+                    app.state.nate_domain_agents[_a.domain] = _a
+                print(f"   ✅ Domain agents started: {', '.join(sorted(app.state.nate_domain_agents))}")
+            except Exception as _da_err:
+                print(f"   ⚠️  Domain agents start failed: {_da_err}")
         # QUANTUM-CRYSTAL-ARCH — LN-Observer engine (feature-flagged)
         if getattr(settings, "ENABLE_LN_OBSERVER", False):
             from app.services.ln_observer_engine import ln_observer_engine as _lnobs
@@ -3537,6 +3564,21 @@ async def lifespan(app: FastAPI):
             print("   ✅ LNObserverAuditor stopped")
         except Exception as _ln_oa_stop:
             print(f"   ⚠️  LNObserverAuditor shutdown: {_ln_oa_stop}")
+
+    # QUANTUM-CRYSTAL-ARCH — stop crystallizer loop + domain agents
+    _cz_h = getattr(app.state, "nate_memory_crystallizer", None)
+    if _cz_h and getattr(_cz_h, "_running", False):
+        try:
+            await _cz_h.stop()
+            print("   ✅ Crystallizer loop stopped")
+        except Exception as _cz_stop:
+            print(f"   ⚠️  Crystallizer shutdown: {_cz_stop}")
+    for _dom, _da_h in (getattr(app.state, "nate_domain_agents", None) or {}).items():
+        try:
+            await _da_h.stop()
+            print(f"   ✅ Domain agent stopped: {_dom}")
+        except Exception as _da_stop:
+            print(f"   ⚠️  Domain agent {_dom} shutdown: {_da_stop}")
 
     # SOVEREIGN-VOICE: stop voice background agents
     if _voice_call_center:

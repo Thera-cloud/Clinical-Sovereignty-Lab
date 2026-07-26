@@ -348,6 +348,7 @@ class NateMemoryCrystallizer:
         self._app_state = app_state
         self._running = False
         self._task: Optional[asyncio.Task] = None
+        self._lock_conn = None  # QUANTUM-CRYSTAL-ARCH — advisory-lock holder
         self._last_harvest = datetime.min.replace(tzinfo=timezone.utc)
         self._last_cluster = datetime.min.replace(tzinfo=timezone.utc)
         self._last_decay = datetime.min.replace(tzinfo=timezone.utc)
@@ -372,15 +373,62 @@ class NateMemoryCrystallizer:
 
         self._project_root = Path(os.environ.get("CLI_PROJECT_ROOT", "."))
 
+    # QUANTUM-CRYSTAL-ARCH — background-loop guards.
+    # _LOOP_GUARD: only the process holding the PG advisory lock runs _run_loop, so a
+    #   second live instance (the bridge builds one under ENABLE_AUTONOMOUS) cannot
+    #   double-harvest. Structural, not env-dependent.
+    # _COLD_START_LOOKBACK_DAYS: a virgin _last_harvest is datetime.min, which makes the
+    #   first pass drag the full history in and (because _last_harvest then jumps to now)
+    #   silently drop everything past each source's LIMIT 200. Seeding a recent window
+    #   keeps the first buffer made of live signal.
+    _LOOP_LOCK_KEY = 847420260101
+    _LOOP_GUARD = (os.getenv("ENABLE_CRYSTALLIZER_LOOP_GUARD", "true").strip().lower()
+                   in ("1", "true", "yes", "on"))
+    _COLD_START_LOOKBACK_DAYS = float(os.getenv("CRYSTALLIZER_COLD_START_LOOKBACK_DAYS", "7"))
+
+    async def _acquire_loop_lock(self) -> bool:
+        """True when this process owns the loop. Holds a session-scoped PG lock."""
+        if self._is_blue or not self._db_pool or not self._LOOP_GUARD:
+            return True
+        try:
+            conn = await self._db_pool.acquire()
+            if await conn.fetchval("SELECT pg_try_advisory_lock($1)", self._LOOP_LOCK_KEY):
+                self._lock_conn = conn
+                return True
+            await self._db_pool.release(conn)
+            logger.warning("Crystallizer loop lock held elsewhere — not starting a second loop")
+            return False
+        except Exception as e:
+            logger.warning("Crystallizer loop lock unavailable (%s) — starting unguarded", e)
+            return True
+
     async def start(self):
         if self._running:
             return
+        # QUANTUM-CRYSTAL-ARCH — singleton guard + cold-start window seeding
+        if not await self._acquire_loop_lock():
+            return
+        _boot = datetime.now(timezone.utc)
+        if self._last_harvest == datetime.min.replace(tzinfo=timezone.utc):
+            self._last_harvest = _boot - timedelta(days=self._COLD_START_LOOKBACK_DAYS)
+        # Defer the first cluster/decay a full interval so neither fires while the rest
+        # of the lifespan is still initializing.
+        self._last_cluster = _boot
+        self._last_decay = _boot
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
-        logger.info("NateMemoryCrystallizer started")
+        logger.info("NateMemoryCrystallizer started (cold-start lookback %.1fd)",
+                    self._COLD_START_LOOKBACK_DAYS)
 
     async def stop(self):
         self._running = False
+        if self._lock_conn is not None:  # QUANTUM-CRYSTAL-ARCH — release singleton lock
+            try:
+                await self._lock_conn.execute("SELECT pg_advisory_unlock($1)", self._LOOP_LOCK_KEY)
+                await self._db_pool.release(self._lock_conn)
+            except Exception:
+                pass
+            self._lock_conn = None
         if self._task:
             self._task.cancel()
             try:

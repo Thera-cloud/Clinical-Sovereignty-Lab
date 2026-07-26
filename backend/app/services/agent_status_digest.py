@@ -103,6 +103,7 @@ class AgentStatusDigest:
         sections.append(await self._section_trust_enforcer())
         sections.append(await self._section_coaching_subsystem())
         sections.append(await self._section_liminal_presence())
+        sections.append(await self._section_self_learning())
         sections.append(await self._section_data_integrity())
         sections.append(await self._section_hive_defense_workers())
         sections.append(await self._section_application_workers())
@@ -358,6 +359,32 @@ class AgentStatusDigest:
             status, detail = self._check_agent(agent, name)
             rows.append((status, name, detail))
         return {"title": "Liminal Presence", "rows": rows}
+
+    async def _section_self_learning(self) -> dict:
+        """Crystallizer loop + 6 domain agents (both flag-gated; see .env.template)."""
+        rows = []
+        cz = getattr(self.app, "nate_memory_crystallizer", None)
+        if cz is None:
+            rows.append(("FAILED", "Crystallizer", "Not registered on app.state"))
+        elif not getattr(cz, "_running", False):
+            rows.append(("WARNING", "Crystallizer Loop",
+                         "Dormant (ENABLE_CRYSTALLIZER_LOOP off) — no harvest/cluster/decay"))
+        else:
+            rows.append(("TRUSTED", "Crystallizer Loop",
+                         f"Running | cycles={getattr(cz, '_cycle_count', 0)} "
+                         f"| buffer={len(getattr(cz, '_harvest_buffer', []) or [])}"))
+
+        agents = getattr(self.app, "nate_domain_agents", None) or {}
+        if not agents:
+            rows.append(("WARNING", "Domain Agents",
+                         "None started (ENABLE_DOMAIN_AGENTS off) — 0/6 self-learning agents"))
+        else:
+            for domain in sorted(agents):
+                agent = agents[domain]
+                status, detail = self._check_agent(agent, f"{domain} agent")
+                detail += f" | cycles={getattr(agent, '_cycle_count', 0)}"
+                rows.append((status, f"Domain Agent: {domain}", detail))
+        return {"title": "Self-Learning (Crystallizer + Domain Agents)", "rows": rows}
 
     async def _section_data_integrity(self) -> dict:
         rows = []

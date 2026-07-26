@@ -219,9 +219,10 @@ services:
       - MAC_AGENT_TOKEN=${MAC_AGENT_TOKEN:-}
       # QUANTUM-CRYSTAL-ARCH — CLI neuro-symbolic + Mac↔Cloud task bus (Agents API / partner runs)
       - ENABLE_ASK_NATE_SYMBOLIC=${ENABLE_ASK_NATE_SYMBOLIC:-true}
-      # QUANTUM-CRYSTAL-ARCH — Phase 5b/5c on after sign-off; graph separate (5d)
-      - ENABLE_SYMBOLIC_EXTRACTION=${ENABLE_SYMBOLIC_EXTRACTION:-true}
-      - ENABLE_SYMBOLIC_VERIFIER=${ENABLE_SYMBOLIC_VERIFIER:-true}
+      # QUANTUM-CRYSTAL-ARCH — Phase 5a/5b: defaults FALSE per roadmap phase gate;
+      # explicit .env entry (with sign-off date) is what enables them. 5c/5d separate.
+      - ENABLE_SYMBOLIC_EXTRACTION=${ENABLE_SYMBOLIC_EXTRACTION:-false}
+      - ENABLE_SYMBOLIC_VERIFIER=${ENABLE_SYMBOLIC_VERIFIER:-false}
       - ENABLE_FORWARD_REASONING=${ENABLE_FORWARD_REASONING:-false}
       - ENABLE_CRYSTAL_GRAPH=${ENABLE_CRYSTAL_GRAPH:-false}
       - CLI_TASK_BUS_ENABLED=${CLI_TASK_BUS_ENABLED:-true}
@@ -282,20 +283,33 @@ services:
       # QUANTUM-CRYSTAL-ARCH: mailto/SMS/HTTPS on prod API can apply staging negotiations
       - ENABLE_STAGING_NEGOTIATION_INBOUND_FALLBACK=${ENABLE_STAGING_NEGOTIATION_INBOUND_FALLBACK:-false}
       - STAGING_NEGOTIATION_DATABASE_URL=${STAGING_NEGOTIATION_DATABASE_URL:-}
-      # QUANTUM-CRYSTAL-ARCH — Agentic Phase 0–4 + N.3 (TOUCH stays off until consent population)
-      - ENABLE_PROACTIVE_TOUCH_POLICY=${ENABLE_PROACTIVE_TOUCH_POLICY:-true}
-      - ENABLE_PROACTIVE_COMMITMENTS=${ENABLE_PROACTIVE_COMMITMENTS:-true}
-      - ENABLE_NATE_TOOL_EXECUTOR=${ENABLE_NATE_TOOL_EXECUTOR:-true}
-      - ENABLE_THERAPEUTIC_PLANS=${ENABLE_THERAPEUTIC_PLANS:-true}
-      - ENABLE_CYCLE_SKILL_PLANS=${ENABLE_CYCLE_SKILL_PLANS:-true}
-      - ENABLE_CLINICAL_TECHNIQUE_DIRECTORY=${ENABLE_CLINICAL_TECHNIQUE_DIRECTORY:-true}
-      - ENABLE_CLINICAL_DIRECTORY_WEB_ENRICH=${ENABLE_CLINICAL_DIRECTORY_WEB_ENRICH:-true}
+      # QUANTUM-CRYSTAL-ARCH — Agentic Phase 0–4 + N.3. Roadmap: "flags stay off in
+      # production until that phase's exit checklist passes. Deployed != enabled."
+      # Defaults are therefore FALSE — a phase is live only via an explicit .env entry
+      # (see the phase-gate sign-off block in .env / .env.template). Never flip to :-true.
+      - ENABLE_PROACTIVE_TOUCH_POLICY=${ENABLE_PROACTIVE_TOUCH_POLICY:-false}
+      - ENABLE_PROACTIVE_COMMITMENTS=${ENABLE_PROACTIVE_COMMITMENTS:-false}
+      - ENABLE_NATE_TOOL_EXECUTOR=${ENABLE_NATE_TOOL_EXECUTOR:-false}
+      - ENABLE_THERAPEUTIC_PLANS=${ENABLE_THERAPEUTIC_PLANS:-false}
+      - ENABLE_CYCLE_SKILL_PLANS=${ENABLE_CYCLE_SKILL_PLANS:-false}
+      - ENABLE_CLINICAL_TECHNIQUE_DIRECTORY=${ENABLE_CLINICAL_TECHNIQUE_DIRECTORY:-false}
+      - ENABLE_CLINICAL_DIRECTORY_WEB_ENRICH=${ENABLE_CLINICAL_DIRECTORY_WEB_ENRICH:-false}
       - CYCLE_SKILL_EMAILS=${CYCLE_SKILL_EMAILS:-}
       - CYCLE_SKILL_COACH_EMAILS=${CYCLE_SKILL_COACH_EMAILS:-}
-      - ENABLE_NATE_SESSION_NEGOTIATION=${ENABLE_NATE_SESSION_NEGOTIATION:-true}
-      - ENABLE_SELF_MONITOR_AGENT=${ENABLE_SELF_MONITOR_AGENT:-true}
-      - ENABLE_SELF_MONITOR_COACH_ALERT=${ENABLE_SELF_MONITOR_COACH_ALERT:-true}
+      - ENABLE_NATE_SESSION_NEGOTIATION=${ENABLE_NATE_SESSION_NEGOTIATION:-false}
+      - ENABLE_SELF_MONITOR_AGENT=${ENABLE_SELF_MONITOR_AGENT:-false}
+      - ENABLE_SELF_MONITOR_COACH_ALERT=${ENABLE_SELF_MONITOR_COACH_ALERT:-false}
       - ENABLE_SELF_MONITOR_TOUCH=${ENABLE_SELF_MONITOR_TOUCH:-false}
+      # QUANTUM-CRYSTAL-ARCH — learning loop. Same phase-gate rule: default FALSE,
+      # enabled only by an explicit .env entry with a dated sign-off.
+      # Crystallizer loop runs on the BACKEND only (bridge holds a second instance
+      # that must stay dormant or harvest double-counts).
+      - ENABLE_CRYSTALLIZER_LOOP=${ENABLE_CRYSTALLIZER_LOOP:-false}
+      # Singleton guard: PG advisory lock so only one process ever owns the loop
+      # (covers the bridge instance and the clone VPS). Keep true.
+      - ENABLE_CRYSTALLIZER_LOOP_GUARD=${ENABLE_CRYSTALLIZER_LOOP_GUARD:-true}
+      - CRYSTALLIZER_COLD_START_LOOKBACK_DAYS=${CRYSTALLIZER_COLD_START_LOOKBACK_DAYS:-7}
+      - ENABLE_DOMAIN_AGENTS=${ENABLE_DOMAIN_AGENTS:-false}
       # QUANTUM-CRYSTAL-ARCH: must stay 1 — each uvicorn worker runs the full lifespan,
       # so >1 duplicates every background agent/auditor (duplicate audits, login collisions)
       - WEB_CONCURRENCY=1
@@ -438,9 +452,9 @@ services:
       - ENABLE_WORKSPACE_PROVIDER=${ENABLE_WORKSPACE_PROVIDER:-0}
       # QUANTUM-CRYSTAL-ARCH — CLI neuro-symbolic + Mac↔Cloud shared task bus (bridge CLI path)
       - ENABLE_ASK_NATE_SYMBOLIC=${ENABLE_ASK_NATE_SYMBOLIC:-true}
-      # QUANTUM-CRYSTAL-ARCH — Phase 5b on; 5c forward stays off until sign-off
-      - ENABLE_SYMBOLIC_EXTRACTION=${ENABLE_SYMBOLIC_EXTRACTION:-true}
-      - ENABLE_SYMBOLIC_VERIFIER=${ENABLE_SYMBOLIC_VERIFIER:-true}
+      # QUANTUM-CRYSTAL-ARCH — Phase 5a/5b defaults FALSE (mirror backend); .env enables
+      - ENABLE_SYMBOLIC_EXTRACTION=${ENABLE_SYMBOLIC_EXTRACTION:-false}
+      - ENABLE_SYMBOLIC_VERIFIER=${ENABLE_SYMBOLIC_VERIFIER:-false}
       - ENABLE_FORWARD_REASONING=${ENABLE_FORWARD_REASONING:-false}
       # QUANTUM-CRYSTAL-ARCH — D.14b: bridge therapy uses live_context + quarantine
       - ENABLE_SIX_QUOTIENT_LIVE_CONTEXT=${ENABLE_SIX_QUOTIENT_LIVE_CONTEXT:-false}
@@ -465,20 +479,27 @@ services:
       # QUANTUM-CRYSTAL-ARCH — Public Trial Funnel: dark-launch default false
       - PUBLIC_TRIAL_ENABLED=${PUBLIC_TRIAL_ENABLED:-false}
       - MAX_TRIAL_TURNS_PER_DAY=${MAX_TRIAL_TURNS_PER_DAY:-2000}
-      # QUANTUM-CRYSTAL-ARCH — Agentic Phase 0–4 + N.3 (mirror backend; TOUCH off)
-      - ENABLE_PROACTIVE_TOUCH_POLICY=${ENABLE_PROACTIVE_TOUCH_POLICY:-true}
-      - ENABLE_PROACTIVE_COMMITMENTS=${ENABLE_PROACTIVE_COMMITMENTS:-true}
-      - ENABLE_NATE_TOOL_EXECUTOR=${ENABLE_NATE_TOOL_EXECUTOR:-true}
-      - ENABLE_THERAPEUTIC_PLANS=${ENABLE_THERAPEUTIC_PLANS:-true}
-      - ENABLE_CYCLE_SKILL_PLANS=${ENABLE_CYCLE_SKILL_PLANS:-true}
-      - ENABLE_CLINICAL_TECHNIQUE_DIRECTORY=${ENABLE_CLINICAL_TECHNIQUE_DIRECTORY:-true}
-      - ENABLE_CLINICAL_DIRECTORY_WEB_ENRICH=${ENABLE_CLINICAL_DIRECTORY_WEB_ENRICH:-true}
+      # QUANTUM-CRYSTAL-ARCH — Agentic Phase 0–4 + N.3 (mirror backend).
+      # Defaults FALSE per roadmap phase gate; explicit .env entry is the enable record.
+      - ENABLE_PROACTIVE_TOUCH_POLICY=${ENABLE_PROACTIVE_TOUCH_POLICY:-false}
+      - ENABLE_PROACTIVE_COMMITMENTS=${ENABLE_PROACTIVE_COMMITMENTS:-false}
+      - ENABLE_NATE_TOOL_EXECUTOR=${ENABLE_NATE_TOOL_EXECUTOR:-false}
+      - ENABLE_THERAPEUTIC_PLANS=${ENABLE_THERAPEUTIC_PLANS:-false}
+      - ENABLE_CYCLE_SKILL_PLANS=${ENABLE_CYCLE_SKILL_PLANS:-false}
+      - ENABLE_CLINICAL_TECHNIQUE_DIRECTORY=${ENABLE_CLINICAL_TECHNIQUE_DIRECTORY:-false}
+      - ENABLE_CLINICAL_DIRECTORY_WEB_ENRICH=${ENABLE_CLINICAL_DIRECTORY_WEB_ENRICH:-false}
       - CYCLE_SKILL_EMAILS=${CYCLE_SKILL_EMAILS:-}
       - CYCLE_SKILL_COACH_EMAILS=${CYCLE_SKILL_COACH_EMAILS:-}
-      - ENABLE_NATE_SESSION_NEGOTIATION=${ENABLE_NATE_SESSION_NEGOTIATION:-true}
-      - ENABLE_SELF_MONITOR_AGENT=${ENABLE_SELF_MONITOR_AGENT:-true}
-      - ENABLE_SELF_MONITOR_COACH_ALERT=${ENABLE_SELF_MONITOR_COACH_ALERT:-true}
+      - ENABLE_NATE_SESSION_NEGOTIATION=${ENABLE_NATE_SESSION_NEGOTIATION:-false}
+      - ENABLE_SELF_MONITOR_AGENT=${ENABLE_SELF_MONITOR_AGENT:-false}
+      - ENABLE_SELF_MONITOR_COACH_ALERT=${ENABLE_SELF_MONITOR_COACH_ALERT:-false}
       - ENABLE_SELF_MONITOR_TOUCH=${ENABLE_SELF_MONITOR_TOUCH:-false}
+      # QUANTUM-CRYSTAL-ARCH — bridge_enrichment tiers. LN_ENRICHMENT is the master
+      # switch; LN_T2_ENRICH gates federated recall + HelixOrchestrator.think() on the
+      # chat path. Default FALSE per phase gate; enable via explicit .env entry.
+      - LN_ENRICHMENT=${LN_ENRICHMENT:-false}
+      - LN_T1_ENRICH=${LN_T1_ENRICH:-}
+      - LN_T2_ENRICH=${LN_T2_ENRICH:-}
       # QUANTUM-CRYSTAL-ARCH — L4 auto-draft + L5 observe (bridge soft-gate path)
       - ENABLE_LN_RULE_LOOP=${ENABLE_LN_RULE_LOOP:-true}
       - LN_RULE_LOOP_APPLY=${LN_RULE_LOOP_APPLY:-true}
