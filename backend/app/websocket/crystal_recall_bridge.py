@@ -451,6 +451,57 @@ async def recall_crystals_for_context(
         except Exception:
             pass
 
+        # QUANTUM-CRYSTAL-ARCH — boost user crystals by PGSD 5D proximity (ACCESS)
+        try:
+            import os as _os_pgsd
+            if (
+                not global_only
+                and _os_pgsd.environ.get("ENABLE_PGSD_ACCESS", "").lower()
+                in ("true", "1", "yes", "on")
+                and user_crystals
+            ):
+                async with db_pool.acquire() as _cprox:
+                    _pin = await _cprox.fetchrow(
+                        """
+                        SELECT d1_valence, d2_arousal, d3_relational,
+                               d4_temporal_depth, d5_integration
+                        FROM pgsd_snapshots
+                        WHERE user_id = $1 OR username = $1
+                        ORDER BY computed_at DESC LIMIT 1
+                        """,
+                        hardware_id,
+                    )
+                    if _pin and user_crystals:
+                        ids = [c["id"] for c in user_crystals if c.get("id")]
+                        stamps = await _cprox.fetch(
+                            """
+                            SELECT id, pgsd_d1, pgsd_d2, pgsd_d3, pgsd_d4, pgsd_d5
+                            FROM nate_intelligence_crystals
+                            WHERE id = ANY($1::uuid[])
+                            """,
+                            ids,
+                        )
+                        by_id = {r["id"]: r for r in stamps}
+
+                        def _dist(c, _by=by_id, _p=_pin):
+                            s = _by.get(c["id"])
+                            if not s or s.get("pgsd_d1") is None:
+                                return 999.0
+                            try:
+                                return (
+                                    (float(s["pgsd_d1"] or 0) - float(_p["d1_valence"] or 0)) ** 2
+                                    + (float(s["pgsd_d2"] or 0) - float(_p["d2_arousal"] or 0)) ** 2
+                                    + (float(s["pgsd_d3"] or 0) - float(_p["d3_relational"] or 0)) ** 2
+                                    + (float(s["pgsd_d4"] or 0) - float(_p["d4_temporal_depth"] or 0)) ** 2
+                                    + (float(s["pgsd_d5"] or 0) - float(_p["d5_integration"] or 0)) ** 2
+                                )
+                            except Exception:
+                                return 999.0
+
+                        user_crystals = sorted(list(user_crystals), key=_dist)
+        except Exception:
+            pass
+
         crystals = user_crystals + clinical_dna + list(global_crystals)
         if not crystals:
             return ""
