@@ -443,7 +443,17 @@ async def decide_ceo_inbox_items(
                 except Exception as e:
                     logger.warning("decide_ceo_inbox reply %s: %s", iid, e)
 
-            # No pending proposal (or reply failed) — clear Redis only
+            # No pending proposal (or reply failed) — clear Redis + apply linked payload
+            apply_result: Dict[str, Any] = {}
+            payload = it.get("payload") if isinstance(it.get("payload"), dict) else {}
+            if decision_u == "APPROVE" and db_pool and payload:
+                apply_result = await _apply_ceo_payload(
+                    db_pool, payload, approved_by=approver or "dashboard_ceo"
+                )
+            elif decision_u == "REJECT" and db_pool and payload:
+                apply_result = await _reject_ceo_payload(
+                    db_pool, payload, approved_by=approver or "dashboard_ceo"
+                )
             ack = ack_ceo_inbox(item_id=iid)
             results.append({
                 "item_id": iid,
@@ -451,6 +461,7 @@ async def decide_ceo_inbox_items(
                 "decision": decision_u,
                 "inbox_only": True,
                 "ack": ack,
+                "apply": apply_result,
             })
             processed += 1
     else:
@@ -514,6 +525,10 @@ async def handle_ceo_decision(
         apply_result = await _apply_ceo_payload(
             db_pool, payload, approved_by=approver or "email_ceo"
         )
+    elif decision == "REJECT" and db_pool:
+        apply_result = await _reject_ceo_payload(
+            db_pool, payload, approved_by=approver or "email_ceo"
+        )
 
     return {
         "status": "ok",
@@ -563,6 +578,34 @@ async def _apply_ceo_payload(
             )
         except Exception as e:
             out["six_quotient_self_dev_error"] = str(e)[:200]
+
+    # QUANTUM-CRYSTAL-ARCH — L4 rule loop close: CEO APPROVE → promote/rollback
+    if payload.get("kind") == "ln_rule_lifecycle":
+        try:
+            from app.services.ln_rule_loop import ceo_apply_ln_rule
+
+            out["ln_rule"] = await ceo_apply_ln_rule(
+                db_pool, payload, approved_by=approved_by, decision="APPROVE"
+            )
+        except Exception as e:
+            out["ln_rule_error"] = str(e)[:200]
+    return out
+
+
+async def _reject_ceo_payload(
+    db_pool, payload: Dict[str, Any], *, approved_by: str
+) -> Dict[str, Any]:
+    """CEO REJECT side-effects (L4 discard / rollback)."""
+    out: Dict[str, Any] = {}
+    if payload.get("kind") == "ln_rule_lifecycle":
+        try:
+            from app.services.ln_rule_loop import ceo_apply_ln_rule
+
+            out["ln_rule"] = await ceo_apply_ln_rule(
+                db_pool, payload, approved_by=approved_by, decision="REJECT"
+            )
+        except Exception as e:
+            out["ln_rule_error"] = str(e)[:200]
     return out
 
 

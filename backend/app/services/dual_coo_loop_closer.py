@@ -56,6 +56,7 @@ class DualCooLoopCloser:
             "prior_art": 0,
             "second_order": 0,
             "failover": 0,
+            "ln_rules": 0,
         }
 
     async def start(self):
@@ -96,6 +97,7 @@ class DualCooLoopCloser:
             out["compliance"] = await self._cycle_compliance_redteam()
         if self._cycles % 3 == 0:
             out["prior_art"] = await self._cycle_prior_art()
+            out["ln_rules"] = await self._cycle_ln_rule_loop()
         if self._cycles % 4 == 0:
             out["second_order"] = await self._cycle_second_order()
         if self._cycles % 3 == 0:
@@ -633,6 +635,81 @@ class DualCooLoopCloser:
                 )
             return {"status": "ok", "attributed": a, "total": t, "pct": pct}
         except Exception as e:
+            return {"status": "error", "error": str(e)[:200]}
+
+    # ── L4 soft-rule loop — surface sandbox awaiting promote to CEO ─────
+    async def _cycle_ln_rule_loop(self) -> Dict[str, Any]:
+        """Close L4: pending sandbox soft rules → Dual-COO YELLOW inbox.
+
+        Soft classes only. Never SI/violence. Idempotent via enqueue dedup.
+        # QUANTUM-CRYSTAL-ARCH
+        """
+        if not self.db_pool:
+            return {"status": "skipped"}
+        try:
+            from app.services.ln_rule_loop import (
+                dual_coo_notify_enabled,
+                is_soft_gate_class,
+                rule_loop_enabled,
+            )
+            from app.websocket.cli_dual_coo import RISK_YELLOW, enqueue_ceo
+
+            if not rule_loop_enabled() or not dual_coo_notify_enabled():
+                return {"status": "skipped", "reason": "flags_off"}
+            async with self.db_pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT rule_key, version, condition_json, notes, created_at
+                    FROM ln_rule_store
+                    WHERE status = 'sandbox'
+                    ORDER BY created_at ASC
+                    LIMIT 20
+                    """
+                )
+            n = 0
+            for row in rows:
+                cond = row["condition_json"] or {}
+                if isinstance(cond, str):
+                    try:
+                        cond = json.loads(cond)
+                    except Exception:
+                        cond = {}
+                gclass = str((cond or {}).get("gate_class") or "")
+                if gclass and not is_soft_gate_class(gclass):
+                    continue
+                key = str(row["rule_key"])
+                ver = int(row["version"])
+                enqueue_ceo(
+                    risk=RISK_YELLOW,
+                    title=f"L4 sandbox ready: {key} v{ver}",
+                    detail=(row["notes"] or f"sandbox soft-gate {gclass}")[:500],
+                    origin="cloud",
+                    task_id=f"ln_rule:{key}:v{ver}:promote_ready",
+                    payload={
+                        "kind": "ln_rule_lifecycle",
+                        "event": "promote_ready",
+                        "rule_key": key,
+                        "version": ver,
+                        "gate_class": gclass,
+                        "action": "promote",
+                        "ceo_summary": "Sandbox soft-gate rule awaiting promote",
+                        "why_it_matters": (
+                            "Dual-COO close-loop: draft→sandbox is done; "
+                            "APPROVE promotes, REJECT discards."
+                        ),
+                        "ask_of_ceo": "APPROVE to activate; REJECT to discard.",
+                    },
+                    dedup_ttl_s=6 * 3600,
+                )
+                n += 1
+            if n:
+                self._stats["ln_rules"] += n
+                await self._log_event(
+                    "ln_rule_sandbox", "YELLOW", f"surfaced={n}", {"count": n}
+                )
+            return {"status": "ok", "surfaced": n}
+        except Exception as e:
+            logger.warning("ln_rule cycle: %s", e)
             return {"status": "error", "error": str(e)[:200]}
 
     # ── 6) Peer Queen failover ──────────────────────────────────────────

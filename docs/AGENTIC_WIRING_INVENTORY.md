@@ -7,6 +7,10 @@
 
 ---
 
+**Executive verdict (updated 2026-07-26 — L4 credibility bars)**
+
+Credible L4 requires three artifacts (not Dual-COO wiring alone): (1) full audit cycle with **lifecycle** rollback (`lifecycle conf=` via `maybe_lifecycle_from_gate_confidence`, not harness `rollback_rule`); (2) shadow-vs-actual in `ln_rule_shadow_scores` (mig 288) + `shadow_accuracy_report`; (3) load-bearing `promotion_invariant_refusal` at promote (crisis/coach_routing/SI — tested). `run_l4_credibility_cycle` / `scripts/l4_credibility_evidence.py` produce `l4_credible` + licensed claim string only when all three hold. Prefer language **Tier 1 clinical competence / L4 soft-rule adaptive when bars met**; do not claim general AGI — NARROW breadth verdict untouched.
+
 ## Executive verdict (updated 2026-07-21 — Tier-1 flywheel D.14a infra / D.14b open)
 
 **D.14a infra shipped** (nightly+accel ON; preds+θ trends write). **D.14b certification NOT done** (Claude review REVISE CLAIMS). Prefer language **Tier 1 clinical competence**; do not treat “AGI-class” or κ@n=8 as certified. `WEEKLY_LIVE` stays false. θ = plumbing until transfer series + human-blinded gold. Journey: `docs/CLINICAL_AGI_ASI_JOURNEY.md`. ASI = research horizon only (no prod flag).
