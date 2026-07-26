@@ -16,7 +16,7 @@
 | κ vs locked gold | **PASS** aggregate≈0.699 (evidence_id=7, `grok-judge-v4`); safety_veto_ok; never edit gold |
 | Rater reliability ≥0.70 on ≥15 | **PASS** (intra_rater id=2, QWK≈0.732, meets_threshold) |
 | Qualifying nights ≥7 | **WAIVED** 2026-07-26 (`TIER1_SOAK_WAIVED=true`; was 4/7 — calendar fuse, not skill). Nightly measure remains on. |
-| `WEEKLY_LIVE` | Keep **false** until D.14b gate GREEN **and** human CEO/self-dev review |
+| `WEEKLY_LIVE` | **ON** GREEN 2026-07-26 (CEO/self-dev reviewed; Sunday 06–07 UTC live WS; AQ live_focus until next CEO APPROVE) |
 | Tier 2 Narrow AGI | Blocked until Tier 1 certified — then family/DOJO/ops batteries + privacy walls |
 
 ## Honesty rule (Tier 0)

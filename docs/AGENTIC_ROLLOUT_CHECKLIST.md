@@ -305,7 +305,7 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 | D.12 | Nightly measure / weekly act: holdout+trend mig 248, auto-judge, `SIX_QUOTIENT_NIGHTLY_MEASURE`, auditor 17→18 | [x] *(2026-07-21 — `ca46ee91`/`6b9e75bd` GREEN; mig 248; flag false; trend `[]`; 133/133)* |
 | D.13 | Acceleration: cycle Brier + PGSD channel + PMB-mined drafts, mig 249, `ENABLE_SIX_QUOTIENT_ACCELERATION`, auditor 18 | [x] *(2026-07-21 — `59eea5ff`/`6b9e75bd` GREEN; mig 249; `GET .../acceleration` ok enabled=false sparse; baseline 18; flags stay false until soak)* |
 | D.14a | Flywheel **infra** shipped: nightly+accel ON, cycle `sweep_and_predict`, gate script, journey doc | [x] `7356b3c0` — preds persist, θ trend rows write, judge smoke κ≈0.72 @ n=8 (**smoke only, not clinician calibration**); `WEEKLY_LIVE=false` |
-| D.14b | Tier-1 **certification** (clinical competence exit) | [ ] **OPEN (2026-07-26).** Floor met: pairs_locked=50, auth scored 50/50, degraded=10, κ≈0.699 (`grok-judge-v4` evidence_id=7), rater rel QWK≈0.732 pass. **Soak:** ≥7 nights **WAIVED** ops (`TIER1_SOAK_WAIVED`; was 4/7). `WEEKLY_LIVE` stays false until gate GREEN + CEO/self-dev human review. Narrow AGI (Tier 2) waits on this exit. See `docs/TIER1_HUMAN_GOLD_WORKSHEET.md`. |
+| D.14b | Tier-1 **certification** (clinical competence exit) | [x] **GREEN exit 2026-07-26.** Floor + κ≈0.699 + rater QWK≈0.732; soak **WAIVED** (`TIER1_SOAK_WAIVED`); CEO/self-dev reviewed; `SIX_QUOTIENT_WEEKLY_LIVE=true` on GREEN (Sunday live WS). Narrow AGI (Tier 2) next: cross-domain batteries + privacy walls. See `docs/TIER1_HUMAN_GOLD_WORKSHEET.md`. |
 
 > **Naming:** Prefer **Tier 1 clinical competence** over “clinical AGI-class” until D.14b certified.
 
