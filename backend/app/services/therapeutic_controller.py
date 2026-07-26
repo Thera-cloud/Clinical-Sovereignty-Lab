@@ -963,6 +963,25 @@ async def prepare_therapeutic_context(
             nevedal_snapshot={"c_emo": ec_current, "c_emo_trend": _emo_trend},
             profile=profile if isinstance(profile, dict) else None,
         )
+        # QUANTUM-CRYSTAL-ARCH — L3c: foresight calibration gates soft constraints
+        try:
+            from app.services.foresight_calibration_gate import (
+                filter_constraints_for_calibration,
+                foresight_calibration_ok,
+            )
+
+            _cal_ok = await foresight_calibration_ok(db_pool)
+            _before_n = len(_constraints or [])
+            _constraints = filter_constraints_for_calibration(
+                _constraints or [], calibration_ok=_cal_ok,
+            )
+            if _before_n and len(_constraints) < _before_n:
+                print(
+                    f">>> [THERAPEUTIC-CTRL] L3c foresight calibration "
+                    f"filtered {_before_n}->{len(_constraints)} constraints"
+                )
+        except Exception as _cal_exc:
+            logger.debug("therapeutic_controller: L3c calibration gate skipped: %s", _cal_exc)
         _fr_text = format_constraints_for_prompt(_constraints)
         if _fr_text:
             forward_reasoning_block = "\n" + _fr_text + "\n"

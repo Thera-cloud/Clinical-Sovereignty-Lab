@@ -83,6 +83,15 @@ _SYNC_DEEP_RECALL = (_os.getenv("BRIDGE_SYNC_DEEP_RECALL", "") or "").strip().lo
 _SYNC_DEEP_TIMEOUT_S = float(_os.getenv("BRIDGE_SYNC_DEEP_TIMEOUT_S", "1.8"))
 _VALIDATOR_FILTER_RECALL = (_os.getenv("BRIDGE_VALIDATOR_FILTER_RECALL", "") or "").strip().lower() in ("1", "true", "yes", "on")
 
+# QUANTUM-CRYSTAL-ARCH: L3a — outcome-weighted recall rank. Uses crystal_outcome_view
+# (C_emo attributed to prior recalls). Does NOT UPDATE confidence for clinical/defense
+# (RED stays CEO-apply only via crystal_outcome_apply). Default ON.
+_OUTCOME_RECALL_RANK = (_os.getenv("ENABLE_CRYSTAL_OUTCOME_RECALL_RANK", "true") or "").strip().lower() not in (
+    "0", "false", "no", "off",
+)
+_OUTCOME_RECALL_MIN_SAMPLE = int(_os.getenv("CRYSTAL_OUTCOME_RECALL_MIN_SAMPLE", "3"))
+_OUTCOME_RECALL_BLEND = float(_os.getenv("CRYSTAL_OUTCOME_RECALL_BLEND", "0.35"))
+
 # QUANTUM-CRYSTAL-ARCH: Commit 2 (crystal attribution) — inert-metadata flag,
 # default True (it only attaches an extra attribute to the returned string;
 # it changes no behavior for callers that don't read it).
@@ -502,6 +511,26 @@ async def recall_crystals_for_context(
         except Exception:
             pass
 
+        # QUANTUM-CRYSTAL-ARCH: L3a — outcome-weighted rank (C_emo attribution).
+        # Partition-preserving: personal / clinical-dna / global slots stay separate.
+        if _OUTCOME_RECALL_RANK and (user_crystals or clinical_dna or global_crystals):
+            try:
+                async with db_pool.acquire() as _oconn:
+                    if user_crystals:
+                        user_crystals = await _rerank_by_outcome(
+                            _oconn, list(user_crystals), len(user_crystals),
+                        )
+                    if clinical_dna:
+                        clinical_dna = await _rerank_by_outcome(
+                            _oconn, list(clinical_dna), len(clinical_dna),
+                        )
+                    if global_crystals:
+                        global_crystals = await _rerank_by_outcome(
+                            _oconn, list(global_crystals), len(global_crystals),
+                        )
+            except Exception as _ore:
+                logger.debug("crystal_recall_bridge: L3a outcome rank skipped: %s", _ore)
+
         crystals = user_crystals + clinical_dna + list(global_crystals)
         if not crystals:
             return ""
@@ -625,6 +654,54 @@ def _rerank_by_affect(crystals: list, affect_weight: float, limit: int) -> list:
         scored.append((blended, c))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [c for _, c in scored[:limit]]
+
+
+async def _rerank_by_outcome(conn, crystals: list, limit: int) -> list:
+    """L3a: re-rank by attributed C_emo outcomes (crystal_outcome_view).
+
+    Blends live confidence with avg_c_emo from prior outcome-linked recalls.
+    Clinical/defense crystals are eligible for *ranking* nudges only — this
+    path never UPDATEs nate_intelligence_crystals.confidence.
+    """
+    if not crystals or not _OUTCOME_RECALL_RANK or limit <= 0:
+        return list(crystals)[:limit] if limit else list(crystals)
+    try:
+        ids = [c["id"] for c in crystals if c.get("id") is not None]
+        if not ids:
+            return list(crystals)[:limit]
+        rows = await conn.fetch(
+            """
+            SELECT crystal_id,
+                   AVG(c_emo) FILTER (WHERE c_emo IS NOT NULL) AS avg_c_emo,
+                   COUNT(*) FILTER (WHERE c_emo IS NOT NULL) AS n
+            FROM crystal_outcome_view
+            WHERE crystal_id = ANY($1::int[])
+            GROUP BY crystal_id
+            HAVING COUNT(*) FILTER (WHERE c_emo IS NOT NULL) >= $2
+            """,
+            ids,
+            max(1, _OUTCOME_RECALL_MIN_SAMPLE),
+        )
+        by_id = {r["crystal_id"]: r for r in rows}
+        if not by_id:
+            return list(crystals)[:limit]
+        blend = max(0.0, min(1.0, _OUTCOME_RECALL_BLEND))
+        scored = []
+        for c in crystals:
+            conf = float(c["confidence"] if c.get("confidence") is not None else 0.0)
+            out = by_id.get(c["id"])
+            if out is not None and out["avg_c_emo"] is not None:
+                avg = float(out["avg_c_emo"])
+                # Map C_emo [0,1] into a rank score; blend with stored confidence.
+                blended = conf * (1.0 - blend) + avg * blend
+            else:
+                blended = conf
+            scored.append((blended, c))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [c for _, c in scored[:limit]]
+    except Exception as e:
+        logger.debug("crystal_recall_bridge: outcome rerank skipped: %s", e)
+        return list(crystals)[:limit]
 
 
 async def _lazy_fill_affect_metadata(conn, crystal_id_text_pairs: list) -> None:

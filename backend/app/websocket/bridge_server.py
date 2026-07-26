@@ -9049,10 +9049,50 @@ class AzureCortex:
         # QUANTUM-CRYSTAL-ARCH: Clinical runtime gate (CLIENT only, pre-inference)
         if _role == "CLIENT" and not user_text.startswith("[SEARCH SYNTHESIS]") and not user_text.startswith("[DOJO SIMULATION"):
             try:
+                # L3b — false-positive feedback against last soft gate fire
+                try:
+                    from app.services.clinical_gate_confidence import (
+                        looks_like_false_positive as _gate_fp,
+                        pop_last_class as _gate_pop,
+                        record_feedback as _gate_fb,
+                    )
+                    if _gate_fp(user_text):
+                        _prev_cls = _gate_pop(uid)
+                        if _prev_cls and db_pool:
+                            await _gate_fb(db_pool, _prev_cls, positive=False)
+                except Exception as _gfb_e:
+                    print(f">>> [GATE CONFIDENCE FB] {_gfb_e!r}")
+
                 from app.services.little_nate_clinical_runtime_gate import evaluate as _clin_gate_eval
                 _gate_result = _clin_gate_eval(uid, user_text)
                 if _gate_result:
+                    _fired_new = str(_gate_result.get("fired_new", "")).lower() == "true"
+                    # L3b — soft follow-ups may be suppressed when class confidence is low
+                    if not _fired_new and db_pool:
+                        try:
+                            from app.services.clinical_gate_confidence import (
+                                allow_soft_followup as _gate_allow,
+                            )
+                            if not await _gate_allow(db_pool, _gate_result["class"]):
+                                print(
+                                    f">>> [CLINICAL GATE] soft follow-up suppressed "
+                                    f"class={_gate_result['class']} (L3b confidence)"
+                                )
+                                _gate_result = None
+                        except Exception as _gsup_e:
+                            print(f">>> [GATE CONFIDENCE] {_gsup_e!r}")
+                if _gate_result:
                     print(f">>> [CLINICAL GATE] class={_gate_result['class']} fired_new={_gate_result['fired_new']} active={_gate_result['active_topics']} user={profile.get('name')}")
+                    try:
+                        from app.services.clinical_gate_confidence import (
+                            remember_fire as _gate_mem,
+                            record_fire as _gate_rec,
+                        )
+                        _gate_mem(uid, _gate_result["class"])
+                        if db_pool:
+                            await _gate_rec(db_pool, _gate_result["class"])
+                    except Exception:
+                        pass
                     await self._send(uid, _gate_result["response"], client_context=_ctx, turn_id=_turn_id)
                     return
             except Exception as _gate_e:
