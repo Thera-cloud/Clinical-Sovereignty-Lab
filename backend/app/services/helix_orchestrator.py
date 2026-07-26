@@ -290,12 +290,27 @@ class HelixOrchestrator:
                             """,
                             user_id,
                         )
+                        _wells_n = 0
+                        if _os_hx.environ.get("ENABLE_PGSD_FIELD", "").lower() in (
+                            "1", "true", "yes", "on",
+                        ):
+                            _wells_n = int(
+                                await _hc.fetchval(
+                                    """
+                                    SELECT COUNT(*) FROM pgsd_trauma_wells
+                                    WHERE user_id = $1
+                                    """,
+                                    user_id,
+                                )
+                                or 0
+                            )
                     if _pin:
                         result.pgsd_field_hint = (
                             f"[PGSD field pin] valence={_pin['d1_valence']!s} "
                             f"integration={_pin['d5_integration']!s} "
                             f"coherence={_pin['coherence']!s} "
                             f"fp={_pin.get('emotional_fingerprint') or 'n/a'}"
+                            f" wells={_wells_n}"
                         )
         except Exception:
             pass

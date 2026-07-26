@@ -36,10 +36,18 @@ def test_domains_five():
     assert set(_mod.TIER2_DOMAINS) == {"therapy", "family", "dojo", "voice", "ops"}
 
 
-def test_pack_skeleton_v1():
+def test_pack_skeleton_v2():
     sk = _mod.design_pack_skeleton()
-    assert sk["version"] == "tier2_pack_v1"
+    assert sk["version"] == "tier2_pack_v2"
+    assert sk["require_surface_hits"] is True
     assert sk["certification"] is False
+
+
+def test_require_surface_hits_env(monkeypatch):
+    monkeypatch.setenv("TIER2_REQUIRE_SURFACE_HITS", "false")
+    assert _mod._require_surface_hits() is False
+    monkeypatch.setenv("TIER2_REQUIRE_SURFACE_HITS", "true")
+    assert _mod._require_surface_hits() is True
 
 
 def test_filter_member_wall():

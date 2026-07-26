@@ -17,7 +17,8 @@
 | Rater reliability ≥0.70 on ≥15 | **PASS** (intra_rater id=2, QWK≈0.732, meets_threshold) |
 | Qualifying nights ≥7 | **WAIVED** 2026-07-26 (`TIER1_SOAK_WAIVED=true`; was 4/7 — calendar fuse, not skill). Nightly measure remains on. |
 | `WEEKLY_LIVE` | **ON** GREEN 2026-07-26 (CEO/self-dev reviewed; Sunday 06–07 UTC live WS; AQ live_focus until next CEO APPROVE) |
-| Tier 2 Narrow AGI | **SUBSTRATE CERTIFIED (2026-07-26)** — gate GREEN: pack `tier2-20260726T143926Z-9121f1e0` 5/5, FIELD wells=63, Patent 12, coach Flutter PGSD `v=2026.07.26.1041`. Not open-domain AGI. |
+| Tier 2 Narrow AGI | **SUBSTRATE CERTIFIED (2026-07-26)** + harden path (v2 surface_hits, multi-family, Queen FIELD CLI, helix hint). Not open-domain AGI. |
+| Tier 3 AGI | **OPEN / Track F kickoff (2026-07-26)** — novel problems + gated self-improve; sovereign train + formal verify. No unsupervised GREEN weight writes. |
 
 ## Honesty rule (Tier 0)
 
@@ -36,7 +37,7 @@
 | 0 | Clinical ANI | Neuro-symbolic + tools + battery scaffolding | Phases 0–5d + Phase 6 / Track D — **deployed / in soak** (not “done” until crisis SLA re-proven in *current* config) |
 | 1 | Clinical competence (was: “AGI-class”) | Transfer on held-out bank; live cues move θ; free-label calibration | D.14a infra shipped; **D.14b certification open**; then `SIX_QUOTIENT_WEEKLY_LIVE` |
 | 2 | Narrow AGI | Same mind across therapy / family / DOJO / truth-bound ops | **Substrate certified 2026-07-26** (batteries + privacy + FIELD) |
-| 3 | AGI | Open novel problems + gated self-improve | Sovereign train + formal verify |
+| 3 | AGI | Open novel problems + gated self-improve | **Track F OPEN** — sovereign train + formal verify (containment) |
 | 4 | ASI | Superhuman recursive improve | Containment + society-scale eval — **not a ship date** |
 
 ## Tier-1 exit criteria (clinical competence)

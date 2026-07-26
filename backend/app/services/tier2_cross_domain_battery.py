@@ -59,14 +59,21 @@ def privacy_wall_spec() -> Dict[str, Any]:
     }
 
 
+def _require_surface_hits() -> bool:
+    """Default strict: each domain needs ≥1 matching trigger_source hit."""
+    raw = os.environ.get("TIER2_REQUIRE_SURFACE_HITS", "true").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def design_pack_skeleton() -> Dict[str, Any]:
     return {
-        "version": "tier2_pack_v1",
+        "version": "tier2_pack_v2",
         "domains": list(TIER2_DOMAINS),
         "privacy": privacy_wall_spec(),
         "eval_table": "tier2_domain_eval_runs",
+        "require_surface_hits": _require_surface_hits(),
         "certification": False,
-        "notes": "Scored packs required before Narrow AGI exit language.",
+        "notes": "v2: surface_hits≥1 per domain (set TIER2_REQUIRE_SURFACE_HITS=false to relax).",
     }
 
 
@@ -200,8 +207,13 @@ async def _domain_scores(
     )
     score = round(min(1.0, raw), 4)
     access_on = _env_true("PGSD_ENABLED") and _env_true("ENABLE_PGSD_ACCESS")
-    # Pass: privacy + ACCESS + evidence (surface hit preferred; agreement covers sparse domains)
-    has_signal = surface_hits >= 1 or agreement is not None or discernment is not None
+    # QUANTUM-CRYSTAL-ARCH — v2: require real surface hits (no agreement-only pass)
+    strict = _require_surface_hits()
+    has_signal = (
+        surface_hits >= 1
+        if strict
+        else (surface_hits >= 1 or agreement is not None or discernment is not None)
+    )
     domain_pass = bool(
         privacy["privacy_ok"]
         and access_on
@@ -220,6 +232,7 @@ async def _domain_scores(
         "privacy": privacy,
         "access_on": access_on,
         "field_on": _env_true("PGSD_ENABLED") and _env_true("ENABLE_PGSD_FIELD"),
+        "require_surface_hits": strict,
         "pass": domain_pass,
     }
 
@@ -303,7 +316,48 @@ async def run_pack(
         "privacy_ok": all_privacy,
         "certify_candidate": certify_ready,
         "field_on": _env_true("ENABLE_PGSD_FIELD"),
-        "version": "tier2_pack_v1",
+        "require_surface_hits": _require_surface_hits(),
+        "version": "tier2_pack_v2",
+    }
+
+
+async def run_multi_family_pack(
+    db_pool: Any,
+    subject_ids: List[str],
+    *,
+    environment: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Run packs for ≥2 distinct subjects. Meta-certify when ≥2 subjects are
+    certify_candidate (cross-family evidence).
+    """
+    subjects = [s.strip() for s in (subject_ids or []) if (s or "").strip()]
+    if len(subjects) < 2:
+        return {"ok": False, "error": "need ≥2 subject_ids for multi-family pack"}
+    meta_id = (
+        f"tier2-multi-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-"
+        f"{uuid.uuid4().hex[:8]}"
+    )
+    packs: List[Dict[str, Any]] = []
+    for sid in subjects:
+        out = await run_pack(
+            db_pool,
+            sid,
+            environment=environment,
+            pack_id=f"{meta_id}-{sid[:24]}",
+        )
+        packs.append(out)
+    ok_packs = [p for p in packs if p.get("ok") and p.get("certify_candidate")]
+    distinct_hw = {p.get("subject_hardware_id") for p in ok_packs if p.get("subject_hardware_id")}
+    return {
+        "ok": True,
+        "meta_pack_id": meta_id,
+        "subjects_requested": subjects,
+        "packs": packs,
+        "certify_candidates": len(ok_packs),
+        "distinct_subjects_certified": len(distinct_hw),
+        "multi_family_certify": len(distinct_hw) >= 2,
+        "version": "tier2_pack_v2_multi",
     }
 
 

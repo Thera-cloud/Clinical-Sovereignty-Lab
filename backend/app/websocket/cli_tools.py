@@ -52,6 +52,8 @@ try:
             "query_pgsd_snapshot": 10,
             "query_pgsd_discernment": 10,
             "query_pgsd_cross_domain": 10,
+            "query_pgsd_wells": 10,
+            "query_pgsd_ground_state": 10,
             "build_start": 30,
             "build_test": 90,
             "build_promote": 10,
@@ -1280,6 +1282,36 @@ _DATA_TOOL_DEFS = [
             },
         },
     },
+    # QUANTUM-CRYSTAL-ARCH — PGSD FIELD Queen reads
+    {
+        "type": "function",
+        "function": {
+            "name": "query_pgsd_wells",
+            "description": "Read PGSD trauma wells (FIELD). ADMIN only. Read-only. Requires ENABLE_PGSD_FIELD.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "client_id": {"type": "string", "description": "Client hardware_id or username"},
+                    "limit": {"type": "integer", "description": "Max wells (default 20, max 40)"},
+                },
+                "required": ["client_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_pgsd_ground_state",
+            "description": "Read latest PGSD field ground state (FIELD). ADMIN only. Read-only. Requires ENABLE_PGSD_FIELD.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "client_id": {"type": "string", "description": "Client hardware_id or username"},
+                },
+                "required": ["client_id"],
+            },
+        },
+    },
 ]
 
 _SENSITIVE_PROFILE_KEYS = frozenset({
@@ -1663,6 +1695,108 @@ async def _query_pgsd_discernment_async(args: Dict[str, Any], db_pool) -> Dict[s
         return {"status": "error", "error": f"PGSD discernment query failed: {e}"}
 
 
+async def _query_pgsd_wells_async(args: Dict[str, Any], db_pool) -> Dict[str, Any]:
+    """QUANTUM-CRYSTAL-ARCH — Queen read: trauma wells (FIELD)."""
+    client_id = (args.get("client_id") or "").strip()
+    if not client_id:
+        return {"status": "error", "error": "client_id is required"}
+    if os.environ.get("ENABLE_PGSD_FIELD", "").strip().lower() not in (
+        "1", "true", "yes", "on",
+    ):
+        return {"status": "error", "error": "ENABLE_PGSD_FIELD is off"}
+    try:
+        from app.services.pgsd_engine import PGSDEngine
+        from app.services.pgsd_trauma_wells import TraumaWellEngine
+
+        eng = PGSDEngine(db_pool=db_pool)
+        resolved = await eng.resolve_pgsd_subject(client_id)
+        hw = (resolved or {}).get("hardware_id") or client_id
+        wells_eng = TraumaWellEngine(db_pool=db_pool)
+        await wells_eng.refresh_wells(hw)
+        limit = min(int(args.get("limit") or 20), 40)
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, temporal_class, depth, source_tag, collapsed,
+                       d1_valence, d2_arousal, d3_relational,
+                       d4_temporal, d5_integration, created_at
+                FROM pgsd_trauma_wells
+                WHERE user_id = $1
+                ORDER BY created_at DESC
+                LIMIT $2
+                """,
+                hw,
+                limit,
+            )
+        wells = []
+        for r in rows:
+            d = dict(r)
+            if d.get("created_at"):
+                d["created_at"] = d["created_at"].isoformat()
+            wells.append(d)
+        return {
+            "status": "ok",
+            "result": {"client_id": hw, "wells": wells, "count": len(wells)},
+            "row_count": len(wells),
+            "query_scope": {"client_id": client_id},
+        }
+    except Exception as e:
+        logger.warning("query_pgsd_wells failed: %s", e)
+        return {"status": "error", "error": f"PGSD wells query failed: {e}"}
+
+
+async def _query_pgsd_ground_state_async(args: Dict[str, Any], db_pool) -> Dict[str, Any]:
+    """QUANTUM-CRYSTAL-ARCH — Queen read: ground state (FIELD)."""
+    client_id = (args.get("client_id") or "").strip()
+    if not client_id:
+        return {"status": "error", "error": "client_id is required"}
+    if os.environ.get("ENABLE_PGSD_FIELD", "").strip().lower() not in (
+        "1", "true", "yes", "on",
+    ):
+        return {"status": "error", "error": "ENABLE_PGSD_FIELD is off"}
+    try:
+        from app.services.pgsd_engine import PGSDEngine
+        from app.services.pgsd_field_engine import PGSDFieldEngine
+
+        eng = PGSDEngine(db_pool=db_pool)
+        resolved = await eng.resolve_pgsd_subject(client_id)
+        hw = (resolved or {}).get("hardware_id") or client_id
+        field = PGSDFieldEngine(db_pool=db_pool)
+        await field.compute_spectrum([hw])
+        ground = None
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT ground_energy, ground_coords, prior_energy,
+                       relocation, computed_at
+                FROM pgsd_ground_states
+                WHERE user_id = $1
+                ORDER BY computed_at DESC
+                LIMIT 1
+                """,
+                hw,
+            )
+            if row:
+                ground = dict(row)
+                if ground.get("computed_at"):
+                    ground["computed_at"] = ground["computed_at"].isoformat()
+                coords = ground.get("ground_coords")
+                if isinstance(coords, str):
+                    try:
+                        ground["ground_coords"] = json.loads(coords)
+                    except Exception:
+                        pass
+        return {
+            "status": "ok",
+            "result": {"client_id": hw, "ground": ground},
+            "row_count": 1 if ground else 0,
+            "query_scope": {"client_id": client_id},
+        }
+    except Exception as e:
+        logger.warning("query_pgsd_ground_state failed: %s", e)
+        return {"status": "error", "error": f"PGSD ground_state query failed: {e}"}
+
+
 async def _query_pgsd_cross_domain_async(args: Dict[str, Any], db_pool) -> Dict[str, Any]:
     """QUANTUM-CRYSTAL-ARCH — Queen read: cross-domain agreement."""
     client_id = (args.get("client_id") or "").strip()
@@ -1727,6 +1861,8 @@ _DATA_TOOL_DISPATCH = {
     "query_pgsd_snapshot": _query_pgsd_snapshot_async,
     "query_pgsd_discernment": _query_pgsd_discernment_async,
     "query_pgsd_cross_domain": _query_pgsd_cross_domain_async,
+    "query_pgsd_wells": _query_pgsd_wells_async,
+    "query_pgsd_ground_state": _query_pgsd_ground_state_async,
 }
 
 GROK_TOOL_DEFINITIONS = list(_READ_TOOL_DEFS)
@@ -3285,6 +3421,8 @@ _DATA_TOOLS = {
     "query_pgsd_snapshot",
     "query_pgsd_discernment",
     "query_pgsd_cross_domain",
+    "query_pgsd_wells",
+    "query_pgsd_ground_state",
 }
 
 _READ_TOOL_DISPATCH = {

@@ -32,9 +32,21 @@ layer on top — see **Flag order** below.
 | 3 | `ENABLE_PGSD_ACCESS` | Chat correlation, discernment scores, briefing, crisis regions |
 | 4 | `ENABLE_PGSD_FIELD` | Trauma wells, TFIM spectrum, ground state, Hamiltonian track |
 
-Optional: `ENABLE_PGSD_BACKFILL`, `ENABLE_PGSD_HELIX_HINT` (see plan doc).
+Optional: `ENABLE_PGSD_BACKFILL`, `ENABLE_PGSD_HELIX_HINT` (helix clinical/TENSION pin string).
 
 Never enable `ENABLE_PGSD_FIELD` before `ENABLE_PGSD_ACCESS` in production smoke.
+
+### Queen CLI tools (Dual-COO / CLI-Cloud ADMIN read-only)
+
+| Tool | Needs | Purpose |
+|------|-------|---------|
+| `query_pgsd_snapshot` | PGSD tables | Latest GPS snapshots |
+| `query_pgsd_discernment` | ACCESS | Past/present/future scores |
+| `query_pgsd_cross_domain` | ACCESS | Same-mind surface agreement |
+| `query_pgsd_wells` | FIELD | Trauma wells |
+| `query_pgsd_ground_state` | FIELD | Latest ground state |
+
+Write/mutate tools stay out of Queens. Coach REST: `/api/coach/pgsd/*`.
 
 ## 1. Turn it on
 
@@ -47,6 +59,8 @@ export PGSD_ENABLED=true
 export ENABLE_PGSD_HEARTBEAT=true   # optional
 export ENABLE_PGSD_ACCESS=true      # Phase B/B2
 export ENABLE_PGSD_FIELD=true       # Phase C/D — after ACCESS validated
+export ENABLE_PGSD_HELIX_HINT=true  # optional R7 — clinical/TENSION pin into helix
+export TIER2_REQUIRE_SURFACE_HITS=true  # Tier-2 pack v2 harden
 ```
 
 Bridge log `[*] PGSD router initialized (PGSD_ENABLED)` confirms the router is live.

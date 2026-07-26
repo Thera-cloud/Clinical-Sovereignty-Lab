@@ -37,6 +37,11 @@ async def pgsd_flags(request: Request):
         "ENABLE_PGSD_ACCESS": _env_true("ENABLE_PGSD_ACCESS"),
         "ENABLE_PGSD_FIELD": _env_true("ENABLE_PGSD_FIELD"),
         "ENABLE_PGSD_HEARTBEAT": _env_true("ENABLE_PGSD_HEARTBEAT"),
+        "ENABLE_PGSD_HELIX_HINT": _env_true("ENABLE_PGSD_HELIX_HINT"),
+        "TIER2_REQUIRE_SURFACE_HITS": os.environ.get(
+            "TIER2_REQUIRE_SURFACE_HITS", "true"
+        ).strip().lower()
+        not in ("0", "false", "no", "off"),
     }
 
 

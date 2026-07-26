@@ -327,8 +327,21 @@ Gold: `docs/TIER1_HUMAN_GOLD_WORKSHEET.md` · Claude packet: `docs/CLINICAL_AGI_
 | E.7 | `ENABLE_PGSD_FIELD` + Patent 12 activation (wells/spectrum/ground) | [x] 2026-07-26 GREEN: FIELD=true; wells=63 ground_states=15; Patent 12 + `backend/assets/patent/` mirror |
 | E.8 | Coach Flutter PGSD UI (`CoachPgsdScreen` + `/api/coach/pgsd/*`) | [x] code + Flutter web deploy `v=2026.07.26.1041` |
 | E.9 | Tier 2 certify gate GREEN (`clinical_tier2_narrow_agi_gate_check.py`) | [x] 2026-07-26 GREEN — pack `tier2-20260726T143926Z-9121f1e0` 5/5 privacy_ok |
+| E.10 | Harden v2 — `surface_hits≥1`, multi-family pack, coach E2E smoke, Queen FIELD CLI, helix hint | [x] code 2026-07-26; GREEN ops: re-run `--multi` pack + set `ENABLE_PGSD_HELIX_HINT` |
 
-PGSD wiring: `docs/PGSD_WIRING.md` · Queen tools: `query_pgsd_snapshot`, `query_pgsd_discernment`, `query_pgsd_cross_domain` · Patent 12: `patent/PATENT_PROVISIONAL_12_QUANTUM_EMOTIONAL_FIELD.md`
+PGSD wiring: `docs/PGSD_WIRING.md` · Queen tools: `query_pgsd_snapshot`, `query_pgsd_discernment`, `query_pgsd_cross_domain`, `query_pgsd_wells`, `query_pgsd_ground_state` · Patent 12: **FILING-READY** `patent/PATENT_PROVISIONAL_12_QUANTUM_EMOTIONAL_FIELD.md`
+
+---
+
+## Track F — Tier 3 AGI kickoff (open novel problems + gated self-improve)
+
+| # | Item | Status |
+|---|------|--------|
+| F.1 | Containment contract — no unsupervised GREEN weight/prompt writes; CEO gate on self-dev RED | [ ] docs + kill-switch review |
+| F.2 | Formal verify harness — held-out novel problem bank + external scorer (not self-κ) | [ ] design |
+| F.3 | Sovereign train offline path (ORANGE/Home GPU) with promotion gate to prod | [ ] design |
+| F.4 | Runtime monitors + sandbox detonation for any self-modify experiment | [ ] ops |
+| F.5 | Explicit non-claim: Tier 3 ≠ public AGI marketing until F.1–F.4 green | [x] journey 2026-07-26 |
 
 ---
 

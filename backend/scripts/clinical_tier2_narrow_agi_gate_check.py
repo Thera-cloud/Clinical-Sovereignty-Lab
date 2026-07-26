@@ -1,23 +1,35 @@
 #!/usr/bin/env python3
 """
-Tier 2 Narrow AGI exit gate (read-only).  # QUANTUM-CRYSTAL-ARCH
+Tier 2 Narrow AGI exit / harden gate (read-only).  # QUANTUM-CRYSTAL-ARCH
 
-Checks: scored multi-domain pack, privacy_ok, ACCESS+FIELD flags,
-LIVE_CONTEXT surface gate in code, Patent 12 draft present.
-Does not lower Tier-1 locks.
+Checks: scored multi-domain pack, privacy_ok, surface_hits≥1 (v2),
+multi-family evidence, ACCESS+FIELD, Queen FIELD CLI tools, helix hint flag,
+LIVE_CONTEXT gate, Patent 12 filing-ready draft, coach Flutter PGSD.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 
 def _env_true(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _scores_dict(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except Exception:
+            return {}
+    return {}
 
 
 async def _check_db(dsn: str) -> List[str]:
@@ -46,8 +58,57 @@ async def _check_db(dsn: str) -> List[str]:
                     f"PASS: scored pack {pack['pack_id']} "
                     f"{pack['scored']}/{pack['total']} privacy_ok"
                 )
+                # v2 surface-hit harden (default on)
+                _strict = os.environ.get(
+                    "TIER2_REQUIRE_SURFACE_HITS", "true"
+                ).strip().lower() not in ("0", "false", "no", "off")
+                if _strict:
+                    rows = await conn.fetch(
+                        """
+                        SELECT domain, scores_json
+                        FROM tier2_domain_eval_runs
+                        WHERE pack_id = $1 AND status = 'scored'
+                        """,
+                        pack["pack_id"],
+                    )
+                    weak = []
+                    for r in rows:
+                        sc = _scores_dict(r["scores_json"])
+                        if int(sc.get("surface_hits") or 0) < 1:
+                            weak.append(r["domain"])
+                    if weak:
+                        lines.append(
+                            f"FAIL: pack surface_hits<1 for domains: {','.join(weak)}"
+                        )
+                    else:
+                        lines.append("PASS: pack surface_hits≥1 all scored domains")
+                else:
+                    lines.append("WARN: TIER2_REQUIRE_SURFACE_HITS off — surface check skipped")
             else:
                 lines.append("FAIL: no fully scored privacy-ok 5-domain pack in 30d")
+
+            # Multi-family: ≥2 distinct subjects with certify-grade packs
+            multi = await conn.fetch(
+                """
+                SELECT DISTINCT notes
+                FROM tier2_domain_eval_runs
+                WHERE created_at > NOW() - INTERVAL '30 days'
+                  AND status = 'scored'
+                  AND notes LIKE 'subject=%'
+                """
+            )
+            subjects = set()
+            for r in multi:
+                note = r["notes"] or ""
+                if note.startswith("subject="):
+                    subjects.add(note.split("subject=", 1)[1].split()[0])
+            if len(subjects) >= 2:
+                lines.append(f"PASS: multi-family subjects≥2 ({len(subjects)})")
+            else:
+                lines.append(
+                    "FAIL: multi-family evidence needs ≥2 distinct subjects "
+                    f"(have {len(subjects)}) — run --multi pack"
+                )
 
             wells = await conn.fetchval("SELECT COUNT(*) FROM pgsd_trauma_wells")
             ground = await conn.fetchval("SELECT COUNT(*) FROM pgsd_ground_states")
@@ -79,8 +140,8 @@ def _check_code() -> List[str]:
     lines = []
     here = Path(__file__).resolve()
     roots = [
-        here.parents[2],  # repo (local backend/scripts/…)
-        here.parents[1],  # /app in container
+        here.parents[2],
+        here.parents[1],
         Path("/opt/clinical-sovereignty-lab"),
         Path("/app"),
     ]
@@ -98,14 +159,18 @@ def _check_code() -> List[str]:
         [r / "patent/PATENT_PROVISIONAL_12_QUANTUM_EMOTIONAL_FIELD.md" for r in roots]
         + [
             Path("/app/assets/patent/PATENT_PROVISIONAL_12_QUANTUM_EMOTIONAL_FIELD.md"),
-            Path("/opt/clinical-sovereignty-lab/backend/assets/patent/"
-                 "PATENT_PROVISIONAL_12_QUANTUM_EMOTIONAL_FIELD.md"),
+            Path(
+                "/opt/clinical-sovereignty-lab/backend/assets/patent/"
+                "PATENT_PROVISIONAL_12_QUANTUM_EMOTIONAL_FIELD.md"
+            ),
         ]
     )
-    # Canonical legal copy remains under repo patent/; assets/patent is the
-    # container-visible mirror for GREEN gate (assets bind-mount).
     if patent:
-        lines.append("PASS: Patent 12 draft present")
+        ptxt = patent.read_text(encoding="utf-8")
+        if "FILING-READY" in ptxt or "FILING READY" in ptxt:
+            lines.append("PASS: Patent 12 FILING-READY draft present")
+        else:
+            lines.append("PASS: Patent 12 draft present")
     else:
         lines.append("FAIL: Patent 12 missing")
 
@@ -117,10 +182,34 @@ def _check_code() -> List[str]:
     else:
         lines.append("FAIL: coach Flutter PGSD screen missing")
 
+    cli = _first_existing(
+        [r / "backend/app/websocket/cli_tools.py" for r in roots]
+        + [Path("/app/app/websocket/cli_tools.py")]
+    )
+    cli_txt = cli.read_text(encoding="utf-8") if cli else ""
+    if "query_pgsd_wells" in cli_txt and "query_pgsd_ground_state" in cli_txt:
+        lines.append("PASS: Queen FIELD CLI tools present")
+    else:
+        lines.append("FAIL: Queen FIELD CLI tools missing")
+
     if _env_true("PGSD_ENABLED") and _env_true("ENABLE_PGSD_ACCESS"):
         lines.append("PASS: PGSD ACCESS ladder env")
     else:
         lines.append("FAIL: PGSD_ENABLED/ACCESS not both true")
+
+    if _env_true("ENABLE_PGSD_HELIX_HINT"):
+        lines.append("PASS: ENABLE_PGSD_HELIX_HINT on")
+    else:
+        lines.append("FAIL: ENABLE_PGSD_HELIX_HINT is false")
+
+    smoke = _first_existing(
+        [r / "backend/scripts/tier2_coach_pgsd_e2e_smoke.py" for r in roots]
+        + [Path("/app/scripts/tier2_coach_pgsd_e2e_smoke.py")]
+    )
+    if smoke:
+        lines.append("PASS: coach PGSD E2E smoke script present")
+    else:
+        lines.append("FAIL: coach PGSD E2E smoke script missing")
     return lines
 
 
@@ -138,7 +227,7 @@ async def main() -> int:
     if fails:
         print(f"GATE: RED ({len(fails)} fail)")
         return 1
-    print("GATE: GREEN — Tier 2 Narrow AGI exit criteria met (substrate certified)")
+    print("GATE: GREEN — Tier 2 harden + Queen FIELD + helix hint criteria met")
     return 0
 
 
