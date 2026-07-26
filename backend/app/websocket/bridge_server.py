@@ -9081,6 +9081,14 @@ class AzureCortex:
                                 _gate_result = None
                         except Exception as _gsup_e:
                             print(f">>> [GATE CONFIDENCE] {_gsup_e!r}")
+                # QUANTUM-CRYSTAL-ARCH: L4a — soft rule-loop bind (never SI/violence)
+                if _gate_result and db_pool:
+                    try:
+                        from app.services.ln_rule_loop import apply_soft_gate_rules as _l4_apply
+                        _gate_result = await _l4_apply(db_pool, _gate_result)
+                    except Exception as _l4_e:
+                        print(f">>> [LN RULE LOOP] {_l4_e!r}")
+
                 if _gate_result:
                     print(f">>> [CLINICAL GATE] class={_gate_result['class']} fired_new={_gate_result['fired_new']} active={_gate_result['active_topics']} user={profile.get('name')}")
                     try:

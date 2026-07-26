@@ -1,10 +1,14 @@
 """
-L4 scaffold — draft → sandbox → promote → rollback for versioned rules.
+L4 — draft → sandbox → promote → rollback for versioned soft-gate rules.
 
-Disabled by default (ENABLE_LN_RULE_LOOP=false). Live chat does not read
-active rules until L3a is proven in prod and this flag is explicitly enabled.
+Soft clinical runtime-gate classes only. SI / violence / crisis NEVER match.
 
-# QUANTUM-CRYSTAL-ARCH — L4 self-adaptive rule loop (scaffold)
+Flags:
+  ENABLE_LN_RULE_LOOP   — master (default false until soak; set true to bind)
+  LN_RULE_LOOP_APPLY    — when true, *active* rules may change soft-gate behavior;
+                          sandbox rules always shadow-log only
+
+# QUANTUM-CRYSTAL-ARCH — L4 self-adaptive rule loop
 """
 
 from __future__ import annotations
@@ -16,14 +20,96 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("ln_rule_loop")
 
+# Soft runtime-gate classes only (see little_nate_clinical_runtime_gate.ALL_CLASSES).
+SOFT_GATE_CLASSES = frozenset(
+    {
+        "pharma_interaction",
+        "sleep_aid",
+        "diagnosis_request",
+        "clinical_instrument",
+        "credential_bypass",
+    }
+)
+
+_ALLOWED_ACTIONS = frozenset({"suppress_soft_followup", "noop"})
+
+_PROMOTE_MIN_N = int(os.getenv("LN_RULE_PROMOTE_MIN_N", "5"))
+_PROMOTE_FLOOR = float(os.getenv("LN_RULE_PROMOTE_CONFIDENCE", "0.55"))
+_ROLLBACK_FLOOR = float(os.getenv("LN_RULE_ROLLBACK_CONFIDENCE", "0.25"))
+
 
 def rule_loop_enabled() -> bool:
-    return os.getenv("ENABLE_LN_RULE_LOOP", "false").strip().lower() in (
+    # Default on after L4a bind; set ENABLE_LN_RULE_LOOP=false to disable.
+    return os.getenv("ENABLE_LN_RULE_LOOP", "true").strip().lower() in (
         "1", "true", "yes", "on",
     )
 
 
+def rule_loop_apply_enabled() -> bool:
+    """Live mutation of soft-gate follow-ups (active rules only)."""
+    return rule_loop_enabled() and os.getenv("LN_RULE_LOOP_APPLY", "true").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _parse_json(val: Any) -> Dict[str, Any]:
+    if isinstance(val, dict):
+        return val
+    if isinstance(val, str):
+        try:
+            out = json.loads(val)
+            return out if isinstance(out, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def is_soft_gate_class(gate_class: str) -> bool:
+    return bool(gate_class) and gate_class in SOFT_GATE_CLASSES
+
+
+def condition_matches(
+    condition: Dict[str, Any],
+    *,
+    gate_class: str,
+    fired_new: bool,
+    confidence: float,
+) -> bool:
+    """Deterministic soft-gate condition match. Hard classes always False."""
+    if not is_soft_gate_class(gate_class):
+        return False
+    if not condition:
+        return False
+    want = condition.get("gate_class")
+    if want and str(want) != gate_class:
+        return False
+    if "fired_new" in condition and bool(condition["fired_new"]) != bool(fired_new):
+        return False
+    if "max_confidence" in condition:
+        try:
+            if confidence > float(condition["max_confidence"]):
+                return False
+        except (TypeError, ValueError):
+            return False
+    if "min_confidence" in condition:
+        try:
+            if confidence < float(condition["min_confidence"]):
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
 async def list_active_rules(db_pool: Any) -> List[Dict[str, Any]]:
+    return await _list_rules(db_pool, statuses=("active",))
+
+
+async def list_eval_rules(db_pool: Any) -> List[Dict[str, Any]]:
+    """Active + sandbox (sandbox is shadow-only at apply time)."""
+    return await _list_rules(db_pool, statuses=("active", "sandbox"))
+
+
+async def _list_rules(db_pool: Any, *, statuses: tuple) -> List[Dict[str, Any]]:
     if not rule_loop_enabled() or not db_pool:
         return []
     try:
@@ -33,31 +119,56 @@ async def list_active_rules(db_pool: Any) -> List[Dict[str, Any]]:
                 SELECT DISTINCT ON (rule_key)
                     id, rule_key, version, status, condition_json, action_json
                 FROM ln_rule_store
-                WHERE status = 'active'
+                WHERE status = ANY($1::text[])
                 ORDER BY rule_key, version DESC
-                """
+                """,
+                list(statuses),
             )
         out = []
         for r in rows:
-            cond = r["condition_json"]
-            act = r["action_json"]
-            if isinstance(cond, str):
-                cond = json.loads(cond)
-            if isinstance(act, str):
-                act = json.loads(act)
+            cond = _parse_json(r["condition_json"])
+            act = _parse_json(r["action_json"])
+            gclass = str(cond.get("gate_class") or "")
+            if gclass and not is_soft_gate_class(gclass):
+                continue  # never surface hard-domain rules
             out.append(
                 {
                     "id": r["id"],
                     "rule_key": r["rule_key"],
                     "version": r["version"],
+                    "status": r["status"],
                     "condition": cond or {},
                     "action": act or {},
                 }
             )
         return out
     except Exception as e:
-        logger.warning("list_active_rules: %s", e)
+        logger.warning("list_rules: %s", e)
         return []
+
+
+async def _audit(
+    db_pool: Any,
+    *,
+    rule_key: str,
+    version: int,
+    action: str,
+    detail: str = "",
+) -> None:
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO ln_rule_audit (rule_key, version, action, detail)
+                VALUES ($1, $2, $3, $4)
+                """,
+                rule_key,
+                int(version),
+                action,
+                (detail or "")[:300],
+            )
+    except Exception as e:
+        logger.debug("ln_rule_audit skip: %s", e)
 
 
 async def draft_rule(
@@ -70,6 +181,14 @@ async def draft_rule(
     notes: str = "",
 ) -> Optional[int]:
     if not rule_loop_enabled() or not db_pool:
+        return None
+    gclass = str((condition or {}).get("gate_class") or "")
+    if gclass and not is_soft_gate_class(gclass):
+        logger.warning("draft_rule refused hard class: %s", gclass)
+        return None
+    atype = str((action or {}).get("type") or "noop")
+    if atype not in _ALLOWED_ACTIONS:
+        logger.warning("draft_rule refused action: %s", atype)
         return None
     try:
         async with db_pool.acquire() as conn:
@@ -106,13 +225,39 @@ async def draft_rule(
         return None
 
 
+async def move_to_sandbox(db_pool: Any, *, rule_key: str, version: int) -> bool:
+    if not rule_loop_enabled() or not db_pool:
+        return False
+    try:
+        async with db_pool.acquire() as conn:
+            n = await conn.fetchval(
+                """
+                UPDATE ln_rule_store
+                SET status = 'sandbox'
+                WHERE rule_key = $1 AND version = $2 AND status = 'draft'
+                RETURNING id
+                """,
+                rule_key,
+                version,
+            )
+            if n:
+                await _audit(
+                    db_pool, rule_key=rule_key, version=version,
+                    action="sandbox_pass", detail="draft→sandbox",
+                )
+            return bool(n)
+    except Exception as e:
+        logger.warning("move_to_sandbox: %s", e)
+        return False
+
+
 async def promote_rule(
     db_pool: Any,
     *,
     rule_key: str,
     version: int,
 ) -> bool:
-    """Promote sandbox→active; prior active for same key → rolled_back."""
+    """Promote sandbox|draft → active; prior active for same key → rolled_back."""
     if not rule_loop_enabled() or not db_pool:
         return False
     try:
@@ -172,7 +317,7 @@ async def rollback_rule(db_pool: Any, *, rule_key: str, version: int) -> bool:
                 await conn.execute(
                     """
                     INSERT INTO ln_rule_audit (rule_key, version, action, detail)
-                    VALUES ($1, $2, 'rollback', 'manual rollback')
+                    VALUES ($1, $2, 'rollback', 'confidence/lifecycle rollback')
                     """,
                     rule_key,
                     version,
@@ -181,3 +326,145 @@ async def rollback_rule(db_pool: Any, *, rule_key: str, version: int) -> bool:
     except Exception as e:
         logger.warning("rollback_rule: %s", e)
         return False
+
+
+async def _gate_confidence(db_pool: Any, gate_class: str) -> tuple[float, int]:
+    try:
+        from app.services.clinical_gate_confidence import get_confidence
+
+        conf = await get_confidence(db_pool, f"runtime_gate:{gate_class}", default=0.70)
+    except Exception:
+        conf = 0.70
+    n = 0
+    try:
+        async with db_pool.acquire() as conn:
+            n = int(
+                await conn.fetchval(
+                    """
+                    SELECT COALESCE(sample_size, 0)
+                    FROM clinical_gate_confidence
+                    WHERE gate_key = $1
+                    """,
+                    f"runtime_gate:{gate_class}",
+                )
+                or 0
+            )
+    except Exception:
+        n = 0
+    return float(conf), n
+
+
+async def maybe_lifecycle_from_gate_confidence(
+    db_pool: Any,
+    gate_class: str,
+) -> None:
+    """Auto promote sandbox→active or rollback active from L3b confidence."""
+    if not rule_loop_enabled() or not db_pool or not is_soft_gate_class(gate_class):
+        return
+    conf, n = await _gate_confidence(db_pool, gate_class)
+    try:
+        async with db_pool.acquire() as conn:
+            active = await conn.fetchrow(
+                """
+                SELECT rule_key, version, condition_json
+                FROM ln_rule_store
+                WHERE status = 'active'
+                  AND condition_json->>'gate_class' = $1
+                ORDER BY version DESC
+                LIMIT 1
+                """,
+                gate_class,
+            )
+            sandbox = await conn.fetchrow(
+                """
+                SELECT rule_key, version
+                FROM ln_rule_store
+                WHERE status = 'sandbox'
+                  AND condition_json->>'gate_class' = $1
+                ORDER BY version DESC
+                LIMIT 1
+                """,
+                gate_class,
+            )
+        if active and conf < _ROLLBACK_FLOOR and n >= _PROMOTE_MIN_N:
+            await rollback_rule(
+                db_pool, rule_key=active["rule_key"], version=int(active["version"]),
+            )
+            logger.info(
+                "L4 rollback %s v%s conf=%.2f n=%d",
+                active["rule_key"], active["version"], conf, n,
+            )
+        elif (
+            sandbox
+            and not active
+            and n >= _PROMOTE_MIN_N
+            and conf >= _PROMOTE_FLOOR
+        ):
+            ok = await promote_rule(
+                db_pool,
+                rule_key=sandbox["rule_key"],
+                version=int(sandbox["version"]),
+            )
+            if ok:
+                logger.info(
+                    "L4 promote %s v%s conf=%.2f n=%d",
+                    sandbox["rule_key"], sandbox["version"], conf, n,
+                )
+    except Exception as e:
+        logger.warning("maybe_lifecycle_from_gate_confidence: %s", e)
+
+
+async def apply_soft_gate_rules(
+    db_pool: Any,
+    gate_result: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Bind rule store to soft runtime-gate result.
+
+    Returns None to suppress the soft follow-up response; otherwise gate_result.
+    Hard classes (non-SOFT) pass through untouched. SI/violence never enter here
+    if callers only pass clinical runtime-gate results.
+    """
+    if not rule_loop_enabled() or not gate_result or not db_pool:
+        return gate_result
+    gate_class = str(gate_result.get("class") or "")
+    if not is_soft_gate_class(gate_class):
+        return gate_result
+    fired_new = str(gate_result.get("fired_new", "")).lower() == "true"
+    conf, _n = await _gate_confidence(db_pool, gate_class)
+    rules = await list_eval_rules(db_pool)
+    apply_live = rule_loop_apply_enabled()
+    for rule in rules:
+        if not condition_matches(
+            rule.get("condition") or {},
+            gate_class=gate_class,
+            fired_new=fired_new,
+            confidence=conf,
+        ):
+            continue
+        action = rule.get("action") or {}
+        atype = str(action.get("type") or "noop")
+        if atype not in _ALLOWED_ACTIONS:
+            continue
+        status = str(rule.get("status") or "")
+        # Sandbox: always shadow. Active: apply only when LN_RULE_LOOP_APPLY.
+        if status == "sandbox" or not apply_live:
+            await _audit(
+                db_pool,
+                rule_key=rule["rule_key"],
+                version=int(rule["version"]),
+                action="shadow_fire",
+                detail=f"class={gate_class} fired_new={fired_new} conf={conf:.2f} would={atype}",
+            )
+            continue
+        await _audit(
+            db_pool,
+            rule_key=rule["rule_key"],
+            version=int(rule["version"]),
+            action="fire",
+            detail=f"class={gate_class} fired_new={fired_new} conf={conf:.2f} action={atype}",
+        )
+        if atype == "suppress_soft_followup" and not fired_new:
+            await maybe_lifecycle_from_gate_confidence(db_pool, gate_class)
+            return None
+    await maybe_lifecycle_from_gate_confidence(db_pool, gate_class)
+    return gate_result

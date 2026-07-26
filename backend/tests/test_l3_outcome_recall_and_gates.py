@@ -112,5 +112,147 @@ class TestL4RuleLoopFlagOff(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class TestL4SoftRuleBind(unittest.TestCase):
+    def test_soft_condition_match(self):
+        mod = _load("ln_rule_loop", "ln_rule_loop.py")
+        cond = {
+            "gate_class": "diagnosis_request",
+            "fired_new": False,
+            "max_confidence": 0.30,
+        }
+        self.assertTrue(
+            mod.condition_matches(
+                cond, gate_class="diagnosis_request", fired_new=False, confidence=0.20,
+            )
+        )
+        self.assertFalse(
+            mod.condition_matches(
+                cond, gate_class="diagnosis_request", fired_new=False, confidence=0.80,
+            )
+        )
+        self.assertFalse(
+            mod.condition_matches(
+                cond, gate_class="diagnosis_request", fired_new=True, confidence=0.20,
+            )
+        )
+
+    def test_hard_class_never_matches(self):
+        mod = _load("ln_rule_loop", "ln_rule_loop.py")
+        self.assertFalse(mod.is_soft_gate_class("suicide_ideation"))
+        self.assertFalse(
+            mod.condition_matches(
+                {"gate_class": "suicide_ideation"},
+                gate_class="suicide_ideation",
+                fired_new=True,
+                confidence=0.9,
+            )
+        )
+
+class TestL4DraftRefuse(unittest.IsolatedAsyncioTestCase):
+    async def test_draft_refuses_hard_class(self):
+        os.environ["ENABLE_LN_RULE_LOOP"] = "true"
+        mod = _load("ln_rule_loop", "ln_rule_loop.py")
+        rid = await mod.draft_rule(
+            AsyncMock(),
+            rule_key="bad.si",
+            condition={"gate_class": "suicide_ideation"},
+            action={"type": "suppress_soft_followup"},
+        )
+        self.assertIsNone(rid)
+
+
+class TestL4ApplySoftGate(unittest.IsolatedAsyncioTestCase):
+    async def test_active_suppress_followup(self):
+        os.environ["ENABLE_LN_RULE_LOOP"] = "true"
+        os.environ["LN_RULE_LOOP_APPLY"] = "true"
+        mod = _load("ln_rule_loop", "ln_rule_loop.py")
+
+        rules = [
+            {
+                "rule_key": "soft_gate.diagnosis_request.followup_suppress",
+                "version": 1,
+                "status": "active",
+                "condition": {
+                    "gate_class": "diagnosis_request",
+                    "fired_new": False,
+                    "max_confidence": 0.30,
+                },
+                "action": {"type": "suppress_soft_followup"},
+            }
+        ]
+
+        async def _list(_pool):
+            return rules
+
+        async def _conf(_pool, _cls):
+            return 0.20, 10
+
+        async def _audit(*_a, **_k):
+            return None
+
+        async def _life(*_a, **_k):
+            return None
+
+        mod.list_eval_rules = _list  # type: ignore
+        mod._gate_confidence = _conf  # type: ignore
+        mod._audit = _audit  # type: ignore
+        mod.maybe_lifecycle_from_gate_confidence = _life  # type: ignore
+
+        out = await mod.apply_soft_gate_rules(
+            object(),
+            {
+                "class": "diagnosis_request",
+                "fired_new": "false",
+                "response": {"type": "clinical_gate"},
+            },
+        )
+        self.assertIsNone(out)
+
+    async def test_sandbox_does_not_suppress(self):
+        os.environ["ENABLE_LN_RULE_LOOP"] = "true"
+        os.environ["LN_RULE_LOOP_APPLY"] = "true"
+        mod = _load("ln_rule_loop", "ln_rule_loop.py")
+
+        rules = [
+            {
+                "rule_key": "soft_gate.diagnosis_request.followup_suppress",
+                "version": 1,
+                "status": "sandbox",
+                "condition": {
+                    "gate_class": "diagnosis_request",
+                    "fired_new": False,
+                    "max_confidence": 0.30,
+                },
+                "action": {"type": "suppress_soft_followup"},
+            }
+        ]
+
+        async def _list(_pool):
+            return rules
+
+        async def _conf(_pool, _cls):
+            return 0.20, 10
+
+        async def _audit(*_a, **_k):
+            return None
+
+        async def _life(*_a, **_k):
+            return None
+
+        mod.list_eval_rules = _list  # type: ignore
+        mod._gate_confidence = _conf  # type: ignore
+        mod._audit = _audit  # type: ignore
+        mod.maybe_lifecycle_from_gate_confidence = _life  # type: ignore
+
+        gate = {
+            "class": "diagnosis_request",
+            "fired_new": "false",
+            "response": {"type": "clinical_gate"},
+        }
+        out = await mod.apply_soft_gate_rules(object(), gate)
+        self.assertIs(out, gate)
+
+
 if __name__ == "__main__":
     unittest.main()
+
