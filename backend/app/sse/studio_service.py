@@ -512,6 +512,44 @@ def get_preset(name: str) -> dict:
     return data
 
 
+def _seed_scenes_from_casting(
+    casting: dict,
+    style: dict,
+    title: str,
+) -> list[dict]:
+    """Minimal scene beats so new subsets are not empty generators."""
+    look = ""
+    if isinstance(style, dict):
+        look = (style.get("look") or "").strip()
+    keys = [str(k) for k in (casting or {}).keys() if k][:6]
+    scenes: list[dict] = []
+    for i, key in enumerate(keys, 1):
+        raw = casting.get(key, key)
+        inline = raw if isinstance(raw, str) else (
+            (raw.get("inline_desc") or raw.get("description") or key) if isinstance(raw, dict) else str(raw)
+        )
+        prefix = f"{look}, " if look else ""
+        scenes.append({
+            "scene": i,
+            "title": f"{title} — {key.replace('_', ' ')}",
+            "characters": [key],
+            "prompt": f"{prefix}{{{key}}} establishing shot. {inline}",
+            "duration_hint_seconds": 3,
+        })
+    while len(scenes) < 3:
+        n = len(scenes) + 1
+        chars = keys[:2] if keys else []
+        prefix = f"{look}, " if look else ""
+        scenes.append({
+            "scene": n,
+            "title": f"{title} — beat {n}",
+            "characters": chars,
+            "prompt": f"{prefix}cinematic beat {n} for {title}",
+            "duration_hint_seconds": 3,
+        })
+    return scenes
+
+
 def _slug_preset_id(raw: str) -> str:
     import re
     s = (raw or "").strip().lower().replace(" ", "_").replace("-", "_")
@@ -552,6 +590,12 @@ def create_or_update_preset(body: dict) -> dict:
     scenes = body.get("scenes")
     if scenes is None:
         scenes = existing.get("scenes") or []
+    casting_dict = casting if isinstance(casting, dict) else {}
+    style_dict = style if isinstance(style, dict) else {"look": str(style)}
+    if not scenes and casting_dict:
+        scenes = _seed_scenes_from_casting(casting_dict, style_dict, title)
+    elif not scenes:
+        scenes = _seed_scenes_from_casting({}, style_dict, title)
 
     doc = {
         **existing,
@@ -560,8 +604,8 @@ def create_or_update_preset(body: dict) -> dict:
         "title": title,
         "description": (body.get("description") or existing.get("description") or title).strip(),
         "subset_kind": body.get("subset_kind") or existing.get("subset_kind") or "custom",
-        "visual_style_anchor": style if isinstance(style, dict) else {"look": str(style)},
-        "casting_locksheet": casting if isinstance(casting, dict) else {},
+        "visual_style_anchor": style_dict,
+        "casting_locksheet": casting_dict,
         "default_color_preset": body.get("default_color_preset")
         or existing.get("default_color_preset")
         or "counseling_neon",
@@ -947,15 +991,40 @@ def _require_replicate() -> None:
         raise HTTPException(status_code=501, detail="LoRA features require REPLICATE_API_TOKEN")
 
 
-async def start_lora_training(character_key: str, training_images_zip_url: str) -> dict:
+async def start_lora_training(
+    character_key: str,
+    training_images_zip_url: str,
+    *,
+    preset_id: str | None = None,
+    project_id: str | None = None,
+) -> dict:
     """Kick off LoRA training on Replicate for a character."""
     _require_replicate()
     from app.sse.infrastructure.replicate_client import train_lora
-    return await train_lora(
+    from app.sse.trailer_generator import (
+        _load_manifest_from_r2,
+        _manifest_preset_id,
+        subset_trigger_word,
+    )
+    pid = preset_id
+    if not pid and project_id:
+        try:
+            man = await _load_manifest_from_r2(project_id) or {}
+            pid = _manifest_preset_id(man)
+        except Exception:
+            pid = None
+    trigger = subset_trigger_word(pid, character_key)
+    result = await train_lora(
         training_images_url=training_images_zip_url,
-        trigger_word=f"THERA_{character_key.upper()}",
+        trigger_word=trigger,
         character_key=character_key,
     )
+    if project_id:
+        result["project_id"] = project_id
+    if pid:
+        result["preset_id"] = pid
+    result["trigger_word"] = trigger
+    return result
 
 
 async def poll_lora_training(
@@ -963,16 +1032,27 @@ async def poll_lora_training(
     project_id: str | None = None,
     character_key: str | None = None,
     db_pool=None,
+    preset_id: str | None = None,
 ) -> dict:
     """Check LoRA training status. On completion, saves LoRA URL to project manifest and DB registry."""
     _require_replicate()
     from app.sse.infrastructure.replicate_client import poll_training
+    from app.sse.trailer_generator import subset_trigger_word
     result = await poll_training(training_id)
     if result.get("status") == "succeeded" and result.get("output") and project_id and character_key:
         lora_url = result["output"] if isinstance(result["output"], str) else result["output"].get("weights", "")
         if lora_url:
-            from app.sse.trailer_generator import save_trained_lora
-            await save_trained_lora(project_id, character_key, lora_url)
+            from app.sse.trailer_generator import (
+                _load_manifest_from_r2,
+                _manifest_preset_id,
+                save_trained_lora,
+            )
+            man = await _load_manifest_from_r2(project_id) or {}
+            pid = preset_id or _manifest_preset_id(man)
+            await save_trained_lora(
+                project_id, character_key, lora_url,
+                preset_id=pid, training_id=training_id,
+            )
             logger.info("[STUDIO] LoRA for %s saved to manifest: %s", character_key, lora_url[:80])
             if db_pool:
                 try:
@@ -980,8 +1060,8 @@ async def poll_lora_training(
                     await register_lora(
                         db_pool, character_key, lora_url,
                         project_id=project_id,
-                        trigger_word=f"THERA_{character_key.upper()}",
-                        metadata={"training_id": training_id},
+                        trigger_word=subset_trigger_word(pid, character_key),
+                        metadata={"training_id": training_id, "preset_id": pid},
                     )
                 except Exception as _lr_err:
                     logger.warning("[STUDIO] LoRA registry mirror failed: %s", _lr_err)

@@ -6160,8 +6160,9 @@ async def sse_imagery_generate(request: Request):
     story_plot = body.get("story_plot")
     if not story_plot: raise HTTPException(422, "story_plot required in body")
     preset_id = body.get("preset_id") or story_plot.get("preset_id")
+    project_id = body.get("project_id") or story_plot.get("studio_project_id") or story_plot.get("project_id")
     from app.sse.layer6_imagination_engine import generate_story_imagery
-    result = await generate_story_imagery(story_plot, preset_id=preset_id)
+    result = await generate_story_imagery(story_plot, preset_id=preset_id, project_id=project_id)
     pool = getattr(request.app.state, "db_pool", None)
     prov_id = body.get("provenance_id")
     if pool and prov_id and result.get("results"):
@@ -6412,9 +6413,28 @@ async def sse_emancipate_minor(request: Request):
 @sse_router.post("/admin/generate-trailer")
 async def sse_generate_trailer(request: Request, background_tasks: BackgroundTasks):
     import uuid as _uuid
-    from app.sse.trailer_generator import generate_all_scenes
-    background_tasks.add_task(generate_all_scenes, str(_uuid.uuid4()))
-    return {"status": "started", "message": "Generating 19 scenes — check status in ~3 minutes"}
+    from app.sse.trailer_generator import DEFAULT_PRESET_ID, generate_all_scenes, _load_preset
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    preset_id = (body.get("preset_id") or DEFAULT_PRESET_ID).strip()
+    project_id = (body.get("project_id") or "").strip() or str(_uuid.uuid4())
+    scenes = None
+    try:
+        scenes = _load_preset(preset_id)
+    except Exception:
+        scenes = None
+    n = len(scenes) if scenes else 0
+    background_tasks.add_task(generate_all_scenes, project_id, scenes, preset_id)
+    return {
+        "status": "started",
+        "preset_id": preset_id,
+        "project_id": project_id,
+        "scene_count": n,
+        "message": f"Generating {n or 'preset'} scenes for {preset_id} — poll trailer-status",
+    }
 
 
 @sse_router.get("/admin/trailer-status")

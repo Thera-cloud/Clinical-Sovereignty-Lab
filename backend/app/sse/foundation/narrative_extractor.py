@@ -65,21 +65,54 @@ def detect_document_type(raw_text: str) -> str:
     return "narrative_arc"
 
 
-async def extract(raw_text: str, filename: str) -> dict[str, Any]:
+def _is_thera_subset(preset_id: str | None) -> bool:
+    pid = (preset_id or "").strip()
+    return (not pid) or pid == "thera_world_origin" or "thera_world" in pid
+
+
+async def extract(
+    raw_text: str,
+    filename: str,
+    preset_id: str | None = None,
+) -> dict[str, Any]:
     doc_type = detect_document_type(raw_text)
     grok_url = os.getenv("NATE_CHAT_URL", "")
     grok_key = os.getenv("NATE_CHAT_KEY", os.getenv("AZURE_API_KEY", ""))
     grok_model = os.getenv("NATE_CHAT_MODEL", "grok-4-1-fast-non-reasoning")
+    use_thera = _is_thera_subset(preset_id)
 
     if doc_type == "narrative_arc":
         mode_instruction = "Extract PART headings + visualization sequences as phases."
     else:
         mode_instruction = "Extract Section headings + reflection arcs as phases."
 
+    if use_thera:
+        phase_rules = (
+            "Phase mapping values must be one of: sealed_book, tower_revealed, the_watchwoman, "
+            "the_door, the_meadow, the_becoming, the_sacred_hallway, open_world.\n\n"
+            "core_character_manifestation per phase:\n"
+            "  sealed_book → Serpent's Whisper\n  tower_revealed → Dragon Scale\n"
+            "  the_watchwoman → Dual Shadow\n  the_door → Still Surface\n"
+            "  the_meadow → Breath Between\n  the_becoming → Mirror Light\n"
+            "  the_sacred_hallway → Glimmer\n  open_world → Mirror Light\n"
+        )
+    else:
+        phase_rules = (
+            "This is a NON-Thera subset generator. Do NOT use Thera-World mythology phases "
+            "(sealed_book, dragon, serpent, watchwoman, sacred_hallway).\n"
+            "sse_phase_mapping: snake_case slug from the phase name (e.g. intake_open, "
+            "mirror_moment, closing_breath).\n"
+            "core_character_manifestation: leave empty string — visual lock comes from "
+            "subset casting / LoRA, not Thera bedrock manifestations.\n"
+            "biome / sacred_space: use realistic clinical or subset setting labels, not "
+            "Thera biomes.\n"
+        )
+
     system_prompt = (
         "You are a clinical story structure extractor. Return ONLY valid JSON — "
         "no preamble, no markdown fences, no explanation.\n\n"
-        f"Document type: {doc_type}. {mode_instruction}\n\n"
+        f"Document type: {doc_type}. {mode_instruction}\n"
+        f"Subset preset_id: {preset_id or 'thera_world_origin'}.\n\n"
         "Required JSON schema keys: story_name, story_id, audience, document_type, "
         "phases_detected (array of objects with: name, description, sse_phase_mapping, "
         "core_character_manifestation, panel_tone, key_visual, biome, sacred_space, "
@@ -87,13 +120,7 @@ async def extract(raw_text: str, filename: str) -> dict[str, Any]:
         "new_required array), biome_requirements (existing_match array, new_required array), "
         "therapeutic_modalities, clinical_pacing_notes, age_tier_hints, "
         "video_extraction (motion_scenes array, audio_atmosphere_per_biome object).\n\n"
-        "Phase mapping values must be one of: sealed_book, tower_revealed, the_watchwoman, "
-        "the_door, the_meadow, the_becoming, the_sacred_hallway, open_world.\n\n"
-        "core_character_manifestation per phase:\n"
-        "  sealed_book → Serpent's Whisper\n  tower_revealed → Dragon Scale\n"
-        "  the_watchwoman → Dual Shadow\n  the_door → Still Surface\n"
-        "  the_meadow → Breath Between\n  the_becoming → Mirror Light\n"
-        "  the_sacred_hallway → Glimmer\n  open_world → Mirror Light\n\n"
+        f"{phase_rules}\n"
         f"panel_tone: use 'action_sequence' for narrative_arc, 'meditative' for theological_workbook.\n"
         f"story_id should be a snake_case slug derived from the title."
     )
@@ -125,10 +152,19 @@ async def extract(raw_text: str, filename: str) -> dict[str, Any]:
     narrative: dict[str, Any] = json.loads(cleaned)
 
     narrative["document_type"] = doc_type
+    if preset_id:
+        narrative["preset_id"] = preset_id
 
     for phase in narrative.get("phases_detected", []):
         mapping = phase.get("sse_phase_mapping", "")
-        phase["core_character_manifestation"] = PHASE_TO_MANIFESTATION.get(mapping, "Glimmer")
+        if use_thera:
+            phase["core_character_manifestation"] = PHASE_TO_MANIFESTATION.get(mapping, "Glimmer")
+        else:
+            phase["core_character_manifestation"] = phase.get("core_character_manifestation") or ""
+            if mapping in PHASE_TO_MANIFESTATION:
+                # Strip accidental Thera mythology ids from non-Thera extracts
+                slug = re.sub(r"[^a-z0-9]+", "_", (phase.get("name") or "phase").lower()).strip("_")
+                phase["sse_phase_mapping"] = slug or "phase"
         if doc_type == "theological_workbook":
             phase["panel_tone"] = "meditative"
         else:

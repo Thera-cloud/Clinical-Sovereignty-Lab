@@ -50,6 +50,7 @@ async def run_pipeline(
     narrative = await narrative_extractor.extract(
         parse_result["raw_text"],
         filename,
+        preset_id=preset_id,
     )
 
     output = await story_plot_generator.generate(narrative, preset_id=preset_id)

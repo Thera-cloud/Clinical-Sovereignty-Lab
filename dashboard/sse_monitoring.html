@@ -225,7 +225,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
         <button class="btn btn-green" onclick="sseShowModal('preview')">🖼 Generate Test Panel</button>
         <button class="btn btn-red" onclick="sseShowModal('override')">🔧 Journey Override</button>
         <button class="btn btn-blue" onclick="sseIngestWorkbooks()">📖 Ingest Workbooks</button>
-        <button class="btn btn-gold" onclick="sseGenerateTrailer()">🎬 Generate Trailer</button>
+        <button class="btn btn-gold" onclick="sseShowModal('trailer')">🎬 Generate Trailer</button>
       </div>
     </div>
   </div>
@@ -692,10 +692,32 @@ function sseShowModal(type) {
   } else if (type === 'preview') {
     html = '<div class="modal-overlay" onclick="if(event.target===this)this.remove()"><div class="modal-box">'
       + '<h3>🖼 Generate Test Panel</h3>'
+      + '<p style="font-size:11px;color:var(--t3);margin:0 0 8px">Thera-World journey preview (client biomes). For subset trailer imagery use Studio / Generate Trailer.</p>'
       + '<input id="mdPreviewUser" placeholder="User ID">'
       + '<div id="mdPreviewResult"></div>'
       + '<div class="modal-btns"><button class="btn btn-ghost" onclick="this.closest(\'.modal-overlay\').remove()">Cancel</button>'
       + '<button class="btn btn-green" onclick="sseDoPreview()">Generate</button></div></div></div>';
+  } else if (type === 'trailer') {
+    html = '<div class="modal-overlay" onclick="if(event.target===this)this.remove()"><div class="modal-box">'
+      + '<h3>🎬 Generate Subset Trailer</h3>'
+      + '<p style="font-size:11px;color:var(--t3);margin:0 0 8px">Pick a Studio subset generator. Scene count comes from that preset (Thera-World is one option).</p>'
+      + '<select id="mdTrailerPreset" style="width:100%;margin-bottom:10px"><option value="thera_world_origin">Loading presets…</option></select>'
+      + '<input id="mdTrailerProject" placeholder="Optional Studio project_id (for LoRA lock)">'
+      + '<div class="modal-btns"><button class="btn btn-ghost" onclick="this.closest(\'.modal-overlay\').remove()">Cancel</button>'
+      + '<button class="btn btn-gold" onclick="sseDoGenerateTrailer()">Generate</button></div></div></div>';
+    setTimeout(function() {
+      fetch(API + '/api/sse/admin/studio/presets', {headers:_authHeaders()})
+        .then(function(r){return r.json()})
+        .then(function(list){
+          var sel = document.getElementById('mdTrailerPreset');
+          if (!sel || !Array.isArray(list)) return;
+          sel.innerHTML = list.map(function(p){
+            var id = p.id || p.preset_id;
+            var n = (p.scene_count != null ? p.scene_count : (p.scenes||[]).length);
+            return '<option value="' + id + '">' + (p.title||id) + ' (' + n + ' scenes)</option>';
+          }).join('');
+        }).catch(function(){});
+    }, 0);
   } else if (type === 'override') {
     html = '<div class="modal-overlay" onclick="if(event.target===this)this.remove()"><div class="modal-box">'
       + '<h3>🔧 Journey Override</h3>'
@@ -732,12 +754,21 @@ async function sseIngestWorkbooks() {
     var d = await r.json(); alert('Workbooks: ' + d.workbooks_processed + ', Crystals created: ' + d.crystals_created);
   } catch(e) { alert('Error: ' + e); }
 }
-function sseGenerateTrailer() {
-  if (!confirm('Generate all 19 Thera-World trailer scenes? Takes ~3 minutes.')) return;
-  fetch(API + '/api/sse/admin/generate-trailer', {method:'POST', headers:_authHeaders()})
+function sseDoGenerateTrailer() {
+  var preset = (document.getElementById('mdTrailerPreset') || {}).value || 'thera_world_origin';
+  var projectId = ((document.getElementById('mdTrailerProject') || {}).value || '').trim();
+  if (!confirm('Generate trailer scenes for subset "' + preset + '"?')) return;
+  var body = {preset_id: preset};
+  if (projectId) body.project_id = projectId;
+  fetch(API + '/api/sse/admin/generate-trailer', {
+    method:'POST',
+    headers:_authHeaders('application/json'),
+    body: JSON.stringify(body)
+  })
     .then(function(r){return r.json()})
     .then(function(d){
-      alert('Trailer generation started — 19 scenes, ~3 minutes');
+      try { document.querySelector('.modal-overlay').remove(); } catch(e) {}
+      alert('Trailer started — ' + (d.scene_count || '?') + ' scenes for ' + (d.preset_id || preset));
       var poll = setInterval(function(){
         fetch(API + '/api/sse/admin/trailer-status', {headers:_authHeaders()})
           .then(function(r){return r.json()})

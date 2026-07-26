@@ -507,6 +507,8 @@ function generateImagery() {
   var btn = document.getElementById('genImgBtn');
   btn.disabled = true; btn.textContent = '⏳ Generating…';
 
+  var _studioPid = '';
+  try { _studioPid = sessionStorage.getItem('studio_project_id') || ''; } catch (e) {}
   fetch(API + '/api/sse/imagery/generate', {
     method: 'POST',
     headers: _authHeaders('application/json'),
@@ -514,7 +516,8 @@ function generateImagery() {
       storyboard_id: _currentPlot.id,
       story_plot: _currentPlot,
       provenance_id: _currentProvId,
-      preset_id: _currentPlot.preset_id || _selectedPreset()
+      preset_id: _currentPlot.preset_id || _selectedPreset(),
+      project_id: _studioPid || undefined
     })
   })
   .then(function(r) { return r.json(); })

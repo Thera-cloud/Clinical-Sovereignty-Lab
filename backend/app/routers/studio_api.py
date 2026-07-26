@@ -396,6 +396,8 @@ async def deduplicate_clips(project_id: str):
 class LoraTrainRequest(BaseModel):
     character_key: str
     training_images_zip_url: str
+    project_id: str | None = None
+    preset_id: str | None = None
 
 class LoraGenerateRequest(BaseModel):
     prompt: str
@@ -428,17 +430,34 @@ class InterpolatedTrailerRequest(BaseModel):
 async def lora_train(body: LoraTrainRequest):
     from app.sse.studio_service import start_lora_training
     try:
-        return await start_lora_training(body.character_key, body.training_images_zip_url)
+        return await start_lora_training(
+            body.character_key,
+            body.training_images_zip_url,
+            preset_id=body.preset_id,
+            project_id=body.project_id,
+        )
     except RuntimeError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
 
 @studio_router.get("/lora/status/{training_id}")
-async def lora_status(request: Request, training_id: str, project_id: str | None = None, character_key: str | None = None):
+async def lora_status(
+    request: Request,
+    training_id: str,
+    project_id: str | None = None,
+    character_key: str | None = None,
+    preset_id: str | None = None,
+):
     from app.sse.studio_service import poll_lora_training
     _db = getattr(request.app.state, "db_pool", None)
     try:
-        return await poll_lora_training(training_id, project_id=project_id, character_key=character_key, db_pool=_db)
+        return await poll_lora_training(
+            training_id,
+            project_id=project_id,
+            character_key=character_key,
+            db_pool=_db,
+            preset_id=preset_id,
+        )
     except RuntimeError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -477,6 +496,13 @@ async def lora_zip_images(body: LoraTrainingImagesRequest):
     if not url:
         raise HTTPException(404, "No training images found for this character")
     return {"zip_url": url, "character": body.character_key}
+
+
+@studio_router.get("/lora/training-images/{project_id}/{character_key}")
+async def lora_list_training_images(project_id: str, character_key: str):
+    from app.sse.trailer_generator import list_lora_training_images
+    images = await list_lora_training_images(project_id, character_key)
+    return {"project_id": project_id, "character": character_key, "images": images, "count": len(images)}
 
 
 @studio_router.post("/lora/test")

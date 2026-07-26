@@ -333,8 +333,24 @@ def _char_refs_from_preset_doc(doc: dict) -> dict[str, dict]:
     return refs
 
 
+def subset_trigger_word(preset_id: str | None, character_key: str) -> str:
+    """LoRA trigger scoped to subset — Thera keeps THERA_*; others use SUBSET_CHAR."""
+    import re as _re
+    ck = (character_key or "char").strip().upper().replace("-", "_")
+    ck = _re.sub(r"[^A-Z0-9_]+", "", ck) or "CHAR"
+    pid = (preset_id or DEFAULT_PRESET_ID).strip()
+    if pid == DEFAULT_PRESET_ID or "thera_world" in pid:
+        return f"THERA_{ck}"
+    stem = pid.replace("_origin", "").upper()
+    stem = _re.sub(r"[^A-Z0-9]+", "_", stem).strip("_")[:28] or "SUBSET"
+    return f"{stem}_{ck}"
+
+
 def _char_refs(preset_id: str | None = None) -> dict[str, dict]:
-    """Character refs for a subset: JSON casting_locksheet first, then Python packs."""
+    """Character refs for a subset: JSON casting_locksheet first, then Python packs.
+
+    Unknown / empty custom subsets return {} — never silently inherit Thera cast.
+    """
     pid = preset_id or DEFAULT_PRESET_ID
     try:
         doc = _load_preset_document(pid)
@@ -343,7 +359,12 @@ def _char_refs(preset_id: str | None = None) -> dict[str, dict]:
             return from_doc
     except FileNotFoundError:
         pass
-    return CHARACTER_REFERENCES_BY_PRESET.get(pid, THERA_WORLD_CHARACTER_REFERENCES)
+    pack = CHARACTER_REFERENCES_BY_PRESET.get(pid)
+    if pack:
+        return pack
+    if pid == DEFAULT_PRESET_ID or "thera_world" in pid:
+        return THERA_WORLD_CHARACTER_REFERENCES
+    return {}
 
 
 # Backward-compat export: canonical Thera-World character map (historic import sites / LoRA tooling).
@@ -875,16 +896,30 @@ async def _load_trained_loras(project_id: str) -> dict[str, dict]:
     return manifest.get("trained_loras", {})
 
 
-async def save_trained_lora(project_id: str, character_key: str, lora_url: str) -> None:
+async def save_trained_lora(
+    project_id: str,
+    character_key: str,
+    lora_url: str,
+    *,
+    preset_id: str | None = None,
+    training_id: str | None = None,
+) -> None:
     """Record a completed LoRA training result in the project manifest."""
     manifest = await _load_manifest_from_r2(project_id) or {}
+    pid = preset_id or _manifest_preset_id(manifest)
     loras = manifest.get("trained_loras", {})
-    loras[character_key] = {
+    entry = {
         "lora_url": lora_url,
-        "trigger_word": f"THERA_{character_key.upper()}",
+        "trigger_word": subset_trigger_word(pid, character_key),
         "trained_at": datetime.utcnow().isoformat(),
+        "preset_id": pid,
     }
+    if training_id:
+        entry["training_id"] = training_id
+    loras[character_key] = entry
     manifest["trained_loras"] = loras
+    if pid:
+        manifest["preset_id"] = manifest.get("preset_id") or pid
     await _save_manifest_to_r2(project_id, manifest)
 
 
@@ -3007,6 +3042,25 @@ async def zip_lora_training_images(project_id: str, character: str) -> str | Non
         return url
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
+
+
+async def list_lora_training_images(project_id: str, character: str) -> list[dict]:
+    """List R2 training PNGs for a character (urls for Character Lab thumbs)."""
+    from app.sse.infrastructure.r2_storage import list_objects, presigned_url, _R2_PUBLIC_BASE
+    prefix = f"sse/studio/projects/{project_id}/lora/{character}/"
+    try:
+        contents = await list_objects(prefix)
+        out: list[dict] = []
+        for c in contents:
+            key = c.get("Key") or ""
+            if not key.endswith(".png"):
+                continue
+            url = presigned_url(key) or f"{_R2_PUBLIC_BASE}/{key}"
+            out.append({"key": key, "r2_url": url, "index": len(out)})
+        return out
+    except Exception as e:
+        logger.warning("[TRAILER] list_lora_training_images failed: %s", e)
+        return []
 
 
 # ---------------------------------------------------------------------------

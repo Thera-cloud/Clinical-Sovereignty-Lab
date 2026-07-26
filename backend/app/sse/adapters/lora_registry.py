@@ -30,7 +30,7 @@ async def register_lora(
 ) -> str:
     """Insert or update a LoRA model record. Returns the model_id."""
     model_id = str(uuid.uuid4())
-    tw = trigger_word or f"THERA_{user_id.upper()}"
+    tw = trigger_word or f"CHAR_{user_id.upper()}"
     now = datetime.now(timezone.utc)
     meta_json = json.dumps(metadata or {})
 

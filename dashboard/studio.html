@@ -258,7 +258,6 @@ function ScriptTab({ scenes, setScenes, setTab, setRecapJobId, setRecapArchetype
           visual_style_anchor: newSubset.visual_style ? { look: newSubset.visual_style } : undefined,
           casting_locksheet: casting,
           default_color_preset: newSubset.color_preset || 'counseling_neon',
-          scenes: [],
         })
       });
       const list = await apiFetch('/api/sse/admin/studio/presets');
@@ -1212,13 +1211,7 @@ function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost, 
 
   const pid = activePresetId || (() => { try { return sessionStorage.getItem('studio_active_preset_id') || ''; } catch (e) { return ''; } })();
   const presetChars = (presets || []).find(p => p.id === pid)?.character_keys;
-  const charNames = (presetChars && presetChars.length)
-    ? presetChars
-    : (pid === 'counseling_office_origin'
-        ? ['little_nate','ask_client','penguin_bot','hallway_bot']
-        : pid === 'family_sanctuary_origin'
-          ? ['mother','daughter','son','father']
-          : ['boy','serpent','dragon','girl','watcher','glowing_woman','knight']);
+  const charNames = (presetChars && presetChars.length) ? presetChars : [];
   const nChars = charNames.length;
 
   return (
@@ -1534,15 +1527,10 @@ function VoiceMappingPanel({ projectId, ensureProject }) {
 //  CHARACTER LAB TAB (LoRA training + testing)
 // ═══════════════════════════════════════════════════════════════════
 function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost, activePresetId, presets }) {
-  const presetChars = (presets || []).find(p => p.id === activePresetId)?.character_keys;
-  const charNames = (presetChars && presetChars.length)
-    ? presetChars
-    : (activePresetId === 'counseling_office_origin'
-        ? ['little_nate','ask_client','penguin_bot','hallway_bot']
-        : activePresetId === 'family_sanctuary_origin'
-          ? ['mother','daughter','son','father']
-          : ['boy','serpent','dragon','girl','watcher','glowing_woman','knight']);
-  const [selectedChar, setSelectedChar] = useState(charNames[0] || 'boy');
+  const presetMeta = (presets || []).find(p => p.id === activePresetId);
+  const presetChars = presetMeta?.character_keys;
+  const charNames = (presetChars && presetChars.length) ? presetChars : [];
+  const [selectedChar, setSelectedChar] = useState(charNames[0] || '');
   const [trainingImages, setTrainingImages] = useState([]);
   const [trainingId, setTrainingId] = useState(null);
   const [trainingStatus, setTrainingStatus] = useState(null);
@@ -1566,7 +1554,16 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost, active
     } catch (e) { console.warn('trained-loras load failed', e); }
   }, [projectId]);
 
+  const refreshThumbs = useCallback(async () => {
+    if (!projectId || !selectedChar) { setTrainingImages([]); return; }
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/lora/training-images/' + encodeURIComponent(projectId) + '/' + encodeURIComponent(selectedChar));
+      setTrainingImages(d.images || []);
+    } catch (e) { setTrainingImages([]); }
+  }, [projectId, selectedChar]);
+
   useEffect(() => { refreshTrained(); }, [refreshTrained]);
+  useEffect(() => { refreshThumbs(); }, [refreshThumbs]);
 
   const generateTrainingSet = async () => {
     const pid = await ensureProject(scenes);
@@ -1582,8 +1579,9 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost, active
           preset_id: activePresetId || undefined,
         })
       });
-      alert('Training image generation started — check Library tab in ~2 minutes.\nOnce done, click "Auto-Zip" to prepare for training.');
+      alert('Training image generation started — thumbs refresh in ~2 minutes.\nThen click "Auto-Zip" to prepare for training.');
       refreshCost();
+      setTimeout(() => refreshThumbs(), 90000);
     } catch (e) { alert('Failed: ' + e.message); }
     setLoading('');
   };
@@ -1599,6 +1597,7 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost, active
       });
       if (d.zip_url) {
         setLoraUrl(d.zip_url);
+        await refreshThumbs();
         alert('Training images zipped! URL auto-filled. Click "Train LoRA" to start.');
       }
     } catch (e) { alert('Failed: ' + e.message); }
@@ -1607,14 +1606,22 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost, active
 
   const startTraining = async () => {
     if (!loraUrl.trim()) return alert('Enter the training images .zip URL');
+    const pid = await ensureProject(scenes);
+    if (!pid) return;
     setLoading('train');
     try {
       const d = await apiFetch('/api/sse/admin/studio/lora/train', {
         method: 'POST', ct: 'application/json',
-        body: JSON.stringify({ character_key: selectedChar, training_images_zip_url: loraUrl })
+        body: JSON.stringify({
+          character_key: selectedChar,
+          training_images_zip_url: loraUrl,
+          project_id: pid,
+          preset_id: activePresetId || undefined,
+        })
       });
       setTrainingId(d.training_id);
       setTrainingStatus(d);
+      try { sessionStorage.setItem('studio_lora_training_id_' + selectedChar, d.training_id || ''); } catch (e) {}
     } catch (e) { alert('Training failed: ' + e.message); }
     setLoading('');
   };
@@ -1624,10 +1631,13 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost, active
     setLoading('poll');
     try {
       const pid = await ensureProject();
-      const d = await apiFetch('/api/sse/admin/studio/lora/status/' + trainingId + '?project_id=' + encodeURIComponent(pid) + '&character_key=' + encodeURIComponent(selectedChar));
+      const qs = '?project_id=' + encodeURIComponent(pid)
+        + '&character_key=' + encodeURIComponent(selectedChar)
+        + (activePresetId ? '&preset_id=' + encodeURIComponent(activePresetId) : '');
+      const d = await apiFetch('/api/sse/admin/studio/lora/status/' + trainingId + qs);
       setTrainingStatus(d);
       if (d.status === 'succeeded') {
-        alert('LoRA training complete! Character lock saved to project. All scene generation will now use this LoRA.');
+        alert('LoRA training complete! Character lock saved to project.');
         refreshTrained();
       }
     } catch (e) { alert('Poll failed: ' + e.message); }
@@ -1664,6 +1674,11 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost, active
           {!projectId ? <> · Create/load a project to persist trained weights.</> : null}
         </p>
 
+        {!charNames.length ? (
+          <div style={{fontSize:12,color:'var(--t3)',marginBottom:16}}>
+            No cast on this subset. Edit the subset casting_locksheet (Script → + New Subset or preset JSON) before training LoRAs.
+          </div>
+        ) : (
         <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
           {charNames.map(c => {
             const trained = !!trainedLoras[c];
@@ -1675,21 +1690,38 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost, active
             );
           })}
         </div>
+        )}
         {selectedTrained && (
           <div style={{fontSize:11,color:'var(--green)',marginBottom:12,wordBreak:'break-all'}}>
-            Trained weights on project: {typeof selectedTrained === 'string' ? selectedTrained.slice(0, 80) : JSON.stringify(selectedTrained).slice(0, 100)}…
+            Trained: trigger {(selectedTrained.trigger_word || '')} · {typeof selectedTrained === 'string' ? selectedTrained.slice(0, 80) : (selectedTrained.lora_url || '').slice(0, 80)}…
+            {selectedTrained.training_id ? <> · training_id {String(selectedTrained.training_id).slice(0, 12)}…</> : null}
+          </div>
+        )}
+
+        {trainingImages.length > 0 && (
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:12,color:'var(--gold-b)',marginBottom:8}}>
+              Training thumbs ({trainingImages.length})
+              <button className="btn btn-sm" style={{marginLeft:8}} onClick={refreshThumbs}>Refresh</button>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(96px,1fr))',gap:8}}>
+              {trainingImages.slice(0, 20).map((img, i) => (
+                <img key={img.key || i} src={img.r2_url} alt={'train ' + i}
+                  style={{width:'100%',aspectRatio:'1',objectFit:'cover',borderRadius:4,border:'1px solid var(--border)'}} />
+              ))}
+            </div>
           </div>
         )}
 
         <div style={{display:'flex',gap:16,marginBottom:16,flexWrap:'wrap'}}>
           <div style={{flex:1,minWidth:300}}>
             <div style={{fontSize:13,color:'var(--gold-b)',marginBottom:8}}>Step 1: Generate Training Images</div>
-            <p style={{fontSize:11,color:'var(--t3)',marginBottom:8}}>Generate 20 diverse poses/angles of {selectedChar} for LoRA fine-tuning.</p>
+            <p style={{fontSize:11,color:'var(--t3)',marginBottom:8}}>Generate 20 diverse poses/angles of {selectedChar || '…'} for LoRA fine-tuning.</p>
             <div style={{display:'flex',gap:8}}>
-              <button className="btn" onClick={generateTrainingSet} disabled={loading==='gen_training'}>
+              <button className="btn" onClick={generateTrainingSet} disabled={!selectedChar || loading==='gen_training'}>
                 {loading==='gen_training' ? <span className="spinner"/> : `Generate 20 Images (~$1.40)`}
               </button>
-              <button className="btn btn-sm" onClick={autoZipTrainingImages} disabled={loading==='zip'}>
+              <button className="btn btn-sm" onClick={autoZipTrainingImages} disabled={!selectedChar || loading==='zip'}>
                 {loading==='zip' ? <span className="spinner"/> : 'Auto-Zip for Training'}
               </button>
             </div>
@@ -1736,7 +1768,7 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost, active
           Test your trained LoRA by generating images with a prompt. The character should look consistent.
         </p>
         <div style={{display:'flex',gap:8,marginBottom:12}}>
-          <input type="text" placeholder="Test prompt (e.g., 'THERA_BOY standing on a mountain top')" value={testPrompt} onChange={e => setTestPrompt(e.target.value)} style={{flex:1}} />
+          <input type="text" placeholder="Test prompt (use subset trigger word from trained LoRA)" value={testPrompt} onChange={e => setTestPrompt(e.target.value)} style={{flex:1}} />
           <button className="btn" onClick={testLora} disabled={loading==='test'}>
             {loading==='test' ? <span className="spinner"/> : 'Generate Test'}
           </button>
@@ -1791,6 +1823,10 @@ function App() {
   const setProjectIdSync = useCallback((id) => {
     projectIdRef.current = id;
     setProjectId(id);
+    try {
+      if (id) sessionStorage.setItem('studio_project_id', id);
+      else sessionStorage.removeItem('studio_project_id');
+    } catch (e) {}
   }, []);
 
   const [activePresetId, setActivePresetId] = useState(() => {

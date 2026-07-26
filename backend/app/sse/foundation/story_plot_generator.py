@@ -9,8 +9,11 @@ core_character_foundation.md Section V.
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # --- Grok Imagine prompt suffixes (core_character_foundation.md §V) ---
 
@@ -108,9 +111,9 @@ async def generate(
         keys = preset_character_keys(pid)
         if keys:
             casting_hint = "characters: " + ", ".join(keys[:8])
-    except Exception:
-        if pid != "thera_world_origin":
-            pid = "thera_world_origin"
+    except Exception as e:
+        # Keep requested subset id — never silently downgrade to Thera-World.
+        logger.warning("story_plot_generator: preset %s load failed: %s", pid, e)
 
     char_vis, cult_ctx = "figure, indeterminate presentation", ""
     if user_id and db_pool:
