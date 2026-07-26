@@ -2904,6 +2904,13 @@ async def generate_lora_training_set(
     refs = _char_refs(pid)
     ref = refs.get(character)
     if not ref:
+        # Resolve character across any Studio preset pack (R2 manifest may lag DB).
+        for try_pid, pack in CHARACTER_REFERENCES_BY_PRESET.items():
+            if character in pack:
+                pid = try_pid
+                ref = pack[character]
+                break
+    if not ref:
         raise ValueError(f"Unknown character: {character} for preset {pid}")
 
     style = _get_style_prefix(1, pid)

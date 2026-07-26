@@ -501,6 +501,11 @@ async def create_project(
             "INSERT INTO sse_studio_projects (project_id, title, scene_count, status, manifest, estimated_cost_cents) "
             "VALUES ($1, $2, $3, 'draft', $4::jsonb, $5)",
             project_id, title, len(scenes), json.dumps(manifest), estimated_cost)
+    try:
+        from app.sse.trailer_generator import _save_manifest_to_r2
+        await _save_manifest_to_r2(project_id, manifest)
+    except Exception as e:
+        logger.warning("[STUDIO] R2 manifest seed failed for %s: %s", project_id, e)
     return {"project_id": project_id, "title": title, "scene_count": len(scenes),
             "estimated_cost_cents": estimated_cost, "preset_id": preset_id}
 
@@ -888,13 +893,29 @@ async def generate_with_lora(prompt: str, lora_urls: list[str], width: int = 102
     return await generate_with_loras(prompt, lora_urls, width=width, height=height)
 
 
-async def generate_lora_training_images(character_key: str, project_id: str, redis=None) -> dict:
+async def generate_lora_training_images(
+    character_key: str,
+    project_id: str,
+    redis=None,
+    db_pool=None,
+    preset_id: str | None = None,
+) -> dict:
     """Generate a diverse set of training images for LoRA fine-tuning."""
     from app.sse.trailer_generator import generate_lora_training_set
+    pid = preset_id
+    if not pid and db_pool:
+        try:
+            proj = await get_project(project_id, db_pool)
+            man = (proj or {}).get("manifest") or {}
+            if isinstance(man, str):
+                man = json.loads(man)
+            pid = man.get("preset_id") or man.get("id")
+        except Exception as e:
+            logger.warning("[STUDIO] preset resolve from DB failed: %s", e)
     num_images = 20
     await _check_cost_budget(COST_PER_IMAGE_CENTS * num_images, redis)
     # project_id first — matches trailer_generator.generate_lora_training_set signature
-    results = await generate_lora_training_set(project_id, character_key)
+    results = await generate_lora_training_set(project_id, character_key, preset_id=pid)
     await _track_cost(COST_PER_IMAGE_CENTS * len(results), redis)
     return {"character": character_key, "images": results, "count": len(results)}
 

@@ -368,6 +368,7 @@ class LoraGenerateRequest(BaseModel):
 class LoraTrainingImagesRequest(BaseModel):
     character_key: str
     project_id: str
+    preset_id: str | None = None
 
 class VoiceOverrideRequest(BaseModel):
     project_id: str
@@ -418,7 +419,15 @@ async def lora_generate(body: LoraGenerateRequest):
 async def lora_training_images(body: LoraTrainingImagesRequest, request: Request, background_tasks: BackgroundTasks):
     from app.sse.studio_service import generate_lora_training_images
     redis = _get_redis(request)
-    background_tasks.add_task(generate_lora_training_images, body.character_key, body.project_id, redis)
+    db = _get_db(request)
+    background_tasks.add_task(
+        generate_lora_training_images,
+        body.character_key,
+        body.project_id,
+        redis,
+        db,
+        body.preset_id,
+    )
     return {"status": "started", "character": body.character_key,
             "message": "Generating 20 training images — ~2 minutes"}
 
