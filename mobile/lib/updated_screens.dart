@@ -48,6 +48,7 @@ import 'screens/onboarding_paid_screen.dart';
 import 'screens/community_mesh_screen.dart';
 import 'screens/sensitive_clinical_profile_screen.dart';
 import 'screens/high_risk_crisis_screens.dart';
+import 'screens/coach_pgsd_screen.dart';
 import 'screens/coach_portal_v2_complete.dart' show CoachQuickBooksTab;
 import 'screens/intake_form_coach_panel.dart';
 import 'screens/daily_reconnect_screen.dart';
@@ -16035,6 +16036,29 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               foregroundColor: const Color(0xFFFFD700),
             ),
             child: const Text("View Brief"),
+          ),
+          const SizedBox(width: 8),
+          // QUANTUM-CRYSTAL-ARCH — Tier 2 coach PGSD UI
+          OutlinedButton(
+            onPressed: id.isEmpty
+                ? null
+                : () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => CoachPgsdScreen(
+                          profile: widget.currentUserProfile,
+                          clientId: id,
+                          clientName: name,
+                        ),
+                      ),
+                    );
+                  },
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Color(0xFF4ECDC4)),
+              foregroundColor: const Color(0xFF4ECDC4),
+            ),
+            child: const Text("PGSD"),
           ),
         ],
       ),

@@ -4486,6 +4486,14 @@ try:
 except Exception as _sbt_err:
     print(f"   ⚠️  sensitive_bridge_telemetry_api router failed: {_sbt_err}")
 
+# QUANTUM-CRYSTAL-ARCH — Tier 2 coach PGSD REST (ACCESS/FIELD + pack)
+try:
+    from app.routers.pgsd_coach_api import router as pgsd_coach_router
+    app.include_router(pgsd_coach_router)
+    print("   ✅ pgsd_coach_api router mounted")
+except Exception as _pgsd_coach_err:
+    print(f"   ⚠️  pgsd_coach_api router failed: {_pgsd_coach_err}")
+
 
 # QUANTUM-CRYSTAL-ARCH: Client Data Export (HIPAA 45 CFR 164.524 Right of Access)
 # Phase 5 Gap N — survivor-facing sensitive-bridge data export with three

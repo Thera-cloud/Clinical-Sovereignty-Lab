@@ -1,6 +1,6 @@
-# Tier 2 Cross-Domain Battery (Design Spike)
+# Tier 2 Cross-Domain Battery
 
-**Status:** kickoff / substrate — **not** Narrow AGI certification.
+**Status:** scored pack runner (`tier2_pack_v1`) — certify via `clinical_tier2_narrow_agi_gate_check.py`.
 
 ## Domains
 
@@ -21,10 +21,18 @@
 ## Scoreboard
 
 - **v0:** `pgsd_cross_domain_agreement` (ACCESS refresh).
-- **v1 stub:** `tier2_domain_eval_runs` (migration 284) — designed/running/scored rows; no Sunday auto-act expansion.
+- **v1:** `tier2_domain_eval_runs` via `run_pack()` / `backend/scripts/tier2_run_domain_battery.py`.
 
 ## Code
 
-- Scaffold: `backend/app/services/tier2_cross_domain_battery.py`
-- Offline privacy: `backend/tests/test_tier2_privacy_walls.py`
-- Checklist: Track E.4 / E.5 in `docs/AGENTIC_ROLLOUT_CHECKLIST.md`
+- Runner: `backend/app/services/tier2_cross_domain_battery.py` → `run_pack`
+- Coach REST: `backend/app/routers/pgsd_coach_api.py`
+- Flutter: `mobile/lib/screens/coach_pgsd_screen.dart` (Briefings → PGSD)
+- Gate: `backend/scripts/clinical_tier2_narrow_agi_gate_check.py`
+- FIELD / Patent 12: `ENABLE_PGSD_FIELD` + `patent/PATENT_PROVISIONAL_12_QUANTUM_EMOTIONAL_FIELD.md` (container mirror: `backend/assets/patent/`)
+- Certify: `python /app/scripts/clinical_tier2_narrow_agi_gate_check.py` → **GREEN 2026-07-26** (pack `tier2-20260726T143926Z-9121f1e0`)
+
+```bash
+docker compose -f docker-compose.prod.yml exec -T -e PYTHONPATH=/app backend \
+  python /app/scripts/tier2_run_domain_battery.py CLIENT_LETSGOLISA_ID
+```

@@ -307,14 +307,14 @@ Fail-closed consent left **0/50** clients able to receive proactive touches. Sof
 | D.14a | Flywheel **infra** shipped: nightly+accel ON, cycle `sweep_and_predict`, gate script, journey doc | [x] `7356b3c0` — preds persist, θ trend rows write, judge smoke κ≈0.72 @ n=8 (**smoke only, not clinician calibration**); `WEEKLY_LIVE=false` |
 | D.14b | Tier-1 **certification** (clinical competence exit) | [x] **GREEN exit 2026-07-26.** Floor + κ≈0.699 + rater QWK≈0.732; soak **WAIVED** (`TIER1_SOAK_WAIVED`); CEO/self-dev reviewed; `SIX_QUOTIENT_WEEKLY_LIVE=true` on GREEN (Sunday live WS). Narrow AGI (Tier 2) next: Track E. See `docs/TIER1_HUMAN_GOLD_WORKSHEET.md`. |
 
-> **Naming:** Prefer **Tier 1 clinical competence** over “clinical AGI-class” until D.14b certified. Prefer **Tier 2 kickoff / substrate** over “Narrow AGI completed” until Track E.4–E.6 pass.
+> **Naming:** Prefer **Tier 1 clinical competence** over “clinical AGI-class” until D.14b certified. Prefer **Tier 2 Narrow AGI (substrate certified)** only after Track E.7–E.9 GREEN — not marketing AGI.
 
 Journey doc: `docs/CLINICAL_AGI_ASI_JOURNEY.md` · Gate: `backend/scripts/clinical_tier1_competence_gate_check.py` (wrapper: `clinical_agi_class_gate_check.py`)  
 Gold: `docs/TIER1_HUMAN_GOLD_WORKSHEET.md` · Claude packet: `docs/CLINICAL_AGI_CLASS_ASSESSMENT_FOR_CLAUDE_REVIEW.md` §11
 
 ---
 
-## Track E — Tier 2 Narrow AGI kickoff (substrate ≠ certification)
+## Track E — Tier 2 Narrow AGI (substrate certified 2026-07-26)
 
 | # | Item | Status |
 |---|------|--------|
@@ -322,10 +322,13 @@ Gold: `docs/TIER1_HUMAN_GOLD_WORKSHEET.md` · Claude packet: `docs/CLINICAL_AGI_
 | E.2 | LIVE_CONTEXT surface gate — therapy/`bridge_chat` only; no AQ `live_focus` bleed to family/DOJO/voice | [x] `get_live_addendum(surface=)`; tests in `test_six_quotient_live_context` / `test_tier2_privacy_walls` |
 | E.3 | PGSD briefing parity — `build_field_briefing` on chat + family + private/group + voice behind `ENABLE_PGSD_ACCESS` | [x] `append_field_briefing` on sanctuary/group/private/voice |
 | E.4 | Privacy walls — offline tests: no cross-member user-crystal recall; LIVE_CONTEXT empty on sanctuary | [x] `test_tier2_privacy_walls.py` |
-| E.5 | Cross-domain battery design spike — domains therapy/family/dojo/voice/ops; no Sunday auto-act expansion | [x] `tier2_cross_domain_battery.py` + mig 284 stub; see `docs/TIER2_CROSS_DOMAIN_BATTERY.md` — open until first scored pack |
-| E.6 | Agreement evidence — `pgsd_cross_domain_agreement` rows for test family; scored multi-domain pack later | [x] GREEN agreement=15 after refresh (multi-domain scored pack still open under E.5) |
+| E.5 | Cross-domain battery design spike — domains therapy/family/dojo/voice/ops; no Sunday auto-act expansion | [x] → **E.5b scored runner** `run_pack` / `tier2_run_domain_battery.py` |
+| E.6 | Agreement evidence — `pgsd_cross_domain_agreement` rows for test family; scored multi-domain pack later | [x] GREEN agreement rows + pack persistence |
+| E.7 | `ENABLE_PGSD_FIELD` + Patent 12 activation (wells/spectrum/ground) | [x] 2026-07-26 GREEN: FIELD=true; wells=63 ground_states=15; Patent 12 + `backend/assets/patent/` mirror |
+| E.8 | Coach Flutter PGSD UI (`CoachPgsdScreen` + `/api/coach/pgsd/*`) | [x] code + Flutter web deploy `v=2026.07.26.1041` |
+| E.9 | Tier 2 certify gate GREEN (`clinical_tier2_narrow_agi_gate_check.py`) | [x] 2026-07-26 GREEN — pack `tier2-20260726T143926Z-9121f1e0` 5/5 privacy_ok |
 
-PGSD wiring: `docs/PGSD_WIRING.md` · Queen tools: `query_pgsd_snapshot`, `query_pgsd_discernment`, `query_pgsd_cross_domain`
+PGSD wiring: `docs/PGSD_WIRING.md` · Queen tools: `query_pgsd_snapshot`, `query_pgsd_discernment`, `query_pgsd_cross_domain` · Patent 12: `patent/PATENT_PROVISIONAL_12_QUANTUM_EMOTIONAL_FIELD.md`
 
 ---
 
