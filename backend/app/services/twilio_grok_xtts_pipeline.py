@@ -415,6 +415,7 @@ async def _open_grok_session(system_prompt: str, silence_duration_ms: int = 700)
         extra_headers={"api-key": api_key},
         max_size=None,
     )
+    # SOVEREIGN-VOICE — Foundry rejects session.audio; use flat input_audio_format
     session_update = {
         "type": "session.update",
         "session": {
@@ -426,9 +427,7 @@ async def _open_grok_session(system_prompt: str, silence_duration_ms: int = 700)
                 "prefix_padding_ms": 300,
             },
             "modalities": ["text"],
-            "audio": {
-                "input": {"format": {"type": "audio/pcm", "rate": 16000}},
-            },
+            "input_audio_format": "pcm16",
         },
     }
     await ws.send(json.dumps(session_update))
@@ -448,15 +447,22 @@ def _extract_assistant_text(event: Dict[str, Any]) -> Optional[str]:
     t = event.get("type") or ""
     resp_id = event.get("response_id") or ""
 
-    if t in ("response.output_audio_transcript.delta",
-             "response.output_audio.delta"):
+    if t in (
+        "response.output_audio_transcript.delta",
+        "response.output_audio.delta",
+        "response.audio_transcript.delta",
+        "response.audio.delta",
+    ):
         return None
 
-    if t == "response.output_audio_transcript.done":
+    # Foundry/xAI emit both response.audio_transcript.done and response.output_audio_transcript.done
+    if t in ("response.output_audio_transcript.done", "response.audio_transcript.done"):
         if resp_id and resp_id in _spoken_response_ids:
             print(f"[GROK-DEDUP] skipping duplicate audio transcript resp={resp_id[:12]}")
             return None
         txt = (event.get("transcript") or event.get("text") or "").strip()
+        if not resp_id:
+            resp_id = (event.get("response") or {}).get("id") or ""
         if txt and resp_id:
             _spoken_response_ids.add(resp_id)
         return txt or None
@@ -483,15 +489,19 @@ def _extract_assistant_text(event: Dict[str, Any]) -> Optional[str]:
         for item in out:
             if isinstance(item, dict):
                 for part in item.get("content") or []:
-                    if isinstance(part, dict) and part.get("type") in (
-                        "output_text",
-                        "text",
-                    ):
+                    if not isinstance(part, dict):
+                        continue
+                    ptype = part.get("type") or ""
+                    if ptype in ("output_text", "text"):
                         tx = (part.get("text") or "").strip()
-                        if tx:
-                            if r_id:
-                                _spoken_response_ids.add(r_id)
-                            return tx
+                    elif ptype in ("audio_transcript", "output_audio_transcript"):
+                        tx = (part.get("transcript") or part.get("text") or "").strip()
+                    else:
+                        tx = ""
+                    if tx:
+                        if r_id:
+                            _spoken_response_ids.add(r_id)
+                        return tx
     return None
 
 
@@ -1426,8 +1436,14 @@ async def run_twilio_grok_xtts_bridge(
                 _grok_event_count += 1
                 if _grok_event_count <= 10 or _grok_event_count % 50 == 0:
                     print(f"[GROK-LISTENER] event #{_grok_event_count}: {et}")
-                if et in ("response.output_text.delta", "response.output_audio.delta",
-                          "response.output_audio_transcript.delta", "ping"):
+                if et in (
+                    "response.output_text.delta",
+                    "response.output_audio.delta",
+                    "response.output_audio_transcript.delta",
+                    "response.audio.delta",
+                    "response.audio_transcript.delta",
+                    "ping",
+                ):
                     continue
                 if et == "error":
                     logger.warning("Grok realtime error event: %s", ev)
@@ -1664,6 +1680,23 @@ async def run_twilio_grok_xtts_bridge(
                     ctx["username"] = uname
                     session_username = uname
 
+                # SOVEREIGN-VOICE — coach-requested check-in: resolve callback ANI → task
+                try:
+                    if not ctx.get("coach_checkin_task_id") and ctx.get("db_pool"):
+                        from app.services.coach_nate_checkin_service import CoachNateCheckinService
+                        _ck = CoachNateCheckinService(ctx.get("db_pool"), ctx.get("app_state"))
+                        _from = (ctx.get("from_number") or ctx.get("caller") or ctx.get("phone") or "").strip()
+                        if _from:
+                            _task = await _ck.resolve_inbound_by_phone(_from)
+                            if _task:
+                                ctx["coach_checkin_task_id"] = int(_task["id"])
+                                ctx["is_callback"] = True
+                                ctx["username"] = _task.get("client_username") or uname
+                                uname = ctx["username"]
+                                session_username = uname
+                except Exception as _cke:
+                    logger.debug("coach checkin inbound resolve: %s", _cke)
+
                 # Patent 11: init Neural Mirror now that username is known
                 if NeuralMirrorSession and session_username and not _neural_mirror:
                     try:
@@ -1697,7 +1730,20 @@ async def run_twilio_grok_xtts_bridge(
                     asyncio.create_task(_record_ec_snapshot("start"))
 
                 _voice_db = ctx.get("db_pool")
-                if _voice_db and uname:
+                # SOVEREIGN-VOICE — coach check-in uses cold/warm prompt (PHI gated)
+                _coach_ck_prompt = None
+                if ctx.get("coach_checkin_task_id") and _voice_db:
+                    try:
+                        from app.services.coach_nate_checkin_service import CoachNateCheckinService
+                        _cksvc = CoachNateCheckinService(_voice_db, ctx.get("app_state"))
+                        _coach_ck_prompt = await _cksvc.pipeline_bootstrap_prompt(ctx)
+                        await _cksvc.maybe_start_voice_recheck(ctx, session_call_sid or "", _voice_db)
+                    except Exception as _cke2:
+                        logger.warning("coach checkin prompt: %s", _cke2)
+                if _coach_ck_prompt:
+                    instructions = _coach_ck_prompt
+                    _session_crystal_scopes = []
+                elif _voice_db and uname:
                     try:
                         instructions, _session_crystal_scopes = await _build_grounded_voice_prompt(
                             uname, _voice_db
