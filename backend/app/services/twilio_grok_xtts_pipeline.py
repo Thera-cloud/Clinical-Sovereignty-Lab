@@ -1356,6 +1356,7 @@ async def run_twilio_grok_xtts_bridge(
     _tts_playback_started = False  # SOVEREIGN-VOICE — ignore barge-in until audio is sending
     _tts_playback_t0 = 0.0  # SOVEREIGN-VOICE — anti-echo grace clock
     _barge_speech_frames = 0  # SOVEREIGN-VOICE — require sustained speech to cut TTS
+    _silence_companion = None  # SOVEREIGN-VOICE — quiet check-in companion
 
     async def _on_grok_text(response_text: str) -> None:
         nonlocal _greeting_spoken, _nate_speaking, _tts_playback_started, _barge_speech_frames
@@ -1366,6 +1367,8 @@ async def run_twilio_grok_xtts_bridge(
         _tts_playback_started = False
         _barge_speech_frames = 0
         _nate_speaking = True
+        if _silence_companion:
+            _silence_companion.set_nate_speaking(True)
         assistant_turns.append({"text": text, "ts": datetime.now(timezone.utc).isoformat()})
         # SOVEREIGN-VOICE — sync avatar expression to linked app
         if _voice_sync:
@@ -1404,6 +1407,8 @@ async def run_twilio_grok_xtts_bridge(
             _nate_speaking = False
             _tts_playback_started = False
             _barge_speech_frames = 0
+            if _silence_companion:
+                _silence_companion.set_nate_speaking(False)
 
     _grok_event_count = 0
     _media_chunk_count = 0
@@ -1476,10 +1481,13 @@ async def run_twilio_grok_xtts_bridge(
                 if _grok_event_count <= 10 or _grok_event_count % 50 == 0:
                     print(f"[GROK-LISTENER] event #{_grok_event_count}: {et}")
                 # SOVEREIGN-VOICE — barge-in: stop TTS + reopen mic when caller speaks
-                if et == "input_audio_buffer.speech_started" and _nate_speaking:
-                    _tts_cancel.set()
-                    _nate_speaking = False
-                    print("[VOICE] barge-in: caller speech_started")
+                if et == "input_audio_buffer.speech_started":
+                    if _silence_companion:
+                        _silence_companion.note_client_speech()
+                    if _nate_speaking:
+                        _tts_cancel.set()
+                        _nate_speaking = False
+                        print("[VOICE] barge-in: caller speech_started")
                 if et in (
                     "response.output_text.delta",
                     "response.output_audio.delta",
@@ -1516,6 +1524,8 @@ async def run_twilio_grok_xtts_bridge(
                 if user_txt:
                     print(f"[VOICE-USER] '{user_txt[:120]}'")
                     user_turns.append({"text": user_txt, "ts": datetime.now(timezone.utc).isoformat()})
+                    if _silence_companion:
+                        _silence_companion.note_client_speech()
                     # SOVEREIGN-VOICE — GA hardening: detection-only bridge sweep (flag-gated)
                     if _SB_VOICE_SWEEP and session_username and ctx.get("db_pool"):
                         try:
@@ -1835,6 +1845,17 @@ async def run_twilio_grok_xtts_bridge(
                     # Start call duration limit timer
                     if ctx.get("max_call_seconds") and not _call_limit_task:
                         _call_limit_task = asyncio.create_task(_enforce_call_limit())
+                    # SOVEREIGN-VOICE — quiet check-in companion (20–30s silence stays)
+                    if not _silence_companion:
+                        try:
+                            from app.services.voice_silence_companion import (
+                                attach_silence_companion,
+                            )
+                            _silence_companion = attach_silence_companion(
+                                ctx, _on_grok_text, client_name=ctx.get("name") or uname or ""
+                            )
+                        except Exception as _sc_e:
+                            logger.warning("silence companion start failed: %s", _sc_e)
                     # Greeting handled by Polly TwiML <Say> before stream connects.
                     # Grok listens passively until the caller speaks.
                 except Exception as e:
@@ -1930,6 +1951,12 @@ async def run_twilio_grok_xtts_bridge(
         if session_start:
             duration_s = time.monotonic() - session_start
 
+        if _silence_companion:
+            try:
+                _silence_companion.stop()
+            except Exception:
+                pass
+            _silence_companion = None
         if _call_limit_task and not _call_limit_task.done():
             _call_limit_task.cancel()
             try:
