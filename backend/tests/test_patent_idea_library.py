@@ -27,13 +27,16 @@ def _ensure_pkg(name: str, path: Path) -> None:
 
 
 def _load(name: str, path: Path):
-    _ensure_pkg("app", APP.parent if APP.name == "app" else APP)
+    """Load module under a unique name — never overwrite live app.* sys.modules entries.
+
+    Overwriting app.websocket.cli_dual_coo leaves a stale package attribute and breaks
+    other suites that patch _redis on the real module (full CI gate).
+    """
+    _ensure_pkg("app", APP)
     _ensure_pkg("app.services", APP / "services")
-    _ensure_pkg("app.websocket", APP / "websocket")
-    if "app" not in sys.modules or not getattr(sys.modules["app"], "__path__", None):
-        app_mod = types.ModuleType("app")
-        app_mod.__path__ = [str(APP)]  # type: ignore[attr-defined]
-        sys.modules["app"] = app_mod
+    # Pre-register real library engine under its import path so reflection engine
+    # `from app.services.patent_idea_library_engine import ...` resolves without
+    # pulling app.services.__init__ (numpy).
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -42,16 +45,20 @@ def _load(name: str, path: Path):
     return mod
 
 
+# Unique names — do not clobber app.websocket.cli_dual_coo
 _lib = _load(
-    "app.services.patent_idea_library_engine",
+    "patent_test_idea_library_engine",
     APP / "services" / "patent_idea_library_engine.py",
 )
+sys.modules["app.services.patent_idea_library_engine"] = _lib
+
 _refl = _load(
-    "app.services.patent_reflection_engine",
+    "patent_test_reflection_engine",
     APP / "services" / "patent_reflection_engine.py",
 )
+
 _cli = _load(
-    "app.websocket.cli_dual_coo",
+    "patent_test_cli_dual_coo",
     APP / "websocket" / "cli_dual_coo.py",
 )
 
