@@ -32693,6 +32693,15 @@ async def main():
     asyncio.create_task(_token_redis_health_loop())
     asyncio.create_task(_balance_sync_listener())
 
+    # SOVEREIGN-VOICE — phone→avatar expression relay (Redis pubsub → WS)
+    try:
+        from app.websocket.voice_avatar_relay import start_voice_avatar_relay
+        if _token_redis_sync and os.environ.get("ENABLE_VOICE_AVATAR_SYNC", "").lower() in ("1", "true", "yes"):
+            await start_voice_avatar_relay(lambda: cortex.sockets, _token_redis_sync)
+            print("[*] Voice avatar relay started (ENABLE_VOICE_AVATAR_SYNC)")
+    except Exception as _var_err:
+        print(f"[!] Voice avatar relay failed: {_var_err}")
+
     # Run Night School on startup (async background task)
     asyncio.create_task(night_school.start_session())
 

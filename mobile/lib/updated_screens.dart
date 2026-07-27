@@ -2077,6 +2077,22 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
             }
           }
         }
+      } else if (data['type'] == 'voice_avatar_expression') {
+        // SOVEREIGN-VOICE — phone call linked to on-screen avatar
+        final serverAvatar = data['avatar_state'];
+        if (_avatarModeEnabled && serverAvatar is Map && serverAvatar['expression'] != null) {
+          final expr = _guardMisMirror(avatarExpressionFromServer(
+              serverAvatar['expression'].toString()));
+          _preferServerAvatar = true;
+          _updateAvatarExpression(expr);
+          final speaking = serverAvatar['speaking'] == true;
+          if (mounted) {
+            setState(() {
+              _voiceState =
+                  speaking ? VoiceState.speaking : VoiceState.listening;
+            });
+          }
+        }
       } else if (data['type'] == 'cycle_skill_plan_update') {
         final status = (data['status'] as String?)?.trim() ?? '';
         final cleared = data['cleared'] == true ||

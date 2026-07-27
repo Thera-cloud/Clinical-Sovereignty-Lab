@@ -228,10 +228,23 @@ async def inbound_call(request: Request):
             media_type="application/xml",
         )
 
-    # 5. Completely unknown caller — capture lead + send signup SMS
+    # 5. Completely unknown caller — optional guest live intro (safe space)
+    # SOVEREIGN-VOICE — ENABLE_VOICE_GUEST_INTRO connects stream instead of hangup
+    _guest_intro = os.getenv("ENABLE_VOICE_GUEST_INTRO", "false").lower() in ("1", "true", "yes")
     is_new = await billing.record_lead(phone)
     if is_new:
         asyncio.create_task(_send_new_caller_sms(phone))
+    if _guest_intro:
+        logger.info("Guest intro stream for unknown phone %s", phone[:6])
+        return Response(
+            content=_twiml_connect({
+                "guest_mode": "true",
+                "voice_billing_user_id": f"guest_{phone[-4:] if len(phone) >= 4 else phone}",
+                "max_call_seconds": "180",
+                "admin_bypass": "true",
+            }),
+            media_type="application/xml",
+        )
 
     return Response(
         content=_twiml_say(

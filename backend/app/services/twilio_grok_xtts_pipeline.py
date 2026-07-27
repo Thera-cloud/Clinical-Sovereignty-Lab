@@ -66,6 +66,13 @@ try:
 except ImportError:
     SecureSearchProxy = None  # type: ignore[assignment,misc]
 
+# SOVEREIGN-VOICE — identity / emotion pace / avatar sync (flag-gated)
+try:
+    from app.services.voice_call_sync import attach_voice_sync
+except ImportError:
+    async def attach_voice_sync(ctx, call_sid, username, instructions):  # type: ignore[misc]
+        return None, instructions
+
 logger = logging.getLogger("nate.twilio_grok_xtts")
 
 XTTS_URL = os.getenv("XTTS_URL", "http://37.27.244.80:8100/synthesize").strip().rstrip("/")
@@ -388,7 +395,7 @@ async def _synthesize_edge_tts_fallback(text: str) -> Optional[bytes]:
         return None
 
 
-async def _open_grok_session(system_prompt: str):
+async def _open_grok_session(system_prompt: str, silence_duration_ms: int = 700):
     """Connect to Azure Foundry Grok Realtime and send session.update."""  # SOVEREIGN-VOICE
     import websockets
 
@@ -396,6 +403,7 @@ async def _open_grok_session(system_prompt: str):
     if not api_key or not _AZ_REALTIME_URL:
         raise RuntimeError("AZURE_API_KEY or AZURE_OPENAI_ENDPOINT not set for voice")
 
+    _sil = max(500, min(1500, int(silence_duration_ms or 700)))  # SOVEREIGN-VOICE pacing
     print(f"[VOICE] Connecting to Azure Foundry Realtime: {_AZ_REALTIME_URL[:60]}...")
     ws = await websockets.connect(
         _AZ_REALTIME_URL,
@@ -408,7 +416,7 @@ async def _open_grok_session(system_prompt: str):
             "instructions": system_prompt,
             "turn_detection": {
                 "type": "server_vad",
-                "silence_duration_ms": 700,
+                "silence_duration_ms": _sil,
                 "threshold": 0.5,
                 "prefix_padding_ms": 300,
             },
@@ -1265,6 +1273,7 @@ async def run_twilio_grok_xtts_bridge(
 
     # Patent 11: Neural Mirror session (initialized after username is known)
     _neural_mirror = None
+    _voice_sync = None  # SOVEREIGN-VOICE — VoiceCallSyncSession
 
     async def _record_ec_snapshot(reason: str) -> None:
         try:
@@ -1315,6 +1324,10 @@ async def run_twilio_grok_xtts_bridge(
             return
         _nate_speaking = True
         assistant_turns.append({"text": text, "ts": datetime.now(timezone.utc).isoformat()})
+        # SOVEREIGN-VOICE — sync avatar expression to linked app
+        if _voice_sync:
+            _ut = user_turns[-1]["text"] if user_turns else ""
+            asyncio.create_task(_voice_sync.on_nate_text(text, _ut))
         async with tts_serial:
             tts_task = asyncio.create_task(
                 _synthesize_with_fallback(text, "connect", xtts_to_mulaw_state)
@@ -1481,6 +1494,9 @@ async def run_twilio_grok_xtts_bridge(
                         print("[BACKCHANNEL] enabled after first user speech")
                     if voice_crystallization_enabled:
                         asyncio.create_task(_record_ec_snapshot("turn"))
+                    # SOVEREIGN-VOICE — identity probe + VAD pace update
+                    if _voice_sync and grok_ws is not None:
+                        await _voice_sync.apply_user_turn(grok_ws, user_txt)
 
                     if _is_memory_query(user_txt) and _search_dedup.should_search(user_txt) and session_username and ctx.get("db_pool"):
                         print(f"[VOICE-DEEP-SEARCH] memory query detected: '{user_txt[:80]}'")
@@ -1707,10 +1723,16 @@ async def run_twilio_grok_xtts_bridge(
                     nm_injection = _neural_mirror.get_prompt_injection()
                     if nm_injection:
                         instructions += "\n\n" + nm_injection
+                # SOVEREIGN-VOICE — identity / pace / avatar sync session
+                nonlocal _voice_sync
+                _voice_sync, instructions = await attach_voice_sync(
+                    ctx, session_call_sid or "", uname or "", instructions
+                )
                 try:
                     print(f"[VOICE-MEMORY] instructions length={len(instructions)} chars")
                     print(f"[VOICE-MEMORY] instructions preview: {instructions[-300:]}")
-                    grok_ws = await _open_grok_session(instructions)
+                    _sil = _voice_sync.silence_ms() if _voice_sync else 700
+                    grok_ws = await _open_grok_session(instructions, silence_duration_ms=_sil)
                     grok_task = asyncio.create_task(grok_listener())
                     # Backchannel stays DISABLED until after Grok's first response
                     print(
@@ -1753,6 +1775,8 @@ async def run_twilio_grok_xtts_bridge(
                     if _neural_mirror and is_speech:
                         mirror_state = _neural_mirror.on_audio_chunk(mulaw_chunk)
                     # Backchannel clips disabled — causes double-talk collisions
+                if _voice_sync and pcm_chunk:  # SOVEREIGN-VOICE
+                    _voice_sync.feed_audio(pcm_chunk)
 
                 if not _nate_speaking:
                     try:
@@ -2058,6 +2082,13 @@ async def run_twilio_grok_xtts_bridge(
                     await redis.delete(f"nate:call_context:{session_call_sid}")
             except Exception:
                 pass
+
+            # SOVEREIGN-VOICE — finalize identity enrollment + avatar idle
+            if _voice_sync:
+                try:
+                    await _voice_sync.finalize()
+                except Exception as _vs_f:
+                    logger.debug("VoiceCallSync finalize: %s", _vs_f)
 
         print(f"[TWILIO-GROK-XTTS] session closed — {duration_s:.0f}s")
 
