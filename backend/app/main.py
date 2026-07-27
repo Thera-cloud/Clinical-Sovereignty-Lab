@@ -3413,6 +3413,18 @@ async def lifespan(app: FastAPI):
     except Exception as _cda_err:
         print(f"   ⚠️  CeoDualCooAuditor init failed: {_cda_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — Little Nate 7 identity + harness (request-response, no background loop)
+    _ln7_engine_ok = False
+    try:
+        from app.services.little_nate_7 import ln7_enabled, PRODUCT_NAME
+        from app.websocket import ln7_harness as _ln7_harness_mod  # noqa: F401
+        _ln7_engine_ok = True
+        app.state.ln7_engine = {"product": PRODUCT_NAME, "enabled": ln7_enabled()}
+        print(f"   ✅ {PRODUCT_NAME} identity + harness ready (enabled={ln7_enabled()})")
+    except Exception as _ln7_err:
+        print(f"   ⚠️  Little Nate 7 init failed: {_ln7_err}")
+        app.state.ln7_engine = None
+
     # SSE: Sovereign Story Engine Orchestrator
     _sse_orchestrator = None
     try:
@@ -3549,6 +3561,7 @@ async def lifespan(app: FastAPI):
         ("voice_call_center_agent", _voice_call_center is not None),  # SOVEREIGN-VOICE
         ("voice_infra_auditor", _voice_infra_auditor is not None),  # SOVEREIGN-VOICE
         ("ceo_dual_coo_auditor", _ceo_dual_coo_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("ln7_engine", _ln7_engine_ok),  # QUANTUM-CRYSTAL-ARCH — Little Nate 7
         ("identity_engine", _identity_engine_ok),  # QUANTUM-CRYSTAL-ARCH
         ("littlenate_inference", getattr(app.state, "littlenate_inference", None) is not None),
         ("nate_memory_crystallizer", getattr(app.state, "nate_memory_crystallizer", None) is not None),
@@ -4222,6 +4235,13 @@ try:
     app.include_router(ln_sandbox_router)
 except Exception as _ln_sb_rerr:
     print(f"   ⚠️  LN Sandbox router failed: {_ln_sb_rerr}")
+
+# QUANTUM-CRYSTAL-ARCH — Little Nate 7 sovereign coding API
+try:
+    from app.routers.ln7_api import router as ln7_router
+    app.include_router(ln7_router)
+except Exception as _ln7_rerr:
+    print(f"   ⚠️  LN7 router failed: {_ln7_rerr}")
 
 # Coherence Engine (Sovereign Swarm)
 app.include_router(coherence_api.router)

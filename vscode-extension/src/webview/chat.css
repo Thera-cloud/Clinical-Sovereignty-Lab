@@ -102,6 +102,16 @@ body {
 .model-select option:disabled {
   color: var(--text-secondary);
 }
+.model-counts {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .refresh-models-btn {
   background: transparent;
   border: 1px solid var(--border);

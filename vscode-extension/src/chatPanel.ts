@@ -41,6 +41,7 @@ export class ChatPanel {
   private _selectedSpace = '';
   private _selectedProvider = '';
   private _modelRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  private _lastModelCatalog: HostToWebviewMessage | null = null;
   private _buildState: BuildPanelState = {
     isBuilding: false,
     phase: 'idle',
@@ -142,7 +143,11 @@ export class ChatPanel {
         bridge_target: this.bridge.bridgeTarget || 'cloud',
         cli_type: this.bridge.cliType,
       });
-      this.requestModelCatalog(false);
+      // Replay last catalog immediately (avoids race where WS reply arrived before attach)
+      if (this._lastModelCatalog) {
+        webview.postMessage(this._lastModelCatalog);
+      }
+      this.requestModelCatalog(true);
     }, 150);
   }
 
@@ -198,7 +203,7 @@ export class ChatPanel {
         break;
 
       case 'requestModels':
-        this.requestModelCatalog(false);
+        this.requestModelCatalog(true);
         break;
 
       case 'refreshModels':
@@ -529,18 +534,24 @@ export class ChatPanel {
         bridge_target: this.bridge.bridgeTarget || 'cloud',
         cli_type: this.bridge.cliType,
       });
-      this.requestModelCatalog(false);
+      this.requestModelCatalog(true);
       this.startModelAutoRefresh();
     });
 
     this.bridge.on('cli_models', (msg: InboundCliModels) => {
-      this.sendToWebview({
+      const payload: HostToWebviewMessage = {
         cmd: 'modelCatalog',
         models: msg.models || [],
         default_model: msg.default_model,
         default_space: msg.default_space,
+        ln7_revised_at: msg.ln7_revised_at,
         bridge_target: this.bridge.bridgeTarget || 'cloud',
-      });
+        counts: msg.counts || msg.picker_counts,
+        picker_counts: msg.picker_counts,
+        errors: msg.errors,
+      };
+      this._lastModelCatalog = payload;
+      this.sendToWebview(payload);
     });
 
     this.bridge.on('cli_models_error', (msg: { error?: string }) => {

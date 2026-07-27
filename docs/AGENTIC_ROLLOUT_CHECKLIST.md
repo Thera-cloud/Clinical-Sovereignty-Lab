@@ -339,7 +339,7 @@ PGSD wiring: `docs/PGSD_WIRING.md` · Queen tools: `query_pgsd_snapshot`, `query
 |---|------|--------|
 | F.1 | Containment contract — no unsupervised GREEN weight/prompt writes; CEO gate on self-dev RED | [ ] docs + kill-switch review |
 | F.2 | Formal verify harness — held-out novel problem bank + external scorer (not self-κ) | [ ] design |
-| F.3 | Sovereign train offline path (ORANGE/Home GPU) with promotion gate to prod | [ ] design |
+| F.3 | Sovereign train offline path (ORANGE/Home GPU) with promotion gate to prod | [~] in build — Little Nate 7 (`docs/ln7/RUNBOOK.md`, migration 291) |
 | F.4 | Runtime monitors + sandbox detonation for any self-modify experiment | [ ] ops |
 | F.5 | Explicit non-claim: Tier 3 ≠ public AGI marketing until F.1–F.4 green | [x] journey 2026-07-26 |
 

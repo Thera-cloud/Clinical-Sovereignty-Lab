@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Mine LN7 coding tasks from git history (bug-fix commits with tests).
+
+Emits task JSON for ln7_tasks insert. License allowlist enforced at mine time.
+Usage:
+  python backend/scripts/ln7_mine_tasks.py --repo . --limit 50 --out /tmp/ln7_tasks.jsonl
+
+# QUANTUM-CRYSTAL-ARCH
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+PERMISSIVE = frozenset({
+    "MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unlicense", "0BSD",
+})
+
+_TEST_HINT = re.compile(r"(test_|_test\.|tests/|pytest|spec\.)", re.I)
+
+
+def _run(cmd, cwd: Path) -> str:
+    p = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True)
+    return p.stdout or ""
+
+
+def detect_spdx(repo: Path) -> str:
+    for name in ("LICENSE", "LICENSE.md", "COPYING"):
+        p = repo / name
+        if not p.is_file():
+            continue
+        text = p.read_text(encoding="utf-8", errors="ignore")[:4000].lower()
+        if "mit license" in text:
+            return "MIT"
+        if "apache license" in text:
+            return "Apache-2.0"
+        if "bsd" in text:
+            return "BSD-3-Clause"
+        if "isc license" in text:
+            return "ISC"
+    return ""
+
+
+def mine(repo: Path, limit: int = 100) -> list:
+    spdx = detect_spdx(repo)
+    if spdx and spdx not in PERMISSIVE:
+        print(f"REFUSE: non-permissive license {spdx}", file=sys.stderr)
+        return []
+    if not spdx:
+        print("WARN: no SPDX detected — tagging as unknown (excluded from train)", file=sys.stderr)
+
+    log = _run(
+        ["git", "log", "--pretty=format:%H%x09%s", "--name-only", f"-n{limit * 3}"],
+        repo,
+    )
+    tasks = []
+    current_hash = None
+    current_subj = ""
+    files: list = []
+    for line in log.splitlines():
+        if not line.strip():
+            if current_hash and files:
+                if any(_TEST_HINT.search(f) for f in files) and any(
+                    f.endswith((".py", ".ts", ".js", ".dart", ".go", ".rs")) for f in files
+                ):
+                    blob = f"{current_hash}:{current_subj}:{','.join(sorted(files))}"
+                    th = hashlib.sha256(blob.encode()).hexdigest()
+                    difficulty = "hard" if len(files) > 8 else ("medium" if len(files) > 3 else "easy")
+                    # Hold out every 5th task
+                    split = "heldout" if (len(tasks) % 5 == 4) else "train"
+                    if spdx and spdx not in PERMISSIVE:
+                        continue
+                    if not spdx and split == "train":
+                        split = "eval"  # quarantine unknown license from train
+                    tasks.append({
+                        "task_id": f"mined_{current_hash[:12]}",
+                        "source": "mined",
+                        "difficulty": difficulty,
+                        "task_hash": th,
+                        "split": split,
+                        "spdx_license": spdx or None,
+                        "prompt_summary": current_subj[:300],
+                        "metadata_json": {
+                            "commit": current_hash,
+                            "files": files[:40],
+                        },
+                    })
+                    if len(tasks) >= limit:
+                        break
+            current_hash = None
+            files = []
+            continue
+        if "\t" in line and len(line.split("\t")[0]) == 40:
+            current_hash, current_subj = line.split("\t", 1)
+            files = []
+        else:
+            files.append(line.strip())
+    return tasks
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--repo", default=".")
+    ap.add_argument("--limit", type=int, default=100)
+    ap.add_argument("--out", default="-")
+    args = ap.parse_args()
+    repo = Path(args.repo).resolve()
+    tasks = mine(repo, limit=args.limit)
+    out = sys.stdout if args.out == "-" else open(args.out, "w", encoding="utf-8")
+    try:
+        for t in tasks:
+            out.write(json.dumps(t) + "\n")
+    finally:
+        if args.out != "-":
+            out.close()
+    print(f"mined {len(tasks)} tasks", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

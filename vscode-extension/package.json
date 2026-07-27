@@ -2,7 +2,7 @@
   "name": "sovereign-sanctuary",
   "displayName": "Sovereign Sanctuary — Little Nate",
   "description": "AI-powered development assistant with multi-mode CLI chat, inline diff review, and debug instrumentation.",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "publisher": "sovereign-sanctuary",
   "license": "UNLICENSED",
   "engines": {
@@ -109,7 +109,8 @@
       "sovereignAgent": [
         {
           "id": "sovereignAgentChat",
-          "name": "Little Nate CLI"
+          "name": "Little Nate CLI",
+          "type": "webview"
         }
       ]
     },

@@ -55,6 +55,10 @@ _SOVEREIGN_MODEL = os.getenv("SOVEREIGN_MODEL", "llama3.1:8b-instruct-q4_K_M")
 _SOVEREIGN_MODEL_FAST = os.getenv("SOVEREIGN_MODEL_FAST", "llama3.1:8b-instruct-q4_K_M")
 _SOVEREIGN_MODEL_MID = os.getenv("SOVEREIGN_MODEL_MID", "qwen2.5:14b-instruct-q4_K_M")
 _SOVEREIGN_MODEL_DEEP = os.getenv("SOVEREIGN_MODEL_DEEP", "qwen2.5:32b-instruct-q4_K_M")
+# QUANTUM-CRYSTAL-ARCH — LN7 coder-class weights (do not reuse clinical SOVEREIGN_MODEL_*)
+_LN7_CODE_MODEL_FAST = os.getenv("LN7_CODE_MODEL_FAST", "qwen2.5-coder:7b-instruct")
+_LN7_CODE_MODEL_MID = os.getenv("LN7_CODE_MODEL_MID", "qwen2.5-coder:14b-instruct-q5_K_M")
+_LN7_CODE_MODEL_DEEP = os.getenv("LN7_CODE_MODEL_DEEP", "qwen2.5-coder:32b-instruct-q5_K_M")
 _WORKERS_AI_URL = os.getenv("WORKERS_AI_URL", "")
 _WORKERS_AI_TOKEN = os.getenv("WORKERS_AI_TOKEN", "")
 _WORKERS_AI_MODEL = os.getenv("WORKERS_AI_MODEL", "@cf/meta/llama-3.1-8b-instruct")
@@ -128,8 +132,28 @@ class NateInferenceRouter:
         except Exception as e:
             logger.warning("SASE outbound check failed (allowing): %s", e)
 
-    def _resolve_sovereign_model(self, odpe_signal: Optional[str], allow_deep: bool = False) -> str:
-        """ODPE-driven three-tier model selection: 8B (fast) / 14B (mid) / 32B (deep)."""
+    def _resolve_sovereign_model(
+        self,
+        odpe_signal: Optional[str],
+        allow_deep: bool = False,
+        *,
+        tier: str = TIER_ANALYTICAL,
+        domain: Optional[str] = None,
+    ) -> str:
+        """ODPE-driven three-tier model selection: 8B (fast) / 14B (mid) / 32B (deep).
+
+        Coding tier / domain uses LN7 coder-class weights (q5 floor), not general instruct.
+        """
+        # QUANTUM-CRYSTAL-ARCH — LN7 coder path
+        if tier == TIER_CODING or (domain or "").lower() == "coding":
+            if odpe_signal in ("LOCKED", "PROMOTED"):
+                return _LN7_CODE_MODEL_FAST
+            if odpe_signal == "DEEP_TENSION" and allow_deep:
+                return _LN7_CODE_MODEL_DEEP
+            if odpe_signal in ("TENSION", "LIMINAL_RESOLVE", "PROVISIONAL", "DEEP_TENSION"):
+                return _LN7_CODE_MODEL_MID
+            return _LN7_CODE_MODEL_MID
+
         if odpe_signal in ("LOCKED", "PROMOTED"):
             return _SOVEREIGN_MODEL_FAST
         elif odpe_signal == "DEEP_TENSION" and allow_deep:
@@ -177,7 +201,9 @@ class NateInferenceRouter:
             else:
                 tier = TIER_CLINICAL
 
-        sovereign_model = self._resolve_sovereign_model(odpe_signal, allow_deep)
+        sovereign_model = self._resolve_sovereign_model(
+            odpe_signal, allow_deep, tier=tier, domain=domain,
+        )
 
         if temperature is None:
             temperature = DOMAIN_TEMPERATURES.get(domain or "general", 0.6)
@@ -306,8 +332,8 @@ class NateInferenceRouter:
 
     async def _call_sovereign(self, messages, temperature, max_tokens, model: str = "") -> Dict:
         selected_model = model or _SOVEREIGN_MODEL_FAST
-        timeout_secs = 30 if selected_model == _SOVEREIGN_MODEL_FAST else 60
-        if selected_model == _SOVEREIGN_MODEL_DEEP:
+        timeout_secs = 30 if selected_model in (_SOVEREIGN_MODEL_FAST, _LN7_CODE_MODEL_FAST) else 60
+        if selected_model in (_SOVEREIGN_MODEL_DEEP, _LN7_CODE_MODEL_DEEP):
             timeout_secs = 120
 
         url = f"{_SOVEREIGN_URL}/v1/chat/completions"

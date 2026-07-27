@@ -40,6 +40,7 @@
   const planClearBtn = document.getElementById('planClearBtn');
   const modelSelect = document.getElementById('modelSelect');
   const cliBadge = document.getElementById('cliBadge');
+  const modelCounts = document.getElementById('modelCounts');
   const refreshModelsBtn = document.getElementById('refreshModelsBtn');
 
   let selectedModelId = '';
@@ -75,23 +76,30 @@
     const defId = (defaults && defaults.default_model) || '';
     const defSpace = (defaults && defaults.default_space) || 'foundry';
 
-    const groups = { cli: [], foundry: [], xai: [] };
+    const groups = { ln7: [], contestant: [], cli: [], foundry: [], xai: [] };
     catalogModels.forEach((m) => {
       const space = m.space || 'cli';
       if (!groups[space]) groups[space] = [];
       groups[space].push(m);
     });
 
-    const labels = { cli: 'CLI defaults', foundry: 'Azure Foundry', xai: 'xAI' };
+    const labels = {
+      ln7: 'Little Nate 7 (Sovereign)',
+      contestant: 'Contestants',
+      cli: 'CLI defaults',
+      foundry: 'Azure Foundry',
+      xai: 'xAI',
+    };
     let html = '';
-    ['cli', 'foundry', 'xai'].forEach((space) => {
+    ['ln7', 'contestant', 'cli', 'foundry', 'xai'].forEach((space) => {
       const rows = groups[space] || [];
       if (!rows.length) return;
-      html += `<optgroup label="${labels[space]}">`;
+      html += `<optgroup label="${labels[space] || space}">`;
       rows.forEach((m) => {
         const disabled = m.agent_eligible === false ? ' disabled' : '';
         const tag = m.agent_eligible === false ? ' (non-agent)' : '';
-        html += `<option value="${escAttr(m.id)}" data-space="${escAttr(space)}" data-provider="${escAttr(m.provider || '')}"${disabled}>${escHtml(m.label || m.id)}${tag}</option>`;
+        const rev = m.revised_at ? ` @${m.revised_at}` : '';
+        html += `<option value="${escAttr(m.id)}" data-space="${escAttr(space)}" data-provider="${escAttr(m.provider || '')}"${disabled}>${escHtml(m.label || m.id)}${escHtml(rev)}${tag}</option>`;
       });
       html += '</optgroup>';
     });
@@ -111,6 +119,23 @@
       }
     }
     syncSelectedModel(defSpace);
+
+    if (modelCounts) {
+      const pc = (defaults && defaults.picker_counts) || {};
+      const nLn7 = pc.ln7 != null ? pc.ln7 : (groups.ln7 || []).length;
+      const nCli = pc.cli != null ? pc.cli : (groups.cli || []).length;
+      const nF = pc.foundry != null ? pc.foundry : (groups.foundry || []).length;
+      const nX = pc.xai != null ? pc.xai : (groups.xai || []).length;
+      const revHint = (defaults && defaults.ln7_revised_at) ? ` · LN7@${defaults.ln7_revised_at}` : '';
+      modelCounts.textContent = `LN7 ${nLn7} · F${nF} · X${nX} · C${nCli}${revHint}`;
+      modelCounts.title = `Little Nate 7 ${nLn7} · Azure Foundry ${nF} · xAI ${nX} · CLI ${nCli} — open the dropdown to pick`;
+    }
+    if (cliBadge && defaults && defaults.ln7_revised_at) {
+      const base = cliBadge.textContent || '';
+      if (!base.includes('LN7@')) {
+        cliBadge.textContent = (base ? base + ' · ' : '') + 'LN7@' + defaults.ln7_revised_at;
+      }
+    }
   }
 
   function syncSelectedModel(fallbackSpace) {
@@ -354,8 +379,24 @@
         renderModelCatalog(msg.models || [], {
           default_model: msg.default_model,
           default_space: msg.default_space,
+          ln7_revised_at: msg.ln7_revised_at,
+          picker_counts: msg.picker_counts || msg.counts,
         });
         if (msg.bridge_target) setCliBadge(msg.bridge_target);
+        {
+          const pc = msg.picker_counts || msg.counts || {};
+          const nF = pc.foundry || 0;
+          const nX = pc.xai || 0;
+          if ((msg.models || []).length) {
+            appendStatusMessage(
+              'Models loaded: Foundry ' + nF + ', xAI ' + nX +
+              ', CLI ' + (pc.cli || 0) + ' — open the model dropdown'
+            );
+          }
+          if (msg.errors && msg.errors.length) {
+            appendStatusMessage('Catalog warnings: ' + msg.errors.join('; '));
+          }
+        }
         break;
 
       case 'ask_user_prompt':

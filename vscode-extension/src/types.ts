@@ -48,10 +48,12 @@ export interface InboundCliModels {
   refreshed_at?: number;
   ttl_s?: number;
   counts?: Record<string, number>;
+  picker_counts?: Record<string, number>;
   errors?: string[];
   spaces?: string[];
   default_model?: string;
   default_space?: string;
+  ln7_revised_at?: string;
 }
 
 export interface InboundCliModelsError {
@@ -414,6 +416,10 @@ export interface HostToWebviewMessage {
   models?: CatalogModel[];
   default_model?: string;
   default_space?: string;
+  ln7_revised_at?: string;
+  counts?: Record<string, number>;
+  picker_counts?: Record<string, number>;
+  errors?: string[];
   question_id?: string;
   question?: string;
   question_type?: string;

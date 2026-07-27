@@ -1,0 +1,370 @@
+"""Little Nate 7 coding harness — retrieve → best-of-N → static gate → sandbox → repair.
+
+Zero vendor calls on the LN7 path. Reuses cli_symbol_store, cli_subagent_hive,
+cli_task_bus, ln_sandbox_engineering_ci.
+
+# QUANTUM-CRYSTAL-ARCH
+"""
+from __future__ import annotations
+
+import ast
+import asyncio
+import hashlib
+import logging
+import os
+import re
+import time
+from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger("ln7_harness")
+
+_SECRET_RE = re.compile(
+    r"(?i)(api[_-]?key|secret|password|token)\s*[:=]\s*['\"][^'\"]{8,}",
+)
+
+
+def kill_switch_on() -> bool:
+    return os.getenv("LN7_KILL_SWITCH", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def best_of_n() -> int:
+    return max(1, min(8, int(os.getenv("LN7_BEST_OF_N", "4") or "4")))
+
+
+def max_repair_rounds() -> int:
+    return max(0, min(6, int(os.getenv("LN7_MAX_REPAIR_ROUNDS", "3") or "3")))
+
+
+def candidate_timeout_s() -> float:
+    return float(os.getenv("LN7_CANDIDATE_TIMEOUT_S", "90") or "90")
+
+
+def max_attempts() -> int:
+    return max(1, min(10, int(os.getenv("LN7_MAX_ATTEMPTS", "4") or "4")))
+
+
+def harness_mode() -> str:
+    m = (os.getenv("LN7_MODE", "max") or "max").strip().lower()
+    return "fast" if m == "fast" else "max"
+
+
+def _ast_hash(text: str) -> str:
+    try:
+        tree = ast.parse(text)
+        dump = ast.dump(tree, annotate_fields=False)
+    except Exception:
+        dump = text
+    return hashlib.sha256(dump.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def static_gate(diff_text: str, *, max_diff_lines: int = 400) -> Tuple[bool, str]:
+    """Reject before sandbox spend: size, secrets, empty."""
+    if not (diff_text or "").strip():
+        return False, "empty_diff"
+    lines = diff_text.splitlines()
+    if len(lines) > max_diff_lines:
+        return False, f"diff_too_large:{len(lines)}"
+    if _SECRET_RE.search(diff_text):
+        return False, "secret_pattern"
+    # Disallow path escapes outside pack
+    for line in lines:
+        if line.startswith("+++ ") or line.startswith("--- "):
+            path = line[4:].strip().split("\t")[0]
+            if path.startswith("/") or ".." in path:
+                return False, f"path_escape:{path}"
+    return True, "ok"
+
+
+async def retrieve_context(
+    query: str,
+    *,
+    workspace_root: Optional[str] = None,
+    k: int = 8,
+) -> Dict[str, Any]:
+    """Symbol-store + optional crystal recall; returns text + recall@k telemetry stub."""
+    chunks: List[str] = []
+    recall_hits = 0
+    try:
+        from app.websocket.cli_symbol_store import search_symbols  # type: ignore
+        hits = await asyncio.to_thread(search_symbols, query, k) if callable(search_symbols) else []
+        if isinstance(hits, list):
+            for h in hits[:k]:
+                if isinstance(h, dict):
+                    chunks.append(str(h.get("snippet") or h.get("text") or h))
+                else:
+                    chunks.append(str(h))
+            recall_hits = len(chunks)
+    except Exception as exc:
+        logger.debug("LN7 retrieve symbols: %s", exc)
+    try:
+        # AST-boundary hint: keep function/class-sized snippets when possible
+        refined = []
+        for c in chunks:
+            if "def " in c or "class " in c:
+                refined.append(c[:4000])
+            else:
+                refined.append(c[:2000])
+        chunks = refined or chunks
+    except Exception:
+        pass
+    return {
+        "context": "\n\n".join(chunks),
+        "recall_at_k": recall_hits / max(1, k),
+        "k": k,
+        "hit_count": recall_hits,
+    }
+
+
+async def propose_candidates(
+    prompt: str,
+    *,
+    system: str,
+    n: Optional[int] = None,
+    mode: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """N candidates at varied temperature via sovereign coder weights."""
+    if kill_switch_on():
+        return []
+    n = n or (2 if (mode or harness_mode()) == "fast" else best_of_n())
+    try:
+        from app.services.little_nate_7 import coder_model, identity_system_preamble
+        from app.services.nate_inference_router import NateInferenceRouter, TIER_CODING
+    except Exception as exc:
+        logger.warning("LN7 propose import failed: %s", exc)
+        return []
+
+    router = NateInferenceRouter()
+    sys_full = identity_system_preamble() + "\n\n" + (system or "")
+    temps = [0.1, 0.3, 0.5, 0.7][:n]
+    while len(temps) < n:
+        temps.append(0.4)
+    model_tier = "fast" if (mode or harness_mode()) == "fast" else "deep"
+    _ = coder_model(model_tier)  # pin for logging
+
+    async def _one(temp: float, idx: int) -> Dict[str, Any]:
+        t0 = time.time()
+        try:
+            result = await asyncio.wait_for(
+                router.generate(
+                    prompt=prompt,
+                    system=sys_full,
+                    tier=TIER_CODING,
+                    domain="coding",
+                    temperature=temp,
+                    max_tokens=4096,
+                    odpe_signal="TENSION",
+                    allow_deep=(model_tier == "deep"),
+                ),
+                timeout=candidate_timeout_s(),
+            )
+            text = (result or {}).get("text") or ""
+            return {
+                "index": idx,
+                "temperature": temp,
+                "text": text,
+                "ast_hash": _ast_hash(text),
+                "provider": (result or {}).get("provider"),
+                "model": (result or {}).get("model"),
+                "tokens": (result or {}).get("tokens_used") or 0,
+                "latency_ms": int((time.time() - t0) * 1000),
+                "ok": bool(text.strip()),
+            }
+        except Exception as exc:
+            return {
+                "index": idx,
+                "temperature": temp,
+                "text": "",
+                "ast_hash": "",
+                "error": str(exc)[:200],
+                "ok": False,
+                "latency_ms": int((time.time() - t0) * 1000),
+            }
+
+    results = await asyncio.gather(*[_one(temps[i], i) for i in range(n)])
+    # Dedupe by AST hash
+    seen = set()
+    deduped: List[Dict[str, Any]] = []
+    for r in results:
+        h = r.get("ast_hash") or ""
+        if h and h in seen:
+            continue
+        if h:
+            seen.add(h)
+        if r.get("ok"):
+            deduped.append(r)
+    return deduped
+
+
+def extract_diff(text: str) -> str:
+    """Pull unified diff from model output if fenced."""
+    if not text:
+        return ""
+    try:
+        from app.services.ln_sandbox_engineering_ci import _extract_unified_diff, _strip_fences
+        d = _extract_unified_diff(text)
+        if d:
+            return d
+        return _strip_fences(text)
+    except Exception:
+        m = re.search(r"```(?:diff)?\n([\s\S]*?)```", text)
+        return (m.group(1) if m else text).strip()
+
+
+async def run_sandbox_candidate(
+    pack_name: str,
+    diff_text: str,
+) -> Dict[str, Any]:
+    """Apply diff to a materialized pack and pytest."""
+    try:
+        from app.services import ln_sandbox_engineering_ci as ci
+    except Exception as exc:
+        return {"passed": False, "error": f"ci_import:{exc}"}
+
+    ok_gate, note = static_gate(diff_text)
+    if not ok_gate:
+        return {"passed": False, "error": f"static_gate:{note}", "score": 0.0}
+
+    workdir, task, mat_note = ci.materialize_pack(pack_name)
+    if not workdir or not task:
+        return {"passed": False, "error": mat_note or "materialize_failed", "score": 0.0}
+
+    try:
+        applied, apply_msg = ci.apply_unified_diff(workdir, diff_text)
+        if not applied:
+            return {"passed": False, "error": f"apply_failed:{apply_msg}", "score": 0.05}
+        test_path = task.get("test_path") or "tests"
+        result = await asyncio.to_thread(ci.run_pytest, workdir, test_path, candidate_timeout_s())
+        score = ci.score_from_pytest(result)
+        return {
+            "passed": bool(result.get("passed")),
+            "score": score.get("score", 0.0),
+            "log": (result.get("log") or "")[-2000:],
+            "diff_lines": len(diff_text.splitlines()),
+            "pack": pack_name,
+        }
+    finally:
+        try:
+            import shutil
+            shutil.rmtree(workdir, ignore_errors=True)
+        except Exception:
+            pass
+
+
+async def repair_loop(
+    prompt: str,
+    *,
+    system: str,
+    pack_name: str,
+    failing_log: str,
+    prior_diff: str,
+    mode: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Bounded repair: feed stderr back, re-propose, re-verify."""
+    rounds = max_repair_rounds()
+    last: Dict[str, Any] = {"passed": False}
+    for r in range(rounds):
+        if kill_switch_on():
+            return {"passed": False, "error": "kill_switch", "round": r}
+        repair_prompt = (
+            f"{prompt}\n\n---\nPrevious patch failed tests. Fix it.\n"
+            f"FAILING LOG:\n{failing_log[-3000:]}\n\n"
+            f"PREVIOUS DIFF:\n{prior_diff[:4000]}\n"
+            "Return a complete corrected unified diff only."
+        )
+        cands = await propose_candidates(repair_prompt, system=system, n=1, mode=mode)
+        if not cands:
+            break
+        diff = extract_diff(cands[0].get("text") or "")
+        last = await run_sandbox_candidate(pack_name, diff)
+        last["round"] = r + 1
+        last["diff"] = diff
+        if last.get("passed"):
+            return last
+        failing_log = last.get("log") or failing_log
+        prior_diff = diff
+    return last
+
+
+async def run_task(
+    prompt: str,
+    *,
+    pack_name: Optional[str] = None,
+    system: str = "",
+    mode: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Full harness cycle for one task. Returns best survivor + metrics."""
+    if kill_switch_on():
+        return {"ok": False, "error": "kill_switch", "generator": "ln7"}
+
+    t0 = time.time()
+    mode = mode or harness_mode()
+    retrieval = await retrieve_context(prompt)
+    sys = (system or "") + (
+        f"\n\nRETRIEVED CONTEXT (recall@k={retrieval.get('recall_at_k'):.2f}):\n"
+        f"{retrieval.get('context') or '(none)'}"
+    )
+
+    pack = pack_name
+    if not pack:
+        try:
+            from app.services.ln_sandbox_engineering_ci import list_pack_names
+            names = list_pack_names()
+            pack = names[0] if names else None
+        except Exception:
+            pack = None
+    if not pack:
+        return {"ok": False, "error": "no_pack", "generator": "ln7"}
+
+    candidates = await propose_candidates(prompt, system=sys, mode=mode)
+    ranked: List[Dict[str, Any]] = []
+    attempts = 0
+    for cand in candidates:
+        attempts += 1
+        if attempts > max_attempts():
+            break
+        diff = extract_diff(cand.get("text") or "")
+        outcome = await run_sandbox_candidate(pack, diff)
+        outcome["candidate_index"] = cand.get("index")
+        outcome["diff"] = diff
+        outcome["tokens"] = cand.get("tokens") or 0
+        ranked.append(outcome)
+        if outcome.get("passed"):
+            break
+
+    best = None
+    for o in ranked:
+        if o.get("passed"):
+            best = o
+            break
+    if not best and ranked:
+        best = max(ranked, key=lambda x: float(x.get("score") or 0))
+
+    if best and not best.get("passed") and best.get("diff"):
+        repaired = await repair_loop(
+            prompt,
+            system=sys,
+            pack_name=pack,
+            failing_log=best.get("log") or "",
+            prior_diff=best.get("diff") or "",
+            mode=mode,
+        )
+        if repaired.get("passed") or float(repaired.get("score") or 0) > float(best.get("score") or 0):
+            best = repaired
+            attempts += int(repaired.get("round") or 1)
+
+    return {
+        "ok": bool(best and best.get("passed")),
+        "generator": "ln7",
+        "harness_mode": mode,
+        "pack": pack,
+        "passed": bool(best and best.get("passed")),
+        "score": (best or {}).get("score", 0.0),
+        "diff": (best or {}).get("diff") or "",
+        "diff_lines": (best or {}).get("diff_lines") or 0,
+        "attempts": attempts,
+        "candidates": len(candidates),
+        "recall_at_k": retrieval.get("recall_at_k"),
+        "latency_ms": int((time.time() - t0) * 1000),
+        "tokens": sum(int(c.get("tokens") or 0) for c in candidates),
+        "log": ((best or {}).get("log") or "")[-1500:],
+    }

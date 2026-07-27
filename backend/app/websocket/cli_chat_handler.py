@@ -93,13 +93,19 @@ def _ensure_grok_config():
         _GROK_KEY = os.getenv("NATE_CHAT_KEY", os.getenv("AZURE_API_KEY", ""))
         _GROK_URL = os.getenv("NATE_CHAT_URL", "")
         _GROK_MODEL = os.getenv("NATE_CHAT_MODEL", "grok-4-1-fast-non-reasoning")
-    # Phase A0: LN-FAB/DEBUG prefer NATE_CLI_REASONING_MODEL, else NATE_CLI_CODE_MODEL
-    _GROK_REASONING_MODEL = (
-        os.getenv("NATE_CLI_REASONING_MODEL")
-        or os.getenv("NATE_CLI_CODE_MODEL")
-        or os.getenv("NATE_CHAT_REASONING_MODEL")
-        or ""
-    )
+    # Phase A0 / LN7: contestant coding model — never use broken Foundry alias grok-4.5
+    try:
+        from app.services.little_nate_7 import contestant_reasoning_model
+        _GROK_REASONING_MODEL = contestant_reasoning_model()
+    except Exception:
+        _GROK_REASONING_MODEL = (
+            os.getenv("NATE_CLI_REASONING_MODEL")
+            or os.getenv("NATE_CLI_CODE_MODEL")
+            or os.getenv("NATE_CHAT_REASONING_MODEL")
+            or "grok-4-1-fast-reasoning"
+        )
+        if (_GROK_REASONING_MODEL or "").strip().lower() in ("grok-4.5", "grok4.5"):
+            _GROK_REASONING_MODEL = os.getenv("NATE_CHAT_MODEL", "grok-4-1-fast-reasoning")
 
 
 _CLI_REDIS = None
@@ -1770,6 +1776,26 @@ async def _stream_with_tools(
     if _sel:
         sel_prov = str(_sel.get("provider") or "")
         sel_model = str(_sel.get("model") or grok_model)
+        if sel_prov == "ln7":
+            # Little Nate 7 — local coder weights; inject identity preamble
+            try:
+                from app.services.little_nate_7 import identity_system_preamble
+                preamble = identity_system_preamble()
+                if messages_for_api and messages_for_api[0].get("role") == "system":
+                    messages_for_api[0]["content"] = (
+                        preamble + "\n\n" + (messages_for_api[0].get("content") or "")
+                    )
+                else:
+                    messages_for_api.insert(0, {"role": "system", "content": preamble})
+            except Exception:
+                pass
+            if _sel.get("url"):
+                return await _do_stream(
+                    _sel["url"], _sel.get("headers") or {"Content-Type": "application/json"},
+                    sel_model, "ln7",
+                )
+            # No SOVEREIGN_INFERENCE_URL — fall through to contestant path with warning
+            logger.warning("LN7 selected but SOVEREIGN_INFERENCE_URL unset — contestant fallback")
         if sel_prov == "xai" and _sel.get("url") and _sel.get("headers"):
             return await _do_stream(_sel["url"], _sel["headers"], sel_model, "xai")
         if sel_prov == "azure":

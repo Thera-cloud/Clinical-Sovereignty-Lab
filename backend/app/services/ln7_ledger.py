@@ -1,0 +1,178 @@
+"""LN7 outcome ledger helpers — eval isolation, license gates, learning promo.
+
+# QUANTUM-CRYSTAL-ARCH
+"""
+from __future__ import annotations
+
+import hashlib
+import logging
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger("ln7_ledger")
+
+try:
+    from app.services.little_nate_7 import PERMISSIVE_SPDX
+except Exception:
+    PERMISSIVE_SPDX = frozenset({"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unlicense"})
+
+
+def task_hash(payload: str) -> str:
+    return hashlib.sha256((payload or "").encode("utf-8", errors="replace")).hexdigest()
+
+
+def license_allowed_for_training(spdx: Optional[str]) -> bool:
+    if not spdx:
+        return False
+    return spdx.strip() in PERMISSIVE_SPDX
+
+
+async def get_task_split(db_pool, task_hash_val: str) -> Optional[str]:
+    if not db_pool:
+        return None
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT split FROM ln7_tasks WHERE task_hash = $1 LIMIT 1",
+                task_hash_val,
+            )
+        return row["split"] if row else None
+    except Exception as exc:
+        logger.warning("LN7 get_task_split: %s", exc)
+        return None
+
+
+async def assert_train_eligible(db_pool, task_hash_val: str) -> bool:
+    """Mechanical eval isolation — heldout/eval never enter learning repo."""
+    split = await get_task_split(db_pool, task_hash_val)
+    if split in ("heldout", "eval"):
+        return False
+    return True
+
+
+async def record_outcome(db_pool, row: Dict[str, Any]) -> Optional[int]:
+    if not db_pool:
+        return None
+    try:
+        async with db_pool.acquire() as conn:
+            oid = await conn.fetchval(
+                """
+                INSERT INTO ln7_coding_outcomes (
+                    task_id, generator, revision_id, harness_mode, patch_hash,
+                    passed, tests_passed, diff_lines, tokens, latency_ms,
+                    cost_usd, recall_at_k, exec_node, metrics_json
+                ) VALUES (
+                    $1, $2, $3, $4, $5,
+                    $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14::jsonb
+                ) RETURNING id
+                """,
+                row.get("task_id"),
+                row.get("generator") or "ln7",
+                row.get("revision_id"),
+                row.get("harness_mode"),
+                row.get("patch_hash"),
+                bool(row.get("passed")),
+                row.get("tests_passed"),
+                row.get("diff_lines"),
+                row.get("tokens"),
+                row.get("latency_ms"),
+                row.get("cost_usd"),
+                row.get("recall_at_k"),
+                row.get("exec_node") or "green",
+                __import__("json").dumps(row.get("metrics_json") or {}),
+            )
+        return int(oid) if oid is not None else None
+    except Exception as exc:
+        logger.warning("LN7 record_outcome: %s", exc)
+        return None
+
+
+async def promote_learning_artifact(
+    db_pool,
+    *,
+    outcome_id: int,
+    path_or_r2_key: str,
+    summary: str,
+    task_hash_val: str,
+    spdx_license: Optional[str],
+    crystal_id: Optional[str] = None,
+) -> bool:
+    if not await assert_train_eligible(db_pool, task_hash_val):
+        logger.info("LN7 learning reject: task_hash in heldout/eval")
+        return False
+    if not license_allowed_for_training(spdx_license):
+        logger.info("LN7 learning reject: non-permissive license %s", spdx_license)
+        return False
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO ln7_learning_artifacts (
+                    outcome_id, path_or_r2_key, summary, crystal_id, spdx_license, task_hash
+                ) VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                outcome_id,
+                path_or_r2_key,
+                summary,
+                crystal_id,
+                spdx_license,
+                task_hash_val,
+            )
+        return True
+    except Exception as exc:
+        logger.warning("LN7 promote_learning: %s", exc)
+        return False
+
+
+async def record_usage_event(db_pool, event_type: str, **kwargs) -> bool:
+    if event_type not in ("accepted", "rejected", "edited_after_apply"):
+        return False
+    if not db_pool:
+        return False
+    try:
+        import json
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO ln7_usage_event (
+                    event_type, patch_hash, content_hash, revision_id,
+                    workspace_hint, metadata_json
+                ) VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                """,
+                event_type,
+                kwargs.get("patch_hash"),
+                kwargs.get("content_hash"),
+                kwargs.get("revision_id"),
+                kwargs.get("workspace_hint"),
+                json.dumps(kwargs.get("metadata_json") or {}),
+            )
+        return True
+    except Exception as exc:
+        logger.warning("LN7 usage_event: %s", exc)
+        return False
+
+
+async def leaderboard(db_pool, *, days: int = 30) -> List[Dict[str, Any]]:
+    if not db_pool:
+        return []
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT generator,
+                       COUNT(*) AS n,
+                       AVG(CASE WHEN passed THEN 1.0 ELSE 0.0 END) AS pass_rate,
+                       AVG(latency_ms) AS avg_latency_ms,
+                       AVG(COALESCE(cost_usd, 0)) AS avg_cost_usd,
+                       AVG(COALESCE(recall_at_k, 0)) AS avg_recall
+                FROM ln7_coding_outcomes
+                WHERE created_at > NOW() - ($1::int * INTERVAL '1 day')
+                GROUP BY generator
+                ORDER BY pass_rate DESC NULLS LAST, n DESC
+                """,
+                days,
+            )
+        return [dict(r) for r in rows]
+    except Exception as exc:
+        logger.warning("LN7 leaderboard: %s", exc)
+        return []

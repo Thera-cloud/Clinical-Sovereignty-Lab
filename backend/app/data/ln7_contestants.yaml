@@ -1,0 +1,24 @@
+# Little Nate 7 contestant registry (bakeoff only — never inside LN7 path)
+# Enable a row only when URL + key + model_id are configured.
+# QUANTUM-CRYSTAL-ARCH
+contestants:
+  - contestant_id: foundry_grok
+    display_name: Foundry Grok
+    provider: foundry
+    model_id: grok-4-1-fast-reasoning
+    enabled: false
+  - contestant_id: xai_grok
+    display_name: xAI Grok
+    provider: xai
+    model_id: grok-4
+    enabled: false
+  - contestant_id: fable_5
+    display_name: Fable 5
+    provider: fable
+    model_id: fable-5
+    enabled: false
+  - contestant_id: mythos_5
+    display_name: Mythos 5
+    provider: mythos
+    model_id: mythos-5
+    enabled: false

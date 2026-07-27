@@ -18,7 +18,7 @@
 | Qualifying nights ≥7 | **WAIVED** 2026-07-26 (`TIER1_SOAK_WAIVED=true`; was 4/7 — calendar fuse, not skill). Nightly measure remains on. |
 | `WEEKLY_LIVE` | **ON** GREEN 2026-07-26 (CEO/self-dev reviewed; Sunday 06–07 UTC live WS; AQ live_focus until next CEO APPROVE) |
 | Tier 2 Narrow AGI | **SUBSTRATE CERTIFIED (2026-07-26)** + harden path (v2 surface_hits, multi-family, Queen FIELD CLI, helix hint). Not open-domain AGI. |
-| Tier 3 AGI | **OPEN / Track F kickoff (2026-07-26)** — novel problems + gated self-improve; sovereign train + formal verify. No unsupervised GREEN weight writes. |
+| Tier 3 AGI | **OPEN / Track F kickoff (2026-07-26)** — novel problems + gated self-improve; sovereign train + formal verify. No unsupervised GREEN weight writes. Coding-domain instance: **Little Nate 7** (Track F.3 in build) — not clinical Tier progress. |
 
 ## Honesty rule (Tier 0)
 
