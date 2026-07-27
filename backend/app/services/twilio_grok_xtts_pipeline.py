@@ -428,6 +428,8 @@ async def _open_grok_session(system_prompt: str, silence_duration_ms: int = 700)
             },
             "modalities": ["text"],
             "input_audio_format": "pcm16",
+            # SOVEREIGN-VOICE — enable user STT for crystallize / SI / barge-in coaching
+            "input_audio_transcription": {"model": "whisper-1"},
         },
     }
     await ws.send(json.dumps(session_update))
@@ -508,17 +510,22 @@ def _extract_assistant_text(event: Dict[str, Any]) -> Optional[str]:
 def _extract_user_text(event: Dict[str, Any]) -> Optional[str]:
     """Best-effort extraction of user transcripts from realtime events."""
     t = event.get("type") or ""
-    if t in ("input_audio_buffer.transcript.done", "conversation.item.input_audio_transcription.completed"):
+    # SOVEREIGN-VOICE — Foundry/OpenAI transcription completed variants
+    if t in (
+        "input_audio_buffer.transcript.done",
+        "conversation.item.input_audio_transcription.completed",
+    ) or t.endswith("input_audio_transcription.completed"):
         txt = (event.get("transcript") or event.get("text") or "").strip()
         return txt or None
     if t == "conversation.item.created":
         item = event.get("item") or {}
         if item.get("role") == "user":
             for part in item.get("content") or []:
-                if isinstance(part, dict) and part.get("type") in ("input_text", "text"):
-                    tx = (part.get("text") or "").strip()
-                    if tx:
-                        return tx
+                if not isinstance(part, dict):
+                    continue
+                tx = (part.get("transcript") or part.get("text") or "").strip()
+                if tx and part.get("type") in ("input_text", "text", "input_audio"):
+                    return tx
     return None
 
 
@@ -1316,6 +1323,9 @@ async def run_twilio_grok_xtts_bridge(
             return
         async with speaking:
             for i in range(0, len(mulaw_out), _TWILIO_MULAW_CHUNK):
+                if _tts_cancel.is_set():  # SOVEREIGN-VOICE barge-in
+                    print("[VOICE] barge-in — stop TTS playback")
+                    return
                 chunk = mulaw_out[i : i + _TWILIO_MULAW_CHUNK]
                 msg = {
                     "event": "media",
@@ -1331,12 +1341,14 @@ async def run_twilio_grok_xtts_bridge(
                     await asyncio.sleep(0.018)
 
     _nate_speaking = False
+    _tts_cancel = asyncio.Event()  # SOVEREIGN-VOICE barge-in
 
     async def _on_grok_text(response_text: str) -> None:
         nonlocal _greeting_spoken, _nate_speaking
         text = (response_text or "").strip()
         if not text:
             return
+        _tts_cancel.clear()
         _nate_speaking = True
         assistant_turns.append({"text": text, "ts": datetime.now(timezone.utc).isoformat()})
         # SOVEREIGN-VOICE — sync avatar expression to linked app
@@ -1344,6 +1356,9 @@ async def run_twilio_grok_xtts_bridge(
             _ut = user_turns[-1]["text"] if user_turns else ""
             asyncio.create_task(_voice_sync.on_nate_text(text, _ut))
         async with tts_serial:
+            if _tts_cancel.is_set():
+                _nate_speaking = False
+                return
             tts_task = asyncio.create_task(
                 _synthesize_with_fallback(text, "connect", xtts_to_mulaw_state)
             )
@@ -1353,13 +1368,13 @@ async def run_twilio_grok_xtts_bridge(
                 )
             except asyncio.TimeoutError:
                 filler = await _get_filler_mulaw(xtts_to_mulaw_state)
-                if filler:
+                if filler and not _tts_cancel.is_set():
                     print("[TWILIO-GROK-XTTS] filler played while waiting for TTS")
                     filler_counts["connect"] = filler_counts.get("connect", 0) + 1
                     await _send_mulaw_to_twilio(filler)
                 mulaw_out = await tts_task
 
-            if mulaw_out:
+            if mulaw_out and not _tts_cancel.is_set():
                 print(f"[TWILIO-GROK-XTTS] synthesized {len(mulaw_out)} bytes μ-law for Twilio")
                 await _send_mulaw_to_twilio(mulaw_out)
         if not _greeting_spoken:
@@ -1402,7 +1417,7 @@ async def run_twilio_grok_xtts_bridge(
             pass
 
     async def grok_listener() -> None:
-        nonlocal _grok_event_count
+        nonlocal _grok_event_count, _nate_speaking
         if grok_ws is None:
             return
         print("[GROK-LISTENER] started")
@@ -1436,6 +1451,11 @@ async def run_twilio_grok_xtts_bridge(
                 _grok_event_count += 1
                 if _grok_event_count <= 10 or _grok_event_count % 50 == 0:
                     print(f"[GROK-LISTENER] event #{_grok_event_count}: {et}")
+                # SOVEREIGN-VOICE — barge-in: stop TTS + reopen mic when caller speaks
+                if et == "input_audio_buffer.speech_started" and _nate_speaking:
+                    _tts_cancel.set()
+                    _nate_speaking = False
+                    print("[VOICE] barge-in: caller speech_started")
                 if et in (
                     "response.output_text.delta",
                     "response.output_audio.delta",
@@ -1817,14 +1837,19 @@ async def run_twilio_grok_xtts_bridge(
                     continue
 
                 # Patent 8: Turn detection on mulaw audio (backchannel DISABLED)
+                chunk_energy = sum(abs(b - 0xFF) for b in mulaw_chunk) / max(len(mulaw_chunk), 1)
+                is_speech = chunk_energy > 45
                 if _turn_detector or _neural_mirror:
-                    chunk_energy = sum(abs(b - 0xFF) for b in mulaw_chunk) / max(len(mulaw_chunk), 1)
-                    is_speech = chunk_energy > 45
                     if _turn_detector:
                         _turn_detector.on_audio_frame(chunk_energy, is_speech, _media_chunk_count * 20.0)
                     if _neural_mirror and is_speech:
                         mirror_state = _neural_mirror.on_audio_chunk(mulaw_chunk)
                     # Backchannel clips disabled — causes double-talk collisions
+                # SOVEREIGN-VOICE — local barge-in (mic gated while Nate speaks → Grok VAD blind)
+                if _nate_speaking and is_speech:
+                    _tts_cancel.set()
+                    _nate_speaking = False
+                    print("[VOICE] barge-in: local energy")
                 if _voice_sync and pcm_chunk:  # SOVEREIGN-VOICE
                     _voice_sync.feed_audio(pcm_chunk)
 
