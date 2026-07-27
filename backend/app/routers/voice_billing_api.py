@@ -152,6 +152,28 @@ async def inbound_call(request: Request):
 
     logger.info("Inbound call from %s (normalized: %s)", From[:8], phone[:6])
 
+    # SOVEREIGN-VOICE — hybrid PAUSED redial (Redis, 5min; no voice_accounts required)
+    try:
+        from app.services.api_server import _get_auth_redis
+        from app.services.voice_hybrid_resume import peek_hybrid_pause
+
+        _hr = await _get_auth_redis()
+        _hp = await peek_hybrid_pause(_hr, phone) if _hr else None
+        if _hp and _hp.get("username"):
+            logger.info("Hybrid PAUSED resume for %s → %s", phone[:6], _hp["username"])
+            return Response(
+                content=_twiml_connect({
+                    "username": str(_hp["username"]),
+                    "admin_bypass": "true",
+                    "hybrid_resume": "true",
+                    "from_number": From,
+                    "resume_call_sid": str(_hp.get("call_sid") or ""),
+                }),
+                media_type="application/xml",
+            )
+    except Exception as _hp_err:
+        logger.warning("hybrid pause peek: %s", _hp_err)
+
     # SOVEREIGN-VOICE — coach check-in callback (platform-paid; skip balance gate)
     try:
         pool = getattr(request.app.state, "db_pool", None)

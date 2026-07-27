@@ -223,6 +223,13 @@ async def _build_grounded_voice_prompt(username: str, db_pool):
             memory_block += f"TRANSCRIPTS FROM RECENT PRIOR CALLS:\n{recent_summary}\n\n"
         memory_block += "=== END PRIOR SESSION MEMORY ===\n\n"
 
+    # SOVEREIGN-VOICE — hybrid resume (dropped voice + main chat + PAUSED redial)
+    try:
+        from app.services.voice_hybrid_resume import build_hybrid_resume_block
+        memory_block += await build_hybrid_resume_block(db_pool, username)
+    except Exception:
+        pass
+
     # QUANTUM-CRYSTAL-ARCH: cycle skill / treatment plan for voice
     skill_plan_block = ""
     try:
@@ -1929,6 +1936,13 @@ async def run_twilio_grok_xtts_bridge(
                 except Exception as e:
                     logger.warning("voice minutes logging failed: %s", e)
 
+                # SOVEREIGN-VOICE — hybrid: persist assistant turns even if STT missed user side
+                if assistant_turns and not user_turns:
+                    user_turns.append({
+                        "text": "[voice audio — transcript unavailable; call may have dropped]",
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                    })
+
                 if _crystal_forge and user_turns and assistant_turns:
                     try:
                         from app.services.vectorize_service import index_conversation as _vec_index
@@ -2149,14 +2163,28 @@ async def run_twilio_grok_xtts_bridge(
                 except Exception as _nm_err:
                     logger.debug("Neural Mirror finalize: %s", _nm_err)
 
+            # SOVEREIGN-VOICE — hybrid resume + PAUSED arm; clear call_context
             try:
-                from app.services.api_server import _get_auth_redis
+                from app.services.voice_hybrid_resume import finalize_hybrid_on_call_end
 
-                redis = await _get_auth_redis()
-                if redis and session_call_sid:
-                    await redis.delete(f"nate:call_context:{session_call_sid}")
-            except Exception:
-                pass
+                await finalize_hybrid_on_call_end(
+                    db_pool,
+                    username=session_username,
+                    call_sid=session_call_sid or "",
+                    ctx=ctx,
+                    user_turns=user_turns,
+                    assistant_turns=assistant_turns,
+                )
+            except Exception as _hy_e:
+                logger.warning("hybrid resume finalize: %s", _hy_e)
+                try:
+                    from app.services.api_server import _get_auth_redis
+
+                    redis = await _get_auth_redis()
+                    if redis and session_call_sid:
+                        await redis.delete(f"nate:call_context:{session_call_sid}")
+                except Exception:
+                    pass
 
             # SOVEREIGN-VOICE — finalize identity enrollment + avatar idle
             if _voice_sync:
