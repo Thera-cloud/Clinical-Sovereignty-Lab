@@ -87,15 +87,16 @@ def build_coach_checkin_prompt(
     confidential_unlocked: bool,
     verified: bool,
     is_callback: bool,
+    number_match: bool = False,
 ) -> str:
     first = (client_name or "there").split()[0]
     mode = "CALLBACK" if is_callback else "OUTBOUND CHECK-IN"
-    unlock = "UNLOCKED" if confidential_unlocked and verified else "LOCKED"
+    # SOVEREIGN-VOICE — matching dialed/ANI number counts as identity for memory
+    unlock = "UNLOCKED" if (confidential_unlocked and verified) or number_match else "LOCKED"
     parts = [
         f"You are Little Nate on a phone {mode} at a coach's request.",
         f"Client first name: {first}. Coach: {coach_name or 'their coach'}.",
         f"Confidential memory access: {unlock}.",
-        COLD_PHI_RULES,
         "",
         "OPENING:",
         f'- Prefer: "{opening_line}"' if opening_line else f"- Warm hello for {first}.",
@@ -111,9 +112,20 @@ def build_coach_checkin_prompt(
         "- NEVER use clinical jargon with the caller.",
     ]
     if unlock == "UNLOCKED":
-        parts.append(
-            "- Memory may be used warmly once verified; still speak plainly."
+        parts.extend(
+            [
+                "",
+                "NUMBER MATCH / MEMORY:",
+                "- The phone number on this call matches the client's number on file "
+                "(outbound dial to their number, or inbound ANI match).",
+                "- Treat them as that client for memory and understanding.",
+                "- Memory and hybrid continuity MAY be used warmly; still speak plainly.",
+                "- If HYBRID RESUME or PRIOR SESSION MEMORY is present below, weigh those "
+                "threads and let the caller choose what to continue.",
+            ]
         )
+    else:
+        parts.extend(["", COLD_PHI_RULES])
     return "\n".join(parts)
 
 
@@ -253,14 +265,6 @@ class CoachNateCheckinService:
             reason="coach_requested_checkin",
         )
         ctx.name = client["name"]
-        cold_prompt = build_coach_checkin_prompt(
-            client_name=client["name"],
-            coach_name=coach_username,
-            opening_line=ctx.opening_line,
-            confidential_unlocked=False,
-            verified=False,
-            is_callback=False,
-        )
 
         call_id = uuid.uuid4()
         async with self.db_pool.acquire() as conn:
@@ -269,8 +273,8 @@ class CoachNateCheckinService:
                 INSERT INTO coach_nate_checkin_tasks (
                     coach_username, client_username, client_hardware_id,
                     client_phone_e164, status, intent, call_id, opening_line,
-                    billed_to, metadata
-                ) VALUES ($1,$2,$3,$4,'queued',$5,$6,$7,$8,$9::jsonb)
+                    billed_to, metadata, verified, verify_method, confidential_unlocked
+                ) VALUES ($1,$2,$3,$4,'queued',$5,$6,$7,$8,$9::jsonb,TRUE,'outbound_dialed',TRUE)
                 RETURNING id
                 """,
                 coach_username,
@@ -286,18 +290,31 @@ class CoachNateCheckinService:
 
         await self._event(task_id, "created", {"coach": coach_username})
 
+        # SOVEREIGN-VOICE — outbound dial to number-on-file = number match → memory OK
+        warm_prompt = build_coach_checkin_prompt(
+            client_name=client["name"],
+            coach_name=coach_username,
+            opening_line=ctx.opening_line,
+            confidential_unlocked=True,
+            verified=True,
+            is_callback=False,
+            number_match=True,
+        )
         call_context = {
             "call_id": str(call_id),
             "username": client["username"],
             "name": client["name"],
             "phone": client["phone"],
+            "to_number": client["phone"],
             "reason": "coach_requested_checkin",
             "is_nate_initiated": True,
             "coach_checkin_task_id": int(task_id),
             "coach_username": coach_username,
-            "confidential_unlocked": False,
-            "verified": False,
-            "system_prompt": cold_prompt,
+            "confidential_unlocked": True,
+            "verified": True,
+            "number_match": True,
+            "verify_method": "outbound_dialed",
+            "system_prompt": warm_prompt,
             "opening_line": ctx.opening_line,
         }
         await self._redis_set_json(f"nate:call_context:{call_id}", call_context, 3600)
@@ -545,14 +562,17 @@ class CoachNateCheckinService:
         task = await self.get_task(task_id)
         if not task:
             return None
+        # SOVEREIGN-VOICE — matching inbound ANI = number match → memory OK
         await self._update(
             task_id,
             status="callback_in_progress",
             verify_method="ani",
             verified=True,
-            confidential_unlocked=False,  # still need OTP or voice for PHI
+            confidential_unlocked=True,
         )
         await self._event(task_id, "callback_ani_match", {"phone_last4": dig[-4:]})
+        task = await self.get_task(task_id) or task
+        await self._refresh_call_context_unlock(task)
         return task
 
     async def send_otp(self, task_id: int) -> Dict[str, Any]:
@@ -664,7 +684,11 @@ class CoachNateCheckinService:
         verified = False if force_lock else bool(task.get("verified"))
         ctx["confidential_unlocked"] = unlocked
         ctx["verified"] = verified
+        ctx["number_match"] = unlocked or verified
         ctx["coach_checkin_task_id"] = int(task["id"])
+        if task.get("client_phone_e164"):
+            ctx["phone"] = task["client_phone_e164"]
+            ctx["to_number"] = task["client_phone_e164"]
         ctx["system_prompt"] = build_coach_checkin_prompt(
             client_name=task.get("client_username") or "",
             coach_name=task.get("coach_username") or "",
@@ -672,6 +696,7 @@ class CoachNateCheckinService:
             confidential_unlocked=unlocked,
             verified=verified,
             is_callback=True,
+            number_match=bool(unlocked or verified),
         )
         await self._redis_set_json(key, ctx, 3600)
 
@@ -683,14 +708,40 @@ class CoachNateCheckinService:
         task = await self.get_task(int(tid))
         if not task:
             return ctx.get("system_prompt")
-        return build_coach_checkin_prompt(
+        number_match = bool(
+            ctx.get("number_match")
+            or task.get("verify_method") in ("ani", "outbound_dialed", "voiceprint")
+            or (task.get("confidential_unlocked") and task.get("verified"))
+        )
+        prompt = build_coach_checkin_prompt(
             client_name=ctx.get("name") or task.get("client_username") or "",
             coach_name=task.get("coach_username") or "",
             opening_line=task.get("opening_line") or ctx.get("opening_line") or "",
             confidential_unlocked=bool(task.get("confidential_unlocked")),
             verified=bool(task.get("verified")),
             is_callback=bool(ctx.get("is_callback")),
+            number_match=number_match,
         )
+        # SOVEREIGN-VOICE — inject hybrid + prior memory when number matches
+        if number_match and self.db_pool:
+            uname = (
+                ctx.get("username")
+                or task.get("client_username")
+                or ""
+            ).strip()
+            if uname:
+                try:
+                    from app.services.twilio_grok_xtts_pipeline import (
+                        _build_grounded_voice_prompt,
+                    )
+
+                    # Grounded prompt includes hybrid resume + recent chat/crystals
+                    grounded, _ = await _build_grounded_voice_prompt(uname, self.db_pool)
+                    if grounded:
+                        prompt = f"{prompt}\n\n{grounded}"
+                except Exception as e:
+                    logger.warning("checkin memory inject failed: %s", e)
+        return prompt
 
     async def maybe_start_voice_recheck(
         self, ctx: Dict[str, Any], call_sid: str, db_pool
@@ -788,7 +839,14 @@ class CoachNateCheckinService:
             return None
 
 
-def twiml_connect_stream(call_id: str, task_id: int, *, answered_by: str = "") -> str:
+def twiml_connect_stream(
+    call_id: str,
+    task_id: int,
+    *,
+    answered_by: str = "",
+    username: str = "",
+    phone: str = "",
+) -> str:
     """Build TwiML: machine → Say VM; human → media stream."""
     ab = (answered_by or "").lower()
     if ab.startswith("machine") or ab == "fax":
@@ -798,13 +856,28 @@ def twiml_connect_stream(call_id: str, task_id: int, *, answered_by: str = "") -
   Please call me back at {TWILIO_PHONE_NUMBER} when you can. Take care.</Say>
   <Hangup/>
 </Response>"""
+    # Escape XML attr values minimally
+    def _x(s: str) -> str:
+        return (
+            (s or "")
+            .replace("&", "&amp;")
+            .replace('"', "&quot;")
+            .replace("<", "&lt;")
+        )
+
+    u = _x(username)
+    p = _x(phone)
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
     <Stream url="{MEDIA_STREAM}">
-      <Parameter name="call_id" value="{call_id}" />
-      <Parameter name="coach_checkin_task_id" value="{task_id}" />
+      <Parameter name="call_id" value="{_x(call_id)}" />
+      <Parameter name="coach_checkin_task_id" value="{int(task_id) if task_id else 0}" />
       <Parameter name="is_nate_initiated" value="true" />
+      <Parameter name="username" value="{u}" />
+      <Parameter name="phone" value="{p}" />
+      <Parameter name="to_number" value="{p}" />
+      <Parameter name="number_match" value="true" />
     </Stream>
   </Connect>
 </Response>"""

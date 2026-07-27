@@ -142,7 +142,19 @@ async def nate_checkin_twiml(
     # Also accept Twilio CallSid mapping via Redis call_id
     if not cid:
         cid = request.query_params.get("call_id") or ""
-    xml = twiml_connect_stream(cid, tid, answered_by=str(answered_by))
+    uname, phone = "", ""
+    if tid:
+        try:
+            svc = _svc(request)
+            task = await svc.get_task(int(tid))
+            if task:
+                uname = str(task.get("client_username") or "")
+                phone = str(task.get("client_phone_e164") or "")
+        except Exception as e:
+            logger.warning("twiml task lookup: %s", e)
+    xml = twiml_connect_stream(
+        cid, tid, answered_by=str(answered_by), username=uname, phone=phone
+    )
     # If machine, mark voicemail
     if str(answered_by).lower().startswith("machine") and tid:
         try:
