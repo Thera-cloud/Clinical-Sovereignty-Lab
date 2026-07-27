@@ -45,7 +45,7 @@ async def test_soft_checkins_then_final_wait_then_alert():
     for expected in (1, 2, 3):
         c._last_client_voice = time.monotonic() - 20
         c._nate_speaking = False
-        async with c._speaking_lock:
+        async with c._lock():
             c._soft_count += 1
             n = c._soft_count
             phrase = c._phrase(n)

@@ -80,7 +80,13 @@ class VoiceSilenceCompanion:
         self._nate_speaking = False
         self._running = False
         self._task: Optional[asyncio.Task] = None
-        self._speaking_lock = asyncio.Lock()
+        # Lazy lock — asyncio.Lock() at init fails on Py3.9 sync tests (no event loop)
+        self._speaking_lock: Optional[asyncio.Lock] = None
+
+    def _lock(self) -> asyncio.Lock:
+        if self._speaking_lock is None:
+            self._speaking_lock = asyncio.Lock()
+        return self._speaking_lock
 
     def start(self) -> None:
         if not feature_enabled() or self._running:
@@ -142,7 +148,7 @@ class VoiceSilenceCompanion:
                 if self._phase == "soft":
                     if silent_for < self.checkin_s:
                         continue
-                    async with self._speaking_lock:
+                    async with self._lock():
                         if self._nate_speaking:
                             continue
                         self._soft_count += 1
