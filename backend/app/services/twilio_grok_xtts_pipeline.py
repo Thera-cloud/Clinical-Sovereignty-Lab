@@ -1729,7 +1729,6 @@ async def run_twilio_grok_xtts_bridge(
                     if nm_injection:
                         instructions += "\n\n" + nm_injection
                 # SOVEREIGN-VOICE — identity / pace / avatar sync session
-                nonlocal _voice_sync
                 _voice_sync, instructions = await attach_voice_sync(
                     ctx, session_call_sid or "", uname or "", instructions
                 )
