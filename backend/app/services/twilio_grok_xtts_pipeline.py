@@ -68,10 +68,15 @@ except ImportError:
 
 # SOVEREIGN-VOICE — identity / emotion pace / avatar sync (flag-gated)
 try:
-    from app.services.voice_call_sync import attach_voice_sync
+    from app.services.voice_call_sync import attach_voice_sync, CLARITY_LANGUAGE_PROMPT_ADDON
 except ImportError:
+    CLARITY_LANGUAGE_PROMPT_ADDON = (  # SOVEREIGN-VOICE
+        "\nCLINICAL CLARITY: If speech is too fast/unclear, kindly ask once to slow down "
+        "so you can hear them; name what pace helps. Mirror their language.\n"
+    )
+
     async def attach_voice_sync(ctx, call_sid, username, instructions):  # type: ignore[misc]
-        return None, instructions
+        return None, (instructions or "") + CLARITY_LANGUAGE_PROMPT_ADDON
 
 logger = logging.getLogger("nate.twilio_grok_xtts")
 

@@ -42,6 +42,20 @@ VOICE IDENTITY & SAFE SPACE (ALWAYS FOLLOW):
 - Use any remembered name naturally; do not invent a name you were not given.
 """
 
+# SOVEREIGN-VOICE — clinical clarity + language mirror (always appended on calls)
+CLARITY_LANGUAGE_PROMPT_ADDON = """
+CLINICAL CLARITY & PACING (ALWAYS FOLLOW):
+- If the caller's speech is too fast, pressured, overlapping, mumbled, or unclear so you cannot follow, say so kindly once — e.g. "I really want to hear what you're saying — could you slow down a little so I don't miss you?" Never shame them. Never label them (no "manic," "crazy," or clinical diagnoses).
+- After they adjust, briefly name what helps you hear them best on this call (pace, pause between thoughts, or calmer tone) — e.g. "That pace is perfect — a bit slower and one thought at a time helps me stay with you." Keep it warm and specific to this caller.
+- Prefer one gentle pace request per stretch of conversation; do not nag. If only one phrase was unclear, ask them to repeat that piece, not the whole story.
+- Your goal is connection and understanding, not controlling how they speak.
+
+LANGUAGE MIRRORING:
+- Reply in the same language the caller is using. Do not default to English if they are speaking another language.
+- Reflect their words in their language. If they code-switch or mix languages, follow their lead.
+- If a word or phrase is unclear, ask in their language for a slower repeat rather than guessing or translating away from their language.
+"""
+
 
 class VoiceCallSyncSession:
     """Per-call session: diarization, pacing, avatar pub/sub."""
@@ -66,6 +80,7 @@ class VoiceCallSyncSession:
         self._last_pace_adjust = 0.0
         self._turns = 0
         self._investigation_injected = False
+        self._pace_coach_injected = False
         self._greeting_buf = bytearray()
         self._greeting_done = False
         self._pace_dirty = False
@@ -93,7 +108,7 @@ class VoiceCallSyncSession:
                 logger.warning("VoiceCallSync: avatar handler init failed: %s", e)
 
     def prompt_addon(self) -> str:
-        parts = [IDENTITY_PROMPT_ADDON]
+        parts = [CLARITY_LANGUAGE_PROMPT_ADDON, IDENTITY_PROMPT_ADDON]
         if self.guest_mode:
             parts.append(
                 "GUEST CALLER: You do not have a confirmed identity. "
@@ -156,11 +171,24 @@ class VoiceCallSyncSession:
             self._pace_dirty = True
 
     async def on_user_text(self, text: str) -> Optional[str]:
-        """Return optional investigation prompt to inject into Grok context."""
+        """Return optional investigation / pace-coach prompt to inject into Grok context."""
         self._turns += 1
         await self.maybe_greeting()
         if not text:
             return None
+        # SOVEREIGN-VOICE — high-energy / pressured speech → one gentle pace coach note
+        if (
+            _PACE
+            and not self._pace_coach_injected
+            and self._silence_ms <= 550
+            and len(text) >= 80
+        ):
+            self._pace_coach_injected = True
+            return (
+                "The caller's recent speech sounds fast or pressured. "
+                "If anything was hard to follow, gently ask them to slow down so you can hear them — "
+                "then name the pace/tone that helps you best. Do not diagnose."
+            )
         if self._diarization and _IDENTITY:
             try:
                 self._diarization.process_transcript(text, speaker="caller")
@@ -299,6 +327,8 @@ class VoiceCallSyncSession:
 
 async def attach_voice_sync(ctx: dict, call_sid: str, username: str, instructions: str):
     """One-call hook for pipeline start. Returns (session|None, instructions)."""
+    # Clarity/language rules always apply — even when identity/avatar/pace flags are off.
+    instructions = (instructions or "") + "\n\n" + CLARITY_LANGUAGE_PROMPT_ADDON
     if not voice_sync_enabled() or not username:
         return None, instructions
     try:
@@ -313,7 +343,11 @@ async def attach_voice_sync(ctx: dict, call_sid: str, username: str, instruction
             guest_mode=str(ctx.get("guest_mode", "")).lower() in ("1", "true", "yes"),
         )
         await sess.start()
-        return sess, instructions + "\n\n" + sess.prompt_addon()
+        # Identity/guest addons only (clarity already prepended above)
+        extra = sess.prompt_addon().replace(CLARITY_LANGUAGE_PROMPT_ADDON, "").strip()
+        if extra:
+            instructions = instructions + "\n\n" + extra
+        return sess, instructions
     except Exception as e:
         logger.warning("attach_voice_sync failed: %s", e)
         return None, instructions
