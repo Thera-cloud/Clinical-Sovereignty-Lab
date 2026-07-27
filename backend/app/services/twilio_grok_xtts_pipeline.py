@@ -1371,32 +1371,39 @@ async def run_twilio_grok_xtts_bridge(
         if _voice_sync:
             _ut = user_turns[-1]["text"] if user_turns else ""
             asyncio.create_task(_voice_sync.on_nate_text(text, _ut))
-        async with tts_serial:
-            # Do not abort on cancel set during synth — ambient energy false barge-in
-            tts_task = asyncio.create_task(
-                _synthesize_with_fallback(text, "connect", xtts_to_mulaw_state)
-            )
-            try:
-                mulaw_out = await asyncio.wait_for(
-                    asyncio.shield(tts_task), timeout=_FILLER_TIMEOUT_S
+        try:
+            async with tts_serial:
+                # Do not abort on cancel set during synth — ambient energy false barge-in
+                tts_task = asyncio.create_task(
+                    _synthesize_with_fallback(text, "connect", xtts_to_mulaw_state)
                 )
-            except asyncio.TimeoutError:
-                filler = await _get_filler_mulaw(xtts_to_mulaw_state)
-                if filler:
-                    print("[TWILIO-GROK-XTTS] filler played while waiting for TTS")
-                    filler_counts["connect"] = filler_counts.get("connect", 0) + 1
-                    _tts_cancel.clear()  # SOVEREIGN-VOICE — play filler after false barge
-                    await _send_mulaw_to_twilio(filler)
-                mulaw_out = await tts_task
+                try:
+                    mulaw_out = await asyncio.wait_for(
+                        asyncio.shield(tts_task), timeout=_FILLER_TIMEOUT_S
+                    )
+                except asyncio.TimeoutError:
+                    filler = await _get_filler_mulaw(xtts_to_mulaw_state)
+                    if filler:
+                        print("[TWILIO-GROK-XTTS] filler played while waiting for TTS")
+                        filler_counts["connect"] = filler_counts.get("connect", 0) + 1
+                        _tts_cancel.clear()  # SOVEREIGN-VOICE — play filler after false barge
+                        await _send_mulaw_to_twilio(filler)
+                    mulaw_out = await tts_task
 
-            if mulaw_out:
-                _tts_cancel.clear()  # SOVEREIGN-VOICE — clear false barge during synth
-                print(f"[TWILIO-GROK-XTTS] synthesized {len(mulaw_out)} bytes μ-law for Twilio")
-                await _send_mulaw_to_twilio(mulaw_out)
-        if not _greeting_spoken:
-            _greeting_spoken = True
-        _nate_speaking = False
-        _tts_playback_started = False
+                if mulaw_out:
+                    _tts_cancel.clear()  # SOVEREIGN-VOICE — clear false barge during synth
+                    print(f"[TWILIO-GROK-XTTS] synthesized {len(mulaw_out)} bytes μ-law for Twilio")
+                    await _send_mulaw_to_twilio(mulaw_out)
+            if not _greeting_spoken:
+                _greeting_spoken = True
+        except Exception as _tts_err:
+            # SOVEREIGN-VOICE — never leave mic gated after TTS failure
+            logger.warning("TTS/playback failed (unmuting mic): %s", _tts_err)
+            print(f"[VOICE] TTS error — force unmute: {_tts_err}")
+        finally:
+            _nate_speaking = False
+            _tts_playback_started = False
+            _barge_speech_frames = 0
 
     _grok_event_count = 0
     _media_chunk_count = 0
@@ -1858,10 +1865,26 @@ async def run_twilio_grok_xtts_bridge(
                 is_speech = chunk_energy > 45
                 if _turn_detector or _neural_mirror:
                     if _turn_detector:
-                        _turn_detector.on_audio_frame(chunk_energy, is_speech, _media_chunk_count * 20.0)
+                        try:
+                            _turn_detector.on_audio_frame(
+                                chunk_energy, is_speech, _media_chunk_count * 20.0
+                            )
+                        except Exception:
+                            pass
                     if _neural_mirror and is_speech:
-                        mirror_state = _neural_mirror.on_audio_chunk(mulaw_chunk)
+                        try:
+                            # SOVEREIGN-VOICE — SVD failures must not kill the call
+                            _neural_mirror.on_audio_chunk(mulaw_chunk)
+                        except Exception as _nm_err:
+                            if _media_chunk_count % 500 == 0:
+                                logger.debug("neural_mirror audio skip: %s", _nm_err)
                     # Backchannel clips disabled — causes double-talk collisions
+                # SOVEREIGN-VOICE — force-unmute if TTS gate stuck (>20s)
+                if _nate_speaking and _tts_playback_started:
+                    if (time.monotonic() - _tts_playback_t0) > 20.0:
+                        _nate_speaking = False
+                        _tts_playback_started = False
+                        print("[VOICE] force unmute — speaking gate exceeded 20s")
                 # SOVEREIGN-VOICE — local barge-in: after playback starts, skip 1.8s echo
                 # grace, then require ~200ms sustained louder speech (not speaker bleed).
                 if _nate_speaking and _tts_playback_started and is_speech:
@@ -1879,7 +1902,10 @@ async def run_twilio_grok_xtts_bridge(
                 else:
                     _barge_speech_frames = 0
                 if _voice_sync and pcm_chunk:  # SOVEREIGN-VOICE
-                    _voice_sync.feed_audio(pcm_chunk)
+                    try:
+                        _voice_sync.feed_audio(pcm_chunk)
+                    except Exception:
+                        pass
 
                 if not _nate_speaking:
                     try:
