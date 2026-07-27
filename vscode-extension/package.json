@@ -2,7 +2,7 @@
   "name": "sovereign-sanctuary",
   "displayName": "Sovereign Sanctuary — Little Nate",
   "description": "AI-powered development assistant with multi-mode CLI chat, inline diff review, and debug instrumentation.",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "publisher": "sovereign-sanctuary",
   "license": "UNLICENSED",
   "engines": {
@@ -74,6 +74,11 @@
           "type": "boolean",
           "default": true,
           "description": "Open the CLI Agent secondary sidebar when the IDE starts."
+        },
+        "sovereignSanctuary.apiBaseUrl": {
+          "type": "string",
+          "default": "https://api.sovereignsanctuary.net",
+          "description": "REST API base for LN7 bakeoff / usage events (admin token from login)."
         },
         "sovereignSanctuary.modelCatalogRefreshMinutes": {
           "type": "number",

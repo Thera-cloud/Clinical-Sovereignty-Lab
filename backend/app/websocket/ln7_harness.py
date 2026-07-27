@@ -1,7 +1,6 @@
 """Little Nate 7 coding harness — retrieve → best-of-N → static gate → sandbox → repair.
 
-Zero vendor calls on the LN7 path. Reuses cli_symbol_store, cli_subagent_hive,
-cli_task_bus, ln_sandbox_engineering_ci.
+Zero vendor calls on the LN7 path. Reuses cli_symbol_store, ln_sandbox_engineering_ci.
 
 # QUANTUM-CRYSTAL-ARCH
 """
@@ -13,13 +12,20 @@ import hashlib
 import logging
 import os
 import re
+import subprocess
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("ln7_harness")
 
 _SECRET_RE = re.compile(
     r"(?i)(api[_-]?key|secret|password|token)\s*[:=]\s*['\"][^'\"]{8,}",
+)
+_PACK_HINT_RE = re.compile(
+    r"\b(asyncpg_cast|catch_all_routes|env_redis_prefix|"
+    r"sandbox\s*pack|fix\s+(?:the\s+)?pack|unified\s+diff)\b",
+    re.I,
 )
 
 
@@ -48,6 +54,15 @@ def harness_mode() -> str:
     return "fast" if m == "fast" else "max"
 
 
+def inference_base_url() -> str:
+    """LN7 local inference — never a vendor URL."""
+    return (
+        (os.getenv("LN7_INFERENCE_URL") or "").rstrip("/")
+        or (os.getenv("SOVEREIGN_INFERENCE_URL") or "").rstrip("/")
+        or (os.getenv("HOME_GPU_URL") or "").rstrip("/")
+    )
+
+
 def _ast_hash(text: str) -> str:
     try:
         tree = ast.parse(text)
@@ -66,7 +81,6 @@ def static_gate(diff_text: str, *, max_diff_lines: int = 400) -> Tuple[bool, str
         return False, f"diff_too_large:{len(lines)}"
     if _SECRET_RE.search(diff_text):
         return False, "secret_pattern"
-    # Disallow path escapes outside pack
     for line in lines:
         if line.startswith("+++ ") or line.startswith("--- "):
             path = line[4:].strip().split("\t")[0]
@@ -75,43 +89,107 @@ def static_gate(diff_text: str, *, max_diff_lines: int = 400) -> Tuple[bool, str
     return True, "ok"
 
 
+def looks_like_pack_task(prompt: str) -> bool:
+    return bool(_PACK_HINT_RE.search(prompt or ""))
+
+
+def infer_pack_name(prompt: str) -> Optional[str]:
+    text = prompt or ""
+    try:
+        from app.services.ln_sandbox_engineering_ci import list_pack_names
+        names = list_pack_names()
+    except Exception:
+        names = ["asyncpg_cast", "catch_all_routes", "env_redis_prefix"]
+    for n in names:
+        if n.lower() in text.lower():
+            return n
+    if looks_like_pack_task(text) and names:
+        return names[0]
+    return None
+
+
+def _lexical_workspace_hits(query: str, root: str, k: int) -> List[str]:
+    """Hybrid lexical retrieval via ripgrep (files that match query tokens)."""
+    tokens = [t for t in re.findall(r"[A-Za-z_]{3,}", query or "") if t.lower() not in {
+        "the", "and", "for", "with", "that", "this", "from", "return", "fix", "make",
+    }][:6]
+    if not tokens or not root or not Path(root).is_dir():
+        return []
+    pattern = "|".join(re.escape(t) for t in tokens)
+    try:
+        proc = subprocess.run(
+            [
+                "rg", "-n", "-i", "-m", "3", "--glob", "!**/node_modules/**",
+                "--glob", "!**/.git/**", "--glob", "!**/dist/**", pattern, root,
+            ],
+            capture_output=True, text=True, timeout=8,
+        )
+        lines = (proc.stdout or "").splitlines()[: max(k * 3, k)]
+        return lines[:k]
+    except Exception as exc:
+        logger.debug("LN7 rg retrieve: %s", exc)
+        return []
+
+
 async def retrieve_context(
     query: str,
     *,
     workspace_root: Optional[str] = None,
+    session_key: Optional[str] = None,
     k: int = 8,
+    gold_files: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Symbol-store + optional crystal recall; returns text + recall@k telemetry stub."""
+    """Symbolic facts + lexical workspace hits; recall@k vs gold_files when provided."""
     chunks: List[str] = []
-    recall_hits = 0
-    try:
-        from app.websocket.cli_symbol_store import search_symbols  # type: ignore
-        hits = await asyncio.to_thread(search_symbols, query, k) if callable(search_symbols) else []
-        if isinstance(hits, list):
-            for h in hits[:k]:
-                if isinstance(h, dict):
-                    chunks.append(str(h.get("snippet") or h.get("text") or h))
-                else:
-                    chunks.append(str(h))
-            recall_hits = len(chunks)
-    except Exception as exc:
-        logger.debug("LN7 retrieve symbols: %s", exc)
-    try:
-        # AST-boundary hint: keep function/class-sized snippets when possible
-        refined = []
-        for c in chunks:
-            if "def " in c or "class " in c:
-                refined.append(c[:4000])
-            else:
-                refined.append(c[:2000])
-        chunks = refined or chunks
-    except Exception:
-        pass
+    hit_paths: List[str] = []
+
+    if session_key:
+        try:
+            from app.websocket.cli_symbol_store import format_symbols_block
+            block = format_symbols_block(session_key)
+            if block and block.strip():
+                chunks.append(block.strip()[:6000])
+        except Exception as exc:
+            logger.debug("LN7 retrieve symbols: %s", exc)
+
+    root = (
+        workspace_root
+        or os.getenv("CLI_WORKSPACE_ROOT")
+        or os.getenv("LN7_WORKSPACE_ROOT")
+        or ""
+    ).strip()
+    if root:
+        lexical = await asyncio.to_thread(_lexical_workspace_hits, query, root, k)
+        for line in lexical:
+            chunks.append(line[:2000])
+            # path:line:content
+            path = line.split(":", 1)[0] if ":" in line else ""
+            if path:
+                hit_paths.append(os.path.basename(path))
+
+    # Prefer AST-ish snippets
+    refined: List[str] = []
+    for c in chunks:
+        if "def " in c or "class " in c:
+            refined.append(c[:4000])
+        else:
+            refined.append(c[:2000])
+    chunks = refined or chunks
+
+    recall_at_k = 0.0
+    if gold_files:
+        gold_base = {os.path.basename(g) for g in gold_files}
+        hits = sum(1 for p in hit_paths if p in gold_base)
+        recall_at_k = hits / max(1, min(k, len(gold_base)))
+    else:
+        recall_at_k = min(1.0, len(chunks) / max(1, k))
+
     return {
         "context": "\n\n".join(chunks),
-        "recall_at_k": recall_hits / max(1, k),
+        "recall_at_k": recall_at_k,
         "k": k,
-        "hit_count": recall_hits,
+        "hit_count": len(chunks),
+        "hit_paths": hit_paths[:k],
     }
 
 
@@ -122,7 +200,7 @@ async def propose_candidates(
     n: Optional[int] = None,
     mode: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """N candidates at varied temperature via sovereign coder weights."""
+    """N candidates at varied temperature via sovereign coder weights only."""
     if kill_switch_on():
         return []
     n = n or (2 if (mode or harness_mode()) == "fast" else best_of_n())
@@ -139,7 +217,7 @@ async def propose_candidates(
     while len(temps) < n:
         temps.append(0.4)
     model_tier = "fast" if (mode or harness_mode()) == "fast" else "deep"
-    _ = coder_model(model_tier)  # pin for logging
+    _ = coder_model(model_tier)
 
     async def _one(temp: float, idx: int) -> Dict[str, Any]:
         t0 = time.time()
@@ -154,16 +232,29 @@ async def propose_candidates(
                     max_tokens=4096,
                     odpe_signal="TENSION",
                     allow_deep=(model_tier == "deep"),
+                    providers_override=["sovereign", "home_gpu"],
                 ),
                 timeout=candidate_timeout_s(),
             )
             text = (result or {}).get("text") or ""
+            prov = (result or {}).get("provider") or ""
+            # Refuse vendor bleed even if router misconfigured
+            if prov and prov not in ("sovereign", "home_gpu", "odpe_skip", ""):
+                return {
+                    "index": idx,
+                    "temperature": temp,
+                    "text": "",
+                    "ast_hash": "",
+                    "error": f"vendor_rejected:{prov}",
+                    "ok": False,
+                    "latency_ms": int((time.time() - t0) * 1000),
+                }
             return {
                 "index": idx,
                 "temperature": temp,
                 "text": text,
                 "ast_hash": _ast_hash(text),
-                "provider": (result or {}).get("provider"),
+                "provider": prov,
                 "model": (result or {}).get("model"),
                 "tokens": (result or {}).get("tokens_used") or 0,
                 "latency_ms": int((time.time() - t0) * 1000),
@@ -181,7 +272,6 @@ async def propose_candidates(
             }
 
     results = await asyncio.gather(*[_one(temps[i], i) for i in range(n)])
-    # Dedupe by AST hash
     seen = set()
     deduped: List[Dict[str, Any]] = []
     for r in results:
@@ -285,12 +375,116 @@ async def repair_loop(
     return last
 
 
+async def generate_sovereign_reply(
+    messages: List[Dict[str, Any]],
+    *,
+    mode: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Interactive LN7 chat turn — sovereign/home_gpu only, never vendor."""
+    if kill_switch_on():
+        return {"ok": False, "error": "kill_switch", "text": "", "provider": "ln7"}
+    try:
+        from app.services.little_nate_7 import coder_model, identity_system_preamble
+        from app.services.nate_inference_router import NateInferenceRouter, TIER_CODING
+    except Exception as exc:
+        return {"ok": False, "error": f"import:{exc}", "text": "", "provider": "ln7"}
+
+    system_parts = [identity_system_preamble()]
+    user_parts: List[str] = []
+    for m in messages:
+        role = (m.get("role") or "").lower()
+        content = m.get("content") or ""
+        if role == "system":
+            system_parts.append(str(content))
+        elif role in ("user", "assistant"):
+            user_parts.append(f"{role.upper()}: {content}")
+    prompt = "\n\n".join(user_parts[-12:]) or "Say hello as Little Nate 7."
+    model_tier = "fast" if (mode or harness_mode()) == "fast" else "deep"
+    router = NateInferenceRouter()
+    result = await router.generate(
+        prompt=prompt,
+        system="\n\n".join(system_parts),
+        tier=TIER_CODING,
+        domain="coding",
+        temperature=0.3,
+        max_tokens=4096,
+        odpe_signal="TENSION",
+        allow_deep=(model_tier == "deep"),
+        providers_override=["sovereign", "home_gpu"],
+    )
+    text = (result or {}).get("text") or ""
+    prov = (result or {}).get("provider") or "sovereign"
+    if prov not in ("sovereign", "home_gpu", "odpe_skip"):
+        return {
+            "ok": False,
+            "error": f"vendor_rejected:{prov}",
+            "text": "",
+            "provider": "ln7",
+            "model": coder_model(model_tier),
+        }
+    return {
+        "ok": bool(text.strip()),
+        "text": text,
+        "provider": "ln7",
+        "upstream": prov,
+        "model": (result or {}).get("model") or coder_model(model_tier),
+        "tokens": (result or {}).get("tokens_used") or 0,
+        "latency_ms": (result or {}).get("latency_ms") or 0,
+    }
+
+
+async def maybe_shadow_compare(
+    db_pool,
+    prompt: str,
+    *,
+    active_text: str,
+) -> None:
+    """Fire-and-forget: score a shadow revision candidate without user impact."""
+    if not db_pool:
+        return
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT revision_id FROM ln7_revisions
+                WHERE status = 'shadow' AND active = FALSE
+                ORDER BY revised_at DESC LIMIT 1
+                """
+            )
+        if not row:
+            return
+        # Record a lightweight comparison stub (no second LLM spend unless env allows)
+        if os.getenv("LN7_SHADOW_SPEND", "").strip().lower() not in ("1", "true", "yes"):
+            from app.services.ln7_ledger import record_outcome
+            await record_outcome(db_pool, {
+                "task_id": None,
+                "generator": "ln7_shadow",
+                "revision_id": row["revision_id"],
+                "harness_mode": "shadow",
+                "patch_hash": hashlib.sha256(
+                    (active_text or "")[:2000].encode()
+                ).hexdigest()[:32],
+                "passed": False,
+                "diff_lines": 0,
+                "tokens": 0,
+                "latency_ms": 0,
+                "metrics_json": {
+                    "note": "shadow_observe_only",
+                    "prompt_chars": len(prompt or ""),
+                },
+            })
+    except Exception as exc:
+        logger.debug("LN7 shadow compare: %s", exc)
+
+
 async def run_task(
     prompt: str,
     *,
     pack_name: Optional[str] = None,
     system: str = "",
     mode: Optional[str] = None,
+    workspace_root: Optional[str] = None,
+    session_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Full harness cycle for one task. Returns best survivor + metrics."""
     if kill_switch_on():
@@ -298,13 +492,15 @@ async def run_task(
 
     t0 = time.time()
     mode = mode or harness_mode()
-    retrieval = await retrieve_context(prompt)
+    retrieval = await retrieve_context(
+        prompt, workspace_root=workspace_root, session_key=session_key,
+    )
     sys = (system or "") + (
         f"\n\nRETRIEVED CONTEXT (recall@k={retrieval.get('recall_at_k'):.2f}):\n"
         f"{retrieval.get('context') or '(none)'}"
     )
 
-    pack = pack_name
+    pack = pack_name or infer_pack_name(prompt)
     if not pack:
         try:
             from app.services.ln_sandbox_engineering_ci import list_pack_names
@@ -367,4 +563,5 @@ async def run_task(
         "latency_ms": int((time.time() - t0) * 1000),
         "tokens": sum(int(c.get("tokens") or 0) for c in candidates),
         "log": ((best or {}).get("log") or "")[-1500:],
+        "text": (best or {}).get("diff") or "",
     }

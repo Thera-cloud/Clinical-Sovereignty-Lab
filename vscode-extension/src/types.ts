@@ -363,7 +363,8 @@ export interface StoredCredentials {
 /** Messages exchanged between Extension Host and WebView via postMessage */
 export interface WebviewToHostMessage {
   cmd: 'send' | 'markFixed' | 'switchMode' | 'openFile' | 'acceptDiff' | 'rejectDiff' | 'clearChat' | 'loadPlan' | 'clearPlan'
-    | 'requestModels' | 'refreshModels' | 'selectModel' | 'ask_user_response';
+    | 'requestModels' | 'refreshModels' | 'selectModel' | 'ask_user_response'
+    | 'ln7Bakeoff' | 'ln7Leaderboard';
   mode?: CliMode;
   message?: string;
   plan_id?: string;
@@ -389,7 +390,8 @@ export interface ChatEntry {
 
 export interface HostToWebviewMessage {
   cmd: 'chunk' | 'tool' | 'status' | 'output' | 'done' | 'error' | 'connected' | 'disconnected' | 'modeChanged' | 'output_applied' | 'planLoaded' | 'planCleared' | 'restoreHistory'
-    | 'modelCatalog' | 'cliTarget' | 'authenticated' | 'ask_user_prompt';
+    | 'modelCatalog' | 'cliTarget' | 'authenticated' | 'ask_user_prompt'
+    | 'ln7BakeoffResult' | 'ln7LeaderboardResult';
   delta?: string;
   provider?: string;
   turn?: number;
@@ -426,4 +428,8 @@ export interface HostToWebviewMessage {
   options?: Array<{ id: string; label: string }>;
   context?: string;
   allow_skip?: boolean;
+  ok?: boolean;
+  pass_rate?: { mean?: number; lo?: number; hi?: number; n?: number };
+  public_note?: string;
+  rows?: Array<Record<string, unknown>>;
 }

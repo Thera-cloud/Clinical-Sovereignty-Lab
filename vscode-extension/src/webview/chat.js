@@ -42,6 +42,9 @@
   const cliBadge = document.getElementById('cliBadge');
   const modelCounts = document.getElementById('modelCounts');
   const refreshModelsBtn = document.getElementById('refreshModelsBtn');
+  const bakeoffRunBtn = document.getElementById('bakeoffRunBtn');
+  const bakeoffBoardBtn = document.getElementById('bakeoffBoardBtn');
+  const bakeoffStatus = document.getElementById('bakeoffStatus');
 
   let selectedModelId = '';
   let selectedModelSpace = '';
@@ -172,6 +175,19 @@
     modelSelect.addEventListener('change', () => syncSelectedModel());
   }
   if (refreshModelsBtn) {
+  if (bakeoffRunBtn) {
+    bakeoffRunBtn.addEventListener('click', () => {
+      if (bakeoffStatus) bakeoffStatus.textContent = 'Running private bakeoff…';
+      vscode.postMessage({ cmd: 'ln7Bakeoff', mode: 'fast' });
+    });
+  }
+  if (bakeoffBoardBtn) {
+    bakeoffBoardBtn.addEventListener('click', () => {
+      if (bakeoffStatus) bakeoffStatus.textContent = 'Loading board…';
+      vscode.postMessage({ cmd: 'ln7Leaderboard' });
+    });
+  }
+
     refreshModelsBtn.addEventListener('click', () => {
       vscode.postMessage({ cmd: 'refreshModels' });
       refreshModelsBtn.disabled = true;
@@ -387,15 +403,39 @@
           const pc = msg.picker_counts || msg.counts || {};
           const nF = pc.foundry || 0;
           const nX = pc.xai || 0;
+          const nL = pc.ln7 || 0;
           if ((msg.models || []).length) {
             appendStatusMessage(
-              'Models loaded: Foundry ' + nF + ', xAI ' + nX +
+              'Models loaded: LN7 ' + nL + ', Foundry ' + nF + ', xAI ' + nX +
               ', CLI ' + (pc.cli || 0) + ' — open the model dropdown'
             );
           }
           if (msg.errors && msg.errors.length) {
             appendStatusMessage('Catalog warnings: ' + msg.errors.join('; '));
           }
+        }
+        break;
+
+      case 'ln7BakeoffResult':
+        if (bakeoffStatus) {
+          const pr = (msg.pass_rate && msg.pass_rate.mean != null)
+            ? (msg.pass_rate.mean * 100).toFixed(0) + '%'
+            : '?';
+          bakeoffStatus.textContent = (msg.ok ? 'OK' : 'ERR') +
+            ' private pass≈' + pr +
+            (msg.error ? ' — ' + msg.error : '');
+        }
+        appendStatusMessage('LN7 bakeoff: ' + JSON.stringify({
+          ok: msg.ok, pass_rate: msg.pass_rate, public: msg.public_note,
+        }));
+        break;
+
+      case 'ln7LeaderboardResult':
+        if (bakeoffStatus) {
+          const rows = msg.rows || [];
+          bakeoffStatus.textContent = rows.length
+            ? ('Top: ' + (rows[0].generator || '?') + ' ' + (rows[0].pass_rate || ''))
+            : 'No bakeoff rows yet';
         }
         break;
 

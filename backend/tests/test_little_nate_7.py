@@ -131,3 +131,16 @@ def test_cli_defaults_skip_grok45(monkeypatch):
     rows = _catalog._cli_defaults()
     ids = {r["id"] for r in rows}
     assert "grok-4.5" not in ids
+
+
+def test_pack_task_detection():
+    assert _harness.looks_like_pack_task("Please fix asyncpg_cast pack")
+    assert _harness.infer_pack_name("env_redis_prefix is broken") == "env_redis_prefix"
+    assert not _harness.looks_like_pack_task("what is the weather?")
+
+
+def test_coding_tier_sovereign_only():
+    from importlib import import_module
+    # Reloaded router may pull numpy — use file load
+    router = _load("app.services.nate_inference_router", APP / "services" / "nate_inference_router.py")
+    assert router._TIER_PRIORITY[router.TIER_CODING] == ["sovereign", "home_gpu"]

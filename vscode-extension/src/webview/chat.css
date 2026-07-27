@@ -60,6 +60,25 @@ body {
 .mode-btn.active { background: var(--gold); color: var(--void); border-color: var(--gold); font-weight: 600; }
 
 /* ── Agent / model bar ── */
+.bakeoff-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border, #333);
+  font-size: 11px;
+}
+.bakeoff-btn {
+  background: transparent;
+  border: 1px solid var(--vscode-button-border, #555);
+  color: var(--vscode-foreground);
+  padding: 2px 8px;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.bakeoff-btn:hover { border-color: #C9A962; color: #C9A962; }
+.bakeoff-status { opacity: 0.75; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .agent-bar {
   display: flex;
   align-items: center;

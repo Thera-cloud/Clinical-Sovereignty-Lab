@@ -174,5 +174,47 @@ async def post_usage_event(
 
 @router.get("/contestants")
 async def get_contestants(request: Request, _admin=Depends(require_admin)):
-    from app.services.ln7_bakeoff_engine import list_contestants
-    return {"status": "ok", "contestants": await list_contestants(_pool(request))}
+    from app.services.ln7_bakeoff_engine import list_contestants, sync_contestant_credentials
+    sync = await sync_contestant_credentials(_pool(request))
+    return {
+        "status": "ok",
+        "contestants": await list_contestants(_pool(request)),
+        "credential_sync": sync,
+    }
+
+
+@router.post("/tasks/seed-packs")
+async def post_seed_packs(request: Request, _admin=Depends(require_admin)):
+    """Idempotent seed of the 3 first-party CI packs into ln7_tasks."""
+    import hashlib
+    pool = _pool(request)
+    if not pool:
+        raise HTTPException(503, "db unavailable")
+    packs = (
+        ("pack:asyncpg_cast", "asyncpg_cast", "train", "easy",
+         "Fix asyncpg polymorphic cast failures. Return a unified diff."),
+        ("pack:catch_all_routes", "catch_all_routes", "train", "medium",
+         "Fix FastAPI catch-all route ordering. Return a unified diff."),
+        ("pack:env_redis_prefix", "env_redis_prefix", "heldout", "medium",
+         "Fix ENVIRONMENT Redis key prefix mismatch. Return a unified diff."),
+    )
+    try:
+        async with pool.acquire() as conn:
+            for tid, pack, split, diff, prompt in packs:
+                th = hashlib.sha256(f"{tid}:v1".encode()).hexdigest()
+                await conn.execute(
+                    """
+                    INSERT INTO ln7_tasks
+                        (task_id, source, difficulty, task_hash, split,
+                         pack_name, prompt_summary, metadata_json)
+                    VALUES ($1, 'authored', $2, $3, $4, $5, $6, $7::jsonb)
+                    ON CONFLICT (task_id) DO NOTHING
+                    """,
+                    tid, diff, th, split, pack, prompt,
+                    f'{{"pack":"{pack}"}}',
+                )
+            n = await conn.fetchval("SELECT COUNT(*) FROM ln7_tasks")
+        return {"status": "ok", "task_count": int(n or 0)}
+    except Exception as exc:
+        logger.warning("seed packs: %s", exc)
+        raise HTTPException(500, str(exc)[:200])

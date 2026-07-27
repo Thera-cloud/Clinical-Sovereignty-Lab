@@ -7,6 +7,7 @@ import { DiffApplicator } from './diffApplicator';
 import { PlanManager } from './planManager';
 import { WorkspaceToolProvider } from './workspaceToolProvider';
 import { AgentSidebarProvider } from './agentSidebar';
+import { Ln7Api } from './ln7Api';
 import {
   createHealthStatusBarItem,
   registerHealthDetailsCommand,
@@ -21,6 +22,7 @@ let diffApplicator: DiffApplicator;
 let planManager: PlanManager;
 let workspaceProvider: WorkspaceToolProvider;
 let agentSidebar: AgentSidebarProvider;
+let ln7Api: Ln7Api;
 
 export function activate(context: vscode.ExtensionContext): void {
   bridge = new BridgeClient();
@@ -28,9 +30,12 @@ export function activate(context: vscode.ExtensionContext): void {
   statusBar = new StatusBarManager(bridge);
   diffApplicator = new DiffApplicator();
   planManager = new PlanManager();
+  ln7Api = new Ln7Api(auth);
+  diffApplicator.setLn7Api(ln7Api);
   workspaceProvider = new WorkspaceToolProvider(bridge, diffApplicator);
   workspaceProvider.setupEventSubscriptions();
   chatPanel = new ChatPanel(bridge, statusBar, diffApplicator, planManager, context.extensionUri);
+  chatPanel.setLn7Api(ln7Api);
   agentSidebar = new AgentSidebarProvider(chatPanel);
 
   const healthBar = createHealthStatusBarItem(99);

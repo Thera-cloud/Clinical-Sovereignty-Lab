@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import type { InboundCliChatOutput } from './types';
+import type { Ln7Api } from './ln7Api';
 
 const SCHEME = 'sovereign-proposed';
 
@@ -12,6 +13,7 @@ export class DiffApplicator {
   private pendingEdits: Map<string, { content: string; uri: vscode.Uri; isNew: boolean }> = new Map();
   private contentProvider: ProposedContentProvider;
   private providerDisposable: vscode.Disposable;
+  private ln7Api: Ln7Api | null = null;
 
   constructor() {
     this.contentProvider = new ProposedContentProvider();
@@ -19,6 +21,10 @@ export class DiffApplicator {
       SCHEME,
       this.contentProvider,
     );
+  }
+
+  setLn7Api(api: Ln7Api): void {
+    this.ln7Api = api;
   }
 
   setProposedContent(uri: vscode.Uri, content: string): void {
@@ -80,8 +86,10 @@ export class DiffApplicator {
 
     if (action === 'Accept') {
       await this.applyEdit(editId);
+      void this.ln7Api?.recordUsage('accepted', { path: fullPath });
     } else {
       this.rejectEdit(editId);
+      void this.ln7Api?.recordUsage('rejected', { path: fullPath });
     }
   }
 
@@ -89,6 +97,7 @@ export class DiffApplicator {
     const firstKey = this.pendingEdits.keys().next().value;
     if (firstKey) {
       await this.applyEdit(firstKey);
+      void this.ln7Api?.recordUsage('accepted', { path: String(firstKey) });
     } else {
       vscode.window.showInformationMessage('No pending proposed changes.');
     }
@@ -98,6 +107,7 @@ export class DiffApplicator {
     const firstKey = this.pendingEdits.keys().next().value;
     if (firstKey) {
       this.rejectEdit(firstKey);
+      void this.ln7Api?.recordUsage('rejected', { path: String(firstKey) });
     } else {
       vscode.window.showInformationMessage('No pending proposed changes.');
     }

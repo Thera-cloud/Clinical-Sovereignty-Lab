@@ -492,7 +492,10 @@ async def run_agentic_loop(
         force_provider = None
     selected_model = (model_id or "").strip() or None
     selected_space = (model_space or "").strip().lower() or None
-    if selected_space and selected_space not in ("foundry", "xai", "cli", "azure"):
+    # QUANTUM-CRYSTAL-ARCH — LN7 + contestant catalog spaces
+    if selected_space and selected_space not in (
+        "foundry", "xai", "cli", "azure", "ln7", "contestant",
+    ):
         selected_space = None
 
     try:
@@ -775,6 +778,7 @@ async def run_agentic_loop(
                 force_provider=force_provider,
                 model_override=selected_model,
                 model_space=selected_space,
+                db_pool=db_pool,
             )
         except Exception as e:
             logger.error("CLI stream error (turn %d): %s", turn, e)
@@ -1577,6 +1581,7 @@ async def _stream_with_tools(
     force_provider: Optional[str] = None,
     model_override: Optional[str] = None,
     model_space: Optional[str] = None,
+    db_pool=None,
 ) -> tuple:
     """
     Mode-aware provider routing + Azure param adaptation.
@@ -1777,9 +1782,15 @@ async def _stream_with_tools(
         sel_prov = str(_sel.get("provider") or "")
         sel_model = str(_sel.get("model") or grok_model)
         if sel_prov == "ln7":
-            # Little Nate 7 — local coder weights; inject identity preamble
+            # QUANTUM-CRYSTAL-ARCH — Little Nate 7: sovereign only; never vendor fallback
             try:
                 from app.services.little_nate_7 import identity_system_preamble
+                from app.websocket.ln7_harness import (
+                    generate_sovereign_reply,
+                    looks_like_pack_task,
+                    maybe_shadow_compare,
+                    run_task,
+                )
                 preamble = identity_system_preamble()
                 if messages_for_api and messages_for_api[0].get("role") == "system":
                     messages_for_api[0]["content"] = (
@@ -1787,15 +1798,77 @@ async def _stream_with_tools(
                     )
                 else:
                     messages_for_api.insert(0, {"role": "system", "content": preamble})
-            except Exception:
-                pass
-            if _sel.get("url"):
-                return await _do_stream(
-                    _sel["url"], _sel.get("headers") or {"Content-Type": "application/json"},
-                    sel_model, "ln7",
+
+                # Pack/sandbox coding tasks → full harness (best-of-N + verifier)
+                user_blob = " ".join(
+                    str(m.get("content") or "")
+                    for m in messages_for_api
+                    if m.get("role") == "user"
+                )[-4000:]
+                harness_mode = str(_sel.get("harness_mode") or "max")
+                if looks_like_pack_task(user_blob) and mode in ("ln_fab", "debug"):
+                    harness = await run_task(
+                        user_blob, mode=harness_mode, system=preamble,
+                    )
+                    text = harness.get("diff") or harness.get("text") or ""
+                    if not text:
+                        text = (
+                            f"[Little Nate 7 harness] pack={harness.get('pack')} "
+                            f"passed={harness.get('passed')} "
+                            f"error={harness.get('error') or harness.get('log') or 'no_diff'}"
+                        )
+                    await _emit(emit, {
+                        "type": "nate_cli_chat_chunk",
+                        "delta": text,
+                        "provider": "ln7",
+                        "turn": turn,
+                        "harness": {
+                            "passed": harness.get("passed"),
+                            "pack": harness.get("pack"),
+                            "recall_at_k": harness.get("recall_at_k"),
+                            "attempts": harness.get("attempts"),
+                            "latency_ms": harness.get("latency_ms"),
+                        },
+                    })
+                    return text, [], "ln7"
+
+                # Interactive stream via local Ollama-compatible URL when present
+                if _sel.get("url"):
+                    return await _do_stream(
+                        _sel["url"],
+                        _sel.get("headers") or {"Content-Type": "application/json"},
+                        sel_model,
+                        "ln7",
+                    )
+
+                # Non-stream sovereign generate (still zero vendor calls)
+                gen = await generate_sovereign_reply(
+                    messages_for_api, mode=harness_mode,
                 )
-            # No SOVEREIGN_INFERENCE_URL — fall through to contestant path with warning
-            logger.warning("LN7 selected but SOVEREIGN_INFERENCE_URL unset — contestant fallback")
+                if not gen.get("ok"):
+                    raise RuntimeError(
+                        f"LN7 sovereign unavailable: {gen.get('error') or 'no_local_coder'}. "
+                        "Set LN7_INFERENCE_URL or SOVEREIGN_INFERENCE_URL / pull coder weights."
+                    )
+                text = gen.get("text") or ""
+                await _emit(emit, {
+                    "type": "nate_cli_chat_chunk",
+                    "delta": text,
+                    "provider": "ln7",
+                    "turn": turn,
+                })
+                if db_pool is not None:
+                    try:
+                        asyncio.create_task(
+                            maybe_shadow_compare(db_pool, user_blob, active_text=text)
+                        )
+                    except Exception:
+                        pass
+                return text, [], "ln7"
+            except RuntimeError:
+                raise
+            except Exception as ln7_err:
+                raise RuntimeError(f"LN7 path failed (no vendor fallback): {ln7_err}") from ln7_err
         if sel_prov == "xai" and _sel.get("url") and _sel.get("headers"):
             return await _do_stream(_sel["url"], _sel["headers"], sel_model, "xai")
         if sel_prov == "azure":

@@ -432,7 +432,12 @@ def resolve_stream_target(
             if ":fast" in mid or mid.endswith(":fast"):
                 mode = "fast"
             model = coder_model("fast" if mode == "fast" else "deep")
-            sov_url = (os.getenv("SOVEREIGN_INFERENCE_URL") or "").rstrip("/")
+            # QUANTUM-CRYSTAL-ARCH — LN7_INFERENCE_URL preferred; never a vendor host
+            sov_url = (
+                (os.getenv("LN7_INFERENCE_URL") or "").rstrip("/")
+                or (os.getenv("SOVEREIGN_INFERENCE_URL") or "").rstrip("/")
+                or (os.getenv("HOME_GPU_URL") or "").rstrip("/")
+            )
             if not sov_url:
                 return {
                     "provider": "ln7",
@@ -441,11 +446,14 @@ def resolve_stream_target(
                     "url": "",
                     "headers": {},
                 }
+            chat_url = sov_url
+            if not chat_url.endswith("/chat/completions"):
+                chat_url = f"{sov_url}/v1/chat/completions"
             return {
                 "provider": "ln7",
                 "model": model,
                 "harness_mode": mode,
-                "url": f"{sov_url}/v1/chat/completions",
+                "url": chat_url,
                 "headers": {"Content-Type": "application/json"},
             }
         except Exception as exc:

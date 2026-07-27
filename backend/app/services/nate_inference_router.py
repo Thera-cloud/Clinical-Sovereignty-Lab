@@ -35,7 +35,8 @@ _TIER_PRIORITY = {
     TIER_ANALYTICAL: ["workers_ai", "grok", "sovereign", "azure"],
     TIER_UTILITY: ["workers_ai", "grok", "azure"],
     TIER_REALTIME: ["azure"],
-    TIER_CODING: ["sovereign", "grok", "workers_ai", "azure"],
+    # QUANTUM-CRYSTAL-ARCH — LN7 coding path is sovereign-only (no vendor fallback)
+    TIER_CODING: ["sovereign", "home_gpu"],
 }
 
 # Domain -> temperature defaults
@@ -173,6 +174,7 @@ class NateInferenceRouter:
         odpe_signal: Optional[str] = None,
         allow_deep: bool = False,
         images: Optional[List[str]] = None,  # QUANTUM-CRYSTAL-ARCH — multimodal (Azure)
+        providers_override: Optional[List[str]] = None,  # QUANTUM-CRYSTAL-ARCH — LN7 sovereign-only
     ) -> Dict[str, Any]:
         """
         Route a generation request to the best available provider.
@@ -184,6 +186,7 @@ class NateInferenceRouter:
           TENSION → TIER_CLINICAL → Grok 4.1 Fast via Foundry
           DEEP_TENSION → TIER_CLINICAL → Grok 4.1 Fast via Foundry
           NOISE → skip LLM call entirely
+        providers_override: when set (e.g. LN7), skip the tier chain entirely.
         """
         if odpe_signal == "NOISE" and not images:
             return {
@@ -193,7 +196,7 @@ class NateInferenceRouter:
                 "latency_ms": 0,
             }
 
-        if odpe_signal == "LOCKED":
+        if odpe_signal == "LOCKED" and not providers_override:
             tier = TIER_UTILITY
         elif odpe_signal in ("TENSION", "DEEP_TENSION", "LIMINAL_RESOLVE"):
             if domain == "coding":
@@ -209,7 +212,13 @@ class NateInferenceRouter:
             temperature = DOMAIN_TEMPERATURES.get(domain or "general", 0.6)
 
         # Vision requires Azure multimodal; force azure when images present
-        providers = ["azure"] if images else _TIER_PRIORITY.get(tier, ["azure"])
+        # QUANTUM-CRYSTAL-ARCH — LN7 passes providers_override=["sovereign","home_gpu"]
+        if providers_override:
+            providers = list(providers_override)
+        elif images:
+            providers = ["azure"]
+        else:
+            providers = _TIER_PRIORITY.get(tier, ["azure"])
 
         for provider in providers:
             if provider == "sovereign" and not self._sovereign_healthy:

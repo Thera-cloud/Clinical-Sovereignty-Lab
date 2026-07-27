@@ -6,6 +6,7 @@ import type { BridgeClient } from './bridgeClient';
 import type { StatusBarManager } from './statusBar';
 import type { DiffApplicator } from './diffApplicator';
 import type { PlanManager } from './planManager';
+import type { Ln7Api } from './ln7Api';
 import type {
   CliMode,
   ChatEntry,
@@ -40,6 +41,7 @@ export class ChatPanel {
   private _selectedModel = '';
   private _selectedSpace = '';
   private _selectedProvider = '';
+  private ln7Api: Ln7Api | null = null;
   private _modelRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private _lastModelCatalog: HostToWebviewMessage | null = null;
   private _buildState: BuildPanelState = {
@@ -75,6 +77,10 @@ export class ChatPanel {
     }
 
     this.setupBridgeListeners();
+  }
+
+  setLn7Api(api: Ln7Api): void {
+    this.ln7Api = api;
   }
 
   async show(): Promise<void> {
@@ -267,6 +273,58 @@ export class ChatPanel {
           skipped: msg.skipped === true,
         } as unknown as Parameters<BridgeClient['send']>[0]);
         break;
+
+      case 'ln7Bakeoff':
+        void this.handleLn7Bakeoff(typeof msg.mode === 'string' ? msg.mode : 'fast');
+        break;
+
+      case 'ln7Leaderboard':
+        void this.handleLn7Leaderboard();
+        break;
+    }
+  }
+
+  private async handleLn7Bakeoff(mode: string): Promise<void> {
+    if (!this.ln7Api) {
+      this.sendToWebview({ cmd: 'ln7BakeoffResult', ok: false, error: 'LN7 API not wired' });
+      return;
+    }
+    try {
+      const raw = await this.ln7Api.runBakeoff(mode) as Record<string, unknown>;
+      const privateRes = (raw.private || {}) as Record<string, unknown>;
+      this.sendToWebview({
+        cmd: 'ln7BakeoffResult',
+        ok: Boolean(raw.ok),
+        pass_rate: privateRes.pass_rate as HostToWebviewMessage['pass_rate'],
+        public_note: 'Public benchmarks report-only until harness containers land',
+        error: typeof raw.error === 'string' ? raw.error : undefined,
+      });
+    } catch (err) {
+      this.sendToWebview({
+        cmd: 'ln7BakeoffResult',
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private async handleLn7Leaderboard(): Promise<void> {
+    if (!this.ln7Api) {
+      this.sendToWebview({ cmd: 'ln7LeaderboardResult', rows: [] });
+      return;
+    }
+    try {
+      const raw = await this.ln7Api.leaderboard() as Record<string, unknown>;
+      this.sendToWebview({
+        cmd: 'ln7LeaderboardResult',
+        rows: (raw.rows as Array<Record<string, unknown>>) || [],
+      });
+    } catch (err) {
+      this.sendToWebview({
+        cmd: 'ln7LeaderboardResult',
+        rows: [],
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

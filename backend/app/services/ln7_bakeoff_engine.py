@@ -47,10 +47,60 @@ def beats_incumbent(candidate_ci: Dict[str, float], incumbent_point: float) -> b
     return float(candidate_ci.get("lo") or 0) > float(incumbent_point or 0)
 
 
+async def sync_contestant_credentials(db_pool) -> Dict[str, Any]:
+    """Enable contestants only when URL/key/model exist — never claim working without creds."""
+    if not db_pool:
+        return {"ok": False, "updated": 0}
+    foundry_ok = bool(
+        (os.getenv("NATE_CHAT_URL") or os.getenv("AZURE_OPENAI_ENDPOINT"))
+        and (os.getenv("NATE_CHAT_KEY") or os.getenv("AZURE_API_KEY"))
+    )
+    xai_ok = bool(os.getenv("XAI_API_KEY") and (os.getenv("XAI_CHAT_URL") or True))
+    fable_ok = bool(os.getenv("FABLE_API_KEY") and os.getenv("FABLE_API_URL"))
+    mythos_ok = bool(os.getenv("MYTHOS_API_KEY") and os.getenv("MYTHOS_API_URL"))
+    mapping = {
+        "foundry_grok": foundry_ok,
+        "xai_grok": xai_ok,
+        "fable_5": fable_ok,
+        "mythos_5": mythos_ok,
+    }
+    updated = 0
+    try:
+        async with db_pool.acquire() as conn:
+            for cid, enabled in mapping.items():
+                await conn.execute(
+                    """
+                    UPDATE ln7_contestants
+                    SET enabled = $2,
+                        version_captured_at = CASE WHEN $2 THEN NOW() ELSE version_captured_at END,
+                        base_url = CASE
+                            WHEN contestant_id = 'foundry_grok' THEN COALESCE($3, base_url)
+                            WHEN contestant_id = 'xai_grok' THEN COALESCE($4, base_url)
+                            WHEN contestant_id = 'fable_5' THEN COALESCE($5, base_url)
+                            WHEN contestant_id = 'mythos_5' THEN COALESCE($6, base_url)
+                            ELSE base_url
+                        END
+                    WHERE contestant_id = $1
+                    """,
+                    cid,
+                    enabled,
+                    os.getenv("NATE_CHAT_URL") or None,
+                    os.getenv("XAI_CHAT_URL") or "https://api.x.ai/v1/chat/completions",
+                    os.getenv("FABLE_API_URL") or None,
+                    os.getenv("MYTHOS_API_URL") or None,
+                )
+                updated += 1
+        return {"ok": True, "updated": updated, "enabled": mapping}
+    except Exception as exc:
+        logger.warning("LN7 sync_contestants: %s", exc)
+        return {"ok": False, "error": str(exc)[:200]}
+
+
 async def list_contestants(db_pool) -> List[Dict[str, Any]]:
     if not db_pool:
         return []
     try:
+        await sync_contestant_credentials(db_pool)
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(
                 """

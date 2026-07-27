@@ -47,6 +47,16 @@ Insert/update `ln7_contestants` with `base_url`, `model_id`, credentials in env,
 
 Set `LN7_KILL_SWITCH=true` and recreate bridge/backend containers. Harness returns immediately with `error=kill_switch`.
 
+## Gap-close notes (2026-07-27)
+
+- CLI path with `space=ln7` never falls through to Foundry/xAI. Missing local coder → hard error.
+- Pack-hinted LN-FAB/DEBUG turns run `ln7_harness.run_task` (best-of-N + sandbox).
+- `TIER_CODING` providers are `sovereign` + `home_gpu` only.
+- Contestants auto-enable when credentials exist (`GET /api/ln7/contestants`).
+- Seed packs: `POST /api/ln7/tasks/seed-packs` or migration `292`.
+- Mine volume: `python backend/scripts/ln7_mine_tasks.py --limit 300 --sql /tmp/ln7_tasks.sql`.
+- Extension 0.2.3: Bakeoff/Board bar + accept/reject → `/api/ln7/usage-event`.
+
 ## Three-node compute
 
 | Workload | Node |
