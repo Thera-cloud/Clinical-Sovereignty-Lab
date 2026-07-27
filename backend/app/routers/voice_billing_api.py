@@ -152,6 +152,26 @@ async def inbound_call(request: Request):
 
     logger.info("Inbound call from %s (normalized: %s)", From[:8], phone[:6])
 
+    # SOVEREIGN-VOICE — coach check-in callback (platform-paid; skip balance gate)
+    try:
+        pool = getattr(request.app.state, "db_pool", None)
+        if pool:
+            from app.services.coach_nate_checkin_service import CoachNateCheckinService
+            _ck_task = await CoachNateCheckinService(pool).resolve_inbound_by_phone(From)
+            if _ck_task:
+                return Response(
+                    content=_twiml_connect({
+                        "username": str(_ck_task.get("client_username") or ""),
+                        "coach_checkin_task_id": str(_ck_task["id"]),
+                        "call_id": str(_ck_task.get("call_id") or ""),
+                        "from_number": From,
+                        "is_callback": "true",
+                    }),
+                    media_type="application/xml",
+                )
+    except Exception as _ck_err:
+        logger.warning("coach checkin callback resolve: %s", _ck_err)
+
     # 1. Check for PAUSED session within recovery window
     paused = await billing.get_paused_session_for_phone(phone)
     if paused:

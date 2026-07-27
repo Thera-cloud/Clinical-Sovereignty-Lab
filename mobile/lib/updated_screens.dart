@@ -10007,11 +10007,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           ),
 
           const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
             children: [
+              _buildCallClientButton(brief),
               _buildMessageClientButton(brief),
-              const SizedBox(width: 8),
               _buildIntakeButton(brief),
             ],
           ),
@@ -10404,6 +10406,122 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         foregroundColor: const Color(0xFF050505),
       ),
     );
+  }
+
+  Widget _buildCallClientButton(Map<String, dynamic> brief) {
+    return ElevatedButton.icon(
+      onPressed: () => _confirmCallClient(brief),
+      icon: const Icon(Icons.phone_in_talk_outlined, size: 16),
+      label: const Text('Call Client'),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFFC9A962),
+        foregroundColor: const Color(0xFF050505),
+      ),
+    );
+  }
+
+  Future<void> _confirmCallClient(Map<String, dynamic> brief) async {
+    final client = (brief['client'] is Map)
+        ? Map<String, dynamic>.from(brief['client'])
+        : <String, dynamic>{};
+    final visibility = brief['sensitive_bridge_visibility'];
+    final usernameFromVisibility =
+        (visibility is Map) ? (visibility['client_username'] ?? '').toString() : '';
+    final clientUsername = usernameFromVisibility.trim().isNotEmpty
+        ? usernameFromVisibility.trim()
+        : (client['username'] ?? '').toString().trim();
+    if (clientUsername.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text(
+                'Call unavailable: missing client username in brief payload.')),
+      );
+      return;
+    }
+    final clientName = (client['name'] ?? '').toString().trim().isNotEmpty
+        ? (client['name'] ?? '').toString().trim()
+        : clientUsername;
+    final phone = (client['phone'] ?? '').toString().trim();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: Text('Call $clientName?',
+            style: const TextStyle(
+                color: Color(0xFFC9A962), fontFamily: 'Cormorant Garamond')),
+        content: Text(
+          phone.isEmpty
+              ? 'Little Nate will dial the phone on file for this client. '
+                  'If they miss the call, Nate leaves a voicemail and invites a callback.'
+              : 'Little Nate will dial the number ending in '
+                  '${phone.length >= 4 ? phone.substring(phone.length - 4) : phone}. '
+                  'Voicemail + callback verify if unanswered.',
+          style: const TextStyle(
+              color: Colors.white70, fontFamily: 'DM Sans', height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('CANCEL',
+                style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFC9A962),
+                foregroundColor: const Color(0xFF050505)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('CALL'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _startNateCheckinCall(clientUsername, clientName);
+  }
+
+  Future<void> _startNateCheckinCall(
+      String clientUsername, String clientName) async {
+    try {
+      final resp = await http.post(
+        _apiUri('/api/coach/nate-checkin'),
+        headers: _restHeaders(),
+        body: jsonEncode({
+          'client_username': clientUsername,
+          'intent': 'coach_checkin',
+        }),
+      );
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final decoded = jsonDecode(resp.body);
+        final data = decoded is Map
+            ? Map<String, dynamic>.from(decoded)
+            : <String, dynamic>{};
+        final last4 = (data['client_phone_last4'] ?? '').toString();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              last4.isNotEmpty
+                  ? 'Little Nate is calling $clientName (…$last4).'
+                  : 'Little Nate is calling $clientName.',
+            ),
+          ),
+        );
+      } else {
+        String err = 'Could not start call (${resp.statusCode}).';
+        try {
+          final body = jsonDecode(resp.body);
+          if (body is Map && body['detail'] != null) {
+            err = body['detail'].toString();
+          }
+        } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Call failed: $e')),
+      );
+    }
   }
 
   void _openMessageClientDialog(Map<String, dynamic> brief) {

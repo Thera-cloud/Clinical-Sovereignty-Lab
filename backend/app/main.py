@@ -4320,6 +4320,13 @@ try:
 except Exception as _tv_err:
     print(f"   ⚠️  Twilio Voice router failed: {_tv_err}")
 
+# SOVEREIGN-VOICE — Coach-requested Nate check-in (outbound + callback verify)
+try:
+    from app.routers.coach_nate_checkin_api import router as coach_nate_checkin_router
+    app.include_router(coach_nate_checkin_router)
+except Exception as _cnc_err:
+    print(f"   ⚠️  Coach Nate check-in router failed: {_cnc_err}")
+
 # Twilio Media Stream WebSocket — /ws/nate-media-stream
 try:
     from app.routers.littlenate_api import twilio_ws_router
