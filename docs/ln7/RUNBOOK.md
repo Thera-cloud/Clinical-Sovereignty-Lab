@@ -57,6 +57,69 @@ Set `LN7_KILL_SWITCH=true` and recreate bridge/backend containers. Harness retur
 - Mine volume: `python backend/scripts/ln7_mine_tasks.py --limit 300 --sql /tmp/ln7_tasks.sql`.
 - Extension 0.2.3: Bakeoff/Board bar + accept/reject → `/api/ln7/usage-event`.
 
+## 1) Public benchmarks (report-only)
+
+| Mode | Env | Where |
+|---|---|---|
+| `smoke` | `LN7_PUBLIC_HARNESS_MODE=smoke` | GREEN ok — tiny tasks via Ollama |
+| `smoke` offline CI | `LN7_PUBLIC_SMOKE_OFFLINE=true` | pytest / no GPU |
+| `ingest` | results JSON in `LN7_PUBLIC_RESULTS_DIR` | GREEN reads ORANGE/BLUE uploads |
+| `full` | `LN7_PUBLIC_HARNESS_ROOT=/opt/ln7-harness` | **ORANGE/BLUE only** |
+
+```bash
+# ORANGE/BLUE — after cloning official harnesses under /opt/ln7-harness/<bench>/
+LN7_PUBLIC_HARNESS_MODE=full LN7_PUBLIC_HARNESS_ROOT=/opt/ln7-harness \
+  PYTHONPATH=backend python backend/scripts/ln7_run_public_benches.py --write
+
+# GREEN — scorecard uses ingest or smoke
+POST /api/ln7/public-benches  {"mode":"ingest"}
+POST /api/ln7/bakeoff         {"include_public":true,"include_private":true}
+```
+
+See `backend/scripts/ln7_public_harness/README.md`. Smoke ≠ competitive SWE-bench.
+
+## 2) Coder weights on ORANGE
+
+```bash
+ssh -J root@68.183.168.75 root@10.13.13.5 \
+  'bash -s' < backend/scripts/ln7_pull_coder_weights.sh
+# Verify: ollama list | grep coder
+# GREEN: LN7_INFERENCE_URL=http://10.13.13.5:11434 + LN7_CODE_MODEL_*
+```
+
+## 3) Shadow spend + HOME_GPU failover
+
+| Flag | Meaning |
+|---|---|
+| `LN7_SHADOW_SPEND=true` | When a revision has `status=shadow`, live LN7 answers also fire a second **sovereign** generate (fast tier) and ledger it as `ln7_shadow` |
+| `HOME_GPU_URL` | BLUE Ollama (Twin Engine). Coding tier tries sovereign then home_gpu |
+
+```bash
+POST /api/ln7/revision/shadow  {"revision_id":"LN7-<ts>"}
+# Promote still requires CEO when LN7_PROMOTE_REQUIRES_CEO=true
+```
+
+## 4) Train / QLoRA (BLUE only)
+
+```bash
+# From GREEN DB (read) or BLUE with DATABASE_URL:
+PYTHONPATH=backend python backend/scripts/ln7_export_train_jsonl.py \
+  --out /tmp/ln7_train.jsonl --limit 500
+
+# On BLUE (NODE_COLOR must not be green):
+python backend/scripts/ln7_qlora_train.py \
+  --train-jsonl /tmp/ln7_train.jsonl \
+  --base qwen2.5-coder:7b-instruct \
+  --out-dir /tmp/ln7_adapters/LN7-<ts>
+
+# Register shadow candidate from manifest:
+POST /api/ln7/revision/register  # body = revision_manifest.json → register_body
+POST /api/ln7/revision/shadow    {"revision_id":"LN7-<ts>"}
+# Statistical gate + CEO → activate
+```
+
+API: `POST /api/ln7/train/export` returns sample metadata (not weights).
+
 ## Three-node compute
 
 | Workload | Node |
@@ -65,3 +128,4 @@ Set `LN7_KILL_SWITCH=true` and recreate bridge/backend containers. Harness retur
 | Interactive fast coder (7B) | ORANGE (Ollama) |
 | Deep / bakeoff / train | BLUE (Home GPU / MLX) or rented GPU |
 | Untrusted third-party task exec | Sandbox VPS (10.13.13.4) — not GREEN |
+| Full public harness containers | ORANGE / BLUE — never GREEN |

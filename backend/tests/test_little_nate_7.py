@@ -151,3 +151,24 @@ def test_coding_tier_sovereign_only():
     assert m, "TIER_CODING priority block missing"
     providers = [p.strip().strip("\"'") for p in m.group(1).split(",") if p.strip()]
     assert providers == ["sovereign", "home_gpu"]
+
+
+def test_public_harness_smoke_offline(monkeypatch):
+    import asyncio
+
+    _pub = _load("app.services.ln7_public_harness", APP / "services" / "ln7_public_harness.py")
+    monkeypatch.setenv("LN7_PUBLIC_HARNESS_MODE", "smoke")
+    monkeypatch.setenv("LN7_PUBLIC_SMOKE_OFFLINE", "true")
+    row = asyncio.run(_pub.run_smoke_benchmark("swe_bench_verified"))
+    assert row["status"] == "ok"
+    assert row["report_only"] is True
+    assert row["pass_rate"]["n"] >= 1
+    assert row["pass_rate"]["mean"] == 1.0
+
+
+def test_public_harness_score_helper():
+    _pub = _load("app.services.ln7_public_harness", APP / "services" / "ln7_public_harness.py")
+    task = {"oracle": "def add(a, b):\n    return a + b\n"}
+    assert _pub._score_smoke_task("swe_bench_verified", task, "def add(a, b):\n    return a + b\n")
+    assert not _pub._score_smoke_task("swe_bench_verified", task, "")
+    assert _pub._score_smoke_task("terminal_bench", {"oracle": "hello"}, "say hello world")

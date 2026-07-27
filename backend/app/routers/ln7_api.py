@@ -28,6 +28,7 @@ except Exception:
 @router.get("/health")
 async def ln7_health():
     try:
+        import os
         from app.services.little_nate_7 import (
             PRODUCT_NAME,
             PRODUCT_MAJOR,
@@ -44,6 +45,11 @@ async def ln7_health():
             "harness": harness_enabled(),
             "bakeoff": bakeoff_enabled(),
             "coder_deep": coder_model("deep"),
+            "coder_fast": coder_model("fast"),
+            "ln7_inference_url": bool(os.getenv("LN7_INFERENCE_URL") or os.getenv("SOVEREIGN_INFERENCE_URL")),
+            "home_gpu_configured": bool(os.getenv("HOME_GPU_URL")),
+            "shadow_spend": os.getenv("LN7_SHADOW_SPEND", "").strip().lower() in ("1", "true", "yes"),
+            "public_harness_mode": (os.getenv("LN7_PUBLIC_HARNESS_MODE") or "smoke").strip().lower(),
             "non_clinical_claim": True,
         }
     except Exception as exc:
@@ -72,8 +78,85 @@ async def post_bakeoff(request: Request, body: Optional[Dict[str, Any]] = None, 
         _pool(request),
         revision_id=str(body.get("revision_id") or "LN7-baseline"),
         mode=str(body.get("mode") or "max"),
+        include_public=bool(body.get("include_public", True)),
+        include_private=bool(body.get("include_private", True)),
     )
     return {"status": "ok" if result.get("ok") else "error", **result}
+
+
+@router.post("/public-benches")
+async def post_public_benches(
+    request: Request,
+    body: Optional[Dict[str, Any]] = None,
+    _admin=Depends(require_admin),
+):
+    """Run smoke/ingest/full public benches (report-only). Prefer ORANGE/BLUE for full."""
+    import os
+    body = body or {}
+    if body.get("mode"):
+        os.environ["LN7_PUBLIC_HARNESS_MODE"] = str(body["mode"])
+    from app.services.ln7_bakeoff_engine import run_public_benchmarks
+    rows = await run_public_benchmarks()
+    return {
+        "status": "ok",
+        "public": rows,
+        "report_only": True,
+        "non_clinical_claim": True,
+    }
+
+
+@router.post("/train/export")
+async def post_train_export(
+    request: Request,
+    body: Optional[Dict[str, Any]] = None,
+    _admin=Depends(require_admin),
+):
+    """Export rejection samples (train split only) for offline QLoRA on BLUE."""
+    from app.services.ln7_revision import collect_rejection_samples
+    body = body or {}
+    limit = max(1, min(2000, int(body.get("limit") or 500)))
+    rows = await collect_rejection_samples(_pool(request), limit=limit)
+    # Strip heldout pack markers
+    filtered = []
+    for r in rows:
+        meta = r.get("metrics_json") or {}
+        if isinstance(meta, str):
+            import json as _json
+            try:
+                meta = _json.loads(meta)
+            except Exception:
+                meta = {}
+        if (meta or {}).get("pack") == "env_redis_prefix":
+            continue
+        filtered.append({
+            "outcome_id": str(r.get("id")),
+            "task_id": r.get("task_id"),
+            "patch_hash": r.get("patch_hash"),
+            "revision_id": r.get("revision_id"),
+            "harness_mode": r.get("harness_mode"),
+        })
+    return {
+        "status": "ok",
+        "n": len(filtered),
+        "samples": filtered,
+        "hint": "Write JSONL on BLUE via backend/scripts/ln7_export_train_jsonl.py then ln7_qlora_train.py",
+        "non_clinical_claim": True,
+    }
+
+
+@router.post("/revision/shadow")
+async def post_revision_shadow(
+    request: Request,
+    body: Optional[Dict[str, Any]] = None,
+    _admin=Depends(require_admin),
+):
+    from app.services.ln7_revision import set_shadow
+    body = body or {}
+    rid = str(body.get("revision_id") or "").strip()
+    if not rid:
+        raise HTTPException(422, "revision_id required")
+    ok = await set_shadow(_pool(request), rid)
+    return {"status": "ok" if ok else "error", "revision_id": rid, "status_field": "shadow"}
 
 
 @router.get("/scorecard/{revision_id}")

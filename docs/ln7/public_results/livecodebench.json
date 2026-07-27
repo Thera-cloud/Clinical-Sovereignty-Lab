@@ -1,0 +1,22 @@
+{
+  "benchmark": "livecodebench",
+  "status": "ok",
+  "mode": "smoke_offline",
+  "report_only": true,
+  "pass_rate": {
+    "mean": 1.0,
+    "lo": 1.0,
+    "hi": 1.0,
+    "n": 1
+  },
+  "latency_ms": 1,
+  "details": [
+    {
+      "task_id": "smoke_lcb_001",
+      "passed": true,
+      "response_chars": 88,
+      "offline": true
+    }
+  ],
+  "note": "Smoke subset only \u2014 not a competitive SWE-bench / LCB score."
+}

@@ -14,7 +14,8 @@ Day-0 stock coder weights baseline. Every later revision's statistical gate and 
 
 ## Public benchmarks
 
-Report-only until official harness containers run on ORANGE/BLUE.
+Report-only. Wiring: `ln7_public_harness` (`smoke` / `ingest` / `full`).  
+Competitive scores require official containers under `LN7_PUBLIC_HARNESS_ROOT` on ORANGE/BLUE; ingest JSON into `docs/ln7/public_results/`.
 
 ## Notes
 

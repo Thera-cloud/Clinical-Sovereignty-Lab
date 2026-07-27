@@ -439,40 +439,65 @@ async def maybe_shadow_compare(
     *,
     active_text: str,
 ) -> None:
-    """Fire-and-forget: score a shadow revision candidate without user impact."""
+    """Fire-and-forget: score a shadow revision candidate without user impact.
+
+    LN7_SHADOW_SPEND=true → second sovereign generate (local only, never vendor).
+    Otherwise observe-only ledger row (hash of active answer).
+    """
     if not db_pool:
         return
     try:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT revision_id FROM ln7_revisions
+                SELECT revision_id, base_checkpoint FROM ln7_revisions
                 WHERE status = 'shadow' AND active = FALSE
                 ORDER BY revised_at DESC LIMIT 1
                 """
             )
         if not row:
             return
-        # Record a lightweight comparison stub (no second LLM spend unless env allows)
-        if os.getenv("LN7_SHADOW_SPEND", "").strip().lower() not in ("1", "true", "yes"):
-            from app.services.ln7_ledger import record_outcome
-            await record_outcome(db_pool, {
-                "task_id": None,
-                "generator": "ln7_shadow",
-                "revision_id": row["revision_id"],
-                "harness_mode": "shadow",
-                "patch_hash": hashlib.sha256(
-                    (active_text or "")[:2000].encode()
-                ).hexdigest()[:32],
-                "passed": False,
-                "diff_lines": 0,
-                "tokens": 0,
-                "latency_ms": 0,
-                "metrics_json": {
-                    "note": "shadow_observe_only",
-                    "prompt_chars": len(prompt or ""),
-                },
-            })
+        from app.services.ln7_ledger import record_outcome
+
+        spend = os.getenv("LN7_SHADOW_SPEND", "").strip().lower() in ("1", "true", "yes")
+        shadow_text = ""
+        tokens = 0
+        latency_ms = 0
+        if spend:
+            t0 = time.time()
+            gen = await generate_sovereign_reply(
+                [
+                    {
+                        "role": "system",
+                        "content": "LN7 shadow revision — produce a candidate patch/answer.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                mode="fast",
+            )
+            shadow_text = (gen or {}).get("text") or ""
+            tokens = int((gen or {}).get("tokens") or 0)
+            latency_ms = int((time.time() - t0) * 1000)
+        await record_outcome(db_pool, {
+            "task_id": None,
+            "generator": "ln7_shadow",
+            "revision_id": row["revision_id"],
+            "harness_mode": "shadow",
+            "patch_hash": hashlib.sha256(
+                (shadow_text or active_text or "")[:4000].encode()
+            ).hexdigest()[:32],
+            "passed": bool(shadow_text.strip()) if spend else False,
+            "diff_lines": len((shadow_text or "").splitlines()),
+            "tokens": tokens,
+            "latency_ms": latency_ms,
+            "metrics_json": {
+                "note": "shadow_spend" if spend else "shadow_observe_only",
+                "prompt_chars": len(prompt or ""),
+                "active_chars": len(active_text or ""),
+                "shadow_chars": len(shadow_text),
+                "base_checkpoint": row.get("base_checkpoint"),
+            },
+        })
     except Exception as exc:
         logger.debug("LN7 shadow compare: %s", exc)
 

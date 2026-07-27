@@ -1,0 +1,22 @@
+{
+  "benchmark": "swe_bench_verified",
+  "status": "ok",
+  "mode": "smoke_offline",
+  "report_only": true,
+  "pass_rate": {
+    "mean": 1.0,
+    "lo": 1.0,
+    "hi": 1.0,
+    "n": 1
+  },
+  "latency_ms": 4,
+  "details": [
+    {
+      "task_id": "smoke_swe_001",
+      "passed": true,
+      "response_chars": 32,
+      "offline": true
+    }
+  ],
+  "note": "Smoke subset only \u2014 not a competitive SWE-bench / LCB score."
+}

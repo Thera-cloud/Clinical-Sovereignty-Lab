@@ -180,7 +180,7 @@ async def run_private_pack_bakeoff(
 
 
 def public_benchmark_stub(name: str) -> Dict[str, Any]:
-    """Placeholder until official harness containers are wired on ORANGE/BLUE."""
+    """Legacy fallback if public harness import fails."""
     return {
         "benchmark": name,
         "status": "harness_pending",
@@ -193,24 +193,41 @@ def public_benchmark_stub(name: str) -> Dict[str, Any]:
     }
 
 
+async def run_public_benchmarks() -> List[Dict[str, Any]]:
+    """Smoke / ingest / full public benches via ln7_public_harness."""
+    try:
+        from app.services.ln7_public_harness import run_all_public
+        return await run_all_public()
+    except Exception as exc:
+        logger.warning("LN7 public harness: %s", exc)
+        return [public_benchmark_stub(b) for b in PUBLIC_BENCHMARKS]
+
+
 async def run_full_scorecard(
     db_pool,
     *,
     revision_id: str = "LN7-baseline",
     mode: str = "max",
+    include_public: bool = True,
+    include_private: bool = True,
 ) -> Dict[str, Any]:
-    private = await run_private_pack_bakeoff(
-        db_pool, revision_id=revision_id, mode=mode,
-    )
-    public = [public_benchmark_stub(b) for b in PUBLIC_BENCHMARKS]
+    private: Dict[str, Any] = {"ok": True, "skipped": True}
+    if include_private:
+        private = await run_private_pack_bakeoff(
+            db_pool, revision_id=revision_id, mode=mode,
+        )
+    public: List[Dict[str, Any]] = []
+    if include_public:
+        public = await run_public_benchmarks()
     contestants = await list_contestants(db_pool)
     return {
-        "ok": bool(private.get("ok")),
+        "ok": bool(private.get("ok")) if include_private else True,
         "revision_id": revision_id,
         "private": private,
         "public": public,
         "contestants": contestants,
         "non_clinical_claim": True,
+        "public_report_only": True,
     }
 
 
