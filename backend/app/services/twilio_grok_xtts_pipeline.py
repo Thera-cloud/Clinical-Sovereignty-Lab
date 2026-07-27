@@ -1325,10 +1325,12 @@ async def run_twilio_grok_xtts_bridge(
             asyncio.create_task(_record_ec_snapshot("rolling"))
 
     async def _send_mulaw_to_twilio(mulaw_out: bytes) -> None:
-        nonlocal stream_sid
+        nonlocal stream_sid, _tts_playback_started
         if not stream_sid or not mulaw_out:
             return
         async with speaking:
+            # SOVEREIGN-VOICE — barge-in only after first chunk queued (not during synth wait)
+            _tts_playback_started = True
             for i in range(0, len(mulaw_out), _TWILIO_MULAW_CHUNK):
                 if _tts_cancel.is_set():  # SOVEREIGN-VOICE barge-in
                     print("[VOICE] barge-in — stop TTS playback")
@@ -1349,13 +1351,15 @@ async def run_twilio_grok_xtts_bridge(
 
     _nate_speaking = False
     _tts_cancel = asyncio.Event()  # SOVEREIGN-VOICE barge-in
+    _tts_playback_started = False  # SOVEREIGN-VOICE — ignore barge-in until audio is sending
 
     async def _on_grok_text(response_text: str) -> None:
-        nonlocal _greeting_spoken, _nate_speaking
+        nonlocal _greeting_spoken, _nate_speaking, _tts_playback_started
         text = (response_text or "").strip()
         if not text:
             return
         _tts_cancel.clear()
+        _tts_playback_started = False
         _nate_speaking = True
         assistant_turns.append({"text": text, "ts": datetime.now(timezone.utc).isoformat()})
         # SOVEREIGN-VOICE — sync avatar expression to linked app
@@ -1363,9 +1367,7 @@ async def run_twilio_grok_xtts_bridge(
             _ut = user_turns[-1]["text"] if user_turns else ""
             asyncio.create_task(_voice_sync.on_nate_text(text, _ut))
         async with tts_serial:
-            if _tts_cancel.is_set():
-                _nate_speaking = False
-                return
+            # Do not abort on cancel set during synth — ambient energy false barge-in
             tts_task = asyncio.create_task(
                 _synthesize_with_fallback(text, "connect", xtts_to_mulaw_state)
             )
@@ -1375,18 +1377,21 @@ async def run_twilio_grok_xtts_bridge(
                 )
             except asyncio.TimeoutError:
                 filler = await _get_filler_mulaw(xtts_to_mulaw_state)
-                if filler and not _tts_cancel.is_set():
+                if filler:
                     print("[TWILIO-GROK-XTTS] filler played while waiting for TTS")
                     filler_counts["connect"] = filler_counts.get("connect", 0) + 1
+                    _tts_cancel.clear()  # SOVEREIGN-VOICE — play filler after false barge
                     await _send_mulaw_to_twilio(filler)
                 mulaw_out = await tts_task
 
-            if mulaw_out and not _tts_cancel.is_set():
+            if mulaw_out:
+                _tts_cancel.clear()  # SOVEREIGN-VOICE — clear false barge during synth
                 print(f"[TWILIO-GROK-XTTS] synthesized {len(mulaw_out)} bytes μ-law for Twilio")
                 await _send_mulaw_to_twilio(mulaw_out)
         if not _greeting_spoken:
             _greeting_spoken = True
         _nate_speaking = False
+        _tts_playback_started = False
 
     _grok_event_count = 0
     _media_chunk_count = 0
@@ -1852,8 +1857,9 @@ async def run_twilio_grok_xtts_bridge(
                     if _neural_mirror and is_speech:
                         mirror_state = _neural_mirror.on_audio_chunk(mulaw_chunk)
                     # Backchannel clips disabled — causes double-talk collisions
-                # SOVEREIGN-VOICE — local barge-in (mic gated while Nate speaks → Grok VAD blind)
-                if _nate_speaking and is_speech:
+                # SOVEREIGN-VOICE — local barge-in only once TTS audio is actually sending
+                # (synth wait used to false-trigger on ambient energy → silent Nate)
+                if _nate_speaking and _tts_playback_started and is_speech:
                     _tts_cancel.set()
                     _nate_speaking = False
                     print("[VOICE] barge-in: local energy")
