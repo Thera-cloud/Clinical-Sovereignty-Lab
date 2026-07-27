@@ -442,6 +442,8 @@ async def run_agentic_loop(
     force_sandbox: bool = False,
     parent_files: Optional[List[Any]] = None,
     parent_session_key: str = "",
+    model_id: Optional[str] = None,
+    model_space: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Full agentic coding loop — WebSocket CLI and partner Agents API share this.
@@ -451,6 +453,7 @@ async def run_agentic_loop(
     cancel_check: optional async callable() -> bool; True aborts between turns.
     llm_provider: force stream provider (workers_ai / grok) for worker ants.
     force_sandbox: worker-ant writes never touch live trees.
+    model_id / model_space: Sovereign IDE catalog selection (foundry | xai | cli).
     """
     user_message = (user_message or "").strip()
     if not user_message:
@@ -479,8 +482,12 @@ async def run_agentic_loop(
 
     max_turns = max_turns_override or _MAX_TOOL_TURNS.get(mode, 25)
     force_provider = (llm_provider or "").strip().lower() or None
-    if force_provider and force_provider not in ("workers_ai", "grok", "azure"):
+    if force_provider and force_provider not in ("workers_ai", "grok", "azure", "xai"):
         force_provider = None
+    selected_model = (model_id or "").strip() or None
+    selected_space = (model_space or "").strip().lower() or None
+    if selected_space and selected_space not in ("foundry", "xai", "cli", "azure"):
+        selected_space = None
 
     try:
         from app.websocket.cli_tools import (
@@ -760,6 +767,8 @@ async def run_agentic_loop(
                 max_tokens=max_tokens, mode=mode,
                 temperature=grounding_temp,
                 force_provider=force_provider,
+                model_override=selected_model,
+                model_space=selected_space,
             )
         except Exception as e:
             logger.error("CLI stream error (turn %d): %s", turn, e)
@@ -1422,6 +1431,10 @@ async def handle_nate_cli_chat(
     )
     admin_username = current_profile.get("username", "unknown")
     user_role = current_profile.get("role", "ADMIN")
+    # QUANTUM-CRYSTAL-ARCH — IDE model catalog selection
+    model_id = (data.get("model") or data.get("model_id") or "").strip() or None
+    model_space = (data.get("model_space") or data.get("space") or "").strip() or None
+    llm_provider = (data.get("llm_provider") or data.get("provider") or "").strip() or None
 
     async def emit(msg: Dict[str, Any]) -> None:
         await _send(websocket, msg)
@@ -1438,6 +1451,9 @@ async def handle_nate_cli_chat(
         emit=emit,
         allow_subagents=True,
         is_subagent=False,
+        llm_provider=llm_provider,
+        model_id=model_id,
+        model_space=model_space,
     )
 
 
@@ -1553,16 +1569,25 @@ async def _stream_with_tools(
     mode: str = "ask",
     temperature: Optional[float] = None,
     force_provider: Optional[str] = None,
+    model_override: Optional[str] = None,
+    model_space: Optional[str] = None,
 ) -> tuple:
     """
     Mode-aware provider routing + Azure param adaptation.
     Returns (accumulated_text, tool_calls_list, provider_name).
     `emit` is an async callback (WebSocket or Agents API event sink).
-    force_provider: workers_ai | grok | azure — used by worker-ant subagents.
+    force_provider: workers_ai | grok | azure | xai — used by worker-ant subagents.
+    model_override / model_space: IDE catalog selection (Foundry / xAI / CLI).
     """
     import aiohttp
 
     _ensure_grok_config()
+
+    try:
+        from app.websocket.cli_model_catalog import resolve_stream_target
+        _sel = resolve_stream_target(model_override, model_space)
+    except Exception:
+        _sel = None
 
     openai_tools = []
     for t_def in tools:
@@ -1741,6 +1766,21 @@ async def _stream_with_tools(
                         })
                     return text, raw_tcs, "workers_ai"
 
+    # QUANTUM-CRYSTAL-ARCH — Sovereign IDE model catalog override
+    if _sel:
+        sel_prov = str(_sel.get("provider") or "")
+        sel_model = str(_sel.get("model") or grok_model)
+        if sel_prov == "xai" and _sel.get("url") and _sel.get("headers"):
+            return await _do_stream(_sel["url"], _sel["headers"], sel_model, "xai")
+        if sel_prov == "azure":
+            return await _try_azure()
+        if sel_prov == "grok":
+            if _sel.get("url") and _sel.get("headers"):
+                return await _do_stream(_sel["url"], _sel["headers"], sel_model, "grok")
+            return await _do_stream(grok_url, grok_headers, sel_model, "grok")
+    elif model_override:
+        grok_model = model_override
+
     # Gap 1 — forced provider for worker ants (escalate path uses force_provider=grok)
     if force_provider == "workers_ai":
         try:
@@ -1750,6 +1790,17 @@ async def _stream_with_tools(
             return await _do_stream(grok_url, grok_headers, grok_model, "grok")
     if force_provider == "azure":
         return await _try_azure()
+    if force_provider == "xai":
+        try:
+            from app.websocket.cli_model_catalog import resolve_stream_target as _rst
+            _xai = _rst(model_override or grok_model, "xai")
+        except Exception:
+            _xai = None
+        if _xai and _xai.get("url") and _xai.get("headers"):
+            return await _do_stream(
+                _xai["url"], _xai["headers"], _xai.get("model") or grok_model, "xai",
+            )
+        raise RuntimeError("xAI not configured (XAI_API_KEY / XAI_CHAT_URL)")
     if force_provider == "grok":
         return await _do_stream(grok_url, grok_headers, grok_model, "grok")
 

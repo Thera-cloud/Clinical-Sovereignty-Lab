@@ -59,6 +59,66 @@ body {
 .mode-btn:hover { border-color: var(--gold-dim); color: var(--text-primary); }
 .mode-btn.active { background: var(--gold); color: var(--void); border-color: var(--gold); font-weight: 600; }
 
+/* ── Agent / model bar ── */
+.agent-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--elevated);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.cli-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: rgba(78, 205, 196, 0.15);
+  color: var(--cyan);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.cli-badge.mac {
+  background: rgba(201, 169, 98, 0.18);
+  color: var(--gold);
+}
+.model-select {
+  flex: 1;
+  min-width: 0;
+  background: var(--void);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.model-select:focus {
+  outline: none;
+  border-color: var(--gold-dim);
+}
+.model-select option:disabled {
+  color: var(--text-secondary);
+}
+.refresh-models-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  width: 28px;
+  height: 26px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.refresh-models-btn:hover {
+  border-color: var(--gold-dim);
+  color: var(--gold);
+}
+
 .mode-bar .spacer { flex: 1; }
 
 .clear-btn {

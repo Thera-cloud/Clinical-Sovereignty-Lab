@@ -6,6 +6,7 @@ import { ChatPanel } from './chatPanel';
 import { DiffApplicator } from './diffApplicator';
 import { PlanManager } from './planManager';
 import { WorkspaceToolProvider } from './workspaceToolProvider';
+import { AgentSidebarProvider } from './agentSidebar';
 import {
   createHealthStatusBarItem,
   registerHealthDetailsCommand,
@@ -19,6 +20,7 @@ let chatPanel: ChatPanel;
 let diffApplicator: DiffApplicator;
 let planManager: PlanManager;
 let workspaceProvider: WorkspaceToolProvider;
+let agentSidebar: AgentSidebarProvider;
 
 export function activate(context: vscode.ExtensionContext): void {
   bridge = new BridgeClient();
@@ -29,6 +31,7 @@ export function activate(context: vscode.ExtensionContext): void {
   workspaceProvider = new WorkspaceToolProvider(bridge, diffApplicator);
   workspaceProvider.setupEventSubscriptions();
   chatPanel = new ChatPanel(bridge, statusBar, diffApplicator, planManager, context.extensionUri);
+  agentSidebar = new AgentSidebarProvider(chatPanel);
 
   const healthBar = createHealthStatusBarItem(99);
   context.subscriptions.push(healthBar);
@@ -38,6 +41,14 @@ export function activate(context: vscode.ExtensionContext): void {
     treeDataProvider: planManager,
     showCollapseAll: false,
   });
+
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      AgentSidebarProvider.viewType,
+      agentSidebar,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+  );
 
   context.subscriptions.push(
     bridge,
@@ -50,11 +61,17 @@ export function activate(context: vscode.ExtensionContext): void {
     { dispose: () => auth.dispose() },
   );
 
-  // ── Commands ──
-
   context.subscriptions.push(
     vscode.commands.registerCommand('sovereignSanctuary.openChat', () => {
       chatPanel.show();
+    }),
+
+    vscode.commands.registerCommand('sovereignSanctuary.focusAgent', async () => {
+      await agentSidebar.reveal();
+    }),
+
+    vscode.commands.registerCommand('sovereignSanctuary.refreshModels', () => {
+      chatPanel.requestModelCatalog(true);
     }),
 
     vscode.commands.registerCommand('sovereignSanctuary.askAboutSelection', () => {
@@ -111,13 +128,24 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  // ── Auto-connect on activation ──
   initializeConnection(context);
 }
 
 async function initializeConnection(_context: vscode.ExtensionContext): Promise<void> {
   const stored = await auth.getStoredCredentials();
-  bridge.connect(stored || undefined);
+  await bridge.connect(stored || undefined);
+
+  const cfg = vscode.workspace.getConfiguration('sovereignSanctuary');
+  if (cfg.get<boolean>('autoOpenAgent', true)) {
+    setTimeout(() => {
+      void agentSidebar.reveal();
+    }, 800);
+  }
+
+  const mins = cfg.get<number>('modelCatalogRefreshMinutes', 15);
+  if (mins > 0) {
+    chatPanel.startModelAutoRefresh();
+  }
 }
 
 export function deactivate(): void {

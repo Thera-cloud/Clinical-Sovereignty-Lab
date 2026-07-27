@@ -14,6 +14,7 @@ import type {
   InboundCliChatStatus,
   InboundCliChatOutput,
   InboundCliChatDone,
+  InboundCliModels,
   WebviewToHostMessage,
   HostToWebviewMessage,
   VsCodeContext,
@@ -24,6 +25,7 @@ import { updateAutonomousStatus } from './statusBarAutonomous';
 
 export class ChatPanel {
   private panel: vscode.WebviewPanel | null = null;
+  private webviews = new Set<vscode.Webview>();
   private bridge: BridgeClient;
   private statusBar: StatusBarManager;
   private diffApplicator: DiffApplicator;
@@ -35,6 +37,10 @@ export class ChatPanel {
   private _chatHistory: ChatEntry[] = [];
   private _currentNateRaw = '';
   private _historyPath = '';
+  private _selectedModel = '';
+  private _selectedSpace = '';
+  private _selectedProvider = '';
+  private _modelRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private _buildState: BuildPanelState = {
     isBuilding: false,
     phase: 'idle',
@@ -89,16 +95,41 @@ export class ChatPanel {
       },
     );
 
-    this.panel.webview.html = await this.getHtml(this.panel.webview);
+    await this.attachWebview(this.panel.webview);
     this.panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'media', 'icon.svg');
+
+    this.panel.onDidDispose(() => {
+      if (this.panel) {
+        this.webviews.delete(this.panel.webview);
+      }
+      this.panel = null;
+    }, null, this.disposables);
+  }
+
+  /** Shared by editor panel + secondary-sidebar WebviewView. */
+  async attachWebview(webview: vscode.Webview): Promise<void> {
+    webview.options = {
+      enableScripts: true,
+      localResourceRoots: [
+        vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview'),
+      ],
+    };
+    webview.html = await this.getHtml(webview);
+    this.webviews.add(webview);
+
+    webview.onDidReceiveMessage(
+      (msg: WebviewToHostMessage) => this.handleWebviewMessage(msg),
+      undefined,
+      this.disposables,
+    );
 
     const activePlan = this.planManager.activePlan;
     setTimeout(() => {
       if (this._chatHistory.length > 0) {
-        this.sendToWebview({ cmd: 'restoreHistory', history: this._chatHistory });
+        webview.postMessage({ cmd: 'restoreHistory', history: this._chatHistory });
       }
       if (activePlan) {
-        this.sendToWebview({
+        webview.postMessage({
           cmd: 'planLoaded',
           plan_name: activePlan.name,
           plan_overview: activePlan.overview,
@@ -106,21 +137,27 @@ export class ChatPanel {
           plan_file: activePlan.file_path,
         });
       }
+      webview.postMessage({
+        cmd: 'cliTarget',
+        bridge_target: this.bridge.bridgeTarget || 'cloud',
+        cli_type: this.bridge.cliType,
+      });
+      this.requestModelCatalog(false);
     }, 150);
+  }
 
-    this.panel.webview.onDidReceiveMessage(
-      (msg: WebviewToHostMessage) => this.handleWebviewMessage(msg),
-      undefined,
-      this.disposables,
-    );
-
-    this.panel.onDidDispose(() => {
-      this.panel = null;
-    }, null, this.disposables);
+  detachWebview(webview: vscode.Webview): void {
+    this.webviews.delete(webview);
   }
 
   sendToWebview(msg: HostToWebviewMessage): void {
-    this.panel?.webview.postMessage(msg);
+    for (const wv of this.webviews) {
+      try {
+        wv.postMessage(msg);
+      } catch {
+        this.webviews.delete(wv);
+      }
+    }
   }
 
   async sendSelectionToMode(mode: CliMode): Promise<void> {
@@ -152,7 +189,26 @@ export class ChatPanel {
   private handleWebviewMessage(msg: WebviewToHostMessage): void {
     switch (msg.cmd) {
       case 'send':
+        if (msg.model) {
+          this._selectedModel = msg.model;
+          this._selectedSpace = msg.model_space || this._selectedSpace;
+          this._selectedProvider = msg.provider || this._selectedProvider;
+        }
         this.handleSend(msg.mode as CliMode, msg.message || '');
+        break;
+
+      case 'requestModels':
+        this.requestModelCatalog(false);
+        break;
+
+      case 'refreshModels':
+        this.requestModelCatalog(true);
+        break;
+
+      case 'selectModel':
+        this._selectedModel = msg.model || '';
+        this._selectedSpace = msg.model_space || '';
+        this._selectedProvider = msg.provider || '';
         break;
 
       case 'switchMode':
@@ -201,10 +257,10 @@ export class ChatPanel {
       case 'ask_user_response':
         this.bridge.send({
           type: 'ask_user_response',
-          question_id: msg.question_id as string,
-          selected_values: msg.selected_values as string[],
-          skipped: (msg as Record<string, unknown>).skipped === true,
-        });
+          question_id: msg.question_id || '',
+          selected_values: msg.selected_values || [],
+          skipped: msg.skipped === true,
+        } as unknown as Parameters<BridgeClient['send']>[0]);
         break;
     }
   }
@@ -263,13 +319,23 @@ export class ChatPanel {
     this._currentTurn = 0;
     this._currentNateRaw = '';
 
-    const sent = this.bridge.send({
+    const payload: Record<string, unknown> = {
       type: 'nate_cli_chat',
       mode,
       cli: this.bridge.cliType,
       message,
       context,
-    });
+    };
+    if (this._selectedModel) {
+      payload.model = this._selectedModel;
+      payload.model_space = this._selectedSpace || 'foundry';
+      if (this._selectedProvider) {
+        payload.provider = this._selectedProvider;
+        payload.llm_provider = this._selectedProvider;
+      }
+    }
+
+    const sent = this.bridge.send(payload as unknown as Parameters<BridgeClient['send']>[0]);
 
     if (!sent) {
       this.sendToWebview({
@@ -277,6 +343,30 @@ export class ChatPanel {
         error: 'Bridge connection lost. Reconnecting...',
       });
     }
+  }
+
+  requestModelCatalog(forceRefresh: boolean): void {
+    if (this.bridge.connectionState !== 'authenticated') {
+      return;
+    }
+    this.bridge.send({
+      type: forceRefresh ? 'nate_cli_models_refresh' : 'nate_cli_models',
+      force_refresh: forceRefresh,
+    });
+  }
+
+  startModelAutoRefresh(): void {
+    if (this._modelRefreshTimer) {
+      return;
+    }
+    const mins = vscode.workspace.getConfiguration('sovereignSanctuary')
+      .get<number>('modelCatalogRefreshMinutes', 15);
+    if (!mins || mins <= 0) {
+      return;
+    }
+    this._modelRefreshTimer = setInterval(() => {
+      this.requestModelCatalog(true);
+    }, mins * 60 * 1000);
   }
 
   private gatherVsCodeContext(): VsCodeContext {
@@ -411,6 +501,11 @@ export class ChatPanel {
     this.bridge.on('bridge_connected', (target: string) => {
       this._reconnecting = false;
       this.sendToWebview({ cmd: 'connected', bridge_target: target });
+      this.sendToWebview({
+        cmd: 'cliTarget',
+        bridge_target: target,
+        cli_type: this.bridge.cliType,
+      });
     });
 
     this.bridge.on('bridge_disconnected', () => {
@@ -429,6 +524,30 @@ export class ChatPanel {
 
     this.bridge.on('login_success', () => {
       this.sendToWebview({ cmd: 'authenticated' });
+      this.sendToWebview({
+        cmd: 'cliTarget',
+        bridge_target: this.bridge.bridgeTarget || 'cloud',
+        cli_type: this.bridge.cliType,
+      });
+      this.requestModelCatalog(false);
+      this.startModelAutoRefresh();
+    });
+
+    this.bridge.on('cli_models', (msg: InboundCliModels) => {
+      this.sendToWebview({
+        cmd: 'modelCatalog',
+        models: msg.models || [],
+        default_model: msg.default_model,
+        default_space: msg.default_space,
+        bridge_target: this.bridge.bridgeTarget || 'cloud',
+      });
+    });
+
+    this.bridge.on('cli_models_error', (msg: { error?: string }) => {
+      this.sendToWebview({
+        cmd: 'error',
+        error: `Model catalog: ${msg.error || 'failed'}`,
+      });
     });
 
     this.bridge.on('ask_user_prompt', (msg: Record<string, unknown>) => {
@@ -478,7 +597,7 @@ export class ChatPanel {
     });
 
     this.bridge.on('health_status', (msg: Record<string, unknown>) => {
-      updateAutonomousStatus(msg as Parameters<typeof updateAutonomousStatus>[0]);
+      updateAutonomousStatus(msg as unknown as Parameters<typeof updateAutonomousStatus>[0]);
     });
   }
 
@@ -580,7 +699,12 @@ export class ChatPanel {
   }
 
   dispose(): void {
+    if (this._modelRefreshTimer) {
+      clearInterval(this._modelRefreshTimer);
+      this._modelRefreshTimer = null;
+    }
     this.panel?.dispose();
+    this.webviews.clear();
     this.disposables.forEach(d => d.dispose());
   }
 }

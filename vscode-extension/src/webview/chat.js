@@ -38,12 +38,124 @@
   const planName = document.getElementById('planName');
   const planProgress = document.getElementById('planProgress');
   const planClearBtn = document.getElementById('planClearBtn');
+  const modelSelect = document.getElementById('modelSelect');
+  const cliBadge = document.getElementById('cliBadge');
+  const refreshModelsBtn = document.getElementById('refreshModelsBtn');
+
+  let selectedModelId = '';
+  let selectedModelSpace = '';
+  let catalogModels = [];
 
   // Safety: bail early if critical elements are missing (prevents silent IIFE crash)
   if (!chatInput || !sendBtn || !chatLog) {
     console.error('[LN] Critical DOM elements missing — chat.js cannot initialize');
     return;
   }
+
+  function currentModelPayload() {
+    if (modelSelect && modelSelect.value) {
+      const opt = modelSelect.selectedOptions[0];
+      return {
+        model: modelSelect.value,
+        model_space: (opt && opt.dataset.space) || selectedModelSpace || '',
+        provider: (opt && opt.dataset.provider) || '',
+      };
+    }
+    return {
+      model: selectedModelId || '',
+      model_space: selectedModelSpace || '',
+      provider: '',
+    };
+  }
+
+  function renderModelCatalog(models, defaults) {
+    if (!modelSelect) return;
+    catalogModels = Array.isArray(models) ? models : [];
+    const prev = modelSelect.value || selectedModelId;
+    const defId = (defaults && defaults.default_model) || '';
+    const defSpace = (defaults && defaults.default_space) || 'foundry';
+
+    const groups = { cli: [], foundry: [], xai: [] };
+    catalogModels.forEach((m) => {
+      const space = m.space || 'cli';
+      if (!groups[space]) groups[space] = [];
+      groups[space].push(m);
+    });
+
+    const labels = { cli: 'CLI defaults', foundry: 'Azure Foundry', xai: 'xAI' };
+    let html = '';
+    ['cli', 'foundry', 'xai'].forEach((space) => {
+      const rows = groups[space] || [];
+      if (!rows.length) return;
+      html += `<optgroup label="${labels[space]}">`;
+      rows.forEach((m) => {
+        const disabled = m.agent_eligible === false ? ' disabled' : '';
+        const tag = m.agent_eligible === false ? ' (non-agent)' : '';
+        html += `<option value="${escAttr(m.id)}" data-space="${escAttr(space)}" data-provider="${escAttr(m.provider || '')}"${disabled}>${escHtml(m.label || m.id)}${tag}</option>`;
+      });
+      html += '</optgroup>';
+    });
+    if (!html) {
+      html = '<option value="">No models — refresh or check keys</option>';
+    }
+    modelSelect.innerHTML = html;
+
+    const prefer = prev || defId;
+    if (prefer) {
+      const match = Array.from(modelSelect.options).find((o) => o.value === prefer && !o.disabled);
+      if (match) {
+        modelSelect.value = prefer;
+      } else if (defId) {
+        const d = Array.from(modelSelect.options).find((o) => o.value === defId && !o.disabled);
+        if (d) modelSelect.value = defId;
+      }
+    }
+    syncSelectedModel(defSpace);
+  }
+
+  function syncSelectedModel(fallbackSpace) {
+    if (!modelSelect) return;
+    const opt = modelSelect.selectedOptions[0];
+    selectedModelId = modelSelect.value || '';
+    selectedModelSpace = (opt && opt.dataset.space) || fallbackSpace || '';
+    vscode.postMessage({
+      cmd: 'selectModel',
+      model: selectedModelId,
+      model_space: selectedModelSpace,
+      provider: (opt && opt.dataset.provider) || '',
+    });
+  }
+
+  function setCliBadge(target) {
+    if (!cliBadge) return;
+    const isMac = target === 'local' || target === 'mac';
+    cliBadge.textContent = isMac ? 'CLI-Mac' : 'CLI-Cloud';
+    cliBadge.classList.toggle('mac', isMac);
+  }
+
+  function escHtml(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+  function escAttr(s) {
+    return String(s || '').replace(/"/g, '&quot;');
+  }
+
+  if (modelSelect) {
+    modelSelect.addEventListener('change', () => syncSelectedModel());
+  }
+  if (refreshModelsBtn) {
+    refreshModelsBtn.addEventListener('click', () => {
+      vscode.postMessage({ cmd: 'refreshModels' });
+      refreshModelsBtn.disabled = true;
+      setTimeout(() => { refreshModelsBtn.disabled = false; }, 2000);
+    });
+  }
+
+  // Ask host for catalog on load
+  vscode.postMessage({ cmd: 'requestModels' });
 
   // Safety timeout: if isBusy stays true for >2min, auto-recover
   let busyTimeoutId = null;
@@ -127,7 +239,15 @@
     setBusy(true);
     resetTurnState();
 
-    vscode.postMessage({ cmd: 'send', mode: currentMode, message: text });
+    const model = currentModelPayload();
+    vscode.postMessage({
+      cmd: 'send',
+      mode: currentMode,
+      message: text,
+      model: model.model,
+      model_space: model.model_space,
+      provider: model.provider,
+    });
   }
 
   // ── Clear Chat ──
@@ -216,12 +336,26 @@
 
       case 'connected':
         appendStatusMessage('Connected to bridge' + (msg.bridge_target ? ` (${msg.bridge_target})` : ''));
+        if (msg.bridge_target) setCliBadge(msg.bridge_target);
         setBusy(false);
         break;
 
       case 'authenticated':
         appendStatusMessage('Authenticated — ready');
         setBusy(false);
+        vscode.postMessage({ cmd: 'requestModels' });
+        break;
+
+      case 'cliTarget':
+        setCliBadge(msg.bridge_target || msg.cli_type || 'cloud');
+        break;
+
+      case 'modelCatalog':
+        renderModelCatalog(msg.models || [], {
+          default_model: msg.default_model,
+          default_space: msg.default_space,
+        });
+        if (msg.bridge_target) setCliBadge(msg.bridge_target);
         break;
 
       case 'ask_user_prompt':

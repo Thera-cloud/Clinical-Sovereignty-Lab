@@ -2,7 +2,7 @@
   "name": "sovereign-sanctuary",
   "displayName": "Sovereign Sanctuary — Little Nate",
   "description": "AI-powered development assistant with multi-mode CLI chat, inline diff review, and debug instrumentation.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "sovereign-sanctuary",
   "license": "UNLICENSED",
   "engines": {
@@ -10,11 +10,16 @@
   },
   "categories": ["AI", "Other"],
   "icon": "media/icon.png",
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:sovereignAgentChat"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       { "command": "sovereignSanctuary.openChat", "title": "Sovereign Sanctuary: Open Chat" },
+      { "command": "sovereignSanctuary.focusAgent", "title": "Sovereign Sanctuary: Focus CLI Agent Sidebar" },
+      { "command": "sovereignSanctuary.refreshModels", "title": "Sovereign Sanctuary: Refresh Model Catalog" },
       { "command": "sovereignSanctuary.askAboutSelection", "title": "Sovereign Sanctuary: Ask About Selection" },
       { "command": "sovereignSanctuary.debugSelection", "title": "Sovereign Sanctuary: Debug Selection" },
       { "command": "sovereignSanctuary.switchMode", "title": "Sovereign Sanctuary: Switch Mode" },
@@ -28,7 +33,8 @@
       { "command": "sovereignSanctuary.loadCursorPlan", "title": "Sovereign Sanctuary: Load Cursor Plan" }
     ],
     "keybindings": [
-      { "command": "sovereignSanctuary.openChat", "key": "ctrl+shift+l", "mac": "cmd+shift+l" },
+      { "command": "sovereignSanctuary.focusAgent", "key": "ctrl+shift+l", "mac": "cmd+shift+l" },
+      { "command": "sovereignSanctuary.openChat", "key": "ctrl+alt+l", "mac": "cmd+alt+l" },
       { "command": "sovereignSanctuary.askAboutSelection", "key": "ctrl+shift+a", "mac": "cmd+shift+a", "when": "editorHasSelection" },
       { "command": "sovereignSanctuary.debugSelection", "key": "ctrl+shift+d", "mac": "cmd+shift+d", "when": "editorHasSelection" }
     ],
@@ -38,8 +44,8 @@
         "sovereignSanctuary.bridge": {
           "type": "string",
           "enum": ["auto", "local", "cloud"],
-          "default": "auto",
-          "description": "Bridge connection mode. 'auto' tries local first, falls back to cloud. Enterprise deployments can lock to 'cloud'.",
+          "default": "cloud",
+          "description": "Bridge connection mode. 'cloud' = CLI-Cloud, 'local' = CLI-Mac, 'auto' tries local first.",
           "scope": "window"
         },
         "sovereignSanctuary.bridgeLocalUrl": {
@@ -63,6 +69,16 @@
           "enum": ["ADMIN", "COACH", "CLIENT"],
           "default": "ADMIN",
           "description": "Role to authenticate as when logging in to the bridge."
+        },
+        "sovereignSanctuary.autoOpenAgent": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open the CLI Agent secondary sidebar when the IDE starts."
+        },
+        "sovereignSanctuary.modelCatalogRefreshMinutes": {
+          "type": "number",
+          "default": 15,
+          "description": "Auto-refresh Foundry / xAI / CLI model catalog interval (minutes)."
         }
       }
     },
@@ -73,6 +89,13 @@
           "title": "Sovereign Sanctuary",
           "icon": "media/icon.svg"
         }
+      ],
+      "secondarySidebar": [
+        {
+          "id": "sovereignAgent",
+          "title": "CLI Agent",
+          "icon": "media/icon.svg"
+        }
       ]
     },
     "views": {
@@ -81,6 +104,12 @@
           "id": "sovereignPlans",
           "name": "Plans",
           "type": "tree"
+        }
+      ],
+      "sovereignAgent": [
+        {
+          "id": "sovereignAgentChat",
+          "name": "Little Nate CLI"
         }
       ]
     },

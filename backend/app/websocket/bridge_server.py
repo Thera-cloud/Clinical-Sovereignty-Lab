@@ -13184,6 +13184,7 @@ async def handle_client(websocket, path=None):
                 "crystal_system_control",
                 # --- CLI Command Terminal --- # SOVEREIGN-VOICE
                 "nate_cli_chat",
+                "nate_cli_models", "nate_cli_models_refresh",  # QUANTUM-CRYSTAL-ARCH
                 # --- Workspace provider (VS Code / code-server) --- # QUANTUM-CRYSTAL-ARCH
                 "workspace_provider_register", "workspace_provider_replaced",
                 "workspace_provider_available", "tool_call_result", "tool_call_ack",
@@ -32383,6 +32384,23 @@ IMPORTANT:
                         await websocket.send(json.dumps({"type": "nate_cli_chat_error", "error": str(_cli_err)}))
                 else:
                     await websocket.send(json.dumps({"type": "nate_cli_chat_error", "error": "Admin role required"}))
+
+            # QUANTUM-CRYSTAL-ARCH — IDE model catalog (Foundry / xAI / CLI)
+            elif t in ("nate_cli_models", "nate_cli_models_refresh"):
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    try:
+                        from app.websocket.cli_model_catalog import handle_models_request
+                        asyncio.create_task(
+                            handle_models_request(websocket, d, t == "nate_cli_models_refresh")
+                        )
+                    except Exception as _merr:
+                        await websocket.send(json.dumps({
+                            "type": "nate_cli_models_error", "error": str(_merr),
+                        }))
+                else:
+                    await websocket.send(json.dumps({
+                        "type": "nate_cli_models_error", "error": "Admin role required",
+                    }))
 
             # QUANTUM-CRYSTAL-ARCH — VS Code / code-server workspace provider
             elif t in (

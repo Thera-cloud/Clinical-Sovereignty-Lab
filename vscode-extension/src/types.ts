@@ -1,8 +1,28 @@
 export * from './types/buildProtocol';
+import type {
+  BuildStatusMessage,
+  BuildVerifyRequest,
+  BuildVerifyResult,
+  BuildPromoteGreen,
+  BuildPromoteComplete,
+  BuildRollback,
+} from './types/buildProtocol';
 
 export type CliMode = 'ask' | 'plan' | 'debug' | 'ln_fab';
 export type CliType = 'mac' | 'cloud';
 export type BridgeTarget = 'auto' | 'local' | 'cloud';
+
+export type ModelSpace = 'cli' | 'foundry' | 'xai' | 'azure';
+
+export interface CatalogModel {
+  id: string;
+  label: string;
+  space: ModelSpace | string;
+  provider: string;
+  kind?: string;
+  agent_eligible?: boolean;
+  source?: string;
+}
 
 export interface OutboundCliChat {
   type: 'nate_cli_chat';
@@ -11,6 +31,32 @@ export interface OutboundCliChat {
   message: string;
   context?: VsCodeContext;
   resume_plan_id?: string;
+  model?: string;
+  model_space?: string;
+  provider?: string;
+  llm_provider?: string;
+}
+
+export interface OutboundCliModels {
+  type: 'nate_cli_models' | 'nate_cli_models_refresh';
+  force_refresh?: boolean;
+}
+
+export interface InboundCliModels {
+  type: 'nate_cli_models';
+  models: CatalogModel[];
+  refreshed_at?: number;
+  ttl_s?: number;
+  counts?: Record<string, number>;
+  errors?: string[];
+  spaces?: string[];
+  default_model?: string;
+  default_space?: string;
+}
+
+export interface InboundCliModelsError {
+  type: 'nate_cli_models_error';
+  error: string;
 }
 
 export interface OutboundLoginRequest {
@@ -225,6 +271,21 @@ export interface InboundWorkspaceProviderAvailable {
   capabilities: string[];
 }
 
+export interface InboundAskUserPrompt {
+  type: 'ask_user_prompt';
+  question_id: string;
+  question: string;
+  question_type?: string;
+  options?: Array<{ id: string; label: string }>;
+  context?: string;
+  allow_skip?: boolean;
+}
+
+export interface InboundHealthStatus {
+  type: 'health_status';
+  [key: string]: unknown;
+}
+
 export type InboundMessage =
   | InboundConnected
   | InboundLoginSuccess
@@ -236,6 +297,10 @@ export type InboundMessage =
   | InboundCliChatStatus
   | InboundCliChatOutput
   | InboundCliChatDone
+  | InboundCliModels
+  | InboundCliModelsError
+  | InboundAskUserPrompt
+  | InboundHealthStatus
   | InboundToolCallRequest
   | InboundWorkspaceRegistered
   | InboundToolCallCancel
@@ -250,6 +315,7 @@ export type InboundMessage =
 
 export type OutboundMessage =
   | OutboundCliChat
+  | OutboundCliModels
   | OutboundLoginRequest
   | OutboundAuthMessage
   | OutboundDebugResolved
@@ -294,13 +360,20 @@ export interface StoredCredentials {
 
 /** Messages exchanged between Extension Host and WebView via postMessage */
 export interface WebviewToHostMessage {
-  cmd: 'send' | 'markFixed' | 'switchMode' | 'openFile' | 'acceptDiff' | 'rejectDiff' | 'clearChat' | 'loadPlan' | 'clearPlan';
+  cmd: 'send' | 'markFixed' | 'switchMode' | 'openFile' | 'acceptDiff' | 'rejectDiff' | 'clearChat' | 'loadPlan' | 'clearPlan'
+    | 'requestModels' | 'refreshModels' | 'selectModel' | 'ask_user_response';
   mode?: CliMode;
   message?: string;
   plan_id?: string;
   resolution?: string;
   file_path?: string;
   start_line?: number;
+  model?: string;
+  model_space?: string;
+  provider?: string;
+  question_id?: string;
+  selected_values?: string[];
+  skipped?: boolean;
 }
 
 export interface ChatEntry {
@@ -313,7 +386,8 @@ export interface ChatEntry {
 }
 
 export interface HostToWebviewMessage {
-  cmd: 'chunk' | 'tool' | 'status' | 'output' | 'done' | 'error' | 'connected' | 'disconnected' | 'modeChanged' | 'output_applied' | 'planLoaded' | 'planCleared' | 'restoreHistory';
+  cmd: 'chunk' | 'tool' | 'status' | 'output' | 'done' | 'error' | 'connected' | 'disconnected' | 'modeChanged' | 'output_applied' | 'planLoaded' | 'planCleared' | 'restoreHistory'
+    | 'modelCatalog' | 'cliTarget' | 'authenticated' | 'ask_user_prompt';
   delta?: string;
   provider?: string;
   turn?: number;
@@ -331,9 +405,19 @@ export interface HostToWebviewMessage {
   hypotheses?: Hypothesis[];
   cost?: CostInfo;
   bridge_target?: string;
+  cli_type?: CliType;
   plan_name?: string;
   plan_overview?: string;
   plan_todos?: CursorPlanTodo[];
   plan_file?: string;
   history?: ChatEntry[];
+  models?: CatalogModel[];
+  default_model?: string;
+  default_space?: string;
+  question_id?: string;
+  question?: string;
+  question_type?: string;
+  options?: Array<{ id: string; label: string }>;
+  context?: string;
+  allow_skip?: boolean;
 }

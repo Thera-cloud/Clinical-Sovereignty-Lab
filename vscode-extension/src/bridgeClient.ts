@@ -225,6 +225,14 @@ export class BridgeClient extends EventEmitter {
         this.emit('cli_done', msg);
         break;
 
+      case 'nate_cli_models':
+        this.emit('cli_models', msg);
+        break;
+
+      case 'nate_cli_models_error':
+        this.emit('cli_models_error', msg);
+        break;
+
       case 'tool_call_request':
         this.emit('tool_call_request', msg as InboundToolCallRequest);
         break;

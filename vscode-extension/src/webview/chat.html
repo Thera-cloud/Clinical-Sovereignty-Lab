@@ -19,6 +19,15 @@
     <button class="clear-btn" id="clearBtn" title="Clear chat">Clear</button>
   </div>
 
+  <!-- CLI target + model catalog (Foundry / xAI / CLI) -->
+  <div class="agent-bar" id="agentBar">
+    <span class="cli-badge" id="cliBadge" title="Bridge target">CLI-Cloud</span>
+    <select id="modelSelect" class="model-select" title="Chat model">
+      <option value="">Loading models…</option>
+    </select>
+    <button class="refresh-models-btn" id="refreshModelsBtn" title="Refresh Foundry + xAI + CLI catalog">↻</button>
+  </div>
+
   <!-- Plan Context Bar -->
   <div class="plan-bar" id="planBar">
     <button class="plan-load-btn" id="planLoadBtn" title="Load a Cursor plan as context">Load Plan</button>
