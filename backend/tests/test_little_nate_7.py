@@ -140,7 +140,14 @@ def test_pack_task_detection():
 
 
 def test_coding_tier_sovereign_only():
-    from importlib import import_module
-    # Reloaded router may pull numpy — use file load
-    router = _load("app.services.nate_inference_router", APP / "services" / "nate_inference_router.py")
-    assert router._TIER_PRIORITY[router.TIER_CODING] == ["sovereign", "home_gpu"]
+    import re
+
+    # Avoid re-execing nate_inference_router after full-suite asyncio teardown (no event loop).
+    src = (APP / "services" / "nate_inference_router.py").read_text(encoding="utf-8")
+    m = re.search(
+        r"TIER_CODING\s*:\s*\[([^\]]+)\]",
+        src,
+    )
+    assert m, "TIER_CODING priority block missing"
+    providers = [p.strip().strip("\"'") for p in m.group(1).split(",") if p.strip()]
+    assert providers == ["sovereign", "home_gpu"]
