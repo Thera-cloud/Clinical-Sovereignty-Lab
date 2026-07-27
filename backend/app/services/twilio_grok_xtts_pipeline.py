@@ -1325,12 +1325,14 @@ async def run_twilio_grok_xtts_bridge(
             asyncio.create_task(_record_ec_snapshot("rolling"))
 
     async def _send_mulaw_to_twilio(mulaw_out: bytes) -> None:
-        nonlocal stream_sid, _tts_playback_started
+        nonlocal stream_sid, _tts_playback_started, _tts_playback_t0, _barge_speech_frames
         if not stream_sid or not mulaw_out:
             return
         async with speaking:
             # SOVEREIGN-VOICE — barge-in only after first chunk queued (not during synth wait)
             _tts_playback_started = True
+            _tts_playback_t0 = time.monotonic()
+            _barge_speech_frames = 0
             for i in range(0, len(mulaw_out), _TWILIO_MULAW_CHUNK):
                 if _tts_cancel.is_set():  # SOVEREIGN-VOICE barge-in
                     print("[VOICE] barge-in — stop TTS playback")
@@ -1352,14 +1354,17 @@ async def run_twilio_grok_xtts_bridge(
     _nate_speaking = False
     _tts_cancel = asyncio.Event()  # SOVEREIGN-VOICE barge-in
     _tts_playback_started = False  # SOVEREIGN-VOICE — ignore barge-in until audio is sending
+    _tts_playback_t0 = 0.0  # SOVEREIGN-VOICE — anti-echo grace clock
+    _barge_speech_frames = 0  # SOVEREIGN-VOICE — require sustained speech to cut TTS
 
     async def _on_grok_text(response_text: str) -> None:
-        nonlocal _greeting_spoken, _nate_speaking, _tts_playback_started
+        nonlocal _greeting_spoken, _nate_speaking, _tts_playback_started, _barge_speech_frames
         text = (response_text or "").strip()
         if not text:
             return
         _tts_cancel.clear()
         _tts_playback_started = False
+        _barge_speech_frames = 0
         _nate_speaking = True
         assistant_turns.append({"text": text, "ts": datetime.now(timezone.utc).isoformat()})
         # SOVEREIGN-VOICE — sync avatar expression to linked app
@@ -1857,12 +1862,22 @@ async def run_twilio_grok_xtts_bridge(
                     if _neural_mirror and is_speech:
                         mirror_state = _neural_mirror.on_audio_chunk(mulaw_chunk)
                     # Backchannel clips disabled — causes double-talk collisions
-                # SOVEREIGN-VOICE — local barge-in only once TTS audio is actually sending
-                # (synth wait used to false-trigger on ambient energy → silent Nate)
+                # SOVEREIGN-VOICE — local barge-in: after playback starts, skip 1.8s echo
+                # grace, then require ~200ms sustained louder speech (not speaker bleed).
                 if _nate_speaking and _tts_playback_started and is_speech:
-                    _tts_cancel.set()
-                    _nate_speaking = False
-                    print("[VOICE] barge-in: local energy")
+                    age = time.monotonic() - _tts_playback_t0
+                    loud = chunk_energy > 70
+                    if age >= 1.8 and loud:
+                        _barge_speech_frames += 1
+                        if _barge_speech_frames >= 10:
+                            _tts_cancel.set()
+                            _nate_speaking = False
+                            _barge_speech_frames = 0
+                            print("[VOICE] barge-in: local energy")
+                    else:
+                        _barge_speech_frames = 0
+                else:
+                    _barge_speech_frames = 0
                 if _voice_sync and pcm_chunk:  # SOVEREIGN-VOICE
                     _voice_sync.feed_audio(pcm_chunk)
 
