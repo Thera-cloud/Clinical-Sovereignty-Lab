@@ -46,6 +46,14 @@ _YELLOW_KINDS = frozenset({
     "insight_route",
     "coach_label",
     "second_order",
+    # QUANTUM-CRYSTAL-ARCH — patent idea library / review (CEO gated)
+    "patent_study",
+    "patent_reflect",
+    "patent_renew",
+    "patent_inquiry_reply",
+    "patent_implement_sandbox",
+    "patent_spawn_variant",
+    "patent_archive",
 })
 
 _GREEN_KINDS = frozenset({
@@ -177,14 +185,17 @@ def classify_risk(
     if any(m in notes_l for m in ("therapeutic", "crisis", "r-floor", "sensitive bridge")):
         return RISK_RED
 
-    # GREEN before patent substring — patent / prior-art / brief / matching stay digest-only
-    if kind_l in _GREEN_KINDS or kind_l in ("", "work", "review"):
-        return RISK_GREEN
-    if "patent" in kind_l or "prior.art" in notes_l or "prior_art" in kind_l:
-        return RISK_GREEN
-
+    # YELLOW patent-library kinds before GREEN patent-tag auto-digest
     if kind_l in _YELLOW_KINDS:
         return RISK_YELLOW
+
+    # GREEN — patent claim tags / prior-art / brief / matching stay digest-only
+    if kind_l in _GREEN_KINDS or kind_l in ("", "work", "review"):
+        return RISK_GREEN
+    if kind_l in ("patent_tag_propose", "patent_crystal_tag", "prior_art_flag"):
+        return RISK_GREEN
+    if "prior.art" in notes_l or "prior_art" in kind_l:
+        return RISK_GREEN
 
     return RISK_YELLOW
 

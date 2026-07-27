@@ -1,4 +1,4 @@
-"""CEO Dual-COO Auditor — 6 checks on Nathan inbox / patent / clinical apply APIs.
+"""CEO Dual-COO Auditor — 10 checks on Nathan inbox / patent library / clinical APIs.
 
 # QUANTUM-CRYSTAL-ARCH — ceo_dual_coo_check_count
 """
@@ -32,6 +32,16 @@ TAB_ENDPOINTS = [
             ("GET", "/api/ceo/patent-tags/pending"),
             ("GET", "/api/ceo/clinical-shadows"),
             ("GET", "/api/ceo/insight-briefs"),
+        ],
+    },
+    {
+        "tab": "Patent Idea Library",
+        "tab_num": 3,
+        "endpoints": [
+            ("GET", "/api/ceo/patent-library"),
+            ("GET", "/api/ceo/patent-library/weights"),
+            ("GET", "/api/ceo/patent-reflections"),
+            ("POST", "/api/ceo/patent-reflections/0/decide"),
         ],
     },
 ]

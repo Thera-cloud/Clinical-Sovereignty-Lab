@@ -57,6 +57,7 @@ class DualCooLoopCloser:
             "second_order": 0,
             "failover": 0,
             "ln_rules": 0,
+            "patent_ideas": 0,
         }
 
     async def start(self):
@@ -102,6 +103,9 @@ class DualCooLoopCloser:
             out["second_order"] = await self._cycle_second_order()
         if self._cycles % 3 == 0:
             out["attribution"] = await self._cycle_attribution_density()
+        # QUANTUM-CRYSTAL-ARCH — patent idea library (flag-gated)
+        if self._cycles % 2 == 0:
+            out["patent_ideas"] = await self._cycle_patent_ideas()
         out["failover"] = await self._cycle_peer_failover()
         return out
 
@@ -763,4 +767,54 @@ class DualCooLoopCloser:
                 "status": "ok", "mode": "cloud_sole", "peer": peer, "probe": probe,
             }
         except Exception as e:
+            return {"status": "error", "error": str(e)[:200]}
+
+    async def _cycle_patent_ideas(self) -> Dict[str, Any]:
+        """Study (≤3/day) → renew → promote (≥90) → auto-archive.
+
+        # QUANTUM-CRYSTAL-ARCH
+        """
+        try:
+            from app.services.patent_idea_library_engine import (
+                PatentIdeaLibraryEngine,
+                patent_reflections_enabled,
+            )
+            from app.services.patent_reflection_engine import PatentReflectionEngine
+
+            if not patent_reflections_enabled():
+                return {"status": "skipped", "reason": "ENABLE_PATENT_REFLECTIONS=false"}
+            if not self.db_pool:
+                return {"status": "skipped", "reason": "no_db"}
+
+            lib = PatentIdeaLibraryEngine(self.db_pool)
+            refl = PatentReflectionEngine(self.db_pool, library_engine=lib)
+
+            study = await refl.study_once()
+            renew = await lib.renew_stale(limit=10)
+            promote = await lib.promote_batch()
+            archive = await lib.auto_archive_stale()
+
+            n_prom = len(promote.get("promoted") or [])
+            self._stats["patent_ideas"] += int(study.get("status") == "ok") + n_prom
+            await self._log_event(
+                "patent_reflection",
+                "YELLOW",
+                f"study={study.get('status')} renew={renew.get('renewed')} "
+                f"promote={n_prom} archive={archive.get('archived')}",
+                {
+                    "study": study,
+                    "renew": renew,
+                    "promote": promote,
+                    "archive": archive,
+                },
+            )
+            return {
+                "status": "ok",
+                "study": study,
+                "renew": renew,
+                "promote": promote,
+                "archive": archive,
+            }
+        except Exception as e:
+            logger.warning("patent_ideas cycle: %s", e)
             return {"status": "error", "error": str(e)[:200]}

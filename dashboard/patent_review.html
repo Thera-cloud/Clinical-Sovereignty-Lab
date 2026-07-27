@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Patent Review — Dual-COO Library</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --void: #050505; --chamber: #0A0A0A; --elevated: #111111;
+  --gold: #C9A962; --gold-bright: #E8D5A3; --gold-dim: #8B7355;
+  --cyan: #4ECDC4; --red: #EF4444; --orange: #F59E0B; --text: #E8E4DC; --muted: #8A8578;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: radial-gradient(ellipse at top, #12100c 0%, var(--void) 55%);
+  color: var(--text); min-height: 100vh; padding: 24px;
+}
+h1 {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 2.1rem; color: var(--gold-bright); font-weight: 600;
+}
+.sub { color: var(--muted); margin: 6px 0 18px; font-size: 0.95rem; }
+a.back { color: var(--gold-dim); text-decoration: none; }
+a.back:hover { color: var(--gold); }
+.tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.tabs button {
+  background: transparent; border: 1px solid var(--gold-dim); color: var(--gold);
+  padding: 8px 14px; cursor: pointer; font-family: inherit; font-size: 0.85rem;
+}
+.tabs button.active { border-color: var(--gold); color: var(--gold-bright); background: #1a1810; }
+.bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+.stat {
+  background: var(--elevated); border: 1px solid #222; padding: 10px 14px; min-width: 100px;
+}
+.stat b { display: block; font-size: 1.25rem; color: var(--gold); }
+button {
+  background: transparent; border: 1px solid var(--gold-dim); color: var(--gold);
+  padding: 7px 12px; cursor: pointer; font-family: inherit; font-size: 0.82rem;
+}
+button:hover { border-color: var(--gold); color: var(--gold-bright); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button.approve { border-color: var(--cyan); color: var(--cyan); }
+button.danger { border-color: var(--red); color: var(--red); }
+button.hold { border-color: var(--gold-dim); color: var(--muted); }
+.grid { display: grid; grid-template-columns: 1.1fr 1.2fr 1fr; gap: 14px; }
+@media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+.panel {
+  background: linear-gradient(180deg, #121212, var(--chamber));
+  border: 1px solid #1e1e1e; padding: 14px; min-height: 200px;
+}
+.panel h2 {
+  font-family: 'Cormorant Garamond', serif; color: var(--gold);
+  font-size: 1.25rem; margin-bottom: 10px;
+}
+.item { border-top: 1px solid #222; padding: 10px 0; cursor: pointer; }
+.item:hover { background: #141414; }
+.item.sel { background: #1a1810; }
+.badge {
+  display: inline-block; font-size: 0.7rem; letter-spacing: 0.04em;
+  padding: 2px 7px; border: 1px solid; margin-right: 6px;
+}
+.badge.TOP { color: var(--cyan); border-color: var(--cyan); }
+.badge.EXPLORE { color: var(--orange); border-color: var(--orange); }
+.badge.CAT { color: var(--gold); border-color: var(--gold-dim); }
+.title { font-weight: 600; margin: 4px 0; }
+.meta { color: #666; font-size: 0.78rem; }
+.detail { color: var(--muted); font-size: 0.88rem; white-space: pre-wrap; margin-top: 8px; max-height: 280px; overflow: auto; }
+.thread { margin-top: 10px; }
+.thread .msg {
+  border-left: 2px solid var(--gold-dim); padding: 6px 10px; margin: 6px 0;
+  font-size: 0.86rem; color: var(--text);
+}
+.thread .msg .who { color: var(--gold); font-size: 0.75rem; }
+textarea, input[type=text], select {
+  width: 100%; background: #0c0c0c; border: 1px solid #333; color: var(--text);
+  padding: 8px; font-family: inherit; margin: 6px 0;
+}
+.cat-block { margin-bottom: 14px; }
+.cat-block h3 { color: var(--gold-bright); font-size: 0.95rem; margin: 8px 0; }
+.topic { color: var(--muted); font-size: 0.8rem; margin: 6px 0 2px; }
+#msg { margin: 8px 0; color: var(--cyan); min-height: 1.2em; }
+.weights { font-size: 0.82rem; }
+.weights div { display: flex; justify-content: space-between; border-top: 1px solid #222; padding: 4px 0; }
+.pane { display: none; }
+.pane.active { display: block; }
+</style>
+</head>
+<body>
+  <a class="back" href="#" onclick="navBack(); return false;">← Sovereign Command</a>
+  <h1>Patent Review</h1>
+  <p class="sub">Dual-COO library · mission categories · promote ≥90 · inquire then APPROVE_CLI / APPROVE_IDE</p>
+  <div class="tabs">
+    <button class="active" data-pane="library" onclick="showPane('library')">Library</button>
+    <button data-pane="review" onclick="showPane('review')">Review</button>
+    <button data-pane="archive" onclick="showPane('archive')">Archive</button>
+    <button data-pane="adapt" onclick="showPane('adapt')">Adapt</button>
+  </div>
+  <div class="bar" id="stats"></div>
+  <div class="bar">
+    <button onclick="loadAll()">Refresh</button>
+    <label class="meta"><input type="checkbox" id="showArchivedLib" onchange="loadLibrary()"> show archived in Library</label>
+  </div>
+  <div id="msg"></div>
+
+  <div id="pane-library" class="pane active">
+    <div class="grid">
+      <div class="panel"><h2>Active ideas</h2><div id="libList"></div></div>
+      <div class="panel"><h2>Idea detail</h2><div id="libDetail">Select an idea</div></div>
+      <div class="panel"><h2>By category</h2><div id="libGrouped"></div></div>
+    </div>
+  </div>
+
+  <div id="pane-review" class="pane">
+    <div class="grid">
+      <div class="panel"><h2>Review queue</h2><div id="revList"></div></div>
+      <div class="panel"><h2>Reflection</h2><div id="revDetail">Select a reflection</div></div>
+      <div class="panel">
+        <h2>Inquiry &amp; decide</h2>
+        <div id="revThread"></div>
+        <textarea id="inqBody" rows="3" placeholder="CEO inquiry…"></textarea>
+        <div class="bar">
+          <button onclick="sendInquire()">Post inquiry</button>
+          <button onclick="markReady()">Mark ready</button>
+        </div>
+        <div class="bar">
+          <button class="approve" id="btnCli" disabled onclick="decide('APPROVE_CLI')">Approve → CLI</button>
+          <button class="approve" id="btnIde" disabled onclick="decide('APPROVE_IDE')">Approve → IDE</button>
+          <button class="hold" onclick="decide('HOLD')">HOLD</button>
+          <button class="danger" onclick="decide('REJECT')">REJECT</button>
+        </div>
+        <div id="ideLink" class="meta"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="pane-archive" class="pane">
+    <div class="panel"><h2>Archived (by category → topic)</h2><div id="archGrouped"></div></div>
+  </div>
+
+  <div id="pane-adapt" class="pane">
+    <div class="grid" style="grid-template-columns:1fr 1fr;">
+      <div class="panel"><h2>Live weights</h2><div class="weights" id="weights"></div></div>
+      <div class="panel"><h2>Recent weight changes</h2><div id="weightHist"></div></div>
+    </div>
+  </div>
+
+<script>
+const API = (location.hostname.includes('sovereign') || location.hostname.includes('command'))
+  ? 'https://api.sovereignsanctuary.net' : (localStorage.getItem('sc_api') || 'https://api.sovereignsanctuary.net');
+
+const CAT_LABEL = {
+  world_qol: 'World / QoL',
+  platform: 'Platform',
+  qec_quantum: 'QEC Quantum',
+  queens_nate: 'Queens + Nate'
+};
+
+let selLib = null;
+let selRev = null;
+
+function _ck(name) {
+  const m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]+)'));
+  return m ? decodeURIComponent(m[1]) : '';
+}
+function _recoverAuth() {
+  try {
+    const h = (location.hash || '').replace(/^#/, '');
+    const ps = new URLSearchParams(h);
+    const ht = ps.get('t');
+    if (ht) {
+      try { sessionStorage.setItem('token', decodeURIComponent(ht)); } catch (e) {}
+      try { localStorage.setItem('sc_token', decodeURIComponent(ht)); } catch (e) {}
+    }
+  } catch (e) {}
+  if (!sessionStorage.getItem('token')) {
+    const ct = _ck('sc_token') || localStorage.getItem('sc_token') || '';
+    if (ct) { try { sessionStorage.setItem('token', ct); } catch (e) {} }
+  }
+}
+_recoverAuth();
+
+function _token() {
+  return sessionStorage.getItem('token') || localStorage.getItem('sc_token') || _ck('sc_token') || '';
+}
+function _authHeaders(ct) {
+  const h = { 'Authorization': 'Bearer ' + _token() };
+  if (ct) h['Content-Type'] = ct;
+  return h;
+}
+function navBack() {
+  const t = _token();
+  const u = sessionStorage.getItem('username') || localStorage.getItem('sc_username') || '';
+  if (t) location.href = 'command.html#t=' + encodeURIComponent(t) + '&u=' + encodeURIComponent(u);
+  else location.href = 'command.html';
+}
+function msg(t) { document.getElementById('msg').textContent = t || ''; }
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function api(path, opts) {
+  if (!_token()) { msg('Not signed in — open Sovereign Command first.'); return null; }
+  const resp = await fetch(API + path, Object.assign({
+    headers: _authHeaders(opts && opts.body ? 'application/json' : null)
+  }, opts || {}));
+  if (resp.status === 401) { msg('Session expired — re-login at command.'); return null; }
+  let data = null;
+  try { data = await resp.json(); } catch (e) { data = { detail: 'bad_json' }; }
+  if (!resp.ok) {
+    msg((data && (data.detail || data.error)) || ('HTTP ' + resp.status));
+    return null;
+  }
+  return data;
+}
+
+function showPane(name) {
+  document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.pane === name));
+  document.getElementById('pane-' + name).classList.add('active');
+}
+
+function renderGrouped(targetId, grouped, archivedMode) {
+  const el = document.getElementById(targetId);
+  if (!grouped) { el.innerHTML = '<div class="meta">Empty</div>'; return; }
+  let html = '';
+  for (const cat of Object.keys(CAT_LABEL)) {
+    const topics = grouped[cat] || {};
+    const topicKeys = Object.keys(topics);
+    if (!topicKeys.length) continue;
+    html += `<div class="cat-block"><h3>${esc(CAT_LABEL[cat] || cat)}</h3>`;
+    for (const t of topicKeys) {
+      html += `<div class="topic">#${esc(t)}</div>`;
+      for (const idea of topics[t]) {
+        html += `<div class="item" onclick="selectLib(${idea.id}, ${archivedMode ? 'true' : 'false'})">
+          <span class="badge CAT">${esc(String(idea.rank_score ?? ''))}</span>
+          <span class="title">${esc(idea.title)}</span>
+          <div class="meta">${esc(idea.library_status)} · id ${idea.id}</div>
+        </div>`;
+      }
+    }
+    html += '</div>';
+  }
+  el.innerHTML = html || '<div class="meta">No ideas in this view</div>';
+}
+
+async function loadLibrary() {
+  const arch = document.getElementById('showArchivedLib').checked;
+  const data = await api('/api/ceo/patent-library?grouped=true&sort=category' + (arch ? '&include_archived=true' : ''));
+  if (!data) return;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><b>${data.count||0}</b>ideas</div>
+    <div class="stat"><b>${data.study_cap_remaining??'—'}</b>study left today</div>`;
+  const ideas = data.ideas || [];
+  document.getElementById('libList').innerHTML = ideas.length ? ideas.map(it => `
+    <div class="item ${selLib===it.id?'sel':''}" onclick="selectLib(${it.id})">
+      <span class="badge CAT">${esc(CAT_LABEL[it.primary_category]||it.primary_category)}</span>
+      <span class="badge">${esc(String(it.rank_score??''))}</span>
+      <div class="title">${esc(it.title)}</div>
+      <div class="meta">${esc(it.library_status)} · ${(it.topics||[]).slice(0,4).map(esc).join(', ')}</div>
+    </div>`).join('') : '<div class="meta">No active ideas yet</div>';
+  renderGrouped('libGrouped', data.grouped, false);
+}
+
+async function selectLib(id) {
+  selLib = id;
+  const data = await api('/api/ceo/patent-library?status=&sort=rank');
+  if (!data) return;
+  const it = (data.ideas || []).find(x => x.id === id);
+  if (!it) {
+    const arch = await api('/api/ceo/patent-library?status=archived');
+    const a = (arch && arch.ideas || []).find(x => x.id === id);
+    if (!a) { msg('Idea not found'); return; }
+    return showLibDetail(a);
+  }
+  showLibDetail(it);
+  loadLibrary();
+}
+
+function showLibDetail(it) {
+  const dims = it.rank_dimensions || {};
+  document.getElementById('libDetail').innerHTML = `
+    <div class="title">${esc(it.title)}</div>
+    <div class="meta">${esc(CAT_LABEL[it.primary_category]||'')} · score ${esc(it.rank_score)} · ${esc(it.library_status)}</div>
+    <div class="detail">${esc(it.idea_summary||'')}</div>
+    <div class="detail">${esc(it.critique_md||'')}</div>
+    <div class="meta">sandbox: ${esc(it.sandbox_path||'')}</div>
+    <div class="bar" style="margin-top:10px;">
+      <button onclick="renewLib(${it.id})">Force renew</button>
+      <button onclick="promoteLib(${it.id})">Manual promote</button>
+      ${it.library_status==='archived'
+        ? `<button onclick="unarchiveLib(${it.id})">Unarchive</button>`
+        : `<button class="danger" onclick="archiveLib(${it.id})">Archive</button>`}
+    </div>
+    <div class="weights" style="margin-top:10px;">
+      ${Object.keys(dims).map(k => `<div><span>${esc(k)}</span><span>${esc(dims[k])}</span></div>`).join('')}
+    </div>`;
+}
+
+async function renewLib(id) {
+  const r = await api('/api/ceo/patent-library/' + id + '/renew', { method: 'POST', body: '{}' });
+  if (r) { msg('Renewed score ' + (r.rank_score ?? '')); loadLibrary(); }
+}
+async function promoteLib(id) {
+  const r = await api('/api/ceo/patent-library/promote', { method: 'POST', body: JSON.stringify({ library_id: id }) });
+  if (r) { msg('Promoted reflection ' + (r.reflection_id ?? r.reason)); loadReview(); showPane('review'); }
+}
+async function archiveLib(id) {
+  const reason = prompt('Archive reason?') || 'manual';
+  const r = await api('/api/ceo/patent-library/' + id + '/archive', { method: 'POST', body: JSON.stringify({ reason }) });
+  if (r) { msg('Archived'); loadLibrary(); loadArchive(); }
+}
+async function unarchiveLib(id) {
+  const r = await api('/api/ceo/patent-library/' + id + '/unarchive', { method: 'POST', body: '{}' });
+  if (r) { msg('Unarchived'); loadLibrary(); loadArchive(); }
+}
+
+async function loadArchive() {
+  const data = await api('/api/ceo/patent-library?status=archived&grouped=true&sort=category&include_archived=true');
+  if (!data) return;
+  renderGrouped('archGrouped', data.grouped, true);
+}
+
+async function loadReview() {
+  const data = await api('/api/ceo/patent-reflections');
+  if (!data) return;
+  const rows = data.reflections || [];
+  document.getElementById('revList').innerHTML = rows.length ? rows.map(r => {
+    const badge = (r.promote_reason === 'explore') ? 'EXPLORE' : 'TOP';
+    return `<div class="item ${selRev===r.id?'sel':''}" onclick="selectRev(${r.id})">
+      <span class="badge ${badge}">${badge}</span>
+      <span class="badge CAT">${esc(r.primary_category||'')}</span>
+      <div class="title">${esc(r.title)}</div>
+      <div class="meta">${esc(r.status)} · lib score ${esc(r.library_rank_score??'')}</div>
+    </div>`;
+  }).join('') : '<div class="meta">No promoted reflections</div>';
+
+  const hash = (location.hash || '').replace(/^#/, '');
+  const idMatch = /(?:^|&)?id=(\d+)/.exec(hash);
+  if (idMatch && !selRev) selectRev(parseInt(idMatch[1], 10));
+}
+
+async function selectRev(id) {
+  selRev = id;
+  const data = await api('/api/ceo/patent-reflections/' + id);
+  if (!data || !data.reflection) return;
+  const r = data.reflection;
+  document.getElementById('revDetail').innerHTML = `
+    <div class="title">${esc(r.title)}</div>
+    <div class="meta">${esc(r.status)} · ${esc(r.promote_reason)} · ${esc(r.primary_category)}</div>
+    <div class="detail">${esc(r.idea_summary||'')}</div>
+    <div class="detail">${esc(r.reflection_md||'')}</div>
+    <div class="meta">${esc(r.sandbox_path||'')}</div>`;
+  const ready = r.status === 'ready_for_decision';
+  document.getElementById('btnCli').disabled = !ready;
+  document.getElementById('btnIde').disabled = !ready;
+  const inqs = r.inquiries || [];
+  document.getElementById('revThread').innerHTML = '<div class="thread">' + (inqs.length ? inqs.map(q =>
+    `<div class="msg"><div class="who">${esc(q.author)} · ${esc(q.created_at||'')}</div>${esc(q.body)}</div>`
+  ).join('') : '<div class="meta">No inquiries yet — discuss before approve</div>') + '</div>';
+  document.getElementById('ideLink').textContent = '';
+  loadReview();
+}
+
+async function sendInquire() {
+  if (!selRev) return msg('Select a reflection');
+  const body = document.getElementById('inqBody').value.trim();
+  if (!body) return msg('Enter inquiry text');
+  const r = await api('/api/ceo/patent-reflections/' + selRev + '/inquire', {
+    method: 'POST', body: JSON.stringify({ body, author: 'ceo' })
+  });
+  if (r) { document.getElementById('inqBody').value = ''; msg('Inquiry posted'); selectRev(selRev); }
+}
+async function markReady() {
+  if (!selRev) return;
+  const r = await api('/api/ceo/patent-reflections/' + selRev + '/ready', { method: 'POST', body: '{}' });
+  if (r) { msg('Ready for decision'); selectRev(selRev); }
+}
+async function decide(decision) {
+  if (!selRev) return;
+  const r = await api('/api/ceo/patent-reflections/' + selRev + '/decide', {
+    method: 'POST', body: JSON.stringify({ decision })
+  });
+  if (!r) return;
+  msg(decision + ' ok');
+  if (r.ide_open_url) {
+    document.getElementById('ideLink').innerHTML =
+      `<a class="back" href="${esc(r.ide_open_url)}">Open in IDE</a> · path ${esc(r.ide_path||'')}`;
+  }
+  selectRev(selRev);
+  loadLibrary();
+  loadAdapt();
+}
+
+async function loadAdapt() {
+  const data = await api('/api/ceo/patent-library/weights');
+  if (!data) return;
+  const w = data.weights || {};
+  document.getElementById('weights').innerHTML = Object.keys(w).map(k =>
+    `<div><span>${esc(k)}</span><span>${esc(w[k])}</span></div>`).join('') || '<div class="meta">No weights</div>';
+  const hist = data.history || [];
+  document.getElementById('weightHist').innerHTML = hist.length ? hist.map(h =>
+    `<div class="item"><div class="meta">${esc(h.decision)} · ${esc(h.created_at||'')}</div></div>`
+  ).join('') : '<div class="meta">No weight history yet</div>';
+}
+
+async function loadAll() {
+  await loadLibrary();
+  await loadReview();
+  await loadArchive();
+  await loadAdapt();
+  msg('Loaded');
+}
+loadAll();
+</script>
+</body>
+</html>

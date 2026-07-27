@@ -43,6 +43,26 @@ class ClinicalApplyBody(BaseModel):
     shadow_ids: List[int] = Field(default_factory=list)
 
 
+class PatentArchiveBody(BaseModel):
+    reason: str = ""
+
+
+class PatentInquireBody(BaseModel):
+    body: str = ""
+    author: str = "ceo"
+    parent_id: Optional[int] = None
+
+
+class PatentDecideBody(BaseModel):
+    decision: str = ""
+    note: str = ""
+    dimension_tags: List[str] = Field(default_factory=list)
+
+
+class PatentPromoteBody(BaseModel):
+    library_id: int = 0
+
+
 @router.get("/health")
 async def ceo_health():
     return {"status": "ok", "service": "ceo_dual_coo"}
@@ -247,3 +267,212 @@ async def loop_status(
             "stats": getattr(closer, "_stats", {}) if closer else {},
         },
     }
+
+
+# --- Patent idea library / review (QUANTUM-CRYSTAL-ARCH) ---
+
+
+def _lib_engine(request: Request):
+    from app.services.patent_idea_library_engine import PatentIdeaLibraryEngine
+
+    db = getattr(request.app.state, "db_pool", None)
+    return PatentIdeaLibraryEngine(db)
+
+
+def _refl_engine(request: Request):
+    from app.services.patent_reflection_engine import PatentReflectionEngine
+
+    db = getattr(request.app.state, "db_pool", None)
+    lib = _lib_engine(request)
+    return PatentReflectionEngine(db, library_engine=lib)
+
+
+@router.get("/patent-library")
+async def patent_library_list(
+    request: Request,
+    status: str = "",
+    category: str = "",
+    topic: str = "",
+    sort: str = "rank",
+    include_archived: bool = False,
+    grouped: bool = False,
+    _: Dict[str, Any] = Depends(require_admin),
+):
+    eng = _lib_engine(request)
+    rows = await eng.list_library(
+        status=status or None,
+        category=category or None,
+        topic=topic or None,
+        sort=sort or "rank",
+        include_archived=include_archived or (status == "archived"),
+    )
+    out: Dict[str, Any] = {
+        "status": "ok",
+        "ideas": rows,
+        "count": len(rows),
+        "study_cap_remaining": await eng.study_cap_remaining(),
+    }
+    if grouped:
+        out["grouped"] = eng.group_by_category(rows)
+    return out
+
+
+@router.get("/patent-library/weights")
+async def patent_library_weights(
+    request: Request,
+    _: Dict[str, Any] = Depends(require_admin),
+):
+    eng = _lib_engine(request)
+    weights = await eng.get_weights()
+    history: List[Dict[str, Any]] = []
+    db = getattr(request.app.state, "db_pool", None)
+    if db:
+        async with db.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, weights_before, weights_after, reflection_id, decision, created_at
+                FROM patent_rank_weight_history
+                ORDER BY created_at DESC LIMIT 10
+                """
+            )
+        for r in rows:
+            d = dict(r)
+            if hasattr(d.get("created_at"), "isoformat"):
+                d["created_at"] = d["created_at"].isoformat()
+            history.append(d)
+    return {"status": "ok", "weights": weights, "history": history}
+
+
+@router.post("/patent-library/{library_id}/renew")
+async def patent_library_renew(
+    library_id: int,
+    request: Request,
+    _: Dict[str, Any] = Depends(require_admin),
+):
+    eng = _lib_engine(request)
+    return await eng.rescore_idea(library_id, reason="manual")
+
+
+@router.post("/patent-library/{library_id}/archive")
+async def patent_library_archive(
+    library_id: int,
+    body: PatentArchiveBody,
+    request: Request,
+    user: Dict[str, Any] = Depends(require_admin),
+):
+    eng = _lib_engine(request)
+    who = str(user.get("username") or "DrNevedal1")
+    return await eng.archive_idea(library_id, reason=body.reason, by=who)
+
+
+@router.post("/patent-library/{library_id}/unarchive")
+async def patent_library_unarchive(
+    library_id: int,
+    request: Request,
+    _: Dict[str, Any] = Depends(require_admin),
+):
+    eng = _lib_engine(request)
+    return await eng.unarchive_idea(library_id)
+
+
+@router.post("/patent-library/promote")
+async def patent_library_promote(
+    body: PatentPromoteBody,
+    request: Request,
+    _: Dict[str, Any] = Depends(require_admin),
+):
+    """Manual promote override — still creates a reflection for review."""
+    if not body.library_id:
+        raise HTTPException(400, "library_id required")
+    refl = _refl_engine(request)
+    return await refl.promote_from_library(body.library_id, promote_reason="manual")
+
+
+@router.get("/patent-reflections")
+async def patent_reflections_list(
+    request: Request,
+    status: str = "",
+    _: Dict[str, Any] = Depends(require_admin),
+):
+    refl = _refl_engine(request)
+    rows = await refl.list_reflections(status=status or None)
+    return {"status": "ok", "reflections": rows, "count": len(rows)}
+
+
+@router.get("/patent-reflections/{reflection_id}")
+async def patent_reflection_get(
+    reflection_id: int,
+    request: Request,
+    _: Dict[str, Any] = Depends(require_admin),
+):
+    refl = _refl_engine(request)
+    row = await refl.get_reflection(reflection_id)
+    if not row:
+        raise HTTPException(404, "not found")
+    return {"status": "ok", "reflection": row}
+
+
+@router.post("/patent-reflections/{reflection_id}/inquire")
+async def patent_reflection_inquire(
+    reflection_id: int,
+    body: PatentInquireBody,
+    request: Request,
+    _: Dict[str, Any] = Depends(require_admin),
+):
+    if not (body.body or "").strip():
+        raise HTTPException(400, "body required")
+    author = (body.author or "ceo").strip().lower()
+    if author not in ("ceo", "dual_coo", "queen_mac", "queen_cloud"):
+        author = "ceo"
+    refl = _refl_engine(request)
+    result = await refl.add_inquiry(
+        reflection_id,
+        author=author,
+        body=body.body,
+        parent_id=body.parent_id,
+    )
+    if result.get("status") == "error":
+        raise HTTPException(400, result.get("error") or "inquire_failed")
+    return result
+
+
+@router.post("/patent-reflections/{reflection_id}/ready")
+async def patent_reflection_ready(
+    reflection_id: int,
+    request: Request,
+    _: Dict[str, Any] = Depends(require_admin),
+):
+    refl = _refl_engine(request)
+    result = await refl.mark_ready(reflection_id)
+    if result.get("status") == "error":
+        raise HTTPException(400, result.get("error") or "ready_failed")
+    return result
+
+
+@router.post("/patent-reflections/{reflection_id}/decide")
+async def patent_reflection_decide(
+    reflection_id: int,
+    body: PatentDecideBody,
+    request: Request,
+    user: Dict[str, Any] = Depends(require_admin),
+):
+    decision = (body.decision or "").strip().upper()
+    if decision not in ("REJECT", "HOLD", "APPROVE_CLI", "APPROVE_IDE"):
+        raise HTTPException(
+            400,
+            "decision must be REJECT, HOLD, APPROVE_CLI, or APPROVE_IDE",
+        )
+    who = str(user.get("username") or user.get("name") or "DrNevedal1")
+    refl = _refl_engine(request)
+    result = await refl.decide(
+        reflection_id,
+        decision=decision,
+        reviewed_by=who,
+        dimension_tags=body.dimension_tags,
+        note=body.note,
+    )
+    if result.get("status") == "error":
+        code = 400
+        raise HTTPException(code, result.get("error") or result.get("detail") or "decide_failed")
+    return result
+
