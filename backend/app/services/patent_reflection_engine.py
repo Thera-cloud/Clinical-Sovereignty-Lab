@@ -43,6 +43,97 @@ def _adversarial_critique(excerpt: str) -> tuple[str, int]:
     return md, min(3, hits)
 
 
+_CAT_LABEL = {
+    "world_qol": "World / QoL",
+    "platform": "Platform",
+    "qec_quantum": "QEC quantum",
+    "queens_nate": "Queens + Little Nate",
+}
+
+
+def _patent_ceo_email_brief(
+    *,
+    title: str,
+    category: str,
+    topics: List[str],
+    summary: str,
+    score: Any,
+    promote_reason: str,
+    reflection_id: int,
+) -> Dict[str, Any]:
+    """CEO email payload: promote level, title, 3–5 sentence review brief."""
+    reason = (promote_reason or "exploit").strip().lower()
+    level = (
+        "EXPLOIT (rank ≥ 90 — top diversity slot)"
+        if reason == "exploit"
+        else "EXPLORE (UCB band 75–89 — one slot/day)"
+    )
+    cat_label = _CAT_LABEL.get(category, category or "uncategorized")
+    topic_bits = ", ".join((topics or [])[:6]) or "general"
+    try:
+        score_s = f"{float(score):.1f}"
+    except (TypeError, ValueError):
+        score_s = str(score or "?")
+
+    raw = re.sub(r"\s+", " ", (summary or "").strip())
+    raw = re.sub(r"[#*`]+", "", raw)
+    chunks = [c.strip() for c in re.split(r"(?<=[.!?])\s+", raw) if c.strip()]
+    if not chunks:
+        chunks = [
+            f"Dual-COO promoted a patent idea in {cat_label} for your Patent Review.",
+            "Open Sovereign Command → Patent Review to inquire, then APPROVE_CLI or APPROVE_IDE.",
+        ]
+    body_sents = chunks[:5]
+    while len(body_sents) < 3:
+        body_sents.append(
+            "Sandbox only — official filed claim markdown is never rewritten by this flow."
+        )
+    review_summary = " ".join(body_sents[:5])
+
+    ceo_summary = (
+        f"Patent Review ready — promote level: {level}. "
+        f"Title: {title[:160]}. Mission category: {cat_label} "
+        f"(topics: {topic_bits}). Rank score: {score_s}."
+    )
+    why = (
+        f"{review_summary}\n\n"
+        f"Open Command → Patent Review (reflection #{reflection_id}). "
+        "Inquire if needed, mark Ready, then APPROVE_CLI (sandbox implement) "
+        "or APPROVE_IDE (keep as IDE brief), or REJECT / HOLD."
+    )
+    return {
+        "email_title": f"Patent Review [{reason.upper()}]: {title[:100]}",
+        "detail": why[:2000],
+        "payload": {
+            "kind": "patent_reflect",
+            "reflection_id": reflection_id,
+            "promote_reason": reason,
+            "promote_level": level,
+            "primary_category": category,
+            "topics": topics[:8],
+            "rank_score": score_s,
+            "ceo_summary": ceo_summary[:600],
+            "why_it_matters": why[:1200],
+            "ask_of_ceo": (
+                "Open Patent Review → inquire if needed → Ready → "
+                "APPROVE_CLI / APPROVE_IDE / REJECT / HOLD"
+            ),
+            "action_steps": [
+                "Open Sovereign Command → Patent Review tab.",
+                f"Find reflection #{reflection_id}: {title[:80]}",
+                "Read the promote-level summary in this email; inquire in-app if unclear.",
+                "Mark Ready, then APPROVE_CLI (sandbox build) or APPROVE_IDE (IDE brief).",
+                "Or REJECT / HOLD to leave the idea out of the build path.",
+            ],
+            "patent_review_path": f"patent_review.html#id={reflection_id}",
+            "expected_impact": (
+                "Your decision routes Dual-COO to sandbox CLI work or an IDE brief; "
+                "filed patent claim docs are never auto-edited."
+            ),
+        },
+    }
+
+
 class PatentReflectionEngine:
     def __init__(self, db_pool, *, library_engine: Optional[PatentIdeaLibraryEngine] = None):
         self.db_pool = db_pool
@@ -195,30 +286,31 @@ class PatentReflectionEngine:
                 library_id, promote_reason[:16],
             )
 
-        # CEO YELLOW enqueue
+        # CEO YELLOW enqueue → email to admin_nevedalnj@… via schedule_ceo_inbox_notify
         ceo_item = None
         try:
             from app.websocket.cli_dual_coo import RISK_YELLOW, enqueue_ceo
 
+            brief = _patent_ceo_email_brief(
+                title=str(row["title"] or ""),
+                category=str(row["primary_category"] or ""),
+                topics=list(row["topics"] or []),
+                summary=str(row["idea_summary"] or ""),
+                score=row["rank_score"],
+                promote_reason=promote_reason,
+                reflection_id=int(rid),
+            )
             enq = enqueue_ceo(
                 risk=RISK_YELLOW,
-                title=f"Patent review: {row['title'][:120]}",
-                detail=(
-                    f"category={row['primary_category']} score={row['rank_score']} "
-                    f"reason={promote_reason}. Open Patent Review tab."
-                ),
+                title=brief["email_title"],
+                detail=brief["detail"],
                 origin="dual_coo",
                 task_id=f"patent-reflect-{rid}",
-                payload={
-                    "kind": "patent_reflect",
-                    "reflection_id": int(rid),
-                    "library_id": library_id,
-                    "ask_of_ceo": "Inquire, then APPROVE_CLI / APPROVE_IDE / REJECT / HOLD",
-                    "patent_review_path": f"patent_review.html#id={int(rid)}",
-                },
+                payload=brief["payload"],
                 dedup_ttl_s=86400,
             )
-            ceo_item = enq.get("id") if isinstance(enq, dict) else None
+            item = (enq or {}).get("item") if isinstance(enq, dict) else None
+            ceo_item = (item or {}).get("id") if isinstance(item, dict) else None
             if ceo_item and self.db_pool:
                 async with self.db_pool.acquire() as conn:
                     await conn.execute(

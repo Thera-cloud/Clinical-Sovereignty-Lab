@@ -293,6 +293,8 @@ services:
       - ENABLE_PATENT_REFLECTIONS=${ENABLE_PATENT_REFLECTIONS:-false}
       - PATENT_IDEA_STUDY_MAX_PER_DAY=${PATENT_IDEA_STUDY_MAX_PER_DAY:-3}
       - PATENT_IDEA_PROMOTE_MIN=${PATENT_IDEA_PROMOTE_MIN:-90}
+      - PATENT_CORPUS_ROOT=${PATENT_CORPUS_ROOT:-/app/patent}
+      - PATENT_SANDBOX_ROOT=${PATENT_SANDBOX_ROOT:-/app/data/patent_sandbox}
       - ENABLE_CRYSTAL_ATTRIBUTION=${ENABLE_CRYSTAL_ATTRIBUTION:-true}
       - SOVEREIGN_STANDARD_GATE_ENABLED=${SOVEREIGN_STANDARD_GATE_ENABLED:-true}
       # QUANTUM-CRYSTAL-ARCH: mailto/SMS/HTTPS on prod API can apply staging negotiations
@@ -376,6 +378,7 @@ services:
       - ./dashboard:/app/dashboard:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (Nevedal Lab UI)
       - ./mobile/lib:/app/mobile/lib:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (Flutter)
       - ./backend/migrations:/app/migrations:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (schema)
+      - ./patent:/app/patent:ro  # QUANTUM-CRYSTAL-ARCH: Dual-COO patent idea corpus (read-only)
       - ./data/backend:/app/data
       - ./data/bridge:/app/bridge_data:ro  # Bridge metrics (PMB, Nevedal state) for dashboard read
       - backend_logs:/app/logs

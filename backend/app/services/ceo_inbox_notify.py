@@ -84,7 +84,7 @@ def build_ceo_review_brief(item: Dict[str, Any]) -> Dict[str, Any]:
     origin = str(item.get("origin") or "cloud")
     task_id = str(item.get("task_id") or "")
 
-    # Prefer caller-supplied brief fields when present
+    # Prefer caller-supplied brief fields when present (patent_reflect uses this path)
     if payload.get("ceo_summary") or payload.get("what_happened"):
         objective = str(
             payload.get("ceo_summary") or payload.get("what_happened") or title
@@ -101,17 +101,22 @@ def build_ceo_review_brief(item: Dict[str, Any]) -> Dict[str, Any]:
             or ""
         ).strip()
         steps = [s for s in (payload.get("action_steps") or []) if s]
-        if ask:
+        if ask and ask not in steps:
             steps = [ask] + steps
         if not steps:
             steps = _default_reply_steps(risk)
+        impact_default = (
+            "Your decision routes Dual-COO to sandbox CLI or an IDE brief; "
+            "filed patent claim docs are never auto-edited."
+            if payload.get("kind") == "patent_reflect"
+            else "Clears CEO inbox after your reply; linked apply runs only on APPROVE."
+        )
         return {
             "objective": objective,
             "reasoning": reasoning,
             "action_steps": steps[:8],
             "expected_impact": str(
-                payload.get("expected_impact")
-                or "Clears CEO inbox after your reply; linked apply runs only on APPROVE."
+                payload.get("expected_impact") or impact_default
             )[:400],
             "rollback": "No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
             "summary_block": _format_summary_block(objective, reasoning, steps, risk),

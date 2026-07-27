@@ -125,7 +125,11 @@ class PatentIdeaLibraryEngine:
             os.path.join(os.getcwd(), "patent"),
         )
         self.patent_root = os.path.abspath(root)
-        self.sandbox_root = os.path.join(self.patent_root, "sandbox_reflections")
+        # Sandbox must be writable; corpus mount is often :ro — keep drafts on data volume.
+        sandbox = os.getenv("PATENT_SANDBOX_ROOT") or os.path.join(
+            self.patent_root, "sandbox_reflections"
+        )
+        self.sandbox_root = os.path.abspath(sandbox)
         self.archive_root = os.path.join(self.sandbox_root, "archive")
 
     def _assert_sandbox_path(self, path: str) -> str:

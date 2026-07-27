@@ -237,6 +237,30 @@ class TestDecideNotReady(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.get("error"), "not_ready")
 
 
+class TestPatentCeoEmailBrief(unittest.TestCase):
+    def test_brief_has_promote_level_and_summary(self):
+        brief = _refl._patent_ceo_email_brief(
+            title="Field coherence mesh",
+            category="qec_quantum",
+            topics=["coherence", "mesh"],
+            summary=(
+                "This idea extends QEC field sensing across household nodes. "
+                "It proposes claim language for multi-node emotional coherence. "
+                "Prior art risk is moderate. Enablement needs structural detail. "
+                "Sandbox only until you approve."
+            ),
+            score=92.5,
+            promote_reason="exploit",
+            reflection_id=42,
+        )
+        pl = brief["payload"]
+        self.assertEqual(pl["kind"], "patent_reflect")
+        self.assertIn("EXPLOIT", pl["promote_level"])
+        self.assertIn("Field coherence", pl["ceo_summary"])
+        self.assertGreaterEqual(len(pl["why_it_matters"].split(".")), 3)
+        self.assertIn("Patent Review", brief["email_title"])
+
+
 class TestAuditorEndpointCount(unittest.TestCase):
     def test_ceo_auditor_has_10(self):
         path = APP / "services" / "ceo_dual_coo_auditor.py"
