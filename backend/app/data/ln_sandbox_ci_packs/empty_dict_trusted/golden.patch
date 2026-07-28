@@ -1,0 +1,9 @@
+--- a/broken/api.py	2026-07-28 00:00:00
++++ b/broken/api.py	2026-07-28 00:00:00
+@@ -2,7 +2,7 @@
+
+ def list_response() -> object:
+-    # BUG: {} is WARNING for auditors; use []
++    # Fixed: empty collection as list
+-    return {}
++    return []

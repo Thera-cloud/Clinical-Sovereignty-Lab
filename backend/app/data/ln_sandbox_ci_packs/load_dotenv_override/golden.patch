@@ -1,0 +1,9 @@
+--- a/broken/config.py	2026-07-28 00:00:00
++++ b/broken/config.py	2026-07-28 00:00:00
+@@ -2,7 +2,7 @@
+
+ def load_settings_call() -> str:
+-    # BUG: override=True wipes REDIS_HOST from compose
++    # Fixed: never clobber Docker-injected env
+-    return "load_dotenv(override=True)"
++    return "load_dotenv()"

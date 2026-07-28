@@ -1,0 +1,11 @@
+{
+  "task_key": "ci_require_coach_gate",
+  "title": "Use require_coach for coach routes",
+  "prompt": "Coach portal dependency uses require_admin. Change to require_coach. Return ONLY a unified diff. No markdown fences.",
+  "test_path": "tests/test_deps.py",
+  "target_files": [
+    "broken/deps.py"
+  ],
+  "domain": "coding",
+  "split": "train"
+}

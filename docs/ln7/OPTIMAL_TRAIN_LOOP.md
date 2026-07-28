@@ -14,11 +14,14 @@ One-liner: **clean preference JSONL → all-linear QLoRA A/B → sandbox bakeoff
 | Thin refuse | `LN7_QLORA_MIN_ROWS=50` (target 200–500 before raising iters); override `LN7_QLORA_FORCE_THIN=1` |
 
 ```bash
-# Rebuild clean JSONL (goldens offline; DB when DATABASE_URL set)
-PYTHONPATH=backend python backend/scripts/ln7_export_train_jsonl.py --out data/ln7_train.jsonl
+# Seed extra train packs (broken+test+golden) then export (≥50 via goldens×paraphrases)
+PYTHONPATH=backend python backend/scripts/ln7_seed_train_packs.py
+LN7_EXPORT_PARAPHRASE_N=3 PYTHONPATH=backend \
+  python backend/scripts/ln7_export_train_jsonl.py --out data/ln7_train.jsonl
 
-# A/B TOR drains (identical JSONL)
-LN7_QLORA_MIN_ROWS=2 LN7_QLORA_FORCE_THIN=1 bash scripts/ln7_ab_qlora_drain.sh   # only while data thin — prefer real ≥50
+# A/B TOR drains (identical JSONL) — refuse thin unless override
+LN7_QLORA_MIN_ROWS=50 bash scripts/ln7_ab_qlora_drain.sh
+# thin override only while bootstrapping: LN7_QLORA_FORCE_THIN=1
 ```
 
 ## Eval half (sovereign)

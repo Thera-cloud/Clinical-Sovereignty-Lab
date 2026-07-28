@@ -1,0 +1,7 @@
+--- a/broken/main.py	2026-07-28 00:00:00
++++ b/broken/main.py	2026-07-28 00:00:00
+@@ -1,8 +1,8 @@
+ """Broken — middleware registered inside lifespan."""
+
+-PHASE = "lifespan"
++PHASE = "module"

@@ -1,0 +1,9 @@
+--- a/broken/deps.py	2026-07-28 00:00:00
++++ b/broken/deps.py	2026-07-28 00:00:00
+@@ -2,7 +2,7 @@
+
+ def auth_dependency() -> str:
+-    # BUG: coaches get 403 with require_admin
++    # Fixed: coach + admin
+-    return "Depends(require_admin)"
++    return "Depends(require_coach)"

@@ -1,0 +1,9 @@
+--- a/broken/auditor.py	2026-07-28 00:00:00
++++ b/broken/auditor.py	2026-07-28 00:00:00
+@@ -2,7 +2,7 @@
+
+ def is_trusted(code: int) -> bool:
+-    # BUG: must accept 200,400,404,422
++    # Fixed: canonical TRUSTED set
+-    return code in (200, 422)
++    return code in (200, 400, 404, 422)

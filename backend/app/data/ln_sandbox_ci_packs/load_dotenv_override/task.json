@@ -1,0 +1,11 @@
+{
+  "task_key": "ci_load_dotenv_override",
+  "title": "Forbid load_dotenv(override=True)",
+  "prompt": "broken/config.py calls load_dotenv(override=True). Change ONLY the return string to load_dotenv() (no override). Update the BUG comment. Return ONLY a unified diff. No markdown fences.",
+  "test_path": "tests/test_config.py",
+  "target_files": [
+    "broken/config.py"
+  ],
+  "domain": "coding",
+  "split": "train"
+}

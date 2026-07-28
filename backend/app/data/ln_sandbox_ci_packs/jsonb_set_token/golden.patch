@@ -1,0 +1,9 @@
+--- a/broken/billing.py	2026-07-28 00:00:00
++++ b/broken/billing.py	2026-07-28 00:00:00
+@@ -2,7 +2,7 @@
+
+ def reset_usage_sql() -> str:
+-    # BUG: must jsonb_set not replace whole profile_data
++    # Fixed: patch one key
+-    return "UPDATE users SET profile_data = $1"
++    return "UPDATE users SET profile_data = jsonb_set(profile_data, '{token_usage_today}', '0')"

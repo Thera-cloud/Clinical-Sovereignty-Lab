@@ -1,9 +1,27 @@
 {
-  "version": 1,
-  "description": "Disposable micro-repos for LN Sandbox Engineering CI DOJO. Never mutates GREEN prod tree.",
+  "version": 2,
+  "description": "Disposable micro-repos for LN Sandbox Engineering CI. Never mutates GREEN prod tree.",
+  "heldout": [
+    "env_redis_prefix"
+  ],
   "packs": [
     "asyncpg_cast",
     "catch_all_routes",
-    "env_redis_prefix"
+    "env_redis_prefix",
+    "load_dotenv_override",
+    "users_no_user_id_column",
+    "skyeye_activity_columns",
+    "require_coach_gate",
+    "ws_ping_timeout",
+    "empty_dict_trusted",
+    "expected_role_login",
+    "jsonb_set_token",
+    "redis_environment_prefix",
+    "auditor_status_codes",
+    "vectorize_outside_db",
+    "no_iframe_embed",
+    "coach_three_fields",
+    "middleware_not_in_lifespan",
+    "flutter_nocache_sw"
   ]
 }

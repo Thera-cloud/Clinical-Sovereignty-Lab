@@ -1,0 +1,11 @@
+{
+  "task_key": "ci_coach_three_fields",
+  "title": "Set all three coach assignment fields",
+  "prompt": "broken/register.py only sets assigned_coach. Set coach_id, assigned_coach_id, and assigned_coach. Return ONLY a unified diff. No markdown fences.",
+  "test_path": "tests/test_register.py",
+  "target_files": [
+    "broken/register.py"
+  ],
+  "domain": "coding",
+  "split": "train"
+}

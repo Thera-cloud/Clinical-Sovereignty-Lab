@@ -1,0 +1,9 @@
+--- a/broken/bridge.py	2026-07-28 00:00:00
++++ b/broken/bridge.py	2026-07-28 00:00:00
+@@ -2,7 +2,7 @@
+
+ def serve_kwargs() -> dict:
+-    # BUG: 10s kills connections mid-inference
++    # Fixed: load-test baseline ping_timeout=60
+-    return {"ping_interval": 20, "ping_timeout": 10, "close_timeout": 30}
++    return {"ping_interval": 20, "ping_timeout": 60, "close_timeout": 30}

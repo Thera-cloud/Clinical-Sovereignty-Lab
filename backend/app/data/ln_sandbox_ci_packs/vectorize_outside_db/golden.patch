@@ -1,0 +1,7 @@
+--- a/broken/crystallizer.py	2026-07-28 00:00:00
++++ b/broken/crystallizer.py	2026-07-28 00:00:00
+@@ -1,6 +1,6 @@
+ """Broken — network call holds DB connection."""
+
+-FLOW = ["acquire", "insert", "vectorize", "release"]
++FLOW = ["acquire", "insert", "release", "vectorize"]

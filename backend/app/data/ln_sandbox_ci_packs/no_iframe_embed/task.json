@@ -1,0 +1,11 @@
+{
+  "task_key": "ci_no_iframe_embed",
+  "title": "No iframe embeds for Hive Defense",
+  "prompt": "broken/dashboard.py embeds via iframe. Return a native section#tab-hive instead. Return ONLY a unified diff. No markdown fences.",
+  "test_path": "tests/test_dashboard.py",
+  "target_files": [
+    "broken/dashboard.py"
+  ],
+  "domain": "coding",
+  "split": "train"
+}

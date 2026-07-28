@@ -1,0 +1,11 @@
+{
+  "task_key": "ci_redis_environment_prefix",
+  "title": "Redis auth key must use ENVIRONMENT",
+  "prompt": "broken/auth_keys.py hardcodes nate:development:auth. Use env parameter. Return ONLY a unified diff. No markdown fences.",
+  "test_path": "tests/test_auth_keys.py",
+  "target_files": [
+    "broken/auth_keys.py"
+  ],
+  "domain": "coding",
+  "split": "train"
+}

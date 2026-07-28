@@ -1,0 +1,13 @@
+--- a/broken/register.py	2026-07-28 00:00:00
++++ b/broken/register.py	2026-07-28 00:00:00
+@@ -2,8 +2,12 @@
+
+ def new_client_profile(coach_hw: str, coach_user: str) -> dict:
+-    # BUG: need coach_id + assigned_coach_id + assigned_coach
++    # Fixed: all three assignment fields
+-    return {"assigned_coach": coach_user}
++    return {
++        "coach_id": coach_hw,
++        "assigned_coach_id": coach_hw,
++        "assigned_coach": coach_user,
++    }

@@ -1,0 +1,11 @@
+{
+  "task_key": "ci_ws_ping_timeout",
+  "title": "Raise WebSocket ping_timeout to 60",
+  "prompt": "broken/bridge.py sets ping_timeout=10. Raise to 60. Return ONLY a unified diff. No markdown fences.",
+  "test_path": "tests/test_bridge.py",
+  "target_files": [
+    "broken/bridge.py"
+  ],
+  "domain": "coding",
+  "split": "train"
+}

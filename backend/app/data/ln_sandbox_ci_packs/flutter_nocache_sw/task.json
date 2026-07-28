@@ -1,0 +1,11 @@
+{
+  "task_key": "ci_flutter_nocache_sw",
+  "title": "No-cache flutter_service_worker.js",
+  "prompt": "broken/nginx.conf caches flutter_service_worker.js for 4h. Set Cache-Control to no-cache, no-store, must-revalidate. Return ONLY a unified diff. No markdown fences.",
+  "test_path": "tests/test_nginx.py",
+  "target_files": [
+    "broken/nginx.conf"
+  ],
+  "domain": "coding",
+  "split": "train"
+}

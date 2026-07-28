@@ -1,0 +1,11 @@
+{
+  "task_key": "ci_expected_role_login",
+  "title": "Pass expected_role on login_request",
+  "prompt": "broken/login.py omits expected_role. Include expected_role=role in the payload dict. Return ONLY a unified diff. No markdown fences.",
+  "test_path": "tests/test_login.py",
+  "target_files": [
+    "broken/login.py"
+  ],
+  "domain": "coding",
+  "split": "train"
+}

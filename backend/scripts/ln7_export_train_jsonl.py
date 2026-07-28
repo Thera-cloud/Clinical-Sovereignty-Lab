@@ -60,9 +60,40 @@ def _packs_root() -> Path:
 
 MAX_CHARS = 4000
 HELDOUT_PACKS = frozenset({"env_redis_prefix"})
+# Fallback if packs_index missing; preferred: all packs with golden.patch minus heldout
 TRAIN_GOLDEN_PACKS = ("asyncpg_cast", "catch_all_routes")
 _STUB_RE = re.compile(r"^\[patch_hash=", re.I)
 _DIFF_MARK = re.compile(r"(?m)^(diff --git |--- |\+\+\+ |@@ )")
+PARAPHRASE_N = int(os.getenv("LN7_EXPORT_PARAPHRASE_N", "3") or "3")
+
+
+def _train_golden_pack_names() -> List[str]:
+    root = _packs_root()
+    names: List[str] = []
+    idx = root / "packs_index.json"
+    if idx.is_file():
+        try:
+            data = json.loads(idx.read_text(encoding="utf-8"))
+            names = [n for n in (data.get("packs") or []) if n not in HELDOUT_PACKS]
+        except Exception:
+            names = []
+    if not names:
+        names = [n for n in TRAIN_GOLDEN_PACKS if n not in HELDOUT_PACKS]
+    return [n for n in names if (root / n / "golden.patch").is_file()]
+
+
+def _paraphrase_prompts(prompt: str) -> List[str]:
+    """Same assistant patch, varied user phrasing — expands thin unique-diff sets."""
+    base = (prompt or "").strip()
+    variants = [
+        base,
+        f"Engineering task: {base}",
+        f"Return a unified diff only. {base}",
+        f"Sandbox CI pack failure — fix it. {base}",
+        f"Produce a minimal correct patch. {base}",
+    ]
+    n = max(1, min(PARAPHRASE_N, len(variants)))
+    return variants[:n]
 
 
 def _cap(s: str, n: int = MAX_CHARS) -> str:
@@ -104,36 +135,36 @@ def _row_messages(prompt: str, assistant: str, rejected: Optional[str] = None) -
 
 
 def golden_rows() -> List[Dict[str, Any]]:
-    """Train-eligible golden.patch rows (heldout pack excluded)."""
+    """Train-eligible golden.patch rows (heldout pack excluded) + prompt paraphrases."""
     from app.websocket.ln7_harness import build_pack_prompt
 
     packs_root = _packs_root()
     out: List[Dict[str, Any]] = []
-    for pack in TRAIN_GOLDEN_PACKS:
+    for pack in _train_golden_pack_names():
         gpath = packs_root / pack / "golden.patch"
         if not gpath.is_file():
             continue
         gdiff = gpath.read_text(encoding="utf-8")
         if not _is_real_diff(gdiff):
             continue
-        prompt = build_pack_prompt(pack) or f"Fix pack {pack}. Return a unified diff."
+        prompt0 = build_pack_prompt(pack) or f"Fix pack {pack}. Return a unified diff."
         ph = hashlib.sha256(gdiff.encode()).hexdigest()[:32]
-        base = {
-            "outcome_id": f"golden:{pack}",
-            "task_id": None,
-            "revision_id": "LN7-golden",
-            "patch_hash": ph,
-            "harness_mode": "golden",
-            "split": "train",
-            "spdx_license": "MIT",
-            "pack": pack,
-            "source": "golden.patch",
-            "clean": True,
-        }
-        base.update(_row_messages(prompt, gdiff))
-        out.append(base)
+        for i, prompt in enumerate(_paraphrase_prompts(prompt0)):
+            base = {
+                "outcome_id": f"golden:{pack}:p{i}",
+                "task_id": None,
+                "revision_id": "LN7-golden",
+                "patch_hash": f"{ph}:p{i}",
+                "harness_mode": "golden",
+                "split": "train",
+                "spdx_license": "MIT",
+                "pack": pack,
+                "source": "golden.patch" if i == 0 else "golden.paraphrase",
+                "clean": True,
+            }
+            base.update(_row_messages(prompt, gdiff))
+            out.append(base)
     return out
-
 
 async def export_rows(
     limit: int = 500,

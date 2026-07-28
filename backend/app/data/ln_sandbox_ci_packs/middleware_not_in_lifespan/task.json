@@ -1,0 +1,11 @@
+{
+  "task_key": "ci_middleware_not_in_lifespan",
+  "title": "Register middleware at module level",
+  "prompt": "broken/main.py sets PHASE=lifespan for middleware. Change PHASE to module. Return ONLY a unified diff. No markdown fences.",
+  "test_path": "tests/test_main.py",
+  "target_files": [
+    "broken/main.py"
+  ],
+  "domain": "coding",
+  "split": "train"
+}

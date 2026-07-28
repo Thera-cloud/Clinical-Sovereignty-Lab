@@ -1,0 +1,14 @@
+--- a/broken/login.py	2026-07-28 00:00:00
++++ b/broken/login.py	2026-07-28 00:00:00
+@@ -2,8 +2,10 @@
+
+ def login_payload(username: str, password: str, role: str) -> dict:
+-    # BUG: dual CLIENT/COACH accounts need expected_role
++    # Fixed: always pass expected_role
+-    return {"type": "login_request", "username": username, "password": password}
++    return {
++        "type": "login_request",
++        "username": username,
++        "password": password,
++        "expected_role": role,
++    }

@@ -1,0 +1,10 @@
+--- a/broken/nginx.conf	2026-07-28 00:00:00
++++ b/broken/nginx.conf	2026-07-28 00:00:00
+@@ -1,6 +1,6 @@
+ # Broken — service worker cached by Safari
+ location = /flutter_service_worker.js {
+-  # BUG: missing no-cache
++  # Fixed: Safari must not pin stale SW
+-  add_header Cache-Control "max-age=14400";
++  add_header Cache-Control "no-cache, no-store, must-revalidate";
+ }

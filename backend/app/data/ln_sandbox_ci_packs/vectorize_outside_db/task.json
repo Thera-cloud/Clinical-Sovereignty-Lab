@@ -1,0 +1,11 @@
+{
+  "task_key": "ci_vectorize_outside_db",
+  "title": "Vectorize outside DB acquire block",
+  "prompt": "broken/crystallizer.py runs vectorize before release. Reorder FLOW so vectorize is after release. Return ONLY a unified diff. No markdown fences.",
+  "test_path": "tests/test_crystallizer.py",
+  "target_files": [
+    "broken/crystallizer.py"
+  ],
+  "domain": "coding",
+  "split": "train"
+}

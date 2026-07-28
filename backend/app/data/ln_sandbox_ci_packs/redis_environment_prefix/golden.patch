@@ -1,0 +1,9 @@
+--- a/broken/auth_keys.py	2026-07-28 00:00:00
++++ b/broken/auth_keys.py	2026-07-28 00:00:00
+@@ -2,7 +2,7 @@
+
+ def token_key(env: str, token: str) -> str:
+-    # BUG: hardcodes development while bridge uses production
++    # Fixed: use ENVIRONMENT argument
+-    return f"nate:development:auth:{token}"
++    return f"nate:{env}:auth:{token}"

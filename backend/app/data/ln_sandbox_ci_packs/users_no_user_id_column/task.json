@@ -1,0 +1,11 @@
+{
+  "task_key": "ci_users_no_user_id_column",
+  "title": "Fix users.user_id \u2192 username",
+  "prompt": "broken/lookup.py queries users.user_id which does not exist. Change WHERE to username = $1. Return ONLY a unified diff for broken/lookup.py. No markdown fences.",
+  "test_path": "tests/test_lookup.py",
+  "target_files": [
+    "broken/lookup.py"
+  ],
+  "domain": "coding",
+  "split": "train"
+}

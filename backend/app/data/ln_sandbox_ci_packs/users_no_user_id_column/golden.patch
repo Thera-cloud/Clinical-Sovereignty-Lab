@@ -1,0 +1,9 @@
+--- a/broken/lookup.py	2026-07-28 00:00:00
++++ b/broken/lookup.py	2026-07-28 00:00:00
+@@ -2,7 +2,7 @@
+
+ def user_lookup_sql() -> str:
+-    # BUG: users has username/id, not user_id
++    # Fixed: lookup by username
+-    return "SELECT * FROM users WHERE user_id = $1"
++    return "SELECT * FROM users WHERE username = $1"

@@ -1,0 +1,9 @@
+--- a/broken/dashboard.py	2026-07-28 00:00:00
++++ b/broken/dashboard.py	2026-07-28 00:00:00
+@@ -2,7 +2,7 @@
+
+ def embed_hive() -> str:
+-    # BUG: iframe blocked by X-Frame-Options
++    # Fixed: native tab section
+-    return '<iframe src="hive_defense.html"></iframe>'
++    return '<section class="tab-content" id="tab-hive"></section>'
