@@ -40,6 +40,17 @@ class TestHealth:
         assert data["agent"] == "nate-mac-agent"
         assert "uptime_s" in data
         assert "managed_processes" in data
+        assert "ollama_reachable" in data
+
+
+class TestOllamaProxy:
+    def test_ollama_requires_auth(self, client):
+        resp = client.get("/ollama/v1/models")
+        assert resp.status_code in (401, 403)
+
+    def test_ollama_wrong_token(self, client):
+        resp = client.get("/ollama/v1/models", headers=BAD_AUTH)
+        assert resp.status_code == 403
 
 
 # ── Token Auth Enforcement ──

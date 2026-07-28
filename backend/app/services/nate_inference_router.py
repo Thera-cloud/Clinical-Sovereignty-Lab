@@ -66,6 +66,17 @@ _WORKERS_AI_MODEL = os.getenv("WORKERS_AI_MODEL", "@cf/meta/llama-3.1-8b-instruc
 
 _HOME_GPU_URL = os.getenv("HOME_GPU_URL", "")
 _HOME_GPU_MODEL = os.getenv("HOME_GPU_MODEL", "")
+# Twin mac-agent Ollama proxy uses MAC_AGENT_TOKEN; allow HOME_GPU_TOKEN override.
+_HOME_GPU_TOKEN = (
+    os.getenv("HOME_GPU_TOKEN", "").strip()
+    or os.getenv("MAC_AGENT_TOKEN", "").strip()
+)
+
+
+def _home_gpu_headers() -> Dict[str, str]:
+    if not _HOME_GPU_TOKEN:
+        return {}
+    return {"Authorization": f"Bearer {_HOME_GPU_TOKEN}"}
 _DIGITAL_OCEAN_URL = os.getenv("DIGITAL_OCEAN_INFERENCE_URL", "")
 _DIGITAL_OCEAN_MODEL = os.getenv("DIGITAL_OCEAN_MODEL", "llama3.1:8b-instruct-q4_K_M")
 
@@ -378,15 +389,20 @@ class NateInferenceRouter:
     async def _call_home_gpu(self, messages, temperature, max_tokens) -> Dict:
         """Home GPU — local 70B model for clinical depth (Ollama-compatible)."""
         model = _HOME_GPU_MODEL or "llama3.1:70b-instruct-q4_K_M"
-        url = f"{_HOME_GPU_URL}/v1/chat/completions"
+        url = f"{_HOME_GPU_URL.rstrip('/')}/v1/chat/completions"
         async with aiohttp.ClientSession() as sess:
-            async with sess.post(url, json={
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "stream": False,
-            }, timeout=aiohttp.ClientTimeout(total=180)) as resp:
+            async with sess.post(
+                url,
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "stream": False,
+                },
+                headers=_home_gpu_headers(),
+                timeout=aiohttp.ClientTimeout(total=180),
+            ) as resp:
                 if resp.status != 200:
                     self._home_gpu_healthy = False
                     raise RuntimeError(f"Home GPU returned {resp.status}")
@@ -506,12 +522,13 @@ class NateInferenceRouter:
 
         self._last_health_check = now
 
-        async def _probe_ollama(url: str) -> bool:
+        async def _probe_ollama(url: str, *, headers: Optional[Dict[str, str]] = None) -> bool:
             try:
                 async with aiohttp.ClientSession() as sess:
                     async with sess.get(
-                        f"{url}/v1/models",
-                        timeout=aiohttp.ClientTimeout(total=5),
+                        f"{url.rstrip('/')}/v1/models",
+                        headers=headers or {},
+                        timeout=aiohttp.ClientTimeout(total=8),
                     ) as resp:
                         return resp.status == 200
             except Exception:
@@ -521,7 +538,9 @@ class NateInferenceRouter:
             self._sovereign_healthy = await _probe_ollama(_SOVEREIGN_URL)
 
         if _HOME_GPU_URL:
-            self._home_gpu_healthy = await _probe_ollama(_HOME_GPU_URL)
+            self._home_gpu_healthy = await _probe_ollama(
+                _HOME_GPU_URL, headers=_home_gpu_headers()
+            )
 
         if _DIGITAL_OCEAN_URL:
             self._digitalocean_healthy = await _probe_ollama(_DIGITAL_OCEAN_URL)

@@ -50,6 +50,23 @@ ingress:
     service: http://localhost:11434
 ```
 
+## HOME_GPU via Twin (preferred — no public :11434)
+
+Mac-agent proxies local Ollama behind the same bearer as CLI-Mac:
+
+| Path | Upstream |
+|------|----------|
+| `GET/POST /ollama/{path}` | `http://127.0.0.1:11434/{path}` |
+
+On GREEN `.env`:
+```bash
+HOME_GPU_URL=https://twin-agent.sovereignsanctuary.net/ollama
+HOME_GPU_MODEL=qwen2.5-coder:14b-instruct-q5_K_M
+# HOME_GPU_TOKEN defaults to MAC_AGENT_TOKEN when unset
+```
+
+Never publish Ollama as an unauthenticated Cloudflare hostname.
+
 ## Security Model
 
 - **127.0.0.1 binding**: Agent only listens on localhost. The Cloudflare tunnel connects to localhost:9900.

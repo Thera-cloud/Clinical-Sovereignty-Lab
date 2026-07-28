@@ -31,7 +31,7 @@ import aiofiles
 import psutil
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
@@ -43,6 +43,9 @@ MAC_AGENT_WORKSPACE = os.getenv(
     "MAC_AGENT_WORKSPACE",
     "/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2",
 )
+# Local Ollama for HOME_GPU_URL via Twin public hostname (auth-gated proxy).
+OLLAMA_UPSTREAM = (os.getenv("OLLAMA_UPSTREAM") or "http://127.0.0.1:11434").rstrip("/")
+OLLAMA_PROXY_TIMEOUT_S = int(os.getenv("OLLAMA_PROXY_TIMEOUT_S", "600"))
 
 DATA_DIR = os.path.join(MAC_AGENT_WORKSPACE, "data")
 AUDIT_LOG = os.path.join(DATA_DIR, "mac_agent_audit.jsonl")
@@ -340,7 +343,7 @@ async def _write_alive_file():
 app = FastAPI(title="nate-mac-agent", version="1.0.0")
 security = HTTPBearer()
 
-_ALLOWED_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost"}
+_ALLOWED_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 
 
 @app.middleware("http")
@@ -412,6 +415,72 @@ class LintRequest(BaseModel):
 
 # ── Endpoints ──
 
+async def _ollama_reachable() -> bool:
+    """Best-effort local Ollama liveness (no auth)."""
+    try:
+        import urllib.request
+
+        def _get():
+            req = urllib.request.Request(f"{OLLAMA_UPSTREAM}/api/tags", method="GET")
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                return 200 <= resp.status < 300
+
+        return await asyncio.to_thread(_get)
+    except Exception:
+        return False
+
+
+@app.api_route(
+    "/ollama/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    dependencies=[Depends(verify_token)],
+)
+async def ollama_proxy(path: str, request: Request):
+    """Auth-gated reverse proxy to local Ollama — HOME_GPU_URL for GREEN.
+
+    Set HOME_GPU_URL=https://twin-agent.sovereignsanctuary.net/ollama
+    and HOME_GPU_TOKEN (or MAC_AGENT_TOKEN) on the VPS. Never expose :11434
+    publicly; this keeps Ollama behind the same bearer as CLI-Mac.
+    """
+    import urllib.error
+    import urllib.request
+
+    target = f"{OLLAMA_UPSTREAM}/{path.lstrip('/')}"
+    if request.url.query:
+        target = f"{target}?{request.url.query}"
+    body = await request.body()
+    headers = {
+        "Content-Type": request.headers.get("content-type") or "application/json",
+        "Accept": request.headers.get("accept") or "application/json",
+    }
+
+    def _forward():
+        req = urllib.request.Request(
+            target,
+            data=body if body else None,
+            headers=headers,
+            method=request.method,
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=OLLAMA_PROXY_TIMEOUT_S) as resp:
+                return resp.status, dict(resp.headers.items()), resp.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, dict(exc.headers.items() if exc.headers else {}), exc.read()
+
+    try:
+        status, resp_headers, payload = await asyncio.to_thread(_forward)
+    except Exception as exc:
+        logger.warning("ollama_proxy upstream error path=%s: %s", path, exc)
+        raise HTTPException(502, f"ollama_upstream: {exc}") from exc
+
+    media = (
+        resp_headers.get("Content-Type")
+        or resp_headers.get("content-type")
+        or "application/json"
+    )
+    return Response(content=payload, status_code=status, media_type=media)
+
+
 @app.get("/health")
 async def health():
     """Intentionally unauthenticated — bound to 127.0.0.1, only reachable through
@@ -420,6 +489,7 @@ async def health():
     alive_age = None
     if os.path.exists(ALIVE_FILE):
         alive_age = round(time.time() - os.path.getmtime(ALIVE_FILE), 1)
+    ollama_ok = await _ollama_reachable()
     return {
         "status": "ok",
         "agent": "nate-mac-agent",
@@ -427,6 +497,8 @@ async def health():
         "workspace": MAC_AGENT_WORKSPACE,
         "tunnel_healthy": _check_system_cloudflared(),
         "alive_file_age_s": alive_age,
+        "ollama_upstream": OLLAMA_UPSTREAM,
+        "ollama_reachable": ollama_ok,
         "managed_processes": {n: _get_process_status(n) for n in MANAGED_PROCESSES},
     }
 
