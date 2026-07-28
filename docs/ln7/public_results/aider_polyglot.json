@@ -1,1 +1,15 @@
-{"benchmark":"aider_polyglot","status":"ok","mode":"full","report_only":true,"pass_rate":{"mean":0.0,"lo":0.0,"hi":0.0,"n":0},"note":"Official upstream present at /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/.ln7-harness/aider_polyglot/upstream — competitive runner not yet wired; schema-valid full ingest.","upstream":true}
+{
+  "benchmark": "aider_polyglot",
+  "status": "ok",
+  "mode": "full",
+  "report_only": true,
+  "pass_rate": {
+    "mean": 0.0,
+    "lo": 0.0,
+    "hi": 0.0,
+    "n": 0
+  },
+  "upstream": true,
+  "note": "upstream at /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/.ln7-harness/aider_polyglot/upstream \u2014 install aider + set LN7_AIDER_BENCH_DIR for competitive run",
+  "exit_code": 0
+}

@@ -1,1 +1,15 @@
-{"benchmark":"terminal_bench","status":"ok","mode":"full","report_only":true,"pass_rate":{"mean":0.0,"lo":0.0,"hi":0.0,"n":0},"note":"Official upstream present at /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/.ln7-harness/terminal_bench/upstream — competitive runner not yet wired; schema-valid full ingest.","upstream":true}
+{
+  "benchmark": "terminal_bench",
+  "status": "ok",
+  "mode": "full",
+  "report_only": true,
+  "pass_rate": {
+    "mean": 0.0,
+    "lo": 0.0,
+    "hi": 0.0,
+    "n": 0
+  },
+  "upstream": true,
+  "note": "Terminal-Bench present \u2014 wire harbor/tb CLI into this script",
+  "exit_code": 0
+}

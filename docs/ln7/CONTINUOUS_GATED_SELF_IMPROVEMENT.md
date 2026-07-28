@@ -47,3 +47,13 @@ python backend/scripts/ln7_micro_qlora_worker.py --job-id N --train-jsonl /tmp/j
 ## Gap vs AGI
 
 This is continuous **coding** self-improvement. Cross-domain world models, long-horizon agency, and reliable transfer are out of LN7 scope.
+
+## Overnight proof (2026-07-28)
+
+| Gate | Evidence |
+|---|---|
+| ORANGE SSH | GREEN `id_ed25519_orange` → `10.13.13.5` OK |
+| CUDA train | DO `gpu-4000adax1-20gb` tor1; method `cuda_qlora_peft`; loss 4.2→2.86 / 40 steps |
+| Revision | `LN7-2026-07-28T052742Z` shadow (CEO activate still required) |
+| Continuous | GREEN agent on; `ENABLE_LN7_AUTO_PROMOTE=false` |
+| Cost hygiene | Ephemeral droplet destroyed via `scripts/ln7_destroy_cuda_droplet.sh` |

@@ -80,14 +80,15 @@ bash scripts/ln7_install_orange_ssh.sh 'ssh-ed25519 AAAA... root@green'
 
 Then from GREEN: `ssh root@10.13.13.5 true`.
 
-## Ops status (2026-07-28 proceed 1–4)
+## Ops status (2026-07-28 overnight 1–5)
 
 | Step | Result |
 |---|---|
-| 1 Train data | Private bakeoff **max** on `LN7-baseline`: **3/3** (incl. `asyncpg_cast`). Export **7** JSONL rows → `data/ln7_train.jsonl` |
-| 2 Real QLoRA | **Blocked on this BLUE** (Intel x86 — no mlx wheels). Dry-run stub only (`LN7_QLORA_ALLOW_X86_DRY_RUN=1`). Need Apple Silicon or CUDA GPU rental |
-| 3 Shadow scorecard | `LN7-2026-07-28T040428Z` (shadow, not activated): private max **2/3** (asyncpg+env pass; catch_all fail). Active baseline remains 3/3 |
-| 4 Public full | BLUE root `.ln7-harness/` via `ln7_setup_blue_harness.sh`; `run.sh` writes `full_stub` JSON under `docs/ln7/public_results/`. Competitive scores need `upstream/run_official.sh`. ORANGE SSH from GREEN still missing pubkey |
+| 1 ORANGE SSH | **OK** — passwordless `/root/.ssh/id_ed25519_orange` on GREEN; pubkey on ORANGE. `ssh orange` / `root@10.13.13.5` works. (Old `id_ed25519` is passphrase-locked.) |
+| 2 Real QLoRA | **OK** — DO `gpu-4000adax1-20gb` (tor1) trained `cuda_qlora_peft` on 7 JSONL rows → adapter + `LN7-2026-07-28T052742Z` (shadow). Droplet destroyed after train (`scripts/ln7_destroy_cuda_droplet.sh`) |
+| 3 Continuous | **ON** GREEN: `ENABLE_LN7_CONTINUOUS=true`, `ENABLE_LN7_AUTO_PROMOTE=false`. Agent started; job `#1` batch_n=8 → trained |
+| 4 E2E | Enqueue → CUDA train → `revision/register` → canary start. CEO activate still required |
+| 5 Public benches | `.ln7-harness/*/upstream/run_official.sh` wired from examples; `mode=full` results in `docs/ln7/public_results/`. Competitive scores still need preds/`swebench`/aider/tb CLIs |
 
 ## Train host constraints (2026-07-28)
 

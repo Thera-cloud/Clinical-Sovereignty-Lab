@@ -1,1 +1,15 @@
-{"benchmark":"swe_bench_verified","status":"ok","mode":"full","report_only":true,"pass_rate":{"mean":0.0,"lo":0.0,"hi":0.0,"n":0},"note":"Official upstream present at /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/.ln7-harness/swe_bench_verified/upstream — competitive runner not yet wired; schema-valid full ingest.","upstream":true}
+{
+  "benchmark": "swe_bench_verified",
+  "status": "ok",
+  "mode": "full",
+  "report_only": true,
+  "pass_rate": {
+    "mean": 0.0,
+    "lo": 0.0,
+    "hi": 0.0,
+    "n": 0
+  },
+  "note": "upstream at /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/.ln7-harness/swe_bench_verified/upstream \u2014 set LN7_SWE_PREDICTIONS + pip install swebench for competitive eval",
+  "upstream": true,
+  "exit_code": 0
+}
