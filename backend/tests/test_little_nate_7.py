@@ -172,3 +172,10 @@ def test_public_harness_score_helper():
     assert _pub._score_smoke_task("swe_bench_verified", task, "def add(a, b):\n    return a + b\n")
     assert not _pub._score_smoke_task("swe_bench_verified", task, "")
     assert _pub._score_smoke_task("terminal_bench", {"oracle": "hello"}, "say hello world")
+
+
+def test_unified_diff_gate():
+    assert _harness.looks_like_unified_diff(
+        "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-a\n+b\n"
+    )
+    assert not _harness.looks_like_unified_diff("I'm sorry, I cannot access the codebase.")

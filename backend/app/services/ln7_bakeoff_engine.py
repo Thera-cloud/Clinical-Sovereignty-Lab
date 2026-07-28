@@ -134,6 +134,9 @@ async def run_private_pack_bakeoff(
     except Exception as exc:
         return {"ok": False, "error": f"import:{exc}"}
 
+    from app.services.ln_sandbox_engineering_ci import load_pack
+    from app.websocket.ln7_harness import build_pack_prompt
+
     packs = pack_names or list_pack_names()
     if not packs:
         return {"ok": False, "error": "no_packs"}
@@ -141,28 +144,39 @@ async def run_private_pack_bakeoff(
     passes: List[bool] = []
     rows: List[Dict[str, Any]] = []
     for pack in packs:
-        prompt = (
-            f"Fix the failing tests in pack {pack}. "
-            "Return a unified diff that makes pytest pass."
-        )
+        # QUANTUM-CRYSTAL-ARCH — use pack task prompt + target file bodies (not a vague name-only hint)
+        prompt = build_pack_prompt(pack)
+        if not prompt:
+            task = load_pack(pack) or {}
+            prompt = task.get("prompt") or (
+                f"Fix the failing tests in pack {pack}. "
+                "Return a unified diff that makes pytest pass."
+            )
         result = await run_task(prompt, pack_name=pack, mode=mode)
         passed = bool(result.get("passed"))
         passes.append(passed)
         th = task_hash(f"pack:{pack}")
+        diff_text = result.get("diff") or ""
         oid = await record_outcome(db_pool, {
             "task_id": None,
             "generator": "ln7",
             "revision_id": revision_id,
             "harness_mode": mode,
-            "patch_hash": task_hash(result.get("diff") or ""),
+            "patch_hash": task_hash(diff_text),
             "passed": passed,
-            "diff_lines": result.get("diff_lines"),
+            "diff_lines": result.get("diff_lines") if result.get("diff_lines") is not None
+            else len(diff_text.splitlines()),
             "tokens": result.get("tokens"),
             "latency_ms": result.get("latency_ms"),
             "cost_usd": 0.0,
             "recall_at_k": result.get("recall_at_k"),
             "exec_node": "green",
-            "metrics_json": {"pack": pack, "task_hash": th},
+            "metrics_json": {
+                "pack": pack,
+                "task_hash": th,
+                "score": result.get("score"),
+                "error": result.get("error") or (result.get("log") or "")[:200],
+            },
         })
         rows.append({"pack": pack, "passed": passed, "outcome_id": oid, **result})
 

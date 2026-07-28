@@ -92,7 +92,11 @@ ssh -J root@68.183.168.75 root@10.13.13.5 \
 | Flag | Meaning |
 |---|---|
 | `LN7_SHADOW_SPEND=true` | When a revision has `status=shadow`, live LN7 answers also fire a second **sovereign** generate (fast tier) and ledger it as `ln7_shadow` |
-| `HOME_GPU_URL` | BLUE Ollama (Twin Engine). Coding tier tries sovereign then home_gpu |
+| `HOME_GPU_URL` | BLUE Ollama OpenAI-compat base (`…/v1/chat/completions`). Coding tier: sovereign → home_gpu |
+
+**HOME_GPU status (2026-07-28):** Mac Ollama is up locally (`127.0.0.1:11434`, coder 7b/14b). GREEN cannot use loopback. `twin-agent.sovereignsanctuary.net` is Access-gated (403). Set `HOME_GPU_URL` only when a Twin/VPC hostname reaches Mac Ollama from GREEN without 403 (Cloudflare Access service token or private tunnel hostname). Until then `home_gpu_configured=false` is expected.
+
+Bakeoff prompts must use pack `task.json` + target file bodies (`build_pack_prompt`). Vague “fix pack X” prompts cause refusals.
 
 ```bash
 POST /api/ln7/revision/shadow  {"revision_id":"LN7-<ts>"}

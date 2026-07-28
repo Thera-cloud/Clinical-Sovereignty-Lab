@@ -341,9 +341,19 @@ class NateInferenceRouter:
 
     async def _call_sovereign(self, messages, temperature, max_tokens, model: str = "") -> Dict:
         selected_model = model or _SOVEREIGN_MODEL_FAST
-        timeout_secs = 30 if selected_model in (_SOVEREIGN_MODEL_FAST, _LN7_CODE_MODEL_FAST) else 60
-        if selected_model in (_SOVEREIGN_MODEL_DEEP, _LN7_CODE_MODEL_DEEP):
+        # QUANTUM-CRYSTAL-ARCH — LN7 coder models need longer than clinical 8B
+        if selected_model == _LN7_CODE_MODEL_DEEP:
+            timeout_secs = int(os.getenv("LN7_SOVEREIGN_TIMEOUT_DEEP_S", "300") or "300")
+        elif selected_model == _LN7_CODE_MODEL_MID:
+            timeout_secs = int(os.getenv("LN7_SOVEREIGN_TIMEOUT_MID_S", "180") or "180")
+        elif selected_model == _LN7_CODE_MODEL_FAST:
+            timeout_secs = int(os.getenv("LN7_SOVEREIGN_TIMEOUT_FAST_S", "120") or "120")
+        elif selected_model in (_SOVEREIGN_MODEL_DEEP,):
             timeout_secs = 120
+        elif selected_model in (_SOVEREIGN_MODEL_FAST,):
+            timeout_secs = 30
+        else:
+            timeout_secs = 60
 
         url = f"{_SOVEREIGN_URL}/v1/chat/completions"
         async with self._SOVEREIGN_SEMAPHORE, aiohttp.ClientSession() as sess:

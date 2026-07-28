@@ -42,7 +42,7 @@ def max_repair_rounds() -> int:
 
 
 def candidate_timeout_s() -> float:
-    return float(os.getenv("LN7_CANDIDATE_TIMEOUT_S", "90") or "90")
+    return float(os.getenv("LN7_CANDIDATE_TIMEOUT_S", "180") or "180")
 
 
 def max_attempts() -> int:
@@ -249,6 +249,8 @@ async def propose_candidates(
                     "ok": False,
                     "latency_ms": int((time.time() - t0) * 1000),
                 }
+            # QUANTUM-CRYSTAL-ARCH — refusals/prose are not candidates
+            ok = bool(text.strip()) and looks_like_unified_diff(text)
             return {
                 "index": idx,
                 "temperature": temp,
@@ -258,7 +260,8 @@ async def propose_candidates(
                 "model": (result or {}).get("model"),
                 "tokens": (result or {}).get("tokens_used") or 0,
                 "latency_ms": int((time.time() - t0) * 1000),
-                "ok": bool(text.strip()),
+                "ok": ok,
+                "error": None if ok else ("no_unified_diff" if text.strip() else "empty"),
             }
         except Exception as exc:
             return {
@@ -271,7 +274,16 @@ async def propose_candidates(
                 "latency_ms": int((time.time() - t0) * 1000),
             }
 
-    results = await asyncio.gather(*[_one(temps[i], i) for i in range(n)])
+    # Serialize under ORANGE load (parallel N×timeouts starve Ollama)
+    sequential = os.getenv("LN7_PROPOSE_SEQUENTIAL", "true").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    if sequential:
+        results = []
+        for i in range(n):
+            results.append(await _one(temps[i], i))
+    else:
+        results = await asyncio.gather(*[_one(temps[i], i) for i in range(n)])
     seen = set()
     deduped: List[Dict[str, Any]] = []
     for r in results:
@@ -298,6 +310,43 @@ def extract_diff(text: str) -> str:
     except Exception:
         m = re.search(r"```(?:diff)?\n([\s\S]*?)```", text)
         return (m.group(1) if m else text).strip()
+
+
+def looks_like_unified_diff(text: str) -> bool:
+    d = extract_diff(text or "")
+    return bool(d) and ("---" in d) and ("@@" in d)
+
+
+def build_pack_prompt(pack_name: str) -> str:
+    """Pack task prompt + target file bodies (matches engineering CI cycle)."""
+    try:
+        from app.services.ln_sandbox_engineering_ci import load_pack, materialize_pack
+    except Exception:
+        return ""
+    task = load_pack(pack_name)
+    if not task:
+        return ""
+    workdir, loaded, _note = materialize_pack(pack_name)
+    try:
+        parts = [(loaded or task).get("prompt") or ""]
+        parts.append(
+            "\nReturn ONLY a unified diff that patches the listed files. "
+            "No prose, no markdown fences."
+        )
+        targets = (loaded or task).get("target_files") or []
+        if workdir:
+            for rel in targets:
+                fp = Path(workdir) / rel
+                if fp.is_file():
+                    parts.append(f"\n--- FILE {rel} ---\n{fp.read_text(encoding='utf-8')}")
+        return "\n".join(p for p in parts if p).strip()
+    finally:
+        if workdir:
+            try:
+                import shutil
+                shutil.rmtree(workdir, ignore_errors=True)
+            except Exception:
+                pass
 
 
 async def run_sandbox_candidate(
@@ -535,6 +584,12 @@ async def run_task(
             pack = None
     if not pack:
         return {"ok": False, "error": "no_pack", "generator": "ln7"}
+
+    # Enrich vague prompts with pack task + file bodies
+    if pack and "--- FILE " not in (prompt or ""):
+        enriched = build_pack_prompt(pack)
+        if enriched:
+            prompt = enriched
 
     candidates = await propose_candidates(prompt, system=sys, mode=mode)
     ranked: List[Dict[str, Any]] = []
