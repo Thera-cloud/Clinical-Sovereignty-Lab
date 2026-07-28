@@ -52,35 +52,61 @@ async def assert_train_eligible(db_pool, task_hash_val: str) -> bool:
 async def record_outcome(db_pool, row: Dict[str, Any]) -> Optional[int]:
     if not db_pool:
         return None
+    patch_body = row.get("patch_text") or row.get("diff") or None
+    if isinstance(patch_body, str) and len(patch_body) > 120_000:
+        patch_body = patch_body[:120_000]
+    args_common = (
+        row.get("task_id"),
+        row.get("generator") or "ln7",
+        row.get("revision_id"),
+        row.get("harness_mode"),
+        row.get("patch_hash"),
+        bool(row.get("passed")),
+        row.get("tests_passed"),
+        row.get("diff_lines"),
+        row.get("tokens"),
+        row.get("latency_ms"),
+        row.get("cost_usd"),
+        row.get("recall_at_k"),
+        row.get("exec_node") or "green",
+        __import__("json").dumps(row.get("metrics_json") or {}),
+    )
     try:
         async with db_pool.acquire() as conn:
-            oid = await conn.fetchval(
-                """
-                INSERT INTO ln7_coding_outcomes (
-                    task_id, generator, revision_id, harness_mode, patch_hash,
-                    passed, tests_passed, diff_lines, tokens, latency_ms,
-                    cost_usd, recall_at_k, exec_node, metrics_json
-                ) VALUES (
-                    $1, $2, $3, $4, $5,
-                    $6, $7, $8, $9, $10,
-                    $11, $12, $13, $14::jsonb
-                ) RETURNING id
-                """,
-                row.get("task_id"),
-                row.get("generator") or "ln7",
-                row.get("revision_id"),
-                row.get("harness_mode"),
-                row.get("patch_hash"),
-                bool(row.get("passed")),
-                row.get("tests_passed"),
-                row.get("diff_lines"),
-                row.get("tokens"),
-                row.get("latency_ms"),
-                row.get("cost_usd"),
-                row.get("recall_at_k"),
-                row.get("exec_node") or "green",
-                __import__("json").dumps(row.get("metrics_json") or {}),
-            )
+            try:
+                # QUANTUM-CRYSTAL-ARCH — clean train export needs real diffs (migration 294)
+                oid = await conn.fetchval(
+                    """
+                    INSERT INTO ln7_coding_outcomes (
+                        task_id, generator, revision_id, harness_mode, patch_hash,
+                        passed, tests_passed, diff_lines, tokens, latency_ms,
+                        cost_usd, recall_at_k, exec_node, metrics_json, patch_text
+                    ) VALUES (
+                        $1, $2, $3, $4, $5,
+                        $6, $7, $8, $9, $10,
+                        $11, $12, $13, $14::jsonb, $15
+                    ) RETURNING id
+                    """,
+                    *args_common,
+                    patch_body,
+                )
+            except Exception as col_exc:
+                if "patch_text" not in str(col_exc):
+                    raise
+                oid = await conn.fetchval(
+                    """
+                    INSERT INTO ln7_coding_outcomes (
+                        task_id, generator, revision_id, harness_mode, patch_hash,
+                        passed, tests_passed, diff_lines, tokens, latency_ms,
+                        cost_usd, recall_at_k, exec_node, metrics_json
+                    ) VALUES (
+                        $1, $2, $3, $4, $5,
+                        $6, $7, $8, $9, $10,
+                        $11, $12, $13, $14::jsonb
+                    ) RETURNING id
+                    """,
+                    *args_common,
+                )
         oid_i = int(oid) if oid is not None else None
         # Continuous gated self-improvement: enqueue green outcomes (train split only)
         if oid_i is not None and bool(row.get("passed")):

@@ -19,6 +19,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 ADAPTER_DIR = Path(os.getenv("LN7_ADAPTER_DIR", "/opt/ln7/adapters/LN7-2026-07-28T054420Z"))
+# Must match ln7_qlora_train.py / LN7_QLORA_HF_BASE used on TOR drain
 HF_BASE = os.getenv("LN7_QLORA_HF_BASE", "Qwen/Qwen2.5-Coder-1.5B-Instruct")
 MODEL_ID = os.getenv("LN7_PEFT_MODEL_ID", "ln7-peft")
 HOST = os.getenv("LN7_PEFT_HOST", "10.13.13.5")

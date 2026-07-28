@@ -178,6 +178,7 @@ async def run_private_pack_bakeoff(
                     "tokens": 0,
                     "latency_ms": 0,
                     "cost_usd": 0.0,
+                    "patch_text": gdiff,
                     "metrics_json": {"pack": pack, "source": "golden.patch"},
                 })
             finally:
@@ -215,6 +216,7 @@ async def run_private_pack_bakeoff(
             "cost_usd": 0.0,
             "recall_at_k": result.get("recall_at_k"),
             "exec_node": "green",
+            "patch_text": diff_text or None,
             "metrics_json": {
                 "pack": pack,
                 "task_hash": th,

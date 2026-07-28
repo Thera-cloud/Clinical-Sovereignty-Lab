@@ -28,6 +28,14 @@ def _utc_rid() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
 
 
+# Must match ORANGE ln7_peft_server.py default (serve :11435)
+DEFAULT_HF_BASE = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+ALL_LINEAR_MODULES = [
+    "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj",
+]
+DEFAULT_MODULES = ["q_proj", "v_proj"]
+
+
 def _load_jsonl(path: Path) -> list:
     rows = []
     with path.open(encoding="utf-8") as f:
@@ -38,7 +46,61 @@ def _load_jsonl(path: Path) -> list:
     return rows
 
 
-def train_cuda(train_path: Path, out_dir: Path, base: str, iters: int) -> dict:
+def _assistant_text(row: dict) -> str:
+    msgs = row.get("messages") or []
+    for m in msgs:
+        if (m.get("role") or "") == "assistant":
+            return str(m.get("content") or "")
+    return str(row.get("assistant") or "")
+
+
+def filter_clean_rows(rows: list) -> list:
+    """Drop stubs / dry-run noise; require real assistant patch body."""
+    import re
+    stub = re.compile(r"^\[patch_hash=", re.I)
+    diff_mark = re.compile(r"(?m)^(diff --git |--- |\+\+\+ |@@ )")
+    clean = []
+    for r in rows:
+        if r.get("method") == "dry_run_stub" or r.get("source") == "dry_run_stub":
+            continue
+        asst = _assistant_text(r)
+        if not asst or stub.match(asst.strip()):
+            continue
+        if "dry_run_stub" in asst:
+            continue
+        if not (diff_mark.search(asst) or (asst.count("\n+") + asst.count("\n-") >= 2)):
+            continue
+        clean.append(r)
+    return clean
+
+
+def _lora_recipe(name: str) -> dict:
+    """default = q/v r=16 α=32; all_linear = all Qwen proj r=32 α=64."""
+    n = (name or "default").strip().lower()
+    if n in ("all", "all_linear", "all-linear", "full"):
+        return {
+            "name": "all_linear",
+            "r": int(os.getenv("LN7_LORA_R", "32") or "32"),
+            "lora_alpha": int(os.getenv("LN7_LORA_ALPHA", "64") or "64"),
+            "target_modules": list(ALL_LINEAR_MODULES),
+        }
+    return {
+        "name": "default",
+        "r": int(os.getenv("LN7_LORA_R", "16") or "16"),
+        "lora_alpha": int(os.getenv("LN7_LORA_ALPHA", "32") or "32"),
+        "target_modules": list(DEFAULT_MODULES),
+    }
+
+
+def train_cuda(
+    train_path: Path,
+    out_dir: Path,
+    base: str,
+    iters: int,
+    *,
+    recipe: str = "default",
+    max_seq_len: int = 2048,
+) -> dict:
     """CUDA QLoRA via peft/transformers when torch.cuda is available (GPU rental)."""
     try:
         import torch  # noqa: F401
@@ -57,7 +119,13 @@ def train_cuda(train_path: Path, out_dir: Path, base: str, iters: int) -> dict:
         return {"ok": False, "error": "cuda_not_available"}
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    model_id = os.getenv("LN7_QLORA_HF_BASE", "Qwen/Qwen2.5-Coder-7B-Instruct")
+    # Prefer explicit HF id; --base Ollama tags are not HF ids
+    model_id = os.getenv("LN7_QLORA_HF_BASE") or (
+        base if base.startswith("Qwen/") or "/" in base else DEFAULT_HF_BASE
+    )
+    if not model_id.startswith("Qwen/") and "Instruct" not in model_id:
+        model_id = DEFAULT_HF_BASE
+    cfg = _lora_recipe(recipe)
     bnb = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
@@ -72,7 +140,14 @@ def train_cuda(train_path: Path, out_dir: Path, base: str, iters: int) -> dict:
     model = prepare_model_for_kbit_training(model)
     model = get_peft_model(
         model,
-        LoraConfig(r=16, lora_alpha=32, lora_dropout=0.05, bias="none", task_type="CAUSAL_LM"),
+        LoraConfig(
+            r=cfg["r"],
+            lora_alpha=cfg["lora_alpha"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+            target_modules=cfg["target_modules"],
+        ),
     )
 
     def _fmt(ex):
@@ -84,7 +159,10 @@ def train_cuda(train_path: Path, out_dir: Path, base: str, iters: int) -> dict:
 
     ds = load_dataset("json", data_files=str(train_path), split="train")
     ds = ds.map(_fmt)
-    ds = ds.map(lambda b: tok(b["text"], truncation=True, max_length=2048), batched=True)
+    ds = ds.map(
+        lambda b: tok(b["text"], truncation=True, max_length=max_seq_len),
+        batched=True,
+    )
 
     args = TrainingArguments(
         output_dir=str(out_dir),
@@ -108,7 +186,14 @@ def train_cuda(train_path: Path, out_dir: Path, base: str, iters: int) -> dict:
     tok.save_pretrained(str(out_dir))
     # Never overwrite PEFT adapter_config.json — peft_type required for load
     (out_dir / "train_meta.json").write_text(
-        json.dumps({"base": model_id, "method": "cuda_qlora_peft", "train_path": str(train_path)}, indent=2),
+        json.dumps({
+            "base": model_id,
+            "method": "cuda_qlora_peft",
+            "train_path": str(train_path),
+            "lora_recipe": cfg,
+            "iters": iters,
+            "max_seq_len": max_seq_len,
+        }, indent=2),
         encoding="utf-8",
     )
     return {
@@ -117,6 +202,10 @@ def train_cuda(train_path: Path, out_dir: Path, base: str, iters: int) -> dict:
         "adapter_dir": str(out_dir),
         "hf_base": model_id,
         "base_checkpoint": model_id,
+        "lora_recipe": cfg["name"],
+        "lora_r": cfg["r"],
+        "lora_alpha": cfg["lora_alpha"],
+        "target_modules": cfg["target_modules"],
     }
 
 
@@ -179,10 +268,21 @@ def main() -> int:
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--train-jsonl", required=True)
-    ap.add_argument("--base", default=os.getenv("LN7_CODE_MODEL_FAST", "qwen2.5-coder:7b-instruct"))
+    ap.add_argument(
+        "--base",
+        default=os.getenv("LN7_QLORA_HF_BASE", DEFAULT_HF_BASE),
+        help="HF base id — must match LN7 PEFT serve (:11435)",
+    )
     ap.add_argument("--out-dir", default="")
     ap.add_argument("--iters", type=int, default=200)
     ap.add_argument("--quantization", default="q5_K_M")
+    ap.add_argument(
+        "--lora-recipe",
+        default=os.getenv("LN7_LORA_RECIPE", "default"),
+        choices=("default", "all_linear"),
+        help="default=q/v r=16; all_linear=all Qwen proj r=32 α=64",
+    )
+    ap.add_argument("--max-seq-len", type=int, default=2048)
     ap.add_argument(
         "--backend",
         default=os.getenv("LN7_QLORA_BACKEND", "auto"),
@@ -195,10 +295,36 @@ def main() -> int:
         print(json.dumps({"ok": False, "error": "missing_train_jsonl"}))
         return 2
 
-    rows = _load_jsonl(train_path)
+    raw_rows = _load_jsonl(train_path)
+    rows = filter_clean_rows(raw_rows)
+    min_rows = int(os.getenv("LN7_QLORA_MIN_ROWS", "50") or "50")
+    force_thin = os.getenv("LN7_QLORA_FORCE_THIN", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
     if not rows:
-        print(json.dumps({"ok": False, "error": "empty_train_set"}))
+        print(json.dumps({
+            "ok": False,
+            "error": "empty_clean_train_set",
+            "raw_n": len(raw_rows),
+            "hint": "Re-export with ln7_export_train_jsonl.py (real diffs, no hash stubs)",
+        }))
         return 2
+    if len(rows) < min_rows and not force_thin:
+        print(json.dumps({
+            "ok": False,
+            "error": "thin_train_set",
+            "clean_n": len(rows),
+            "min_rows": min_rows,
+            "hint": "Collect ≥200–500 clean rows before all_linear/iters raise; "
+                    "or LN7_QLORA_FORCE_THIN=1 for explicit thin runs",
+        }))
+        return 5
+    # Rewrite filtered JSONL so datasets does not re-ingest stubs
+    clean_path = train_path.parent / f"{train_path.stem}.clean.jsonl"
+    with clean_path.open("w", encoding="utf-8") as cf:
+        for r in rows:
+            cf.write(json.dumps(r, default=str) + "\n")
+    train_path = clean_path
 
     rid = _utc_rid()
     out_dir = Path(args.out_dir or f"/tmp/ln7_adapters/LN7-{rid}")
@@ -219,7 +345,10 @@ def main() -> int:
             backend = "mlx" if platform.machine().lower() in ("arm64", "aarch64") else "dry_run"
 
     if backend == "cuda":
-        result = train_cuda(train_path, out_dir, args.base, args.iters)
+        result = train_cuda(
+            train_path, out_dir, args.base, args.iters,
+            recipe=args.lora_recipe, max_seq_len=args.max_seq_len,
+        )
     elif backend == "dry_run":
         if os.getenv("LN7_QLORA_ALLOW_X86_DRY_RUN", "").strip().lower() not in (
             "1", "true", "yes", "on",
@@ -272,8 +401,11 @@ def main() -> int:
             "notes": f"QLoRA from {len(rows)} samples; method={result.get('method')}; adapter={out_dir}",
             "harness_config": {
                 "train_n": len(rows),
+                "raw_n": len(raw_rows),
                 "method": result.get("method"),
                 "hf_base": result.get("hf_base"),
+                "lora_recipe": result.get("lora_recipe") or args.lora_recipe,
+                "lora_r": result.get("lora_r"),
                 "serve_note": "PEFT adapter not auto-merged into Ollama; durable store only until merge path ships",
             },
         },

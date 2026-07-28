@@ -11,7 +11,38 @@ TTL="${LN7_GPU_TTL_S:-3600}"
 ITERS="${LN7_QLORA_ITERS:-40}"
 STORE="${LN7_ADAPTER_STORE:-/opt/ln7/adapters}"
 GREEN="${LN7_GREEN_HOST:-root@68.183.168.75}"
+# Must match ORANGE ln7_peft_server.py / :11435
 HF_BASE="${LN7_QLORA_HF_BASE:-Qwen/Qwen2.5-Coder-1.5B-Instruct}"
+LORA_RECIPE="${LN7_LORA_RECIPE:-default}"
+MIN_ROWS="${LN7_QLORA_MIN_ROWS:-50}"
+
+# Preflight: refuse thin / stub JSONL before burning GPU $
+CLEAN_N="$(python3 - <<PY
+import json
+from pathlib import Path
+import re
+stub=re.compile(r'^\[patch_hash=', re.I)
+diff=re.compile(r'(?m)^(diff --git |--- |\+\+\+ |@@ )')
+n=0
+p=Path("$REPO/data/ln7_train.jsonl")
+if p.is_file():
+  for line in p.open():
+    line=line.strip()
+    if not line: continue
+    r=json.loads(line)
+    asst=""
+    for m in r.get("messages") or []:
+      if m.get("role")=="assistant": asst=m.get("content") or ""
+    if asst and not stub.match(asst.strip()) and (diff.search(asst) or asst.count(chr(10)+'+')+asst.count(chr(10)+'-')>=2):
+      n+=1
+print(n)
+PY
+)"
+echo "[drain] clean_rows=$CLEAN_N min=$MIN_ROWS recipe=$LORA_RECIPE hf=$HF_BASE"
+if [[ "${CLEAN_N:-0}" -lt "$MIN_ROWS" && "${LN7_QLORA_FORCE_THIN:-}" != "1" ]]; then
+  echo "[drain] refuse thin train set (set LN7_QLORA_FORCE_THIN=1 to override)"
+  exit 5
+fi
 
 echo "[drain] provision $SIZE @ $REGION"
 CREATE_OUT="$(bash "$REPO/scripts/ln7_provision_cuda_droplet.sh" "$SIZE" "$REGION")"
@@ -45,8 +76,10 @@ pip install -q --upgrade pip
 pip install -q torch --index-url https://download.pytorch.org/whl/cu124
 pip install -q peft transformers bitsandbytes datasets accelerate
 export HF_HOME=/opt/ln7/hf_cache LN7_QLORA_HF_BASE='$HF_BASE'
+export LN7_QLORA_MIN_ROWS='$MIN_ROWS' LN7_QLORA_FORCE_THIN='${LN7_QLORA_FORCE_THIN:-}'
 python backend/scripts/ln7_qlora_train.py \
   --train-jsonl data/ln7_train.jsonl --backend cuda --iters $ITERS \
+  --lora-recipe $LORA_RECIPE --base '$HF_BASE' \
   --out-dir /opt/ln7/adapters/LN7-${RID_TS}
 EOF
 

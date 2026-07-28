@@ -49,17 +49,20 @@ Set `LN7_KILL_SWITCH=true` and recreate bridge/backend containers. Harness retur
 
 ## Continuous gated self-improvement (2026-07-28)
 
-See [CONTINUOUS_GATED_SELF_IMPROVEMENT.md](./CONTINUOUS_GATED_SELF_IMPROVEMENT.md).
+See [CONTINUOUS_GATED_SELF_IMPROVEMENT.md](./CONTINUOUS_GATED_SELF_IMPROVEMENT.md) and **[OPTIMAL_TRAIN_LOOP.md](./OPTIMAL_TRAIN_LOOP.md)** (clean JSONL → A/B QLoRA → bakeoff → CEO).
 
 | Piece | Status |
 |---|---|
 | Train queue + canary tables | migration `293` |
+| Outcome `patch_text` | migration `294` — required for clean export |
 | GREEN agent | `Ln7ContinuousAgent` behind `ENABLE_LN7_CONTINUOUS` |
-| CUDA QLoRA | `ln7_qlora_train.py --backend cuda` (needs GPU host) |
+| CUDA QLoRA | `ln7_qlora_train.py --backend cuda --lora-recipe {default\|all_linear}` |
+| Clean export | `ln7_export_train_jsonl.py` (passed + pairs + goldens; no hash stubs) |
 | Public upstream clones | BLUE `.ln7-harness/<bench>/upstream/` (gitignored) |
 | ORANGE SSH from GREEN | **OK** — `id_ed25519_orange` (passphrase-locked default key is not used) |
 | Durable adapters | ORANGE `/opt/ln7/adapters/` + BLUE `.ln7-adapters/` (gitignored) |
-| One-shot GPU drain | `bash scripts/ln7_continuous_drain.sh` (provision→train→persist→register→destroy) |
+| One-shot GPU drain | `bash scripts/ln7_continuous_drain.sh` (refuses thin JSONL unless `LN7_QLORA_FORCE_THIN=1`) |
+| A/B drain | `bash scripts/ln7_ab_qlora_drain.sh` — default vs all_linear on identical JSONL |
 
 ### (a) Real QLoRA
 
