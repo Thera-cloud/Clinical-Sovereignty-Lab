@@ -15,6 +15,7 @@ PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 STATE_DIR="$HOME/.local/state/ln7_gpu_watch"
 INTERVAL="${LN7_GPU_WATCH_INTERVAL_S:-900}"
 UID_NUM="$(id -u)"
+MIN_ROWS="${LN7_QLORA_MIN_ROWS:-50}"
 
 uninstall() {
   launchctl bootout "gui/${UID_NUM}/${LABEL}" 2>/dev/null || true
@@ -31,15 +32,18 @@ fi
 if [[ "${1:-}" == "--reset" ]]; then
   rm -f "$STATE_DIR/AVAILABLE" "$STATE_DIR/AB_OK" "$STATE_DIR/AB_FAIL" \
         "$STATE_DIR/DRAINING" "$STATE_DIR/probe.env" "$STATE_DIR/ab_drain.pid" \
-        "$STATE_DIR/run_ab_detached.sh"
+        "$STATE_DIR/run_ab_detached.sh" "$STATE_DIR/droplet_handoff.env" \
+        "$STATE_DIR/AB_COMPARE" "$STATE_DIR/rev_a" "$STATE_DIR/rev_b" \
+        "$STATE_DIR/doctl_auth_fails" "$STATE_DIR/doctl_auth_backoff_until" \
+        "$STATE_DIR/WORKER_PAUSED" "$STATE_DIR/ttl_heartbeat"
   echo "[gpu-watch] cleared $STATE_DIR"
 fi
 
 mkdir -p "$DEST/scripts" "$DEST/data" "$DEST/backend/scripts" \
   "$HOME/Library/LaunchAgents" "$STATE_DIR" "$HOME/Library/Logs"
 
-for f in ln7_gpu_capacity_watch.sh ln7_ab_qlora_drain.sh ln7_continuous_drain.sh \
-         ln7_provision_cuda_droplet.sh ln7_destroy_cuda_droplet.sh; do
+for f in ln7_gpu_capacity_watch.sh ln7_ab_qlora_drain.sh ln7_ab_bakeoff_compare.sh \
+         ln7_continuous_drain.sh ln7_provision_cuda_droplet.sh ln7_destroy_cuda_droplet.sh; do
   if [[ -f "$SRC_REPO/scripts/$f" ]]; then
     cp "$SRC_REPO/scripts/$f" "$DEST/scripts/$f"
     chmod +x "$DEST/scripts/$f"
@@ -53,7 +57,44 @@ if [[ -f "$SRC_REPO/data/ln7_train.jsonl" ]]; then
   cp "$SRC_REPO/data/ln7_train.jsonl" "$DEST/data/ln7_train.jsonl"
 fi
 
+CLEAN_N="$(python3 - <<PY
+import json,re
+from pathlib import Path
+stub=re.compile(r'^\[patch_hash=', re.I)
+diff=re.compile(r'(?m)^(diff --git |--- |\+\+\+ |@@ )')
+n=0
+p=Path("$SRC_REPO/data/ln7_train.jsonl")
+if p.is_file():
+  for line in p.open():
+    line=line.strip()
+    if not line: continue
+    r=json.loads(line)
+    asst=""
+    for m in r.get("messages") or []:
+      if m.get("role")=="assistant": asst=m.get("content") or ""
+    if asst and not stub.match(asst.strip()) and (diff.search(asst) or asst.count(chr(10)+'+')+asst.count(chr(10)+'-')>=2):
+      n+=1
+print(n)
+PY
+)"
+# Only force-thin when set is thin; once ≥ min, leave unset (refuse thin forever).
+FORCE_THIN_VAL=""
+if [[ -n "${LN7_QLORA_FORCE_THIN:-}" ]]; then
+  FORCE_THIN_VAL="$LN7_QLORA_FORCE_THIN"
+elif [[ "${CLEAN_N:-0}" -lt "$MIN_ROWS" ]]; then
+  FORCE_THIN_VAL="1"
+fi
+echo "[gpu-watch] clean_rows=$CLEAN_N min=$MIN_ROWS force_thin=${FORCE_THIN_VAL:-off}"
+
 uninstall || true
+
+# Build EnvironmentVariables dict (omit FORCE_THIN key when empty)
+FORCE_THIN_XML=""
+if [[ -n "$FORCE_THIN_VAL" ]]; then
+  FORCE_THIN_XML="
+    <key>LN7_QLORA_FORCE_THIN</key>
+    <string>${FORCE_THIN_VAL}</string>"
+fi
 
 cat >"$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -81,10 +122,10 @@ cat >"$PLIST" <<EOF
     <string>${LN7_GPU_WATCH_AUTO_DRAIN:-1}</string>
     <key>LN7_GPU_WATCH_UNLOAD</key>
     <string>1</string>
-    <key>LN7_QLORA_FORCE_THIN</key>
-    <string>${LN7_QLORA_FORCE_THIN:-1}</string>
     <key>LN7_QLORA_MIN_ROWS</key>
-    <string>${LN7_QLORA_MIN_ROWS:-50}</string>
+    <string>${MIN_ROWS}</string>
+    <key>LN7_SRC_REPO</key>
+    <string>${SRC_REPO}</string>${FORCE_THIN_XML}
   </dict>
   <key>WorkingDirectory</key>
   <string>${DEST}</string>
@@ -105,6 +146,7 @@ launchctl bootstrap "gui/${UID_NUM}" "$PLIST" 2>/dev/null \
 
 echo "[gpu-watch] installed $LABEL interval=${INTERVAL}s dest=$DEST"
 echo "[gpu-watch] logs: ~/Library/Logs/ln7-gpu-capacity-watch*.log  ~/Library/Logs/ln7_ab_qlora_drain.log"
-echo "[gpu-watch] success gate: $STATE_DIR/AB_OK"
-echo "[gpu-watch] one-shot now:"
-bash "$DEST/scripts/ln7_gpu_capacity_watch.sh" || true
+echo "[gpu-watch] success gate: $STATE_DIR/AB_OK  compare: $STATE_DIR/AB_COMPARE"
+# RunAtLoad already fires — do not also one-shot (double-probe race).
+# Manual: bash ~/sovereign-ln7/scripts/ln7_gpu_capacity_watch.sh
+echo "[gpu-watch] RunAtLoad will probe; skip duplicate one-shot"

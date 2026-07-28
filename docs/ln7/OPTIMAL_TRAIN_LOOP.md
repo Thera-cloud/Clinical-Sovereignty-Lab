@@ -36,19 +36,22 @@ LN7_QLORA_MIN_ROWS=2 LN7_QLORA_FORCE_THIN=1 bash scripts/ln7_ab_qlora_drain.sh  
 
 ## DO GPU capacity watcher (BLUE)
 
-LaunchAgent every 15m: **keep** probe droplet (no create→delete TOCTOU) → **detach** A/B drain (survives launchd) → unload only on `AB_OK`. Failed drain clears `DRAINING` and re-probes.
+LaunchAgent every 15m: **keep** probe → **detach** A/B on **one droplet** (both recipes) → private bakeoff compare → unload only on `AB_OK`. Prefail keeps `probe.env` for retry; `doctl` auth Forbidden backs off.
 
 ```bash
 bash scripts/ln7_install_gpu_capacity_watch.sh
 # logs: ~/Library/Logs/ln7-gpu-capacity-watch*.log  ~/Library/Logs/ln7_ab_qlora_drain.log
 # success: ~/.local/state/ln7_gpu_watch/AB_OK
+# compare: ~/.local/state/ln7_gpu_watch/AB_COMPARE  (winner hint; activate=false)
 # stop: bash scripts/ln7_install_gpu_capacity_watch.sh --uninstall
 # re-arm: bash scripts/ln7_install_gpu_capacity_watch.sh --reset
 ```
 
-- Lives under `~/sovereign-ln7` (Desktop TCC bypass); install syncs `ln7_qlora_train.py` + JSONL.
-- Drain: region fallbacks + provision retries; first recipe reuses probe droplet.
-- Default `LN7_GPU_WATCH_AUTO_DRAIN=1` + `LN7_QLORA_FORCE_THIN=1` (drop FORCE_THIN once clean JSONL ≥50).
+- Lives under `~/sovereign-ln7`; each tick syncs from Desktop (`LN7_SRC_REPO`) unless drain running.
+- A/B: `LN7_KEEP_DROPLET` handoff — no second create TOCTOU; venv/torch reused on recipe B.
+- SSH waits for cloud-init + apt locks; TTL is **idle heartbeat** (not hard kill mid-train); hard max 4h.
+- Pauses `com.sovereign.ln7-continuous-worker` during A/B (GPU contention).
+- `FORCE_THIN` only when clean JSONL &lt; `LN7_QLORA_MIN_ROWS` (auto-clears once ≥50).
 
 ## Kill criteria
 
