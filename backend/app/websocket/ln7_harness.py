@@ -331,8 +331,15 @@ def build_pack_prompt(pack_name: str) -> str:
         parts = [(loaded or task).get("prompt") or ""]
         parts.append(
             "\nReturn ONLY a unified diff that patches the listed files. "
-            "No prose, no markdown fences."
+            "No prose, no markdown fences. "
+            "Hunk context lines must match the FILE bodies below exactly "
+            "(same indentation and quotes)."
         )
+        if pack_name == "asyncpg_cast":
+            parts.append(
+                "\nRequired SQL edit: replace to_jsonb($1) with to_jsonb($1::int) "
+                "in the string literal. Minimal hunk preferred."
+            )
         targets = (loaded or task).get("target_files") or []
         if workdir:
             for rel in targets:
