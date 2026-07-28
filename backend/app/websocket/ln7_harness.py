@@ -361,16 +361,31 @@ async def run_sandbox_candidate(
 
     ok_gate, note = static_gate(diff_text)
     if not ok_gate:
-        return {"passed": False, "error": f"static_gate:{note}", "score": 0.0}
+        return {
+            "passed": False,
+            "error": f"static_gate:{note}",
+            "score": 0.0,
+            "diff_lines": len((diff_text or "").splitlines()),
+        }
 
     workdir, task, mat_note = ci.materialize_pack(pack_name)
     if not workdir or not task:
-        return {"passed": False, "error": mat_note or "materialize_failed", "score": 0.0}
+        return {
+            "passed": False,
+            "error": mat_note or "materialize_failed",
+            "score": 0.0,
+            "diff_lines": len((diff_text or "").splitlines()),
+        }
 
     try:
         applied, apply_msg = ci.apply_unified_diff(workdir, diff_text)
         if not applied:
-            return {"passed": False, "error": f"apply_failed:{apply_msg}", "score": 0.05}
+            return {
+                "passed": False,
+                "error": f"apply_failed:{apply_msg}",
+                "score": 0.05,
+                "diff_lines": len((diff_text or "").splitlines()),
+            }
         test_path = task.get("test_path") or "tests"
         result = await asyncio.to_thread(ci.run_pytest, workdir, test_path, candidate_timeout_s())
         score = ci.score_from_pytest(result)
@@ -380,6 +395,7 @@ async def run_sandbox_candidate(
             "log": (result.get("log") or "")[-2000:],
             "diff_lines": len(diff_text.splitlines()),
             "pack": pack_name,
+            "error": None if result.get("passed") else (score.get("notes") or "pytest_fail"),
         }
     finally:
         try:

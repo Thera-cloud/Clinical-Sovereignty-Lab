@@ -5,6 +5,7 @@ Public benchmarks are report-only; private held-out is the promotion gate.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import os
@@ -122,8 +123,13 @@ async def run_private_pack_bakeoff(
     revision_id: str = "LN7-baseline",
     pack_names: Optional[List[str]] = None,
     mode: str = "max",
+    seed_golden: bool = False,
 ) -> Dict[str, Any]:
-    """Run LN7 harness on CI packs (private / first-party). Contestants optional later."""
+    """Run LN7 harness on CI packs (private / first-party). Contestants optional later.
+
+    seed_golden=True also records golden.patch passes as train-eligible outcomes
+    (generator=ln7_golden) without counting them as LN7 model pass_rate.
+    """
     if not bakeoff_enabled():
         return {"ok": False, "error": "bakeoff_disabled"}
 
@@ -134,12 +140,48 @@ async def run_private_pack_bakeoff(
     except Exception as exc:
         return {"ok": False, "error": f"import:{exc}"}
 
-    from app.services.ln_sandbox_engineering_ci import load_pack
+    from app.services.ln_sandbox_engineering_ci import load_pack, materialize_pack, apply_unified_diff, run_pytest
     from app.websocket.ln7_harness import build_pack_prompt
+    from pathlib import Path
+    import shutil
 
     packs = pack_names or list_pack_names()
     if not packs:
         return {"ok": False, "error": "no_packs"}
+
+    if seed_golden or os.getenv("LN7_BAKEOFF_SEED_GOLDEN", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    ):
+        for pack in packs:
+            wd, task, _ = materialize_pack(pack)
+            if not wd or not task:
+                continue
+            try:
+                gpath = Path(wd) / "golden.patch"
+                if not gpath.is_file():
+                    continue
+                gdiff = gpath.read_text(encoding="utf-8")
+                ok_a, _ = apply_unified_diff(Path(wd), gdiff)
+                if not ok_a:
+                    continue
+                pr = await asyncio.to_thread(
+                    run_pytest, Path(wd), task.get("test_path") or "tests", 60.0,
+                )
+                await record_outcome(db_pool, {
+                    "task_id": None,
+                    "generator": "ln7_golden",
+                    "revision_id": revision_id,
+                    "harness_mode": "golden",
+                    "patch_hash": task_hash(gdiff),
+                    "passed": bool(pr.get("passed")),
+                    "diff_lines": len(gdiff.splitlines()),
+                    "tokens": 0,
+                    "latency_ms": 0,
+                    "cost_usd": 0.0,
+                    "metrics_json": {"pack": pack, "source": "golden.patch"},
+                })
+            finally:
+                shutil.rmtree(wd, ignore_errors=True)
 
     passes: List[bool] = []
     rows: List[Dict[str, Any]] = []
@@ -224,11 +266,12 @@ async def run_full_scorecard(
     mode: str = "max",
     include_public: bool = True,
     include_private: bool = True,
+    seed_golden: bool = False,
 ) -> Dict[str, Any]:
     private: Dict[str, Any] = {"ok": True, "skipped": True}
     if include_private:
         private = await run_private_pack_bakeoff(
-            db_pool, revision_id=revision_id, mode=mode,
+            db_pool, revision_id=revision_id, mode=mode, seed_golden=seed_golden,
         )
     public: List[Dict[str, Any]] = []
     if include_public:

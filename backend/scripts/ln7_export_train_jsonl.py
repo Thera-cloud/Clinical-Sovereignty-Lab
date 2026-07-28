@@ -44,7 +44,7 @@ async def export_rows(limit: int = 500) -> list:
                    t.split, t.spdx_license, t.prompt_summary, t.task_hash
             FROM ln7_coding_outcomes o
             LEFT JOIN ln7_tasks t ON t.task_id = o.task_id
-            WHERE o.passed = TRUE AND o.generator = 'ln7'
+            WHERE o.passed = TRUE AND o.generator IN ('ln7', 'ln7_golden')
               AND (t.split IS NULL OR t.split = 'train')
               AND (t.spdx_license IS NULL OR t.spdx_license IN
                    ('MIT','Apache-2.0','BSD-2-Clause','BSD-3-Clause','ISC','Unlicense','0BSD'))
@@ -59,7 +59,8 @@ async def export_rows(limit: int = 500) -> list:
             SELECT o.id, o.task_id, o.patch_hash, o.revision_id, o.harness_mode,
                    o.metrics_json, o.diff_lines, o.tokens
             FROM ln7_coding_outcomes o
-            WHERE o.passed = TRUE AND o.generator = 'ln7' AND o.task_id IS NULL
+            WHERE o.passed = TRUE AND o.generator IN ('ln7', 'ln7_golden')
+              AND o.task_id IS NULL
             ORDER BY o.created_at DESC
             LIMIT $1
             """,

@@ -162,11 +162,30 @@ def _apply_unified_diff_impl(workdir: Path, diff: str) -> Tuple[bool, str]:
                     notes.append("bad_hunk_header")
                     break
                 old_start = int(m.group(1)) - 1  # 0-based
+                # QUANTUM-CRYSTAL-ARCH — fuzzy reposition when model line numbers drift
+                peek = i + 1
+                anchor = None
+                while peek < len(lines) and lines[peek][:1] in (" ", "-", "+"):
+                    if lines[peek].startswith("-") or lines[peek].startswith(" "):
+                        anchor = lines[peek][1:].rstrip()
+                        break
+                    peek += 1
+                if anchor:
+                    window = src[max(0, old_start - 8): min(len(src), old_start + 24)]
+                    for off, row in enumerate(window):
+                        if row.rstrip() == anchor:
+                            old_start = max(0, old_start - 8) + off
+                            break
                 # copy unchanged prefix
                 if old_start < src_i:
-                    ok = False
-                    notes.append("hunk_order")
-                    break
+                    # allow rewind only within same file when fuzzy moved up
+                    if old_start >= 0 and not out:
+                        src_i = 0
+                        out = []
+                    else:
+                        ok = False
+                        notes.append("hunk_order")
+                        break
                 out.extend(src[src_i:old_start])
                 src_i = old_start
                 i += 1
@@ -189,9 +208,17 @@ def _apply_unified_diff_impl(workdir: Path, diff: str) -> Tuple[bool, str]:
                         if src_i >= len(src) or src[src_i] != payload:
                             # soft match: allow if strip equal
                             if src_i >= len(src) or src[src_i].rstrip() != payload.rstrip():
-                                ok = False
-                                notes.append(f"ctx_mismatch@{src_i+1}")
-                                break
+                                # skip one source line if next matches (model dropped a blank)
+                                if (
+                                    src_i + 1 < len(src)
+                                    and src[src_i + 1].rstrip() == payload.rstrip()
+                                ):
+                                    out.append(src[src_i])
+                                    src_i += 1
+                                else:
+                                    ok = False
+                                    notes.append(f"ctx_mismatch@{src_i+1}")
+                                    break
                         out.append(src[src_i])
                         src_i += 1
                     elif tag == "-":
@@ -199,9 +226,18 @@ def _apply_unified_diff_impl(workdir: Path, diff: str) -> Tuple[bool, str]:
                             src[src_i] != payload
                             and src[src_i].rstrip() != payload.rstrip()
                         ):
-                            ok = False
-                            notes.append(f"del_mismatch@{src_i+1}")
-                            break
+                            # search forward a few lines for the delete target
+                            found = None
+                            for j in range(src_i, min(len(src), src_i + 6)):
+                                if src[j] == payload or src[j].rstrip() == payload.rstrip():
+                                    found = j
+                                    break
+                            if found is None:
+                                ok = False
+                                notes.append(f"del_mismatch@{src_i+1}")
+                                break
+                            out.extend(src[src_i:found])
+                            src_i = found
                         src_i += 1
                     elif tag == "+":
                         out.append(payload)

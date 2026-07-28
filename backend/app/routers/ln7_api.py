@@ -80,6 +80,7 @@ async def post_bakeoff(request: Request, body: Optional[Dict[str, Any]] = None, 
         mode=str(body.get("mode") or "max"),
         include_public=bool(body.get("include_public", True)),
         include_private=bool(body.get("include_private", True)),
+        seed_golden=bool(body.get("seed_golden", False)),
     )
     return {"status": "ok" if result.get("ok") else "error", **result}
 

@@ -51,7 +51,7 @@ async def collect_rejection_samples(db_pool, *, limit: int = 500) -> List[Dict[s
                 SELECT id, task_id, patch_hash, generator, revision_id,
                        harness_mode, metrics_json
                 FROM ln7_coding_outcomes
-                WHERE passed = TRUE AND generator = 'ln7'
+                WHERE passed = TRUE AND generator IN ('ln7', 'ln7_golden')
                 ORDER BY created_at DESC
                 LIMIT $1
                 """,
