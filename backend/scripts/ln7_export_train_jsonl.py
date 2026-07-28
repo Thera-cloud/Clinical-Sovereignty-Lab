@@ -28,8 +28,35 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "backend"))
+def _resolve_root() -> Path:
+    here = Path(__file__).resolve()
+    # Repo checkout: .../backend/scripts/<this>
+    if len(here.parents) >= 3 and (here.parents[2] / "backend" / "app").is_dir():
+        return here.parents[2]
+    # nate_backend bind: /app/scripts/<this>, code at /app/app
+    if (Path("/app") / "app").is_dir():
+        return Path("/app")
+    env = os.environ.get("LN7_REPO_ROOT")
+    if env and Path(env).is_dir():
+        return Path(env)
+    return here.parents[2] if len(here.parents) >= 3 else here.parent
+
+
+ROOT = _resolve_root()
+for _p in (ROOT / "backend", ROOT, Path("/app")):
+    if _p.is_dir() and str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+
+
+def _packs_root() -> Path:
+    for cand in (
+        ROOT / "backend" / "app" / "data" / "ln_sandbox_ci_packs",
+        ROOT / "app" / "data" / "ln_sandbox_ci_packs",
+    ):
+        if cand.is_dir():
+            return cand
+    return ROOT / "backend" / "app" / "data" / "ln_sandbox_ci_packs"
+
 
 MAX_CHARS = 4000
 HELDOUT_PACKS = frozenset({"env_redis_prefix"})
@@ -80,7 +107,7 @@ def golden_rows() -> List[Dict[str, Any]]:
     """Train-eligible golden.patch rows (heldout pack excluded)."""
     from app.websocket.ln7_harness import build_pack_prompt
 
-    packs_root = ROOT / "backend" / "app" / "data" / "ln_sandbox_ci_packs"
+    packs_root = _packs_root()
     out: List[Dict[str, Any]] = []
     for pack in TRAIN_GOLDEN_PACKS:
         gpath = packs_root / pack / "golden.patch"
