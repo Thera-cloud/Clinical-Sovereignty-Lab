@@ -47,6 +47,39 @@ Insert/update `ln7_contestants` with `base_url`, `model_id`, credentials in env,
 
 Set `LN7_KILL_SWITCH=true` and recreate bridge/backend containers. Harness returns immediately with `error=kill_switch`.
 
+## Continuous gated self-improvement (2026-07-28)
+
+See [CONTINUOUS_GATED_SELF_IMPROVEMENT.md](./CONTINUOUS_GATED_SELF_IMPROVEMENT.md).
+
+| Piece | Status |
+|---|---|
+| Train queue + canary tables | migration `293` |
+| GREEN agent | `Ln7ContinuousAgent` behind `ENABLE_LN7_CONTINUOUS` |
+| CUDA QLoRA | `ln7_qlora_train.py --backend cuda` (needs GPU host) |
+| Public upstream clones | BLUE `.ln7-harness/<bench>/upstream/` (gitignored) |
+| ORANGE SSH from GREEN | **blocked** until `scripts/ln7_install_orange_ssh.sh` run on ORANGE console |
+
+### (a) Real QLoRA
+
+Intel BLUE cannot run mlx. On a CUDA GPU droplet:
+
+```bash
+pip install torch peft transformers bitsandbytes datasets accelerate
+LN7_QLORA_BACKEND=cuda python backend/scripts/ln7_qlora_train.py \
+  --train-jsonl data/ln7_train.jsonl --backend cuda --iters 80
+```
+
+### (b) ORANGE SSH
+
+On ORANGE console (once):
+
+```bash
+# paste GREEN pubkey from: ssh root@GREEN 'cat /root/.ssh/id_ed25519.pub'
+bash scripts/ln7_install_orange_ssh.sh 'ssh-ed25519 AAAA... root@green'
+```
+
+Then from GREEN: `ssh root@10.13.13.5 true`.
+
 ## Ops status (2026-07-28 proceed 1–4)
 
 | Step | Result |

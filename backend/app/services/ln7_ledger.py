@@ -81,7 +81,15 @@ async def record_outcome(db_pool, row: Dict[str, Any]) -> Optional[int]:
                 row.get("exec_node") or "green",
                 __import__("json").dumps(row.get("metrics_json") or {}),
             )
-        return int(oid) if oid is not None else None
+        oid_i = int(oid) if oid is not None else None
+        # Continuous gated self-improvement: enqueue green outcomes (train split only)
+        if oid_i is not None and bool(row.get("passed")):
+            try:
+                from app.services.ln7_train_queue import enqueue_outcome
+                await enqueue_outcome(db_pool, oid_i, trigger_source="outcome")
+            except Exception as _eq:
+                logger.debug("LN7 train enqueue: %s", _eq)
+        return oid_i
     except Exception as exc:
         logger.warning("LN7 record_outcome: %s", exc)
         return None
@@ -146,6 +154,16 @@ async def record_usage_event(db_pool, event_type: str, **kwargs) -> bool:
                 kwargs.get("workspace_hint"),
                 json.dumps(kwargs.get("metadata_json") or {}),
             )
+        try:
+            from app.services.ln7_train_queue import enqueue_usage_preference
+            await enqueue_usage_preference(
+                db_pool,
+                event_type=event_type,
+                revision_id=kwargs.get("revision_id"),
+                patch_hash=kwargs.get("patch_hash"),
+            )
+        except Exception as _eq:
+            logger.debug("LN7 pref enqueue: %s", _eq)
         return True
     except Exception as exc:
         logger.warning("LN7 usage_event: %s", exc)

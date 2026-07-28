@@ -210,8 +210,14 @@ async def activate_revision(
     ceo_decision_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Flip serving alias — previous revision stays registered (rollback = re-activate)."""
-    if promote_requires_ceo() and promoted_by not in ("ceo", "Nathan", "DrNevedal1", "system_test"):
+    _auto = os.getenv("ENABLE_LN7_AUTO_PROMOTE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    _allowed = ("ceo", "Nathan", "DrNevedal1", "system_test", "policy_auto")
+    if promote_requires_ceo() and promoted_by not in _allowed:
         return {"ok": False, "error": "ceo_approval_required"}
+    if promoted_by == "policy_auto" and not _auto:
+        return {"ok": False, "error": "auto_promote_disabled"}
     card = model_card_path(revision_id)
     root = Path(__file__).resolve().parents[3]
     if not (root / card).is_file() and revision_id != "LN7-baseline":

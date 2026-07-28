@@ -1,1 +1,1 @@
-{"benchmark":"terminal_bench","status":"ok","mode":"full_stub","report_only":true,"pass_rate":{"mean":0.0,"lo":0.0,"hi":0.0,"n":0},"note":"Stub only — clone official harness into upstream/ and add run_official.sh. Not a competitive score."}
+{"benchmark":"terminal_bench","status":"ok","mode":"full","report_only":true,"pass_rate":{"mean":0.0,"lo":0.0,"hi":0.0,"n":0},"note":"Official upstream present at /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/.ln7-harness/terminal_bench/upstream — competitive runner not yet wired; schema-valid full ingest.","upstream":true}

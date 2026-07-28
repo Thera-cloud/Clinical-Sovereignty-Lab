@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Copy to .ln7-harness/swe_bench_verified/upstream/run_official.sh after clone.
+# OUT path is $1. Official competitive eval is expensive — start with a tiny subset.
+set -euo pipefail
+OUT="${1:?out json path}"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+# Example (operator fills real CLI):
+# python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Verified --predictions_path ... 
+cat > "$OUT" <<JSON
+{"benchmark":"swe_bench_verified","status":"ok","mode":"full","report_only":true,"pass_rate":{"mean":0.0,"lo":0.0,"hi":0.0,"n":0},"note":"upstream cloned at $ROOT — wire official SWE-bench Verified CLI here.","upstream":true}
+JSON

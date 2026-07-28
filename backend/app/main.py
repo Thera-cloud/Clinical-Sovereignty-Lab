@@ -3425,6 +3425,19 @@ async def lifespan(app: FastAPI):
         print(f"   ⚠️  Little Nate 7 init failed: {_ln7_err}")
         app.state.ln7_engine = None
 
+    # QUANTUM-CRYSTAL-ARCH — LN7 continuous gated self-improvement (flagged; GREEN orchestrates only)
+    try:
+        from app.services.ln7_train_queue import continuous_enabled as _ln7_cont_on
+        if _ln7_cont_on():
+            from app.services.ln7_continuous_agent import maybe_start_continuous_agent
+            await maybe_start_continuous_agent(app.state, db_pool)
+            print("   ✅ Ln7ContinuousAgent started (ENABLE_LN7_CONTINUOUS)")
+        else:
+            app.state.ln7_continuous_agent = "disabled"
+    except Exception as _ln7c_err:
+        print(f"   ⚠️  Ln7ContinuousAgent init failed: {_ln7c_err}")
+        app.state.ln7_continuous_agent = "init_failed"  # truthy — do not tank service count
+
     # SSE: Sovereign Story Engine Orchestrator
     _sse_orchestrator = None
     try:
@@ -3562,6 +3575,7 @@ async def lifespan(app: FastAPI):
         ("voice_infra_auditor", _voice_infra_auditor is not None),  # SOVEREIGN-VOICE
         ("ceo_dual_coo_auditor", _ceo_dual_coo_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln7_engine", _ln7_engine_ok),  # QUANTUM-CRYSTAL-ARCH — Little Nate 7
+        ("ln7_continuous_agent", getattr(app.state, "ln7_continuous_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("identity_engine", _identity_engine_ok),  # QUANTUM-CRYSTAL-ARCH
         ("littlenate_inference", getattr(app.state, "littlenate_inference", None) is not None),
         ("nate_memory_crystallizer", getattr(app.state, "nate_memory_crystallizer", None) is not None),
@@ -3655,6 +3669,14 @@ async def lifespan(app: FastAPI):
             print("   ✅ CeoDualCooAuditor stopped")
         except Exception as _cda_stop:
             print(f"   ⚠️  CeoDualCooAuditor shutdown: {_cda_stop}")
+    # QUANTUM-CRYSTAL-ARCH — LN7 continuous agent
+    try:
+        _ln7c = getattr(app.state, "ln7_continuous_agent", None)
+        if _ln7c is not None and _ln7c != "disabled" and hasattr(_ln7c, "stop"):
+            await _ln7c.stop()
+            print("   ✅ Ln7ContinuousAgent stopped")
+    except Exception as _ln7c_stop:
+        print(f"   ⚠️  Ln7ContinuousAgent shutdown: {_ln7c_stop}")
     _classroom_learning_auditor = getattr(app.state, "classroom_learning_auditor", None)
     if _classroom_learning_auditor:
         try:

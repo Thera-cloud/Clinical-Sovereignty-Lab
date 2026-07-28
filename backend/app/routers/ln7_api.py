@@ -256,6 +256,52 @@ async def post_usage_event(
     return {"status": "ok" if ok else "error"}
 
 
+@router.get("/train/jobs")
+async def get_train_jobs(request: Request, limit: int = 50, _admin=Depends(require_admin)):
+    from app.services.ln7_train_queue import list_jobs, continuous_enabled
+    return {
+        "status": "ok",
+        "continuous": continuous_enabled(),
+        "jobs": await list_jobs(_pool(request), limit=limit),
+        "non_clinical_claim": True,
+    }
+
+
+@router.post("/train/enqueue")
+async def post_train_enqueue(
+    request: Request,
+    body: Optional[Dict[str, Any]] = None,
+    _admin=Depends(require_admin),
+):
+    from app.services.ln7_train_queue import enqueue_outcome, continuous_enabled
+    body = body or {}
+    if not continuous_enabled():
+        raise HTTPException(400, "ENABLE_LN7_CONTINUOUS is off")
+    oid = body.get("outcome_id")
+    if oid is None:
+        raise HTTPException(422, "outcome_id required")
+    job_id = await enqueue_outcome(
+        _pool(request), int(oid), trigger_source=str(body.get("trigger_source") or "manual"),
+    )
+    return {"status": "ok" if job_id else "error", "job_id": job_id}
+
+
+@router.post("/canary/evaluate")
+async def post_canary_evaluate(
+    request: Request,
+    body: Optional[Dict[str, Any]] = None,
+    _admin=Depends(require_admin),
+):
+    from app.services.ln7_canary_promoter import evaluate_canary, start_canary
+    body = body or {}
+    rid = str(body.get("revision_id") or "").strip()
+    if not rid:
+        raise HTTPException(422, "revision_id required")
+    if body.get("start"):
+        await start_canary(_pool(request), rid, incumbent_id=str(body.get("incumbent_id") or "LN7-baseline"))
+    return await evaluate_canary(_pool(request), rid)
+
+
 @router.get("/contestants")
 async def get_contestants(request: Request, _admin=Depends(require_admin)):
     from app.services.ln7_bakeoff_engine import list_contestants, sync_contestant_credentials
