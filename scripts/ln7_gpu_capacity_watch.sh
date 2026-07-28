@@ -36,6 +36,11 @@ log() { echo "[gpu-watch] $(ts) $*" | tee -a "$LOG" >&2; }
 sync_mirror() {
   [[ -d "$SRC_REPO/scripts" ]] || return 0
   [[ "$REPO" == "$SRC_REPO" ]] && return 0
+  # Desktop TCC: LaunchAgent often cannot read ~/Desktop — skip quietly
+  if ! test -r "$SRC_REPO/scripts/ln7_gpu_capacity_watch.sh" 2>/dev/null; then
+    log "skip mirror sync — SRC_REPO not readable (TCC?): $SRC_REPO"
+    return 0
+  fi
   # Skip mid-drain (avoid breaking running scripts mid-parse)
   if [[ -f "$DRAINING" ]]; then
     local pid=""
@@ -48,12 +53,12 @@ sync_mirror() {
   mkdir -p "$REPO/scripts" "$REPO/data" "$REPO/backend/scripts"
   for f in ln7_gpu_capacity_watch.sh ln7_ab_qlora_drain.sh ln7_ab_bakeoff_compare.sh \
            ln7_continuous_drain.sh ln7_provision_cuda_droplet.sh ln7_destroy_cuda_droplet.sh; do
-    [[ -f "$SRC_REPO/scripts/$f" ]] && cp "$SRC_REPO/scripts/$f" "$REPO/scripts/$f" && chmod +x "$REPO/scripts/$f"
+    [[ -f "$SRC_REPO/scripts/$f" ]] && cp "$SRC_REPO/scripts/$f" "$REPO/scripts/$f" 2>/dev/null && chmod +x "$REPO/scripts/$f" || true
   done
   [[ -f "$SRC_REPO/backend/scripts/ln7_qlora_train.py" ]] \
-    && cp "$SRC_REPO/backend/scripts/ln7_qlora_train.py" "$REPO/backend/scripts/ln7_qlora_train.py"
+    && cp "$SRC_REPO/backend/scripts/ln7_qlora_train.py" "$REPO/backend/scripts/ln7_qlora_train.py" 2>/dev/null || true
   [[ -f "$SRC_REPO/data/ln7_train.jsonl" ]] \
-    && cp "$SRC_REPO/data/ln7_train.jsonl" "$REPO/data/ln7_train.jsonl"
+    && cp "$SRC_REPO/data/ln7_train.jsonl" "$REPO/data/ln7_train.jsonl" 2>/dev/null || true
   log "synced mirror from $SRC_REPO"
 }
 
@@ -364,13 +369,21 @@ try_reuse_probe() {
 }
 
 one_check() {
-  local lock="$STATE_DIR/watch.lock"
-  # Prevent install one-shot + RunAtLoad double-probe
-  exec 9>"$lock"
-  if ! flock -n 9; then
-    log "another watch check holds lock — skip"
-    return 0
+  # macOS LaunchAgent has no util-linux flock — atomic mkdir lock instead
+  local lockdir="$STATE_DIR/watch.lock.d"
+  if ! mkdir "$lockdir" 2>/dev/null; then
+    local holder=""
+    [[ -f "$lockdir/pid" ]] && holder="$(tr -d '[:space:]' <"$lockdir/pid" || true)"
+    if [[ -n "$holder" ]] && kill -0 "$holder" 2>/dev/null; then
+      log "another watch check holds lock — skip (pid=$holder)"
+      return 0
+    fi
+    log "breaking stale watch.lock.d (holder=${holder:-none})"
+    rm -rf "$lockdir"
+    mkdir "$lockdir" || { log "lock busy — skip"; return 0; }
   fi
+  echo "$$" >"$lockdir/pid"
+  trap 'rm -rf "$STATE_DIR/watch.lock.d"' EXIT
 
   sync_mirror
   reconcile_drain_state

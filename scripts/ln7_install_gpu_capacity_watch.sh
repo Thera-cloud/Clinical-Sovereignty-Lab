@@ -35,7 +35,9 @@ if [[ "${1:-}" == "--reset" ]]; then
         "$STATE_DIR/run_ab_detached.sh" "$STATE_DIR/droplet_handoff.env" \
         "$STATE_DIR/AB_COMPARE" "$STATE_DIR/rev_a" "$STATE_DIR/rev_b" \
         "$STATE_DIR/doctl_auth_fails" "$STATE_DIR/doctl_auth_backoff_until" \
-        "$STATE_DIR/WORKER_PAUSED" "$STATE_DIR/ttl_heartbeat"
+        "$STATE_DIR/WORKER_PAUSED" "$STATE_DIR/ttl_heartbeat" \
+        "$STATE_DIR/watch.lock"
+  rm -rf "$STATE_DIR/watch.lock.d"
   echo "[gpu-watch] cleared $STATE_DIR"
 fi
 
@@ -125,7 +127,7 @@ cat >"$PLIST" <<EOF
     <key>LN7_QLORA_MIN_ROWS</key>
     <string>${MIN_ROWS}</string>
     <key>LN7_SRC_REPO</key>
-    <string>${SRC_REPO}</string>${FORCE_THIN_XML}
+    <string>${DEST}</string>${FORCE_THIN_XML}
   </dict>
   <key>WorkingDirectory</key>
   <string>${DEST}</string>
