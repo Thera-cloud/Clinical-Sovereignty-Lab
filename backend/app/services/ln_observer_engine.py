@@ -27,6 +27,10 @@ RECONNECT_GRACE_S = 90
 MAX_SESSION_S = 3 * 3600
 WARN_SESSION_S = int(2.75 * 3600)  # 2:45 warn before 3h cap
 OBSERVE_DEBOUNCE_S = 20
+# Time-based observe — static Zoom/Box screens send few frames; do not wait for N frames.
+OBSERVE_INTERVAL_S = 45.0
+OBSERVE_EVERY_N = 6
+VISION_INFLIGHT_STALE_S = 45.0
 CHAT_COMPACT_EVERY = 20
 # QUANTUM-CRYSTAL-ARCH — same-brain enrichment (non-lean only; bounded)
 # Short Vectorize budget; PG keyword fallback runs separately (≤3s). # QUANTUM-CRYSTAL-ARCH
@@ -120,6 +124,8 @@ class LiveSession:
         self.last_frame_observation = ""
         self.last_frame_id = ""
         self.vision_inflight = False
+        self.vision_inflight_since = 0.0
+        self.lean_observe_count = 0
         # Pending audio window from client {t_start_ms, t_end_ms, seq}
         self.pending_audio_window: Optional[Dict[str, Any]] = None
         self.av_bundles: List[Dict[str, Any]] = []
@@ -929,6 +935,7 @@ class LNObserverEngine:
             for k in (
                 "client", "session", "clinical", "cue", "title", "notes",
                 "attachment", "trauma", "coach", "window", "app/",
+                "guidance", "seen:", "ask", "emotion", "pacing",
             )
         ):
             return
@@ -1080,17 +1087,27 @@ class LNObserverEngine:
             chat_tail += f"[{role}] {m.get('content', '')}\n"
 
         if lean:
+            # QUANTUM-CRYSTAL-ARCH — OCR + actionable coach guidance (not OCR-only)
             user_prompt = (
-                "OCR the attached screenshot only. Name the app/window title if "
-                "legible, the open file name, and 1 clinical cue if any. "
-                "1-2 sentences. Quote only text you can actually read."
+                "From the screenshot + recent [TRANSCRIPT]/[FORENSIC A/V TIMELINE]: "
+                "(1) One short SEEN line — app/window title and any legible on-screen text "
+                "you can actually read. "
+                "(2) One COACH GUIDANCE line — a concrete suggestion for what the coach "
+                "could say, ask, or notice next (pacing, emotion under content, rupture, "
+                "safety). Format exactly:\n"
+                "SEEN: …\n"
+                "GUIDANCE: …\n"
+                "Do not invent on-screen text. If the screen is unclear, say so in SEEN "
+                "and still give GUIDANCE from the spoken transcript when available."
             )
         elif look_now or detail_q:
             user_prompt = (
                 coach_message
-                or "Read the attached screenshot(s) carefully. Quote window titles, "
-                   "open filenames, and any visible prompt/CLI text exactly. "
-                   "Use [FORENSIC A/V TIMELINE] to sync what was said with what was shown."
+                or "Look closely at the live screen and recent spoken content. "
+                   "Quote window titles / filenames only when legible. Then give "
+                   "2–4 bullet coaching suggestions the coach can use right now "
+                   "(what to say, what to track emotionally, what to avoid). "
+                   "Lead with actionable guidance, not an OCR dump."
             )
         else:
             user_prompt = coach_message
@@ -1134,11 +1151,13 @@ class LNObserverEngine:
 
         system = (
             "You are Little Nate observing a live coach screen share with forensic "
-            "A/V alignment. ACCURACY RULES: (1) When JPEGs are attached, answer from "
-            "those images first. (2) When citing spoken content, prefer ALIGNED "
-            "forensic pairs (audio window linked to a frame). (3) Never invent "
-            "on-screen text. (4) Prefer 'I cannot read that clearly' over a guess. "
-            "(5) When [RELEVANT MEMORY] or [NIGHT SCHOOL WISDOM] are present, use them "
+            "A/V alignment. Your job is dual: accurate screen reading AND real-time "
+            "coaching guidance. ACCURACY RULES: (1) When JPEGs are attached, ground "
+            "SEEN lines in those images. (2) When citing spoken content, prefer ALIGNED "
+            "forensic pairs. (3) Never invent on-screen text. (4) Prefer 'I cannot read "
+            "that clearly' over a guess. (5) GUIDANCE may use transcript + clinical "
+            "judgment even when OCR is thin — never invent client quotes. "
+            "(6) When [RELEVANT MEMORY] or [NIGHT SCHOOL WISDOM] are present, use them "
             "as clinical continuity — do not invent memories not listed there."
         )
         return prompt, system
@@ -1162,7 +1181,7 @@ class LNObserverEngine:
         images, frame_ages, detail_q, n_buf, obs_block = self._collect_vision(
             sess, coach_message, look_now=look_now, lean=False
         )
-        if images and sess.vision_inflight and not look_now and not detail_q:
+        if images and self._vision_busy(sess) and not look_now and not detail_q:
             return ""
 
         prompt, system = self._build_observer_prompts(
@@ -1179,7 +1198,7 @@ class LNObserverEngine:
         )
 
         if images:
-            sess.vision_inflight = True
+            self._mark_vision_inflight(sess, True)
         try:
             logger.warning(
                 "LNObserverEngine lni-safe look_now=%s vision=%s sb=%s buf=%s",
@@ -1225,7 +1244,38 @@ class LNObserverEngine:
             return ""
         finally:
             if images:
-                sess.vision_inflight = False
+                self._mark_vision_inflight(sess, False)
+
+    def _vision_busy(self, sess: LiveSession) -> bool:
+        """True if vision in flight; auto-clears stale locks. # QUANTUM-CRYSTAL-ARCH"""
+        if not sess.vision_inflight:
+            return False
+        age = time.time() - (sess.vision_inflight_since or 0.0)
+        if age > VISION_INFLIGHT_STALE_S:
+            logger.warning(
+                "LNObserverEngine clearing stale vision_inflight age=%.1fs", age
+            )
+            sess.vision_inflight = False
+            sess.vision_inflight_since = 0.0
+            return False
+        return True
+
+    def _mark_vision_inflight(self, sess: LiveSession, busy: bool) -> None:
+        sess.vision_inflight = bool(busy)
+        sess.vision_inflight_since = time.time() if busy else 0.0
+
+    def should_schedule_observe(self, sess: LiveSession, frame_counter: int) -> bool:
+        """Frame-count or wall-clock due, debounce clear, vision free."""
+        now = time.time()
+        if self._vision_busy(sess):
+            return False
+        if (now - sess.last_observe_at) < OBSERVE_DEBOUNCE_S:
+            return False
+        due_count = frame_counter > 0 and (frame_counter % OBSERVE_EVERY_N == 0)
+        due_time = (now - sess.last_observe_at) >= OBSERVE_INTERVAL_S
+        # First observe soon after frames arrive (last_observe_at==0)
+        due_first = sess.last_observe_at <= 0 and frame_counter >= 1
+        return due_count or due_time or due_first
 
     async def _generate_chat_fast(
         self,
@@ -1267,10 +1317,10 @@ class LNObserverEngine:
         )
 
         # Serialize Azure vision so lean+look_now+chat don't pile up ("maxed out")
-        if images and sess.vision_inflight and lean and not look_now and not detail_q:
+        if images and self._vision_busy(sess) and lean and not look_now and not detail_q:
             return ""
         if images:
-            sess.vision_inflight = True
+            self._mark_vision_inflight(sess, True)
         try:
             from app.services.nate_inference_router import NateInferenceRouter
 
@@ -1281,7 +1331,7 @@ class LNObserverEngine:
                 system=system,
                 tier=tier,
                 temperature=0.15 if images else 0.35,
-                max_tokens=120 if lean else (480 if (look_now or detail_q) else 500),
+                max_tokens=220 if lean else (480 if (look_now or detail_q) else 500),
                 domain="coaching",
                 odpe_signal=None if images else "LOCKED",
                 allow_deep=False,
@@ -1337,18 +1387,54 @@ class LNObserverEngine:
             return f"(LN-Observer reasoning error: {e})"
         finally:
             if images:
-                sess.vision_inflight = False
+                self._mark_vision_inflight(sess, False)
+
+    @staticmethod
+    def _transcript_line_worth_keeping(src: str, content: str) -> bool:
+        """Drop filler STT crumbs that poison close summaries. # QUANTUM-CRYSTAL-ARCH"""
+        c = (content or "").strip()
+        if not c:
+            return False
+        if src in ("frame_observation", "coach_chat", "ln_chat"):
+            return len(c) >= 12
+        if src in ("audio_transcript", "av_bundle"):
+            words = re.findall(r"[A-Za-z']+", c)
+            if len(words) < 3 or len(c) < 12:
+                return False
+            low = c.lower().strip(" .,?!\"'")
+            if low in {
+                "you", "yeah", "yes", "uh", "um", "ok", "okay", "mm", "hmm",
+                "right", "sure", "so", "and", "the", "a", "i", "me",
+            }:
+                return False
+            return True
+        return len(c) >= 12
 
     def _extractive_close_summary(self, sess: LiveSession) -> str:
         """Fallback when LNI unavailable — never leave ln_summary empty. # QUANTUM-CRYSTAL-ARCH"""
-        lines = []
-        for t in sess.transcript[-24:]:
+        preferred: List[str] = []
+        audioish: List[str] = []
+        for t in sess.transcript[-40:]:
             src = t.get("source") or ""
-            if src in ("audio_transcript", "frame_observation", "coach_chat", "ln_chat", "av_bundle"):
-                content = (t.get("content") or "").strip()
-                if content:
-                    lines.append(f"{src}: {content[:180]}")
-        body = " | ".join(lines[-12:]) if lines else "Session ended with limited transcript."
+            if src not in (
+                "audio_transcript",
+                "frame_observation",
+                "coach_chat",
+                "ln_chat",
+                "av_bundle",
+            ):
+                continue
+            content = (t.get("content") or "").strip()
+            if not self._transcript_line_worth_keeping(src, content):
+                continue
+            line = f"{src}: {content[:180]}"
+            if src in ("frame_observation", "ln_chat", "coach_chat"):
+                preferred.append(line)
+            else:
+                audioish.append(line)
+        # Prefer clinical notes over raw STT
+        lines = (preferred[-8:] + audioish[-4:]) if preferred else audioish[-10:]
+        body = " | ".join(lines) if lines else "Session ended with limited transcript."
         return (
             f"LN-Observer close ({sess.coach_name}): {body}"
         )[:900]

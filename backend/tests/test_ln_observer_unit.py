@@ -202,6 +202,54 @@ def test_extractive_close_summary_nonempty():
     assert text.startswith("LN-Observer close")
 
 
+def test_extractive_close_summary_drops_filler_audio():
+    eng = _load("app.services.ln_observer_engine", _SERVICES / "ln_observer_engine.py")
+    sess = eng.LiveSession("s1", "CoachN", "Coach N")
+    for _ in range(8):
+        sess.add_transcript("audio_transcript", "You")
+        sess.add_transcript("av_bundle", "AUDIO: you || FRAME x || SEEN:")
+    sess.add_transcript(
+        "frame_observation",
+        "SEEN: Zoom + Box notes\nGUIDANCE: Ask what longing means in the body.",
+    )
+    text = eng.LNObserverEngine()._extractive_close_summary(sess)
+    assert "GUIDANCE" in text or "longing" in text.lower()
+    assert text.lower().count("audio_transcript: you") == 0
+
+
+def test_lean_prompt_requests_coach_guidance():
+    eng = _load("app.services.ln_observer_engine", _SERVICES / "ln_observer_engine.py")
+    sess = eng.LiveSession("s1", "CoachN", "Coach N")
+    engine = eng.LNObserverEngine()
+    prompt, system = engine._build_observer_prompts(
+        sess,
+        "observe",
+        look_now=False,
+        lean=True,
+        images=["x"],
+        frame_ages=["0s"],
+        detail_q=False,
+        n_buf=1,
+        obs_block="",
+    )
+    assert "GUIDANCE" in prompt
+    assert "coaching guidance" in system.lower() or "GUIDANCE" in system
+
+
+def test_should_schedule_observe_time_and_stale_vision():
+    eng = _load("app.services.ln_observer_engine", _SERVICES / "ln_observer_engine.py")
+    sess = eng.LiveSession("s1", "CoachN", "Coach N")
+    engine = eng.LNObserverEngine()
+    assert engine.should_schedule_observe(sess, 1) is True
+    sess.last_observe_at = time.time()
+    assert engine.should_schedule_observe(sess, 2) is False
+    sess.vision_inflight = True
+    sess.vision_inflight_since = time.time() - 100
+    sess.last_observe_at = time.time() - 50
+    assert engine.should_schedule_observe(sess, 3) is True
+    assert sess.vision_inflight is False
+
+
 def test_whisper_stt_has_429_backoff_constants():
     # Read source — avoid caching conflicts with other suites importing whisper_stt
     src = (_SERVICES / "whisper_stt.py").read_text(encoding="utf-8")

@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from app.services.api_server import require_admin, require_coach
 from app.services.ln_observer_engine import (
     ACK_TEXT_V1,
-    OBSERVE_DEBOUNCE_S,
+    OBSERVE_INTERVAL_S,
     ln_observer_engine,
     mint_ws_ticket,
     verify_ws_ticket,
@@ -380,40 +380,52 @@ async def _bg_frame_observe(ws: WebSocket, eng, sess, session_id: str) -> None:
         fid = sess.last_frame_id or ""
         fr = sess.frame_by_id(fid) if fid else None
         note = await eng.generate_chat(sess, "observe", lean=True)
-        if note and not note.startswith("("):
-            meta = {"frame_id": fid, "lean": True}
-            storage_key = ""
-            if fr and fr.get("b64"):
-                storage_key = await eng.persist_frame_jpeg(
-                    session_id, fid, fr.get("b64") or ""
-                )
-                if storage_key:
-                    meta["storage_key"] = storage_key
-            async with sess.lock:
-                sess.set_frame_note(fid, note)
-                sess.add_transcript("frame_observation", note, meta=meta)
-            await eng.db_log(session_id, "frame_observation", note, meta=meta)
-            await eng.db_log_forensic(
-                session_id,
-                "seen",
-                frame_id=fid,
-                seen_text=note,
-                storage_key=storage_key,
-                payload=meta,
+        if not note or note.startswith("("):
+            # Empty / busy — allow sooner retry (do not burn full interval)
+            sess.last_observe_at = max(0.0, time.time() - (OBSERVE_INTERVAL_S * 0.6))
+            return
+        sess.lean_observe_count = int(getattr(sess, "lean_observe_count", 0) or 0) + 1
+        meta = {"frame_id": fid, "lean": True, "has_guidance": "GUIDANCE:" in note}
+        storage_key = ""
+        if fr and fr.get("b64"):
+            storage_key = await eng.persist_frame_jpeg(
+                session_id, fid, fr.get("b64") or ""
             )
-            # Rate-limited durable SEEN crystals (clinical UI cues)
-            asyncio.create_task(
-                eng.maybe_crystallize_seen(sess, note, frame_id=fid)
-            )
-            try:
-                await ws.send_json({
-                    "type": "observation",
-                    "text": note,
-                    "frame_id": fid,
-                })
-            except Exception:
-                pass
+            if storage_key:
+                meta["storage_key"] = storage_key
+        async with sess.lock:
+            sess.set_frame_note(fid, note)
+            sess.add_transcript("frame_observation", note, meta=meta)
+        await eng.db_log(session_id, "frame_observation", note, meta=meta)
+        await eng.db_log_forensic(
+            session_id,
+            "seen",
+            frame_id=fid,
+            seen_text=note,
+            storage_key=storage_key,
+            payload=meta,
+        )
+        # Rate-limited durable SEEN crystals (clinical UI cues)
+        asyncio.create_task(
+            eng.maybe_crystallize_seen(sess, note, frame_id=fid)
+        )
+        try:
+            payload = {
+                "type": "observation",
+                "text": note,
+                "frame_id": fid,
+            }
+            if "GUIDANCE:" in note:
+                # Dual-channel for UI: full note + guidance slice
+                gpart = note.split("GUIDANCE:", 1)[-1].strip()
+                if gpart:
+                    payload["guidance"] = gpart[:500]
+            await ws.send_json(payload)
+        except Exception:
+            pass
     except Exception as e:
+        # Unlock cadence after crash so observes do not stall for the rest of the hour
+        sess.last_observe_at = max(0.0, time.time() - (OBSERVE_INTERVAL_S * 0.6))
         logger.warning("LN-Observer bg frame observe failed: %s", e)
 
 
@@ -464,7 +476,6 @@ async def observer_ws(ws: WebSocket, session_id: str):
     await ws.send_json({"type": "ready", "session_id": session_id})
 
     frame_counter = 0
-    OBSERVE_EVERY_N = 10
 
     try:
         while True:
@@ -548,14 +559,9 @@ async def observer_ws(ws: WebSocket, session_id: str):
                             "iso": fmeta.get("iso"),
                         },
                     )
-                now = time.time()
-                if (
-                    frame_counter % OBSERVE_EVERY_N == 0
-                    and (now - sess.last_observe_at) >= OBSERVE_DEBOUNCE_S
-                    and not sess.vision_inflight
-                ):
-                    sess.last_observe_at = now
-                    # QUANTUM-CRYSTAL-ARCH — never block chat WS on lean observe
+                # QUANTUM-CRYSTAL-ARCH — count + wall-clock observe (static screens)
+                if eng.should_schedule_observe(sess, frame_counter):
+                    sess.last_observe_at = time.time()
                     asyncio.create_task(
                         _bg_frame_observe(ws, eng, sess, session_id)
                     )
@@ -612,8 +618,10 @@ async def observer_ws(ws: WebSocket, session_id: str):
                 await ws.send_json({"type": "thinking"})
                 look_prompt = (
                     msg.get("text")
-                    or "Look closely at what is on screen right now and note "
-                       "clinically relevant cues for the coach."
+                    or "Look closely at the live screen and recent spoken content. "
+                       "Give actionable coaching guidance the coach can use now "
+                       "(what to say/ask/track), plus brief SEEN notes only for "
+                       "legible on-screen text."
                 )
                 fid = sess.last_frame_id or ""
                 fr = sess.frame_by_id(fid) if fid else None
@@ -671,11 +679,16 @@ async def observer_ws(ws: WebSocket, session_id: str):
                         frame_id=fid,
                     )
                     await ws.send_json({"type": "ln_reply", "text": note})
-                    await ws.send_json({
+                    obs_payload = {
                         "type": "observation",
                         "text": note,
                         "frame_id": fid,
-                    })
+                    }
+                    if "GUIDANCE:" in note:
+                        gpart = note.split("GUIDANCE:", 1)[-1].strip()
+                        if gpart:
+                            obs_payload["guidance"] = gpart[:500]
+                    await ws.send_json(obs_payload)
 
             elif mtype == "end":
                 # QUANTUM-CRYSTAL-ARCH — explicit end closes + summarizes (not reconnect grace)

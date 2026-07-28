@@ -516,7 +516,11 @@ function onWsMessage(ev){
   else if(m.type === "observation"){
     const fid = m.frame_id || "";
     const body = m.text || m.observation || "";
+    const guide = (m.guidance || "").trim();
     addMsg("obs", "LN noticed"+(fid?(" ["+fid+"]"):""), body);
+    if(guide){
+      addMsg("ln", "Little Nate — guidance", guide);
+    }
     if(fid) showForensic(fid, "LN looked");
     setIris("watching");
   }
@@ -721,6 +725,19 @@ function stopMedia(closeWs){
   if(closeWs && ws){ try{ws.close();}catch(e){} ws=null; }
   _lastFrameData = null;
 }
+
+/* Prevent leftover screen-share capture when tab closes / laptop sleeps mid-session. */
+function _emergencyReleaseCapture(){
+  try{
+    if(sessionId && ws && ws.readyState === 1){
+      ws.send(JSON.stringify({type:"end"}));
+    }
+  }catch(e){}
+  stopMedia(true);
+  sessionId = null;
+}
+window.addEventListener("pagehide", _emergencyReleaseCapture);
+window.addEventListener("beforeunload", _emergencyReleaseCapture);
 
 function addMsg(kind, who, text){
   const div = document.createElement("div");
