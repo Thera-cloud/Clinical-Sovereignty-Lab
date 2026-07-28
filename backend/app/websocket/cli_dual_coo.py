@@ -244,6 +244,13 @@ def enqueue_ceo(
         "created_at": time.time(),
         "status": "pending_ceo",
     }
+    # QUANTUM-CRYSTAL-ARCH — persist decision brief on Redis item (email/dashboard match)
+    try:
+        from app.services.ceo_brief_schema import attach_ceo_brief_to_item
+
+        attach_ceo_brief_to_item(item)
+    except Exception as brief_err:
+        logger.debug("ceo brief attach: %s", brief_err)
     try:
         c.lpush(ceo_inbox_key(), json.dumps(item, default=str))
         c.ltrim(ceo_inbox_key(), 0, 199)

@@ -74,15 +74,34 @@ async def get_leaderboard(request: Request, days: int = 30, _admin=Depends(requi
 async def post_bakeoff(request: Request, body: Optional[Dict[str, Any]] = None, _admin=Depends(require_admin)):
     from app.services.ln7_bakeoff_engine import run_full_scorecard
     body = body or {}
+    rid = str(body.get("revision_id") or "LN7-baseline")
     result = await run_full_scorecard(
         _pool(request),
-        revision_id=str(body.get("revision_id") or "LN7-baseline"),
+        revision_id=rid,
         mode=str(body.get("mode") or "max"),
         include_public=bool(body.get("include_public", True)),
         include_private=bool(body.get("include_private", True)),
         seed_golden=bool(body.get("seed_golden", False)),
     )
-    return {"status": "ok" if result.get("ok") else "error", **result}
+    # QUANTUM-CRYSTAL-ARCH — re-assess + READY renotify when shadow candidate clears packs
+    notify_out = None
+    if result.get("ok") and rid and rid != "LN7-baseline":
+        try:
+            from app.services.ln7_revision import notify_revision_candidate
+            from app.services.ln7_revision_readiness import assess_revision_readiness
+
+            ready = await assess_revision_readiness(_pool(request), rid)
+            if ready.get("ready"):
+                notify_out = await notify_revision_candidate(
+                    _pool(request), rid, force_ready=True
+                )
+        except Exception as exc:
+            notify_out = {"status": "error", "error": str(exc)[:120]}
+    return {
+        "status": "ok" if result.get("ok") else "error",
+        **result,
+        "ceo_notify": notify_out,
+    }
 
 
 @router.post("/public-benches")
@@ -213,8 +232,26 @@ async def post_register_revision(
         scorecard=body.get("scorecard"),
     )
     if result.get("ok") and body.get("notify_ceo"):
-        await notify_revision_candidate(result["revision_id"])
+        result["ceo_notify"] = await notify_revision_candidate(
+            _pool(request), result["revision_id"]
+        )
     return result
+
+
+@router.get("/revision/{revision_id}/readiness")
+async def get_revision_readiness(
+    revision_id: str,
+    request: Request,
+    _admin=Depends(require_admin),
+):
+    """Admin/debug readiness snapshot used by Dual-COO CEO LN7 briefs."""
+    from app.services.ln7_revision_readiness import assess_revision_readiness
+
+    rid = (revision_id or "").strip()
+    if not rid:
+        raise HTTPException(422, "revision_id required")
+    readiness = await assess_revision_readiness(_pool(request), rid)
+    return {"status": "ok", "readiness": readiness, "non_clinical_claim": True}
 
 
 @router.post("/revision/activate")
@@ -299,7 +336,18 @@ async def post_canary_evaluate(
         raise HTTPException(422, "revision_id required")
     if body.get("start"):
         await start_canary(_pool(request), rid, incumbent_id=str(body.get("incumbent_id") or "LN7-baseline"))
-    return await evaluate_canary(_pool(request), rid)
+    result = await evaluate_canary(_pool(request), rid)
+    # QUANTUM-CRYSTAL-ARCH — READY renotify when gate awaits CEO
+    if result.get("action") == "await_ceo" and result.get("ok"):
+        try:
+            from app.services.ln7_revision import notify_revision_candidate
+
+            result["ceo_notify"] = await notify_revision_candidate(
+                _pool(request), rid, force_ready=True
+            )
+        except Exception as exc:
+            result["ceo_notify"] = {"status": "error", "error": str(exc)[:120]}
+    return result
 
 
 @router.get("/contestants")

@@ -130,6 +130,9 @@ class TestCeoInboxNotify(unittest.TestCase):
             }
         )
         self.assertIn("WHAT HAPPENED", brief["summary_block"])
+        self.assertIn("WHAT IT SHOULD DO", brief["summary_block"])
+        self.assertIn("WHAT IT SHOULD NOT BE", brief["summary_block"])
+        self.assertIn("BOTTOM LINE", brief["summary_block"])
         self.assertIn("WHAT I NEED FROM YOU", brief["summary_block"])
         self.assertIn("healthy response", brief["reasoning"].lower())
         self.assertNotEqual(brief["objective"], "Trust YELLOW: Token Lab (ENDPOINT_DOWN)")

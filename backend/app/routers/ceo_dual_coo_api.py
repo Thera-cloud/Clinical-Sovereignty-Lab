@@ -97,9 +97,13 @@ async def ceo_inbox(
     limit: int = 50,
     _: Dict[str, Any] = Depends(require_admin),
 ):
+    from app.services.ceo_inbox_notify import enrich_ceo_inbox_item
     from app.websocket.cli_dual_coo import ceo_inbox_summary, peek_ceo_inbox
 
-    items = peek_ceo_inbox(max(1, min(limit, 100)))
+    items = [
+        enrich_ceo_inbox_item(it)
+        for it in peek_ceo_inbox(max(1, min(limit, 100)))
+    ]
     summary = ceo_inbox_summary()
     return {"status": "ok", "summary": summary, "items": items}
 

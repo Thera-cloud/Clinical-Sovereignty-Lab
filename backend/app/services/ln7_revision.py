@@ -261,15 +261,97 @@ async def activate_revision(
         return {"ok": False, "error": str(exc)}
 
 
-async def notify_revision_candidate(revision_id: str) -> None:
-    """RED-class enqueue for Dual-COO + CEO before activate."""
+async def notify_revision_candidate(
+    db_pool,
+    revision_id: str,
+    *,
+    force_ready: bool = False,
+) -> Dict[str, Any]:
+    """Enqueue Dual-COO CEO ask with readiness brief (YELLOW if premature, RED if ready).
+
+    force_ready=True after canary await_ceo — still re-assesses; only sets RED/activate
+    when readiness.ready (or force_class allows).
+    """
+    only_when_ready = os.getenv("LN7_CEO_NOTIFY_ONLY_WHEN_READY", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
     try:
-        from app.websocket.cli_dual_coo import RISK_RED, enqueue_ceo
-        enqueue_ceo(
-            risk=RISK_RED,
-            title=f"LN7 revision candidate: {revision_id}",
-            detail="Awaiting Dual-COO peer review + CEO APPROVE before serving flip.",
-            origin="ln7",
+        from app.services.ln7_revision_readiness import (
+            assess_revision_readiness,
+            checklist_one_liner,
         )
+        from app.websocket.cli_dual_coo import RISK_RED, RISK_YELLOW, enqueue_ceo
+
+        readiness = await assess_revision_readiness(
+            db_pool,
+            revision_id,
+            force_class="ready" if force_ready else None,
+        )
+        ready = bool(readiness.get("ready"))
+        if only_when_ready and not ready:
+            return {"status": "skipped", "reason": "not_ready_only_when_ready", "readiness": readiness}
+
+        cls = "ready" if ready else "premature"
+        title = (
+            f"LN7 revision candidate: {revision_id} [READY]"
+            if ready
+            else f"LN7 revision candidate: {revision_id} [HOLD]"
+        )
+        checklist = checklist_one_liner(readiness)
+        bottom = (
+            f"APPROVE to activate {revision_id} as default LN7 brain."
+            if ready
+            else f"HOLD — {revision_id} premature ({readiness.get('reason')})."
+        )
+        detail = f"{bottom} | {checklist}"
+        payload: Dict[str, Any] = {
+            "kind": "ln7_revision_candidate",
+            "revision_id": revision_id,
+            "ready": ready,
+            "readiness": readiness,
+            "readiness_class": cls,
+            "checklist": checklist,
+            "status": readiness.get("status"),
+            "base_checkpoint": readiness.get("base_checkpoint"),
+            "adapter_path": readiness.get("adapter_path"),
+            "peft_url": readiness.get("peft_url"),
+            "bottom_line": bottom,
+            "what_it_should_do": (
+                [
+                    "On APPROVE: flip Sanctuary CLI LN7 serving alias to this revision.",
+                    "Prior revision stays registered for rollback.",
+                ]
+                if ready
+                else [
+                    "Informational HOLD until bakeoff/canary READY renotify.",
+                    "Do not treat this as an activate authorization.",
+                ]
+            ),
+            "what_it_should_not_be": [
+                "Not clinical AGI / Tier-2 evidence.",
+                "Not auto-clinical traffic.",
+                (
+                    "APPROVE does not invent a missing adapter."
+                    if ready
+                    else "APPROVE will not activate while readiness.ready=false."
+                ),
+            ],
+            "apply": {
+                "action": "activate" if ready else "none",
+                "revision_id": revision_id,
+                "kind": "ln7_activate" if ready else "ln7_hold",
+            },
+        }
+        risk = RISK_RED if ready else RISK_YELLOW
+        enq = enqueue_ceo(
+            risk=risk,
+            title=title,
+            detail=detail[:2000],
+            origin="ln7",
+            task_id=f"{revision_id}:{cls}",
+            payload=payload,
+        )
+        return {"status": enq.get("status"), "ready": ready, "enqueue": enq, "readiness": readiness}
     except Exception as exc:
         logger.debug("LN7 candidate notify: %s", exc)
+        return {"status": "error", "error": str(exc)[:200]}

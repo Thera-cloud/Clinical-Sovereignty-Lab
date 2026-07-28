@@ -29,7 +29,10 @@ green outcome / reject-edit usage-event
 
 - `GET /api/ln7/train/jobs`
 - `POST /api/ln7/train/enqueue` `{outcome_id}`
-- `POST /api/ln7/canary/evaluate` `{revision_id, start?}`
+- `POST /api/ln7/canary/evaluate` `{revision_id, start?}` — on `await_ceo` + gate ok, re-notifies CEO with `[READY]` brief
+- `GET /api/ln7/revision/{id}/readiness` — admin readiness snapshot for Dual-COO briefs
+
+CEO inbox LN7 asks include readiness facts; first notify after train is often YELLOW HOLD, second after canary/bakeoff is RED READY (see RUNBOOK).
 
 ## Worker (never GREEN)
 

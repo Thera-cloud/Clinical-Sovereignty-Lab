@@ -294,6 +294,9 @@ class ApprovalProtocolService:
             "expected_impact": (details.get("expected_impact") or "").strip()
                                or "Impact not recorded.",
             "rollback": rollback_text.strip() if isinstance(rollback_text, str) else str(rollback_text),
+            "what_it_should_do": details.get("what_it_should_do") or [],
+            "what_it_should_not_be": details.get("what_it_should_not_be") or [],
+            "bottom_line": (details.get("bottom_line") or "").strip(),
             "deployment_window": details.get("deployment_window"),
             "data_sources": [s for s in (details.get("data_sources") or []) if s],
             "token_cost_estimate": details.get("token_cost_estimate"),
@@ -801,11 +804,14 @@ class ApprovalProtocolService:
         risk = (proposal.get("risk") or "medium").upper()
         pid_short = str(proposal.get("proposal_id", ""))[:8]
 
-        # Prefer the objective; fall back to the title if it's a legacy stub.
+        # Prefer bottom_line (CEO decision briefs); else objective; else title.
+        bottom = str(details.get("bottom_line") or "").strip()
         objective = details["objective"]
         legacy_objective = objective.startswith("No objective recorded")
         summary = self._sms_truncate(
-            proposal["title"] if legacy_objective else objective,
+            bottom
+            if bottom
+            else (proposal["title"] if legacy_objective else objective),
             self._SMS_OBJECTIVE_MAX,
         )
 

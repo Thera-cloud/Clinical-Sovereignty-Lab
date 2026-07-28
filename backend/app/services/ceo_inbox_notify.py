@@ -23,6 +23,12 @@ from typing import Any, Dict, Optional
 from uuid import UUID
 
 from app.ceo_notify_policy import ceo_external_notify_enabled
+from app.services.ceo_brief_schema import (
+    default_decision_fields,
+    format_decision_summary_block,
+    normalize_decision_fields,
+    payload_has_decision_brief,
+)
 
 logger = logging.getLogger("nate.ceo_inbox_notify")
 
@@ -71,11 +77,53 @@ _TRUST_CATEGORY_EN = {
 }
 
 
+def _with_decision(
+    *,
+    objective: str,
+    reasoning: str,
+    steps: list,
+    risk: str,
+    expected_impact: str,
+    rollback: str,
+    decision: Optional[Dict[str, Any]] = None,
+    payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Attach canonical decision sections + summary_block."""
+    payload = payload if isinstance(payload, dict) else {}
+    base = decision or default_decision_fields(risk)
+    # Prefer payload overrides when present
+    if payload.get("what_it_should_do") or payload.get("bottom_line"):
+        base = normalize_decision_fields(
+            what_it_should_do=payload.get("what_it_should_do") or base["what_it_should_do"],
+            what_it_should_not_be=payload.get("what_it_should_not_be")
+            or base["what_it_should_not_be"],
+            bottom_line=payload.get("bottom_line") or base["bottom_line"],
+        )
+    return {
+        "objective": objective[:600],
+        "reasoning": reasoning[:1200],
+        "action_steps": steps[:8],
+        "expected_impact": expected_impact[:400],
+        "rollback": rollback,
+        "what_it_should_do": base["what_it_should_do"],
+        "what_it_should_not_be": base["what_it_should_not_be"],
+        "bottom_line": base["bottom_line"],
+        "summary_block": format_decision_summary_block(
+            objective=objective,
+            what_it_should_do=base["what_it_should_do"],
+            what_it_should_not_be=base["what_it_should_not_be"],
+            bottom_line=base["bottom_line"],
+            steps=steps,
+            risk=risk,
+        ),
+    }
+
+
 def build_ceo_review_brief(item: Dict[str, Any]) -> Dict[str, Any]:
-    """Build English objective/reasoning/action_steps for CEO email + SMS.
+    """Build English objective + decision brief for CEO email + SMS + dashboard.
 
     Call sites may pass terse titles (codes, task ids). This expands them into
-    what happened, why it matters, and what Nathan should do.
+    what happened, what APPROVE should/should not mean, and bottom line.
     """
     risk = str(item.get("risk") or "YELLOW").upper()
     title = (item.get("title") or "CEO inbox item").strip()
@@ -83,6 +131,16 @@ def build_ceo_review_brief(item: Dict[str, Any]) -> Dict[str, Any]:
     payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
     origin = str(item.get("origin") or "cloud")
     task_id = str(item.get("task_id") or "")
+    title_l = title.lower()
+    kind = str(payload.get("kind") or "")
+
+    # LN7 revision candidate (promote / premature HOLD)
+    if (
+        kind == "ln7_revision_candidate"
+        or "ln7 revision candidate" in title_l
+        or (origin == "ln7" and "revision" in title_l and "activat" not in title_l)
+    ):
+        return _build_ln7_revision_brief(item, risk=risk, title=title, detail=detail, payload=payload)
 
     # Prefer caller-supplied brief fields when present (patent_reflect uses this path)
     if payload.get("ceo_summary") or payload.get("what_happened"):
@@ -111,18 +169,33 @@ def build_ceo_review_brief(item: Dict[str, Any]) -> Dict[str, Any]:
             if payload.get("kind") == "patent_reflect"
             else "Clears CEO inbox after your reply; linked apply runs only on APPROVE."
         )
-        return {
-            "objective": objective,
-            "reasoning": reasoning,
-            "action_steps": steps[:8],
-            "expected_impact": str(
-                payload.get("expected_impact") or impact_default
-            )[:400],
-            "rollback": "No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
-            "summary_block": _format_summary_block(objective, reasoning, steps, risk),
-        }
+        decision = normalize_decision_fields(
+            what_it_should_do=payload.get("what_it_should_do")
+            or [
+                "Authorize Dual-COO follow-up / sandbox or IDE brief as described.",
+                "Clear this CEO inbox item after your reply.",
+            ],
+            what_it_should_not_be=payload.get("what_it_should_not_be")
+            or [
+                "Not an automatic edit of filed patent claim documents.",
+                "Not a silent production ship without your verb.",
+            ],
+            bottom_line=payload.get("bottom_line")
+            or (
+                "APPROVE only if you accept the proposed Dual-COO path; else REJECT/HOLD."
+            ),
+        )
+        return _with_decision(
+            objective=objective,
+            reasoning=reasoning,
+            steps=steps[:8],
+            risk=risk,
+            expected_impact=str(payload.get("expected_impact") or impact_default)[:400],
+            rollback="No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
+            decision=decision,
+            payload=payload,
+        )
 
-    title_l = title.lower()
     cat = str(payload.get("category") or "").upper()
     auditor = str(payload.get("auditor") or "").strip()
 
@@ -161,17 +234,32 @@ def build_ceo_review_brief(item: Dict[str, Any]) -> Dict[str, Any]:
         ask = str(payload.get("ask_of_ceo") or "").strip()
         if ask:
             steps = [ask] + steps
-        return {
-            "objective": objective[:600],
-            "reasoning": reasoning[:1200],
-            "action_steps": steps[:8],
-            "expected_impact": (
+        decision = normalize_decision_fields(
+            what_it_should_do=[
+                "Acknowledge a production trust check failure and clear the inbox when reviewed.",
+                "Drive remediation via Trust / auditor tabs before treating as green.",
+            ],
+            what_it_should_not_be=[
+                "Not an automatic endpoint fix — APPROVE does not repair the failing check.",
+                "Not a Dual-COO learning / patent task.",
+            ],
+            bottom_line=(
+                f"{risk_word}: review Trust / {who}; APPROVE to ack when understood, REJECT if false alert."
+            ),
+        )
+        return _with_decision(
+            objective=objective[:600],
+            reasoning=reasoning[:1200],
+            steps=steps[:8],
+            risk=risk_word,
+            expected_impact=(
                 "APPROVE records that you reviewed the trust alert and clears the CEO inbox item. "
                 "It does not auto-fix the endpoint."
             ),
-            "rollback": "No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
-            "summary_block": _format_summary_block(objective, reasoning, steps, risk_word),
-        }
+            rollback="No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
+            decision=decision,
+            payload=payload,
+        )
 
     # Six-Quotient battery
     if "six-quotient" in title_l or payload.get("kind", "").startswith("six_quotient"):
@@ -190,14 +278,29 @@ def build_ceo_review_brief(item: Dict[str, Any]) -> Dict[str, Any]:
             "Reply APPROVE if you accept the finding and want growth crystals / Dual-COO follow-up to proceed as queued.",
             "Reply HOLD if you want the item parked without apply.",
         ]
-        return {
-            "objective": objective[:600],
-            "reasoning": reasoning[:1200],
-            "action_steps": steps,
-            "expected_impact": "Clears inbox; APPROVE may allow linked growth/enqueue paths already prepared.",
-            "rollback": "No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
-            "summary_block": _format_summary_block(objective, reasoning, steps, risk),
-        }
+        decision = normalize_decision_fields(
+            what_it_should_do=[
+                "Accept or park a Six-Quotient finding for Dual-COO / growth follow-up.",
+            ],
+            what_it_should_not_be=[
+                "Not an automatic clinical prompt rewrite without your APPROVE path.",
+            ],
+            bottom_line=(
+                "RED regression — decide now."
+                if risk == "RED"
+                else "YELLOW dip — APPROVE to proceed or HOLD to park."
+            ),
+        )
+        return _with_decision(
+            objective=objective[:600],
+            reasoning=reasoning[:1200],
+            steps=steps,
+            risk=risk,
+            expected_impact="Clears inbox; APPROVE may allow linked growth/enqueue paths already prepared.",
+            rollback="No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
+            decision=decision,
+            payload=payload,
+        )
 
     # Clinical / coach hold
     if "clinical" in title_l or "clinical_hold" in title_l or risk == "RED" and "coach" in title_l:
@@ -211,14 +314,26 @@ def build_ceo_review_brief(item: Dict[str, Any]) -> Dict[str, Any]:
             "Reply APPROVE only if you authorize applying the linked shadow/actions.",
             "Reply REJECT or HOLD to dismiss without applying.",
         ]
-        return {
-            "objective": objective[:600],
-            "reasoning": reasoning[:1200],
-            "action_steps": steps,
-            "expected_impact": "APPROVE may apply linked clinical shadow / crystal actions.",
-            "rollback": "No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
-            "summary_block": _format_summary_block(objective, reasoning, steps, risk),
-        }
+        decision = normalize_decision_fields(
+            what_it_should_do=[
+                "Authorize applying linked clinical shadow / crystal actions on APPROVE.",
+            ],
+            what_it_should_not_be=[
+                "Not a routine marketing or trust-baseline ack.",
+                "Not auto-ship — Dual-COO waits for your verb.",
+            ],
+            bottom_line="APPROVE only if you authorize clinical apply; else REJECT/HOLD.",
+        )
+        return _with_decision(
+            objective=objective[:600],
+            reasoning=reasoning[:1200],
+            steps=steps,
+            risk=risk,
+            expected_impact="APPROVE may apply linked clinical shadow / crystal actions.",
+            rollback="No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
+            decision=decision,
+            payload=payload,
+        )
 
     # Generic fallback — still English-first
     objective = (
@@ -232,14 +347,120 @@ def build_ceo_review_brief(item: Dict[str, Any]) -> Dict[str, Any]:
         + ". Reference IDs are for tracing only — the ask is the decision above."
     )
     steps = _default_reply_steps(risk)
-    return {
-        "objective": objective[:600],
-        "reasoning": reasoning[:1200],
-        "action_steps": steps,
-        "expected_impact": "Clears CEO inbox after your reply; linked apply runs only on APPROVE.",
-        "rollback": "No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
-        "summary_block": _format_summary_block(objective, reasoning, steps, risk),
-    }
+    decision = default_decision_fields(risk)
+    return _with_decision(
+        objective=objective[:600],
+        reasoning=reasoning[:1200],
+        steps=steps,
+        risk=risk,
+        expected_impact="Clears CEO inbox after your reply; linked apply runs only on APPROVE.",
+        rollback="No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
+        decision=decision,
+        payload=payload,
+    )
+
+
+def _build_ln7_revision_brief(
+    item: Dict[str, Any],
+    *,
+    risk: str,
+    title: str,
+    detail: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    rid = str(
+        payload.get("revision_id")
+        or item.get("task_id")
+        or ""
+    ).strip()
+    if not rid:
+        m = re.search(r"(LN7-[0-9TZz:-]+)", title)
+        rid = m.group(1) if m else "unknown"
+    readiness = payload.get("readiness") if isinstance(payload.get("readiness"), dict) else {}
+    ready = bool(payload.get("ready") if "ready" in payload else readiness.get("ready"))
+    checks = readiness.get("checks") if isinstance(readiness.get("checks"), dict) else {}
+    checklist = str(payload.get("checklist") or readiness.get("reason") or detail or "")
+    status = str(payload.get("status") or readiness.get("status") or checks.get("status") or "")
+    base = str(payload.get("base_checkpoint") or readiness.get("base_checkpoint") or "")
+    adapter = str(payload.get("adapter_path") or readiness.get("adapter_path") or "")
+    peft = str(payload.get("peft_url") or readiness.get("peft_url") or "")
+    pack_n = readiness.get("pack_n", checks.get("private_pack_n", "?"))
+    canary = str(
+        readiness.get("canary_status") or checks.get("canary_status") or "none"
+    )
+
+    lines = [
+        f"Revision: {rid}",
+        f"Status: {status or 'n/a'} · ready={ready}",
+        f"Base: {base or 'n/a'}",
+        f"Adapter: {adapter or '(missing)'}",
+        f"PEFT: {peft or '(missing)'}",
+        f"Private pack outcomes: n={pack_n}",
+        f"Canary: {canary}",
+        f"Checklist: {checklist[:400]}",
+    ]
+    objective = (
+        f"LN7 revision candidate {rid} "
+        + ("is READY for serving activate." if ready else "is PREMATURE — do not activate.")
+    )
+    reasoning = "\n".join(lines)
+
+    if ready:
+        decision = normalize_decision_fields(
+            what_it_should_do=[
+                "On APPROVE: flip Sanctuary CLI LN7 serving alias to this revision (activate_revision).",
+                "Keep prior revision registered for rollback via re-activate.",
+            ],
+            what_it_should_not_be=[
+                "Not clinical AGI / Tier-2 evidence.",
+                "Not auto-clinical traffic; LN7 path stays non-clinical coding.",
+                "APPROVE does not invent a missing adapter — readiness already verified PEFT smoke.",
+            ],
+            bottom_line=str(
+                payload.get("bottom_line")
+                or f"APPROVE to activate {rid} as default LN7 brain; REJECT/HOLD leaves shadow."
+            ),
+        )
+        steps = [
+            "Confirm private bakeoff + PEFT health match the checklist above.",
+            "Reply APPROVE to activate this revision (serving flip).",
+            "Reply REJECT or HOLD to leave incumbent serving / keep shadow.",
+        ]
+        impact = "APPROVE calls activate_revision for this candidate."
+        risk_out = "RED"
+    else:
+        decision = normalize_decision_fields(
+            what_it_should_do=[
+                "Treat as informational HOLD: training/register completed but promote gate not met.",
+                "Wait for private bakeoff + canary READY renotify before activating.",
+            ],
+            what_it_should_not_be=[
+                "Not an activate ask — APPROVE will not flip serving while readiness.ready=false.",
+                "Not AGI; not auto-clinical; missing adapter/PEFT/packs cannot be wished into existence.",
+            ],
+            bottom_line=str(
+                payload.get("bottom_line")
+                or f"HOLD — {rid} premature ({readiness.get('reason') or 'not ready'})."
+            ),
+        )
+        steps = [
+            "ACK or HOLD to clear noise, or leave pending until a READY renotify arrives.",
+            "Do not APPROVE expecting activate — apply is gated on readiness.ready.",
+            "Run private bakeoff / canary evaluate, then expect a second CEO ping with [READY].",
+        ]
+        impact = "No serving flip on APPROVE while premature."
+        risk_out = risk if risk in ("YELLOW", "RED") else "YELLOW"
+
+    return _with_decision(
+        objective=objective[:600],
+        reasoning=reasoning[:1200],
+        steps=steps,
+        risk=risk_out,
+        expected_impact=impact,
+        rollback="Rollback = re-activate prior revision_id via Command / API.",
+        decision=decision,
+        payload=payload,
+    )
 
 
 def _default_reply_steps(risk: str) -> list:
@@ -257,14 +478,44 @@ def _default_reply_steps(risk: str) -> list:
 
 
 def _format_summary_block(
-    objective: str, reasoning: str, steps: list, risk: str
+    objective: str,
+    reasoning: str,
+    steps: list,
+    risk: str,
+    *,
+    what_it_should_do: Any = None,
+    what_it_should_not_be: Any = None,
+    bottom_line: str = "",
 ) -> str:
-    step_lines = "\n".join(f"  {i}. {s}" for i, s in enumerate(steps[:6], 1))
-    return (
-        f"=== WHAT HAPPENED ({risk}) ===\n{objective.strip()}\n\n"
-        f"=== WHY IT MATTERS ===\n{reasoning.strip()}\n\n"
-        f"=== WHAT I NEED FROM YOU ===\n{step_lines}\n"
+    """Legacy signature retained; emits canonical decision sections."""
+    decision = normalize_decision_fields(
+        what_it_should_do=what_it_should_do
+        or ["See WHAT I NEED — authorize or dismiss this Dual-COO item."],
+        what_it_should_not_be=what_it_should_not_be
+        or ["Not an automatic production ship without your reply verb."],
+        bottom_line=bottom_line
+        or (reasoning[:240] if reasoning else f"{risk}: review and reply ACK/APPROVE/REJECT/HOLD."),
     )
+    return format_decision_summary_block(
+        objective=objective,
+        what_it_should_do=decision["what_it_should_do"],
+        what_it_should_not_be=decision["what_it_should_not_be"],
+        bottom_line=decision["bottom_line"],
+        steps=steps,
+        risk=risk,
+    )
+
+
+def enrich_ceo_inbox_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Lazy backfill decision brief onto a Redis inbox item for GET /inbox."""
+    if not isinstance(item, dict):
+        return item
+    payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+    if payload_has_decision_brief(payload) and isinstance(item.get("brief"), dict):
+        return item
+    from app.services.ceo_brief_schema import attach_ceo_brief_to_item
+
+    return attach_ceo_brief_to_item(dict(item))
 
 
 def ceo_short_id(item_id: str) -> str:
@@ -594,6 +845,48 @@ async def _apply_ceo_payload(
             )
         except Exception as e:
             out["ln_rule_error"] = str(e)[:200]
+
+    # QUANTUM-CRYSTAL-ARCH — LN7 READY candidate: APPROVE → activate_revision
+    if payload.get("kind") == "ln7_revision_candidate":
+        apply = payload.get("apply") if isinstance(payload.get("apply"), dict) else {}
+        readiness = (
+            payload.get("readiness") if isinstance(payload.get("readiness"), dict) else {}
+        )
+        ready = bool(
+            payload.get("ready")
+            if "ready" in payload
+            else readiness.get("ready")
+        )
+        action = str(apply.get("action") or "").strip().lower()
+        rid = str(
+            apply.get("revision_id")
+            or payload.get("revision_id")
+            or ""
+        ).strip()
+        if not ready or action != "activate" or not rid:
+            out["ln7_revision"] = {
+                "ok": False,
+                "skipped": True,
+                "reason": "not_ready_or_no_activate",
+                "ready": ready,
+                "action": action,
+                "revision_id": rid,
+            }
+        else:
+            try:
+                from app.services.ln7_revision import activate_revision
+
+                out["ln7_revision"] = await activate_revision(
+                    db_pool,
+                    rid,
+                    promoted_by=approved_by or "ceo",
+                    ceo_decision_id=str(
+                        apply.get("ceo_decision_id") or payload.get("ceo_decision_id") or ""
+                    )
+                    or None,
+                )
+            except Exception as e:
+                out["ln7_revision_error"] = str(e)[:200]
     return out
 
 
@@ -640,6 +933,10 @@ async def _insert_ceo_proposal(db_pool, item: Dict[str, Any]) -> Optional[Dict[s
             "action_steps": brief["action_steps"],
             "expected_impact": brief["expected_impact"],
             "rollback": brief["rollback"],
+            "what_it_should_do": brief.get("what_it_should_do") or [],
+            "what_it_should_not_be": brief.get("what_it_should_not_be") or [],
+            "bottom_line": brief.get("bottom_line") or "",
+            "summary_block": brief.get("summary_block") or "",
         },
     }
     # Lead with English summary; technical refs last

@@ -84,6 +84,15 @@ class Ln7ContinuousAgent:
                     r["revision_id"],
                     result.get("action") or result.get("error"),
                 )
+                if result.get("action") == "await_ceo" and result.get("ok"):
+                    try:
+                        from app.services.ln7_revision import notify_revision_candidate
+
+                        await notify_revision_candidate(
+                            self._db, r["revision_id"], force_ready=True
+                        )
+                    except Exception as nexc:
+                        logger.warning("LN7 READY renotify: %s", nexc)
         except Exception as exc:
             logger.warning("LN7 canary sweep: %s", exc)
 

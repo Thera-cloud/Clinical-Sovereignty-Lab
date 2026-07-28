@@ -66,6 +66,18 @@ button.all-btn { font-weight: 600; letter-spacing: 0.02em; }
   white-space: pre-wrap; line-height: 1.45;
 }
 .detail { color: var(--muted); font-size: 0.9rem; white-space: pre-wrap; }
+.brief-block {
+  margin: 10px 0; padding: 10px 12px;
+  border-left: 2px solid var(--gold-dim);
+  background: rgba(201, 169, 98, 0.06);
+}
+.brief-block h4 {
+  margin: 0 0 4px; font-size: 0.72rem; letter-spacing: 0.06em;
+  color: var(--gold); font-weight: 600; text-transform: uppercase;
+}
+.brief-block ul { margin: 0 0 10px 1.1rem; padding: 0; color: var(--text); font-size: 0.88rem; }
+.brief-block ul:last-child, .brief-block .bl { margin-bottom: 0; }
+.brief-block .bl { color: var(--gold-bright); font-size: 0.92rem; white-space: pre-wrap; }
 .meta { color: #666; font-size: 0.78rem; margin-top: 6px; }
 .row-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
 .bulk-label { color: var(--muted); font-size: 0.85rem; margin-right: 4px; }
@@ -182,7 +194,31 @@ function esc(s) {
 
 function itemAsk(it) {
   const p = it.payload || {};
-  return p.ask_of_ceo || p.ceo_summary || p.what_happened || '';
+  const b = it.brief || {};
+  return b.bottom_line || p.bottom_line || p.ask_of_ceo || p.ceo_summary || p.what_happened || '';
+}
+
+function asLines(v) {
+  if (!v) return [];
+  if (Array.isArray(v)) return v.map(x => String(x || '').trim()).filter(Boolean);
+  const s = String(v).trim();
+  return s ? [s] : [];
+}
+
+function renderBrief(it) {
+  const p = it.payload || {};
+  const b = it.brief || {};
+  const doL = asLines(b.what_it_should_do || p.what_it_should_do);
+  const notL = asLines(b.what_it_should_not_be || p.what_it_should_not_be);
+  const bl = String(b.bottom_line || p.bottom_line || '').trim();
+  if (!doL.length && !notL.length && !bl) return '';
+  const li = (arr) => arr.map(x => `<li>${esc(x)}</li>`).join('');
+  return `
+    <div class="brief-block">
+      ${doL.length ? `<h4>What it should do</h4><ul>${li(doL)}</ul>` : ''}
+      ${notL.length ? `<h4>What it should not be</h4><ul>${li(notL)}</ul>` : ''}
+      ${bl ? `<h4>Bottom line</h4><div class="bl">${esc(bl)}</div>` : ''}
+    </div>`;
 }
 
 function decisionButtons(id) {
@@ -208,11 +244,13 @@ async function loadInbox() {
   const items = data.items || [];
   document.getElementById('inbox').innerHTML = items.length ? items.map(it => {
     const ask = itemAsk(it);
+    const briefHtml = renderBrief(it);
     return `
     <div class="item">
       <span class="badge ${esc(it.risk)}">${esc(it.risk)}</span>
       <div class="title">${esc(it.title)}</div>
-      ${ask ? `<div class="ask">${esc(ask)}</div>` : ''}
+      ${ask && !briefHtml ? `<div class="ask">${esc(ask)}</div>` : ''}
+      ${briefHtml}
       <div class="detail">${esc(it.detail)}</div>
       <div class="meta">${esc(it.origin)} · ${esc(it.task_id||'')} · ${new Date((it.created_at||0)*1000).toLocaleString()}</div>
       ${decisionButtons(it.id)}

@@ -28,8 +28,21 @@
 3. `POST /api/ln7/revision/register` with scorecard + notes → writes `docs/ln7/LN7_<ts>.md`.
 4. Shadow: set status `shadow` (candidate answers in parallel; not user-visible).
 5. Statistical gate: candidate CI lower bound > incumbent point on private held-out.
-6. Dual-COO + CEO APPROVE → `POST /api/ln7/revision/activate`.
+6. Dual-COO + CEO APPROVE → serving flip (`activate_revision` via CEO APPROVE apply, or `POST /api/ln7/revision/activate`).
 7. Rollback: re-activate previous `revision_id`.
+
+## CEO Dual-COO briefs (LN7 promote)
+
+`notify_ceo: true` on register always enqueues a CEO inbox item, but the brief is honesty-gated:
+
+| Wave | Risk | Title suffix | Meaning |
+|---|---|---|---|
+| After train/register | YELLOW | `[HOLD]` | Premature — missing packs/PEFT/canary; **APPROVE does not activate** |
+| After bakeoff/canary `await_ceo` | RED | `[READY]` | Readiness green — **APPROVE runs `activate_revision`** |
+
+Inspect readiness without pinging CEO: `GET /api/ln7/revision/{id}/readiness`.
+
+Brief sections (email + dashboard): **What it should do / What it should not be / Bottom line**. Premature ≠ activate.
 
 ## Add a contestant
 
@@ -46,6 +59,17 @@ Insert/update `ln7_contestants` with `base_url`, `model_id`, credentials in env,
 ## Kill switch
 
 Set `LN7_KILL_SWITCH=true` and recreate bridge/backend containers. Harness returns immediately with `error=kill_switch`.
+
+## CEO Dual-COO LN7 briefs
+
+Register / bakeoff / canary paths call `notify_revision_candidate(db_pool, revision_id)` with a **readiness** snapshot (`GET /api/ln7/revision/{id}/readiness`).
+
+| Wave | Risk | Title suffix | Meaning |
+|---|---|---|---|
+| Premature (worker just registered) | YELLOW | `[HOLD]` | Bakeoff/canary not green — **do not activate** |
+| Ready (canary `await_ceo` / bakeoff gate) | RED | `[READY]` | APPROVE runs `activate_revision` via `_apply_ceo_payload` |
+
+Email / SMS / `dashboard/ceo_inbox.html` share the same sections: **What it should do / What it should not be / Bottom line**. Premature ≠ activate. Opt-in suppress premature: `LN7_CEO_NOTIFY_ONLY_WHEN_READY=true` (default off so HOLD briefs still land).
 
 ## Continuous gated self-improvement (2026-07-28)
 
