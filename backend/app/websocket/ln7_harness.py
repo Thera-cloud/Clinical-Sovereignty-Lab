@@ -199,13 +199,21 @@ async def propose_candidates(
     system: str,
     n: Optional[int] = None,
     mode: Optional[str] = None,
+    revision_id: Optional[str] = None,
+    db_pool=None,
 ) -> List[Dict[str, Any]]:
     """N candidates at varied temperature via sovereign coder weights only."""
     if kill_switch_on():
         return []
     n = n or (2 if (mode or harness_mode()) == "fast" else best_of_n())
     try:
-        from app.services.little_nate_7 import coder_model, identity_system_preamble
+        from app.services.little_nate_7 import (
+            coder_model,
+            identity_system_preamble,
+            load_active_revision,
+            load_revision,
+            serve_target_from_revision,
+        )
         from app.services.nate_inference_router import NateInferenceRouter, TIER_CODING
     except Exception as exc:
         logger.warning("LN7 propose import failed: %s", exc)
@@ -218,6 +226,16 @@ async def propose_candidates(
         temps.append(0.4)
     model_tier = "fast" if (mode or harness_mode()) == "fast" else "deep"
     _ = coder_model(model_tier)
+    # QUANTUM-CRYSTAL-ARCH — serve PEFT / ollama tag for revision under test
+    rev = None
+    if db_pool is not None:
+        if revision_id:
+            rev = await load_revision(db_pool, revision_id)
+        if rev is None:
+            rev = await load_active_revision(db_pool)
+    target = serve_target_from_revision(rev, tier=model_tier)
+    model_override = target.get("model") or None
+    base_url_override = target.get("url") or None
 
     async def _one(temp: float, idx: int) -> Dict[str, Any]:
         t0 = time.time()
@@ -233,6 +251,8 @@ async def propose_candidates(
                     odpe_signal="TENSION",
                     allow_deep=(model_tier == "deep"),
                     providers_override=["sovereign", "home_gpu"],
+                    model_override=model_override,
+                    base_url_override=base_url_override,
                 ),
                 timeout=candidate_timeout_s(),
             )
@@ -451,12 +471,20 @@ async def generate_sovereign_reply(
     messages: List[Dict[str, Any]],
     *,
     mode: Optional[str] = None,
+    db_pool=None,
+    revision_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Interactive LN7 chat turn — sovereign/home_gpu only, never vendor."""
     if kill_switch_on():
         return {"ok": False, "error": "kill_switch", "text": "", "provider": "ln7"}
     try:
-        from app.services.little_nate_7 import coder_model, identity_system_preamble
+        from app.services.little_nate_7 import (
+            coder_model,
+            identity_system_preamble,
+            load_active_revision,
+            load_revision,
+            serve_target_from_revision,
+        )
         from app.services.nate_inference_router import NateInferenceRouter, TIER_CODING
     except Exception as exc:
         return {"ok": False, "error": f"import:{exc}", "text": "", "provider": "ln7"}
@@ -472,6 +500,13 @@ async def generate_sovereign_reply(
             user_parts.append(f"{role.upper()}: {content}")
     prompt = "\n\n".join(user_parts[-12:]) or "Say hello as Little Nate 7."
     model_tier = "fast" if (mode or harness_mode()) == "fast" else "deep"
+    rev = None
+    if db_pool is not None:
+        if revision_id:
+            rev = await load_revision(db_pool, revision_id)
+        if rev is None:
+            rev = await load_active_revision(db_pool)
+    target = serve_target_from_revision(rev, tier=model_tier)
     router = NateInferenceRouter()
     result = await router.generate(
         prompt=prompt,
@@ -483,6 +518,8 @@ async def generate_sovereign_reply(
         odpe_signal="TENSION",
         allow_deep=(model_tier == "deep"),
         providers_override=["sovereign", "home_gpu"],
+        model_override=target.get("model") or None,
+        base_url_override=target.get("url") or None,
     )
     text = (result or {}).get("text") or ""
     prov = (result or {}).get("provider") or "sovereign"
@@ -582,6 +619,8 @@ async def run_task(
     mode: Optional[str] = None,
     workspace_root: Optional[str] = None,
     session_key: Optional[str] = None,
+    revision_id: Optional[str] = None,
+    db_pool=None,
 ) -> Dict[str, Any]:
     """Full harness cycle for one task. Returns best survivor + metrics."""
     if kill_switch_on():
@@ -614,7 +653,9 @@ async def run_task(
         if enriched:
             prompt = enriched
 
-    candidates = await propose_candidates(prompt, system=sys, mode=mode)
+    candidates = await propose_candidates(
+        prompt, system=sys, mode=mode, revision_id=revision_id, db_pool=db_pool,
+    )
     ranked: List[Dict[str, Any]] = []
     attempts = 0
     for cand in candidates:

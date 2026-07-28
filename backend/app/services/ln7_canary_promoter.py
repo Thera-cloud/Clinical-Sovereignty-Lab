@@ -70,6 +70,35 @@ async def _passes_for_revision(db_pool, revision_id: str, *, limit: int = 50) ->
     return [bool(r["passed"]) for r in rows]
 
 
+async def _forgetting_monitor(db_pool, revision_id: str) -> Dict[str, Any]:
+    """Thin continual-learning control: recent vs older pack pass rates."""
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT passed, created_at FROM ln7_coding_outcomes
+            WHERE revision_id = $1 AND generator = 'ln7'
+              AND (metrics_json->>'pack') IS NOT NULL
+            ORDER BY created_at DESC LIMIT 20
+            """,
+            revision_id,
+        )
+    if len(rows) < 6:
+        return {"ok": True, "skipped": True, "n": len(rows)}
+    recent = [bool(r["passed"]) for r in rows[: len(rows) // 2]]
+    older = [bool(r["passed"]) for r in rows[len(rows) // 2 :]]
+    r_mean = sum(recent) / max(1, len(recent))
+    o_mean = sum(older) / max(1, len(older))
+    # Flag if recent collapses >20pp vs older (catastrophic forgetting signal)
+    drift = o_mean - r_mean
+    return {
+        "ok": drift <= 0.20,
+        "recent_mean": round(r_mean, 4),
+        "older_mean": round(o_mean, 4),
+        "drift": round(drift, 4),
+        "alert": drift > 0.20,
+    }
+
+
 async def evaluate_canary(db_pool, revision_id: str) -> Dict[str, Any]:
     """Run statistical gate vs incumbent; promote or leave in shadow / rollback."""
     from app.services.ln7_bakeoff_engine import statistical_gate
@@ -87,9 +116,23 @@ async def evaluate_canary(db_pool, revision_id: str) -> Dict[str, Any]:
                 inc_id = await conn.fetchval(
                     "SELECT revision_id FROM ln7_revisions WHERE active = TRUE LIMIT 1"
                 ) or "LN7-baseline"
+            # Held-out canary every N updates: require at least one heldout pack outcome exists system-wide
+            heldout_n = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM ln7_coding_outcomes
+                WHERE metrics_json->>'pack' = 'env_redis_prefix'
+                   OR (metrics_json->>'split') = 'heldout'
+                """
+            )
+        forget = await _forgetting_monitor(db_pool, revision_id)
         cand = await _passes_for_revision(db_pool, revision_id)
         inc = await _passes_for_revision(db_pool, str(inc_id))
         gate = statistical_gate(cand, inc, min_tasks=3)
+        gate["forgetting"] = forget
+        gate["heldout_outcomes_n"] = int(heldout_n or 0)
+        if forget.get("alert"):
+            gate["ok"] = False
+            gate["reason"] = "forgetting_monitor_drift"
         async with db_pool.acquire() as conn:
             await conn.execute(
                 """

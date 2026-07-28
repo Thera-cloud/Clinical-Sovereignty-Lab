@@ -106,11 +106,18 @@ def train_cuda(train_path: Path, out_dir: Path, base: str, iters: int) -> dict:
     trainer.train()
     model.save_pretrained(str(out_dir))
     tok.save_pretrained(str(out_dir))
-    (out_dir / "adapter_config.json").write_text(
+    # Never overwrite PEFT adapter_config.json — peft_type required for load
+    (out_dir / "train_meta.json").write_text(
         json.dumps({"base": model_id, "method": "cuda_qlora_peft", "train_path": str(train_path)}, indent=2),
         encoding="utf-8",
     )
-    return {"ok": True, "method": "cuda_qlora_peft", "adapter_dir": str(out_dir)}
+    return {
+        "ok": True,
+        "method": "cuda_qlora_peft",
+        "adapter_dir": str(out_dir),
+        "hf_base": model_id,
+        "base_checkpoint": model_id,
+    }
 
 
 def train_mlx(train_path: Path, out_dir: Path, base: str, iters: int) -> dict:
@@ -241,10 +248,16 @@ def main() -> int:
                 return 4
         result = train_mlx(train_path, out_dir, args.base, args.iters)
 
+    # Prefer HF id actually trained (cuda), else Ollama tag used for mlx/dry_run.
+    base_label = (
+        result.get("hf_base")
+        or result.get("base_checkpoint")
+        or args.base
+    )
     manifest = {
         "revision_id": f"LN7-{rid}",
-        "base_checkpoint": args.base,
-        "quantization": args.quantization,
+        "base_checkpoint": base_label,
+        "quantization": args.quantization if backend != "cuda" else "nf4_qlora",
         "adapter_dir": str(out_dir),
         "n_train": len(rows),
         "train_method": result.get("method"),
@@ -253,11 +266,16 @@ def main() -> int:
         "non_clinical_claim": True,
         "register_body": {
             "revision_id": f"LN7-{rid}",
-            "base_checkpoint": args.base,
-            "quantization": args.quantization,
+            "base_checkpoint": base_label,
+            "quantization": args.quantization if backend != "cuda" else "nf4_qlora",
             "status": "shadow",
-            "notes": f"QLoRA from {len(rows)} rejection samples; adapter={out_dir}",
-            "harness_config": {"train_n": len(rows), "method": result.get("method")},
+            "notes": f"QLoRA from {len(rows)} samples; method={result.get('method')}; adapter={out_dir}",
+            "harness_config": {
+                "train_n": len(rows),
+                "method": result.get("method"),
+                "hf_base": result.get("hf_base"),
+                "serve_note": "PEFT adapter not auto-merged into Ollama; durable store only until merge path ships",
+            },
         },
     }
     man_path = out_dir / "revision_manifest.json"

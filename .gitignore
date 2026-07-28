@@ -208,3 +208,4 @@ mobile/**/Untitled
 /data/**
 !/data/.gitkeep
 .ln7-harness/
+.ln7-adapters/

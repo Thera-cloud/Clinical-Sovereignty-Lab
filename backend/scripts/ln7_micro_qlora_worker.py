@@ -79,9 +79,22 @@ def main() -> int:
         with urllib.request.urlopen(req, timeout=120) as resp:
             return json.loads(resp.read().decode())
 
+    # Optional durable copy (BLUE/ORANGE path) — never GREEN train host
+    persist = (os.getenv("LN7_ADAPTER_STORE") or "").strip()
+    if persist:
+        import shutil
+        dest = Path(persist) / str(body.get("revision_id") or f"job_{args.job_id}")
+        dest.mkdir(parents=True, exist_ok=True)
+        for p in out.iterdir():
+            if p.is_file():
+                shutil.copy2(p, dest / p.name)
+        body.setdefault("harness_config", {})
+        if isinstance(body.get("harness_config"), dict):
+            body["harness_config"]["durable_store"] = str(dest)
+
     reg = _post("/api/ln7/revision/register", {**body, "notify_ceo": True})
     can = _post("/api/ln7/canary/evaluate", {"revision_id": body.get("revision_id"), "start": True})
-    print(json.dumps({"ok": True, "register": reg, "canary": can, "job_id": args.job_id}))
+    print(json.dumps({"ok": True, "register": reg, "canary": can, "job_id": args.job_id, "persisted": persist or None}))
     return 0
 
 

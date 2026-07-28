@@ -186,6 +186,8 @@ class NateInferenceRouter:
         allow_deep: bool = False,
         images: Optional[List[str]] = None,  # QUANTUM-CRYSTAL-ARCH — multimodal (Azure)
         providers_override: Optional[List[str]] = None,  # QUANTUM-CRYSTAL-ARCH — LN7 sovereign-only
+        model_override: Optional[str] = None,  # QUANTUM-CRYSTAL-ARCH — LN7 revision tag / peft id
+        base_url_override: Optional[str] = None,  # QUANTUM-CRYSTAL-ARCH — LN7 PEFT URL
     ) -> Dict[str, Any]:
         """
         Route a generation request to the best available provider.
@@ -215,7 +217,7 @@ class NateInferenceRouter:
             else:
                 tier = TIER_CLINICAL
 
-        sovereign_model = self._resolve_sovereign_model(
+        sovereign_model = model_override or self._resolve_sovereign_model(
             odpe_signal, allow_deep, tier=tier, domain=domain,
         )
 
@@ -251,6 +253,7 @@ class NateInferenceRouter:
                     provider, prompt, system, temperature, max_tokens,
                     sovereign_model=sovereign_model,
                     images=images,
+                    base_url_override=base_url_override,
                 )
                 latency = int((time.time() - start) * 1000)
 
@@ -300,6 +303,7 @@ class NateInferenceRouter:
         max_tokens: int,
         sovereign_model: str = "",
         images: Optional[List[str]] = None,
+        base_url_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         self._sase_validate_outbound(provider)
 
@@ -336,6 +340,7 @@ class NateInferenceRouter:
             return await self._call_sovereign(
                 messages, temperature, max_tokens,
                 model=sovereign_model or _SOVEREIGN_MODEL_FAST,
+                base_url_override=base_url_override,
             )
         elif provider == "home_gpu":
             return await self._call_home_gpu(messages, temperature, max_tokens)
@@ -350,7 +355,14 @@ class NateInferenceRouter:
 
     _SOVEREIGN_SEMAPHORE = asyncio.Semaphore(4)
 
-    async def _call_sovereign(self, messages, temperature, max_tokens, model: str = "") -> Dict:
+    async def _call_sovereign(
+        self,
+        messages,
+        temperature,
+        max_tokens,
+        model: str = "",
+        base_url_override: Optional[str] = None,
+    ) -> Dict:
         selected_model = model or _SOVEREIGN_MODEL_FAST
         # QUANTUM-CRYSTAL-ARCH — LN7 coder models need longer than clinical 8B
         if selected_model == _LN7_CODE_MODEL_DEEP:
@@ -359,6 +371,8 @@ class NateInferenceRouter:
             timeout_secs = int(os.getenv("LN7_SOVEREIGN_TIMEOUT_MID_S", "180") or "180")
         elif selected_model == _LN7_CODE_MODEL_FAST:
             timeout_secs = int(os.getenv("LN7_SOVEREIGN_TIMEOUT_FAST_S", "120") or "120")
+        elif selected_model in ("ln7-peft",) or str(selected_model).startswith("ln7-"):
+            timeout_secs = int(os.getenv("LN7_PEFT_TIMEOUT_S", "300") or "300")
         elif selected_model in (_SOVEREIGN_MODEL_DEEP,):
             timeout_secs = 120
         elif selected_model in (_SOVEREIGN_MODEL_FAST,):
@@ -366,7 +380,16 @@ class NateInferenceRouter:
         else:
             timeout_secs = 60
 
-        url = f"{_SOVEREIGN_URL}/v1/chat/completions"
+        # QUANTUM-CRYSTAL-ARCH — LN7 PEFT / LN7_INFERENCE_URL preferred when set
+        base = (base_url_override or "").rstrip("/")
+        if not base and (
+            selected_model in (_LN7_CODE_MODEL_FAST, _LN7_CODE_MODEL_MID, _LN7_CODE_MODEL_DEEP)
+            or str(selected_model).startswith("ln7")
+        ):
+            base = (os.getenv("LN7_INFERENCE_URL") or "").rstrip("/")
+        if not base:
+            base = (_SOVEREIGN_URL or "").rstrip("/")
+        url = f"{base}/v1/chat/completions"
         async with self._SOVEREIGN_SEMAPHORE, aiohttp.ClientSession() as sess:
             async with sess.post(url, json={
                 "model": selected_model,

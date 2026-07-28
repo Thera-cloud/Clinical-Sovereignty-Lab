@@ -57,7 +57,9 @@ See [CONTINUOUS_GATED_SELF_IMPROVEMENT.md](./CONTINUOUS_GATED_SELF_IMPROVEMENT.m
 | GREEN agent | `Ln7ContinuousAgent` behind `ENABLE_LN7_CONTINUOUS` |
 | CUDA QLoRA | `ln7_qlora_train.py --backend cuda` (needs GPU host) |
 | Public upstream clones | BLUE `.ln7-harness/<bench>/upstream/` (gitignored) |
-| ORANGE SSH from GREEN | **blocked** until `scripts/ln7_install_orange_ssh.sh` run on ORANGE console |
+| ORANGE SSH from GREEN | **OK** — `id_ed25519_orange` (passphrase-locked default key is not used) |
+| Durable adapters | ORANGE `/opt/ln7/adapters/` + BLUE `.ln7-adapters/` (gitignored) |
+| One-shot GPU drain | `bash scripts/ln7_continuous_drain.sh` (provision→train→persist→register→destroy) |
 
 ### (a) Real QLoRA
 
@@ -71,14 +73,21 @@ LN7_QLORA_BACKEND=cuda python backend/scripts/ln7_qlora_train.py \
 
 ### (b) ORANGE SSH
 
-On ORANGE console (once):
+GREEN uses **`/root/.ssh/id_ed25519_orange`** (passwordless). Host alias `orange` → `10.13.13.5`.
 
 ```bash
-# paste GREEN pubkey from: ssh root@GREEN 'cat /root/.ssh/id_ed25519.pub'
-bash scripts/ln7_install_orange_ssh.sh 'ssh-ed25519 AAAA... root@green'
+ssh -o BatchMode=yes root@68.183.168.75 'ssh -o BatchMode=yes -i /root/.ssh/id_ed25519_orange root@10.13.13.5 true'
+# Ollama binds WireGuard only: http://10.13.13.5:11434 (not 127.0.0.1)
 ```
 
-Then from GREEN: `ssh root@10.13.13.5 true`.
+### Durable QLoRA drain (recommended)
+
+```bash
+# BLUE — ~$0.76/hr while GPU lives; auto-destroy on EXIT + TTL
+bash scripts/ln7_continuous_drain.sh
+# Adapter: .ln7-adapters/LN7-<ts>  and  ORANGE:/opt/ln7/adapters/LN7-<ts>
+# PEFT is durable store only until merge→Ollama path ships (serve still LN7_CODE_MODEL_*)
+```
 
 ## Ops status (2026-07-28 overnight 1–5)
 

@@ -194,7 +194,9 @@ async def run_private_pack_bakeoff(
                 f"Fix the failing tests in pack {pack}. "
                 "Return a unified diff that makes pytest pass."
             )
-        result = await run_task(prompt, pack_name=pack, mode=mode)
+        result = await run_task(
+            prompt, pack_name=pack, mode=mode, revision_id=revision_id, db_pool=db_pool,
+        )
         passed = bool(result.get("passed"))
         passes.append(passed)
         th = task_hash(f"pack:{pack}")

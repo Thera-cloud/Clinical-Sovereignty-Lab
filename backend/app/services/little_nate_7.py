@@ -53,6 +53,83 @@ def coder_model(tier: str = "deep") -> str:
     return os.getenv("LN7_CODE_MODEL_DEEP", "qwen2.5-coder:32b-instruct-q5_K_M")
 
 
+def peft_serve_url_default() -> str:
+    """ORANGE PEFT OpenAI-compat base (WireGuard). Empty = disabled."""
+    return (os.getenv("LN7_PEFT_URL") or "").rstrip("/")
+
+
+def serve_target_from_revision(
+    revision: Optional[Dict[str, Any]],
+    *,
+    tier: str = "mid",
+) -> Dict[str, str]:
+    """Resolve inference URL + model for a revision (PEFT when wired).
+
+    Returns keys: url, model, mode (peft|ollama).
+    # QUANTUM-CRYSTAL-ARCH
+    """
+    hc: Dict[str, Any] = {}
+    if revision:
+        raw = revision.get("harness_config_json") or revision.get("harness_config") or {}
+        if isinstance(raw, str):
+            try:
+                import json
+                raw = json.loads(raw)
+            except Exception:
+                raw = {}
+        if isinstance(raw, dict):
+            hc = raw
+    peft_url = (hc.get("peft_url") or peft_serve_url_default() or "").rstrip("/")
+    peft_model = str(hc.get("peft_model") or os.getenv("LN7_PEFT_MODEL_ID") or "ln7-peft")
+    ollama_tag = str(
+        hc.get("ollama_tag")
+        or (revision or {}).get("serve_checkpoint")
+        or ""
+    ).strip()
+    # Prefer explicit PEFT serve when adapter was trained (nf4_qlora / peft path)
+    quant = str((revision or {}).get("quantization") or hc.get("quantization") or "")
+    method = str(hc.get("method") or "")
+    wants_peft = bool(peft_url) and (
+        "qlora" in quant.lower()
+        or "peft" in method.lower()
+        or bool(hc.get("adapter_dir") or hc.get("durable_store"))
+        or bool(hc.get("force_peft"))
+    )
+    if wants_peft and peft_url:
+        return {"url": peft_url, "model": peft_model, "mode": "peft"}
+    if ollama_tag:
+        base = (
+            (os.getenv("LN7_INFERENCE_URL") or "").rstrip("/")
+            or (os.getenv("SOVEREIGN_INFERENCE_URL") or "").rstrip("/")
+        )
+        return {"url": base, "model": ollama_tag, "mode": "ollama"}
+    base = (
+        (os.getenv("LN7_INFERENCE_URL") or "").rstrip("/")
+        or (os.getenv("SOVEREIGN_INFERENCE_URL") or "").rstrip("/")
+    )
+    return {"url": base, "model": coder_model(tier), "mode": "ollama"}
+
+
+async def load_revision(db_pool, revision_id: str) -> Optional[Dict[str, Any]]:
+    if not db_pool or not revision_id:
+        return None
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT revision_id, revised_at, base_checkpoint, quantization,
+                       harness_config_json, notes, active, status
+                FROM ln7_revisions
+                WHERE revision_id = $1
+                LIMIT 1
+                """,
+                revision_id,
+            )
+        return dict(row) if row else None
+    except Exception:
+        return None
+
+
 def quantization_floor() -> str:
     """Minimum accepted quant for deep tier (q4 is a regression floor, not a target)."""
     return os.getenv("LN7_QUANT_FLOOR", "q5_K_M")

@@ -1,0 +1,23 @@
+[Unit]
+Description=LN7 PEFT OpenAI-compat server (WireGuard :11435)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ln7/peft_serve
+Environment=LN7_ADAPTER_DIR=/opt/ln7/adapters/LN7-2026-07-28T054420Z
+Environment=LN7_QLORA_HF_BASE=Qwen/Qwen2.5-Coder-1.5B-Instruct
+Environment=LN7_PEFT_MODEL_ID=ln7-peft
+Environment=LN7_PEFT_HOST=10.13.13.5
+Environment=LN7_PEFT_PORT=11435
+Environment=HF_HOME=/opt/ln7/hf_cache
+Environment=PATH=/opt/ln7/peft_serve/.venv/bin:/usr/local/bin:/usr/bin
+ExecStart=/opt/ln7/peft_serve/.venv/bin/python /opt/ln7/peft_serve/ln7_peft_server.py
+Restart=on-failure
+RestartSec=8
+MemoryMax=12G
+
+[Install]
+WantedBy=multi-user.target
