@@ -63,6 +63,31 @@ async def collect_rejection_samples(db_pool, *, limit: int = 500) -> List[Dict[s
         return []
 
 
+def _resolve_model_card_file(revision_id: str) -> tuple[Path, str]:
+    """Return (absolute path, stored path string). GREEN uses /app/data (writable)."""
+    name = Path(model_card_path(revision_id)).name
+    override = (os.getenv("LN7_MODEL_CARD_ROOT") or "").strip()
+    if override:
+        full = Path(override) / name
+        return full, str(full)
+    # QUANTUM-CRYSTAL-ARCH — container layout: /app/app/services → parents[3] is /
+    candidates = [
+        (Path(__file__).resolve().parents[3] / "docs" / "ln7" / name, f"docs/ln7/{name}"),
+        (Path("/app/data/ln7/model_cards") / name, f"data/ln7/model_cards/{name}"),
+        (Path("/tmp/ln7/model_cards") / name, f"/tmp/ln7/model_cards/{name}"),
+    ]
+    for full, stored in candidates:
+        try:
+            full.parent.mkdir(parents=True, exist_ok=True)
+            if os.access(str(full.parent), os.W_OK):
+                return full, stored
+        except OSError:
+            continue
+    full = Path("/tmp/ln7/model_cards") / name
+    full.parent.mkdir(parents=True, exist_ok=True)
+    return full, str(full)
+
+
 def write_model_card(
     revision_id: str,
     *,
@@ -71,11 +96,8 @@ def write_model_card(
     scorecard: Dict[str, Any],
     notes: str = "",
 ) -> str:
-    """Emit docs/ln7/LN7_<timestamp>.md — required before activation."""
-    path = model_card_path(revision_id)
-    root = Path(__file__).resolve().parents[3]  # repo root
-    full = root / path
-    full.parent.mkdir(parents=True, exist_ok=True)
+    """Emit LN7_<timestamp>.md — required before activation."""
+    full, path = _resolve_model_card_file(revision_id)
     private = (scorecard or {}).get("private") or {}
     pr = (private.get("pass_rate") or {})
     body = f"""# Little Nate 7 — Model Card
