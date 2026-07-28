@@ -44,11 +44,45 @@ if [[ "${CLEAN_N:-0}" -lt "$MIN_ROWS" && "${LN7_QLORA_FORCE_THIN:-}" != "1" ]]; 
   exit 5
 fi
 
-echo "[drain] provision $SIZE @ $REGION"
-CREATE_OUT="$(bash "$REPO/scripts/ln7_provision_cuda_droplet.sh" "$SIZE" "$REGION")"
-echo "$CREATE_OUT"
-DROPLET_ID="$(echo "$CREATE_OUT" | awk 'NR==2{print $1}')"
-IP="$(echo "$CREATE_OUT" | awk 'NR==2{print $3}')"
+REGIONS="${LN7_GPU_WATCH_REGIONS:-$REGION nyc1 nyc3 atl1 sfo3 fra1}"
+PROVISION_RETRIES="${LN7_GPU_PROVISION_RETRIES:-3}"
+DROPLET_ID=""
+IP=""
+
+if [[ -n "${LN7_EXISTING_DROPLET_ID:-}" && -n "${LN7_EXISTING_DROPLET_IP:-}" ]]; then
+  DROPLET_ID="$LN7_EXISTING_DROPLET_ID"
+  IP="$LN7_EXISTING_DROPLET_IP"
+  REGION="${LN7_EXISTING_DROPLET_REGION:-$REGION}"
+  echo "[drain] reusing probe droplet id=$DROPLET_ID ip=$IP region=$REGION"
+else
+  _try_regions="$REGION"
+  for _r in $REGIONS; do
+    [[ " $_try_regions " == *" $_r "* ]] && continue
+    _try_regions="$_try_regions $_r"
+  done
+  for _attempt in $(seq 1 "$PROVISION_RETRIES"); do
+    for _r in $_try_regions; do
+      echo "[drain] provision attempt ${_attempt}/${PROVISION_RETRIES} $SIZE @ $_r"
+      set +e
+      CREATE_OUT="$(bash "$REPO/scripts/ln7_provision_cuda_droplet.sh" "$SIZE" "$_r" 2>&1)"
+      _prc=$?
+      set -e
+      echo "$CREATE_OUT"
+      if [[ $_prc -ne 0 ]]; then
+        echo "[drain] provision fail rc=$_prc"
+        continue
+      fi
+      DROPLET_ID="$(echo "$CREATE_OUT" | awk 'NR==2{print $1}')"
+      IP="$(echo "$CREATE_OUT" | awk 'NR==2{print $3}')"
+      if [[ -n "$DROPLET_ID" && -n "$IP" && "$IP" != "PublicIPv4" ]]; then
+        REGION="$_r"
+        break 2
+      fi
+      DROPLET_ID=""; IP=""
+    done
+    sleep $((5 * _attempt))
+  done
+fi
 [[ -n "$DROPLET_ID" && -n "$IP" && "$IP" != "PublicIPv4" ]] || { echo provision_failed; exit 2; }
 
 cleanup() { bash "$REPO/scripts/ln7_destroy_cuda_droplet.sh" "$DROPLET_ID" || true; }
@@ -56,10 +90,20 @@ trap cleanup EXIT
 ( sleep "$TTL"; echo "[drain] TTL"; cleanup ) &
 WATCH=$!
 
-for _ in $(seq 1 36); do
-  ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "root@$IP" 'echo up' && break
+_ssh_ok=0
+for _ in $(seq 1 72); do
+  if ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new \
+      "root@$IP" 'echo up' >/dev/null 2>&1; then
+    _ssh_ok=1
+    break
+  fi
   sleep 5
 done
+if [[ "$_ssh_ok" != "1" ]]; then
+  echo "[drain] ssh never became ready on $IP"
+  exit 3
+fi
+echo "[drain] ssh ready root@$IP"
 
 ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "root@$IP" \
   'export DEBIAN_FRONTEND=noninteractive; apt-get update -qq; apt-get install -y -qq python3.10-venv python3-pip >/dev/null; mkdir -p /opt/ln7/{backend/scripts,data,adapters,hf_cache}'

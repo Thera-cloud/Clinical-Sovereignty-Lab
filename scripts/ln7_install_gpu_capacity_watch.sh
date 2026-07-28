@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Install BLUE LaunchAgent: poll DO GPU capacity; self-stop + optional A/B drain on hit.
-# Scripts live under ~/sovereign-ln7 (Desktop TCC bypass — same as continuous worker).
+# Install BLUE LaunchAgent: poll DO GPU capacity; keep probe → detach A/B; unload on AB_OK.
+# Scripts live under ~/sovereign-ln7 (Desktop TCC bypass).
 #
 #   bash scripts/ln7_install_gpu_capacity_watch.sh
 #   bash scripts/ln7_install_gpu_capacity_watch.sh --uninstall
-#   bash scripts/ln7_install_gpu_capacity_watch.sh --reset   # clear AVAILABLE + re-enable
+#   bash scripts/ln7_install_gpu_capacity_watch.sh --reset   # clear state + re-enable
 #
 # # QUANTUM-CRYSTAL-ARCH
 set -euo pipefail
@@ -29,11 +29,14 @@ if [[ "${1:-}" == "--uninstall" ]]; then
 fi
 
 if [[ "${1:-}" == "--reset" ]]; then
-  rm -f "$STATE_DIR/AVAILABLE" "$STATE_DIR/ab_drain.pid"
+  rm -f "$STATE_DIR/AVAILABLE" "$STATE_DIR/AB_OK" "$STATE_DIR/AB_FAIL" \
+        "$STATE_DIR/DRAINING" "$STATE_DIR/probe.env" "$STATE_DIR/ab_drain.pid" \
+        "$STATE_DIR/run_ab_detached.sh"
   echo "[gpu-watch] cleared $STATE_DIR"
 fi
 
-mkdir -p "$DEST/scripts" "$DEST/data" "$HOME/Library/LaunchAgents" "$STATE_DIR" "$HOME/Library/Logs"
+mkdir -p "$DEST/scripts" "$DEST/data" "$DEST/backend/scripts" \
+  "$HOME/Library/LaunchAgents" "$STATE_DIR" "$HOME/Library/Logs"
 
 for f in ln7_gpu_capacity_watch.sh ln7_ab_qlora_drain.sh ln7_continuous_drain.sh \
          ln7_provision_cuda_droplet.sh ln7_destroy_cuda_droplet.sh; do
@@ -42,6 +45,13 @@ for f in ln7_gpu_capacity_watch.sh ln7_ab_qlora_drain.sh ln7_continuous_drain.sh
     chmod +x "$DEST/scripts/$f"
   fi
 done
+if [[ -f "$SRC_REPO/backend/scripts/ln7_qlora_train.py" ]]; then
+  cp "$SRC_REPO/backend/scripts/ln7_qlora_train.py" "$DEST/backend/scripts/ln7_qlora_train.py"
+  chmod +x "$DEST/backend/scripts/ln7_qlora_train.py"
+fi
+if [[ -f "$SRC_REPO/data/ln7_train.jsonl" ]]; then
+  cp "$SRC_REPO/data/ln7_train.jsonl" "$DEST/data/ln7_train.jsonl"
+fi
 
 uninstall || true
 
@@ -94,7 +104,7 @@ launchctl bootstrap "gui/${UID_NUM}" "$PLIST" 2>/dev/null \
   || launchctl load "$PLIST"
 
 echo "[gpu-watch] installed $LABEL interval=${INTERVAL}s dest=$DEST"
-echo "[gpu-watch] logs: ~/Library/Logs/ln7-gpu-capacity-watch*.log"
-echo "[gpu-watch] state: $STATE_DIR/AVAILABLE (created on hit)"
+echo "[gpu-watch] logs: ~/Library/Logs/ln7-gpu-capacity-watch*.log  ~/Library/Logs/ln7_ab_qlora_drain.log"
+echo "[gpu-watch] success gate: $STATE_DIR/AB_OK"
 echo "[gpu-watch] one-shot now:"
 bash "$DEST/scripts/ln7_gpu_capacity_watch.sh" || true

@@ -36,19 +36,19 @@ LN7_QLORA_MIN_ROWS=2 LN7_QLORA_FORCE_THIN=1 bash scripts/ln7_ab_qlora_drain.sh  
 
 ## DO GPU capacity watcher (BLUE)
 
-When TOR/stock returns `Size is not available`, install a LaunchAgent that probes create→delete every 15m and **self-unloads** on first accept, optionally starting A/B drain:
+LaunchAgent every 15m: **keep** probe droplet (no create→delete TOCTOU) → **detach** A/B drain (survives launchd) → unload only on `AB_OK`. Failed drain clears `DRAINING` and re-probes.
 
 ```bash
 bash scripts/ln7_install_gpu_capacity_watch.sh
-# logs: ~/Library/Logs/ln7-gpu-capacity-watch*.log
-# done: ~/.local/state/ln7_gpu_watch/AVAILABLE
+# logs: ~/Library/Logs/ln7-gpu-capacity-watch*.log  ~/Library/Logs/ln7_ab_qlora_drain.log
+# success: ~/.local/state/ln7_gpu_watch/AB_OK
 # stop: bash scripts/ln7_install_gpu_capacity_watch.sh --uninstall
 # re-arm: bash scripts/ln7_install_gpu_capacity_watch.sh --reset
 ```
 
-- Lives under `~/sovereign-ln7` (Desktop TCC bypass).
+- Lives under `~/sovereign-ln7` (Desktop TCC bypass); install syncs `ln7_qlora_train.py` + JSONL.
+- Drain: region fallbacks + provision retries; first recipe reuses probe droplet.
 - Default `LN7_GPU_WATCH_AUTO_DRAIN=1` + `LN7_QLORA_FORCE_THIN=1` (drop FORCE_THIN once clean JSONL ≥50).
-- Not Workers AI — plain `doctl` poll ($0 LLM).
 
 ## Kill criteria
 
