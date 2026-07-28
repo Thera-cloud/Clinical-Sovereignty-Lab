@@ -92,6 +92,22 @@ def main() -> int:
         print(json.dumps({"ok": False, "error": "refusing_train_on_green"}))
         return 3
 
+    import platform
+
+    # mlx / mlx-lm require Apple Silicon — Intel BLUE hosts must use a GPU rental.
+    if platform.machine().lower() in ("x86_64", "amd64", "i386", "i686"):
+        if os.getenv("LN7_QLORA_ALLOW_X86_DRY_RUN", "").strip().lower() not in (
+            "1", "true", "yes", "on",
+        ):
+            print(json.dumps({
+                "ok": False,
+                "error": "mlx_requires_apple_silicon",
+                "arch": platform.machine(),
+                "hint": "Run QLoRA on Apple Silicon or a CUDA GPU droplet; "
+                        "set LN7_QLORA_ALLOW_X86_DRY_RUN=1 only for stub manifests.",
+            }))
+            return 4
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--train-jsonl", required=True)
     ap.add_argument("--base", default=os.getenv("LN7_CODE_MODEL_FAST", "qwen2.5-coder:7b-instruct"))

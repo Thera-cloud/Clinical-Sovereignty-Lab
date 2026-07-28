@@ -264,9 +264,20 @@ async def run_public_benchmark(name: str) -> Dict[str, Any]:
             "note": f"Place {name}.json under {results_dir()}",
         }
     if mode == "full":
-        # Prefer ingested if fresh; else container
+        # Prefer official ingest only when forced-off and result looks non-stub.
+        force = os.getenv("LN7_PUBLIC_FORCE_FULL", "").strip().lower() in (
+            "1", "true", "yes", "on",
+        )
         data = load_ingested_result(name)
-        if data and data.get("pass_rate"):
+        cached_mode = str((data or {}).get("mode") or "")
+        stubbish = cached_mode in ("full_cached", "full_stub", "smoke", "smoke_offline", "")
+        if (
+            not force
+            and data
+            and data.get("pass_rate")
+            and not stubbish
+            and data.get("status") == "ok"
+        ):
             data["mode"] = "full_cached"
             return data
         return run_full_container(name)

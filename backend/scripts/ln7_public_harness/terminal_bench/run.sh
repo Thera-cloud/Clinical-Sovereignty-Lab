@@ -1,14 +1,34 @@
 #!/usr/bin/env bash
-# Official harness wrapper — replace body with SWE-bench / LCB / Aider / Terminal-Bench CLI.
-# Must write $LN7_PUBLIC_RESULTS_DIR/terminal_bench.json (or repo docs/ln7/public_results/terminal_bench.json).
+# Official harness wrapper. If upstream/ exists, expect operator CLI; else schema stub.
 set -euo pipefail
+BENCH=terminal_bench
+HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="${LN7_PUBLIC_RESULTS_DIR:-}"
 if [[ -z "$ROOT" ]]; then
-  ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)/docs/ln7/public_results"
+  # scripts/ln7_public_harness/<bench> → repo root = ../../..
+  # .ln7-harness/<bench> → repo root = ../..
+  if [[ -d "$(cd "$HERE/../../docs/ln7/public_results" 2>/dev/null && pwd)" ]]; then
+    ROOT="$(cd "$HERE/../../docs/ln7/public_results" && pwd)"
+  else
+    ROOT="$(cd "$HERE/../../../docs/ln7/public_results" && pwd)"
+  fi
 fi
 mkdir -p "$ROOT"
-OUT="$ROOT/terminal_bench.json"
-cat > "$OUT" <<'JSON'
-{"benchmark":"terminal_bench","status":"ok","mode":"full","report_only":true,"pass_rate":{"mean":0.0,"lo":0.0,"hi":0.0,"n":0},"note":"Replace run.sh with official harness; this stub records schema only."}
+OUT="$ROOT/${BENCH}.json"
+UP="$HERE/upstream"
+if [[ -d "$UP/.git" || -x "$UP/run_official.sh" ]]; then
+  if [[ -x "$UP/run_official.sh" ]]; then
+    "$UP/run_official.sh" "$OUT"
+    echo "wrote $OUT (official)"
+    exit 0
+  fi
+  cat > "$OUT" <<JSON
+{"benchmark":"$BENCH","status":"blocked_needs_official_cli","mode":"full","report_only":true,"pass_rate":{"mean":0.0,"lo":0.0,"hi":0.0,"n":0},"note":"upstream/ cloned but run_official.sh missing — wire official CLI here."}
 JSON
-echo "wrote $OUT"
+  echo "wrote $OUT (blocked)"
+  exit 0
+fi
+cat > "$OUT" <<JSON
+{"benchmark":"$BENCH","status":"ok","mode":"full_stub","report_only":true,"pass_rate":{"mean":0.0,"lo":0.0,"hi":0.0,"n":0},"note":"Stub only — clone official harness into upstream/ and add run_official.sh. Not a competitive score."}
+JSON
+echo "wrote $OUT (stub)"

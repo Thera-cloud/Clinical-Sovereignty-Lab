@@ -47,6 +47,26 @@ Insert/update `ln7_contestants` with `base_url`, `model_id`, credentials in env,
 
 Set `LN7_KILL_SWITCH=true` and recreate bridge/backend containers. Harness returns immediately with `error=kill_switch`.
 
+## Ops status (2026-07-28 proceed 1–4)
+
+| Step | Result |
+|---|---|
+| 1 Train data | Private bakeoff **max** on `LN7-baseline`: **3/3** (incl. `asyncpg_cast`). Export **7** JSONL rows → `data/ln7_train.jsonl` |
+| 2 Real QLoRA | **Blocked on this BLUE** (Intel x86 — no mlx wheels). Dry-run stub only (`LN7_QLORA_ALLOW_X86_DRY_RUN=1`). Need Apple Silicon or CUDA GPU rental |
+| 3 Shadow scorecard | `LN7-2026-07-28T040428Z` (shadow, not activated): private max **2/3** (asyncpg+env pass; catch_all fail). Active baseline remains 3/3 |
+| 4 Public full | BLUE root `.ln7-harness/` via `ln7_setup_blue_harness.sh`; `run.sh` writes `full_stub` JSON under `docs/ln7/public_results/`. Competitive scores need `upstream/run_official.sh`. ORANGE SSH from GREEN still missing pubkey |
+
+## Train host constraints (2026-07-28)
+
+| Host | QLoRA path | Notes |
+|---|---|---|
+| BLUE Apple Silicon | `mlx-lm` via `ln7_qlora_train.py` | Preferred offline train |
+| BLUE Intel (x86_64) | **blocked for mlx** | Use short-lived CUDA GPU (e.g. DO H100) or keep `dry_run_stub` |
+| ORANGE | CUDA / Ollama serve only | Public harness full + inference; SSH key must allow GREEN→ORANGE |
+| GREEN | never train | Export JSONL only |
+
+`ln7_qlora_train.py` exits `mlx_requires_apple_silicon` on x86 unless `LN7_QLORA_ALLOW_X86_DRY_RUN=1`.
+
 ## Gap-close notes (2026-07-27)
 
 - CLI path with `space=ln7` never falls through to Foundry/xAI. Missing local coder → hard error.

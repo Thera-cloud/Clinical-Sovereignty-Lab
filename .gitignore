@@ -207,3 +207,4 @@ mobile/**/Untitled
 # Defensive: never let git clean track vault dirs — stub file stays tracked for emptiable dirs
 /data/**
 !/data/.gitkeep
+.ln7-harness/
