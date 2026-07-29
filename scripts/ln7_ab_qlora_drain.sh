@@ -57,7 +57,9 @@ fi
 # Mirror sync: Desktop → this REPO tree when running from ~/sovereign-ln7
 if [[ -d "$SRC_REPO/scripts" && "$REPO" != "$SRC_REPO" ]]; then
   for f in ln7_continuous_drain.sh ln7_ab_qlora_drain.sh ln7_ab_bakeoff_compare.sh \
-           ln7_gpu_capacity_watch.sh ln7_provision_cuda_droplet.sh ln7_destroy_cuda_droplet.sh; do
+           ln7_gpu_capacity_watch.sh ln7_gpu_orphan_reaper.sh ln7_drain_watchdog.sh \
+           ln7_ab_compare_watchdog.sh \
+           ln7_provision_cuda_droplet.sh ln7_destroy_cuda_droplet.sh; do
     [[ -f "$SRC_REPO/scripts/$f" ]] && cp "$SRC_REPO/scripts/$f" "$REPO/scripts/$f" && chmod +x "$REPO/scripts/$f"
   done
   [[ -f "$SRC_REPO/backend/scripts/ln7_qlora_train.py" ]] \
@@ -115,13 +117,15 @@ REV_B="$(tr -d '[:space:]' <"$STATE_DIR/rev_b" 2>/dev/null || true)"
 [[ -n "$REV_B" ]] || { echo "[ab] missing rev_b"; exit 6; }
 
 echo "[ab] private bakeoff compare $REV_A vs $REV_B"
-bash "$REPO/scripts/ln7_ab_bakeoff_compare.sh" "$REV_A" "$REV_B" || {
-  echo "[ab] bakeoff compare failed (revisions still registered as shadow)"
-  # Still mark AB train OK — compare file may be partial
-  true
-}
+# QUANTUM-CRYSTAL-ARCH — AB_OK only when compare succeeds (not on timeout/partial)
+if ! bash "$REPO/scripts/ln7_ab_bakeoff_compare.sh" "$REV_A" "$REV_B"; then
+  echo "[ab] bakeoff compare failed — NOT writing AB_OK (revisions still registered as shadow)"
+  echo "fail compare $(date -u +%Y-%m-%dT%H%M%SZ) a=$REV_A b=$REV_B" >"$STATE_DIR/AB_FAIL"
+  rm -f "$STATE_DIR/DRAINING" "$HANDOFF"
+  exit 9
+fi
 
 echo "[ab] both registered — CEO activate only if bakeoff gate + READY"
 echo "ok $(date -u +%Y-%m-%dT%H%M%SZ) a=$REV_A b=$REV_B" >"$STATE_DIR/AB_OK"
-rm -f "$STATE_DIR/DRAINING" "$STATE_DIR/AB_FAIL" "$HANDOFF"
+rm -f "$STATE_DIR/DRAINING" "$STATE_DIR/AB_FAIL" "$HANDOFF" "$STATE_DIR/DRAIN_FAIL_COUNT"
 echo "[ab] AB_OK written"

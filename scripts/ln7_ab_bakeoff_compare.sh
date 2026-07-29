@@ -29,6 +29,36 @@ mkdir -p "$STATE_DIR"
 
 log() { echo "[ab-compare] $*" >&2; }
 
+_OWN_COMPARE_LOCK=0
+
+# QUANTUM-CRYSTAL-ARCH — skip if AB_COMPARE already complete (unless FORCE)
+ab_compare_complete() {
+  [[ -s "$OUT" ]] || return 1
+  python3 - "$OUT" "$REV_A" "$REV_B" "${LN7_BAKEOFF_MIN_ACCEPT_PACKS:-$EXPECTED_PACKS}" <<'PY'
+import json, sys
+path, ra, rb, min_n = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+try:
+    d = json.load(open(path))
+except Exception:
+    raise SystemExit(1)
+a, b = d.get("a") or {}, d.get("b") or {}
+ids = {a.get("revision_id"), b.get("revision_id"), d.get("winner"), d.get("loser")}
+if ra not in ids or rb not in ids:
+    # Different pair — allow re-run
+    raise SystemExit(1)
+if int(a.get("n") or 0) < min_n and int(b.get("n") or 0) < min_n:
+    raise SystemExit(1)
+if not d.get("winner"):
+    raise SystemExit(1)
+raise SystemExit(0)
+PY
+}
+
+if [[ "${LN7_AB_COMPARE_FORCE:-0}" != "1" ]] && ab_compare_complete; then
+  log "AB_COMPARE already complete for $REV_A vs $REV_B — skip (LN7_AB_COMPARE_FORCE=1 to re-run)"
+  exit 0
+fi
+
 # QUANTUM-CRYSTAL-ARCH — heartbeat + mutex so watchdog can recover stalled compares
 heartbeat() {
   local phase="${1:-running}" n="${2:-}" rev="${3:-}"
@@ -45,23 +75,40 @@ heartbeat() {
 }
 
 pause_continuous_worker() {
+  # Refuse second owner of COMPARE_LOCK
+  if [[ -f "$STATE_DIR/COMPARE_LOCK" ]]; then
+    local lock_pid
+    lock_pid="$(sed -n 's/.* pid=\([0-9][0-9]*\).*/\1/p' "$STATE_DIR/COMPARE_LOCK" | head -1)"
+    if [[ -n "$lock_pid" && "$lock_pid" != "$$" ]] && kill -0 "$lock_pid" 2>/dev/null; then
+      log "COMPARE_LOCK held by live pid=$lock_pid — abort (single-flight)"
+      exit 8
+    fi
+    log "stale COMPARE_LOCK (pid=${lock_pid:-none}) — taking ownership"
+  fi
   launchctl bootout "gui/$(id -u)/$WORKER_LABEL" 2>/dev/null || true
   echo "paused $(date -u +%Y-%m-%dT%H%M%SZ) by=ab-compare pid=$$" >"$STATE_DIR/WORKER_PAUSED"
   echo "COMPARE_LOCK $(date -u +%Y-%m-%dT%H%M%SZ) pid=$$ a=$REV_A b=$REV_B" >"$STATE_DIR/COMPARE_LOCK"
+  _OWN_COMPARE_LOCK=1
   log "paused $WORKER_LABEL (COMPARE_LOCK)"
 }
 
 resume_continuous_worker() {
-  rm -f "$STATE_DIR/COMPARE_LOCK"
-  heartbeat "done"
+  if [[ "$_OWN_COMPARE_LOCK" == "1" ]]; then
+    rm -f "$STATE_DIR/COMPARE_LOCK"
+    heartbeat "done"
+  fi
   if [[ -f "$STATE_DIR/WORKER_PAUSED" ]]; then
-    local plist="$HOME/Library/LaunchAgents/${WORKER_LABEL}.plist"
-    if [[ -f "$plist" ]]; then
-      launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null \
-        || launchctl load "$plist" 2>/dev/null || true
-      log "resumed $WORKER_LABEL"
+    local owner
+    owner="$(sed -n 's/.* pid=\([0-9][0-9]*\).*/\1/p' "$STATE_DIR/WORKER_PAUSED" | head -1)"
+    if [[ -z "$owner" || "$owner" == "$$" ]]; then
+      local plist="$HOME/Library/LaunchAgents/${WORKER_LABEL}.plist"
+      if [[ -f "$plist" ]]; then
+        launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null \
+          || launchctl load "$plist" 2>/dev/null || true
+        log "resumed $WORKER_LABEL"
+      fi
+      rm -f "$STATE_DIR/WORKER_PAUSED"
     fi
-    rm -f "$STATE_DIR/WORKER_PAUSED"
   fi
 }
 

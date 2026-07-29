@@ -30,6 +30,8 @@ REV_OUT="${LN7_REVISION_OUT:-$STATE_DIR/last_revision_id}"
 _TRAIN_STARTED=0
 _CLEANUP_DONE=0
 _DRAIN_PHASE="init"
+# Post-train persist failure must not KEEP the droplet (overnight orphan GPUs).
+_PERSIST_FAIL=0
 
 # Preflight: refuse thin / stub JSONL before burning GPU $
 CLEAN_N="$(python3 - <<PY
@@ -134,6 +136,14 @@ cleanup() {
   [[ "$_CLEANUP_DONE" == "1" ]] && return 0
   _CLEANUP_DONE=1
   rm -f "$HB" "$DRAIN_HB" "$DRAIN_LOCK" 2>/dev/null || true
+  # QUANTUM-CRYSTAL-ARCH — persist/scp fail after train: always destroy (ignore KEEP)
+  if [[ "$_PERSIST_FAIL" == "1" ]]; then
+    echo "[drain] persist fail — destroying $DROPLET_ID (KEEP ignored)"
+    rm -f "$STATE_DIR/probe.env" "$STATE_DIR/droplet_handoff.env" \
+      "${LN7_HANDOFF_ENV:-}" 2>/dev/null || true
+    bash "$REPO/scripts/ln7_destroy_cuda_droplet.sh" "$DROPLET_ID" || true
+    return 0
+  fi
   if [[ "$KEEP" == "1" ]]; then
     write_handoff "${LN7_HANDOFF_ENV:-$STATE_DIR/droplet_handoff.env}"
     echo "[drain] KEEP_DROPLET=1 — not destroying $DROPLET_ID"
@@ -309,12 +319,27 @@ fi
 
 _DRAIN_PHASE="register"
 hb
-ssh -o BatchMode=yes "$GREEN" "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i /root/.ssh/id_ed25519_orange root@10.13.13.5 'mkdir -p $STORE'"
-scp -o BatchMode=yes -o ProxyJump="$GREEN" -r "$LOCAL_TMP/." \
-  "root@10.13.13.5:$STORE/${REG_REV}/"
+# QUANTUM-CRYSTAL-ARCH — mkdir full adapter path (scp fails if REG_REV dir missing)
+if ! ssh -o BatchMode=yes "$GREEN" \
+  "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i /root/.ssh/id_ed25519_orange root@10.13.13.5 \
+   'mkdir -p \"$STORE/${REG_REV}\" && test -d \"$STORE/${REG_REV}\"'"; then
+  echo "[drain] ORANGE mkdir failed for $STORE/${REG_REV}"
+  _PERSIST_FAIL=1
+  exit 7
+fi
+if ! scp -o BatchMode=yes -o ProxyJump="$GREEN" -r "$LOCAL_TMP/." \
+  "root@10.13.13.5:$STORE/${REG_REV}/"; then
+  echo "[drain] ORANGE scp failed for $STORE/${REG_REV}"
+  _PERSIST_FAIL=1
+  exit 7
+fi
 hb
 
-scp -o BatchMode=yes "$LOCAL_TMP/revision_manifest.json" "$GREEN:/tmp/ln7_revision_manifest.json"
+if ! scp -o BatchMode=yes "$LOCAL_TMP/revision_manifest.json" "$GREEN:/tmp/ln7_revision_manifest.json"; then
+  echo "[drain] GREEN manifest scp failed"
+  _PERSIST_FAIL=1
+  exit 7
+fi
 REG_OUT="$(ssh -o BatchMode=yes "$GREEN" "STORE='$STORE/${REG_REV}' python3 -" <<'PY'
 import json, re, os, urllib.request
 man = json.load(open("/tmp/ln7_revision_manifest.json"))

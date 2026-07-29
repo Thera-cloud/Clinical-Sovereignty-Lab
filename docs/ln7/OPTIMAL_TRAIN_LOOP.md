@@ -43,7 +43,7 @@ LN7_QLORA_MIN_ROWS=50 bash scripts/ln7_ab_qlora_drain.sh
 
 ## DO GPU capacity watcher (BLUE)
 
-LaunchAgent every 15m: **keep** probe → **detach** A/B on **one droplet** (both recipes) → private bakeoff compare → unload only on `AB_OK`. Prefail keeps `probe.env` for retry; `doctl` auth Forbidden backs off.
+LaunchAgent every 15m: **keep** probe → **detach** A/B on **one droplet** (both recipes) → private bakeoff compare → unload on `AB_OK` **or complete `AB_COMPARE`**. Prefail keeps `probe.env` for retry (capped by `LN7_MAX_DRAIN_FAILS`, default 2); then destroy probe + unload. `doctl` auth Forbidden backs off.
 
 ```bash
 bash scripts/ln7_install_gpu_capacity_watch.sh
@@ -66,8 +66,10 @@ bash scripts/ln7_install_gpu_capacity_watch.sh
 
 | Piece | Role |
 |---|---|
-| `COMPARE_LOCK` | Held while `ln7_ab_bakeoff_compare.sh` runs; continuous-worker + GPU capacity watch skip drain/probe |
+| `COMPARE_LOCK` | Single-flight: second compare exits 8 if lock pid live; continuous-worker + GPU capacity watch skip drain/probe |
 | `COMPARE_HEARTBEAT` | Rewritten each poll/deploy phase (`ts=`, `phase=`, `n=`, revs) |
+| `AB_COMPARE` skip | If complete for same A/B, compare exits 0 unless `LN7_AB_COMPARE_FORCE=1` |
+| `AB_OK` gate | Written only when compare succeeds (not on timeout/partial); capacity watch may synthesize from complete `AB_COMPARE` |
 | `com.sovereign.ln7-ab-compare-watchdog` | Every 5m: stale heartbeat → kill compare + PEFT deploy SSH, re-submit (max 2). `phase=deploy*` uses tighter `LN7_COMPARE_DEPLOY_STALE_S` (default 720s) |
 | PEFT health | Probed **GREEN → `10.13.13.5:11435`** after ORANGE restart (not ORANGE self-curl) |
 
@@ -85,7 +87,8 @@ Compare itself pauses `com.sovereign.ln7-continuous-worker` on start and resumes
 |---|---|
 | `DRAIN_LOCK` / `DRAIN_HEARTBEAT` | Written by `ln7_continuous_drain.sh` (`phase=ssh_wait\|train\|persist\|…`) |
 | `com.sovereign.ln7-drain-watchdog` | Every 5m: dead mid-train or heartbeat ≥1800s → kill drain, destroy droplet, clear `DRAINING`; always runs orphan reaper |
-| `ln7_gpu_orphan_reaper.sh` | `doctl` list `ln7-train` / `ln7-gpu-probe` vs `probe.env` / fresh heartbeat; destroy unknowns past `LN7_ORPHAN_TTL_S` (7200s) |
+| `ln7_gpu_orphan_reaper.sh` | Protects `probe.env` / handoff only if age &lt; `LN7_PROBE_PROTECT_MAX_S` (7200) **or** fresh `DRAIN_HEARTBEAT`; else IDs are reapable past `LN7_ORPHAN_TTL_S` |
+| ORANGE persist | `mkdir -p /opt/ln7/adapters/<REV>` before scp; persist fail → destroy droplet (**KEEP ignored**) |
 | `GET/POST /api/ln7/bakeoff/sweep*` | GREEN: age of last `ln7_coding_outcomes` + optional re-fire when `_BAKEOFF_TASKS` empty and n ≪ expected |
 
 ```bash

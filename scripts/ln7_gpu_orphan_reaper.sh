@@ -38,18 +38,30 @@ is_protected() {
   esac
 }
 
-for f in "$STATE_DIR/probe.env" "$STATE_DIR/droplet_handoff.env"; do
-  [[ -f "$f" ]] || continue
-  protect_id "$(awk -F= '/^LN7_EXISTING_DROPLET_ID=/{print $2; exit}' "$f" | tr -d '[:space:]')"
-done
-
+PROBE_PROTECT_MAX_S="${LN7_PROBE_PROTECT_MAX_S:-7200}"
+HB_FRESH_S="${LN7_DRAIN_HEARTBEAT_STALE_S:-1800}"
+now="$(date +%s)"
+hb_fresh=0
 if [[ -f "$STATE_DIR/DRAIN_HEARTBEAT" ]]; then
-  mtime="$(stat -f %m "$STATE_DIR/DRAIN_HEARTBEAT" 2>/dev/null || stat -c %Y "$STATE_DIR/DRAIN_HEARTBEAT" 2>/dev/null || echo 0)"
-  now="$(date +%s)"
-  if [[ $((now - mtime)) -lt "${LN7_DRAIN_HEARTBEAT_STALE_S:-1800}" ]]; then
+  hb_mtime="$(stat -f %m "$STATE_DIR/DRAIN_HEARTBEAT" 2>/dev/null \
+    || stat -c %Y "$STATE_DIR/DRAIN_HEARTBEAT" 2>/dev/null || echo 0)"
+  if [[ $((now - hb_mtime)) -lt "$HB_FRESH_S" ]]; then
+    hb_fresh=1
     protect_id "$(awk -F= '/^droplet_id=/{print $2; exit}' "$STATE_DIR/DRAIN_HEARTBEAT" | tr -d '[:space:]')"
   fi
 fi
+
+# QUANTUM-CRYSTAL-ARCH — aged probe.env without fresh drain heartbeat is NOT protected forever
+for f in "$STATE_DIR/probe.env" "$STATE_DIR/droplet_handoff.env"; do
+  [[ -f "$f" ]] || continue
+  f_mtime="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)"
+  age=$((now - f_mtime))
+  if [[ "$age" -ge "$PROBE_PROTECT_MAX_S" && "$hb_fresh" != "1" ]]; then
+    log "stale ${f##*/} age=${age}s >= ${PROBE_PROTECT_MAX_S}s + no fresh DRAIN_HEARTBEAT — not protecting"
+    continue
+  fi
+  protect_id "$(awk -F= '/^LN7_EXISTING_DROPLET_ID=/{print $2; exit}' "$f" | tr -d '[:space:]')"
+done
 
 reap_tag() {
   local tag="$1"

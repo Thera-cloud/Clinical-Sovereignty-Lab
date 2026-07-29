@@ -149,11 +149,71 @@ clear_auth_fail() {
   rm -f "$AUTH_FAILS" "$AUTH_BACKOFF_UNTIL"
 }
 
+MAX_DRAIN_FAILS="${LN7_MAX_DRAIN_FAILS:-2}"
+FAIL_COUNT_FILE="$STATE_DIR/DRAIN_FAIL_COUNT"
+
+_ab_compare_done() {
+  local f="$STATE_DIR/AB_COMPARE"
+  [[ -s "$f" ]] || return 1
+  python3 - "$f" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    raise SystemExit(1)
+a, b = d.get("a") or {}, d.get("b") or {}
+if not d.get("winner"):
+    raise SystemExit(1)
+# Accept if either side has packs (compare wrote a real summary)
+if int(a.get("n") or 0) < 1 and int(b.get("n") or 0) < 1:
+    raise SystemExit(1)
+raise SystemExit(0)
+PY
+}
+
+_bump_fail_and_maybe_stop() {
+  local n=0
+  [[ -f "$FAIL_COUNT_FILE" ]] && n="$(tr -d '[:space:]' <"$FAIL_COUNT_FILE" || echo 0)"
+  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  n=$((n + 1))
+  echo "$n" >"$FAIL_COUNT_FILE"
+  log "drain fail count=$n / max=$MAX_DRAIN_FAILS"
+  if [[ "$n" -ge "$MAX_DRAIN_FAILS" ]]; then
+    log "max drain fails reached — destroy probe, clear probe.env, stop re-probe"
+    if [[ -f "$PROBE" ]]; then
+      # shellcheck disable=SC1090
+      source "$PROBE" || true
+      local did="${LN7_EXISTING_DROPLET_ID:-}"
+      if [[ -n "$did" ]]; then
+        doctl compute droplet delete "$did" --force >/dev/null 2>&1 || true
+      fi
+    fi
+    rm -f "$PROBE" "$STATE_DIR/droplet_handoff.env" "$DRAINING" "$PIDFILE"
+    echo "terminal_fail fails=$n $(ts)" >"$AB_FAIL"
+    echo "terminal_fail $(ts)" >"$DONE_FILE"
+    unload_agent
+    exit 0
+  fi
+}
+
 # Reap dead drain / finalize success or retry window.
 reconcile_drain_state() {
   if [[ -f "$AB_OK" ]]; then
     log "AB_OK present ($(cat "$AB_OK")) — watcher complete"
     echo "ab_ok $(cat "$AB_OK")" >"$DONE_FILE"
+    unload_agent
+    exit 0
+  fi
+
+  # QUANTUM-CRYSTAL-ARCH — AB_COMPARE done ⇒ write AB_OK and unload (no re-probe)
+  if _ab_compare_done; then
+    local ra rb
+    ra="$(python3 -c "import json;d=json.load(open('$STATE_DIR/AB_COMPARE'));print((d.get('a') or {}).get('revision_id') or '')" 2>/dev/null || true)"
+    rb="$(python3 -c "import json;d=json.load(open('$STATE_DIR/AB_COMPARE'));print((d.get('b') or {}).get('revision_id') or '')" 2>/dev/null || true)"
+    echo "ok from_AB_COMPARE $(ts) a=${ra} b=${rb}" >"$AB_OK"
+    log "AB_COMPARE complete — wrote AB_OK; unloading"
+    rm -f "$DRAINING" "$PIDFILE" "$PROBE" "$FAIL_COUNT_FILE"
+    echo "ab_ok from_compare $(cat "$AB_OK")" >"$DONE_FILE"
     unload_agent
     exit 0
   fi
@@ -165,10 +225,11 @@ reconcile_drain_state() {
       log "A/B drain still running pid=$pid — skip probe"
       exit 0
     fi
-    log "A/B drain dead without AB_OK — clearing DRAINING for re-probe"
+    log "A/B drain dead without AB_OK — clearing DRAINING"
     echo "fail $(ts) pid=${pid:-none}" >"$AB_FAIL"
     rm -f "$DRAINING" "$PIDFILE" "$DONE_FILE"
-    # Keep probe.env if present (prefail keep) — do NOT mass-destroy
+    _bump_fail_and_maybe_stop
+    # Keep probe.env only under fail cap
     if [[ ! -f "$PROBE" ]]; then
       doctl compute droplet list --tag-name ln7-gpu-probe --format ID --no-header 2>/dev/null \
         | while read -r did; do
@@ -177,7 +238,7 @@ reconcile_drain_state() {
             doctl compute droplet delete "$did" --force >/dev/null 2>&1 || true
           done
     else
-      log "probe.env retained for retry — not destroying"
+      log "probe.env retained for retry (fails < $MAX_DRAIN_FAILS)"
     fi
   fi
 }
