@@ -189,6 +189,23 @@ class AgentStatusDigest:
         else:
             status, detail = self._check_agent(cf, "ContentFactory")
             rows.append((status, "ContentFactory", detail))
+        ow = getattr(self.app, "outreach_worker", None)
+        if ow == "disabled":
+            rows.append(("INFO", "OutreachWorker", "ENABLE_OUTREACH_ENGINE=false"))
+        elif ow == "init_failed":
+            rows.append(("WARNING", "OutreachWorker", "init_failed"))
+        elif ow is not None and getattr(ow, "last_health", None):
+            lh = ow.last_health or {}
+            rows.append(
+                (
+                    "WARNING" if lh.get("status") == "degraded" else "OK",
+                    "OutreachWorker",
+                    str(lh.get("status") or lh.get("error") or "ok")[:80],
+                )
+            )
+        else:
+            status, detail = self._check_agent(ow, "OutreachWorker")
+            rows.append((status, "OutreachWorker", detail))
         return {"title": "Content Operations", "rows": rows}
 
     async def _section_token_lifecycle(self) -> dict:

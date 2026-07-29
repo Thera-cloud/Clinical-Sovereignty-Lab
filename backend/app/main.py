@@ -3479,10 +3479,21 @@ async def lifespan(app: FastAPI):
         else:
             app.state.content_factory = "disabled"
             print("   ℹ️  ContentFactoryWorker disabled (ENABLE_CONTENT_FACTORY=false)")
+        # QUANTUM-CRYSTAL-ARCH — Phase 3 Instantly outreach health worker
+        if outreach_engine_enabled() and db_pool is not None:
+            from app.services.growth.outreach_worker import OutreachWorker
+            _outreach_w = OutreachWorker(db_pool)
+            await _outreach_w.start()
+            app.state.outreach_worker = _outreach_w
+            print("   ✅ OutreachWorker started (ENABLE_OUTREACH_ENGINE)")
+        else:
+            app.state.outreach_worker = "disabled"
+            print("   ℹ️  OutreachWorker disabled (ENABLE_OUTREACH_ENGINE=false)")
     except Exception as _growth_err:
         print(f"   ⚠️  Growth engine init failed: {_growth_err}")
         app.state.growth_scheduler = getattr(app.state, "growth_scheduler", None) or "init_failed"
         app.state.content_factory = getattr(app.state, "content_factory", None) or "init_failed"
+        app.state.outreach_worker = getattr(app.state, "outreach_worker", None) or "init_failed"
 
     # SSE: Sovereign Story Engine Orchestrator
     _sse_orchestrator = None
@@ -3625,6 +3636,7 @@ async def lifespan(app: FastAPI):
         ("nate_clinical_bakeoff_agent", callable(getattr(getattr(app.state, "nate_clinical_bakeoff_agent", None), "run_night", None))),  # QUANTUM-CRYSTAL-ARCH
         ("growth_scheduler", getattr(app.state, "growth_scheduler", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("content_factory", getattr(app.state, "content_factory", None) is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("outreach_worker", getattr(app.state, "outreach_worker", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("identity_engine", _identity_engine_ok),  # QUANTUM-CRYSTAL-ARCH
         ("littlenate_inference", getattr(app.state, "littlenate_inference", None) is not None),
         ("nate_memory_crystallizer", getattr(app.state, "nate_memory_crystallizer", None) is not None),
@@ -3748,6 +3760,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ ContentFactoryWorker stopped")
     except Exception as _cf_stop:
         print(f"   ⚠️  ContentFactoryWorker shutdown: {_cf_stop}")
+    try:
+        _ow = getattr(app.state, "outreach_worker", None)
+        if _ow is not None and _ow not in ("disabled", "init_failed") and hasattr(_ow, "stop"):
+            await _ow.stop()
+            print("   ✅ OutreachWorker stopped")
+    except Exception as _ow_stop:
+        print(f"   ⚠️  OutreachWorker shutdown: {_ow_stop}")
     _classroom_learning_auditor = getattr(app.state, "classroom_learning_auditor", None)
     if _classroom_learning_auditor:
         try:

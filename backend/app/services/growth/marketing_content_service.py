@@ -307,8 +307,37 @@ class MarketingContentService:
             )
             if not row:
                 raise ValueError("content not found")
+            if row["status"] not in ("approved", "scheduled"):
+                raise ValueError("not schedulable for publish")
+
+            # QUANTUM-CRYSTAL-ARCH — Instantly cold outreach (Phase 3)
+            if row["content_type"] == "outreach":
+                from app.services.growth.outreach_publisher import push_outreach_sequence
+
+                push = await push_outreach_sequence(
+                    self.db_pool, dict(row), actor=actor
+                )
+                if not push.get("ok"):
+                    raise ValueError(
+                        push.get("error") or "outreach_push_failed"
+                    )
+                updated = await conn.fetchrow(
+                    """
+                    UPDATE marketing_content
+                    SET status = 'published', published_at = NOW(), updated_at = NOW()
+                    WHERE id = $1
+                    RETURNING *
+                    """,
+                    int(content_id),
+                )
+                await self._audit(
+                    conn, content_id, "publish", actor, {"outreach": push}
+                )
+                out = self._serialize(dict(updated))
+                out["outreach"] = push
+                return out
+
             if row["content_type"] != "blog":
-                # Non-blog: mark published without static write
                 updated = await conn.fetchrow(
                     """
                     UPDATE marketing_content
@@ -350,7 +379,6 @@ class MarketingContentService:
                 conn, content_id, "publish", actor, {"path": result["public_path"]}
             )
         return self._serialize(dict(updated))
-
     async def unpublish(
         self, content_id: int, *, actor: str = "ceo"
     ) -> Dict[str, Any]:

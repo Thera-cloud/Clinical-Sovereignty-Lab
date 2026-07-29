@@ -89,6 +89,42 @@ class KeywordUpsert(BaseModel):
     status: str = "queued"
 
 
+class LeadUpsert(BaseModel):
+    email: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    company: Optional[str] = None
+    title: Optional[str] = None
+    npi: Optional[str] = None
+    specialty: Optional[str] = None
+    state: Optional[str] = None
+    source: str = "manual"
+    run_enrichment: bool = False
+
+
+class NpiBatchIngest(BaseModel):
+    rows: list = Field(default_factory=list)
+
+
+class GdprErase(BaseModel):
+    email: str
+
+
+class ReplyEnqueue(BaseModel):
+    email: str
+    body: str
+    lead_id: Optional[int] = None
+
+
+class LandingCaptureBody(BaseModel):
+    landing: str
+    email: str
+    name: Optional[str] = None
+    org: Optional[str] = None
+    website: Optional[str] = None  # honeypot
+    meta: Optional[Dict[str, Any]] = None
+
+
 # =============================================================================
 # PLAYBOOK ENDPOINTS
 # =============================================================================
@@ -576,6 +612,144 @@ async def growth_factory_tick(request: Request):
         )
     result = await worker.tick()
     return {"status": "ok", **result}
+
+
+# QUANTUM-CRYSTAL-ARCH — Phase 3 outbound
+@router.get("/growth/leads")
+async def list_growth_leads(
+    request: Request,
+    status: Optional[str] = None,
+    limit: int = Query(default=50, le=200),
+):
+    from app.services.growth.buyer_leads import BuyerLeadsService
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    items = await BuyerLeadsService(pool).list(status=status, limit=limit)
+    return {"status": "ok", "items": items}
+
+
+@router.post("/growth/leads")
+async def upsert_growth_lead(body: LeadUpsert, request: Request):
+    from app.services.growth.buyer_leads import BuyerLeadsService
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    try:
+        item = await BuyerLeadsService(pool).upsert_lead(**body.dict())
+        return {"status": "ok", "item": item}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/growth/leads/npi-batch")
+async def ingest_npi_batch(body: NpiBatchIngest, request: Request):
+    from app.services.growth.buyer_leads import BuyerLeadsService
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    result = await BuyerLeadsService(pool).ingest_npi_batch(body.rows or [])
+    return {"status": "ok", **result}
+
+
+@router.post("/growth/leads/{lead_id}/enrich")
+async def enrich_growth_lead(lead_id: int, request: Request):
+    from app.services.growth.buyer_leads import BuyerLeadsService
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    try:
+        item = await BuyerLeadsService(pool).enrich(lead_id)
+        return {"status": "ok", "item": item}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/growth/leads/gdpr-erase")
+async def gdpr_erase_lead(body: GdprErase, request: Request):
+    from app.services.growth.buyer_leads import BuyerLeadsService
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    try:
+        result = await BuyerLeadsService(pool).gdpr_erase(body.email, actor="admin")
+        return {"status": "ok", **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/growth/replies")
+async def list_outreach_replies(
+    request: Request,
+    status: str = "pending",
+    limit: int = Query(default=50, le=200),
+):
+    from app.services.growth.buyer_leads import BuyerLeadsService
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    items = await BuyerLeadsService(pool).list_replies(status=status, limit=limit)
+    return {"status": "ok", "items": items}
+
+
+@router.post("/growth/replies")
+async def enqueue_outreach_reply(body: ReplyEnqueue, request: Request):
+    """Enqueue a reply for human review — never auto-sends."""
+    from app.services.growth.buyer_leads import BuyerLeadsService
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    item = await BuyerLeadsService(pool).enqueue_reply(
+        email=body.email, body=body.body, lead_id=body.lead_id
+    )
+    return {"status": "ok", "item": item}
+
+
+@router.post("/growth/outreach/tick")
+async def growth_outreach_tick(request: Request):
+    from app.services.growth import outreach_engine_enabled
+    from app.services.growth.outreach_worker import OutreachWorker
+
+    if not outreach_engine_enabled():
+        raise HTTPException(status_code=400, detail="ENABLE_OUTREACH_ENGINE=false")
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    worker = getattr(request.app.state, "outreach_worker", None)
+    if worker in (None, "disabled", "init_failed") or not hasattr(worker, "tick"):
+        worker = OutreachWorker(pool)
+    result = await worker.tick()
+    return {"status": "ok", **result}
+
+
+@public_router.post("/landing/capture")
+async def public_landing_capture(body: LandingCaptureBody, request: Request):
+    """Public providers/enterprise capture → SendGrid product drip (not Instantly)."""
+    from app.services.growth.landing_capture import capture_landing
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    try:
+        result = await capture_landing(
+            pool,
+            landing=body.landing,
+            email=body.email,
+            name=body.name,
+            org=body.org,
+            meta=body.meta,
+            honeypot=body.website or "",
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @public_router.get("/content/{content_id}/preview", response_class=HTMLResponse)

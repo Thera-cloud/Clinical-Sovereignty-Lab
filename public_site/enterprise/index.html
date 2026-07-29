@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Sovereign Sanctuary — for teams</title>
+  <style>
+    :root { --void:#050505; --gold:#C9A962; --ink:#E8E4DC; --mute:#8B7355; --cyan:#4ECDC4; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; color: var(--ink);
+      font-family: "DM Sans", system-ui, sans-serif;
+      background: radial-gradient(1000px 500px at 80% 0%, #0d1a1a 0%, var(--void) 50%);
+    }
+    main { max-width: 520px; margin: 0 auto; padding: 4rem 1.25rem 3rem; }
+    h1 {
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-weight: 500; font-size: clamp(2rem, 5vw, 2.75rem);
+      color: var(--gold); margin: 0 0 .75rem;
+    }
+    p { color: var(--mute); line-height: 1.55; margin: 0 0 1.75rem; }
+    label { display: block; font-size: .8rem; color: var(--mute); margin: .85rem 0 .35rem; }
+    input {
+      width: 100%; padding: .7rem .85rem; border-radius: 6px;
+      border: 1px solid #1c2a2a; background: #111; color: var(--ink);
+    }
+    .hp { position: absolute; left: -9999px; opacity: 0; height: 0; width: 0; }
+    button {
+      margin-top: 1.25rem; width: 100%; padding: .85rem 1rem;
+      border: none; border-radius: 6px; background: var(--cyan); color: #052020;
+      font-weight: 600; cursor: pointer;
+    }
+    button:disabled { opacity: .5; cursor: wait; }
+    #msg { margin-top: 1rem; font-size: .9rem; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Sovereign Sanctuary</h1>
+  <p>For organizations evaluating a privacy-first coaching and clinical companion for their people — product email only after you ask.</p>
+  <form id="f">
+    <label for="name">Name</label>
+    <input id="name" name="name" autocomplete="name"/>
+    <label for="org">Company</label>
+    <input id="org" name="org" autocomplete="organization"/>
+    <label for="email">Work email</label>
+    <input id="email" name="email" type="email" required autocomplete="email"/>
+    <input class="hp" id="website" name="website" tabindex="-1" autocomplete="off"/>
+    <button type="submit" id="btn">Talk with our team</button>
+    <div id="msg"></div>
+  </form>
+</main>
+<script>
+const API = (location.hostname.includes('sovereignsanctuary'))
+  ? 'https://api.sovereignsanctuary.net' : (localStorage.getItem('sc_api') || 'http://localhost:8000');
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('btn');
+  const msg = document.getElementById('msg');
+  btn.disabled = true; msg.textContent = '';
+  try {
+    const resp = await fetch(API + '/api/marketing/landing/capture', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        landing: 'enterprise',
+        email: document.getElementById('email').value.trim(),
+        name: document.getElementById('name').value.trim() || null,
+        org: document.getElementById('org').value.trim() || null,
+        website: document.getElementById('website').value || '',
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || 'Request failed');
+    msg.style.color = '#4ECDC4';
+    msg.textContent = 'Thanks — we sent a product note (SendGrid), not a cold sequence.';
+    document.getElementById('f').reset();
+  } catch (err) {
+    msg.style.color = '#EF4444';
+    msg.textContent = err.message || 'Something went wrong';
+  } finally { btn.disabled = false; }
+});
+</script>
+</body>
+</html>

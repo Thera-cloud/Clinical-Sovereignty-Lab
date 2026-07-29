@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: phase3-outbound
     content: "Phase 3: buyer_leads + Instantly sequences + enrichment (keyed vendors) + landings + SendGrid drips + GDPR erasure + outreach panel"
-    status: pending
+    status: completed
   - id: phase4-attribution
     content: "Phase 4: extend coach_profiles for SEO directory (not new provider_profiles table); lead_events + bwas_weekly + attribution join; beacon; Funnel/BWAS UI"
     status: pending
