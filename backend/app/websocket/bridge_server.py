@@ -17566,8 +17566,12 @@ async def handle_client(websocket, path=None):
                         if db_pool:
                             async with db_pool.acquire() as _alc:
                                 rows = await _alc.fetch(
-                                    """SELECT action_type, admin_id, target_id, description,
-                                              ip_address::text as ip, logged_at
+                                    """SELECT action_type,
+                                              admin_id::text AS admin_id,
+                                              target_id::text AS target_id,
+                                              description,
+                                              ip_address::text AS ip,
+                                              logged_at
                                     FROM audit_log
                                     ORDER BY logged_at DESC
                                     LIMIT $1""",
@@ -17576,18 +17580,19 @@ async def handle_client(websocket, path=None):
                                 for r in rows:
                                     _audit_entries.append({
                                         "action_type": r["action_type"],
-                                        "admin_id": r.get("admin_id", ""),
-                                        "target_id": r.get("target_id", ""),
-                                        "description": r.get("description", ""),
-                                        "ip": r.get("ip", ""),
-                                        "logged_at": str(r.get("logged_at", "")),
+                                        "admin_id": r["admin_id"] or "",
+                                        "target_id": r["target_id"] or "",
+                                        "description": r["description"] or "",
+                                        "ip": r["ip"] or "",
+                                        "logged_at": str(r["logged_at"] or ""),
                                     })
                     except Exception as _al_err:
                         print(f">>> [AUDIT] Log fetch failed: {_al_err}")
+                    # QUANTUM-CRYSTAL-ARCH — never let UUID/datetime leak into WS JSON
                     await websocket.send(json.dumps({
                         "type": "audit_log_data",
                         "entries": _audit_entries,
-                    }))
+                    }, default=str))
             
             # === ADMIN: GET FAMILIES ===
             elif t == "admin_get_families":

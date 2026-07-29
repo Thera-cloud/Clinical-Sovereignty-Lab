@@ -1696,12 +1696,11 @@ bool canUseAvatarMode(Map<String, dynamic> userProfile) {
 // GLB 3D AVATAR WIDGET
 // =============================================================================
 
-/// GLB models — one file per expression name on CDN (re-export when art diverges).
-const String _glbNeutral   = 'mininate%20neutral.glb';
-const String _glbSoft      = 'mininate%20empathetic.glb';
-const String _glbCalming   = 'mininate%20calming.glb';
-const String _glbCurious   = 'mininate%20curious.glb';
-// sad/mad/proud GLBs exist on CDN but are duplicates — not wired until re-export.
+/// Canonical avatar mesh (2026-07-29 lil_nate kit). Single Y-up textured GLB.
+/// Expression sync still drives AvatarExpression / server avatar_state; visual
+/// morph targets land after Blender shape keys (eyeBlink, jawOpen, mouthSmile_*,
+/// browInnerUp) are baked — until then all logical states share this mesh.
+const String _glbLilNate = 'lil_nate.glb';
 
 /// Maps server avatar_state strings (SCREAMING_SNAKE) to client enum.
 AvatarExpression avatarExpressionFromServer(String? raw) {
@@ -1738,22 +1737,20 @@ AvatarExpression avatarExpressionFromServer(String? raw) {
 String avatarExpressionWireName(AvatarExpression e) =>
     e.toString().split('.').last.toLowerCase();
 
-// Interim asset routing (2026-07): sad/mad/proud GLBs are byte-duplicates and
-// still smile; neutral.glb is the proper resting face. Keep warm/calm on the
-// soft empathetic mesh until distinct exports land.
+/// All expressions → lil_nate.glb until morph-target export lands.
 const Map<AvatarExpression, String> _expressionToGlb = {
-  AvatarExpression.neutral:     _glbNeutral,
-  AvatarExpression.attentive:   _glbNeutral,
-  AvatarExpression.thoughtful:  _glbNeutral,
-  AvatarExpression.warm:        _glbSoft,
-  AvatarExpression.empathetic:  _glbSoft,
-  AvatarExpression.calming:     _glbCalming,
-  AvatarExpression.validating:  _glbSoft,
-  AvatarExpression.curious:     _glbCurious,
-  AvatarExpression.encouraging: _glbSoft,
-  AvatarExpression.proud:       _glbNeutral,
-  AvatarExpression.sad:         _glbNeutral,
-  AvatarExpression.frustrated:  _glbNeutral,
+  AvatarExpression.neutral:     _glbLilNate,
+  AvatarExpression.attentive:   _glbLilNate,
+  AvatarExpression.thoughtful:  _glbLilNate,
+  AvatarExpression.warm:        _glbLilNate,
+  AvatarExpression.empathetic:  _glbLilNate,
+  AvatarExpression.calming:     _glbLilNate,
+  AvatarExpression.validating:  _glbLilNate,
+  AvatarExpression.curious:     _glbLilNate,
+  AvatarExpression.encouraging: _glbLilNate,
+  AvatarExpression.proud:       _glbLilNate,
+  AvatarExpression.sad:         _glbLilNate,
+  AvatarExpression.frustrated:  _glbLilNate,
 };
 
 /// 3D GLB avatar that renders the current expression model.
@@ -1885,7 +1882,7 @@ class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
   }
 
   String _glbForExpression(AvatarExpression expr) {
-    return _expressionToGlb[expr] ?? _glbNeutral;
+    return _expressionToGlb[expr] ?? _glbLilNate;
   }
 
   Widget _modelLayer(String glb, Key key) {
@@ -1899,9 +1896,11 @@ class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
       disableZoom: true,
       autoPlay: true,
       loading: Loading.eager,
-      cameraOrbit: '0deg 80deg 2.5m',
+      // lil_nate ~1.53m Y-up; frame upper torso / face
+      cameraOrbit: '0deg 85deg 3.2m',
+      cameraTarget: '0m 1.05m 0m',
       fieldOfView: '30deg',
-      exposure: 1.0,
+      exposure: 1.05,
       interactionPrompt: InteractionPrompt.none,
     );
   }
