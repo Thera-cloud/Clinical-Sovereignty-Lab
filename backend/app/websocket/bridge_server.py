@@ -8952,6 +8952,18 @@ class AzureCortex:
             return ""
 
     async def process_interaction(self, profile: dict, user_text: str, dojo_type: Optional[str] = None, client_context: Optional[str] = None, depth_mode: Optional[str] = None):
+        # QUANTUM-CRYSTAL-ARCH: mark chat busy so autonomous learn yields the event loop
+        from app.websocket.chat_load_gate import chat_turn_begin, chat_turn_end
+        chat_turn_begin()
+        try:
+            return await self._process_interaction_impl(
+                profile, user_text, dojo_type=dojo_type,
+                client_context=client_context, depth_mode=depth_mode,
+            )
+        finally:
+            chat_turn_end()
+
+    async def _process_interaction_impl(self, profile: dict, user_text: str, dojo_type: Optional[str] = None, client_context: Optional[str] = None, depth_mode: Optional[str] = None):
         uid = profile.get("hardware_id", "UNKNOWN")
         self._last_avatar_user_text[uid] = user_text  # SOVEREIGN-VOICE
         # QUANTUM-CRYSTAL-ARCH: scope all _send() emissions to the originating
@@ -8968,10 +8980,14 @@ class AzureCortex:
                 pg_history_limit as _pg_hist_lim,
                 allow_enrichment as _allow_enrich,
                 allow_plan_heavy as _allow_plan_heavy,
+                allow_plan_context as _allow_plan_ctx,
                 allow_fsf as _allow_fsf,
                 allow_newsletter_library as _allow_lib,
                 allow_deep_memory_search as _allow_deep_mem,
                 build_depth_richness_directive as _depth_rich_dir,
+                crystal_recall_timeout_s as _crystal_to,
+                relational_timeout_s as _rel_to,
+                stream_before_therapeutic_audit as _stream_before_audit_fn,
             )
             _depth = _norm_depth(depth_mode)
         except Exception:
@@ -8981,10 +8997,14 @@ class AzureCortex:
             _pg_hist_lim = lambda m: 15  # noqa: E731
             _allow_enrich = lambda m: True  # noqa: E731
             _allow_plan_heavy = lambda m: True  # noqa: E731
+            _allow_plan_ctx = lambda m: True  # noqa: E731
             _allow_fsf = lambda m: True  # noqa: E731
             _allow_lib = lambda m: True  # noqa: E731
             _allow_deep_mem = lambda m: True  # noqa: E731
             _depth_rich_dir = lambda m, t: ""  # noqa: E731
+            _crystal_to = lambda m: None  # noqa: E731
+            _rel_to = lambda m: None  # noqa: E731
+            _stream_before_audit_fn = lambda m: False  # noqa: E731
         print(f">>> [AI] Cortex Active for {profile.get('name')} ctx={_ctx} depth={_depth}")
         # QUANTUM-CRYSTAL-ARCH: resolve DOJO per-type model-tier override (skips ODPE)
         _dojo_tier = _DOJO_TYPE_MODEL_TIER.get((dojo_type or "").lower()) if dojo_type else None
@@ -9228,7 +9248,7 @@ class AzureCortex:
 
         async def _fetch_plan_context():
             # QUANTUM-CRYSTAL-ARCH: coach plans + cycle skill micro-plans
-            if not _cpool or _role != "CLIENT":
+            if not _cpool or _role != "CLIENT" or not _allow_plan_ctx(_depth):
                 return ""
             blocks = []
             _plans_on = os.environ.get("ENABLE_THERAPEUTIC_PLANS", "").lower() in ("true", "1", "yes")
@@ -9291,12 +9311,30 @@ class AzureCortex:
                     _qq = await augment_recall_query_for_skill_plan(_pool, _un or _hid, _qq)
             except Exception:
                 pass
-            return await recall_crystals_for_context(
+            _coro = recall_crystals_for_context(
                 _pool, _hid, max_results=_crystal_max(_depth), source="bridge_chat", query_text=_qq or _q,
             )
+            _cto = _crystal_to(_depth)  # QUANTUM-CRYSTAL-ARCH: Faster crystal wall-clock cap
+            if not _cto:
+                return await _coro
+            try:
+                return await asyncio.wait_for(_coro, timeout=_cto)
+            except asyncio.TimeoutError:
+                print(f">>> [CTX] crystal recall timeout {_cto}s depth={_depth}")
+                return ""
+
+        async def _rel_capped():
+            _rto = _rel_to(_depth)  # QUANTUM-CRYSTAL-ARCH: Faster relational cap
+            if not _rto:
+                return await self._get_relational_context(profile)
+            try:
+                return await asyncio.wait_for(self._get_relational_context(profile), timeout=_rto)
+            except asyncio.TimeoutError:
+                print(f">>> [CTX] relational timeout {_rto}s depth={_depth}")
+                return ""
 
         relational_context, checkin_context, crystal_context, pg_history_context, intake_context, fsf_context, reconnect_context, _enrich_addendum, trial_context_block, plan_context_block = await asyncio.gather(
-            _timed("relational", self._get_relational_context(profile)),
+            _timed("relational", _rel_capped()),
             _timed("checkin", self._get_checkin_context(profile)),
             _timed("crystals", _recall_with_skill_bias(_cpool, _hw_id, user_text, _uname)),
             _timed("pg_history", _fetch_pg_history_for_chat(_cpool, _uname, _hw_id, limit=_pg_hist_lim(_depth))),
@@ -10401,8 +10439,9 @@ class AzureCortex:
                         )
             except Exception as _ttc_pre_err:
                 print(f">>> [THERAPEUTIC-CTRL] pre-flight failed for {uid}: {_ttc_pre_err}")
-            # QUANTUM-CRYSTAL-ARCH: buffer provider output until post-flight audit when TMC audit is active (C1).
-            _buffer_for_therapeutic_audit = bool(_ttc_audit_meta)
+            # QUANTUM-CRYSTAL-ARCH: buffer until audit unless stream-before-audit (Faster default).
+            _stream_before_audit = bool(_stream_before_audit_fn(_depth))
+            _buffer_for_therapeutic_audit = bool(_ttc_audit_meta) and not _stream_before_audit
             if _buffer_for_therapeutic_audit:
                 await self._send_nate_thinking(uid, client_context=_ctx, turn_id=_turn_id)
             full_response = ""
@@ -10753,12 +10792,15 @@ class AzureCortex:
                             or uid
                         )
                     from app.services.therapeutic_controller import audit_therapeutic_response as _ttc_post
+                    _pre_audit_text = full_response
                     _ttc_audited = await _ttc_post(
                         response_text=full_response, audit_metadata=_ttc_audit_meta,
                         user_id=uid, db_pool=db_pool, recent_narratives=_ttc_recent_narrs,
                     )
                     if _ttc_audited and _ttc_audited.get("response_text"):
                         full_response = _ttc_audited["response_text"]
+                    if _stream_before_audit and _already_streamed and full_response.strip() != (_pre_audit_text or "").strip():
+                        _already_streamed = False  # QUANTUM-CRYSTAL-ARCH: re-emit audit rewrite
                 except Exception as _ttc_post_err:
                     print(f">>> [THERAPEUTIC-CTRL] post-audit failed for {uid}: {_ttc_post_err}")
             elif full_response.strip():

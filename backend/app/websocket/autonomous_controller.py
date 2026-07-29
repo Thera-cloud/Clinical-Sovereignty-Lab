@@ -381,6 +381,14 @@ class LearnMode:
         )
         self._evergreen_cursor: int = 0
 
+    def _chat_busy(self) -> bool:
+        """QUANTUM-CRYSTAL-ARCH: yield learn work while live chat turns are in flight."""
+        try:
+            from app.websocket.chat_load_gate import chat_in_flight
+            return chat_in_flight()
+        except Exception:
+            return False
+
     async def run_learn_cycle(self) -> Dict[str, Any]:
         """
         Run one learn cycle. Returns summary of what was done.
@@ -398,34 +406,43 @@ class LearnMode:
             "activities": [],
         }
 
+        # QUANTUM-CRYSTAL-ARCH: do not start a heavy learn cycle over live chat
+        if self._chat_busy():
+            results["skipped"] = "chat_in_flight"
+            results["elapsed_seconds"] = round(time.monotonic() - start, 1)
+            results["crystals_forged"] = 0
+            results["total_crystals"] = _count_before
+            print(">>> [AUTONOMOUS] Learn cycle skipped — chat in flight")
+            return results
+
         # Priority 1: Session crystallization
         remaining = self._budget - (time.monotonic() - start)
-        if remaining > 30:
+        if remaining > 30 and not self._chat_busy():
             r = await self._crystallize_sessions(max_seconds=min(remaining * 0.5, 300))
             results["activities"].append(r)
 
         # Priority 2: Crystal maintenance
         remaining = self._budget - (time.monotonic() - start)
-        if remaining > 30:
+        if remaining > 30 and not self._chat_busy():
             r = await self._crystal_maintenance(max_seconds=min(remaining * 0.5, 180))
             results["activities"].append(r)
 
         # Priority 3: Organic ingestion (if time remains)
         remaining = self._budget - (time.monotonic() - start)
-        if remaining > 60:
+        if remaining > 60 and not self._chat_busy():
             r = await self._organic_ingestion(max_seconds=remaining)
             results["activities"].append(r)
 
         # Priority 4: Idle crystallization from R2 cached workspace files
         remaining = self._budget - (time.monotonic() - start)
-        if remaining > 30 and self._r2_cache:
+        if remaining > 30 and self._r2_cache and not self._chat_busy():
             r = await self._idle_crystallization(max_seconds=min(remaining, 120))
             results["activities"].append(r)
 
         # Priority 5: Autonomous internet search for knowledge gaps (high cadence)
         remaining = self._budget - (time.monotonic() - start)
         _since_last_search = time.monotonic() - self._last_internet_search
-        if remaining > 30 and _since_last_search >= self._internet_search_interval:
+        if remaining > 30 and _since_last_search >= self._internet_search_interval and not self._chat_busy():
             r = await self._internet_research(max_seconds=min(remaining * 0.5, 120))
             results["activities"].append(r)
             if r.get("queries_run", 0) > 0:
@@ -439,6 +456,7 @@ class LearnMode:
         # bridge runs continuously.
         remaining = self._budget - (time.monotonic() - start)
         if (remaining > 60
+                and not self._chat_busy()
                 and self._crystallizer
                 and hasattr(self._crystallizer, "_harvest_buffer")
                 and hasattr(self._crystallizer, "_cluster_and_synthesize_cycle")
@@ -468,7 +486,7 @@ class LearnMode:
 
         # Priority 7: BLUE→GREEN crystal sync (when production DB is reachable)
         remaining = self._budget - (time.monotonic() - start)
-        if remaining > 10 and self._crystallizer and hasattr(self._crystallizer, "_is_blue") and self._crystallizer._is_blue:
+        if remaining > 10 and not self._chat_busy() and self._crystallizer and hasattr(self._crystallizer, "_is_blue") and self._crystallizer._is_blue:
             r = await self._sync_blue_to_green()
             results["activities"].append(r)
 
@@ -1131,10 +1149,19 @@ class AutonomousController:
                 print(f">>> [AUTONOMOUS] Cycle {self._cycles}: {report.summary_line()}")
 
                 if report.all_passed:
-                    # Step 2a: LEARN MODE
+                    # Step 2a: LEARN MODE — wait briefly if chat is busy, else skip
                     self._mode = "LEARN"
                     try:
+                        from app.websocket.chat_load_gate import wait_while_chat_busy
+                        _clear = await wait_while_chat_busy(poll_s=0.25, max_wait_s=45.0)
+                        if not _clear:
+                            print(">>> [AUTONOMOUS] Learn deferred — chat still in flight")
+                            await asyncio.sleep(self._interval)
+                            continue
                         result = await self._learn.run_learn_cycle()
+                        if result.get("skipped") == "chat_in_flight":
+                            await asyncio.sleep(self._interval)
+                            continue
                         forged = result.get("crystals_forged", 0)
                         _total = result.get("total_crystals", 0)
                         self._total_crystals = _total

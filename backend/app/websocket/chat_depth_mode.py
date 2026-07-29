@@ -45,6 +45,59 @@ def allow_plan_heavy(mode: str) -> bool:
     return not is_faster(mode)
 
 
+def allow_plan_context(mode: str) -> bool:
+    """QUANTUM-CRYSTAL-ARCH: Faster skips all plan_ctx (active + cycle + sandbox)."""
+    return not is_faster(mode)
+
+
+def crystal_recall_timeout_s(mode: str) -> float | None:
+    """
+    Wall-clock cap for crystal recall on Faster. Extra = uncapped (None).
+    Override via BRIDGE_FASTER_CRYSTAL_TIMEOUT_S (seconds).
+    """
+    if not is_faster(mode):
+        return None
+    import os
+
+    raw = (os.getenv("BRIDGE_FASTER_CRYSTAL_TIMEOUT_S") or "2.5").strip()
+    try:
+        val = float(raw)
+    except ValueError:
+        val = 2.5
+    return max(0.5, val) if val > 0 else None
+
+
+def relational_timeout_s(mode: str) -> float | None:
+    """Cap relational/story gather on Faster; Extra uncapped."""
+    if not is_faster(mode):
+        return None
+    import os
+
+    raw = (os.getenv("BRIDGE_FASTER_RELATIONAL_TIMEOUT_S") or "1.2").strip()
+    try:
+        val = float(raw)
+    except ValueError:
+        val = 1.2
+    return max(0.3, val) if val > 0 else None
+
+
+def stream_before_therapeutic_audit(mode: str) -> bool:
+    """
+    When True, stream tokens to client before post-flight TMC audit.
+    Env ENABLE_STREAM_BEFORE_THERAPEUTIC_AUDIT:
+      faster (default) | true | always | false
+    """
+    import os
+
+    raw = (os.getenv("ENABLE_STREAM_BEFORE_THERAPEUTIC_AUDIT") or "faster").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on", "always"):
+        return True
+    # default / "faster": only Faster depth streams before audit
+    return is_faster(mode)
+
+
 def allow_fsf(mode: str) -> bool:
     return not is_faster(mode)
 

@@ -4,13 +4,17 @@ from app.websocket.chat_depth_mode import (
     DEPTH_FASTER,
     allow_deep_memory_search,
     allow_enrichment,
+    allow_plan_context,
     allow_plan_heavy,
     build_depth_richness_directive,
     build_extra_quotient_directive,
     build_faster_richness_directive,
     crystal_max_results,
+    crystal_recall_timeout_s,
     normalize_depth_mode,
     pg_history_limit,
+    relational_timeout_s,
+    stream_before_therapeutic_audit,
 )
 
 
@@ -27,7 +31,11 @@ def test_faster_budgets():
     assert pg_history_limit("faster") == 8
     assert allow_enrichment("faster") is False
     assert allow_plan_heavy("faster") is False
+    assert allow_plan_context("faster") is False
     assert allow_deep_memory_search("faster") is False
+    assert crystal_recall_timeout_s("faster") == 2.5
+    assert relational_timeout_s("faster") == 1.2
+    assert stream_before_therapeutic_audit("faster") is True
 
 
 def test_extra_budgets():
@@ -35,7 +43,11 @@ def test_extra_budgets():
     assert pg_history_limit("extra") == 15
     assert allow_enrichment("extra") is True
     assert allow_plan_heavy("extra") is True
+    assert allow_plan_context("extra") is True
     assert allow_deep_memory_search("extra") is True
+    assert crystal_recall_timeout_s("extra") is None
+    assert relational_timeout_s("extra") is None
+    assert stream_before_therapeutic_audit("extra") is False
 
 
 def test_extra_quotient_directive_mentions_levels():
