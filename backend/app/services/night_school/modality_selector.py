@@ -21,6 +21,14 @@ MODALITY_KEYWORDS = {
     "gottman_method": ["gottman", "four horsemen", "repair attempt", "love map", "sound relationship"],
     "DBT": ["dialectical", "dbt", "distress tolerance", "emotion regulation", "mindfulness"],
     "CBT": ["cognitive behavioral", "cbt", "thought record", "cognitive distortion", "behavioral activation"],
+    "MI": [
+        "motivational interviewing", "change talk", "roll with resistance",
+        "ambivalence", "evoking", "sustain talk", "oars", "develop discrepancy",
+    ],
+    "ACT": [
+        "acceptance and commitment", "act therapy", "cognitive defusion",
+        "values-based", "psychological flexibility", "experiential avoidance",
+    ],
     "psychodynamic": ["psychodynamic", "transference", "countertransference", "unconscious", "defense mechanism"],
     "trauma_informed": ["trauma", "ptsd", "emdr", "flashback", "hypervigilance", "dissociation"],
     "family_systems": ["family system", "differentiation", "triangulation", "genogram", "bowen"],

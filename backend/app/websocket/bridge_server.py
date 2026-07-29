@@ -10313,6 +10313,25 @@ class AzureCortex:
             except Exception as _ad_err:
                 print(f">>> [ADAPTIVE] error (non-fatal): {type(_ad_err).__name__}: {_ad_err}")
 
+        # QUANTUM-CRYSTAL-ARCH — clinical fast-loop (flag default OFF; shadow = log only)
+        try:
+            from app.services.nate_clinical_flags import fast_loop_enabled
+            if fast_loop_enabled() and _role == "CLIENT" and not dojo_type:
+                from app.services.nate_clinical_fast_loop import (
+                    clinical_reflection_scratchpad,
+                    log_fast_loop_shadow,
+                )
+                _fl = clinical_reflection_scratchpad(
+                    {"user_text": user_text, "profile": profile}
+                )
+                if _fl:
+                    if _fl.get("shadow"):
+                        asyncio.create_task(log_fast_loop_shadow(db_pool, uid, _fl))
+                    elif _fl.get("addendum"):
+                        system_prompt = (system_prompt or "") + "\n\n---\n" + _fl["addendum"]
+        except Exception as _fl_err:
+            print(f">>> [CLINICAL-FAST-LOOP] non-fatal: {type(_fl_err).__name__}: {_fl_err}")
+
         # QUANTUM-CRYSTAL-ARCH: high-risk occupational prompt modifiers (reserved headroom)
         _pop_sfx = ""
         try:

@@ -194,6 +194,7 @@ class AgentStatusDigest:
             ("Six-Quotient Standards Index", "six_quotient_standards_index"),  # QUANTUM-CRYSTAL-ARCH
             ("Six-Quotient Growth Engine", "six_quotient_growth_engine"),  # QUANTUM-CRYSTAL-ARCH
             ("Six-Quotient Self-Dev", "six_quotient_self_dev_agent"),  # QUANTUM-CRYSTAL-ARCH
+            ("Nate Clinical Bakeoff", "nate_clinical_bakeoff_agent"),  # QUANTUM-CRYSTAL-ARCH
             ("LN Sandbox DOJO", "ln_sandbox_engine"),  # QUANTUM-CRYSTAL-ARCH
             ("LN Sandbox Auditor", "ln_sandbox_auditor"),  # QUANTUM-CRYSTAL-ARCH
             ("PGSD Heartbeat", "pgsd_heartbeat_agent"),  # QUANTUM-CRYSTAL-ARCH

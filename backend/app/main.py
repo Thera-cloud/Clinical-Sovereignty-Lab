@@ -3438,6 +3438,17 @@ async def lifespan(app: FastAPI):
         print(f"   ⚠️  Ln7ContinuousAgent init failed: {_ln7c_err}")
         app.state.ln7_continuous_agent = "init_failed"  # truthy — do not tank service count
 
+    # QUANTUM-CRYSTAL-ARCH — Nate clinical coevolution bakeoff (flags default OFF)
+    try:
+        from app.services.nate_clinical_bakeoff_agent import NateClinicalBakeoffAgent
+        _nate_clin_agent = NateClinicalBakeoffAgent(db_pool, app_state=app.state)
+        await _nate_clin_agent.start()
+        app.state.nate_clinical_bakeoff_agent = _nate_clin_agent
+        print("   ✅ NateClinicalBakeoffAgent started (ENABLE_NATE_CLINICAL_BAKEOFF gated)")
+    except Exception as _nca_err:
+        print(f"   ⚠️  NateClinicalBakeoffAgent init failed: {_nca_err}")
+        app.state.nate_clinical_bakeoff_agent = "init_failed"
+
     # SSE: Sovereign Story Engine Orchestrator
     _sse_orchestrator = None
     try:
@@ -3576,6 +3587,7 @@ async def lifespan(app: FastAPI):
         ("ceo_dual_coo_auditor", _ceo_dual_coo_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln7_engine", _ln7_engine_ok),  # QUANTUM-CRYSTAL-ARCH — Little Nate 7
         ("ln7_continuous_agent", getattr(app.state, "ln7_continuous_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("nate_clinical_bakeoff_agent", getattr(app.state, "nate_clinical_bakeoff_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("identity_engine", _identity_engine_ok),  # QUANTUM-CRYSTAL-ARCH
         ("littlenate_inference", getattr(app.state, "littlenate_inference", None) is not None),
         ("nate_memory_crystallizer", getattr(app.state, "nate_memory_crystallizer", None) is not None),
@@ -3677,6 +3689,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ Ln7ContinuousAgent stopped")
     except Exception as _ln7c_stop:
         print(f"   ⚠️  Ln7ContinuousAgent shutdown: {_ln7c_stop}")
+    try:
+        _nca = getattr(app.state, "nate_clinical_bakeoff_agent", None)
+        if _nca is not None and _nca != "init_failed" and hasattr(_nca, "stop"):
+            await _nca.stop()
+            print("   ✅ NateClinicalBakeoffAgent stopped")
+    except Exception as _nca_stop:
+        print(f"   ⚠️  NateClinicalBakeoffAgent shutdown: {_nca_stop}")
     _classroom_learning_auditor = getattr(app.state, "classroom_learning_auditor", None)
     if _classroom_learning_auditor:
         try:
@@ -4245,7 +4264,6 @@ if settings.ENABLE_SKYEYE:
 # Marketing Brain (always enabled when SkyEye is enabled)
 if settings.ENABLE_SKYEYE:
     app.include_router(marketing_api.router)
-
 # QUANTUM-CRYSTAL-ARCH — LN-Observer (Coach Command)
 if getattr(settings, "ENABLE_LN_OBSERVER", False):
     from app.routers.ln_observer_api import router as ln_observer_router
@@ -4264,6 +4282,13 @@ try:
     app.include_router(ln7_router)
 except Exception as _ln7_rerr:
     print(f"   ⚠️  LN7 router failed: {_ln7_rerr}")
+
+# QUANTUM-CRYSTAL-ARCH — Nate clinical coevolution admin API
+try:
+    from app.routers.nate_clinical_api import router as nate_clinical_router
+    app.include_router(nate_clinical_router)
+except Exception as _ncr_err:
+    print(f"   ⚠️  Nate clinical router failed: {_ncr_err}")
 
 # Coherence Engine (Sovereign Swarm)
 app.include_router(coherence_api.router)
