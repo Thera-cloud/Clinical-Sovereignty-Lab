@@ -9,6 +9,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 GREEN="${LN7_GREEN_HOST:-root@68.183.168.75}"
 SLEEP="${LN7_WORKER_SLEEP_S:-300}"
 REGION="${LN7_GPU_REGION:-tor1}"
+STATE_DIR="${LN7_GPU_WATCH_STATE_DIR:-$HOME/.local/state/ln7_gpu_watch}"
 export LN7_GPU_REGION="$REGION"
 
 queued() {
@@ -19,6 +20,11 @@ queued() {
 }
 
 one_cycle() {
+  # Hard mutex: A/B bakeoff compare owns GPU/ORANGE PEFT — do not drain
+  if [[ -f "$STATE_DIR/COMPARE_LOCK" ]]; then
+    echo "[worker] $(date -u +%Y-%m-%dT%H%M%SZ) COMPARE_LOCK present — skip drain"
+    return 0
+  fi
   n="$(queued || echo 0)"
   echo "[worker] $(date -u +%Y-%m-%dT%H%M%SZ) queued=$n region=$REGION"
   if [[ "${n:-0}" =~ ^[0-9]+$ ]] && [[ "$n" -ge 1 ]]; then

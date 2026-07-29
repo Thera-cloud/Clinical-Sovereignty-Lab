@@ -62,6 +62,23 @@ bash scripts/ln7_install_gpu_capacity_watch.sh
 - Bakeoff compare: sequential PEFT deploy → `POST /bakeoff` with `background:true` → poll scorecard `?since=` (poll max `max(7200, packs×600)`).
 - Adapter prune after persist keeps last N shadows (+ active).
 
+## Bakeoff ops (BLUE — smoother compare)
+
+| Piece | Role |
+|---|---|
+| `COMPARE_LOCK` | Held while `ln7_ab_bakeoff_compare.sh` runs; continuous-worker + GPU capacity watch skip drain/probe |
+| `COMPARE_HEARTBEAT` | Rewritten each poll/deploy phase (`ts=`, `phase=`, `n=`, revs) |
+| `com.sovereign.ln7-ab-compare-watchdog` | Every 5m: if heartbeat stale (≥900s) and no `AB_COMPARE`, kill stuck compare and `launchctl submit` restart (max 2) |
+| PEFT health | Probed **GREEN → `10.13.13.5:11435`** after ORANGE restart (not ORANGE self-curl) |
+
+```bash
+bash scripts/ln7_install_ab_compare_watchdog.sh
+# logs: ~/Library/Logs/ln7_ab_compare_watchdog*.log
+# uninstall: bash scripts/ln7_install_ab_compare_watchdog.sh --uninstall
+```
+
+Compare itself pauses `com.sovereign.ln7-continuous-worker` on start and resumes on exit (`WORKER_PAUSED`).
+
 ## Kill criteria
 
 Empty/thin queue burn, recipe change without A/B, promote on vibe/judge, Ollama merge before PEFT clears gate.

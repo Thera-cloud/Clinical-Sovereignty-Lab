@@ -74,10 +74,15 @@ fi
 systemctl daemon-reload
 systemctl enable ln7_peft_server
 systemctl restart ln7_peft_server
+echo "[peft] remote restart issued for $ADAPTER_NAME"
+REMOTE
+
+# Health from GREEN→WG (ORANGE self-curl to 10.13.13.5 can stall/buffer; localhost not bound)
 ok=0
 for i in $(seq 1 60); do
-  h=$(curl -sS --max-time 5 http://10.13.13.5:11435/health 2>/dev/null || true)
-  echo "health_try_$i $h"
+  h="$(ssh -o BatchMode=yes -o ConnectTimeout=20 "$GREEN" \
+    "curl -sS --max-time 5 http://${ORANGE_IP}:11435/health 2>/dev/null || true")"
+  echo "[peft] health_try_$i $h"
   if echo "$h" | grep -qE '"loaded"[[:space:]]*:[[:space:]]*true'; then
     if echo "$h" | grep -q "$ADAPTER_NAME"; then
       ok=1
@@ -90,5 +95,4 @@ for i in $(seq 1 60); do
   sleep 8
 done
 [[ "$ok" == "1" ]] || { echo "[peft] FAIL: health never loaded $ADAPTER_NAME" >&2; exit 3; }
-REMOTE
 echo "[peft] done adapter=$ADAPTER_NAME"

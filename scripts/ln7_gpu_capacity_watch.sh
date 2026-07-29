@@ -388,6 +388,12 @@ one_check() {
   sync_mirror
   reconcile_drain_state
 
+  # Manual / watchdog bakeoff compare owns ORANGE PEFT + GPU — do not probe/drain
+  if [[ -f "$STATE_DIR/COMPARE_LOCK" ]]; then
+    log "COMPARE_LOCK present — skip probe/drain"
+    return 0
+  fi
+
   if [[ -f "$AB_OK" ]]; then
     exit 0
   fi

@@ -55,7 +55,8 @@ _safe_cp() {
 }
 for f in ln7_gpu_capacity_watch.sh ln7_ab_qlora_drain.sh ln7_ab_bakeoff_compare.sh \
          ln7_continuous_drain.sh ln7_provision_cuda_droplet.sh ln7_destroy_cuda_droplet.sh \
-         ln7_deploy_peft_serve_orange.sh; do
+         ln7_deploy_peft_serve_orange.sh ln7_ab_compare_watchdog.sh \
+         ln7_install_ab_compare_watchdog.sh ln7_continuous_worker.sh; do
   _safe_cp "$SRC_REPO/scripts/$f" "$DEST/scripts/$f"
 done
 _safe_cp "$SRC_REPO/backend/scripts/ln7_qlora_train.py" "$DEST/backend/scripts/ln7_qlora_train.py"

@@ -23,9 +23,57 @@ if [[ -z "$POLL_MAX" ]]; then
   [[ "$POLL_MAX" -lt 7200 ]] && POLL_MAX=7200
 fi
 POLL_INTERVAL="${LN7_BAKEOFF_POLL_INTERVAL_S:-30}"
+WORKER_LABEL="${LN7_CONTINUOUS_WORKER_LABEL:-com.sovereign.ln7-continuous-worker}"
+COMPARE_LABEL="${LN7_AB_COMPARE_LABEL:-ln7-ab-compare}"
 mkdir -p "$STATE_DIR"
 
 log() { echo "[ab-compare] $*" >&2; }
+
+# QUANTUM-CRYSTAL-ARCH — heartbeat + mutex so watchdog can recover stalled compares
+heartbeat() {
+  local phase="${1:-running}" n="${2:-}" rev="${3:-}"
+  {
+    echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "phase=$phase"
+    echo "pid=$$"
+    echo "rev_a=$REV_A"
+    echo "rev_b=$REV_B"
+    echo "rev=${rev}"
+    echo "n=${n}"
+    true
+  } >"$STATE_DIR/COMPARE_HEARTBEAT"
+}
+
+pause_continuous_worker() {
+  launchctl bootout "gui/$(id -u)/$WORKER_LABEL" 2>/dev/null || true
+  echo "paused $(date -u +%Y-%m-%dT%H%M%SZ) by=ab-compare pid=$$" >"$STATE_DIR/WORKER_PAUSED"
+  echo "COMPARE_LOCK $(date -u +%Y-%m-%dT%H%M%SZ) pid=$$ a=$REV_A b=$REV_B" >"$STATE_DIR/COMPARE_LOCK"
+  log "paused $WORKER_LABEL (COMPARE_LOCK)"
+}
+
+resume_continuous_worker() {
+  rm -f "$STATE_DIR/COMPARE_LOCK"
+  heartbeat "done"
+  if [[ -f "$STATE_DIR/WORKER_PAUSED" ]]; then
+    local plist="$HOME/Library/LaunchAgents/${WORKER_LABEL}.plist"
+    if [[ -f "$plist" ]]; then
+      launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null \
+        || launchctl load "$plist" 2>/dev/null || true
+      log "resumed $WORKER_LABEL"
+    fi
+    rm -f "$STATE_DIR/WORKER_PAUSED"
+  fi
+}
+
+cleanup() {
+  local ec=$?
+  resume_continuous_worker || true
+  exit "$ec"
+}
+trap cleanup EXIT INT TERM
+
+pause_continuous_worker
+heartbeat "start"
 log "$(date -u +%Y-%m-%dT%H%M%SZ) a=$REV_A b=$REV_B poll_max=${POLL_MAX}s packs=$EXPECTED_PACKS min_accept=$MIN_ACCEPT"
 
 resolve_adapter() {
@@ -155,7 +203,8 @@ PY
 run_one() {
   local rev="$1" adapter="$2"
   local result_file
-  result_file="$(mktemp "${TMPDIR:-/tmp}/ln7_ab_XXXXXX.json")"
+  result_file="$(mktemp -t ln7_ab).json"
+  : >"$result_file"
   # Always emit a JSON line to stdout (captured by caller); noise → stderr
   log "=== $rev (adapter=$adapter) ==="
 
@@ -181,15 +230,18 @@ PY
 )"
   log "verify: $verify_out"
 
+  heartbeat "deploy" "" "$rev"
   log "deploy PEFT $adapter"
   bash "$REPO/scripts/ln7_deploy_peft_serve_orange.sh" "$adapter" >&2
   log "deploy done $adapter"
+  heartbeat "deploy_done" "" "$rev"
 
   log "wait bakeoff idle"
   wait_bakeoff_idle 900 || true
 
   SINCE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   log "fire background bakeoff since=$SINCE"
+  heartbeat "bakeoff_fire" "" "$rev"
   fire_bakeoff "$rev" || log "WARN: fire_bakeoff exit $? — continuing poll"
 
   local elapsed=0
@@ -220,6 +272,7 @@ except Exception as e:
 PY
 )" || true
     n="$(python3 -c 'import json,sys; d=json.loads(sys.argv[1] or "{}"); print(int(d.get("n") or 0))' "$score_json" 2>/dev/null || echo 0)"
+    heartbeat "poll" "$n" "$rev"
     log "poll ${elapsed}s n=$n (need $EXPECTED_PACKS min_accept=$MIN_ACCEPT)"
 
     if [[ "$n" -ge "$EXPECTED_PACKS" ]]; then
@@ -323,4 +376,5 @@ print(json.dumps(summary, indent=2))
 raise SystemExit(0 if (a.get("ok") or b.get("ok")) else 1)
 PY
 
+rm -f "$STATE_DIR/COMPARE_WATCHDOG_RESTARTS" "$STATE_DIR/COMPARE_STALE"
 log "wrote $OUT"
