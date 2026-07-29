@@ -135,7 +135,7 @@ a{color:var(--cyan)}
 
   <section class="card" id="panel-themes" style="display:none">
     <h3 style="margin-top:0;color:var(--goldb)">Keyword queue (Phase 2)</h3>
-    <p class="note">Priority = volume×0.30 + intent×0.25 + audience×0.25 + buyer×0.20 (× demand_prior after Phase 2b). Factory drafts → CEO inbox.</p>
+    <p class="note">Priority = volume×0.30 + intent×0.25 + audience×0.25 + buyer×0.20 × demand_prior (1.0–1.5 from try themes). Upsert auto-computes demand unless overridden.</p>
     <div class="row">
       <input id="kwText" placeholder="keyword"/>
       <input id="kwAud" placeholder="audience" value="general"/>
@@ -145,11 +145,12 @@ a{color:var(--cyan)}
       <input id="kwBuy" placeholder="buyer" value="0.3" style="min-width:100px"/>
       <button onclick="upsertKeyword()">Upsert keyword</button>
       <button class="secondary" onclick="loadKeywords()">Refresh</button>
+      <button class="secondary" onclick="refreshDemand()">Refresh demand</button>
       <button class="secondary" onclick="factoryTick()">Factory tick</button>
     </div>
     <table>
-      <thead><tr><th>ID</th><th>Keyword</th><th>Audience</th><th>Score</th><th>Status</th></tr></thead>
-      <tbody id="kwBody"><tr><td colspan="5" class="note">—</td></tr></tbody>
+      <thead><tr><th>ID</th><th>Keyword</th><th>Audience</th><th>Demand</th><th>Score</th><th>Status</th></tr></thead>
+      <tbody id="kwBody"><tr><td colspan="6" class="note">—</td></tr></tbody>
     </table>
     <h3 style="margin-top:24px;color:var(--goldb)">try.html themes (Phase 4b)</h3>
     <p class="note">Anonymized weekly counts only (<code>try_theme_weekly</code>). No utterances. Crisis → ops_only (never stored). Flag: <code>ENABLE_TRY_THEME_TELEMETRY</code>.</p>
@@ -193,6 +194,12 @@ a{color:var(--cyan)}
       <thead><tr><th>Kind</th><th>Content</th><th>Audience</th><th>Score</th><th>Weeks</th></tr></thead>
       <tbody id="funnelBody"><tr><td colspan="5" class="note">—</td></tr></tbody>
     </table>
+    <h4 style="color:var(--gold);margin:1.25rem 0 .5rem">Diagnostics (Phase 5)</h4>
+    <p class="note">Propose-only. Flag: <code>ENABLE_GROWTH_DIAGNOSTICS</code>.</p>
+    <div class="row">
+      <button class="secondary" onclick="loadDiagnostics(true)">Run diagnostics</button>
+    </div>
+    <pre id="diagnosticsJson" style="white-space:pre-wrap;font-size:.8rem;color:var(--mute);margin-top:.5rem">—</pre>
     <pre id="configJson" style="white-space:pre-wrap;font-size:.8rem;color:var(--mute);margin-top:1rem"></pre>
   </section>
 </main>
@@ -233,7 +240,7 @@ function switchTab(name){
   document.getElementById('panel-funnel').style.display = name==='funnel' ? '' : 'none';
   document.getElementById('panel-outreach-ops').style.display = name==='outreach' ? '' : 'none';
   document.getElementById('panel-directory-ops').style.display = name==='directory' ? '' : 'none';
-  if (name==='funnel') { loadConfig(); loadFunnel(); }
+  if (name==='funnel') { loadConfig(); loadFunnel(); loadDiagnostics(false); }
   if (name==='themes') { loadKeywords(); loadTryThemes(); }
   if (name==='outreach') { loadLeads(); loadReplies(); }
   if (name==='directory') loadDirectory();
@@ -344,13 +351,35 @@ async function loadKeywords(){
     const data = await api('/api/marketing/growth/keywords');
     const items = (data && data.items) || [];
     const tb = document.getElementById('kwBody');
-    if (!items.length){ tb.innerHTML = '<tr><td colspan="5" class="note">No keywords</td></tr>'; return; }
+    if (!items.length){ tb.innerHTML = '<tr><td colspan="6" class="note">No keywords</td></tr>'; return; }
     tb.innerHTML = items.map(it => `<tr>
       <td>${it.id}</td><td>${esc(it.keyword||'')}</td><td>${esc(it.audience||'')}</td>
+      <td>${Number(it.demand_prior||1).toFixed(3)}</td>
       <td>${Number(it.priority_score||0).toFixed(3)}</td>
       <td><span class="badge">${esc(it.status||'')}</span></td>
     </tr>`).join('');
   } catch(e){ toast('Keywords: '+e.message); }
+}
+
+async function refreshDemand(){
+  try {
+    const data = await api('/api/marketing/growth/keywords/refresh-demand', { method:'POST', body:'{}' });
+    toast('Demand refreshed: '+(data.updated||0));
+    loadKeywords(); loadTryThemes();
+  } catch(e){ toast(e.message); }
+}
+
+async function loadDiagnostics(refresh){
+  try {
+    const q = refresh ? '?refresh=true' : '';
+    const data = await api('/api/marketing/growth/diagnostics'+q);
+    const el = document.getElementById('diagnosticsJson');
+    if (!el) return;
+    el.textContent = JSON.stringify(data||{}, null, 2);
+  } catch(e){
+    const el = document.getElementById('diagnosticsJson');
+    if (el) el.textContent = e.message;
+  }
 }
 
 async function loadTryThemes(){
@@ -379,7 +408,7 @@ async function upsertKeyword(){
       intent: parseFloat(document.getElementById('kwInt').value)||0,
       audience_value: parseFloat(document.getElementById('kwAudV').value)||0,
       buyer_prior: parseFloat(document.getElementById('kwBuy').value)||0,
-      demand_prior: 1.0,
+      auto_demand: true,
     };
     if (!body.keyword){ toast('Keyword required'); return; }
     const data = await api('/api/marketing/growth/keywords', { method:'POST', body: JSON.stringify(body) });

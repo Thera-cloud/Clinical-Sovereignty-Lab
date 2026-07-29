@@ -84,7 +84,8 @@ class KeywordUpsert(BaseModel):
     intent: float = 0.0
     audience_value: float = 0.0
     buyer_prior: float = 0.0
-    demand_prior: float = 1.0
+    demand_prior: Optional[float] = None  # None → Phase 2b auto from try_theme_weekly
+    auto_demand: bool = True
     notes: Optional[str] = None
     status: str = "queued"
 
@@ -442,6 +443,7 @@ async def growth_health(request: Request):
     from app.services.growth import (
         bwas_enabled,
         content_factory_enabled,
+        growth_diagnostics_enabled,
         growth_engine_enabled,
         outreach_engine_enabled,
         try_theme_telemetry_enabled,
@@ -465,6 +467,7 @@ async def growth_health(request: Request):
         "enable_outreach_engine": outreach_engine_enabled(),
         "enable_bwas": bwas_enabled(),
         "enable_try_theme_telemetry": try_theme_telemetry_enabled(),
+        "enable_growth_diagnostics": growth_diagnostics_enabled(),
         "sender_guard": {"ok": ok_sender, "message": sender_msg},
         "instantly": instantly,
         "studio": studio,
@@ -603,6 +606,17 @@ async def upsert_growth_keyword(body: KeywordUpsert, request: Request):
         return {"status": "ok", "item": item}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/growth/keywords/refresh-demand")
+async def refresh_keyword_demand(request: Request):
+    """Phase 2b: recompute demand_prior from try_theme_weekly for active keywords."""
+    from app.services.growth.keyword_queue import KeywordQueueService
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    return {"status": "ok", **(await KeywordQueueService(pool).refresh_demand_priors())}
 
 
 @router.post("/growth/factory/tick")
@@ -908,6 +922,52 @@ async def growth_themes(
         raise HTTPException(status_code=503, detail="db unavailable")
     items = await list_try_themes(pool, weeks=weeks, limit=limit)
     return {"status": "ok", "source": "try_theme_weekly", "items": items}
+
+
+@router.get("/growth/diagnostics")
+async def growth_diagnostics(request: Request, refresh: bool = Query(default=False)):
+    """Phase 5: propose-only growth diagnostics (flag-gated)."""
+    from app.services.growth import growth_diagnostics_enabled
+    from app.services.growth.diagnostics_worker import GrowthDiagnosticsWorker
+
+    if not growth_diagnostics_enabled():
+        return {
+            "status": "ok",
+            "skipped": True,
+            "reason": "ENABLE_GROWTH_DIAGNOSTICS=false",
+            "checks": [],
+            "proposals": [],
+        }
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    worker = getattr(request.app.state, "growth_diagnostics", None)
+    if worker in (None, "disabled", "init_failed") or not hasattr(worker, "run_once"):
+        worker = GrowthDiagnosticsWorker(pool)
+    if refresh or not worker.last_report().get("checks"):
+        report = await worker.run_once()
+    else:
+        report = worker.last_report()
+    return {"status": "ok", **report}
+
+
+@router.get("/growth/policies")
+async def growth_policies(request: Request):
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT policy_key, stance, body, updated_at FROM marketing_policies "
+            "ORDER BY stance, policy_key"
+        )
+    items = []
+    for r in rows:
+        d = dict(r)
+        if hasattr(d.get("updated_at"), "isoformat"):
+            d["updated_at"] = d["updated_at"].isoformat()
+        items.append(d)
+    return {"status": "ok", "items": items}
 
 
 @public_router.post("/landing/capture")

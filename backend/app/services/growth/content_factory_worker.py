@@ -1,6 +1,6 @@
 """Content factory: keyword_queue → blog draft → brand check → CEO review → SkyEye kids.
 
-Phase 2 v1: no try_theme demand boost. ENABLE_CONTENT_FACTORY gate.
+Phase 2b: demand_prior refresh + demand_themes in prompt. ENABLE_CONTENT_FACTORY gate.
 
 # QUANTUM-CRYSTAL-ARCH
 """
@@ -22,7 +22,7 @@ from app.services.growth.studio_budget import factory_generation_mode
 
 logger = logging.getLogger("nate.growth.factory")
 
-PROMPT_VERSION = "growth_factory_blog_v1"
+PROMPT_VERSION = "growth_factory_blog_v2"
 
 _SYSTEM = """You write Sovereign Sanctuary blog drafts for coaches/clients.
 Hard rules:
@@ -102,12 +102,19 @@ class ContentFactoryWorker:
             pass
         return ["x", "linkedin"]
 
-    async def _generate_article(self, keyword: Dict[str, Any]) -> Dict[str, str]:
+    async def _generate_article(
+        self, keyword: Dict[str, Any], *, demand_themes: Optional[List[str]] = None
+    ) -> Dict[str, str]:
         kw = keyword.get("keyword") or "coaching"
         audience = keyword.get("audience") or "general"
+        themes = [t for t in (demand_themes or []) if t and t != "ops_only"][:8]
+        theme_line = ", ".join(themes) if themes else "(none — insufficient try theme history)"
         user_prompt = (
             f"Keyword: {kw}\nAudience: {audience}\nCluster: {keyword.get('cluster') or kw}\n"
-            "Write a 600–900 word educational blog post. Include the YMYL footer."
+            f"demand_themes (slugs only, anonymized try demand): {theme_line}\n"
+            f"demand_prior: {keyword.get('demand_prior', 1.0)}\n"
+            "Write a 600–900 word educational blog post. Include the YMYL footer. "
+            "Use demand_themes only as topic gravity — never quote trial users."
         )
         text = ""
         model = "template_fallback"
@@ -168,6 +175,14 @@ class ContentFactoryWorker:
 
         mode_info = await factory_generation_mode(self.db_pool, self.redis)
         batch = await self._batch_size()
+        # QUANTUM-CRYSTAL-ARCH — Phase 2b: refresh demand before claim
+        try:
+            await self.keywords.refresh_demand_priors(limit=100)
+        except Exception as e:
+            logger.warning("factory demand refresh skipped: %s", e)
+        from app.services.growth.demand_prior import top_demand_themes
+
+        demand_themes = await top_demand_themes(self.db_pool, limit=8)
         claimed = await self.keywords.claim_next(limit=batch)
         results: List[Dict[str, Any]] = []
         platforms = await self._social_platforms()
@@ -175,7 +190,7 @@ class ContentFactoryWorker:
         for kw in claimed:
             kid = int(kw["id"])
             try:
-                gen = await self._generate_article(kw)
+                gen = await self._generate_article(kw, demand_themes=demand_themes)
                 checklist = run_brand_checklist(gen["title"], gen["body"])
                 if not checklist.get("passed"):
                     await self.keywords.mark(
@@ -204,6 +219,7 @@ class ContentFactoryWorker:
                         "prompt_version": PROMPT_VERSION,
                         "model": gen.get("model"),
                         "keyword_id": kid,
+                        "demand_themes": demand_themes,
                         "priority_inputs": {
                             "volume_norm": kw.get("volume_norm"),
                             "intent": kw.get("intent"),

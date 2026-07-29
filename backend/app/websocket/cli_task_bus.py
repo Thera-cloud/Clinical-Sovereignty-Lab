@@ -37,6 +37,14 @@ NEWSLETTER_TASK_KINDS = frozenset({
     "newsletter_chat_learn",
 })
 
+# QUANTUM-CRYSTAL-ARCH — Adaptive Growth Engine Dual-COO bus kinds (Phase 5)
+GROWTH_TASK_KINDS = frozenset({
+    "growth_policy_cross_review",
+    "growth_weekly_digest",
+    "growth_segment_propose",
+    "growth_experiment_conclude",
+})
+
 
 def _env() -> str:
     return os.getenv("ENVIRONMENT", "production")
@@ -123,6 +131,13 @@ def ensure_bus_meta(client=None, *, consumer_active: bool = False) -> bool:
         if _hive_on:
             features.append("newsletter_hive")
             features.extend(sorted(NEWSLETTER_TASK_KINDS))
+        # QUANTUM-CRYSTAL-ARCH — Phase 5 growth Dual-COO kinds when growth engine on
+        _growth_on = os.getenv("ENABLE_GROWTH_ENGINE", "false").strip().lower() in (
+            "1", "true", "yes", "on",
+        )
+        if _growth_on:
+            features.append("adaptive_growth")
+            features.extend(sorted(GROWTH_TASK_KINDS))
         meta = {
             "features": features,
             "max_review_rounds": MAX_REVIEW_ROUNDS,

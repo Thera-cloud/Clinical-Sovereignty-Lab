@@ -355,17 +355,20 @@ class NateAutonomousAgent(ABC):
 # ═══════════════════════════════════════════════════════════════
 
 class MarketingIntelligenceAgent(NateAutonomousAgent):
-    """Observes marketing playbook, post analytics, funnel data."""
+    """Observes marketing playbook, post analytics, funnel data, growth aggregates."""
 
     def __init__(self, **kwargs):
         super().__init__("MarketingIntelligence", "marketing", cycle_hours=4, **kwargs)
 
     async def observe(self) -> List[Dict]:
-        observations = []
+        # QUANTUM-CRYSTAL-ARCH — Phase 5: widen observe; never trial chat text
+        observations: List[Dict] = []
         if not self._db_pool:
             return observations
-        try:
-            async with self._db_pool.acquire() as conn:
+        now = datetime.now(timezone.utc)
+
+        async with self._db_pool.acquire() as conn:
+            try:
                 rows = await conn.fetch("""
                     SELECT type, content, platform, created_at
                     FROM skyeye_activity
@@ -379,9 +382,175 @@ class MarketingIntelligenceAgent(NateAutonomousAgent):
                         "source": "skyeye_activity",
                         "created_at": r["created_at"],
                     })
-        except Exception as e:
-            logger.debug("Marketing observe failed: %s", e)
+            except Exception as e:
+                logger.debug("Marketing observe skyeye_activity: %s", e)
+
+            try:
+                rows = await conn.fetch("""
+                    SELECT platform, post_id, likes, reposts, comments, impressions, captured_at
+                    FROM skyeye_post_analytics
+                    WHERE captured_at > NOW() - INTERVAL '7 days'
+                    ORDER BY captured_at DESC LIMIT 15
+                """)
+                for r in rows:
+                    observations.append({
+                        "text": (
+                            f"[post_analytics] {r['platform']} likes={r.get('likes')} "
+                            f"reposts={r.get('reposts')} comments={r.get('comments')} "
+                            f"impressions={r.get('impressions')}"
+                        ),
+                        "source": "skyeye_post_analytics",
+                        "created_at": r.get("captured_at") or now,
+                    })
+            except Exception as e:
+                logger.debug("Marketing observe post_analytics: %s", e)
+
+            try:
+                rows = await conn.fetch("""
+                    SELECT stage, COUNT(*)::int AS n
+                    FROM funnel_routing_log
+                    WHERE created_at > NOW() - INTERVAL '7 days'
+                    GROUP BY stage ORDER BY n DESC LIMIT 10
+                """)
+                for r in rows:
+                    observations.append({
+                        "text": f"[funnel_routing] stage={r['stage']} n={r['n']}",
+                        "source": "funnel_routing_log",
+                        "created_at": now,
+                    })
+            except Exception as e:
+                logger.debug("Marketing observe funnel: %s", e)
+
+            try:
+                rows = await conn.fetch("""
+                    SELECT content_type, status, COUNT(*)::int AS n
+                    FROM marketing_content
+                    WHERE updated_at > NOW() - INTERVAL '14 days'
+                    GROUP BY content_type, status ORDER BY n DESC LIMIT 12
+                """)
+                for r in rows:
+                    observations.append({
+                        "text": (
+                            f"[marketing_content] type={r['content_type']} "
+                            f"status={r['status']} n={r['n']}"
+                        ),
+                        "source": "marketing_content",
+                        "created_at": now,
+                    })
+            except Exception as e:
+                logger.debug("Marketing observe marketing_content: %s", e)
+
+            try:
+                rows = await conn.fetch("""
+                    SELECT content_kind, SUM(score)::float AS s, COUNT(*)::int AS n
+                    FROM bwas_weekly
+                    WHERE week_bucket >= CURRENT_DATE - 28
+                    GROUP BY content_kind ORDER BY s DESC NULLS LAST LIMIT 10
+                """)
+                for r in rows:
+                    observations.append({
+                        "text": (
+                            f"[bwas_weekly] kind={r['content_kind']} "
+                            f"score={r['s']} rows={r['n']}"
+                        ),
+                        "source": "bwas_weekly",
+                        "created_at": now,
+                    })
+            except Exception as e:
+                logger.debug("Marketing observe bwas: %s", e)
+
+            try:
+                rows = await conn.fetch("""
+                    SELECT theme, SUM(count_bucket)::int AS total
+                    FROM try_theme_weekly
+                    WHERE week_bucket >= CURRENT_DATE - 28
+                    GROUP BY theme ORDER BY total DESC LIMIT 10
+                """)
+                for r in rows:
+                    if (r["theme"] or "") == "ops_only":
+                        continue
+                    observations.append({
+                        "text": f"[try_theme_weekly] theme={r['theme']} total={r['total']}",
+                        "source": "try_theme_weekly",
+                        "created_at": now,
+                    })
+            except Exception as e:
+                logger.debug("Marketing observe try_themes: %s", e)
+
+            try:
+                rows = await conn.fetch("""
+                    SELECT keyword, audience, demand_prior, priority_score, status
+                    FROM keyword_queue
+                    WHERE status IN ('queued', 'in_progress', 'done')
+                    ORDER BY priority_score DESC NULLS LAST LIMIT 10
+                """)
+                for r in rows:
+                    observations.append({
+                        "text": (
+                            f"[keyword_queue] {r['keyword']} aud={r['audience']} "
+                            f"demand={r['demand_prior']} score={r['priority_score']} "
+                            f"status={r['status']}"
+                        ),
+                        "source": "keyword_queue",
+                        "created_at": now,
+                    })
+            except Exception as e:
+                logger.debug("Marketing observe keywords: %s", e)
+
+            try:
+                rows = await conn.fetch("""
+                    SELECT test_name, status, winner, verdict, hypothesis
+                    FROM content_ab_tests
+                    ORDER BY created_at DESC LIMIT 8
+                """)
+                for r in rows:
+                    observations.append({
+                        "text": (
+                            f"[content_ab_tests] {r['test_name']} status={r['status']} "
+                            f"winner={r.get('winner')} verdict={r.get('verdict')}"
+                        ),
+                        "source": "content_ab_tests",
+                        "created_at": now,
+                    })
+            except Exception as e:
+                logger.debug("Marketing observe ab_tests: %s", e)
+
         return observations
+
+    async def recall(self, observations: List[Dict]) -> str:
+        """Phase 5: FederatedSearch domain=marketing via growth crystal_bridge."""
+        if not observations:
+            return ""
+        query = " ".join(o.get("text", "")[:200] for o in observations[:5])[:1000]
+        try:
+            from app.services.growth.crystal_bridge import recall_marketing
+
+            ctx = await recall_marketing(
+                self._db_pool, query, app_state=self._app_state, limit=5
+            )
+            if ctx:
+                return ctx
+        except Exception as e:
+            logger.debug("Marketing FederatedSearch recall failed: %s", e)
+        return await super().recall(observations)
+
+    async def crystallize(self, insights: List[Dict]):
+        """Route marketing insights through growth crystal_bridge allowlist."""
+        try:
+            from app.services.growth.crystal_bridge import harvest_marketing_insight
+
+            for insight in insights:
+                harvest_marketing_insight(
+                    self._app_state,
+                    text=insight.get("text", ""),
+                    source="agent:MarketingIntelligence",
+                )
+            if self._db_pool:
+                await self._trigger_research_if_needed(insights)
+            return
+        except Exception as e:
+            logger.debug("Marketing crystal_bridge harvest failed: %s", e)
+        await super().crystallize(insights)
 
 
 class ClinicalPatternAgent(NateAutonomousAgent):

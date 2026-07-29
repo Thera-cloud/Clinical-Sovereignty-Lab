@@ -1,8 +1,8 @@
-"""keyword_queue CRUD + priority formula (Phase 2 v1 — no try demand boost).
+"""keyword_queue CRUD + priority formula (Phase 2b demand_prior from themes).
 
 priority = (volume_norm*w_v + intent*w_i + audience_value*w_a + buyer_prior*w_b)
            * demand_prior
-demand_prior stays 1.0 until Phase 2b.
+demand_prior from try_theme_weekly when auto_demand=True (bound 1.0–1.5).
 
 # QUANTUM-CRYSTAL-ARCH
 """
@@ -88,7 +88,8 @@ class KeywordQueueService:
         intent: float = 0.0,
         audience_value: float = 0.0,
         buyer_prior: float = 0.0,
-        demand_prior: float = 1.0,
+        demand_prior: Optional[float] = None,
+        auto_demand: bool = True,
         notes: Optional[str] = None,
         status: str = "queued",
     ) -> Dict[str, Any]:
@@ -98,6 +99,15 @@ class KeywordQueueService:
         audience = (audience or "general").strip().lower() or "general"
         async with self.db_pool.acquire() as conn:
             weights = await self._weights(conn)
+            # QUANTUM-CRYSTAL-ARCH — Phase 2b: theme-derived demand when auto
+            if auto_demand or demand_prior is None:
+                from app.services.growth.demand_prior import demand_prior_for_keyword
+
+                demand_prior = await demand_prior_for_keyword(
+                    self.db_pool, keyword, weights=weights
+                )
+            else:
+                demand_prior = float(demand_prior)
             score = compute_priority_score(
                 volume_norm=volume_norm,
                 intent=intent,
@@ -161,6 +171,55 @@ class KeywordQueueService:
         async with self.db_pool.acquire() as conn:
             rows = await conn.fetch(sql, *args)
         return [self._serialize(dict(r)) for r in rows]
+
+    async def refresh_demand_priors(self, *, limit: int = 200) -> Dict[str, Any]:
+        """Recompute demand_prior + priority_score for queued/in_progress keywords."""
+        from app.services.growth.demand_prior import (
+            demand_prior_for_keyword,
+            load_theme_totals,
+        )
+
+        themes = await load_theme_totals(self.db_pool)
+        updated = 0
+        async with self.db_pool.acquire() as conn:
+            weights = await self._weights(conn)
+            rows = await conn.fetch(
+                """
+                SELECT id, keyword, volume_norm, intent, audience_value, buyer_prior
+                FROM keyword_queue
+                WHERE status IN ('queued', 'in_progress')
+                ORDER BY updated_at DESC
+                LIMIT $1
+                """,
+                min(max(limit, 1), 500),
+            )
+            for r in rows:
+                d = await demand_prior_for_keyword(
+                    self.db_pool,
+                    r["keyword"],
+                    weights=weights,
+                    themes=themes,
+                )
+                score = compute_priority_score(
+                    volume_norm=_f(r["volume_norm"]),
+                    intent=_f(r["intent"]),
+                    audience_value=_f(r["audience_value"]),
+                    buyer_prior=_f(r["buyer_prior"]),
+                    demand_prior=d,
+                    weights=weights,
+                )
+                await conn.execute(
+                    """
+                    UPDATE keyword_queue
+                    SET demand_prior = $2, priority_score = $3, updated_at = NOW()
+                    WHERE id = $1
+                    """,
+                    r["id"],
+                    d,
+                    score,
+                )
+                updated += 1
+        return {"updated": updated, "themes_considered": len(themes)}
 
     async def claim_next(self, *, limit: int = 2) -> List[Dict[str, Any]]:
         async with self.db_pool.acquire() as conn:

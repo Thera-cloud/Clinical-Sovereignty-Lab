@@ -3463,6 +3463,7 @@ async def lifespan(app: FastAPI):
         from app.services.growth import (
             bwas_enabled,
             content_factory_enabled,
+            growth_diagnostics_enabled,
             growth_engine_enabled,
             outreach_engine_enabled,
         )
@@ -3509,12 +3510,23 @@ async def lifespan(app: FastAPI):
         else:
             app.state.bwas_worker = "disabled"
             print("   ℹ️  BwasWorker disabled (ENABLE_BWAS=false)")
+        # QUANTUM-CRYSTAL-ARCH — Phase 5 growth diagnostics (propose-only)
+        if growth_diagnostics_enabled() and db_pool is not None:
+            from app.services.growth.diagnostics_worker import GrowthDiagnosticsWorker
+            _gd = GrowthDiagnosticsWorker(db_pool)
+            await _gd.start()
+            app.state.growth_diagnostics = _gd
+            print("   ✅ GrowthDiagnosticsWorker started (ENABLE_GROWTH_DIAGNOSTICS)")
+        else:
+            app.state.growth_diagnostics = "disabled"
+            print("   ℹ️  GrowthDiagnosticsWorker disabled (ENABLE_GROWTH_DIAGNOSTICS=false)")
     except Exception as _growth_err:
         print(f"   ⚠️  Growth engine init failed: {_growth_err}")
         app.state.growth_scheduler = getattr(app.state, "growth_scheduler", None) or "init_failed"
         app.state.content_factory = getattr(app.state, "content_factory", None) or "init_failed"
         app.state.outreach_worker = getattr(app.state, "outreach_worker", None) or "init_failed"
         app.state.bwas_worker = getattr(app.state, "bwas_worker", None) or "init_failed"
+        app.state.growth_diagnostics = getattr(app.state, "growth_diagnostics", None) or "init_failed"
 
     # SSE: Sovereign Story Engine Orchestrator
     _sse_orchestrator = None
@@ -3659,6 +3671,7 @@ async def lifespan(app: FastAPI):
         ("content_factory", getattr(app.state, "content_factory", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("outreach_worker", getattr(app.state, "outreach_worker", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("bwas_worker", getattr(app.state, "bwas_worker", None) is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("growth_diagnostics", getattr(app.state, "growth_diagnostics", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("identity_engine", _identity_engine_ok),  # QUANTUM-CRYSTAL-ARCH
         ("littlenate_inference", getattr(app.state, "littlenate_inference", None) is not None),
         ("nate_memory_crystallizer", getattr(app.state, "nate_memory_crystallizer", None) is not None),
@@ -3796,6 +3809,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ BwasWorker stopped")
     except Exception as _bw_stop:
         print(f"   ⚠️  BwasWorker shutdown: {_bw_stop}")
+    try:
+        _gd = getattr(app.state, "growth_diagnostics", None)
+        if _gd is not None and _gd not in ("disabled", "init_failed") and hasattr(_gd, "stop"):
+            await _gd.stop()
+            print("   ✅ GrowthDiagnosticsWorker stopped")
+    except Exception as _gd_stop:
+        print(f"   ⚠️  GrowthDiagnosticsWorker shutdown: {_gd_stop}")
     _classroom_learning_auditor = getattr(app.state, "classroom_learning_auditor", None)
     if _classroom_learning_auditor:
         try:

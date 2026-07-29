@@ -51,3 +51,12 @@ def try_theme_telemetry_enabled() -> bool:
         "yes",
         "on",
     )
+
+
+def growth_diagnostics_enabled() -> bool:
+    return os.getenv("ENABLE_GROWTH_DIAGNOSTICS", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
