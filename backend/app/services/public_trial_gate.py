@@ -22,6 +22,7 @@ outage must never become a path to unmetered inference or unmetered email.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -1178,6 +1179,18 @@ async def finalize_public_trial_turn(ctx: TrialTurnContext, assistant_text: str)
         await db_append_history(ctx.device_uuid_hash, ctx.text, assistant_text)
     finally:
         await release_turn_inflight(ctx.fp_hash)
+
+    # QUANTUM-CRYSTAL-ARCH — Phase 4b: anonymized theme aggregate only (flag-gated).
+    # Never awaits crystal forge; never logs utterance. Single emit call site.
+    try:
+        from app.services.growth.try_theme_emitter import emit_try_theme
+
+        _pool = get_db_pool()
+        _utt = (ctx.text or "").strip()
+        if _pool is not None and _utt:
+            asyncio.create_task(emit_try_theme(_pool, _utt))
+    except Exception:
+        pass
 
     payload: Dict[str, Any] = {
         "type": "trial_response",

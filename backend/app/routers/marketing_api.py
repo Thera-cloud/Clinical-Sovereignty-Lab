@@ -440,9 +440,11 @@ def _growth_svc(request: Request):
 @router.get("/growth/health")
 async def growth_health(request: Request):
     from app.services.growth import (
+        bwas_enabled,
         content_factory_enabled,
         growth_engine_enabled,
         outreach_engine_enabled,
+        try_theme_telemetry_enabled,
     )
     from app.services.growth.instantly_client import InstantlyClient
     from app.services.growth.sender_guard import validate_outreach_sender_domains
@@ -455,7 +457,6 @@ async def growth_health(request: Request):
     studio = await factory_generation_mode(
         request.app.state.db_pool, getattr(request.app.state, "redis", None)
     )
-    from app.services.growth import bwas_enabled
 
     return {
         "status": "ok",
@@ -463,6 +464,7 @@ async def growth_health(request: Request):
         "enable_content_factory": content_factory_enabled(),
         "enable_outreach_engine": outreach_engine_enabled(),
         "enable_bwas": bwas_enabled(),
+        "enable_try_theme_telemetry": try_theme_telemetry_enabled(),
         "sender_guard": {"ok": ok_sender, "message": sender_msg},
         "instantly": instantly,
         "studio": studio,
@@ -890,6 +892,22 @@ async def growth_bwas_tick(request: Request):
     if worker in (None, "disabled", "init_failed") or not hasattr(worker, "tick"):
         worker = BwasWorker(pool)
     return {"status": "ok", **(await worker.tick(weeks=2))}
+
+
+@router.get("/growth/themes")
+async def growth_themes(
+    request: Request,
+    weeks: int = Query(default=4, le=26),
+    limit: int = Query(default=40, le=100),
+):
+    """Anonymized try.html theme aggregates (counts only — no utterances)."""
+    from app.services.growth.try_theme_emitter import list_try_themes
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    items = await list_try_themes(pool, weeks=weeks, limit=limit)
+    return {"status": "ok", "source": "try_theme_weekly", "items": items}
 
 
 @public_router.post("/landing/capture")

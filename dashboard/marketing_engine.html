@@ -151,7 +151,15 @@ a{color:var(--cyan)}
       <thead><tr><th>ID</th><th>Keyword</th><th>Audience</th><th>Score</th><th>Status</th></tr></thead>
       <tbody id="kwBody"><tr><td colspan="5" class="note">—</td></tr></tbody>
     </table>
-    <p class="note" style="margin-top:16px">try.html Themes strip lights up after Phase 4b (<code>try_theme_weekly</code>).</p>
+    <h3 style="margin-top:24px;color:var(--goldb)">try.html themes (Phase 4b)</h3>
+    <p class="note">Anonymized weekly counts only (<code>try_theme_weekly</code>). No utterances. Crisis → ops_only (never stored). Flag: <code>ENABLE_TRY_THEME_TELEMETRY</code>.</p>
+    <div class="row">
+      <button class="secondary" onclick="loadTryThemes()">Refresh themes</button>
+    </div>
+    <table>
+      <thead><tr><th>Theme</th><th>Total</th><th>Last week</th></tr></thead>
+      <tbody id="tryThemeBody"><tr><td colspan="3" class="note">—</td></tr></tbody>
+    </table>
   </section>
 
   <section class="card" id="panel-directory-ops" style="display:none">
@@ -226,7 +234,7 @@ function switchTab(name){
   document.getElementById('panel-outreach-ops').style.display = name==='outreach' ? '' : 'none';
   document.getElementById('panel-directory-ops').style.display = name==='directory' ? '' : 'none';
   if (name==='funnel') { loadConfig(); loadFunnel(); }
-  if (name==='themes') loadKeywords();
+  if (name==='themes') { loadKeywords(); loadTryThemes(); }
   if (name==='outreach') { loadLeads(); loadReplies(); }
   if (name==='directory') loadDirectory();
   if (['blog','email','outreach','directory'].includes(name)) {
@@ -343,6 +351,23 @@ async function loadKeywords(){
       <td><span class="badge">${esc(it.status||'')}</span></td>
     </tr>`).join('');
   } catch(e){ toast('Keywords: '+e.message); }
+}
+
+async function loadTryThemes(){
+  try {
+    const data = await api('/api/marketing/growth/themes?weeks=4');
+    const items = (data && data.items) || [];
+    const tb = document.getElementById('tryThemeBody');
+    if (!items.length){
+      tb.innerHTML = '<tr><td colspan="3" class="note">No theme counts yet (flag off or empty)</td></tr>';
+      return;
+    }
+    tb.innerHTML = items.map(it => `<tr>
+      <td>${esc(it.theme||'')}</td>
+      <td>${it.total||0}</td>
+      <td>${esc(it.last_week||'')}</td>
+    </tr>`).join('');
+  } catch(e){ toast('Themes: '+e.message); }
 }
 
 async function upsertKeyword(){

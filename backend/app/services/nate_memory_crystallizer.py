@@ -623,6 +623,7 @@ class NateMemoryCrystallizer:
             # Client AI conversations (privacy-safe: only AI responses, never user messages)
             try:
                 from app.services.pii_cipher import decrypt_pii
+                # QUANTUM-CRYSTAL-ARCH — Phase 4b: never re-harvest try merge turns
                 client_rows = await conn.fetch("""
                     SELECT ai_text, session_id, user_id, created_at,
                            client_timezone, content_encrypted
@@ -630,6 +631,10 @@ class NateMemoryCrystallizer:
                     WHERE created_at > $1
                       AND ai_text IS NOT NULL
                       AND LENGTH(ai_text) > 100
+                      AND COALESCE(metadata->>'source', '') NOT IN (
+                          'public_trial_merge', 'public_trial', 'try_html'
+                      )
+                      AND COALESCE(session_id, '') NOT LIKE 'trial_%'
                     ORDER BY created_at ASC LIMIT 200
                 """, since)
                 for r in client_rows:

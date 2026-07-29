@@ -42,3 +42,12 @@ def bwas_enabled() -> bool:
         "yes",
         "on",
     )
+
+
+def try_theme_telemetry_enabled() -> bool:
+    return os.getenv("ENABLE_TRY_THEME_TELEMETRY", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )

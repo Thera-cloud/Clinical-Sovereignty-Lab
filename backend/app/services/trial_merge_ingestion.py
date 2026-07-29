@@ -43,6 +43,19 @@ def digest_prompt_enabled() -> bool:
     )
 
 
+def assert_trial_merge_crystal_allowed(*, domain: str, scope: str) -> None:
+    """Hard lock: pre-merge try prose must never become global marketing crystals.
+
+    # QUANTUM-CRYSTAL-ARCH — Adaptive Growth Phase 4b
+    """
+    d = (domain or "").strip().lower()
+    s = (scope or "").strip().lower()
+    if d == "marketing" and (s == "global" or s.startswith("global")):
+        raise ValueError(
+            "trial_merge forbids domain=marketing with scope=global"
+        )
+
+
 def detect_ordinal_recall_intent(query_text: str) -> Optional[str]:
     """Return ``first`` or ``last`` when the user asks for ordinal recall."""
     if not query_text or len(query_text) < 8:
@@ -399,6 +412,8 @@ async def _run_trial_merge_ingestion(
             logger.warning("trial_merge_ingestion: vault memorize failed for %s: %s", username, exc)
         try:
             if user_text:
+                # QUANTUM-CRYSTAL-ARCH — Phase 4b: clinical + user scope only
+                assert_trial_merge_crystal_allowed(domain="clinical", scope="user")
                 await crystallize_from_conversation(
                     db_pool,
                     hardware_id,
@@ -485,6 +500,8 @@ async def _persist_trial_digest(
     crystal_text = f"TRIAL CONTEXT DIGEST ({name_tag}): {digest}"
     content_hash = hashlib.sha256(crystal_text.encode()).hexdigest()
     meta = json.dumps({"source": "trial_merge", "digest": True})
+    # QUANTUM-CRYSTAL-ARCH — Phase 4b: digest stays clinical/user, never marketing/global
+    assert_trial_merge_crystal_allowed(domain="clinical", scope="user")
     async with db_pool.acquire() as conn:
         user_uuid = await conn.fetchval(
             "SELECT id FROM users WHERE username = $1", username,
