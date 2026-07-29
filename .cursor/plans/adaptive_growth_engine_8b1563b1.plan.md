@@ -16,7 +16,7 @@ todos:
     status: completed
   - id: phase4-attribution
     content: "Phase 4: extend coach_profiles for SEO directory (not new provider_profiles table); lead_events + bwas_weekly + attribution join; beacon; Funnel/BWAS UI"
-    status: pending
+    status: completed
   - id: phase4b-try-telemetry
     content: "Phase 4b: try_theme_weekly + emitter in public_trial_gate; keyword classifier only; merge/global crystal guards; poison CI tests"
     status: pending

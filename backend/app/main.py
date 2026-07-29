@@ -3461,6 +3461,7 @@ async def lifespan(app: FastAPI):
     # QUANTUM-CRYSTAL-ARCH — Adaptive Growth Engine (scheduler + content factory)
     try:
         from app.services.growth import (
+            bwas_enabled,
             content_factory_enabled,
             growth_engine_enabled,
             outreach_engine_enabled,
@@ -3498,11 +3499,22 @@ async def lifespan(app: FastAPI):
         else:
             app.state.outreach_worker = "disabled"
             print("   ℹ️  OutreachWorker disabled (ENABLE_OUTREACH_ENGINE=false)")
+        # QUANTUM-CRYSTAL-ARCH — Phase 4 BWAS weekly rollup
+        if bwas_enabled() and db_pool is not None:
+            from app.services.growth.bwas_worker import BwasWorker
+            _bwas_w = BwasWorker(db_pool)
+            await _bwas_w.start()
+            app.state.bwas_worker = _bwas_w
+            print("   ✅ BwasWorker started (ENABLE_BWAS)")
+        else:
+            app.state.bwas_worker = "disabled"
+            print("   ℹ️  BwasWorker disabled (ENABLE_BWAS=false)")
     except Exception as _growth_err:
         print(f"   ⚠️  Growth engine init failed: {_growth_err}")
         app.state.growth_scheduler = getattr(app.state, "growth_scheduler", None) or "init_failed"
         app.state.content_factory = getattr(app.state, "content_factory", None) or "init_failed"
         app.state.outreach_worker = getattr(app.state, "outreach_worker", None) or "init_failed"
+        app.state.bwas_worker = getattr(app.state, "bwas_worker", None) or "init_failed"
 
     # SSE: Sovereign Story Engine Orchestrator
     _sse_orchestrator = None
@@ -3646,6 +3658,7 @@ async def lifespan(app: FastAPI):
         ("growth_scheduler", getattr(app.state, "growth_scheduler", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("content_factory", getattr(app.state, "content_factory", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("outreach_worker", getattr(app.state, "outreach_worker", None) is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("bwas_worker", getattr(app.state, "bwas_worker", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("identity_engine", _identity_engine_ok),  # QUANTUM-CRYSTAL-ARCH
         ("littlenate_inference", getattr(app.state, "littlenate_inference", None) is not None),
         ("nate_memory_crystallizer", getattr(app.state, "nate_memory_crystallizer", None) is not None),
@@ -3776,6 +3789,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ OutreachWorker stopped")
     except Exception as _ow_stop:
         print(f"   ⚠️  OutreachWorker shutdown: {_ow_stop}")
+    try:
+        _bw = getattr(app.state, "bwas_worker", None)
+        if _bw is not None and _bw not in ("disabled", "init_failed") and hasattr(_bw, "stop"):
+            await _bw.stop()
+            print("   ✅ BwasWorker stopped")
+    except Exception as _bw_stop:
+        print(f"   ⚠️  BwasWorker shutdown: {_bw_stop}")
     _classroom_learning_auditor = getattr(app.state, "classroom_learning_auditor", None)
     if _classroom_learning_auditor:
         try:
@@ -4330,6 +4350,8 @@ app.include_router(prospect_api.router)
 app.include_router(response_api.router)
 app.include_router(golden_ticket_api.router)
 app.include_router(analytics_api.router)
+if hasattr(analytics_api, "public_router"):
+    app.include_router(analytics_api.public_router)  # QUANTUM-CRYSTAL-ARCH — growth beacon
 app.include_router(webhook_api.router)
 app.include_router(meta_webhook_router)
 

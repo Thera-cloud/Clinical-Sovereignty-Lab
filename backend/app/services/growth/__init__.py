@@ -33,3 +33,12 @@ def outreach_engine_enabled() -> bool:
         "yes",
         "on",
     )
+
+
+def bwas_enabled() -> bool:
+    return os.getenv("ENABLE_BWAS", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )

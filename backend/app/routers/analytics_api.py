@@ -4,12 +4,27 @@ Campaign metrics, funnel data, timeseries, and activity feed.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from pydantic import BaseModel, Field
 
 from app.services.api_server import require_admin
-from typing import Optional
+from typing import Any, Dict, Optional
 from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"], dependencies=[Depends(require_admin)])
+
+# QUANTUM-CRYSTAL-ARCH — public beacon (no admin auth)
+public_router = APIRouter(prefix="/api/analytics", tags=["analytics-public"])
+
+
+class AnalyticsHit(BaseModel):
+    stage: str = Field(..., description="impression|engage|click|quiz_start|quiz_complete|signup|active_client")
+    content_kind: Optional[str] = None
+    content_id: Optional[int] = None
+    provider_slug: Optional[str] = None
+    audience: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    source: str = "beacon"
+    meta: Optional[Dict[str, Any]] = None
 
 
 # =============================================================================
@@ -309,3 +324,28 @@ async def twilio_stats(request: Request, days: int = 30):
             days
         )
         return dict(stats) if stats else {}
+
+
+@public_router.post("/hit")
+async def analytics_hit(body: AnalyticsHit, request: Request):
+    """Public growth beacon → lead_events (no PII; meta scrubbed)."""
+    from app.services.growth.lead_events import record_lead_event
+
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    try:
+        result = await record_lead_event(
+            pool,
+            stage=body.stage,
+            content_kind=body.content_kind,
+            content_id=body.content_id,
+            provider_slug=body.provider_slug,
+            audience=body.audience,
+            utm_campaign=body.utm_campaign,
+            source=body.source or "beacon",
+            meta=body.meta,
+        )
+        return {"status": "ok", **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

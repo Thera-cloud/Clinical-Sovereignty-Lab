@@ -33,12 +33,15 @@ async def list_coaches(request: Request, user: Dict = Depends(get_current_user))
         raise HTTPException(503, "Database unavailable")
 
     async with db.acquire() as conn:
+        # QUANTUM-CRYSTAL-ARCH — include SEO directory fields when migration 299 applied
         rows = await conn.fetch(
             """SELECT coach_user_id, username, display_name, photo_url, bio,
-                      specialty_tags, years_experience, session_duration_minutes
+                      specialty_tags, years_experience, session_duration_minutes,
+                      COALESCE(directory_published, false) AS directory_published,
+                      public_slug
                FROM coach_profiles
                WHERE accepting_new_clients = true
-               ORDER BY display_name"""
+               ORDER BY directory_published DESC, display_name"""
         )
 
     coaches = []
@@ -59,6 +62,8 @@ async def list_coaches(request: Request, user: Dict = Depends(get_current_user))
             "specialty_tags": tags or [],
             "years_experience": r["years_experience"] or 0,
             "session_duration_minutes": r["session_duration_minutes"] or 60,
+            "directory_published": bool(r["directory_published"]),
+            "public_slug": r["public_slug"],
         })
 
     return {"coaches": coaches, "count": len(coaches)}

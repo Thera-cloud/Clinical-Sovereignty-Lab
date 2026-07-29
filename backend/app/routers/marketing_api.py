@@ -125,6 +125,14 @@ class LandingCaptureBody(BaseModel):
     meta: Optional[Dict[str, Any]] = None
 
 
+class DirectoryConsent(BaseModel):
+    consent_public: bool = True
+    public_slug: str
+    seo_bio_md: str = ""
+    directory_city: Optional[str] = None
+    directory_region: Optional[str] = None
+
+
 # =============================================================================
 # PLAYBOOK ENDPOINTS
 # =============================================================================
@@ -447,11 +455,14 @@ async def growth_health(request: Request):
     studio = await factory_generation_mode(
         request.app.state.db_pool, getattr(request.app.state, "redis", None)
     )
+    from app.services.growth import bwas_enabled
+
     return {
         "status": "ok",
         "enable_growth_engine": growth_engine_enabled(),
         "enable_content_factory": content_factory_enabled(),
         "enable_outreach_engine": outreach_engine_enabled(),
+        "enable_bwas": bwas_enabled(),
         "sender_guard": {"ok": ok_sender, "message": sender_msg},
         "instantly": instantly,
         "studio": studio,
@@ -727,6 +738,158 @@ async def growth_outreach_tick(request: Request):
         worker = OutreachWorker(pool)
     result = await worker.tick()
     return {"status": "ok", **result}
+
+
+# QUANTUM-CRYSTAL-ARCH — Phase 4 directory + BWAS
+@router.get("/growth/directory")
+async def list_directory_profiles(request: Request, limit: int = Query(default=50, le=200)):
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT coach_user_id, username, display_name, public_slug,
+                   consent_public, directory_published, directory_city,
+                   directory_content_id, updated_at
+            FROM coach_profiles
+            ORDER BY directory_published DESC, display_name
+            LIMIT $1
+            """,
+            limit,
+        )
+    items = []
+    for r in rows:
+        d = dict(r)
+        if hasattr(d.get("updated_at"), "isoformat"):
+            d["updated_at"] = d["updated_at"].isoformat()
+        items.append(d)
+    return {"status": "ok", "items": items}
+
+
+@router.post("/growth/directory/{coach_user_id}/consent")
+async def directory_consent(coach_user_id: str, body: DirectoryConsent, request: Request):
+    from app.services.growth.directory_publisher import validate_slug
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    try:
+        slug = validate_slug(body.public_slug)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    async with pool.acquire() as conn:
+        try:
+            row = await conn.fetchrow(
+                """
+                UPDATE coach_profiles
+                SET consent_public = $2,
+                    public_slug = $3,
+                    seo_bio_md = $4,
+                    directory_city = $5,
+                    directory_region = $6,
+                    updated_at = NOW()
+                WHERE coach_user_id = $1
+                RETURNING coach_user_id, public_slug, consent_public
+                """,
+                coach_user_id,
+                bool(body.consent_public),
+                slug,
+                body.seo_bio_md or "",
+                body.directory_city,
+                body.directory_region,
+            )
+        except Exception as e:
+            if "uq_coach_profiles_public_slug" in str(e) or "unique" in str(e).lower():
+                raise HTTPException(status_code=400, detail="public_slug already taken")
+            raise
+    if not row:
+        raise HTTPException(status_code=404, detail="coach profile not found")
+    return {"status": "ok", "item": dict(row)}
+
+
+@router.post("/growth/directory/{coach_user_id}/approve")
+async def directory_approve(coach_user_id: str, request: Request):
+    from app.services.growth.directory_publisher import approve_and_publish
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    try:
+        result = await approve_and_publish(pool, coach_user_id, actor="admin")
+        return {"status": "ok", **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/growth/directory/{coach_user_id}/withdraw")
+async def directory_withdraw(coach_user_id: str, request: Request):
+    from app.services.growth.directory_publisher import withdraw
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    try:
+        result = await withdraw(pool, coach_user_id)
+        return {"status": "ok", **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/growth/directory/rebuild-aggregates")
+async def directory_rebuild_aggregates(request: Request):
+    from app.services.growth.directory_publisher import rebuild_aggregation_pages
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    return {"status": "ok", **(await rebuild_aggregation_pages(pool))}
+
+
+@router.get("/growth/bwas")
+async def growth_bwas(
+    request: Request,
+    weeks: int = Query(default=4, le=26),
+    limit: int = Query(default=50, le=200),
+):
+    from app.services.growth.bwas_worker import list_bwas
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    items = await list_bwas(pool, weeks=weeks, limit=limit)
+    return {"status": "ok", "items": items}
+
+
+@router.get("/growth/funnel")
+async def growth_funnel(
+    request: Request,
+    weeks: int = Query(default=4, le=26),
+    limit: int = Query(default=40, le=200),
+):
+    from app.services.growth.bwas_worker import funnel_ranked
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    items = await funnel_ranked(pool, weeks=weeks, limit=limit)
+    return {"status": "ok", "items": items}
+
+
+@router.post("/growth/bwas/tick")
+async def growth_bwas_tick(request: Request):
+    from app.services.growth import bwas_enabled
+    from app.services.growth.bwas_worker import BwasWorker
+
+    if not bwas_enabled():
+        raise HTTPException(status_code=400, detail="ENABLE_BWAS=false")
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    worker = getattr(request.app.state, "bwas_worker", None)
+    if worker in (None, "disabled", "init_failed") or not hasattr(worker, "tick"):
+        worker = BwasWorker(pool)
+    return {"status": "ok", **(await worker.tick(weeks=2))}
 
 
 @public_router.post("/landing/capture")

@@ -154,9 +154,38 @@ a{color:var(--cyan)}
     <p class="note" style="margin-top:16px">try.html Themes strip lights up after Phase 4b (<code>try_theme_weekly</code>).</p>
   </section>
 
+  <section class="card" id="panel-directory-ops" style="display:none">
+    <h3 style="margin-top:0;color:var(--goldb)">Directory SEO (Phase 4)</h3>
+    <p class="note">Dual gate: coach consent + admin approve → <code>/providers/{slug}.html</code>. Withdraw → 410 + sitemap.</p>
+    <div class="row">
+      <input id="dirCoachId" placeholder="coach_user_id"/>
+      <input id="dirSlug" placeholder="public-slug"/>
+      <input id="dirCity" placeholder="city" style="min-width:120px"/>
+      <button onclick="dirConsent()">Save consent</button>
+      <button onclick="dirApprove()">Approve + publish</button>
+      <button class="danger" onclick="dirWithdraw()">Withdraw</button>
+      <button class="secondary" onclick="loadDirectory()">Refresh</button>
+      <button class="secondary" onclick="dirRebuild()">Rebuild aggregates</button>
+    </div>
+    <textarea id="dirBio" placeholder="seo_bio_md…" style="min-height:100px"></textarea>
+    <table>
+      <thead><tr><th>Coach</th><th>Slug</th><th>Consent</th><th>Published</th><th>City</th></tr></thead>
+      <tbody id="dirBody"><tr><td colspan="5" class="note">—</td></tr></tbody>
+    </table>
+  </section>
+
   <section class="card" id="panel-funnel" style="display:none">
-    <p class="note">BWAS / funnel ranking arrives in Phase 4. Growth config weights are editable below.</p>
-    <pre id="configJson" style="white-space:pre-wrap;font-size:.8rem;color:var(--mute)"></pre>
+    <h3 style="margin-top:0;color:var(--goldb)">Funnel / BWAS</h3>
+    <p class="note">Ranked by Buyer Weighted Attribution Score (real events only). Beacon: <code>POST /api/analytics/hit</code>.</p>
+    <div class="row">
+      <button class="secondary" onclick="loadFunnel()">Refresh funnel</button>
+      <button class="secondary" onclick="bwasTick()">BWAS tick</button>
+    </div>
+    <table>
+      <thead><tr><th>Kind</th><th>Content</th><th>Audience</th><th>Score</th><th>Weeks</th></tr></thead>
+      <tbody id="funnelBody"><tr><td colspan="5" class="note">—</td></tr></tbody>
+    </table>
+    <pre id="configJson" style="white-space:pre-wrap;font-size:.8rem;color:var(--mute);margin-top:1rem"></pre>
   </section>
 </main>
 <div id="toast"></div>
@@ -195,9 +224,11 @@ function switchTab(name){
   document.getElementById('panel-themes').style.display = name==='themes' ? '' : 'none';
   document.getElementById('panel-funnel').style.display = name==='funnel' ? '' : 'none';
   document.getElementById('panel-outreach-ops').style.display = name==='outreach' ? '' : 'none';
-  if (name==='funnel') loadConfig();
+  document.getElementById('panel-directory-ops').style.display = name==='directory' ? '' : 'none';
+  if (name==='funnel') { loadConfig(); loadFunnel(); }
   if (name==='themes') loadKeywords();
   if (name==='outreach') { loadLeads(); loadReplies(); }
+  if (name==='directory') loadDirectory();
   if (['blog','email','outreach','directory'].includes(name)) {
     document.getElementById('ctype').value = typeMap[name] || 'blog';
     loadQueue();
@@ -211,6 +242,7 @@ async function loadHealth(){
     document.getElementById('healthBadge').textContent = 'growth: ' + (h.enable_growth_engine ? 'ON' : 'OFF') +
       ' · factory: ' + (h.enable_content_factory ? 'ON' : 'OFF') +
       ' · outreach: ' + (h.enable_outreach_engine ? 'ON' : 'OFF') +
+      ' · bwas: ' + (h.enable_bwas ? 'ON' : 'OFF') +
       ' · instantly: ' + (h.instantly?.status || '?');
     const s = await api('/api/marketing/growth/spend');
     if (s) document.getElementById('spendBadge').textContent = 'spend: $' + (s.total_usd||0).toFixed(2);
@@ -398,6 +430,87 @@ async function outreachTick(){
   try {
     const data = await api('/api/marketing/growth/outreach/tick', { method:'POST', body:'{}' });
     toast('Instantly: '+(data.health?.status || JSON.stringify(data)));
+  } catch(e){ toast(e.message); }
+}
+
+async function loadDirectory(){
+  try {
+    const data = await api('/api/marketing/growth/directory');
+    const items = (data && data.items) || [];
+    const tb = document.getElementById('dirBody');
+    if (!items.length){ tb.innerHTML = '<tr><td colspan="5" class="note">No coach profiles</td></tr>'; return; }
+    tb.innerHTML = items.map(it => `<tr>
+      <td>${esc(it.display_name||it.coach_user_id||'')}<br/><span class="note">${esc(it.coach_user_id||'')}</span></td>
+      <td>${esc(it.public_slug||'—')}</td>
+      <td>${it.consent_public ? 'yes' : 'no'}</td>
+      <td><span class="badge">${it.directory_published ? 'published' : 'draft'}</span></td>
+      <td>${esc(it.directory_city||'')}</td>
+    </tr>`).join('');
+  } catch(e){ toast('Directory: '+e.message); }
+}
+
+async function dirConsent(){
+  const id = document.getElementById('dirCoachId').value.trim();
+  if (!id){ toast('coach_user_id required'); return; }
+  try {
+    await api('/api/marketing/growth/directory/'+encodeURIComponent(id)+'/consent', {
+      method:'POST', body: JSON.stringify({
+        consent_public: true,
+        public_slug: document.getElementById('dirSlug').value.trim(),
+        seo_bio_md: document.getElementById('dirBio').value,
+        directory_city: document.getElementById('dirCity').value.trim() || null,
+      })
+    });
+    toast('Consent saved'); loadDirectory();
+  } catch(e){ toast(e.message); }
+}
+
+async function dirApprove(){
+  const id = document.getElementById('dirCoachId').value.trim();
+  if (!id){ toast('coach_user_id required'); return; }
+  try {
+    const data = await api('/api/marketing/growth/directory/'+encodeURIComponent(id)+'/approve', { method:'POST', body:'{}' });
+    toast('Published '+ (data.public_path||data.slug||'')); loadDirectory();
+  } catch(e){ toast(e.message); }
+}
+
+async function dirWithdraw(){
+  const id = document.getElementById('dirCoachId').value.trim();
+  if (!id){ toast('coach_user_id required'); return; }
+  if (!confirm('Withdraw directory listing for '+id+'?')) return;
+  try {
+    await api('/api/marketing/growth/directory/'+encodeURIComponent(id)+'/withdraw', { method:'POST', body:'{}' });
+    toast('Withdrawn (410)'); loadDirectory();
+  } catch(e){ toast(e.message); }
+}
+
+async function dirRebuild(){
+  try {
+    const data = await api('/api/marketing/growth/directory/rebuild-aggregates', { method:'POST', body:'{}' });
+    toast('Aggregates: '+(data.pages_published||0)+' pages');
+  } catch(e){ toast(e.message); }
+}
+
+async function loadFunnel(){
+  try {
+    const data = await api('/api/marketing/growth/funnel?weeks=4');
+    const items = (data && data.items) || [];
+    const tb = document.getElementById('funnelBody');
+    if (!items.length){ tb.innerHTML = '<tr><td colspan="5" class="note">No BWAS rows yet (beacon + ENABLE_BWAS tick)</td></tr>'; return; }
+    tb.innerHTML = items.map(it => `<tr>
+      <td>${esc(it.content_kind||'')}</td>
+      <td>${it.content_id}</td>
+      <td>${esc(it.audience||'')}</td>
+      <td>${Number(it.total_score||0).toFixed(2)}</td>
+      <td>${it.week_count||0}</td>
+    </tr>`).join('');
+  } catch(e){ toast('Funnel: '+e.message); }
+}
+
+async function bwasTick(){
+  try {
+    const data = await api('/api/marketing/growth/bwas/tick', { method:'POST', body:'{}' });
+    toast('BWAS upserted '+(data.upserted||0)); loadFunnel();
   } catch(e){ toast(e.message); }
 }
 

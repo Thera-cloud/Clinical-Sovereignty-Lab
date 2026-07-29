@@ -206,6 +206,17 @@ class AgentStatusDigest:
         else:
             status, detail = self._check_agent(ow, "OutreachWorker")
             rows.append((status, "OutreachWorker", detail))
+        bw = getattr(self.app, "bwas_worker", None)
+        if bw == "disabled":
+            rows.append(("INFO", "BwasWorker", "ENABLE_BWAS=false"))
+        elif bw == "init_failed":
+            rows.append(("WARNING", "BwasWorker", "init_failed"))
+        elif bw is not None and getattr(bw, "last_run", None):
+            lr = bw.last_run or {}
+            rows.append(("OK", "BwasWorker", str(lr.get("status") or "ok")[:80]))
+        else:
+            status, detail = self._check_agent(bw, "BwasWorker")
+            rows.append((status, "BwasWorker", detail))
         return {"title": "Content Operations", "rows": rows}
 
     async def _section_token_lifecycle(self) -> dict:
