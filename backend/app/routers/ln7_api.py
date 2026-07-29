@@ -241,9 +241,17 @@ async def get_scorecard(
     pool = _pool(request)
     if not pool:
         raise HTTPException(503, "db unavailable")
+    since_dt = None
+    if since:
+        try:
+            from datetime import datetime as _dt
+
+            since_dt = _dt.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(422, "since must be an ISO-8601 timestamp")
     try:
         async with pool.acquire() as conn:
-            if since:
+            if since_dt is not None:
                 rows = await conn.fetch(
                     """
                     SELECT passed, latency_ms, cost_usd, harness_mode, created_at
@@ -255,7 +263,7 @@ async def get_scorecard(
                     LIMIT 500
                     """,
                     revision_id,
-                    since,
+                    since_dt,
                 )
             else:
                 rows = await conn.fetch(
