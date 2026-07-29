@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: phase2-factory
     content: "Phase 2 v1: keyword_queue + factory without try boost; Studio budget; SkyEye dedupe handoff; brand check; each pending_review fires CEO notify"
-    status: pending
+    status: completed
   - id: phase3-outbound
     content: "Phase 3: buyer_leads + Instantly sequences + enrichment (keyed vendors) + landings + SendGrid drips + GDPR erasure + outreach panel"
     status: pending

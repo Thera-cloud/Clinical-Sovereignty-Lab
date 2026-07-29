@@ -3449,9 +3449,13 @@ async def lifespan(app: FastAPI):
         print(f"   ⚠️  NateClinicalBakeoffAgent init failed: {_nca_err}")
         app.state.nate_clinical_bakeoff_agent = None  # QUANTUM-CRYSTAL-ARCH — not truthy fake
 
-    # QUANTUM-CRYSTAL-ARCH — Adaptive Growth Engine (Phase 1 scheduler + sender guard)
+    # QUANTUM-CRYSTAL-ARCH — Adaptive Growth Engine (scheduler + content factory)
     try:
-        from app.services.growth import growth_engine_enabled, outreach_engine_enabled
+        from app.services.growth import (
+            content_factory_enabled,
+            growth_engine_enabled,
+            outreach_engine_enabled,
+        )
         from app.services.growth.sender_guard import startup_hard_fail_if_needed
         if outreach_engine_enabled():
             startup_hard_fail_if_needed()
@@ -3464,9 +3468,21 @@ async def lifespan(app: FastAPI):
         else:
             app.state.growth_scheduler = "disabled"
             print("   ℹ️  GrowthSchedulerWorker disabled (ENABLE_GROWTH_ENGINE=false)")
+        if content_factory_enabled() and db_pool is not None:
+            from app.services.growth.content_factory_worker import ContentFactoryWorker
+            _growth_factory = ContentFactoryWorker(
+                db_pool, redis=getattr(app.state, "redis", None), app_state=app.state
+            )
+            await _growth_factory.start()
+            app.state.content_factory = _growth_factory
+            print("   ✅ ContentFactoryWorker started (ENABLE_CONTENT_FACTORY)")
+        else:
+            app.state.content_factory = "disabled"
+            print("   ℹ️  ContentFactoryWorker disabled (ENABLE_CONTENT_FACTORY=false)")
     except Exception as _growth_err:
         print(f"   ⚠️  Growth engine init failed: {_growth_err}")
-        app.state.growth_scheduler = "init_failed"  # truthy sentinel
+        app.state.growth_scheduler = getattr(app.state, "growth_scheduler", None) or "init_failed"
+        app.state.content_factory = getattr(app.state, "content_factory", None) or "init_failed"
 
     # SSE: Sovereign Story Engine Orchestrator
     _sse_orchestrator = None
@@ -3608,6 +3624,7 @@ async def lifespan(app: FastAPI):
         ("ln7_continuous_agent", getattr(app.state, "ln7_continuous_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_clinical_bakeoff_agent", callable(getattr(getattr(app.state, "nate_clinical_bakeoff_agent", None), "run_night", None))),  # QUANTUM-CRYSTAL-ARCH
         ("growth_scheduler", getattr(app.state, "growth_scheduler", None) is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("content_factory", getattr(app.state, "content_factory", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("identity_engine", _identity_engine_ok),  # QUANTUM-CRYSTAL-ARCH
         ("littlenate_inference", getattr(app.state, "littlenate_inference", None) is not None),
         ("nate_memory_crystallizer", getattr(app.state, "nate_memory_crystallizer", None) is not None),
@@ -3716,7 +3733,7 @@ async def lifespan(app: FastAPI):
             print("   ✅ NateClinicalBakeoffAgent stopped")
     except Exception as _nca_stop:
         print(f"   ⚠️  NateClinicalBakeoffAgent shutdown: {_nca_stop}")
-    # QUANTUM-CRYSTAL-ARCH — Adaptive Growth scheduler
+    # QUANTUM-CRYSTAL-ARCH — Adaptive Growth scheduler + factory
     try:
         _gs = getattr(app.state, "growth_scheduler", None)
         if _gs is not None and _gs not in ("disabled", "init_failed") and hasattr(_gs, "stop"):
@@ -3724,6 +3741,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ GrowthSchedulerWorker stopped")
     except Exception as _gs_stop:
         print(f"   ⚠️  GrowthSchedulerWorker shutdown: {_gs_stop}")
+    try:
+        _cf = getattr(app.state, "content_factory", None)
+        if _cf is not None and _cf not in ("disabled", "init_failed") and hasattr(_cf, "stop"):
+            await _cf.stop()
+            print("   ✅ ContentFactoryWorker stopped")
+    except Exception as _cf_stop:
+        print(f"   ⚠️  ContentFactoryWorker shutdown: {_cf_stop}")
     _classroom_learning_auditor = getattr(app.state, "classroom_learning_auditor", None)
     if _classroom_learning_auditor:
         try:

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from app.services.growth import growth_engine_enabled
 from app.services.growth.marketing_content_service import MarketingContentService

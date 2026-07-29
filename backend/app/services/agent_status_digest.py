@@ -172,7 +172,7 @@ class AgentStatusDigest:
         nl = getattr(self.app, "newsletter_agent", None)
         status, detail = self._check_agent(nl, "NewsletterAgent")
         rows.append((status, "NewsletterAgent", detail))
-        # QUANTUM-CRYSTAL-ARCH — Adaptive Growth scheduler
+        # QUANTUM-CRYSTAL-ARCH — Adaptive Growth scheduler + factory
         gs = getattr(self.app, "growth_scheduler", None)
         if gs == "disabled":
             rows.append(("INFO", "GrowthScheduler", "ENABLE_GROWTH_ENGINE=false"))
@@ -181,6 +181,14 @@ class AgentStatusDigest:
         else:
             status, detail = self._check_agent(gs, "GrowthScheduler")
             rows.append((status, "GrowthScheduler", detail))
+        cf = getattr(self.app, "content_factory", None)
+        if cf == "disabled":
+            rows.append(("INFO", "ContentFactory", "ENABLE_CONTENT_FACTORY=false"))
+        elif cf == "init_failed":
+            rows.append(("WARNING", "ContentFactory", "init_failed"))
+        else:
+            status, detail = self._check_agent(cf, "ContentFactory")
+            rows.append((status, "ContentFactory", detail))
         return {"title": "Content Operations", "rows": rows}
 
     async def _section_token_lifecycle(self) -> dict:

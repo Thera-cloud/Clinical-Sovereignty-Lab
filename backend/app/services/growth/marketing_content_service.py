@@ -30,7 +30,9 @@ class MarketingContentService:
         audience: str = "general",
         slug: Optional[str] = None,
         keyword_cluster: Optional[str] = None,
+        keyword_id: Optional[int] = None,
         generation_meta: Optional[Dict[str, Any]] = None,
+        brand_checklist: Optional[Dict[str, Any]] = None,
         created_by: str = "system",
         submit_for_review: bool = False,
     ) -> Dict[str, Any]:
@@ -43,8 +45,11 @@ class MarketingContentService:
                 """
                 INSERT INTO marketing_content (
                     content_type, platform, audience, title, slug, draft_body,
-                    status, keyword_cluster, generation_meta, created_by
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
+                    status, keyword_cluster, keyword_id, generation_meta,
+                    brand_checklist, created_by, prompt_version
+                ) VALUES (
+                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13
+                )
                 RETURNING *
                 """,
                 content_type,
@@ -55,8 +60,11 @@ class MarketingContentService:
                 draft_body,
                 status,
                 keyword_cluster,
+                keyword_id,
                 json.dumps(generation_meta or {}),
+                json.dumps(brand_checklist or {}),
                 created_by,
+                (generation_meta or {}).get("prompt_version"),
             )
             await self._audit(conn, row["id"], "create", created_by, {"status": status})
         item = dict(row)

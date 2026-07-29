@@ -104,7 +104,24 @@ a{color:var(--cyan)}
   </section>
 
   <section class="card" id="panel-themes" style="display:none">
-    <p class="note">Themes strip lights up after Phase 4b (<code>try_theme_weekly</code>). Placeholder until then.</p>
+    <h3 style="margin-top:0;color:var(--goldb)">Keyword queue (Phase 2)</h3>
+    <p class="note">Priority = volume×0.30 + intent×0.25 + audience×0.25 + buyer×0.20 (× demand_prior after Phase 2b). Factory drafts → CEO inbox.</p>
+    <div class="row">
+      <input id="kwText" placeholder="keyword"/>
+      <input id="kwAud" placeholder="audience" value="general"/>
+      <input id="kwVol" placeholder="volume 0–1" value="0.5" style="min-width:100px"/>
+      <input id="kwInt" placeholder="intent 0–1" value="0.5" style="min-width:100px"/>
+      <input id="kwAudV" placeholder="aud value" value="0.5" style="min-width:100px"/>
+      <input id="kwBuy" placeholder="buyer" value="0.3" style="min-width:100px"/>
+      <button onclick="upsertKeyword()">Upsert keyword</button>
+      <button class="secondary" onclick="loadKeywords()">Refresh</button>
+      <button class="secondary" onclick="factoryTick()">Factory tick</button>
+    </div>
+    <table>
+      <thead><tr><th>ID</th><th>Keyword</th><th>Audience</th><th>Score</th><th>Status</th></tr></thead>
+      <tbody id="kwBody"><tr><td colspan="5" class="note">—</td></tr></tbody>
+    </table>
+    <p class="note" style="margin-top:16px">try.html Themes strip lights up after Phase 4b (<code>try_theme_weekly</code>).</p>
   </section>
 
   <section class="card" id="panel-funnel" style="display:none">
@@ -148,6 +165,7 @@ function switchTab(name){
   document.getElementById('panel-themes').style.display = name==='themes' ? '' : 'none';
   document.getElementById('panel-funnel').style.display = name==='funnel' ? '' : 'none';
   if (name==='funnel') loadConfig();
+  if (name==='themes') loadKeywords();
   if (['blog','email','outreach','directory'].includes(name)) {
     document.getElementById('ctype').value = typeMap[name] || 'blog';
     loadQueue();
@@ -159,6 +177,7 @@ async function loadHealth(){
     const h = await api('/api/marketing/growth/health');
     if (!h) return;
     document.getElementById('healthBadge').textContent = 'growth: ' + (h.enable_growth_engine ? 'ON' : 'OFF') +
+      ' · factory: ' + (h.enable_content_factory ? 'ON' : 'OFF') +
       ' · instantly: ' + (h.instantly?.status || '?');
     const s = await api('/api/marketing/growth/spend');
     if (s) document.getElementById('spendBadge').textContent = 'spend: $' + (s.total_usd||0).toFixed(2);
@@ -245,6 +264,46 @@ async function loadConfig(){
     const data = await api('/api/marketing/growth/config');
     document.getElementById('configJson').textContent = JSON.stringify(data?.config||{}, null, 2);
   } catch(e){ document.getElementById('configJson').textContent = e.message; }
+}
+
+async function loadKeywords(){
+  try {
+    const data = await api('/api/marketing/growth/keywords');
+    const items = (data && data.items) || [];
+    const tb = document.getElementById('kwBody');
+    if (!items.length){ tb.innerHTML = '<tr><td colspan="5" class="note">No keywords</td></tr>'; return; }
+    tb.innerHTML = items.map(it => `<tr>
+      <td>${it.id}</td><td>${esc(it.keyword||'')}</td><td>${esc(it.audience||'')}</td>
+      <td>${Number(it.priority_score||0).toFixed(3)}</td>
+      <td><span class="badge">${esc(it.status||'')}</span></td>
+    </tr>`).join('');
+  } catch(e){ toast('Keywords: '+e.message); }
+}
+
+async function upsertKeyword(){
+  try {
+    const body = {
+      keyword: document.getElementById('kwText').value.trim(),
+      audience: document.getElementById('kwAud').value.trim() || 'general',
+      volume_norm: parseFloat(document.getElementById('kwVol').value)||0,
+      intent: parseFloat(document.getElementById('kwInt').value)||0,
+      audience_value: parseFloat(document.getElementById('kwAudV').value)||0,
+      buyer_prior: parseFloat(document.getElementById('kwBuy').value)||0,
+      demand_prior: 1.0,
+    };
+    if (!body.keyword){ toast('Keyword required'); return; }
+    const data = await api('/api/marketing/growth/keywords', { method:'POST', body: JSON.stringify(body) });
+    toast('Keyword #'+data.item.id+' score '+Number(data.item.priority_score).toFixed(3));
+    loadKeywords();
+  } catch(e){ toast(e.message); }
+}
+
+async function factoryTick(){
+  try {
+    const data = await api('/api/marketing/growth/factory/tick', { method:'POST', body:'{}' });
+    toast('Factory: claimed '+(data.claimed||0));
+    loadKeywords(); loadQueue();
+  } catch(e){ toast(e.message); }
 }
 
 (function boot(){

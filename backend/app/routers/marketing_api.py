@@ -76,6 +76,19 @@ class GrowthDecide(BaseModel):
     scheduled_at: Optional[str] = None
 
 
+class KeywordUpsert(BaseModel):
+    keyword: str
+    audience: str = "general"
+    cluster: Optional[str] = None
+    volume_norm: float = 0.0
+    intent: float = 0.0
+    audience_value: float = 0.0
+    buyer_prior: float = 0.0
+    demand_prior: float = 1.0
+    notes: Optional[str] = None
+    status: str = "queued"
+
+
 # =============================================================================
 # PLAYBOOK ENDPOINTS
 # =============================================================================
@@ -382,20 +395,30 @@ def _growth_svc(request: Request):
 
 @router.get("/growth/health")
 async def growth_health(request: Request):
-    from app.services.growth import growth_engine_enabled, outreach_engine_enabled
+    from app.services.growth import (
+        content_factory_enabled,
+        growth_engine_enabled,
+        outreach_engine_enabled,
+    )
     from app.services.growth.instantly_client import InstantlyClient
     from app.services.growth.sender_guard import validate_outreach_sender_domains
+    from app.services.growth.studio_budget import factory_generation_mode
 
     ok_sender, sender_msg = validate_outreach_sender_domains(
         require_when_outreach_enabled=True
     )
     instantly = await InstantlyClient().health()
+    studio = await factory_generation_mode(
+        request.app.state.db_pool, getattr(request.app.state, "redis", None)
+    )
     return {
         "status": "ok",
         "enable_growth_engine": growth_engine_enabled(),
+        "enable_content_factory": content_factory_enabled(),
         "enable_outreach_engine": outreach_engine_enabled(),
         "sender_guard": {"ok": ok_sender, "message": sender_msg},
         "instantly": instantly,
+        "studio": studio,
         "newsletter": {
             "note": "Dispatch owns newsletter — open newsletter_dispatch.html",
             "deep_link": "/newsletter_dispatch.html",
@@ -502,6 +525,57 @@ async def put_growth_config(body: GrowthConfigUpdate, request: Request):
 async def get_growth_spend(request: Request, month: Optional[str] = None):
     svc = _growth_svc(request)
     return {"status": "ok", **(await svc.spend_summary(month=month))}
+
+
+@router.get("/growth/keywords")
+async def list_growth_keywords(
+    request: Request,
+    status: Optional[str] = None,
+    limit: int = Query(default=50, le=200),
+):
+    from app.services.growth.keyword_queue import KeywordQueueService
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    items = await KeywordQueueService(pool).list(status=status, limit=limit)
+    return {"status": "ok", "items": items}
+
+
+@router.post("/growth/keywords")
+async def upsert_growth_keyword(body: KeywordUpsert, request: Request):
+    from app.services.growth.keyword_queue import KeywordQueueService
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    try:
+        item = await KeywordQueueService(pool).upsert(**body.dict())
+        return {"status": "ok", "item": item}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/growth/factory/tick")
+async def growth_factory_tick(request: Request):
+    """Manual factory tick (admin). Requires ENABLE_CONTENT_FACTORY=true."""
+    from app.services.growth import content_factory_enabled
+    from app.services.growth.content_factory_worker import ContentFactoryWorker
+
+    if not content_factory_enabled():
+        raise HTTPException(status_code=400, detail="ENABLE_CONTENT_FACTORY=false")
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    worker = getattr(request.app.state, "content_factory", None)
+    if worker in (None, "disabled", "init_failed") or not hasattr(worker, "tick"):
+        worker = ContentFactoryWorker(
+            pool,
+            redis=getattr(request.app.state, "redis", None),
+            app_state=request.app.state,
+        )
+    result = await worker.tick()
+    return {"status": "ok", **result}
 
 
 @public_router.get("/content/{content_id}/preview", response_class=HTMLResponse)
