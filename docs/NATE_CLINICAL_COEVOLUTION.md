@@ -36,3 +36,10 @@ Requires live `nate_inference_router` when bakeoff is enabled (no silent stub ni
 Fast-loop and bakeoff are gated off by default. Bridge hook is no-op unless `ENABLE_NATE_CLINICAL_FAST_LOOP=true`. Shadow mode never mutates client-visible prompts.
 
 Deploy primary **and** clone after API changes so LB REST does not 404 `/api/nate-clinical/*`.
+
+```bash
+# After GREEN pull + safe_deploy backend:
+bash scripts/sync_clone_backend_app.sh
+```
+
+Agent start warms `nate_clinical_seeds` even when bakeoff is off. Enable checklist: `ENABLE_NATE_CLINICAL_BAKEOFF=true`, live `nate_inference_router`, optional `NATE_CLINICAL_FAST_LOOP_SHADOW=false` for live addenda.

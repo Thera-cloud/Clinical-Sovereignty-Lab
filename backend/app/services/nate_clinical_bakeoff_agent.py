@@ -62,6 +62,11 @@ class NateClinicalBakeoffAgent:
         if self._running:
             return
         self._running = True
+        # Warm synthetic seed rows even when bakeoff flag is off (readiness).
+        try:
+            await ensure_seed_pool(self.db_pool, split="all")
+        except Exception as e:
+            logger.warning("seed pool warm failed: %s", e)
         self._task = asyncio.create_task(self._loop())
         logger.info("NateClinicalBakeoffAgent started (enabled=%s)", bakeoff_enabled())
 

@@ -59,10 +59,8 @@ def maybe_escalate(win_rate: float, level: int) -> int:
 
 
 async def ensure_seed_pool(db_pool, *, split: str = "train") -> int:
-    """Insert synthetic seeds for bakeoff/curriculum. Returns count inserted."""
+    """Warm synthetic seeds (safe when flags off). Returns count inserted."""
     if db_pool is None:
-        return 0
-    if not _seeds_active():
         return 0
     inserted = 0
     max_reuse = seed_max_reuse()
