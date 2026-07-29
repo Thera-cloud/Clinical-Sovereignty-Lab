@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Little Nate — Morph Expression Viewer</title>
+<meta http-equiv="Content-Security-Policy"
+      content="connect-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;" />
+<style>
+  html,body{margin:0;height:100%;background:#050505;overflow:hidden;
+            font-family:'DM Sans',system-ui,sans-serif}
+  #c{width:100%;height:100%;display:block}
+  #panel{display:none;position:fixed;right:10px;top:10px;background:#111c;border:1px solid #C9A96233;
+         border-radius:10px;padding:10px 14px;color:#C9A962;font-size:12px;
+         backdrop-filter:blur(6px);max-width:240px;max-height:90vh;overflow:auto;z-index:2}
+  #panel label{display:flex;align-items:center;gap:8px;margin:4px 0}
+  #panel input[type=range]{flex:1;accent-color:#C9A962}
+  #panel .hide{position:absolute;top:4px;right:8px;cursor:pointer;color:#888}
+  #panel .btns{display:flex;flex-wrap:wrap;gap:2px;margin-top:8px}
+  #status{position:fixed;left:10px;bottom:10px;color:#C9A96266;font-size:11px;z-index:2}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel"><span class="hide" onclick="panel.style.display='none'">×</span>
+  <b>ARKit morphs</b><div id="sliders"></div>
+  <div class="btns" id="exprBtns"></div>
+</div>
+<div id="status">loading…</div>
+
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const MODEL_URL = './lil_nate_morphs.glb';
+const TRANSITION_MS = 450;
+const WEIGHT_SCALE = 1.35; // bake deltas are subtle — boost for readable face
+const DEBUG = new URLSearchParams(location.search).has('debug');
+const status = document.getElementById('status');
+const panel = document.getElementById('panel');
+if (DEBUG) panel.style.display = 'block';
+
+/** Therapy AvatarExpression → ARKit key mixes (eyeBlink, jawOpen, mouthSmile_L/R, browInnerUp). */
+const EXPR_WEIGHTS = {
+  neutral:     {},
+  attentive:   { browInnerUp: 0.28, jawOpen: 0.10 },
+  thoughtful:  { browInnerUp: 0.40, eyeBlink: 0.18 },
+  warm:        { mouthSmile_L: 0.55, mouthSmile_R: 0.55, browInnerUp: 0.18 },
+  empathetic:  { browInnerUp: 0.58, mouthSmile_L: 0.28, mouthSmile_R: 0.28, eyeBlink: 0.12 },
+  calming:     { mouthSmile_L: 0.32, mouthSmile_R: 0.32, eyeBlink: 0.22 },
+  validating:  { browInnerUp: 0.38, mouthSmile_L: 0.42, mouthSmile_R: 0.42 },
+  curious:     { browInnerUp: 0.78, jawOpen: 0.16 },
+  encouraging: { mouthSmile_L: 0.82, mouthSmile_R: 0.82, browInnerUp: 0.42, jawOpen: 0.12 },
+  proud:       { mouthSmile_L: 0.95, mouthSmile_R: 0.95, browInnerUp: 0.38, jawOpen: 0.22 },
+  sad:         { browInnerUp: 0.68, eyeBlink: 0.28 },
+  frustrated:  { browInnerUp: 0.22, jawOpen: 0.08, eyeBlink: 0.12 },
+};
+
+const THERAPY_KEYS = Object.keys(EXPR_WEIGHTS);
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:false});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(0x050505);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.05));
+const key = new THREE.DirectionalLight(0xfff2dd, 1.55); key.position.set(1.4, 2.2, 2.4);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0x88aacc, 0.35); fill.position.set(-2, 1, -1);
+scene.add(fill);
+
+function resize(){
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+let morphMeshes = [];
+let nameToIndex = {};
+let current = null;
+let tweens = [];
+let voiceState = 'idle';
+let jawPulse = 0;
+
+function frameObject(obj){
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  obj.position.sub(center);
+  // Prefer upper torso / face framing (matches prior model-viewer orbit)
+  const faceY = size.y * 0.18;
+  const dist = Math.max(size.x, size.y, size.z) / (2 * Math.tan(camera.fov * Math.PI / 360));
+  camera.position.set(0, faceY, dist * 1.05);
+  camera.lookAt(0, faceY * 0.35, 0);
+}
+
+const canon = n => String(n).toLowerCase().replace(/^(mininate|test)[\s_]*/, '').trim();
+
+new GLTFLoader().load(MODEL_URL, (gltf)=>{
+  scene.add(gltf.scene);
+  gltf.scene.traverse(o=>{
+    if (o.isMesh && o.morphTargetInfluences?.length){
+      morphMeshes.push(o);
+      Object.entries(o.morphTargetDictionary || {}).forEach(([n, i])=>{
+        nameToIndex[canon(n)] = i;
+      });
+    }
+  });
+  frameObject(gltf.scene);
+  if (DEBUG) buildDebugUi();
+  const keys = Object.keys(nameToIndex);
+  status.textContent = DEBUG
+    ? ('ready — morphs: ' + keys.join(', '))
+    : '';
+  parent.postMessage({
+    type: 'spline_ready',
+    expressions: THERAPY_KEYS,
+    morphs: keys,
+  }, '*');
+  setExpression('neutral', 0);
+}, undefined, (err)=>{
+  status.textContent = 'LOAD ERROR: ' + err;
+  parent.postMessage({type:'spline_error', message:String(err)}, '*');
+});
+
+function influencesFor(exprName){
+  const target = {};
+  Object.values(nameToIndex).forEach(i => { target[i] = 0; });
+  const mix = EXPR_WEIGHTS[exprName] || EXPR_WEIGHTS.neutral;
+  Object.entries(mix).forEach(([key, w])=>{
+    const i = nameToIndex[canon(key)];
+    if (i === undefined) return;
+    target[i] = Math.min(1, (w || 0) * WEIGHT_SCALE);
+  });
+  return target;
+}
+
+function setExpression(name, ms = TRANSITION_MS){
+  name = canon(name);
+  if (!(name in EXPR_WEIGHTS)) name = 'neutral';
+  if (name === current && ms > 0) return;
+  current = name;
+
+  const goal = influencesFor(name);
+  // Preserve speaking jaw pulse on top of expression jawOpen
+  if ((voiceState === 'speaking' || voiceState === 'listening') && nameToIndex.jawopen !== undefined) {
+    const ji = nameToIndex.jawopen;
+    goal[ji] = Math.min(1, (goal[ji] || 0) + 0.12);
+  }
+  const starts = morphMeshes.map(m => [...m.morphTargetInfluences]);
+  const t0 = performance.now();
+  tweens = [{t0, ms: Math.max(0, ms), starts, goal}];
+}
+
+function setVoiceState(state){
+  voiceState = String(state || 'idle').toLowerCase();
+  if (current) setExpression(current, 200);
+}
+
+function tick(now){
+  if (tweens.length){
+    const {t0, ms, starts, goal} = tweens[0];
+    const k = ms <= 0 ? 1 : Math.min(1, (now - t0) / ms);
+    const e = k < .5 ? 2*k*k : 1 - ((-2*k+2)**2)/2;
+    morphMeshes.forEach((m, mi)=>{
+      m.morphTargetInfluences.forEach((_, i)=>{
+        const from = starts[mi][i] ?? 0, to = goal[i] ?? 0;
+        m.morphTargetInfluences[i] = from + (to - from) * e;
+      });
+    });
+    if (k >= 1) tweens = [];
+    if (DEBUG) syncSliders();
+  }
+
+  // Subtle jaw pulse while speaking (over expression base)
+  if (voiceState === 'speaking' && nameToIndex.jawopen !== undefined && !tweens.length){
+    jawPulse = 0.08 + 0.10 * (0.5 + 0.5 * Math.sin(now * 0.012));
+    const ji = nameToIndex.jawopen;
+    const base = (influencesFor(current || 'neutral')[ji] || 0);
+    morphMeshes.forEach(m => {
+      m.morphTargetInfluences[ji] = Math.min(1, base + jawPulse);
+    });
+  }
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+addEventListener('message', (e)=>{
+  const d = e.data || {};
+  if (d.type === 'setExpression' && typeof d.expression === 'string')
+    setExpression(d.expression);
+  if (d.type === 'setVoiceState' && typeof d.state === 'string')
+    setVoiceState(d.state);
+});
+
+const slidersEl = document.getElementById('sliders');
+const exprBtns = document.getElementById('exprBtns');
+let sliderInputs = [];
+
+function buildDebugUi(){
+  slidersEl.innerHTML = '';
+  sliderInputs = Object.entries(nameToIndex).map(([n, i])=>{
+    const row = document.createElement('label');
+    row.innerHTML = `<span style="width:92px">${n}</span>`;
+    const r = Object.assign(document.createElement('input'),
+      {type:'range', min:0, max:1, step:0.01, value:0});
+    r.oninput = ()=>{
+      tweens = []; current = null;
+      morphMeshes.forEach(m => { m.morphTargetInfluences[i] = parseFloat(r.value); });
+    };
+    row.appendChild(r); slidersEl.appendChild(row);
+    return [i, r];
+  });
+  exprBtns.innerHTML = '';
+  THERAPY_KEYS.forEach(n=>{
+    const b = document.createElement('button');
+    b.textContent = n;
+    b.style.cssText =
+      'margin:2px;background:#222;color:#C9A962;border:1px solid #C9A96244;'+
+      'border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px';
+    b.onclick = ()=> setExpression(n);
+    exprBtns.appendChild(b);
+  });
+}
+function syncSliders(){
+  if (!morphMeshes.length) return;
+  sliderInputs.forEach(([i, r])=> { r.value = morphMeshes[0].morphTargetInfluences[i]; });
+}
+</script>
+</body>
+</html>

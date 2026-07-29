@@ -11,6 +11,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -20,6 +21,8 @@ import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'dart:io';
 
 import 'config/app_config.dart';
+import 'morph_iframe_stub.dart'
+    if (dart.library.html) 'morph_iframe_web.dart' as morph_iframe;
 
 // =============================================================================
 // ENUMS - Avatar States
@@ -1696,10 +1699,7 @@ bool canUseAvatarMode(Map<String, dynamic> userProfile) {
 // GLB 3D AVATAR WIDGET
 // =============================================================================
 
-/// Canonical avatar mesh (2026-07-29 lil_nate kit). Single Y-up textured GLB.
-/// Expression sync still drives AvatarExpression / server avatar_state; visual
-/// morph targets land after Blender shape keys (eyeBlink, jawOpen, mouthSmile_*,
-/// browInnerUp) are baked — until then all logical states share this mesh.
+/// Fallback static mesh (non-web / morph unavailable).
 const String _glbLilNate = 'lil_nate.glb';
 
 /// Maps server avatar_state strings (SCREAMING_SNAKE) to client enum.
@@ -1733,29 +1733,11 @@ AvatarExpression avatarExpressionFromServer(String? raw) {
   }
 }
 
-/// Lowercase wire name shared with Spline postMessage contract.
+/// Lowercase wire name shared with morph/Spline postMessage contract.
 String avatarExpressionWireName(AvatarExpression e) =>
     e.toString().split('.').last.toLowerCase();
 
-/// All expressions → lil_nate.glb until morph-target export lands.
-const Map<AvatarExpression, String> _expressionToGlb = {
-  AvatarExpression.neutral:     _glbLilNate,
-  AvatarExpression.attentive:   _glbLilNate,
-  AvatarExpression.thoughtful:  _glbLilNate,
-  AvatarExpression.warm:        _glbLilNate,
-  AvatarExpression.empathetic:  _glbLilNate,
-  AvatarExpression.calming:     _glbLilNate,
-  AvatarExpression.validating:  _glbLilNate,
-  AvatarExpression.curious:     _glbLilNate,
-  AvatarExpression.encouraging: _glbLilNate,
-  AvatarExpression.proud:       _glbLilNate,
-  AvatarExpression.sad:         _glbLilNate,
-  AvatarExpression.frustrated:  _glbLilNate,
-};
-
-/// 3D GLB avatar that renders the current expression model.
-/// Uses a single ModelViewer keyed by the current GLB URL so the widget
-/// rebuilds cleanly when the expression changes.
+/// Web: three.js morph viewer (ARKit mixes). Native: static ModelViewer.
 class GlbAvatarWidget extends StatefulWidget {
   final AvatarExpression expression;
   final VoiceState voiceState;
@@ -1776,119 +1758,86 @@ enum _GlbLoadPhase { loading, assumedLoaded, failed }
 
 class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
   _GlbLoadPhase _phase = _GlbLoadPhase.loading;
-
-  // Bottom layer: the expression currently fully on-screen.
-  String _baseGlb = '';
   int _loadAttempt = 0;
+  Timer? _assumeTimer;
+  Timer? _failTimer;
 
-  // Top layer: the next expression cross-fading in over the base. Null
-  // when no transition is in flight. Morph-target blending on the GLB
-  // itself isn't possible yet (see tools/avatar_morph_pipeline —
-  // production exports aren't vertex-compatible), so this cross-fade is
-  // the smoothest transition achievable without new 3D assets: it
-  // replaces the old hard "spinner flash" cut with a 450ms dissolve.
-  String? _incomingGlb;
-  double _incomingOpacity = 0.0;
-  int _crossfadeAttempt = 0;
-  Timer? _revealTimer;
-  Timer? _promoteTimer;
+  static const _assumeLoadedAfter = Duration(seconds: 8);
+  static const _failAfter = Duration(seconds: 25);
 
-  static const _assumeLoadedAfter = Duration(seconds: 12);
-  static const _failAfter = Duration(seconds: 30);
-
-  /// Head start given to the incoming model-viewer to parse/render its
-  /// first frame before it starts fading in, so the dissolve doesn't
-  /// reveal a blank canvas.
-  static const _crossfadeRevealDelay = Duration(milliseconds: 180);
-  /// Fade tempo -- matches TRANSITION_MS in the morph-target viewer
-  /// (tools/avatar_morph_pipeline/expression_viewer.html) so motion feels
-  /// consistent once true blending ships.
-  static const _crossfadeDuration = Duration(milliseconds: 450);
+  bool get _useMorph => kIsWeb && morph_iframe.isMorphAvatarAvailable();
 
   @override
   void initState() {
     super.initState();
-    _baseGlb = _glbForExpression(widget.expression);
+    if (_useMorph) {
+      morph_iframe.onMorphViewerReady = () {
+        if (mounted && _phase == _GlbLoadPhase.loading) {
+          setState(() => _phase = _GlbLoadPhase.assumedLoaded);
+        }
+      };
+    }
     _beginLoadCycle();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _pushMorphState());
   }
 
   @override
   void didUpdateWidget(GlbAvatarWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.expression != widget.expression) {
-      final newGlb = _glbForExpression(widget.expression);
-      if (newGlb != _baseGlb && newGlb != _incomingGlb) {
-        _startCrossfadeTo(newGlb);
-      }
+    if (oldWidget.expression != widget.expression ||
+        oldWidget.voiceState != widget.voiceState) {
+      _pushMorphState();
     }
   }
 
   @override
   void dispose() {
-    _revealTimer?.cancel();
-    _promoteTimer?.cancel();
+    morph_iframe.onMorphViewerReady = null;
+    _assumeTimer?.cancel();
+    _failTimer?.cancel();
     super.dispose();
   }
 
+  void _pushMorphState() {
+    if (!_useMorph) return;
+    morph_iframe.sendExpressionToMorph(
+      avatarExpressionWireName(widget.expression),
+    );
+    morph_iframe.sendVoiceStateToMorph(
+      widget.voiceState.toString().split('.').last.toLowerCase(),
+    );
+  }
+
   void _beginLoadCycle() {
+    _assumeTimer?.cancel();
+    _failTimer?.cancel();
     final attempt = ++_loadAttempt;
-    Future.delayed(_assumeLoadedAfter, () {
+    setState(() => _phase = _GlbLoadPhase.loading);
+    _assumeTimer = Timer(_assumeLoadedAfter, () {
       if (mounted && attempt == _loadAttempt && _phase == _GlbLoadPhase.loading) {
         setState(() => _phase = _GlbLoadPhase.assumedLoaded);
       }
     });
-    Future.delayed(_failAfter, () {
+    _failTimer = Timer(_failAfter, () {
       if (mounted && attempt == _loadAttempt && _phase == _GlbLoadPhase.loading) {
         setState(() => _phase = _GlbLoadPhase.failed);
       }
     });
   }
 
-  /// Transitions to [glb] with a cross-fade instead of remounting the
-  /// base layer directly. The incoming model loads behind the current
-  /// one, gets a brief head start to render, then dissolves in. Once the
-  /// fade completes it's promoted to the base layer so a rapid run of
-  /// expression changes never stacks up extra layers.
-  void _startCrossfadeTo(String glb) {
-    _revealTimer?.cancel();
-    _promoteTimer?.cancel();
-    final attempt = ++_crossfadeAttempt;
-    setState(() {
-      _incomingGlb = glb;
-      _incomingOpacity = 0.0;
-    });
-    _revealTimer = Timer(_crossfadeRevealDelay, () {
-      if (!mounted || attempt != _crossfadeAttempt) return;
-      setState(() => _incomingOpacity = 1.0);
-    });
-    _promoteTimer = Timer(_crossfadeRevealDelay + _crossfadeDuration, () {
-      if (!mounted || attempt != _crossfadeAttempt) return;
-      setState(() {
-        _baseGlb = glb;
-        _incomingGlb = null;
-        _incomingOpacity = 0.0;
-      });
-    });
-    // Keep the loading/failed safety net alive if the base itself hasn't
-    // finished its very first load yet.
-    if (_phase != _GlbLoadPhase.assumedLoaded) {
-      _beginLoadCycle();
-    }
-  }
-
   void _retry() {
-    setState(() => _phase = _GlbLoadPhase.loading);
     _beginLoadCycle();
+    _pushMorphState();
   }
 
-  String _glbForExpression(AvatarExpression expr) {
-    return _expressionToGlb[expr] ?? _glbLilNate;
+  Widget _morphLayer() {
+    return morph_iframe.buildMorphAvatarIframe(AppConfig.avatarMorphViewerUrl);
   }
 
-  Widget _modelLayer(String glb, Key key) {
-    final src = '${AppConfig.avatarGlbBaseUrl}/$glb';
+  Widget _staticModelLayer() {
+    final src = '${AppConfig.avatarGlbBaseUrl}/$_glbLilNate';
     return ModelViewer(
-      key: key,
+      key: ValueKey('glb-static#$_loadAttempt'),
       src: src,
       backgroundColor: const Color(0xFF050505),
       autoRotate: false,
@@ -1896,7 +1845,6 @@ class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
       disableZoom: true,
       autoPlay: true,
       loading: Loading.eager,
-      // lil_nate ~1.53m Y-up; frame upper torso / face
       cameraOrbit: '0deg 85deg 3.2m',
       cameraTarget: '0m 1.05m 0m',
       fieldOfView: '30deg',
@@ -1915,45 +1863,33 @@ class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
             child: Container(color: const Color(0xFF050505)),
           ),
           Positioned.fill(
-            child: _modelLayer(
-              _baseGlb,
-              ValueKey('glb-base#$_baseGlb#$_loadAttempt'),
-            ),
+            child: _useMorph ? _morphLayer() : _staticModelLayer(),
           ),
-          if (_incomingGlb != null)
+          if (_phase == _GlbLoadPhase.loading)
             Positioned.fill(
-              child: AnimatedOpacity(
-                opacity: _incomingOpacity,
-                duration: _crossfadeDuration,
-                curve: Curves.easeInOut,
-                child: _modelLayer(
-                  _incomingGlb!,
-                  ValueKey('glb-incoming#$_incomingGlb#$_crossfadeAttempt'),
-                ),
-              ),
-            ),
-          if (_phase == _GlbLoadPhase.loading && _incomingGlb == null)
-            Positioned.fill(
-              child: Container(
-                color: const Color(0xFF050505),
-                child: const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      CircularProgressIndicator(
-                        valueColor: AlwaysStoppedAnimation(Color(0xFFC9A962)),
-                        strokeWidth: 2,
-                      ),
-                      SizedBox(height: 16),
-                      Text(
-                        'Little Nate is on his way...',
-                        style: TextStyle(
-                          color: Color(0xFFC9A962),
-                          fontSize: 14,
-                          fontFamily: 'DM Sans',
+              child: IgnorePointer(
+                child: Container(
+                  color: const Color(0xFF050505).withValues(alpha: 0.55),
+                  child: const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(
+                          valueColor:
+                              AlwaysStoppedAnimation(Color(0xFFC9A962)),
+                          strokeWidth: 2,
                         ),
-                      ),
-                    ],
+                        SizedBox(height: 16),
+                        Text(
+                          'Little Nate is on his way...',
+                          style: TextStyle(
+                            color: Color(0xFFC9A962),
+                            fontSize: 14,
+                            fontFamily: 'DM Sans',
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -1966,10 +1902,10 @@ class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.cloud_off,
+                      const Icon(Icons.cloud_off,
                           color: Color(0xFFC9A962), size: 40),
-                      SizedBox(height: 12),
-                      Text(
+                      const SizedBox(height: 12),
+                      const Text(
                         "Little Nate couldn't load right now.",
                         style: TextStyle(
                           color: Color(0xFFC9A962),
@@ -1977,25 +1913,26 @@ class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
                           fontFamily: 'DM Sans',
                         ),
                       ),
-                      SizedBox(height: 16),
+                      const SizedBox(height: 16),
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           OutlinedButton(
                             onPressed: _retry,
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: Color(0xFFC9A962),
-                              side: BorderSide(color: Color(0xFFC9A962)),
+                              foregroundColor: const Color(0xFFC9A962),
+                              side: const BorderSide(
+                                  color: Color(0xFFC9A962)),
                             ),
-                            child: Text('Try Again'),
+                            child: const Text('Try Again'),
                           ),
-                          SizedBox(width: 12),
+                          const SizedBox(width: 12),
                           TextButton(
                             onPressed: widget.onTap,
                             style: TextButton.styleFrom(
                               foregroundColor: Colors.grey,
                             ),
-                            child: Text('Back to Orb'),
+                            child: const Text('Back to Orb'),
                           ),
                         ],
                       ),

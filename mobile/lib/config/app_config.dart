@@ -51,6 +51,10 @@ class AppConfig {
       ? 'https://app.sovereignsanctuary.net/avatar-modes'
       : 'http://$serverHost:8080/avatar-modes';
 
+  /// Morph-target expression viewer (three.js + lil_nate_morphs.glb).
+  static String get avatarMorphViewerUrl =>
+      '$avatarGlbBaseUrl/expression_viewer.html';
+
   /// Spline web avatar export (index.html, scene.splinecode) — app origin, not API.
   static String get splineBaseUrl => useProduction
       ? 'https://app.sovereignsanctuary.net/spline'
