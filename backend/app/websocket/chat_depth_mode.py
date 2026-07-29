@@ -111,6 +111,36 @@ def allow_deep_memory_search(mode: str) -> bool:
     return not is_faster(mode)
 
 
+def allow_metrics_prompt_inject(mode: str) -> bool:
+    """QUANTUM-CRYSTAL-ARCH: Faster skips observer/CEE/drift/reply metrics I/O."""
+    return not is_faster(mode)
+
+
+def allow_transfer_summary(mode: str) -> bool:
+    """QUANTUM-CRYSTAL-ARCH: Faster skips transfer-crystal pre-ODPE await."""
+    return not is_faster(mode)
+
+
+def allow_full_therapeutic_preflight(mode: str) -> bool:
+    """QUANTUM-CRYSTAL-ARCH: Faster uses text-state light TTC (not Extra deep dive)."""
+    return not is_faster(mode)
+
+
+def faster_max_tokens(default_max_tokens: int = 600) -> int:
+    """Conversational cap so Faster LLM finishes like a normal turn (~6–7s)."""
+    import os
+
+    raw = (os.getenv("BRIDGE_FASTER_MAX_TOKENS") or "450").strip()
+    try:
+        cap = int(raw)
+    except ValueError:
+        cap = 450
+    cap = max(200, min(cap, 600))
+    if default_max_tokens and default_max_tokens > 0:
+        return min(default_max_tokens, cap)
+    return cap
+
+
 def allow_web_search_auto(mode: str) -> bool:
     """Faster: only explicit search phrases (handled by caller); skip soft triggers."""
     return not is_faster(mode)

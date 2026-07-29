@@ -696,6 +696,146 @@ _USER_CRISIS_INTENT = re.compile(
 )
 
 
+async def _prepare_therapeutic_context_faster(
+    *,
+    user_text: str,
+    canonical_user_id: str,
+    user_id: str,
+    base_system_prompt: str,
+    default_max_tokens: int,
+    register_directive: Optional[str],
+    locale: str,
+    token_cap_fn,
+) -> dict:
+    """QUANTUM-CRYSTAL-ARCH: Faster conversational preflight — text state only.
+
+    Skips Sensitive Bridge, TMC DB classify, narratives, neuroscience recall,
+    forward reasoning, six-quotient live, and principal-review guide fetches.
+    Crisis keyword detection + state caps remain. Target: normal-chat latency.
+    """
+    text_state = _detect_state_from_text(user_text)
+    _crisis = bool(_USER_CRISIS_INTENT.search(user_text or ""))
+    if _crisis or text_state == "activated":
+        autonomic_state = "activated"
+        tmc_class = "CRISIS" if _crisis else "THRESHOLD"
+    elif text_state == "shutdown":
+        autonomic_state = "shutdown"
+        tmc_class = "REST"
+    else:
+        # Conversational default — never "regulated" (1500-token Extra dive)
+        autonomic_state = "in_window"
+        tmc_class = "REST"
+
+    state_cap = TOKEN_CAPS.get(autonomic_state, 450)
+    max_tokens = min(int(token_cap_fn(default_max_tokens)), int(state_cap))
+
+    book_context_block = ""
+    try:
+        from app.services import therapeutic_book_registry as _tbr
+
+        _matched_books = _tbr.detect_referenced_books(user_text or "")
+        if _matched_books:
+            book_context_block = _tbr.build_book_context_block(_matched_books)
+    except Exception as _tbr_exc:
+        logger.warning("therapeutic_controller faster: book context skipped: %s", _tbr_exc)
+
+    direct_action_kind = None
+    direct_action_block = ""
+    try:
+        from app.services.little_nate_clinical_output_policy import (
+            build_direct_action_delivery_block as _dad_block,
+            classify_direct_action_request as _dad_classify,
+        )
+
+        direct_action_kind = _dad_classify(user_text or "")
+        if direct_action_kind:
+            direct_action_block = "\n" + _dad_block(direct_action_kind) + "\n"
+            if direct_action_kind == "action_steps" and max_tokens < 350:
+                max_tokens = max(max_tokens, 350)
+    except Exception as _dad_exc:
+        logger.warning("therapeutic_controller faster: direct-action skipped: %s", _dad_exc)
+
+    effective_register_directive = register_directive
+    register_variant_block = _register_variant_guidance(effective_register_directive)
+
+    _state_sym: dict = {}
+    try:
+        from dataclasses import asdict as _asdict_state
+
+        from app.services.nate_commitment_extractor import build_state_symbol as _bss_pre
+
+        _state_sym = _asdict_state(
+            _bss_pre(
+                user_text or "",
+                audit_metadata={
+                    "autonomic_state": autonomic_state,
+                    "tmc_class": tmc_class,
+                    "register_directive": effective_register_directive,
+                    "distress_present": _crisis or autonomic_state == "activated",
+                },
+            )
+        )
+    except Exception as _ss_exc:
+        logger.warning("therapeutic_controller faster: state_symbol skipped: %s", _ss_exc)
+
+    enriched = (
+        f"## CURRENT THERAPEUTIC STATE (FASTER)\n"
+        f"autonomic_state: {autonomic_state} | tmc_class: {tmc_class}\n"
+        f"Respond like a natural conversation — present, clinical, concise.\n\n"
+        f"{_state_guidance(autonomic_state)}\n"
+        f"{register_variant_block}\n"
+        f"{direct_action_block}\n"
+        f"{book_context_block}\n"
+        f"---\n\n{base_system_prompt}"
+    )
+
+    if effective_register_directive:
+        register_default_field = effective_register_directive
+    else:
+        register_default_field = "WARM"
+
+    print(
+        f">>> [THERAPEUTIC-CTRL] FASTER light path user={canonical_user_id} "
+        f"state={autonomic_state} tmc={tmc_class} cap={max_tokens}"
+    )
+
+    return {
+        "enriched_system_prompt": enriched,
+        "max_tokens": max_tokens,
+        "recent_narratives": [],
+        "audit_metadata": {
+            "autonomic_state": autonomic_state,
+            "tmc_class": tmc_class,
+            "mismatch_available": False,
+            "encoded_patterns": [],
+            "register_default": register_default_field,
+            "max_tokens": max_tokens,
+            "register_directive": effective_register_directive,
+            "thalamic_gate_blocked": False,
+            "thalamic_gate_reason": "faster_light_path",
+            "dissociation_delta": None,
+            "coercion_severity": None,
+            "novelty_threshold": 0.30,
+            "thalamic_gate_forced": False,
+            "locale": locale,
+            "bridge_event_severity": "info",
+            "user_text_for_audit": (user_text or "")[:2000],
+            "direct_action_request_kind": direct_action_kind,
+            "state_symbol": _state_sym,
+            "crisis_exempt": bool(_crisis),
+            "crisis_class_fired": bool(_crisis),
+            "principal_review_turn_class": "",
+            "principal_review_teach_class": "",
+            "principal_review_class_fired": False,
+            "principal_review_guide_ids": [],
+            "principal_review_guide_classes": [],
+            "principal_review_guide_scenarios": [],
+            "requester_user_id": canonical_user_id or user_id,
+            "faster_light_path": True,
+        },
+    }
+
+
 @therapeutic_module
 async def prepare_therapeutic_context(
     user_text: str,
@@ -722,6 +862,8 @@ async def prepare_therapeutic_context(
     profile: Optional[dict] = None,
     # QUANTUM-CRYSTAL-ARCH — gold/live-stack teaching class for non-crisis PR inject
     preferred_response_class: Optional[str] = None,
+    # QUANTUM-CRYSTAL-ARCH — Faster depth: light preflight (not Extra deep dive)
+    depth_mode: Optional[str] = None,
 ) -> dict:
     """Classify state, assemble context, shape prompt + cap. Always returns
     a dict; on partial failure, fields default to the original prompt/cap.
@@ -761,6 +903,30 @@ async def prepare_therapeutic_context(
                 _rid_exc,
             )
             canonical_user_id = user_id
+
+    # QUANTUM-CRYSTAL-ARCH: Faster = conversational light path (~6–7s), not Extra dive
+    try:
+        from app.websocket.chat_depth_mode import (
+            allow_full_therapeutic_preflight as _allow_full_ttc,
+            faster_max_tokens as _faster_tok,
+        )
+
+        if not _allow_full_ttc(depth_mode or ""):
+            return await _prepare_therapeutic_context_faster(
+                user_text=user_text,
+                canonical_user_id=canonical_user_id,
+                user_id=user_id,
+                base_system_prompt=base_system_prompt,
+                default_max_tokens=default_max_tokens,
+                register_directive=register_directive,
+                locale=locale,
+                token_cap_fn=_faster_tok,
+            )
+    except Exception as _fast_exc:
+        logger.warning(
+            "therapeutic_controller: Faster light path failed, falling through: %s",
+            _fast_exc,
+        )
 
     lens_bridge_block = ""
     _bd = None

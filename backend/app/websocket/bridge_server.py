@@ -8988,6 +8988,8 @@ class AzureCortex:
                 crystal_recall_timeout_s as _crystal_to,
                 relational_timeout_s as _rel_to,
                 stream_before_therapeutic_audit as _stream_before_audit_fn,
+                allow_metrics_prompt_inject as _allow_metrics_inject,
+                allow_transfer_summary as _allow_xfer_sum,
             )
             _depth = _norm_depth(depth_mode)
         except Exception:
@@ -9005,6 +9007,8 @@ class AzureCortex:
             _crystal_to = lambda m: None  # noqa: E731
             _rel_to = lambda m: None  # noqa: E731
             _stream_before_audit_fn = lambda m: False  # noqa: E731
+            _allow_metrics_inject = lambda m: True  # noqa: E731
+            _allow_xfer_sum = lambda m: True  # noqa: E731
         print(f">>> [AI] Cortex Active for {profile.get('name')} ctx={_ctx} depth={_depth}")
         # QUANTUM-CRYSTAL-ARCH: resolve DOJO per-type model-tier override (skips ODPE)
         _dojo_tier = _DOJO_TYPE_MODEL_TIER.get((dojo_type or "").lower()) if dojo_type else None
@@ -9526,6 +9530,7 @@ class AzureCortex:
         try:
             if (
                 not is_dojo_simulation
+                and _allow_xfer_sum(_depth)  # QUANTUM-CRYSTAL-ARCH: Faster skips
                 and os.environ.get("ENABLE_TRANSFER_FULL_RECALL", "true").lower()
                 not in ("0", "false", "no")
             ):
@@ -9537,6 +9542,12 @@ class AzureCortex:
                 ) or ""
         except Exception as _ts_err:
             logger.warning("Transfer summary inject failed: %s", _ts_err)
+
+        # QUANTUM-CRYSTAL-ARCH: Faster skips vault metrics I/O (observer/CEE/drift/reply)
+        _lm_restore = None
+        if not _allow_metrics_inject(_depth):
+            _lm_restore = self.metrics.load_metrics
+            self.metrics.load_metrics = lambda _p: {}
 
         # === OBSERVER PROTOCOL: Build perception/shame/PMB context (Patent 2 Section 15) ===
         observer_context = ""
@@ -9799,10 +9810,13 @@ class AzureCortex:
         except Exception as _rp_err:
             print(f">>> [REPLY THERAPY] Context build error (non-fatal): {_rp_err}")
 
+        if _lm_restore is not None:
+            self.metrics.load_metrics = _lm_restore  # QUANTUM-CRYSTAL-ARCH
+
         # Pull workbook guidance (local RAG) if available - especially useful for Dojo training
         workbook_guidance = ""
         try:
-            if self.workbooks:
+            if self.workbooks and not _is_faster_depth(_depth):  # QUANTUM-CRYSTAL-ARCH
                 # For Dojo, use the query content for retrieval
                 query_for_workbook = user_text
                 if is_dojo_simulation:
@@ -10425,6 +10439,7 @@ class AzureCortex:
                     session_id=_turn_id,
                     coach_id=(profile.get("assigned_coach") or None),
                     profile=profile,  # QUANTUM-CRYSTAL-ARCH — Phase 5c trial exclusion
+                    depth_mode=_depth,  # QUANTUM-CRYSTAL-ARCH: Faster light TTC
                 )
                 if _ttc_pack:
                     system_prompt = _ttc_pack.get("enriched_system_prompt", system_prompt)
