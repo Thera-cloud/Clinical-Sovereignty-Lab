@@ -66,6 +66,16 @@ def test_flags_default_off(monkeypatch):
     assert _flags.auto_promote_enabled() is False
     assert _flags.min_preference_yield() == 0.30
     assert _flags.judge_kappa_floor() == 0.70
+    assert _flags.agent_ready(None) is False
+    assert _flags.agent_ready("init_failed") is False
+    assert _flags.dpo_export_dir().endswith("nate_clinical_dpo")
+
+
+def test_curriculum_escalate_gated(monkeypatch):
+    monkeypatch.setenv("ENABLE_NATE_ADVERSARIAL_CURRICULUM", "false")
+    assert _adv.maybe_escalate(0.9, 1) == 1
+    monkeypatch.setenv("ENABLE_NATE_ADVERSARIAL_CURRICULUM", "true")
+    assert _adv.maybe_escalate(0.9, 1) == 2
 
 
 def test_modality_precedence_crisis():

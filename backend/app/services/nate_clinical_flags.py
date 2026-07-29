@@ -42,6 +42,21 @@ def auto_promote_enabled() -> bool:
     return False
 
 
+def agent_ready(agent) -> bool:
+    """True only for a real bakeoff agent (not None / 'init_failed')."""
+    return agent is not None and agent != "init_failed" and callable(
+        getattr(agent, "run_night", None)
+    )
+
+
+def dpo_export_dir() -> str:
+    """Durable export root (bind-mounted data), not ephemeral /tmp."""
+    return os.getenv(
+        "NATE_CLINICAL_DPO_EXPORT_DIR",
+        "/app/data/nate_clinical_dpo",
+    ).strip() or "/app/data/nate_clinical_dpo"
+
+
 def min_preference_yield() -> float:
     try:
         return float(os.getenv("NATE_CLINICAL_MIN_PREFERENCE_YIELD", "0.30"))

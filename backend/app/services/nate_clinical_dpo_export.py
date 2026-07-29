@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.services.nate_clinical_flags import dpo_export_enabled
+from app.services.nate_clinical_flags import dpo_export_dir, dpo_export_enabled
 
 logger = logging.getLogger("nate.clinical_dpo")
 
@@ -65,7 +65,7 @@ async def export_preferences_jsonl(
             )
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    directory = Path(out_dir or "/tmp/nate_clinical_dpo")
+    directory = Path(out_dir or dpo_export_dir())
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"preferences_{stamp}.jsonl"
     with path.open("w", encoding="utf-8") as f:

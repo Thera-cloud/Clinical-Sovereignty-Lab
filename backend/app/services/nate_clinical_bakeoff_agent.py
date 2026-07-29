@@ -92,14 +92,51 @@ class NateClinicalBakeoffAgent:
                 logger.warning("bakeoff agent cycle error: %s", e)
             await asyncio.sleep(CYCLE_SECONDS)
 
+    async def _persist_variants(self, variants: tuple) -> None:
+        if self.db_pool is None:
+            return
+        try:
+            async with self.db_pool.acquire() as conn:
+                for v in variants:
+                    await conn.execute(
+                        """
+                        INSERT INTO nate_clinical_variants (
+                            variant_id, prompt_pack, prompt_pack_hash,
+                            crystal_index_scope, modality_router_on, notes
+                        ) VALUES ($1, $2, $3, $4, $5, $6)
+                        ON CONFLICT (variant_id) DO UPDATE SET
+                            prompt_pack = EXCLUDED.prompt_pack,
+                            prompt_pack_hash = EXCLUDED.prompt_pack_hash,
+                            crystal_index_scope = EXCLUDED.crystal_index_scope,
+                            modality_router_on = EXCLUDED.modality_router_on,
+                            notes = EXCLUDED.notes
+                        """,
+                        v.get("variant_id"),
+                        v.get("prompt_pack") or "",
+                        v.get("prompt_pack_hash") or "",
+                        v.get("crystal_index_scope") or "clinical_global",
+                        bool(v.get("modality_router_on")),
+                        "default bakeoff pack",
+                    )
+        except Exception as e:
+            logger.warning("variant persist failed: %s", e)
+
     async def run_night(self, *, max_matches: Optional[int] = None) -> Dict[str, Any]:
         if not bakeoff_enabled():
             return {"ok": False, "reason": "flag_off"}
         await ensure_seed_pool(self.db_pool, split="all")
         va, vb = _default_variants()
+        await self._persist_variants((va, vb))
         router = None
         if self.app_state is not None:
             router = getattr(self.app_state, "nate_inference_router", None)
+        if router is None:
+            return {
+                "ok": False,
+                "reason": "nate_inference_router_missing",
+                "matches_attempted": 0,
+                "preferences_written": 0,
+            }
 
         attempted = 0
         complete = 0

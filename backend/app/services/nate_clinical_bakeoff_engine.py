@@ -214,6 +214,18 @@ async def run_twin_match(
     match_id = uuid.uuid4()
     if not bakeoff_enabled():
         return {"match_id": str(match_id), "status": "aborted", "reason": "flag_off"}
+    # Production nights require a router; tests may pass a stub object.
+    if router is None and os.getenv("NATE_CLINICAL_ALLOW_STUB_ROUTER", "").lower() not in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return {
+            "match_id": str(match_id),
+            "status": "aborted",
+            "reason": "nate_inference_router_missing",
+        }
 
     err = preflight_variants(variant_a, variant_b)
     if err:

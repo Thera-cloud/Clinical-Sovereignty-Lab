@@ -5,8 +5,17 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Dict, List, Optional
 
-from app.services.nate_clinical_flags import seed_max_reuse
+from app.services.nate_clinical_flags import (
+    bakeoff_enabled,
+    curriculum_enabled,
+    seed_max_reuse,
+)
 from app.services.nate_reactive_patient_sim import LEVEL_DESCRIPTORS
+
+
+def _seeds_active() -> bool:
+    """Seed pool serves bakeoff and/or adversarial curriculum."""
+    return bakeoff_enabled() or curriculum_enabled()
 
 LEVEL_OPENINGS = {
     1: [
@@ -39,6 +48,9 @@ def curriculum_profile(level: int) -> Dict[str, Any]:
 
 
 def maybe_escalate(win_rate: float, level: int) -> int:
+    """Level move only when adversarial curriculum flag is on."""
+    if not curriculum_enabled():
+        return level
     if win_rate >= 0.65 and level < 3:
         return level + 1
     if win_rate <= 0.35 and level > 1:
@@ -47,8 +59,10 @@ def maybe_escalate(win_rate: float, level: int) -> int:
 
 
 async def ensure_seed_pool(db_pool, *, split: str = "train") -> int:
-    """Insert synthetic seeds if table empty for split. Returns count inserted."""
+    """Insert synthetic seeds for bakeoff/curriculum. Returns count inserted."""
     if db_pool is None:
+        return 0
+    if not _seeds_active():
         return 0
     inserted = 0
     max_reuse = seed_max_reuse()
@@ -86,8 +100,23 @@ async def ensure_seed_pool(db_pool, *, split: str = "train") -> int:
     return inserted
 
 
+async def _reset_exhausted_seeds(conn, split: str) -> None:
+    """When all seeds hit max_reuse, recycle the pool so nights don't abort."""
+    await conn.execute(
+        """
+        UPDATE nate_clinical_seeds
+        SET reuse_count = 0
+        WHERE split = $1 AND synthetic_ok = TRUE
+          AND reuse_count >= max_reuse
+        """,
+        split,
+    )
+
+
 async def pick_seed(db_pool, *, heldout: bool = False) -> Optional[Dict[str, Any]]:
     if db_pool is None:
+        return None
+    if not _seeds_active():
         return None
     split = "heldout" if heldout else "train"
     async with db_pool.acquire() as conn:
@@ -102,6 +131,19 @@ async def pick_seed(db_pool, *, heldout: bool = False) -> Optional[Dict[str, Any
             """,
             split,
         )
+        if not row:
+            await _reset_exhausted_seeds(conn, split)
+            row = await conn.fetchrow(
+                """
+                SELECT seed_id, seed_hash, split, curriculum_level, opening_line,
+                       persona_prompt_hash, reuse_count, max_reuse
+                FROM nate_clinical_seeds
+                WHERE split = $1 AND synthetic_ok = TRUE AND reuse_count < max_reuse
+                ORDER BY reuse_count ASC, random()
+                LIMIT 1
+                """,
+                split,
+            )
         if not row:
             return None
         await conn.execute(

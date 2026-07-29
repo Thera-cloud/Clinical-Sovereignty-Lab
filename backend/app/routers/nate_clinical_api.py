@@ -14,9 +14,13 @@ router = APIRouter(prefix="/api/nate-clinical", tags=["nate-clinical"])
 
 try:
     from app.services.api_server import require_admin
-except Exception:
+except Exception as _admin_import_err:
+    # Fail closed — never stub-open admin auth.
     async def require_admin():  # type: ignore
-        return {"role": "ADMIN"}
+        raise HTTPException(
+            503,
+            f"admin auth unavailable: {_admin_import_err}",
+        )
 
 
 def _pool(request: Request):
@@ -24,12 +28,19 @@ def _pool(request: Request):
 
 
 def _agent(request: Request):
-    return getattr(request.app.state, "nate_clinical_bakeoff_agent", None)
+    from app.services.nate_clinical_flags import agent_ready
+
+    agent = getattr(request.app.state, "nate_clinical_bakeoff_agent", None)
+    return agent if agent_ready(agent) else None
 
 
 @router.get("/health")
 async def health(request: Request, _admin=Depends(require_admin)):
-    from app.services.nate_clinical_flags import flag_snapshot, min_preference_yield
+    from app.services.nate_clinical_flags import (
+        agent_ready,
+        flag_snapshot,
+        min_preference_yield,
+    )
 
     stats = {}
     pool = _pool(request)
@@ -51,12 +62,13 @@ async def health(request: Request, _admin=Depends(require_admin)):
                     stats["preference_yield_rate"] = (pref / att) if att else 0.0
         except Exception as e:
             stats = {"error": str(e)}
+    raw_agent = getattr(request.app.state, "nate_clinical_bakeoff_agent", None)
     return {
         "status": "ok",
         "flags": flag_snapshot(),
         "min_preference_yield": min_preference_yield(),
         "latest_nightly": stats or {"matches_attempted": 0, "preferences_written": 0},
-        "agent": _agent(request) is not None,
+        "agent": agent_ready(raw_agent),
     }
 
 

@@ -106,6 +106,9 @@ TAB_ENDPOINTS = [
             ("GET", "/api/ai-modes/status"),
             ("GET", "/api/admin/settings"),
             ("GET", "/api/admin/deadman-switch/status"),
+            ("GET", "/api/nate-clinical/health"),
+            ("GET", "/api/nate-clinical/leaderboard"),
+            ("POST", "/api/nate-clinical/bakeoff/run"),
         ],
     },
     {

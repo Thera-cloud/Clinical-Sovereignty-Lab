@@ -3447,7 +3447,7 @@ async def lifespan(app: FastAPI):
         print("   ✅ NateClinicalBakeoffAgent started (ENABLE_NATE_CLINICAL_BAKEOFF gated)")
     except Exception as _nca_err:
         print(f"   ⚠️  NateClinicalBakeoffAgent init failed: {_nca_err}")
-        app.state.nate_clinical_bakeoff_agent = "init_failed"
+        app.state.nate_clinical_bakeoff_agent = None  # QUANTUM-CRYSTAL-ARCH — not truthy fake
 
     # QUANTUM-CRYSTAL-ARCH — Adaptive Growth Engine (Phase 1 scheduler + sender guard)
     try:
@@ -3606,7 +3606,7 @@ async def lifespan(app: FastAPI):
         ("ceo_dual_coo_auditor", _ceo_dual_coo_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln7_engine", _ln7_engine_ok),  # QUANTUM-CRYSTAL-ARCH — Little Nate 7
         ("ln7_continuous_agent", getattr(app.state, "ln7_continuous_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
-        ("nate_clinical_bakeoff_agent", getattr(app.state, "nate_clinical_bakeoff_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("nate_clinical_bakeoff_agent", callable(getattr(getattr(app.state, "nate_clinical_bakeoff_agent", None), "run_night", None))),  # QUANTUM-CRYSTAL-ARCH
         ("growth_scheduler", getattr(app.state, "growth_scheduler", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("identity_engine", _identity_engine_ok),  # QUANTUM-CRYSTAL-ARCH
         ("littlenate_inference", getattr(app.state, "littlenate_inference", None) is not None),
