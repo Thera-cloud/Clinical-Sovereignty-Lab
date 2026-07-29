@@ -35,6 +35,7 @@ class MarketingContentService:
         brand_checklist: Optional[Dict[str, Any]] = None,
         created_by: str = "system",
         submit_for_review: bool = False,
+        notify_ceo: bool = True,
     ) -> Dict[str, Any]:
         if content_type not in ALLOWED_TYPES:
             raise ValueError(f"invalid content_type: {content_type}")
@@ -68,7 +69,8 @@ class MarketingContentService:
             )
             await self._audit(conn, row["id"], "create", created_by, {"status": status})
         item = dict(row)
-        if status == "pending_review":
+        # QUANTUM-CRYSTAL-ARCH — factory digest may suppress per-item notify
+        if status == "pending_review" and notify_ceo:
             await self.enqueue_ceo_review(item)
         return self._serialize(item)
 

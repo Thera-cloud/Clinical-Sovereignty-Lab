@@ -151,12 +151,12 @@ class GrowthDiagnosticsWorker:
             except Exception:
                 checks.append({"name": "skyeye_cadence", "source": "unavailable"})
 
-            # Content decay proxy: pending_review older than 14d
+            # Content decay: pending_review >7d (weekly digest resurfaces these)
             try:
                 stale = await conn.fetchval(
                     "SELECT COUNT(*) FROM marketing_content "
                     "WHERE status = 'pending_review' "
-                    "AND created_at < NOW() - INTERVAL '14 days'"
+                    "AND created_at < NOW() - INTERVAL '7 days'"
                 )
                 checks.append(
                     {
@@ -167,7 +167,7 @@ class GrowthDiagnosticsWorker:
                 )
                 if int(stale or 0) > 0:
                     proposals.append(
-                        f"{int(stale)} drafts pending_review >14d — CEO inbox / reject stale."
+                        f"{int(stale)} drafts pending_review >7d — weekly digest / CEO inbox."
                     )
             except Exception:
                 checks.append({"name": "content_decay", "source": "unavailable"})

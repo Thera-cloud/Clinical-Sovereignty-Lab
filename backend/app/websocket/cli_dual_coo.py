@@ -54,6 +54,10 @@ _YELLOW_KINDS = frozenset({
     "patent_implement_sandbox",
     "patent_spawn_variant",
     "patent_archive",
+    # QUANTUM-CRYSTAL-ARCH — Adaptive Growth Dual-COO (CEO gated)
+    "growth_policy_cross_review",
+    "growth_weekly_digest",
+    "growth_segment_propose",
 })
 
 _GREEN_KINDS = frozenset({
@@ -80,6 +84,8 @@ _GREEN_KINDS = frozenset({
     "newsletter_trend_pairing",
     "newsletter_growth_attribution",
     "newsletter_chat_learn",
+    # QUANTUM-CRYSTAL-ARCH — Adaptive Growth (digest / auto-conclude)
+    "growth_experiment_conclude",
 })
 
 

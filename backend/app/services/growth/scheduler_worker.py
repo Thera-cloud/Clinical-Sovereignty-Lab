@@ -70,4 +70,13 @@ class GrowthSchedulerWorker:
                 published += 1
             except Exception as e:
                 logger.warning("publish %s failed: %s", r["id"], e)
-        return {"published": published, "checked": len(rows)}
+        # QUANTUM-CRYSTAL-ARCH — daily Dual-COO growth hive enqueue (deduped in hive)
+        hive: Dict[str, Any] = {}
+        try:
+            from app.services.growth.growth_hive import enqueue_growth_tasks
+
+            hive = enqueue_growth_tasks()
+        except Exception as e:
+            logger.warning("growth hive enqueue: %s", e)
+            hive = {"ok": False, "error": str(e)[:120]}
+        return {"published": published, "checked": len(rows), "hive": hive}

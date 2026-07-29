@@ -978,6 +978,69 @@ async def _apply_ceo_payload(
             )
         except Exception as e:
             out["growth_error"] = str(e)[:200]
+
+    # QUANTUM-CRYSTAL-ARCH — peer+CEO GREEN policy activate
+    if payload.get("kind") == "growth_policy_activate":
+        try:
+            from app.services.growth.authority_map import activate_policy_green
+
+            key = str(
+                payload.get("policy_key")
+                or (payload.get("apply") or {}).get("policy_key")
+                or ""
+            )
+            out["growth_policy"] = await activate_policy_green(
+                db_pool,
+                key,
+                peer_pass=bool(payload.get("peer_pass")),
+                ceo_approved=True,
+            )
+        except Exception as e:
+            out["growth_policy_error"] = str(e)[:200]
+
+    # QUANTUM-CRYSTAL-ARCH — segment draft → growth_config
+    if payload.get("kind") == "growth_segment_propose":
+        try:
+            from app.services.growth.marketing_content_service import MarketingContentService
+
+            proposal = payload.get("proposal") or {}
+            svc = MarketingContentService(db_pool)
+            out["growth_segment"] = await svc.set_growth_config(
+                "segment_proposal_draft",
+                proposal if isinstance(proposal, dict) else {"raw": proposal},
+                updated_by=approved_by or "ceo",
+            )
+        except Exception as e:
+            out["growth_segment_error"] = str(e)[:200]
+
+    # QUANTUM-CRYSTAL-ARCH — factory digest APPROVE_ALL (blog IDs only)
+    if payload.get("kind") == "growth_factory_digest":
+        try:
+            from app.services.growth.marketing_content_service import MarketingContentService
+
+            ids = list(
+                payload.get("content_ids")
+                or (payload.get("apply") or {}).get("content_ids")
+                or []
+            )
+            svc = MarketingContentService(db_pool)
+            approved = []
+            for cid in ids[:40]:
+                try:
+                    approved.append(
+                        await svc.apply_ceo_decision(
+                            int(cid), decision="APPROVE", actor=approved_by or "ceo"
+                        )
+                    )
+                except Exception as ie:
+                    approved.append({"id": cid, "error": str(ie)[:120]})
+            out["growth_factory_digest"] = {"ok": True, "approved": len(approved), "items": approved}
+        except Exception as e:
+            out["growth_factory_digest_error"] = str(e)[:200]
+
+    # growth_weekly_digest — ACK/APPROVE clears inbox only (no publish)
+    if payload.get("kind") == "growth_weekly_digest":
+        out["growth_weekly_digest"] = {"ok": True, "acked": True}
     return out
 
 

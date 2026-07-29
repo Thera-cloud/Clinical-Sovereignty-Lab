@@ -217,6 +217,15 @@ class AgentStatusDigest:
         else:
             status, detail = self._check_agent(bw, "BwasWorker")
             rows.append((status, "BwasWorker", detail))
+        # QUANTUM-CRYSTAL-ARCH — Phase 5 growth diagnostics
+        gd = getattr(self.app, "growth_diagnostics", None)
+        if gd == "disabled":
+            rows.append(("INFO", "GrowthDiagnostics", "ENABLE_GROWTH_DIAGNOSTICS=false"))
+        elif gd == "init_failed":
+            rows.append(("WARNING", "GrowthDiagnostics", "init_failed"))
+        else:
+            status, detail = self._check_agent(gd, "GrowthDiagnostics")
+            rows.append((status, "GrowthDiagnostics", detail))
         return {"title": "Content Operations", "rows": rows}
 
     async def _section_token_lifecycle(self) -> dict:

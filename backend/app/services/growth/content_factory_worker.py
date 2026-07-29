@@ -119,12 +119,14 @@ class ContentFactoryWorker:
         text = ""
         model = "template_fallback"
         try:
+            from app.services.growth.authority_map import get_factory_system_prompt
             from app.services.nate_inference_router import NateInferenceRouter
 
+            system = await get_factory_system_prompt(self.db_pool, _SYSTEM)
             router = NateInferenceRouter(app_state=self.app_state)
             result = await router.generate(
                 prompt=user_prompt,
-                system=_SYSTEM,
+                system=system,
                 domain="marketing",
                 max_tokens=1800,
             )
@@ -185,7 +187,12 @@ class ContentFactoryWorker:
         demand_themes = await top_demand_themes(self.db_pool, limit=8)
         claimed = await self.keywords.claim_next(limit=batch)
         results: List[Dict[str, Any]] = []
+        pending_items: List[Dict[str, Any]] = []
         platforms = await self._social_platforms()
+        from app.services.growth.growth_hive import FACTORY_DIGEST_MIN
+
+        # Batch ≥N → one digest email; suppress per-item CEO (blog only)
+        use_digest = len(claimed) >= FACTORY_DIGEST_MIN
 
         for kw in claimed:
             kid = int(kw["id"])
@@ -233,7 +240,8 @@ class ContentFactoryWorker:
                     },
                     brand_checklist=checklist,
                     created_by="content_factory",
-                    submit_for_review=True,  # fires CEO notify
+                    submit_for_review=True,
+                    notify_ceo=not use_digest,
                 )
                 cid = int(item["id"])
                 kids = await enqueue_social_children(
@@ -244,6 +252,7 @@ class ContentFactoryWorker:
                     platforms=platforms,
                 )
                 await self.keywords.mark(kid, status="done", last_content_id=cid)
+                pending_items.append(item)
                 results.append(
                     {
                         "keyword_id": kid,
@@ -257,8 +266,23 @@ class ContentFactoryWorker:
                 await self.keywords.mark(kid, status="queued", notes=f"retry:{e}")
                 results.append({"keyword_id": kid, "status": "error", "error": str(e)})
 
+        digest = None
+        if use_digest and pending_items:
+            try:
+                from app.services.growth.growth_hive import enqueue_factory_digest
+
+                digest = await enqueue_factory_digest(self.db_pool, pending_items)
+            except Exception as e:
+                logger.warning("factory digest failed, falling back per-item: %s", e)
+                for it in pending_items:
+                    try:
+                        await self.content.enqueue_ceo_review(it)
+                    except Exception:
+                        pass
+
         return {
             "claimed": len(claimed),
             "results": results,
             "studio": mode_info,
+            "ceo_digest": digest,
         }

@@ -19,13 +19,13 @@ todos:
     status: completed
   - id: phase4b-try-telemetry
     content: "Phase 4b: try_theme_weekly + emitter in public_trial_gate; keyword classifier only; merge/global crystal guards; poison CI tests"
-    status: pending
+    status: completed
   - id: phase2b-theme-boost
     content: "Phase 2b (after 4b): factory demand_prior from try_theme_weekly + Themes strip consumers"
-    status: pending
+    status: completed
   - id: phase5-adaptive
     content: "Phase 5: crystal_bridge; widen MarketingIntelligence; extend content_ab_tests; diagnostics; Dual-COO task kinds; authority map vs MarketingBrain; weekly digest; spend ledger"
-    status: pending
+    status: completed
 isProject: false
 ---
 

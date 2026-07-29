@@ -40,6 +40,11 @@ _CLAIM_KINDS = (
     "newsletter_chat_learn",
     "newsletter_trend_pairing",
     "newsletter_growth_attribution",
+    # QUANTUM-CRYSTAL-ARCH — Adaptive Growth hive kinds
+    "growth_weekly_digest",
+    "growth_policy_cross_review",
+    "growth_segment_propose",
+    "growth_experiment_conclude",
 )
 
 
@@ -197,6 +202,13 @@ class CliTaskBusConsumer:
         elif kind.startswith("newsletter_"):
             findings, passed = await self._dispatch_newsletter_kind(task, kind)
             self._green_auto += 1
+        elif kind.startswith("growth_"):
+            # QUANTUM-CRYSTAL-ARCH — Adaptive Growth hive
+            findings, passed = await self._dispatch_growth_kind(task, kind)
+            if risk == RISK_GREEN:
+                self._green_auto += 1
+            elif risk == RISK_YELLOW:
+                self._ceo_routed += 1
         elif kind in (
             "brief_refine",
             "matching_weight",
@@ -303,6 +315,39 @@ class CliTaskBusConsumer:
         except Exception as e:
             findings.append({
                 "detail": f"newsletter {kind} failed: {e}",
+                "severity": "warn",
+            })
+            return findings, False
+
+    async def _dispatch_growth_kind(self, task: Dict[str, Any], kind: str) -> tuple:
+        """QUANTUM-CRYSTAL-ARCH — Dual-COO Queen executes Adaptive Growth hive kind."""
+        findings: List[Dict[str, Any]] = []
+        pool = getattr(self._app_state, "db_pool", None) if self._app_state else None
+        if not pool:
+            findings.append({
+                "detail": f"growth kind={kind} skipped — no db_pool",
+                "severity": "warn",
+            })
+            return findings, False
+        try:
+            from app.services.growth.growth_hive import execute_growth_kind, hive_enabled
+
+            if not hive_enabled():
+                findings.append({
+                    "detail": f"growth kind={kind} skipped — ENABLE_GROWTH_ENGINE=false",
+                    "severity": "info",
+                })
+                return findings, True
+            out = await execute_growth_kind(pool, kind)
+            findings.append({
+                "detail": f"growth {kind}: {str(out)[:400]}",
+                "severity": "info",
+                "risk": "GREEN" if kind == "growth_experiment_conclude" else "YELLOW",
+            })
+            return findings, bool(out.get("ok", True))
+        except Exception as e:
+            findings.append({
+                "detail": f"growth {kind} failed: {e}",
                 "severity": "warn",
             })
             return findings, False
