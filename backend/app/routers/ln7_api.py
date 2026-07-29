@@ -4,18 +4,29 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 logger = logging.getLogger("ln7_api")
 
 router = APIRouter(prefix="/api/ln7", tags=["ln7"])
 
+# Single-flight bakeoff tasks: revision_id -> asyncio.Task (ORANGE PEFT = one adapter).
+_BAKEOFF_TASKS: Dict[str, asyncio.Task] = {}
+
 
 def _pool(request: Request):
     return getattr(request.app.state, "db_pool", None)
+
+
+def _bakeoff_running_ids() -> list:
+    dead = [k for k, t in _BAKEOFF_TASKS.items() if t.done()]
+    for k in dead:
+        _BAKEOFF_TASKS.pop(k, None)
+    return list(_BAKEOFF_TASKS.keys())
 
 
 try:
@@ -70,37 +81,77 @@ async def get_leaderboard(request: Request, days: int = 30, _admin=Depends(requi
     return {"status": "ok", "days": days, "rows": rows, "non_clinical_claim": True}
 
 
+@router.get("/bakeoff/running")
+async def get_bakeoff_running(_admin=Depends(require_admin)):
+    """In-flight background bakeoffs (single-flight guard visibility)."""
+    return {"status": "ok", "running": _bakeoff_running_ids(), "non_clinical_claim": True}
+
+
 @router.post("/bakeoff")
 async def post_bakeoff(request: Request, body: Optional[Dict[str, Any]] = None, _admin=Depends(require_admin)):
     from app.services.ln7_bakeoff_engine import run_full_scorecard
     body = body or {}
     rid = str(body.get("revision_id") or "LN7-baseline")
-    result = await run_full_scorecard(
-        _pool(request),
-        revision_id=rid,
-        mode=str(body.get("mode") or "max"),
-        include_public=bool(body.get("include_public", True)),
-        include_private=bool(body.get("include_private", True)),
-        seed_golden=bool(body.get("seed_golden", False)),
-    )
-    # QUANTUM-CRYSTAL-ARCH — re-assess + READY renotify when shadow candidate clears packs
-    notify_out = None
-    if result.get("ok") and rid and rid != "LN7-baseline":
-        try:
-            from app.services.ln7_revision import notify_revision_candidate
-            from app.services.ln7_revision_readiness import assess_revision_readiness
+    background = bool(body.get("background", False))
+    mode = str(body.get("mode") or "max")
+    include_public = bool(body.get("include_public", True))
+    include_private = bool(body.get("include_private", True))
+    seed_golden = bool(body.get("seed_golden", False))
+    pool = _pool(request)
 
-            ready = await assess_revision_readiness(_pool(request), rid)
-            if ready.get("ready"):
-                notify_out = await notify_revision_candidate(
-                    _pool(request), rid, force_ready=True
-                )
-        except Exception as exc:
-            notify_out = {"status": "error", "error": str(exc)[:120]}
+    # QUANTUM-CRYSTAL-ARCH — single-flight: PEFT serve holds one adapter
+    running = _bakeoff_running_ids()
+    if running:
+        raise HTTPException(
+            409,
+            f"bakeoff already running for {running[0]}; wait or GET /api/ln7/bakeoff/running",
+        )
+
+    async def _run_and_notify():
+        result = await run_full_scorecard(
+            pool,
+            revision_id=rid,
+            mode=mode,
+            include_public=include_public,
+            include_private=include_private,
+            seed_golden=seed_golden,
+        )
+        notify_out = None
+        if result.get("ok") and rid and rid != "LN7-baseline":
+            try:
+                from app.services.ln7_revision import notify_revision_candidate
+                from app.services.ln7_revision_readiness import assess_revision_readiness
+
+                ready = await assess_revision_readiness(pool, rid)
+                if ready.get("ready"):
+                    notify_out = await notify_revision_candidate(
+                        pool, rid, force_ready=True
+                    )
+            except Exception as exc:
+                notify_out = {"status": "error", "error": str(exc)[:120]}
+        return {**result, "ceo_notify": notify_out}
+
+    if background:
+        task = asyncio.create_task(_run_and_notify())
+        _BAKEOFF_TASKS[rid] = task
+
+        def _clear(_t: asyncio.Task, _rid: str = rid) -> None:
+            _BAKEOFF_TASKS.pop(_rid, None)
+
+        task.add_done_callback(_clear)
+        return {
+            "status": "ok",
+            "ok": True,
+            "started": True,
+            "background": True,
+            "revision_id": rid,
+            "non_clinical_claim": True,
+        }
+
+    result = await _run_and_notify()
     return {
         "status": "ok" if result.get("ok") else "error",
         **result,
-        "ceo_notify": notify_out,
     }
 
 
@@ -180,24 +231,44 @@ async def post_revision_shadow(
 
 
 @router.get("/scorecard/{revision_id}")
-async def get_scorecard(revision_id: str, request: Request, _admin=Depends(require_admin)):
-    from app.services.ln7_bakeoff_engine import run_full_scorecard
-    # Return last private outcomes summary; re-running full bakeoff is POST
+async def get_scorecard(
+    revision_id: str,
+    request: Request,
+    since: Optional[str] = Query(None, description="ISO timestamp; only outcomes created_at > since"),
+    _admin=Depends(require_admin),
+):
+    # Return last private LN7 outcomes summary; re-running full bakeoff is POST
     pool = _pool(request)
     if not pool:
         raise HTTPException(503, "db unavailable")
     try:
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT passed, latency_ms, cost_usd, harness_mode, created_at
-                FROM ln7_coding_outcomes
-                WHERE revision_id = $1
-                ORDER BY created_at DESC
-                LIMIT 200
-                """,
-                revision_id,
-            )
+            if since:
+                rows = await conn.fetch(
+                    """
+                    SELECT passed, latency_ms, cost_usd, harness_mode, created_at
+                    FROM ln7_coding_outcomes
+                    WHERE revision_id = $1
+                      AND generator = 'ln7'
+                      AND created_at > $2::timestamptz
+                    ORDER BY created_at DESC
+                    LIMIT 500
+                    """,
+                    revision_id,
+                    since,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT passed, latency_ms, cost_usd, harness_mode, created_at
+                    FROM ln7_coding_outcomes
+                    WHERE revision_id = $1
+                      AND generator = 'ln7'
+                    ORDER BY created_at DESC
+                    LIMIT 200
+                    """,
+                    revision_id,
+                )
         passes = [bool(r["passed"]) for r in rows]
         from app.services.ln7_bakeoff_engine import bootstrap_ci
         return {
@@ -205,6 +276,7 @@ async def get_scorecard(revision_id: str, request: Request, _admin=Depends(requi
             "revision_id": revision_id,
             "pass_rate": bootstrap_ci(passes),
             "n": len(rows),
+            "since": since,
             "non_clinical_claim": True,
             "public_report_only": True,
         }

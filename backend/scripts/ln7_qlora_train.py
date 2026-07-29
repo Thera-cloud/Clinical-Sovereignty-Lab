@@ -274,6 +274,11 @@ def main() -> int:
         help="HF base id — must match LN7 PEFT serve (:11435)",
     )
     ap.add_argument("--out-dir", default="")
+    ap.add_argument(
+        "--revision-id",
+        default="",
+        help="Canonical revision id (LN7-… or bare ts). Prefer over minting a new UTC id.",
+    )
     ap.add_argument("--iters", type=int, default=200)
     ap.add_argument("--quantization", default="q5_K_M")
     ap.add_argument(
@@ -326,7 +331,18 @@ def main() -> int:
             cf.write(json.dumps(r, default=str) + "\n")
     train_path = clean_path
 
-    rid = _utc_rid()
+    # Prefer explicit --revision-id, else LN7-* basename of --out-dir, else mint UTC.
+    def _resolve_rid() -> str:
+        raw = (args.revision_id or "").strip()
+        if raw:
+            return raw[4:] if raw.startswith("LN7-") else raw
+        if args.out_dir:
+            base = Path(args.out_dir).name
+            if base.startswith("LN7-") and len(base) > 4:
+                return base[4:]
+        return _utc_rid()
+
+    rid = _resolve_rid()
     out_dir = Path(args.out_dir or f"/tmp/ln7_adapters/LN7-{rid}")
 
     backend = args.backend

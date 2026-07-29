@@ -44,20 +44,22 @@ fi
 mkdir -p "$DEST/scripts" "$DEST/data" "$DEST/backend/scripts" \
   "$HOME/Library/LaunchAgents" "$STATE_DIR" "$HOME/Library/Logs"
 
+_safe_cp() {
+  local src="$1" dst="$2"
+  [[ -f "$src" ]] || return 0
+  # Same inode / identical path: skip (macOS cp exits 1 on identical files)
+  [[ "$(cd "$(dirname "$src")" && pwd)/$(basename "$src")" == \
+     "$(cd "$(dirname "$dst")" 2>/dev/null && pwd)/$(basename "$dst")" ]] && return 0
+  cp -f "$src" "$dst" 2>/dev/null || true
+  chmod +x "$dst" 2>/dev/null || true
+}
 for f in ln7_gpu_capacity_watch.sh ln7_ab_qlora_drain.sh ln7_ab_bakeoff_compare.sh \
-         ln7_continuous_drain.sh ln7_provision_cuda_droplet.sh ln7_destroy_cuda_droplet.sh; do
-  if [[ -f "$SRC_REPO/scripts/$f" ]]; then
-    cp "$SRC_REPO/scripts/$f" "$DEST/scripts/$f"
-    chmod +x "$DEST/scripts/$f"
-  fi
+         ln7_continuous_drain.sh ln7_provision_cuda_droplet.sh ln7_destroy_cuda_droplet.sh \
+         ln7_deploy_peft_serve_orange.sh; do
+  _safe_cp "$SRC_REPO/scripts/$f" "$DEST/scripts/$f"
 done
-if [[ -f "$SRC_REPO/backend/scripts/ln7_qlora_train.py" ]]; then
-  cp "$SRC_REPO/backend/scripts/ln7_qlora_train.py" "$DEST/backend/scripts/ln7_qlora_train.py"
-  chmod +x "$DEST/backend/scripts/ln7_qlora_train.py"
-fi
-if [[ -f "$SRC_REPO/data/ln7_train.jsonl" ]]; then
-  cp "$SRC_REPO/data/ln7_train.jsonl" "$DEST/data/ln7_train.jsonl"
-fi
+_safe_cp "$SRC_REPO/backend/scripts/ln7_qlora_train.py" "$DEST/backend/scripts/ln7_qlora_train.py"
+_safe_cp "$SRC_REPO/data/ln7_train.jsonl" "$DEST/data/ln7_train.jsonl"
 
 CLEAN_N="$(python3 - <<PY
 import json,re
@@ -79,24 +81,11 @@ if p.is_file():
 print(n)
 PY
 )"
-# Only force-thin when set is thin; once ≥ min, leave unset (refuse thin forever).
-FORCE_THIN_VAL=""
-if [[ -n "${LN7_QLORA_FORCE_THIN:-}" ]]; then
-  FORCE_THIN_VAL="$LN7_QLORA_FORCE_THIN"
-elif [[ "${CLEAN_N:-0}" -lt "$MIN_ROWS" ]]; then
-  FORCE_THIN_VAL="1"
-fi
-echo "[gpu-watch] clean_rows=$CLEAN_N min=$MIN_ROWS force_thin=${FORCE_THIN_VAL:-off}"
+# Never bake FORCE_THIN into the plist — drain computes thin from live clean_n only.
+# Explicit export LN7_QLORA_FORCE_THIN=1 still works for one-shot shell drains.
+echo "[gpu-watch] clean_rows=$CLEAN_N min=$MIN_ROWS force_thin=drain-time-only (not in plist)"
 
 uninstall || true
-
-# Build EnvironmentVariables dict (omit FORCE_THIN key when empty)
-FORCE_THIN_XML=""
-if [[ -n "$FORCE_THIN_VAL" ]]; then
-  FORCE_THIN_XML="
-    <key>LN7_QLORA_FORCE_THIN</key>
-    <string>${FORCE_THIN_VAL}</string>"
-fi
 
 cat >"$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -127,7 +116,7 @@ cat >"$PLIST" <<EOF
     <key>LN7_QLORA_MIN_ROWS</key>
     <string>${MIN_ROWS}</string>
     <key>LN7_SRC_REPO</key>
-    <string>${DEST}</string>${FORCE_THIN_XML}
+    <string>${DEST}</string>
   </dict>
   <key>WorkingDirectory</key>
   <string>${DEST}</string>

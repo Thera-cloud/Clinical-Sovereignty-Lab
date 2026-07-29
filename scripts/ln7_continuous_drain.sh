@@ -13,8 +13,6 @@ SIZE="${LN7_GPU_SIZE:-gpu-4000adax1-20gb}"
 REGION="${LN7_GPU_REGION:-tor1}"
 # Idle grace: destroy only if heartbeat goes stale this long (train keeps it fresh).
 TTL="${LN7_GPU_TTL_S:-1800}"
-HARD_MAX="${LN7_GPU_HARD_MAX_S:-14400}"
-ITERS="${LN7_QLORA_ITERS:-40}"
 STORE="${LN7_ADAPTER_STORE:-/opt/ln7/adapters}"
 GREEN="${LN7_GREEN_HOST:-root@68.183.168.75}"
 HF_BASE="${LN7_QLORA_HF_BASE:-Qwen/Qwen2.5-Coder-1.5B-Instruct}"
@@ -22,6 +20,7 @@ LORA_RECIPE="${LN7_LORA_RECIPE:-default}"
 MIN_ROWS="${LN7_QLORA_MIN_ROWS:-50}"
 KEEP="${LN7_KEEP_DROPLET:-0}"
 KEEP_ON_PREFAIL="${LN7_KEEP_ON_PREFAIL:-1}"
+ADAPTER_KEEP_N="${LN7_ADAPTER_KEEP_N:-6}"
 STATE_DIR="${LN7_GPU_WATCH_STATE_DIR:-$HOME/.local/state/ln7_gpu_watch}"
 mkdir -p "$STATE_DIR"
 HB="$STATE_DIR/ttl_heartbeat"
@@ -51,7 +50,25 @@ if p.is_file():
 print(n)
 PY
 )"
-echo "[drain] clean_rows=$CLEAN_N min=$MIN_ROWS recipe=$LORA_RECIPE hf=$HF_BASE keep=$KEEP"
+# Growth tiers: env overrides always win; else scale from clean_n
+if [[ -z "${LN7_QLORA_ITERS:-}" ]]; then
+  if [[ "${CLEAN_N:-0}" -lt 50 ]]; then ITERS=40
+  elif [[ "${CLEAN_N:-0}" -lt 200 ]]; then ITERS=80
+  elif [[ "${CLEAN_N:-0}" -lt 500 ]]; then ITERS=120
+  else ITERS=200
+  fi
+else
+  ITERS="$LN7_QLORA_ITERS"
+fi
+if [[ -z "${LN7_GPU_HARD_MAX_S:-}" ]]; then
+  if [[ "${CLEAN_N:-0}" -lt 200 ]]; then HARD_MAX=14400
+  elif [[ "${CLEAN_N:-0}" -lt 500 ]]; then HARD_MAX=18000
+  else HARD_MAX=21600
+  fi
+else
+  HARD_MAX="$LN7_GPU_HARD_MAX_S"
+fi
+echo "[drain] clean_rows=$CLEAN_N min=$MIN_ROWS iters=$ITERS hard_max=${HARD_MAX}s recipe=$LORA_RECIPE hf=$HF_BASE keep=$KEEP"
 if [[ "${CLEAN_N:-0}" -lt "$MIN_ROWS" && "${LN7_QLORA_FORCE_THIN:-}" != "1" ]]; then
   echo "[drain] refuse thin train set (set LN7_QLORA_FORCE_THIN=1 to override)"
   exit 5
@@ -233,24 +250,32 @@ export LN7_QLORA_MIN_ROWS='$MIN_ROWS' LN7_QLORA_FORCE_THIN='${LN7_QLORA_FORCE_TH
 python backend/scripts/ln7_qlora_train.py \
   --train-jsonl data/ln7_train.jsonl --backend cuda --iters $ITERS \
   --lora-recipe $LORA_RECIPE --base '$HF_BASE' \
+  --revision-id LN7-${RID_TS} \
   --out-dir /opt/ln7/adapters/LN7-${RID_TS}
 EOF
 kill "$_HB_PID" 2>/dev/null || true
 hb
 
-LOCAL_TMP="/tmp/ln7_adapter_LN7-${RID_TS}"
-rm -rf "$LOCAL_TMP" && mkdir -p "$LOCAL_TMP" "$REPO/.ln7-adapters/LN7-${RID_TS}"
-scp -o BatchMode=yes -r "root@$IP:/opt/ln7/adapters/LN7-${RID_TS}/." "$LOCAL_TMP/"
-cp -a "$LOCAL_TMP/." "$REPO/.ln7-adapters/LN7-${RID_TS}/"
+REG_REV="LN7-${RID_TS}"
+LOCAL_TMP="/tmp/ln7_adapter_${REG_REV}"
+rm -rf "$LOCAL_TMP" && mkdir -p "$LOCAL_TMP" "$REPO/.ln7-adapters/${REG_REV}"
+scp -o BatchMode=yes -r "root@$IP:/opt/ln7/adapters/${REG_REV}/." "$LOCAL_TMP/"
+cp -a "$LOCAL_TMP/." "$REPO/.ln7-adapters/${REG_REV}/"
 hb
 
+# Prefer revision_id from train manifest (must match --revision-id)
+if [[ -f "$LOCAL_TMP/revision_manifest.json" ]]; then
+  _man_rid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("revision_id",""))' "$LOCAL_TMP/revision_manifest.json" 2>/dev/null || true)"
+  [[ -n "$_man_rid" ]] && REG_REV="$_man_rid"
+fi
+
 ssh -o BatchMode=yes "$GREEN" "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i /root/.ssh/id_ed25519_orange root@10.13.13.5 'mkdir -p $STORE'"
-scp -o BatchMode=yes -o ProxyJump="$GREEN" -r "$LOCAL_TMP" \
-  "root@10.13.13.5:$STORE/LN7-${RID_TS}"
+scp -o BatchMode=yes -o ProxyJump="$GREEN" -r "$LOCAL_TMP/." \
+  "root@10.13.13.5:$STORE/${REG_REV}/"
 hb
 
 scp -o BatchMode=yes "$LOCAL_TMP/revision_manifest.json" "$GREEN:/tmp/ln7_revision_manifest.json"
-ssh -o BatchMode=yes "$GREEN" "STORE='$STORE/LN7-${RID_TS}' python3 -" <<'PY'
+REG_OUT="$(ssh -o BatchMode=yes "$GREEN" "STORE='$STORE/${REG_REV}' python3 -" <<'PY'
 import json, re, os, urllib.request
 man = json.load(open("/tmp/ln7_revision_manifest.json"))
 body = man["register_body"]
@@ -273,9 +298,65 @@ print(json.dumps({"register": post("/api/ln7/revision/register", body)}))
 print(json.dumps({"canary": post("/api/ln7/canary/evaluate", {"revision_id": body["revision_id"], "start": True})}))
 print("REVISION_ID=" + body["revision_id"])
 PY
+)"
+echo "$REG_OUT"
+REG_REV="$(echo "$REG_OUT" | awk -F= '/^REVISION_ID=/{print $2; exit}')"
+[[ -n "$REG_REV" ]] || REG_REV="LN7-${RID_TS}"
+echo "$REG_REV" >"$REV_OUT"
+echo "[drain] ok $REG_REV durable=$STORE/${REG_REV} blue=.ln7-adapters/${REG_REV}"
 
-echo "LN7-${RID_TS}" >"$REV_OUT"
-echo "[drain] ok LN7-${RID_TS} durable=$STORE/LN7-${RID_TS} blue=.ln7-adapters/LN7-${RID_TS}"
+# Adapter retention: keep last N on BLUE + ORANGE; never delete active
+_prune_adapters() {
+  local keep_n="$1"
+  local protect="${LN7_ADAPTER_PROTECT:-}"
+  local active=""
+  active="$(ssh -o BatchMode=yes -o ConnectTimeout=20 "$GREEN" 'python3 -' <<'PY' 2>/dev/null || true
+import json, re, urllib.request
+env = open("/opt/clinical-sovereignty-lab/.env").read()
+tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()
+req = urllib.request.Request(
+    "http://localhost:8000/api/ln7/revision",
+    headers={"Authorization": f"Bearer {tok}"},
+)
+with urllib.request.urlopen(req, timeout=30) as r:
+    d = json.loads(r.read().decode())
+print((d.get("active") or {}).get("revision_id") or "")
+PY
+)"
+  protect="$protect $active $REG_REV"
+  python3 - <<PY
+import os, shutil
+from pathlib import Path
+root = Path("$REPO/.ln7-adapters")
+keep_n = int("$keep_n")
+protect = set(x for x in """$protect""".split() if x)
+if not root.is_dir():
+    raise SystemExit(0)
+dirs = sorted([p for p in root.iterdir() if p.is_dir() and p.name.startswith("LN7-")], key=lambda p: p.name)
+drop = [p for p in dirs[:-keep_n] if p.name not in protect] if len(dirs) > keep_n else []
+for p in drop:
+    shutil.rmtree(p, ignore_errors=True)
+    print(f"[drain] pruned blue {p.name}")
+PY
+  ssh -o BatchMode=yes -o ProxyJump="$GREEN" "root@10.13.13.5" \
+    "KEEP_N='$keep_n' PROTECT='$protect' STORE='$STORE' bash -s" <<'REMOTE' || true
+set -euo pipefail
+cd "$STORE" 2>/dev/null || exit 0
+mapfile -t dirs < <(ls -1d LN7-* 2>/dev/null | sort)
+n=${#dirs[@]}
+(( n > KEEP_N )) || exit 0
+drop_n=$((n - KEEP_N))
+for d in "${dirs[@]:0:$drop_n}"; do
+  skip=0
+  for p in $PROTECT; do [[ "$d" == "$p" ]] && skip=1 && break; done
+  [[ $skip -eq 1 ]] && continue
+  rm -rf "$d"
+  echo "[drain] pruned orange $d"
+done
+REMOTE
+}
+_prune_adapters "$ADAPTER_KEEP_N"
+
 kill "$WATCH" 2>/dev/null || true
 # Success path: if KEEP, handoff; else trap destroys
 if [[ "$KEEP" == "1" ]]; then

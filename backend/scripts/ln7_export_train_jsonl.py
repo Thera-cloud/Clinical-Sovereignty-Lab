@@ -58,7 +58,7 @@ def _packs_root() -> Path:
     return ROOT / "backend" / "app" / "data" / "ln_sandbox_ci_packs"
 
 
-MAX_CHARS = 4000
+MAX_CHARS = int(os.getenv("LN7_EXPORT_MAX_CHARS", "4000") or "4000")
 HELDOUT_PACKS = frozenset({"env_redis_prefix"})
 # Fallback if packs_index missing; preferred: all packs with golden.patch minus heldout
 TRAIN_GOLDEN_PACKS = ("asyncpg_cast", "catch_all_routes")
@@ -314,7 +314,11 @@ async def export_rows(
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
-    ap.add_argument("--limit", type=int, default=500)
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=int(os.getenv("LN7_EXPORT_LIMIT", "2000") or "2000"),
+    )
     ap.add_argument("--include-goldens", action="store_true", default=True)
     ap.add_argument("--no-goldens", action="store_true")
     ap.add_argument("--goldens-only", action="store_true")

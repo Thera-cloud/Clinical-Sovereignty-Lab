@@ -1,21 +1,33 @@
 #!/usr/bin/env bash
-# Deploy LN7 PEFT serve to ORANGE via ProxyJump (no nested heredoc).
+# Deploy LN7 PEFT serve to ORANGE via ProxyJump — sync full adapter tree from BLUE.
 #   bash scripts/ln7_deploy_peft_serve_orange.sh [adapter_dirname]
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 ADAPTER_NAME="${1:-LN7-2026-07-28T054420Z}"
 GREEN="${LN7_GREEN_HOST:-root@68.183.168.75}"
 ORANGE_IP="${LN7_ORANGE_WG:-10.13.13.5}"
+SRC="$REPO/.ln7-adapters/${ADAPTER_NAME}"
+
+if [[ ! -d "$SRC" ]]; then
+  echo "[peft] FAIL: missing BLUE adapter dir $SRC" >&2
+  exit 2
+fi
 
 echo "[peft] deploy adapter=$ADAPTER_NAME → $ORANGE_IP:11435"
 scp -o BatchMode=yes -o ProxyJump="$GREEN" \
   "$REPO/backend/scripts/orange/ln7_peft_server.py" \
   "root@${ORANGE_IP}:/opt/ln7/peft_serve/ln7_peft_server.py"
 
+# Full adapter tree BLUE → ORANGE (overwrite)
+ssh -o BatchMode=yes -o ProxyJump="$GREEN" "root@${ORANGE_IP}" \
+  "mkdir -p /opt/ln7/adapters/${ADAPTER_NAME}"
+scp -o BatchMode=yes -o ProxyJump="$GREEN" -r "$SRC/." \
+  "root@${ORANGE_IP}:/opt/ln7/adapters/${ADAPTER_NAME}/"
+
 # Restore PEFT adapter_config from checkpoint if root was clobbered
-if [[ -f "$REPO/.ln7-adapters/${ADAPTER_NAME}/checkpoint-40/adapter_config.json" ]]; then
+if [[ -f "$SRC/checkpoint-40/adapter_config.json" ]]; then
   scp -o BatchMode=yes -o ProxyJump="$GREEN" \
-    "$REPO/.ln7-adapters/${ADAPTER_NAME}/checkpoint-40/adapter_config.json" \
+    "$SRC/checkpoint-40/adapter_config.json" \
     "root@${ORANGE_IP}:/opt/ln7/adapters/${ADAPTER_NAME}/adapter_config.json"
 fi
 
@@ -53,17 +65,30 @@ ufw allow from 10.13.13.0/24 to any port 11435 proto tcp comment 'LN7 PEFT WG' |
 cd /opt/ln7/peft_serve
 [[ -d .venv ]] || python3 -m venv .venv
 . .venv/bin/activate
-pip install -q --upgrade pip
-pip install -q torch --index-url https://download.pytorch.org/whl/cpu
-pip install -q 'fastapi>=0.110' uvicorn pydantic transformers peft accelerate safetensors sentencepiece
+# Skip pip when peft already importable
+if ! python -c 'import peft, fastapi, transformers' 2>/dev/null; then
+  pip install -q --upgrade pip
+  pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+  pip install -q 'fastapi>=0.110' uvicorn pydantic transformers peft accelerate safetensors sentencepiece
+fi
 systemctl daemon-reload
 systemctl enable ln7_peft_server
 systemctl restart ln7_peft_server
+ok=0
 for i in $(seq 1 60); do
   h=$(curl -sS --max-time 5 http://10.13.13.5:11435/health 2>/dev/null || true)
   echo "health_try_$i $h"
-  echo "$h" | grep -q '"loaded": true\|"loaded":true' && break
+  if echo "$h" | grep -qE '"loaded"[[:space:]]*:[[:space:]]*true'; then
+    if echo "$h" | grep -q "$ADAPTER_NAME"; then
+      ok=1
+      break
+    fi
+    echo "[peft] WARN: loaded but adapter_dir may not match $ADAPTER_NAME"
+    ok=1
+    break
+  fi
   sleep 8
 done
+[[ "$ok" == "1" ]] || { echo "[peft] FAIL: health never loaded $ADAPTER_NAME" >&2; exit 3; }
 REMOTE
-echo "[peft] done"
+echo "[peft] done adapter=$ADAPTER_NAME"
