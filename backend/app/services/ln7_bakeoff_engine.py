@@ -187,43 +187,59 @@ async def run_private_pack_bakeoff(
     passes: List[bool] = []
     rows: List[Dict[str, Any]] = []
     for pack in packs:
-        # QUANTUM-CRYSTAL-ARCH — use pack task prompt + target file bodies (not a vague name-only hint)
-        prompt = build_pack_prompt(pack)
-        if not prompt:
-            task = load_pack(pack) or {}
-            prompt = task.get("prompt") or (
-                f"Fix the failing tests in pack {pack}. "
-                "Return a unified diff that makes pytest pass."
+        # QUANTUM-CRYSTAL-ARCH — per-pack isolate: one failure must not abort the remaining packs
+        try:
+            prompt = build_pack_prompt(pack)
+            if not prompt:
+                task = load_pack(pack) or {}
+                prompt = task.get("prompt") or (
+                    f"Fix the failing tests in pack {pack}. "
+                    "Return a unified diff that makes pytest pass."
+                )
+            result = await run_task(
+                prompt, pack_name=pack, mode=mode, revision_id=revision_id, db_pool=db_pool,
             )
-        result = await run_task(
-            prompt, pack_name=pack, mode=mode, revision_id=revision_id, db_pool=db_pool,
-        )
+        except Exception as exc:
+            logger.warning("LN7 private bakeoff pack %s failed: %s", pack, exc)
+            result = {
+                "passed": False,
+                "diff": "",
+                "diff_lines": 0,
+                "tokens": 0,
+                "latency_ms": 0,
+                "error": f"pack_exception:{exc}"[:200],
+                "log": str(exc)[:200],
+            }
         passed = bool(result.get("passed"))
         passes.append(passed)
         th = task_hash(f"pack:{pack}")
         diff_text = result.get("diff") or ""
-        oid = await record_outcome(db_pool, {
-            "task_id": None,
-            "generator": "ln7",
-            "revision_id": revision_id,
-            "harness_mode": mode,
-            "patch_hash": task_hash(diff_text),
-            "passed": passed,
-            "diff_lines": result.get("diff_lines") if result.get("diff_lines") is not None
-            else len(diff_text.splitlines()),
-            "tokens": result.get("tokens"),
-            "latency_ms": result.get("latency_ms"),
-            "cost_usd": 0.0,
-            "recall_at_k": result.get("recall_at_k"),
-            "exec_node": "green",
-            "patch_text": diff_text or None,
-            "metrics_json": {
-                "pack": pack,
-                "task_hash": th,
-                "score": result.get("score"),
-                "error": result.get("error") or (result.get("log") or "")[:200],
-            },
-        })
+        try:
+            oid = await record_outcome(db_pool, {
+                "task_id": None,
+                "generator": "ln7",
+                "revision_id": revision_id,
+                "harness_mode": mode,
+                "patch_hash": task_hash(diff_text),
+                "passed": passed,
+                "diff_lines": result.get("diff_lines") if result.get("diff_lines") is not None
+                else len(diff_text.splitlines()),
+                "tokens": result.get("tokens"),
+                "latency_ms": result.get("latency_ms"),
+                "cost_usd": 0.0,
+                "recall_at_k": result.get("recall_at_k"),
+                "exec_node": "green",
+                "patch_text": diff_text or None,
+                "metrics_json": {
+                    "pack": pack,
+                    "task_hash": th,
+                    "score": result.get("score"),
+                    "error": result.get("error") or (result.get("log") or "")[:200],
+                },
+            })
+        except Exception as exc:
+            logger.warning("LN7 record_outcome pack %s failed: %s", pack, exc)
+            oid = None
         rows.append({"pack": pack, "passed": passed, "outcome_id": oid, **result})
 
     ci = bootstrap_ci(passes)
