@@ -29,6 +29,22 @@ def _bakeoff_running_ids() -> list:
     return list(_BAKEOFF_TASKS.keys())
 
 
+def _bakeoff_recommend_refire(
+    *,
+    in_flight: bool,
+    n: int,
+    expected_packs: int,
+    outcomes_age_s: Optional[int],
+    stale_outcomes_s: int,
+) -> bool:
+    """True when memory empty, packs incomplete, and outcomes idle (or never started)."""
+    if in_flight or n >= expected_packs:
+        return False
+    if outcomes_age_s is None:
+        return True
+    return outcomes_age_s >= stale_outcomes_s
+
+
 try:
     from app.services.api_server import require_admin
 except Exception:
@@ -85,6 +101,135 @@ async def get_leaderboard(request: Request, days: int = 30, _admin=Depends(requi
 async def get_bakeoff_running(_admin=Depends(require_admin)):
     """In-flight background bakeoffs (single-flight guard visibility)."""
     return {"status": "ok", "running": _bakeoff_running_ids(), "non_clinical_claim": True}
+
+
+@router.get("/bakeoff/sweep-status")
+async def get_bakeoff_sweep_status(
+    request: Request,
+    revision_id: str = Query(..., description="LN7 revision to inspect"),
+    since: Optional[str] = Query(None, description="ISO; count outcomes after this"),
+    expected_packs: int = Query(18, ge=1, le=64),
+    stale_outcomes_s: int = Query(600, ge=60, le=86400),
+    _admin=Depends(require_admin),
+):
+    """Age of last ln7_coding_outcomes row + whether re-fire is recommended.
+
+    Survives backend restart clearing in-memory _BAKEOFF_TASKS while client still polls.
+    """
+    from datetime import datetime, timezone
+
+    pool = _pool(request)
+    if not pool:
+        raise HTTPException(503, "db unavailable")
+    since_dt = None
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(422, "since must be an ISO-8601 timestamp")
+    running = _bakeoff_running_ids()
+    try:
+        async with pool.acquire() as conn:
+            if since_dt is not None:
+                row = await conn.fetchrow(
+                    """
+                    SELECT COUNT(*)::int AS n,
+                           MAX(created_at) AS last_at
+                    FROM ln7_coding_outcomes
+                    WHERE revision_id = $1
+                      AND generator = 'ln7'
+                      AND created_at > $2::timestamptz
+                    """,
+                    revision_id,
+                    since_dt,
+                )
+            else:
+                row = await conn.fetchrow(
+                    """
+                    SELECT COUNT(*)::int AS n,
+                           MAX(created_at) AS last_at
+                    FROM ln7_coding_outcomes
+                    WHERE revision_id = $1
+                      AND generator = 'ln7'
+                    """,
+                    revision_id,
+                )
+    except Exception as exc:
+        logger.warning("bakeoff sweep-status: %s", exc)
+        raise HTTPException(500, str(exc)[:200])
+
+    n = int((row and row["n"]) or 0)
+    last_at = row["last_at"] if row else None
+    age_s = None
+    if last_at is not None:
+        if last_at.tzinfo is None:
+            last_at = last_at.replace(tzinfo=timezone.utc)
+        age_s = max(0, int((datetime.now(timezone.utc) - last_at).total_seconds()))
+    # Any in-memory bakeoff blocks re-fire (single-flight PEFT)
+    in_flight = bool(running)
+    recommend_refire = _bakeoff_recommend_refire(
+        in_flight=in_flight,
+        n=n,
+        expected_packs=expected_packs,
+        outcomes_age_s=age_s,
+        stale_outcomes_s=stale_outcomes_s,
+    )
+    return {
+        "status": "ok",
+        "revision_id": revision_id,
+        "running": running,
+        "in_flight": in_flight,
+        "n": n,
+        "expected_packs": expected_packs,
+        "last_outcome_at": last_at.isoformat() if last_at else None,
+        "outcomes_age_s": age_s,
+        "stale_outcomes_s": stale_outcomes_s,
+        "since": since,
+        "recommend_refire": recommend_refire,
+        "non_clinical_claim": True,
+    }
+
+
+@router.post("/bakeoff/sweep")
+async def post_bakeoff_sweep(
+    request: Request,
+    body: Optional[Dict[str, Any]] = None,
+    _admin=Depends(require_admin),
+):
+    """Optional re-fire when running empty and n << expected (wedged / restart wipe)."""
+    body = body or {}
+    rid = str(body.get("revision_id") or "").strip()
+    if not rid:
+        raise HTTPException(422, "revision_id required")
+    expected = int(body.get("expected_packs") or 18)
+    stale_s = int(body.get("stale_outcomes_s") or 600)
+    since = body.get("since")
+    do_refire = bool(body.get("refire", True))
+
+    status = await get_bakeoff_sweep_status(
+        request,
+        revision_id=rid,
+        since=str(since) if since else None,
+        expected_packs=max(1, min(64, expected)),
+        stale_outcomes_s=max(60, min(86400, stale_s)),
+        _admin=_admin,
+    )
+    if not do_refire or not status.get("recommend_refire"):
+        return {**status, "refired": False}
+
+    started = await post_bakeoff(
+        request,
+        body={
+            "revision_id": rid,
+            "background": True,
+            "mode": body.get("mode") or "max",
+            "include_public": bool(body.get("include_public", True)),
+            "include_private": bool(body.get("include_private", True)),
+            "seed_golden": bool(body.get("seed_golden", False)),
+        },
+        _admin=_admin,
+    )
+    return {**status, "refired": True, "bakeoff": started}
 
 
 @router.post("/bakeoff")

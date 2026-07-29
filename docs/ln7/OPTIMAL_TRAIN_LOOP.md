@@ -68,7 +68,7 @@ bash scripts/ln7_install_gpu_capacity_watch.sh
 |---|---|
 | `COMPARE_LOCK` | Held while `ln7_ab_bakeoff_compare.sh` runs; continuous-worker + GPU capacity watch skip drain/probe |
 | `COMPARE_HEARTBEAT` | Rewritten each poll/deploy phase (`ts=`, `phase=`, `n=`, revs) |
-| `com.sovereign.ln7-ab-compare-watchdog` | Every 5m: if heartbeat stale (≥900s) and no `AB_COMPARE`, kill stuck compare and `launchctl submit` restart (max 2) |
+| `com.sovereign.ln7-ab-compare-watchdog` | Every 5m: stale heartbeat → kill compare + PEFT deploy SSH, re-submit (max 2). `phase=deploy*` uses tighter `LN7_COMPARE_DEPLOY_STALE_S` (default 720s) |
 | PEFT health | Probed **GREEN → `10.13.13.5:11435`** after ORANGE restart (not ORANGE self-curl) |
 
 ```bash
@@ -78,6 +78,28 @@ bash scripts/ln7_install_ab_compare_watchdog.sh
 ```
 
 Compare itself pauses `com.sovereign.ln7-continuous-worker` on start and resumes on exit (`WORKER_PAUSED`).
+
+## Drain / orphan / GREEN sweeper watchdogs
+
+| Piece | Role |
+|---|---|
+| `DRAIN_LOCK` / `DRAIN_HEARTBEAT` | Written by `ln7_continuous_drain.sh` (`phase=ssh_wait\|train\|persist\|…`) |
+| `com.sovereign.ln7-drain-watchdog` | Every 5m: dead mid-train or heartbeat ≥1800s → kill drain, destroy droplet, clear `DRAINING`; always runs orphan reaper |
+| `ln7_gpu_orphan_reaper.sh` | `doctl` list `ln7-train` / `ln7-gpu-probe` vs `probe.env` / fresh heartbeat; destroy unknowns past `LN7_ORPHAN_TTL_S` (7200s) |
+| `GET/POST /api/ln7/bakeoff/sweep*` | GREEN: age of last `ln7_coding_outcomes` + optional re-fire when `_BAKEOFF_TASKS` empty and n ≪ expected |
+
+```bash
+bash scripts/ln7_install_drain_watchdog.sh
+# logs: ~/Library/Logs/ln7_drain_watchdog*.log , ln7_gpu_orphan_reaper.log
+# dry-run orphans: LN7_ORPHAN_DRY_RUN=1 bash scripts/ln7_gpu_orphan_reaper.sh
+
+# GREEN (admin token) — status then optional re-fire
+curl -sH "Authorization: Bearer $TOKEN" \
+  "http://localhost:8000/api/ln7/bakeoff/sweep-status?revision_id=LN7-…&expected_packs=18"
+curl -sX POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"revision_id":"LN7-…","expected_packs":18,"refire":true,"since":"2026-07-28T00:00:00Z"}' \
+  http://localhost:8000/api/ln7/bakeoff/sweep
+```
 
 ## Kill criteria
 

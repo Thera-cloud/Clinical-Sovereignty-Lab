@@ -301,10 +301,29 @@ PY
         log "bakeoff idle with n=$n >= min_accept=$MIN_ACCEPT — accept"
         break
       fi
-      # Bakeoff died short — re-fire up to 3 times (same since= accumulates)
+      # Bakeoff died short — GREEN sweep re-fire (survives _BAKEOFF_TASKS wipe)
       if [[ $idle_streak -ge 2 && $refires -lt 3 && $elapsed -gt 180 ]]; then
-        log "bakeoff idle early n=$n < $MIN_ACCEPT — re-fire ($((refires+1))/3)"
-        fire_bakeoff "$rev" || true
+        log "bakeoff idle early n=$n < $MIN_ACCEPT — sweep re-fire ($((refires+1))/3)"
+        ssh -o BatchMode=yes -o ConnectTimeout=30 "$GREEN" "python3 -" <<PY || fire_bakeoff "$rev" || true
+import json, re, urllib.request
+env = open("/opt/clinical-sovereignty-lab/.env").read()
+tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()
+body = json.dumps({
+  "revision_id": "$rev",
+  "expected_packs": $EXPECTED_PACKS,
+  "stale_outcomes_s": 120,
+  "refire": True,
+  "since": "$since",
+}).encode()
+req = urllib.request.Request(
+  "http://localhost:8000/api/ln7/bakeoff/sweep",
+  data=body,
+  headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+  method="POST",
+)
+with urllib.request.urlopen(req, timeout=60) as r:
+  print(r.read().decode()[:300])
+PY
         refires=$((refires + 1))
         idle_streak=0
       fi

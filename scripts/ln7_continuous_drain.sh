@@ -24,9 +24,12 @@ ADAPTER_KEEP_N="${LN7_ADAPTER_KEEP_N:-6}"
 STATE_DIR="${LN7_GPU_WATCH_STATE_DIR:-$HOME/.local/state/ln7_gpu_watch}"
 mkdir -p "$STATE_DIR"
 HB="$STATE_DIR/ttl_heartbeat"
+DRAIN_HB="$STATE_DIR/DRAIN_HEARTBEAT"
+DRAIN_LOCK="$STATE_DIR/DRAIN_LOCK"
 REV_OUT="${LN7_REVISION_OUT:-$STATE_DIR/last_revision_id}"
 _TRAIN_STARTED=0
 _CLEANUP_DONE=0
+_DRAIN_PHASE="init"
 
 # Preflight: refuse thin / stub JSONL before burning GPU $
 CLEAN_N="$(python3 - <<PY
@@ -130,7 +133,7 @@ write_handoff() {
 cleanup() {
   [[ "$_CLEANUP_DONE" == "1" ]] && return 0
   _CLEANUP_DONE=1
-  rm -f "$HB" 2>/dev/null || true
+  rm -f "$HB" "$DRAIN_HB" "$DRAIN_LOCK" 2>/dev/null || true
   if [[ "$KEEP" == "1" ]]; then
     write_handoff "${LN7_HANDOFF_ENV:-$STATE_DIR/droplet_handoff.env}"
     echo "[drain] KEEP_DROPLET=1 — not destroying $DROPLET_ID"
@@ -145,7 +148,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
-touch "$HB"
+hb() {
+  touch "$HB"
+  {
+    echo "ts=$(date -u +%Y-%m-%dT%H%M%SZ)"
+    echo "phase=${_DRAIN_PHASE:-init}"
+    echo "droplet_id=${DROPLET_ID:-}"
+    echo "ip=${IP:-}"
+    echo "pid=$$"
+    echo "recipe=${LORA_RECIPE:-}"
+  } >"$DRAIN_HB"
+}
+
+{
+  echo "pid=$$"
+  echo "started=$(date -u +%Y-%m-%dT%H%M%SZ)"
+  echo "droplet_id=${DROPLET_ID:-}"
+  echo "ip=${IP:-}"
+} >"$DRAIN_LOCK"
+
+hb
 _START_EPOCH="$(date +%s)"
 (
   while true; do
@@ -168,8 +190,8 @@ _START_EPOCH="$(date +%s)"
   done
 ) &
 WATCH=$!
-hb() { touch "$HB"; }
 
+_DRAIN_PHASE="ssh_wait"
 _ssh_ok=0
 for _ in $(seq 1 72); do
   hb
@@ -186,6 +208,7 @@ if [[ "$_ssh_ok" != "1" ]]; then
 fi
 echo "[drain] ssh open root@$IP — waiting apt/cloud-init"
 
+_DRAIN_PHASE="apt_wait"
 _apt_ok=0
 for _ in $(seq 1 90); do
   hb
@@ -213,6 +236,7 @@ if [[ "$_apt_ok" != "1" ]]; then
   exit 4
 fi
 echo "[drain] apt ready root@$IP"
+_DRAIN_PHASE="bootstrap"
 hb
 
 ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "root@$IP" \
@@ -227,9 +251,22 @@ hb
 
 RID_TS="$(date -u +%Y-%m-%dT%H%M%SZ)"
 _TRAIN_STARTED=1
+_DRAIN_PHASE="train"
+hb
 # Heartbeat while remote train runs
 (
-  while kill -0 $$ 2>/dev/null; do touch "$HB"; sleep 20; done
+  while kill -0 $$ 2>/dev/null; do
+    touch "$HB"
+    {
+      echo "ts=$(date -u +%Y-%m-%dT%H%M%SZ)"
+      echo "phase=train"
+      echo "droplet_id=${DROPLET_ID:-}"
+      echo "ip=${IP:-}"
+      echo "pid=$$"
+      echo "recipe=${LORA_RECIPE:-}"
+    } >"$DRAIN_HB"
+    sleep 20
+  done
 ) &
 _HB_PID=$!
 
@@ -254,6 +291,7 @@ python backend/scripts/ln7_qlora_train.py \
   --out-dir /opt/ln7/adapters/LN7-${RID_TS}
 EOF
 kill "$_HB_PID" 2>/dev/null || true
+_DRAIN_PHASE="persist"
 hb
 
 REG_REV="LN7-${RID_TS}"
@@ -269,6 +307,8 @@ if [[ -f "$LOCAL_TMP/revision_manifest.json" ]]; then
   [[ -n "$_man_rid" ]] && REG_REV="$_man_rid"
 fi
 
+_DRAIN_PHASE="register"
+hb
 ssh -o BatchMode=yes "$GREEN" "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i /root/.ssh/id_ed25519_orange root@10.13.13.5 'mkdir -p $STORE'"
 scp -o BatchMode=yes -o ProxyJump="$GREEN" -r "$LOCAL_TMP/." \
   "root@10.13.13.5:$STORE/${REG_REV}/"

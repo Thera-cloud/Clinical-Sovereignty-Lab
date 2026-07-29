@@ -27,6 +27,8 @@ if [[ ! -f "$STATE_DIR/COMPARE_LOCK" && ! -f "$STATE_DIR/COMPARE_HEARTBEAT" ]]; 
 fi
 
 HB="$STATE_DIR/COMPARE_HEARTBEAT"
+DEPLOY_STALE_S="${LN7_COMPARE_DEPLOY_STALE_S:-720}"
+PHASE=""
 if [[ ! -f "$HB" ]]; then
   log "COMPARE_LOCK without heartbeat — treat as stale"
   age=$STALE_S
@@ -35,9 +37,18 @@ else
   mtime="$(stat -f %m "$HB" 2>/dev/null || stat -c %Y "$HB" 2>/dev/null || echo 0)"
   now="$(date +%s)"
   age=$(( now - mtime ))
+  PHASE="$(awk -F= '/^phase=/{print $2; exit}' "$HB" | tr -d '[:space:]')"
 fi
 
-if [[ "$age" -lt "$STALE_S" ]]; then
+# PEFT deploy hung: tighter stale than bakeoff poll
+EFFECTIVE_STALE="$STALE_S"
+case "$PHASE" in
+  deploy|deploy_*|peft|peft_*)
+    EFFECTIVE_STALE="$DEPLOY_STALE_S"
+    ;;
+esac
+
+if [[ "$age" -lt "$EFFECTIVE_STALE" ]]; then
   # Still fresh — ensure continuous worker stays paused while lock held
   if [[ -f "$STATE_DIR/COMPARE_LOCK" ]]; then
     launchctl bootout "gui/$(id -u)/com.sovereign.ln7-continuous-worker" 2>/dev/null || true
@@ -45,7 +56,7 @@ if [[ "$age" -lt "$STALE_S" ]]; then
   exit 0
 fi
 
-log "stale heartbeat age=${age}s (limit=${STALE_S}s)"
+log "stale heartbeat age=${age}s (limit=${EFFECTIVE_STALE}s phase=${PHASE:-unknown})"
 
 # Parse revs from heartbeat or lock
 REV_A=""
@@ -81,10 +92,13 @@ if [[ "$RESTARTS" -ge "$MAX_RESTARTS" ]]; then
   exit 2
 fi
 
-# Kill stuck compare + peft deploy children
-log "restart $((RESTARTS+1))/$MAX_RESTARTS for $REV_A vs $REV_B"
+# Kill stuck compare + peft deploy SSH children (phase=deploy stall)
+log "restart $((RESTARTS+1))/$MAX_RESTARTS for $REV_A vs $REV_B phase=${PHASE:-unknown}"
 pkill -f 'ln7_ab_bakeoff_compare.sh' 2>/dev/null || true
 pkill -f 'ln7_deploy_peft_serve_orange.sh' 2>/dev/null || true
+# Drop hung ProxyJump / health probe SSH from deploy
+pkill -f 'ssh.*10\.13\.13\.5.*11435' 2>/dev/null || true
+pkill -f 'ssh.*ln7.*peft' 2>/dev/null || true
 launchctl remove "$COMPARE_LABEL" 2>/dev/null || true
 sleep 2
 
