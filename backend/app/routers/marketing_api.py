@@ -3,14 +3,18 @@ LITTLE NATE — Marketing Brain API
 Endpoints for the marketing playbook, funnel stats, actions, growth, and quiz factory.
 """
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 
 from app.services.api_server import require_admin
 
 router = APIRouter(prefix="/api/marketing", tags=["marketing"], dependencies=[Depends(require_admin)])
+
+# Public HMAC-signed preview (no admin auth) — QUANTUM-CRYSTAL-ARCH
+public_router = APIRouter(prefix="/api/marketing", tags=["marketing-public"])
 
 
 # =============================================================================
@@ -47,6 +51,29 @@ class QuizGenRequest(BaseModel):
 class ShowcaseRequest(BaseModel):
     scenario: str  # session, coach_demo, family, platform_overview
     format: str = "html"  # html, data
+
+
+class GrowthContentCreate(BaseModel):
+    content_type: str = Field(..., description="blog|email_drip|outreach|directory_page")
+    title: str
+    draft_body: str = ""
+    platform: Optional[str] = None
+    audience: str = "general"
+    slug: Optional[str] = None
+    keyword_cluster: Optional[str] = None
+    generation_meta: Optional[Dict[str, Any]] = None
+    submit_for_review: bool = False
+
+
+class GrowthConfigUpdate(BaseModel):
+    key: str
+    value: Dict[str, Any]
+
+
+class GrowthDecide(BaseModel):
+    decision: str  # APPROVE|REJECT|REWRITE|DELAY|RETRACT
+    note: Optional[str] = None
+    scheduled_at: Optional[str] = None
 
 
 # =============================================================================
@@ -338,3 +365,176 @@ async def get_notifications(
             return [dict(r) for r in rows]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# ADAPTIVE GROWTH ENGINE — QUANTUM-CRYSTAL-ARCH
+# =============================================================================
+
+def _growth_svc(request: Request):
+    from app.services.growth.marketing_content_service import MarketingContentService
+
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    return MarketingContentService(pool)
+
+
+@router.get("/growth/health")
+async def growth_health(request: Request):
+    from app.services.growth import growth_engine_enabled, outreach_engine_enabled
+    from app.services.growth.instantly_client import InstantlyClient
+    from app.services.growth.sender_guard import validate_outreach_sender_domains
+
+    ok_sender, sender_msg = validate_outreach_sender_domains(
+        require_when_outreach_enabled=True
+    )
+    instantly = await InstantlyClient().health()
+    return {
+        "status": "ok",
+        "enable_growth_engine": growth_engine_enabled(),
+        "enable_outreach_engine": outreach_engine_enabled(),
+        "sender_guard": {"ok": ok_sender, "message": sender_msg},
+        "instantly": instantly,
+        "newsletter": {
+            "note": "Dispatch owns newsletter — open newsletter_dispatch.html",
+            "deep_link": "/newsletter_dispatch.html",
+        },
+    }
+
+
+@router.get("/growth/content")
+async def list_growth_content(
+    request: Request,
+    status: Optional[str] = None,
+    content_type: Optional[str] = None,
+    limit: int = Query(default=50, le=200),
+):
+    svc = _growth_svc(request)
+    return {
+        "status": "ok",
+        "items": await svc.list(
+            status=status, content_type=content_type, limit=limit
+        ),
+    }
+
+
+@router.post("/growth/content")
+async def create_growth_content(body: GrowthContentCreate, request: Request):
+    svc = _growth_svc(request)
+    try:
+        item = await svc.create(
+            content_type=body.content_type,
+            title=body.title,
+            draft_body=body.draft_body,
+            platform=body.platform or "",
+            audience=body.audience,
+            slug=body.slug,
+            keyword_cluster=body.keyword_cluster,
+            generation_meta=body.generation_meta,
+            created_by="admin",
+            submit_for_review=body.submit_for_review,
+        )
+        return {"status": "ok", "item": item}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/growth/content/{content_id}")
+async def get_growth_content(content_id: int, request: Request):
+    svc = _growth_svc(request)
+    item = await svc.get(content_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"status": "ok", "item": item}
+
+
+@router.post("/growth/content/{content_id}/submit")
+async def submit_growth_content(content_id: int, request: Request):
+    svc = _growth_svc(request)
+    try:
+        item = await svc.submit_for_review(content_id, actor="admin")
+        return {"status": "ok", "item": item}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/growth/content/{content_id}/decide")
+async def decide_growth_content(content_id: int, body: GrowthDecide, request: Request):
+    from datetime import datetime, timezone
+
+    svc = _growth_svc(request)
+    scheduled = None
+    if body.scheduled_at:
+        try:
+            scheduled = datetime.fromisoformat(body.scheduled_at.replace("Z", "+00:00"))
+            if scheduled.tzinfo is None:
+                scheduled = scheduled.replace(tzinfo=timezone.utc)
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid scheduled_at")
+    try:
+        item = await svc.apply_ceo_decision(
+            content_id,
+            decision=body.decision,
+            actor="admin",
+            note=body.note or "",
+            scheduled_at=scheduled,
+        )
+        return {"status": "ok", "item": item}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/growth/config")
+async def get_growth_config(request: Request):
+    svc = _growth_svc(request)
+    return {"status": "ok", "config": await svc.get_growth_config()}
+
+
+@router.put("/growth/config")
+async def put_growth_config(body: GrowthConfigUpdate, request: Request):
+    svc = _growth_svc(request)
+    result = await svc.set_growth_config(body.key, body.value, updated_by="admin")
+    return {"status": "ok", **result}
+
+
+@router.get("/growth/spend")
+async def get_growth_spend(request: Request, month: Optional[str] = None):
+    svc = _growth_svc(request)
+    return {"status": "ok", **(await svc.spend_summary(month=month))}
+
+
+@public_router.get("/content/{content_id}/preview", response_class=HTMLResponse)
+async def public_content_preview(
+    content_id: int,
+    request: Request,
+    exp: str = Query(...),
+    sig: str = Query(...),
+):
+    """HMAC-signed read-only preview for CEO emails (72h TTL)."""
+    from app.services.growth.blog_publisher import body_to_html
+    from app.services.growth.preview_links import parse_and_verify
+
+    ok, reason = parse_and_verify(content_id, exp, sig)
+    if not ok:
+        raise HTTPException(status_code=403, detail=reason)
+    pool = request.app.state.db_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db unavailable")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT title, draft_body, content_type, status FROM marketing_content WHERE id = $1",
+            int(content_id),
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="not found")
+    body = body_to_html(row["draft_body"] or "")
+    title = (row["title"] or "Draft").replace("<", "&lt;")
+    return HTMLResponse(
+        f"""<!DOCTYPE html><html><head><meta charset="utf-8"/>
+<title>{title} — preview</title>
+<style>body{{font-family:system-ui;background:#111;color:#eee;max-width:720px;margin:40px auto;padding:0 16px}}
+.badge{{color:#C9A962;font-size:.85rem}}</style></head>
+<body><p class="badge">{row['content_type']} · {row['status']} · signed preview</p>
+<h1>{title}</h1>{body}</body></html>"""
+    )

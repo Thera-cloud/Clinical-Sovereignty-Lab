@@ -142,6 +142,53 @@ def build_ceo_review_brief(item: Dict[str, Any]) -> Dict[str, Any]:
     ):
         return _build_ln7_revision_brief(item, risk=risk, title=title, detail=detail, payload=payload)
 
+    # QUANTUM-CRYSTAL-ARCH — Adaptive Growth content review
+    if kind == "growth_content_review":
+        objective = str(
+            payload.get("ceo_summary") or payload.get("what_happened") or title
+        )[:600]
+        reasoning = str(
+            payload.get("why_it_matters") or payload.get("reasoning") or detail
+        )[:1200]
+        ask = str(payload.get("ask_of_ceo") or "").strip()
+        steps = [s for s in (payload.get("action_steps") or []) if s]
+        if ask and ask not in steps:
+            steps = [ask] + steps
+        if not steps:
+            steps = [
+                "Reply APPROVE to schedule/publish.",
+                "Reply REJECT to decline.",
+                "Reply REWRITE <note> for a revision draft.",
+                "Reply DELAY +3d (or ISO date) to reschedule.",
+            ]
+        decision = normalize_decision_fields(
+            what_it_should_do=payload.get("what_it_should_do")
+            or [
+                "Approve or rewrite growth content from email.",
+                "Inspect signed proof URL before deciding.",
+            ],
+            what_it_should_not_be=payload.get("what_it_should_not_be")
+            or [
+                "Not an LLM performance forecast.",
+                "Not auto-publish without APPROVE.",
+            ],
+            bottom_line=payload.get("bottom_line")
+            or "APPROVE schedules; REJECT declines; REWRITE creates a revision.",
+        )
+        return _with_decision(
+            objective=objective,
+            reasoning=reasoning,
+            steps=steps[:8],
+            risk=risk,
+            expected_impact=str(
+                payload.get("expected_impact")
+                or "APPROVE → scheduled/published; REJECT → rejected."
+            )[:400],
+            rollback="RETRACT via dashboard or reply RETRACT after publish.",
+            decision=decision,
+            payload=payload,
+        )
+
     # Prefer caller-supplied brief fields when present (patent_reflect uses this path)
     if payload.get("ceo_summary") or payload.get("what_happened"):
         objective = str(
@@ -754,6 +801,7 @@ async def handle_ceo_decision(
     decision: str,
     channel: str = "email",
     approver: str = "",
+    modifier_text: Optional[str] = None,
 ) -> Dict[str, Any]:
     """After ApprovalProtocol records ACK/APPROVE/REJECT/HOLD for a CEO item."""
     from app.websocket.cli_dual_coo import ack_ceo_inbox
@@ -773,7 +821,15 @@ async def handle_ceo_decision(
         payload = {}
 
     ack_result = {"status": "skipped"}
-    if item_id and decision in ("ACK", "APPROVE", "REJECT", "HOLD"):
+    if item_id and decision in (
+        "ACK",
+        "APPROVE",
+        "REJECT",
+        "HOLD",
+        "REWRITE",
+        "DELAY",
+        "RETRACT",
+    ):
         ack_result = ack_ceo_inbox(item_id=item_id)
 
     apply_result: Dict[str, Any] = {}
@@ -785,6 +841,25 @@ async def handle_ceo_decision(
         apply_result = await _reject_ceo_payload(
             db_pool, payload, approved_by=approver or "email_ceo"
         )
+    elif decision in ("REWRITE", "DELAY", "RETRACT") and db_pool:
+        # QUANTUM-CRYSTAL-ARCH — growth content reply verbs
+        if payload.get("kind") == "growth_content_review":
+            apply_result = {
+                "growth": await _apply_growth_content_decision(
+                    db_pool,
+                    payload,
+                    approved_by=approver or "email_ceo",
+                    decision=decision,
+                    modifier_text=modifier_text,
+                )
+            }
+        else:
+            apply_result = await _apply_ceo_payload(
+                db_pool,
+                payload,
+                approved_by=approver or "email_ceo",
+                decision_override=decision,
+            )
 
     return {
         "status": "ok",
@@ -797,7 +872,11 @@ async def handle_ceo_decision(
 
 
 async def _apply_ceo_payload(
-    db_pool, payload: Dict[str, Any], *, approved_by: str
+    db_pool,
+    payload: Dict[str, Any],
+    *,
+    approved_by: str,
+    decision_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     shadow_ids = payload.get("shadow_ids") or payload.get("shadow_id")
@@ -887,7 +966,82 @@ async def _apply_ceo_payload(
                 )
             except Exception as e:
                 out["ln7_revision_error"] = str(e)[:200]
+
+    # QUANTUM-CRYSTAL-ARCH — Adaptive Growth content review
+    if payload.get("kind") == "growth_content_review":
+        try:
+            out["growth"] = await _apply_growth_content_decision(
+                db_pool,
+                payload,
+                approved_by=approved_by,
+                decision=decision_override or "APPROVE",
+            )
+        except Exception as e:
+            out["growth_error"] = str(e)[:200]
     return out
+
+
+async def _apply_growth_content_decision(
+    db_pool,
+    payload: Dict[str, Any],
+    *,
+    approved_by: str,
+    decision: str,
+    modifier_text: Optional[str] = None,
+) -> Dict[str, Any]:
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.growth.marketing_content_service import MarketingContentService
+
+    content_id = int(
+        payload.get("content_id")
+        or (payload.get("apply") or {}).get("content_id")
+        or 0
+    )
+    if not content_id:
+        return {"ok": False, "error": "missing content_id"}
+
+    svc = MarketingContentService(db_pool)
+    decision_u = (decision or "APPROVE").strip().upper()
+    note = (modifier_text or "").strip()
+    scheduled_at = None
+
+    if decision_u == "DELAY":
+        # Parse +Nd or ISO from modifier / apply
+        raw = note or str((payload.get("apply") or {}).get("delay") or "")
+        scheduled_at = _parse_delay_when(raw)
+        if not scheduled_at:
+            scheduled_at = datetime.now(timezone.utc) + timedelta(days=3)
+
+    result = await svc.apply_ceo_decision(
+        content_id,
+        decision=decision_u,
+        actor=approved_by or "ceo",
+        note=note,
+        scheduled_at=scheduled_at,
+    )
+    return {"ok": True, "content": result, "decision": decision_u}
+
+
+def _parse_delay_when(raw: str):
+    """Parse '+3d', '+12h', or ISO datetime. Returns aware UTC datetime or None."""
+    from datetime import datetime, timedelta, timezone
+
+    s = (raw or "").strip()
+    if not s:
+        return None
+    m = re.match(r"^\+?(\d+)\s*([dh])$", s, re.IGNORECASE)
+    if m:
+        n, unit = int(m.group(1)), m.group(2).lower()
+        delta = timedelta(days=n) if unit == "d" else timedelta(hours=n)
+        return datetime.now(timezone.utc) + delta
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
 
 
 async def _reject_ceo_payload(
@@ -904,6 +1058,13 @@ async def _reject_ceo_payload(
             )
         except Exception as e:
             out["ln_rule_error"] = str(e)[:200]
+    if payload.get("kind") == "growth_content_review":
+        try:
+            out["growth"] = await _apply_growth_content_decision(
+                db_pool, payload, approved_by=approved_by, decision="REJECT"
+            )
+        except Exception as e:
+            out["growth_error"] = str(e)[:200]
     return out
 
 

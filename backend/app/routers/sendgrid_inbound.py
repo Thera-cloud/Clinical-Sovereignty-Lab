@@ -44,7 +44,10 @@ SENDGRID_INBOUND_SECRET = os.getenv("SENDGRID_INBOUND_SECRET", "")
 # Mirror of ``twilio_webhook.APPROVAL_PREFIXES`` / ``APPROVAL_SYNONYMS`` so
 # the email path recognizes the exact same vocabulary as SMS.
 # BUSY/ALT are negotiation-only — do not share with strategy ApprovalProtocol.
-_APPROVAL_PREFIXES: Tuple[str, ...] = ("APPROVE", "REJECT", "HOLD", "MODIFY", "ACK", "DISMISS")
+_APPROVAL_PREFIXES: Tuple[str, ...] = (
+    "APPROVE", "REJECT", "HOLD", "MODIFY", "ACK", "DISMISS",
+    "REWRITE", "DELAY", "RETRACT",  # QUANTUM-CRYSTAL-ARCH — growth content
+)
 _APPROVAL_SYNONYMS = {
     "YES", "GO", "DO IT", "SHIP IT", "APPROVED",
     "WAIT", "DEFER", "LATER", "PAUSE",

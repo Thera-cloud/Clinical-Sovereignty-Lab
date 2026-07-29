@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Marketing Engine — Sovereign Command</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+:root{--void:#050505;--chamber:#0A0A0A;--elev:#111;--gold:#C9A962;--goldb:#E8D5A3;--goldd:#8B7355;--cyan:#4ECDC4;--text:#E8E4DC;--mute:#8a8478;--red:#EF4444}
+*{box-sizing:border-box}body{margin:0;background:var(--void);color:var(--text);font-family:'DM Sans',sans-serif}
+header{padding:20px 28px;border-bottom:1px solid #222;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
+h1{font-family:'Cormorant Garamond',serif;color:var(--gold);font-weight:500;margin:0;font-size:1.8rem}
+.sub{color:var(--mute);font-size:.85rem;margin-top:4px}
+.tabs{display:flex;gap:8px;padding:16px 28px;flex-wrap:wrap}
+.tab{background:var(--elev);border:1px solid #333;color:var(--goldd);padding:8px 14px;border-radius:6px;cursor:pointer;font-size:.85rem}
+.tab.active{border-color:var(--gold);color:var(--goldb)}
+main{padding:0 28px 40px}
+.card{background:var(--chamber);border:1px solid #222;border-radius:10px;padding:18px;margin-bottom:16px}
+.row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+input,textarea,select{background:#111;border:1px solid #333;color:var(--text);padding:10px 12px;border-radius:6px;font:inherit;min-width:180px}
+textarea{width:100%;min-height:140px}
+button{background:var(--gold);color:#111;border:0;padding:10px 16px;border-radius:6px;font-weight:600;cursor:pointer}
+button.secondary{background:transparent;border:1px solid var(--goldd);color:var(--goldb)}
+button.danger{background:var(--red);color:#fff}
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #222}
+th{color:var(--goldd);font-weight:500}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.75rem;border:1px solid #444;color:var(--mute)}
+.badge.pending_review{border-color:var(--gold);color:var(--gold)}
+.badge.published{border-color:var(--cyan);color:var(--cyan)}
+.badge.rejected,.badge.unpublished{border-color:var(--red);color:var(--red)}
+.note{color:var(--mute);font-size:.85rem;line-height:1.5}
+a{color:var(--cyan)}
+#toast{position:fixed;bottom:20px;right:20px;background:#222;border:1px solid var(--gold);padding:12px 16px;border-radius:8px;display:none;z-index:99}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Marketing Engine</h1>
+    <div class="sub">CEO email/SMS is the primary approve path · this console is the full queue</div>
+  </div>
+  <div class="row" style="margin:0">
+    <span class="badge" id="spendBadge">spend: —</span>
+    <span class="badge" id="healthBadge">health: —</span>
+    <button class="secondary" onclick="navTo('command.html')">Command</button>
+  </div>
+</header>
+<div class="tabs">
+  <div class="tab active" data-tab="blog" onclick="switchTab('blog')">Blog</div>
+  <div class="tab" data-tab="email" onclick="switchTab('email')">Email drip</div>
+  <div class="tab" data-tab="outreach" onclick="switchTab('outreach')">Outreach</div>
+  <div class="tab" data-tab="directory" onclick="switchTab('directory')">Directory</div>
+  <div class="tab" data-tab="themes" onclick="switchTab('themes')">Themes</div>
+  <div class="tab" data-tab="funnel" onclick="switchTab('funnel')">Funnel / BWAS</div>
+  <div class="tab" data-tab="newsletter" onclick="switchTab('newsletter')">Newsletter → Dispatch</div>
+</div>
+<main>
+  <section class="card" id="panel-compose">
+    <h3 style="margin-top:0;color:var(--goldb)">Compose</h3>
+    <div class="row">
+      <select id="ctype">
+        <option value="blog">blog</option>
+        <option value="email_drip">email_drip</option>
+        <option value="outreach">outreach</option>
+        <option value="directory_page">directory_page</option>
+      </select>
+      <input id="title" placeholder="Title"/>
+      <input id="audience" placeholder="Audience" value="general"/>
+      <input id="cluster" placeholder="Keyword cluster"/>
+    </div>
+    <textarea id="body" placeholder="Draft body…"></textarea>
+    <div class="row">
+      <button onclick="createDraft(false)">Save draft</button>
+      <button onclick="createDraft(true)">Save + CEO review</button>
+      <button class="secondary" onclick="loadQueue()">Refresh queue</button>
+    </div>
+  </section>
+
+  <section class="card" id="panel-queue">
+    <h3 style="margin-top:0;color:var(--goldb)">Queue <span id="filterLabel"></span></h3>
+    <table>
+      <thead><tr><th>ID</th><th>Type</th><th>Title</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead>
+      <tbody id="queueBody"><tr><td colspan="6" class="note">Loading…</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="card" id="panel-detail" style="display:none">
+    <h3 style="margin-top:0;color:var(--goldb)">Detail #<span id="dId"></span></h3>
+    <pre id="dJson" style="white-space:pre-wrap;font-size:.8rem;color:var(--mute)"></pre>
+    <div class="row">
+      <button onclick="decide('APPROVE')">APPROVE</button>
+      <button class="danger" onclick="decide('REJECT')">REJECT</button>
+      <button class="secondary" onclick="decide('REWRITE')">REWRITE</button>
+      <button class="secondary" onclick="decide('DELAY')">DELAY +3d</button>
+      <button class="danger" onclick="decide('RETRACT')">RETRACT</button>
+      <button class="secondary" onclick="submitReview()">Submit for CEO review</button>
+    </div>
+  </section>
+
+  <section class="card" id="panel-newsletter" style="display:none">
+    <p class="note">Newsletter send is owned by Little Nate Dispatch — not this growth engine.</p>
+    <button onclick="navTo('newsletter_dispatch.html')">Open Dispatch</button>
+  </section>
+
+  <section class="card" id="panel-themes" style="display:none">
+    <p class="note">Themes strip lights up after Phase 4b (<code>try_theme_weekly</code>). Placeholder until then.</p>
+  </section>
+
+  <section class="card" id="panel-funnel" style="display:none">
+    <p class="note">BWAS / funnel ranking arrives in Phase 4. Growth config weights are editable below.</p>
+    <pre id="configJson" style="white-space:pre-wrap;font-size:.8rem;color:var(--mute)"></pre>
+  </section>
+</main>
+<div id="toast"></div>
+<script>
+const API = (location.hostname.includes('sovereignsanctuary') || location.hostname.includes('command.'))
+  ? 'https://api.sovereignsanctuary.net' : (localStorage.getItem('sc_api') || 'http://localhost:8000');
+let currentTab = 'blog';
+let selectedId = null;
+const typeMap = {blog:'blog', email:'email_drip', outreach:'outreach', directory:'directory_page'};
+
+function _token(){
+  return sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
+}
+function _authHeaders(ct){
+  const h = { 'Authorization': 'Bearer ' + _token() };
+  if (ct) h['Content-Type'] = ct;
+  return h;
+}
+function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.style.display='block'; setTimeout(()=>t.style.display='none', 3200); }
+function navTo(p){ location.href = p + (location.hash||''); }
+
+async function api(path, opts={}){
+  const resp = await fetch(API + path, { ...opts, headers: { ..._authHeaders(opts.body ? 'application/json' : null), ...(opts.headers||{}) } });
+  if (resp.status === 401) { console.warn('Auth issue', path); return null; }
+  if (!resp.ok) { const t = await resp.text(); throw new Error(t.slice(0,200)); }
+  const ct = resp.headers.get('content-type')||'';
+  return ct.includes('json') ? resp.json() : resp.text();
+}
+
+function switchTab(name){
+  currentTab = name;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===name));
+  document.getElementById('panel-compose').style.display = ['blog','email','outreach','directory'].includes(name) ? '' : 'none';
+  document.getElementById('panel-queue').style.display = ['blog','email','outreach','directory'].includes(name) ? '' : 'none';
+  document.getElementById('panel-newsletter').style.display = name==='newsletter' ? '' : 'none';
+  document.getElementById('panel-themes').style.display = name==='themes' ? '' : 'none';
+  document.getElementById('panel-funnel').style.display = name==='funnel' ? '' : 'none';
+  if (name==='funnel') loadConfig();
+  if (['blog','email','outreach','directory'].includes(name)) {
+    document.getElementById('ctype').value = typeMap[name] || 'blog';
+    loadQueue();
+  }
+}
+
+async function loadHealth(){
+  try {
+    const h = await api('/api/marketing/growth/health');
+    if (!h) return;
+    document.getElementById('healthBadge').textContent = 'growth: ' + (h.enable_growth_engine ? 'ON' : 'OFF') +
+      ' · instantly: ' + (h.instantly?.status || '?');
+    const s = await api('/api/marketing/growth/spend');
+    if (s) document.getElementById('spendBadge').textContent = 'spend: $' + (s.total_usd||0).toFixed(2);
+  } catch(e){ document.getElementById('healthBadge').textContent = 'health error'; }
+}
+
+async function loadQueue(){
+  const ct = typeMap[currentTab] || null;
+  document.getElementById('filterLabel').textContent = ct ? '('+ct+')' : '';
+  try {
+    const q = ct ? '?content_type='+encodeURIComponent(ct) : '';
+    const data = await api('/api/marketing/growth/content'+q);
+    const items = (data && data.items) || [];
+    const tb = document.getElementById('queueBody');
+    if (!items.length){ tb.innerHTML = '<tr><td colspan="6" class="note">No items</td></tr>'; return; }
+    tb.innerHTML = items.map(it => `<tr>
+      <td>${it.id}</td><td>${it.content_type}</td>
+      <td>${esc(it.title||'')}</td>
+      <td><span class="badge ${it.status}">${it.status}</span></td>
+      <td>${(it.updated_at||'').slice(0,19)}</td>
+      <td><button class="secondary" onclick="openDetail(${it.id})">Open</button></td>
+    </tr>`).join('');
+  } catch(e){ toast('Queue load failed: '+e.message); }
+}
+
+function esc(s){ return String(s).replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+async function createDraft(submit){
+  try {
+    const body = {
+      content_type: document.getElementById('ctype').value,
+      title: document.getElementById('title').value.trim(),
+      draft_body: document.getElementById('body').value,
+      audience: document.getElementById('audience').value.trim() || 'general',
+      keyword_cluster: document.getElementById('cluster').value.trim() || null,
+      submit_for_review: !!submit,
+    };
+    if (!body.title){ toast('Title required'); return; }
+    const data = await api('/api/marketing/growth/content', { method:'POST', body: JSON.stringify(body) });
+    toast(submit ? 'Queued for CEO review #'+data.item.id : 'Draft saved #'+data.item.id);
+    loadQueue();
+  } catch(e){ toast(e.message); }
+}
+
+async function openDetail(id){
+  selectedId = id;
+  const data = await api('/api/marketing/growth/content/'+id);
+  if (!data) return;
+  document.getElementById('panel-detail').style.display = '';
+  document.getElementById('dId').textContent = id;
+  document.getElementById('dJson').textContent = JSON.stringify(data.item, null, 2);
+  location.hash = 'content='+id;
+}
+
+async function decide(decision){
+  if (!selectedId) return;
+  let note = '';
+  let scheduled_at = null;
+  if (decision === 'REWRITE') note = prompt('Rewrite note') || '';
+  if (decision === 'DELAY') {
+    const d = new Date(); d.setDate(d.getDate()+3);
+    scheduled_at = d.toISOString();
+  }
+  try {
+    await api('/api/marketing/growth/content/'+selectedId+'/decide', {
+      method:'POST', body: JSON.stringify({ decision, note, scheduled_at })
+    });
+    toast(decision+' applied');
+    openDetail(selectedId); loadQueue();
+  } catch(e){ toast(e.message); }
+}
+
+async function submitReview(){
+  if (!selectedId) return;
+  try {
+    await api('/api/marketing/growth/content/'+selectedId+'/submit', { method:'POST', body:'{}' });
+    toast('Submitted for CEO review');
+    openDetail(selectedId); loadQueue();
+  } catch(e){ toast(e.message); }
+}
+
+async function loadConfig(){
+  try {
+    const data = await api('/api/marketing/growth/config');
+    document.getElementById('configJson').textContent = JSON.stringify(data?.config||{}, null, 2);
+  } catch(e){ document.getElementById('configJson').textContent = e.message; }
+}
+
+(function boot(){
+  const m = (location.hash||'').match(/content=(\d+)/);
+  loadHealth();
+  switchTab('blog');
+  if (m) openDetail(parseInt(m[1],10));
+})();
+</script>
+</body>
+</html>

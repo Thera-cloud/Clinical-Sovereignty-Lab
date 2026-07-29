@@ -984,6 +984,16 @@ class ApprovalProtocolService:
             return {"decision": "HOLD", "modifier_text": None}
         elif msg.startswith("REJECT") or msg in ("NO", "CANCEL", "NOPE"):
             return {"decision": "REJECT", "modifier_text": None}
+        elif msg.startswith("REWRITE"):
+            # QUANTUM-CRYSTAL-ARCH — growth content revision request
+            note = (first or raw_message).strip()[len("REWRITE"):].lstrip(": ").strip()
+            return {"decision": "REWRITE", "modifier_text": note or None}
+        elif msg.startswith("DELAY"):
+            when = (first or raw_message).strip()[len("DELAY"):].lstrip(": ").strip()
+            return {"decision": "DELAY", "modifier_text": when or None}
+        elif msg.startswith("RETRACT"):
+            note = (first or raw_message).strip()[len("RETRACT"):].lstrip(": ").strip()
+            return {"decision": "RETRACT", "modifier_text": note or None}
         elif msg.startswith("MODIFY"):
             changes = (first or raw_message).strip()[len("MODIFY"):].lstrip(": ").strip()
             return {"decision": "MODIFY", "modifier_text": changes or None}
@@ -1157,6 +1167,21 @@ class ApprovalProtocolService:
                 }))
                 print(f">>> [APPROVAL] Proposal {pid} MODIFY requested via {channel}")
 
+            elif decision in ("REWRITE", "DELAY", "RETRACT"):
+                # QUANTUM-CRYSTAL-ARCH — growth content CEO verbs
+                await conn.execute("""
+                    UPDATE strategy_proposals
+                    SET status = 'approved', approved_by = $2, approved_at = NOW(),
+                        metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb,
+                        updated_at = NOW()
+                    WHERE proposal_id = $1
+                """, pid, approver, json.dumps({
+                    "growth_decision": decision,
+                    "modifier_text": parsed.get("modifier_text"),
+                    "via": channel,
+                }))
+                print(f">>> [APPROVAL] Proposal {pid} {decision} via {channel}")
+
             # PhD Spec §10.4: Immutable approval-decisions audit trail
             await conn.execute("""
                 INSERT INTO approval_decisions_audit
@@ -1176,7 +1201,10 @@ class ApprovalProtocolService:
             # next scheduler tick won't re-fire an escalation email for a
             # proposal the operator already responded to (especially HOLD,
             # which keeps status='pending_approval').
-            if decision in ("APPROVE", "REJECT", "HOLD", "MODIFY", "ACK"):
+            if decision in (
+                "APPROVE", "REJECT", "HOLD", "MODIFY", "ACK",
+                "REWRITE", "DELAY", "RETRACT",
+            ):
                 await conn.execute("""
                     UPDATE strategy_proposals
                     SET metadata = metadata || $2, updated_at = NOW()
@@ -1189,7 +1217,9 @@ class ApprovalProtocolService:
 
         # Dual-COO CEO inbox: ACK/APPROVE/REJECT/HOLD also clear Redis inbox
         ceo_side: Dict[str, Any] = {}
-        if decision in ("ACK", "APPROVE", "REJECT", "HOLD") and meta.get("ceo_inbox"):
+        if decision in (
+            "ACK", "APPROVE", "REJECT", "HOLD", "REWRITE", "DELAY", "RETRACT",
+        ) and meta.get("ceo_inbox"):
             try:
                 from app.services.ceo_inbox_notify import handle_ceo_decision
 
@@ -1199,6 +1229,7 @@ class ApprovalProtocolService:
                     decision=decision,
                     channel=channel,
                     approver=approver,
+                    modifier_text=parsed.get("modifier_text"),
                 )
             except Exception as e:
                 print(f">>> [APPROVAL] CEO inbox side-effect failed: {e}")
@@ -1206,7 +1237,10 @@ class ApprovalProtocolService:
 
         # FIX 3: send post-decision confirmation back to the operator who
         # replied. Only for email channel — SMS already gets inline TwiML.
-        if decision in ("APPROVE", "REJECT", "HOLD", "MODIFY", "ACK") and channel == "email":
+        if decision in (
+            "APPROVE", "REJECT", "HOLD", "MODIFY", "ACK",
+            "REWRITE", "DELAY", "RETRACT",
+        ) and channel == "email":
             try:
                 await self.send_decision_confirmation(
                     proposal=proposal,

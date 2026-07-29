@@ -62,7 +62,10 @@ STOP_KEYWORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"}
 START_KEYWORDS = {"START", "UNSTOP", "YES"}
 
 # Approval protocol keywords (Sovereign Swarm + CEO inbox)
-APPROVAL_PREFIXES = ("APPROVE", "REJECT", "HOLD", "MODIFY", "ACK", "DISMISS")
+APPROVAL_PREFIXES = (
+    "APPROVE", "REJECT", "HOLD", "MODIFY", "ACK", "DISMISS",
+    "REWRITE", "DELAY", "RETRACT",  # QUANTUM-CRYSTAL-ARCH — growth content
+)
 APPROVAL_SYNONYMS = {
     "YES", "GO", "DO IT", "SHIP IT", "WAIT", "DEFER", "LATER",
     "NO", "NOPE", "ACKED", "GOT IT", "SEEN",

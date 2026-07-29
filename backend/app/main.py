@@ -3449,6 +3449,25 @@ async def lifespan(app: FastAPI):
         print(f"   ⚠️  NateClinicalBakeoffAgent init failed: {_nca_err}")
         app.state.nate_clinical_bakeoff_agent = "init_failed"
 
+    # QUANTUM-CRYSTAL-ARCH — Adaptive Growth Engine (Phase 1 scheduler + sender guard)
+    try:
+        from app.services.growth import growth_engine_enabled, outreach_engine_enabled
+        from app.services.growth.sender_guard import startup_hard_fail_if_needed
+        if outreach_engine_enabled():
+            startup_hard_fail_if_needed()
+        if growth_engine_enabled() and db_pool is not None:
+            from app.services.growth.scheduler_worker import GrowthSchedulerWorker
+            _growth_sched = GrowthSchedulerWorker(db_pool)
+            await _growth_sched.start()
+            app.state.growth_scheduler = _growth_sched
+            print("   ✅ GrowthSchedulerWorker started (ENABLE_GROWTH_ENGINE)")
+        else:
+            app.state.growth_scheduler = "disabled"
+            print("   ℹ️  GrowthSchedulerWorker disabled (ENABLE_GROWTH_ENGINE=false)")
+    except Exception as _growth_err:
+        print(f"   ⚠️  Growth engine init failed: {_growth_err}")
+        app.state.growth_scheduler = "init_failed"  # truthy sentinel
+
     # SSE: Sovereign Story Engine Orchestrator
     _sse_orchestrator = None
     try:
@@ -3588,6 +3607,7 @@ async def lifespan(app: FastAPI):
         ("ln7_engine", _ln7_engine_ok),  # QUANTUM-CRYSTAL-ARCH — Little Nate 7
         ("ln7_continuous_agent", getattr(app.state, "ln7_continuous_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_clinical_bakeoff_agent", getattr(app.state, "nate_clinical_bakeoff_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("growth_scheduler", getattr(app.state, "growth_scheduler", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("identity_engine", _identity_engine_ok),  # QUANTUM-CRYSTAL-ARCH
         ("littlenate_inference", getattr(app.state, "littlenate_inference", None) is not None),
         ("nate_memory_crystallizer", getattr(app.state, "nate_memory_crystallizer", None) is not None),
@@ -3696,6 +3716,14 @@ async def lifespan(app: FastAPI):
             print("   ✅ NateClinicalBakeoffAgent stopped")
     except Exception as _nca_stop:
         print(f"   ⚠️  NateClinicalBakeoffAgent shutdown: {_nca_stop}")
+    # QUANTUM-CRYSTAL-ARCH — Adaptive Growth scheduler
+    try:
+        _gs = getattr(app.state, "growth_scheduler", None)
+        if _gs is not None and _gs not in ("disabled", "init_failed") and hasattr(_gs, "stop"):
+            await _gs.stop()
+            print("   ✅ GrowthSchedulerWorker stopped")
+    except Exception as _gs_stop:
+        print(f"   ⚠️  GrowthSchedulerWorker shutdown: {_gs_stop}")
     _classroom_learning_auditor = getattr(app.state, "classroom_learning_auditor", None)
     if _classroom_learning_auditor:
         try:
@@ -4264,6 +4292,9 @@ if settings.ENABLE_SKYEYE:
 # Marketing Brain (always enabled when SkyEye is enabled)
 if settings.ENABLE_SKYEYE:
     app.include_router(marketing_api.router)
+    # QUANTUM-CRYSTAL-ARCH — HMAC preview for growth CEO emails (no admin auth)
+    if hasattr(marketing_api, "public_router"):
+        app.include_router(marketing_api.public_router)
 # QUANTUM-CRYSTAL-ARCH — LN-Observer (Coach Command)
 if getattr(settings, "ENABLE_LN_OBSERVER", False):
     from app.routers.ln_observer_api import router as ln_observer_router

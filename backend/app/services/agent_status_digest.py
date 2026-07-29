@@ -172,6 +172,15 @@ class AgentStatusDigest:
         nl = getattr(self.app, "newsletter_agent", None)
         status, detail = self._check_agent(nl, "NewsletterAgent")
         rows.append((status, "NewsletterAgent", detail))
+        # QUANTUM-CRYSTAL-ARCH — Adaptive Growth scheduler
+        gs = getattr(self.app, "growth_scheduler", None)
+        if gs == "disabled":
+            rows.append(("INFO", "GrowthScheduler", "ENABLE_GROWTH_ENGINE=false"))
+        elif gs == "init_failed":
+            rows.append(("WARNING", "GrowthScheduler", "init_failed"))
+        else:
+            status, detail = self._check_agent(gs, "GrowthScheduler")
+            rows.append((status, "GrowthScheduler", detail))
         return {"title": "Content Operations", "rows": rows}
 
     async def _section_token_lifecycle(self) -> dict:
