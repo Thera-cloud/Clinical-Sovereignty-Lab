@@ -20,6 +20,18 @@ GREEN="${LN7_GREEN_HOST:-root@68.183.168.75}"
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
 SSH_DROPLET=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
 SSH_ORANGE=(-o BatchMode=yes -o ProxyJump="$GREEN" -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+
+# QUANTUM-CRYSTAL-ARCH — portable timeout (macOS has gtimeout via coreutils, not timeout)
+TIMEOUT_BIN="$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)"
+run_to() {
+  local secs="$1"; shift
+  if [[ -n "$TIMEOUT_BIN" ]]; then
+    "$TIMEOUT_BIN" "$secs" "$@"
+  else
+    echo "[WARN] no timeout/gtimeout on PATH — running without wall clock: $*" >&2
+    "$@"
+  fi
+}
 HF_BASE="${LN7_QLORA_HF_BASE:-Qwen/Qwen2.5-Coder-7B-Instruct}"
 TRAIN_TIER="${LN7_TRAIN_TIER:-fast}"
 LORA_RECIPE="${LN7_LORA_RECIPE:-default}"
@@ -45,7 +57,7 @@ _PERSIST_FAIL=0
 refresh_training_data() {
   local fresh="/tmp/ln7_export_fresh_$$.jsonl"
   echo "[drain] refreshing train data from GREEN outcomes"
-  if ! timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
+  if ! run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
       'cd /opt/clinical-sovereignty-lab && \
        docker compose -f docker-compose.prod.yml exec -T backend \
          python /app/scripts/ln7_export_train_jsonl.py --out /tmp/ln7_export_fresh.jsonl >/tmp/ln7_export_stats.json 2>&1; \
@@ -453,7 +465,7 @@ fi
 _DRAIN_PHASE="register"
 hb
 # QUANTUM-CRYSTAL-ARCH — mkdir full adapter path (scp fails if REG_REV dir missing)
-if ! timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
+if ! run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
   "ssh -o BatchMode=yes -o IdentitiesOnly=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -i /root/.ssh/id_ed25519_orange root@10.13.13.5 \
    'mkdir -p \"$STORE/${REG_REV}\" && test -d \"$STORE/${REG_REV}\"'"; then
   echo "[drain] ORANGE mkdir failed for $STORE/${REG_REV}"
@@ -473,7 +485,7 @@ if ! scp -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$L
   _PERSIST_FAIL=1
   exit 7
 fi
-REG_OUT="$(timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" "STORE='$STORE/${REG_REV}' python3 -" <<'PY'
+REG_OUT="$(run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" "STORE='$STORE/${REG_REV}' python3 -" <<'PY'
 import json, re, os, urllib.request
 man = json.load(open("/tmp/ln7_revision_manifest.json"))
 body = man["register_body"]
@@ -521,7 +533,7 @@ ln7_oneshot_mark_consume "$REG_REV" 2>/dev/null || true
 # Close out any continuous-learning job-queue rows consumed by this batch —
 # without this, ln7_train_jobs rows claimed by ln7_continuous_agent.py stay
 # stuck in 'training' forever (worker never marks them done).
-timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
+run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
   "docker exec nate_postgres psql -U nate_admin -d little_nate -c \
    \"UPDATE ln7_train_jobs SET status='canary', revision_id='$REG_REV', updated_at=now() \
      WHERE status IN ('queued','claimed','training')\"" 2>/dev/null || true
@@ -531,7 +543,7 @@ _prune_adapters() {
   local keep_n="$1"
   local protect="${LN7_ADAPTER_PROTECT:-}"
   local active=""
-  active="$(timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" 'python3 -' <<'PY' 2>/dev/null || true
+  active="$(run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" 'python3 -' <<'PY' 2>/dev/null || true
 import json, re, urllib.request
 env = open("/opt/clinical-sovereignty-lab/.env").read()
 tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()

@@ -27,7 +27,18 @@ WORKER_LABEL="${LN7_CONTINUOUS_WORKER_LABEL:-com.sovereign.ln7-continuous-worker
 COMPARE_LABEL="${LN7_AB_COMPARE_LABEL:-ln7-ab-compare}"
 mkdir -p "$STATE_DIR"
 
-# QUANTUM-CRYSTAL-ARCH — dead peer → exit ≤~60s; bounded steps use timeout 300
+# QUANTUM-CRYSTAL-ARCH — portable timeout (macOS has gtimeout via coreutils, not timeout)
+TIMEOUT_BIN="$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)"
+run_to() {
+  local secs="$1"; shift
+  if [[ -n "$TIMEOUT_BIN" ]]; then
+    "$TIMEOUT_BIN" "$secs" "$@"
+  else
+    echo "[WARN] no timeout/gtimeout on PATH — running without wall clock: $*" >&2
+    "$@"
+  fi
+}
+# QUANTUM-CRYSTAL-ARCH — dead peer → exit ≤~60s; bounded steps use run_to
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=30
           -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
 
@@ -187,7 +198,7 @@ wait_bakeoff_idle() {
   local elapsed=0
   while [[ $elapsed -lt $max_wait ]]; do
     local running
-    running="$(timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" 'python3 -' <<'PY' 2>/dev/null || echo '[]'
+    running="$(run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" 'python3 -' <<'PY' 2>/dev/null || echo '[]'
 import json, re, urllib.request
 env = open("/opt/clinical-sovereignty-lab/.env").read()
 tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()
@@ -216,7 +227,7 @@ PY
 
 fire_bakeoff() {
   local rev="$1"
-  timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
+  run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
     "REV='$rev' python3 -" <<'PY' >&2
 import json, os, re, urllib.request, sys
 rev = os.environ["REV"]
@@ -261,7 +272,7 @@ run_one() {
 
   log "verify scorecard $rev"
   local verify_out
-  verify_out="$(timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
+  verify_out="$(run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
     "REV='$rev' python3 -" <<'PY' || true
 import json, os, re, urllib.request
 rev = os.environ["REV"]
@@ -311,7 +322,7 @@ PY
   while [[ $elapsed -lt $POLL_MAX ]]; do
     sleep "$POLL_INTERVAL"
     elapsed=$((elapsed + POLL_INTERVAL))
-    score_json="$(timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
+    score_json="$(run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
       "REV='$rev' SINCE='$SINCE' python3 -" <<'PY'
 import json, os, re, urllib.request, urllib.parse, sys
 rev = os.environ["REV"]
@@ -339,7 +350,7 @@ PY
     fi
 
     local still
-    still="$(timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" 'python3 -' <<'PY' 2>/dev/null || echo '[]'
+    still="$(run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" 'python3 -' <<'PY' 2>/dev/null || echo '[]'
 import json, re, urllib.request
 env = open("/opt/clinical-sovereignty-lab/.env").read()
 tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()
@@ -363,7 +374,7 @@ PY
       # Bakeoff died short — GREEN sweep re-fire (survives _BAKEOFF_TASKS wipe)
       if [[ $idle_streak -ge 2 && $refires -lt 3 && $elapsed -gt 180 ]]; then
         log "bakeoff idle early n=$n < $MIN_ACCEPT — sweep re-fire ($((refires+1))/3)"
-        timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" "python3 -" <<PY || fire_bakeoff "$rev" || true
+        run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" "python3 -" <<PY || fire_bakeoff "$rev" || true
 import json, re, urllib.request
 env = open("/opt/clinical-sovereignty-lab/.env").read()
 tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()
@@ -372,7 +383,7 @@ body = json.dumps({
   "expected_packs": $EXPECTED_PACKS,
   "stale_outcomes_s": 120,
   "refire": True,
-  "since": "$since",
+  "since": "$SINCE",
 }).encode()
 req = urllib.request.Request(
   "http://localhost:8000/api/ln7/bakeoff/sweep",

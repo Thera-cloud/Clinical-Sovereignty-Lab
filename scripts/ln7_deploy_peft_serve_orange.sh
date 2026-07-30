@@ -18,6 +18,17 @@ if [[ ! -d "$SRC" ]]; then
   exit 2
 fi
 
+# QUANTUM-CRYSTAL-ARCH — portable timeout (macOS has gtimeout via coreutils, not timeout)
+TIMEOUT_BIN="$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)"
+run_to() {
+  local secs="$1"; shift
+  if [[ -n "$TIMEOUT_BIN" ]]; then
+    "$TIMEOUT_BIN" "$secs" "$@"
+  else
+    echo "[WARN] no timeout/gtimeout on PATH — running without wall clock: $*" >&2
+    "$@"
+  fi
+}
 # QUANTUM-CRYSTAL-ARCH — dead peer → exit ≤~60s (tonight's hung ProxyJump)
 SSH_OPTS=(-o BatchMode=yes -o ProxyJump="$GREEN" -o ConnectTimeout=30
           -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
@@ -25,12 +36,12 @@ SSH_GREEN=(-o BatchMode=yes -o ConnectTimeout=20
            -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
 
 echo "[peft] deploy adapter=$ADAPTER_NAME → $ORANGE_IP:11435"
-timeout 300 scp "${SSH_OPTS[@]}" \
+run_to 300 scp "${SSH_OPTS[@]}" \
   "$REPO/backend/scripts/orange/ln7_peft_server.py" \
   "root@${ORANGE_IP}:/opt/ln7/peft_serve/ln7_peft_server.py"
 
 # Full adapter tree BLUE → ORANGE (overwrite)
-timeout 300 ssh "${SSH_OPTS[@]}" "root@${ORANGE_IP}" \
+run_to 300 ssh "${SSH_OPTS[@]}" "root@${ORANGE_IP}" \
   "mkdir -p /opt/ln7/adapters/${ADAPTER_NAME}"
 # Large trees: keepalive only (no 300s cap — adapter sync can exceed that)
 scp "${SSH_OPTS[@]}" -r "$SRC/." \
@@ -38,7 +49,7 @@ scp "${SSH_OPTS[@]}" -r "$SRC/." \
 
 # Restore PEFT adapter_config from checkpoint if root was clobbered
 if [[ -f "$SRC/checkpoint-40/adapter_config.json" ]]; then
-  timeout 300 scp "${SSH_OPTS[@]}" \
+  run_to 300 scp "${SSH_OPTS[@]}" \
     "$SRC/checkpoint-40/adapter_config.json" \
     "root@${ORANGE_IP}:/opt/ln7/adapters/${ADAPTER_NAME}/adapter_config.json"
 fi
@@ -95,7 +106,7 @@ REMOTE
 # Health from GREEN→WG (ORANGE self-curl to 10.13.13.5 can stall/buffer; localhost not bound)
 ok=0
 for i in $(seq 1 60); do
-  h="$(timeout 60 ssh "${SSH_GREEN[@]}" "$GREEN" \
+  h="$(run_to 60 ssh "${SSH_GREEN[@]}" "$GREEN" \
     "curl -sS --max-time 5 http://${ORANGE_IP}:11435/health 2>/dev/null || true")"
   echo "[peft] health_try_$i $h"
   if echo "$h" | grep -qE '"loaded"[[:space:]]*:[[:space:]]*true'; then
