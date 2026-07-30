@@ -18,25 +18,33 @@ if [[ ! -d "$SRC" ]]; then
   exit 2
 fi
 
+# QUANTUM-CRYSTAL-ARCH — dead peer → exit ≤~60s (tonight's hung ProxyJump)
+SSH_OPTS=(-o BatchMode=yes -o ProxyJump="$GREEN" -o ConnectTimeout=30
+          -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+SSH_GREEN=(-o BatchMode=yes -o ConnectTimeout=20
+           -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+
 echo "[peft] deploy adapter=$ADAPTER_NAME → $ORANGE_IP:11435"
-scp -o BatchMode=yes -o ProxyJump="$GREEN" \
+timeout 300 scp "${SSH_OPTS[@]}" \
   "$REPO/backend/scripts/orange/ln7_peft_server.py" \
   "root@${ORANGE_IP}:/opt/ln7/peft_serve/ln7_peft_server.py"
 
 # Full adapter tree BLUE → ORANGE (overwrite)
-ssh -o BatchMode=yes -o ProxyJump="$GREEN" "root@${ORANGE_IP}" \
+timeout 300 ssh "${SSH_OPTS[@]}" "root@${ORANGE_IP}" \
   "mkdir -p /opt/ln7/adapters/${ADAPTER_NAME}"
-scp -o BatchMode=yes -o ProxyJump="$GREEN" -r "$SRC/." \
+# Large trees: keepalive only (no 300s cap — adapter sync can exceed that)
+scp "${SSH_OPTS[@]}" -r "$SRC/." \
   "root@${ORANGE_IP}:/opt/ln7/adapters/${ADAPTER_NAME}/"
 
 # Restore PEFT adapter_config from checkpoint if root was clobbered
 if [[ -f "$SRC/checkpoint-40/adapter_config.json" ]]; then
-  scp -o BatchMode=yes -o ProxyJump="$GREEN" \
+  timeout 300 scp "${SSH_OPTS[@]}" \
     "$SRC/checkpoint-40/adapter_config.json" \
     "root@${ORANGE_IP}:/opt/ln7/adapters/${ADAPTER_NAME}/adapter_config.json"
 fi
 
-ssh -o BatchMode=yes -o ProxyJump="$GREEN" "root@${ORANGE_IP}" \
+# Remote unit rewrite + restart: keepalive only (7B load can exceed 300s)
+ssh "${SSH_OPTS[@]}" "root@${ORANGE_IP}" \
   "ADAPTER_NAME='$ADAPTER_NAME' PEFT_BARE='$PEFT_BARE' bash -s" <<'REMOTE'
 set -euo pipefail
 mkdir -p /opt/ln7/peft_serve /opt/ln7/hf_cache
@@ -87,7 +95,7 @@ REMOTE
 # Health from GREEN→WG (ORANGE self-curl to 10.13.13.5 can stall/buffer; localhost not bound)
 ok=0
 for i in $(seq 1 60); do
-  h="$(ssh -o BatchMode=yes -o ConnectTimeout=20 "$GREEN" \
+  h="$(timeout 60 ssh "${SSH_GREEN[@]}" "$GREEN" \
     "curl -sS --max-time 5 http://${ORANGE_IP}:11435/health 2>/dev/null || true")"
   echo "[peft] health_try_$i $h"
   if echo "$h" | grep -qE '"loaded"[[:space:]]*:[[:space:]]*true'; then

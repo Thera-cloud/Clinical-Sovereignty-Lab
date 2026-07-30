@@ -15,6 +15,11 @@ REGION="${LN7_GPU_REGION:-tor1}"
 TTL="${LN7_GPU_TTL_S:-1800}"
 STORE="${LN7_ADAPTER_STORE:-/opt/ln7/adapters}"
 GREEN="${LN7_GREEN_HOST:-root@68.183.168.75}"
+
+# QUANTUM-CRYSTAL-ARCH — dead peer → exit ≤~60s
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+SSH_DROPLET=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+SSH_ORANGE=(-o BatchMode=yes -o ProxyJump="$GREEN" -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
 HF_BASE="${LN7_QLORA_HF_BASE:-Qwen/Qwen2.5-Coder-7B-Instruct}"
 TRAIN_TIER="${LN7_TRAIN_TIER:-fast}"
 LORA_RECIPE="${LN7_LORA_RECIPE:-default}"
@@ -40,7 +45,7 @@ _PERSIST_FAIL=0
 refresh_training_data() {
   local fresh="/tmp/ln7_export_fresh_$$.jsonl"
   echo "[drain] refreshing train data from GREEN outcomes"
-  if ! ssh -o BatchMode=yes -o ConnectTimeout=20 "$GREEN" \
+  if ! timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
       'cd /opt/clinical-sovereignty-lab && \
        docker compose -f docker-compose.prod.yml exec -T backend \
          python /app/scripts/ln7_export_train_jsonl.py --out /tmp/ln7_export_fresh.jsonl >/tmp/ln7_export_stats.json 2>&1; \
@@ -333,7 +338,7 @@ _DRAIN_PHASE="ssh_wait"
 _ssh_ok=0
 for _ in $(seq 1 72); do
   hb
-  if ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new \
+  if ssh "${SSH_DROPLET[@]}" \
       "root@$IP" 'echo up' >/dev/null 2>&1; then
     _ssh_ok=1
     break
@@ -350,7 +355,7 @@ _DRAIN_PHASE="apt_wait"
 _apt_ok=0
 for _ in $(seq 1 90); do
   hb
-  if ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "root@$IP" \
+  if ssh "${SSH_DROPLET[@]}" "root@$IP" \
     'set -e
      # cloud-init done or absent
      if command -v cloud-init >/dev/null 2>&1; then
@@ -377,14 +382,14 @@ echo "[drain] apt ready root@$IP"
 _DRAIN_PHASE="bootstrap"
 hb
 
-ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "root@$IP" \
+ssh "${SSH_DROPLET[@]}" "root@$IP" \
   'export DEBIAN_FRONTEND=noninteractive
    apt-get update -qq
    apt-get install -y -qq python3.10-venv python3-pip >/dev/null
    mkdir -p /opt/ln7/{backend/scripts,data,adapters,hf_cache}'
 hb
-scp -o BatchMode=yes "$REPO/backend/scripts/ln7_qlora_train.py" "root@$IP:/opt/ln7/backend/scripts/"
-scp -o BatchMode=yes "$REPO/data/ln7_train.jsonl" "root@$IP:/opt/ln7/data/ln7_train.jsonl"
+scp -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$REPO/backend/scripts/ln7_qlora_train.py" "root@$IP:/opt/ln7/backend/scripts/"
+scp -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$REPO/data/ln7_train.jsonl" "root@$IP:/opt/ln7/data/ln7_train.jsonl"
 hb
 
 RID_TS="$(date -u +%Y-%m-%dT%H%M%SZ)"
@@ -408,7 +413,7 @@ hb
 ) &
 _HB_PID=$!
 
-ssh -o BatchMode=yes "root@$IP" "bash -s" <<EOF
+ssh "${SSH_DROPLET[@]}" "root@$IP" "bash -s" <<EOF
 set -euo pipefail
 cd /opt/ln7
 if [[ ! -x .venv/bin/python ]]; then
@@ -435,7 +440,7 @@ hb
 REG_REV="LN7-${RID_TS}"
 LOCAL_TMP="/tmp/ln7_adapter_${REG_REV}"
 rm -rf "$LOCAL_TMP" && mkdir -p "$LOCAL_TMP" "$REPO/.ln7-adapters/${REG_REV}"
-scp -o BatchMode=yes -r "root@$IP:/opt/ln7/adapters/${REG_REV}/." "$LOCAL_TMP/"
+scp -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -r "root@$IP:/opt/ln7/adapters/${REG_REV}/." "$LOCAL_TMP/"
 cp -a "$LOCAL_TMP/." "$REPO/.ln7-adapters/${REG_REV}/"
 hb
 
@@ -448,14 +453,14 @@ fi
 _DRAIN_PHASE="register"
 hb
 # QUANTUM-CRYSTAL-ARCH — mkdir full adapter path (scp fails if REG_REV dir missing)
-if ! ssh -o BatchMode=yes "$GREEN" \
-  "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i /root/.ssh/id_ed25519_orange root@10.13.13.5 \
+if ! timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
+  "ssh -o BatchMode=yes -o IdentitiesOnly=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -i /root/.ssh/id_ed25519_orange root@10.13.13.5 \
    'mkdir -p \"$STORE/${REG_REV}\" && test -d \"$STORE/${REG_REV}\"'"; then
   echo "[drain] ORANGE mkdir failed for $STORE/${REG_REV}"
   _PERSIST_FAIL=1
   exit 7
 fi
-if ! scp -o BatchMode=yes -o ProxyJump="$GREEN" -r "$LOCAL_TMP/." \
+if ! scp -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o ProxyJump="$GREEN" -r "$LOCAL_TMP/." \
   "root@10.13.13.5:$STORE/${REG_REV}/"; then
   echo "[drain] ORANGE scp failed for $STORE/${REG_REV}"
   _PERSIST_FAIL=1
@@ -463,12 +468,12 @@ if ! scp -o BatchMode=yes -o ProxyJump="$GREEN" -r "$LOCAL_TMP/." \
 fi
 hb
 
-if ! scp -o BatchMode=yes "$LOCAL_TMP/revision_manifest.json" "$GREEN:/tmp/ln7_revision_manifest.json"; then
+if ! scp -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$LOCAL_TMP/revision_manifest.json" "$GREEN:/tmp/ln7_revision_manifest.json"; then
   echo "[drain] GREEN manifest scp failed"
   _PERSIST_FAIL=1
   exit 7
 fi
-REG_OUT="$(ssh -o BatchMode=yes "$GREEN" "STORE='$STORE/${REG_REV}' python3 -" <<'PY'
+REG_OUT="$(timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" "STORE='$STORE/${REG_REV}' python3 -" <<'PY'
 import json, re, os, urllib.request
 man = json.load(open("/tmp/ln7_revision_manifest.json"))
 body = man["register_body"]
@@ -516,7 +521,7 @@ ln7_oneshot_mark_consume "$REG_REV" 2>/dev/null || true
 # Close out any continuous-learning job-queue rows consumed by this batch —
 # without this, ln7_train_jobs rows claimed by ln7_continuous_agent.py stay
 # stuck in 'training' forever (worker never marks them done).
-ssh -o BatchMode=yes -o ConnectTimeout=20 "$GREEN" \
+timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
   "docker exec nate_postgres psql -U nate_admin -d little_nate -c \
    \"UPDATE ln7_train_jobs SET status='canary', revision_id='$REG_REV', updated_at=now() \
      WHERE status IN ('queued','claimed','training')\"" 2>/dev/null || true
@@ -526,7 +531,7 @@ _prune_adapters() {
   local keep_n="$1"
   local protect="${LN7_ADAPTER_PROTECT:-}"
   local active=""
-  active="$(ssh -o BatchMode=yes -o ConnectTimeout=20 "$GREEN" 'python3 -' <<'PY' 2>/dev/null || true
+  active="$(timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" 'python3 -' <<'PY' 2>/dev/null || true
 import json, re, urllib.request
 env = open("/opt/clinical-sovereignty-lab/.env").read()
 tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()
@@ -554,7 +559,7 @@ for p in drop:
     shutil.rmtree(p, ignore_errors=True)
     print(f"[drain] pruned blue {p.name}")
 PY
-  ssh -o BatchMode=yes -o ProxyJump="$GREEN" "root@10.13.13.5" \
+  ssh "${SSH_ORANGE[@]}" "root@10.13.13.5" \
     "KEEP_N='$keep_n' PROTECT='$protect' STORE='$STORE' bash -s" <<'REMOTE' || true
 set -euo pipefail
 cd "$STORE" 2>/dev/null || exit 0

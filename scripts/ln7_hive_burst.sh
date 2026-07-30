@@ -48,7 +48,9 @@ HF_BASE="${LN7_QLORA_HF_BASE:-Qwen/Qwen2.5-Coder-7B-Instruct}"
 ADAPTER_ROOT="${LN7_ADAPTER_ROOT:-$REPO/.ln7-adapters}"
 PROBE_MAX_S="${LN7_BURST_PROBE_MAX_S:-900}"
 PROBE_INTERVAL_S="${LN7_BURST_PROBE_INTERVAL_S:-15}"
-SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=30)
+# QUANTUM-CRYSTAL-ARCH — dead peer → exit ≤~60s (not wedged forever)
+SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=30
+          -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
 
 API_KEY="${LN7_BURST_API_KEY:-$(openssl rand -hex 24)}"
 DROPLET_ID=""

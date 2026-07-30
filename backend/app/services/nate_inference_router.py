@@ -29,6 +29,23 @@ TIER_UTILITY = "utility"
 TIER_REALTIME = "realtime"
 TIER_CODING = "coding"
 
+
+def openai_compat_chat_url(base: str) -> str:
+    """Join an OpenAI-compat base to /v1/chat/completions without doubling /v1.
+
+    Burst handoff URLs are already `http://host:11436/v1` (models probe uses
+    `{url}/models`). PEFT/Ollama bases are typically host:port with no /v1.
+    Doubling produced /v1/v1/chat/completions → router provider=none → harness
+    vendor_rejected:none wall of zero-diff bakeoff rows.
+    # QUANTUM-CRYSTAL-ARCH
+    """
+    b = (base or "").rstrip("/")
+    if not b:
+        return "/v1/chat/completions"
+    if b.endswith("/v1"):
+        return f"{b}/chat/completions"
+    return f"{b}/v1/chat/completions"
+
 _TIER_PRIORITY = {
     TIER_CLINICAL: ["grok", "home_gpu", "sovereign", "azure"],
     TIER_CREATIVE: ["workers_ai", "grok", "sovereign", "azure"],
@@ -234,7 +251,14 @@ class NateInferenceRouter:
             providers = _TIER_PRIORITY.get(tier, ["azure"])
 
         for provider in providers:
-            if provider == "sovereign" and not self._sovereign_healthy:
+            # QUANTUM-CRYSTAL-ARCH — LN7 burst/PEFT overrides must not be gated on
+            # ORANGE Ollama health. A stale _sovereign_healthy=False skips the
+            # override URL entirely and returns provider=none.
+            if (
+                provider == "sovereign"
+                and not self._sovereign_healthy
+                and not base_url_override
+            ):
                 continue
             if provider == "workers_ai" and not self._workers_healthy:
                 continue
@@ -389,7 +413,7 @@ class NateInferenceRouter:
             base = (os.getenv("LN7_INFERENCE_URL") or "").rstrip("/")
         if not base:
             base = (_SOVEREIGN_URL or "").rstrip("/")
-        url = f"{base}/v1/chat/completions"
+        url = openai_compat_chat_url(base)
         async with self._SOVEREIGN_SEMAPHORE, aiohttp.ClientSession() as sess:
             async with sess.post(url, json={
                 "model": selected_model,

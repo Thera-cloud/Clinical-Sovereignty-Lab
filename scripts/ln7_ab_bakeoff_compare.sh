@@ -27,6 +27,10 @@ WORKER_LABEL="${LN7_CONTINUOUS_WORKER_LABEL:-com.sovereign.ln7-continuous-worker
 COMPARE_LABEL="${LN7_AB_COMPARE_LABEL:-ln7-ab-compare}"
 mkdir -p "$STATE_DIR"
 
+# QUANTUM-CRYSTAL-ARCH — dead peer → exit ≤~60s; bounded steps use timeout 300
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=30
+          -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+
 log() { echo "[ab-compare] $*" >&2; }
 
 _OWN_COMPARE_LOCK=0
@@ -183,7 +187,7 @@ wait_bakeoff_idle() {
   local elapsed=0
   while [[ $elapsed -lt $max_wait ]]; do
     local running
-    running="$(ssh -o BatchMode=yes -o ConnectTimeout=20 "$GREEN" 'python3 -' <<'PY' 2>/dev/null || echo '[]'
+    running="$(timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" 'python3 -' <<'PY' 2>/dev/null || echo '[]'
 import json, re, urllib.request
 env = open("/opt/clinical-sovereignty-lab/.env").read()
 tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()
@@ -212,7 +216,7 @@ PY
 
 fire_bakeoff() {
   local rev="$1"
-  ssh -o BatchMode=yes -o ConnectTimeout=30 "$GREEN" \
+  timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
     "REV='$rev' python3 -" <<'PY' >&2
 import json, os, re, urllib.request, sys
 rev = os.environ["REV"]
@@ -257,7 +261,7 @@ run_one() {
 
   log "verify scorecard $rev"
   local verify_out
-  verify_out="$(ssh -o BatchMode=yes -o ConnectTimeout=30 "$GREEN" \
+  verify_out="$(timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
     "REV='$rev' python3 -" <<'PY' || true
 import json, os, re, urllib.request
 rev = os.environ["REV"]
@@ -277,11 +281,19 @@ PY
 )"
   log "verify: $verify_out"
 
-  heartbeat "deploy" "" "$rev"
-  log "deploy PEFT $adapter"
-  bash "$REPO/scripts/ln7_deploy_peft_serve_orange.sh" "$adapter" >&2
-  log "deploy done $adapter"
-  heartbeat "deploy_done" "" "$rev"
+  # QUANTUM-CRYSTAL-ARCH — burst scores via ephemeral :11436; ORANGE PEFT
+  # deploy is a legacy blocking step and must not gate vllm_burst arms.
+  if [[ "${LN7_SERVE_ENGINE:-}" == "vllm_burst" ]]; then
+    heartbeat "deploy_skipped_burst" "" "$rev"
+    log "skip PEFT orange deploy (LN7_SERVE_ENGINE=vllm_burst — score via burst :11436)"
+    heartbeat "deploy_done" "" "$rev"
+  else
+    heartbeat "deploy" "" "$rev"
+    log "deploy PEFT $adapter"
+    bash "$REPO/scripts/ln7_deploy_peft_serve_orange.sh" "$adapter" >&2
+    log "deploy done $adapter"
+    heartbeat "deploy_done" "" "$rev"
+  fi
 
   log "wait bakeoff idle"
   wait_bakeoff_idle 900 || true
@@ -299,7 +311,7 @@ PY
   while [[ $elapsed -lt $POLL_MAX ]]; do
     sleep "$POLL_INTERVAL"
     elapsed=$((elapsed + POLL_INTERVAL))
-    score_json="$(ssh -o BatchMode=yes -o ConnectTimeout=30 "$GREEN" \
+    score_json="$(timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
       "REV='$rev' SINCE='$SINCE' python3 -" <<'PY'
 import json, os, re, urllib.request, urllib.parse, sys
 rev = os.environ["REV"]
@@ -327,7 +339,7 @@ PY
     fi
 
     local still
-    still="$(ssh -o BatchMode=yes -o ConnectTimeout=20 "$GREEN" 'python3 -' <<'PY' 2>/dev/null || echo '[]'
+    still="$(timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" 'python3 -' <<'PY' 2>/dev/null || echo '[]'
 import json, re, urllib.request
 env = open("/opt/clinical-sovereignty-lab/.env").read()
 tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()
@@ -351,7 +363,7 @@ PY
       # Bakeoff died short — GREEN sweep re-fire (survives _BAKEOFF_TASKS wipe)
       if [[ $idle_streak -ge 2 && $refires -lt 3 && $elapsed -gt 180 ]]; then
         log "bakeoff idle early n=$n < $MIN_ACCEPT — sweep re-fire ($((refires+1))/3)"
-        ssh -o BatchMode=yes -o ConnectTimeout=30 "$GREEN" "python3 -" <<PY || fire_bakeoff "$rev" || true
+        timeout 300 ssh "${SSH_OPTS[@]}" "$GREEN" "python3 -" <<PY || fire_bakeoff "$rev" || true
 import json, re, urllib.request
 env = open("/opt/clinical-sovereignty-lab/.env").read()
 tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()

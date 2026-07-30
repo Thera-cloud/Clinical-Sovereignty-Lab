@@ -19,6 +19,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("ln7_harness")
 
+# QUANTUM-CRYSTAL-ARCH — sovereign-only path. provider=none means the router
+# exhausted overrides (not cloud vendor bleed) — surface as upstream_unavailable.
+_LN7_PROVIDER_ALLOWLIST = frozenset({"sovereign", "home_gpu", "odpe_skip", ""})
+
 _SECRET_RE = re.compile(
     r"(?i)(api[_-]?key|secret|password|token)\s*[:=]\s*['\"][^'\"]{8,}",
 )
@@ -271,8 +275,18 @@ async def propose_candidates(
             )
             text = (result or {}).get("text") or ""
             prov = (result or {}).get("provider") or ""
-            # Refuse vendor bleed even if router misconfigured
-            if prov and prov not in ("sovereign", "home_gpu", "odpe_skip", ""):
+            # Refuse vendor bleed; distinguish router exhaustion from vendor bleed
+            if prov == "none":
+                return {
+                    "index": idx,
+                    "temperature": temp,
+                    "text": "",
+                    "ast_hash": "",
+                    "error": "upstream_unavailable",
+                    "ok": False,
+                    "latency_ms": int((time.time() - t0) * 1000),
+                }
+            if prov not in _LN7_PROVIDER_ALLOWLIST:
                 return {
                     "index": idx,
                     "temperature": temp,
@@ -544,7 +558,15 @@ async def generate_sovereign_reply(
     )
     text = (result or {}).get("text") or ""
     prov = (result or {}).get("provider") or "sovereign"
-    if prov not in ("sovereign", "home_gpu", "odpe_skip"):
+    if prov == "none":
+        return {
+            "ok": False,
+            "error": "upstream_unavailable",
+            "text": "",
+            "provider": "ln7",
+            "model": coder_model(model_tier),
+        }
+    if prov not in _LN7_PROVIDER_ALLOWLIST:
         return {
             "ok": False,
             "error": f"vendor_rejected:{prov}",
