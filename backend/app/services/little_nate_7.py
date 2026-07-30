@@ -61,6 +61,94 @@ def peft_serve_url_default() -> str:
     return (os.getenv("LN7_PEFT_URL") or "").rstrip("/")
 
 
+def serve_engine() -> str:
+    """ollama (default) | vllm_burst — read PER CALL, never cached at import.
+
+    The drain flips engines mid-run around burst windows. A module-level
+    constant would pin the process to whatever was set at startup — the same
+    class of bug as the boot-pinned ADAPTER_DIR.
+    # QUANTUM-CRYSTAL-ARCH
+    """
+    v = (os.getenv("LN7_SERVE_ENGINE") or "").strip().lower()
+    if v in ("ollama", "vllm_burst"):
+        return v
+    # Unset: an open burst window may declare the engine itself, so the drain can
+    # flip mid-run without recreating the container. The window carries a TTL and
+    # is renamed .destroyed on teardown, so it cannot linger silently.
+    win = burst_window()
+    if win.get("ok") and str(win.get("engine") or "").lower() == "vllm_burst":
+        return "vllm_burst"
+    return "ollama"
+
+
+def burst_handoff_path() -> str:
+    """Where the burst window writes its live host. Renamed .destroyed on teardown."""
+    return (os.getenv("LN7_BURST_HANDOFF") or "/app/data/ln7_burst_window.env").strip()
+
+
+def burst_window() -> Dict[str, Any]:
+    """Read the active burst window handoff. Never falls back to ORANGE.
+
+    A missing file (or the .destroyed rename) means the droplet is gone and its
+    IP is stale. Refuse loudly with no_active_burst_window — a silent fallback
+    would recreate the both-arms-one-server bug wearing a different hat.
+    # QUANTUM-CRYSTAL-ARCH
+    """
+    path = burst_handoff_path()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = fh.read()
+    except FileNotFoundError:
+        return {"ok": False, "error": "no_active_burst_window", "path": path}
+    except Exception as exc:
+        return {"ok": False, "error": f"burst_handoff_unreadable:{str(exc)[:80]}", "path": path}
+
+    kv: Dict[str, str] = {}
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        kv[k.strip()] = v.strip().strip('"').strip("'")
+
+    host = kv.get("LN7_BURST_HOST", "")
+    if not host:
+        return {"ok": False, "error": "burst_window_no_host", "path": path}
+
+    until = kv.get("LN7_BURST_TTL_UNTIL", "")
+    if until:
+        try:
+            dt = datetime.fromisoformat(until.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) >= dt:
+                return {"ok": False, "error": f"burst_window_expired:{until}", "path": path}
+        except ValueError:
+            return {"ok": False, "error": f"burst_window_bad_ttl:{until[:40]}", "path": path}
+
+    port = kv.get("LN7_BURST_PORT", "11436")
+    return {
+        "ok": True,
+        "host": host,
+        "port": port,
+        "url": f"http://{host}:{port}/v1",
+        "burst_id": kv.get("LN7_BURST_ID", ""),
+        "engine": kv.get("LN7_SERVE_ENGINE", ""),
+        "api_key": kv.get("LN7_BURST_API_KEY", ""),
+        "ttl_until": until,
+        "base_served_name": kv.get(
+            "LN7_BURST_BASE_MODEL",
+            os.getenv("LN7_QLORA_HF_BASE", "Qwen/Qwen2.5-Coder-7B-Instruct"),
+        ),
+    }
+
+
+def vllm_lora_name(revision: Optional[Dict[str, Any]]) -> str:
+    """vLLM served-model name for this revision's adapter (migration 305 column)."""
+    rev = revision or {}
+    return str(rev.get("vllm_lora_name") or rev.get("revision_id") or "").strip()
+
+
 def serve_target_from_revision(
     revision: Optional[Dict[str, Any]],
     *,
@@ -68,9 +156,25 @@ def serve_target_from_revision(
 ) -> Dict[str, str]:
     """Resolve inference URL + model for a revision (PEFT when wired).
 
-    Returns keys: url, model, mode (peft|ollama).
+    Returns keys: url, model, mode (peft|ollama|vllm_burst|unavailable).
     # QUANTUM-CRYSTAL-ARCH
     """
+    # QUANTUM-CRYSTAL-ARCH — two-way engine switch, not an abstraction layer.
+    # vllm_burst serves every arm from one multi-LoRA process, so arms are
+    # distinguishable by served-model name instead of by whatever the single
+    # PEFT server happened to boot with.
+    if serve_engine() == "vllm_burst":
+        win = burst_window()
+        if not win.get("ok"):
+            return {"url": "", "model": "", "mode": "unavailable", "error": str(win.get("error"))}
+        expected = expected_serve_identity(revision)
+        if expected.get("kind") == "bare":
+            return {"url": win["url"], "model": win["base_served_name"], "mode": "vllm_burst"}
+        lora = vllm_lora_name(revision)
+        if not lora:
+            return {"url": "", "model": "", "mode": "unavailable", "error": "no_vllm_lora_name"}
+        return {"url": win["url"], "model": lora, "mode": "vllm_burst"}
+
     hc: Dict[str, Any] = {}
     if revision:
         raw = revision.get("harness_config_json") or revision.get("harness_config") or {}
@@ -163,8 +267,54 @@ async def probe_serve_identity(
     expected = expected_serve_identity(revision)
     mode = str((target or {}).get("mode") or "").strip().lower()
     url = str((target or {}).get("url") or "").rstrip("/")
+    if mode == "unavailable":
+        return {
+            "ok": False,
+            "reason": str((target or {}).get("error") or "serve_unavailable"),
+            "served": None,
+            "expected": expected,
+        }
     if not url:
         return {"ok": False, "reason": "no_serve_url", "served": None, "expected": expected}
+
+    if mode == "vllm_burst":
+        # vLLM advertises every loaded LoRA as its own model id on /v1/models.
+        # Identity is the served-model name, so arms are provably distinct.
+        want = str((target or {}).get("model") or "").strip()
+        try:
+            import httpx
+            headers = {}
+            win = burst_window()
+            if win.get("ok") and win.get("api_key"):
+                headers["Authorization"] = f"Bearer {win['api_key']}"
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(f"{url}/models", headers=headers)
+            if resp.status_code != 200:
+                return {
+                    "ok": False,
+                    "reason": f"burst_models_http_{resp.status_code}",
+                    "served": None,
+                    "expected": expected,
+                }
+            body = resp.json() or {}
+        except Exception as exc:
+            return {
+                "ok": False,
+                "reason": f"burst_unreachable:{str(exc)[:120]}",
+                "served": None,
+                "expected": expected,
+            }
+        ids = [str((m or {}).get("id") or "") for m in (body.get("data") or [])]
+        if want not in ids:
+            return {
+                "ok": False,
+                "reason": f"serve_mismatch:expected={want} served={','.join(ids)[:120] or 'none'}",
+                "served": {"models": ids},
+                "expected": expected,
+            }
+        kind = "bare_ok" if expected.get("kind") == "bare" else f"adapter_ok:{want}"
+        return {"ok": True, "reason": kind, "served": {"models": ids}, "expected": expected}
+
     if mode != "peft":
         # Ollama identity is carried by the model tag itself; nothing to cross-check.
         return {

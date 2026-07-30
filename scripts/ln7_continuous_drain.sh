@@ -487,12 +487,25 @@ def post(path, payload):
     with urllib.request.urlopen(req, timeout=180) as r:
         return json.loads(r.read().decode())
 
-print(json.dumps({"register": post("/api/ln7/revision/register", body)}))
+reg = post("/api/ln7/revision/register", body)
+print(json.dumps({"register": reg}))
+# QUANTUM-CRYSTAL-ARCH — A0 asserts (pinned 7B base, uniform LoRA rank) run
+# inside register_revision. They fired for droplet-trained adapters all along;
+# what was missing was anyone reading the answer. A rejected revision must not
+# advance to canary or get written to REVISION_OUT as if it registered.
+if isinstance(reg, dict) and reg.get("ok") is False:
+    print("REGISTER_REJECTED=" + str(reg.get("error") or "unknown"))
+    raise SystemExit(11)
 print(json.dumps({"canary": post("/api/ln7/canary/evaluate", {"revision_id": body["revision_id"], "start": True})}))
 print("REVISION_ID=" + body["revision_id"])
 PY
 )"
 echo "$REG_OUT"
+if grep -q '^REGISTER_REJECTED=' <<<"$REG_OUT"; then
+  echo "[drain] A0 assert rejected this revision: $(grep '^REGISTER_REJECTED=' <<<"$REG_OUT")"
+  _PERSIST_FAIL=1
+  exit 11
+fi
 REG_REV="$(echo "$REG_OUT" | awk -F= '/^REVISION_ID=/{print $2; exit}')"
 [[ -n "$REG_REV" ]] || REG_REV="LN7-${RID_TS}"
 echo "$REG_REV" >"$REV_OUT"

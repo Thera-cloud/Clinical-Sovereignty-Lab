@@ -115,7 +115,10 @@ source "$HANDOFF"
 export LN7_EXISTING_DROPLET_ID LN7_EXISTING_DROPLET_IP LN7_EXISTING_DROPLET_REGION
 echo "[ab] recipe=all_linear (reuse id=$LN7_EXISTING_DROPLET_ID)"
 
-LN7_KEEP_DROPLET=0 \
+# QUANTUM-CRYSTAL-ARCH — keep the droplet alive for the burst window. Both
+# adapters are already on its disk; re-provisioning would cost ~10min and a
+# second rsync. hive_burst's EXIT trap owns the destroy from here.
+LN7_KEEP_DROPLET="${LN7_AB_KEEP_FOR_BURST:-1}" \
 LN7_KEEP_ON_PREFAIL=0 \
 LN7_REVISION_OUT="$STATE_DIR/rev_b" \
 LN7_LORA_RECIPE=all_linear \
@@ -123,9 +126,20 @@ LN7_LORA_RECIPE=all_linear \
 REV_B="$(tr -d '[:space:]' <"$STATE_DIR/rev_b" 2>/dev/null || true)"
 [[ -n "$REV_B" ]] || { echo "[ab] missing rev_b"; exit 6; }
 
-echo "[ab] private bakeoff compare $REV_A vs $REV_B"
+echo "[ab] private bakeoff compare $REV_A vs $REV_B (engine=${LN7_SERVE_ENGINE:-vllm_burst})"
 # QUANTUM-CRYSTAL-ARCH — AB_OK only when compare succeeds (not on timeout/partial)
-if ! bash "$REPO/scripts/ln7_ab_bakeoff_compare.sh" "$REV_A" "$REV_B"; then
+#
+# Default to the burst window. ORANGE :11435 is a boot-pinned single-adapter
+# server: both arms resolve to whatever it loaded at startup, so a direct
+# compare scores the SAME weights twice. hive_burst gates on two distinct
+# adapter_ok identities before a task runs. Set LN7_SERVE_ENGINE=ollama to
+# opt back into the old path (only valid for single-arm smoke).
+if [[ "${LN7_SERVE_ENGINE:-vllm_burst}" == "vllm_burst" ]]; then
+  COMPARE_CMD=(bash "$REPO/scripts/ln7_hive_burst.sh" "$REV_A" "$REV_B")
+else
+  COMPARE_CMD=(bash "$REPO/scripts/ln7_ab_bakeoff_compare.sh" "$REV_A" "$REV_B")
+fi
+if ! "${COMPARE_CMD[@]}"; then
   echo "[ab] bakeoff compare failed — NOT writing AB_OK (revisions still registered as shadow)"
   echo "fail compare $(date -u +%Y-%m-%dT%H%M%SZ) a=$REV_A b=$REV_B" >"$STATE_DIR/AB_FAIL"
   rm -f "$STATE_DIR/DRAINING" "$HANDOFF"

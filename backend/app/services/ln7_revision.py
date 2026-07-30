@@ -195,6 +195,29 @@ async def register_revision(
         return {"ok": False, "error": "invalid_target_modules", "revision_id": rid}
     if _targets is not None:
         hc["target_modules"] = list(_targets)
+    # QUANTUM-CRYSTAL-ARCH — A0 merge standard: r=32 across all linear projections
+    # (the T220130Z config). This gates Stage 4 MERGE, not registration: a bakeoff
+    # arm is allowed to be r=16 on purpose — that is the experimental variable.
+    # Merging heterogeneous deltas is what the uniform requirement exists to
+    # prevent, so the verdict is recorded here and read at merge time.
+    _std_rank = int(os.getenv("LN7_MERGE_STD_RANK", "32") or "32")
+    _std_targets = {
+        "q_proj", "k_proj", "v_proj", "o_proj",
+        "gate_proj", "up_proj", "down_proj",
+    }
+    if _rank is not None:
+        _have = set(hc.get("target_modules") or [])
+        if int(hc["lora_rank"]) != _std_rank:
+            hc["merge_eligible"] = False
+            hc["merge_block_reason"] = f"rank_mismatch_r{hc['lora_rank']}"
+        elif _have and not _std_targets.issubset(_have):
+            hc["merge_eligible"] = False
+            hc["merge_block_reason"] = "target_modules_not_all_linear:" + ",".join(
+                sorted(_std_targets - _have)
+            )
+        else:
+            hc["merge_eligible"] = True
+            hc["merge_block_reason"] = ""
     quant = quantization or quantization_floor()
     card = write_model_card(
         rid,
