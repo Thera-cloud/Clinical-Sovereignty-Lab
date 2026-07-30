@@ -110,6 +110,37 @@ async def record_outcome(db_pool, row: Dict[str, Any]) -> Optional[int]:
                     *args_common,
                 )
         oid_i = int(oid) if oid is not None else None
+        # QUANTUM-CRYSTAL-ARCH — dual-write outcome_envelope (W7 / B1)
+        if oid_i is not None:
+            try:
+                from app.services.ln7_outcome_envelope import (
+                    attach_envelope_to_outcome,
+                    write_envelope,
+                )
+
+                metrics = dict(row.get("metrics_json") or {})
+                if row.get("route_tier") is not None:
+                    metrics["route_tier"] = row.get("route_tier")
+                if row.get("runner_ups") is not None:
+                    metrics["runner_ups"] = row.get("runner_ups")
+                env_id = await write_envelope(
+                    db_pool,
+                    loop_name="ln7",
+                    event_kind="coding_outcome",
+                    revision_id=row.get("revision_id"),
+                    task_hash=row.get("task_hash"),
+                    patch_hash=row.get("patch_hash"),
+                    domain_tag=row.get("domain_tag"),
+                    source_node=row.get("exec_node") or "green",
+                    burst_id=row.get("burst_id"),
+                    metrics=metrics,
+                    provenance=row.get("provenance_json") or {},
+                    cost_usd=row.get("cost_usd"),
+                )
+                if env_id:
+                    await attach_envelope_to_outcome(db_pool, oid_i, env_id)
+            except Exception as _env_exc:
+                logger.warning("LN7 envelope dual-write: %s", _env_exc)
         # Continuous gated self-improvement: enqueue green outcomes (train split only)
         if oid_i is not None and bool(row.get("passed")):
             try:

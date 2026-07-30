@@ -28,8 +28,14 @@ def _utc_rid() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
 
 
-# Must match ORANGE ln7_peft_server.py default (serve :11435)
-DEFAULT_HF_BASE = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+# QUANTUM-CRYSTAL-ARCH — Phase A0 pin 7B (quarantine 1.5B adapters)
+# Must match ORANGE ln7_peft_server.py LN7_QLORA_HF_BASE default
+DEFAULT_HF_BASE = "Qwen/Qwen2.5-Coder-7B-Instruct"
+PINNED_HF_BASE = "Qwen/Qwen2.5-Coder-7B-Instruct"
+UNIFORM_LORA_RANK = 16
+UNIFORM_TARGET_MODULES = [
+    "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj",
+]
 ALL_LINEAR_MODULES = [
     "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj",
 ]

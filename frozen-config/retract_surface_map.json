@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "surfaces": [
+    {
+      "id": "sovereign_command_growth",
+      "paths": ["dashboard/", "/var/www/sovereign-command/"],
+      "action": "grep_and_flag"
+    },
+    {
+      "id": "skyeye_content_queue",
+      "table": "skyeye_content_queue",
+      "statuses": ["pending", "scheduled"],
+      "action": "cancel_or_rewrite"
+    },
+    {
+      "id": "directory_profile_fields",
+      "action": "clear_growth_fields"
+    }
+  ],
+  "note": "Already-sent email/syndicated posts are not rewritten; blocked at publish by long_horizon class"
+}

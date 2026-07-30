@@ -45,6 +45,9 @@ _CLAIM_KINDS = (
     "growth_policy_cross_review",
     "growth_segment_propose",
     "growth_experiment_conclude",
+    # QUANTUM-CRYSTAL-ARCH — Multi-LoRA flywheel
+    "hive_burst",
+    "ln7_shadow_fork",
 )
 
 
@@ -209,6 +212,10 @@ class CliTaskBusConsumer:
                 self._green_auto += 1
             elif risk == RISK_YELLOW:
                 self._ceo_routed += 1
+        elif kind in ("hive_burst", "ln7_shadow_fork"):
+            # QUANTUM-CRYSTAL-ARCH — flywheel bus kinds (W3 / W1)
+            findings, passed = await self._dispatch_flywheel_kind(task, kind)
+            self._green_auto += 1
         elif kind in (
             "brief_refine",
             "matching_weight",
@@ -351,6 +358,55 @@ class CliTaskBusConsumer:
                 "severity": "warn",
             })
             return findings, False
+
+    async def _dispatch_flywheel_kind(self, task: Dict[str, Any], kind: str) -> tuple:
+        """QUANTUM-CRYSTAL-ARCH — hive_burst / ln7_shadow_fork worker body."""
+        findings: List[Dict[str, Any]] = []
+        pool = getattr(self._app_state, "db_pool", None) if self._app_state else None
+        notes = str(task.get("notes") or "")
+        try:
+            if kind == "hive_burst":
+                from app.services.ln7_hive_burst import run_hive_burst
+
+                out = await run_hive_burst(
+                    pool,
+                    notes=notes,
+                    dry_run=os.getenv("LN7_HIVE_DRY_RUN", "0") == "1",
+                )
+                findings.append({
+                    "detail": f"hive_burst: {str(out)[:400]}",
+                    "severity": "info" if out.get("ok") else "warn",
+                })
+                return findings, bool(out.get("ok"))
+            if kind == "ln7_shadow_fork":
+                import json as _json
+                from app.services.ln7_shadow_fork import run_shadow_fork
+
+                meta: Dict[str, Any] = {}
+                try:
+                    meta = _json.loads(notes) if notes.startswith("{") else {}
+                except Exception:
+                    meta = {}
+                out = await run_shadow_fork(
+                    pool,
+                    patch_hash=str(meta.get("patch_hash") or task.get("task_id") or ""),
+                    domain=str(meta.get("domain") or ""),
+                    evidence_uri=str(meta.get("evidence_uri") or ""),
+                    counterfactual_diff=str(meta.get("counterfactual_diff") or ""),
+                )
+                findings.append({
+                    "detail": f"ln7_shadow_fork: {str(out)[:400]}",
+                    "severity": "info",
+                })
+                return findings, bool(out.get("ok"))
+        except Exception as e:
+            findings.append({
+                "detail": f"flywheel {kind} failed: {e}",
+                "severity": "warn",
+            })
+            return findings, False
+        findings.append({"detail": f"unknown flywheel kind {kind}", "severity": "warn"})
+        return findings, False
 
     async def _dispatch_ops_task(self, task: Dict[str, Any]) -> tuple:
         """GREEN ops/compliance: structured findings; no therapeutic code changes."""

@@ -181,6 +181,7 @@ async def assess_revision_readiness(
                     SELECT COUNT(*) FROM ln7_coding_outcomes
                     WHERE revision_id = $1 AND generator = 'ln7'
                       AND (metrics_json->>'pack') IS NOT NULL
+                      AND COALESCE(metrics_json->>'invalidated', '') = ''
                     """,
                     rid,
                 )
@@ -193,6 +194,7 @@ async def assess_revision_readiness(
                     WHERE revision_id = $1 AND generator = 'ln7'
                       AND passed = TRUE
                       AND (metrics_json->>'pack') IS NOT NULL
+                      AND COALESCE(metrics_json->>'invalidated', '') = ''
                     """,
                     rid,
                 )

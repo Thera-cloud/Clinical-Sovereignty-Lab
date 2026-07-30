@@ -4,6 +4,11 @@
 # promotion loop never permanently stalls on one bad/slow candidate.
 # Install: bash scripts/ln7_install_ab_compare_watchdog.sh
 #
+# F1 observability (2026-07-30): a watchdog that cannot see must freeze, not shoot.
+# Death requires positive staleness (HB exists AND mtime > threshold). Absent /
+# unreadable HB, state I/O failure, or operator pause → hold + alarm; never
+# re-dispatch bakeoff/GPU work.
+#
 # # QUANTUM-CRYSTAL-ARCH
 set -euo pipefail
 REPO="${LN7_SOVEREIGN_HOME:-$HOME/sovereign-ln7}"
@@ -19,7 +24,25 @@ TESTED_LOG="$STATE_DIR/BASELINE_TESTED"
 mkdir -p "$STATE_DIR" "$(dirname "$LOG")"
 touch "$TESTED_LOG"
 
+# shellcheck disable=SC1091
+source "${REPO}/scripts/ln7_watchdog_observability.sh" 2>/dev/null \
+  || source "$(cd "$(dirname "$0")" && pwd)/ln7_watchdog_observability.sh"
+
 log() { echo "[ab-watchdog] $(date -u +%Y-%m-%dT%H%M%SZ) $*" | tee -a "$LOG" >&2; }
+
+# ── Blind / operator hold — never re-dispatch ────────────────────────────────
+if ! ln7_wd_probe_io; then
+  log "BLIND: state I/O failed — freeze (no re-dispatch)"
+  exit 0
+fi
+if ln7_wd_operator_paused; then
+  log "WORKER_PAUSED present — freeze (operator hold)"
+  exit 0
+fi
+if ln7_wd_compare_hold_lock; then
+  log "COMPARE_LOCK hold marker — freeze (no re-dispatch)"
+  exit 0
+fi
 
 # Newest shadow revision from GREEN's Postgres, excluding anything already tried
 # against baseline (win/lose/inconclusive). Empty output = nothing new to test yet.
@@ -46,6 +69,15 @@ mark_tested() {
 
 launch_compare() {
   local a="$1" b="$2"
+  # Re-check freeze gates immediately before money-touching dispatch
+  if ln7_wd_operator_paused || ln7_wd_compare_hold_lock; then
+    log "launch_compare aborted — pause/hold active"
+    return 1
+  fi
+  if ! ln7_wd_probe_io; then
+    log "launch_compare aborted — blind I/O"
+    return 1
+  fi
   echo "0" >"$STATE_DIR/COMPARE_WATCHDOG_RESTARTS"
   echo "$a" >"$STATE_DIR/rev_a"
   echo "$b" >"$STATE_DIR/rev_b"
@@ -79,26 +111,28 @@ if [[ -s "$STATE_DIR/AB_COMPARE" ]]; then
   if [[ -n "$next" ]]; then
     log "AB_COMPARE complete for $winner_rev — advancing to next candidate $next"
     archive_ab_compare
-    launch_compare "$BASELINE_REV" "$next"
+    launch_compare "$BASELINE_REV" "$next" || true
   else
     log "AB_COMPARE present — idle (no new shadow revision to test yet)"
   fi
   exit 0
 fi
 
-# ── Case 2: no active compare and nothing ever ran — cold start ─────────────
+# ── Case 2: no active compare — cold start only with explicit targets ────────
+# Never treat "no heartbeat" as death. Cold start requires rev_a+rev_b files
+# (or pick_next) AND no freeze markers — already checked above.
 if [[ ! -f "$STATE_DIR/COMPARE_LOCK" && ! -f "$STATE_DIR/COMPARE_HEARTBEAT" ]]; then
   rev_a_file="$(cat "$STATE_DIR/rev_a" 2>/dev/null || true)"
   rev_b_file="$(cat "$STATE_DIR/rev_b" 2>/dev/null || true)"
   if [[ -n "$rev_a_file" && -n "$rev_b_file" ]] && ! grep -qxF "$rev_b_file" "$TESTED_LOG" 2>/dev/null; then
     log "cold start — no active compare, launching pending target $rev_a_file vs $rev_b_file"
-    launch_compare "$rev_a_file" "$rev_b_file"
+    launch_compare "$rev_a_file" "$rev_b_file" || true
     exit 0
   fi
   next="$(pick_next_candidate || true)"
   if [[ -n "$next" ]]; then
     log "cold start — no target set, picking newest untested candidate $next"
-    launch_compare "$BASELINE_REV" "$next"
+    launch_compare "$BASELINE_REV" "$next" || true
   fi
   exit 0
 fi
@@ -106,22 +140,35 @@ fi
 HB="$STATE_DIR/COMPARE_HEARTBEAT"
 DEPLOY_STALE_S="${LN7_COMPARE_DEPLOY_STALE_S:-720}"
 PHASE=""
-if [[ ! -f "$HB" ]]; then
-  log "COMPARE_LOCK without heartbeat — treat as stale"
-  age=$STALE_S
-else
-  # macOS stat
-  mtime="$(stat -f %m "$HB" 2>/dev/null || stat -c %Y "$HB" 2>/dev/null || echo 0)"
-  now="$(date +%s)"
-  age=$(( now - mtime ))
-  PHASE="$(awk -F= '/^phase=/{print $2; exit}' "$HB" | tr -d '[:space:]')"
+age=""
+hb_rc=0
+age="$(ln7_wd_hb_age "$HB")" && hb_rc=0 || hb_rc=$?
+
+if [[ "$hb_rc" -eq 1 ]]; then
+  # Absent heartbeat while lock/activity claimed — FREEZE (was: treat as stale → shoot)
+  ln7_wd_alarm "hb_absent" "COMPARE_LOCK_or_activity without COMPARE_HEARTBEAT"
+  log "BLIND: heartbeat absent — freeze + alarm (no re-dispatch)"
+  exit 0
 fi
+if [[ "$hb_rc" -eq 2 ]]; then
+  ln7_wd_alarm "hb_unreadable" "COMPARE_HEARTBEAT exists but unreadable/stat_failed"
+  log "BLIND: heartbeat unreadable — freeze + alarm (no re-dispatch)"
+  exit 0
+fi
+
+PHASE="$(awk -F= '/^phase=/{print $2; exit}' "$HB" 2>/dev/null | tr -d '[:space:]' || true)"
 
 # PEFT deploy hung: tighter stale than bakeoff poll
 EFFECTIVE_STALE="$STALE_S"
 case "$PHASE" in
   deploy|deploy_*|peft|peft_*)
     EFFECTIVE_STALE="$DEPLOY_STALE_S"
+    ;;
+  paused_p1*|paused_*|hold|freeze)
+    # Operator/bleed-stop phases in HB body — freeze even if age would be "stale"
+    ln7_wd_alarm "hb_hold_phase" "phase=$PHASE"
+    log "hold phase=$PHASE — freeze (no re-dispatch)"
+    exit 0
     ;;
 esac
 
@@ -133,6 +180,7 @@ if [[ "$age" -lt "$EFFECTIVE_STALE" ]]; then
   exit 0
 fi
 
+# Positive staleness only — heartbeat existed, readable, and past threshold
 log "stale heartbeat age=${age}s (limit=${EFFECTIVE_STALE}s phase=${PHASE:-unknown})"
 
 # Parse revs from heartbeat or lock
@@ -152,8 +200,8 @@ if [[ -z "$REV_A" || -z "$REV_B" ]]; then
 fi
 
 if [[ -z "$REV_A" || -z "$REV_B" ]]; then
-  log "FAIL: cannot resolve rev_a/rev_b for restart — clearing stale lock"
-  rm -f "$STATE_DIR/COMPARE_LOCK"
+  ln7_wd_alarm "rev_unresolved" "stale_hb but cannot resolve rev_a/rev_b — freeze (do not clear lock blindly)"
+  log "FAIL: cannot resolve rev_a/rev_b — freeze + alarm (lock retained)"
   exit 1
 fi
 
@@ -178,11 +226,17 @@ if [[ "$RESTARTS" -ge "$MAX_RESTARTS" ]]; then
   rm -f "$STATE_DIR/COMPARE_LOCK" "$STATE_DIR/COMPARE_HEARTBEAT"
   next="$(pick_next_candidate || true)"
   if [[ -n "$next" ]]; then
-    launch_compare "$REV_A" "$next"
+    launch_compare "$REV_A" "$next" || true
   else
     log "no further untested candidates — will retry same pair next tick once training produces more"
     echo "stale $(date -u +%Y-%m-%dT%H%M%SZ) restarts=$RESTARTS a=$REV_A b=$REV_B" >"$STATE_DIR/COMPARE_STALE"
   fi
+  exit 0
+fi
+
+if ln7_wd_operator_paused || ln7_wd_compare_hold_lock || ! ln7_wd_probe_io; then
+  ln7_wd_alarm "restart_aborted_blind" "positive_stale but freeze gate tripped before re-dispatch"
+  log "restart aborted — freeze gate (no re-dispatch)"
   exit 0
 fi
 

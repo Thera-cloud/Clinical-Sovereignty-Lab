@@ -3447,6 +3447,50 @@ async def lifespan(app: FastAPI):
         print(f"   ⚠️  Ln7ContinuousAgent init failed: {_ln7c_err}")
         app.state.ln7_continuous_agent = "init_failed"  # truthy — do not tank service count
 
+    # QUANTUM-CRYSTAL-ARCH — Multi-LoRA flywheel agents (W13 boot fence + R1/R2/W15)
+    try:
+        from app.services.ln7_frozen_config import boot_fence_check
+
+        _fence = await boot_fence_check(db_pool)
+        app.state.ln7_fence = _fence
+        print(f"   ✅ LN7 fence boot check ok={_fence.get('ok')}")
+    except Exception as _fence_err:
+        print(f"   ⚠️  LN7 fence boot check failed: {_fence_err}")
+        app.state.ln7_fence = {"ok": False, "error": str(_fence_err)}
+    try:
+        from app.services.ln7_living_packs import LivingPackAgent
+
+        _living = LivingPackAgent(db_pool)
+        if not _is_clone:
+            await _living.start()
+        app.state.ln7_living_pack_agent = _living
+        print("   ✅ LivingPackAgent started")
+    except Exception as _lp_err:
+        print(f"   ⚠️  LivingPackAgent init failed: {_lp_err}")
+        app.state.ln7_living_pack_agent = None
+    try:
+        from app.services.phase_h_predicate_poller import PhaseHPredicatePoller
+
+        _php = PhaseHPredicatePoller(db_pool)
+        if not _is_clone:
+            await _php.start()
+        app.state.phase_h_predicate_poller = _php
+        print("   ✅ PhaseHPredicatePoller started")
+    except Exception as _php_err:
+        print(f"   ⚠️  PhaseHPredicatePoller init failed: {_php_err}")
+        app.state.phase_h_predicate_poller = None
+    try:
+        from app.services.goodhart_drift_sentinel import GoodhartDriftSentinel
+
+        _gds = GoodhartDriftSentinel(db_pool)
+        if not _is_clone:
+            await _gds.start()
+        app.state.goodhart_drift_sentinel = _gds
+        print("   ✅ GoodhartDriftSentinel started")
+    except Exception as _gds_err:
+        print(f"   ⚠️  GoodhartDriftSentinel init failed: {_gds_err}")
+        app.state.goodhart_drift_sentinel = None
+
     # QUANTUM-CRYSTAL-ARCH — Nate clinical coevolution bakeoff (flags default OFF)
     try:
         from app.services.nate_clinical_bakeoff_agent import NateClinicalBakeoffAgent
@@ -3666,6 +3710,10 @@ async def lifespan(app: FastAPI):
         ("ceo_dual_coo_auditor", _ceo_dual_coo_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln7_engine", _ln7_engine_ok),  # QUANTUM-CRYSTAL-ARCH — Little Nate 7
         ("ln7_continuous_agent", getattr(app.state, "ln7_continuous_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("ln7_fence", getattr(app.state, "ln7_fence", None) is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("ln7_living_pack_agent", getattr(app.state, "ln7_living_pack_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("phase_h_predicate_poller", getattr(app.state, "phase_h_predicate_poller", None) is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("goodhart_drift_sentinel", getattr(app.state, "goodhart_drift_sentinel", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_clinical_bakeoff_agent", callable(getattr(getattr(app.state, "nate_clinical_bakeoff_agent", None), "run_night", None))),  # QUANTUM-CRYSTAL-ARCH
         ("growth_scheduler", getattr(app.state, "growth_scheduler", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("content_factory", getattr(app.state, "content_factory", None) is not None),  # QUANTUM-CRYSTAL-ARCH
@@ -3773,6 +3821,18 @@ async def lifespan(app: FastAPI):
             print("   ✅ Ln7ContinuousAgent stopped")
     except Exception as _ln7c_stop:
         print(f"   ⚠️  Ln7ContinuousAgent shutdown: {_ln7c_stop}")
+    for _fly_attr in (
+        "ln7_living_pack_agent",
+        "phase_h_predicate_poller",
+        "goodhart_drift_sentinel",
+    ):
+        try:
+            _fly = getattr(app.state, _fly_attr, None)
+            if _fly is not None and hasattr(_fly, "stop"):
+                await _fly.stop()
+                print(f"   ✅ {_fly_attr} stopped")
+        except Exception as _fly_stop:
+            print(f"   ⚠️  {_fly_attr} shutdown: {_fly_stop}")
     try:
         _nca = getattr(app.state, "nate_clinical_bakeoff_agent", None)
         if _nca is not None and _nca != "init_failed" and hasattr(_nca, "stop"):

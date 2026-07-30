@@ -193,6 +193,8 @@ services:
       - SANDBOX_URL=http://10.13.13.4:9090
       - SANDBOX_HMAC_KEY=${SANDBOX_HMAC_KEY:-}
       - ENVIRONMENT=production
+      # QUANTUM-CRYSTAL-ARCH — LN7 Step 0 weld tree (W13); host dir is SA-unwritable
+      - FROZEN_CONFIG_DIR=/opt/ln7/frozen-config
       - ENABLE_VOICE_TRANSCRIPT_CRYSTALLIZATION=true
       # SOVEREIGN-VOICE — call identity / avatar sync / emotion pacing / guest intro
       - ENABLE_VOICE_IDENTITY=${ENABLE_VOICE_IDENTITY:-true}
@@ -398,6 +400,7 @@ services:
       - ./mobile/lib:/app/mobile/lib:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (Flutter)
       - ./backend/migrations:/app/migrations:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (schema)
       - ./patent:/app/patent:ro  # QUANTUM-CRYSTAL-ARCH: Dual-COO patent idea corpus (read-only)
+      - ./frozen-config:/opt/ln7/frozen-config:ro  # QUANTUM-CRYSTAL-ARCH — Step 0 fence (W13)
       - ./data/backend:/app/data
       - ./data/bridge:/app/bridge_data:ro  # Bridge metrics (PMB, Nevedal state) for dashboard read
       - backend_logs:/app/logs

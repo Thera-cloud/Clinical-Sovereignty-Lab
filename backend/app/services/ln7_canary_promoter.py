@@ -15,9 +15,21 @@ logger = logging.getLogger("ln7_canary_promoter")
 
 
 def auto_promote_enabled() -> bool:
-    return os.getenv("ENABLE_LN7_AUTO_PROMOTE", "").strip().lower() in (
-        "1", "true", "yes", "on",
-    )
+    """Sync helper: env kill-switch / force-on. Prefer async_auto_promote_enabled(db)."""
+    raw = os.getenv("ENABLE_LN7_AUTO_PROMOTE", "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return raw in ("1", "true", "yes", "on")
+
+
+async def async_auto_promote_enabled(db_pool=None) -> bool:
+    """PG-first flag (W6); env false remains kill-switch."""
+    try:
+        from app.services.ln7_feature_flags import auto_promote_enabled as _pg
+
+        return await _pg(db_pool)
+    except Exception:
+        return auto_promote_enabled()
 
 
 def canary_pct() -> float:
@@ -97,6 +109,7 @@ async def _passes_for_revision(db_pool, revision_id: str, *, limit: int = 50) ->
             SELECT passed FROM ln7_coding_outcomes
             WHERE revision_id = $1 AND generator = 'ln7'
               AND (metrics_json->>'pack') IS NOT NULL
+              AND COALESCE(metrics_json->>'invalidated', '') = ''
             ORDER BY created_at DESC LIMIT $2
             """,
             revision_id,
@@ -113,6 +126,7 @@ async def _forgetting_monitor(db_pool, revision_id: str) -> Dict[str, Any]:
             SELECT passed, created_at FROM ln7_coding_outcomes
             WHERE revision_id = $1 AND generator = 'ln7'
               AND (metrics_json->>'pack') IS NOT NULL
+              AND COALESCE(metrics_json->>'invalidated', '') = ''
             ORDER BY created_at DESC LIMIT 20
             """,
             revision_id,
@@ -197,12 +211,12 @@ async def evaluate_canary(db_pool, revision_id: str) -> Dict[str, Any]:
                 return {"ok": False, "action": "rolled_back", "gate": gate}
             return {"ok": False, "action": "hold_shadow", "gate": gate}
 
-        if not auto_promote_enabled():
+        if not await async_auto_promote_enabled(db_pool):
             return {
                 "ok": True,
                 "action": "await_ceo",
                 "gate": gate,
-                "hint": "ENABLE_LN7_AUTO_PROMOTE=true to flip serving under policy",
+                "hint": "G0: CEO activate valid until Step 0 greens ENABLE_LN7_AUTO_PROMOTE",
             }
 
         from app.services.ln7_revision import activate_revision

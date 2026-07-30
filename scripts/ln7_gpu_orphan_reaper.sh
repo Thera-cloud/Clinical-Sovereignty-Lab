@@ -93,6 +93,18 @@ reap_tag() {
     log "destroy orphan $id age=${age}s tag=$tag name=$name"
     bash "$REPO/scripts/ln7_destroy_cuda_droplet.sh" "$id" 2>>"$LOG" || \
       doctl compute droplet delete "$id" --force >/dev/null 2>&1 || true
+    # Destruction verification (orphan-cost hole) — silence ≠ gone
+    sleep 2
+    if doctl compute droplet get "$id" >/dev/null 2>&1; then
+      log "ALARM burst_destroy_fail: droplet $id still exists after delete"
+      mkdir -p "$STATE_DIR"
+      echo "ts=$(date -u +%Y-%m-%dT%H%M%SZ) kind=burst_destroy_fail droplet_id=$id" \
+        >>"$STATE_DIR/WATCHDOG_BLIND_ALARM.jsonl" 2>/dev/null || true
+      echo "ts=$(date -u +%Y-%m-%dT%H%M%SZ)"$'\n'"kind=burst_destroy_fail"$'\n'"detail=droplet_id=$id" \
+        >"$STATE_DIR/WATCHDOG_BLIND_ALARM" 2>/dev/null || true
+    else
+      log "destroy verified gone id=$id"
+    fi
   done < <(doctl compute droplet list --tag-name "$tag" \
     --format ID,Name,CreatedAt --no-header 2>/dev/null || true)
 }

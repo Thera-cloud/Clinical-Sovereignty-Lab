@@ -148,6 +148,53 @@ async def register_revision(
 ) -> Dict[str, Any]:
     rid = revision_id or f"LN7-{utc_revision_id()}"
     base = base_checkpoint or coder_model("deep")
+    # QUANTUM-CRYSTAL-ARCH — Phase A0: refuse 1.5B / base mismatch vs pinned 7B
+    _pinned = os.getenv(
+        "LN7_QLORA_HF_BASE", "Qwen/Qwen2.5-Coder-7B-Instruct"
+    ).strip()
+    _base_l = str(base or "").lower()
+    if "1.5b" in _base_l or (
+        "qwen2.5-coder" in _base_l
+        and "7b" not in _base_l
+        and "32b" not in _base_l
+        and "14b" not in _base_l
+    ):
+        return {
+            "ok": False,
+            "error": "base_mismatch_1p5b",
+            "revision_id": rid,
+            "base_checkpoint": base,
+            "pinned": _pinned,
+        }
+    hc = dict(harness_config or {})
+    if hc.get("hf_base") and str(hc.get("hf_base")).lower() != _pinned.lower():
+        if "1.5b" in str(hc.get("hf_base")).lower():
+            return {
+                "ok": False,
+                "error": "base_mismatch_1p5b",
+                "revision_id": rid,
+                "hf_base": hc.get("hf_base"),
+            }
+    # QUANTUM-CRYSTAL-ARCH — A0: uniform rank + target_modules recorded
+    _rank = hc.get("lora_rank") or hc.get("rank")
+    _targets = hc.get("target_modules")
+    if _rank is not None:
+        try:
+            _rank_i = int(_rank)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "invalid_lora_rank", "revision_id": rid}
+        if _rank_i not in (8, 16, 32, 64):
+            return {
+                "ok": False,
+                "error": "lora_rank_not_uniform",
+                "revision_id": rid,
+                "rank": _rank_i,
+            }
+        hc["lora_rank"] = _rank_i
+    if _targets is not None and not isinstance(_targets, (list, tuple)):
+        return {"ok": False, "error": "invalid_target_modules", "revision_id": rid}
+    if _targets is not None:
+        hc["target_modules"] = list(_targets)
     quant = quantization or quantization_floor()
     card = write_model_card(
         rid,
@@ -179,7 +226,7 @@ async def register_revision(
                 rid,
                 base,
                 quant,
-                json.dumps(harness_config or {}),
+                json.dumps(hc),
                 notes,
                 status,
                 card,
@@ -213,10 +260,34 @@ async def activate_revision(
     ceo_decision_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Flip serving alias for one tier — other tier active stays (fast ≠ deep)."""
-    _auto = os.getenv("ENABLE_LN7_AUTO_PROMOTE", "").strip().lower() in (
-        "1", "true", "yes", "on",
+    # QUANTUM-CRYSTAL-ARCH — fence + suppress gates; dual_coo_mechanical allowed in G2
+    try:
+        from app.services.ln7_frozen_config import promotions_allowed
+
+        if not promotions_allowed():
+            return {"ok": False, "error": "fence_manifest_mismatch"}
+    except Exception:
+        pass
+    try:
+        from app.services.ln7_suppress import is_suppressed
+
+        if await is_suppressed(db_pool, f"revision:{revision_id}"):
+            return {"ok": False, "error": "pattern_suppressed"}
+    except Exception:
+        pass
+    _auto = False
+    try:
+        from app.services.ln7_feature_flags import auto_promote_enabled as _pg_auto
+
+        _auto = await _pg_auto(db_pool)
+    except Exception:
+        _auto = os.getenv("ENABLE_LN7_AUTO_PROMOTE", "").strip().lower() in (
+            "1", "true", "yes", "on",
+        )
+    _allowed = (
+        "ceo", "Nathan", "DrNevedal1", "system_test", "policy_auto",
+        "dual_coo_mechanical",
     )
-    _allowed = ("ceo", "Nathan", "DrNevedal1", "system_test", "policy_auto")
     if promote_requires_ceo() and promoted_by not in _allowed:
         return {"ok": False, "error": "ceo_approval_required"}
     if promoted_by == "policy_auto" and not _auto:

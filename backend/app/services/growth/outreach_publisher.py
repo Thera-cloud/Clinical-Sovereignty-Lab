@@ -100,6 +100,27 @@ async def push_outreach_sequence(
     if not outreach_engine_enabled():
         return {"ok": False, "error": "ENABLE_OUTREACH_ENGINE=false", "degraded": True}
 
+    # QUANTUM-CRYSTAL-ARCH — W11 claim gate (refuse missing/expired/short_horizon email)
+    claim_ids = content_row.get("claim_ids") or []
+    if isinstance(claim_ids, str):
+        claim_ids = [c.strip() for c in claim_ids.split(",") if c.strip()]
+    if claim_ids:
+        try:
+            from app.services.growth_claims import assert_claims_publishable
+
+            gate = await assert_claims_publishable(
+                db_pool, claim_ids, channel="email"
+            )
+            if not gate.get("ok"):
+                return {
+                    "ok": False,
+                    "error": f"claim_gate:{gate.get('error')}",
+                    "claim_id": gate.get("claim_id"),
+                    "degraded": True,
+                }
+        except Exception as _cg:
+            return {"ok": False, "error": f"claim_gate_error:{_cg}", "degraded": True}
+
     ok_sender, sender_msg = validate_outreach_sender_domains()
     if not ok_sender:
         return {"ok": False, "error": sender_msg, "degraded": True}

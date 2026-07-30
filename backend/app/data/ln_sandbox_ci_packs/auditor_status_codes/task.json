@@ -7,5 +7,6 @@
     "broken/auditor.py"
   ],
   "domain": "coding",
-  "split": "train"
+  "split": "train",
+  "domain_tag": "trust"
 }

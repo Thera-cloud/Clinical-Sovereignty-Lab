@@ -3,6 +3,10 @@
   "title": "Fix asyncpg to_jsonb polymorphic cast",
   "prompt": "The file broken/handler.py fails under asyncpg because to_jsonb($1) has no type. Change ONLY the SQL fragment to_jsonb($1) into to_jsonb($1::int) inside the return string (exact cast). You may also update the nearby BUG comment. Do not invent helpers, do not rewrite the whole function, do not change looks_fixed(). Return ONLY a unified diff (---/+++ @@) for broken/handler.py. No markdown fences.",
   "test_path": "tests/test_handler.py",
-  "target_files": ["broken/handler.py"],
-  "domain": "coding"
+  "target_files": [
+    "broken/handler.py"
+  ],
+  "domain": "coding",
+  "domain_tag": "python",
+  "split": "train"
 }

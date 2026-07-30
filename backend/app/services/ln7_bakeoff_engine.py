@@ -149,6 +149,20 @@ async def run_private_pack_bakeoff(
     if not packs:
         return {"ok": False, "error": "no_packs"}
 
+    # Phase D / R2: stratify vintage vs living_* (fresh) packs
+    vintage = [p for p in packs if not str(p).startswith("living_")]
+    fresh = [p for p in packs if str(p).startswith("living_")]
+    if pack_names is None and (vintage or fresh):
+        # Prefer mix: up to half slots from fresh when present
+        n = min(len(packs), int(os.getenv("LN7_BAKEOFF_PACK_CAP", "24") or 24))
+        fresh_n = min(len(fresh), max(0, n // 2)) if fresh else 0
+        vintage_n = min(len(vintage), n - fresh_n)
+        rng = random.Random(int(os.getenv("LN7_BAKEOFF_STRAT_SEED", "42") or 42))
+        packs = rng.sample(vintage, vintage_n) if vintage_n else []
+        if fresh_n:
+            packs.extend(rng.sample(fresh, fresh_n))
+        rng.shuffle(packs)
+
     if seed_golden or os.getenv("LN7_BAKEOFF_SEED_GOLDEN", "").strip().lower() in (
         "1", "true", "yes", "on",
     ):
@@ -243,12 +257,24 @@ async def run_private_pack_bakeoff(
         rows.append({"pack": pack, "passed": passed, "outcome_id": oid, **result})
 
     ci = bootstrap_ci(passes)
+    fresh_passes = [
+        bool(r.get("passed"))
+        for r in rows
+        if str(r.get("pack") or "").startswith("living_")
+    ]
+    vintage_passes = [
+        bool(r.get("passed"))
+        for r in rows
+        if not str(r.get("pack") or "").startswith("living_")
+    ]
     return {
         "ok": True,
         "surface": "private_packs",
         "revision_id": revision_id,
         "harness_mode": mode,
         "pass_rate": ci,
+        "fresh_pass_rate": bootstrap_ci(fresh_passes) if fresh_passes else None,
+        "vintage_pass_rate": bootstrap_ci(vintage_passes) if vintage_passes else None,
         "results": rows,
         "report_only_public": False,
         "gate_surface": True,

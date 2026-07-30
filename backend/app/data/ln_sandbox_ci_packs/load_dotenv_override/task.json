@@ -7,5 +7,6 @@
     "broken/config.py"
   ],
   "domain": "coding",
-  "split": "train"
+  "split": "train",
+  "domain_tag": "python"
 }

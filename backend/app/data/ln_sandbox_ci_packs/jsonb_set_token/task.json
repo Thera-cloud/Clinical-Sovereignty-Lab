@@ -7,5 +7,6 @@
     "broken/billing.py"
   ],
   "domain": "coding",
-  "split": "train"
+  "split": "train",
+  "domain_tag": "billing"
 }

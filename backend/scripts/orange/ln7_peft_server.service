@@ -8,7 +8,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/ln7/peft_serve
 Environment=LN7_ADAPTER_DIR=/opt/ln7/adapters/LN7-2026-07-28T054420Z
-Environment=LN7_QLORA_HF_BASE=Qwen/Qwen2.5-Coder-1.5B-Instruct
+Environment=LN7_QLORA_HF_BASE=Qwen/Qwen2.5-Coder-7B-Instruct
 Environment=LN7_PEFT_MODEL_ID=ln7-peft
 Environment=LN7_PEFT_HOST=10.13.13.5
 Environment=LN7_PEFT_PORT=11435

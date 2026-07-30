@@ -2,6 +2,11 @@
 # BLUE drain/train watchdog — stale DRAIN_HEARTBEAT or dead mid-train → clear DRAINING + reap.
 # Same LaunchAgent pattern as compare watchdog.
 #
+# F1 observability (2026-07-30): a watchdog that cannot see must freeze, not shoot.
+# Stale-kill requires heartbeat EXISTS + readable + mtime past threshold while pid alive.
+# Absent/unreadable HB with live pid → freeze + alarm (do not destroy / re-probe).
+# Orphan reaper still runs as the third strap (independent of heartbeat).
+#
 # Install: bash scripts/ln7_install_drain_watchdog.sh
 #
 # # QUANTUM-CRYSTAL-ARCH
@@ -18,9 +23,13 @@ DRAIN_LOCK="$STATE_DIR/DRAIN_LOCK"
 TTL_HB="$STATE_DIR/ttl_heartbeat"
 mkdir -p "$STATE_DIR" "$(dirname "$LOG")"
 
+# shellcheck disable=SC1091
+source "${REPO}/scripts/ln7_watchdog_observability.sh" 2>/dev/null \
+  || source "$(cd "$(dirname "$0")" && pwd)/ln7_watchdog_observability.sh"
+
 log() { echo "[drain-watchdog] $(date -u +%Y-%m-%dT%H%M%SZ) $*" | tee -a "$LOG" >&2; }
 
-# Always attempt orphan reaper (cheap; protects live train IDs)
+# Always attempt orphan reaper (cheap; protects live train IDs) — third strap
 if [[ -x "$REPO/scripts/ln7_gpu_orphan_reaper.sh" ]]; then
   bash "$REPO/scripts/ln7_gpu_orphan_reaper.sh" || true
 elif [[ -f "$REPO/scripts/ln7_gpu_orphan_reaper.sh" ]]; then
@@ -32,19 +41,20 @@ if [[ -f "$STATE_DIR/COMPARE_LOCK" ]]; then
   exit 0
 fi
 
+if ln7_wd_operator_paused; then
+  log "WORKER_PAUSED — freeze drain kill path (orphan reaper already ran)"
+  exit 0
+fi
+
+if ! ln7_wd_probe_io; then
+  log "BLIND: state I/O failed — freeze (no kill/re-probe)"
+  exit 0
+fi
+
 # Nothing claiming a drain
 if [[ ! -f "$DRAINING" && ! -f "$DRAIN_LOCK" && ! -f "$PIDFILE" ]]; then
   exit 0
 fi
-
-file_age() {
-  local f="$1"
-  [[ -f "$f" ]] || { echo "$STALE_S"; return; }
-  local mtime now
-  mtime="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)"
-  now="$(date +%s)"
-  echo $((now - mtime))
-}
 
 pid_alive() {
   local p="$1"
@@ -61,23 +71,45 @@ if [[ -z "$PID" && -f "$DRAIN_LOCK" ]]; then
   PID="$(awk -F= '/^pid=/{print $2; exit}' "$DRAIN_LOCK" | tr -d '[:space:]')"
 fi
 
-AGE_HB="$(file_age "$DRAIN_HB")"
-[[ -f "$DRAIN_HB" ]] || AGE_HB="$(file_age "$TTL_HB")"
 ALIVE=0
 pid_alive "$PID" && ALIVE=1
 
-if [[ "$ALIVE" == "1" && "$AGE_HB" -lt "$STALE_S" ]]; then
+# Resolve heartbeat age with positive-evidence semantics
+HB_PATH=""
+AGE_HB=""
+hb_rc=1
+if [[ -f "$DRAIN_HB" ]]; then
+  HB_PATH="$DRAIN_HB"
+  AGE_HB="$(ln7_wd_hb_age "$DRAIN_HB")" && hb_rc=0 || hb_rc=$?
+elif [[ -f "$TTL_HB" ]]; then
+  HB_PATH="$TTL_HB"
+  AGE_HB="$(ln7_wd_hb_age "$TTL_HB")" && hb_rc=0 || hb_rc=$?
+else
+  hb_rc=1
+fi
+
+# Live pid + missing/unreadable HB → freeze (was: treat missing as stale → kill)
+if [[ "$ALIVE" == "1" && "$hb_rc" -ne 0 ]]; then
+  if [[ "$hb_rc" -eq 1 ]]; then
+    ln7_wd_alarm "drain_hb_absent" "live_pid=$PID DRAINING set but no heartbeat"
+    log "BLIND: live drain pid=$PID but heartbeat absent — freeze + alarm"
+  else
+    ln7_wd_alarm "drain_hb_unreadable" "live_pid=$PID path=${HB_PATH:-none}"
+    log "BLIND: live drain pid=$PID but heartbeat unreadable — freeze + alarm"
+  fi
+  exit 0
+fi
+
+if [[ "$ALIVE" == "1" && "$hb_rc" -eq 0 && "$AGE_HB" -lt "$STALE_S" ]]; then
   exit 0
 fi
 
 # Dead process but DRAINING left — clear for capacity watch re-probe
 if [[ "$ALIVE" != "1" ]]; then
-  log "drain dead pid=${PID:-none} — clear DRAINING/LOCK (age_hb=${AGE_HB}s)"
+  log "drain dead pid=${PID:-none} — clear DRAINING/LOCK (hb_rc=${hb_rc} age_hb=${AGE_HB:-n/a})"
   echo "fail $(date -u +%Y-%m-%dT%H%M%SZ) pid=${PID:-none} watchdog=dead" >"$STATE_DIR/AB_FAIL"
   rm -f "$DRAINING" "$PIDFILE" "$DRAIN_LOCK" "$DRAIN_HB" "$TTL_HB"
-  # Drop protect so orphan reaper can destroy leftover GPU
   if [[ -f "$STATE_DIR/probe.env" ]]; then
-    # Keep probe.env only if droplet still listed AND we want retry — clear protect by renaming
     mv "$STATE_DIR/probe.env" "$STATE_DIR/probe.env.stale.$(date -u +%Y%m%d%H%M%S)" 2>/dev/null || \
       rm -f "$STATE_DIR/probe.env"
   fi
@@ -85,7 +117,7 @@ if [[ "$ALIVE" != "1" ]]; then
   exit 0
 fi
 
-# Alive but heartbeat stale — mid-train hung
+# Alive + positive stale heartbeat — mid-train hung
 KILLS=0
 [[ -f "$STATE_DIR/DRAIN_WATCHDOG_KILLS" ]] && KILLS="$(tr -d '[:space:]' <"$STATE_DIR/DRAIN_WATCHDOG_KILLS" || true)"
 KILLS="${KILLS:-0}"
@@ -111,6 +143,11 @@ sleep 2
 
 if [[ -n "$DROPLET_ID" ]]; then
   bash "$REPO/scripts/ln7_destroy_cuda_droplet.sh" "$DROPLET_ID" || true
+  # Destruction verification (orphan-cost hole)
+  if doctl compute droplet get "$DROPLET_ID" >/dev/null 2>&1; then
+    ln7_wd_alarm "burst_destroy_fail" "droplet_id=$DROPLET_ID still exists after delete"
+    log "ALARM: droplet $DROPLET_ID still present after destroy"
+  fi
 fi
 
 echo "fail $(date -u +%Y-%m-%dT%H%M%SZ) pid=$PID watchdog=stale_hb" >"$STATE_DIR/AB_FAIL"

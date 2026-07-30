@@ -182,6 +182,7 @@ async def export_rows(
     *,
     include_goldens: bool = True,
     goldens_only: bool = False,
+    domain: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     stats = {
         "from_db_passed": 0,
@@ -190,6 +191,7 @@ async def export_rows(
         "dropped_stub": 0,
         "dropped_heldout": 0,
         "dropped_no_diff": 0,
+        "domain": domain,
     }
     out: List[Dict[str, Any]] = []
     seen_ph: set = set()
@@ -255,9 +257,26 @@ async def export_rows(
                 stats["dropped_heldout"] += 1
                 continue
             if d.get("split") == "heldout":
+                # Phase D hard-block: held-out never trains
                 stats["dropped_heldout"] += 1
                 continue
+            if domain:
+                meta = d.get("metrics_json") or {}
+                if isinstance(meta, str):
+                    try:
+                        meta = json.loads(meta)
+                    except Exception:
+                        meta = {}
+                row_dom = (
+                    (meta.get("domain_tag") or meta.get("domain") or "")
+                    if isinstance(meta, dict)
+                    else ""
+                )
+                if str(row_dom).lower() != str(domain).lower():
+                    continue
             body = (d.get("patch_text") or "") if isinstance(d.get("patch_text"), str) else ""
+            # Re-assert heldout never enters train JSONL
+            assert d.get("split") != "heldout", "heldout hard-block violated"
             if not _is_real_diff(body):
                 stats["dropped_no_diff"] += 1
                 continue
@@ -333,6 +352,11 @@ def main() -> int:
     ap.add_argument("--include-goldens", action="store_true", default=True)
     ap.add_argument("--no-goldens", action="store_true")
     ap.add_argument("--goldens-only", action="store_true")
+    ap.add_argument(
+        "--domain",
+        default=None,
+        help="Filter export to domain_tag (W9 / B3)",
+    )
     args = ap.parse_args()
     include = not args.no_goldens
     rows, stats = asyncio.run(
@@ -340,6 +364,7 @@ def main() -> int:
             args.limit,
             include_goldens=include,
             goldens_only=args.goldens_only,
+            domain=args.domain,
         )
     )
     path = Path(args.out)

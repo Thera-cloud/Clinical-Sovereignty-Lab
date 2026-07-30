@@ -45,6 +45,12 @@ GROWTH_TASK_KINDS = frozenset({
     "growth_experiment_conclude",
 })
 
+# QUANTUM-CRYSTAL-ARCH — Multi-LoRA flywheel (W3 / W1)
+FLYWHEEL_TASK_KINDS = frozenset({
+    "hive_burst",
+    "ln7_shadow_fork",
+})
+
 
 def _env() -> str:
     return os.getenv("ENVIRONMENT", "production")
@@ -138,6 +144,9 @@ def ensure_bus_meta(client=None, *, consumer_active: bool = False) -> bool:
         if _growth_on:
             features.append("adaptive_growth")
             features.extend(sorted(GROWTH_TASK_KINDS))
+        # QUANTUM-CRYSTAL-ARCH — flywheel hive_burst + ln7_shadow_fork
+        features.append("ln7_flywheel")
+        features.extend(sorted(FLYWHEEL_TASK_KINDS))
         meta = {
             "features": features,
             "max_review_rounds": MAX_REVIEW_ROUNDS,

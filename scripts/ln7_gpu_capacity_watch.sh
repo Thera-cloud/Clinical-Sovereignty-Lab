@@ -266,14 +266,30 @@ probe_region_keep() {
     return 1
   fi
   name="ln7-gpu-probe-$(date -u +%Y%m%d%H%M%S)-$RANDOM"
+  # QUANTUM-CRYSTAL-ARCH — droplet-side TTL self-destruct (belt; orphan-reaper = strap 3)
+  local userdata=""
+  if [[ -f "$REPO/scripts/ln7_droplet_ttl_cloudinit.sh" ]]; then
+    userdata="$(bash "$REPO/scripts/ln7_droplet_ttl_cloudinit.sh" 2>/dev/null || true)"
+  fi
   set +e
-  out="$(doctl compute droplet create "$name" \
-    --size "$SIZE" \
-    --image gpu-h100x1-base \
-    --region "$region" \
-    --ssh-keys "$key" \
-    --tag-names ln7-gpu-probe,ln7-train,ephemeral \
-    --format ID --no-header 2>&1)"
+  if [[ -n "$userdata" ]]; then
+    out="$(doctl compute droplet create "$name" \
+      --size "$SIZE" \
+      --image gpu-h100x1-base \
+      --region "$region" \
+      --ssh-keys "$key" \
+      --tag-names ln7-gpu-probe,ln7-train,ephemeral \
+      --user-data "$userdata" \
+      --format ID --no-header 2>&1)"
+  else
+    out="$(doctl compute droplet create "$name" \
+      --size "$SIZE" \
+      --image gpu-h100x1-base \
+      --region "$region" \
+      --ssh-keys "$key" \
+      --tag-names ln7-gpu-probe,ln7-train,ephemeral \
+      --format ID --no-header 2>&1)"
+  fi
   local rc=$?
   set -e
   if [[ $rc -ne 0 ]]; then
@@ -351,8 +367,9 @@ set +e
 bash "$REPO/scripts/ln7_ab_qlora_drain.sh" >>"$DRAIN_LOG" 2>&1
 rc=\$?
 set -e
-# Resume continuous worker if we paused it
-if [[ -f "$STATE_DIR/WORKER_PAUSED" ]]; then
+# Resume continuous worker only if WE paused it for this drain — never clear
+# operator/bleed-stop holds (paused_by_*, p1_single, freeze).
+if [[ -f "$STATE_DIR/WORKER_PAUSED" ]] && ! grep -qiE 'paused_by_|bleed_stop|p1_single|freeze|destroyed_or_absent' "$STATE_DIR/WORKER_PAUSED" 2>/dev/null; then
   plist="\$HOME/Library/LaunchAgents/$WORKER_LABEL.plist"
   if [[ -f "\$plist" ]]; then
     launchctl bootstrap "gui/\$(id -u)" "\$plist" 2>/dev/null || launchctl load "\$plist" 2>/dev/null || true
@@ -499,6 +516,23 @@ one_check() {
   if [[ -f "$STATE_DIR/COMPARE_LOCK" ]]; then
     log "COMPARE_LOCK present — skip probe/drain"
     return 0
+  fi
+
+  # F1: operator / bleed-stop pause — freeze, never provision (watchdog that can't see must freeze)
+  if [[ -f "$STATE_DIR/WORKER_PAUSED" ]]; then
+    log "WORKER_PAUSED present — skip probe/drain (freeze)"
+    return 0
+  fi
+  if [[ -f "$STATE_DIR/WATCHDOG_BLIND_ALARM" ]]; then
+    # Fresh blind alarm (<1h) — do not shoot while observability is broken
+    local alarm_age=0 mtime now
+    mtime="$(stat -f %m "$STATE_DIR/WATCHDOG_BLIND_ALARM" 2>/dev/null || stat -c %Y "$STATE_DIR/WATCHDOG_BLIND_ALARM" 2>/dev/null || echo 0)"
+    now="$(date +%s)"
+    alarm_age=$((now - mtime))
+    if [[ "$alarm_age" -lt 3600 ]]; then
+      log "WATCHDOG_BLIND_ALARM age=${alarm_age}s — skip probe/drain (freeze)"
+      return 0
+    fi
   fi
 
   if [[ -f "$AB_OK" ]]; then

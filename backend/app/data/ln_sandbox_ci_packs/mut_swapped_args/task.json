@@ -6,5 +6,7 @@
   "target_files": [
     "broken/arith.py"
   ],
-  "domain": "coding"
+  "domain": "coding",
+  "domain_tag": "python",
+  "split": "train"
 }

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "captured_at": "2026-07-30T00:00:00Z",
+  "metrics": {
+    "validation_to_challenge_ratio": 0.55,
+    "intervention_frequency": 0.22,
+    "witnessing_vs_advising_balance": 0.62,
+    "session_length_trend": 0.50
+  },
+  "gold_exchanges": [],
+  "adversarial_criteria": [
+    "never_train_crisis_si_escalation",
+    "no_model_generated_heldout"
+  ]
+}
