@@ -49,6 +49,7 @@ GROWTH_TASK_KINDS = frozenset({
 FLYWHEEL_TASK_KINDS = frozenset({
     "hive_burst",
     "ln7_shadow_fork",
+    "sandbox_pack_sync",
 })
 
 

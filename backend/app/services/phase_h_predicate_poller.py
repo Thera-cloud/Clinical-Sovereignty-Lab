@@ -11,10 +11,14 @@ logger = logging.getLogger("phase_h_predicate_poller")
 
 
 async def evaluate_predicates(db_pool) -> Dict[str, Any]:
-    """Five mechanical predicates. All true → PHASE_H_OPEN."""
+    """Five mechanical predicates. All true → PHASE_H_OPEN.
+
+    Tightened vs bootstrap: no soft fallbacks that auto-open on bare tables.
+    Does not flip G2 promote flags.
+    """
     results: List[Dict[str, Any]] = []
 
-    # 1 Gold-sample audit present
+    # 1 Gold-sample audit — need real heldout coverage (not a single seed row)
     gold_ok = False
     try:
         async with db_pool.acquire() as conn:
@@ -24,7 +28,7 @@ async def evaluate_predicates(db_pool) -> Dict[str, Any]:
                 WHERE split = 'heldout' AND source IN ('authored', 'public_bench')
                 """
             )
-            gold_ok = int(n or 0) >= 1
+            gold_ok = int(n or 0) >= 5
     except Exception as e:
         logger.warning("gold predicate: %s", e)
     results.append({"id": "gold_sample_audit", "ok": gold_ok})
@@ -40,12 +44,12 @@ async def evaluate_predicates(db_pool) -> Dict[str, Any]:
                    OR metrics_json ? 'brier'
                 """
             )
-            cal_ok = int(n or 0) >= 1
+            cal_ok = int(n or 0) >= 3
     except Exception as e:
         logger.warning("calibration predicate: %s", e)
     results.append({"id": "calibrated_abstention", "ok": cal_ok})
 
-    # 3 Labeling provenance fields exist on outcomes
+    # 3 Labeling provenance + at least one W1 shadow_outcome row proven
     prov_ok = False
     try:
         async with db_pool.acquire() as conn:
@@ -55,24 +59,26 @@ async def evaluate_predicates(db_pool) -> Dict[str, Any]:
                 WHERE provenance_json != '{}'::jsonb
                 """
             )
-            prov_ok = int(n or 0) >= 1
+            shadow_n = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM outcome_envelope
+                WHERE shadow_outcome IS NOT NULL
+                  AND (shadow_outcome->>'passed') IS NOT NULL
+                """
+            )
+            prov_ok = int(n or 0) >= 3 and int(shadow_n or 0) >= 1
     except Exception as e:
         logger.warning("provenance predicate: %s", e)
     results.append({"id": "labeling_provenance", "ok": prov_ok})
 
-    # 4 Adversarial held-out weld artifact (platform-state derived, not model-gen)
-    from pathlib import Path
+    # 4 Adversarial held-out — dedicated file only (no goodhart_reference fallback)
     from app.services.ln7_frozen_config import frozen_config_dir
 
     adv_path = frozen_config_dir() / "adversarial_heldout.json"
-    # Bootstrap: goodhart_reference adversarial_criteria counts until dedicated file
     adv_ok = adv_path.is_file()
-    if not adv_ok:
-        ref = frozen_config_dir() / "goodhart_reference.json"
-        adv_ok = ref.is_file()
     results.append({"id": "adversarial_heldout", "ok": adv_ok})
 
-    # 5 Data governance — consent/de-id flag presence (conservative: require table)
+    # 5 Data governance — growth_claims + fence manifest green
     gov_ok = False
     try:
         async with db_pool.acquire() as conn:
@@ -80,11 +86,14 @@ async def evaluate_predicates(db_pool) -> Dict[str, Any]:
                 """
                 SELECT EXISTS (
                     SELECT 1 FROM information_schema.tables
-                    WHERE table_name = 'users'
+                    WHERE table_name = 'growth_claims'
                 )
                 """
             )
-            gov_ok = bool(exists)
+        from app.services.ln7_frozen_config import verify_manifest
+
+        fence_ok, _ = verify_manifest()
+        gov_ok = bool(exists) and bool(fence_ok)
     except Exception as e:
         logger.warning("governance predicate: %s", e)
     results.append({"id": "data_governance", "ok": gov_ok})

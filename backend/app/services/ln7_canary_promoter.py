@@ -96,6 +96,13 @@ async def start_canary(
                 canary_pct(),
                 inc,
             )
+        # QUANTUM-CRYSTAL-ARCH — W1: seed shadow_outcome when canary opens
+        try:
+            from app.services.ln7_flywheel_pipeline import ensure_shadow_for_revision
+
+            await ensure_shadow_for_revision(db_pool, revision_id)
+        except Exception as _sh:
+            logger.info("ln7_canary shadow seed: %s", _sh)
         return True
     except Exception as exc:
         logger.warning("ln7_canary start: %s", exc)
@@ -211,15 +218,44 @@ async def evaluate_canary(db_pool, revision_id: str) -> Dict[str, Any]:
                 return {"ok": False, "action": "rolled_back", "gate": gate}
             return {"ok": False, "action": "hold_shadow", "gate": gate}
 
-        if not await async_auto_promote_enabled(db_pool):
+        # QUANTUM-CRYSTAL-ARCH — W1/W2 pipeline: shadow rows + promote path
+        # G0 keeps CEO activate; G2 mechanical only when flag already true.
+        from app.services.ln7_feature_flags import dual_coo_mechanical_promote
+        from app.services.ln7_flywheel_pipeline import promote_path_after_gate
+
+        mechanical = False
+        try:
+            mechanical = await dual_coo_mechanical_promote(db_pool)
+        except Exception:
+            mechanical = False
+
+        if not await async_auto_promote_enabled(db_pool) or mechanical:
+            pipe = await promote_path_after_gate(
+                db_pool,
+                revision_id,
+                evidence={
+                    "gate": gate,
+                    "heldout_outcomes_n": gate.get("heldout_outcomes_n"),
+                },
+                title=f"LN7 canary READY: {revision_id}",
+            )
+            action = "promoted" if pipe.get("activated") else "await_ceo"
             return {
                 "ok": True,
-                "action": "await_ceo",
+                "action": action,
                 "gate": gate,
-                "hint": "G0: CEO activate valid until Step 0 greens ENABLE_LN7_AUTO_PROMOTE",
+                "pipeline": pipe,
+                "hint": (
+                    "G2 mechanical"
+                    if mechanical
+                    else "G0: CEO activate valid until Step 0 + W1 proven"
+                ),
             }
 
+        from app.services.ln7_flywheel_pipeline import ensure_shadow_for_revision
         from app.services.ln7_revision import activate_revision
+
+        await ensure_shadow_for_revision(db_pool, revision_id)
         act = await activate_revision(
             db_pool,
             revision_id,

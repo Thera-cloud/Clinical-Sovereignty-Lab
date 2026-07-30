@@ -134,7 +134,8 @@ async def retract_surfaces(db_pool, claim_id: str) -> Dict[str, Any]:
     try:
         async with db_pool.acquire() as conn:
             for surface in smap.get("surfaces") or []:
-                if surface.get("id") == "skyeye_content_queue":
+                sid = surface.get("id")
+                if sid == "skyeye_content_queue":
                     await conn.execute(
                         """
                         UPDATE skyeye_content_queue
@@ -149,6 +150,43 @@ async def retract_surfaces(db_pool, claim_id: str) -> Dict[str, Any]:
                         claim_id,
                     )
                     actions.append("skyeye_content_queue_cancel")
+                elif sid == "directory_profile_fields":
+                    # Clear growth claim refs from profile_data (JSONB patch)
+                    await conn.execute(
+                        """
+                        UPDATE users
+                        SET profile_data = (
+                            COALESCE(profile_data, '{}'::jsonb)
+                            - 'growth_claim_ids'
+                            - 'growth_claim_text'
+                            - 'directory_growth_blurb'
+                        )
+                        WHERE profile_data::text ILIKE '%' || $1 || '%'
+                        """,
+                        claim_id,
+                    )
+                    actions.append("directory_profile_fields_clear")
+                elif sid == "sovereign_command_growth":
+                    # Flag for dashboard grep/rewrite job (no silent HTML rewrite)
+                    await conn.execute(
+                        """
+                        INSERT INTO skyeye_activity (type, content, platform, created_at)
+                        VALUES (
+                            'growth_claim_retract_flag',
+                            $1::text,
+                            'growth',
+                            NOW()
+                        )
+                        """,
+                        json.dumps(
+                            {
+                                "claim_id": claim_id,
+                                "action": "grep_and_flag",
+                                "paths": surface.get("paths") or [],
+                            }
+                        ),
+                    )
+                    actions.append("sovereign_command_growth_flag")
     except Exception as e:
         logger.warning("retract_surfaces failed: %s", e)
         return {"ok": False, "actions": actions, "error": str(e)}

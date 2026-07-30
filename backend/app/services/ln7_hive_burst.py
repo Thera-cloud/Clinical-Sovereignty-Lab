@@ -87,19 +87,36 @@ async def run_hive_burst(
         "dry_run": dry_run,
     }
 
+    endpoint_url = os.getenv("LN7_HIVE_ENDPOINT", "").strip()
+    ttl_s = int(os.getenv("LN7_HIVE_ENDPOINT_TTL_S", "3600") or "3600")
     try:
-        if dry_run or not script.is_file():
-            # Skeleton path: publish stub endpoint marker only in dry_run
-            if dry_run:
-                publish_serve_endpoint(
-                    os.getenv("LN7_HIVE_STUB_URL", "http://127.0.0.1:11436"),
-                    ttl_s=120,
-                )
-            result["mode"] = "dry_run_or_missing_script"
+        if dry_run or os.getenv("LN7_HIVE_DRY_RUN", "").strip() in ("1", "true", "yes"):
+            # Activate-ready dry path: publish Redis serve key for clients/tests
+            stub = endpoint_url or os.getenv(
+                "LN7_HIVE_STUB_URL", "http://127.0.0.1:11436"
+            )
+            published = publish_serve_endpoint(stub, engine="vllm_burst", ttl_s=min(300, ttl_s))
+            result["mode"] = "dry_run"
+            result["endpoint"] = stub
+            result["endpoint_published"] = published
+            write_watchdog({
+                "burst_id": burst_id, "phase": "dry_run", "endpoint": stub,
+            })
+            # Dry-run still clears endpoint so miss → Ollama (unless keep flag)
+            if os.getenv("LN7_HIVE_DRY_KEEP_ENDPOINT", "").strip() not in (
+                "1", "true", "yes",
+            ):
+                clear_serve_endpoint()
+        elif not script.is_file():
+            result["mode"] = "missing_script"
+            result["ok"] = False
+            result["error"] = "ln7_hive_burst.sh missing"
         else:
             env = os.environ.copy()
             env["LN7_BURST_ID"] = burst_id
             env["LN7_ADAPTER_INTENTS"] = json.dumps(intents)
+            if endpoint_url:
+                env["LN7_HIVE_ENDPOINT"] = endpoint_url
             proc = subprocess.run(
                 ["bash", str(script)],
                 cwd=str(REPO_ROOT),
@@ -112,12 +129,23 @@ async def run_hive_burst(
             result["stdout_tail"] = (proc.stdout or "")[-2000:]
             result["stderr_tail"] = (proc.stderr or "")[-2000:]
             result["ok"] = proc.returncode == 0
+            # Publish endpoint when script echoes LN7_SERVE_URL=...
+            serve_url = endpoint_url
+            for line in (proc.stdout or "").splitlines():
+                if line.startswith("LN7_SERVE_URL="):
+                    serve_url = line.split("=", 1)[1].strip()
+            if result["ok"] and serve_url:
+                result["endpoint_published"] = publish_serve_endpoint(
+                    serve_url, engine="vllm_burst", ttl_s=ttl_s
+                )
+                result["endpoint"] = serve_url
             if not result["ok"]:
                 await notify_flywheel_anomaly(
                     "burst_destroy_fail",
                     {"burst_id": burst_id, "rc": proc.returncode},
                     db_pool=db_pool,
                 )
+                clear_serve_endpoint()
 
         write_watchdog({"burst_id": burst_id, "phase": "done", "ok": result["ok"]})
     except Exception as e:

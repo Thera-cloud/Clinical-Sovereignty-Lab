@@ -246,6 +246,13 @@ async def set_shadow(db_pool, revision_id: str) -> bool:
                 "UPDATE ln7_revisions SET status = 'shadow' WHERE revision_id = $1",
                 revision_id,
             )
+        # QUANTUM-CRYSTAL-ARCH — G1/W1: Queens-merge equivalent → CI oracle shadow
+        try:
+            from app.services.ln7_flywheel_pipeline import ensure_shadow_for_revision
+
+            await ensure_shadow_for_revision(db_pool, revision_id)
+        except Exception as _sh:
+            logger.info("LN7 set_shadow W1 emit: %s", _sh)
         return True
     except Exception as exc:
         logger.warning("LN7 set_shadow: %s", exc)
@@ -292,6 +299,34 @@ async def activate_revision(
         return {"ok": False, "error": "ceo_approval_required"}
     if promoted_by == "policy_auto" and not _auto:
         return {"ok": False, "error": "auto_promote_disabled"}
+    # QUANTUM-CRYSTAL-ARCH — G1: require shadow_outcome when patch_hash known
+    if db_pool is not None:
+        try:
+            async with db_pool.acquire() as conn:
+                _hc = await conn.fetchval(
+                    "SELECT harness_config_json FROM ln7_revisions WHERE revision_id = $1",
+                    revision_id,
+                )
+            _cfg = _hc if isinstance(_hc, dict) else {}
+            if isinstance(_hc, str):
+                import json as _json
+
+                try:
+                    _cfg = _json.loads(_hc)
+                except Exception:
+                    _cfg = {}
+            _ph = str((_cfg or {}).get("patch_hash") or "").strip()
+            if _ph:
+                from app.services.ln7_shadow_fork import g1_promote_allowed
+
+                if not await g1_promote_allowed(db_pool, _ph):
+                    return {
+                        "ok": False,
+                        "error": "shadow_outcome_required",
+                        "patch_hash": _ph,
+                    }
+        except Exception as _g1e:
+            logger.debug("LN7 g1 shadow gate: %s", _g1e)
     card = model_card_path(revision_id)
     root = Path(__file__).resolve().parents[3]
     if (

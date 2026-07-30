@@ -276,13 +276,17 @@ async def post_bakeoff(request: Request, body: Optional[Dict[str, Any]] = None, 
         notify_out = None
         if result.get("ok") and rid and rid != "LN7-baseline":
             try:
-                from app.services.ln7_revision import notify_revision_candidate
+                from app.services.ln7_flywheel_pipeline import (
+                    ensure_shadow_for_revision,
+                    promote_path_after_gate,
+                )
                 from app.services.ln7_revision_readiness import assess_revision_readiness
 
+                await ensure_shadow_for_revision(pool, rid)
                 ready = await assess_revision_readiness(pool, rid)
                 if ready.get("ready"):
-                    notify_out = await notify_revision_candidate(
-                        pool, rid, force_ready=True
+                    notify_out = await promote_path_after_gate(
+                        pool, rid, title=f"LN7 bakeoff READY: {rid}"
                     )
             except Exception as exc:
                 notify_out = {"status": "error", "error": str(exc)[:120]}
@@ -581,17 +585,51 @@ async def post_canary_evaluate(
             incumbent_id=str(raw_inc).strip() if raw_inc else None,
         )
     result = await evaluate_canary(_pool(request), rid)
-    # QUANTUM-CRYSTAL-ARCH — READY renotify when gate awaits CEO
-    if result.get("action") == "await_ceo" and result.get("ok"):
-        try:
-            from app.services.ln7_revision import notify_revision_candidate
-
-            result["ceo_notify"] = await notify_revision_candidate(
-                _pool(request), rid, force_ready=True
-            )
-        except Exception as exc:
-            result["ceo_notify"] = {"status": "error", "error": str(exc)[:120]}
+    # Pipeline already ran promote_path_after_gate (G0 CEO + W1 shadow)
+    if result.get("pipeline"):
+        result["ceo_notify"] = result.get("pipeline", {}).get("ceo_notify")
     return result
+
+
+@router.post("/shadow-fork/revision")
+async def post_shadow_fork_revision(
+    request: Request,
+    body: Optional[Dict[str, Any]] = None,
+    _admin=Depends(require_admin),
+):
+    """W1 prove path — emit Queens merge → sandbox shadow_outcome (no G2 flip)."""
+    from app.services.ln7_flywheel_pipeline import ensure_shadow_for_revision
+
+    body = body or {}
+    rid = str(body.get("revision_id") or "").strip()
+    if not rid:
+        raise HTTPException(422, "revision_id required")
+    out = await ensure_shadow_for_revision(
+        _pool(request), rid, force=bool(body.get("force"))
+    )
+    return {"status": "ok" if out.get("ok") else "error", **out}
+
+
+@router.post("/pipeline/promote-ready")
+async def post_pipeline_promote_ready(
+    request: Request,
+    body: Optional[Dict[str, Any]] = None,
+    _admin=Depends(require_admin),
+):
+    """G0: shadow + CEO inbox. G2 only activates when mechanical flag already on."""
+    from app.services.ln7_flywheel_pipeline import promote_path_after_gate
+
+    body = body or {}
+    rid = str(body.get("revision_id") or "").strip()
+    if not rid:
+        raise HTTPException(422, "revision_id required")
+    out = await promote_path_after_gate(
+        _pool(request),
+        rid,
+        evidence=body.get("evidence") if isinstance(body.get("evidence"), dict) else {},
+        title=str(body.get("title") or f"LN7 promote candidate: {rid}"),
+    )
+    return {"status": "ok", **out}
 
 
 @router.get("/contestants")

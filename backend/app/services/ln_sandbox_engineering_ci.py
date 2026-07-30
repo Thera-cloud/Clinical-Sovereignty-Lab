@@ -140,8 +140,19 @@ def _apply_unified_diff_impl(workdir: Path, diff: str) -> Tuple[bool, str]:
             notes.append(f"escape:{rel}")
             continue
         if not target.is_file():
-            notes.append(f"missing:{rel}")
-            continue
+            # QUANTUM-CRYSTAL-ARCH — G1: allow new-file hunks (--- /dev/null or @@ -0,0)
+            create_ok = (
+                old_spec.rstrip().endswith("/dev/null")
+                or old_spec.strip() == "/dev/null"
+                or "@@ -0,0" in chunk
+            )
+            if create_ok:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("", encoding="utf-8")
+                notes.append(f"created:{rel}")
+            else:
+                notes.append(f"missing:{rel}")
+                continue
 
         original = target.read_text(encoding="utf-8").splitlines(keepends=True)
         # Normalize to lines preserving newline style
@@ -162,6 +173,9 @@ def _apply_unified_diff_impl(workdir: Path, diff: str) -> Tuple[bool, str]:
                     notes.append("bad_hunk_header")
                     break
                 old_start = int(m.group(1)) - 1  # 0-based
+                # QUANTUM-CRYSTAL-ARCH — G1: @@ -0,0 new-file hunks → old_start=-1
+                if old_start < 0:
+                    old_start = 0
                 # QUANTUM-CRYSTAL-ARCH — fuzzy reposition when model line numbers drift
                 peek = i + 1
                 anchor = None

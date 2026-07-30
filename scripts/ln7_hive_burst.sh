@@ -12,19 +12,33 @@ echo "[hive_burst] start burst_id=${BURST_ID}"
 PROVISION="${ROOT}/scripts/ln7_provision_cuda_droplet.sh"
 DESTROY="${ROOT}/scripts/ln7_destroy_cuda_droplet.sh"
 
+SERVE="${ROOT}/scripts/ln7_hive_vllm_serve.sh"
+
 if [[ "${LN7_HIVE_DRY_RUN:-0}" == "1" ]]; then
   echo "[hive_burst] dry-run — skip DO provision"
+  echo "LN7_SERVE_URL=${LN7_HIVE_ENDPOINT:-http://127.0.0.1:11436}"
   exit 0
 fi
 
 if [[ ! -x "$PROVISION" ]]; then
   echo "[hive_burst] provision script missing or not executable: $PROVISION" >&2
   echo "[hive_burst] skeleton exit 0 (wire DO GPU in deploy)" >&2
+  echo "LN7_SERVE_URL=${LN7_HIVE_ENDPOINT:-http://127.0.0.1:11436}"
   exit 0
 fi
 
 # shellcheck disable=SC1091
 "$PROVISION"
+# Optional: start Multi-LoRA vLLM on droplet and print LN7_SERVE_URL=
+if [[ -x "$SERVE" ]]; then
+  # shellcheck disable=SC1091
+  "$SERVE" || {
+    echo "[hive_burst] vllm serve failed" >&2
+    exit 3
+  }
+elif [[ -n "${LN7_HIVE_ENDPOINT:-}" ]]; then
+  echo "LN7_SERVE_URL=${LN7_HIVE_ENDPOINT}"
+fi
 # Load adapters from LN7_ADAPTER_INTENTS JSON is done inside provision/vLLM start
 # Destroy + verify (suspenders)
 if [[ -x "$DESTROY" ]]; then

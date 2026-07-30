@@ -3,6 +3,11 @@
 Event: queens.task.merged → ln7_shadow_fork → sandbox apply+pytest →
 envelope.shadow_outcome. Similarity scoring forbidden.
 
+Oracle contract:
+  - empty / probe-only diffs write shadow_outcome with oracle!=ci_pack
+    and do NOT unlock G1 promote
+  - real pack apply+pytest writes oracle=ci_pack (passed true|false)
+
 # QUANTUM-CRYSTAL-ARCH
 """
 from __future__ import annotations
@@ -14,6 +19,9 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("ln7_shadow_fork")
 
+# Notes payload budget for cli_task_bus (hard cap ~2000); keep headroom.
+_BUS_DIFF_CAP = 1200
+
 
 async def run_shadow_fork(
     db_pool,
@@ -24,9 +32,13 @@ async def run_shadow_fork(
     counterfactual_diff: str = "",
     pack_ids: Optional[List[str]] = None,
     engine: Any = None,
+    force: bool = False,
 ) -> Dict[str, Any]:
     """Apply LN7 counterfactual patch in sandbox CI; record shadow_outcome."""
-    from app.services.ln7_outcome_envelope import write_envelope
+    from app.services.ln7_outcome_envelope import (
+        has_shadow_outcome_for_patch,
+        write_envelope,
+    )
 
     started = time.time()
     passed = False
@@ -36,6 +48,15 @@ async def run_shadow_fork(
         "domain": domain,
         "evidence_uri": evidence_uri,
     }
+
+    if not force and patch_hash and await has_shadow_outcome_for_patch(db_pool, patch_hash):
+        return {
+            "ok": True,
+            "passed": True,
+            "skipped": True,
+            "reason": "shadow_outcome_exists",
+            "patch_hash": patch_hash,
+        }
 
     if not counterfactual_diff.strip():
         detail["error"] = "empty_counterfactual_diff"
@@ -50,10 +71,12 @@ async def run_shadow_fork(
                 "pack_ids": pack_ids or [],
                 "latency_ms": 0,
                 "error": "empty_diff",
+                "oracle": "empty",
             },
         )
         return {"ok": False, "passed": False, "envelope_id": envelope_id, **detail}
 
+    oracle = "ci_pack"
     try:
         from app.services.ln_sandbox_engineering_ci import (
             apply_unified_diff,
@@ -83,8 +106,11 @@ async def run_shadow_fork(
             if pack_ok:
                 passed = True
         detail["pack_results"] = pack_results
+        if not pack_results:
+            oracle = "no_packs"
     except Exception as e:
         detail["error"] = str(e)
+        oracle = "exception"
         logger.warning("shadow fork failed: %s", e)
 
     # Optional engine path when no pack_ids / materialize unavailable
@@ -98,15 +124,18 @@ async def run_shadow_fork(
             if isinstance(cycle, dict):
                 passed = bool(cycle.get("passed") or cycle.get("ok"))
                 detail["cycle"] = cycle
+                oracle = "ci_pack_cycle"
         except Exception as e:
             detail["error"] = str(e)
 
     latency_ms = int((time.time() - started) * 1000)
+    # Only ci_pack / ci_pack_cycle unlock G1 promote (see has_shadow_outcome_for_patch)
     shadow = {
         "passed": passed,
         "pack_ids": [p.get("pack") for p in pack_results] or (pack_ids or []),
         "latency_ms": latency_ms,
         "error": detail.get("error"),
+        "oracle": oracle,
     }
     envelope_id = await write_envelope(
         db_pool,
@@ -134,20 +163,29 @@ async def on_queens_task_merged(
     evidence_uri: str = "",
     counterfactual_diff: str = "",
     pack_ids: Optional[List[str]] = None,
+    force: bool = False,
 ) -> Dict[str, Any]:
-    """W1 trigger: publish ln7_shadow_fork and run."""
+    """W1 trigger: publish ln7_shadow_fork and run inline (consumer is backup)."""
     try:
         from app.websocket.cli_task_bus import publish_task
         from app.services.ln7_living_packs import record_pack_candidate
 
+        notes_obj: Dict[str, Any] = {
+            "patch_hash": patch_hash,
+            "domain": domain,
+            "evidence_uri": evidence_uri,
+            "pack_ids": pack_ids or [],
+            "event": "queens.task.merged",
+        }
+        diff = (counterfactual_diff or "").strip()
+        if diff:
+            notes_obj["counterfactual_diff"] = diff[:_BUS_DIFF_CAP]
+            if len(diff) > _BUS_DIFF_CAP:
+                notes_obj["counterfactual_diff_truncated"] = True
         publish_task(
             origin="queens",
             kind="ln7_shadow_fork",
-            notes=json.dumps({
-                "patch_hash": patch_hash,
-                "domain": domain,
-                "evidence_uri": evidence_uri,
-            }),
+            notes=json.dumps(notes_obj)[:2000],
             files=[],
         )
         await record_pack_candidate(
@@ -166,11 +204,12 @@ async def on_queens_task_merged(
         evidence_uri=evidence_uri,
         counterfactual_diff=counterfactual_diff,
         pack_ids=pack_ids,
+        force=force,
     )
 
 
 async def g1_promote_allowed(db_pool, patch_hash: str) -> bool:
-    """Hard-disable G1 promote without executed shadow_outcome rows."""
+    """Hard-disable G1 promote without executed ci_pack shadow_outcome rows."""
     from app.services.ln7_outcome_envelope import has_shadow_outcome_for_patch
 
     return await has_shadow_outcome_for_patch(db_pool, patch_hash)

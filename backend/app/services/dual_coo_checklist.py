@@ -168,6 +168,14 @@ async def maybe_promote_via_checklist_or_ceo(
             return {"path": "mechanical", "activated": ok, "review": review}
         return {"path": "mechanical", "activated": False, "review": review}
 
+    # G0/G1 — seed CI oracle shadow before CEO inbox (idempotent)
+    try:
+        from app.services.ln7_flywheel_pipeline import ensure_shadow_for_revision
+
+        await ensure_shadow_for_revision(db_pool, revision_id)
+    except Exception:
+        pass
+
     # G0/G1 — CEO activate remains valid (patch-point for offline CI)
     enq = _enqueue_ceo_promote(
         revision_id=revision_id,

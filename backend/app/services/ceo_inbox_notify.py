@@ -953,8 +953,11 @@ async def _apply_ceo_payload(
             }
         else:
             try:
+                # QUANTUM-CRYSTAL-ARCH — W1: seed shadow_outcome before activate
+                from app.services.ln7_flywheel_pipeline import ensure_shadow_for_revision
                 from app.services.ln7_revision import activate_revision
 
+                out["ln7_shadow"] = await ensure_shadow_for_revision(db_pool, rid)
                 out["ln7_revision"] = await activate_revision(
                     db_pool,
                     rid,

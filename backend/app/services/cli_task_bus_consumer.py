@@ -387,12 +387,16 @@ class CliTaskBusConsumer:
                     meta = _json.loads(notes) if notes.startswith("{") else {}
                 except Exception:
                     meta = {}
+                _packs = meta.get("pack_ids") or []
+                if isinstance(_packs, str):
+                    _packs = [_packs]
                 out = await run_shadow_fork(
                     pool,
                     patch_hash=str(meta.get("patch_hash") or task.get("task_id") or ""),
                     domain=str(meta.get("domain") or ""),
                     evidence_uri=str(meta.get("evidence_uri") or ""),
                     counterfactual_diff=str(meta.get("counterfactual_diff") or ""),
+                    pack_ids=list(_packs) if _packs else None,
                 )
                 findings.append({
                     "detail": f"ln7_shadow_fork: {str(out)[:400]}",

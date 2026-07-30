@@ -112,7 +112,11 @@ async def update_shadow_outcome(
 
 
 async def has_shadow_outcome_for_patch(db_pool, patch_hash: str) -> bool:
-    """G1 promote gate: require executed sandbox row."""
+    """G1 promote gate: require executed CI-pack oracle (not empty/probe).
+
+    empty_diff / probe rows write passed=false with oracle!=ci_pack and must
+    not unlock promote — same constitution as F1 freeze-don't-shoot.
+    """
     if not db_pool or not patch_hash:
         return False
     try:
@@ -123,6 +127,9 @@ async def has_shadow_outcome_for_patch(db_pool, patch_hash: str) -> bool:
                 WHERE patch_hash = $1
                   AND shadow_outcome IS NOT NULL
                   AND (shadow_outcome->>'passed') IS NOT NULL
+                  AND COALESCE(shadow_outcome->>'oracle', '') IN (
+                      'ci_pack', 'ci_pack_cycle'
+                  )
                 LIMIT 1
                 """,
                 patch_hash,

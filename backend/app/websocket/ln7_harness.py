@@ -647,6 +647,32 @@ async def run_task(
     if not pack:
         return {"ok": False, "error": "no_pack", "generator": "ln7"}
 
+    # QUANTUM-CRYSTAL-ARCH — W5 domain router (no-op when flag off)
+    route_meta: Dict[str, Any] = {}
+    try:
+        from app.services.ln7_flywheel_pipeline import route_coding_turn
+        import hashlib as _hl
+
+        route_meta = await route_coding_turn(
+            db_pool,
+            prompt,
+            file_paths=[pack] if pack else [],
+            task_hash=_hl.sha256((prompt or "")[:2000].encode()).hexdigest()[:16],
+        )
+        if route_meta.get("adapter_id") and not revision_id:
+            revision_id = str(route_meta.get("adapter_id"))
+    except Exception as _rt:
+        logger.debug("LN7 domain route: %s", _rt)
+
+    # Burst serve URL when hive published Redis endpoint
+    try:
+        from app.services.ln7_serve_endpoint import get_serve_endpoint, get_serve_engine
+
+        if get_serve_engine() == "vllm_burst" and get_serve_endpoint():
+            route_meta["serve_endpoint"] = get_serve_endpoint()
+    except Exception:
+        pass
+
     # Enrich vague prompts with pack task + file bodies
     if pack and "--- FILE " not in (prompt or ""):
         enriched = build_pack_prompt(pack)
@@ -697,6 +723,7 @@ async def run_task(
         "generator": "ln7",
         "harness_mode": mode,
         "pack": pack,
+        "route": route_meta,
         "passed": bool(best and best.get("passed")),
         "score": (best or {}).get("score", 0.0),
         "diff": (best or {}).get("diff") or "",

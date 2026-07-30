@@ -3490,6 +3490,18 @@ async def lifespan(app: FastAPI):
     except Exception as _gds_err:
         print(f"   ⚠️  GoodhartDriftSentinel init failed: {_gds_err}")
         app.state.goodhart_drift_sentinel = None
+    try:
+        # QUANTUM-CRYSTAL-ARCH — R5 quarterly fallback drill (no G2 flip)
+        from app.services.ln7_fallback_drill import FallbackDrillAgent
+
+        _fbd = FallbackDrillAgent(db_pool)
+        if not _is_clone:
+            await _fbd.start()
+        app.state.ln7_fallback_drill_agent = _fbd
+        print("   ✅ FallbackDrillAgent started")
+    except Exception as _fbd_err:
+        print(f"   ⚠️  FallbackDrillAgent init failed: {_fbd_err}")
+        app.state.ln7_fallback_drill_agent = None
 
     # QUANTUM-CRYSTAL-ARCH — Nate clinical coevolution bakeoff (flags default OFF)
     try:
@@ -3714,6 +3726,7 @@ async def lifespan(app: FastAPI):
         ("ln7_living_pack_agent", getattr(app.state, "ln7_living_pack_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("phase_h_predicate_poller", getattr(app.state, "phase_h_predicate_poller", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("goodhart_drift_sentinel", getattr(app.state, "goodhart_drift_sentinel", None) is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("ln7_fallback_drill_agent", getattr(app.state, "ln7_fallback_drill_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_clinical_bakeoff_agent", callable(getattr(getattr(app.state, "nate_clinical_bakeoff_agent", None), "run_night", None))),  # QUANTUM-CRYSTAL-ARCH
         ("growth_scheduler", getattr(app.state, "growth_scheduler", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("content_factory", getattr(app.state, "content_factory", None) is not None),  # QUANTUM-CRYSTAL-ARCH
@@ -3825,6 +3838,7 @@ async def lifespan(app: FastAPI):
         "ln7_living_pack_agent",
         "phase_h_predicate_poller",
         "goodhart_drift_sentinel",
+        "ln7_fallback_drill_agent",
     ):
         try:
             _fly = getattr(app.state, _fly_attr, None)
