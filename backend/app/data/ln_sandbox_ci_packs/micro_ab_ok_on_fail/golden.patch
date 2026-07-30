@@ -1,0 +1,9 @@
+--- a/broken/fix.py	2026-07-28 00:00:00
++++ b/broken/fix.py	2026-07-28 00:00:00
+@@ -2,7 +2,7 @@
+
+ def value() -> str:
+-    # BUG: AB_OK after compare fail
++    # Fixed: AB_OK only on success
+-    return "AB_OK after compare fail"
++    return "AB_OK only on success"

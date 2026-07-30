@@ -1,0 +1,12 @@
+{
+  "task_key": "ci_micro_ab_ok_on_fail",
+  "title": "AB_OK gate",
+  "prompt": "broken/fix.py returns 'AB_OK after compare fail'. Change the return to 'AB_OK only on success' and update the BUG comment. Return ONLY a unified diff for broken/fix.py. No markdown fences.",
+  "test_path": "tests/test_fix.py",
+  "target_files": [
+    "broken/fix.py"
+  ],
+  "domain": "coding",
+  "split": "train",
+  "domain_tag": "python"
+}
