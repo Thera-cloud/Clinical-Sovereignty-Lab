@@ -145,6 +145,54 @@ async def run_private_pack_bakeoff(
     from pathlib import Path
     import shutil
 
+    # QUANTUM-CRYSTAL-ARCH — preflight serve identity.
+    # The PEFT server is single-adapter and boot-pinned, so two revisions can
+    # resolve to the same endpoint and score the SAME weights twice. Abort loudly
+    # instead of writing a wall of 0.0 rows that poison pass_rate.
+    if os.getenv("LN7_BAKEOFF_PREFLIGHT", "true").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            from app.services.little_nate_7 import (
+                load_revision as _load_rev,
+                probe_serve_identity,
+                serve_target_from_revision,
+            )
+            _tier = "fast" if (mode or "").strip().lower() == "fast" else "deep"
+            _rev = await _load_rev(db_pool, revision_id)
+            if _rev is None:
+                return {
+                    "ok": False,
+                    "status": "aborted_preflight",
+                    "error": f"unknown_revision:{revision_id}",
+                    "revision_id": revision_id,
+                }
+            _target = serve_target_from_revision(_rev, tier=_tier)
+            _probe = await probe_serve_identity(_target, _rev)
+            if not _probe.get("ok"):
+                allow = os.getenv(
+                    "LN7_BAKEOFF_ALLOW_SERVE_MISMATCH", "false"
+                ).strip().lower() in ("1", "true", "yes", "on")
+                logger.warning(
+                    "LN7 bakeoff preflight failed rev=%s target=%s reason=%s allow=%s",
+                    revision_id, _target, _probe.get("reason"), allow,
+                )
+                if not allow:
+                    return {
+                        "ok": False,
+                        "status": "aborted_preflight",
+                        "error": str(_probe.get("reason") or "serve_preflight_failed"),
+                        "revision_id": revision_id,
+                        "serve_target": _target,
+                        "serve_probe": _probe,
+                        "packs_run": 0,
+                    }
+            else:
+                logger.info(
+                    "LN7 bakeoff preflight ok rev=%s mode=%s reason=%s",
+                    revision_id, _target.get("mode"), _probe.get("reason"),
+                )
+        except Exception as exc:
+            logger.warning("LN7 bakeoff preflight error: %s", exc)
+
     packs = pack_names or list_pack_names()
     if not packs:
         return {"ok": False, "error": "no_packs"}

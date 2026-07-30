@@ -121,6 +121,119 @@ def serve_target_from_revision(
     return {"url": base, "model": coder_model(t if t in ("fast", "deep") else "deep"), "mode": "ollama"}
 
 
+def expected_serve_identity(revision: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """What the served weights must be for this revision to be scored honestly.
+
+    kind='bare'    -> base model with no adapter attached (baseline arms)
+    kind='adapter' -> PEFT server must report this exact revision_id
+    # QUANTUM-CRYSTAL-ARCH
+    """
+    rev = revision or {}
+    hc: Dict[str, Any] = {}
+    raw = rev.get("harness_config_json") or rev.get("harness_config") or {}
+    if isinstance(raw, str):
+        try:
+            import json
+            raw = json.loads(raw)
+        except Exception:
+            raw = {}
+    if isinstance(raw, dict):
+        hc = raw
+    base = str(rev.get("base_checkpoint") or "").strip().lower()
+    if base in ("bare_hf", "bare", "base") or bool(hc.get("bare_hf")) or bool(hc.get("bare")):
+        return {"kind": "bare", "revision_id": None}
+    return {"kind": "adapter", "revision_id": str(rev.get("revision_id") or "").strip()}
+
+
+async def probe_serve_identity(
+    target: Dict[str, str],
+    revision: Optional[Dict[str, Any]],
+    *,
+    timeout: float = 8.0,
+) -> Dict[str, Any]:
+    """Assert the endpoint is actually serving the requested revision.
+
+    The PEFT server is single-adapter and boot-pinned: two revisions can resolve
+    to the same {url, model} and silently score the *same* weights twice. This
+    probes /health and compares the served identity to what was requested.
+
+    Returns: {ok, reason, served, expected, detail}
+    # QUANTUM-CRYSTAL-ARCH
+    """
+    expected = expected_serve_identity(revision)
+    mode = str((target or {}).get("mode") or "").strip().lower()
+    url = str((target or {}).get("url") or "").rstrip("/")
+    if not url:
+        return {"ok": False, "reason": "no_serve_url", "served": None, "expected": expected}
+    if mode != "peft":
+        # Ollama identity is carried by the model tag itself; nothing to cross-check.
+        return {
+            "ok": True,
+            "reason": "ollama_tag_identity",
+            "served": {"model": (target or {}).get("model")},
+            "expected": expected,
+        }
+
+    health: Dict[str, Any] = {}
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(f"{url}/health")
+            if resp.status_code != 200:
+                return {
+                    "ok": False,
+                    "reason": f"health_http_{resp.status_code}",
+                    "served": None,
+                    "expected": expected,
+                }
+            health = resp.json() or {}
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": f"serve_unreachable:{str(exc)[:120]}",
+            "served": None,
+            "expected": expected,
+        }
+
+    if not bool(health.get("loaded")):
+        return {
+            "ok": False,
+            "reason": f"adapter_not_loaded:{str(health.get('error'))[:120]}",
+            "served": health,
+            "expected": expected,
+        }
+
+    served_bare = bool(health.get("bare"))
+    served_rev = str(health.get("revision_id") or "").strip()
+
+    if expected["kind"] == "bare":
+        if served_bare:
+            return {"ok": True, "reason": "bare_ok", "served": health, "expected": expected}
+        return {
+            "ok": False,
+            "reason": f"serve_mismatch:expected=bare served_adapter={served_rev or 'unknown'}",
+            "served": health,
+            "expected": expected,
+        }
+
+    want = expected["revision_id"]
+    if served_bare:
+        return {
+            "ok": False,
+            "reason": f"serve_mismatch:expected={want} served=bare",
+            "served": health,
+            "expected": expected,
+        }
+    if want and served_rev != want:
+        return {
+            "ok": False,
+            "reason": f"serve_mismatch:expected={want} served={served_rev or 'unknown'}",
+            "served": health,
+            "expected": expected,
+        }
+    return {"ok": True, "reason": "adapter_ok", "served": health, "expected": expected}
+
+
 async def load_revision(db_pool, revision_id: str) -> Optional[Dict[str, Any]]:
     if not db_pool or not revision_id:
         return None

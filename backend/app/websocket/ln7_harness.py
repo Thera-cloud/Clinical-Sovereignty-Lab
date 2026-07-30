@@ -201,9 +201,21 @@ async def propose_candidates(
     mode: Optional[str] = None,
     revision_id: Optional[str] = None,
     db_pool=None,
+    reasons: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
-    """N candidates at varied temperature via sovereign coder weights only."""
+    """N candidates at varied temperature via sovereign coder weights only.
+
+    Rejected candidates are dropped from the return value but their reasons are
+    appended to ``reasons`` when supplied, so callers can distinguish "model
+    answered badly" from "no answer / wrong format / endpoint down".
+    # QUANTUM-CRYSTAL-ARCH
+    """
+    def _why(msg: str) -> None:
+        if reasons is not None:
+            reasons.append(msg)
+
     if kill_switch_on():
+        _why("kill_switch")
         return []
     n = n or (2 if (mode or harness_mode()) == "fast" else best_of_n())
     try:
@@ -217,6 +229,7 @@ async def propose_candidates(
         from app.services.nate_inference_router import NateInferenceRouter, TIER_CODING
     except Exception as exc:
         logger.warning("LN7 propose import failed: %s", exc)
+        _why(f"import:{str(exc)[:120]}")
         return []
 
     router = NateInferenceRouter()
@@ -309,11 +322,19 @@ async def propose_candidates(
     for r in results:
         h = r.get("ast_hash") or ""
         if h and h in seen:
+            _why(f"dupe@t{r.get('temperature')}")
             continue
         if h:
             seen.add(h)
         if r.get("ok"):
             deduped.append(r)
+        else:
+            _why(f"{r.get('error') or 'rejected'}@t{r.get('temperature')}")
+    if not deduped:
+        logger.warning(
+            "LN7 propose produced 0 usable candidates target=%s model=%s reasons=%s",
+            base_url_override, model_override, (reasons or [])[:6],
+        )
     return deduped
 
 
@@ -679,9 +700,28 @@ async def run_task(
         if enriched:
             prompt = enriched
 
+    gen_reasons: List[str] = []
     candidates = await propose_candidates(
         prompt, system=sys, mode=mode, revision_id=revision_id, db_pool=db_pool,
+        reasons=gen_reasons,
     )
+    if not candidates:
+        # QUANTUM-CRYSTAL-ARCH — never return a silent 0.0; say why there was no patch
+        return {
+            "ok": False,
+            "generator": "ln7",
+            "harness_mode": mode,
+            "pack": pack,
+            "passed": False,
+            "score": 0.0,
+            "diff_lines": 0,
+            "candidates": 0,
+            "tokens": 0,
+            "error": ("no_candidates:" + ",".join(gen_reasons[:4]))[:200]
+            if gen_reasons else "no_candidates",
+            "latency_ms": int((time.time() - t0) * 1000),
+            "text": "",
+        }
     ranked: List[Dict[str, Any]] = []
     attempts = 0
     for cand in candidates:
