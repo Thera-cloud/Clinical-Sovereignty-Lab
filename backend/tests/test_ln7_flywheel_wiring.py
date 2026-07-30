@@ -56,7 +56,7 @@ def test_g0_promote_still_enqueues_ceo():
             "app.services.ln7_feature_flags.dual_coo_mechanical_promote",
             new=AsyncMock(return_value=False),
         ):
-            with patch("app.websocket.cli_dual_coo.enqueue_ceo", enq):
+            with patch.object(dcc, "_enqueue_ceo_promote", enq):
                 out = await dcc.maybe_promote_via_checklist_or_ceo(
                     None,
                     revision_id="LN7-test",
@@ -66,6 +66,7 @@ def test_g0_promote_still_enqueues_ceo():
         assert out.get("path") == "ceo_inbox"
         assert enq.called
         assert out.get("activated") is False
+        assert out.get("enqueued") == {"ok": True, "id": "ceo1"}
 
     asyncio.run(_run())
 
@@ -89,7 +90,7 @@ def test_g2_mechanical_skips_enqueue_ceo():
                 with patch(
                     "app.services.ln7_revision.activate_revision", activate
                 ):
-                    with patch("app.websocket.cli_dual_coo.enqueue_ceo", enq):
+                    with patch.object(dcc, "_enqueue_ceo_promote", enq):
                         out = await dcc.maybe_promote_via_checklist_or_ceo(
                             MagicMock(),
                             revision_id="LN7-x",

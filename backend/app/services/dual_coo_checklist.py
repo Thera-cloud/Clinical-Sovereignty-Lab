@@ -168,10 +168,28 @@ async def maybe_promote_via_checklist_or_ceo(
             return {"path": "mechanical", "activated": ok, "review": review}
         return {"path": "mechanical", "activated": False, "review": review}
 
-    # G0/G1 — CEO activate remains valid
+    # G0/G1 — CEO activate remains valid (patch-point for offline CI)
+    enq = _enqueue_ceo_promote(
+        revision_id=revision_id,
+        title=title,
+        detail=detail,
+        evidence=evidence,
+    )
+    return {"path": "ceo_inbox", "enqueued": enq, "activated": False}
+
+
+def _enqueue_ceo_promote(
+    *,
+    revision_id: str,
+    title: str,
+    detail: str = "",
+    evidence: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Thin wrapper so G0 tests can patch without racing late imports."""
     from app.websocket.cli_dual_coo import enqueue_ceo
 
-    enq = enqueue_ceo(
+    evidence = evidence or {}
+    return enqueue_ceo(
         risk="YELLOW",
         title=title,
         detail=detail or f"LN7 promote candidate {revision_id}",
@@ -184,4 +202,3 @@ async def maybe_promote_via_checklist_or_ceo(
             **evidence,
         },
     )
-    return {"path": "ceo_inbox", "enqueued": enq, "activated": False}
