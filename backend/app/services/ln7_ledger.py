@@ -124,7 +124,7 @@ async def record_outcome(db_pool, row: Dict[str, Any]) -> Optional[int]:
             try:
                 await _auto_promote_learning_artifact(db_pool, oid_i, row, patch_body)
             except Exception as _pl:
-                logger.debug("LN7 auto-promote: %s", _pl)
+                logger.warning("LN7 auto-promote failed for outcome %s: %s", oid_i, _pl)
         return oid_i
     except Exception as exc:
         logger.warning("LN7 record_outcome: %s", exc)
