@@ -1,0 +1,8 @@
+--- a/broken/names.py
++++ b/broken/names.py
+@@ -1,3 +1,3 @@
+ def clean_name(name: str) -> str:
+-    # BUG: leaves leading/trailing whitespace in place
+-    return name.lower()
++    # Fixed: strip whitespace before lowercasing
++    return name.strip().lower()

@@ -452,8 +452,23 @@ def _write_pack(name: str, rel: str, broken: str, test: str, hunk_lines: list, p
 
 
 def main() -> int:
+    # QUANTUM-CRYSTAL-ARCH — bulk micros scale clean JSONL toward ≥500/2k export
+    try:
+        from ln7_bulk_micro_packs import build_micro_specs
+    except ImportError:
+        import importlib.util
+        from pathlib import Path as _P
+
+        _bp = _P(__file__).resolve().parent / "ln7_bulk_micro_packs.py"
+        _spec = importlib.util.spec_from_file_location("ln7_bulk_micro_packs", _bp)
+        _mod = importlib.util.module_from_spec(_spec)
+        assert _spec.loader is not None
+        _spec.loader.exec_module(_mod)
+        build_micro_specs = _mod.build_micro_specs
+
+    all_specs = list(SPECS) + build_micro_specs()
     names = []
-    for name, rel, broken, test, hunk, prompt, title in SPECS:
+    for name, rel, broken, test, hunk, prompt, title in all_specs:
         _write_pack(name, rel, broken, test, hunk, prompt, title)
         names.append(name)
 

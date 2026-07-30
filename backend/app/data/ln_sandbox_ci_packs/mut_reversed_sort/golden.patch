@@ -1,0 +1,8 @@
+--- a/broken/ranking.py
++++ b/broken/ranking.py
+@@ -1,3 +1,3 @@
+ def top_n(values, n: int):
+-    # BUG: ascending sort returns the smallest values, not the largest
+-    return sorted(values)[:n]
++    # Fixed: sort descending to get the largest values
++    return sorted(values, reverse=True)[:n]

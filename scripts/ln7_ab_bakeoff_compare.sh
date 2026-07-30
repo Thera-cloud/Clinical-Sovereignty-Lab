@@ -436,7 +436,9 @@ summary = {
     "loser": loser.get("revision_id"),
     "gate_hint": gate_hint,
     "activate": False,
-    "note": "CEO activate only after canary await_ceo READY; ENABLE_LN7_AUTO_PROMOTE=false",
+    "note": "CEO activate only after canary await_ceo READY vs LN7-fast-baseline; ENABLE_LN7_AUTO_PROMOTE=false; deep LN7-baseline untouched",
+    "incumbent_id": "LN7-fast-baseline",
+    "tier": "fast",
 }
 print(json.dumps(summary, indent=2))
 raise SystemExit(0 if (a.get("ok") or b.get("ok")) else 1)

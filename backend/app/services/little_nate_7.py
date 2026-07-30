@@ -16,9 +16,12 @@ LN7_NON_CLINICAL_CLAIM = True  # never cite LN7 scores as clinical Tier 2/3 evid
 # Broken Foundry aliases that must not be advertised as selectable
 _BROKEN_FOUNDRY_ALIASES = frozenset({"grok-4.5", "grok4.5", "grok-4.5-reasoning"})
 
-# Permissive SPDX allowlist for training / shipped checkpoints
+# Permissive SPDX allowlist for training / shipped checkpoints.
+# FIRST-PARTY is a sentinel (not a real SPDX id) for code mined/authored/mutated
+# from this repo's own tree — we hold full rights, no third-party license applies.
 PERMISSIVE_SPDX = frozenset({
     "MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unlicense", "0BSD",
+    "FIRST-PARTY",
 })
 
 
@@ -95,9 +98,17 @@ def serve_target_from_revision(
         or bool(hc.get("adapter_dir") or hc.get("durable_store"))
         or bool(hc.get("force_peft"))
     )
+    t = (tier or "mid").strip().lower()
+    if t in ("mid", "max"):
+        t = "deep"
+    # QUANTUM-CRYSTAL-ARCH — fast coding → PEFT :11435; deep/max → Ollama 32B
     if wants_peft and peft_url:
         return {"url": peft_url, "model": peft_model, "mode": "peft"}
-    if ollama_tag:
+    if t == "fast":
+        peft_fallback = peft_url or peft_serve_url_default()
+        if peft_fallback:
+            return {"url": peft_fallback, "model": peft_model, "mode": "peft"}
+    if ollama_tag and t != "fast":
         base = (
             (os.getenv("LN7_INFERENCE_URL") or "").rstrip("/")
             or (os.getenv("SOVEREIGN_INFERENCE_URL") or "").rstrip("/")
@@ -107,7 +118,7 @@ def serve_target_from_revision(
         (os.getenv("LN7_INFERENCE_URL") or "").rstrip("/")
         or (os.getenv("SOVEREIGN_INFERENCE_URL") or "").rstrip("/")
     )
-    return {"url": base, "model": coder_model(tier), "mode": "ollama"}
+    return {"url": base, "model": coder_model(t if t in ("fast", "deep") else "deep"), "mode": "ollama"}
 
 
 async def load_revision(db_pool, revision_id: str) -> Optional[Dict[str, Any]]:
@@ -222,10 +233,23 @@ def model_card_path(revision_id: str) -> str:
     return f"docs/ln7/LN7_{safe}.md"
 
 
-async def load_active_revision(db_pool) -> Optional[Dict[str, Any]]:
-    """Load the active LN7 revision from PG, or None if table/row missing."""
+async def load_active_revision(
+    db_pool,
+    *,
+    tier: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Load the active LN7 revision for a serving tier (fast|deep).
+
+    Milestone A: one active per harness_config.tier; deep default when unset.
+    # QUANTUM-CRYSTAL-ARCH
+    """
     if db_pool is None:
         return None
+    want = (tier or "deep").strip().lower()
+    if want in ("mid", "max"):
+        want = "deep"
+    if want not in ("fast", "deep"):
+        want = "deep"
     try:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -234,12 +258,57 @@ async def load_active_revision(db_pool) -> Optional[Dict[str, Any]]:
                        harness_config_json, notes, active
                 FROM ln7_revisions
                 WHERE active = TRUE
+                  AND COALESCE(NULLIF(TRIM(harness_config_json->>'tier'), ''), 'deep') = $1
                 ORDER BY revised_at DESC
                 LIMIT 1
-                """
+                """,
+                want,
             )
+            if row is None and want == "deep":
+                # Pre-migration rows: single global active without tier key
+                row = await conn.fetchrow(
+                    """
+                    SELECT revision_id, revised_at, base_checkpoint, quantization,
+                           harness_config_json, notes, active
+                    FROM ln7_revisions
+                    WHERE active = TRUE
+                    ORDER BY revised_at DESC
+                    LIMIT 1
+                    """
+                )
         if not row:
             return None
         return dict(row)
     except Exception:
         return None
+
+
+def default_incumbent_id(tier: str = "fast") -> str:
+    """Promote gate incumbent — fast LoRA never compared to 32B deep baseline."""
+    t = (tier or "fast").strip().lower()
+    if t in ("deep", "mid", "max"):
+        return os.getenv("LN7_DEEP_INCUMBENT_ID", "LN7-baseline")
+    return os.getenv("LN7_FAST_INCUMBENT_ID", "LN7-fast-baseline")
+
+
+def revision_serving_tier(revision: Optional[Dict[str, Any]]) -> str:
+    """Extract harness tier from a revision row (default deep)."""
+    if not revision:
+        return "deep"
+    raw = revision.get("harness_config_json") or revision.get("harness_config") or {}
+    if isinstance(raw, str):
+        try:
+            import json
+
+            raw = json.loads(raw)
+        except Exception:
+            raw = {}
+    if not isinstance(raw, dict):
+        return "deep"
+    t = str(raw.get("tier") or "").strip().lower()
+    if t == "fast":
+        return "fast"
+    rid = str(revision.get("revision_id") or "")
+    if rid == "LN7-fast-baseline" or rid.startswith("LN7-fast"):
+        return "fast"
+    return "deep"

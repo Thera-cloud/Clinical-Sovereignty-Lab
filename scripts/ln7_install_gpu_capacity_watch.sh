@@ -110,6 +110,14 @@ cat >"$PLIST" <<EOF
     <string>${LN7_GPU_REGION:-tor1}</string>
     <key>LN7_GPU_SIZE</key>
     <string>${LN7_GPU_SIZE:-gpu-4000adax1-20gb}</string>
+    <key>LN7_GPU_PREFERRED_SIZE</key>
+    <string>${LN7_GPU_PREFERRED_SIZE:-gpu-4000adax1-20gb}</string>
+    <key>LN7_GPU_ONESHOT_FALLBACK</key>
+    <string>${LN7_GPU_ONESHOT_FALLBACK:-1}</string>
+    <key>LN7_GPU_ONESHOT_FALLBACK_SIZE</key>
+    <string>${LN7_GPU_ONESHOT_FALLBACK_SIZE:-gpu-l40sx1-48gb}</string>
+    <key>LN7_GPU_ONESHOT_COOLDOWN_S</key>
+    <string>${LN7_GPU_ONESHOT_COOLDOWN_S:-21600}</string>
     <key>LN7_GPU_WATCH_AUTO_DRAIN</key>
     <string>${LN7_GPU_WATCH_AUTO_DRAIN:-1}</string>
     <key>LN7_GPU_WATCH_UNLOAD</key>

@@ -1,0 +1,10 @@
+{
+  "task_key": "ci_mut_swapped_args",
+  "title": "Fix swapped operand order in subtraction",
+  "prompt": "The file broken/arith.py has subtract(a, b) computing b - a instead of a - b. Fix ONLY the operand order. Return ONLY a unified diff (---/+++ @@) for broken/arith.py. No markdown fences.",
+  "test_path": "tests/test_arith.py",
+  "target_files": [
+    "broken/arith.py"
+  ],
+  "domain": "coding"
+}

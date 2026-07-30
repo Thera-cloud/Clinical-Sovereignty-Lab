@@ -1,0 +1,10 @@
+{
+  "task_key": "ci_mut_wrong_exception_type",
+  "title": "Fix wrong exception type caught in safe division",
+  "prompt": "The file broken/safe_math.py has safe_div catching TypeError instead of ZeroDivisionError, so dividing by zero still raises. Fix ONLY the except clause. Return ONLY a unified diff (---/+++ @@) for broken/safe_math.py. No markdown fences.",
+  "test_path": "tests/test_safe_math.py",
+  "target_files": [
+    "broken/safe_math.py"
+  ],
+  "domain": "coding"
+}

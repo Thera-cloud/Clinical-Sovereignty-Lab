@@ -27,11 +27,46 @@ def canary_pct() -> float:
         return 5.0
 
 
-async def start_canary(db_pool, revision_id: str, *, incumbent_id: str = "LN7-baseline") -> bool:
+async def resolve_incumbent_id(
+    db_pool,
+    revision_id: str,
+    *,
+    incumbent_id: Optional[str] = None,
+) -> str:
+    """Fast-tier candidates gate vs LN7-fast-baseline; deep vs LN7-baseline."""
+    if incumbent_id and str(incumbent_id).strip():
+        return str(incumbent_id).strip()
+    try:
+        from app.services.little_nate_7 import (
+            default_incumbent_id,
+            load_revision,
+            revision_serving_tier,
+        )
+
+        rev = await load_revision(db_pool, revision_id) if db_pool else None
+        tier = revision_serving_tier(rev)
+        # Heuristic: 7B / peft / fast notes → fast incumbent
+        notes = str((rev or {}).get("notes") or "").lower()
+        base = str((rev or {}).get("base_checkpoint") or "").lower()
+        if "7b" in base or "fast" in notes or tier == "fast":
+            tier = "fast"
+        return default_incumbent_id(tier)
+    except Exception:
+        return os.getenv("LN7_FAST_INCUMBENT_ID", "LN7-fast-baseline")
+
+
+async def start_canary(
+    db_pool,
+    revision_id: str,
+    *,
+    incumbent_id: Optional[str] = None,
+) -> bool:
     if not db_pool or not revision_id:
         return False
     try:
         from app.services.ln7_revision import set_shadow
+
+        inc = await resolve_incumbent_id(db_pool, revision_id, incumbent_id=incumbent_id)
         await set_shadow(db_pool, revision_id)
         async with db_pool.acquire() as conn:
             await conn.execute(
@@ -47,7 +82,7 @@ async def start_canary(db_pool, revision_id: str, *, incumbent_id: str = "LN7-ba
                 """,
                 revision_id,
                 canary_pct(),
-                incumbent_id,
+                inc,
             )
         return True
     except Exception as exc:
@@ -113,9 +148,7 @@ async def evaluate_canary(db_pool, revision_id: str) -> Dict[str, Any]:
             )
             inc_id = (canary or {}).get("incumbent_id") if canary else None
             if not inc_id:
-                inc_id = await conn.fetchval(
-                    "SELECT revision_id FROM ln7_revisions WHERE active = TRUE LIMIT 1"
-                ) or "LN7-baseline"
+                inc_id = await resolve_incumbent_id(db_pool, revision_id)
             # Held-out canary every N updates: require at least one heldout pack outcome exists system-wide
             heldout_n = await conn.fetchval(
                 """

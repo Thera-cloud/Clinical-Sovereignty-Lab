@@ -1,0 +1,10 @@
+{
+  "task_key": "ci_mut_off_by_one_range",
+  "title": "Fix off-by-one in cumulative sum",
+  "prompt": "The file broken/ranges.py has an off-by-one bug in sum_first_n: it excludes n itself from the running total. Fix ONLY the range() bound so sum_first_n(n) returns 1+2+...+n inclusive. Return ONLY a unified diff (---/+++ @@) for broken/ranges.py. No markdown fences.",
+  "test_path": "tests/test_ranges.py",
+  "target_files": [
+    "broken/ranges.py"
+  ],
+  "domain": "coding"
+}

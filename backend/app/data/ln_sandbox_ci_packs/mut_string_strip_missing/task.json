@@ -1,0 +1,10 @@
+{
+  "task_key": "ci_mut_string_strip_missing",
+  "title": "Fix missing strip() before normalizing a name",
+  "prompt": "The file broken/names.py has clean_name that lowercases but never strips surrounding whitespace. Add ONLY a .strip() call before .lower(). Return ONLY a unified diff (---/+++ @@) for broken/names.py. No markdown fences.",
+  "test_path": "tests/test_names.py",
+  "target_files": [
+    "broken/names.py"
+  ],
+  "domain": "coding"
+}

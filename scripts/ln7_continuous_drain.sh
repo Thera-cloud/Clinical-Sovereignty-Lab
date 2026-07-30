@@ -15,9 +15,10 @@ REGION="${LN7_GPU_REGION:-tor1}"
 TTL="${LN7_GPU_TTL_S:-1800}"
 STORE="${LN7_ADAPTER_STORE:-/opt/ln7/adapters}"
 GREEN="${LN7_GREEN_HOST:-root@68.183.168.75}"
-HF_BASE="${LN7_QLORA_HF_BASE:-Qwen/Qwen2.5-Coder-1.5B-Instruct}"
+HF_BASE="${LN7_QLORA_HF_BASE:-Qwen/Qwen2.5-Coder-7B-Instruct}"
+TRAIN_TIER="${LN7_TRAIN_TIER:-fast}"
 LORA_RECIPE="${LN7_LORA_RECIPE:-default}"
-MIN_ROWS="${LN7_QLORA_MIN_ROWS:-50}"
+MIN_ROWS="${LN7_QLORA_MIN_ROWS:-500}"
 KEEP="${LN7_KEEP_DROPLET:-0}"
 KEEP_ON_PREFAIL="${LN7_KEEP_ON_PREFAIL:-1}"
 ADAPTER_KEEP_N="${LN7_ADAPTER_KEEP_N:-6}"
@@ -32,6 +33,88 @@ _CLEANUP_DONE=0
 _DRAIN_PHASE="init"
 # Post-train persist failure must not KEEP the droplet (overnight orphan GPUs).
 _PERSIST_FAIL=0
+
+# QUANTUM-CRYSTAL-ARCH — continuous-learning: merge fresh outcomes/golden rows into
+# the training file before every drain. Union (dedup by patch_hash) so the corpus
+# only grows — never blocks the MIN_ROWS gate, never loses the existing baseline.
+refresh_training_data() {
+  local fresh="/tmp/ln7_export_fresh_$$.jsonl"
+  echo "[drain] refreshing train data from GREEN outcomes"
+  if ! ssh -o BatchMode=yes -o ConnectTimeout=20 "$GREEN" \
+      'cd /opt/clinical-sovereignty-lab && \
+       docker compose -f docker-compose.prod.yml exec -T backend \
+         python /app/scripts/ln7_export_train_jsonl.py --out /tmp/ln7_export_fresh.jsonl >/tmp/ln7_export_stats.json 2>&1; \
+       docker compose -f docker-compose.prod.yml exec -T backend cat /tmp/ln7_export_fresh.jsonl' \
+      >"$fresh" 2>/dev/null; then
+    echo "[drain] export fetch failed — keeping existing data/ln7_train.jsonl"
+    rm -f "$fresh"
+    return 0
+  fi
+  local nfresh
+  nfresh="$(wc -l <"$fresh" 2>/dev/null | tr -d '[:space:]')"
+  if [[ -z "$nfresh" || "$nfresh" -lt 1 ]]; then
+    echo "[drain] export returned 0 rows — keeping existing data/ln7_train.jsonl"
+    rm -f "$fresh"
+    return 0
+  fi
+  echo "[drain] fetched $nfresh fresh rows — merging into data/ln7_train.jsonl"
+  python3 - "$REPO/data/ln7_train.jsonl" "$fresh" <<'PY' || true
+import json, sys
+existing_path, fresh_path = sys.argv[1], sys.argv[2]
+seen = set()
+merged = []
+
+
+def _key(rec):
+    ph = rec.get("patch_hash")
+    if ph:
+        return ph
+    return json.dumps(rec.get("messages"), sort_keys=True)
+
+
+try:
+    with open(existing_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            k = _key(rec)
+            if k in seen:
+                continue
+            seen.add(k)
+            merged.append(line)
+except FileNotFoundError:
+    pass
+
+added = 0
+with open(fresh_path) as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        k = _key(rec)
+        if k in seen:
+            continue
+        seen.add(k)
+        merged.append(line)
+        added += 1
+
+with open(existing_path, "w") as f:
+    for line in merged:
+        f.write(line + "\n")
+print(f"[drain] merged +{added} new rows, total={len(merged)}")
+PY
+  rm -f "$fresh"
+}
+refresh_training_data
 
 # Preflight: refuse thin / stub JSONL before burning GPU $
 CLEAN_N="$(python3 - <<PY
@@ -83,23 +166,27 @@ REGIONS="${LN7_GPU_WATCH_REGIONS:-$REGION nyc1 nyc3 atl1 sfo3 fra1}"
 PROVISION_RETRIES="${LN7_GPU_PROVISION_RETRIES:-3}"
 DROPLET_ID=""
 IP=""
+# QUANTUM-CRYSTAL-ARCH — preferred SKU; oneshot fallback only after inventory block
+PREFERRED_SIZE="$SIZE"
+# shellcheck disable=SC1091
+source "$REPO/scripts/ln7_gpu_oneshot_lib.sh"
+export LN7_GPU_WATCH_STATE_DIR="$STATE_DIR"
+export LN7_GPU_PREFERRED_SIZE="$PREFERRED_SIZE"
+export LN7_GPU_SIZE="$PREFERRED_SIZE"
 
-if [[ -n "${LN7_EXISTING_DROPLET_ID:-}" && -n "${LN7_EXISTING_DROPLET_IP:-}" ]]; then
-  DROPLET_ID="$LN7_EXISTING_DROPLET_ID"
-  IP="$LN7_EXISTING_DROPLET_IP"
-  REGION="${LN7_EXISTING_DROPLET_REGION:-$REGION}"
-  echo "[drain] reusing probe droplet id=$DROPLET_ID ip=$IP region=$REGION"
-else
-  _try_regions="$REGION"
+_provision_size_across_regions() {
+  local size="$1" retries="${2:-$PROVISION_RETRIES}"
+  local _attempt _r _prc CREATE_OUT
+  local _try_regions="$REGION"
   for _r in $REGIONS; do
     [[ " $_try_regions " == *" $_r "* ]] && continue
     _try_regions="$_try_regions $_r"
   done
-  for _attempt in $(seq 1 "$PROVISION_RETRIES"); do
+  for _attempt in $(seq 1 "$retries"); do
     for _r in $_try_regions; do
-      echo "[drain] provision attempt ${_attempt}/${PROVISION_RETRIES} $SIZE @ $_r"
+      echo "[drain] provision attempt ${_attempt}/${retries} $size @ $_r"
       set +e
-      CREATE_OUT="$(bash "$REPO/scripts/ln7_provision_cuda_droplet.sh" "$SIZE" "$_r" 2>&1)"
+      CREATE_OUT="$(bash "$REPO/scripts/ln7_provision_cuda_droplet.sh" "$size" "$_r" 2>&1)"
       _prc=$?
       set -e
       echo "$CREATE_OUT"
@@ -111,12 +198,52 @@ else
       IP="$(echo "$CREATE_OUT" | awk 'NR==2{print $3}')"
       if [[ -n "$DROPLET_ID" && -n "$IP" && "$IP" != "PublicIPv4" ]]; then
         REGION="$_r"
-        break 2
+        SIZE="$size"
+        return 0
       fi
       DROPLET_ID=""; IP=""
     done
     sleep $((5 * _attempt))
   done
+  return 1
+}
+
+if [[ -n "${LN7_EXISTING_DROPLET_ID:-}" && -n "${LN7_EXISTING_DROPLET_IP:-}" ]]; then
+  DROPLET_ID="$LN7_EXISTING_DROPLET_ID"
+  IP="$LN7_EXISTING_DROPLET_IP"
+  REGION="${LN7_EXISTING_DROPLET_REGION:-$REGION}"
+  # Honor size from watcher handoff / oneshot arm when reusing probe
+  if [[ -n "${LN7_GPU_SIZE:-}" && "$LN7_GPU_SIZE" != "$PREFERRED_SIZE" ]]; then
+    SIZE="$LN7_GPU_SIZE"
+  elif [[ -f "$STATE_DIR/ONESHOT_ARMED" ]]; then
+    SIZE="$(sed -n 's/^size=//p' "$STATE_DIR/ONESHOT_ARMED" | head -1)"
+    SIZE="${SIZE:-$PREFERRED_SIZE}"
+  fi
+  echo "[drain] reusing probe droplet id=$DROPLET_ID ip=$IP region=$REGION size=$SIZE"
+else
+  if ! _provision_size_across_regions "$PREFERRED_SIZE" "$PROVISION_RETRIES"; then
+    ln7_oneshot_telemetry primary_blocked \
+      "size=$PREFERRED_SIZE" "regions=$REGIONS" "clean_n=$CLEAN_N" \
+      "tier=$TRAIN_TIER" "hf=$HF_BASE" >/dev/null || true
+    echo "[drain] preferred $PREFERRED_SIZE unavailable across regions"
+    if ln7_oneshot_should_try; then
+      _fb="$(ln7_oneshot_fallback_size)"
+      echo "[drain] ONE-SHOT fallback → $_fb (advance blocked cycle)"
+      ln7_oneshot_telemetry oneshot_attempt "size=$_fb" "reason=primary_inventory_block" >/dev/null || true
+      if _provision_size_across_regions "$_fb" 1; then
+        ln7_oneshot_mark_armed "$SIZE" "$REGION" "$DROPLET_ID" "$IP"
+        export LN7_GPU_SIZE="$SIZE"
+        echo "[drain] oneshot armed size=$SIZE region=$REGION id=$DROPLET_ID"
+      else
+        ln7_oneshot_telemetry oneshot_blocked "size=$_fb" "reason=fallback_also_unavailable" >/dev/null || true
+        echo "[drain] oneshot fallback also unavailable"
+      fi
+    else
+      echo "[drain] oneshot disabled or cooldown — not trying fallback"
+    fi
+  else
+    ln7_oneshot_telemetry preferred_ok "size=$SIZE" "region=$REGION" "droplet_id=$DROPLET_ID" >/dev/null || true
+  fi
 fi
 [[ -n "$DROPLET_ID" && -n "$IP" && "$IP" != "PublicIPv4" ]] || { echo provision_failed; exit 2; }
 
@@ -127,9 +254,10 @@ write_handoff() {
     echo "LN7_EXISTING_DROPLET_ID=$DROPLET_ID"
     echo "LN7_EXISTING_DROPLET_IP=$IP"
     echo "LN7_EXISTING_DROPLET_REGION=$REGION"
+    echo "LN7_GPU_SIZE=$SIZE"
   } >"$dest"
   cp "$dest" "$STATE_DIR/probe.env" 2>/dev/null || true
-  echo "[drain] handoff written $dest id=$DROPLET_ID"
+  echo "[drain] handoff written $dest id=$DROPLET_ID size=$SIZE"
 }
 
 cleanup() {
@@ -369,6 +497,16 @@ REG_REV="$(echo "$REG_OUT" | awk -F= '/^REVISION_ID=/{print $2; exit}')"
 [[ -n "$REG_REV" ]] || REG_REV="LN7-${RID_TS}"
 echo "$REG_REV" >"$REV_OUT"
 echo "[drain] ok $REG_REV durable=$STORE/${REG_REV} blue=.ln7-adapters/${REG_REV}"
+# QUANTUM-CRYSTAL-ARCH — oneshot cycle advanced; clear arm + telemetry
+ln7_oneshot_mark_consume "$REG_REV" 2>/dev/null || true
+
+# Close out any continuous-learning job-queue rows consumed by this batch —
+# without this, ln7_train_jobs rows claimed by ln7_continuous_agent.py stay
+# stuck in 'training' forever (worker never marks them done).
+ssh -o BatchMode=yes -o ConnectTimeout=20 "$GREEN" \
+  "docker exec nate_postgres psql -U nate_admin -d little_nate -c \
+   \"UPDATE ln7_train_jobs SET status='canary', revision_id='$REG_REV', updated_at=now() \
+     WHERE status IN ('queued','claimed','training')\"" 2>/dev/null || true
 
 # Adapter retention: keep last N on BLUE + ORANGE; never delete active
 _prune_adapters() {

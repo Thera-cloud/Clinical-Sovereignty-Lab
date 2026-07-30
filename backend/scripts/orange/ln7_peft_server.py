@@ -18,14 +18,17 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
-ADAPTER_DIR = Path(os.getenv("LN7_ADAPTER_DIR", "/opt/ln7/adapters/LN7-2026-07-28T054420Z"))
+ADAPTER_DIR = Path(os.getenv("LN7_ADAPTER_DIR", "/opt/ln7/adapters/LN7-fast-baseline"))
 # Must match ln7_qlora_train.py / LN7_QLORA_HF_BASE used on TOR drain
-HF_BASE = os.getenv("LN7_QLORA_HF_BASE", "Qwen/Qwen2.5-Coder-1.5B-Instruct")
+HF_BASE = os.getenv("LN7_QLORA_HF_BASE", "Qwen/Qwen2.5-Coder-7B-Instruct")
 MODEL_ID = os.getenv("LN7_PEFT_MODEL_ID", "ln7-peft")
 HOST = os.getenv("LN7_PEFT_HOST", "10.13.13.5")
 PORT = int(os.getenv("LN7_PEFT_PORT", "11435") or "11435")
 AUTH = (os.getenv("LN7_PEFT_AUTH_TOKEN") or os.getenv("CLASSROOM_REMOTE_AUTH_TOKEN") or "").strip()
 MAX_NEW = int(os.getenv("LN7_PEFT_MAX_NEW_TOKENS", "2048") or "2048")
+# QUANTUM-CRYSTAL-ARCH — bare base (no LoRA) for LN7-fast-baseline incumbent
+BARE = os.getenv("LN7_PEFT_BARE", "").strip().lower() in ("1", "true", "yes", "on")
+REVISION_LABEL = os.getenv("LN7_PEFT_REVISION_ID", ADAPTER_DIR.name)
 
 _tokenizer = None
 _model = None
@@ -45,29 +48,52 @@ def _load() -> None:
     global _tokenizer, _model, _load_error
     try:
         import torch
-        from peft import PeftModel
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        if not ADAPTER_DIR.is_dir():
-            raise FileNotFoundError(f"adapter missing: {ADAPTER_DIR}")
-        tok = AutoTokenizer.from_pretrained(str(ADAPTER_DIR), trust_remote_code=True)
-        if tok.pad_token is None:
-            tok.pad_token = tok.eos_token
-        dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-        base = AutoModelForCausalLM.from_pretrained(
-            HF_BASE,
-            torch_dtype=dtype,
-            device_map="auto" if torch.cuda.is_available() else None,
-            trust_remote_code=True,
+        # QUANTUM-CRYSTAL-ARCH — float16 on CPU too (7B fp32 ≈28GB; ORANGE ~32GB)
+        force_f16 = os.getenv("LN7_PEFT_FORCE_F16", "1").strip().lower() in (
+            "1", "true", "yes", "on",
         )
-        if not torch.cuda.is_available():
-            base = base.to("cpu")
-        model = PeftModel.from_pretrained(base, str(ADAPTER_DIR))
-        # Merge for lower latency on CPU/GPU serve
-        try:
-            model = model.merge_and_unload()
-        except Exception:
-            pass
+        dtype = (
+            torch.float16
+            if (torch.cuda.is_available() or force_f16)
+            else torch.float32
+        )
+        if BARE:
+            tok = AutoTokenizer.from_pretrained(HF_BASE, trust_remote_code=True)
+            if tok.pad_token is None:
+                tok.pad_token = tok.eos_token
+            model = AutoModelForCausalLM.from_pretrained(
+                HF_BASE,
+                torch_dtype=dtype,
+                device_map="auto" if torch.cuda.is_available() else None,
+                low_cpu_mem_usage=True,
+                trust_remote_code=True,
+            )
+            if not torch.cuda.is_available():
+                model = model.to("cpu")
+        else:
+            from peft import PeftModel
+
+            if not ADAPTER_DIR.is_dir():
+                raise FileNotFoundError(f"adapter missing: {ADAPTER_DIR}")
+            tok = AutoTokenizer.from_pretrained(str(ADAPTER_DIR), trust_remote_code=True)
+            if tok.pad_token is None:
+                tok.pad_token = tok.eos_token
+            base = AutoModelForCausalLM.from_pretrained(
+                HF_BASE,
+                torch_dtype=dtype,
+                device_map="auto" if torch.cuda.is_available() else None,
+                low_cpu_mem_usage=True,
+                trust_remote_code=True,
+            )
+            if not torch.cuda.is_available():
+                base = base.to("cpu")
+            model = PeftModel.from_pretrained(base, str(ADAPTER_DIR))
+            try:
+                model = model.merge_and_unload()
+            except Exception:
+                pass
         model.eval()
         _tokenizer = tok
         _model = model
@@ -107,6 +133,8 @@ def health() -> Dict[str, Any]:
         "model": MODEL_ID,
         "adapter_dir": str(ADAPTER_DIR),
         "hf_base": HF_BASE,
+        "bare": BARE,
+        "revision_id": REVISION_LABEL,
         "loaded": _model is not None,
         "error": _load_error,
     }

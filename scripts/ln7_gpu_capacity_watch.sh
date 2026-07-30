@@ -9,6 +9,7 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SIZE="${LN7_GPU_SIZE:-gpu-4000adax1-20gb}"
+PREFERRED_SIZE="$SIZE"
 PREF="${LN7_GPU_REGION:-tor1}"
 REGIONS="${LN7_GPU_WATCH_REGIONS:-tor1 nyc1 nyc3 atl1 sfo3 fra1}"
 SLEEP="${LN7_GPU_WATCH_SLEEP_S:-900}"
@@ -29,6 +30,17 @@ AUTH_FAILS="$STATE_DIR/doctl_auth_fails"
 AUTH_BACKOFF_UNTIL="$STATE_DIR/doctl_auth_backoff_until"
 DONE_FILE="$STATE_DIR/AVAILABLE" # legacy; AB_OK is authoritative
 mkdir -p "$STATE_DIR" "$(dirname "$LOG")" "$(dirname "$DRAIN_LOG")"
+export LN7_GPU_WATCH_STATE_DIR="$STATE_DIR"
+export LN7_GPU_PREFERRED_SIZE="$PREFERRED_SIZE"
+export LN7_GPU_SIZE="$PREFERRED_SIZE"
+# Soft-sync oneshot lib before source (LaunchAgent may run from ~/sovereign-ln7)
+if [[ -r "${SRC_REPO}/scripts/ln7_gpu_oneshot_lib.sh" && "$REPO" != "$SRC_REPO" ]]; then
+  mkdir -p "$REPO/scripts"
+  cp "${SRC_REPO}/scripts/ln7_gpu_oneshot_lib.sh" "$REPO/scripts/ln7_gpu_oneshot_lib.sh" 2>/dev/null || true
+  chmod +x "$REPO/scripts/ln7_gpu_oneshot_lib.sh" 2>/dev/null || true
+fi
+# shellcheck disable=SC1091
+source "$REPO/scripts/ln7_gpu_oneshot_lib.sh"
 
 ts() { date -u +%Y-%m-%dT%H%M%SZ; }
 log() { echo "[gpu-watch] $(ts) $*" | tee -a "$LOG" >&2; }
@@ -52,7 +64,8 @@ sync_mirror() {
   fi
   mkdir -p "$REPO/scripts" "$REPO/data" "$REPO/backend/scripts"
   for f in ln7_gpu_capacity_watch.sh ln7_ab_qlora_drain.sh ln7_ab_bakeoff_compare.sh \
-           ln7_continuous_drain.sh ln7_provision_cuda_droplet.sh ln7_destroy_cuda_droplet.sh; do
+           ln7_continuous_drain.sh ln7_gpu_oneshot_lib.sh \
+           ln7_provision_cuda_droplet.sh ln7_destroy_cuda_droplet.sh; do
     [[ -f "$SRC_REPO/scripts/$f" ]] && cp "$SRC_REPO/scripts/$f" "$REPO/scripts/$f" 2>/dev/null && chmod +x "$REPO/scripts/$f" || true
   done
   [[ -f "$SRC_REPO/backend/scripts/ln7_qlora_train.py" ]] \
@@ -393,11 +406,12 @@ on_probe_kept() {
     echo "LN7_EXISTING_DROPLET_ID=$id"
     echo "LN7_EXISTING_DROPLET_IP=$ip"
     echo "LN7_EXISTING_DROPLET_REGION=$region"
+    echo "LN7_GPU_SIZE=$SIZE"
   } >"$PROBE"
   echo "${SIZE}@${region} kept $(ts) id=$id" >"$DONE_FILE"
   echo "draining $(ts) id=$id" >"$DRAINING"
   rm -f "$AB_FAIL" "$AB_OK"
-  log "stock held id=$id ip=$ip region=$region"
+  log "stock held id=$id ip=$ip region=$region size=$SIZE"
 
   if [[ "$AUTO_DRAIN" != "1" ]]; then
     log "AUTO_DRAIN=0 — droplet KEPT; run manually with probe.env"
@@ -417,6 +431,10 @@ try_reuse_probe() {
   source "$PROBE"
   local id="${LN7_EXISTING_DROPLET_ID:-}" ip="${LN7_EXISTING_DROPLET_IP:-}" region="${LN7_EXISTING_DROPLET_REGION:-}"
   [[ -n "$id" && -n "$ip" ]] || return 1
+  # Honor size from prior oneshot / probe handoff
+  if [[ -n "${LN7_GPU_SIZE:-}" ]]; then
+    SIZE="$LN7_GPU_SIZE"
+  fi
   local st
   st="$(doctl compute droplet get "$id" --format Status --no-header 2>/dev/null | tr -d '[:space:]' || true)"
   if [[ "$st" != "active" ]]; then
@@ -424,9 +442,37 @@ try_reuse_probe() {
     rm -f "$PROBE"
     return 1
   fi
-  log "reusing kept probe id=$id ip=$ip"
+  log "reusing kept probe id=$id ip=$ip size=$SIZE"
   on_probe_kept "$id" "$ip" "${region:-$PREF}"
   return 0
+}
+
+# Probe preferred SIZE across regions; on total miss, one-shot L40S + telemetry.
+_probe_all_regions() {
+  local r rc line id ip region
+  while read -r r; do
+    [[ -z "$r" ]] && continue
+    set +e
+    line="$(probe_region_keep "$r")"
+    rc=$?
+    set -e
+    if [[ $rc -eq 0 ]]; then
+      id="$(echo "$line" | awk -F'\t' '{print $1}')"
+      ip="$(echo "$line" | awk -F'\t' '{print $2}')"
+      region="$(echo "$line" | awk -F'\t' '{print $3}')"
+      on_probe_kept "$id" "$ip" "$region"
+      return 0
+    fi
+    if [[ $rc -eq 2 ]]; then
+      log "GPU account limit at $r — not starting drain"
+      osascript -e "display notification \"GPU account limit — destroy idle ln7-train droplets\" with title \"LN7 GPU capacity\"" 2>/dev/null || true
+      return 2
+    fi
+    if [[ $rc -eq 3 ]]; then
+      return 3
+    fi
+  done < <(ordered_regions)
+  return 1
 }
 
 one_check() {
@@ -469,31 +515,51 @@ one_check() {
     return 0
   fi
 
-  local r rc line id ip region
+  local rc _fb
+  SIZE="$PREFERRED_SIZE"
+  export LN7_GPU_SIZE="$PREFERRED_SIZE"
   log "check size=$SIZE prefer=$PREF"
-  while read -r r; do
-    [[ -z "$r" ]] && continue
+  set +e
+  _probe_all_regions
+  rc=$?
+  set -e
+  if [[ $rc -eq 0 ]]; then
+    ln7_oneshot_telemetry preferred_ok "size=$SIZE" >/dev/null || true
+    return 0
+  fi
+  if [[ $rc -eq 2 || $rc -eq 3 ]]; then
+    return 1
+  fi
+  # QUANTUM-CRYSTAL-ARCH — preferred inventory block → one-shot fallback to advance build
+  ln7_oneshot_telemetry primary_blocked "size=$PREFERRED_SIZE" "regions=$REGIONS" >/dev/null || true
+  log "still unavailable for $PREFERRED_SIZE"
+  if ln7_oneshot_should_try; then
+    _fb="$(ln7_oneshot_fallback_size)"
+    log "ONE-SHOT fallback probe → $_fb"
+    ln7_oneshot_telemetry oneshot_attempt "size=$_fb" "reason=primary_inventory_block" >/dev/null || true
+    SIZE="$_fb"
+    export LN7_GPU_SIZE="$SIZE"
     set +e
-    line="$(probe_region_keep "$r")"
+    _probe_all_regions
     rc=$?
     set -e
     if [[ $rc -eq 0 ]]; then
-      id="$(echo "$line" | awk -F'\t' '{print $1}')"
-      ip="$(echo "$line" | awk -F'\t' '{print $2}')"
-      region="$(echo "$line" | awk -F'\t' '{print $3}')"
-      on_probe_kept "$id" "$ip" "$region"
+      # shellcheck disable=SC1090
+      source "$PROBE" 2>/dev/null || true
+      ln7_oneshot_mark_armed "$SIZE" \
+        "${LN7_EXISTING_DROPLET_REGION:-$PREF}" \
+        "${LN7_EXISTING_DROPLET_ID:-}" \
+        "${LN7_EXISTING_DROPLET_IP:-}"
+      osascript -e "display notification \"One-shot ${_fb} — advancing blocked cycle\" with title \"LN7 GPU capacity\"" 2>/dev/null || true
       return 0
     fi
-    if [[ $rc -eq 2 ]]; then
-      log "GPU account limit at $r — not starting drain"
-      osascript -e "display notification \"GPU account limit — destroy idle ln7-train droplets\" with title \"LN7 GPU capacity\"" 2>/dev/null || true
-      return 1
-    fi
-    if [[ $rc -eq 3 ]]; then
-      return 1
-    fi
-  done < <(ordered_regions)
-  log "still unavailable for $SIZE"
+    ln7_oneshot_telemetry oneshot_blocked "size=$_fb" "reason=fallback_also_unavailable" >/dev/null || true
+    log "oneshot $_fb also unavailable"
+    SIZE="$PREFERRED_SIZE"
+    export LN7_GPU_SIZE="$PREFERRED_SIZE"
+  else
+    log "oneshot disabled or cooldown — stay on $PREFERRED_SIZE"
+  fi
   return 1
 }
 

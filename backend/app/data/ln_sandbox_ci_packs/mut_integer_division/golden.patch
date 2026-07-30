@@ -1,0 +1,8 @@
+--- a/broken/stats.py
++++ b/broken/stats.py
+@@ -1,3 +1,3 @@
+ def average(a: float, b: float) -> float:
+-    # BUG: floor division truncates the result
+-    return (a + b) // 2
++    # Fixed: true division preserves fractional average
++    return (a + b) / 2

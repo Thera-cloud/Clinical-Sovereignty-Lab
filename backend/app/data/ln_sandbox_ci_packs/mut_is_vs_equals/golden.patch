@@ -1,0 +1,8 @@
+--- a/broken/checks.py
++++ b/broken/checks.py
+@@ -1,3 +1,3 @@
+ def is_zero(x) -> bool:
+-    # BUG: 'is' checks identity, not value equality
+-    return x is 0
++    # Fixed: value comparison
++    return x == 0

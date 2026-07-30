@@ -171,7 +171,10 @@ async def register_revision(
                 ON CONFLICT (revision_id) DO UPDATE SET
                     notes = EXCLUDED.notes,
                     model_card_path = EXCLUDED.model_card_path,
-                    status = EXCLUDED.status
+                    status = EXCLUDED.status,
+                    base_checkpoint = EXCLUDED.base_checkpoint,
+                    quantization = EXCLUDED.quantization,
+                    harness_config_json = EXCLUDED.harness_config_json
                 """,
                 rid,
                 base,
@@ -209,7 +212,7 @@ async def activate_revision(
     promoted_by: str = "ceo",
     ceo_decision_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Flip serving alias — previous revision stays registered (rollback = re-activate)."""
+    """Flip serving alias for one tier — other tier active stays (fast ≠ deep)."""
     _auto = os.getenv("ENABLE_LN7_AUTO_PROMOTE", "").strip().lower() in (
         "1", "true", "yes", "on",
     )
@@ -220,28 +223,58 @@ async def activate_revision(
         return {"ok": False, "error": "auto_promote_disabled"}
     card = model_card_path(revision_id)
     root = Path(__file__).resolve().parents[3]
-    if not (root / card).is_file() and revision_id != "LN7-baseline":
+    if (
+        not (root / card).is_file()
+        and revision_id not in ("LN7-baseline", "LN7-fast-baseline")
+    ):
         # baseline card written at register; require card for others
         if not (root / "docs/ln7/LN7_baseline.md").is_file():
             return {"ok": False, "error": "model_card_missing"}
     if not db_pool:
         return {"ok": False, "error": "no_db"}
     try:
+        from app.services.little_nate_7 import revision_serving_tier
+
         async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT revision_id, harness_config_json FROM ln7_revisions
+                WHERE revision_id = $1
+                """,
+                revision_id,
+            )
+            if not row:
+                return {"ok": False, "error": "revision_not_found"}
+            tier = revision_serving_tier(dict(row))
             async with conn.transaction():
+                # QUANTUM-CRYSTAL-ARCH — deactivate only same serving tier
                 await conn.execute(
-                    "UPDATE ln7_revisions SET active = FALSE, status = CASE WHEN active THEN 'rolled_back' ELSE status END"
+                    """
+                    UPDATE ln7_revisions
+                    SET active = FALSE,
+                        status = CASE WHEN active THEN 'rolled_back' ELSE status END
+                    WHERE active = TRUE
+                      AND COALESCE(NULLIF(TRIM(harness_config_json->>'tier'), ''), 'deep') = $1
+                    """,
+                    tier,
                 )
                 await conn.execute(
                     """
                     UPDATE ln7_revisions
                     SET active = TRUE, status = 'active',
-                        promoted_by = $2, ceo_decision_id = $3
+                        promoted_by = $2, ceo_decision_id = $3,
+                        harness_config_json = jsonb_set(
+                            COALESCE(harness_config_json, '{}'::jsonb),
+                            '{tier}',
+                            to_jsonb($4::text),
+                            true
+                        )
                     WHERE revision_id = $1
                     """,
                     revision_id,
                     promoted_by,
                     ceo_decision_id,
+                    tier,
                 )
         # Dual-COO notify (best-effort)
         try:
@@ -250,12 +283,15 @@ async def activate_revision(
                 enqueue_ceo(
                     risk=RISK_RED,
                     title=f"LN7 revision activated: {revision_id}",
-                    detail=f"promoted_by={promoted_by} ceo_decision_id={ceo_decision_id}",
+                    detail=(
+                        f"promoted_by={promoted_by} ceo_decision_id={ceo_decision_id} "
+                        f"tier={tier}"
+                    ),
                     origin="ln7",
                 )
         except Exception as exc:
             logger.debug("LN7 dual-coo notify: %s", exc)
-        return {"ok": True, "revision_id": revision_id, "active": True}
+        return {"ok": True, "revision_id": revision_id, "active": True, "tier": tier}
     except Exception as exc:
         logger.warning("LN7 activate: %s", exc)
         return {"ok": False, "error": str(exc)}
@@ -298,8 +334,22 @@ async def notify_revision_candidate(
             else f"LN7 revision candidate: {revision_id} [HOLD]"
         )
         checklist = checklist_one_liner(readiness)
+        try:
+            from app.services.little_nate_7 import (
+                default_incumbent_id,
+                load_revision,
+                revision_serving_tier,
+            )
+
+            _rev = await load_revision(db_pool, revision_id)
+            _tier = revision_serving_tier(_rev)
+            _inc = default_incumbent_id(_tier)
+        except Exception:
+            _tier = "fast" if "7b" in str(readiness.get("base_checkpoint") or "").lower() else "deep"
+            _inc = "LN7-fast-baseline" if _tier == "fast" else "LN7-baseline"
         bottom = (
-            f"APPROVE to activate {revision_id} as default LN7 brain."
+            f"APPROVE to activate {revision_id} as LN7 {_tier} brain "
+            f"(gate was vs {_inc}; deep 32B unchanged if fast)."
             if ready
             else f"HOLD — {revision_id} premature ({readiness.get('reason')})."
         )

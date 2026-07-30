@@ -1,0 +1,10 @@
+{
+  "task_key": "ci_mut_reversed_sort",
+  "title": "Fix ascending sort used where descending was required",
+  "prompt": "The file broken/ranking.py has top_n returning the smallest values because it sorts ascending. Fix ONLY the sorted() call to sort descending (reverse=True). Return ONLY a unified diff (---/+++ @@) for broken/ranking.py. No markdown fences.",
+  "test_path": "tests/test_ranking.py",
+  "target_files": [
+    "broken/ranking.py"
+  ],
+  "domain": "coding"
+}

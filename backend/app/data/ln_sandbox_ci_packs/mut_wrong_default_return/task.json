@@ -1,0 +1,10 @@
+{
+  "task_key": "ci_mut_wrong_default_return",
+  "title": "Fix wrong sentinel returned on failed search",
+  "prompt": "The file broken/search.py has find_index returning the last loop index instead of -1 when the target is not found. Fix ONLY the fallback return value. Return ONLY a unified diff (---/+++ @@) for broken/search.py. No markdown fences.",
+  "test_path": "tests/test_search.py",
+  "target_files": [
+    "broken/search.py"
+  ],
+  "domain": "coding"
+}

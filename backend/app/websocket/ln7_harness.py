@@ -232,7 +232,7 @@ async def propose_candidates(
         if revision_id:
             rev = await load_revision(db_pool, revision_id)
         if rev is None:
-            rev = await load_active_revision(db_pool)
+            rev = await load_active_revision(db_pool, tier=model_tier)
     target = serve_target_from_revision(rev, tier=model_tier)
     model_override = target.get("model") or None
     base_url_override = target.get("url") or None
@@ -505,7 +505,7 @@ async def generate_sovereign_reply(
         if revision_id:
             rev = await load_revision(db_pool, revision_id)
         if rev is None:
-            rev = await load_active_revision(db_pool)
+            rev = await load_active_revision(db_pool, tier=model_tier)
     target = serve_target_from_revision(rev, tier=model_tier)
     router = NateInferenceRouter()
     result = await router.generate(

@@ -16,6 +16,8 @@ from typing import Any, Optional
 
 logger = logging.getLogger("ln7_continuous_agent")
 
+_MIN_PACK_OUTCOMES_DEFAULT = 3
+
 
 class Ln7ContinuousAgent:
     def __init__(self, db_pool, *, interval_s: int = 300):
@@ -23,6 +25,10 @@ class Ln7ContinuousAgent:
         self._interval = max(60, interval_s)
         self._task: Optional[asyncio.Task] = None
         self._stop = asyncio.Event()
+        # G2 fix: revisions currently running an auto-triggered private-pack
+        # bakeoff, so we never double-fire concurrent bakeoffs for the same
+        # revision across cycles (bakeoffs can run longer than the 300s tick).
+        self._bakeoff_inflight: set[str] = set()
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -78,10 +84,12 @@ class Ln7ContinuousAgent:
                     "SELECT revision_id FROM ln7_canary_state WHERE status = 'active'"
                 )
             for r in rows:
-                result = await evaluate_canary(self._db, r["revision_id"])
+                rid = r["revision_id"]
+                await self._ensure_pack_outcomes(rid)
+                result = await evaluate_canary(self._db, rid)
                 logger.info(
                     "LN7 canary %s → %s",
-                    r["revision_id"],
+                    rid,
                     result.get("action") or result.get("error"),
                 )
                 if result.get("action") == "await_ceo" and result.get("ok"):
@@ -89,12 +97,67 @@ class Ln7ContinuousAgent:
                         from app.services.ln7_revision import notify_revision_candidate
 
                         await notify_revision_candidate(
-                            self._db, r["revision_id"], force_ready=True
+                            self._db, rid, force_ready=True
                         )
                     except Exception as nexc:
                         logger.warning("LN7 READY renotify: %s", nexc)
         except Exception as exc:
             logger.warning("LN7 canary sweep: %s", exc)
+
+    async def _ensure_pack_outcomes(self, revision_id: str) -> None:
+        """G2 fix: without this, a freshly-registered shadow revision sits in
+        ln7_canary_state with zero ln7_coding_outcomes rows forever — nothing
+        ever ran run_private_pack_bakeoff() for it, so evaluate_canary() keeps
+        returning insufficient_tasks (0/3) until a human manually triggers a
+        bakeoff via the API. Auto-fire the bakeoff here instead.
+        """
+        if not revision_id or revision_id in self._bakeoff_inflight:
+            return
+        min_n = int(
+            os.getenv("LN7_CANARY_MIN_PACK_OUTCOMES", str(_MIN_PACK_OUTCOMES_DEFAULT))
+            or _MIN_PACK_OUTCOMES_DEFAULT
+        )
+        try:
+            async with self._db.acquire() as conn:
+                n = await conn.fetchval(
+                    """
+                    SELECT COUNT(*) FROM ln7_coding_outcomes
+                    WHERE revision_id = $1 AND generator = 'ln7'
+                      AND (metrics_json->>'pack') IS NOT NULL
+                    """,
+                    revision_id,
+                )
+        except Exception as exc:
+            logger.warning("LN7 pack-outcome count %s: %s", revision_id, exc)
+            return
+        if int(n or 0) >= min_n:
+            return
+        self._bakeoff_inflight.add(revision_id)
+        logger.info(
+            "LN7 continuous: auto-triggering private-pack bakeoff for %s (have=%s, need=%s)",
+            revision_id, n, min_n,
+        )
+        asyncio.create_task(self._run_auto_bakeoff(revision_id))
+
+    async def _run_auto_bakeoff(self, revision_id: str) -> None:
+        try:
+            from app.services.ln7_bakeoff_engine import run_private_pack_bakeoff
+
+            result = await run_private_pack_bakeoff(
+                self._db, revision_id=revision_id, mode="max",
+            )
+            pass_rate = (result.get("pass_rate") or {}) if isinstance(result, dict) else {}
+            logger.info(
+                "LN7 auto-bakeoff %s: ok=%s n=%s mean=%.2f",
+                revision_id,
+                result.get("ok") if isinstance(result, dict) else None,
+                pass_rate.get("n"),
+                float(pass_rate.get("mean") or 0.0),
+            )
+        except Exception as exc:
+            logger.warning("LN7 auto-bakeoff %s failed: %s", revision_id, exc)
+        finally:
+            self._bakeoff_inflight.discard(revision_id)
 
 
 async def maybe_start_continuous_agent(app_state, db_pool) -> Any:

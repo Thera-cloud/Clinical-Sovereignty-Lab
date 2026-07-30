@@ -1,0 +1,10 @@
+{
+  "task_key": "ci_mut_off_by_one_slice",
+  "title": "Fix off-by-one slice bound dropping the middle element",
+  "prompt": "The file broken/splitter.py has first_half slicing with an extra '- 1' that drops an element. Fix ONLY the slice bound. Return ONLY a unified diff (---/+++ @@) for broken/splitter.py. No markdown fences.",
+  "test_path": "tests/test_splitter.py",
+  "target_files": [
+    "broken/splitter.py"
+  ],
+  "domain": "coding"
+}

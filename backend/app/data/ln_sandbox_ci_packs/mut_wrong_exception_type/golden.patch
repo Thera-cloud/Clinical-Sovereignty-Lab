@@ -1,0 +1,11 @@
+--- a/broken/safe_math.py
++++ b/broken/safe_math.py
+@@ -1,6 +1,6 @@
+ def safe_div(a: float, b: float):
+-    # BUG: catches the wrong exception type
++    # Fixed: division by zero raises ZeroDivisionError
+     try:
+         return a / b
+-    except TypeError:
++    except ZeroDivisionError:
+         return None

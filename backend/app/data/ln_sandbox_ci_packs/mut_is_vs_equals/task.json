@@ -1,0 +1,10 @@
+{
+  "task_key": "ci_mut_is_vs_equals",
+  "title": "Fix identity check misused for value equality",
+  "prompt": "The file broken/checks.py has is_zero using 'is 0' (identity check) instead of '== 0' (value check). Fix ONLY that comparison operator. Return ONLY a unified diff (---/+++ @@) for broken/checks.py. No markdown fences.",
+  "test_path": "tests/test_checks.py",
+  "target_files": [
+    "broken/checks.py"
+  ],
+  "domain": "coding"
+}

@@ -1,0 +1,8 @@
+--- a/broken/grader.py
++++ b/broken/grader.py
+@@ -1,3 +1,3 @@
+ def passed_threshold(score: float, cutoff: float) -> bool:
+-    # BUG: '>' excludes a score exactly equal to the cutoff
+-    return score > cutoff
++    # Fixed: '>=' correctly treats the cutoff itself as passing
++    return score >= cutoff

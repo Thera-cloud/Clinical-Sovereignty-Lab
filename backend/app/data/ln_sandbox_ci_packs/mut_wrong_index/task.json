@@ -1,0 +1,10 @@
+{
+  "task_key": "ci_mut_wrong_index",
+  "title": "Fix wrong index for last element",
+  "prompt": "The file broken/lists.py has last_element returning items[0] instead of the final element. Fix ONLY the index. Return ONLY a unified diff (---/+++ @@) for broken/lists.py. No markdown fences.",
+  "test_path": "tests/test_lists.py",
+  "target_files": [
+    "broken/lists.py"
+  ],
+  "domain": "coding"
+}

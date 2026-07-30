@@ -269,11 +269,14 @@ def public_benchmark_stub(name: str) -> Dict[str, Any]:
     }
 
 
-async def run_public_benchmarks() -> List[Dict[str, Any]]:
-    """Smoke / ingest / full public benches via ln7_public_harness."""
+async def run_public_benchmarks(
+    *, revision_id: Optional[str] = None, db_pool=None,
+) -> List[Dict[str, Any]]:
+    """Smoke / ingest / full public benches via ln7_public_harness, plus the
+    real executed humaneval_subset benchmark (G3 fix)."""
     try:
         from app.services.ln7_public_harness import run_all_public
-        return await run_all_public()
+        return await run_all_public(revision_id=revision_id, db_pool=db_pool)
     except Exception as exc:
         logger.warning("LN7 public harness: %s", exc)
         return [public_benchmark_stub(b) for b in PUBLIC_BENCHMARKS]
@@ -295,7 +298,7 @@ async def run_full_scorecard(
         )
     public: List[Dict[str, Any]] = []
     if include_public:
-        public = await run_public_benchmarks()
+        public = await run_public_benchmarks(revision_id=revision_id, db_pool=db_pool)
     contestants = await list_contestants(db_pool)
     return {
         "ok": bool(private.get("ok")) if include_private else True,

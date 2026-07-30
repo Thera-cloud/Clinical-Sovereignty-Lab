@@ -1,0 +1,10 @@
+{
+  "task_key": "ci_mut_negated_condition",
+  "title": "Fix inverted emptiness check",
+  "prompt": "The file broken/empties.py has is_empty using '!= 0' instead of '== 0', inverting the result. Fix ONLY that comparison operator. Return ONLY a unified diff (---/+++ @@) for broken/empties.py. No markdown fences.",
+  "test_path": "tests/test_empties.py",
+  "target_files": [
+    "broken/empties.py"
+  ],
+  "domain": "coding"
+}

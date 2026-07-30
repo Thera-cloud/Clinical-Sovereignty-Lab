@@ -10,10 +10,14 @@ Scores are report-only; private held-out remains the promotion gate.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
+import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -25,6 +29,16 @@ PUBLIC_BENCHMARKS = (
     "livecodebench",
     "aider_polyglot",
     "terminal_bench",
+)
+
+# G3 fix: the benchmarks above are report-only stubs (smoke string-matching or
+# missing official harness roots) — they never write to ln7_coding_outcomes,
+# so source='public' outcomes were always zero. humaneval_subset is a real,
+# actually-executed benchmark: MIT-licensed, embedded in-repo (no network dep
+# at eval time), real subprocess execution against real unit tests, and
+# recorded into ln7_coding_outcomes with source='public' provenance.
+HUMANEVAL_SUBSET_PATH = (
+    Path(__file__).resolve().parents[2] / "data" / "ln7_humaneval_subset.json"
 )
 
 # Minimal smoke tasks — prove harness I/O; not competitive scores.
@@ -284,7 +298,190 @@ async def run_public_benchmark(name: str) -> Dict[str, Any]:
     return await run_smoke_benchmark(name)
 
 
-async def run_all_public() -> List[Dict[str, Any]]:
+def _load_humaneval_subset() -> Dict[str, Any]:
+    if not HUMANEVAL_SUBSET_PATH.is_file():
+        return {}
+    try:
+        return json.loads(HUMANEVAL_SUBSET_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("humaneval subset load: %s", exc)
+        return {}
+
+
+def _extract_completion(text: str) -> str:
+    """Strip markdown fences / chatter the model may add around raw code."""
+    t = (text or "").strip()
+    t = re.sub(r"^```(?:python)?\s*\n?", "", t)
+    t = re.sub(r"\n?```\s*$", "", t)
+    return t
+
+
+def _exec_humaneval_case(
+    prompt: str, completion: str, test: str, entry_point: str, timeout_s: float = 10.0,
+) -> bool:
+    """Real subprocess execution of prompt+completion+test — actual pass/fail,
+    not string matching. Isolated in a temp file / fresh interpreter."""
+    program = f"{prompt}{completion}\n\n{test}\ncheck({entry_point})\n"
+    fpath = ""
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+            f.write(program)
+            fpath = f.name
+        proc = subprocess.run(
+            [sys.executable, fpath],
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
+    finally:
+        if fpath:
+            try:
+                os.unlink(fpath)
+            except Exception:
+                pass
+
+
+async def _propose_humaneval_solution(prompt: str, *, mode: str, revision_id: Optional[str]) -> str:
+    """Real LN7 model call (sovereign-only, never vendor) — actual generation,
+    not the tiny oracle-keyword stub used by run_smoke_benchmark()."""
+    try:
+        from app.websocket.ln7_harness import generate_sovereign_reply
+        out = await generate_sovereign_reply(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "Complete the Python function below. Return ONLY the "
+                        "function body / continuation as raw Python code — no "
+                        "markdown fences, no explanation, do not repeat the "
+                        "signature or docstring."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            mode=mode,
+            revision_id=revision_id,
+        )
+        return (out or {}).get("text") or ""
+    except Exception as exc:
+        logger.warning("humaneval propose: %s", exc)
+        return ""
+
+
+async def _ensure_humaneval_tasks_seeded(db_pool, problems: List[Dict[str, Any]]) -> None:
+    """Idempotent safety net alongside migration 297 — self-heals if the
+    migration hasn't run yet. split='eval' keeps these out of the training
+    feedback loop (assert_train_eligible excludes heldout/eval)."""
+    if not db_pool or not problems:
+        return
+    try:
+        async with db_pool.acquire() as conn:
+            for prob in problems:
+                tid = prob["task_id"]
+                await conn.execute(
+                    """
+                    INSERT INTO ln7_tasks
+                        (task_id, source, difficulty, task_hash, split, spdx_license,
+                         pack_name, prompt_summary, metadata_json)
+                    VALUES ($1, 'public', 'medium',
+                            encode(sha256(('humaneval:' || $1)::bytea), 'hex'),
+                            'eval', 'MIT', NULL, $2, $3::jsonb)
+                    ON CONFLICT (task_id) DO NOTHING
+                    """,
+                    tid,
+                    (prob.get("prompt") or "")[:200],
+                    json.dumps({"benchmark": "humaneval", "entry_point": prob.get("entry_point")}),
+                )
+    except Exception as exc:
+        logger.warning("humaneval seed: %s", exc)
+
+
+async def run_humaneval_benchmark(
+    *,
+    revision_id: str = "LN7-baseline",
+    mode: str = "max",
+    db_pool=None,
+    record: bool = True,
+) -> Dict[str, Any]:
+    """G3 fix: a genuinely-scored public benchmark. 20-problem MIT-licensed
+    HumanEval subset (embedded in-repo, no network dependency at eval time),
+    real LN7 generation, real subprocess execution against the official unit
+    tests, and (when db_pool is supplied) real rows in ln7_coding_outcomes
+    with source='public' provenance — not a report-only string-match stub.
+    """
+    data = _load_humaneval_subset()
+    problems = data.get("problems") or []
+    if not problems:
+        return {
+            "benchmark": "humaneval_subset",
+            "status": "no_problems",
+            "report_only": True,
+            "note": f"Missing/empty {HUMANEVAL_SUBSET_PATH}",
+        }
+
+    if record and db_pool is not None:
+        await _ensure_humaneval_tasks_seeded(db_pool, problems)
+
+    passes: List[bool] = []
+    details: List[Dict[str, Any]] = []
+    t0 = time.time()
+    for prob in problems:
+        tid = prob["task_id"]
+        completion = ""
+        ok = False
+        try:
+            raw = await _propose_humaneval_solution(prob["prompt"], mode=mode, revision_id=revision_id)
+            completion = _extract_completion(raw)
+            ok = await asyncio.to_thread(
+                _exec_humaneval_case, prob["prompt"], completion, prob["test"], prob["entry_point"],
+            )
+        except Exception as exc:
+            logger.warning("humaneval task %s: %s", tid, exc)
+        passes.append(ok)
+        details.append({"task_id": tid, "passed": ok, "response_chars": len(completion)})
+
+        if record and db_pool is not None:
+            try:
+                from app.services.ln7_ledger import record_outcome, task_hash as _th
+                await record_outcome(
+                    db_pool,
+                    {
+                        "task_id": tid,
+                        "generator": "ln7",
+                        "revision_id": revision_id,
+                        "harness_mode": mode,
+                        "patch_hash": _th(completion or tid),
+                        "passed": ok,
+                        "diff_lines": len((completion or "").splitlines()),
+                        "cost_usd": 0.0,
+                        "exec_node": "green",
+                        "patch_text": completion or None,
+                        "metrics_json": {"benchmark": "humaneval_subset", "task_id": tid, "source": "public"},
+                    },
+                )
+            except Exception as exc:
+                logger.warning("humaneval record_outcome %s: %s", tid, exc)
+
+    ci = _bootstrap_ci(passes)
+    return {
+        "benchmark": "humaneval_subset",
+        "status": "ok",
+        "mode": f"{mode}_executed",
+        "report_only": True,
+        "gate_surface": False,
+        "pass_rate": ci,
+        "latency_ms": int((time.time() - t0) * 1000),
+        "details": details,
+        "n": len(problems),
+        "license": data.get("spdx_license", "MIT"),
+        "note": "20-problem MIT-licensed HumanEval subset, real subprocess execution — not string matching.",
+    }
+
+
+async def run_all_public(*, revision_id: Optional[str] = None, db_pool=None) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for name in PUBLIC_BENCHMARKS:
         try:
@@ -296,6 +493,14 @@ async def run_all_public() -> List[Dict[str, Any]]:
                 "report_only": True,
                 "error": str(exc)[:200],
             })
+    try:
+        out.append(
+            await run_humaneval_benchmark(
+                revision_id=revision_id or "LN7-baseline", db_pool=db_pool, record=db_pool is not None,
+            )
+        )
+    except Exception as exc:
+        out.append({"benchmark": "humaneval_subset", "status": "error", "report_only": True, "error": str(exc)[:200]})
     return out
 
 

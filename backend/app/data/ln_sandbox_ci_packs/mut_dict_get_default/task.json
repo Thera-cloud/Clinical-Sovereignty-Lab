@@ -1,0 +1,10 @@
+{
+  "task_key": "ci_mut_dict_get_default",
+  "title": "Fix KeyError from direct dict indexing",
+  "prompt": "The file broken/config.py has get_setting using cfg[key] directly, which raises KeyError for missing keys instead of returning the default. Fix ONLY that line to use cfg.get(key, default). Return ONLY a unified diff (---/+++ @@) for broken/config.py. No markdown fences.",
+  "test_path": "tests/test_config.py",
+  "target_files": [
+    "broken/config.py"
+  ],
+  "domain": "coding"
+}

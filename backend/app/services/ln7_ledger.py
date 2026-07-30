@@ -13,7 +13,9 @@ logger = logging.getLogger("ln7_ledger")
 try:
     from app.services.little_nate_7 import PERMISSIVE_SPDX
 except Exception:
-    PERMISSIVE_SPDX = frozenset({"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unlicense"})
+    PERMISSIVE_SPDX = frozenset({
+        "MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unlicense", "FIRST-PARTY",
+    })
 
 
 def task_hash(payload: str) -> str:
@@ -115,10 +117,72 @@ async def record_outcome(db_pool, row: Dict[str, Any]) -> Optional[int]:
                 await enqueue_outcome(db_pool, oid_i, trigger_source="outcome")
             except Exception as _eq:
                 logger.debug("LN7 train enqueue: %s", _eq)
+            # G4: wire accepted outcome -> ln7_learning_artifacts feedback loop.
+            # promote_learning_artifact() re-checks split (heldout/eval excluded)
+            # and license (permissive-only) internally, so this is safe to fire
+            # unconditionally for every passed outcome.
+            try:
+                await _auto_promote_learning_artifact(db_pool, oid_i, row, patch_body)
+            except Exception as _pl:
+                logger.debug("LN7 auto-promote: %s", _pl)
         return oid_i
     except Exception as exc:
         logger.warning("LN7 record_outcome: %s", exc)
         return None
+
+
+async def _auto_promote_learning_artifact(
+    db_pool, outcome_id: int, row: Dict[str, Any], patch_body: Optional[str]
+) -> bool:
+    """Look up the task's hash/license and promote a passed outcome automatically.
+
+    This is the G4 fix: previously promote_learning_artifact() existed but was
+    never called from record_outcome(), so ln7_learning_artifacts stayed empty
+    even though passed outcomes were accumulating.
+
+    Private-pack bakeoff outcomes (run_private_pack_bakeoff) always pass
+    task_id=None by design — the pack identity lives in metrics_json.pack
+    instead. Resolve the task row by pack_name in that case so those outcomes
+    (the vast majority of LN7's passed outcomes) aren't silently skipped.
+    """
+    if not patch_body:
+        return False
+    task_id = row.get("task_id")
+    metrics = row.get("metrics_json") or {}
+    pack_name = metrics.get("pack") if isinstance(metrics, dict) else None
+    async with db_pool.acquire() as conn:
+        if task_id:
+            task_row = await conn.fetchrow(
+                "SELECT task_hash, spdx_license, pack_name, source FROM ln7_tasks WHERE task_id = $1",
+                task_id,
+            )
+        elif pack_name:
+            task_row = await conn.fetchrow(
+                "SELECT task_hash, spdx_license, pack_name, source FROM ln7_tasks "
+                "WHERE pack_name = $1 ORDER BY created_at DESC LIMIT 1",
+                pack_name,
+            )
+        else:
+            task_row = None
+    if not task_row:
+        return False
+    th = task_row["task_hash"]
+    spdx = task_row["spdx_license"]
+    if not th:
+        return False
+    pack_or_src = task_row["pack_name"] or task_row["source"] or "unknown"
+    summary = (
+        f"{row.get('generator') or 'ln7'} passed {pack_or_src} "
+        f"(harness={row.get('harness_mode') or 'max'}, revision={row.get('revision_id') or 'n/a'})"
+    )
+    return await promote_learning_artifact(
+        db_pool,
+        outcome_id=outcome_id,
+        path_or_r2_key=f"ln7_coding_outcomes/{outcome_id}",
+        summary=summary,
+        task_hash_val=th,
+        spdx_license=spdx,
+    )
 
 
 async def promote_learning_artifact(

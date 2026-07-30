@@ -1,0 +1,10 @@
+{
+  "task_key": "ci_mut_any_vs_all",
+  "title": "Fix any()/all() confusion in positivity check",
+  "prompt": "The file broken/quantifiers.py has all_positive using any() where all() is required. Fix ONLY that function name. Return ONLY a unified diff (---/+++ @@) for broken/quantifiers.py. No markdown fences.",
+  "test_path": "tests/test_quantifiers.py",
+  "target_files": [
+    "broken/quantifiers.py"
+  ],
+  "domain": "coding"
+}

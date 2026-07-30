@@ -1,0 +1,12 @@
+--- a/broken/search.py
++++ b/broken/search.py
+@@ -1,7 +1,6 @@
+ def find_index(items: list, target) -> int:
+-    i = -1
+     for i, v in enumerate(items):
+         if v == target:
+             return i
+-    # BUG: returns the last loop index instead of -1 on miss
+-    return i
++    # Fixed: -1 sentinel means not found
++    return -1

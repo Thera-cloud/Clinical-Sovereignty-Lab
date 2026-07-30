@@ -7,6 +7,11 @@ ADAPTER_NAME="${1:-LN7-2026-07-28T054420Z}"
 GREEN="${LN7_GREEN_HOST:-root@68.183.168.75}"
 ORANGE_IP="${LN7_ORANGE_WG:-10.13.13.5}"
 SRC="$REPO/.ln7-adapters/${ADAPTER_NAME}"
+# QUANTUM-CRYSTAL-ARCH — bare 7B incumbent (no LoRA weights)
+PEFT_BARE="${LN7_PEFT_BARE:-0}"
+if [[ "$ADAPTER_NAME" == "LN7-fast-baseline" ]]; then
+  PEFT_BARE=1
+fi
 
 if [[ ! -d "$SRC" ]]; then
   echo "[peft] FAIL: missing BLUE adapter dir $SRC" >&2
@@ -32,7 +37,7 @@ if [[ -f "$SRC/checkpoint-40/adapter_config.json" ]]; then
 fi
 
 ssh -o BatchMode=yes -o ProxyJump="$GREEN" "root@${ORANGE_IP}" \
-  "ADAPTER_NAME='$ADAPTER_NAME' bash -s" <<'REMOTE'
+  "ADAPTER_NAME='$ADAPTER_NAME' PEFT_BARE='$PEFT_BARE' bash -s" <<'REMOTE'
 set -euo pipefail
 mkdir -p /opt/ln7/peft_serve /opt/ln7/hf_cache
 test -d "/opt/ln7/adapters/$ADAPTER_NAME"
@@ -47,16 +52,18 @@ Type=simple
 User=root
 WorkingDirectory=/opt/ln7/peft_serve
 Environment=LN7_ADAPTER_DIR=/opt/ln7/adapters/${ADAPTER_NAME}
-Environment=LN7_QLORA_HF_BASE=Qwen/Qwen2.5-Coder-1.5B-Instruct
+Environment=LN7_QLORA_HF_BASE=Qwen/Qwen2.5-Coder-7B-Instruct
 Environment=LN7_PEFT_MODEL_ID=ln7-peft
 Environment=LN7_PEFT_HOST=10.13.13.5
 Environment=LN7_PEFT_PORT=11435
+Environment=LN7_PEFT_BARE=${PEFT_BARE}
+Environment=LN7_PEFT_REVISION_ID=${ADAPTER_NAME}
 Environment=HF_HOME=/opt/ln7/hf_cache
 Environment=PATH=/opt/ln7/peft_serve/.venv/bin:/usr/local/bin:/usr/bin
 ExecStart=/opt/ln7/peft_serve/.venv/bin/python /opt/ln7/peft_serve/ln7_peft_server.py
 Restart=on-failure
 RestartSec=8
-MemoryMax=12G
+MemoryMax=28G
 
 [Install]
 WantedBy=multi-user.target

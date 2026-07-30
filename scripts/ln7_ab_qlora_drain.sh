@@ -11,13 +11,19 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 export LN7_GPU_REGION="${LN7_GPU_REGION:-tor1}"
 export LN7_GPU_SIZE="${LN7_GPU_SIZE:-gpu-4000adax1-20gb}"
-export LN7_QLORA_HF_BASE="${LN7_QLORA_HF_BASE:-Qwen/Qwen2.5-Coder-1.5B-Instruct}"
-export LN7_QLORA_MIN_ROWS="${LN7_QLORA_MIN_ROWS:-50}"
+export LN7_GPU_PREFERRED_SIZE="${LN7_GPU_PREFERRED_SIZE:-gpu-4000adax1-20gb}"
+export LN7_GPU_ONESHOT_FALLBACK="${LN7_GPU_ONESHOT_FALLBACK:-1}"
+export LN7_GPU_ONESHOT_FALLBACK_SIZE="${LN7_GPU_ONESHOT_FALLBACK_SIZE:-gpu-l40sx1-48gb}"
+export LN7_QLORA_HF_BASE="${LN7_QLORA_HF_BASE:-Qwen/Qwen2.5-Coder-7B-Instruct}"
+# QUANTUM-CRYSTAL-ARCH — Milestone A fast-tier: refuse thin 7B burns
+export LN7_QLORA_MIN_ROWS="${LN7_QLORA_MIN_ROWS:-500}"
+export LN7_TRAIN_TIER="${LN7_TRAIN_TIER:-fast}"
+# QUANTUM-CRYSTAL-ARCH — 7B dual-recipe wall ~8h (was 4h for 1.5B)
+export LN7_GPU_HARD_MAX_S="${LN7_GPU_HARD_MAX_S:-28800}"
 export LN7_GPU_WATCH_REGIONS="${LN7_GPU_WATCH_REGIONS:-tor1 nyc1 nyc3 atl1 sfo3 fra1}"
 export LN7_GPU_PROVISION_RETRIES="${LN7_GPU_PROVISION_RETRIES:-3}"
 # Dual-recipe wall + idle grace (heartbeat refreshed during train)
 export LN7_GPU_TTL_S="${LN7_GPU_TTL_S:-1800}"
-export LN7_GPU_HARD_MAX_S="${LN7_GPU_HARD_MAX_S:-14400}"
 
 STATE_DIR="${LN7_GPU_WATCH_STATE_DIR:-$HOME/.local/state/ln7_gpu_watch}"
 mkdir -p "$STATE_DIR"
@@ -57,7 +63,8 @@ fi
 # Mirror sync: Desktop → this REPO tree when running from ~/sovereign-ln7
 if [[ -d "$SRC_REPO/scripts" && "$REPO" != "$SRC_REPO" ]]; then
   for f in ln7_continuous_drain.sh ln7_ab_qlora_drain.sh ln7_ab_bakeoff_compare.sh \
-           ln7_gpu_capacity_watch.sh ln7_gpu_orphan_reaper.sh ln7_drain_watchdog.sh \
+           ln7_gpu_capacity_watch.sh ln7_gpu_oneshot_lib.sh \
+           ln7_gpu_orphan_reaper.sh ln7_drain_watchdog.sh \
            ln7_ab_compare_watchdog.sh \
            ln7_provision_cuda_droplet.sh ln7_destroy_cuda_droplet.sh; do
     [[ -f "$SRC_REPO/scripts/$f" ]] && cp "$SRC_REPO/scripts/$f" "$REPO/scripts/$f" && chmod +x "$REPO/scripts/$f"

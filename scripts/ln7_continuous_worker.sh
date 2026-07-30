@@ -13,9 +13,15 @@ STATE_DIR="${LN7_GPU_WATCH_STATE_DIR:-$HOME/.local/state/ln7_gpu_watch}"
 export LN7_GPU_REGION="$REGION"
 
 queued() {
+  # NOTE: 'claimed' is not a real ln7_train_jobs status (schema only defines
+  # queued/exporting/training/registering/canary/promoted/rolled_back/failed/skipped).
+  # ln7_continuous_agent.py claims jobs by setting status='training', so that
+  # value MUST be included here or claimed jobs sit stuck forever (bug fixed
+  # 2026-07-29). Any in-flight (non-terminal) status counts as work to drain —
+  # a single drain run closes out ALL outstanding jobs together.
   ssh -o BatchMode=yes -o ConnectTimeout=15 "$GREEN" \
     "docker exec nate_postgres psql -U nate_admin -d little_nate -tAc \
-     \"SELECT count(*) FROM ln7_train_jobs WHERE status IN ('queued','claimed')\"" \
+     \"SELECT count(*) FROM ln7_train_jobs WHERE status IN ('queued','exporting','training','registering')\"" \
     | tr -d '[:space:]'
 }
 

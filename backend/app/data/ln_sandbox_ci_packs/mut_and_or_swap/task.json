@@ -1,0 +1,10 @@
+{
+  "task_key": "ci_mut_and_or_swap",
+  "title": "Fix boolean operator swap (and/or)",
+  "prompt": "The file broken/validators.py has is_valid_age using 'or' where both bounds must hold. Change ONLY the boolean operator to 'and'. Return ONLY a unified diff (---/+++ @@) for broken/validators.py. No markdown fences.",
+  "test_path": "tests/test_validators.py",
+  "target_files": [
+    "broken/validators.py"
+  ],
+  "domain": "coding"
+}

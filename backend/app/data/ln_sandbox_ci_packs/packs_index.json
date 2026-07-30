@@ -2,7 +2,9 @@
   "version": 2,
   "description": "Disposable micro-repos for LN Sandbox Engineering CI. Never mutates GREEN prod tree.",
   "heldout": [
-    "env_redis_prefix"
+    "env_redis_prefix",
+    "mut_off_by_one_range",
+    "mut_mutable_default_arg"
   ],
   "packs": [
     "asyncpg_cast",
@@ -22,6 +24,22 @@
     "no_iframe_embed",
     "coach_three_fields",
     "middleware_not_in_lifespan",
-    "flutter_nocache_sw"
+    "flutter_nocache_sw",
+    "mut_off_by_one_range",
+    "mut_and_or_swap",
+    "mut_wrong_index",
+    "mut_integer_division",
+    "mut_mutable_default_arg",
+    "mut_dict_get_default",
+    "mut_swapped_args",
+    "mut_is_vs_equals",
+    "mut_reversed_sort",
+    "mut_off_by_one_slice",
+    "mut_wrong_exception_type",
+    "mut_string_strip_missing",
+    "mut_any_vs_all",
+    "mut_wrong_default_return",
+    "mut_negated_condition",
+    "mut_wrong_comparison_bound"
   ]
 }

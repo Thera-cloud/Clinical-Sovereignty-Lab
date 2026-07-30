@@ -86,8 +86,20 @@ async def ln7_health():
 @router.get("/revision")
 async def get_revision(request: Request, _admin=Depends(require_admin)):
     from app.services.little_nate_7 import load_active_revision
-    rev = await load_active_revision(_pool(request))
-    return {"status": "ok", "active": rev or {"revision_id": "LN7-baseline", "active": True}}
+
+    deep = await load_active_revision(_pool(request), tier="deep")
+    fast = await load_active_revision(_pool(request), tier="fast")
+    return {
+        "status": "ok",
+        "active": deep or {"revision_id": "LN7-baseline", "active": True, "tier": "deep"},
+        "active_deep": deep or {"revision_id": "LN7-baseline", "active": True, "tier": "deep"},
+        "active_fast": fast or {
+            "revision_id": "LN7-fast-baseline",
+            "active": False,
+            "tier": "fast",
+            "hint": "register+activate LN7-fast-baseline for PEFT fast path",
+        },
+    }
 
 
 @router.get("/leaderboard")
@@ -312,7 +324,8 @@ async def post_public_benches(
     if body.get("mode"):
         os.environ["LN7_PUBLIC_HARNESS_MODE"] = str(body["mode"])
     from app.services.ln7_bakeoff_engine import run_public_benchmarks
-    rows = await run_public_benchmarks()
+    rid = str(body.get("revision_id") or "LN7-baseline").strip() or "LN7-baseline"
+    rows = await run_public_benchmarks(revision_id=rid, db_pool=_pool(request))
     return {
         "status": "ok",
         "public": rows,
@@ -560,7 +573,13 @@ async def post_canary_evaluate(
     if not rid:
         raise HTTPException(422, "revision_id required")
     if body.get("start"):
-        await start_canary(_pool(request), rid, incumbent_id=str(body.get("incumbent_id") or "LN7-baseline"))
+        # QUANTUM-CRYSTAL-ARCH — fast candidates default incumbent LN7-fast-baseline
+        raw_inc = body.get("incumbent_id")
+        await start_canary(
+            _pool(request),
+            rid,
+            incumbent_id=str(raw_inc).strip() if raw_inc else None,
+        )
     result = await evaluate_canary(_pool(request), rid)
     # QUANTUM-CRYSTAL-ARCH — READY renotify when gate awaits CEO
     if result.get("action") == "await_ceo" and result.get("ok"):

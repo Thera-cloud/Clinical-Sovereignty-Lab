@@ -64,7 +64,7 @@ HELDOUT_PACKS = frozenset({"env_redis_prefix"})
 TRAIN_GOLDEN_PACKS = ("asyncpg_cast", "catch_all_routes")
 _STUB_RE = re.compile(r"^\[patch_hash=", re.I)
 _DIFF_MARK = re.compile(r"(?m)^(diff --git |--- |\+\+\+ |@@ )")
-PARAPHRASE_N = int(os.getenv("LN7_EXPORT_PARAPHRASE_N", "3") or "3")
+PARAPHRASE_N = int(os.getenv("LN7_EXPORT_PARAPHRASE_N", "16") or "16")
 
 
 def _train_golden_pack_names() -> List[str]:
@@ -91,6 +91,17 @@ def _paraphrase_prompts(prompt: str) -> List[str]:
         f"Return a unified diff only. {base}",
         f"Sandbox CI pack failure — fix it. {base}",
         f"Produce a minimal correct patch. {base}",
+        f"Little Nate 7 train sample — patch only. {base}",
+        f"Fix the broken file; pytest must pass. {base}",
+        f"Sovereign CI: emit unified diff, no prose. {base}",
+        f"Apply the smallest correct change. {base}",
+        f"Repo hygiene task — diff only. {base}",
+        f"Milestone A fast-tier sample. {base}",
+        f"QLoRA preference row — assistant is the golden patch. {base}",
+        f"Do not explain; patch only. {base}",
+        f"CI red: restore green with a unified diff. {base}",
+        f"Clinical Sovereignty Lab coding pack. {base}",
+        f"Adapter train example (user→golden.diff). {base}",
     ]
     n = max(1, min(PARAPHRASE_N, len(variants)))
     return variants[:n]

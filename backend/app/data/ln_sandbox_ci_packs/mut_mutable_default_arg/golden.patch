@@ -1,0 +1,11 @@
+--- a/broken/collector.py
++++ b/broken/collector.py
+@@ -1,4 +1,6 @@
+-def append_item(item, items=[]):
+-    # BUG: mutable default arg is shared across calls
++def append_item(item, items=None):
++    # Fixed: fresh list per call
++    if items is None:
++        items = []
+     items.append(item)
+     return items

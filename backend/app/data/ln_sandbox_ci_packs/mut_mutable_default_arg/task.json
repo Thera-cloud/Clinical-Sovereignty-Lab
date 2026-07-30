@@ -1,0 +1,10 @@
+{
+  "task_key": "ci_mut_mutable_default_arg",
+  "title": "Fix classic mutable default argument bug",
+  "prompt": "The file broken/collector.py has a classic Python mutable-default-argument bug in append_item: the default list is shared across calls. Fix it using the None-sentinel pattern. Return ONLY a unified diff (---/+++ @@) for broken/collector.py. No markdown fences.",
+  "test_path": "tests/test_collector.py",
+  "target_files": [
+    "broken/collector.py"
+  ],
+  "domain": "coding"
+}
