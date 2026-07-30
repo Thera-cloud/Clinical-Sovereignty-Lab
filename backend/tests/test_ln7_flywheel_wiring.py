@@ -378,8 +378,10 @@ def test_phase_h_predicates_require_adversarial_file():
             ):
                 ev = await evaluate_predicates(pool)
         by_id = {p["id"]: p["ok"] for p in ev["predicates"]}
-        # Without adversarial_heldout.json, predicate must fail
-        if not (FROZEN / "adversarial_heldout.json").is_file():
+        # Step 0 weld: adversarial_heldout.json required for Phase H predicate
+        if (FROZEN / "adversarial_heldout.json").is_file():
+            assert by_id["adversarial_heldout"] is True
+        else:
             assert by_id["adversarial_heldout"] is False
             assert ev["open"] is False
 

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "id": "bakeoff_win",
+      "evidence_class": "short_horizon",
+      "text": "LN7 revision {revision_id} beat incumbent on held-out pack suite ({wins}/{n}).",
+      "ttl_hours": 168
+    },
+    {
+      "id": "canary_stable",
+      "evidence_class": "long_horizon",
+      "text": "LN7 canary {revision_id} held ≥2 consecutive wins vs baseline.",
+      "ttl_hours": 720
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "checklist": [
+    {"id": "heldout_not_in_train", "required": true},
+    {"id": "beats_incumbent_on_heldout", "required": true},
+    {"id": "license_train_eligible", "required": true},
+    {"id": "base_checkpoint_pinned", "required": true},
+    {"id": "fence_manifest_ok", "required": true},
+    {"id": "not_suppressed", "required": true},
+    {"id": "shadow_outcome_present_if_g1", "required": false},
+    {"id": "influence_gini_ok", "required": false}
+  ],
+  "queen_models": {
+    "mac": "diverse_a",
+    "cloud": "diverse_b",
+    "note": "Queens must use deliberately different models/configs"
+  }
+}
