@@ -4,6 +4,8 @@ Readers consult PG first; env remains emergency kill-switch
 (env false/empty does not override PG true except for force-off:
 ENABLE_LN7_AUTO_PROMOTE=false kills auto-promote even if PG true).
 
+W13: weld keys require allow_weld_flip (Python + PG trigger).
+
 # QUANTUM-CRYSTAL-ARCH
 """
 from __future__ import annotations
@@ -16,6 +18,12 @@ logger = logging.getLogger("ln7_feature_flags")
 
 _CACHE: dict[str, tuple[bool, float]] = {}
 _CACHE_TTL_S = 30.0
+
+# Step 0 / G2 product-rule keys — blocked unless allow_weld_flip
+WELD_FLIP_KEYS = frozenset({
+    "ENABLE_LN7_AUTO_PROMOTE",
+    "DUAL_COO_MECHANICAL_PROMOTE",
+})
 
 
 def _env_force_off(key: str) -> bool:
@@ -61,24 +69,34 @@ async def set_flag(
     enabled: bool,
     *,
     notes: Optional[str] = None,
+    allow_weld_flip: bool = False,
 ) -> bool:
     if not db_pool:
         return False
+    if key in WELD_FLIP_KEYS and not allow_weld_flip:
+        logger.warning(
+            "ln7_feature_flags: refused weld flip for %s without allow_weld_flip",
+            key,
+        )
+        return False
     try:
         async with db_pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO ln7_feature_flags (key, enabled, updated_at, notes)
-                VALUES ($1, $2, NOW(), $3)
-                ON CONFLICT (key) DO UPDATE SET
-                    enabled = EXCLUDED.enabled,
-                    updated_at = NOW(),
-                    notes = COALESCE(EXCLUDED.notes, ln7_feature_flags.notes)
-                """,
-                key,
-                enabled,
-                notes,
-            )
+            async with conn.transaction():
+                if key in WELD_FLIP_KEYS and allow_weld_flip:
+                    await conn.execute("SELECT set_config('ln7.allow_weld_flip', 'on', true)")
+                await conn.execute(
+                    """
+                    INSERT INTO ln7_feature_flags (key, enabled, updated_at, notes)
+                    VALUES ($1, $2, NOW(), $3)
+                    ON CONFLICT (key) DO UPDATE SET
+                        enabled = EXCLUDED.enabled,
+                        updated_at = NOW(),
+                        notes = COALESCE(EXCLUDED.notes, ln7_feature_flags.notes)
+                    """,
+                    key,
+                    enabled,
+                    notes,
+                )
         _CACHE.pop(key, None)
         return True
     except Exception as e:
@@ -105,11 +123,19 @@ async def dual_coo_mechanical_promote(db_pool=None) -> bool:
 
 
 async def flip_g2_governance(db_pool, *, reason: str = "step0_green") -> bool:
-    """Step 0 green → G0→G2 product-rule change."""
+    """Step 0 green → G0→G2 product-rule change (explicit weld flip only)."""
     ok1 = await set_flag(
-        db_pool, "ENABLE_LN7_AUTO_PROMOTE", True, notes=reason
+        db_pool,
+        "ENABLE_LN7_AUTO_PROMOTE",
+        True,
+        notes=reason,
+        allow_weld_flip=True,
     )
     ok2 = await set_flag(
-        db_pool, "DUAL_COO_MECHANICAL_PROMOTE", True, notes=reason
+        db_pool,
+        "DUAL_COO_MECHANICAL_PROMOTE",
+        True,
+        notes=reason,
+        allow_weld_flip=True,
     )
     return ok1 and ok2

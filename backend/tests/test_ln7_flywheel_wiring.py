@@ -45,6 +45,32 @@ def test_feature_flags_default_off_without_db():
     asyncio.run(_run())
 
 
+def test_w13_weld_flip_blocked_without_allow():
+    from app.services.ln7_feature_flags import set_flag
+
+    async def _run():
+        pool = MagicMock()
+        assert (
+            await set_flag(pool, "ENABLE_LN7_AUTO_PROMOTE", True, allow_weld_flip=False)
+            is False
+        )
+        assert pool.acquire.called is False
+
+    asyncio.run(_run())
+
+
+def test_w13_artifacts_and_scripts_exist():
+    assert (REPO / "backend" / "migrations" / "311_ln7_queens_fence_acl.sql").is_file()
+    assert (REPO / "scripts" / "ln7_weld_backup_r2.sh").is_file()
+    assert (REPO / "scripts" / "ln7_w13_host_fence.sh").is_file()
+    sql = (
+        REPO / "backend" / "migrations" / "311_ln7_queens_fence_acl.sql"
+    ).read_text(encoding="utf-8")
+    assert "ln7_queens" in sql
+    assert "allow_weld_flip" in sql
+    assert "ENABLE_LN7_AUTO_PROMOTE" in sql
+
+
 def test_g0_promote_still_enqueues_ceo():
     """G0/G1: dual_coo path must keep enqueue_ceo when mechanical flag off."""
     from app.services import dual_coo_checklist as dcc

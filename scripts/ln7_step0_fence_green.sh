@@ -16,5 +16,9 @@ PY
 echo "[step0] fence pytest"
 python3 -m pytest "$FROZEN_CONFIG_DIR/fence_tests" -q
 
-echo "[step0] fence suite green — G2 flip requires DB (run via backend):"
+echo "[step0] weld backup (local + R2 when configured)"
+bash "$ROOT/scripts/ln7_weld_backup_r2.sh"
+
+echo "[step0] fence suite green — G2 flip is MANUAL after W13 host ro + mig 311:"
 echo "  await flip_g2_governance(db_pool, reason='step0_green')"
+echo "  (do NOT auto-flip from this script)"

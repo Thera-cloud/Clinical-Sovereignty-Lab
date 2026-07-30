@@ -457,6 +457,8 @@ services:
       - CLASSROOM_SESSIONS_FILE=/app/backend_data/classroom_sessions.json
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=production
+      # QUANTUM-CRYSTAL-ARCH — LN7 Step 0 weld tree (W13); host dir is SA-unwritable
+      - FROZEN_CONFIG_DIR=/opt/ln7/frozen-config
       # Coaching scope gate stack — dark-launch defaults; flip after 48h review + clinical sign-off
       - ENABLE_COACHING_SCOPE_GATE=${ENABLE_COACHING_SCOPE_GATE:-false}
       - ENABLE_CLASSIFIER_LAYER=${ENABLE_CLASSIFIER_LAYER:-false}
@@ -575,6 +577,7 @@ services:
       - ./dashboard:/app/dashboard:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (Nevedal Lab UI)
       - ./mobile/lib:/app/mobile/lib:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (Flutter)
       - ./backend/migrations:/app/migrations:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (schema)
+      - ./frozen-config:/opt/ln7/frozen-config:ro  # QUANTUM-CRYSTAL-ARCH — Step 0 fence (W13)
       - ./data/bridge:/app/data
       # Read backend scheduling + Zoom join_url without duplicating stores
       - ./data/backend:/app/backend_data:ro
