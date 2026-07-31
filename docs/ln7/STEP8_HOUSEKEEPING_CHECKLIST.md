@@ -23,6 +23,7 @@
 
 ## Post-sweep verify (GREEN)
 
-- [ ] Apply mig `314_ln7_fuel_gauge.sql`
-- [ ] Deploy Steps 6–8; `Ln7OpsScheduler` in STARTUP COMPLETE
+- [x] Apply mig `314_ln7_fuel_gauge.sql` — `ln7_fuel_snapshots` + `ln7_fuel_notifications`
+- [x] Deploy Steps 6–8 at `11d6e1e4`; `Ln7OpsScheduler` in STARTUP COMPLETE (153/153)
 - [x] Offline: bakeoff regression + dry bus + fuel/health guards PASS
+- [x] First fuel cycle 2026-07-31 — snapshots: `coding` 1/300, `general` 2/300 (PRE6 far; no unlock email)

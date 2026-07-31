@@ -22,15 +22,15 @@ Untouched until separate CEO authorization after Step 0 green.
 
 ---
 
-## Steps 6–8 (code-level spec — built)
+## Steps 6–8 (code-level spec — COMPLETE on GREEN)
 
 | Step | Artifact | Status |
 |------|----------|--------|
-| 6.1 | `backend/tests/fixtures/attempt6_*` + `test_bakeoff_regression.py` (`pytest.approx`) | green offline |
-| 6.2 | `scripts/ln7_attempt6_autopsy.py` → `docs/ln7/ATTEMPT6_AUTOPSY.md` | hypotheses only |
-| 6.3 | mig `314` + `ln7_fuel_gauge.py` (slope via `days_tracked`) | code ready; apply 314 on GREEN |
-| 6.4 | `ln7_serve_health_monitor.py` → `ln7_rollback.py` (`MIN_REQUEST_FLOOR=30`) | code ready |
-| 7 | `ln7_bakeoff` bus + `LN7_BAKEOFF_DRY=1` acceptance | dry PASS |
-| 8 | MemoryMax drop-in, DO audit, `INCIDENT_SEAMS_1_TO_7_CLOSED.md` | see STEP8 checklist |
+| 6.1 | `attempt6_*` fixtures + `test_bakeoff_regression.py` | CI green; locked at `11d6e1e4` |
+| 6.2 | `ln7_attempt6_autopsy.py` → `ATTEMPT6_AUTOPSY.md` | hypotheses only (n=12) |
+| 6.3 | mig `314` + `ln7_fuel_gauge.py` | live; first snap 2026-07-31 |
+| 6.4 | serve-health → `ln7_rollback.py` (`N≥30`) | live via `Ln7OpsScheduler` |
+| 7 | `ln7_bakeoff` bus dry | PASS (`LN7_BAKEOFF_DRY=1`) |
+| 8 | MemoryMax 22G, DO audit, incident archive | done; PEFT left stopped |
 
-Sharpenings applied: float `approx`, health N≥30, fuel slope ≠ blind `/7`.
+Commit/tag: `11d6e1e4` on main · `bakeoff-v0.6-attempt6-proven` · sharpenings: `approx` / N≥30 / `days_tracked`.

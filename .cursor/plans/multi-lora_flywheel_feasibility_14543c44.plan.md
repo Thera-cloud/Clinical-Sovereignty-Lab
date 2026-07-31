@@ -33,8 +33,14 @@ todos:
     content: "Phase F: Mechanical Dual-COO after Step 0 only; until then CEO activate remains valid; living packs; injection"
     status: pending
   - id: phase-g-ln7-shadow-handover
-    content: "Phase G: queens.merged → ln7.shadow_fork → sandbox score → shadow_outcome; handover/revert"
-    status: pending
+    content: "Phase G: queens.merged → ln7.shadow_fork → sandbox score → shadow_outcome; handover/revert — G1 proven 2026-07-31 (LN7_G1_OPEN; G2 weld keys still false)"
+    status: completed
+  - id: attempt6-decoupled-bakeoff
+    content: "Attempt 6: Phase A freeze→destroy + Phase B offline score; winner LN7-2026-07-30T190327Z; tag bakeoff-v0.6-attempt6-proven; CEO HOLD (no promote/G2)"
+    status: completed
+  - id: attempt6-steps-6-8
+    content: "Post-bakeoff Steps 6–8 at 11d6e1e4: CI gold lock, fuel gauge+mig314, serve-health→rollback, ln7_bakeoff bus dry, ORANGE MemoryMax, incident archive; first fuel snap coding=1 general=2"
+    status: completed
   - id: phase-m-marketing-bound
     content: "Phase M: Mig 308 growth_claims; publisher gate; retract surfaces; provenance BWAS"
     status: pending
@@ -520,6 +526,21 @@ sequenceDiagram
 - Creating migrations numbered 303 or 304 (already HumanEval seed + authored-license backfill)
 - Moving Goodhart reference without out-of-band weld change
 - Untested fallbacks treated as production-ready
+
+---
+
+## Completed — Attempt 6 era (2026-07-31)
+
+| Item | Evidence |
+|------|----------|
+| Decoupled bakeoff proven | Tag `bakeoff-v0.6-attempt6-proven`; freeze R2 + ledger mig 313 |
+| Winner HOLD (not promoted) | `LN7-2026-07-30T190327Z` shadow; `ENABLE_LN7_AUTO_PROMOTE=false` |
+| PRE6 paid gate | Organic G1 ≥300 required; Attempt 6 bypass closed |
+| Steps 6–8 | Commit **`11d6e1e4`** on GREEN; 153/153; `Ln7OpsScheduler` live |
+| Fuel baseline | `coding` 1/300, `general` 2/300 — ETA n/a until slope days accumulate |
+| Next paid Phase A | Human: `LN7_BURST_ALLOW_PAID=1` + enqueue `ln7_bakeoff` only after PRE6 unlock email |
+
+**Still open on this plan:** Phase W → Step 0 → A0… (execution order below). G2 weld keys remain false.
 
 ---
 
