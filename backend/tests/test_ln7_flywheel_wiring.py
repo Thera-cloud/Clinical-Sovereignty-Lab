@@ -17,11 +17,12 @@ FROZEN = REPO / "frozen-config"
 
 def test_migrations_305_310_exist_not_303_304_reuse():
     mig = REPO / "backend" / "migrations"
-    for n in (305, 306, 307, 308, 309, 310):
+    for n in (305, 306, 307, 308, 309, 310, 312):
         assert list(mig.glob(f"{n}_*.sql")), f"missing migration {n}"
     # 303/304 are occupied by non-flywheel seeds
     assert (mig / "303_ln7_humaneval_subset_seed.sql").is_file()
     assert (mig / "304_ln7_backfill_authored_license.sql").is_file()
+    assert (mig / "312_ln7_g1_open_flag.sql").is_file()
 
 
 def test_fence_manifest_green():
@@ -36,11 +37,41 @@ def test_feature_flags_default_off_without_db():
     from app.services.ln7_feature_flags import (
         auto_promote_enabled,
         dual_coo_mechanical_promote,
+        g1_open,
     )
 
     async def _run():
         assert await auto_promote_enabled(None) is False
         assert await dual_coo_mechanical_promote(None) is False
+        assert await g1_open(None) is False
+
+    asyncio.run(_run())
+
+
+def test_flip_g1_does_not_touch_weld_keys():
+    """G1 flip is non-weld; G2 keys stay false without allow_weld_flip."""
+    from app.services.ln7_feature_flags import flip_g1_governance, set_flag
+
+    async def _run():
+        pool = MagicMock()
+        conn = AsyncMock()
+        conn.execute = AsyncMock()
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=conn)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        tx = MagicMock()
+        tx.__aenter__ = AsyncMock(return_value=None)
+        tx.__aexit__ = AsyncMock(return_value=False)
+        conn.transaction = MagicMock(return_value=tx)
+        pool.acquire = MagicMock(return_value=cm)
+        assert await flip_g1_governance(pool, reason="test") is True
+        # weld keys still refused
+        assert (
+            await set_flag(
+                pool, "ENABLE_LN7_AUTO_PROMOTE", True, allow_weld_flip=False
+            )
+            is False
+        )
 
     asyncio.run(_run())
 
@@ -339,17 +370,64 @@ def test_promote_path_g0_does_not_activate():
                     new=AsyncMock(return_value=False),
                 ):
                     with patch(
-                        "app.services.ln7_revision.notify_revision_candidate",
-                        new=AsyncMock(return_value={"ok": True}),
+                        "app.services.ln7_feature_flags.g1_open",
+                        new=AsyncMock(return_value=False),
                     ):
                         with patch(
-                            "app.services.dual_coo_checklist.maybe_promote_via_checklist_or_ceo",
-                            new=AsyncMock(return_value={"path": "ceo_inbox", "activated": False}),
+                            "app.services.ln7_revision.notify_revision_candidate",
+                            new=AsyncMock(return_value={"ok": True}),
                         ):
-                            out = await pipe.promote_path_after_gate(
-                                MagicMock(), "LN7-t", title="t"
-                            )
+                            with patch(
+                                "app.services.dual_coo_checklist.maybe_promote_via_checklist_or_ceo",
+                                new=AsyncMock(
+                                    return_value={"path": "ceo_inbox", "activated": False}
+                                ),
+                            ):
+                                out = await pipe.promote_path_after_gate(
+                                    MagicMock(), "LN7-t", title="t"
+                                )
         assert out.get("governance") == "G0"
+        assert out.get("activated") is False
+
+    asyncio.run(_run())
+
+
+def test_promote_path_g1_still_ceo_not_activate():
+    from app.services import ln7_flywheel_pipeline as pipe
+
+    async def _run():
+        with patch.object(
+            pipe,
+            "ensure_shadow_for_revision",
+            new=AsyncMock(return_value={"ok": True, "patch_hash": "ph"}),
+        ):
+            with patch.object(
+                pipe,
+                "_revision_row",
+                new=AsyncMock(return_value={"revision_id": "LN7-t", "harness_config_json": {}}),
+            ):
+                with patch(
+                    "app.services.ln7_feature_flags.dual_coo_mechanical_promote",
+                    new=AsyncMock(return_value=False),
+                ):
+                    with patch(
+                        "app.services.ln7_feature_flags.g1_open",
+                        new=AsyncMock(return_value=True),
+                    ):
+                        with patch(
+                            "app.services.ln7_revision.notify_revision_candidate",
+                            new=AsyncMock(return_value={"ok": True}),
+                        ):
+                            with patch(
+                                "app.services.dual_coo_checklist.maybe_promote_via_checklist_or_ceo",
+                                new=AsyncMock(
+                                    return_value={"path": "ceo_inbox", "activated": False}
+                                ),
+                            ):
+                                out = await pipe.promote_path_after_gate(
+                                    MagicMock(), "LN7-t", title="t"
+                                )
+        assert out.get("governance") == "G1"
         assert out.get("activated") is False
 
     asyncio.run(_run())

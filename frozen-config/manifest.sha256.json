@@ -5,9 +5,10 @@
     "claim_templates.json": "d027abbfa26f1bb2b9e08856cee68663359c7e5d9793eefea286a204a377b824",
     "dual_coo_checklist.json": "8335ce73a0c4bd6b28b68ddc9aa64d98d8e58d98e6ef9f961c009d0da1df39f1",
     "fence_tests/test_governance_weld.py": "4976836621f5bbfe482db23865d4a0246a8d3d4da90167ecb09d2a917475f422",
+    "fence_tests/test_host_role_contract.py": "d78aca49c40e58b6bba61e52b5edaf5b559ea15876f8ca262a423c30def2e734",
     "goodhart_probes.json": "08b8155e3b6a90601afad8c0f4db0d94edbc3279d0f00ffa4d35dcf584b1b08e",
     "goodhart_reference.json": "8538c25f2fea795a1dc527075a95e11eb72a3e57d2dbf5703e20ef8949b26597",
-    "governance.json": "34628cd8c01f7bc2b97ef82d64b3b5061b52c01cbce63187119002eaf12c1d93",
+    "governance.json": "09c9a987bf1f43af47d13b4a2c3859bee9a7232a08f23962ce56a5580bbe9e8a",
     "retract_surface_map.json": "4c1c1cf61909b18f82ab66660c7074870bb95066395cd345c477f05059f0d112"
   }
 }

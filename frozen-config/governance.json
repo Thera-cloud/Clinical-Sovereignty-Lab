@@ -12,6 +12,7 @@
   "influence_gini_hold": 0.85,
   "generalization_min_independent_users": 5,
   "epochs": {
-    "note": "G0 CEO activate until Step 0 green; G2 mechanical Dual-COO + CEO reverse-only"
+    "current": "G1",
+    "note": "G1: shadow oracle + CEO activate still authoritative; G2 only after Step 0 green + weld flip of AUTO_PROMOTE + MECHANICAL"
   }
 }

@@ -298,6 +298,7 @@ async def promote_path_after_gate(
 
     if not mechanical:
         # G0/G1 — keep rich CEO readiness notify as primary activate path
+        from app.services.ln7_feature_flags import g1_open
         from app.services.ln7_revision import notify_revision_candidate
 
         ceo = await notify_revision_candidate(
@@ -310,9 +311,10 @@ async def promote_path_after_gate(
             evidence=ev,
             title=title or f"LN7 promote candidate: {revision_id}",
         )
+        epoch = "G1" if await g1_open(db_pool) else "G0"
         return {
             "ok": True,
-            "governance": "G0",
+            "governance": epoch,
             "shadow": shadow,
             "ceo_notify": ceo,
             "checklist_path": thin,

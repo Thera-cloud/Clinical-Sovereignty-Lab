@@ -122,6 +122,26 @@ async def dual_coo_mechanical_promote(db_pool=None) -> bool:
     return _env_force_on("DUAL_COO_MECHANICAL_PROMOTE")
 
 
+async def g1_open(db_pool=None) -> bool:
+    """G1 transition epoch (shadow gate live; CEO still authoritative). Non-weld."""
+    if _env_force_off("LN7_G1_OPEN"):
+        return False
+    if db_pool is not None:
+        return await flag_enabled(db_pool, "LN7_G1_OPEN", default=False)
+    return _env_force_on("LN7_G1_OPEN")
+
+
+async def flip_g1_governance(db_pool, *, reason: str = "shadow_oracle_proven") -> bool:
+    """Open G1 only — never touches G2 weld keys."""
+    return await set_flag(
+        db_pool,
+        "LN7_G1_OPEN",
+        True,
+        notes=reason,
+        allow_weld_flip=False,
+    )
+
+
 async def flip_g2_governance(db_pool, *, reason: str = "step0_green") -> bool:
     """Step 0 green → G0→G2 product-rule change (explicit weld flip only)."""
     ok1 = await set_flag(

@@ -92,12 +92,19 @@ else
   fail "dry-run blocked by paid gate"
 fi
 
-# --- Destroy path self-test -------------------------------------------------
-echo "=== destroy path self-test ==="
+# --- Destroy path self-test (penny rehearsal: fake id → 404) ----------------
+echo "=== destroy path self-test (penny) ==="
 if ln7_destroy_path_selftest; then
   pass "destroy verified-gone for nonexistent id"
 else
   fail "destroy selftest (see above)"
+fi
+
+# --- Binary/script audit ----------------------------------------------------
+if bash "$REPO/scripts/ln7_binary_audit_preflight.sh"; then
+  pass "binary_audit nested"
+else
+  fail "binary_audit nested"
 fi
 
 # --- Syntax / source sanity -------------------------------------------------
@@ -105,7 +112,8 @@ bash -n "$REPO/scripts/ln7_host_roles.sh"
 bash -n "$REPO/scripts/ln7_host_roles_preflight.sh"
 bash -n "$REPO/scripts/ln7_hive_burst.sh"
 bash -n "$REPO/scripts/ln7_ab_bakeoff_compare.sh"
-pass "bash -n host_roles + preflight + burst + compare"
+bash -n "$REPO/scripts/ln7_binary_audit_preflight.sh"
+pass "bash -n host_roles + preflight + burst + compare + binary_audit"
 
 echo "=== RESULT fails=$FAILS ==="
 [[ "$FAILS" -eq 0 ]] || exit 1
