@@ -31,6 +31,24 @@ async def upsert_claim(
         return None
     cid = claim_id or _claim_id(claim_text, artifact_uri)
     expires = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
+    # QUANTUM-CRYSTAL-ARCH — W7 marketing dual-write into outcome_envelope
+    env_id = envelope_id
+    if not env_id:
+        try:
+            from app.services.ln7_outcome_envelope import write_envelope
+
+            env_id = await write_envelope(
+                db_pool,
+                loop_name="marketing",
+                event_kind="growth_claim",
+                domain_tag="marketing",
+                source_node="growth_claims",
+                attribution={"claim_id": cid, "evidence_class": evidence_class},
+                metrics={"artifact_uri": artifact_uri or "", "ttl_hours": ttl_hours},
+                provenance={"claim_text_sha": _claim_id(claim_text, "")},
+            )
+        except Exception as e:
+            logger.warning("claim envelope dual-write: %s", e)
     try:
         async with db_pool.acquire() as conn:
             await conn.execute(
@@ -43,6 +61,7 @@ async def upsert_claim(
                     claim_text = EXCLUDED.claim_text,
                     evidence_class = EXCLUDED.evidence_class,
                     artifact_uri = EXCLUDED.artifact_uri,
+                    envelope_id = COALESCE(EXCLUDED.envelope_id, growth_claims.envelope_id),
                     expires_at = EXCLUDED.expires_at,
                     status = 'active',
                     updated_at = NOW()
@@ -51,7 +70,7 @@ async def upsert_claim(
                 claim_text,
                 evidence_class,
                 artifact_uri or None,
-                envelope_id,
+                env_id,
                 expires,
             )
         return cid

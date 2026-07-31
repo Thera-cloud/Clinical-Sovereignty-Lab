@@ -3,20 +3,20 @@ name: Multi-LoRA Flywheel Feasibility
 overview: "Flywheel A0–D + Amendment 1 + autonomy gaps + residuals + Phase W. Migrations start at 305+ (303/304 already taken). Governance is phased: CEO activate remains valid until Step 0 greens; then Dual-COO mechanical promote + CEO reverse-only."
 todos:
   - id: phase-w-wiring
-    content: "Phase W: Event edges + stores; Dual-COO cutover only after Step 0; migs 305–310 (never reuse 303/304)"
-    status: pending
+    content: "Phase W skeletons DONE (migs 305–310, hive_burst/shadow_fork, anomaly, fence). W7 marketing dual-write landed. Residual: W8 sandbox rsync, W11 hard claim_ids+SkyEye, W14 live App, W16 live probes — do not block Phase A"
+    status: completed
   - id: step-0-weld-extraction
-    content: "Step 0: Frozen-config + fence ACL + boot manifest; Goodhart reference; PG feature_flags flip; gates governance transition to CEO reverse-only"
-    status: pending
+    content: "Step 0 fence GREEN 2026-07-31: manifest_ok, 6 fence tests PASS, R2 weld backup 20260731T130607Z; GREEN boot_fence ok=True. G2 flags LEFT FALSE (manual flip only — not done)"
+    status: completed
   - id: phase-a0-base-pin
-    content: "Phase A0: Pin 7B; quarantine 1.5B; register asserts; uniform rank/target_modules"
-    status: pending
+    content: "Phase A0 DONE: pin Qwen2.5-Coder-7B; refuse/quarantine 1.5B (mig 305 + register asserts); rank/target_modules + merge_eligible"
+    status: completed
   - id: phase-a-burst-hive
     content: "Phase A: hive_burst via cli_task_bus; Redis serve endpoint; economics bootstrap; R2 weight mirror"
     status: pending
   - id: phase-b1-route-telemetry
-    content: "Phase B1: Dual-write envelope; adapter revision_id + route_tier; provenance; ln7_adapter_win_rate"
-    status: pending
+    content: "Phase B1/W7 DONE for LN7 ledger+shadow+hive; marketing dual-write via growth_claims.upsert_claim → outcome_envelope (2026-07-31)"
+    status: completed
   - id: phase-b2-domain-router
     content: "Phase B2/B3: Mig 305 domain registry; Workers BGE; intent→burst; domain_tag + export --domain"
     status: pending
@@ -540,7 +540,7 @@ sequenceDiagram
 | Fuel baseline | `coding` 1/300, `general` 2/300 — ETA n/a until slope days accumulate |
 | Next paid Phase A | Human: `LN7_BURST_ALLOW_PAID=1` + enqueue `ln7_bakeoff` only after PRE6 unlock email |
 
-**Still open on this plan:** Phase W → Step 0 → A0… (execution order below). G2 weld keys remain false.
+**Still open on this plan:** Phase A (`hive_burst` worker hardening / economics) next; then E leases. G2 flip deferred (CEO/manual). Residual polish: W8 sandbox rsync, W11 hard claim_ids+SkyEye, W14 live App, W16 live probes.
 
 ---
 
