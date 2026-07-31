@@ -45,3 +45,16 @@ Fail clause: park. Re-entry = ≥300 organic rows + reviewed patch. No attempt 5
 6. CI green (flywheel + fence + host-roles).
 7. One verified `shadow_outcome` with `oracle=ci_pack`.
 8. Flip **G1** (`LN7_G1_OPEN=true`) — **not** G2 weld keys.
+
+## Verification (GREEN 2026-07-31)
+
+| Check | Result |
+|---|---|
+| Commit on `main` / GREEN HEAD | `3e5c6cdc` (+ prove script follow-up) |
+| Binary audit | `BINARY_AUDIT_PREFLIGHT=PASS` |
+| Penny destroy (fake id `999999999`) | verified-gone **404** after attempt 1 |
+| Flags before flip | `LN7_G1_OPEN=f`, `ENABLE_LN7_AUTO_PROMOTE=f`, `DUAL_COO_MECHANICAL_PROMOTE=f` |
+| Shadow row | `patch_hash=g1_verified_shadow_20260731_host_contract` `oracle=ci_pack` `passed=true` envelope `fd1c3c4a-ee44-4195-82c9-3b53bd1ed963` |
+| After flip | `LN7_G1_OPEN=t`; G2 weld keys still **false** |
+
+Prove helper: `backend/scripts/ln7_g1_shadow_prove.py`
