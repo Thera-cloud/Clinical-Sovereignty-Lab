@@ -36,6 +36,14 @@ for needle in LN7_AUTH_BASE LN7_ORCH_HOST LN7_BURST_SSH ln7_assert_not_loopback_
   grep -q "$needle" "$src" || fail "host_roles missing $needle"
 done
 pass "host_roles defines AUTH_BASE/ORCH_HOST/BURST_SSH + loopback + verified destroy"
+grep -q 'ln7_doctl_droplet_scope_ok' "$src" || fail "host_roles missing droplet-scope auth probe"
+if grep -nE 'doctl[[:space:]]+account[[:space:]]+get' "$src" \
+  "$REPO/scripts/ln7_penny_droplet_rehearsal.sh" 2>/dev/null \
+  | grep -vE '^\s*#|Never |never '; then
+  fail "doctl account endpoint still invoked (use droplet-scope probe)"
+else
+  pass "auth probes are droplet-scoped (no account endpoint)"
+fi
 
 # Burst must source host roles and gate paid provision
 burst="$REPO/scripts/ln7_hive_burst.sh"

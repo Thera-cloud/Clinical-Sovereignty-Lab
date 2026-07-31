@@ -10,7 +10,7 @@
 | Phase B scorer + fixture CI (`test_ln7_decoupled_bakeoff.py`) | DONE — 6/6 pass |
 | Phase A dry-run script (default; paid gated) | DONE — no GPU |
 | Host-role + binary audit preflight | DONE — PASS |
-| Live penny non-GPU droplet | BLOCKED — `doctl account get` Forbidden on BLUE; destroy verified-gone for nonexistent id still PASS |
+| Live penny non-GPU droplet | PASS — droplet-scoped auth; id `588869818` create→destroy 404 (2026-07-31) |
 | Paid Phase A GPU | **NOT AUTHORIZED** — organic G1 ≪ 300; `LN7_BURST_ALLOW_PAID` unset |
 
 ---

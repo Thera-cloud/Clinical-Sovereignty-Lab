@@ -145,6 +145,22 @@ ln7_green_mv_destroyed() {
   fi
 }
 
+# Droplet-scoped doctl probe. Never call the account endpoint — narrow write
+# tokens can create/delete/get droplets but Forbidden on account (credential
+# separation). Exit 0 iff droplet API is usable for the live trap contract.
+ln7_doctl_droplet_scope_ok() {
+  local out ec=0
+  if ! command -v doctl >/dev/null 2>&1; then
+    return 2
+  fi
+  out="$(doctl compute droplet list --format ID --no-header 2>&1)" || ec=$?
+  if echo "$out" | grep -qiE 'Forbidden|Unauthorized|Unable to authenticate|authentication|401|403'; then
+    echo "[ln7_host_roles] doctl droplet-scope auth failed: ${out//$'\n'/ }" >&2
+    return 1
+  fi
+  [[ "$ec" -eq 0 ]]
+}
+
 # Destroy with mandatory retry + 404 confirmation. Never "ANOMALY then walk away"
 # while the resource still GETs. Returns 0 only when GET is 404/gone.
 ln7_destroy_droplet_verified() {
@@ -182,11 +198,12 @@ ln7_destroy_path_selftest() {
     echo "[ln7_host_roles] SKIP destroy selftest — doctl missing" >&2
     return 0
   fi
-  if doctl account get >/dev/null 2>&1; then
+  # Droplet-scoped only — account-endpoint Forbidden must not skip a working trap token.
+  if ln7_doctl_droplet_scope_ok; then
     ln7_destroy_droplet_verified "$fake" 3
     return $?
   fi
-  echo "[ln7_host_roles] SKIP destroy selftest — doctl not authenticated" >&2
+  echo "[ln7_host_roles] SKIP destroy selftest — doctl droplet API not usable" >&2
   return 0
 }
 

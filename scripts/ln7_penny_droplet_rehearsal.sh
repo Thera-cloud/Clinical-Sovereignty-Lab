@@ -15,10 +15,15 @@ REGION="${LN7_PENNY_REGION:-nyc3}"
 NAME="ln7-penny-$(date -u +%Y%m%d%H%M%S)"
 
 command -v doctl >/dev/null || { echo "FATAL: doctl missing" >&2; exit 2; }
-doctl account get >/dev/null || { echo "FATAL: doctl not authenticated" >&2; exit 3; }
+# Droplet-scoped auth only (create/list/get/delete). Never account get —
+# narrow tokens Forbidden there while still able to rehearse the live trap.
+ln7_doctl_droplet_scope_ok || { echo "FATAL: doctl droplet API not usable" >&2; exit 3; }
 
-KEY_ID="${DO_SSH_KEY_ID:-$(doctl compute ssh-key list --format ID --no-header | awk 'NR==1{print $1}')}"
-[[ -n "$KEY_ID" ]] || { echo "FATAL: no SSH key id" >&2; exit 4; }
+KEY_ID="${DO_SSH_KEY_ID:-}"
+if [[ -z "$KEY_ID" ]]; then
+  KEY_ID="$(doctl compute ssh-key list --format ID --no-header 2>/dev/null | awk 'NR==1{print $1}')"
+fi
+[[ -n "$KEY_ID" ]] || { echo "FATAL: no SSH key id (set DO_SSH_KEY_ID)" >&2; exit 4; }
 
 DROPLET_ID=""
 cleanup() {
