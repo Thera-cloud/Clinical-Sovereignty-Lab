@@ -530,6 +530,26 @@ for rev in (a, b):
 print(f"GREEN_AUTH_HTTP_OK url={url} arm_a={a} arm_b={b}")
 PY
 
+# Attempt 6+: generate→freeze only (no scoring on droplet). Compare stays fused path.
+if [[ "${LN7_BURST_MODE:-compare}" == "generate_freeze" ]]; then
+  log "step 6/7 Phase A generate→freeze (no score) burst_id=$BURST_ID"
+  FREEZE_OUT="${LN7_PHASE_A_FREEZE_OUT:-$STATE_DIR/frozen_${BURST_ID}.jsonl}"
+  PY="${REPO}/.venv/bin/python"
+  [[ -x "$PY" ]] || PY="$(command -v python3)"
+  export LN7_BURST_SSH
+  "$PY" "$REPO/backend/scripts/ln7_phase_a_generate_freeze.py" \
+    --handoff "$HANDOFF" \
+    --burst-id "$BURST_ID" \
+    --rev-a "$REV_A" \
+    --rev-b "$REV_B" \
+    --out "$FREEZE_OUT" \
+    --burst-ssh "$LN7_BURST_SSH" \
+    || die "phase_a_generate_freeze_failed" 6
+  log "frozen set → $FREEZE_OUT"
+  COMPARE_EC=0
+  exit "$COMPARE_EC"
+fi
+
 log "step 6/7 compare $REV_A vs $REV_B"
 LN7_SERVE_ENGINE=vllm_burst \
 LN7_BURST_HANDOFF_LOCAL="$HANDOFF" \

@@ -155,13 +155,23 @@ async def _forgetting_monitor(db_pool, revision_id: str) -> Dict[str, Any]:
     }
 
 
-async def evaluate_canary(db_pool, revision_id: str) -> Dict[str, Any]:
+async def evaluate_canary(
+    db_pool,
+    revision_id: str,
+    *,
+    min_tasks: int = 3,
+    outcome_limit: Optional[int] = None,
+    strict_dominance: bool = False,
+) -> Dict[str, Any]:
     """Run statistical gate vs incumbent; promote or leave in shadow / rollback."""
     from app.services.ln7_bakeoff_engine import statistical_gate
 
     if not db_pool:
         return {"ok": False, "error": "no_db"}
     try:
+        min_tasks = max(3, int(min_tasks or 3))
+        # QUANTUM-CRYSTAL-ARCH — Attempt 6: pull enough outcomes for max-power canary
+        limit = int(outcome_limit) if outcome_limit is not None else max(50, min_tasks * 4)
         async with db_pool.acquire() as conn:
             canary = await conn.fetchrow(
                 "SELECT * FROM ln7_canary_state WHERE revision_id = $1 AND status = 'active'",
@@ -179,9 +189,11 @@ async def evaluate_canary(db_pool, revision_id: str) -> Dict[str, Any]:
                 """
             )
         forget = await _forgetting_monitor(db_pool, revision_id)
-        cand = await _passes_for_revision(db_pool, revision_id)
-        inc = await _passes_for_revision(db_pool, str(inc_id))
-        gate = statistical_gate(cand, inc, min_tasks=3)
+        cand = await _passes_for_revision(db_pool, revision_id, limit=limit)
+        inc = await _passes_for_revision(db_pool, str(inc_id), limit=limit)
+        gate = statistical_gate(
+            cand, inc, min_tasks=min_tasks, strict_dominance=bool(strict_dominance)
+        )
         gate["forgetting"] = forget
         gate["heldout_outcomes_n"] = int(heldout_n or 0)
         if forget.get("alert"):

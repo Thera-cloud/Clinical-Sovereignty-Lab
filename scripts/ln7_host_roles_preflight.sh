@@ -75,16 +75,21 @@ export LN7_ORCH_HOST=blue
 export LN7_GREEN_HOST=root@68.183.168.75
 ln7_resolve_host_roles >/dev/null
 
-# --- Paid gate --------------------------------------------------------------
+# --- Paid gate + PRE6 (≥300 organic; Attempt 6 bypass closed) ---------------
 if LN7_BURST_DRY_RUN=0 LN7_BURST_ALLOW_PAID=0 ln7_assert_paid_burst_allowed 2>/dev/null; then
   fail "paid gate open without LN7_BURST_ALLOW_PAID"
 else
   pass "paid gate closed by default"
 fi
-if LN7_BURST_ALLOW_PAID=1 ln7_assert_paid_burst_allowed 2>/dev/null; then
-  pass "paid gate opens with LN7_BURST_ALLOW_PAID=1"
+if LN7_BURST_ALLOW_PAID=1 LN7_ORGANIC_G1_COUNT=3 ln7_assert_paid_burst_allowed 2>/dev/null; then
+  fail "PRE6 bypass still open (ALLOW_PAID alone / low organic)"
 else
-  fail "paid gate stuck closed with ALLOW_PAID=1"
+  pass "PRE6 refuses ALLOW_PAID when organic < 300"
+fi
+if LN7_BURST_ALLOW_PAID=1 LN7_ORGANIC_G1_COUNT=300 ln7_assert_paid_burst_allowed 2>/dev/null; then
+  pass "paid gate opens with ALLOW_PAID=1 and PRE6 organic≥300"
+else
+  fail "paid gate stuck closed with ALLOW_PAID=1 + organic=300"
 fi
 if LN7_BURST_DRY_RUN=1 LN7_BURST_ALLOW_PAID=0 ln7_assert_paid_burst_allowed 2>/dev/null; then
   pass "dry-run bypasses paid gate"

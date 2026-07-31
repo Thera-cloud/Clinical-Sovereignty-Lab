@@ -584,7 +584,25 @@ async def post_canary_evaluate(
             rid,
             incumbent_id=str(raw_inc).strip() if raw_inc else None,
         )
-    result = await evaluate_canary(_pool(request), rid)
+    # QUANTUM-CRYSTAL-ARCH — Attempt 6: max-power + strict CI dominance for CEO gate
+    min_tasks = body.get("min_tasks")
+    try:
+        min_tasks_i = max(3, int(min_tasks)) if min_tasks is not None else 3
+    except (TypeError, ValueError):
+        min_tasks_i = 3
+    outcome_limit = body.get("outcome_limit")
+    try:
+        outcome_limit_i = int(outcome_limit) if outcome_limit is not None else None
+    except (TypeError, ValueError):
+        outcome_limit_i = None
+    strict = bool(body.get("strict_dominance", False))
+    result = await evaluate_canary(
+        _pool(request),
+        rid,
+        min_tasks=min_tasks_i,
+        outcome_limit=outcome_limit_i,
+        strict_dominance=strict,
+    )
     # Pipeline already ran promote_path_after_gate (G0 CEO + W1 shadow)
     if result.get("pipeline"):
         result["ceo_notify"] = result.get("pipeline", {}).get("ceo_notify")

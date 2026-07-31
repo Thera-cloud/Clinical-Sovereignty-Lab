@@ -48,6 +48,13 @@ def beats_incumbent(candidate_ci: Dict[str, float], incumbent_point: float) -> b
     return float(candidate_ci.get("lo") or 0) > float(incumbent_point or 0)
 
 
+def beats_incumbent_strict(
+    candidate_ci: Dict[str, float], incumbent_ci: Dict[str, float]
+) -> bool:
+    """Attempt 6+ activation math: non-overlapping CIs — cand_lo > baseline_hi."""
+    return float(candidate_ci.get("lo") or 0) > float(incumbent_ci.get("hi") or 0)
+
+
 async def sync_contestant_credentials(db_pool) -> Dict[str, Any]:
     """Enable contestants only when URL/key/model exist — never claim working without creds."""
     if not db_pool:
@@ -390,18 +397,32 @@ def statistical_gate(
     incumbent_passes: List[bool],
     *,
     min_tasks: int = 3,
+    strict_dominance: bool = False,
 ) -> Dict[str, Any]:
     if len(candidate_passes) < min_tasks:
         return {"ok": False, "reason": "insufficient_tasks", "n": len(candidate_passes)}
     cand = bootstrap_ci(candidate_passes)
-    inc_point = (
-        sum(1 for p in incumbent_passes if p) / len(incumbent_passes)
-        if incumbent_passes else 0.0
-    )
-    ok = beats_incumbent(cand, inc_point)
+    if incumbent_passes:
+        inc_ci = bootstrap_ci(incumbent_passes)
+        inc_point = float(inc_ci.get("mean") or 0.0)
+    else:
+        inc_ci = {"mean": 0.0, "lo": 0.0, "hi": 0.0, "n": 0}
+        inc_point = 0.0
+    if strict_dominance:
+        ok = beats_incumbent_strict(cand, inc_ci)
+        reason = (
+            "ci_strict_dominance_cand_lo_gt_inc_hi"
+            if ok
+            else "ci_overlap_or_not_above_inc_hi"
+        )
+    else:
+        ok = beats_incumbent(cand, inc_point)
+        reason = "ci_beats_incumbent" if ok else "ci_not_above_incumbent"
     return {
         "ok": ok,
         "candidate_ci": cand,
+        "incumbent_ci": inc_ci,
         "incumbent_point": inc_point,
-        "reason": "ci_beats_incumbent" if ok else "ci_not_above_incumbent",
+        "strict_dominance": bool(strict_dominance),
+        "reason": reason,
     }

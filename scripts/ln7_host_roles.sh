@@ -207,14 +207,52 @@ ln7_destroy_path_selftest() {
   return 0
 }
 
-# Paid burst gate: host-contract patch alone must not spend GPU on starved adapters.
+# Organic G1 ci_pack shadow rows (PRE6). Prefer LN7_ORGANIC_G1_COUNT (int) cache;
+# else query GREEN postgres when LN7_GREEN_SSH / default is reachable.
+ln7_organic_g1_count() {
+  if [[ -n "${LN7_ORGANIC_G1_COUNT:-}" ]]; then
+    echo "${LN7_ORGANIC_G1_COUNT}"
+    return 0
+  fi
+  local green="${LN7_GREEN_SSH:-root@68.183.168.75}"
+  local n
+  n="$(ssh -o BatchMode=yes -o ConnectTimeout=12 \
+      -o StrictHostKeyChecking=accept-new \
+      "$green" \
+      "docker exec nate_postgres psql -U nate_admin -d little_nate -tAc \"
+        SELECT COUNT(*) FROM outcome_envelope
+        WHERE shadow_outcome IS NOT NULL
+          AND COALESCE(shadow_outcome->>'oracle','') IN ('ci_pack','ci_pack_cycle')
+          AND (shadow_outcome->>'passed') IS NOT NULL
+      \"" 2>/dev/null | tr -d '[:space:]')" || n=""
+  if [[ "$n" =~ ^[0-9]+$ ]]; then
+    echo "$n"
+    return 0
+  fi
+  echo ""
+  return 1
+}
+
+# Paid burst gate: ALLOW_PAID + PRE6 (≥300 organic G1). Attempt 6 PRE6 bypass CLOSED.
+# LN7_BURST_ALLOW_PAID=1 alone is insufficient after Attempt 6.
 ln7_assert_paid_burst_allowed() {
   if [[ "${LN7_BURST_DRY_RUN:-0}" == "1" ]]; then
     return 0
   fi
-  if [[ "${LN7_BURST_ALLOW_PAID:-0}" == "1" ]]; then
-    return 0
+  if [[ "${LN7_BURST_ALLOW_PAID:-0}" != "1" ]]; then
+    echo "[ln7_host_roles] REFUSE paid provision — set LN7_BURST_ALLOW_PAID=1 only after ≥300 organic G1 rows AND reviewed host-contract on main" >&2
+    return 9
   fi
-  echo "[ln7_host_roles] REFUSE paid provision — set LN7_BURST_ALLOW_PAID=1 only after ≥300 organic G1 rows AND reviewed host-contract on main (Attempt 4 sequencing)" >&2
-  return 9
+  local need="${LN7_PRE6_ORGANIC_MIN:-300}"
+  local n
+  n="$(ln7_organic_g1_count || true)"
+  if [[ -z "$n" ]]; then
+    echo "[ln7_host_roles] REFUSE paid provision — cannot verify PRE6 organic G1 count (set LN7_ORGANIC_G1_COUNT=<n> or fix GREEN ssh)" >&2
+    return 9
+  fi
+  if [[ "$n" -lt "$need" ]]; then
+    echo "[ln7_host_roles] REFUSE paid provision — PRE6 closed: organic G1 ci_pack rows=$n < $need (Attempt 6 bypass retired)" >&2
+    return 9
+  fi
+  return 0
 }
