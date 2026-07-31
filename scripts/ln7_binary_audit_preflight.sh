@@ -17,6 +17,9 @@ SCRIPTS=(
   "$REPO/scripts/ln7_ab_bakeoff_compare.sh"
   "$REPO/scripts/ln7_destroy_cuda_droplet.sh"
   "$REPO/scripts/ln7_binary_audit_preflight.sh"
+  "$REPO/scripts/ln7_bakeoff_phase_a_generate.sh"
+  "$REPO/scripts/ln7_bakeoff_phase_b_score.sh"
+  "$REPO/scripts/ln7_penny_droplet_rehearsal.sh"
 )
 
 echo "=== LN7 binary/script audit (host-role seams) ==="
@@ -65,12 +68,37 @@ else
   fail "destroy verified path incomplete"
 fi
 
-# doctl present is optional offline; note only
+# Attempt 5: required host tools (fail-closed). macOS: accept gtimeout (coreutils).
+if command -v timeout >/dev/null 2>&1; then
+  pass "tool timeout ($(command -v timeout))"
+elif command -v gtimeout >/dev/null 2>&1; then
+  pass "tool gtimeout ($(command -v gtimeout)) [darwin coreutils]"
+elif [[ "$(uname -s)" == "Darwin" && "${LN7_REQUIRE_TIMEOUT:-0}" != "1" ]]; then
+  pass "tool timeout absent on Darwin (optional; brew install coreutils → gtimeout)"
+else
+  fail "missing required tool: timeout (or gtimeout)"
+fi
+for bin in jq curl python3 rsync; do
+  if command -v "$bin" >/dev/null 2>&1; then
+    pass "tool $bin ($(command -v "$bin"))"
+  else
+    fail "missing required tool: $bin"
+  fi
+done
 if command -v doctl >/dev/null 2>&1; then
   pass "doctl present ($(command -v doctl))"
+elif [[ "${LN7_REQUIRE_DOCTL:-0}" == "1" ]]; then
+  fail "missing required tool: doctl (LN7_REQUIRE_DOCTL=1)"
 else
-  pass "doctl absent (audit still green; penny destroy may SKIP)"
+  pass "doctl absent (CI/offline ok; set LN7_REQUIRE_DOCTL=1 for penny/Phase A host)"
 fi
+
+# Phase A must stay dry/gated by default
+phase_a="$REPO/scripts/ln7_bakeoff_phase_a_generate.sh"
+grep -q 'LN7_BURST_ALLOW_PAID\|ln7_assert_paid_burst_allowed' "$phase_a" \
+  || fail "phase_a missing paid gate"
+grep -q 'LN7_PHASE_A_DRY_RUN' "$phase_a" || fail "phase_a missing dry-run default"
+pass "phase_a dry-run + paid gate present"
 
 echo "=== RESULT fails=$FAILS ==="
 [[ "$FAILS" -eq 0 ]] || exit 1
