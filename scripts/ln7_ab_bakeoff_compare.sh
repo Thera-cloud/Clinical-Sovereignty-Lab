@@ -11,7 +11,11 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 REV_A="${1:?usage: ln7_ab_bakeoff_compare.sh <rev_a> <rev_b>}"
 REV_B="${2:?usage: ln7_ab_bakeoff_compare.sh <rev_a> <rev_b>}"
-GREEN="${LN7_GREEN_HOST:-root@68.183.168.75}"
+# QUANTUM-CRYSTAL-ARCH — host-role contract: GREEN orch uses local AUTH_BASE (no SSH-to-self)
+# shellcheck source=scripts/ln7_host_roles.sh
+source "$REPO/scripts/ln7_host_roles.sh"
+ln7_resolve_host_roles
+GREEN="${LN7_GREEN_SSH:-}"
 STATE_DIR="${LN7_GPU_WATCH_STATE_DIR:-$HOME/.local/state/ln7_gpu_watch}"
 OUT="${LN7_AB_COMPARE_OUT:-$STATE_DIR/AB_COMPARE}"
 EXPECTED_PACKS="${LN7_BAKEOFF_EXPECTED_PACKS:-18}"
@@ -25,6 +29,7 @@ fi
 POLL_INTERVAL="${LN7_BAKEOFF_POLL_INTERVAL_S:-30}"
 WORKER_LABEL="${LN7_CONTINUOUS_WORKER_LABEL:-com.sovereign.ln7-continuous-worker}"
 COMPARE_LABEL="${LN7_AB_COMPARE_LABEL:-ln7-ab-compare}"
+GREEN_ENV_FILE="${LN7_GREEN_ENV_FILE:-/opt/clinical-sovereignty-lab/.env}"
 mkdir -p "$STATE_DIR"
 
 # QUANTUM-CRYSTAL-ARCH — portable timeout (macOS has gtimeout via coreutils, not timeout)
@@ -41,8 +46,25 @@ run_to() {
 # QUANTUM-CRYSTAL-ARCH — dead peer → exit ≤~60s; bounded steps use run_to
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=30
           -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+export LN7_SSH_OPTS="${SSH_OPTS[*]}"
 
 log() { echo "[ab-compare] $*" >&2; }
+
+# stdin = python program. Extra args are KEY=val for the child env.
+# Local AUTH_BASE when orch=green; else SSH to GREEN_SSH (never loopback).
+green_python() {
+  if [[ "${LN7_GREEN_EXEC_MODE}" == "local" ]]; then
+    run_to 300 env AUTH_BASE="$LN7_AUTH_BASE" ENV_FILE="$GREEN_ENV_FILE" "$@" python3 -
+  else
+    [[ -n "$GREEN" ]] || { log "FATAL LN7_GREEN_SSH empty (refusing implicit loopback)"; exit 3; }
+    local env_export="AUTH_BASE='http://127.0.0.1:8000' ENV_FILE='$GREEN_ENV_FILE'"
+    local kv
+    for kv in "$@"; do
+      env_export+=" $(printf '%q' "$kv")"
+    done
+    run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" "env $env_export python3 -"
+  fi
+}
 
 _OWN_COMPARE_LOCK=0
 
@@ -137,6 +159,7 @@ trap cleanup EXIT INT TERM
 pause_continuous_worker
 heartbeat "start"
 log "$(date -u +%Y-%m-%dT%H%M%SZ) a=$REV_A b=$REV_B poll_max=${POLL_MAX}s packs=$EXPECTED_PACKS min_accept=$MIN_ACCEPT"
+log "host_roles orch=$LN7_ORCH_HOST auth=$LN7_AUTH_BASE green_exec=$LN7_GREEN_EXEC_MODE green_ssh=${LN7_GREEN_SSH:-local}"
 
 resolve_adapter() {
   local rev="$1" alias="${2:-}"
@@ -198,12 +221,13 @@ wait_bakeoff_idle() {
   local elapsed=0
   while [[ $elapsed -lt $max_wait ]]; do
     local running
-    running="$(run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" 'python3 -' <<'PY' 2>/dev/null || echo '[]'
-import json, re, urllib.request
-env = open("/opt/clinical-sovereignty-lab/.env").read()
+    running="$(green_python <<'PY' 2>/dev/null || echo '[]'
+import json, os, re, urllib.request
+env = open(os.environ.get("ENV_FILE", "/opt/clinical-sovereignty-lab/.env")).read()
 tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()
+base = os.environ.get("AUTH_BASE", "http://127.0.0.1:8000").rstrip("/")
 req = urllib.request.Request(
-    "http://localhost:8000/api/ln7/bakeoff/running",
+    f"{base}/api/ln7/bakeoff/running",
     headers={"Authorization": f"Bearer {tok}"},
 )
 try:
@@ -227,12 +251,12 @@ PY
 
 fire_bakeoff() {
   local rev="$1"
-  run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
-    "REV='$rev' python3 -" <<'PY' >&2
+  green_python REV="$rev" <<'PY' >&2
 import json, os, re, urllib.request, sys
 rev = os.environ["REV"]
-env = open("/opt/clinical-sovereignty-lab/.env").read()
+env = open(os.environ.get("ENV_FILE", "/opt/clinical-sovereignty-lab/.env")).read()
 tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()
+base = os.environ.get("AUTH_BASE", "http://127.0.0.1:8000").rstrip("/")
 payload = {
     "revision_id": rev,
     "mode": "max",
@@ -242,7 +266,7 @@ payload = {
     "background": True,
 }
 req = urllib.request.Request(
-    "http://localhost:8000/api/ln7/bakeoff",
+    f"{base}/api/ln7/bakeoff",
     data=json.dumps(payload).encode(),
     headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
     method="POST",
@@ -272,14 +296,14 @@ run_one() {
 
   log "verify scorecard $rev"
   local verify_out
-  verify_out="$(run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
-    "REV='$rev' python3 -" <<'PY' || true
+  verify_out="$(green_python REV="$rev" <<'PY' || true
 import json, os, re, urllib.request
 rev = os.environ["REV"]
-env = open("/opt/clinical-sovereignty-lab/.env").read()
+env = open(os.environ.get("ENV_FILE", "/opt/clinical-sovereignty-lab/.env")).read()
 tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()
+base = os.environ.get("AUTH_BASE", "http://127.0.0.1:8000").rstrip("/")
 req = urllib.request.Request(
-    f"http://localhost:8000/api/ln7/scorecard/{rev}",
+    f"{base}/api/ln7/scorecard/{rev}",
     headers={"Authorization": f"Bearer {tok}"},
 )
 try:
@@ -322,16 +346,16 @@ PY
   while [[ $elapsed -lt $POLL_MAX ]]; do
     sleep "$POLL_INTERVAL"
     elapsed=$((elapsed + POLL_INTERVAL))
-    score_json="$(run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" \
-      "REV='$rev' SINCE='$SINCE' python3 -" <<'PY'
+    score_json="$(green_python REV="$rev" SINCE="$SINCE" <<'PY'
 import json, os, re, urllib.request, urllib.parse, sys
 rev = os.environ["REV"]
 since = os.environ["SINCE"]
-env = open("/opt/clinical-sovereignty-lab/.env").read()
+env = open(os.environ.get("ENV_FILE", "/opt/clinical-sovereignty-lab/.env")).read()
 tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()
+base = os.environ.get("AUTH_BASE", "http://127.0.0.1:8000").rstrip("/")
 q = urllib.parse.urlencode({"since": since})
 req = urllib.request.Request(
-    f"http://localhost:8000/api/ln7/scorecard/{rev}?{q}",
+    f"{base}/api/ln7/scorecard/{rev}?{q}",
     headers={"Authorization": f"Bearer {tok}"},
 )
 try:
@@ -350,12 +374,13 @@ PY
     fi
 
     local still
-    still="$(run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" 'python3 -' <<'PY' 2>/dev/null || echo '[]'
-import json, re, urllib.request
-env = open("/opt/clinical-sovereignty-lab/.env").read()
+    still="$(green_python <<'PY' 2>/dev/null || echo '[]'
+import json, os, re, urllib.request
+env = open(os.environ.get("ENV_FILE", "/opt/clinical-sovereignty-lab/.env")).read()
 tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()
+base = os.environ.get("AUTH_BASE", "http://127.0.0.1:8000").rstrip("/")
 req = urllib.request.Request(
-    "http://localhost:8000/api/ln7/bakeoff/running",
+    f"{base}/api/ln7/bakeoff/running",
     headers={"Authorization": f"Bearer {tok}"},
 )
 try:
@@ -374,9 +399,9 @@ PY
       # Bakeoff died short — GREEN sweep re-fire (survives _BAKEOFF_TASKS wipe)
       if [[ $idle_streak -ge 2 && $refires -lt 3 && $elapsed -gt 180 ]]; then
         log "bakeoff idle early n=$n < $MIN_ACCEPT — sweep re-fire ($((refires+1))/3)"
-        run_to 300 ssh "${SSH_OPTS[@]}" "$GREEN" "python3 -" <<PY || fire_bakeoff "$rev" || true
-import json, re, urllib.request
-env = open("/opt/clinical-sovereignty-lab/.env").read()
+        green_python <<PY || fire_bakeoff "$rev" || true
+import json, os, re, urllib.request
+env = open(os.environ.get("ENV_FILE", "/opt/clinical-sovereignty-lab/.env")).read()
 tok = re.search(r"^SKYEYE_AUDIT_TOKEN=(.*)$", env, re.M).group(1).strip()
 body = json.dumps({
   "revision_id": "$rev",
@@ -385,8 +410,9 @@ body = json.dumps({
   "refire": True,
   "since": "$SINCE",
 }).encode()
+base = os.environ.get("AUTH_BASE", "http://127.0.0.1:8000").rstrip("/")
 req = urllib.request.Request(
-  "http://localhost:8000/api/ln7/bakeoff/sweep",
+  f"{base}/api/ln7/bakeoff/sweep",
   data=body,
   headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
   method="POST",

@@ -29,7 +29,11 @@ STATE_DIR="${LN7_GPU_WATCH_STATE_DIR:-$HOME/.local/state/ln7_gpu_watch}"
 mkdir -p "$STATE_DIR"
 BURST_ID="${LN7_BURST_ID:-burst_$(date -u +%Y%m%dT%H%M%SZ)}"
 HANDOFF="${LN7_BURST_HANDOFF_LOCAL:-$STATE_DIR/ln7_burst_window.env}"
-GREEN="${LN7_GREEN_HOST:-root@68.183.168.75}"
+# QUANTUM-CRYSTAL-ARCH — host-role contract (Attempt 4); no SSH-to-self on GREEN
+# shellcheck source=scripts/ln7_host_roles.sh
+source "$REPO/scripts/ln7_host_roles.sh"
+ln7_resolve_host_roles
+GREEN="${LN7_GREEN_SSH:-}"
 GREEN_HANDOFF="${LN7_BURST_HANDOFF_GREEN:-/opt/clinical-sovereignty-lab/data/backend/ln7_burst_window.env}"
 # QUANTUM-CRYSTAL-ARCH — dry run exercises the whole window lifecycle (provision,
 # vLLM, LoRA attach, probe gate, GREEN read-back, teardown) without a compare and
@@ -51,6 +55,7 @@ PROBE_INTERVAL_S="${LN7_BURST_PROBE_INTERVAL_S:-15}"
 # QUANTUM-CRYSTAL-ARCH — dead peer → exit ≤~60s (not wedged forever)
 SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=30
           -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+export LN7_SSH_OPTS="${SSH_OPTS[*]}"
 
 API_KEY="${LN7_BURST_API_KEY:-$(openssl rand -hex 24)}"
 DROPLET_ID=""
@@ -59,6 +64,20 @@ _TORN_DOWN=0
 
 log() { echo "[hive_burst] $*" >&2; }
 die() { log "FATAL $*"; exit "${2:-1}"; }
+
+# GREEN work: local when orch=green (no SSH-to-self); else SSH to LN7_GREEN_SSH.
+green_run() {
+  if [[ "${LN7_GREEN_EXEC_MODE}" == "local" ]]; then
+    "$@"
+  else
+    [[ -n "${GREEN:-}" ]] || die "LN7_GREEN_SSH empty while orch needs remote GREEN" 3
+    ssh "${SSH_OPTS[@]}" "$GREEN" "$@"
+  fi
+}
+
+# Paid droplet: ≥300 organic rows + reviewed contract — not "patch landed, ship it"
+ln7_assert_paid_burst_allowed || die "paid_burst_gated (LN7_BURST_ALLOW_PAID=1 only after ≥300 G1 rows + reviewed host-contract)" 9
+log "host_roles orch=$LN7_ORCH_HOST auth=$LN7_AUTH_BASE green_exec=$LN7_GREEN_EXEC_MODE green_ssh=${LN7_GREEN_SSH:-local}"
 
 # --- step 7 (runs on every exit path) ----------------------------------------
 teardown() {
@@ -70,18 +89,12 @@ teardown() {
     log "handoff renamed -> ${HANDOFF}.destroyed"
   fi
   # Stale host must fail loudly on GREEN, never fall back to ORANGE.
-  ssh "${SSH_OPTS[@]}" "$GREEN" \
-    "mv -f '$GREEN_HANDOFF' '${GREEN_HANDOFF}.destroyed' 2>/dev/null || true" || true
+  ln7_green_mv_destroyed "$GREEN_HANDOFF"
   if [[ -n "$DROPLET_ID" ]]; then
-    log "destroying droplet $DROPLET_ID"
-    doctl compute droplet delete "$DROPLET_ID" --force >/dev/null 2>&1 \
-      || log "WARN destroy failed — orphan reaper must catch $DROPLET_ID"
-    # API can briefly still GET a droplet mid-delete; wait before asserting.
-    sleep 8
-    if doctl compute droplet get "$DROPLET_ID" >/dev/null 2>&1; then
-      log "ANOMALY burst_destroy_fail id=$DROPLET_ID"
-    else
-      log "destroy verified id=$DROPLET_ID"
+    log "destroying droplet $DROPLET_ID (verified 404)"
+    if ! ln7_destroy_droplet_verified "$DROPLET_ID"; then
+      log "FATAL billing_resource_still_alive id=$DROPLET_ID — refuse silent walkaway"
+      ec=4
     fi
   fi
   log "window closed burst_id=$BURST_ID ec=$ec"
@@ -123,12 +136,14 @@ else
   [[ -n "$DROPLET_ID" && -n "$DROPLET_IP" ]] || { log "$PROV_OUT"; die "provision_no_ip" 2; }
 fi
 log "droplet id=$DROPLET_ID ip=$DROPLET_IP size=$SIZE region=$REGION"
+ln7_set_burst_ssh "$DROPLET_IP" || die "burst_ssh_refuse:$DROPLET_IP" 2
+log "BURST_SSH=$LN7_BURST_SSH (handoff-only; not GREEN)"
 
 for _ in $(seq 1 40); do
-  ssh "${SSH_OPTS[@]}" "root@$DROPLET_IP" true 2>/dev/null && break
+  ssh "${SSH_OPTS[@]}" "$LN7_BURST_SSH" true 2>/dev/null && break
   sleep 10
 done
-ssh "${SSH_OPTS[@]}" "root@$DROPLET_IP" true 2>/dev/null || die "ssh_unreachable" 2
+ssh "${SSH_OPTS[@]}" "$LN7_BURST_SSH" true 2>/dev/null || die "ssh_unreachable" 2
 
 # --- step 2: write handoff env -----------------------------------------------
 # Advertise the WireGuard IP when the droplet has one; otherwise the public IP
@@ -150,31 +165,35 @@ LN7_BURST_BASE_MODEL=$HF_BASE
 LN7_BURST_DROPLET_ID=$DROPLET_ID
 EOF
 chmod 600 "$HANDOFF"
-scp "${SSH_OPTS[@]}" "$HANDOFF" "$GREEN:$GREEN_HANDOFF" >/dev/null \
-  || die "handoff_push_failed" 2
-ssh "${SSH_OPTS[@]}" "$GREEN" "chown 1000:1000 '$GREEN_HANDOFF'; chmod 640 '$GREEN_HANDOFF'" || true
+ln7_green_install_file "$HANDOFF" "$GREEN_HANDOFF" || die "handoff_push_failed" 2
 
 # --- step 3: rsync base + arm adapters ---------------------------------------
 log "step 3/7 rsync adapters"
-ssh "${SSH_OPTS[@]}" "root@$DROPLET_IP" "mkdir -p /opt/ln7/adapters" >/dev/null
+ssh "${SSH_OPTS[@]}" "$LN7_BURST_SSH" "mkdir -p /opt/ln7/adapters" >/dev/null
 for rev in "$REV_A" "$REV_B"; do
   # Reused training droplet already holds the weights it just wrote.
-  if ssh "${SSH_OPTS[@]}" "root@$DROPLET_IP" \
+  if ssh "${SSH_OPTS[@]}" "$LN7_BURST_SSH" \
        "test -s /opt/ln7/adapters/$rev/adapter_model.safetensors" 2>/dev/null; then
     log "  adapter $rev already on droplet — skip rsync"
     continue
   fi
   src="$ADAPTER_ROOT/$rev"
   [[ -d "$src" ]] || die "adapter_missing:$rev (not on droplet, not at $src)" 3
-  rsync -az -e "ssh ${SSH_OPTS[*]}" "$src/" "root@$DROPLET_IP:/opt/ln7/adapters/$rev/" \
+  rsync -az -e "ssh ${SSH_OPTS[*]}" "$src/" "$LN7_BURST_SSH:/opt/ln7/adapters/$rev/" \
     || die "rsync_failed:$rev" 3
   log "  adapter $rev -> /opt/ln7/adapters/$rev"
 done
 
 # --- step 4: launch vLLM multi-LoRA ------------------------------------------
 log "step 4/7 launch vLLM :$PORT (--enable-lora --max-loras 4)"
-FIREWALL_SRC="${GREEN_WG_IP:-$(ssh "${SSH_OPTS[@]}" "$GREEN" 'curl -s -4 ifconfig.co' 2>/dev/null || echo '')}"
-ssh "${SSH_OPTS[@]}" "root@$DROPLET_IP" \
+if [[ -n "$GREEN_WG_IP" ]]; then
+  FIREWALL_SRC="$GREEN_WG_IP"
+elif [[ "${LN7_GREEN_EXEC_MODE}" == "local" ]]; then
+  FIREWALL_SRC="$(curl -s -4 ifconfig.co 2>/dev/null || echo '')"
+else
+  FIREWALL_SRC="$(ssh "${SSH_OPTS[@]}" "$GREEN" 'curl -s -4 ifconfig.co' 2>/dev/null || echo '')"
+fi
+ssh "${SSH_OPTS[@]}" "$LN7_BURST_SSH" \
   "REV_A='$REV_A' REV_B='$REV_B' HF_BASE='$HF_BASE' PORT='$PORT' \
    API_KEY='$API_KEY' TTL_S='$TTL_S' FW_SRC='$FIREWALL_SRC' bash -s" <<'REMOTE' \
   || die "vllm_launch_failed" 4
@@ -225,7 +244,7 @@ log "step 5/7 identity probe gate (max ${PROBE_MAX_S}s)"
 elapsed=0
 gate_ok=0
 while [[ $elapsed -lt $PROBE_MAX_S ]]; do
-  if ssh "${SSH_OPTS[@]}" "root@$DROPLET_IP" \
+  if ssh "${SSH_OPTS[@]}" "$LN7_BURST_SSH" \
        "REV_A='$REV_A' REV_B='$REV_B' PORT='$PORT' API_KEY='$API_KEY' python3 -" <<'PY'
 import json, os, sys, urllib.error, urllib.request
 
@@ -287,17 +306,17 @@ PY
   log "  probe not converged (${elapsed}s/${PROBE_MAX_S}s)"
 done
 [[ "$gate_ok" == "1" ]] || {
-  ssh "${SSH_OPTS[@]}" "root@$DROPLET_IP" 'tail -30 /var/log/ln7_vllm.log' 2>/dev/null >&2 || true
+  ssh "${SSH_OPTS[@]}" "$LN7_BURST_SSH" 'tail -30 /var/log/ln7_vllm.log' 2>/dev/null >&2 || true
   die "probe_gate_never_converged — refusing to compare indistinguishable arms" 5
 }
 log "step 5/7 GATE PASSED — arms provably distinct"
 
 # Keep the resolver's model name in sync with what vLLM actually serves.
 # A dry run must not write to the production ledger for throwaway revisions.
-[[ "$DRY_RUN" == "1" ]] || ssh "${SSH_OPTS[@]}" "$GREEN" \
-  "docker exec nate_postgres psql -U nate_admin -d little_nate -c \
-   \"UPDATE ln7_revisions SET vllm_lora_name = revision_id \
-     WHERE revision_id IN ('$REV_A','$REV_B')\"" >/dev/null 2>&1 || true
+[[ "$DRY_RUN" == "1" ]] || green_run \
+  docker exec nate_postgres psql -U nate_admin -d little_nate -c \
+   "UPDATE ln7_revisions SET vllm_lora_name = revision_id \
+     WHERE revision_id IN ('$REV_A','$REV_B')" >/dev/null 2>&1 || true
 
 # --- step 6: hand off to compare ---------------------------------------------
 if [[ "$DRY_RUN" == "1" ]]; then
@@ -309,8 +328,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   # The bind mount is provable without deploying code: if the container can read
   # the file the resolver will be handed, the mount and ownership are correct.
   GREEN_CONTAINER_HANDOFF="/app/data/$(basename "$GREEN_HANDOFF")"
-  if ssh "${SSH_OPTS[@]}" "$GREEN" \
-       "docker exec nate_backend sh -c \"grep -q '^LN7_BURST_HOST=' '$GREEN_CONTAINER_HANDOFF'\"" 2>/dev/null; then
+  if green_run docker exec nate_backend sh -c "grep -q '^LN7_BURST_HOST=' '$GREEN_CONTAINER_HANDOFF'" 2>/dev/null; then
     log "  bind mount OK — container reads $GREEN_CONTAINER_HANDOFF"
   else
     die "green_bind_mount_unreadable:$GREEN_CONTAINER_HANDOFF" 6
@@ -392,9 +410,10 @@ PY
   # path (GREEN → public burst host:11436 with the handoff API key). Fail here is
   # the bounded cause for a Branch-B attempt — fix before any drain spend.
   log "  GREEN auth HTTP preflight (resolver URL)"
-  ssh "${SSH_OPTS[@]}" "$GREEN" \
-    "REV_A='$REV_A' REV_B='$REV_B' HANDOFF='$GREEN_HANDOFF' \
-     EXPECT_HOST='$ADVERTISE_HOST' PORT='$PORT' python3 -" <<'PY' \
+  green_run env \
+    REV_A="$REV_A" REV_B="$REV_B" HANDOFF="$GREEN_HANDOFF" \
+    EXPECT_HOST="$ADVERTISE_HOST" PORT="$PORT" \
+    python3 - <<'PY' \
     || die "green_auth_http_preflight_failed" 6
 import json, os, sys, urllib.error, urllib.request
 
@@ -476,9 +495,10 @@ fi
 # Live compare also requires GREEN can hit the resolver URL before pack spend.
 log "step 6/7 GREEN auth HTTP preflight (before compare)"
 GREEN_CONTAINER_HANDOFF="/app/data/$(basename "$GREEN_HANDOFF")"
-ssh "${SSH_OPTS[@]}" "$GREEN" \
-  "REV_A='$REV_A' REV_B='$REV_B' HANDOFF='$GREEN_HANDOFF' \
-   EXPECT_HOST='$ADVERTISE_HOST' PORT='$PORT' python3 -" <<'PY' \
+green_run env \
+  REV_A="$REV_A" REV_B="$REV_B" HANDOFF="$GREEN_HANDOFF" \
+  EXPECT_HOST="$ADVERTISE_HOST" PORT="$PORT" \
+  python3 - <<'PY' \
   || die "green_auth_http_preflight_failed" 6
 import json, os, sys, urllib.error, urllib.request
 path = os.environ["HANDOFF"]
