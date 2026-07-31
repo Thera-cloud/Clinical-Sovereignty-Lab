@@ -367,12 +367,29 @@ class CliTaskBusConsumer:
         notes = str(task.get("notes") or "")
         try:
             if kind == "hive_burst":
+                import json as _json_hb
                 from app.services.ln7_hive_burst import run_hive_burst
 
+                # QUANTUM-CRYSTAL-ARCH — Phase A: pass arms + dry_run from notes
+                _hb: Dict[str, Any] = {}
+                try:
+                    _hb = _json_hb.loads(notes) if notes.startswith("{") else {}
+                except Exception:
+                    _hb = {}
+                _dry = bool(_hb.get("dry_run")) or os.getenv(
+                    "LN7_HIVE_DRY_RUN", "0"
+                ) == "1"
                 out = await run_hive_burst(
                     pool,
                     notes=notes,
-                    dry_run=os.getenv("LN7_HIVE_DRY_RUN", "0") == "1",
+                    dry_run=_dry,
+                    rev_a=str(_hb.get("rev_a") or _hb.get("revision_a") or ""),
+                    rev_b=str(_hb.get("rev_b") or _hb.get("revision_b") or ""),
+                    estimated_cost_usd=(
+                        float(_hb["estimated_cost_usd"])
+                        if _hb.get("estimated_cost_usd") is not None
+                        else None
+                    ),
                 )
                 findings.append({
                     "detail": f"hive_burst: {str(out)[:400]}",

@@ -497,3 +497,9 @@ def test_fallback_drill_module_importable():
 
     assert callable(run_fallback_drill)
     assert FallbackDrillAgent is not None
+
+
+def test_governance_has_cpai_baseline():
+    data = json.loads((FROZEN / "governance.json").read_text(encoding="utf-8"))
+    assert "cpai_baseline_usd" in data
+    assert data["bootstrap_burst_windows"] == 5

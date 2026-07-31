@@ -12,8 +12,8 @@ todos:
     content: "Phase A0 DONE: pin Qwen2.5-Coder-7B; refuse/quarantine 1.5B (mig 305 + register asserts); rank/target_modules + merge_eligible"
     status: completed
   - id: phase-a-burst-hive
-    content: "Phase A: hive_burst via cli_task_bus; Redis serve endpoint; economics bootstrap; R2 weight mirror"
-    status: pending
+    content: "Phase A DONE (code): economics F1 bootstrap/CPAI gate; hive_burst resolves rev_a/b + R2 mirror + script args; Redis serve publish; consumer notes wiring. Paid provision still gated by LN7_BURST_ALLOW_PAID + PRE6"
+    status: completed
   - id: phase-b1-route-telemetry
     content: "Phase B1/W7 DONE for LN7 ledger+shadow+hive; marketing dual-write via growth_claims.upsert_claim → outcome_envelope (2026-07-31)"
     status: completed
@@ -540,7 +540,7 @@ sequenceDiagram
 | Fuel baseline | `coding` 1/300, `general` 2/300 — ETA n/a until slope days accumulate |
 | Next paid Phase A | Human: `LN7_BURST_ALLOW_PAID=1` + enqueue `ln7_bakeoff` only after PRE6 unlock email |
 
-**Still open on this plan:** Phase A (`hive_burst` worker hardening / economics) next; then E leases. G2 flip deferred (CEO/manual). Residual polish: W8 sandbox rsync, W11 hard claim_ids+SkyEye, W14 live App, W16 live probes.
+**Still open on this plan:** Phase B2/B3 domain router next (or E leases). G2 flip deferred (CEO/manual). Residual polish: W8 sandbox rsync, W11 hard claim_ids+SkyEye, W14 live App, W16 live probes. Paid Phase A GPU still human-gated.
 
 ---
 

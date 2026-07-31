@@ -5,6 +5,7 @@
   "change_lease_ttl_s": 900,
   "bootstrap_burst_windows": 5,
   "bootstrap_spend_cap_usd": 75.0,
+  "cpai_baseline_usd": 25.0,
   "cpai_yellow_multiplier": 1.5,
   "semantic_route_threshold": 0.78,
   "suppress_days": 30,
