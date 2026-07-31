@@ -2808,6 +2808,17 @@ async def lifespan(app: FastAPI):
     except Exception as _ctbc_err:
         print(f"   ⚠️  CliTaskBusConsumer init failed: {_ctbc_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — LN7 fuel gauge + serve-health sensors → shared rollback
+    _ln7_ops_scheduler = None
+    try:
+        from app.jobs.ln7_ops_scheduler import Ln7OpsScheduler
+        _ln7_ops_scheduler = Ln7OpsScheduler(db_pool)  # QUANTUM-CRYSTAL-ARCH
+        await _ln7_ops_scheduler.start()
+        app.state.ln7_ops_scheduler = _ln7_ops_scheduler
+        print("   ✅ Ln7OpsScheduler started (fuel nightly + serve health 60s)")
+    except Exception as _ln7ops_err:
+        print(f"   ⚠️  Ln7OpsScheduler init failed: {_ln7ops_err}")
+
     _crystal_outcome_apply = None
     try:
         from app.services.crystal_outcome_apply import CrystalOutcomeApplyAgent
@@ -3724,6 +3735,7 @@ async def lifespan(app: FastAPI):
         ("ln7_continuous_agent", getattr(app.state, "ln7_continuous_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln7_fence", getattr(app.state, "ln7_fence", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln7_living_pack_agent", getattr(app.state, "ln7_living_pack_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("ln7_ops_scheduler", getattr(app.state, "ln7_ops_scheduler", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("phase_h_predicate_poller", getattr(app.state, "phase_h_predicate_poller", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("goodhart_drift_sentinel", getattr(app.state, "goodhart_drift_sentinel", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln7_fallback_drill_agent", getattr(app.state, "ln7_fallback_drill_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
@@ -3925,6 +3937,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ CliTaskBusConsumer stopped")
         except Exception as _ctbc_stop:
             print(f"   ⚠️  CliTaskBusConsumer shutdown: {_ctbc_stop}")
+    _ln7_ops_scheduler_h = getattr(app.state, "ln7_ops_scheduler", None)  # QUANTUM-CRYSTAL-ARCH
+    if _ln7_ops_scheduler_h:
+        try:
+            await _ln7_ops_scheduler_h.stop()
+            print("   ✅ Ln7OpsScheduler stopped")
+        except Exception as _ln7ops_stop:
+            print(f"   ⚠️  Ln7OpsScheduler shutdown: {_ln7ops_stop}")
     _crystal_outcome_apply_h = getattr(app.state, "crystal_outcome_apply", None)  # QUANTUM-CRYSTAL-ARCH
     if _crystal_outcome_apply_h:
         try:

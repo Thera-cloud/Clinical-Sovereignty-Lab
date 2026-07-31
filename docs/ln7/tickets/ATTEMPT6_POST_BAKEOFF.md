@@ -19,3 +19,18 @@ Require **strict dominance**: `candidate_ci.lo > incumbent_ci.hi` (non-overlappi
 ## G2
 
 Untouched until separate CEO authorization after Step 0 green.
+
+---
+
+## Steps 6–8 (code-level spec — built)
+
+| Step | Artifact | Status |
+|------|----------|--------|
+| 6.1 | `backend/tests/fixtures/attempt6_*` + `test_bakeoff_regression.py` (`pytest.approx`) | green offline |
+| 6.2 | `scripts/ln7_attempt6_autopsy.py` → `docs/ln7/ATTEMPT6_AUTOPSY.md` | hypotheses only |
+| 6.3 | mig `314` + `ln7_fuel_gauge.py` (slope via `days_tracked`) | code ready; apply 314 on GREEN |
+| 6.4 | `ln7_serve_health_monitor.py` → `ln7_rollback.py` (`MIN_REQUEST_FLOOR=30`) | code ready |
+| 7 | `ln7_bakeoff` bus + `LN7_BAKEOFF_DRY=1` acceptance | dry PASS |
+| 8 | MemoryMax drop-in, DO audit, `INCIDENT_SEAMS_1_TO_7_CLOSED.md` | see STEP8 checklist |
+
+Sharpenings applied: float `approx`, health N≥30, fuel slope ≠ blind `/7`.

@@ -48,6 +48,7 @@ _CLAIM_KINDS = (
     # QUANTUM-CRYSTAL-ARCH — Multi-LoRA flywheel
     "hive_burst",
     "ln7_shadow_fork",
+    "ln7_bakeoff",
 )
 
 
@@ -212,8 +213,8 @@ class CliTaskBusConsumer:
                 self._green_auto += 1
             elif risk == RISK_YELLOW:
                 self._ceo_routed += 1
-        elif kind in ("hive_burst", "ln7_shadow_fork"):
-            # QUANTUM-CRYSTAL-ARCH — flywheel bus kinds (W3 / W1)
+        elif kind in ("hive_burst", "ln7_shadow_fork", "ln7_bakeoff"):
+            # QUANTUM-CRYSTAL-ARCH — flywheel bus kinds (W3 / W1 / Attempt 6 bakeoff)
             findings, passed = await self._dispatch_flywheel_kind(task, kind)
             self._green_auto += 1
         elif kind in (
@@ -360,7 +361,7 @@ class CliTaskBusConsumer:
             return findings, False
 
     async def _dispatch_flywheel_kind(self, task: Dict[str, Any], kind: str) -> tuple:
-        """QUANTUM-CRYSTAL-ARCH — hive_burst / ln7_shadow_fork worker body."""
+        """QUANTUM-CRYSTAL-ARCH — hive_burst / ln7_shadow_fork / ln7_bakeoff worker body."""
         findings: List[Dict[str, Any]] = []
         pool = getattr(self._app_state, "db_pool", None) if self._app_state else None
         notes = str(task.get("notes") or "")
@@ -401,6 +402,21 @@ class CliTaskBusConsumer:
                 findings.append({
                     "detail": f"ln7_shadow_fork: {str(out)[:400]}",
                     "severity": "info",
+                })
+                return findings, bool(out.get("ok"))
+            if kind == "ln7_bakeoff":
+                import json as _json
+                from app.services.ln7_bakeoff_bus import handle_ln7_bakeoff
+
+                meta: Dict[str, Any] = {}
+                try:
+                    meta = _json.loads(notes) if notes.startswith("{") else {}
+                except Exception:
+                    meta = {}
+                out = await handle_ln7_bakeoff(pool, payload=meta, notes=notes)
+                findings.append({
+                    "detail": f"ln7_bakeoff: {str(out)[:400]}",
+                    "severity": "info" if out.get("ok") else "warn",
                 })
                 return findings, bool(out.get("ok"))
         except Exception as e:

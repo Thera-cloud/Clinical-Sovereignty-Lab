@@ -338,11 +338,17 @@ def run_phase_b(
         "smoke_ok": True,
         "bakeoff_verdict": True,
     }
+    # QUANTUM-CRYSTAL-ARCH — keep row results for CI regression / autopsy
     return {
         "ok": True,
         "anchor": anchor,
         "smoke": smoke,
-        "full": {"winner": full["winner"], "stats": full["stats"], "n_results": len(full["results"])},
+        "full": {
+            "winner": full["winner"],
+            "stats": full["stats"],
+            "n_results": len(full["results"]),
+            "results": full["results"],
+        },
         "verdict": verdict,
     }
 

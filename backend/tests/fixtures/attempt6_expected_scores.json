@@ -1,0 +1,28 @@
+{
+  "anchor_mean": 1.0,
+  "arm_a": {
+    "revision": "LN7-2026-07-30T190327Z",
+    "mean": 0.292,
+    "per_task": {
+      "asyncpg_cast": 0,
+      "catch_all_routes": 0,
+      "env_redis_prefix": 0,
+      "load_dotenv_override": 0,
+      "users_no_user_id_column": 0,
+      "skyeye_activity_columns": 1
+    }
+  },
+  "arm_b": {
+    "revision": "LN7-2026-07-30T191329Z",
+    "mean": 0.167,
+    "per_task": {
+      "asyncpg_cast": 0,
+      "catch_all_routes": 0,
+      "env_redis_prefix": 0,
+      "load_dotenv_override": 1,
+      "users_no_user_id_column": 0,
+      "skyeye_activity_columns": 0
+    }
+  },
+  "winner": "LN7-2026-07-30T190327Z"
+}
