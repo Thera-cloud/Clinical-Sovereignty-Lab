@@ -17,6 +17,17 @@ Usage:
         --run-ids fuel_burning_verify_20260801,fuel_burning_verify_20260801_affinity
 
     python3 backend/scripts/print_quartet_scoring_pane.py --json > pane.json
+
+Note on six_quotient_human_gold: scenario_id is UNIQUE, so live_stack_run_id
+is a *label on a single row*, not a key for multiple generations. Every
+`generate_live_stack_batch` call for the same scenario overwrites the prior
+row's nate_response_live/live_stack_run_id/etc. If you regenerated under a
+new label after already regenerating once, the earlier label's response text
+no longer exists in the table — only the most recent generation is live-
+pullable. Use --supplement-file to fold in a prior generation's text that was
+captured to a flat file (format: `SCENARIO_ID|response text` per line, one
+line per scenario) before it was overwritten, so the pane still shows both
+generations side-by-side for scoring even though only one is UI-native.
 """
 from __future__ import annotations
 
@@ -132,6 +143,13 @@ ORDER BY
 """
 
 
+STATIC_QUERY = """
+SELECT scenario_id, section, client_says
+FROM six_quotient_human_gold
+WHERE scenario_id = ANY($1::text[])
+"""
+
+
 async def fetch_rows(run_ids: List[str]) -> List[Dict[str, Any]]:
     if asyncpg is None:
         print("ERROR: asyncpg not installed", file=sys.stderr)
@@ -149,6 +167,68 @@ async def fetch_rows(run_ids: List[str]) -> List[Dict[str, Any]]:
         sys.exit(2)
     finally:
         await conn.close()
+
+
+async def fetch_static_fields() -> Dict[str, Dict[str, Any]]:
+    """scenario_id -> {section, client_says}. Used to backfill supplement rows
+    (which only carry scenario_id + response text) with the fields that don't
+    change across generations."""
+    if asyncpg is None:
+        return {}
+    try:
+        conn = await asyncpg.connect(_dsn())
+    except Exception:
+        return {}
+    try:
+        rows = await conn.fetch(STATIC_QUERY, list(QUARTET))
+        return {r["scenario_id"]: dict(r) for r in rows}
+    except Exception:
+        return {}
+    finally:
+        await conn.close()
+
+
+def load_supplement_file(path: str, label: str, static: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Parse a `SCENARIO_ID|response text` file (one line per scenario) into
+    synthetic row dicts that render identically to a DB-pulled row, so a
+    generation that was overwritten in six_quotient_human_gold can still be
+    scored side-by-side with a live row. Never touches the database."""
+    out: List[Dict[str, Any]] = []
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.rstrip("\n")
+                if not line.strip() or "|" not in line:
+                    continue
+                sid, _, text = line.partition("|")
+                sid = sid.strip()
+                if sid not in QUARTET:
+                    continue
+                meta = static.get(sid, {})
+                out.append(
+                    {
+                        "scenario_id": sid,
+                        "section": meta.get("section", ""),
+                        "client_says": meta.get("client_says", "(not available — see static fetch)"),
+                        "nate_response_live": text.strip(),
+                        "live_stack_run_id": label,
+                        "live_response_provenance": "recovered_text_file",
+                        "live_generated_at": None,
+                        "live_inject_meta": None,
+                        "live_human_scored": False,
+                        "live_primary_score": None,
+                        "live_accuracy_score": None,
+                        "live_naturalness_score": None,
+                        "live_notes": None,
+                    }
+                )
+    except FileNotFoundError:
+        print(f"ERROR: supplement file not found: {path}", file=sys.stderr)
+        sys.exit(2)
+    # Keep quartet order regardless of file order
+    order = {sid: i for i, sid in enumerate(QUARTET)}
+    out.sort(key=lambda r: order.get(r["scenario_id"], 99))
+    return out
 
 
 def _fmt_inject_meta(raw: Any) -> str:
@@ -243,10 +323,30 @@ async def main() -> int:
         help="Comma-separated live_stack_run_id values to pull (default: %(default)s)",
     )
     ap.add_argument("--json", action="store_true", help="Emit JSON instead of the text pane")
+    ap.add_argument(
+        "--supplement-file",
+        default=None,
+        help=(
+            "Path to a SCENARIO_ID|response text file (one line per scenario) "
+            "for a generation that was overwritten in six_quotient_human_gold "
+            "before it could be pulled live. Rendered with the same checklist, "
+            "prepended before the DB-pulled rows."
+        ),
+    )
+    ap.add_argument(
+        "--supplement-label",
+        default="recovered_text_snapshot",
+        help="Label to display for the supplement rows (default: %(default)s)",
+    )
     args = ap.parse_args()
 
     run_ids = [r.strip() for r in args.run_ids.split(",") if r.strip()]
     rows = await fetch_rows(run_ids)
+
+    if args.supplement_file:
+        static = await fetch_static_fields()
+        supplement_rows = load_supplement_file(args.supplement_file, args.supplement_label, static)
+        rows = supplement_rows + rows
 
     if args.json:
         print(render_json(rows))
