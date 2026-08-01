@@ -314,6 +314,37 @@ def publish_task(
         risk_tier = classify_risk(kind=kind, files=files, notes=notes or "")
     except Exception:
         risk_tier = "GREEN"
+    # QUANTUM-CRYSTAL-ARCH — R4 layer 2: privilege asymmetry / serialization
+    # boundary. Every task's notes cross this floor before any Queen can
+    # read them, regardless of caller privilege or task kind.
+    injection_flagged: Optional[str] = None
+    safe_notes = notes or ""
+    try:
+        from app.services.ln7_injection_firewall import sanitize_notes
+
+        _scan = sanitize_notes(safe_notes)
+        safe_notes = _scan["notes"]
+        if _scan.get("tripped"):
+            injection_flagged = _scan.get("token")
+            logger.warning(
+                "publish_task: injection pattern flagged in notes (kind=%s, token=%s)",
+                kind, injection_flagged,
+            )
+            try:
+                import asyncio
+
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    from app.services.flywheel_anomaly import notify_flywheel_anomaly
+
+                    asyncio.ensure_future(notify_flywheel_anomaly(
+                        "honeytoken",
+                        {"token": injection_flagged, "kind": kind, "agent": "cli_task_bus"},
+                    ))
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning("publish_task: sanitize_notes unavailable, passing notes through: %s", e)
     record = {
         "task_id": task_id,
         "origin": origin,
@@ -323,7 +354,8 @@ def publish_task(
         "kind": kind,
         "run_id": run_id or "",
         "plan_id": plan_id or "",
-        "notes": (notes or "")[:2000],
+        "notes": safe_notes[:2000],
+        "injection_flagged": injection_flagged,
         "risk_tier": risk_tier,
         "review_round": 0,
         "max_review_rounds": MAX_REVIEW_ROUNDS,
