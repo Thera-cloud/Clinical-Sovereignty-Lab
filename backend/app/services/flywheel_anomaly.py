@@ -3,7 +3,7 @@
 Kinds: rollback_storm, queens_disagree_lineage, confound_spike,
 burst_destroy_fail, watchdog_blind, fence_manifest_mismatch,
 bootstrap_cap, fingerprint_drift, honeytoken, fallback_drill_fail,
-drift_sentinel.
+drift_sentinel, merge_disk_low, merge_drain_fail.
 
 # QUANTUM-CRYSTAL-ARCH
 """
@@ -29,6 +29,8 @@ ANOMALY_KINDS = frozenset({
     "honeytoken",
     "fallback_drill_fail",
     "drift_sentinel",
+    "merge_disk_low",  # QUANTUM-CRYSTAL-ARCH — Phase C: <120GB free before merge
+    "merge_drain_fail",  # QUANTUM-CRYSTAL-ARCH — Phase C: merge_drain orchestrator exception
 })
 
 _COOLDOWN: Dict[str, float] = {}

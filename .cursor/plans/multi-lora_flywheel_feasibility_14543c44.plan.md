@@ -21,8 +21,8 @@ todos:
     content: "Phase B2/B3 DONE: mig 305 domain registry (domain_tag/adapter_uri/embedding/serve_weight); Tier1 static+pack-hint routing, Tier2 BGE cosine w/ welded semantic_threshold, Tier3 burst BoN fallback; push_adapter_intent on winner+runner-ups (intent→burst); export --domain flag (2026-08-01)"
     status: completed
   - id: phase-c-merge-drain
-    content: "Phase C: dare_ties merge drain; abort-on-regression authority"
-    status: pending
+    content: "Phase C DONE (code): ln7_merge_drain.py extended with the full Stage 4 orchestrator (run_merge_drain) — disk preflight (check_disk_space, >=120GB gate → merge_disk_low anomaly), PEFT→HF materialization (materialize_peft_to_hf, merge_and_unload), pinned mergekit dare_ties invocation (run_mergekit, no target_model/no relisted base — pre-existing mergekit_yaml_dare_ties), abort_gate as sole authority (beat LN7-fast-baseline AND every contributor on held-out; pre-existing), GGUF conversion for ORANGE Ollama on accept (convert_to_gguf), ~15GB WireGuard transfer to ORANGE via ProxyJump (transfer_gguf_to_orange), and prune_micro_experts (marks contributor revisions merged_pruned only after abort_gate accepts — never on reject). Mirrors ln7_hive_burst.py's lease/watchdog/outcome_envelope pattern: acquire_lease/release_lease around the whole run, write_envelope with E2 cross_loop_attribution on both accept and reject paths, merge_drain_fail anomaly on exception. register_revision now always passed full harness_config/base_checkpoint/quantization (draft + final status update) so ON CONFLICT never wipes merge_of/mergekit_pin provenance. Wired into task bus: FLYWHEEL_TASK_KINDS + _CLAIM_KINDS in cli_task_bus.py/cli_task_bus_consumer.py gained ln7_merge_drain; new anomaly kinds merge_disk_low/merge_drain_fail registered in flywheel_anomaly.py. 18 offline tests in test_ln7_merge_drain_phase_c.py (helpers dry-run, abort_gate accept/reject/no-data, prune, and full orchestrator accept/reject/lease-held/missing-adapter paths). Real (non-dry-run) execution of materialize/mergekit/gguf/transfer subprocess calls, and end-to-end Queens-trigger wiring, remain to be exercised on actual L40S hardware — same paid/live-gated posture as Phase A burst."
+    status: completed
   - id: phase-d-flywheel-harden
     content: "Phase D: Held-out hard-block; stratified vintage+fresh bakeoffs; canary/GGUF"
     status: pending
@@ -540,7 +540,7 @@ sequenceDiagram
 | Fuel baseline | `coding` 1/300, `general` 2/300 — ETA n/a until slope days accumulate |
 | Next paid Phase A | Human: `LN7_BURST_ALLOW_PAID=1` + enqueue `ln7_bakeoff` only after PRE6 unlock email |
 
-**Still open on this plan:** Phase C merge drain (dare_ties + abort-on-regression) next, or Phase E leases/nervous-system. G2 flip deferred (CEO/manual). Residual polish: W8 sandbox rsync, W11 hard claim_ids+SkyEye, W14 live App, W16 live probes. Paid Phase A GPU still human-gated.
+**Still open on this plan:** Phase D (held-out hard-block; stratified vintage+fresh bakeoffs; canary/GGUF) next. Phase C merge drain code+tests DONE (2026-08-01) — real subprocess execution + Queens-trigger end-to-end on L40S still human/paid-gated. G2 flip deferred (CEO/manual). Residual polish: W8 sandbox rsync, W11 hard claim_ids+SkyEye, W14 live App, W16 live probes. Paid Phase A GPU still human-gated.
 
 ---
 

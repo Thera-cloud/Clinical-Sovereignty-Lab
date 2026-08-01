@@ -49,6 +49,7 @@ _CLAIM_KINDS = (
     "hive_burst",
     "ln7_shadow_fork",
     "ln7_bakeoff",
+    "ln7_merge_drain",  # QUANTUM-CRYSTAL-ARCH — Phase C Stage 4 dare_ties consolidation
 )
 
 
@@ -213,8 +214,8 @@ class CliTaskBusConsumer:
                 self._green_auto += 1
             elif risk == RISK_YELLOW:
                 self._ceo_routed += 1
-        elif kind in ("hive_burst", "ln7_shadow_fork", "ln7_bakeoff"):
-            # QUANTUM-CRYSTAL-ARCH — flywheel bus kinds (W3 / W1 / Attempt 6 bakeoff)
+        elif kind in ("hive_burst", "ln7_shadow_fork", "ln7_bakeoff", "ln7_merge_drain"):
+            # QUANTUM-CRYSTAL-ARCH — flywheel bus kinds (W3 / W1 / bakeoff / Phase C merge)
             findings, passed = await self._dispatch_flywheel_kind(task, kind)
             self._green_auto += 1
         elif kind in (
@@ -433,6 +434,34 @@ class CliTaskBusConsumer:
                 out = await handle_ln7_bakeoff(pool, payload=meta, notes=notes)
                 findings.append({
                     "detail": f"ln7_bakeoff: {str(out)[:400]}",
+                    "severity": "info" if out.get("ok") else "warn",
+                })
+                return findings, bool(out.get("ok"))
+            if kind == "ln7_merge_drain":
+                import json as _json
+                from app.services.ln7_merge_drain import run_merge_drain
+
+                meta: Dict[str, Any] = {}
+                try:
+                    meta = _json.loads(notes) if notes.startswith("{") else {}
+                except Exception:
+                    meta = {}
+                _contributors = meta.get("contributor_ids") or []
+                if isinstance(_contributors, str):
+                    _contributors = [_contributors]
+                _dry = bool(meta.get("dry_run")) or os.getenv(
+                    "LN7_MERGE_DRY_RUN", "1"
+                ) == "1"
+                out = await run_merge_drain(
+                    pool,
+                    contributor_ids=list(_contributors),
+                    incumbent_id=str(meta.get("incumbent_id") or "LN7-fast-baseline"),
+                    density=float(meta.get("density") or 0.6),
+                    dry_run=_dry,
+                    notes=notes,
+                )
+                findings.append({
+                    "detail": f"ln7_merge_drain: {str(out)[:400]}",
                     "severity": "info" if out.get("ok") else "warn",
                 })
                 return findings, bool(out.get("ok"))

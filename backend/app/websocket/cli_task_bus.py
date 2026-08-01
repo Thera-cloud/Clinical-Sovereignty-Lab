@@ -51,6 +51,7 @@ FLYWHEEL_TASK_KINDS = frozenset({
     "ln7_shadow_fork",
     "sandbox_pack_sync",
     "ln7_bakeoff",  # QUANTUM-CRYSTAL-ARCH — Attempt 6 Phase A/B via Queens bus
+    "ln7_merge_drain",  # QUANTUM-CRYSTAL-ARCH — Phase C Stage 4 dare_ties consolidation
 })
 
 

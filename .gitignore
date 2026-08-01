@@ -209,6 +209,7 @@ mobile/**/Untitled
 !/data/.gitkeep
 .ln7-harness/
 .ln7-adapters/
+.ln7-merge/
 
 # LN7 weld backups (local+R2); keep explicit Step0 snapshots only
 archive/frozen-config-backups/20*/
