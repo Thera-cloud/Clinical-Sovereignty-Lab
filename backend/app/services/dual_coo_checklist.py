@@ -47,6 +47,19 @@ async def evaluate_evidence(
                 ok = promotions_allowed()
             except Exception:
                 ok = False
+        if iid == "heldout_not_in_train" and iid not in evidence and "checks" not in evidence:
+            # Phase H held-out weld: mechanical floor-integrity check, not a
+            # per-row training-set trace (that would require a separate
+            # provenance table). This verifies the held-out *definition*
+            # itself hasn't been silently narrowed in packs_index.json out
+            # from under the frozen-config pin — see
+            # ln7_heldout_registry.heldout_weld_status().
+            try:
+                from app.services.ln7_heldout_registry import heldout_weld_status
+
+                ok = bool(heldout_weld_status().get("ok"))
+            except Exception:
+                ok = False
         if iid == "not_suppressed" and db_pool and evidence.get("pattern_key"):
             from app.services.ln7_suppress import is_suppressed
 
