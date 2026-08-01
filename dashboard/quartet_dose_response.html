@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quartet Dose-Response · Sovereign Command</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--void:#050505;--chamber:#0A0A0A;--elev:#111;--line:#2a2a2a;--gold:#C9A962;--goldb:#E8D5A3;
+--dim:#8B7355;--cyan:#4ECDC4;--red:#EF4444;--ok:#22C55E;--purple:#9D4EDD}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--void);color:var(--goldb);font-family:'DM Sans',system-ui,sans-serif;
+font-size:14.5px;line-height:1.5;min-height:100vh}
+.top{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;
+padding:1.25rem 1.5rem;border-bottom:1px solid var(--line);background:var(--chamber)}
+h1{font-family:'Cormorant Garamond',Georgia,serif;font-size:1.85rem;color:var(--gold);font-weight:700}
+.sub{color:var(--dim);font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;margin-top:.2rem}
+.tabs{display:flex;gap:.4rem;padding:.75rem 1.5rem;border-bottom:1px solid var(--line);background:var(--chamber)}
+.tab{padding:.45rem .9rem;border:1px solid var(--line);border-radius:6px;background:transparent;
+color:var(--dim);cursor:pointer;font:inherit;font-weight:600;font-size:.8rem}
+.tab.on{border-color:var(--gold);color:var(--gold)}
+main{max-width:980px;margin:0 auto;padding:1.25rem 1.25rem 3rem}
+.panel{display:none}.panel.on{display:block}
+.warn{color:var(--red);margin-bottom:1rem;font-size:.9rem}
+.meta{color:var(--dim);font-size:.85rem;margin-bottom:1rem}
+.card{background:var(--elev);border:1px solid var(--line);border-radius:8px;padding:1rem 1.1rem;margin:1rem 0}
+.client,.resp{white-space:pre-wrap;background:var(--void);padding:.75rem;border-radius:4px;margin:.4rem 0 .8rem}
+label{display:inline-block;margin:0 .85rem .5rem 0;color:var(--cyan);font-size:.85rem}
+input[type=number],select,textarea,input[type=text]{background:var(--void);color:var(--goldb);
+border:1px solid var(--line);border-radius:4px;padding:.35rem .5rem;font:inherit}
+input[type=number]{width:3.2rem}
+textarea{width:100%;min-height:3.5rem;margin:.35rem 0}
+button{font:inherit;font-weight:600;cursor:pointer;border-radius:6px;padding:.45rem .9rem;
+border:1px solid var(--gold);background:transparent;color:var(--gold);margin:.2rem .35rem .2rem 0}
+button.primary{background:var(--gold);color:var(--void)}
+button.danger{border-color:var(--red);color:var(--red)}
+button:disabled{opacity:.4;cursor:not-allowed}
+.row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.6rem 0}
+.pill{font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;padding:.2rem .55rem;
+border-radius:999px;border:1px solid var(--line);color:var(--dim)}
+.pill.ok{border-color:var(--ok);color:var(--ok)}
+.pill.pend{border-color:var(--gold);color:var(--gold)}
+.pill.before{border-color:var(--dim);color:var(--dim)}
+.pill.after{border-color:var(--cyan);color:var(--cyan)}
+.mono{font-family:ui-monospace,monospace;font-size:.78rem;color:var(--dim)}
+.timer{font-variant-numeric:tabular-nums;color:var(--cyan);font-weight:600}
+.empty{color:var(--dim);padding:1rem 0}
+h2{font-family:'Cormorant Garamond',Georgia,serif;color:var(--gold);font-size:1.35rem;margin:1.2rem 0 .6rem}
+.moves{border-top:1px solid var(--line);margin-top:.8rem;padding-top:.6rem}
+.move-row{display:flex;align-items:flex-start;gap:.6rem;padding:.4rem 0;border-bottom:1px dashed var(--line)}
+.move-row:last-child{border-bottom:none}
+.move-label{flex:1;font-size:.85rem;color:var(--goldb)}
+.move-choices{display:flex;gap:.3rem;flex-shrink:0;align-items:center}
+.move-choices label{margin:0;font-size:.75rem;display:flex;align-items:center;gap:.15rem;color:var(--dim)}
+.move-choices input[type=radio]{width:auto;margin:0}
+.move-reason{width:6rem;padding:.2rem .35rem;font-size:.75rem}
+table{width:100%;border-collapse:collapse;margin:.6rem 0}
+th,td{border:1px solid var(--line);padding:.45rem .6rem;font-size:.82rem;text-align:left}
+th{color:var(--gold);background:var(--elev)}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.up{color:var(--ok)}.down{color:var(--red)}.flat{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="top">
+  <div>
+    <h1>Quartet Dose-Response</h1>
+    <div class="sub">AQ-1 · AQ-2 · AQ-G07 · AQ-G08 &middot; before_no_affinity vs after_affinity_fix</div>
+  </div>
+  <button onclick="navBack()">← Command</button>
+</div>
+<div class="tabs">
+  <button class="tab on" data-p="score" onclick="showPanel('score')">Score</button>
+  <button class="tab" data-p="report" onclick="showPanel('report')">Report</button>
+</div>
+<main>
+  <div id="authWarn" class="warn" style="display:none">No admin token — open from Sovereign Command after login.</div>
+
+  <!-- SCORE -->
+  <section class="panel on" id="panel-score">
+    <div class="meta" id="queueProgress">Loading queue…</div>
+    <div class="row">
+      <button class="primary" id="btnStart" onclick="startSession()">Start scoring session</button>
+      <button onclick="loadItems()">Load queue (8)</button>
+      <span class="pill pend" id="runPill">no session</span>
+      <span class="timer" id="itemTimer">—</span>
+    </div>
+    <p class="meta">Session label <span class="mono">quartet_dose_response_v1</span>. Eight rows, interleaved by
+      scenario (before/after adjacent). Scoring writes only to the dose-response queue — never touches
+      <span class="mono">six_quotient_human_gold</span> or <span class="mono">nate_live_responses</span>.
+      ≥45s dwell per row enforced server-side.</p>
+    <div id="scoreCard" class="empty">Start a session, then load the queue.</div>
+  </section>
+
+  <!-- REPORT -->
+  <section class="panel" id="panel-report">
+    <h2>Dose-response grid</h2>
+    <p class="meta">2×4 grid (condition × scenario) of move-counts, plus per-move transfer rates
+      (present/partial/absent, before → after) pooled across all four scenarios.</p>
+    <button onclick="loadReport()">Refresh report</button>
+    <div id="reportBox" class="empty">Loading…</div>
+  </section>
+</main>
+
+<script>
+const API = (window.SS_API_BASE || "https://api.sovereignsanctuary.net") + "/api/admin/quartet-dose-response";
+const SESSION_LABEL = "quartet_dose_response_v1";
+let _runId = null, _items = [], _idx = 0, _shownAt = 0, _timerIv = null, _moveDefs = {};
+
+function _token(){
+  try{
+    return sessionStorage.getItem("sc_token") || localStorage.getItem("sc_token")
+      || sessionStorage.getItem("token") || "";
+  }catch(e){ return ""; }
+}
+function _headers(){
+  const h = {"Content-Type":"application/json"};
+  const t = _token();
+  if(t) h["Authorization"] = "Bearer " + t;
+  return h;
+}
+function esc(s){ const d=document.createElement("div"); d.textContent=s??""; return d.innerHTML; }
+function navBack(){ try{ window.location.href = "command.html"; }catch(e){} }
+function showPanel(name){
+  document.querySelectorAll(".panel").forEach(p=>p.classList.remove("on"));
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on", t.dataset.p===name));
+  document.getElementById("panel-"+name).classList.add("on");
+  if(name==="report") loadReport();
+}
+async function api(path, opts){
+  const res = await fetch(API + path, Object.assign({headers:_headers()}, opts||{}));
+  if(res.status===401){
+    console.warn("Auth issue on", path);
+    document.getElementById("authWarn").style.display="block";
+    return null;
+  }
+  if(!res.ok){
+    let msg = res.statusText;
+    try{ const j=await res.json(); msg=j.detail||JSON.stringify(j); }catch(e){}
+    alert("Error "+res.status+": "+msg);
+    return null;
+  }
+  return res.json();
+}
+
+async function startSession(){
+  const d = await api("/session/start", {
+    method:"POST",
+    body: JSON.stringify({session_label: SESSION_LABEL, notes: "Quartet dose-response UI"})
+  });
+  if(!d) return;
+  _runId = d.run_id;
+  document.getElementById("runPill").textContent = _runId;
+  document.getElementById("runPill").className = "pill ok";
+  await loadItems();
+}
+
+async function loadItems(){
+  const d = await api("/items?session_label=" + encodeURIComponent(SESSION_LABEL));
+  if(!d) return;
+  _items = d.items || [];
+  _moveDefs = d.moves || {};
+  document.getElementById("queueProgress").textContent =
+    `Session ${d.session_label} · ${d.scored}/${d.count} scored · ${d.remaining} remaining`;
+  // Land on the first unscored row.
+  _idx = _items.findIndex(it => !it.human_scored);
+  if(_idx < 0) _idx = 0;
+  renderScoreItem();
+}
+
+function _tickTimer(){
+  if(!_shownAt) return;
+  const sec = Math.floor((Date.now()-_shownAt)/1000);
+  const el = document.getElementById("itemTimer");
+  el.textContent = sec + "s on item" + (sec < 45 ? " (need ≥45s)" : "");
+  el.style.color = sec < 45 ? "var(--red)" : "var(--ok)";
+}
+
+function renderScoreItem(){
+  if(_timerIv) clearInterval(_timerIv);
+  if(!_items.length){
+    document.getElementById("scoreCard").innerHTML = "<div class='empty'>Start a session, then load the queue.</div>";
+    return;
+  }
+  if(_idx >= _items.length){
+    document.getElementById("scoreCard").innerHTML = "<div class='empty'>Queue complete. Check the Report tab.</div>";
+    document.getElementById("itemTimer").textContent = "—";
+    return;
+  }
+  const it = _items[_idx];
+  _shownAt = Date.now();
+  _tickTimer();
+  _timerIv = setInterval(_tickTimer, 500);
+  const condClass = it.condition_label === "before_no_affinity" ? "before" : "after";
+  const moves = _moveDefs[it.scenario_id] || [];
+  const existing = it.spine_moves || {};
+  const movesHtml = moves.map(m => {
+    const cur = existing[m.id] || {};
+    const mkRadio = (val) => `<label><input type="radio" name="move_${m.id}" value="${val}"
+      ${cur.value===val?"checked":""} onchange="_onMoveChange('${m.id}')"> ${val[0].toUpperCase()}</label>`;
+    return `<div class="move-row">
+      <div class="move-label">${esc(m.label)}</div>
+      <div class="move-choices">
+        ${mkRadio("present")}${mkRadio("partial")}${mkRadio("absent")}
+        <input type="text" class="move-reason" id="reason_${m.id}" placeholder="reason (partial)"
+          value="${esc(cur.reason||'')}" style="display:${cur.value==='partial'?'inline-block':'none'}">
+      </div>
+    </div>`;
+  }).join("");
+  document.getElementById("scoreCard").innerHTML = `
+    <div class="card">
+      <div class="meta">${esc(it.scenario_id)} · ${esc(it.section||"")}
+        <span class="pill ${condClass}">${esc(it.condition_label)}</span>
+        <span class="pill">${esc(it.source)}</span>
+        <span class="pill">${_idx+1}/${_items.length}</span>
+        ${it.human_scored ? `<span class="pill ok">already scored</span>` : ""}</div>
+      <p><strong>Client</strong></p>
+      <div class="client">${esc(it.client_says||"")}</div>
+      <p><strong>Response</strong> <span class="mono">(${esc(it.original_run_id||"")})</span></p>
+      <div class="resp">${esc(it.response_text)}</div>
+      <div class="row">
+        <label>primary <input type="number" id="sPrimary" min="0" max="3" value="${it.primary_score??''}"></label>
+        <label>accuracy <input type="number" id="sAccuracy" min="0" max="3" value="${it.accuracy_score??''}"></label>
+        <label>naturalness <input type="number" id="sNatural" min="0" max="3" value="${it.naturalness_score??''}"></label>
+        <label>safety_veto <select id="sVeto"><option value="">—</option>
+          <option ${it.safety_veto==='ok'?'selected':''}>ok</option>
+          <option ${it.safety_veto==='fail'?'selected':''}>fail</option></select></label>
+      </div>
+      <div class="moves">
+        <strong>Spine moves</strong> <span class="meta" style="display:inline">present / partial / absent — partial requires a one-word reason</span>
+        ${movesHtml}
+      </div>
+      <textarea id="sNotes" placeholder="Optional notes">${esc(it.notes||"")}</textarea>
+      <div class="row">
+        <button class="primary" onclick="submitScore()">Submit score</button>
+        <button onclick="_idx++;renderScoreItem()">Skip</button>
+        <button onclick="_idx=Math.max(0,_idx-1);renderScoreItem()">Back</button>
+      </div>
+    </div>`;
+}
+
+function _onMoveChange(moveId){
+  const checked = document.querySelector(`input[name="move_${moveId}"]:checked`);
+  const reasonEl = document.getElementById("reason_"+moveId);
+  if(reasonEl) reasonEl.style.display = (checked && checked.value === "partial") ? "inline-block" : "none";
+}
+
+async function submitScore(){
+  const it = _items[_idx];
+  if(!_runId || !it){ alert("Start a session first."); return; }
+  const latency = Date.now() - _shownAt;
+  if(latency < 45000){
+    alert("Hold ≥45s on this item before submit (server rejects shorter latency).");
+    return;
+  }
+  const primary = parseInt(document.getElementById("sPrimary").value, 10);
+  const accuracy = parseInt(document.getElementById("sAccuracy").value, 10);
+  const naturalness = parseInt(document.getElementById("sNatural").value, 10);
+  if([primary,accuracy,naturalness].some(v => Number.isNaN(v) || v<0 || v>3)){
+    alert("Enter primary, accuracy, naturalness as 0–3.");
+    return;
+  }
+  const vetoEl = document.getElementById("sVeto");
+  const safety_veto = vetoEl && vetoEl.value ? vetoEl.value : null;
+
+  const moves = _moveDefs[it.scenario_id] || [];
+  const spine_moves = {};
+  for(const m of moves){
+    const checked = document.querySelector(`input[name="move_${m.id}"]:checked`);
+    if(!checked){ alert("Score every move for " + it.scenario_id + " (missing: " + m.id + ")."); return; }
+    const value = checked.value;
+    let reason = null;
+    if(value === "partial"){
+      reason = (document.getElementById("reason_"+m.id).value || "").trim();
+      if(!reason){ alert("Move '" + m.id + "' marked partial needs a one-word reason."); return; }
+    }
+    spine_moves[m.id] = {value, reason};
+  }
+
+  const d = await api("/score", {
+    method:"POST",
+    body: JSON.stringify({
+      item_id: it.id,
+      run_id: _runId,
+      primary, accuracy, naturalness,
+      safety_veto,
+      notes: document.getElementById("sNotes").value||"",
+      latency_ms: latency,
+      spine_moves
+    })
+  });
+  if(!d) return;
+  it.human_scored = true;
+  _idx++;
+  await loadItems();
+}
+
+async function loadReport(){
+  const d = await api("/report?session_label=" + encodeURIComponent(SESSION_LABEL));
+  if(!d){ document.getElementById("reportBox").innerHTML = "<div class='empty'>No data yet.</div>"; return; }
+  const conds = ["before_no_affinity", "after_affinity_fix"];
+  let grid = `<table><tr><th>Scenario</th><th>before_no_affinity</th><th>after_affinity_fix</th></tr>`;
+  for(const row of d.grid){
+    const b = row.before_no_affinity, a = row.after_affinity_fix;
+    grid += `<tr><td>${esc(row.scenario_id)}</td>
+      <td class="num">${b.human_scored ? b.moves_present_count+"/6" : "—"}</td>
+      <td class="num">${a.human_scored ? a.moves_present_count+"/6" : "—"}</td></tr>`;
+  }
+  grid += `</table>`;
+
+  const ct = d.condition_totals || {};
+  let totals = `<table><tr><th>Condition</th><th>Scenarios scored</th><th>Avg moves present</th><th>Total moves present</th></tr>`;
+  for(const c of conds){
+    const t = ct[c] || {};
+    totals += `<tr><td>${esc(c)}</td><td class="num">${t.n_scenarios_scored??0}</td>
+      <td class="num">${t.avg_moves_present??"—"}</td><td class="num">${t.total_moves_present??"—"}</td></tr>`;
+  }
+  totals += `</table>`;
+
+  const mt = d.move_transfer || {};
+  let transfer = `<table><tr><th>Scenario</th><th>Move</th><th>Before</th><th>After</th><th>Δ</th></tr>`;
+  for(const row of (mt.detail || [])){
+    const cls = row.improved ? "up" : (row.regressed ? "down" : "flat");
+    const arrow = row.improved ? "↑ improved" : (row.regressed ? "↓ regressed" : "= unchanged");
+    transfer += `<tr><td>${esc(row.scenario_id)}</td><td>${esc(row.move_id)}</td>
+      <td>${esc(row.before)}</td><td>${esc(row.after)}</td>
+      <td class="${cls}">${arrow}</td></tr>`;
+  }
+  transfer += `</table>`;
+
+  document.getElementById("reportBox").innerHTML = `
+    <div class="meta">${d.scored_rows}/${d.total_rows} rows scored ·
+      dose_response_ready: <strong>${d.dose_response_ready}</strong></div>
+    <h2 style="font-size:1.05rem">Move-counts (condition × scenario)</h2>
+    ${grid}
+    <h2 style="font-size:1.05rem">Condition totals</h2>
+    ${totals}
+    <h2 style="font-size:1.05rem">Per-move transfer (${mt.pairs_evaluated||0} pairs · ${mt.improved||0} improved · ${mt.regressed||0} regressed · ${mt.unchanged||0} unchanged)</h2>
+    ${transfer}
+  `;
+}
+
+loadItems();
+</script>
+</body>
+</html>
