@@ -115,6 +115,7 @@ async def record_outcome(db_pool, row: Dict[str, Any]) -> Optional[int]:
             try:
                 from app.services.ln7_outcome_envelope import (
                     attach_envelope_to_outcome,
+                    cross_loop_attribution,
                     write_envelope,
                 )
 
@@ -123,6 +124,11 @@ async def record_outcome(db_pool, row: Dict[str, Any]) -> Optional[int]:
                     metrics["route_tier"] = row.get("route_tier")
                 if row.get("runner_ups") is not None:
                     metrics["runner_ups"] = row.get("runner_ups")
+                # E2: coding_outcome is the genesis envelope for a lineage —
+                # every downstream write (shadow_fork, hive_burst,
+                # checklist_disagree, canary_eval) joins back to this row via
+                # attribution_json, so surface the full key set here.
+                attribution = cross_loop_attribution(row)
                 env_id = await write_envelope(
                     db_pool,
                     loop_name="ln7",
@@ -133,6 +139,7 @@ async def record_outcome(db_pool, row: Dict[str, Any]) -> Optional[int]:
                     domain_tag=row.get("domain_tag"),
                     source_node=row.get("exec_node") or "green",
                     burst_id=row.get("burst_id"),
+                    attribution=attribution,
                     metrics=metrics,
                     provenance=row.get("provenance_json") or {},
                     cost_usd=row.get("cost_usd"),

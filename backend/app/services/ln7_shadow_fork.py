@@ -36,6 +36,7 @@ async def run_shadow_fork(
 ) -> Dict[str, Any]:
     """Apply LN7 counterfactual patch in sandbox CI; record shadow_outcome."""
     from app.services.ln7_outcome_envelope import (
+        cross_loop_attribution,
         has_shadow_outcome_for_patch,
         write_envelope,
     )
@@ -66,6 +67,13 @@ async def run_shadow_fork(
             event_kind="shadow_fork",
             patch_hash=patch_hash,
             domain_tag=domain or None,
+            # E2: evidence_uri has no dedicated column on outcome_envelope, so
+            # surface it (plus the redundant patch_hash/domain_tag) into
+            # attribution_json to keep this lineage joinable end to end.
+            attribution=cross_loop_attribution(
+                None, patch_hash=patch_hash, domain_tag=domain or None,
+                evidence_uri=evidence_uri or None,
+            ),
             shadow_outcome={
                 "passed": False,
                 "pack_ids": pack_ids or [],
@@ -143,6 +151,10 @@ async def run_shadow_fork(
         event_kind="shadow_fork",
         patch_hash=patch_hash,
         domain_tag=domain or None,
+        attribution=cross_loop_attribution(
+            None, patch_hash=patch_hash, domain_tag=domain or None,
+            evidence_uri=evidence_uri or None,
+        ),
         shadow_outcome=shadow,
         metrics=detail,
     )
