@@ -542,8 +542,17 @@ def select_crisis_guides(
     limit: int = CRISIS_INJECT_LIMIT,
     safety_reserve: int = CRISIS_SAFETY_SLOT_RESERVE,
     turn_class: str = TURN_CLASS_SI,
+    user_text: str = "",
 ) -> List[Dict[str, Any]]:
-    """Class-aware slot fill: escalate_or_safety first, turn_class affinity, then recency."""
+    """Class-aware slot fill: escalate_or_safety first (hard boundary, never
+    crossed), then lexical overlap with this turn's disclosure (which
+    scenario-specific guide the client's own words actually match), then
+    turn_class affinity, then recency.
+
+    Overlap ranks strictly *within* the safety-class boundary. It never lets
+    a high-overlap non-safety guide displace a safety guide on a crisis turn
+    — that would reintroduce the original slot defect through the fix itself.
+    """
     lim = max(1, min(int(limit), 6))
     reserve = max(0, min(int(safety_reserve), lim))
     tc = (turn_class or TURN_CLASS_SI).strip().lower()
@@ -558,10 +567,25 @@ def select_crisis_guides(
         d["response_class"] = rc
         d["_safety"] = 1 if is_safety_class(rc) else 0
         d["_affinity"] = _turn_class_affinity(d, tc)
+        blob = " ".join(
+            [
+                str(d.get("source_scenario") or ""),
+                str(d.get("crystal_text") or "")[:800],
+            ]
+        )
+        d["_overlap"] = _token_overlap_score(user_text, blob)
         enriched.append(d)
-    # Safety first, then HI/SI affinity, then newer id
+    # Safety class is the hard boundary (never crossed). Within it: lexical
+    # overlap with this turn's disclosure first, then turn_class affinity,
+    # then recency. Overlap also decides primacy order in the injected set,
+    # which matters once a guide is actually chosen over the others.
     enriched.sort(
-        key=lambda x: (x["_safety"], x["_affinity"], int(x.get("id") or 0)),
+        key=lambda x: (
+            x["_safety"],
+            x["_overlap"],
+            x["_affinity"],
+            int(x.get("id") or 0),
+        ),
         reverse=True,
     )
     safety = [x for x in enriched if x["_safety"]]
@@ -584,8 +608,10 @@ async def fetch_principal_review_crisis_guides(
     limit: int = CRISIS_INJECT_LIMIT,
     turn_class: str = TURN_CLASS_SI,
     actor_id: Optional[str] = None,
+    user_text: str = "",
 ) -> List[Dict[str, Any]]:
-    """Deterministic crisis Guides — turn_class + safety class over newest-id ranking."""
+    """Deterministic crisis Guides — safety class boundary, then lexical
+    overlap with this turn's disclosure, then turn_class affinity + recency."""
     if not db_pool:
         return []
     tc = (turn_class or TURN_CLASS_SI).strip().lower()
@@ -627,6 +653,7 @@ async def fetch_principal_review_crisis_guides(
                 limit=limit,
                 safety_reserve=CRISIS_SAFETY_SLOT_RESERVE,
                 turn_class=tc,
+                user_text=user_text,
             )
             # Demonstrated: inject path reinforces recall (same contract as
             # recall_crystals_for_context — not storage alone).

@@ -40,7 +40,11 @@ async def inject_principal_review_crisis_guides(
 
     try:
         guides = await fetch_principal_review_crisis_guides(
-            db_pool, limit=3, turn_class=turn_class, actor_id=username or None
+            db_pool,
+            limit=3,
+            turn_class=turn_class,
+            actor_id=username or None,
+            user_text=user_text,
         )
         block = format_crisis_guide_injection(guides, turn_class=turn_class)
     except Exception as e:

@@ -1213,7 +1213,11 @@ async def prepare_therapeutic_context(
 
             _tc = _pr_turn_class or TURN_CLASS_SI
             _pr_guides = await fetch_principal_review_crisis_guides(
-                db_pool, limit=3, turn_class=_tc, actor_id=canonical_user_id
+                db_pool,
+                limit=3,
+                turn_class=_tc,
+                actor_id=canonical_user_id,
+                user_text=user_text or "",
             )
             principal_crisis_block = format_crisis_guide_injection(
                 _pr_guides, turn_class=_tc
