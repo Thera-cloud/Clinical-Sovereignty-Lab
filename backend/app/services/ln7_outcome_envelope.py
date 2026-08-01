@@ -67,35 +67,104 @@ async def write_envelope(
 ) -> Optional[str]:
     if not db_pool:
         return None
+    attribution_str = json.dumps(attribution or {})
+    metrics_str = json.dumps(metrics or {})
+    provenance_str = json.dumps(provenance or {})
+    shadow_str = json.dumps(shadow_outcome) if shadow_outcome is not None else None
+    # E4: per-window HMAC over every field that feeds the promote decision,
+    # so a post-hoc edit to shadow_outcome/metrics/confounded is detectable
+    # even though the row itself remains a normal, queryable table row.
+    try:
+        from app.services.ln7_envelope_signing import sign_fields
+
+        sig_fields = sign_fields(
+            {
+                "loop_name": loop_name,
+                "event_kind": event_kind,
+                "revision_id": revision_id,
+                "task_hash": task_hash,
+                "patch_hash": patch_hash,
+                "domain_tag": domain_tag,
+                "source_node": source_node,
+                "burst_id": burst_id,
+                "attribution_json": attribution_str,
+                "metrics_json": metrics_str,
+                "provenance_json": provenance_str,
+                "shadow_outcome": shadow_str,
+                "confounded": confounded,
+                "cost_usd": cost_usd,
+            }
+        )
+    except Exception as _sig_exc:
+        logger.warning("envelope signing failed, writing unsigned: %s", _sig_exc)
+        sig_fields = {"sig": None, "sig_window": None}
     try:
         async with db_pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                INSERT INTO outcome_envelope (
-                    loop_name, event_kind, revision_id, task_hash, patch_hash,
-                    domain_tag, source_node, burst_id, attribution_json,
-                    metrics_json, provenance_json, shadow_outcome, confounded, cost_usd
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8,
-                    $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, $13, $14
+            try:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO outcome_envelope (
+                        loop_name, event_kind, revision_id, task_hash, patch_hash,
+                        domain_tag, source_node, burst_id, attribution_json,
+                        metrics_json, provenance_json, shadow_outcome, confounded,
+                        cost_usd, sig, sig_window
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8,
+                        $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, $13,
+                        $14, $15, $16
+                    )
+                    RETURNING envelope_id::text
+                    """,
+                    loop_name,
+                    event_kind,
+                    revision_id,
+                    task_hash,
+                    patch_hash,
+                    domain_tag,
+                    source_node,
+                    burst_id,
+                    attribution_str,
+                    metrics_str,
+                    provenance_str,
+                    shadow_str,
+                    confounded,
+                    cost_usd,
+                    sig_fields.get("sig"),
+                    sig_fields.get("sig_window"),
                 )
-                RETURNING envelope_id::text
-                """,
-                loop_name,
-                event_kind,
-                revision_id,
-                task_hash,
-                patch_hash,
-                domain_tag,
-                source_node,
-                burst_id,
-                json.dumps(attribution or {}),
-                json.dumps(metrics or {}),
-                json.dumps(provenance or {}),
-                json.dumps(shadow_outcome) if shadow_outcome is not None else None,
-                confounded,
-                cost_usd,
-            )
+            except Exception as col_exc:
+                # Pre-migration-315 database: sig/sig_window columns don't
+                # exist yet. Fall back to the unsigned insert so a code
+                # deploy that races the migration doesn't break every writer.
+                if "sig" not in str(col_exc) and "column" not in str(col_exc).lower():
+                    raise
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO outcome_envelope (
+                        loop_name, event_kind, revision_id, task_hash, patch_hash,
+                        domain_tag, source_node, burst_id, attribution_json,
+                        metrics_json, provenance_json, shadow_outcome, confounded, cost_usd
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8,
+                        $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, $13, $14
+                    )
+                    RETURNING envelope_id::text
+                    """,
+                    loop_name,
+                    event_kind,
+                    revision_id,
+                    task_hash,
+                    patch_hash,
+                    domain_tag,
+                    source_node,
+                    burst_id,
+                    attribution_str,
+                    metrics_str,
+                    provenance_str,
+                    shadow_str,
+                    confounded,
+                    cost_usd,
+                )
         return str(row["envelope_id"]) if row else None
     except Exception as e:
         logger.warning("outcome_envelope write failed: %s", e)
