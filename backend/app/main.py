@@ -2808,14 +2808,16 @@ async def lifespan(app: FastAPI):
     except Exception as _ctbc_err:
         print(f"   ⚠️  CliTaskBusConsumer init failed: {_ctbc_err}")
 
-    # QUANTUM-CRYSTAL-ARCH — LN7 fuel gauge + serve-health sensors → shared rollback
+    # QUANTUM-CRYSTAL-ARCH — LN7 fuel gauge + serve-health sensors + E6 weekly digest → shared rollback
     _ln7_ops_scheduler = None
     try:
         from app.jobs.ln7_ops_scheduler import Ln7OpsScheduler
-        _ln7_ops_scheduler = Ln7OpsScheduler(db_pool)  # QUANTUM-CRYSTAL-ARCH
+        _ln7_ops_scheduler = Ln7OpsScheduler(
+            db_pool, notification_system=getattr(app.state, "notification_system", None)
+        )  # QUANTUM-CRYSTAL-ARCH
         await _ln7_ops_scheduler.start()
         app.state.ln7_ops_scheduler = _ln7_ops_scheduler
-        print("   ✅ Ln7OpsScheduler started (fuel nightly + serve health 60s)")
+        print("   ✅ Ln7OpsScheduler started (fuel nightly + serve health 60s + E6 weekly digest)")
     except Exception as _ln7ops_err:
         print(f"   ⚠️  Ln7OpsScheduler init failed: {_ln7ops_err}")
 

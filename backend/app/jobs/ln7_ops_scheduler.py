@@ -12,15 +12,19 @@ from typing import Any, Optional
 logger = logging.getLogger("ln7_ops_scheduler")
 
 FUEL_HOUR_UTC = 6  # once nightly after 06:00 UTC
+DIGEST_HOUR_UTC = 7  # E6 weekly digest — Monday, after fuel gauge
+DIGEST_WEEKDAY = 0  # Monday
 HEALTH_POLL_S = 60
 
 
 class Ln7OpsScheduler:
-    def __init__(self, db_pool=None):
+    def __init__(self, db_pool=None, notification_system=None):
         self._db_pool = db_pool
+        self._notification_system = notification_system  # QUANTUM-CRYSTAL-ARCH — E6 digest email
         self._running = False
         self._task: Optional[asyncio.Task] = None
         self._last_fuel_date: Optional[str] = None
+        self._last_digest_week: Optional[str] = None
         self._cycles = 0
 
     async def start(self):
@@ -51,6 +55,7 @@ class Ln7OpsScheduler:
     async def _tick(self):
         from app.jobs.ln7_serve_health_monitor import run_serve_health_cycle
         from app.jobs.ln7_fuel_gauge import run_fuel_gauge_cycle
+        from app.jobs.ln7_weekly_digest import run_weekly_digest_cycle, iso_week
 
         await run_serve_health_cycle(self._db_pool)
         now = datetime.now(timezone.utc)
@@ -61,9 +66,21 @@ class Ln7OpsScheduler:
                 self._last_fuel_date = day
                 logger.info("fuel gauge digest: %s", out.get("digest"))
 
+        week = iso_week(now)
+        if (
+            now.weekday() == DIGEST_WEEKDAY
+            and now.hour >= DIGEST_HOUR_UTC
+            and self._last_digest_week != week
+        ):
+            out = await run_weekly_digest_cycle(self._db_pool, self._notification_system)
+            if out.get("ok"):
+                self._last_digest_week = week
+                logger.info("E6 weekly digest: %s", out)
+
     def status(self) -> dict[str, Any]:
         return {
             "running": self._running,
             "cycles": self._cycles,
             "last_fuel_date": self._last_fuel_date,
+            "last_digest_week": self._last_digest_week,
         }
