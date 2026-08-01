@@ -218,17 +218,21 @@ function renderScoreItem(){
       <div class="client">${esc(it.client_says||"")}</div>
       <p><strong>Response</strong> <span class="mono">(${esc(it.original_run_id||"")})</span></p>
       <div class="resp">${esc(it.response_text)}</div>
-      <div class="row">
+      <div class="moves">
+        <strong>1. Spine moves — score this first</strong>
+        <span class="meta" style="display:inline">present / partial / absent — partial requires a one-word reason.
+        Score against the checklist before looking at the 0–3s below: the move grid is the primary
+        instrument, the scalars should inherit from it, not from contrast with the row you just scored.</span>
+        ${movesHtml}
+      </div>
+      <div class="row" style="margin-top:1rem">
+        <strong style="flex-basis:100%;color:var(--gold)">2. Scalars — score against this row's checklist result, not against the paired row</strong>
         <label>primary <input type="number" id="sPrimary" min="0" max="3" value="${it.primary_score??''}"></label>
         <label>accuracy <input type="number" id="sAccuracy" min="0" max="3" value="${it.accuracy_score??''}"></label>
         <label>naturalness <input type="number" id="sNatural" min="0" max="3" value="${it.naturalness_score??''}"></label>
         <label>safety_veto <select id="sVeto"><option value="">—</option>
           <option ${it.safety_veto==='ok'?'selected':''}>ok</option>
           <option ${it.safety_veto==='fail'?'selected':''}>fail</option></select></label>
-      </div>
-      <div class="moves">
-        <strong>Spine moves</strong> <span class="meta" style="display:inline">present / partial / absent — partial requires a one-word reason</span>
-        ${movesHtml}
       </div>
       <textarea id="sNotes" placeholder="Optional notes">${esc(it.notes||"")}</textarea>
       <div class="row">
