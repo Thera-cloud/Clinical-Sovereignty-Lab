@@ -192,25 +192,41 @@ async def emit_queens_task_merged(
     try:
         from app.websocket.cli_task_bus import publish_task
         from app.services.ln7_living_packs import record_pack_candidate
+        from app.services.ln7_injection_firewall import (
+            tripwire_check,
+            validate_tool_dispatch,
+        )
         import json
 
-        _diff = (counterfactual_diff or "")[:1200]
-        _notes = {
+        _raw_diff = counterfactual_diff or ""
+        _notes: Dict[str, Any] = {
             "patch_hash": patch_hash,
             "domain": domain,
             "evidence_uri": evidence_uri,
             "revision_id": revision_id,
             "pack_ids": resolved_packs or [],
-            "counterfactual_diff": _diff,
         }
-        if len(counterfactual_diff or "") > 1200:
-            _notes["counterfactual_diff_truncated"] = True
-        publish_task(
-            origin="queens",
-            kind="ln7_shadow_fork",
-            notes=json.dumps(_notes)[:2000],
-            files=[],
-        )
+        if _raw_diff.strip():
+            # R4: same external-content scan as the inline path — this diff
+            # is about to sit in another CLI consumer's task notes.
+            trip = await tripwire_check(_raw_diff, db_pool=db_pool, agent="ln7_flywheel_pipeline")
+            if trip.get("tripped"):
+                _notes["counterfactual_diff_redacted"] = True
+                _notes["injection_flagged"] = trip.get("token")
+            else:
+                _notes["counterfactual_diff"] = _raw_diff[:1200]
+                if len(_raw_diff) > 1200:
+                    _notes["counterfactual_diff_truncated"] = True
+        _kind = "ln7_shadow_fork"
+        if validate_tool_dispatch(_kind):
+            publish_task(
+                origin="queens",
+                kind=_kind,
+                notes=json.dumps(_notes)[:2000],
+                files=[],
+            )
+        else:
+            logger.warning("emit_queens_task_merged: kind %s not in R4 allowlist", _kind)
         if db_pool:
             await record_pack_candidate(
                 db_pool,

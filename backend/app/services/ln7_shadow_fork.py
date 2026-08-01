@@ -181,6 +181,10 @@ async def on_queens_task_merged(
     try:
         from app.websocket.cli_task_bus import publish_task
         from app.services.ln7_living_packs import record_pack_candidate
+        from app.services.ln7_injection_firewall import (
+            tripwire_check,
+            validate_tool_dispatch,
+        )
 
         notes_obj: Dict[str, Any] = {
             "patch_hash": patch_hash,
@@ -191,15 +195,27 @@ async def on_queens_task_merged(
         }
         diff = (counterfactual_diff or "").strip()
         if diff:
-            notes_obj["counterfactual_diff"] = diff[:_BUS_DIFF_CAP]
-            if len(diff) > _BUS_DIFF_CAP:
-                notes_obj["counterfactual_diff_truncated"] = True
-        publish_task(
-            origin="queens",
-            kind="ln7_shadow_fork",
-            notes=json.dumps(notes_obj)[:2000],
-            files=[],
-        )
+            # R4: a merged patch's diff is external/ingested content by the time
+            # it reaches the cross-CLI task bus — scan for honeytoken or
+            # instruction-override shapes before embedding raw text in notes.
+            trip = await tripwire_check(diff, db_pool=db_pool, agent="ln7_shadow_fork")
+            if trip.get("tripped"):
+                notes_obj["counterfactual_diff_redacted"] = True
+                notes_obj["injection_flagged"] = trip.get("token")
+            else:
+                notes_obj["counterfactual_diff"] = diff[:_BUS_DIFF_CAP]
+                if len(diff) > _BUS_DIFF_CAP:
+                    notes_obj["counterfactual_diff_truncated"] = True
+        _kind = "ln7_shadow_fork"
+        if validate_tool_dispatch(_kind):
+            publish_task(
+                origin="queens",
+                kind=_kind,
+                notes=json.dumps(notes_obj)[:2000],
+                files=[],
+            )
+        else:
+            logger.warning("on_queens_task_merged: kind %s not in R4 allowlist", _kind)
         await record_pack_candidate(
             db_pool,
             patch_hash=patch_hash,
