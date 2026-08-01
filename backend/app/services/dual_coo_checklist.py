@@ -96,7 +96,10 @@ async def dual_coo_checklist_review(
     if not agree:
         try:
             from app.services.flywheel_anomaly import notify_flywheel_anomaly
-            from app.services.ln7_outcome_envelope import write_envelope
+            from app.services.ln7_outcome_envelope import (
+                cross_loop_attribution,
+                write_envelope,
+            )
 
             await notify_flywheel_anomaly(
                 "queens_disagree_lineage",
@@ -104,10 +107,17 @@ async def dual_coo_checklist_review(
                 db_pool=db_pool,
             )
             if db_pool:
+                # E2: carry revision_id/patch_hash through so this disagreement
+                # can be joined against the shadow_fork/hive_burst/canary_eval
+                # envelopes for the same lineage, not just viewed in isolation.
+                attribution = cross_loop_attribution(payload, evidence_uri=evidence_uri)
                 await write_envelope(
                     db_pool,
                     loop_name="dual_coo",
                     event_kind="checklist_disagree",
+                    revision_id=payload.get("revision_id"),
+                    patch_hash=payload.get("patch_hash"),
+                    attribution=attribution,
                     metrics={"mac": mac, "cloud": cloud},
                 )
         except Exception as e:

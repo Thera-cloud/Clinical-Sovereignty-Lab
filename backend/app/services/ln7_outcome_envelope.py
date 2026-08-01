@@ -11,6 +11,41 @@ from uuid import UUID
 
 logger = logging.getLogger("ln7_outcome_envelope")
 
+# E2: cross-loop attribution keys. A single causal chain (Queens merge -> LN7
+# shadow fork -> hive_burst -> dual_coo checklist -> canary_eval) spans
+# multiple loop_name values. These are the standardized join keys writers
+# should surface into attribution_json whenever known, even when the same
+# value is also stored in a dedicated column (redundancy makes JSONB-only
+# analytics/joins possible without a table scan across columns).
+CROSS_LOOP_ATTRIBUTION_KEYS = (
+    "revision_id",
+    "patch_hash",
+    "task_hash",
+    "evidence_uri",
+    "queens_task_id",
+    "burst_id",
+    "domain_tag",
+)
+
+
+def cross_loop_attribution(
+    evidence: Optional[Dict[str, Any]], **extra: Any
+) -> Dict[str, Any]:
+    """E2: normalize a context/evidence dict into standardized join keys.
+
+    Only non-empty values are included. `extra` kwargs override values found
+    in `evidence` (callers can supply keys not present in the source dict,
+    e.g. evidence_uri passed as a separate positional arg upstream).
+    """
+    out: Dict[str, Any] = {}
+    src = dict(evidence or {})
+    src.update({k: v for k, v in extra.items() if v is not None})
+    for key in CROSS_LOOP_ATTRIBUTION_KEYS:
+        val = src.get(key)
+        if val not in (None, ""):
+            out[key] = val
+    return out
+
 
 async def write_envelope(
     db_pool,

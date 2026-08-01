@@ -281,7 +281,10 @@ async def run_hive_burst(
 
     if db_pool:
         try:
-            from app.services.ln7_outcome_envelope import write_envelope
+            from app.services.ln7_outcome_envelope import (
+                cross_loop_attribution,
+                write_envelope,
+            )
 
             cost = None if dry else float(est)
             await write_envelope(
@@ -291,6 +294,15 @@ async def run_hive_burst(
                 burst_id=burst_id,
                 revision_id=arm_a or None,
                 source_node="green",
+                # E2: rev_b isn't a dedicated column — surface both arms in
+                # attribution_json so a burst compare can be joined back to
+                # either candidate's shadow_fork/canary_eval lineage.
+                attribution={
+                    **cross_loop_attribution(
+                        None, revision_id=arm_a or None, burst_id=burst_id
+                    ),
+                    "rev_b": arm_b or None,
+                },
                 metrics={
                     **{k: v for k, v in result.items() if k != "intents"},
                     "intent_count": len(intents),

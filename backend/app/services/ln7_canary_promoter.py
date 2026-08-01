@@ -222,13 +222,17 @@ async def evaluate_canary(
                     __import__("json").dumps(gate),
                 )
             try:
-                from app.services.ln7_outcome_envelope import write_envelope
+                from app.services.ln7_outcome_envelope import (
+                    cross_loop_attribution,
+                    write_envelope,
+                )
 
                 await write_envelope(
                     db_pool,
                     loop_name="canary_eval",
                     event_kind="confounded_skip",
                     revision_id=revision_id,
+                    attribution=cross_loop_attribution(None, revision_id=revision_id),
                     metrics=gate,
                     confounded=True,
                 )
