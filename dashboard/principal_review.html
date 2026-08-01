@@ -19,6 +19,9 @@ h1{font-family:'Cormorant Garamond',Georgia,serif;font-size:1.85rem;color:var(--
 .tab{padding:.45rem .9rem;border:1px solid var(--line);border-radius:6px;background:transparent;
 color:var(--dim);cursor:pointer;font:inherit;font-weight:600;font-size:.8rem}
 .tab.on{border-color:var(--gold);color:var(--gold)}
+.qtab{padding:.45rem .9rem;border:1px solid var(--line);border-radius:6px;background:transparent;
+color:var(--dim);cursor:pointer;font:inherit;font-weight:600;font-size:.8rem}
+.qtab.on{border-color:var(--cyan);color:var(--cyan)}
 main{max-width:920px;margin:0 auto;padding:1.25rem 1.25rem 3rem}
 .panel{display:none}.panel.on{display:block}
 .warn{color:var(--red);margin-bottom:1rem;font-size:.9rem}
@@ -46,6 +49,19 @@ border-radius:999px;border:1px solid var(--line);color:var(--dim)}
 .timer{font-variant-numeric:tabular-nums;color:var(--cyan);font-weight:600}
 .empty{color:var(--dim);padding:1rem 0}
 h2{font-family:'Cormorant Garamond',Georgia,serif;color:var(--gold);font-size:1.35rem;margin:1.2rem 0 .6rem}
+.moves{border-top:1px solid var(--line);margin-top:.8rem;padding-top:.6rem}
+.move-row{display:flex;align-items:flex-start;gap:.6rem;padding:.4rem 0;border-bottom:1px dashed var(--line)}
+.move-row:last-child{border-bottom:none}
+.move-label{flex:1;font-size:.85rem;color:var(--goldb)}
+.move-choices{display:flex;gap:.3rem;flex-shrink:0;align-items:center}
+.move-choices label{margin:0;font-size:.75rem;display:flex;align-items:center;gap:.15rem;color:var(--dim)}
+.move-choices input[type=radio]{width:auto;margin:0}
+.move-reason{width:6rem;padding:.2rem .35rem;font-size:.75rem}
+.qtable{width:100%;border-collapse:collapse;margin:.6rem 0}
+.qtable th,.qtable td{border:1px solid var(--line);padding:.45rem .6rem;font-size:.82rem;text-align:left}
+.qtable th{color:var(--gold);background:var(--elev)}
+.qtable td.num{text-align:right;font-variant-numeric:tabular-nums}
+.qup{color:var(--ok)}.qdown{color:var(--red)}.qflat{color:var(--dim)}
 </style>
 </head>
 <body>
@@ -62,6 +78,7 @@ h2{font-family:'Cormorant Garamond',Georgia,serif;color:var(--gold);font-size:1.
   <button class="tab" data-p="evidence" onclick="showPanel('evidence')">Evidence</button>
   <button class="tab" data-p="library" onclick="showPanel('library')">Library</button>
   <button class="tab" data-p="coach" onclick="showPanel('coach')">Coach Shares</button>
+  <button class="tab" data-p="quartet" onclick="showPanel('quartet')">Quartet Dose-Response</button>
 </div>
 <main>
   <div id="authWarn" class="warn" style="display:none">No admin token — open from Sovereign Command after login.</div>
@@ -145,6 +162,39 @@ h2{font-family:'Cormorant Garamond',Georgia,serif;color:var(--gold);font-size:1.
     <button onclick="loadCoachShares()">Refresh shares</button>
     <div id="coachList" class="empty">Loading…</div>
   </section>
+
+  <!-- QUARTET DOSE-RESPONSE -->
+  <section class="panel" id="panel-quartet">
+    <h2>Quartet Dose-Response</h2>
+    <p class="meta">AQ-1 · AQ-2 · AQ-G07 · AQ-G08 — <span class="mono">before_no_affinity</span> vs
+      <span class="mono">after_affinity_fix</span>. Session label <span class="mono">quartet_dose_response_v1</span>.
+      Eight rows, interleaved by scenario (before/after adjacent). Scoring writes only to the dose-response
+      queue — never touches <span class="mono">six_quotient_human_gold</span>. ≥45s dwell per row enforced
+      server-side. Blind: condition, source, and run id are withheld while scoring — visible only in the
+      Report sub-tab after scoring.</p>
+      <div class="row">
+        <button class="qtab on" data-qp="score" onclick="qShowSub('score')">Score</button>
+        <button class="qtab" data-qp="report" onclick="qShowSub('report')">Report</button>
+      </div>
+
+    <div id="qsub-score">
+      <div class="meta" id="qQueueProgress">Loading queue…</div>
+      <div class="row">
+        <button class="primary" id="qBtnStart" onclick="qStartSession()">Start scoring session</button>
+        <button onclick="qLoadItems()">Load queue (8)</button>
+        <span class="pill pend" id="qRunPill">no session</span>
+        <span class="timer" id="qItemTimer">—</span>
+      </div>
+      <div id="qScoreCard" class="empty">Start a session, then load the queue.</div>
+    </div>
+
+    <div id="qsub-report" style="display:none">
+      <p class="meta">2×4 grid (condition × scenario) of move-counts, plus per-move transfer rates
+        (present/partial/absent, before → after) pooled across all four scenarios.</p>
+      <button onclick="qLoadReport()">Refresh report</button>
+      <div id="qReportBox" class="empty">Loading…</div>
+    </div>
+  </section>
 </main>
 
 <script>
@@ -193,6 +243,7 @@ function showPanel(name){
   if(name==="score") refreshProgress();
   if(name==="evidence") loadEvidence();
   if(name==="recheck") {/* keep session */}
+  if(name==="quartet") qLoadItems();
 }
 async function api(path, opts){
   const res = await fetch(API + path, Object.assign({headers:_headers()}, opts||{}));
@@ -602,6 +653,236 @@ async function computeKappa(){
       alert("κ job failed: "+(j.error||"unknown"));
     }
   }, 3000);
+}
+
+/* ---------------- Quartet Dose-Response (namespaced q* to avoid colliding
+   with the Gold Score globals above — reuses esc()/_headers() from this
+   page). Mirrors dashboard/quartet_dose_response.html; keep both in sync. ---------------- */
+const Q_API = (window.SS_API_BASE || "https://api.sovereignsanctuary.net") + "/api/admin/quartet-dose-response";
+const Q_SESSION_LABEL = "quartet_dose_response_v1";
+let _qRunId = null, _qItems = [], _qIdx = 0, _qShownAt = 0, _qTimerIv = null, _qMoveDefs = {};
+
+async function qApi(path, opts){
+  const res = await fetch(Q_API + path, Object.assign({headers:_headers()}, opts||{}));
+  if(res.status===401){
+    console.warn("Auth issue on", path);
+    document.getElementById("authWarn").style.display="block";
+    return null;
+  }
+  if(!res.ok){
+    let msg = res.statusText;
+    try{ const j=await res.json(); msg=j.detail||JSON.stringify(j); }catch(e){}
+    alert("Error "+res.status+": "+msg);
+    return null;
+  }
+  return res.json();
+}
+
+function qShowSub(name){
+  document.querySelectorAll(".qtab").forEach(t=>t.classList.toggle("on", t.dataset.qp===name));
+  document.getElementById("qsub-score").style.display = name==="score" ? "" : "none";
+  document.getElementById("qsub-report").style.display = name==="report" ? "" : "none";
+  if(name==="report") qLoadReport();
+}
+
+async function qStartSession(){
+  const d = await qApi("/session/start", {
+    method:"POST",
+    body: JSON.stringify({session_label: Q_SESSION_LABEL, notes: "Principal-Review · Quartet tab"})
+  });
+  if(!d) return;
+  _qRunId = d.run_id;
+  document.getElementById("qRunPill").textContent = _qRunId;
+  document.getElementById("qRunPill").className = "pill ok";
+  await qLoadItems();
+}
+
+async function qLoadItems(){
+  const d = await qApi("/items?session_label=" + encodeURIComponent(Q_SESSION_LABEL));
+  if(!d) return;
+  _qItems = d.items || [];
+  _qMoveDefs = d.moves || {};
+  document.getElementById("qQueueProgress").textContent =
+    `Session ${d.session_label} · ${d.scored}/${d.count} scored · ${d.remaining} remaining`;
+  _qIdx = _qItems.findIndex(it => !it.human_scored);
+  if(_qIdx < 0) _qIdx = 0;
+  qRenderScoreItem();
+}
+
+function _qTickTimer(){
+  if(!_qShownAt) return;
+  const sec = Math.floor((Date.now()-_qShownAt)/1000);
+  const el = document.getElementById("qItemTimer");
+  el.textContent = sec + "s on item" + (sec < 45 ? " (need ≥45s)" : "");
+  el.style.color = sec < 45 ? "var(--red)" : "var(--ok)";
+}
+
+function qRenderScoreItem(){
+  if(_qTimerIv) clearInterval(_qTimerIv);
+  if(!_qItems.length){
+    document.getElementById("qScoreCard").innerHTML = "<div class='empty'>Start a session, then load the queue.</div>";
+    return;
+  }
+  if(_qIdx >= _qItems.length){
+    document.getElementById("qScoreCard").innerHTML = "<div class='empty'>Queue complete. Check the Report sub-tab.</div>";
+    document.getElementById("qItemTimer").textContent = "—";
+    return;
+  }
+  const it = _qItems[_qIdx];
+  _qShownAt = Date.now();
+  _qTickTimer();
+  _qTimerIv = setInterval(_qTickTimer, 500);
+  // condition_label / source / original_run_id are intentionally withheld while scoring —
+  // original_run_id itself leaks condition (the "_affinity" suffix marks after-rows).
+  // Revealed only in the Report sub-tab, never on the live scoring card.
+  const moves = _qMoveDefs[it.scenario_id] || [];
+  const existing = it.spine_moves || {};
+  const movesHtml = moves.map(m => {
+    const cur = existing[m.id] || {};
+    const mkRadio = (val) => `<label><input type="radio" name="qmove_${m.id}" value="${val}"
+      ${cur.value===val?"checked":""} onchange="_qOnMoveChange('${m.id}')"> ${val[0].toUpperCase()}</label>`;
+    return `<div class="move-row">
+      <div class="move-label">${esc(m.label)}</div>
+      <div class="move-choices">
+        ${mkRadio("present")}${mkRadio("partial")}${mkRadio("absent")}
+        <input type="text" class="move-reason" id="qreason_${m.id}" placeholder="reason (partial)"
+          value="${esc(cur.reason||'')}" style="display:${cur.value==='partial'?'inline-block':'none'}">
+      </div>
+    </div>`;
+  }).join("");
+  document.getElementById("qScoreCard").innerHTML = `
+    <div class="card">
+      <div class="meta">${esc(it.scenario_id)} · ${esc(it.section||"")}
+        <span class="pill">${_qIdx+1}/${_qItems.length}</span>
+        ${it.human_scored ? `<span class="pill ok">already scored</span>` : ""}</div>
+      <p><strong>Client</strong></p>
+      <div class="client">${esc(it.client_says||"")}</div>
+      <p><strong>Response (blind)</strong></p>
+      <div class="resp">${esc(it.response_text)}</div>
+      <div class="moves">
+        <strong>1. Spine moves — score this first</strong>
+        <span class="meta" style="display:inline">present / partial / absent — partial requires a one-word reason.
+        Score against the checklist before looking at the 0–3s below: the move grid is the primary
+        instrument, the scalars should inherit from it, not from contrast with the row you just scored.</span>
+        ${movesHtml}
+      </div>
+      <div class="row" style="margin-top:1rem">
+        <strong style="flex-basis:100%;color:var(--gold)">2. Scalars — score against this row's checklist result, not against the paired row</strong>
+        <label>primary <input type="number" id="qsPrimary" min="0" max="3" value="${it.primary_score??''}"></label>
+        <label>accuracy <input type="number" id="qsAccuracy" min="0" max="3" value="${it.accuracy_score??''}"></label>
+        <label>naturalness <input type="number" id="qsNatural" min="0" max="3" value="${it.naturalness_score??''}"></label>
+        <label>safety_veto <select id="qsVeto"><option value="">—</option>
+          <option ${it.safety_veto==='ok'?'selected':''}>ok</option>
+          <option ${it.safety_veto==='fail'?'selected':''}>fail</option></select></label>
+      </div>
+      <textarea id="qsNotes" placeholder="Optional notes">${esc(it.notes||"")}</textarea>
+      <div class="row">
+        <button class="primary" onclick="qSubmitScore()">Submit score</button>
+        <button onclick="_qIdx++;qRenderScoreItem()">Skip</button>
+        <button onclick="_qIdx=Math.max(0,_qIdx-1);qRenderScoreItem()">Back</button>
+      </div>
+    </div>`;
+}
+
+function _qOnMoveChange(moveId){
+  const checked = document.querySelector(`input[name="qmove_${moveId}"]:checked`);
+  const reasonEl = document.getElementById("qreason_"+moveId);
+  if(reasonEl) reasonEl.style.display = (checked && checked.value === "partial") ? "inline-block" : "none";
+}
+
+async function qSubmitScore(){
+  const it = _qItems[_qIdx];
+  if(!_qRunId || !it){ alert("Start a session first."); return; }
+  const latency = Date.now() - _qShownAt;
+  if(latency < 45000){
+    alert("Hold ≥45s on this item before submit (server rejects shorter latency).");
+    return;
+  }
+  const primary = parseInt(document.getElementById("qsPrimary").value, 10);
+  const accuracy = parseInt(document.getElementById("qsAccuracy").value, 10);
+  const naturalness = parseInt(document.getElementById("qsNatural").value, 10);
+  if([primary,accuracy,naturalness].some(v => Number.isNaN(v) || v<0 || v>3)){
+    alert("Enter primary, accuracy, naturalness as 0–3.");
+    return;
+  }
+  const vetoEl = document.getElementById("qsVeto");
+  const safety_veto = vetoEl && vetoEl.value ? vetoEl.value : null;
+
+  const moves = _qMoveDefs[it.scenario_id] || [];
+  const spine_moves = {};
+  for(const m of moves){
+    const checked = document.querySelector(`input[name="qmove_${m.id}"]:checked`);
+    if(!checked){ alert("Score every move for " + it.scenario_id + " (missing: " + m.id + ")."); return; }
+    const value = checked.value;
+    let reason = null;
+    if(value === "partial"){
+      reason = (document.getElementById("qreason_"+m.id).value || "").trim();
+      if(!reason){ alert("Move '" + m.id + "' marked partial needs a one-word reason."); return; }
+    }
+    spine_moves[m.id] = {value, reason};
+  }
+
+  const d = await qApi("/score", {
+    method:"POST",
+    body: JSON.stringify({
+      item_id: it.id,
+      run_id: _qRunId,
+      primary, accuracy, naturalness,
+      safety_veto,
+      notes: document.getElementById("qsNotes").value||"",
+      latency_ms: latency,
+      spine_moves
+    })
+  });
+  if(!d) return;
+  it.human_scored = true;
+  _qIdx++;
+  await qLoadItems();
+}
+
+async function qLoadReport(){
+  const d = await qApi("/report?session_label=" + encodeURIComponent(Q_SESSION_LABEL));
+  if(!d){ document.getElementById("qReportBox").innerHTML = "<div class='empty'>No data yet.</div>"; return; }
+  const conds = ["before_no_affinity", "after_affinity_fix"];
+  let grid = `<table class="qtable"><tr><th>Scenario</th><th>before_no_affinity</th><th>after_affinity_fix</th></tr>`;
+  for(const row of d.grid){
+    const b = row.before_no_affinity, a = row.after_affinity_fix;
+    grid += `<tr><td>${esc(row.scenario_id)}</td>
+      <td class="num">${b.human_scored ? b.moves_present_count+"/6" : "—"}</td>
+      <td class="num">${a.human_scored ? a.moves_present_count+"/6" : "—"}</td></tr>`;
+  }
+  grid += `</table>`;
+
+  const ct = d.condition_totals || {};
+  let totals = `<table class="qtable"><tr><th>Condition</th><th>Scenarios scored</th><th>Avg moves present</th><th>Total moves present</th></tr>`;
+  for(const c of conds){
+    const t = ct[c] || {};
+    totals += `<tr><td>${esc(c)}</td><td class="num">${t.n_scenarios_scored??0}</td>
+      <td class="num">${t.avg_moves_present??"—"}</td><td class="num">${t.total_moves_present??"—"}</td></tr>`;
+  }
+  totals += `</table>`;
+
+  const mt = d.move_transfer || {};
+  let transfer = `<table class="qtable"><tr><th>Scenario</th><th>Move</th><th>Before</th><th>After</th><th>Δ</th></tr>`;
+  for(const row of (mt.detail || [])){
+    const cls = row.improved ? "qup" : (row.regressed ? "qdown" : "qflat");
+    const arrow = row.improved ? "↑ improved" : (row.regressed ? "↓ regressed" : "= unchanged");
+    transfer += `<tr><td>${esc(row.scenario_id)}</td><td>${esc(row.move_id)}</td>
+      <td>${esc(row.before)}</td><td>${esc(row.after)}</td>
+      <td class="${cls}">${arrow}</td></tr>`;
+  }
+  transfer += `</table>`;
+
+  document.getElementById("qReportBox").innerHTML = `
+    <div class="meta">${d.scored_rows}/${d.total_rows} rows scored ·
+      dose_response_ready: <strong>${d.dose_response_ready}</strong></div>
+    <h2 style="font-size:1.05rem">Move-counts (condition × scenario)</h2>
+    ${grid}
+    <h2 style="font-size:1.05rem">Condition totals</h2>
+    ${totals}
+    <h2 style="font-size:1.05rem">Per-move transfer (${mt.pairs_evaluated||0} pairs · ${mt.improved||0} improved · ${mt.regressed||0} regressed · ${mt.unchanged||0} unchanged)</h2>
+    ${transfer}
+  `;
 }
 
 (function init(){

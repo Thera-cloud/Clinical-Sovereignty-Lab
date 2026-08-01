@@ -40,8 +40,6 @@ button:disabled{opacity:.4;cursor:not-allowed}
 border-radius:999px;border:1px solid var(--line);color:var(--dim)}
 .pill.ok{border-color:var(--ok);color:var(--ok)}
 .pill.pend{border-color:var(--gold);color:var(--gold)}
-.pill.before{border-color:var(--dim);color:var(--dim)}
-.pill.after{border-color:var(--cyan);color:var(--cyan)}
 .mono{font-family:ui-monospace,monospace;font-size:.78rem;color:var(--dim)}
 .timer{font-variant-numeric:tabular-nums;color:var(--cyan);font-weight:600}
 .empty{color:var(--dim);padding:1rem 0}
@@ -191,7 +189,9 @@ function renderScoreItem(){
   _shownAt = Date.now();
   _tickTimer();
   _timerIv = setInterval(_tickTimer, 500);
-  const condClass = it.condition_label === "before_no_affinity" ? "before" : "after";
+  // Condition label, source, and original_run_id are intentionally withheld while scoring —
+  // original_run_id itself leaks condition (the "_affinity" suffix marks after-rows). They are
+  // only revealed post-hoc in the Report tab, never on the scoring card.
   const moves = _moveDefs[it.scenario_id] || [];
   const existing = it.spine_moves || {};
   const movesHtml = moves.map(m => {
@@ -210,13 +210,11 @@ function renderScoreItem(){
   document.getElementById("scoreCard").innerHTML = `
     <div class="card">
       <div class="meta">${esc(it.scenario_id)} · ${esc(it.section||"")}
-        <span class="pill ${condClass}">${esc(it.condition_label)}</span>
-        <span class="pill">${esc(it.source)}</span>
         <span class="pill">${_idx+1}/${_items.length}</span>
         ${it.human_scored ? `<span class="pill ok">already scored</span>` : ""}</div>
       <p><strong>Client</strong></p>
       <div class="client">${esc(it.client_says||"")}</div>
-      <p><strong>Response</strong> <span class="mono">(${esc(it.original_run_id||"")})</span></p>
+      <p><strong>Response (blind)</strong></p>
       <div class="resp">${esc(it.response_text)}</div>
       <div class="moves">
         <strong>1. Spine moves — score this first</strong>
