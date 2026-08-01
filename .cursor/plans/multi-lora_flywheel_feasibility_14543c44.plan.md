@@ -18,8 +18,8 @@ todos:
     content: "Phase B1/W7 DONE for LN7 ledger+shadow+hive; marketing dual-write via growth_claims.upsert_claim → outcome_envelope (2026-07-31)"
     status: completed
   - id: phase-b2-domain-router
-    content: "Phase B2/B3: Mig 305 domain registry; Workers BGE; intent→burst; domain_tag + export --domain"
-    status: pending
+    content: "Phase B2/B3 DONE: mig 305 domain registry (domain_tag/adapter_uri/embedding/serve_weight); Tier1 static+pack-hint routing, Tier2 BGE cosine w/ welded semantic_threshold, Tier3 burst BoN fallback; push_adapter_intent on winner+runner-ups (intent→burst); export --domain flag (2026-08-01)"
+    status: completed
   - id: phase-c-merge-drain
     content: "Phase C: dare_ties merge drain; abort-on-regression authority"
     status: pending
@@ -540,7 +540,7 @@ sequenceDiagram
 | Fuel baseline | `coding` 1/300, `general` 2/300 — ETA n/a until slope days accumulate |
 | Next paid Phase A | Human: `LN7_BURST_ALLOW_PAID=1` + enqueue `ln7_bakeoff` only after PRE6 unlock email |
 
-**Still open on this plan:** Phase B2/B3 domain router next (or E leases). G2 flip deferred (CEO/manual). Residual polish: W8 sandbox rsync, W11 hard claim_ids+SkyEye, W14 live App, W16 live probes. Paid Phase A GPU still human-gated.
+**Still open on this plan:** Phase C merge drain (dare_ties + abort-on-regression) next, or Phase E leases/nervous-system. G2 flip deferred (CEO/manual). Residual polish: W8 sandbox rsync, W11 hard claim_ids+SkyEye, W14 live App, W16 live probes. Paid Phase A GPU still human-gated.
 
 ---
 
