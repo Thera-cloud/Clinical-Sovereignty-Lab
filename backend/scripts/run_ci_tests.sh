@@ -30,6 +30,10 @@ print('Sovereign Standard gate: PASS')
 # QUANTUM-CRYSTAL-ARCH — Principal-Review gold learning gate (offline harness)
 python3 "${ROOT}/backend/scripts/verify_gold_learning_gate.py" --offline
 
+# QUANTUM-CRYSTAL-ARCH — Fuel-cycle funnel verification (offline harness; audits
+# production data when DATABASE_URL is set, no-ops cleanly in CI otherwise)
+python3 "${ROOT}/backend/scripts/verify_fuel_cycle.py" --offline
+
 # QUANTUM-CRYSTAL-ARCH — LN7 flywheel fence suite (Step 0 welds; Queens SA must not write)
 export FROZEN_CONFIG_DIR="${FROZEN_CONFIG_DIR:-${ROOT}/frozen-config}"
 python3 -m pytest "${ROOT}/frozen-config/fence_tests" -q --tb=short

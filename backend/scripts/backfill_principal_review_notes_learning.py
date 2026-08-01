@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""One-shot: gold notes → Principal Guide → principal_review crystals (adapt-not-recite)."""
+"""One-shot: gold notes → Principal Guide → principal_review crystals (adapt-not-recite).
+
+QUANTUM-CRYSTAL-ARCH: crystal_text() below must stay byte-for-byte aligned with
+_build_principal_crystal_text() in app/routers/principal_review_api.py — that is
+the live-promotion path, this is the backfill path. Divergence here reintroduces
+the exact stem-ID / "Blind Nate draft" verbatim contamination that
+verify_fuel_cycle.py Stage 3 exists to catch. See scrub_principal_review_crystals.py
+for the one-time cleanup of crystals written before this fix.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -7,8 +15,16 @@ import hashlib
 import json
 import os
 import sys
+from pathlib import Path
 
 import asyncpg
+
+# Needed to import app.services.principal_review_crisis_policy when run standalone
+# (PYTHONPATH=backend inside the container already covers this, but keep it
+# explicit so `python backend/scripts/backfill_...py` works from repo root too).
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 ANTI = (
     "TEACHING RULE: Absorb principles, stance, safety moves, and clinical intent "
@@ -19,20 +35,51 @@ ANTI = (
 MIN_NOTES = 80
 
 
-def crystal_text(section, topic, client, principal, nate) -> str:
-    parts = [
-        f"[Principal-Review · {section} · {topic}]",
-        ANTI,
-        f"Client: {(client or '')[:1200]}",
-        "Principal Guide (3/3/3 corrective underwriting — adapt, do not recite):\n"
-        f"{(principal or '')[:2500]}",
-    ]
-    if (nate or "").strip():
+def crystal_text(section, lib_id, principal, nate) -> str:
+    """Corrective underwriting: annotated delta + Guide; no stem ids / Client: in body.
+
+    Mirrors _build_principal_crystal_text() in principal_review_api.py exactly —
+    scrub first, DELTA-annotate (never quote failed blinds verbatim), scrub again.
+    """
+    from app.services.principal_review_crisis_policy import (
+        annotate_teaching_delta,
+        classify_failure_class,
+        scrub_teaching_text,
+    )
+
+    principal_s = scrub_teaching_text(principal or "")
+    nate_s = scrub_teaching_text(nate or "")
+    if not (principal_s or nate_s):
+        return ""
+    section_s = str(section or "clinical")[:40]
+    tag = str(lib_id or "").replace("-", "")[:12]
+    header = (
+        f"[Principal-Review · {section_s} · lib:{tag}]"
+        if tag
+        else f"[Principal-Review · {section_s}]"
+    )
+    parts = [header, ANTI]
+    try:
+        delta = annotate_teaching_delta(principal=principal_s, nate_blind=nate_s)
+        if delta:
+            parts.append(delta)
+    except Exception:
+        if principal_s and nate_s:
+            parts.append(
+                "DELTA (near-miss → correction):\n"
+                f"- Failed class (do not reproduce): {classify_failure_class(nate_s)}\n"
+                f"- Corrected move (Principal Guide — adapt, do not recite): "
+                f"{principal_s[:1200]}\n"
+                "- Why: never quote failed blinds in teaching; failure classes only."
+            )
+    if principal_s:
         parts.append(
-            "Blind Nate draft (contrast — do not imitate failures):\n"
-            f"{(nate or '')[:1200]}"
+            "Principal Guide (3/3/3 corrective underwriting — adapt, do not recite):\n"
+            f"{principal_s[:2500]}"
         )
-    return "\n".join(parts)
+    elif nate_s:
+        parts.append(f"Guide: {nate_s[:2500]}")
+    return scrub_teaching_text("\n".join(parts))
 
 
 async def main() -> int:
@@ -89,11 +136,15 @@ async def main() -> int:
                 )
             ct = crystal_text(
                 g["section"] or "clinical",
-                g["scenario_id"],
-                g["client_says"],
+                lib_id,
                 notes,
                 g["nate_response"],
             )
+            if not ct.strip():
+                out.append(
+                    {"scenario_id": g["scenario_id"], "library_id": str(lib_id), "skipped": "empty_after_scrub"}
+                )
+                continue
             ch = hashlib.sha256(ct.encode()).hexdigest()
             cid = await conn.fetchval(
                 """INSERT INTO nate_intelligence_crystals

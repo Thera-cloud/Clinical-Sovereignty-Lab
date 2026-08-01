@@ -167,6 +167,30 @@ _SCENARIO_HEADER = re.compile(r"(?im)^\s*Scenario:\s*.*$")
 _STEM_ID = re.compile(r"\b(?:AQ|EQ|IQ|MQ|SQ|CQ)-(?:G?\d+|\d+)\b", re.I)
 _CLIENT_LINE = re.compile(r"(?im)^\s*Client:\s*.*$")
 
+# Third-person stage-direction / roleplay-mode-leakage narration — the exact
+# failure class classify_failure_class() names but must never quote verbatim.
+# A Principal's own clinical analysis often *discusses* a failed blind by
+# quoting its stage directions ("Nate's eyes are cast downward,\" \"his voice
+# cracks slightly\"...) — that quoted narration is exactly what verify_fuel_cycle.py
+# Stage 3 flags as contamination (it re-teaches the leak it's describing).
+# Redact the literal narration, keep the surrounding clinical commentary.
+_STAGE_DIRECTION_LEAK_RE = re.compile(
+    r"Nate'?s\s+(?:eyes|voice|gaze|hand)[^\"'.,;:\n]{0,60}"
+    r"|his voice (?:cracks?|barely)[^\"'.,;:\n]{0,60}"
+    r"|eyes are cast[^\"'.,;:\n]{0,40}"
+    r"|looking up at you[^\"'.,;:\n]{0,40}"
+    r"|He pauses,[^\"'.,;:\n]{0,40}"
+    r"|\*[a-z][a-z ]{0,20}\*",
+    re.I,
+)
+# Literal substrings that verify_fuel_cycle.py Stage 3 treats as hard contamination —
+# scrub_teaching_text guarantees these never survive into stored crystal text,
+# regardless of whether they came from Scenario headers, stem ids, or (as with
+# "eyes are cast" / "blind Nate") a Principal's own quoted failure analysis.
+_LITERAL_CONTAM_SUBS = (
+    (re.compile(r"\bblind nate\b", re.I), "[reference redacted]"),
+)
+
 
 def scrub_teaching_text(text: str) -> str:
     """Remove battery/quarantine tripwires from teaching crystal bodies.
@@ -181,6 +205,12 @@ def scrub_teaching_text(text: str) -> str:
     out = _CLIENT_LINE.sub("", out)
     # Drop stem ids entirely (do not leave placeholder tokens that look like labels)
     out = _STEM_ID.sub("", out)
+    # Redact quoted/described third-person stage-direction narration — a Principal
+    # note that *analyzes* a roleplay-mode-leakage blind by citing its narration
+    # must not re-embed that narration verbatim into the teaching crystal.
+    out = _STAGE_DIRECTION_LEAK_RE.sub("[narrated third-person action — redacted]", out)
+    for pat, repl in _LITERAL_CONTAM_SUBS:
+        out = pat.sub(repl, out)
     out = re.sub(r"\s·\s·", " · ", out)
     out = re.sub(r"\[\s*Principal-Review\s·\s*([A-Z]{2})\s·\s*\]", r"[Principal-Review · \1]", out)
     try:
@@ -318,8 +348,22 @@ def select_class_guides(
     return enriched[:lim]
 
 
-async def _reinforce_pr_guide_recalls(conn, ids: Sequence[int]) -> None:
-    """Demonstrated path — same reinforcement contract as crisis inject."""
+async def _reinforce_pr_guide_recalls(
+    conn,
+    ids: Sequence[int],
+    *,
+    source: str = "principal_review_inject",
+    actor_id: Optional[str] = None,
+) -> None:
+    """Demonstrated path — same reinforcement contract as crisis inject.
+
+    QUANTUM-CRYSTAL-ARCH: this is a distinct recall surface from
+    recall_crystals_for_context() (crystal-recall-crystallization-wiring.mdc).
+    It must ALSO write crystal_recall_log — not just bump recall_count in place —
+    so verify_fuel_cycle.py Stage 4 and the Time Crystal Forge see class-aware
+    inject recalls, not only chat-path recalls. Without this insert, Stage 4's
+    audit query (which joins crystal_recall_log) undercounts real recall.
+    """
     clean = [int(i) for i in ids if i is not None]
     if not clean:
         return
@@ -335,6 +379,19 @@ async def _reinforce_pr_guide_recalls(conn, ids: Sequence[int]) -> None:
         """,
         clean,
     )
+    uid = (actor_id or "").strip() or "system:principal_review_inject"
+    try:
+        await conn.executemany(
+            """
+            INSERT INTO crystal_recall_log (user_id, crystal_id, source, recalled_at)
+            VALUES ($1, $2, $3, NOW())
+            """,
+            [(uid, cid, source) for cid in clean],
+        )
+    except Exception as e:
+        logger.warning(
+            "principal_review_crisis_policy: crystal_recall_log insert failed: %s", e
+        )
 
 
 def score_crisis_class_response(text: str) -> Dict[str, Any]:
@@ -526,6 +583,7 @@ async def fetch_principal_review_crisis_guides(
     *,
     limit: int = CRISIS_INJECT_LIMIT,
     turn_class: str = TURN_CLASS_SI,
+    actor_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Deterministic crisis Guides — turn_class + safety class over newest-id ranking."""
     if not db_pool:
@@ -573,7 +631,10 @@ async def fetch_principal_review_crisis_guides(
             # Demonstrated: inject path reinforces recall (same contract as
             # recall_crystals_for_context — not storage alone).
             await _reinforce_pr_guide_recalls(
-                conn, [int(g["id"]) for g in selected if g.get("id") is not None]
+                conn,
+                [int(g["id"]) for g in selected if g.get("id") is not None],
+                source=f"principal_review_crisis_inject_{tc}",
+                actor_id=actor_id,
             )
             return selected
     except Exception as e:
@@ -587,6 +648,7 @@ async def fetch_principal_review_class_guides(
     response_class: str,
     user_text: str = "",
     limit: int = CLASS_INJECT_LIMIT,
+    actor_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Non-crisis teaching Guides matched by response_class + lexical affinity."""
     if not db_pool:
@@ -626,7 +688,10 @@ async def fetch_principal_review_class_guides(
                 limit=limit,
             )
             await _reinforce_pr_guide_recalls(
-                conn, [int(g["id"]) for g in selected if g.get("id") is not None]
+                conn,
+                [int(g["id"]) for g in selected if g.get("id") is not None],
+                source=f"principal_review_class_inject_{rc}",
+                actor_id=actor_id,
             )
             return selected
     except Exception as e:
