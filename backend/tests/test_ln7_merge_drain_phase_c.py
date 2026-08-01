@@ -45,8 +45,9 @@ def _md():
 class FakeConn:
     """Sequenced fetchrow results for successive heldout_rate() calls."""
 
-    def __init__(self, fetchrow_results=None):
+    def __init__(self, fetchrow_results=None, fetch_results=None):
         self._results = list(fetchrow_results or [])
+        self._fetch_results = list(fetch_results or [])
         self.executed = []
 
     async def fetchrow(self, *_a, **_k):
@@ -55,7 +56,7 @@ class FakeConn:
         return self._results.pop(0)
 
     async def fetch(self, *_a, **_k):
-        return []
+        return self._fetch_results
 
     async def execute(self, query, *args):
         self.executed.append((query, args))
@@ -88,6 +89,95 @@ def test_check_disk_space_returns_dict_with_free_gb():
     out = md.check_disk_space()
     assert "ok" in out and "free_gb" in out and "min_gb" in out
     assert out["min_gb"] == md.MIN_FREE_GB
+
+
+# ---------------------------------------------------------------------------
+# check_data_budget — Phase D data budget preflight
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_check_data_budget_no_db_pool_fails_closed():
+    md = _md()
+    out = await md.check_data_budget(None)
+    assert out["ok"] is False
+    assert out["reason"] == "no_db"
+
+
+@pytest.mark.asyncio
+async def test_check_data_budget_query_exception_fails_closed():
+    md = _md()
+    out = await md.check_data_budget(object())
+    assert out["ok"] is False
+    assert out["reason"].startswith("query_failed:")
+
+
+@pytest.mark.asyncio
+async def test_check_data_budget_passes_when_thresholds_met():
+    md = _md()
+    conn = FakeConn(
+        fetch_results=[
+            {"domain": "clinical", "n": 400},
+            {"domain": "coaching", "n": 350},
+            {"domain": "marketing", "n": 300},
+            {"domain": "research", "n": 300},
+            {"domain": "defense", "n": 300},
+        ]
+    )
+    pool = FakePool(conn)
+    out = await md.check_data_budget(pool)
+    assert out["ok"] is True
+    assert out["total"] == 1650
+    assert out["thin_domains"] == {}
+
+
+@pytest.mark.asyncio
+async def test_check_data_budget_fails_on_thin_domain():
+    md = _md()
+    conn = FakeConn(
+        fetch_results=[
+            {"domain": "clinical", "n": 400},
+            {"domain": "coaching", "n": 50},  # thin
+            {"domain": "marketing", "n": 400},
+            {"domain": "research", "n": 400},
+            {"domain": "defense", "n": 400},
+        ]
+    )
+    pool = FakePool(conn)
+    out = await md.check_data_budget(pool)
+    assert out["ok"] is False
+    assert "coaching" in out["thin_domains"]
+    assert out["total"] == 1650  # total met, but a thin domain still fails the gate
+
+
+@pytest.mark.asyncio
+async def test_check_data_budget_fails_on_low_total():
+    md = _md()
+    conn = FakeConn(fetch_results=[{"domain": "clinical", "n": 400}])
+    pool = FakePool(conn)
+    out = await md.check_data_budget(pool)
+    assert out["ok"] is False
+    assert out["total"] == 400
+
+
+@pytest.mark.asyncio
+async def test_run_merge_drain_blocks_on_thin_data_budget_when_not_dry_run():
+    md = _md()
+    _load("app.services.ln7_change_lease", SERVICES / "ln7_change_lease.py")
+    _load("app.services.flywheel_anomaly", SERVICES / "flywheel_anomaly.py")
+
+    md.check_disk_space = lambda: {"ok": True, "free_gb": 500.0, "min_gb": md.MIN_FREE_GB}
+    conn = FakeConn(fetch_results=[{"domain": "clinical", "n": 10}])
+    pool = FakePool(conn)
+
+    with patch("app.services.flywheel_anomaly.notify_flywheel_anomaly", new=AsyncMock()) as notif:
+        out = await md.run_merge_drain(
+            pool, contributor_ids=["LN7-A", "LN7-B"], dry_run=False
+        )
+
+    assert out["ok"] is False
+    assert out["error"] == "data_budget_low"
+    assert notif.called
+    assert notif.call_args.args[0] == "merge_data_budget_low"
 
 
 def test_mergekit_yaml_dare_ties_no_target_model_no_relisted_base():

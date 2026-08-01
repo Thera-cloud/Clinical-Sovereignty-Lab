@@ -59,7 +59,14 @@ def _packs_root() -> Path:
 
 
 MAX_CHARS = int(os.getenv("LN7_EXPORT_MAX_CHARS", "4000") or "4000")
-HELDOUT_PACKS = frozenset({"env_redis_prefix"})
+try:
+    # Phase D: single source of truth is packs_index.json's "heldout" list,
+    # shared with ln7_train_queue.py — never hardcode a second copy here.
+    from app.services.ln7_heldout_registry import heldout_packs as _heldout_packs
+
+    HELDOUT_PACKS = _heldout_packs()
+except Exception:
+    HELDOUT_PACKS = frozenset({"env_redis_prefix"})
 # Fallback if packs_index missing; preferred: all packs with golden.patch minus heldout
 TRAIN_GOLDEN_PACKS = ("asyncpg_cast", "catch_all_routes")
 _STUB_RE = re.compile(r"^\[patch_hash=", re.I)
@@ -230,6 +237,10 @@ async def export_rows(
                 """
             )
             patch_col = "o.patch_text" if has_patch else "NULL::text AS patch_text"
+            # Phase D — SQL-level hard-block: heldout-split rows never leave the
+            # query at all. Pack-name-based HELDOUT_PACKS filtering below is a
+            # second, independent layer for CI packs without a ln7_tasks.split
+            # row (defense in depth, not a substitute for this WHERE clause).
             rows = await conn.fetch(
                 f"""
                 SELECT o.id, o.task_id, o.patch_hash, o.revision_id, o.harness_mode,
@@ -239,12 +250,25 @@ async def export_rows(
                 FROM ln7_coding_outcomes o
                 LEFT JOIN ln7_tasks t ON t.task_id = o.task_id
                 WHERE o.generator IN ('ln7', 'ln7_golden')
-                  AND (t.split IS NULL OR t.split IN ('train', 'heldout'))
+                  AND (t.split IS NULL OR t.split = 'train')
                 ORDER BY o.created_at DESC
                 LIMIT $1
                 """,
                 max(limit * 4, 200),
             )
+            try:
+                stats["dropped_heldout_sql"] = int(
+                    await conn.fetchval(
+                        """
+                        SELECT COUNT(*) FROM ln7_coding_outcomes o
+                        LEFT JOIN ln7_tasks t ON t.task_id = o.task_id
+                        WHERE o.generator IN ('ln7', 'ln7_golden') AND t.split = 'heldout'
+                        """
+                    )
+                    or 0
+                )
+            except Exception:
+                stats["dropped_heldout_sql"] = None
         finally:
             await conn.close()
 

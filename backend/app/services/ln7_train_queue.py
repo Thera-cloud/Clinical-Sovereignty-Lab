@@ -14,7 +14,14 @@ from typing import Any, Dict, List, Optional, Sequence
 
 logger = logging.getLogger("ln7_train_queue")
 
-HELDOUT_PACKS = frozenset({"env_redis_prefix"})
+try:
+    # Phase D: shared with ln7_export_train_jsonl.py — packs_index.json's
+    # "heldout" list is the single source of truth, never a local copy.
+    from app.services.ln7_heldout_registry import heldout_packs as _heldout_packs
+
+    HELDOUT_PACKS = _heldout_packs()
+except Exception:
+    HELDOUT_PACKS = frozenset({"env_redis_prefix"})
 
 
 def continuous_enabled() -> bool:

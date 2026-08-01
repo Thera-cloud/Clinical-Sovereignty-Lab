@@ -13,6 +13,23 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("ln7_canary_promoter")
 
+# Phase D — flywheel harden: GGUF conversion requires >=2 consecutive canary wins
+GGUF_MIN_CONSECUTIVE_WINS = 2
+
+
+def _extract_win_streak(canary_row: Optional[Dict[str, Any]]) -> int:
+    """Read prior win_streak from ln7_canary_state.pass_rate_json (str or dict)."""
+    if not canary_row:
+        return 0
+    raw = canary_row.get("pass_rate_json") if hasattr(canary_row, "get") else None
+    if raw is None:
+        return 0
+    try:
+        data = raw if isinstance(raw, dict) else __import__("json").loads(raw)
+        return int(data.get("win_streak") or 0)
+    except Exception:
+        return 0
+
 
 def auto_promote_enabled() -> bool:
     """Sync helper: env kill-switch / force-on. Prefer async_auto_promote_enabled(db)."""
@@ -39,13 +56,38 @@ def canary_pct() -> float:
         return 5.0
 
 
+def _is_stage4_merge_product(rev: Optional[Dict[str, Any]]) -> bool:
+    """True if this revision was registered by ln7_merge_drain (dare_ties Stage 4).
+
+    ln7_merge_drain.register_revision() always stamps harness_config.merge_of
+    with the contributor revision_ids on both the draft and accepted rows.
+    """
+    if not rev:
+        return False
+    raw = rev.get("harness_config_json") or rev.get("harness_config") or {}
+    if isinstance(raw, str):
+        try:
+            raw = __import__("json").loads(raw)
+        except Exception:
+            raw = {}
+    if not isinstance(raw, dict):
+        return False
+    merge_of = raw.get("merge_of")
+    return isinstance(merge_of, list) and len(merge_of) >= 2
+
+
 async def resolve_incumbent_id(
     db_pool,
     revision_id: str,
     *,
     incumbent_id: Optional[str] = None,
 ) -> str:
-    """Fast-tier candidates gate vs LN7-fast-baseline; deep vs LN7-baseline."""
+    """Fast-tier candidates gate vs LN7-fast-baseline; deep vs LN7-baseline.
+
+    Phase D — post-Stage 4: a dare_ties merge product is meant to *supersede*
+    its pre-merge contributors, so it gates against LN7-v2-Base rather than
+    the fast/deep baseline the contributors themselves gated against.
+    """
     if incumbent_id and str(incumbent_id).strip():
         return str(incumbent_id).strip()
     try:
@@ -56,6 +98,8 @@ async def resolve_incumbent_id(
         )
 
         rev = await load_revision(db_pool, revision_id) if db_pool else None
+        if _is_stage4_merge_product(rev):
+            return os.getenv("LN7_V2_BASE_INCUMBENT_ID", "LN7-v2-Base")
         tier = revision_serving_tier(rev)
         # Heuristic: 7B / peft / fast notes → fast incumbent
         notes = str((rev or {}).get("notes") or "").lower()
@@ -178,6 +222,7 @@ async def evaluate_canary(
                 revision_id,
             )
             inc_id = (canary or {}).get("incumbent_id") if canary else None
+            prev_streak = _extract_win_streak(canary)
             if not inc_id:
                 inc_id = await resolve_incumbent_id(db_pool, revision_id)
             # Held-out canary every N updates: require at least one heldout pack outcome exists system-wide
@@ -211,6 +256,10 @@ async def evaluate_canary(
         if confounded:
             gate["ok"] = False
             gate["reason"] = "confounded_window"
+            # Confounded window isn't a real evaluation — carry the streak forward
+            # unchanged rather than penalizing the candidate for cross-loop noise.
+            gate["win_streak"] = prev_streak
+            gate["gguf_eligible"] = prev_streak >= GGUF_MIN_CONSECUTIVE_WINS
             async with db_pool.acquire() as conn:
                 await conn.execute(
                     """
@@ -243,6 +292,14 @@ async def evaluate_canary(
         if forget.get("alert"):
             gate["ok"] = False
             gate["reason"] = "forgetting_monitor_drift"
+
+        # Phase D — flywheel harden: consecutive-win streak gates GGUF conversion.
+        # A single lucky pass on noisy CI is not evidence of quantization safety;
+        # any real fail resets the streak to zero.
+        new_streak = (prev_streak + 1) if gate.get("ok") else 0
+        gate["win_streak"] = new_streak
+        gate["gguf_eligible"] = new_streak >= GGUF_MIN_CONSECUTIVE_WINS
+
         async with db_pool.acquire() as conn:
             await conn.execute(
                 """

@@ -27,6 +27,10 @@ PINNED_MERGEKIT = "mergekit==0.0.5.1"  # pin; update only via weld
 MIN_FREE_GB = 120.0
 BASE_MODEL = "Qwen/Qwen2.5-Coder-7B-Instruct"
 
+# Phase D — flywheel harden: data budget preflight (>=300 rows/domain, >=1500 total)
+MIN_ROWS_PER_DOMAIN = 300
+MIN_TOTAL_ROWS = 1500
+
 
 async def abort_gate(
     db_pool,
@@ -123,6 +127,62 @@ def check_disk_space(path: Optional[str] = None, *, min_gb: float = MIN_FREE_GB)
         return {"ok": free_gb >= min_gb, "free_gb": round(free_gb, 1), "min_gb": min_gb, "path": str(target)}
     except Exception as e:
         return {"ok": False, "error": str(e), "path": str(target)}
+
+
+async def check_data_budget(
+    db_pool,
+    *,
+    min_rows_per_domain: int = MIN_ROWS_PER_DOMAIN,
+    min_total_rows: int = MIN_TOTAL_ROWS,
+) -> Dict[str, Any]:
+    """Preflight: Phase D data budget — >=300 passed/train rows per domain, >=1500 total.
+
+    A merge trained on thin per-domain evidence is a coin flip dressed up as
+    consolidation. Only passed, train-split outcomes count (held-out rows are
+    never counted here, mirroring ln7_export_train_jsonl.py's hard-block).
+    Any DB/shape failure returns ok=False rather than silently passing.
+    """
+    base: Dict[str, Any] = {
+        "by_domain": {},
+        "total": 0,
+        "min_rows_per_domain": min_rows_per_domain,
+        "min_total_rows": min_total_rows,
+    }
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", **base}
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT COALESCE(
+                           NULLIF(o.metrics_json->>'domain_tag', ''),
+                           NULLIF(o.metrics_json->>'domain', ''),
+                           'unknown'
+                       ) AS domain,
+                       COUNT(*)::int AS n
+                FROM ln7_coding_outcomes o
+                LEFT JOIN ln7_tasks t ON t.task_id = o.task_id
+                WHERE o.generator IN ('ln7', 'ln7_golden')
+                  AND o.passed = TRUE
+                  AND (t.split IS NULL OR t.split = 'train')
+                GROUP BY 1
+                """
+            )
+    except Exception as e:
+        return {"ok": False, "reason": f"query_failed:{e}", **base}
+
+    by_domain = {str(r["domain"]): int(r["n"] or 0) for r in rows}
+    total = sum(by_domain.values())
+    thin_domains = {d: n for d, n in by_domain.items() if n < min_rows_per_domain}
+    ok = total >= min_total_rows and not thin_domains
+    return {
+        "ok": ok,
+        "by_domain": by_domain,
+        "total": total,
+        "min_rows_per_domain": min_rows_per_domain,
+        "min_total_rows": min_total_rows,
+        "thin_domains": thin_domains,
+    }
 
 
 def _merge_workdir(merge_revision_id: str) -> Path:
@@ -361,9 +421,15 @@ async def run_merge_drain(
         await notify_flywheel_anomaly("merge_disk_low", {"disk": disk}, db_pool=db_pool)
         return {"ok": False, "error": "disk_space_low", "disk": disk}
 
+    # Phase D — flywheel harden: hold consolidation on thin per-domain evidence
+    budget = await check_data_budget(db_pool)
+    if not dry_run and not budget.get("ok"):
+        await notify_flywheel_anomaly("merge_data_budget_low", {"budget": budget}, db_pool=db_pool)
+        return {"ok": False, "error": "data_budget_low", "disk": disk, "budget": budget}
+
     lease = acquire_lease("merge_drain")
     if not lease:
-        return {"ok": False, "error": "lease_held", "disk": disk}
+        return {"ok": False, "error": "lease_held", "disk": disk, "budget": budget}
 
     merge_revision_id = f"LN7-merge-{int(time.time())}"
     result: Dict[str, Any] = {
@@ -373,6 +439,7 @@ async def run_merge_drain(
         "incumbent_id": incumbent_id,
         "dry_run": dry_run,
         "disk": disk,
+        "budget": budget,
     }
     try:
         rows = await _fetch_contributor_rows(db_pool, contributor_ids)
