@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "domains": {
+    "growth": {
+      "paths": [
+        "backend/app/services/growth/",
+        "backend/app/services/growth_claims.py"
+      ],
+      "allowed_tables": [
+        "buyer_leads",
+        "bwas_weekly",
+        "coach_profiles",
+        "content_ab_tests",
+        "directory_pages",
+        "enrichment_runs",
+        "growth_attribution_links",
+        "growth_claims",
+        "growth_config",
+        "growth_spend_ledger",
+        "keyword_queue",
+        "landing_captures",
+        "lead_events",
+        "marketing_audit_log",
+        "marketing_content",
+        "marketing_policies",
+        "outreach_reply_queue",
+        "outreach_suppression",
+        "skyeye_activity",
+        "skyeye_content_queue",
+        "try_theme_weekly",
+        "information_schema",
+        "users"
+      ],
+      "narrow_exceptions": {
+        "users": "growth_claims.py retract_growth_claim() ONLY clears the 3 growth-owned JSONB keys it itself wrote (growth_claim_ids, growth_claim_text, directory_growth_blurb) via a targeted UPDATE ... - 'key' JSONB removal, filtered by claim_id substring match. It never SELECTs from users and never touches any other column or JSONB key (no PII, no clinical fields, no session/health data)."
+      }
+    }
+  },
+  "note": "E3 (flywheel plan Phase E residual): the growth/marketing domain may only read/write its own growth-owned tables plus shared read-only SkyEye activity/content-queue tables, plus the single narrow `users` exception documented above. It must never query clinical or client-PII tables (conversation_history, nevedal_metrics, sensitive_bridge_*, client_metrics, session_memories, etc). coach_profiles is the public coach directory (bio/photo/specialty) — not client data. Enforced statically by backend/tests/test_ln7_compliance_grants.py in CI; any new table reference inside a growth-domain file that is not on this allowlist fails the build until added here deliberately (a reviewable, explicit act)."
+}
