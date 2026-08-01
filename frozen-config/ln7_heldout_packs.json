@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "description": "Phase H held-out weld. Pinned floor for LN Sandbox CI pack names that must never enter QLoRA training data. The effective held-out set used by ln7_heldout_registry.heldout_packs() is the UNION of this file and packs_index.json['heldout'] — packs_index.json may ADD held-out packs freely, but removing an entry from packs_index.json alone does not un-heldout it: it must also be removed here, which requires touching frozen-config (SA-unwritable on GREEN per ln7_w13_host_fence.sh, and any change here breaks fence_manifest_ok until manifest.sha256.json is deliberately regenerated). This makes silent held-out-set shrinkage — the actual attack this weld targets — surface as a fence mismatch (RED hold on promotions) instead of a quiet one-line JSON edit.",
+  "heldout": [
+    "env_redis_prefix",
+    "mut_off_by_one_range",
+    "mut_mutable_default_arg"
+  ]
+}
