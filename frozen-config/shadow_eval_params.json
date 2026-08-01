@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "divergence_threshold": 0.20,
+  "min_samples": 4,
+  "note": "R3 shadow evaluators — candidate parameter overlays scored in parallel with the live frozen evaluator. Never enforced; logged to outcome_envelope(loop_name='shadow_eval') only. Monthly divergence over threshold drafts a PR via sovereign_weld_bot (draft-only, no self-merge).",
+  "variants": [
+    {
+      "id": "goodhart_tighter_bands_v1",
+      "target": "goodhart_probes",
+      "overlay": {
+        "drift_bands": {
+          "validation_to_challenge_ratio": {"max_abs_delta": 0.15},
+          "intervention_frequency": {"max_abs_delta": 0.18},
+          "witnessing_vs_advising_balance": {"max_abs_delta": 0.15},
+          "session_length_trend": {"max_abs_delta": 0.20}
+        }
+      }
+    }
+  ]
+}

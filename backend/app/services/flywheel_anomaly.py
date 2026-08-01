@@ -32,6 +32,7 @@ ANOMALY_KINDS = frozenset({
     "merge_disk_low",  # QUANTUM-CRYSTAL-ARCH — Phase C: <120GB free before merge
     "merge_drain_fail",  # QUANTUM-CRYSTAL-ARCH — Phase C: merge_drain orchestrator exception
     "merge_data_budget_low",  # QUANTUM-CRYSTAL-ARCH — Phase D: <300/domain or <1500 total rows
+    "shadow_eval_divergence",  # QUANTUM-CRYSTAL-ARCH — R3: monthly shadow/live divergence over threshold
 })
 
 _COOLDOWN: Dict[str, float] = {}
