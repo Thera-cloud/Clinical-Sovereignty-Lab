@@ -90,3 +90,17 @@ def lease_holder(loop: str) -> Optional[str]:
         return cur.decode() if isinstance(cur, bytes) else str(cur)
     except Exception:
         return None
+
+
+def is_any_loop_active(loops) -> bool:
+    """E5: cross-loop overlap detection — True if any named loop currently
+    holds a change-lease. Used to flag confounded evidence windows (e.g. a
+    canary evaluation running while hive_burst is mutating shared state).
+    """
+    for loop in loops or []:
+        try:
+            if lease_holder(loop) is not None:
+                return True
+        except Exception:
+            continue
+    return False

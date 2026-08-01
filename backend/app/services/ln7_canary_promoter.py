@@ -196,6 +196,46 @@ async def evaluate_canary(
         )
         gate["forgetting"] = forget
         gate["heldout_outcomes_n"] = int(heldout_n or 0)
+
+        # QUANTUM-CRYSTAL-ARCH — E5: cross-loop lease overlap confounds evidence.
+        # A hive_burst mutating shared state while we score this canary means
+        # the pass/fail signal can't be cleanly attributed to the revision —
+        # flag the window and hold, never promote off confounded evidence.
+        confounded = False
+        try:
+            from app.services.ln7_change_lease import is_any_loop_active
+
+            confounded = is_any_loop_active(["hive_burst"])
+        except Exception:
+            confounded = False
+        if confounded:
+            gate["ok"] = False
+            gate["reason"] = "confounded_window"
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE ln7_canary_state
+                    SET pass_rate_json = $2::jsonb, last_check_at = NOW()
+                    WHERE revision_id = $1
+                    """,
+                    revision_id,
+                    __import__("json").dumps(gate),
+                )
+            try:
+                from app.services.ln7_outcome_envelope import write_envelope
+
+                await write_envelope(
+                    db_pool,
+                    loop_name="canary_eval",
+                    event_kind="confounded_skip",
+                    revision_id=revision_id,
+                    metrics=gate,
+                    confounded=True,
+                )
+            except Exception as _we:
+                logger.debug("confounded envelope write: %s", _we)
+            return {"ok": False, "action": "hold_shadow", "gate": gate}
+
         if forget.get("alert"):
             gate["ok"] = False
             gate["reason"] = "forgetting_monitor_drift"

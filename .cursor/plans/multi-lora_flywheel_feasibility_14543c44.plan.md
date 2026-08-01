@@ -27,8 +27,8 @@ todos:
     content: "Phase D: Held-out hard-block; stratified vintage+fresh bakeoffs; canary/GGUF"
     status: pending
   - id: phase-e-nervous-system
-    content: "Phase E: Mig 306 envelope; 307 flags; 309/310 pack_candidates+suppress; lease TTL; flywheel_anomaly"
-    status: pending
+    content: "Phase E mostly DONE: mig 306 envelope (E1), 307 flags, 310 suppress (E8 — is_suppressed wired into activate_revision choke point, verified already-present), lease TTL (E5 acquire/release in hive_burst), flywheel_anomaly (E7). Added 2026-08-01: E5 confounded-window detection — evaluate_canary checks is_any_loop_active(['hive_burst']) before gate decision; overlap → gate.ok=False, reason=confounded_window, envelope confounded=True, hold_shadow (never promotes off confounded evidence). Residual: E2 cross-loop attribution keys, E3 compliance grants CI-verify, E4 per-window signing key, E6 weekly digest — not yet built."
+    status: in_progress
   - id: phase-f-queens-operators
     content: "Phase F: Mechanical Dual-COO after Step 0 only; until then CEO activate remains valid; living packs; injection"
     status: pending
