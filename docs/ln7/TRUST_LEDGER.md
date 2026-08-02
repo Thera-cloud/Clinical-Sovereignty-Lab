@@ -1421,3 +1421,81 @@ insert against the real schema — a gap worth naming rather than hiding:
 structural/AST tests confirmed the code *says* the right thing, but only
 a live invocation against the actual constrained table caught that the
 schema didn't yet agree with it.
+
+---
+
+## Entry 19 — 2026-08-02 — Phase M (marketing bound) closed: 4 gaps found on
+## audit, not assumed closed because migration 308 existed
+
+CEO asked to build the 3 unbuilt capability-session items plus fix "the
+partial gap in Phase M." Before writing code, audited what Phase M
+(`W11/W12/M` — claims registry, publisher gate, retract surfaces, BWAS
+provenance) actually had wired versus what the plan's execution-order
+line implied was done. Found the claims registry (migration 308,
+`growth_claims.py`) and W7 envelope dual-write were real and landed, but
+four sub-items were either partially wired or entirely missing:
+
+**M2 (publisher-gate parity) — partial, not full:** the outreach path
+(`outreach_publisher.py` → `marketing_content_service.py`) called
+`growth_claims.assert_claims_publishable()` before every send, but
+SkyEye's social-post path (`skyeye_session_engine._post_phase()`) did
+not — it read `claim_ids` from `emotion_context` if present but posted
+unconditionally when absent, meaning organic social content bypassed the
+claims gate entirely (the outreach channel and the social channel are
+both publisher surfaces; only one enforced the rule). Fixed: `_post_phase()`
+now calls the same `assert_claims_publishable()` gate and blocks the post
+on failure. Also added `"social"` to the unretractable-channel list in
+`assert_claims_publishable` (a retracted claim on a live social post can't
+be un-published the way an email send can be halted mid-queue) and fixed
+a latent bug found while reading `retract_surfaces()`: it queried
+`metadata->>'claim_ids'` on `skyeye_content_queue`, but that table has no
+`metadata` column — claim IDs actually live in `emotion_context`. This bug
+meant retraction cascades silently never touched social posts even before
+today's gate fix; a claim retraction that should black out a live post
+was a no-op.
+
+**M3 (therapeutic advisory sensitivity) — missing on one surface:**
+`growth.brand_checklist`'s blocklist (diagnosis claims, AGI/consciousness
+hype, outcome guarantees) was applied inside `marketing_content_service`'s
+CRUD path but SkyEye's five live content-generation functions
+(`generate_post`, `generate_reply`, `generate_cross_promo`,
+`adapt_for_platform`, `generate_video_script` in
+`skyeye_content_generator.py`) had no call to it at all — social content
+could ship with a checklist-violating claim that the marketing-content
+path would have blocked. New `_check_therapeutic_advisory()` helper wraps
+`run_brand_checklist()` and is now called from all five paths.
+
+**M4 (BWAS provenance weighting) — not built, not partial:** `bwas_worker
+.tick()` counted every `lead_events` row identically toward a growth
+claim's evidentiary stage, regardless of whether the lead was linked to a
+verifiable attribution chain (`attribution_link_id`) or was an orphan
+event with no traceable source. New `provenance_weighted_stage_score()`
+pure function splits `attributed_n` vs `orphan_n` and applies a
+configurable discount (`_provenance_config`) to orphan-sourced stage
+scores, so an unverified lead can no longer fully count the same as an
+attributed one toward a public growth claim.
+
+**M7 (marketing ingester privilege asymmetry) — not built on this
+surface:** `ln7_injection_firewall.sanitize_notes()` was already standard
+on the LN7 task-bus ingestion boundary but `generate_reply`'s
+`comment_text`/`user_handle` inputs — external, untrusted social-media
+comment text — were embedded directly into the LLM prompt with no
+sanitization pass. Now routed through `sanitize_notes()` first, closing
+the one marketing-domain external-input surface that lacked it.
+
+23 new tests (`test_phase_m_completion.py` ×13, `test_phase_m_bwas_
+provenance.py` ×10 — split into two files after both crashed a shared
+pytest process with a `Floating point exception` on this macOS
+environment when imported together; a known, pre-existing, environment-
+specific numpy issue, not a CI concern — both files pass reliably when
+run standalone or via the full suite). Deployed to GREEN via `docker
+compose -f docker-compose.prod.yml up -d --build backend`, confirmed
+153/153 services healthy and zero new schema/import errors post-restart.
+Full local suite green. Commit `a998821d` pushed to `main`.
+
+**Not built / explicitly deferred:** no admin UI surfaces the provenance
+discount or the therapeutic-advisory block reasons to a human reviewer —
+both are enforced silently (block or discount) with the reason available
+only in logs/exception text, not a dashboard. Left for whoever next
+touches the SkyEye/growth admin surfaces, since it's a UX decision, not a
+correctness gap.
