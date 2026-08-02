@@ -767,3 +767,92 @@ explain the collapse that haven't been measured yet" — that list is now
 empty except for the pending fresh live-track held-out run (Entry 8's
 44-item reserve), which remains the one number that actually answers
 whether v5 generalizes to production text.
+
+---
+
+## Entry 10 — 2026-08-02 — 4 of the "44 unscored" rows were burned dose-response
+## duplicates; write-back applied, clean fresh held-out pool is 40, not 44
+
+Caught by the CEO mid-session, before scoring: item 1/44 in the
+Principal-Review "Capability — live-stack blinds" queue (`AQ-1`) was, word
+for word, the dose-response `after_affinity_fix` row already human-scored
+at move-level on 2026-08-02 (grid 0P/1p/5A, scalars 1/1/1, veto ok,
+naming=absent — the exact row central to Entry 1's cross-sample-variance
+finding).
+
+**Mechanism:** the dose-response seed step (`316_quartet_dose_response.sql`
++ its seed script) copied `AQ-1`/`AQ-2`/`AQ-G07`/`AQ-G08`'s
+`nate_response_live` text out of `six_quotient_human_gold`
+(`live_stack_run_id = fuel_burning_verify_20260801_affinity`) into
+`quartet_dose_response_queue` (`condition_label='after_affinity_fix'`,
+`source='live_snapshot'`) for the 8-row move-level sitting, but never
+wrote `live_human_scored=true` back onto the 4 source gold rows. Those 4
+rows therefore still showed as unscored in the capability-track UI —
+identical response text, already human-scored, being re-served as fresh.
+Confirmed pre-fix: all 4 had `live_human_scored=false` in
+`six_quotient_human_gold` with exact text match against
+`quartet_dose_response_queue.response_text`.
+
+**Two consequences identified, both acted on:**
+
+1. **Double-entry risk.** Scoring `AQ-1` again tonight in the
+   capability-track UI would either duplicate an existing score or —
+   given Entry 7's same-day-recheck drift finding — disagree with the
+   rater's own prior score on the identical text, muddying both records
+   with no diagnostic value. **Fix applied:** migration
+   `318_ln7_live_scored_via.sql` adds a nullable `live_scored_via TEXT`
+   column to `six_quotient_human_gold`. `writeback_dose_response_to_live_gold.py`
+   ports the 4 dose-response scores onto the matching gold rows,
+   refusing to run unless `nate_response_live` matches
+   `quartet_dose_response_queue.response_text` **exactly** (hard abort
+   on any mismatch, no partial writes) and refusing to overwrite any row
+   already `live_human_scored=true`. Applied on GREEN 2026-08-02: all 4
+   rows written back (`AQ-1`, `AQ-2`, `AQ-G07`, `AQ-G08`), each now
+   `live_human_scored=true`, `live_scored_via='dose_response_queue'`.
+   Post-write-back counts: 40 still unscored, 1 scored fresh via the
+   normal capability-track UI (`MQ-2`), 4 scored via write-back — the
+   queue counter is now honest and will not re-serve these 4.
+
+2. **Held-out-set contamination risk — the more consequential one.**
+   The 8 quartet rows (`AQ-1`/`AQ-2`/`AQ-G07`/`AQ-G08` x
+   before/after) were the exact diagnostic set used to identify
+   Mechanism A/B and write `JUDGE_SYSTEM_PROMPT_V5` (Entry 6). If the
+   live-track duplicates of those same 4 response texts flowed into a
+   "fresh" v5 held-out κ run, that run would silently be re-scoring v5
+   against its own revision material through a side door — the exact
+   leak this project spent a week (Entries 5–9) catching in v4, now
+   reopened one table over. Additionally, `MQ-2` — the 5th row named
+   explicitly in Entry 6's mechanism table ("all overscored" disagreement
+   set) — is burned by direct use as error-analysis material even though
+   it was never duplicated, so a naive `live_scored_via IS NULL` filter
+   alone does not fully clean the pool.
+
+   **Fix applied:** a new script, `compute_tier1_v5_fresh_holdout_kappa.py`
+   (deliberately separate from `compute_tier1_holdout_kappa.py`, not a
+   flag on it — conflating the two pools in one script is the same
+   silent-relabeling shape Entry 6 already flagged once), applies two
+   independent, separately-logged exclusions:
+     - `live_scored_via IS NULL` — excludes the 4 ported rows **by
+       construction** (schema-enforced, not a hand-maintained id list),
+     - `scenario_id NOT IN ('MQ-2')` — excludes the 1 named-burned row
+       (`_BURNED_SCENARIO_IDS` constant, the only case requiring a
+       literal list because no schema flag distinguishes
+       "scored-then-used-as-revision-material" from
+       "scored-and-never-revisited").
+
+   **Clean fresh held-out pool: 40 rows, not 44** (confirmed by direct
+   count on GREEN: 40 `live_human_scored=false`, 1 fresh-scored
+   (`MQ-2`, excluded), 4 write-back-scored (excluded)). Any κ number
+   this project reports as "v5's fresh held-out result" must come from
+   this 40-row pool via this script, or it inherits the exact
+   contamination this entry exists to prevent.
+
+**Disposition:** no certification claim was made or reversed by this
+entry — the fresh held-out run (Entry 8/9's pending item) has not yet
+executed; this entry documents that its input pool was quietly wrong
+before that run happened, not after. Caught by inspection of the served
+item, not by a score disagreeing with expectation — worth noting as a
+process point: the catch required recognizing response *text*, which an
+automated exclusion list would have prevented from ever being a judgment
+call. That automation now exists (`live_scored_via`); this entry is the
+reason it exists.
