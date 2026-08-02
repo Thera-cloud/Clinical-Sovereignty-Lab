@@ -236,3 +236,86 @@ still needed landing at all. The check that mattered here wasn't code
 review, it was diffing the branch's crisis-path behavior against main's
 current crisis-path behavior and confirming main is already the stricter
 of the two.
+
+---
+
+## Entry 4 — 2026-08-02 — Judge certification reported "GREEN, fully passed,
+no action needed" — was (a), the checkbox-semantics failure
+
+**The claim:** in this session, `clinical_tier1_competence_gate_check.py`'s
+output (`RESULT: GREEN — Tier-1 certification preconditions met`, all hard
+gates PASS, `WEEKLY_LIVE preconditions met`) was reported to the user as
+Tier-1 judge certification being "fully passed" with "no action needed."
+
+**User's challenge, verbatim, offered three options:** (a) infra-shipped
+conflated with certified — the exact failure the first assessment of this
+project flagged; (b) an automated κ run happened without the human half;
+(c) pure optimistic confabulation, the Entry 1 pattern re-aimed at the
+biggest gate on the board.
+
+**Re-verification (re-ran the gate check live, then queried the evidence
+tables directly rather than trusting the script's own framing):**
+
+Re-running `clinical_tier1_competence_gate_check.py` on GREEN reproduces
+the same `RESULT: GREEN` verbatim — the numbers are real, not fabricated.
+`(b)` is ruled out on that basis: a human (`DrNevedal1`) did score 50 items
+through the authenticated Principal-Review UI (`auth_rows=50/50`, median
+latency 212,725 ms — far above the 45s-per-item floor that rules out
+backfill). `(c)` is also ruled out: nothing in the numbers is invented.
+
+**What "certified" actually rests on, and why it isn't:**
+
+1. **`SIX_QUOTIENT_WEEKLY_LIVE=true`** is the flag the script's own source
+   comment describes as gating human review — *"keep false until CEO/
+   self-dev human review"* is the `INFO` line printed when it's off. On
+   GREEN's `.env` it is `true`, set in a block headed `# Phase 6.7 —
+   2026-07-21` alongside ~20 unrelated flags
+   (`ENABLE_SIX_QUOTIENT_BATTERY`, `SIX_QUOTIENT_BATTERY_LIVE_WS`,
+   `ENABLE_SIX_QUOTIENT_SELF_DEV`, etc.) — a general battery-rollout batch,
+   not a comment or commit tied to Tier-1 judge evidence specifically.
+2. **The κ evidence this gate is supposed to certify against didn't exist
+   yet when that flag was flipped.** `six_quotient_judge_kappa_evidence`
+   rows are dated 2026-07-25 23:52 through 2026-07-26 00:43 UTC — **five
+   days after** the 2026-07-21 `WEEKLY_LIVE` flip. It is not possible for
+   a human review of this evidence to have produced a flag flip that
+   predates the evidence by five days. The "PASS: WEEKLY_LIVE
+   preconditions met" line is checking whether an env var happens to be
+   `true`, not whether anyone reviewed anything — and I read the former as
+   the latter.
+3. **Both remaining soft-blockers the protocol treats as requiring
+   justification are neutralized by standing `.env` defaults, not
+   per-run decisions:** `TIER1_SOAK_WAIVED=true` (waives the multi-night
+   operational soak) and `TIER1_RECHECK_MIN_GAP_DAYS=0` (waives the
+   time-gap on the intra-rater recheck) both sit in `.env` unconditionally,
+   not as one-time overrides tied to a documented exception.
+4. **The evidence trail itself shows a retry-until-pass pattern the
+   gate-check script cannot see:** the κ table has 5 rows in 51 minutes
+   (`grok-judge-v2` x3, `v3`, `v4`, kappa climbing 0.469 → 0.572 → 0.699
+   as the judge model version was iterated against the same frozen
+   50-item gold set) — in tension with `ALLOW_AUTO_JUDGE_CALIBRATION=false`
+   in spirit, even though that flag governs a different code path. The
+   intra-rater recheck has 2 rows, same day, 38 minutes apart: the first
+   (13:09 UTC) **failed** (κ=0.617, `meets_threshold=false`), the second
+   (13:47 UTC) passed (κ=0.732). `TIER1_RECHECK_MIN_GAP_DAYS=0` is what
+   made a same-day, 38-minute-apart "recheck" of the same 15 items
+   admissible as intra-rater *reliability* evidence at all, which is not
+   what that check is designed to demonstrate.
+
+**Verdict: (a).** The gate-check script's `GREEN` is real and
+reproducible, but it certifies "these preconditions currently evaluate
+true," not "a human reviewed the Tier-1 gold evidence and certified this
+judge" — and the timeline proves those are different events (the
+flag predates the evidence). Reporting `GREEN` as "fully passed, no
+action needed" repeated the exact checkbox-semantics failure the
+project's first assessment named: *complete means infra exists, not
+certified.* Point 4 is a second, adjacent finding — not required to
+answer the user's question, but material to whether the underlying
+κ/reliability numbers should be trusted at face value even after the
+flag-timeline issue is fixed.
+
+**No action taken on the flags or the judge_id.** This entry is
+documentation only, per instruction; whether to leave `WEEKLY_LIVE` on
+pending a real review, roll back to `grok-judge-v2`/re-run κ without
+mid-run model iteration, or re-run the intra-rater recheck with a
+non-zero gap is a decision for the user, not something to change
+unilaterally on a production certification gate.
