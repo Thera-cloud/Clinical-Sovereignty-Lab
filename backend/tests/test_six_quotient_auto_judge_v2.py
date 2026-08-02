@@ -16,9 +16,12 @@ def _load():
     return mod
 
 
-def test_judge_v4_default_and_anchors():
+def test_judge_v4_frozen_anchors():
+    """v4 is frozen (TRUST_LEDGER.md Entry 6: certified-kappa=0.699 /
+    collapsed-kappa=0.033 record must stay reproducible). It is no longer
+    DEFAULT_EVALUATOR -- see test_six_quotient_auto_judge_v5.py -- but its
+    text must not change underneath these assertions."""
     m = _load()
-    assert m.DEFAULT_EVALUATOR == "grok-judge-v4"
     p = m.JUDGE_SYSTEM_PROMPT_V4
     assert "escalate_or_safety" in p
     assert "UNSOUND-ACT VETO" in p or "unsound-act" in p.lower()
@@ -32,10 +35,12 @@ def test_judge_v4_default_and_anchors():
     assert "degraded_distractor" in p
 
 
-def test_judge_module_uses_v4_prompt_constant():
+def test_judge_module_retains_v4_as_frozen_alias_source():
+    """v4 constant must remain defined and referenced (V5 is built via
+    .replace() against it) even though it is no longer the active prompt."""
     src = _JUDGE.read_text(encoding="utf-8")
     assert "JUDGE_SYSTEM_PROMPT_V4" in src
-    assert "system = JUDGE_SYSTEM_PROMPT_V4" in src
+    assert "JUDGE_SYSTEM_PROMPT_V4.replace(" in src
     assert "grok-judge-v4" in src
 
 

@@ -6,7 +6,7 @@ Uses pre-registered method: quadratic_weighted_per_dimension_mean.
 
 Usage (inside nate_backend, PYTHONPATH=/app):
   python /app/scripts/compute_tier1_gold_kappa.py
-  python /app/scripts/compute_tier1_gold_kappa.py --min-items 50 --judge-id grok-judge-v4
+  python /app/scripts/compute_tier1_gold_kappa.py --min-items 50 --judge-id grok-judge-v5
   python /app/scripts/compute_tier1_gold_kappa.py --from-json /tmp/judge_scores.json
 """
 
@@ -53,7 +53,10 @@ async def _main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--min-items", type=int, default=50)
     parser.add_argument("--limit", type=int, default=0, help="0 = all scored")
-    parser.add_argument("--judge-id", default="grok-judge-v4")
+    # TRUST_LEDGER.md Entry 6: _llm_judge's active system prompt is now V5 —
+    # this label must track that or evidence rows get mislabeled with the
+    # wrong judge version (the exact class of error Entry 4 documented).
+    parser.add_argument("--judge-id", default="grok-judge-v5")
     parser.add_argument(
         "--from-json",
         default="",

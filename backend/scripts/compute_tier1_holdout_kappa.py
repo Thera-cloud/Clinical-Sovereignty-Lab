@@ -27,8 +27,22 @@ replacement for the certification-track kappa. It is logged with
 gold_locked=false so the certification gate (WHERE gold_locked=true) never
 counts it.
 
+BURNED SET WARNING (TRUST_LEDGER.md Entry 6): this exact n=9 set was used
+to diagnose v4's failure mechanism, so it is no longer a valid held-out
+set for any later judge version. six_quotient_auto_judge._llm_judge now
+scores with JUDGE_SYSTEM_PROMPT_V5 unconditionally (v4 is a frozen,
+non-invocable text record, not a live option -- see that module's
+docstring), so re-running this script no longer reproduces the v4/0.033
+result; it would silently score these burned rows with v5 instead. Do
+not re-run this script and report its output as either "the v4 result"
+(it isn't, once v5 lands) or "a fresh v5 held-out result" (the set is
+burned). The v4/0.033 number is a closed DB record (evidence_id=8);
+read it, don't regenerate it. New held-out evaluation of v5+ must draw
+from a set these nine rows are not part of (earlier capability-track
+scored rows, or dose-response-v2 rows once generated) via a new script
+or an updated query in this one.
+
 Usage (inside nate_backend, PYTHONPATH=/app):
-  python /app/scripts/compute_tier1_holdout_kappa.py
   python /app/scripts/compute_tier1_holdout_kappa.py --dry-run
 """
 
@@ -121,7 +135,10 @@ async def _judge_all(app_state, items):
 
 async def _main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--judge-id", default="grok-judge-v4")
+    # TRUST_LEDGER.md Entry 6: this label must match what _llm_judge actually
+    # scores with (v5, unconditionally) or every future run of this script
+    # mislabels its own evidence rows with a retired judge id.
+    parser.add_argument("--judge-id", default="grok-judge-v5")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 

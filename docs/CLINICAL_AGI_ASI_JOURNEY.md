@@ -1,9 +1,27 @@
 # Tier 1 Clinical Competence → ASI Research Journey
 
 **Status:** Operational path (not a marketing claim)  
-**Updated:** 2026-07-26 (κ gate cleared @ grok-judge-v4 evidence_id=7)  
-**Related:** `docs/AGENTIC_ROLLOUT_CHECKLIST.md` Track D.12–D.14b, `docs/AGENTIC_WIRING_INVENTORY.md`  
+**Updated:** 2026-08-02 (on-gold κ PASS reclassified — see correction below; do not cite line 16 alone)  
+**Related:** `docs/AGENTIC_ROLLOUT_CHECKLIST.md` Track D.12–D.14b, `docs/AGENTIC_WIRING_INVENTORY.md`, `docs/ln7/TRUST_LEDGER.md` Entries 4–6  
 **Preferred name:** Tier 1 clinical competence (avoid “AGI-class” / “Narrow AGI” until D.14b then Tier-2 exit)
+
+### Correction (2026-08-02) — read before citing the κ row below
+
+The 2026-07-26 "κ gate cleared" line was a checkbox-semantics failure
+(`TRUST_LEDGER.md` Entry 4): the on-gold PASS is real (aggregate≈0.699,
+evidence_id=7) but on-gold agreement is not certification, and no
+held-out check had been run. It has now been run: `grok-judge-v4`
+against 9 held-out rows the tuning never saw collapsed to κ≈0.033
+(evidence_id=8, gold_locked=false — Entry 5). Mechanism analysis (Entry
+6) found this was not diffuse overfit but two describable causes: a
+literal-lexicon escalation bug (fixed in `grok-judge-v5`, now
+`DEFAULT_EVALUATOR`) and a rubric-definition mismatch between two
+scoring instruments (flagged, not yet resolved). The one dimension with
+a hard gate — safety-veto — held at 0 misses on the same held-out set.
+**Certification remains open** pending: (1) a held-out re-run of v5
+against a *fresh* set (the 9 diagnostic rows are burned), and (2) a
+10-item re-score reliability check, κ≥0.70. Do not present the row
+below as "certified" without both.
 
 ### Path note (2026-07-26)
 
@@ -13,7 +31,7 @@
 |------|--------|
 | D.14a infra | Done |
 | Gold locked + auth scored 50/50 + degraded≥8 | Done (GREEN) |
-| κ vs locked gold | **PASS** aggregate≈0.699 (evidence_id=7, `grok-judge-v4`); safety_veto_ok; never edit gold |
+| κ vs locked gold | **PASS on-gold only** aggregate≈0.699 (evidence_id=7, `grok-judge-v4`); safety_veto_ok; never edit gold. **Not certification** — held-out collapsed to κ≈0.033 (evidence_id=8); see Correction above and `TRUST_LEDGER.md` Entries 4–6. |
 | Rater reliability ≥0.70 on ≥15 | **PASS** (intra_rater id=2, QWK≈0.732, meets_threshold) |
 | Qualifying nights ≥7 | **WAIVED** 2026-07-26 (`TIER1_SOAK_WAIVED=true`; was 4/7 — calendar fuse, not skill). Nightly measure remains on. |
 | `WEEKLY_LIVE` | **ON** GREEN 2026-07-26 (CEO/self-dev reviewed; Sunday 06–07 UTC live WS; AQ live_focus until next CEO APPROVE) |
