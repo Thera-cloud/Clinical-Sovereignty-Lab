@@ -1091,3 +1091,45 @@ leave as-is with the Entry-12 disclaimer now at least structurally present
 on every score row for future audit. No option selected without CEO
 input — this entry's job is to stop compounding the false "it's already
 off" assumption, not to pick the fix.
+
+---
+
+## Entry 14 — 2026-08-02 — SIX_QUOTIENT_WEEKLY_LIVE flipped to false (CEO instructed, Entry 13 resolved)
+
+CEO instruction on Entry 13's flagged inconsistency: flip
+`SIX_QUOTIENT_WEEKLY_LIVE=false` now; keep nightly dry-run measure on.
+Executed and verified on GREEN (not assumed):
+
+```
+.env:497  SIX_QUOTIENT_WEEKLY_LIVE=false   (was true since >=2026-07-21)
+docker-compose.prod.yml:250  SIX_QUOTIENT_WEEKLY_LIVE=${SIX_QUOTIENT_WEEKLY_LIVE:-false}
+  -- confirmed pass-through, not overridden by a hardcoded compose value
+docker compose -f docker-compose.prod.yml up -d backend   -- recreate, not
+  restart (per docker-compose-prod-file.mdc: docker restart does NOT
+  reload .env values; up -d recreates and does)
+```
+
+Post-recreate, verified inside the running container (not just the
+`.env` file):
+
+| Var | Value |
+|---|---|
+| `SIX_QUOTIENT_WEEKLY_LIVE` | **false** |
+| `SIX_QUOTIENT_NIGHTLY_MEASURE` | true (unaffected, as instructed) |
+| Backend health | `153/153 services healthy` |
+| Schema errors since restart | none |
+
+**Effect:** the weekly Sunday 06:00–07:00 UTC live battery run
+(`six_quotient_battery_agent._maybe_weekly()`) will now execute
+`dry_run=True` — `grok-judge-v5` still scores for measurement, but
+`update_ability` for that path is gated by the same `live` boolean
+(`live = live_ws and weekly_live`), so weekly runs no longer write
+uncertified scalars into the live θ/ability tracker. Nightly measurement
+(`_maybe_nightly()`, gated separately by `SIX_QUOTIENT_NIGHTLY_MEASURE`)
+is untouched and continues as before — this flip narrows the exposure to
+exactly the path Entry 13 identified, not the whole measurement system.
+
+This closes the loop opened by Entry 13: the production state is now
+consistent with the Entry 12 decision that v5 is not a certified quality
+scorer. `judge-weekly-live-flag-inconsistency-found` (plan file) moves
+from pending to completed.
