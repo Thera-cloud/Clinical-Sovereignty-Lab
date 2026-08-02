@@ -26,6 +26,65 @@ _DEFAULT_WEIGHTS = {
     "active_client": 1.0,
 }
 
+# M4 (Phase M, R6 mirror) — provenance weighting by verified stage.
+# lead_events deliberately strips device_id/hardware_id/ip/email/phone from
+# `meta` at write time (lead_events.py _PII_META_KEYS) — there is no
+# per-user Sybil-resistance signal available on this table without
+# reintroducing PII tracking, which the existing privacy architecture
+# forbids. The one non-PII structural signal this schema does support:
+# attribution_link_id. A row with a link_id is traceable to a specific
+# campaign/provider touch (ensure_attribution_link() was called with real
+# content_kind+content_id); a row with no link_id is an orphan beacon fire
+# with no traceable source — the profile most consistent with bot/replay
+# noise, not a claim that any specific orphan event IS fraudulent.
+#
+# _VERIFIED_STAGES are stages that cannot occur without a real backend
+# side effect (signup creates a users row; active_client requires payment)
+# — provenance discount does not apply to them regardless of attribution
+# presence, since the stage itself is already the verification.
+_VERIFIED_STAGES = frozenset({"signup", "active_client"})
+_DEFAULT_ORPHAN_DISCOUNT = 0.5
+
+
+async def _provenance_config(conn) -> Dict[str, Any]:
+    row = await conn.fetchrow(
+        "SELECT value FROM growth_config WHERE key = 'bwas_provenance'"
+    )
+    cfg: Dict[str, Any] = {
+        "orphan_discount": _DEFAULT_ORPHAN_DISCOUNT,
+        "verified_stages": sorted(_VERIFIED_STAGES),
+    }
+    if row and isinstance(row["value"], dict):
+        try:
+            cfg["orphan_discount"] = max(
+                0.0, min(1.0, float(row["value"].get("orphan_discount", _DEFAULT_ORPHAN_DISCOUNT)))
+            )
+        except (TypeError, ValueError):
+            pass
+        vs = row["value"].get("verified_stages")
+        if isinstance(vs, list) and vs:
+            cfg["verified_stages"] = [str(s) for s in vs]
+    return cfg
+
+
+def provenance_weighted_stage_score(
+    stage: str,
+    attributed_n: int,
+    orphan_n: int,
+    *,
+    stage_weight: float,
+    orphan_discount: float = _DEFAULT_ORPHAN_DISCOUNT,
+    verified_stages: Optional[frozenset] = None,
+) -> float:
+    """Pure function (unit-testable without DB): a stage's BWAS contribution
+    after provenance weighting. Verified stages count fully regardless of
+    attribution (the stage IS the verification); non-verified stages
+    discount their orphan (no attribution_link_id) count."""
+    vs = verified_stages if verified_stages is not None else _VERIFIED_STAGES
+    if stage in vs:
+        return stage_weight * (attributed_n + orphan_n)
+    return stage_weight * (attributed_n + orphan_n * orphan_discount)
+
 
 class BwasWorker:
     def __init__(self, db_pool, *, interval_s: int = 3600):
@@ -87,8 +146,13 @@ class BwasWorker:
         upserted = 0
         async with self.db_pool.acquire() as conn:
             weights = await self._weights(conn)
+            prov_cfg = await _provenance_config(conn)
+            orphan_discount = float(prov_cfg["orphan_discount"])
+            verified_stages = frozenset(prov_cfg["verified_stages"])
             for bucket in buckets:
                 bucket_end = bucket + timedelta(days=7)
+                # M4: split attributed (has attribution_link_id) vs orphan
+                # (no link_id) counts per stage, instead of a flat COUNT(*).
                 rows = await conn.fetch(
                     """
                     SELECT
@@ -96,7 +160,8 @@ class BwasWorker:
                         COALESCE(content_kind, 'marketing') AS content_kind,
                         COALESCE(content_id, 0) AS content_id,
                         stage,
-                        COUNT(*)::int AS n
+                        COUNT(*) FILTER (WHERE attribution_link_id IS NOT NULL)::int AS attributed_n,
+                        COUNT(*) FILTER (WHERE attribution_link_id IS NULL)::int AS orphan_n
                     FROM lead_events
                     WHERE created_at >= $1::date
                       AND created_at < $2::date
@@ -107,14 +172,27 @@ class BwasWorker:
                     bucket_end,
                 )
                 # group by audience/kind/id
-                groups: Dict[tuple, Dict[str, int]] = {}
+                groups: Dict[tuple, Dict[str, Dict[str, int]]] = {}
                 for r in rows:
                     key = (r["audience"], r["content_kind"], int(r["content_id"]))
-                    groups.setdefault(key, {})[r["stage"]] = int(r["n"])
-                for (audience, kind, cid), counts in groups.items():
+                    groups.setdefault(key, {})[r["stage"]] = {
+                        "attributed": int(r["attributed_n"]),
+                        "orphan": int(r["orphan_n"]),
+                    }
+                for (audience, kind, cid), stage_counts in groups.items():
                     score = 0.0
-                    for stage, n in counts.items():
-                        score += float(weights.get(stage, 0)) * n
+                    counts: Dict[str, int] = {}
+                    for stage, split in stage_counts.items():
+                        n_total = split["attributed"] + split["orphan"]
+                        counts[stage] = n_total
+                        score += provenance_weighted_stage_score(
+                            stage,
+                            split["attributed"],
+                            split["orphan"],
+                            stage_weight=float(weights.get(stage, 0)),
+                            orphan_discount=orphan_discount,
+                            verified_stages=verified_stages,
+                        )
                     await conn.execute(
                         """
                         INSERT INTO bwas_weekly (

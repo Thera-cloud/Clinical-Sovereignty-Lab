@@ -7,6 +7,17 @@ expression wrapping — all filtered through the content safety pipeline.
 
 SAFETY: All generated content passes through check_content_safety()
 before being queued or posted. This cannot be disabled.
+
+TRUST_LEDGER.md Entry 19 (Phase M / M3): check_content_safety() only
+blocks porn/CSAM/extreme-violence-instruction patterns — it has no
+concept of therapeutic overclaim risk (diagnosis claims, "cures"/
+guaranteed-outcome language, fabricated statistics, AGI overclaims,
+missing YMYL disclaimer, crisis mentions without 988 steering). That
+blocklist already exists (growth.brand_checklist.run_brand_checklist,
+built for the blog/email pipeline) but was never wired into the social
+pipeline this file drives. Every generation path below now also runs
+_check_therapeutic_advisory() alongside check_content_safety() — same
+"cannot be disabled" posture, same fail-blocks-publish contract.
 """
 
 import json
@@ -20,6 +31,30 @@ from app.config import settings
 from app.services.skyeye_expressions import check_content_safety, strip_pii
 
 logger = logging.getLogger("skyeye.content_generator")
+
+
+def _check_therapeutic_advisory(title: str, content: str) -> Dict[str, Any]:
+    """M3 (Phase M) — therapeutic-advisory sensitivity path for social
+    content. Reuses growth.brand_checklist's existing blocklist (built for
+    blog/email, never wired to the social pipeline) rather than
+    re-deriving a second blocklist with its own drift risk. Returns
+    {"ok": bool, "fails": [...]} — never raises, callers decide how to
+    surface a failure (mirrors check_content_safety's boolean contract).
+    """
+    try:
+        from app.services.growth.brand_checklist import run_brand_checklist
+
+        result = run_brand_checklist(title or "", content or "")
+        return {"ok": bool(result.get("passed")), "fails": result.get("fails") or []}
+    except Exception as e:
+        # Fail CLOSED for the hard-block class (matches check_content_safety's
+        # "cannot be disabled" posture) but never crash content generation on
+        # an import/runtime hiccup in a sibling module — log loudly instead.
+        logger.warning(
+            "skyeye_content_generator: therapeutic advisory check unavailable, "
+            "failing closed: %s", e,
+        )
+        return {"ok": False, "fails": ["advisory_check_unavailable"]}
 
 
 # =============================================================================
@@ -215,6 +250,19 @@ class SkyEyeContentGenerator:
                 "error": "Content failed safety filter — blocked",
             }
 
+        advisory = _check_therapeutic_advisory(topic, raw_content)
+        if not advisory["ok"]:
+            logger.warning(
+                "Generated content failed therapeutic advisory check for %s: %s",
+                platform, advisory["fails"],
+            )
+            return {
+                "content": raw_content,
+                "platform": platform,
+                "safe": False,
+                "error": f"advisory_blocked:{','.join(advisory['fails'])}",
+            }
+
         # Truncate to platform max length
         max_len = voice.get("max_length", 2000)
         if len(raw_content) > max_len:
@@ -243,6 +291,27 @@ class SkyEyeContentGenerator:
         Returns:
             Dict with: content, safe, platform
         """
+        # M7 (Phase M, R4 mirror) — comment_text/user_handle are the
+        # marketing domain's dirtiest input: raw text from an anonymous,
+        # unauthenticated external commenter, embedded directly into an
+        # LLM prompt below with only quote-wrapping (trivially escaped by
+        # closing the quote in the comment itself). Reuses
+        # ln7_injection_firewall.sanitize_notes() (already tuned to exclude
+        # the false-positive-prone pattern classes — see that module's own
+        # docstring) rather than building a second, divergent pattern bank
+        # for the same threat class in a different domain.
+        try:
+            from app.services.ln7_injection_firewall import sanitize_notes
+
+            comment_text = sanitize_notes(comment_text or "")["notes"]
+            user_handle = sanitize_notes(user_handle or "")["notes"]
+        except Exception as e:
+            logger.warning(
+                "skyeye_content_generator: injection firewall unavailable "
+                "for generate_reply, failing closed: %s", e,
+            )
+            return {"content": "", "error": "injection_firewall_unavailable", "safe": False}
+
         voice = PLATFORM_VOICE.get(platform, PLATFORM_VOICE["facebook"])
 
         memory_section = ""
@@ -291,12 +360,21 @@ class SkyEyeContentGenerator:
 
         raw_content = strip_pii(raw_content)
         is_safe = check_content_safety(raw_content)
+        advisory_fails: List[str] = []
+        if is_safe:
+            advisory = _check_therapeutic_advisory("", raw_content)
+            is_safe = advisory["ok"]
+            advisory_fails = advisory["fails"]
 
         return {
             "content": raw_content,
             "platform": platform,
             "safe": is_safe,
-            **({"error": "Reply failed safety filter"} if not is_safe else {}),
+            **(
+                {"error": f"advisory_blocked:{','.join(advisory_fails)}"}
+                if advisory_fails
+                else ({"error": "Reply failed safety filter"} if not is_safe else {})
+            ),
         }
 
     async def generate_cross_promo(self, source_platform: str,
@@ -336,13 +414,22 @@ class SkyEyeContentGenerator:
 
         raw_content = strip_pii(raw_content)
         is_safe = check_content_safety(raw_content)
+        advisory_fails: List[str] = []
+        if is_safe:
+            advisory = _check_therapeutic_advisory("", raw_content)
+            is_safe = advisory["ok"]
+            advisory_fails = advisory["fails"]
 
         return {
             "content": raw_content,
             "platform": target_platform,
             "safe": is_safe,
             "content_type": "cross_promo",
-            **({"error": "Cross-promo failed safety filter"} if not is_safe else {}),
+            **(
+                {"error": f"advisory_blocked:{','.join(advisory_fails)}"}
+                if advisory_fails
+                else ({"error": "Cross-promo failed safety filter"} if not is_safe else {})
+            ),
         }
 
     async def adapt_for_platform(self, content: str,
@@ -378,6 +465,11 @@ class SkyEyeContentGenerator:
 
         raw_content = strip_pii(raw_content)
         is_safe = check_content_safety(raw_content)
+        advisory_fails: List[str] = []
+        if is_safe:
+            advisory = _check_therapeutic_advisory("", raw_content)
+            is_safe = advisory["ok"]
+            advisory_fails = advisory["fails"]
 
         max_len = voice.get("max_length", 2000)
         if len(raw_content) > max_len:
@@ -387,7 +479,11 @@ class SkyEyeContentGenerator:
             "content": raw_content,
             "platform": target_platform,
             "safe": is_safe,
-            **({"error": "Adapted content failed safety filter"} if not is_safe else {}),
+            **(
+                {"error": f"advisory_blocked:{','.join(advisory_fails)}"}
+                if advisory_fails
+                else ({"error": "Adapted content failed safety filter"} if not is_safe else {})
+            ),
         }
 
     async def generate_session_summary(self, session_actions: List[Dict]) -> str:
@@ -477,6 +573,14 @@ RULES:
         is_safe = check_content_safety(raw)
         if not is_safe:
             return {"content": raw, "safe": False, "error": "Video script failed safety filter"}
+
+        advisory = _check_therapeutic_advisory(topic, raw)
+        if not advisory["ok"]:
+            return {
+                "content": raw,
+                "safe": False,
+                "error": f"advisory_blocked:{','.join(advisory['fails'])}",
+            }
 
         try:
             start = raw.find("{")

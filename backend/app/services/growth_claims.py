@@ -90,7 +90,12 @@ async def assert_claims_publishable(
         return {"ok": False, "error": "missing_claim_ids"}
     if not db_pool:
         return {"ok": False, "error": "no_db"}
-    unretractable = channel in ("email", "syndicate", "syndicated")
+    # "social" added for M2/publisher-gate-parity (TRUST_LEDGER.md Entry 19):
+    # a live social post is not automatically rewritten/deleted on retract
+    # (M2b: retract_surfaces() only cancels PENDING/scheduled queue rows and
+    # clears profile fields) — once posted, it behaves like sent email for
+    # this gate's purposes, so short_horizon claims must not reach it either.
+    unretractable = channel in ("email", "syndicate", "syndicated", "social")
     try:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(
@@ -155,14 +160,21 @@ async def retract_surfaces(db_pool, claim_id: str) -> Dict[str, Any]:
             for surface in smap.get("surfaces") or []:
                 sid = surface.get("id")
                 if sid == "skyeye_content_queue":
+                    # NOTE (Phase M / M3-M7 pass): skyeye_content_queue has no
+                    # `metadata` column — claim_ids for this table live inside
+                    # the existing `emotion_context` TEXT column (JSON blob,
+                    # same field _post_phase() parses for post_as). The prior
+                    # `metadata->>'claim_ids'` reference targeted a
+                    # non-existent column and would raise UndefinedColumnError
+                    # at runtime the first time this branch actually ran.
                     await conn.execute(
                         """
                         UPDATE skyeye_content_queue
                         SET status = 'cancelled'
                         WHERE status = ANY($1::text[])
                           AND (
-                            content ILIKE '%' || $2 || '%'
-                            OR (metadata->>'claim_ids') ILIKE '%' || $2 || '%'
+                            content_text ILIKE '%' || $2 || '%'
+                            OR COALESCE(emotion_context, '') ILIKE '%' || $2 || '%'
                           )
                         """,
                         surface.get("statuses") or ["pending", "scheduled"],

@@ -1473,6 +1473,40 @@ class SkyEyeSessionEngine:
                     pass
                 _post_as = _meta.get("post_as", "person")
 
+                # TRUST_LEDGER.md Entry 19 (Phase M / M2 publisher-gate
+                # parity): outreach_publisher.py has enforced this same
+                # growth_claims gate on cold-email content since W11; the
+                # SkyEye social post path (this function) never did, despite
+                # being the second path the Phase M spec explicitly names.
+                # Only gates content that actually carries claim_ids — most
+                # organic social posts assert nothing claim-worthy and are
+                # unaffected, matching outreach_publisher's own pattern.
+                _claim_ids = _meta.get("claim_ids") or []
+                if isinstance(_claim_ids, str):
+                    _claim_ids = [c.strip() for c in _claim_ids.split(",") if c.strip()]
+                if _claim_ids:
+                    try:
+                        from app.services.growth_claims import assert_claims_publishable
+
+                        _gate = await assert_claims_publishable(
+                            self.db_pool, _claim_ids, channel="social"
+                        )
+                    except Exception as _gate_exc:
+                        _gate = {"ok": False, "error": f"claim_gate_error:{_gate_exc}"}
+                    if not _gate.get("ok"):
+                        await generator.update_queue_status(
+                            item["id"], "failed",
+                            error_message=f"claim_gate:{_gate.get('error')}",
+                        )
+                        await self._log_action(
+                            platform, SessionState.POSTING, "post_blocked_claim_gate",
+                            detail={
+                                "summary": f"Blocked by claim gate: {_gate.get('error')}",
+                                "queue_id": item["id"],
+                            }
+                        )
+                        continue
+
                 result = await adapter.post_content(
                     text=content_text,
                     media_url=media_url,
