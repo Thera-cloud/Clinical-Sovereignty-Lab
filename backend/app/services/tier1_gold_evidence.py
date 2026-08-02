@@ -128,15 +128,24 @@ async def persist_kappa_evidence(
     safety_miss_count: int,
     per_quotient: Optional[Dict[str, Any]] = None,
     notes: str = "",
+    gold_locked: bool = True,
 ) -> int:
+    """
+    gold_locked=True: this run counts toward D.14b certification (locked
+    50-item worksheet). Certification gate queries filter WHERE gold_locked.
+    gold_locked=False: informational/held-out run (e.g. post-certification
+    validation against data the judge prompt was never scored against) —
+    logged for traceability but never counted by the certification gate.
+    """
     row = await conn.fetchrow(
         """INSERT INTO six_quotient_judge_kappa_evidence
            (judge_id, gold_locked, aggregate_kappa, n_items,
             per_quotient_json, notes, kappa_method, per_dimension_json,
             safety_veto_ok, safety_miss_count)
-           VALUES ($1, true, $2, $3, $4::jsonb, $5, $6, $7::jsonb, $8, $9)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, $9, $10)
            RETURNING id""",
         judge_id[:80],
+        bool(gold_locked),
         float(aggregate_kappa),
         int(n_items),
         json.dumps(per_quotient or {}),

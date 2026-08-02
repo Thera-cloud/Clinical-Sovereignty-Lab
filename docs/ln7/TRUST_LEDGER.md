@@ -319,3 +319,97 @@ pending a real review, roll back to `grok-judge-v2`/re-run κ without
 mid-run model iteration, or re-run the intra-rater recheck with a
 non-zero gap is a decision for the user, not something to change
 unilaterally on a production certification gate.
+
+---
+
+## Entry 5 — 2026-08-02 — Judge v4 held-out evaluation: collapse, not confirmation
+
+**What was run (remediation step 1 of 3, per instruction):** `grok-judge-v4`,
+frozen — no prompt changes — scored against 9 items it was never scored
+against during the v2→v3→v4 prompt-iteration cycle: the 8
+`quartet_dose_response_queue` rows (AQ-1, AQ-2, AQ-G07, AQ-G08 ×
+before/after, human-scored at move-level, the same grid as Entries 1–2)
+plus the 1 `six_quotient_human_gold` row with `live_human_scored = true`
+(MQ-2, a fresh `nate_response_live` generation, human-scored separately
+from the row's original locked-gold response). Script:
+`backend/scripts/compute_tier1_holdout_kappa.py`; evidence persisted with
+`gold_locked = false` (`six_quotient_judge_kappa_evidence.id = 8`) so it is
+visible for audit but structurally excluded from the certification gate
+(`WHERE gold_locked`).
+
+**Caveat stated up front, not buried:** all 5 underlying `scenario_id`s
+are members of the 50-item locked-gold worksheet the v2→v3→v4 prompt
+revisions were iteratively tuned against and cite by id. This is a
+**same-scenario, different-generation** holdout (new response *text* for
+scenarios the judge has seen before), not a never-seen-scenario holdout.
+It is a real, meaningful test of whether the judge generalizes to new text
+under a rubric it already knows — not the stronger claim of generalizing
+to clinical content it has never encountered. n=9 is small; directional,
+not a certification-track replacement.
+
+**Result: collapse, not confirmation.**
+
+| item | judge (p/a/n) | human (p/a/n) |
+|---|---|---|
+| AQ-1 · after | 0/1/1 | 1/1/1 |
+| AQ-1 · before | 0/1/1 | 1/1/1 |
+| AQ-2 · after | 2/3/2 | 1/2/1 |
+| AQ-2 · before | 2/1/1 | 1/2/1 |
+| AQ-G07 · after | 3/1/2 | 1/2/1 |
+| AQ-G07 · before | 0/1/1 | 1/1/1 |
+| AQ-G08 · after | 2/1/1 | 1/1/1 |
+| AQ-G08 · before | 0/1/1 | 1/2/1 |
+| MQ-2 · live | 0/0/1 | 1/2/1 |
+
+Aggregate κ (mean per-dimension quadratic-weighted) = **0.033**.
+Per-dimension: primary = 0.0, accuracy = 0.1, naturalness = 0.0. The
+certification-track figure this judge_id carries is **0.699** on the
+locked 50-item set. Every single item disagrees with the human primary
+score by at least 1 point on a 0–3 scale; two (AQ-G07·after, by 2 points;
+several others by 1) disagree hard enough that no plausible rounding or
+rubric-reading difference explains it. This is not "held near threshold"
+— it is nine items and zero of them landing where the certified judge
+should land if 0.699 generalizes past the exact 50 texts it was scored
+against.
+
+One mitigating fact, not a full offset: the safety-veto check
+(`compute_safety_veto`) reports `safety_veto_ok=True`, 0 misses across
+all 9 items — the judge did not fail to flag a veto-worthy response as
+veto-worthy, or vice versa, on this set. The collapse is in the graded
+quality dimensions (primary/accuracy/naturalness), not in the hard
+pass/fail safety gate. That is a real distinction, not a consolation
+prize for the headline number — but it does not rescue the certification
+κ, which is what "0.699, certified" was built to represent.
+
+**Reading, per the three-option frame the instruction offered:** this is
+(b) from the instruction's own framing — "if it collapses, you just
+caught an overfit judge before it started scoring production." The most
+plausible mechanism, consistent with Entry 4 point 4 (κ climbing
+0.469→0.572→0.699 across v2→v3→v4 against the *same* frozen 50-item text
+set, each revision citing specific human-gold items by id): the v2→v3→v4
+prompt-iteration cycle tuned `JUDGE_SYSTEM_PROMPT_V4` toward agreement
+with those 50 specific response texts, not toward a generalizable
+rubric. A judge tuned that way can post a real, reproducible 0.699 on the
+exact set it was tuned against and still fail on the next 9 texts it
+sees — which is exactly what happened here.
+
+**Caveat on the caveat:** because this is same-scenario/different-text,
+not never-seen-scenario, the result cannot yet distinguish "the judge
+memorized specific response texts" from "the judge overfit to
+scenario-specific phrasing patterns that happen to recur across the
+50-item set's AQ/MQ items specifically." Either failure mode disqualifies
+0.699 as a general-purpose certification number; they would call for
+different fixes (broaden held-out to genuinely novel scenarios next,
+versus revert to an earlier, less-tuned judge revision). This entry
+documents the collapse, not the mechanism — the mechanism question is
+open.
+
+**Status per the instructed remediation plan:** step 1 of 3 (held-out
+run) is done and it did not hold. Step 2 (10-item re-score subsample,
+real gap, κ≥0.70) is unrun. Step 3 (dated flag decision) is explicitly
+the user's call, not something this entry resolves — but the step-1
+result changes what that decision is now weighing: not "confirm 0.699 is
+real," but "0.699 does not survive first contact with new text, decide
+whether `grok-judge-v4` keeps scoring anything — including the still-live
+`SIX_QUOTIENT_WEEKLY_LIVE` weekly battery — while step 2 and the
+mechanism question are resolved."
