@@ -140,6 +140,7 @@ async def _main() -> int:
             n_items=len(used),
             safety_veto_ok=ok,
             safety_miss_count=miss_n,
+            safety_miss_ids=miss_ids,
             notes=f"compute_tier1_gold_kappa; misses={miss_ids}",
         )
         print(f"OK: evidence_id={eid}")

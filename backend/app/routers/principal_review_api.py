@@ -903,6 +903,7 @@ async def gold_kappa_ingest(
             n_items=len(used),
             safety_veto_ok=ok,
             safety_miss_count=miss_n,
+            safety_miss_ids=miss_ids,
             notes=(body.notes or f"ingest; misses={miss_ids}")[:2000],
         )
     return {
@@ -1042,6 +1043,7 @@ async def gold_kappa_compute(
             n_items=len(used),
             safety_veto_ok=ok,
             safety_miss_count=miss_n,
+            safety_miss_ids=miss_ids,
             notes=f"compute API sync; misses={miss_ids}",
         )
     return {

@@ -117,6 +117,118 @@ def compute_safety_veto(
     return (len(misses) == 0), len(misses), misses
 
 
+_VALID_JUDGE_ROLES = (
+    "unrated",
+    "quality_scorer",
+    "safety_veto_screener_only",
+    "suspended",
+)
+
+
+async def get_judge_role(conn, judge_id: str) -> Dict[str, Any]:
+    """
+    Current certification-vs-screener role state for judge_id
+    (TRUST_LEDGER.md Entry 12; migration 319 six_quotient_judge_role).
+
+    Fails closed: a judge with no row (or a lookup error upstream) is
+    reported as 'unrated' / not-certified-for-anything, never assumed
+    trustworthy by omission.
+    """
+    row = await conn.fetchrow(
+        """SELECT judge_id, role, quality_certified, veto_screener_certified,
+                  veto_check_total, veto_miss_total, suspended_at,
+                  suspended_reason
+           FROM six_quotient_judge_role WHERE judge_id = $1""",
+        judge_id,
+    )
+    if not row:
+        return {
+            "judge_id": judge_id,
+            "role": "unrated",
+            "quality_certified": False,
+            "veto_screener_certified": False,
+            "veto_check_total": 0,
+            "veto_miss_total": 0,
+            "suspended_at": None,
+            "suspended_reason": None,
+        }
+    return dict(row)
+
+
+async def apply_veto_auto_revert(
+    conn,
+    *,
+    judge_id: str,
+    safety_miss_count: int,
+    evidence_id: int,
+    miss_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Auto-revert condition attached to the TRUST_LEDGER.md Entry 12 flag
+    decision (CEO, 2026-08-02): a judge currently certified as
+    'safety_veto_screener_only' is immediately suspended on ANY veto miss,
+    pending human review. This is structural, not a script-level reminder
+    — it is called from persist_kappa_evidence on every kappa-evidence
+    insert, so no future evidence-writing script can silently skip it.
+
+    No-ops (returns reverted=False) for judges with no role row yet —
+    there is no screener certification to revert, and get_judge_role's
+    'unrated' default already refuses to treat such a judge as certified
+    for anything.
+    """
+    row = await conn.fetchrow(
+        "SELECT role FROM six_quotient_judge_role WHERE judge_id = $1",
+        judge_id,
+    )
+    if not row:
+        return {"reverted": False, "reason": "no_role_row"}
+
+    current_role = row["role"]
+    misses = int(safety_miss_count or 0)
+
+    if current_role == "safety_veto_screener_only" and misses > 0:
+        reason = (
+            f"veto miss on evidence_id={evidence_id} "
+            f"(scenario_ids={list(miss_ids or [])}) — auto-revert per "
+            f"TRUST_LEDGER.md Entry 12 condition 1"
+        )
+        await conn.execute(
+            """UPDATE six_quotient_judge_role
+               SET role = 'suspended',
+                   suspended_at = now(),
+                   suspended_reason = $2,
+                   last_evidence_id = $3,
+                   veto_check_total = veto_check_total + 1,
+                   veto_miss_total = veto_miss_total + $4,
+                   updated_at = now()
+               WHERE judge_id = $1""",
+            judge_id,
+            reason,
+            evidence_id,
+            misses,
+        )
+        logger.error(
+            "JUDGE AUTO-REVERT: %s suspended as safety-veto screener — %s",
+            judge_id,
+            reason,
+        )
+        return {"reverted": True, "reason": reason}
+
+    if current_role in ("safety_veto_screener_only", "quality_scorer"):
+        await conn.execute(
+            """UPDATE six_quotient_judge_role
+               SET veto_check_total = veto_check_total + 1,
+                   veto_miss_total = veto_miss_total + $2,
+                   last_evidence_id = $3,
+                   updated_at = now()
+               WHERE judge_id = $1""",
+            judge_id,
+            misses,
+            evidence_id,
+        )
+    return {"reverted": False, "reason": None}
+
+
 async def persist_kappa_evidence(
     conn,
     *,
@@ -129,6 +241,7 @@ async def persist_kappa_evidence(
     per_quotient: Optional[Dict[str, Any]] = None,
     notes: str = "",
     gold_locked: bool = True,
+    safety_miss_ids: Optional[List[str]] = None,
 ) -> int:
     """
     gold_locked=True: this run counts toward D.14b certification (locked
@@ -136,6 +249,11 @@ async def persist_kappa_evidence(
     gold_locked=False: informational/held-out run (e.g. post-certification
     validation against data the judge prompt was never scored against) —
     logged for traceability but never counted by the certification gate.
+
+    Also applies the Entry 12 veto auto-revert check (see
+    apply_veto_auto_revert) so any future run that records a veto miss
+    against a judge in the safety_veto_screener_only role suspends it
+    immediately — this cannot be skipped by a caller.
     """
     row = await conn.fetchrow(
         """INSERT INTO six_quotient_judge_kappa_evidence
@@ -155,7 +273,29 @@ async def persist_kappa_evidence(
         bool(safety_veto_ok),
         int(safety_miss_count),
     )
-    return int(row["id"])
+    evidence_id = int(row["id"])
+    try:
+        await apply_veto_auto_revert(
+            conn,
+            judge_id=judge_id[:80],
+            safety_miss_count=safety_miss_count,
+            evidence_id=evidence_id,
+            miss_ids=safety_miss_ids,
+        )
+    except Exception as e:
+        # Non-fatal: the evidence row itself is the source of truth and is
+        # already committed by the time this runs; a role-table hiccup
+        # must not un-write real evidence. Logged loudly since a silent
+        # failure here would defeat condition 1.
+        logger.error(
+            "veto auto-revert check failed for judge_id=%s evidence_id=%s "
+            "(evidence row IS persisted; role state may be stale — "
+            "investigate immediately): %s",
+            judge_id,
+            evidence_id,
+            e,
+        )
+    return evidence_id
 
 
 async def persist_rater_reliability(

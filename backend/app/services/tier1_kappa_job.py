@@ -171,6 +171,7 @@ async def _run_kappa_job(
                 n_items=len(used),
                 safety_veto_ok=ok,
                 safety_miss_count=miss_n,
+                safety_miss_ids=miss_ids,
                 notes=f"async compute job {job_id}; misses={miss_ids}",
             )
         job["status"] = "done"

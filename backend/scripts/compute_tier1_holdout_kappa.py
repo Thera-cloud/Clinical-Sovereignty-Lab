@@ -212,6 +212,7 @@ async def _main() -> int:
             n_items=len(used),
             safety_veto_ok=ok,
             safety_miss_count=miss_n,
+            safety_miss_ids=miss_ids,
             notes=(
                 f"HELD-OUT eval (D.14b remediation step 1/3, not certification "
                 f"evidence): {n_quartet} quartet dose-response rows + {n_live} "

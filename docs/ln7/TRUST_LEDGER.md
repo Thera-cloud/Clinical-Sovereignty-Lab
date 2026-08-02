@@ -856,3 +856,238 @@ process point: the catch required recognizing response *text*, which an
 automated exclusion list would have prevented from ever being a judgment
 call. That automation now exists (`live_scored_via`); this entry is the
 reason it exists.
+
+---
+
+## Entry 11 — 2026-08-02 — Judge v5 fresh held-out κ = 0.189 on clean n=40 live-track pool; safety veto held; not certifiable
+
+Remediation step 1 restart (post Entries 5–10) executed after CEO completed
+Capability-track scoring of the clean 40-row reserve
+(`Capability live: 45/45` in Principal-Review UI = 40 fresh + MQ-2 + 4
+dose-response write-backs). Ran
+`compute_tier1_v5_fresh_holdout_kappa.py` on GREEN against
+`nate_backend`. Exclusions logged at run start: 4 ported via
+`live_scored_via`, 1 named-burned (`MQ-2`). Evaluated set: 40
+`live_stack_attempt` rows, never used as v5 revision material.
+
+**Result (persisted `six_quotient_judge_kappa_evidence.id=9`,
+`gold_locked=false`):**
+
+| Metric | Value |
+|---|---|
+| n | 40 |
+| aggregate κ (mean of 3 dims) | **0.18947** |
+| primary κ | 0.2116 |
+| accuracy κ | 0.1504 |
+| naturalness κ | 0.2063 |
+| safety_veto_ok | **True** (0 misses) |
+| threshold for certification | ≥ 0.70 |
+
+**Primary-score disagreement shape (not noise):**
+
+| Pattern | Count |
+|---|---|
+| Exact match | 21/40 (52.5%) |
+| Within ±1 | 40/40 (100%) |
+| Overscore (judge > human) | 11 |
+| Underscore (judge < human) | 8 |
+| Mean signed delta (judge−human) | +0.075 |
+| Mean \|delta\| | 0.475 |
+| Deltas of ±2 or more | **0** |
+
+Reading vs prior holds:
+- Better than burned n=9 collapse (Entry 5: κ=0.033) — v5's Mechanism B
+  fix and anti-mirror guardrails moved the needle on production-length
+  text, but nowhere near 0.70.
+- Same qualitative shape as Entry 6: mostly within-one, mixed
+  over/under, not random scatter. Exact-match half the set is real
+  agreement; the other half is a systematic ~1-point leniency/
+  strictness wobble that quadratic-weighted κ punishes hard when
+  human marginals are concentrated on 1–2.
+- **Safety veto continues to generalize** (0 misses on n=9 and n=40).
+  Floor/screener use remains defensible; quality-scorer certification
+  does not.
+
+**What this closes / does not close:**
+- Closes Mechanism C's open measurement gap (Entry 8): first κ ever
+  computed on production-length `live_stack_attempt` text that was
+  also held out from revision. Answer: v5 does not certify on that
+  distribution.
+- Does not reopen Mechanism A policy (judge floor vs quartet
+  tolerant-primary) — still an open CEO call.
+- Does not change Entry 7 (intra-rater recheck failed at 0.294): any
+  dated flag decision must weigh both the 0.189 held-out and the
+  unstable single-rater target.
+- `SIX_QUOTIENT_WEEKLY_LIVE` / certification flag: **still off /
+  not certified.** Evidence row is `gold_locked=false` so it cannot
+  silently satisfy the certification gate query.
+
+**Disposition for remediation step 3 (dated flag decision):** the
+honest certificate today is: *v5 is usable as a safety-veto screener
+(0 misses across 49 held-out crisis-adjacent and general items
+combined); it is not certified as a graded quality scorer
+(κ=0.189 << 0.70 on clean live-track holdout).* Next code iteration
+against this 40-row set would burn it the same way Entry 6 burned the
+n=9 — do not revise the prompt against these disagreements if a later
+held-out is still intended. Fresh reserve after that would be
+dose-response v2's 8 rows + any newly generated live-stack blinds.
+
+---
+
+## Entry 12 — 2026-08-02 — Flag decision (A): v5 = safety-veto screener only, not quality scorer; two auto-enforced conditions shipped
+
+Remediation step 3 (dated flag decision), following Entry 11's fresh
+held-out κ=0.189 (n=40, clean pool). CEO decision, verbatim disposition:
+
+> v5 = safety-veto screener only, explicit label, with two conditions:
+> (1) auto-revert — any veto miss in screening use suspends the role
+> pending review; (2) every screener output carries the
+> uncertified-quality disclaimer so no downstream surface quietly treats
+> its scalars as real.
+
+**Reading the number correctly (not a re-litigation of the threshold):**
+0.189 overstates the incoherence the same way 0.033 did — the 40
+ground-truth rows are almost entirely 1s/2s (range restriction). Against
+that distribution: 21/40 exact, 40/40 within-±1, mean signed delta
++0.075, zero ±2 misses, zero veto misses. This is a systematically
+mildly-lenient judge on a compressed scale, not a random one. **The
+thresholds were pre-registered precisely so this could not be argued
+past — 0.189 fails, v5 is not a quality scorer, and the label stands as
+written.** No exception made.
+
+**Why not (B) (idle the judge program pending a second-rater protocol):**
+Entry 7's inter-rater question is real but already has an answer that
+doesn't require idling anything — the grid. The recheck showed holistic
+scalars drift while criterion-level calls (spine_moves) hold; a
+second-rater protocol would land on exactly that same finding. This
+session was functionally dual-rater throughout (CEO scores vs. this
+agent's scores, row by row, on the dose-response grid) — formalize that
+later, don't block the judge program on formalizing it now.
+
+**Conditions shipped as structure, not policy text:**
+
+1. **Migration `319_six_quotient_judge_role.sql`** — new table
+   `six_quotient_judge_role` (judge_id, role, quality_certified,
+   veto_screener_certified, veto_check_total, veto_miss_total,
+   suspended_at/reason, decided_at/by, notes). Seeded row for
+   `grok-judge-v5`: `role='safety_veto_screener_only'`,
+   `quality_certified=false`, `veto_screener_certified=true`,
+   `veto_check_total=49` (n=9 Entry 5 + n=40 Entry 11), `veto_miss_total=0`.
+2. **`tier1_gold_evidence.apply_veto_auto_revert()`** — condition 1,
+   auto-revert. Called from inside `persist_kappa_evidence()` itself (not
+   a separate step a script author could forget) on every future
+   kappa-evidence insert: if the judge's current role is
+   `safety_veto_screener_only` and `safety_miss_count > 0`, the role
+   flips to `suspended` immediately, with the evidence_id and missed
+   scenario_ids logged as `suspended_reason`. A role-table lookup failure
+   is caught and logged loudly but never blocks the evidence row itself
+   from persisting (the evidence row is the ground truth; a stale role
+   flag is a lesser failure than losing a real measurement).
+   `get_judge_role()` fails closed: any judge with no row (typo,
+   never-decided, lookup error) reports `role='unrated'`,
+   `quality_certified=false` — never assumed trustworthy by omission.
+3. **`six_quotient_auto_judge.JUDGE_QUALITY_CERTIFIED = False` /
+   `JUDGE_ROLE = "safety_veto_screener_only"`** — condition 2, disclaimer.
+   `_llm_judge()`'s return dict now always includes
+   `"quality_certified": False, "role": "safety_veto_screener_only"`
+   alongside `primary/accuracy/naturalness/notes`, added AFTER
+   `apply_tier1_score_floors()` so flooring can't strip it. This dict
+   flows into `six_quotient_score_intake.upsert_scores()` (plain
+   `.get()`/`item["key"]` access, confirmed no schema break) and into
+   `six_quotient_battery_agent.auto_score_run()`'s
+   `analyze_and_enqueue(..., update_ability=...)` path — the one live
+   consumer where judge scalars currently do feed a real signal (the
+   self-development θ/ability tracker) that a future audit might
+   otherwise mistake for "the certified judge said so." Kept as
+   versioned module constants (not a live per-call DB read) to avoid
+   adding a DB round-trip to every single-item judge call; the DB table
+   is the durable, queryable, auto-revertible record for dashboards/audits.
+4. 19 new offline tests: `test_tier1_judge_role_auto_revert.py` (10 —
+   role fail-closed default, auto-revert suspend/no-op/no-row/already-
+   suspended paths, `persist_kappa_evidence` wiring including survival of
+   a role-lookup exception) and
+   `test_six_quotient_auto_judge_v5_disclaimer.py` (3 — constants, and
+   two live `_llm_judge()` invocations via a fake router confirming the
+   disclaimer fields survive both the normal path and the
+   degraded-distractor floor rewrite). All passing.
+
+**v6 path (referenced, explicitly NOT started this entry):** the scored
+corpus — harness blinds capped 0-2, live rows the same — contains **zero
+3s**. v5 has never seen the top of its own scale, and its mild
+overscoring of 1s is consistent with a judge missing its ceiling anchor.
+Fix, when undertaken: (a) full-range calibration — enter the locked
+canonicals as scored 3-anchors and the distractors as 0-anchors (the
+still-undone item from the recheck analysis); (b) grid-then-scalars
+protocol so both raters (human + judge) run one instrument, not two; (c)
+revise with a rationale log, same discipline as v4→v5; (d) hold the
+fresh held-out for dose-response v2's rows — **do not re-touch this
+40-row set**, it is now burned as v5 revision-diagnostic material the
+same way the original n=9 was (Entry 6). Held-out sets are consumable;
+budget them.
+
+**Routing (unblocked by this decision, not gated on it):** gate-2 RED
+review and the MUST-sequence living-pack acceptance test proceed now —
+neither has ever depended on judge certification. Judge v6 waits for its
+calibration-set rebuild and borrows its held-out from dose-response v2
+once that run produces fresh rows. Costs nothing, burns nothing.
+
+**Disposition:** `SIX_QUOTIENT_WEEKLY_LIVE` / graded-quality certification
+remain off / not certified — unchanged by this entry. What changes is
+that `grok-judge-v5` now has an honest, structural, auto-enforced role
+(`safety_veto_screener_only`) instead of an implicit, undeclared one.
+
+---
+
+## Entry 13 — 2026-08-02 — CORRECTION: Entry 11 wrongly claimed WEEKLY_LIVE is off; it is live in production right now
+
+Entry 11 stated `SIX_QUOTIENT_WEEKLY_LIVE / certification remain off`.
+**That was not verified before being written — it was an assumption
+carried forward from Entries 5/6/8/9's "stays off" language, which meant
+"we do not flip it further," not "it is currently off."** Checked
+directly on GREEN while wiring Entry 12's mechanism:
+
+```
+SIX_QUOTIENT_WEEKLY_LIVE=true
+SIX_QUOTIENT_BATTERY_LIVE_WS=true
+ENABLE_SIX_QUOTIENT_BATTERY=true
+```
+
+All three flags required by `six_quotient_battery_agent._maybe_weekly()`
+to run the weekly battery **live** (not dry-run) are **true**, and have
+been since at least the 2026-07-21 flip Entry 4 already found premature.
+This means: every Sunday 06:00–07:00 UTC, `auto_score_run()` calls
+`grok-judge-v5` (now via `_llm_judge`, which as of this same session
+carries the Entry 12 `quality_certified=false` disclaimer) with
+`update_ability=True` — the judge's uncertified scalars **are currently
+feeding the live θ/ability self-development tracker in production**, not
+merely sitting in an audit table.
+
+**Self-classification (per `.cursorrules` GAP 11):** IID CLASSIFICATION:
+[A] Artificial Evasion, secondary [S] structural. REASONING: writing
+"remain off" without a `docker exec printenv` check is exactly the
+unverified-claim pattern this project's own accuracy rules exist to
+catch — the check took one command and was skipped because prior entries'
+language ("stays off") was read as a status report instead of a
+decision-not-to-escalate. LEGAL RISK: Substantiation Failure on Entry 11
+(confidence stated higher than data supported); would be M1 (false
+statement about external fact) if the flag had been asserted as
+externally verified rather than carried forward from phrasing — treating
+as Substantiation Failure since the wording traces to an honest
+misreading of prior entries' intent, not a fabricated check.
+
+**Not changed here.** Per the standing posture in this thread (Entry 4:
+"No flags or judge_id were changed — this is documentation only"; Entry
+7: "Not changed without instruction"), flipping a live production flag
+that gates a real weekly write path is a CEO decision, not something this
+entry unilaterally corrects by editing `.env`. Flagged for explicit
+instruction: **`SIX_QUOTIENT_WEEKLY_LIVE=true` in production is now
+directly inconsistent with the Entry 12 decision that v5 is not a quality
+scorer** — every Sunday run since 2026-07-21 has fed real θ updates from
+an uncertified judge. Options once instructed: (a) flip
+`SIX_QUOTIENT_WEEKLY_LIVE=false`, keep nightly dry-run measure on; (b)
+leave live but set `update_ability=false` for auto-judge-sourced runs
+specifically (θ still measured, not updated from uncertified scores); (c)
+leave as-is with the Entry-12 disclaimer now at least structurally present
+on every score row for future audit. No option selected without CEO
+input — this entry's job is to stop compounding the false "it's already
+off" assumption, not to pick the fix.

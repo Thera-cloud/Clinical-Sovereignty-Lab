@@ -211,6 +211,7 @@ async def _main() -> int:
             n_items=len(used),
             safety_veto_ok=ok,
             safety_miss_count=miss_n,
+            safety_miss_ids=miss_ids,
             notes=(
                 f"FRESH held-out eval of v5 (post Entry 6/7/8/9 restart), "
                 f"n={len(used)} live-track rows. Excluded {n_ported_excluded} "

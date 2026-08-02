@@ -1,8 +1,8 @@
 # Tier 1 Clinical Competence → ASI Research Journey
 
 **Status:** Operational path (not a marketing claim)  
-**Updated:** 2026-08-02 (on-gold κ PASS reclassified — see correction below; do not cite line 16 alone)  
-**Related:** `docs/AGENTIC_ROLLOUT_CHECKLIST.md` Track D.12–D.14b, `docs/AGENTIC_WIRING_INVENTORY.md`, `docs/ln7/TRUST_LEDGER.md` Entries 4–6  
+**Updated:** 2026-08-02 (flag decision landed — v5 = safety-veto screener only; see correction below; do not cite line 16 alone)  
+**Related:** `docs/AGENTIC_ROLLOUT_CHECKLIST.md` Track D.12–D.14b, `docs/AGENTIC_WIRING_INVENTORY.md`, `docs/ln7/TRUST_LEDGER.md` Entries 4–13  
 **Preferred name:** Tier 1 clinical competence (avoid “AGI-class” / “Narrow AGI” until D.14b then Tier-2 exit)
 
 ### Correction (2026-08-02) — read before citing the κ row below
@@ -10,18 +10,50 @@
 The 2026-07-26 "κ gate cleared" line was a checkbox-semantics failure
 (`TRUST_LEDGER.md` Entry 4): the on-gold PASS is real (aggregate≈0.699,
 evidence_id=7) but on-gold agreement is not certification, and no
-held-out check had been run. It has now been run: `grok-judge-v4`
-against 9 held-out rows the tuning never saw collapsed to κ≈0.033
-(evidence_id=8, gold_locked=false — Entry 5). Mechanism analysis (Entry
-6) found this was not diffuse overfit but two describable causes: a
-literal-lexicon escalation bug (fixed in `grok-judge-v5`, now
-`DEFAULT_EVALUATOR`) and a rubric-definition mismatch between two
-scoring instruments (flagged, not yet resolved). The one dimension with
-a hard gate — safety-veto — held at 0 misses on the same held-out set.
-**Certification remains open** pending: (1) a held-out re-run of v5
-against a *fresh* set (the 9 diagnostic rows are burned), and (2) a
-10-item re-score reliability check, κ≥0.70. Do not present the row
-below as "certified" without both.
+held-out check had been run. Two held-out runs have now been executed,
+both against clean (never-revised-against) samples: `grok-judge-v4`
+against n=9 collapsed to κ≈0.033 (evidence_id=8, Entry 5); after
+Mechanism A/B fixes shipped as `grok-judge-v5`, a fresh n=40 clean
+live-track pool still only reached κ≈0.189 (evidence_id=9, Entry 11) —
+better, still far below the pre-registered 0.70 threshold. The
+disagreement in both runs is range-restricted and mostly within-one
+(21/40 exact, 40/40 within-±1 on the n=40 run), not incoherent — but the
+threshold was pre-registered precisely so a below-threshold result could
+not be argued past.
+
+**FLAG DECISION (2026-08-02, `TRUST_LEDGER.md` Entry 12):**
+`grok-judge-v5` is certified **ONLY as a safety-veto screener**, not as
+a quality scorer. Its safety-veto component has never missed — 0-for-49
+across both held-out runs (n=9 + n=40) and 0 misses across all 7 on-gold
+certification runs. Two conditions shipped as code, not policy text:
+(1) **auto-revert** — `six_quotient_judge_role` table (migration 319) +
+`tier1_gold_evidence.apply_veto_auto_revert()` automatically suspends the
+screener role the moment any future evidence run records a veto miss;
+(2) **disclaimer** — every `_llm_judge()` output now carries
+`quality_certified=false, role="safety_veto_screener_only"`
+(`six_quotient_auto_judge.py`), so no downstream consumer can quietly
+treat the scalars as certified. **Quality-scorer certification remains
+open** pending a v6 rebuild: the scored corpus has never contained a 3
+(no ceiling anchor), so v5 has never seen what "masterful" looks like —
+v6 requires full-range calibration (canonicals as 3-anchors, distractors
+as 0-anchors) plus a grid-then-scalars protocol, with its held-out
+borrowed from dose-response v2's rows (this n=40 set is now burned as
+revision-diagnostic material, same as the original n=9).
+
+**CORRECTION TO THIS CORRECTION (`TRUST_LEDGER.md` Entry 13):** an
+earlier draft of this section (and Entry 11) stated
+`SIX_QUOTIENT_WEEKLY_LIVE` was off. That was never verified —
+`docker exec nate_backend printenv` on GREEN shows
+`SIX_QUOTIENT_WEEKLY_LIVE=true`, `SIX_QUOTIENT_BATTERY_LIVE_WS=true`,
+`ENABLE_SIX_QUOTIENT_BATTERY=true`, all three required for the weekly
+battery to run **live** (not dry-run) every Sunday 06:00–07:00 UTC,
+feeding `grok-judge-v5`'s uncertified scalars into the live θ/ability
+tracker via `update_ability=True`. This has been true since at least
+2026-07-21. **Not corrected in this edit** — flipping a live production
+flag is a CEO decision (see Entry 13), not something a documentation
+pass unilaterally resolves. Flagged as an open, currently-live
+inconsistency between "v5 is not a quality scorer" and "v5's quality
+scores are updating a live ability signal every week."
 
 ### Path note (2026-07-26)
 
@@ -31,10 +63,10 @@ below as "certified" without both.
 |------|--------|
 | D.14a infra | Done |
 | Gold locked + auth scored 50/50 + degraded≥8 | Done (GREEN) |
-| κ vs locked gold | **PASS on-gold only** aggregate≈0.699 (evidence_id=7, `grok-judge-v4`); safety_veto_ok; never edit gold. **Not certification** — held-out collapsed to κ≈0.033 (evidence_id=8); see Correction above and `TRUST_LEDGER.md` Entries 4–6. |
-| Rater reliability ≥0.70 on ≥15 | **PASS** (intra_rater id=2, QWK≈0.732, meets_threshold) |
+| κ vs locked gold | **PASS on-gold only** aggregate≈0.699 (evidence_id=7, `grok-judge-v4`); safety_veto_ok; never edit gold. **Not certification** — both held-out runs failed threshold (v4 n=9 κ≈0.033 evidence_id=8; v5 n=40 κ≈0.189 evidence_id=9). **Flag decision landed 2026-08-02**: v5 = safety-veto screener only (0-for-49 held-out veto misses), quality certification stays open pending v6 full-range calibration. See Correction above and `TRUST_LEDGER.md` Entries 4–12. |
+| Rater reliability ≥0.70 on ≥15 | **FAILED on real 7-day gap** — intra_rater id=3, QWK≈0.294 (Entry 7); the earlier id=2 same-day 0.732 pass is inadmissible per Entry 4 (38-min gap tests memory, not reliability). Rater shows 92%-directional stricter-over-time drift on primary/accuracy/naturalness scalars even within one instrument. |
 | Qualifying nights ≥7 | **WAIVED** 2026-07-26 (`TIER1_SOAK_WAIVED=true`; was 4/7 — calendar fuse, not skill). Nightly measure remains on. |
-| `WEEKLY_LIVE` | **ON** GREEN 2026-07-26 (CEO/self-dev reviewed; Sunday 06–07 UTC live WS; AQ live_focus until next CEO APPROVE) |
+| `WEEKLY_LIVE` | **ON in production right now** (`SIX_QUOTIENT_WEEKLY_LIVE=true` verified on GREEN 2026-08-02, `TRUST_LEDGER.md` Entry 13) — **inconsistent with the 2026-08-02 flag decision** that v5 is not a certified quality scorer; feeding uncertified scalars into the live θ/ability tracker every Sunday since ≥2026-07-21. Open CEO decision on whether to flip off, gate `update_ability` separately, or leave with the new disclaimer fields as the interim mitigant. |
 | Tier 2 Narrow AGI | **SUBSTRATE CERTIFIED (2026-07-26)** + harden path (v2 surface_hits, multi-family, Queen FIELD CLI, helix hint). Not open-domain AGI. |
 | Tier 3 AGI | **OPEN / Track F kickoff (2026-07-26)** — novel problems + gated self-improve; sovereign train + formal verify. No unsupervised GREEN weight writes. Coding-domain instance: **Little Nate 7** (Track F.3 in build) — not clinical Tier progress. |
 

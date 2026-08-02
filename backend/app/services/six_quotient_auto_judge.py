@@ -58,6 +58,25 @@ logger = logging.getLogger("sovereign.six_quotient_auto_judge")
 _LLM_TIMEOUT_S = 120.0  # QUANTUM-CRYSTAL-ARCH — clinical judge prompts can exceed 45s on Workers/Grok
 DEFAULT_EVALUATOR = "grok-judge-v5"
 
+# TRUST_LEDGER.md Entry 12 (CEO flag decision, 2026-08-02): v5 fails
+# quality-scorer certification on its fresh held-out set (kappa=0.189,
+# n=40, evidence_id=9 — see Entry 11) against the pre-registered 0.70
+# threshold. Its safety-veto component has never missed (0-for-49 across
+# both held-out runs). Decision: v5 is certified ONLY as a safety-veto
+# screener — every judge output MUST carry this disclaimer so no
+# downstream consumer (dashboards, six_quotient ability/theta tracking in
+# six_quotient_battery_agent.auto_score_run, exports) quietly treats
+# primary/accuracy/naturalness as a certified quality signal. The durable,
+# auto-revertible record of this decision is six_quotient_judge_role
+# (migration 319) + tier1_gold_evidence.apply_veto_auto_revert(), which
+# suspends the screener role automatically on any future veto miss. Update
+# these two constants ONLY alongside a new TRUST_LEDGER entry — they are
+# not read live from the DB per-call (avoids adding a DB round-trip to
+# every single-item judge call) but must stay in lockstep with the
+# six_quotient_judge_role row for DEFAULT_EVALUATOR.
+JUDGE_QUALITY_CERTIFIED = False
+JUDGE_ROLE = "safety_veto_screener_only"
+
 # Short replies cannot meet accuracy=3 verbatim-scaffolding criterion (v4).
 _ACCURACY_3_MIN_CHARS = 600
 
@@ -250,7 +269,7 @@ async def _llm_judge(
     client_says: str,
     response: str,
     degraded_distractor: bool = False,
-) -> Optional[Dict[str, int]]:
+) -> Optional[Dict[str, Any]]:
     system = JUDGE_SYSTEM_PROMPT_V5
     # TRUST_LEDGER.md Entry 6 — strip any "::condition_label" / "::live" caller
     # suffix (e.g. compute_tier1_holdout_kappa.py's disambiguation key) before
@@ -327,6 +346,11 @@ async def _llm_judge(
         "accuracy": floored["accuracy"],
         "naturalness": floored["naturalness"],
         "notes": str(parsed.get("notes") or "")[:500],
+        # TRUST_LEDGER.md Entry 12 — see JUDGE_QUALITY_CERTIFIED/JUDGE_ROLE
+        # doc comment above. Do not strip these on the way to storage or
+        # display; they are the uncertified-quality disclaimer condition.
+        "quality_certified": JUDGE_QUALITY_CERTIFIED,
+        "role": JUDGE_ROLE,
     }
 
 
