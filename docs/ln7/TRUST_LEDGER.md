@@ -536,3 +536,234 @@ place for an unpatched judge to be quietly scoring live theta trends.
 Interim division of labor from Entry 5 stands: safety-veto (0 misses
 here too) may be usable now; graded quality scoring is not, and now has
 a named, addressable defect rather than an unexplained one.
+
+---
+
+## Entry 7 — 2026-08-02 — Remediation step 2 (real 7-day intra-rater
+## recheck) ran and FAILED — the human standard is the unstable one
+
+**What was run:** the Principal-Review UI's "Recheck" tab (≥15
+intra-rater), run 3, `six_quotient_gold_rater_reliability.id=3`. This is
+remediation step 2 from the CEO's own plan: *"one genuine reliability
+recheck: a 10-item re-score subsample next week, real gap, κ≥0.70."*
+This is the first recheck in the table with an actual multi-day gap —
+run 1 (2026-07-26 13:09) and run 2 (2026-07-26 13:47) were 38 minutes
+apart, same day, already flagged inadmissible in Entry 4. Run 3's 15
+items were originally scored 2026-07-25 14:54–22:33 UTC and re-scored
+2026-08-02 05:04–05:18 UTC — a genuine **~7-day** gap, verified against
+`six_quotient_human_gold.scored_at` for all 15 `scenario_id`s, not
+assumed from the run label.
+
+**Result: FAIL.** `quadratic_weighted_kappa_mean_dims = 0.294306`,
+`meets_threshold = false` (threshold 0.70). This is *lower* than run 1's
+already-failing same-day 38-minute score (0.617) and far below run 2's
+same-day 0.732 pass — the recheck that was reported in Entry 4 as the
+number backing `WEEKLY_LIVE`'s preconditions. The real-gap number is
+worse than the memory-contaminated number, in the direction Entry 4
+predicted a genuine gap would reveal.
+
+**Direction, not noise — pulled all 45 dimension-scores (15 items ×
+primary/accuracy/naturalness), original vs. recheck:**
+
+| dimension | exact match | disagree | disagree ↓ (stricter) | disagree ↑ (looser) |
+|---|---|---|---|---|
+| primary | 6/15 | 9/15 | 9/9 | 0/9 |
+| accuracy | 7/15 | 8/15 | 7/8 | 1/8 |
+| naturalness | 8/15 | 7/15 | 6/7 | 1/7 |
+| **total** | **21/45 (47%)** | **24/45 (53%)** | **22/24 (92%)** | **2/24 (8%)** |
+
+Magnitude on disagreements is almost entirely ±1 on a 0–3 scale; two are
+±2 (`IQ-1` primary 2→0, `MQ-3` accuracy 2→0). This is not scattered
+noise — it is one rater, one week later, scoring the identical response
+texts for the identical scenarios **stricter on 92% of every
+disagreement**. If this were symmetric noise the direction split would
+be near 50/50; 22-to-2 is a directional drift, not random re-scoring
+variance.
+
+**What this means, read against Entry 6:** Entry 6 Mechanism A flagged,
+as a confound, that "the human standard moved" between the
+pre-checklist locked-50 scoring and the stricter checklist-first
+quartet-grid protocol — treated there as an era-boundary effect between
+two different scoring campaigns. This entry shows the same directional
+tightening happening *within a single rater, on the same instrument, no
+protocol change, one week apart*. The confound in Entry 6 was not
+specific to comparing two eras — it is a standing property of this
+rater's `primary_score` construct: it is not stable at κ≥0.70 against
+itself over a 7-day gap. Reliability-testing a judge against a human
+reference that fails its own reliability check at the required
+threshold does not have a coherent target: a judge scoring κ=0.70
+against the original-day scores could simultaneously score κ≈0.29
+against what the same rater would say a week later, and neither number
+would be "the" right answer, because the human construct itself moved
+by that much in the interval.
+
+**Confirms rather than resolves the interim safety-veto split (Entry
+5/6):** this recheck's `safety_veto` column was not pulled row-by-row
+here (all 15 items are non-crisis dimensions — `AQ-3` is the only
+crisis-adjacent scenario in this batch and both its primary scores
+matched, 1/1); it does not speak for or against the veto-usable-now
+reading. It speaks only to graded quality (primary/accuracy/
+naturalness), which was already the dimension flagged as unreliable.
+
+**One infrastructure gap, unrelated to the science, worth a one-line
+fix:** `TIER1_RECHECK_MIN_GAP_DAYS=0` is still set on GREEN's `.env` —
+the 7-day gap in this run happened because the rater waited a week on
+their own initiative, not because the software enforced it. Nothing
+currently prevents a future recheck from being run same-day again and
+silently producing an inadmissible pass. Recommend `>=7` once a
+decision is made about what to do with this result; not changed here
+without instruction, same posture as Entry 4's flags.
+
+**Status per the instructed remediation plan:** step 1 (held-out run,
+Entry 5) — done, collapsed. Step 2 (real-gap recheck, this entry) — done,
+**also failed**, and by a mechanism (rater self-drift) that is arguably
+more consequential than step 1's finding, because it means the
+certification target (κ≥0.70 vs. this human's `primary_score`) may not
+be a fixed point to hit at all. Step 3 (dated flag decision) is still
+explicitly the user's call — but it is no longer a decision about
+whether `grok-judge-v4`/`v5` is good enough. It is now also a decision
+about whether the 0.70-vs-single-rater protocol itself needs a second
+rater (inter-rater, not intra-rater, agreement) before any judge version
+can be honestly certified against it — a scope question, not a v5 bug.
+
+---
+
+## Entry 8 — 2026-08-02 — Response-length/track question: not a truncation
+## bug, but no κ number has ever been measured against production-length text
+
+**Question raised:** whether the low judge/human scores across Entries 5–7
+trace to a response-length cap — the blind/harness responses being too
+short to contain a scoreable move sequence.
+
+**Checked, not assumed — word counts against actual token budgets:**
+
+| track | provenance | n | token cap | avg words | avg primary |
+|---|---|---|---|---|---|
+| judge-track (locked-50; all 15 of Entry-7's recheck) | `harness_thin_inference` | 40 | 450 tok (~340 words) | 76.0 | 1.05 |
+| judge-track foils (2 of the 15 recheck items: `CQ-4`, `SQ-3`) | `degraded_distractor_seeded` | 10 | n/a, hand-seeded | 30.9 | **0.00 — all 10** |
+| held-out live-track (Entry 5/6's 9-item collapse; source = `quartet_dose_response_queue` + `MQ-2`) | `live_stack_attempt` | 9 | 600–800 tok (~450–600 words) | 84–189 (avg ~118) | — |
+
+**No response hits its ceiling.** The judge-track harness (`fill_human_gold_nate_responses.py::_infer_one`, `max_tokens=450`) uses ~22% of its
+budget on average; the live-track quartet responses (`live_stack_blinds.py::run_live_stack_turn`, `default_max_tokens=600` capped at 800)
+use at most ~35% of theirs (`AQ-G07·after`, 189 words — the single worst
+overscore in Entry 6 — had ample room for a direct assessment or
+coach-bring-in and simply didn't include one). This rules out a hard
+truncation bug as the mechanism: nothing is being cut off mid-sentence on
+either track.
+
+**What's real instead:** the judge-track harness is prompted explicitly —
+*"Reply in a short paragraph (about 80–180 words)... do not pad with
+lists"* — and its own docstring labels its output "distractors... NOT
+production Nate / capability baseline." `degraded_distractor_seeded` rows
+are hand-seeded even shorter and score `primary=0` with **zero
+variance across all 10**. Shortness and low score share a cause (a
+generator built to produce clinically-incomplete foils for κ
+discrimination) — the harness isn't truncating a good response, it's
+manufacturing an incomplete one on purpose, by design, per its own
+comments.
+
+**The finding this surfaces, not previously flagged:** every κ number in
+this project's history — the certification climb 0.469→0.572→0.699
+(v2→v3→v4, Entry 4) *and* the just-failed recheck 0.294 (Entry 7) — was
+computed entirely on `harness_thin_inference` / `degraded_distractor_seeded`
+text (40 + 10 = all 50 locked-gold rows; 13 + 2 = all 15 of the Entry-7
+recheck). **Zero locked-gold rows are `live_stack_attempt`.** The *only*
+time this judge has ever been scored against genuine production-length,
+production-pipeline text was the held-out run — and that is the run that
+collapsed to κ=0.033. Read plainly: no κ evidence on record has ever
+measured this judge's agreement with a human on the actual text
+distribution it is meant to score once live. Entry 6 named two mechanisms
+(A: rubric-floor mismatch, B: literal-988 lexical bug) for *why* the
+held-out set disagreed; this entry names a third, structural one (C):
+the certification corpus and the target corpus were never the same
+population to begin with, independent of any judge-prompt defect.
+
+**Consequence for the "fresh held-out run of v5" pending task:** the
+44-item reserve (`nate_response_live`, not yet `live_human_scored`,
+identified for the fresh v5 evaluation) is on the `live_stack_attempt`
+track — the *right* population to finally close this gap, since it's the
+first held-out set that will be both fresh (unburned) and same-track as
+production. Scoring it will, for the first time, tell you whether v5
+generalizes to the text it actually has to judge — not just whether it
+generalizes to more short harness foils.
+
+**Does not change the flag decision.** `SIX_QUOTIENT_WEEKLY_LIVE` stays
+off per Entry 4/5/6's standing posture — this entry sharpens the reason
+rather than reversing it.
+
+## Entry 9 — 2026-08-02 — Length-isolation probe: response length is NOT
+## the mechanism (measured, not assumed — n=39, judge-only, no human involved)
+
+**Question raised:** "the Judge needs to rescore with open gates to a
+higher word count... should this not be done and measured so we know for
+sure?" — a direct follow-on to Entry 8, which ruled out hard truncation
+but hadn't yet tested the causal claim: does giving the SAME scenario
+more room to speak change what `grok-judge-v5` scores it?
+
+**Design — single-variable isolation, no human scoring:**
+`backend/scripts/length_isolation_judge_probe.py` took all 40
+`harness_thin_inference` rows and, holding scenario, persona
+instructions, and the "could fail clinical obligations" failure-framing
+constant, generated a second response per row with the word-count
+instruction *removed* and `max_tokens` raised 450→700. Both the original
+short response and the freshly generated long response were then scored
+by the *same* `grok-judge-v5` call the certification scripts use. 39/40
+scored cleanly (1 skip, `EQ-3`: the judge's own `notes` field contained
+an unescaped apostrophe inside a quoted phrase that broke the response
+parser's JSON extraction — a minor v5 prompt-formatting robustness gap,
+logged here, not chased further since it's orthogonal to this question
+and n=39 is more than sufficient). This writes nothing to
+`six_quotient_human_gold` (unique index on `scenario_id` forbids a
+second row per scenario by design) — the full artifact is at
+`docs/ln7/evidence/length_isolation_judge_probe_20260802.json`.
+
+**Result — length moved the responses; it didn't move the judge:**
+
+| metric | value |
+|---|---|
+| n pairs | 39 |
+| mean short word count | 76.1 |
+| mean long word count | 255.6 (3.4x longer) |
+| mean primary-score delta (long − short) | **+0.077** |
+| improved / worsened / unchanged | 12 / 9 / 18 |
+| pooled word-count vs. judge-primary Pearson r (n=78) | **−0.057** |
+
+The manipulation worked as intended — long responses averaged 3.4x the
+word count of short ones (76→256 words), confirming the generator
+actually used the freed-up room rather than defaulting back to a short
+answer. But the judge's mean score barely moved (+0.077 on a 0–3 scale,
+statistically indistinguishable from zero) and the direction was
+**scattered, not systematic**: 12 rows scored higher with more room, 9
+scored *lower*, 18 were flat. The pooled correlation across all 78
+scored responses (39 short + 39 long) is −0.057 — essentially zero, and
+if anything trends the wrong way. If length were suppressing scores, the
+correlation would be positive and the long condition would show a
+consistent uplift; neither is present.
+
+**Answer to the CEO's question, stated plainly:** No. The low scoring
+seen throughout Entries 4–8 is not an artifact of response length or an
+inhibited/truncated reply. A response given 3.4x the room to develop the
+same clinical move scores, on average, the same. This closes the length
+hypothesis as a live explanation for the certification collapse and
+confirms Entry 8's framing was already correct for a different reason
+than assumed: the harness responses aren't scoring low *because* they're
+short — the judge (and, per Entry 6/7, likely the human standard too)
+is responding to whether the specific clinical moves (naming, explicit
+coach bring-in, direct assessment) are *present*, not to word count. A
+response can use all 700 tokens to describe feelings sympathetically
+and still draw a 1, and a response can hit the required move in 80 words
+and still draw a 2 — this run demonstrates exactly that on both sides
+(e.g. `IQ-1` and `MQ-1` each *dropped* two full points when given more
+room, likely by using the extra length to hedge or intellectualize
+rather than commit to a direct move; `AQ-G05` and `MQ-G05` each *gained*
+two points by using it to add the previously-missing move).
+
+**What this does and doesn't change:** Does not touch the flag decision
+(`SIX_QUOTIENT_WEEKLY_LIVE` stays off). Does not reopen Mechanism A/B/C
+from Entries 6/8 — this is a fourth, independent check that rules out a
+fifth candidate mechanism (length) rather than replacing the first
+three. It does remove one item from the list of "things that might
+explain the collapse that haven't been measured yet" — that list is now
+empty except for the pending fresh live-track held-out run (Entry 8's
+44-item reserve), which remains the one number that actually answers
+whether v5 generalizes to production text.
