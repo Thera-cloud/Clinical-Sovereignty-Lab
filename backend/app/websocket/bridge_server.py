@@ -9109,7 +9109,14 @@ class AzureCortex:
                 if _gate_result and db_pool:
                     try:
                         from app.services.ln_rule_loop import apply_soft_gate_rules as _l4_apply
-                        _gate_result = await _l4_apply(db_pool, _gate_result)
+                        # QUANTUM-CRYSTAL-ARCH — Phase H / R6: anti-Sybil fingerprint
+                        # (never the raw uid) so promote_rule() can require N>=5
+                        # distinct provenances, not N>=5 raw fire events from a
+                        # small user set.
+                        _l4_prov = f"{profile.get('hardware_id', '')}|{profile.get('coach_id', '')}"
+                        _gate_result = await _l4_apply(
+                            db_pool, _gate_result, user_id=uid, provenance_hash=_l4_prov,
+                        )
                     except Exception as _l4_e:
                         print(f">>> [LN RULE LOOP] {_l4_e!r}")
 

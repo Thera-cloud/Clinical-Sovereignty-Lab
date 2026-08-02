@@ -72,6 +72,22 @@ _ACCURACY_PROMOTE_MIN_SCORED = int(os.getenv("LN_RULE_ACCURACY_PROMOTE_MIN_SCORE
 _FP_DRAFT_MIN_N = int(os.getenv("LN_RULE_FP_DRAFT_MIN_N", "3"))
 _FP_DRAFT_MAX_CONF = float(os.getenv("LN_RULE_FP_DRAFT_MAX_CONF", "0.45"))
 
+# Phase H (plan §H1): "promoted therapeutic rules" — i.e. rules promoted via
+# this module — must clear the same generalization gate as LN7 weight
+# export/register: N>=5 provenance-independent users, not N>=5 raw samples.
+# Off by default (0) because provenance_hash is only populated going forward
+# (see migration 317) — existing/backfilled audit rows have no fingerprint.
+# Ops flips LN_RULE_PROMOTE_MIN_PROVENANCE=5 once population has run long
+# enough to have real coverage; flipping it earlier hard-freezes promotion.
+_PROMOTE_MIN_PROVENANCE = int(os.getenv("LN_RULE_PROMOTE_MIN_PROVENANCE", "0"))
+# Hard-gate rule promotion on the five-predicate PHASE_H_OPEN flag. Off by
+# default so existing installs / tests that predate the predicate poller are
+# not silently frozen; CEO/ops enables via LN_RULE_REQUIRE_PHASE_H=true once
+# the poller (phase_h_predicate_poller.py) is live and trusted.
+_REQUIRE_PHASE_H_FOR_PROMOTE = os.getenv(
+    "LN_RULE_REQUIRE_PHASE_H", "false",
+).strip().lower() in ("1", "true", "yes", "on")
+
 _DEFAULT_SOFT_CONDITION = {"fired_new": False}
 _DEFAULT_SOFT_ACTION = {"type": "suppress_soft_followup"}
 
@@ -411,21 +427,51 @@ async def _audit(
     version: int,
     action: str,
     detail: str = "",
+    provenance_hash: Optional[str] = None,
 ) -> None:
     try:
         async with db_pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO ln_rule_audit (rule_key, version, action, detail)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO ln_rule_audit (rule_key, version, action, detail, provenance_hash)
+                VALUES ($1, $2, $3, $4, $5)
                 """,
                 rule_key,
                 int(version),
                 action,
                 (detail or "")[:300],
+                (provenance_hash or None),
             )
     except Exception as e:
         logger.debug("ln_rule_audit skip: %s", e)
+
+
+async def _distinct_provenance_count(db_pool: Any, rule_key: str) -> int:
+    """Count distinct provenance-independent users who have hit rule_key.
+
+    Scoped to rule_key (not rule_key+version) — a rule that iterates through
+    versions while accumulating evidence should not reset its user-diversity
+    count on every version bump; the gate class / behavior is what a user
+    "hit", not the specific stored row version.
+    """
+    if not db_pool:
+        return 0
+    try:
+        async with db_pool.acquire() as conn:
+            n = await conn.fetchval(
+                """
+                SELECT COUNT(DISTINCT provenance_hash)
+                FROM ln_rule_audit
+                WHERE rule_key = $1
+                  AND action IN ('shadow_fire', 'fire')
+                  AND provenance_hash IS NOT NULL
+                """,
+                rule_key,
+            )
+            return int(n or 0)
+    except Exception as e:
+        logger.debug("_distinct_provenance_count skip: %s", e)
+        return 0
 
 
 async def record_shadow_score(
@@ -786,6 +832,48 @@ async def promote_rule(
                             f"< floor={_ACCURACY_PROMOTE_FLOOR} scored={scored}"
                         )[:300],
                     )
+                return False
+        # Phase H predicate gate — hard-refuse promotion until all five
+        # predicates (gold-sample audit, calibrated abstention, labeling
+        # provenance, adversarial held-out, data governance) are GREEN.
+        # Off by default (LN_RULE_REQUIRE_PHASE_H unset) so this module keeps
+        # working before the predicate poller is trusted in an environment.
+        if _REQUIRE_PHASE_H_FOR_PROMOTE:
+            try:
+                from app.services.ln7_feature_flags import flag_enabled
+                phase_h_open = await flag_enabled(db_pool, "PHASE_H_OPEN", default=False)
+            except Exception as e:
+                logger.warning("promote_rule: PHASE_H_OPEN check failed, refusing: %s", e)
+                phase_h_open = False
+            if not phase_h_open:
+                await _audit(
+                    db_pool, rule_key=rule_key, version=version,
+                    action="sandbox_fail",
+                    detail="promote refused: PHASE_H_OPEN is false",
+                )
+                logger.warning(
+                    "promote_rule refused %s v%s: PHASE_H_OPEN closed", rule_key, version,
+                )
+                return False
+        # Phase H / R6 generalization gate — N>=5 provenance-independent
+        # users, not N>=5 raw fire/shadow_fire rows. Off by default (0) until
+        # provenance_hash population has run long enough for real coverage
+        # (see migration 317 + apply_soft_gate_rules provenance_hash param).
+        if _PROMOTE_MIN_PROVENANCE > 0:
+            distinct_n = await _distinct_provenance_count(db_pool, rule_key)
+            if distinct_n < _PROMOTE_MIN_PROVENANCE:
+                await _audit(
+                    db_pool, rule_key=rule_key, version=version,
+                    action="sandbox_fail",
+                    detail=(
+                        f"promote refused: provenance={distinct_n} "
+                        f"< required={_PROMOTE_MIN_PROVENANCE}"
+                    ),
+                )
+                logger.warning(
+                    "promote_rule refused %s v%s: provenance %d < %d",
+                    rule_key, version, distinct_n, _PROMOTE_MIN_PROVENANCE,
+                )
                 return False
         async with db_pool.acquire() as conn:
             async with conn.transaction():
@@ -1524,12 +1612,22 @@ async def maybe_lifecycle_from_gate_confidence(
 async def apply_soft_gate_rules(
     db_pool: Any,
     gate_result: Optional[Dict[str, Any]],
+    *,
+    user_id: Optional[str] = None,
+    provenance_hash: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Bind rule store to soft runtime-gate result.
 
     Returns None to suppress the soft follow-up response; otherwise gate_result.
     Hard classes (non-SOFT) pass through untouched. SI/violence never enter here
     if callers only pass clinical runtime-gate results.
+
+    `provenance_hash` (Phase H / R6): an anti-Sybil user fingerprint — never the
+    raw user_id — composited by the caller from attributes such as hardware_id
+    + coach assignment. Recorded on every shadow_fire/fire audit row so
+    promote_rule() can require N>=5 *distinct* fingerprints, not N>=5 events
+    from the same handful of accounts. `user_id` is accepted for future
+    caller-side logging only; it is never persisted here.
     """
     if not rule_loop_enabled() or not gate_result or not db_pool:
         return gate_result
@@ -1581,6 +1679,7 @@ async def apply_soft_gate_rules(
                 version=int(rule["version"]),
                 action="shadow_fire",
                 detail=detail,
+                provenance_hash=provenance_hash,
             )
             await _notify_l5_observe(
                 db_pool,
@@ -1602,6 +1701,7 @@ async def apply_soft_gate_rules(
             version=int(rule["version"]),
             action="fire",
             detail=detail,
+            provenance_hash=provenance_hash,
         )
         await _notify_l5_observe(
             db_pool,
