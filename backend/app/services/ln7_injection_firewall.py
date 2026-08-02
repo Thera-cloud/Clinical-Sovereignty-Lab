@@ -24,6 +24,62 @@ HONEYTOKENS = (
     "sk-honeytoken-ln7-not-a-real-key",
 )
 
+# R4 layer 2 hardening (2026-08-02): scan_honeytokens() only ever checked
+# literal tokens plus one narrow "ignore previous instructions" regex. A
+# much broader, already-tested instruction-injection pattern bank exists at
+# app.services.vault.content_sentinel_file.FileContentSentinel (B6, ~30
+# patterns: role hijack, jailbreak, admin-mode, delimiter escape, extraction
+# attempts, unicode obfuscation). Rather than growing a second, divergent
+# regex lexicon here — exactly the kind of split-source-of-truth drift that
+# produced the escalation-axis false-positive bug documented in
+# docs/ln7/TRUST_LEDGER.md Entry 2 — this module reuses that scanner via a
+# lazy import (see _scan_instruction_shapes below). Import is lazy, not
+# module-level, because app.services.vault requires importing the
+# app.services package first, which pulls in nevedal_engine's numpy import
+# and SIGFPEs on some macOS dev hosts (see backend/scripts/run_ci_tests.sh
+# comment); this mirrors the existing lazy-import pattern already used by
+# tripwire_check() below for flywheel_anomaly.
+
+
+# Pattern names to trust from FileContentSentinel for THIS module's threat
+# model (instructions-to-the-agent shapes only). Deliberately excludes
+# credential_probe, sql_injection, base64_blob, and redact_marker: those are
+# real B6 vault-upload concerns but have heavy legitimate false-positive
+# surface in ordinary cli_task_bus notes, which routinely name env vars
+# ("rotate AZURE_API_KEY"), contain pasted diffs/hashes, or reference other
+# tools' redaction markers. A generic risk_level>=high cutoff would silently
+# redact that ordinary engineering language every time it ran through
+# sanitize_notes() — the same over-broad-lexicon failure mode as the
+# escalation-axis bug in docs/ln7/TRUST_LEDGER.md Entry 2, just on the
+# injection side instead of the verifier side.
+_TRUSTED_INSTRUCTION_PATTERNS = frozenset({
+    "instruction_override", "instruction_inject", "role_hijack", "admin_mode",
+    "safety_bypass", "jailbreak", "restriction_removal", "llm_delimiter",
+    "delimiter_escape", "extraction_attempt", "echo_extraction",
+    "embedded_role_override", "embedded_admin_role", "json_structure_escape",
+    "unicode_obfuscation",
+})
+
+
+def _scan_instruction_shapes(text: str) -> Optional[str]:
+    """Lazy wrapper around FileContentSentinel.scan(), filtered to the
+    instruction-injection pattern names in _TRUSTED_INSTRUCTION_PATTERNS.
+    Returns the first matching pattern name, or None. Never raises: any
+    import or scan failure degrades to "no hit" rather than blocking the
+    caller (this is a defense-in-depth layer on top of the literal-token
+    checks in scan_honeytokens, not the only one).
+    """
+    try:
+        from app.services.vault.content_sentinel_file import FileContentSentinel
+
+        result = FileContentSentinel.scan(text)
+        for pattern_name in result.patterns_found:
+            if pattern_name in _TRUSTED_INSTRUCTION_PATTERNS:
+                return pattern_name
+    except Exception as e:  # pragma: no cover - defense-in-depth only
+        logger.warning("instruction-shape scan unavailable, degrading to literal-only: %s", e)
+    return None
+
 
 def wrap_external_content(text: str, *, source: str = "external") -> Dict[str, Any]:
     """Ingestion quarantine envelope — not executable instructions."""
@@ -43,13 +99,18 @@ def validate_tool_dispatch(task_kind: str, allowlist: Optional[FrozenSet[str]] =
 
 def scan_honeytokens(text: str) -> Optional[str]:
     blob = text or ""
+    if not blob:
+        return None
     for tok in HONEYTOKENS:
         if tok in blob:
             return tok
     # Obvious instruction-injection shapes from dirty readers
     if re.search(r"(?i)ignore\s+(all\s+)?previous\s+instructions", blob):
         return "instruction_override"
-    return None
+    # Broader instruction-shape bank (role hijack, jailbreak, admin-mode,
+    # delimiter escape, extraction attempts) — see _scan_instruction_shapes
+    # docstring for why this is a lazy-imported reuse, not a new lexicon.
+    return _scan_instruction_shapes(blob)
 
 
 def sanitize_notes(text: str) -> Dict[str, Any]:
