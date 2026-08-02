@@ -1133,3 +1133,291 @@ This closes the loop opened by Entry 13: the production state is now
 consistent with the Entry 12 decision that v5 is not a certified quality
 scorer. `judge-weekly-live-flag-inconsistency-found` (plan file) moves
 from pending to completed.
+
+---
+
+## Entry 15 — 2026-08-02 — Fallback-template trace-pull: mechanism confirmed
+## (missing_somatic_invitation on commitment-demand stems), tagged going forward
+
+Priority-1 item from the capability-session review: pull the raw trace for
+the 3 verbatim fallback firings (EQ-3, SQ-G07, SQ-G08) and the CQ-G08
+counterexample, using `live_inject_meta` (JSONB, written by
+`live_stack_blinds.generate_live_stack_batch`) rather than guessing.
+
+**Text confirmed identical (word-for-word) across all 3 firings:**
+`therapeutic_controller.TRANSPARENT_AUDIT_FALLBACK_MESSAGE` /
+`stall_suppression._STALL_EXACT` — "I want to think about that more
+carefully — can you tell me which part of what you shared feels most
+important to you right now?"
+
+**Mechanism, confirmed from `live_inject_meta` top-level fields (not
+inferred):**
+
+| Scenario | `audit_passed` | `violations` |
+|---|---|---|
+| EQ-3 | false | `["missing_somatic_invitation"]` |
+| SQ-G07 | false | `["missing_somatic_invitation"]` |
+| SQ-G08 | false | `["missing_somatic_invitation"]` |
+| CQ-G08 (counterexample) | **true** | `[]` |
+
+`therapeutic_controller._audit_violations()` fires
+`missing_somatic_invitation` when `autonomic_state == "activated"` and the
+response text contains none of a fixed keyword list (body/breath/chest/
+shoulder/"feel in your"/notice/sensation/heart/"sit with"/grounded/
+grounding/"i sense"). After the audit fails and (per `audit_therapeutic_response`) regeneration attempts don't clear it, `stall_suppression.resolve_audit_fallback()` substitutes the transparent fallback UNLESS `ENABLE_STALL_SUPPRESSION` is set and severity is high-acuity (checked: not the active path here).
+
+**Stem-level pattern (refines, not just confirms, the CEO's hypothesis)**
+— pulled full `client_says` text for all 4:
+
+- EQ-3 ends: *"What am I supposed to do with that?"*
+- SQ-G07 ends: *"So tell me: which one are you taking notes on?"*
+- SQ-G08 ends: *"So tell me — do I get to grieve a person who chose to
+  leave? Or is that just self-pity with better PR? And be careful how you
+  answer."*
+- CQ-G08 (no fallback) ends: *"Different problem. Most people can't hear
+  the difference. Can you?"*
+
+All four end in a direct question. The three that trip the fallback
+demand a forced-choice or adjudicated stance from the responder
+("which one," "do I get to," explicit warning against evasion); CQ-G08's
+closing question invites demonstrated attunement, not a binary verdict —
+consistent with, and sharpening, the commitment-demand-vs-mirror-permit
+axis Entry 16 finds independently predicts the whole 40-row score split.
+
+**Cross-run finding (not previously visible):** the nested `pre_regenerate`
+history inside `live_inject_meta` shows EQ-3 was regenerated 4 separate
+times across 2026-07-25 (runs b/c/d/e). Run c PASSED the audit and
+produced real content ("It can be really tough to see someone you
+love..."); runs b, d, and the current e all failed with
+`missing_somatic_invitation` and fell to the stall string. **This is
+stochastic, not a deterministic hard-coded branch** — temperature=0.35
+generation sometimes happens to include a somatic-marker word and
+sometimes doesn't, on the identical stem, and the currently-persisted run
+(e) is one of the failing draws. A commitment-demand stem raises the
+audit-collision *probability* (a direct answer doesn't naturally reach
+for body/breath language) without making it certain.
+
+**Caveat honored (per the CEO's note):** judge and human scored the
+SAME served text in both tracks for these 3 rows — no κ contamination.
+The contamination risk is at the capability-statistics layer: any mean
+score, transfer-rate tally, or "surface defects repaired" count that
+doesn't segment these 3 rows conflates the generator with its own audit's
+error handler.
+
+**Fix shipped (migration 320 + write-path tag, not just documentation):**
+- `320_ln7_live_fallback_template_flag.sql` adds
+  `six_quotient_human_gold.live_is_fallback_template BOOLEAN DEFAULT false`,
+  backfilled for the 3 known rows via exact-string match.
+- `live_stack_blinds.generate_live_stack_batch()` now computes
+  `is_fallback_template = stall_suppression.is_stall_fallback(text)` at
+  write time for every future regeneration and persists it — no manual
+  backfill needed after future capability runs.
+- 3 new tests (`test_live_stack_fallback_template_tag.py`) assert the
+  migration's literal stays byte-identical to `_STALL_EXACT` (guards
+  against future drift between the SQL backfill and the Python constant)
+  and that the write path actually sets the column.
+
+Not built (deliberately out of scope for this entry, deferred to a
+separate decision): whether to raise `ENABLE_STALL_SUPPRESSION`'s
+high-acuity threshold to cover this stem class, or extend the somatic-
+marker keyword list to recognize direct-answer register as an acceptable
+alternative to embodied language on commitment-demand turns. That is a
+clinical-policy call (loosening a safety-adjacent audit gate), not a
+data-tagging fix — flagged, not decided here.
+
+---
+
+## Entry 16 — 2026-08-02 — Guide-injection self-referential leakage: 44% of
+## scored capability rows retrieved their OWN promoted guide; exclusion shipped
+
+Investigating the CEO's item 3 (AQ-G06 "statin-catch," proposed as the
+session's strongest teaching-transfer candidate) surfaced a materially
+different and more consequential finding than the one asked about.
+
+**AQ-G06 specifically:** `live_inject_meta.guide_scenarios` for AQ-G06's
+regeneration = `["AQ-G06", "CQ-G07", "MQ-G08", "SQ-4"]` — **AQ-G06's own
+guide was one of its own 4 injected guides.** Checked the guide's actual
+content (`principal_review_library`, `source_scenario='AQ-G06'`,
+crystal id 708345, created 2026-07-25): its `principal_response` opens
+"Blind response: primary=0, accuracy=0, naturalness=0... What was
+disclosed: six years of passive ideation..., one protective factor...,
+and — the live wire — active statin non-adherence with felt relief at a
+mortality signal." **The guide explicitly names the statin detail as the
+prior miss, for this exact scenario.** The regeneration that "caught" it
+was told, in its own injected context, precisely what to catch.
+
+**Correction to the CEO's framing:** this is NOT cross-scenario teaching
+transfer (a guide written from scenario A generalizing to help on
+scenario B) — it is same-scenario guide reuse (scenario A's guide,
+written about scenario A's own prior miss, retrieved when regenerating
+scenario A again). The mechanism is mechanical, not a content-uptake
+success: `select_class_guides()`/`select_crisis_guides()` rank candidates
+by lexical overlap between the current stem and each guide's
+`crystal_text`; a guide written about THIS stem has near-maximal overlap
+with THIS stem by construction, so it wins the ranking almost
+automatically whenever it exists. This downgrades AQ-G06 from "strongest
+teaching-transfer candidate" to "expected behavior of an unguarded
+retrieval function," and is analogous in shape to Entry 10's burned-
+holdout finding — a different measurement surface (guide injection
+instead of judge held-out sets), same underlying failure class (a
+same-item duplicate presenting as fresh evidence).
+
+**Scope check, not assumed — queried directly:** of the 45 scored
+capability rows, **20 (44%)** had their own `scenario_id` present in their
+own `guide_scenarios` list:
+
+```
+AQ-1, AQ-2, AQ-3, AQ-4, AQ-G06, AQ-G07, AQ-G08, CQ-1, CQ-G08, EQ-2, EQ-4,
+EQ-G05, EQ-G07, EQ-G09, IQ-2, IQ-3, MQ-3, MQ-G06, SQ-2 (19 confirmed +
+AQ-G06 = 20)
+```
+
+This means any capability-delta claim on any of these 20 rows is, at
+minimum, confounded by same-scenario guide reuse and should not be cited
+as evidence the pack/Guide system generalizes across scenarios without
+that caveat.
+
+**Fix shipped (code, not just a finding):**
+- `select_crisis_guides()` and `select_class_guides()`
+  (`principal_review_crisis_policy.py`) gain an
+  `exclude_source_scenario: Optional[str] = None` parameter — filters out
+  any candidate whose `source_scenario` matches before ranking.
+- `fetch_principal_review_crisis_guides()` and
+  `fetch_principal_review_class_guides()` thread the same parameter
+  through.
+- `therapeutic_controller.prepare_therapeutic_context()` gains the same
+  additive parameter (default `None`, preserves every production call
+  site's behavior unchanged — real user turns have no scenario_id).
+- `live_stack_blinds.run_live_stack_turn()` gains `scenario_id`, passed as
+  `exclude_source_scenario`; `generate_live_stack_batch()` passes the
+  scenario_id being regenerated. `inject_meta["exclude_source_scenario"]`
+  now records this for future audit (no more guessing from nested
+  history).
+- 3 new tests confirm both `select_*` functions actually drop the
+  self-referential row while leaving other candidates and other
+  scenario_ids' regenerations unaffected, plus a signature-presence check
+  on both `fetch_*` wrappers.
+
+**Not touched:** production (non-harness) guide retrieval is unaffected —
+`exclude_source_scenario` defaults to `None` everywhere except the
+six_quotient capability harness, and reusing a matching prior guide for a
+similar real user disclosure remains the intended mechanism there.
+
+**Consequence for future capability runs:** any future regeneration of
+AQ-G06 (or any of the other 19) will no longer see its own guide. If it
+still catches the statin detail (or the equivalent characteristic move)
+on a clean run, THAT would be the actual teaching-transfer evidence the
+session was looking for. This entry does not claim the packs don't work —
+it removes a leak that was making it impossible to tell.
+
+---
+
+## Entry 17 — 2026-08-02 — Session synthesis folded into pack design:
+## commitment-vs-mirror taxonomy, EQ-G09 phrasing template
+
+CEO's item 2 synthesis of the 40-row capability session, verified against
+the underlying data rather than taken as given: **~18 twos / ~22 ones**
+split, predicted almost perfectly by whether the stem demands a committed
+stance (answer / refuse / differentiate / hold-at-stated-certainty) or
+permits mirroring. Era-over-era: surface defects (names, modes,
+third-person RP) show zero occurrences this session; content-level misses
+reproduce the same characteristic failure whenever the same stem recurs
+across eras.
+
+**EQ-G09 "both eras" verified directly** (judge-track `nate_response` vs
+live-track `nate_response_live`, same stem — client demands a flat,
+clinical, non-empathetic tone due to a specific triggering pattern):
+
+| Era | Text | Score |
+|---|---|---|
+| Judge-track | "I'm here to support you... I agree to maintain a flat tone and avoid triggers... I'll work with you... even if it means being more clinical and less empathetic... Let's proceed with that understanding." | primary=0 |
+| Live-track | "You've noticed a pattern where warmth or gentleness can trigger a defensive response in you, stemming from past experiences with your mother. You're asking me to maintain a flat, clinical tone... I can do that, and I'll keep my responses straightforward and neutral... How would you like to proceed...?" | primary=2 |
+
+Both attempt explicit contract-acceptance; only the live-track era
+executes the full reliable shape: (1) name the SPECIFIC pattern/reason
+behind the demand, not a generic ack, (2) state the commitment explicitly
+in first person matching the requested register, (3) invite forward
+movement with one question. That three-part shape is now a named,
+independently-addressable line in the pack module — `ln7_must_sequence_pack.
+COMMITMENT_DEMAND_LINE` / `format_commitment_demand_line()`, kept separate
+from the six crisis MUST-sequence lines (which derive from the gate-1
+dose-response grid, a different instrument) since commitment-demand is a
+general `therapeutic_engage` concern independent of `turn_class`. 2 new
+tests confirm the line names all four demand forms (answer, refusal,
+differentiation, certainty) and is independently addressable.
+
+**Not wired live** — same posture as the rest of `ln7_must_sequence_pack.
+py`: this is the format module only. Acceptance test is the same as the
+crisis lines' — a regeneration+re-score against commitment-demand stems
+specifically, not yet run.
+
+---
+
+## Entry 18 — 2026-08-02 — Harvest-path ticket shipped: live-track notes to
+## DRAFT Guides (human promotion required), not auto-taught
+
+CEO's item 4: 45 live-track (capability) rows accumulated substantial
+(>=80 char) `live_notes` during this session with **zero mechanism** to
+ever become a Guide — `POST /gold/score`'s live-track branch has always
+explicitly returned `notes_as_principal_guide=false, library_id=None,
+promoted_crystal_id=None` ("live-track score stored for capability
+baseline only — no crystal promote"), unlike the judge-track branch which
+can auto-promote at score time. That asymmetry was a correct default
+(capability baseline shouldn't silently mutate the teaching corpus
+mid-measurement) but left the diagnostic value in those 45 notes with
+nowhere to go.
+
+**Shipped:** `POST /api/principal-review/gold/live-track/harvest-notes`
+(`principal_review_api.py`). Scans `six_quotient_human_gold` for
+`live_human_scored=true AND live_notes` >=80 chars, **excluding**
+`live_is_fallback_template=true` rows (Entry 15's flag — a note about the
+audit's error handler is a system-integrity finding, not clinical
+teaching material, and promoting it would misfile the two). Creates or
+updates a `principal_review_library` row per qualifying note,
+`source_kind='live_scored'` (distinct from judge-track's `'gold_scored'`
+so dedup lookups never collide), **status always `'draft'`** — this
+endpoint never calls `_promote_library_item()`. The "post-condition
+review that converts the durable ones to guides" the CEO named IS the
+existing `POST /library/{item_id}/promote` endpoint, applied per-draft by
+a human deciding which of the 45 are durable, generalizable findings
+versus one-off observations about a single generation.
+
+**Dependency fixed so promotion isn't a dead end:** the guide-injection
+queries in both `fetch_principal_review_crisis_guides()` and
+`fetch_principal_review_class_guides()` hard-filtered their JOIN on
+`l.source_kind = 'gold_scored'` — a promoted `'live_scored'` crystal would
+have matched the crystal-table scan but the JOIN would have silently
+dropped its `response_class`/`source_scenario`, making it structurally
+unselectable by either ranking function. Both queries now use
+`l.source_kind IN ('gold_scored', 'live_scored')`.
+
+4 new tests confirm: the route exists, the harvest function never calls
+`_promote_library_item`, the fallback-template exclusion is present in
+the query, and both injection queries were actually broadened (not just
+one).
+
+**Not built:** a bulk-review UI for the 45 drafts (currently reviewed one
+at a time via the existing library endpoints) and a decision on whether
+Entry 16's `exclude_source_scenario` fix should also gate which harvested
+guides get shown to a reviewer as candidates for THEIR OWN source
+scenario specifically (vs. other scenarios) — left to whoever does the
+promotion review, since that judgment call is exactly what "post-condition
+review" means here.
+
+**Same-day follow-up, caught on first real invocation:** the endpoint's
+first live call returned a 500 (`asyncpg.exceptions.CheckViolationError`
+on `principal_review_library_source_chk`) — migration 274's original CHECK
+constraint enumerated exactly 6 allowed `source_kind` values
+(`gold_scored`, `coach_dojo`, `principal_authored`, `generated_pair`,
+`night_school`, `sandbox`) and did not anticipate a 7th. Migration
+`321_pr_library_live_scored_source.sql` drops and recreates the
+constraint with `live_scored` added (all 6 prior values preserved
+verbatim — strictly widening, no data touched). Re-ran after applying:
+**42 draft rows created** (45 scored − 3 `live_is_fallback_template`
+exclusions, exactly matching the expected count), all confirmed
+`status='draft'`, zero auto-promoted. Not caught by the offline test
+suite because none of the 14 new tests this session exercise a live DB
+insert against the real schema — a gap worth naming rather than hiding:
+structural/AST tests confirmed the code *says* the right thing, but only
+a live invocation against the actual constrained table caught that the
+schema didn't yet agree with it.

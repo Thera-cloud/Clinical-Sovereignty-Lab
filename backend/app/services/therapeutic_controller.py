@@ -864,6 +864,12 @@ async def prepare_therapeutic_context(
     preferred_response_class: Optional[str] = None,
     # QUANTUM-CRYSTAL-ARCH — Faster depth: light preflight (not Extra deep dive)
     depth_mode: Optional[str] = None,
+    # TRUST_LEDGER.md Entry 15 — six_quotient capability harness passes its own
+    # scenario_id here so a scenario's own promoted guide (source_scenario
+    # match) is excluded from its own regeneration's injected set. None in
+    # every production call site (real user turns have no scenario_id) —
+    # additive, preserves prior behavior everywhere except the harness.
+    exclude_source_scenario: Optional[str] = None,
 ) -> dict:
     """Classify state, assemble context, shape prompt + cap. Always returns
     a dict; on partial failure, fields default to the original prompt/cap.
@@ -1218,6 +1224,7 @@ async def prepare_therapeutic_context(
                 turn_class=_tc,
                 actor_id=canonical_user_id,
                 user_text=user_text or "",
+                exclude_source_scenario=exclude_source_scenario,
             )
             principal_crisis_block = format_crisis_guide_injection(
                 _pr_guides, turn_class=_tc
@@ -1246,6 +1253,7 @@ async def prepare_therapeutic_context(
                 user_text=user_text or "",
                 limit=4,
                 actor_id=canonical_user_id,
+                exclude_source_scenario=exclude_source_scenario,
             )
             principal_class_block = format_class_guide_injection(
                 _pr_guides, response_class=_pr_teach_class

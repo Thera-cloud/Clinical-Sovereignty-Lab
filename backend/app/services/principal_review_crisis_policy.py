@@ -317,14 +317,27 @@ def select_class_guides(
     response_class: str,
     user_text: str = "",
     limit: int = CLASS_INJECT_LIMIT,
+    exclude_source_scenario: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Prefer exact response_class match, then lexical overlap, then recency."""
+    """Prefer exact response_class match, then lexical overlap, then recency.
+
+    exclude_source_scenario: see select_crisis_guides' doc comment
+    (TRUST_LEDGER.md Entry 15) — same same-scenario-guide-reuse concern,
+    and this is actually the higher-traffic path: the capability harness's
+    therapeutic_engage rows (the majority of the 45-row scored set) route
+    through THIS function, not select_crisis_guides, since the elif branch
+    in therapeutic_controller.prepare_therapeutic_context is mutually
+    exclusive with the crisis-guide branch.
+    """
     rc = normalize_teaching_response_class(response_class)
     if not rc:
         return []
     lim = max(1, min(int(limit), 6))
+    exclude_sid = (exclude_source_scenario or "").strip()
     enriched: List[Dict[str, Any]] = []
     for r in rows:
+        if exclude_sid and str(r.get("source_scenario") or "").strip() == exclude_sid:
+            continue
         d = dict(r)
         row_rc = (d.get("response_class") or "").strip().lower()
         if not row_rc:
@@ -543,6 +556,7 @@ def select_crisis_guides(
     safety_reserve: int = CRISIS_SAFETY_SLOT_RESERVE,
     turn_class: str = TURN_CLASS_SI,
     user_text: str = "",
+    exclude_source_scenario: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Class-aware slot fill: escalate_or_safety first (hard boundary, never
     crossed), then lexical overlap with this turn's disclosure (which
@@ -552,14 +566,34 @@ def select_crisis_guides(
     Overlap ranks strictly *within* the safety-class boundary. It never lets
     a high-overlap non-safety guide displace a safety guide on a crisis turn
     — that would reintroduce the original slot defect through the fix itself.
+
+    exclude_source_scenario: when set (the six_quotient capability harness
+    regenerating scenario X passes X here), drops any candidate guide whose
+    source_scenario == X before ranking. Without this, a scenario that was
+    previously scored, wrote a Principal-Review guide about its own miss,
+    and got promoted to a crystal will — on a later regeneration of the
+    SAME scenario — retrieve its own guide via lexical overlap (the guide's
+    crystal_text is near-identical to the stem it was written about, so it
+    wins the overlap ranking almost automatically). That is same-scenario
+    guide reuse, not cross-scenario teaching transfer, and a capability
+    delta measured on such a row is not evidence the packs generalize.
+    Measured on GREEN 2026-08-02: 20/45 (44%) of scored capability rows had
+    their own scenario_id in their own injected guide_scenarios. Production
+    (non-harness) calls never set this — real user disclosures don't carry
+    a synthetic scenario_id, and reusing a matching prior guide for a
+    similar real disclosure is the intended mechanism there. See
+    TRUST_LEDGER.md Entry 15.
     """
     lim = max(1, min(int(limit), 6))
     reserve = max(0, min(int(safety_reserve), lim))
     tc = (turn_class or TURN_CLASS_SI).strip().lower()
     if tc not in (TURN_CLASS_SI, TURN_CLASS_HI):
         tc = TURN_CLASS_SI
+    exclude_sid = (exclude_source_scenario or "").strip()
     enriched: List[Dict[str, Any]] = []
     for r in rows:
+        if exclude_sid and str(r.get("source_scenario") or "").strip() == exclude_sid:
+            continue
         d = dict(r)
         rc = (d.get("response_class") or "").strip().lower()
         if not rc:
@@ -609,6 +643,7 @@ async def fetch_principal_review_crisis_guides(
     turn_class: str = TURN_CLASS_SI,
     actor_id: Optional[str] = None,
     user_text: str = "",
+    exclude_source_scenario: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Deterministic crisis Guides — safety class boundary, then lexical
     overlap with this turn's disclosure, then turn_class affinity + recency."""
@@ -631,7 +666,11 @@ async def fetch_principal_review_crisis_guides(
                 FROM nate_intelligence_crystals c
                 LEFT JOIN principal_review_library l
                   ON l.promoted_crystal_id = c.id::text
-                 AND l.source_kind = 'gold_scored'
+                 -- TRUST_LEDGER.md Entry 16: 'live_scored' = human-reviewed
+                 -- and promoted via the harvest-notes endpoint (draft-only
+                 -- at harvest time; only rows a human explicitly promoted
+                 -- reach this JOIN, same as 'gold_scored').
+                 AND l.source_kind IN ('gold_scored', 'live_scored')
                 WHERE c.origin_surface = 'principal_review'
                   AND c.scope = 'global'
                   AND c.superseded_by IS NULL
@@ -654,6 +693,7 @@ async def fetch_principal_review_crisis_guides(
                 safety_reserve=CRISIS_SAFETY_SLOT_RESERVE,
                 turn_class=tc,
                 user_text=user_text,
+                exclude_source_scenario=exclude_source_scenario,
             )
             # Demonstrated: inject path reinforces recall (same contract as
             # recall_crystals_for_context — not storage alone).
@@ -676,6 +716,7 @@ async def fetch_principal_review_class_guides(
     user_text: str = "",
     limit: int = CLASS_INJECT_LIMIT,
     actor_id: Optional[str] = None,
+    exclude_source_scenario: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Non-crisis teaching Guides matched by response_class + lexical affinity."""
     if not db_pool:
@@ -697,7 +738,9 @@ async def fetch_principal_review_class_guides(
                 FROM nate_intelligence_crystals c
                 LEFT JOIN principal_review_library l
                   ON l.promoted_crystal_id = c.id::text
-                 AND l.source_kind = 'gold_scored'
+                 -- TRUST_LEDGER.md Entry 16: see fetch_principal_review_crisis_guides'
+                 -- matching comment above.
+                 AND l.source_kind IN ('gold_scored', 'live_scored')
                 WHERE c.origin_surface = 'principal_review'
                   AND c.scope = 'global'
                   AND c.superseded_by IS NULL
@@ -713,6 +756,7 @@ async def fetch_principal_review_class_guides(
                 response_class=rc,
                 user_text=user_text or "",
                 limit=limit,
+                exclude_source_scenario=exclude_source_scenario,
             )
             await _reinforce_pr_guide_recalls(
                 conn,

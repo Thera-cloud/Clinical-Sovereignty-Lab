@@ -102,6 +102,7 @@ async def run_live_stack_turn(
     user_text: str,
     user_id: str,
     preferred_response_class: Optional[str] = None,
+    scenario_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     from app.services.sovereign_chat_client import generate_complete
     from app.services.therapeutic_controller import (
@@ -127,6 +128,10 @@ async def run_live_stack_turn(
         default_max_tokens=600,
         session_id=f"live_stack_{uuid.uuid4().hex[:12]}",
         preferred_response_class=preferred_response_class,
+        # TRUST_LEDGER.md Entry 15 — exclude this scenario's own guide from
+        # its own regeneration's injected set (same-scenario reuse is not
+        # cross-scenario teaching transfer).
+        exclude_source_scenario=scenario_id,
     )
     enriched = pack.get("enriched_system_prompt") or _BASE_CLIENT_PROMPT
     max_tok = min(int(pack.get("max_tokens") or 600), 800)
@@ -168,6 +173,7 @@ async def run_live_stack_turn(
     final = (audit or {}).get("response_text") or text or ""
     inversion_final = looks_like_perspective_inversion(final)
     inject_meta = {
+        "exclude_source_scenario": scenario_id,
         "crisis_class_fired": bool(audit_meta.get("crisis_class_fired")),
         "crisis_exempt": bool(audit_meta.get("crisis_exempt")),
         "tmc_class": audit_meta.get("tmc_class"),
@@ -377,6 +383,7 @@ async def generate_live_stack_batch(
                 user_text=user_text,
                 user_id=user_id,
                 preferred_response_class=(r["response_class"] or None),
+                scenario_id=str(r["scenario_id"] or ""),
             )
         except Exception as e:
             results.append(
@@ -393,6 +400,17 @@ async def generate_live_stack_batch(
         inject_meta["used_stem_not_paraphrase"] = user_text == stem
         inject_meta["stem_crisis"] = _stem_crisis
         inject_meta["paraphrase_crisis"] = _para_crisis
+        # Capability-session finding, 2026-08-02 (TRUST_LEDGER.md): tag
+        # transparent-audit-fallback text so capability statistics can
+        # exclude/segment it rather than conflating the generation system
+        # with its own error handler.
+        try:
+            from app.services.stall_suppression import is_stall_fallback
+
+            is_fallback_template = is_stall_fallback(text)
+        except Exception:
+            is_fallback_template = False
+        inject_meta["is_fallback_template"] = is_fallback_template
         async with pool.acquire() as conn:
             prior = await conn.fetchrow(
                 """SELECT nate_response_live, live_stack_run_id, live_inject_meta,
@@ -426,6 +444,7 @@ async def generate_live_stack_batch(
                        live_paraphrase_used = $4,
                        live_inject_meta = $5::jsonb,
                        live_mode_failure = $7,
+                       live_is_fallback_template = $8,
                        live_primary_score = CASE WHEN $6 THEN NULL ELSE live_primary_score END,
                        live_accuracy_score = CASE WHEN $6 THEN NULL ELSE live_accuracy_score END,
                        live_naturalness_score = CASE WHEN $6 THEN NULL ELSE live_naturalness_score END,
@@ -441,6 +460,7 @@ async def generate_live_stack_batch(
                 json.dumps(inject_meta),
                 clear_scores,
                 mode_fail,
+                is_fallback_template,
             )
         results.append(
             {
@@ -452,6 +472,7 @@ async def generate_live_stack_batch(
                 "crisis_class_fired": inject_meta.get("crisis_class_fired"),
                 "guide_scenarios": inject_meta.get("guide_scenarios"),
                 "violations": (out.get("violations") or [])[:5],
+                "is_fallback_template": is_fallback_template,
             }
         )
 

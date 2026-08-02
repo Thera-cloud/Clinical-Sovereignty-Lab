@@ -667,6 +667,140 @@ async def gold_backfill_notes_learning(
     }
 
 
+LIVE_NOTES_HARVEST_MIN = GOLD_NOTES_AUTO_PROMOTE_MIN
+
+
+@router.post("/gold/live-track/harvest-notes")
+async def live_track_harvest_notes(
+    request: Request,
+    admin: Dict = Depends(require_admin),
+):
+    """Capability-session harvest ticket (docs/ln7/TRUST_LEDGER.md Entry 16).
+
+    Live-track (capability) scoring is deliberately "no-promote" at score
+    time — POST /gold/score's live branch always returns
+    notes_as_principal_guide=False, library_id=None, promoted_crystal_id=
+    None, unlike the judge-track branch which can auto-promote. That
+    asymmetry was correct as a default (capability baseline should not
+    silently mutate the teaching corpus mid-measurement) but left no path
+    at all for the diagnostic value in those notes — 45 live-track rows
+    accumulated substantial (>=80 char) live_notes with zero mechanism to
+    ever become a Guide.
+
+    This endpoint is the harvest path, DRAFT-ONLY: it creates or updates a
+    principal_review_library row per qualifying live-track note
+    (source_kind='live_scored', distinct from judge-track's 'gold_scored'
+    so the two provenances never collide in dedup lookups), status
+    always 'draft'. It does NOT call _promote_library_item — unlike
+    gold_backfill_notes_learning's judge-track equivalent, promotion here
+    requires a human to review each draft individually via the existing
+    POST /library/{item_id}/promote endpoint. That per-item human review
+    IS the "post-condition review" this ticket names: which of the 40+
+    diagnostic notes are durable, generalizable findings (promote) versus
+    one-off observations about a single generation (leave as draft, or
+    archive). Skips rows already flagged live_is_fallback_template=true
+    (migration 320) — a note written about the audit fallback string is
+    diagnostic about the audit gate, not clinical teaching material, and
+    promoting it would misfile a system-integrity finding as a therapeutic
+    guide.
+    """
+    rater = _rater(admin)
+    if rater not in _ALLOWED_RATERS:
+        if str((admin or {}).get("role") or "").upper() == "ADMIN" and (
+            admin.get("is_audit") or admin.get("is_audit_token")
+        ):
+            rater = "DrNevedal1"
+        else:
+            raise HTTPException(403, f"rater_id {rater!r} not in allowlist")
+    pool = _pool(request)
+    harvested: List[Dict[str, Any]] = []
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT scenario_id, live_notes, nate_response_live, section,
+                      client_says, response_class
+               FROM six_quotient_human_gold
+               WHERE live_human_scored = true
+                 AND COALESCE(live_is_fallback_template, false) = false
+                 AND NULLIF(BTRIM(live_notes), '') IS NOT NULL
+                 AND LENGTH(BTRIM(live_notes)) >= $1""",
+            LIVE_NOTES_HARVEST_MIN,
+        )
+        for g in rows:
+            notes_text = _clip_gold_notes(g["live_notes"])
+            meta = json.dumps(
+                {
+                    "notes_as_principal_guide": True,
+                    "harvested_from": "live_track_capability_session",
+                    "requires_human_promotion_review": True,
+                }
+            )
+            lib_id = await conn.fetchval(
+                """SELECT id FROM principal_review_library
+                   WHERE source_kind = 'live_scored' AND source_ref = $1""",
+                g["scenario_id"],
+            )
+            if lib_id:
+                await conn.execute(
+                    """UPDATE principal_review_library SET
+                         topic = $1,
+                         principal_response = $2,
+                         nate_response = $3,
+                         response_class = $6,
+                         source_scenario = $1,
+                         metadata = COALESCE(metadata, '{}'::jsonb) || $4::jsonb,
+                         status = CASE
+                           WHEN status IN ('archived', 'promoted') THEN status
+                           ELSE 'draft'
+                         END,
+                         updated_at = NOW()
+                       WHERE id = $5::uuid""",
+                    g["scenario_id"],
+                    notes_text,
+                    g["nate_response_live"] or "",
+                    meta,
+                    lib_id,
+                    g["response_class"],
+                )
+                action = "updated"
+            else:
+                lib_id = await conn.fetchval(
+                    """INSERT INTO principal_review_library
+                       (topic, section, client_says, principal_response, nate_response,
+                        source_kind, source_ref, status, created_by, metadata,
+                        response_class, source_scenario)
+                       VALUES ($1, $2, $3, $4, $5, 'live_scored', $1, 'draft', $6, $7::jsonb,
+                               $8, $1)
+                       RETURNING id""",
+                    g["scenario_id"],
+                    g["section"] or "clinical",
+                    g["client_says"] or "",
+                    notes_text,
+                    g["nate_response_live"] or "",
+                    rater[:64],
+                    meta,
+                    g["response_class"],
+                )
+                action = "created"
+            harvested.append(
+                {
+                    "scenario_id": g["scenario_id"],
+                    "library_id": str(lib_id),
+                    "action": action,
+                }
+            )
+    return {
+        "status": "ok",
+        "harvested": len(harvested),
+        "items": harvested,
+        "learning": (
+            "live-track diagnostic notes now exist as DRAFT Principal Guides — "
+            "none auto-promoted. Review each via POST /library/{item_id}/promote "
+            "to convert the durable findings into teaching crystals; the rest "
+            "stay draft (or archive them) as one-off observations."
+        ),
+    }
+
+
 # ── Live-stack capability baseline (dual-track) ─────────────────────────────
 
 

@@ -109,6 +109,83 @@ def test_turn_class_hi_prefers_hi_affinity_guides():
     assert "escalate_or_safety" in src
 
 
+def test_select_crisis_guides_excludes_own_source_scenario():
+    """TRUST_LEDGER.md Entry 15 — a scenario's own guide (source_scenario
+    match) must not be selectable for its own regeneration, or a
+    capability delta on that row measures same-scenario guide reuse, not
+    cross-scenario teaching transfer. Found on GREEN: 20/45 (44%) of
+    scored capability rows had this self-reference before the fix."""
+    m = _load(_POLICY, "pr_crisis_policy_selfref")
+    rows = [
+        {
+            "id": 1,
+            "response_class": "escalate_or_safety",
+            "source_scenario": "AQ-G06",
+            "crystal_text": "Principal Guide: statin non-adherence missed",
+        },
+        {
+            "id": 2,
+            "response_class": "escalate_or_safety",
+            "source_scenario": "AQ-1",
+            "crystal_text": "Principal Guide: suicide 988 I'm here",
+        },
+    ]
+    # Without exclusion, both are eligible.
+    both = m.select_crisis_guides(rows, limit=3, safety_reserve=3)
+    assert {g["id"] for g in both} == {1, 2}
+    # Regenerating AQ-G06 itself must not retrieve guide id=1.
+    excluded = m.select_crisis_guides(
+        rows, limit=3, safety_reserve=3, exclude_source_scenario="AQ-G06"
+    )
+    assert {g["id"] for g in excluded} == {2}
+    # A different scenario regenerating is unaffected.
+    unaffected = m.select_crisis_guides(
+        rows, limit=3, safety_reserve=3, exclude_source_scenario="MQ-2"
+    )
+    assert {g["id"] for g in unaffected} == {1, 2}
+    # None/empty string is a no-op (matches every production call site).
+    noop = m.select_crisis_guides(rows, limit=3, safety_reserve=3, exclude_source_scenario=None)
+    assert {g["id"] for g in noop} == {1, 2}
+
+
+def test_select_class_guides_excludes_own_source_scenario():
+    m = _load(_POLICY, "pr_class_guides_selfref")
+    rows = [
+        {
+            "id": 10,
+            "response_class": "therapeutic_engage",
+            "source_scenario": "EQ-3",
+            "crystal_text": "Principal Guide: somatic grounding language",
+        },
+        {
+            "id": 11,
+            "response_class": "therapeutic_engage",
+            "source_scenario": "CQ-G08",
+            "crystal_text": "Principal Guide: performing a body for strangers",
+        },
+    ]
+    excluded = m.select_class_guides(
+        rows,
+        response_class="therapeutic_engage",
+        limit=4,
+        exclude_source_scenario="EQ-3",
+    )
+    assert {g["id"] for g in excluded} == {11}
+    unaffected = m.select_class_guides(
+        rows, response_class="therapeutic_engage", limit=4,
+    )
+    assert {g["id"] for g in unaffected} == {10, 11}
+
+
+def test_fetch_functions_accept_exclude_source_scenario_param():
+    """Both fetch_* wrappers must expose the kwarg and thread it to their
+    select_* call — a signature check via AST since these are async/DB
+    functions not directly invoked in offline tests."""
+    src = _POLICY.read_text(encoding="utf-8")
+    assert "exclude_source_scenario: Optional[str] = None" in src
+    assert src.count("exclude_source_scenario=exclude_source_scenario") >= 2
+
+
 def test_class_matched_guide_select_and_format():
     m = _load(_POLICY, "pr_crisis_policy_class")
     rows = [

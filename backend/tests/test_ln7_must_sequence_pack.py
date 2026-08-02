@@ -151,3 +151,27 @@ def test_live_wiring_flag_reads_env_true(monkeypatch):
     monkeypatch.setenv("LN7_MUST_SEQUENCE_PACK_LIVE", "true")
     assert pack.must_sequence_pack_live_enabled() is True
     monkeypatch.delenv("LN7_MUST_SEQUENCE_PACK_LIVE", raising=False)
+
+
+def test_commitment_demand_line_present_and_independent_of_turn_class():
+    """TRUST_LEDGER.md Entry 16 — the commitment-vs-mirror split, not the
+    gate-1 crisis grid, is this line's derivation. It must be independently
+    addressable (not folded into format_must_sequence_pack, which is
+    turn_class-scoped) and must not itself compound with '∧'."""
+    pack = _pack()
+    line = pack.format_commitment_demand_line()
+    assert line == pack.COMMITMENT_DEMAND_LINE
+    assert "commitment demand" in line.lower()
+    assert "\u2227" not in line
+    # Independent of turn_class / applicability gates entirely.
+    assert "explicit" in line.lower() or "explicitly" in line.lower()
+    assert "mirroring is not a substitute" in line.lower()
+
+
+def test_commitment_demand_line_names_all_three_demand_forms():
+    """The four demand forms named in the capability-session synthesis:
+    answer, refusal, differentiation, hold-at-stated-certainty."""
+    pack = _pack()
+    line = pack.format_commitment_demand_line().lower()
+    for term in ("answer", "refusal", "differentiation", "certainty"):
+        assert term in line

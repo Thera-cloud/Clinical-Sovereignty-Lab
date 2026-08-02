@@ -177,6 +177,57 @@ def format_must_sequence_pack(
     return "\n".join([header, *lines, footer]) + "\n"
 
 
+# ─── Commitment-demand line (capability-session synthesis, 2026-08-02) ───
+#
+# Distinct derivation from the six MUST-sequence lines above: not from the
+# gate-1 crisis dose-response grid, but from the 40-row general capability
+# session (docs/ln7/TRUST_LEDGER.md Entry 16). Finding: whether a stem
+# DEMANDS a committed stance (answer / refuse / differentiate / hold at a
+# stated certainty) or PERMITS mirroring predicted the primary-score split
+# (~18 twos vs ~22 ones) almost perfectly across all 40 rows, independent
+# of response_class or turn_class. The one reliably-scoring commitment
+# form, observed across two independently-generated eras of the identical
+# stem (EQ-G09: judge-track era primary=0, live-track era primary=2 —
+# both attempted explicit contract-acceptance; only the live-track era
+# executed the full shape below) is:
+#
+#   1. Name the SPECIFIC pattern or reason behind the demand — not a
+#      generic acknowledgement, reference what they actually said/asked.
+#   2. State the behavioral commitment explicitly, in first person,
+#      matching the register they requested ("I can do that, I'll...").
+#   3. Invite forward movement with ONE question about proceeding — do
+#      not soften the commitment with a hedge or substitute a mirror-only
+#      reflection for the actual answer.
+#
+# This is a general therapeutic_engage move, not a crisis MUST — it
+# applies whenever ANY stem demands a stance, independent of turn_class,
+# and is therefore kept separate from format_must_sequence_pack() above
+# rather than folded into it. Same live-wiring posture as the rest of this
+# module: additive, not called by any live path, acceptance test is a
+# dose-response-v2-style regeneration+re-score against commitment-demand
+# stems specifically (not yet run).
+
+COMMITMENT_DEMAND_LINE = (
+    "MUST (commitment demand): When the client demands a stance — an "
+    "answer, a refusal, a differentiation, or that you hold a certainty "
+    "they've stated — do not resolve it with mirroring alone. Name the "
+    "specific pattern or reason behind their demand, then state your "
+    "commitment explicitly in first person ('I can do that, I will...'), "
+    "then invite forward movement with one question. Mirroring is not a "
+    "substitute for the requested stance."
+)
+
+
+def format_commitment_demand_line() -> str:
+    """Single addressable line for the commitment-demand move (see module
+    addendum above, TRUST_LEDGER.md Entry 16). Independent of turn_class —
+    callers append this to non-crisis therapeutic_engage teaching context
+    or compose it alongside the crisis MUST-sequence pack when a turn is
+    both crisis-adjacent and stance-demanding. Not wired to any live call
+    site; same posture as format_must_sequence_pack()."""
+    return COMMITMENT_DEMAND_LINE
+
+
 def must_sequence_pack_live_enabled() -> bool:
     """Feature-flag read for future live wiring. Defaults to False/unset —
     this module is design-build-only until dose-response v2 clears RED
