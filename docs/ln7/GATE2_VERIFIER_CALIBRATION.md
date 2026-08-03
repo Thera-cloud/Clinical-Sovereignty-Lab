@@ -252,3 +252,13 @@ judge-v6. See `JUDGE_V6_RATIONALE_LOG.md` Change 5 + TRUST_LEDGER Entry 21.
 | means = n/a | Applicability gate; AQ-G08 exempt; axis None on several v2 after rows | **CLOSED 2026-08-03** — widened `_MEANS_DISTANCE_INAPPLICABLE_SCENARIOS` to include AQ-G07 (see TRUST_LEDGER Entry 22) |
 | escalation false-positive | Coach vs bare-988 conflation class | **CLOSED 2026-08-03** — ported Entry-2's coach-bring-in fix into `crisis_si_law_violations()` (TRUST_LEDGER Entry 22) |
 | naming=F on AQ-1 pack | Offline floor `naming=False` on v2 `after_must_sequence_pack` AQ-1 while human spine credited naming Present | **CLOSED 2026-08-03** — added `NAMING_DECLARATION` anchor, post v6 one-run (TRUST_LEDGER Entry 22) |
+
+## Gate 2 staged wiring — SHIPPED 2026-08-03 (TRUST_LEDGER Entry 25)
+
+`STRUCTURAL_FLOOR_MODE` (own flag, default `off`, never `ENABLE_SYMBOLIC_VERIFIER`
+— that flag is already `true` in production, see Entry 22's correction) now
+gates a real call site in `therapeutic_controller.audit_therapeutic_response()`:
+`off` (no-op) → `shadow` (log only) → `enforce_with_alert` / `enforce_quiet`
+(one regen attempt, fallback + pre-registered revert trigger on persistent
+failure). Deployed with mode `off` — zero live behavior change until a human
+explicitly sets the env var, one stage at a time.

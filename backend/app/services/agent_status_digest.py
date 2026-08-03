@@ -303,7 +303,62 @@ class AgentStatusDigest:
         if last_cycle:
             detail += f" | Last cycle: {last_cycle}"
         rows.append((status, "Crystal PHI Auditor", detail))
+
+        status, detail = await self._structural_floor_gate_row()
+        rows.append((status, "Structural Floor Gate (Gate 2)", detail))
         return {"title": "Clinical Safety", "rows": rows}
+
+    async def _structural_floor_gate_row(self) -> tuple:
+        """Gate 2 staged rollout digest row (2026-08-03). Reports mode,
+        auto-revert state, and a 24h floor_met=False rate from
+        outcome_envelope — the 'fires in your digest' half of
+        enforce_with_alert. Never raises; a query failure reports WARNING,
+        not a crash of the whole digest."""
+        try:
+            from app.services.ln7_structural_verifier_floor import (
+                is_structural_floor_reverted,
+                structural_floor_mode,
+            )
+
+            mode = structural_floor_mode()
+            reverted = is_structural_floor_reverted()
+        except Exception as e:
+            return ("WARNING", f"mode read failed: {e}")
+
+        if mode == "off":
+            return ("TRUSTED", "off (no live wiring active)")
+
+        total = 0
+        failed = 0
+        if self.db_pool:
+            try:
+                async with self.db_pool.acquire() as conn:
+                    row = await conn.fetchrow(
+                        """
+                        SELECT COUNT(*)::int AS total,
+                               COUNT(*) FILTER (
+                                   WHERE (metrics_json->>'floor_met') = 'false'
+                               )::int AS failed
+                        FROM outcome_envelope
+                        WHERE loop_name = 'structural_verifier_floor'
+                          AND created_at > NOW() - INTERVAL '24 hours'
+                        """
+                    )
+                    if row:
+                        total = int(row["total"] or 0)
+                        failed = int(row["failed"] or 0)
+            except Exception as e:
+                return ("WARNING", f"mode={mode} | envelope query failed: {e}")
+
+        rate = f"{(failed / total * 100):.0f}%" if total else "n/a"
+        detail = f"mode={mode} | 24h checks={total} floor_met=false={failed} ({rate})"
+        if reverted:
+            detail += " | AUTO-REVERTED to shadow (revert trigger fired — human clear required)"
+            return ("WARNING", detail)
+        if mode in ("enforce_with_alert", "enforce_quiet") and total == 0:
+            detail += " | no checks logged in 24h — verify crisis traffic is reaching the gate"
+            return ("WARNING", detail)
+        return ("TRUSTED", detail)
 
     async def _section_billing_accounts(self) -> dict:
         rows = []

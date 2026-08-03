@@ -1587,9 +1587,21 @@ one-run" authorization):
    including rows human-scored `escalation=absent`. Ported the already-approved
    `_ESCALATION_COACH_ANY`/`_ESCALATION_HARD_ANCHOR` fix (Entry 2, shadow floor)
    into this sibling function verbatim. `crisis_si_law_violations()` stays gated
-   behind `ENABLE_SYMBOLIC_VERIFIER` (default false) — no live-behavior change,
-   corrects what the check measures if/when enabled. `_ESCALATION_ANY` itself
-   untouched (still used by `classify_failure_class()`'s distinct, softer check).
+   behind `ENABLE_SYMBOLIC_VERIFIER` (code default false).
+   **CORRECTION 2026-08-03 (same pattern as Entry 23's `.env` surprise):**
+   the claim "no live-behavior change" above checked the code's bare default,
+   not the actual deployed value. `ENABLE_SYMBOLIC_VERIFIER=true` on GREEN
+   (verified via `docker exec nate_backend printenv`) — this flag has been
+   live in production this whole time. This fix therefore **was** an
+   immediate live-behavior change: any crisis response that previously
+   satisfied `VIOLATION_ESCALATION` via bare hotline text alone now fails it,
+   triggering `audit_therapeutic_response()`'s deterministic crisis-spine
+   suffix (or an LLM regen) on real traffic starting at deploy. The fix
+   itself is still correct (it closes a real false-positive), but the
+   "dormant/gated" framing was wrong — a live flag value must be checked on
+   GREEN, not inferred from a code default, before any claim like this is
+   made again. `_ESCALATION_ANY` itself untouched (still used by
+   `classify_failure_class()`'s distinct, softer check).
 3. **naming=F on AQ-1 pack row** — new `NAMING_DECLARATION` anchor in
    `ln7_structural_verifier_floor.py` for the pack's own scripted language
    surfacing verbatim ("I'm naming it plainly" / "this is a clear suicidal
@@ -1737,3 +1749,67 @@ independent evaluation path, not the same function called twice), a
 live-exercised `run_fallback_drill()` result, and a domain-scoped exclusion
 list for clinical/defense revisions in `evaluate_evidence()` are the
 concrete prerequisites named in this entry for re-attempting the G2 flip.
+
+---
+
+## Entry 25 — 2026-08-03 — Gate 2 staged wiring shipped, pre-flighted against Entry 23/24's own mistake
+
+CEO asked directly, before any code was written: "are we going to run into
+another G2-flip-type issue — something not tested before?" Answer: yes,
+found one immediately, in Entry 22's own prior work, before writing a
+single line of the new wiring.
+
+**Found (correction to Entry 22):** `ENABLE_SYMBOLIC_VERIFIER=true` on GREEN
+(checked via `docker exec nate_backend printenv`, not inferred from the
+code's bare `false` default). Entry 22's claim "stays gated behind
+`ENABLE_SYMBOLIC_VERIFIER` (default false) — no live-behavior change" was
+therefore wrong: that fix has been live on real crisis traffic since
+deploy, not dormant. The fix itself is still correct; only the blast-radius
+claim was wrong. Corrected in place in Entry 22 above.
+
+**Two more gaps found before any wiring existed:**
+- `shadow → enforce_with_alert → enforce_quiet` and the "pre-registered
+  revert trigger" named in the plan's signed rollout had **zero code
+  anywhere** — pure plan-language, no mechanism. "Small PR" undersold the
+  actual scope.
+- Naively hooking the floor into the existing `_symbolic_audit_violations()`
+  path would have inherited `ENABLE_SYMBOLIC_VERIFIER=true` and jumped
+  straight to enforce on deploy day one — skipping shadow entirely, the
+  exact shape of Entry 23's `.env` kill-switch surprise.
+
+**Built with those two lessons applied, not just noted:**
+
+1. `ln7_structural_verifier_floor.py` — `STRUCTURAL_FLOOR_MODE`
+   (`off`/`shadow`/`enforce_with_alert`/`enforce_quiet`, default `off`,
+   own flag, never `ENABLE_SYMBOLIC_VERIFIER`), Redis-backed consecutive-
+   fail counter, and the actual pre-registered revert trigger
+   (`STRUCTURAL_FLOOR_REVERT_THRESHOLD`, default 3 consecutive
+   still-fails-after-regen) — auto-downgrades enforcement to shadow and
+   fires `structural_floor_auto_revert` via `notify_flywheel_anomaly`;
+   stays reverted until a human calls
+   `clear_structural_floor_auto_revert()`, no auto-re-escalation.
+2. `flywheel_anomaly.py` — 2 new `ANOMALY_KINDS`:
+   `structural_floor_auto_revert`, `structural_floor_persist_fail`.
+3. `therapeutic_controller.audit_therapeutic_response()` — new block, runs
+   last, only on `crisis_si`/`crisis_hi` turns. `shadow` fire-and-forgets
+   `log_structural_floor_check()` (already existed, never had a call site).
+   `enforce_*` attempts one regen naming the missing moves, then falls back
+   via the existing `resolve_audit_fallback()` path on persistent failure.
+   `enforce_with_alert` alerts every persistent fire; `enforce_quiet`
+   suppresses that but still alerts when the revert trigger itself fires.
+4. `agent_status_digest.py` — new `_structural_floor_gate_row()` in the
+   Clinical Safety section: mode, auto-revert state, 24h check count and
+   floor_met=false rate from `outcome_envelope`. TRUSTED when off or
+   operating normally; WARNING on auto-revert or on zero checks logged
+   while an enforce mode is configured (silent-gate detector).
+5. 26 new offline tests across 3 files — mode/revert-trigger logic
+   (fake-Redis, no live dependency), real integration tests against
+   `audit_therapeutic_response()` (same harness as
+   `test_symbolic_verifier_seams.py`, proving behavior under
+   `ENABLE_SYMBOLIC_VERIFIER=false` — true independence, not claimed),
+   and the digest row. 2510/2510 CI green.
+
+**Deployed with `STRUCTURAL_FLOOR_MODE` unset (`off`).** Verified on GREEN
+post-deploy: mode reads `off`, digest row reads `TRUSTED — off (no live
+wiring active)`, zero behavior change. Moving to `shadow` — the next stage
+— is a separate, explicit action, not part of this deploy.

@@ -62,6 +62,7 @@ def _preload_lazy_deps():
     namespace packages instead of triggering a real package __init__."""
     _load("app.services.principal_review_crisis_policy", SERVICES / "principal_review_crisis_policy.py")
     _load("app.services.ln7_outcome_envelope", SERVICES / "ln7_outcome_envelope.py")
+    _load("app.services.flywheel_anomaly", SERVICES / "flywheel_anomaly.py")
 
 
 def _svf():
@@ -361,6 +362,190 @@ def test_naming_declaration_does_not_broaden_to_generic_plan_language():
 
 
 # ── floor_met composition ───────────────────────────────────────────────
+
+
+# ── Gate 2 staged rollout: mode resolution + revert trigger (2026-08-03) ──
+# Independent of ENABLE_SYMBOLIC_VERIFIER by design -- see module docstring
+# comment above STRUCTURAL_FLOOR_MODES. Uses a fake Redis (dict-backed) so
+# these run offline without a real Redis connection.
+
+
+class _FakeRedis:
+    def __init__(self):
+        self.store: dict = {}
+
+    def get(self, key):
+        return self.store.get(key)
+
+    def set(self, key, value):
+        self.store[key] = value
+        return True
+
+    def delete(self, key):
+        self.store.pop(key, None)
+        return 1
+
+    def incr(self, key):
+        self.store[key] = int(self.store.get(key, 0)) + 1
+        return self.store[key]
+
+    def expire(self, key, seconds):
+        return True
+
+
+def test_structural_floor_mode_defaults_off(monkeypatch):
+    svf = _svf()
+    monkeypatch.delenv("STRUCTURAL_FLOOR_MODE", raising=False)
+    assert svf.structural_floor_mode() == "off"
+
+
+def test_structural_floor_mode_respects_valid_env_values(monkeypatch):
+    svf = _svf()
+    for mode in svf.STRUCTURAL_FLOOR_MODES:
+        monkeypatch.setenv("STRUCTURAL_FLOOR_MODE", mode)
+        assert svf.structural_floor_mode() == mode
+
+
+def test_structural_floor_mode_invalid_value_falls_back_to_off(monkeypatch):
+    svf = _svf()
+    monkeypatch.setenv("STRUCTURAL_FLOOR_MODE", "definitely_not_a_real_mode")
+    assert svf.structural_floor_mode() == "off"
+
+
+def test_effective_mode_off_and_shadow_never_consult_redis(monkeypatch):
+    svf = _svf()
+
+    def _boom():
+        raise AssertionError("off/shadow must never touch redis")
+
+    monkeypatch.setattr(svf, "_redis", _boom)
+    monkeypatch.setenv("STRUCTURAL_FLOOR_MODE", "off")
+    import asyncio
+
+    assert asyncio.run(svf.effective_structural_floor_mode()) == "off"
+    monkeypatch.setenv("STRUCTURAL_FLOOR_MODE", "shadow")
+    assert asyncio.run(svf.effective_structural_floor_mode()) == "shadow"
+
+
+def test_effective_mode_downgrades_to_shadow_when_reverted(monkeypatch):
+    svf = _svf()
+    fake = _FakeRedis()
+    fake.set(svf._revert_key(), "1")
+    monkeypatch.setattr(svf, "_redis", lambda: fake)
+    monkeypatch.setenv("STRUCTURAL_FLOOR_MODE", "enforce_quiet")
+    import asyncio
+
+    assert asyncio.run(svf.effective_structural_floor_mode()) == "shadow"
+
+
+def test_effective_mode_stays_enforce_when_not_reverted(monkeypatch):
+    svf = _svf()
+    fake = _FakeRedis()
+    monkeypatch.setattr(svf, "_redis", lambda: fake)
+    monkeypatch.setenv("STRUCTURAL_FLOOR_MODE", "enforce_with_alert")
+    import asyncio
+
+    assert asyncio.run(svf.effective_structural_floor_mode()) == "enforce_with_alert"
+
+
+def test_record_enforcement_outcome_resets_streak_on_success(monkeypatch):
+    svf = _svf()
+    fake = _FakeRedis()
+    fake.store[svf._fail_streak_key()] = 2
+    monkeypatch.setattr(svf, "_redis", lambda: fake)
+    import asyncio
+
+    out = asyncio.run(svf.record_enforcement_outcome(persisted_after_regen=False))
+    assert out["streak"] == 0
+    assert svf._fail_streak_key() not in fake.store
+
+
+def test_record_enforcement_outcome_increments_streak_on_failure(monkeypatch):
+    svf = _svf()
+    fake = _FakeRedis()
+    monkeypatch.setattr(svf, "_redis", lambda: fake)
+    import asyncio
+
+    out1 = asyncio.run(svf.record_enforcement_outcome(persisted_after_regen=True))
+    assert out1["streak"] == 1
+    assert out1["reverted_now"] is False
+    out2 = asyncio.run(svf.record_enforcement_outcome(persisted_after_regen=True))
+    assert out2["streak"] == 2
+
+
+def test_record_enforcement_outcome_triggers_revert_at_threshold(monkeypatch):
+    svf = _svf()
+    fake = _FakeRedis()
+    monkeypatch.setattr(svf, "_redis", lambda: fake)
+
+    notified = []
+
+    async def _fake_notify(kind, payload=None, *, db_pool=None):
+        notified.append((kind, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        "app.services.flywheel_anomaly.notify_flywheel_anomaly", _fake_notify
+    )
+    import asyncio
+
+    for i in range(svf.STRUCTURAL_FLOOR_REVERT_THRESHOLD - 1):
+        out = asyncio.run(svf.record_enforcement_outcome(persisted_after_regen=True))
+        assert out["reverted_now"] is False
+
+    final = asyncio.run(svf.record_enforcement_outcome(persisted_after_regen=True))
+    assert final["reverted_now"] is True
+    assert fake.get(svf._revert_key()) == "1"
+    assert notified and notified[0][0] == "structural_floor_auto_revert"
+
+
+def test_record_enforcement_outcome_does_not_rerevert_once_already_reverted(monkeypatch):
+    svf = _svf()
+    fake = _FakeRedis()
+    fake.set(svf._revert_key(), "1")
+    monkeypatch.setattr(svf, "_redis", lambda: fake)
+
+    notified = []
+
+    async def _fake_notify(kind, payload=None, *, db_pool=None):
+        notified.append(kind)
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        "app.services.flywheel_anomaly.notify_flywheel_anomaly", _fake_notify
+    )
+    import asyncio
+
+    for _ in range(svf.STRUCTURAL_FLOOR_REVERT_THRESHOLD + 2):
+        asyncio.run(svf.record_enforcement_outcome(persisted_after_regen=True))
+    assert notified == []  # already reverted -- no repeat anomaly spam
+
+
+def test_clear_auto_revert_deletes_both_keys(monkeypatch):
+    svf = _svf()
+    fake = _FakeRedis()
+    fake.set(svf._revert_key(), "1")
+    fake.store[svf._fail_streak_key()] = 5
+    monkeypatch.setattr(svf, "_redis", lambda: fake)
+
+    assert svf.clear_structural_floor_auto_revert() is True
+    assert svf.is_structural_floor_reverted() is False
+    assert svf._fail_streak_key() not in fake.store
+
+
+def test_is_reverted_false_when_redis_unavailable(monkeypatch):
+    svf = _svf()
+    monkeypatch.setattr(svf, "_redis", lambda: None)
+    assert svf.is_structural_floor_reverted() is False
+
+
+def test_new_anomaly_kinds_registered_in_flywheel_anomaly():
+    """Regression guard: notify_flywheel_anomaly() silently coerces any kind
+    not in ANOMALY_KINDS to 'confound_spike' (with just a warning log) --
+    a typo'd kind string here would misfile every alert without erroring."""
+    fa = _load("app.services.flywheel_anomaly", SERVICES / "flywheel_anomaly.py")
+    assert "structural_floor_auto_revert" in fa.ANOMALY_KINDS
+    assert "structural_floor_persist_fail" in fa.ANOMALY_KINDS
 
 
 def test_floor_met_true_when_all_applicable_moves_present():

@@ -3,7 +3,9 @@
 Kinds: rollback_storm, queens_disagree_lineage, confound_spike,
 burst_destroy_fail, watchdog_blind, fence_manifest_mismatch,
 bootstrap_cap, fingerprint_drift, honeytoken, fallback_drill_fail,
-drift_sentinel, merge_disk_low, merge_drain_fail.
+drift_sentinel, merge_disk_low, merge_drain_fail, merge_data_budget_low,
+shadow_eval_divergence, structural_floor_auto_revert,
+structural_floor_persist_fail.
 
 # QUANTUM-CRYSTAL-ARCH
 """
@@ -33,6 +35,8 @@ ANOMALY_KINDS = frozenset({
     "merge_drain_fail",  # QUANTUM-CRYSTAL-ARCH — Phase C: merge_drain orchestrator exception
     "merge_data_budget_low",  # QUANTUM-CRYSTAL-ARCH — Phase D: <300/domain or <1500 total rows
     "shadow_eval_divergence",  # QUANTUM-CRYSTAL-ARCH — R3: monthly shadow/live divergence over threshold
+    "structural_floor_auto_revert",  # Gate 2: pre-registered revert trigger fired
+    "structural_floor_persist_fail",  # Gate 2: floor still failed after the one regen attempt (enforce_with_alert only)
 })
 
 _COOLDOWN: Dict[str, float] = {}

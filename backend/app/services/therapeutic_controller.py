@@ -1912,6 +1912,129 @@ async def audit_therapeutic_response(
             f"violations={len(violations)}"
         )
 
+    # QUANTUM-CRYSTAL-ARCH — Gate 2 structural floor staged wiring (2026-08-03,
+    # docs/ln7/GATE2_VERIFIER_CALIBRATION.md). Runs LAST, independent of
+    # ENABLE_SYMBOLIC_VERIFIER (own flag: STRUCTURAL_FLOOR_MODE, default
+    # 'off' — zero behavior change until a human explicitly sets it), and
+    # only on crisis-classified turns. off/shadow never touch final_text;
+    # enforce_with_alert/enforce_quiet attempt one regen, then fall back to
+    # the same resolve_audit_fallback() path above if the floor still fails.
+    _floor_turn_class = (audit_metadata.get("principal_review_turn_class") or "").strip()
+    if _floor_turn_class in ("crisis_si", "crisis_hi"):
+        try:
+            from app.services.ln7_structural_verifier_floor import (
+                effective_structural_floor_mode,
+                log_structural_floor_check,
+                record_enforcement_outcome,
+                verify_structural_floor,
+            )
+
+            _floor_mode = await effective_structural_floor_mode(db_pool)
+            _floor_user_text = audit_metadata.get("user_text_for_audit") or ""
+
+            if _floor_mode == "shadow":
+                import asyncio as _floor_asyncio
+
+                _floor_asyncio.create_task(
+                    log_structural_floor_check(
+                        db_pool,
+                        response_text=final_text,
+                        user_text=_floor_user_text,
+                        turn_class=_floor_turn_class,
+                        source="audit_therapeutic_response_shadow",
+                    )
+                )
+            elif _floor_mode in ("enforce_with_alert", "enforce_quiet"):
+                _floor_result = await log_structural_floor_check(
+                    db_pool,
+                    response_text=final_text,
+                    user_text=_floor_user_text,
+                    turn_class=_floor_turn_class,
+                    source="audit_therapeutic_response_enforce",
+                )
+                if _floor_result and not _floor_result.get("floor_met"):
+                    _missing = [
+                        k for k, v in (_floor_result.get("floor_checks") or {}).items()
+                        if not v
+                    ]
+                    _floor_regen_ok = False
+                    try:
+                        from app.sse.llm_fallback import chat_completion_with_fallback
+
+                        _retry_sys = (
+                            "Structural floor check failed. This is a crisis turn "
+                            f"missing required moves: {', '.join(_missing)}. Rewrite "
+                            "to include them explicitly — name the danger plainly if "
+                            "'naming_or_assessment' is missing, bring in the coach "
+                            "non-contingently if 'escalation' is missing, ask for "
+                            "distance from the named means if 'means_distance' is "
+                            "missing. Keep the warm therapeutic register; adapt, "
+                            "do not recite a script."
+                        )
+                        _retry = await chat_completion_with_fallback(
+                            [
+                                {"role": "system", "content": _retry_sys},
+                                {"role": "user", "content": f"Draft: {final_text[:500]}"},
+                            ],
+                            max_tokens=audit_metadata.get("max_tokens", 600),
+                            temperature=0.4,
+                        )
+                        if _retry and _retry.strip():
+                            _retry_result = verify_structural_floor(
+                                _retry.strip(),
+                                user_text=_floor_user_text,
+                                turn_class=_floor_turn_class,
+                            )
+                            if _retry_result.get("floor_met"):
+                                final_text = _retry.strip()
+                                _floor_regen_ok = True
+                    except Exception as _floor_regen_exc:
+                        logger.warning(
+                            "structural_floor: regen failed: %s", _floor_regen_exc
+                        )
+
+                    _floor_outcome = await record_enforcement_outcome(
+                        persisted_after_regen=not _floor_regen_ok,
+                        db_pool=db_pool,
+                        notes=f"user={user_id}",
+                    )
+                    if not _floor_regen_ok:
+                        if _floor_mode == "enforce_with_alert" or _floor_outcome.get(
+                            "reverted_now"
+                        ):
+                            try:
+                                from app.services.flywheel_anomaly import (
+                                    notify_flywheel_anomaly,
+                                )
+
+                                await notify_flywheel_anomaly(
+                                    "structural_floor_persist_fail",
+                                    {
+                                        "user_id": user_id,
+                                        "missing": _missing,
+                                        "streak": _floor_outcome.get("streak"),
+                                    },
+                                    db_pool=db_pool,
+                                )
+                            except Exception:
+                                pass
+                        from app.services.stall_suppression import resolve_audit_fallback
+
+                        final_text = resolve_audit_fallback(
+                            user_text=_floor_user_text,
+                            bridge_event_severity=audit_metadata.get(
+                                "bridge_event_severity"
+                            )
+                            or "info",
+                            default_fallback=TRANSPARENT_AUDIT_FALLBACK_MESSAGE,
+                        )
+                        print(
+                            f">>> [THERAPEUTIC-CTRL] structural_floor_fallback "
+                            f"user={user_id} mode={_floor_mode} missing={_missing}"
+                        )
+        except Exception as _floor_exc:
+            logger.warning("structural_floor: gate check failed: %s", _floor_exc)
+
     await _log_audit(
         db_pool=db_pool, user_id=user_id, audit_metadata=audit_metadata,
         violations=violations, audit_passed=audit_passed,

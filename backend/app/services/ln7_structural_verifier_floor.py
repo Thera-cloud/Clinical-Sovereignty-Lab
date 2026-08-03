@@ -47,10 +47,155 @@ narrative-inflation pattern documented in docs/ln7/TRUST_LEDGER.md Entry 1.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger("nate.ln7_structural_verifier_floor")
+
+# ─── Gate 2 staged rollout (2026-08-03) ─────────────────────────────────────
+#
+# Independent of ENABLE_SYMBOLIC_VERIFIER by design. That flag is ALREADY
+# true in production (discovered 2026-08-03 auditing this exact rollout —
+# see docs/ln7/TRUST_LEDGER.md Entry 22's correction) — reusing it for this
+# floor would have skipped "shadow" entirely and jumped straight to enforce
+# on first deploy. STRUCTURAL_FLOOR_MODE is its own flag, its own default
+# (off), and its own auto-revert path so this floor's staged rollout can
+# never repeat that mistake.
+STRUCTURAL_FLOOR_MODES = ("off", "shadow", "enforce_with_alert", "enforce_quiet")
+
+# Pre-registered revert trigger (named in the plan, never previously coded —
+# see docs/ln7/TRUST_LEDGER.md Entry 24/25): N consecutive turns where the
+# floor still fails AFTER the one regen attempt means a real user would have
+# seen the fallback message N times in a row — evidence the floor is
+# miscalibrated against live traffic, not evidence it's doing its job. Auto-
+# reverts enforcement to shadow and stays reverted (Redis key, no TTL) until
+# a human calls clear_structural_floor_auto_revert() — no auto-re-escalation.
+STRUCTURAL_FLOOR_REVERT_THRESHOLD = int(
+    os.getenv("STRUCTURAL_FLOOR_REVERT_THRESHOLD", "3")
+)
+
+
+def structural_floor_mode() -> str:
+    """Configured mode from STRUCTURAL_FLOOR_MODE. Defaults to 'off' — this
+    floor changes NO live behavior until a human explicitly sets this env
+    var, and moving through shadow -> enforce_with_alert -> enforce_quiet is
+    always an explicit, one-stage-at-a-time choice, never inferred."""
+    raw = (os.getenv("STRUCTURAL_FLOOR_MODE", "") or "off").strip().lower()
+    return raw if raw in STRUCTURAL_FLOOR_MODES else "off"
+
+
+def _redis():
+    """Same lazy-import pattern as ln7_serve_endpoint._redis() — reuses the
+    one real Redis connection helper rather than duplicating connection
+    logic. Returns None (never raises) if Redis is unavailable; every caller
+    here already treats that as a safe no-op."""
+    try:
+        from app.websocket.cli_task_bus import _redis as _r
+
+        return _r()
+    except Exception:
+        return None
+
+
+def _key_prefix() -> str:
+    env = os.getenv("ENVIRONMENT", "production")
+    pref = os.getenv("REDIS_KEY_PREFIX", "nate")
+    return f"{pref}:{env}"
+
+
+def _revert_key() -> str:
+    return f"{_key_prefix()}:structural_floor:auto_reverted"
+
+
+def _fail_streak_key() -> str:
+    return f"{_key_prefix()}:structural_floor:consecutive_persist_fail"
+
+
+def is_structural_floor_reverted() -> bool:
+    try:
+        r = _redis()
+        return bool(r and r.get(_revert_key()))
+    except Exception:
+        return False
+
+
+def clear_structural_floor_auto_revert() -> bool:
+    """Human-invoked only. No code path in this module calls this
+    automatically — an auto-revert stays reverted until a person decides
+    the floor is ready to try enforcing again."""
+    try:
+        r = _redis()
+        if r:
+            r.delete(_revert_key())
+            r.delete(_fail_streak_key())
+            return True
+    except Exception as e:
+        logger.warning("structural_floor: clear_auto_revert failed: %s", e)
+    return False
+
+
+async def effective_structural_floor_mode(db_pool=None) -> str:
+    """The mode callers should actually act on: the configured mode,
+    downgraded to 'shadow' if an auto-revert is currently armed. 'off' and
+    'shadow' never consult Redis (no reason to — there's nothing to revert
+    away from)."""
+    configured = structural_floor_mode()
+    if configured in ("off", "shadow"):
+        return configured
+    if is_structural_floor_reverted():
+        return "shadow"
+    return configured
+
+
+async def record_enforcement_outcome(
+    *,
+    persisted_after_regen: bool,
+    db_pool=None,
+    notes: str = "",
+) -> Dict[str, Any]:
+    """Rolling consecutive-failure counter feeding the pre-registered revert
+    trigger. Call once per enforce-mode floor check, after the one regen
+    attempt: persisted_after_regen=True means the floor still failed with
+    the regen already spent — the fallback message is what a real user saw.
+    A success (persisted_after_regen=False) resets the streak to 0; only
+    consecutive failures count."""
+    r = _redis()
+    streak = 0
+    reverted_now = False
+    if r:
+        try:
+            key = _fail_streak_key()
+            if persisted_after_regen:
+                streak = int(r.incr(key))
+                r.expire(key, 86400)
+            else:
+                r.delete(key)
+                streak = 0
+            if (
+                streak >= STRUCTURAL_FLOOR_REVERT_THRESHOLD
+                and not r.get(_revert_key())
+            ):
+                r.set(_revert_key(), "1")
+                reverted_now = True
+        except Exception as e:
+            logger.warning("structural_floor: enforcement counter failed: %s", e)
+    if reverted_now:
+        try:
+            from app.services.flywheel_anomaly import notify_flywheel_anomaly
+
+            await notify_flywheel_anomaly(
+                "structural_floor_auto_revert",
+                {
+                    "consecutive_persist_fail": streak,
+                    "threshold": STRUCTURAL_FLOOR_REVERT_THRESHOLD,
+                    "notes": notes,
+                },
+                db_pool=db_pool,
+            )
+        except Exception as e:
+            logger.warning("structural_floor: auto-revert anomaly notify failed: %s", e)
+    return {"streak": streak, "reverted_now": reverted_now}
 
 # NOTE: app.services.* imports are intentionally deferred to call-time inside
 # the functions below, not done at module level. app/services/__init__.py
