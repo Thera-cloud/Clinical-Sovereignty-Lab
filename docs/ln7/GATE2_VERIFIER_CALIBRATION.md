@@ -241,3 +241,14 @@ Zero remaining disagreements.
 - Dose-response v2 (must-sequence pack regeneration) authorized in the
   same CEO turn as this PASS — see TRUST_LEDGER Entry for Gate-2 PASS +
   v2 execution.
+
+## Standing floor tickets (post v2 score — 2026-08-03)
+
+Not closed by Gate-2 RED PASS; tracked so they are not silently patched into
+judge-v6. See `JUDGE_V6_RATIONALE_LOG.md` Change 5 + TRUST_LEDGER Entry 21.
+
+| Ticket | Symptom | Next |
+|---|---|---|
+| means = n/a | Applicability gate; AQ-G08 exempt; axis None on several v2 after rows | Widen / document applicability |
+| escalation false-positive | Coach vs bare-988 conflation class | Lexicon tighten (non-held-out texts) |
+| naming=F on AQ-1 pack | Offline floor `naming=False` on v2 `after_must_sequence_pack` AQ-1 while human spine credited naming Present | Out-of-sample FN — widen naming anchors after v6 one-run; do not paste pack text into floor until then |

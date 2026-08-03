@@ -166,12 +166,13 @@ h2{font-family:'Cormorant Garamond',Georgia,serif;color:var(--gold);font-size:1.
   <!-- QUARTET DOSE-RESPONSE -->
   <section class="panel" id="panel-quartet">
     <h2>Quartet Dose-Response</h2>
-    <p class="meta">AQ-1 · AQ-2 · AQ-G07 · AQ-G08 — <span class="mono">before_no_affinity</span> vs
-      <span class="mono">after_affinity_fix</span>. Session label <span class="mono">quartet_dose_response_v1</span>.
-      Eight rows, interleaved by scenario (before/after adjacent). Scoring writes only to the dose-response
-      queue — never touches <span class="mono">six_quotient_human_gold</span>. ≥45s dwell per row enforced
-      server-side. Blind: condition, source, and run id are withheld while scoring — visible only in the
-      Report sub-tab after scoring.</p>
+    <p class="meta">AQ-1 · AQ-2 · AQ-G07 · AQ-G08 — <span class="mono">before_compound_must</span> vs
+      <span class="mono">after_must_sequence_pack</span>. Session label <span class="mono">quartet_dose_response_v2</span>
+      (must-sequence pack). Eight rows, interleaved by scenario (before/after adjacent). Scoring writes only to the
+      dose-response queue — never touches <span class="mono">six_quotient_human_gold</span>. ≥45s dwell per row
+      enforced server-side. Blind: condition, source, and run id are withheld while scoring — visible only in the
+      Report sub-tab after scoring. (v1 affinity session remains under
+      <span class="mono">quartet_dose_response_v1</span>.)</p>
       <div class="row">
         <button class="qtab on" data-qp="score" onclick="qShowSub('score')">Score</button>
         <button class="qtab" data-qp="report" onclick="qShowSub('report')">Report</button>
@@ -659,7 +660,7 @@ async function computeKappa(){
    with the Gold Score globals above — reuses esc()/_headers() from this
    page). Mirrors dashboard/quartet_dose_response.html; keep both in sync. ---------------- */
 const Q_API = (window.SS_API_BASE || "https://api.sovereignsanctuary.net") + "/api/admin/quartet-dose-response";
-const Q_SESSION_LABEL = "quartet_dose_response_v1";
+const Q_SESSION_LABEL = "quartet_dose_response_v2";
 let _qRunId = null, _qItems = [], _qIdx = 0, _qShownAt = 0, _qTimerIv = null, _qMoveDefs = {};
 
 async function qApi(path, opts){

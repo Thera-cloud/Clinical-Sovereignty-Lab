@@ -1531,3 +1531,39 @@ compound ∧-joined MUST digest, holding affinity ranking constant.
 flag** (production stays compound MUST until CEO scores v2 and accepts the
 format). Human scoring of the 8 v2 rows is the acceptance test for permanent
 pack enablement.
+
+---
+
+## Entry 21 — 2026-08-03 — grok-judge-v6 freeze (before v2 held-out contact)
+
+CEO: scores done on `quartet_dose_response_v2` (8/8); **v6 freezes now** before
+anything else touches those rows. Third held-out set must survive (n=9 and
+n=40 already burned to prompt-revision-from-disagreement).
+
+**Freeze package:**
+1. Immutable export:
+   `backend/app/data/quartet_dose_response_v2/scored_export_2026-08-03.json`
+2. Rationale log: `docs/ln7/JUDGE_V6_RATIONALE_LOG.md` (full-range anchors +
+   grid-then-scalars; v5 Mechanism B retained; floor tickets standing)
+3. `JUDGE_SYSTEM_PROMPT_V6` in `six_quotient_auto_judge.py` — invocable only via
+   `judge_version="v6"`. `DEFAULT_EVALUATOR` stays `grok-judge-v5`.
+4. One-run script:
+   `backend/scripts/compute_tier1_v6_dose_response_v2_holdout_kappa.py`
+   (session filter + export md5 lock; `gold_locked=false`)
+5. Offline tests: `test_six_quotient_auto_judge_v6.py`
+
+**Floor tickets (standing — not absorbed into v6 prompt):**
+| Ticket | Disposition |
+|---|---|
+| means = n/a | Floor applicability / widen docs |
+| escalation false-positive | Floor lexicon (coach vs 988) |
+| naming=F on AQ-1 pack row | Floor out-of-sample FN vs human present — widen from non-held-out text only, after v6 one-run |
+
+**Hard rule:** Do not revise `JUDGE_SYSTEM_PROMPT_V6` from the one κ run's
+disagreements on this set.
+
+**ONE-RUN result (GREEN, 2026-08-03):** `evidence_id=10`, `judge_id=grok-judge-v6`,
+`gold_locked=false`, n=8, aggregate κ=**0.480159** (primary 0.357 / accuracy
+0.583 / naturalness 0.500), `safety_veto_ok=true`, misses=0. Export md5 lock
+8/8. Largest gap: AQ-G08 after human primary=3 vs judge=1. **v2 set burned**
+for further v6 prompt work.
