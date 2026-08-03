@@ -834,9 +834,15 @@ def format_crisis_guide_injection(
     guides: Sequence[Dict[str, Any]],
     *,
     turn_class: str = TURN_CLASS_SI,
+    must_block_override: Optional[str] = None,
 ) -> str:
-    """Budgeted prompt block: MUST digest + short Guide slices (not full 8k notes)."""
-    if not guides:
+    """Budgeted prompt block: MUST digest + short Guide slices (not full 8k notes).
+
+    `must_block_override`: when set (dose-response v2 / LN7_MUST_SEQUENCE_PACK_LIVE),
+    replaces the compound ∧-joined MUST line with the caller-supplied block
+    (sequenced one-move-per-line pack). MUST-NOT and Guide slices unchanged.
+    """
+    if not guides and not (must_block_override or "").strip():
         return ""
     tc = (turn_class or TURN_CLASS_SI).strip().lower()
     if tc == TURN_CLASS_HI:
@@ -861,10 +867,11 @@ def format_crisis_guide_injection(
             "MUST NOT: validate suicide-plan rationale; debate the client out of stated "
             "reality; lead with activity/coping diversions."
         )
+    must_block = (must_block_override or "").strip() or must
     chunks = [
         "## PRINCIPAL-REVIEW CRISIS POLICY (deterministic — not ranked recall)",
         class_line,
-        must,
+        must_block,
         must_not,
         "Adapt principles for THIS moment — never recite Guide text verbatim.",
     ]

@@ -19,10 +19,10 @@ id=gate-1-dose-response-scored and docs/ln7/TRUST_LEDGER.md):
     despite that prose already existing is itself evidence against the
     compound-sentence shape, not just against affinity ranking.
 
-Hypothesis under test (dose-response v2, NOT YET RUN — requires a live
-regeneration of the same quartet, which is an infra/paid-gated step, see
-Acceptance below): a SEQUENCE of short, individually-imperative, one-move-
-per-line statements transfers where one dense compound sentence did not.
+Hypothesis under test (dose-response v2 — regeneration authorized 2026-08-02
+with Gate-2 RED PASS; session_label=quartet_dose_response_v2): a SEQUENCE of
+short, individually-imperative, one-move-per-line statements transfers where
+one dense compound sentence did not.
 This is a format hypothesis, not a content hypothesis — the six moves named
 below are identical in substance to what the crisis MUST/MUST-NOT block
 already says; only the presentation (sequenced vs. compounded) changes.
@@ -76,13 +76,12 @@ baseline. That regeneration is a live-inference run (infra/paid-gated,
 mirrors Phase A/C's human-gated GPU steps) and is NOT performed by this
 module. This module only builds and unit-tests the format itself.
 
-Live-wiring status: NOT wired into therapeutic_controller.py or
-voice_pr_crisis_inject.py. Those two call sites still use
-principal_review_crisis_policy.format_crisis_guide_injection() unchanged.
-Wiring this format behind a flag (LN7_MUST_SEQUENCE_PACK_LIVE, default
-unset/false below) is a follow-on decision gated on dose-response v2's result
-and RED review, per the crisis-seam care standard — this module intentionally
-stops short of that wiring.
+Live-wiring status: flag hook landed in therapeutic_controller.py behind
+LN7_MUST_SEQUENCE_PACK_LIVE (default unset/false). When true, the sequenced
+pack replaces the compound ∧ MUST digest inside format_crisis_guide_injection
+(guides + MUST-NOT unchanged). Production default remains OFF — enable only
+for the v2 regeneration window (or after CEO scores v2 and accepts the
+format). voice_pr_crisis_inject.py is not yet wired to the flag.
 
 # QUANTUM-CRYSTAL-ARCH
 """

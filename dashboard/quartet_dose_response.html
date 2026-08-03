@@ -83,10 +83,12 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
       <span class="pill pend" id="runPill">no session</span>
       <span class="timer" id="itemTimer">—</span>
     </div>
-    <p class="meta">Session label <span class="mono">quartet_dose_response_v1</span>. Eight rows, interleaved by
-      scenario (before/after adjacent). Scoring writes only to the dose-response queue — never touches
-      <span class="mono">six_quotient_human_gold</span> or <span class="mono">nate_live_responses</span>.
-      ≥45s dwell per row enforced server-side.</p>
+    <p class="meta">Session label <span class="mono">quartet_dose_response_v2</span> (must-sequence pack).
+      Eight rows: <span class="mono">before_compound_must</span> vs
+      <span class="mono">after_must_sequence_pack</span>, interleaved by scenario.
+      Scoring writes only to the dose-response queue — never touches
+      <span class="mono">six_quotient_human_gold</span>. ≥45s dwell per row enforced server-side.
+      (v1 affinity session remains in DB under <span class="mono">quartet_dose_response_v1</span>.)</p>
     <div id="scoreCard" class="empty">Start a session, then load the queue.</div>
   </section>
 
@@ -102,7 +104,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 
 <script>
 const API = (window.SS_API_BASE || "https://api.sovereignsanctuary.net") + "/api/admin/quartet-dose-response";
-const SESSION_LABEL = "quartet_dose_response_v1";
+const SESSION_LABEL = "quartet_dose_response_v2";
 let _runId = null, _items = [], _idx = 0, _shownAt = 0, _timerIv = null, _moveDefs = {};
 
 function _token(){

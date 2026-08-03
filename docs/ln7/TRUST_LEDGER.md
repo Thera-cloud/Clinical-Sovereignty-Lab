@@ -1499,3 +1499,35 @@ both are enforced silently (block or discount) with the reason available
 only in logs/exception text, not a dashboard. Left for whoever next
 touches the SkyEye/growth admin surfaces, since it's a UX decision, not a
 correctness gap.
+
+---
+
+## Entry 20 — 2026-08-02 — Gate-2 RED PASS + dose-response v2 regeneration authorized
+
+**Gate-2 RED review:** CEO PASS on the review packet (rule definitions,
+positive-control re-run 20/20 under partial=FAIL, failure-mode answers F1–F14,
+shadow summary). Calibration doc status updated to RED PASS. Live wiring of
+`verify_structural_floor` into the therapeutic audit path remains a **separate
+explicit PR** — PASS clears the review gate, not an automatic wire.
+
+**Dose-response v2 authorized in the same turn.** Format hypothesis under
+test (`ln7_must_sequence_pack.py`): sequenced one-move-per-line MUST lines vs
+compound ∧-joined MUST digest, holding affinity ranking constant.
+
+**Build shipped for the regeneration window:**
+1. `LN7_MUST_SEQUENCE_PACK_LIVE` flag hook in `therapeutic_controller.py`
+   (replaces compound MUST via `must_block_override` on
+   `format_crisis_guide_injection`; default OFF).
+2. Migration `322_quartet_dose_response_v2_conditions.sql` expands
+   `condition_label` CHECK for `before_compound_must` /
+   `after_must_sequence_pack`.
+3. `seed_quartet_dose_response_v2.py` — before = v1 `after_affinity_fix`
+   snapshot; after = new live_stack run under the flag.
+4. Quartet dose-response API report + dashboard pointed at
+   `quartet_dose_response_v2`.
+
+**Execution posture:** enable flag → regenerate AQ-1/AQ-2/AQ-G07/AQ-G08 with
+`force_rewrite` + dedicated `live_stack_run_id` → seed v2 queue → **disable
+flag** (production stays compound MUST until CEO scores v2 and accepts the
+format). Human scoring of the 8 v2 rows is the acceptance test for permanent
+pack enablement.

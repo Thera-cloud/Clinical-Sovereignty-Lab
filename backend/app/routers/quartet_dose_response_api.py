@@ -44,8 +44,19 @@ router = APIRouter(
 _ALLOWED_RATERS = frozenset({"DrNevedal1"})
 # Same D.14b dwell floor as the principal-review gold surface.
 MIN_ITEM_LATENCY_MS = 45000
-_CONDITIONS = ("before_no_affinity", "after_affinity_fix")
+_CONDITION_PAIRS = {
+    "quartet_dose_response_v1": ("before_no_affinity", "after_affinity_fix"),
+    "quartet_dose_response_v2": ("before_compound_must", "after_must_sequence_pack"),
+}
+_CONDITIONS = _CONDITION_PAIRS["quartet_dose_response_v1"]
 _DEFAULT_SESSION_LABEL = "quartet_dose_response_v1"
+
+
+def _conditions_for_session(session_label: str) -> tuple:
+    return _CONDITION_PAIRS.get(
+        (session_label or "").strip(),
+        _CONDITION_PAIRS["quartet_dose_response_v1"],
+    )
 
 
 def _pool(request: Request):
@@ -334,11 +345,12 @@ async def report(
     by_key: Dict[tuple, Dict[str, Any]] = {(r["scenario_id"], r["condition_label"]): dict(r) for r in rows}
     total = len(rows)
     scored = sum(1 for r in rows if r["human_scored"])
+    before_cond, after_cond = _conditions_for_session(session_label)
 
     grid: List[Dict[str, Any]] = []
     for scenario_id in QUARTET_SCENARIOS:
         row_entry = {"scenario_id": scenario_id}
-        for cond in _CONDITIONS:
+        for cond in (before_cond, after_cond):
             r = by_key.get((scenario_id, cond))
             row_entry[cond] = {
                 "human_scored": bool(r and r["human_scored"]),
@@ -352,8 +364,8 @@ async def report(
     # across every (scenario, move_id) pair that is scored in BOTH conditions.
     move_stats: Dict[str, Dict[str, int]] = {}
     for scenario_id in QUARTET_SCENARIOS:
-        before = by_key.get((scenario_id, "before_no_affinity"))
-        after = by_key.get((scenario_id, "after_affinity_fix"))
+        before = by_key.get((scenario_id, before_cond))
+        after = by_key.get((scenario_id, after_cond))
         if not (before and after and before["human_scored"] and after["human_scored"]):
             continue
         before_moves = _as_dict(before["spine_moves"])
@@ -381,7 +393,7 @@ async def report(
     unchanged = sum(v["unchanged"] for v in move_stats.values())
 
     condition_totals = {}
-    for cond in _CONDITIONS:
+    for cond in (before_cond, after_cond):
         vals = [by_key[(s, cond)]["moves_present_count"] for s in QUARTET_SCENARIOS if (s, cond) in by_key and by_key[(s, cond)]["human_scored"]]
         condition_totals[cond] = {
             "n_scenarios_scored": len(vals),

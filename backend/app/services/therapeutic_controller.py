@@ -1226,14 +1226,51 @@ async def prepare_therapeutic_context(
                 user_text=user_text or "",
                 exclude_source_scenario=exclude_source_scenario,
             )
+            # QUANTUM-CRYSTAL-ARCH — dose-response v2: sequenced MUST pack
+            # behind LN7_MUST_SEQUENCE_PACK_LIVE (default off). Replaces the
+            # compound ∧-joined MUST digest only; guides + MUST-NOT unchanged.
+            _must_override = None
+            try:
+                from app.services.ln7_must_sequence_pack import (
+                    format_must_sequence_pack,
+                    must_sequence_pack_live_enabled,
+                )
+                from app.services.ln7_structural_verifier_floor import (
+                    MEANS_LANGUAGE_IN_TEXT,
+                )
+
+                if must_sequence_pack_live_enabled():
+                    _ut = user_text or ""
+                    _must_override = format_must_sequence_pack(
+                        turn_class=_tc,
+                        has_named_means=bool(MEANS_LANGUAGE_IN_TEXT.search(_ut)),
+                        has_stated_prohibition=bool(
+                            re.search(
+                                r"\b(?:not suicidal|i(?:'m| am) not going to|"
+                                r"legally|by law|don'?t (?:tell|say)|"
+                                r"can(?:'?t|not) tell)\b",
+                                _ut,
+                                re.I,
+                            )
+                        ),
+                    )
+            except Exception as _msp_exc:
+                logger.warning(
+                    "therapeutic_controller: must-sequence pack skipped: %s",
+                    _msp_exc,
+                )
+                _must_override = None
             principal_crisis_block = format_crisis_guide_injection(
-                _pr_guides, turn_class=_tc
+                _pr_guides,
+                turn_class=_tc,
+                must_block_override=_must_override,
             )
             if principal_crisis_block:
                 _gids = [str(g.get("id") or "") for g in (_pr_guides or [])]
                 print(
                     f">>> [THERAPEUTIC-CTRL] principal_review crisis guides n="
                     f"{len(_pr_guides)} turn_class={_tc} ids={_gids}"
+                    f" must_sequence={'on' if _must_override else 'off'}"
                 )
         except Exception as _pr_exc:
             logger.warning(

@@ -219,7 +219,7 @@ an `absent` score anyway — floor and human both land on "no means-distance
 move happened here," they just get there by different applicability logic.
 Zero remaining disagreements.
 
-## Status: gate 2 is calibrated, all three blockers closed — ready for RED review before live wiring
+## Status: gate 2 is calibrated, all three blockers closed — RED PASS 2026-08-02
 
 - Escalation bug found and fixed in round 1 — confirmed by re-running
   calibration (25% → 75%).
@@ -229,15 +229,15 @@ Zero remaining disagreements.
   anchored fix and its own test coverage
   (`test_ln7_structural_verifier_floor.py`), re-verified against the same
   8-row grid: **20/20 (100%) direct-mapping agreement**.
-- This clears the calibration gate. It does **not** clear the review gate:
-  this floor sits on the therapeutic path (crisis-turn structural moves),
-  so live wiring into 5b regeneration still requires the RED-adjacent
-  review the YELLOW-build track was scoped for from the start — calibration
-  is the evidence that review needs, not a substitute for it.
-- Both anchor patterns added in round 2 (`THIRD_PARTY_HARM_NAMING`,
-  `_MEANS_DISTANCE_INAPPLICABLE_SCENARIOS`) are grounded in thin samples
-  (2 positive rows, 1 scenario respectively) precisely because the grid
-  itself is thin (8 rows, 4 scenarios). Dose-response v2 (regenerating the
-  quartet under the must-sequence pack format) is the next chance to widen
-  these anchors against fresh data before the floor sees live traffic
-  volume.
+- **RED review PASS (CEO, 2026-08-02):** rule definitions, positive-control
+  re-run, failure-mode answers, and shadow summary accepted. Clears the
+  review gate for live-wiring design (separate PR still required to call
+  the floor from `therapeutic_controller` / 5b regeneration — PASS is not
+  an automatic wire).
+- Thin-anchor residual accepted under dose-response v2 widen plan:
+  `THIRD_PARTY_HARM_NAMING` (2 phrases) and
+  `_MEANS_DISTANCE_INAPPLICABLE_SCENARIOS` (AQ-G08) widen against v2 rows
+  before volume traffic, not by guessing.
+- Dose-response v2 (must-sequence pack regeneration) authorized in the
+  same CEO turn as this PASS — see TRUST_LEDGER Entry for Gate-2 PASS +
+  v2 execution.
