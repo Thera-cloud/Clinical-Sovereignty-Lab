@@ -4,31 +4,31 @@ overview: Build a Little Nate–only Competitive Clinical Sandbox with dual-loop
 todos:
   - id: phase0-schema-flags
     content: Additive migration (variants, matches w/ status+repro+yield cols, preferences with winner-gate rule, lessons, curriculum_state, seed registry, revision registry pointing at sovereign checkpoint refs) + flags + admin API stub
-    status: pending
+    status: completed
   - id: phase1-modality-router
     content: "nate_modality_router.py: state→DBT/MI/CBT/ACT/crisis; precedence crisis > enrolled framework lens > router; add MI to Night School map; bakeoff ablation hook"
-    status: pending
+    status: completed
   - id: phase2-fast-loop
     content: Hidden clinical scratchpad (heuristic-first live latency lock) + pivot directives; shadow skyeye_activity; integrate with little_nate_adaptive
-    status: pending
+    status: completed
   - id: phase2b-reactive-patient
     content: Reactive patient sim (conditions on Nate prior turn); persona fidelity not alliance; pinned model; reject scripted-only multi-turn as bakeoff substrate
-    status: pending
+    status: completed
   - id: phase3-twin-bakeoff
     content: Twin bakeoff—variant preflight, clinical crystal snapshot freeze, complete-only pairs, order-swapped Azure-eval judge, length-normalized rubric, inversion auto-loss, winner-gate preferences, nightly yield metrics + budget abort
-    status: pending
+    status: completed
   - id: phase4-lessons
     content: Post-match self-debrief → nate_clinical_lessons candidates; crystallize only after 2+ independent matches on same trigger pattern
-    status: pending
+    status: completed
   - id: phase5-curriculum
     content: Levels 1–3 + win-rate escalation; synthetic seeds; seed hash split + max-reuse; masked-crisis hard-detectable
-    status: pending
+    status: completed
   - id: phase6-dpo-ceo
     content: PII-gated DPO export targeting sovereign ORANGE/Home GPU checkpoints only; CEO yield brief; revision flip activates checkpoint; vendor path improves via packs/lessons/router only
-    status: pending
+    status: completed
   - id: phase7-live-ops
     content: Human gold κ≥0.70 then live fast-loop on bridge therapy; Nevedal Lab leaderboard (matches vs preferences_written); docs + service_checks
-    status: pending
+    status: completed
 isProject: false
 ---
 

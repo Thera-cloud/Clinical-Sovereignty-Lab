@@ -36,6 +36,14 @@ QUEUE_LOOKAHEAD_HOURS = 4
 BATCH_SIZE = 6
 ENGAGEMENT_POSTS_PER_DAY = 8
 
+# LinkedIn publish is owned exclusively by LinkedInCampaignScheduler
+# (generated_by="linkedin_campaign_v1", published on ET slot windows).
+# This worker must never queue LinkedIn content — the session engine's
+# _post_phase hard-skips LinkedIn, and the campaign executor only
+# publishes its own tagged rows, so anything queued here for LinkedIn
+# would never be picked up by any publisher and would pile up forever.
+EXCLUDED_PLATFORMS = {"linkedin"}
+
 
 POST_VERIFY_EVERY_N_TICKS = 36  # 36 × 10 min = 6 hours
 
@@ -90,6 +98,9 @@ class MarketingAutomationWorker:
             return
 
         for platform in active_platforms:
+            if platform in EXCLUDED_PLATFORMS:
+                continue
+
             cadence = await self._get_platform_cadence(platform)
             if not cadence:
                 continue
@@ -110,6 +121,9 @@ class MarketingAutomationWorker:
 
         # Strategic engagement posts
         for platform in active_platforms:
+            if platform in EXCLUDED_PLATFORMS:
+                continue
+
             engagement_count = await self._count_todays_engagement(platform)
             if engagement_count < ENGAGEMENT_POSTS_PER_DAY:
                 await self._generate_engagement_post(platform)
