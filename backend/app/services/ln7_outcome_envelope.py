@@ -67,7 +67,22 @@ async def write_envelope(
 ) -> Optional[str]:
     if not db_pool:
         return None
-    attribution_str = json.dumps(attribution or {})
+    # E2: always mirror dedicated join-key columns into attribution_json so
+    # JSONB-only digest/analytics coverage matches the columnar store even
+    # when a caller passes attribution={} or omits it (weekly_sample, older
+    # dual-write sites). Caller-supplied attribution wins on key conflict.
+    # QUANTUM-CRYSTAL-ARCH
+    merged_attribution = cross_loop_attribution(
+        {
+            "revision_id": revision_id,
+            "task_hash": task_hash,
+            "patch_hash": patch_hash,
+            "domain_tag": domain_tag,
+            "burst_id": burst_id,
+            **dict(attribution or {}),
+        }
+    )
+    attribution_str = json.dumps(merged_attribution)
     metrics_str = json.dumps(metrics or {})
     provenance_str = json.dumps(provenance or {})
     shadow_str = json.dumps(shadow_outcome) if shadow_outcome is not None else None

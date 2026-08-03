@@ -182,3 +182,51 @@ def test_write_envelope_falls_back_when_columns_missing():
     second_query, _ = conn.calls[1]
     assert "sig_window" in first_query
     assert "sig_window" not in second_query
+
+
+def test_write_envelope_mirrors_columns_into_attribution_json():
+    """E2: empty/omitted attribution still gets revision_id/patch_hash in JSONB."""
+    env = _load("app.services.ln7_outcome_envelope", SERVICES / "ln7_outcome_envelope.py")
+    conn = _FakeConn()
+    pool = _FakePool(conn)
+
+    result = asyncio.run(
+        env.write_envelope(
+            pool,
+            loop_name="ln7",
+            event_kind="coding_outcome",
+            revision_id="LN7-1",
+            patch_hash="abc123",
+            attribution={},  # caller forgot E2 keys
+        )
+    )
+
+    assert result == "env-fixed-1"
+    _query, args = conn.calls[0]
+    # $9 is attribution_json
+    import json
+
+    attr = json.loads(args[8])
+    assert attr.get("revision_id") == "LN7-1"
+    assert attr.get("patch_hash") == "abc123"
+
+
+def test_write_envelope_caller_attribution_overrides_columns():
+    env = _load("app.services.ln7_outcome_envelope", SERVICES / "ln7_outcome_envelope.py")
+    conn = _FakeConn()
+    pool = _FakePool(conn)
+
+    asyncio.run(
+        env.write_envelope(
+            pool,
+            loop_name="ln7",
+            event_kind="coding_outcome",
+            revision_id="COL-REV",
+            attribution={"revision_id": "CALLER-REV", "evidence_uri": "s3://x"},
+        )
+    )
+    import json
+
+    attr = json.loads(conn.calls[0][1][8])
+    assert attr["revision_id"] == "CALLER-REV"
+    assert attr["evidence_uri"] == "s3://x"

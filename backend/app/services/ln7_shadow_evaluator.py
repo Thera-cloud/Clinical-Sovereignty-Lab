@@ -135,6 +135,7 @@ async def run_shadow_sample(db_pool=None) -> Dict[str, Any]:
             db_pool,
             loop_name="shadow_eval",
             event_kind="weekly_sample",
+            domain_tag="goodhart_shadow",  # QUANTUM-CRYSTAL-ARCH — E2 join key for digest
             metrics=live_metrics,
             shadow_outcome={
                 "live_tripped": live_verdict["tripped"],
