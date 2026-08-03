@@ -1613,3 +1613,51 @@ truncation checked and ruled out, word count in normal range vs siblings).
 brief presents two non-mutually-exclusive paths (ship as-is, or ship gated
 with G07's prohibition-nav line tracked for a future recursive-split
 iteration) but does not flip the flag.
+
+---
+
+## Entry 23 — 2026-08-03 — G0→G2 governance flip executed (CEO-authorized)
+
+CEO explicitly authorized the G2 flip via chat (`flip_now` selected against a
+direct question naming what the flip does: "Step 0 fence is green; this is
+the G0→G2 product-rule change and removes CEO-decide from promote paths").
+Paid Phase A/C GPU burst was explicitly declined in the same exchange
+(`wait_for_fuel` — PRE6's organic-fuel gate is nowhere close: 1/300 coding,
+2/300 general — not attempted).
+
+**New script:** `backend/scripts/flip_g2_governance.py` — re-verifies Step 0
+fence (`boot_fence_check()`) before calling the pre-existing
+`ln7_feature_flags.flip_g2_governance()` weld-flip path; refuses on a red
+fence even with authorization. 4 new offline tests
+(`test_ln7_flywheel_wiring.py`), including a guard that
+`flip_g2_governance()` remains the sole `allow_weld_flip=True` call site in
+the codebase. 2482/2482 CI green.
+
+**Execution (GREEN, 2026-08-03):**
+1. Dry-run confirmed fence green, both weld keys false.
+2. Real flip: PG write succeeded for both keys (`ln7_feature_flags` rows
+   both `enabled=true`), but read-back showed `ENABLE_LN7_AUTO_PROMOTE`
+   still `False` — **caught by the script's own post-flip verification**,
+   which failed loudly instead of reporting a false success.
+3. **Root cause:** `.env` had `ENABLE_LN7_AUTO_PROMOTE=false` as a standing
+   default (set alongside `ENABLE_LN7_CONTINUOUS=false` when this flag area
+   was first built, migration 307) — `ln7_feature_flags.py`'s documented
+   "env remains emergency kill-switch" design means an explicit env `false`
+   overrides a PG `true` unconditionally. The env default was never revisited
+   after Step 0 went green, so it silently blocked the PG-authoritative path
+   the whole G2 design assumes. `DUAL_COO_MECHANICAL_PROMOTE` had no such env
+   entry and took effect immediately.
+4. **Fix:** commented out the `.env` line (backup taken:
+   `.env.bak.g2flip.<timestamp>`), redeployed with `docker compose up -d
+   backend` (not a bare restart — `.env` changes require the recreate path),
+   verified 154/154 healthy post-recreate.
+5. **Final verification:** re-ran the flip script in `--dry-run` — effective
+   read (through the app's own `flag_enabled()`, not a raw SQL query) now
+   shows both `ENABLE_LN7_AUTO_PROMOTE=True` and
+   `DUAL_COO_MECHANICAL_PROMOTE=True`.
+
+**State after this entry:** Dual-COO mechanical checklist agreement is now
+promote authority for LN7/Queens promote paths. CEO surface is transparency
++ one-click reverse only, per the plan's Governance model (rev 3). `enqueue_
+ceo` on promote paths should stop firing going forward — worth confirming on
+the next real promote decision, not asserted here from code alone.
