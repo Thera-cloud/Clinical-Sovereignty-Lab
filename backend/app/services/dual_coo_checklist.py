@@ -13,6 +13,26 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("dual_coo_checklist")
 
+# Domain-scoped exclusion (TRUST_LEDGER.md Entry 24/27's 3rd named
+# prerequisite for re-attempting the G2 flip). Clinical and defense domain
+# revisions must never promote through the identical mechanical path as
+# anything else — this is a structural safety invariant enforced in code,
+# not a configurable checklist item a future edit to
+# frozen-config/dual_coo_checklist.json could accidentally drop. Checked
+# unconditionally inside evaluate_evidence_independent() below, before the
+# per-item checklist loop even runs.
+EXCLUDED_DOMAINS = frozenset({"clinical", "defense"})
+
+
+def is_domain_excluded(evidence: Dict[str, Any]) -> bool:
+    """True when evidence['domain_tag'] names an excluded domain. Missing
+    or unrecognized domain_tag is NOT excluded — this is a targeted block
+    on the two named high-stakes domains, not a default-deny on every
+    revision (most flywheel candidates, e.g. 'python'/'infra'/'ml', carry
+    no clinical/defense risk and must keep flowing through G2 normally)."""
+    domain = str(evidence.get("domain_tag") or "").strip().lower()
+    return domain in EXCLUDED_DOMAINS
+
 
 def load_checklist() -> Dict[str, Any]:
     try:
@@ -106,11 +126,32 @@ async def evaluate_evidence_independent(
     (ok=False) unless a corroborating `<id>_evidence_uri` artifact
     reference is present in `evidence` — a bare bool is never sufficient
     for this reviewer, unlike evaluate_evidence()'s escape hatch.
+
+    Also enforces `is_domain_excluded()` (TRUST_LEDGER.md Entry 24/27's 3rd
+    named prerequisite) unconditionally, before the per-item loop —
+    clinical/defense `domain_tag` revisions always fail this reviewer
+    regardless of what evidence.json or the checklist otherwise claims.
     """
     spec = load_checklist()
     items = list(spec.get("checklist") or [])
     results: List[Dict[str, Any]] = []
     all_required_ok = True
+
+    # Domain exclusion runs FIRST and unconditionally — not driven by
+    # dual_coo_checklist.json, so it can't be silently dropped by a future
+    # config edit. A clinical/defense domain_tag fails this reviewer no
+    # matter what every other item reports.
+    domain_excluded = is_domain_excluded(evidence)
+    results.append(
+        {
+            "id": "domain_not_excluded",
+            "ok": not domain_excluded,
+            "required": True,
+            "verified_independently": True,
+        }
+    )
+    if domain_excluded:
+        all_required_ok = False
 
     for item in items:
         iid = item.get("id")

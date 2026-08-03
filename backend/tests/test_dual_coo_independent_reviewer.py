@@ -185,6 +185,144 @@ def test_independent_reviewer_influence_gini_uses_real_audit():
     assert _ids(out)["influence_gini_ok"] is False
 
 
+# ── domain-scoped clinical/defense exclusion (TRUST_LEDGER Entry 24/27's
+# 3rd named prerequisite) ──────────────────────────────────────────────
+
+
+def test_independent_reviewer_blocks_clinical_domain_even_when_everything_else_passes():
+    dcc = _checklist()
+
+    async def _go():
+        with patch(
+            "app.services.ln7_frozen_config.promotions_allowed", return_value=True
+        ), patch(
+            "app.services.ln7_heldout_registry.heldout_weld_status",
+            return_value={"ok": True, "missing_from_index": []},
+        ):
+            return await dcc.evaluate_evidence_independent(
+                {
+                    "domain_tag": "clinical",
+                    "fence_manifest_ok": True,
+                    "heldout_not_in_train": True,
+                    "base_checkpoint_pinned": True,
+                    "base_checkpoint": "Qwen2.5-Coder-7B",
+                    "beats_incumbent_on_heldout_evidence_uri": "s3://x",
+                    "license_train_eligible_evidence_uri": "s3://y",
+                }
+            )
+
+    out = _run_async(_go())
+    assert _ids(out)["domain_not_excluded"] is False
+    assert out["agree"] is False  # required item failing blocks everything
+
+
+def test_independent_reviewer_blocks_defense_domain():
+    dcc = _checklist()
+
+    async def _go():
+        return await dcc.evaluate_evidence_independent({"domain_tag": "defense"})
+
+    out = _run_async(_go())
+    assert _ids(out)["domain_not_excluded"] is False
+
+
+def test_independent_reviewer_allows_non_excluded_domain():
+    """Proves this is a targeted block, not a default-deny-everything --
+    ordinary flywheel domains must keep flowing through G2 normally."""
+    dcc = _checklist()
+
+    async def _go():
+        with patch(
+            "app.services.ln7_frozen_config.promotions_allowed", return_value=True
+        ), patch(
+            "app.services.ln7_heldout_registry.heldout_weld_status",
+            return_value={"ok": True, "missing_from_index": []},
+        ):
+            return await dcc.evaluate_evidence_independent(
+                {
+                    "domain_tag": "python",
+                    "fence_manifest_ok": True,
+                    "heldout_not_in_train": True,
+                    "base_checkpoint_pinned": True,
+                    "base_checkpoint": "Qwen2.5-Coder-7B",
+                    "beats_incumbent_on_heldout_evidence_uri": "s3://x",
+                    "license_train_eligible_evidence_uri": "s3://y",
+                }
+            )
+
+    out = _run_async(_go())
+    assert _ids(out)["domain_not_excluded"] is True
+    assert out["agree"] is True
+
+
+def test_independent_reviewer_missing_domain_tag_is_not_excluded():
+    dcc = _checklist()
+
+    async def _go():
+        return await dcc.evaluate_evidence_independent({})
+
+    out = _run_async(_go())
+    assert _ids(out)["domain_not_excluded"] is True
+
+
+def test_domain_exclusion_check_bypasses_no_bare_bool_escape_hatch():
+    """Even a proposer claiming domain_tag_evidence_uri or a bare
+    domain_not_excluded=True must not clear this gate -- it is computed
+    directly from domain_tag, never from a self-reported override."""
+    dcc = _checklist()
+
+    async def _go():
+        return await dcc.evaluate_evidence_independent(
+            {
+                "domain_tag": "clinical",
+                "domain_not_excluded": True,  # attempted self-report override
+                "domain_not_excluded_evidence_uri": "s3://fake",
+            }
+        )
+
+    out = _run_async(_go())
+    assert _ids(out)["domain_not_excluded"] is False
+
+
+def test_dual_coo_review_red_holds_on_clinical_domain_even_when_mac_agrees():
+    """End-to-end proof: dual_coo_checklist_review() RED-holds a clinical-
+    domain candidate even when evaluate_evidence() (mac) trusts every
+    self-reported claim -- cloud's domain gate alone is sufficient."""
+    dcc = _checklist()
+
+    async def _go():
+        with patch(
+            "app.services.ln7_frozen_config.promotions_allowed", return_value=True
+        ), patch(
+            "app.services.ln7_heldout_registry.heldout_weld_status",
+            return_value={"ok": True, "missing_from_index": []},
+        ), patch(
+            "app.services.flywheel_anomaly.notify_flywheel_anomaly", AsyncMock()
+        ):
+            return await dcc.dual_coo_checklist_review(
+                "s3://evidence/clinical-candidate",
+                db_pool=None,
+                evidence={
+                    "domain_tag": "clinical",
+                    "fence_manifest_ok": True,
+                    "heldout_not_in_train": True,
+                    "base_checkpoint_pinned": True,
+                    "base_checkpoint": "Qwen2.5-Coder-7B",
+                    "not_suppressed": True,
+                    "beats_incumbent_on_heldout": True,
+                    "beats_incumbent_on_heldout_evidence_uri": "s3://x",
+                    "license_train_eligible": True,
+                    "license_train_eligible_evidence_uri": "s3://y",
+                },
+            )
+
+    result = _run_async(_go())
+    assert result["mac"]["agree"] is True  # trusted every self-reported claim
+    assert result["cloud"]["agree"] is False  # domain gate alone blocks it
+    assert result["agree"] is False
+    assert result["action"] == "red_hold"
+
+
 def test_independent_reviewer_reports_verified_independently_flag():
     dcc = _checklist()
 

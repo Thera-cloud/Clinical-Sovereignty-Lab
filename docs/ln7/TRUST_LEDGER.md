@@ -1963,3 +1963,54 @@ workspace branch-switching behavior.**
   designed behavior: 2 of 3 now genuinely true from live evidence, correctly
   still refuses because the domain-exclusion prerequisite has never been
   built. G2 remains correctly un-flippable until that lands.
+
+---
+
+## Entry 28 — 2026-08-03 — Domain-scoped clinical/defense exclusion built (Entry 24/27's 3rd prerequisite closed)
+
+CEO authorized item 1 from the "remaining items" list: the last of Entry
+24's three named prerequisites for re-attempting G2.
+
+**Built:** `dual_coo_checklist.EXCLUDED_DOMAINS = frozenset({"clinical",
+"defense"})` + `is_domain_excluded(evidence)`, checked unconditionally at
+the top of `evaluate_evidence_independent()` — BEFORE the per-item
+checklist loop, so it can't be silently dropped by a future edit to
+`frozen-config/dual_coo_checklist.json`. A `domain_tag` of `clinical` or
+`defense` fails this reviewer regardless of what every other item reports;
+missing/other domain_tag values are unaffected (targeted block, not
+default-deny — ordinary flywheel domains like `python`/`infra`/`ml` keep
+flowing through G2 normally).
+
+**Why only `cloud` needed the change, not `mac` too:**
+`dual_coo_checklist_review()`'s `agree = mac.agree AND cloud.agree` means
+`cloud` alone failing is already sufficient to RED-hold any clinical/
+defense candidate — `evaluate_evidence()` (mac)'s deliberate, tested
+self-report escape hatch (Entry 27) stays untouched and doesn't need to
+duplicate this gate.
+
+**No bare-bool escape hatch for this gate specifically:** unlike other
+`evaluate_evidence_independent()` items, `domain_not_excluded` is computed
+directly from `evidence['domain_tag']`, never from a self-reported
+override — a proposer claiming `domain_not_excluded=True` or
+`domain_not_excluded_evidence_uri=...` cannot clear it. Test-locked.
+
+**6 new tests:** blocks clinical, blocks defense, allows non-excluded
+domains, allows missing domain_tag, no self-report bypass, and an
+end-to-end `dual_coo_checklist_review()` proof that RED-holds a clinical
+candidate even when `mac` trusts every other self-reported claim.
+`flip_g2_governance.py`'s own precondition tests updated to match:
+`domain_exclusion_wired` now correctly reports `True`, and the "not
+majority rules" AND-gate proof was re-pointed at the still-genuinely-
+missing prerequisite (a fresh drill row) since domain exclusion is no
+longer the missing one. 2554/2554 CI green.
+
+**Entry 24/27 status after this entry:** all 3 named prerequisites for
+re-attempting G2 are now real: independent reviewer (Entry 27), live-
+exercised fallback drill (Entry 27, executed on GREEN), domain-scoped
+clinical/defense exclusion (this entry). What's still missing for an
+actual re-flip is unrelated to code: a genuine shadow-agreement clock with
+real proposals, which needs Phase A/C paid GPU generation to resume
+(declined twice this session) — `flip_g2_governance.py --dry-run` will
+correctly report `all_ok=True` once the drill evidence is fresh, but that
+alone is not authorization to re-flip; the shadow-agreement volume is a
+separate, still-unmet bar.

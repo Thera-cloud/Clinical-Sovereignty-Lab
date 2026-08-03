@@ -97,14 +97,16 @@ def test_independent_reviewer_precondition_true_on_real_dual_coo_checklist():
     assert out["independent_reviewer_wired"] is True
 
 
-def test_domain_exclusion_precondition_correctly_false_until_built():
-    """As of this writing, no domain-scoped clinical/defense exclusion
-    exists in evaluate_evidence_independent() -- this MUST report False,
-    not True. A test that expects True here would be asserting a fix that
-    doesn't exist yet."""
+def test_domain_exclusion_precondition_now_true_after_build():
+    """Entry 24/27's 3rd named prerequisite: is_domain_excluded() +
+    EXCLUDED_DOMAINS={'clinical','defense'} now wired into
+    evaluate_evidence_independent() (dual_coo_checklist.py), checked
+    unconditionally before the per-item loop. This must now report True --
+    a test that still expected False would be asserting a since-fixed gap
+    still exists."""
     script = _script()
     out = _run_async(script.check_g2_preconditions(None))
-    assert out["domain_exclusion_wired"] is False
+    assert out["domain_exclusion_wired"] is True
 
 
 def test_fallback_drill_precondition_true_when_recent_row_exists():
@@ -128,16 +130,32 @@ def test_fallback_drill_precondition_false_without_db_pool():
 
 
 def test_all_ok_requires_every_precondition_true():
-    """Even with 2 of 3 satisfied (independent reviewer + drill), all_ok
-    must stay False until domain exclusion also lands -- proves this is a
-    real AND-gate, not majority-rules."""
+    """Even with 2 of 3 satisfied (independent reviewer + domain
+    exclusion, both now real), all_ok must stay False while the drill
+    evidence is missing -- proves this is a real AND-gate, not
+    majority-rules. (Domain exclusion landed this session -- see
+    test_domain_exclusion_precondition_now_true_after_build -- so the
+    'missing one' for this test is now the drill evidence instead.)"""
+    script = _script()
+    pool = _FakePool(_FakeConn(count=0))  # no recent drill row
+    out = _run_async(script.check_g2_preconditions(pool))
+    assert out["independent_reviewer_wired"] is True
+    assert out["domain_exclusion_wired"] is True
+    assert out["fallback_drill_exercised"] is False
+    assert out["all_ok"] is False  # the one missing precondition still blocks
+
+
+def test_all_ok_true_when_all_three_preconditions_genuinely_met():
+    """Positive control: with a real drill row present too, all three are
+    now true and all_ok flips to True -- proving this isn't hard-coded
+    False, it genuinely tracks the three prerequisites."""
     script = _script()
     pool = _FakePool(_FakeConn(count=1))
     out = _run_async(script.check_g2_preconditions(pool))
     assert out["independent_reviewer_wired"] is True
+    assert out["domain_exclusion_wired"] is True
     assert out["fallback_drill_exercised"] is True
-    assert out["domain_exclusion_wired"] is False
-    assert out["all_ok"] is False  # the one missing precondition still blocks
+    assert out["all_ok"] is True
 
 
 def test_precondition_check_never_raises_on_query_failure():
