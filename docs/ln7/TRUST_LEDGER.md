@@ -1933,3 +1933,33 @@ reason). Fixed by reusing the established `_run_async()` /
 `asyncio.get_event_loop().run_until_complete()` helper pattern instead.
 2545/2545 CI green after the fix — verified isolated-file runs before AND
 after to confirm the fix (not assumed).
+
+**Deploy note — shared-workspace branch surprise:** the commit initially
+landed on `fix/e2-e4-envelope-attribution`, not `main` — some other process
+in this shared workspace had checked out that branch (containing an
+unrelated, legitimate `67f30732` "E2/E4: mirror envelope join keys"
+commit) between this session's earlier work and this commit, and `git push
+origin main` from that checkout silently no-op'd ("Everything
+up-to-date") since local `main` itself was untouched. Caught immediately
+by checking `git branch --show-current` after the "up-to-date" push
+looked suspicious. Diagnosed: zero file overlap between the two commits,
+`origin/main` had already been fast-forwarded to include both (by whatever
+external process manages this branch) by the time of investigation.
+Resolved by fast-forwarding local `main` to `origin/main` (verified
+byte-identical diff content first — zero risk of loss) rather than
+re-committing. **Verification discipline note for future sessions in this
+workspace: check `git branch --show-current` before trusting a `git push
+origin main` result, given this environment's demonstrated shared-
+workspace branch-switching behavior.**
+
+**Live verification, GREEN, 2026-08-03T16:28 UTC (after deploy):**
+- `run_fallback_drill_once.py` executed for real — all 5 sub-checks passed
+  (`hive_dry_run`, `serve_cleared`, `fingerprint`, `fence_manifest`,
+  `supply_chain_pin`), `outcome_envelope` row confirmed:
+  `envelope_id=9ef38cdf-b4a0-4732-8c94-5ab02358da73`.
+- `flip_g2_governance.py --dry-run` re-run after the drill: preconditions
+  now read `{'independent_reviewer_wired': True, 'fallback_drill_exercised':
+  True, 'domain_exclusion_wired': False, 'all_ok': False}` — exactly the
+  designed behavior: 2 of 3 now genuinely true from live evidence, correctly
+  still refuses because the domain-exclusion prerequisite has never been
+  built. G2 remains correctly un-flippable until that lands.
