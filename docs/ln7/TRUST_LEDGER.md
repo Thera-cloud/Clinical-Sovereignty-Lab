@@ -1813,3 +1813,123 @@ claim was wrong. Corrected in place in Entry 22 above.
 post-deploy: mode reads `off`, digest row reads `TRUSTED — off (no live
 wiring active)`, zero behavior change. Moving to `shadow` — the next stage
 — is a separate, explicit action, not part of this deploy.
+
+---
+
+## Entry 26 — 2026-08-03 — Gate 2 shadow stage started (clock starts here)
+
+CEO-authorized flip: `.env` gets `STRUCTURAL_FLOOR_MODE=shadow` (backup
+taken: `.env.bak.gate2shadow.<timestamp>`), `docker compose up -d backend`
+(required for env changes — bare restart doesn't pick it up), verified via
+the real function call (not env presence): `structural_floor_mode() ==
+"shadow"`, `is_structural_floor_reverted() == False`. 154/154 healthy.
+
+**Clock start: 2026-08-03T14:00 UTC.** Shadow mode logs
+`log_structural_floor_check()` on every crisis-classified turn (fire-and-
+forget, touches nothing) — the digest's "Structural Floor Gate" row will
+start showing real 24h check counts and `floor_met=false` rates starting
+with the next digest cycle (5am/5pm/11pm UTC). Observe this for a few days
+before considering `enforce_with_alert`. No enforcement, no fallback, no
+regen — pure measurement on real traffic for the first time.
+
+---
+
+## Entry 27 — 2026-08-03 — Items 2–6 closed in one session: class-inject trace, Pack v1.1, independent reviewer, precondition ticket, live fallback drill
+
+CEO authorized items 2–6 from the "next steps" list together, same night as
+Entries 23–26.
+
+**#2 — class-inject zero-rows, traced (not silently "fixed").** Verified
+`prepare_therapeutic_context()` genuinely IS wired into the live chat path
+(`bridge_server.py:10440`) — an earlier hasty read of this session missed
+the import-alias (`as _ttc_pre`) and wrongly concluded otherwise; caught
+and corrected before asserting it. Real root cause: every layer on the
+class-inject path (`fetch_principal_review_class_guides`,
+`select_class_guides`, `_reinforce_pr_guide_recalls`,
+`format_class_guide_injection`) is silent-on-empty with zero positive-or-
+negative logging anywhere — 0 rows was indistinguishable from "never
+called" vs. "called but always empty" from logs alone, and the promoted-
+crystal data pool is NOT empty (46 promoted rows across
+`presence_silence_ok`/`refusal_or_frame_hold`/`therapeutic_engage`).
+**Shipped:** one `logger.info` line in `fetch_principal_review_class_guides`
+reporting `rc`/`sql_rows`/`selected` on every call, success or empty. The
+next observation window will show which branch is actually empty on live
+traffic — this entry does not claim to already know.
+
+**#3 — Pack v1.1 (G07 stem-matched MUST-form), design-build only.** Per
+`docs/ln7/DOSE_RESPONSE_V2_PACK_ACCEPTANCE_BRIEF.md`'s "Not yet covered"
+recommendation: split v1.0's single compound `MUST 5 (prohibition
+navigation)` line into four one-move-per-line imperatives (5a legal-first,
+5b denial-not-at-face-value, 5c collaborative means-restriction, 5d
+disclosure-escalation) — the same recursive treatment that produced the
+AQ-1/AQ-2 gains, applied to the one line that didn't transfer. Also covers
+AQ-G07's `disclosure_escalation` rubric column (wife/support-person
+disclosure + coach connection) that v1.0 had ZERO line for at all.
+**`format_must_sequence_pack_v1_1()`** — new, independently-addressable
+function; v1.0's `format_must_sequence_pack()` is completely unmodified so
+the already-scored, burned dose-response v2 export stays reproducible.
+Not wired to any live call site — same design-build-only posture v1.0 had
+before its own acceptance test ran. 8 new tests.
+
+**#6 — independent second reviewer, built.** Confirmed the headline finding
+from Entry 24: `evaluate_evidence()` has a deliberate, TESTED escape hatch
+(`test_dual_coo_heldout_weld_check.py`) — any caller-supplied bool in
+`evidence[iid]` bypasses the mechanical check for that item, by design.
+That's legitimate for a single reviewer but is exactly why `mac`/`cloud`
+calling the same function could never disagree. **New
+`evaluate_evidence_independent()`** never honors that escape hatch: every
+mechanically-checkable item (`fence_manifest_ok`, `heldout_not_in_train`,
+`not_suppressed`, `base_checkpoint_pinned`, `shadow_outcome_present_if_g1`,
+`influence_gini_ok`) is re-derived from source every time, ignoring the
+proposer's claim; items with no independent check
+(`beats_incumbent_on_heldout`, `license_train_eligible`) fail closed unless
+a corroborating `<id>_evidence_uri` artifact is present — never a bare
+bool. `dual_coo_checklist_review()` now calls `mac = evaluate_evidence(...)`
++ `cloud = evaluate_evidence_independent(...)` — two different functions
+consulting different sources of truth. 12 new tests prove disagreement is
+now structurally possible (a false self-reported `fence_manifest_ok=True`
+produces `mac.agree=True`, `cloud.agree=False`, real RED hold) and that
+truthful self-reports still agree (not just "cloud always fails").
+`evaluate_evidence()` itself is untouched — its escape hatch stays intact
+and tested, by design, for `mac`'s role.
+
+**#4 — Entry 24/27 preconditions, machine-checked in the flip script
+itself.** `flip_g2_governance.py`'s forward flip now calls
+`check_g2_preconditions()` before the fence check even applies, and refuses
+(`return 2`) unless all three of Entry 24's named prerequisites verify
+true: (1) `dual_coo_checklist_review()` structurally calls
+`evaluate_evidence_independent()`, not `evaluate_evidence()` twice — code-
+level check via `inspect.getsource`, not a flag; (2) a real
+`outcome_envelope(loop_name='ops', event_kind='fallback_drill')` row exists
+within 90 days; (3) a domain-scoped clinical/defense exclusion is wired
+into `evaluate_evidence_independent()` — **correctly reports False as of
+this writing**, since that exclusion has not been built (not in scope for
+items 2–6; a real 4th prerequisite is now visibly outstanding, not silently
+dropped). `--revert` stays exempt (unchanged from Entry 24 — reverting to
+the safer state is never gated). `--skip-preconditions` exists only for
+this script's own test fixtures, prints a loud warning every use, and is
+not a production bypass. 9 new tests, including a real `_main()`
+integration test proving a green fence alone is insufficient to flip.
+
+**#5 — live fallback drill, actually executed.** New
+`run_fallback_drill_once.py` — verified safe before running: the drill's
+hive-burst leg is hard-forced `dry_run=True`, which only publishes a
+localhost stub serve-endpoint to Redis and clears it again; it never
+reaches the real paid-GPU-provisioning script
+(`scripts/ln7_hive_burst.sh`) — confirmed by reading `run_hive_burst()`'s
+dry branch directly, not assumed. **Executed live on GREEN 2026-08-03** —
+see verification below; the `outcome_envelope(loop_name='ops',
+event_kind='fallback_drill')` row this produces is precondition #2 for
+item #4, now satisfied for real, not just in a mocked test.
+
+**Cross-cutting fix, caught before it shipped:** the new async tests
+initially used bare `asyncio.run()`, which on Python 3.9 calls
+`asyncio.set_event_loop(None)` on exit — this silently broke two unrelated,
+pre-existing test files (`test_family_system_field.py`,
+`test_growth_ops_closure.py`) that depend on a shared event loop persisting
+across the suite (exact failure mode already documented in
+`test_dual_coo_heldout_weld_check.py`'s own comments, for the exact same
+reason). Fixed by reusing the established `_run_async()` /
+`asyncio.get_event_loop().run_until_complete()` helper pattern instead.
+2545/2545 CI green after the fix — verified isolated-file runs before AND
+after to confirm the fix (not assumed).

@@ -794,6 +794,23 @@ async def fetch_principal_review_class_guides(
                 limit=limit,
                 exclude_source_scenario=exclude_source_scenario,
             )
+            # Standing floor ticket "class-inject zero-rows question"
+            # (docs/ln7/TRUST_LEDGER.md — traced 2026-08-03): every layer of
+            # this path (this function, select_class_guides,
+            # _reinforce_pr_guide_recalls, format_class_guide_injection) was
+            # silent-on-empty with no positive-or-negative log anywhere,
+            # so zero crystal_recall_log rows was indistinguishable from
+            # "never called" vs "called but always empty" from logs alone.
+            # This line makes every call observable regardless of outcome —
+            # do not remove without replacing with equivalent visibility.
+            logger.info(
+                "principal_review class_inject: rc=%s sql_rows=%d selected=%d "
+                "user_text_len=%d",
+                rc,
+                len(rows),
+                len(selected),
+                len(user_text or ""),
+            )
             await _reinforce_pr_guide_recalls(
                 conn,
                 [int(g["id"]) for g in selected if g.get("id") is not None],

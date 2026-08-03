@@ -264,6 +264,96 @@ def test_class_matched_guide_select_and_format():
     assert m.fetch_principal_review_class_guides.__name__
 
 
+def test_fetch_class_guides_logs_observably_regardless_of_outcome(caplog):
+    """Standing floor ticket 'class-inject zero-rows question', traced
+    2026-08-03: every layer on this path (fetch_principal_review_class_
+    guides, select_class_guides, _reinforce_pr_guide_recalls,
+    format_class_guide_injection) was silent-on-empty with zero positive-
+    or-negative logging, so 0 crystal_recall_log rows was indistinguishable
+    from 'never called' vs 'called but always empty'. This test locks in
+    the new observability line firing on BOTH outcomes."""
+    import asyncio
+    import logging
+
+    m = _load(_POLICY, "pr_crisis_policy_class_inject_log")
+
+    class _FakeConn:
+        def __init__(self, rows):
+            self._rows = rows
+            self.executed = []
+
+        async def fetch(self, query, *args):
+            return self._rows
+
+        async def execute(self, query, *args):
+            self.executed.append((query, args))
+
+    class _FakeAcquireCtx:
+        def __init__(self, conn):
+            self._conn = conn
+
+        async def __aenter__(self):
+            return self._conn
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _FakePool:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def acquire(self):
+            return _FakeAcquireCtx(self._conn)
+
+    # Case 1: SQL returns a matching row -> selected non-empty.
+    conn_hit = _FakeConn(
+        [
+            {
+                "id": 42,
+                "crystal_text": "Principal Guide: stay with the silence.",
+                "confidence": 0.8,
+                "topics": [],
+                "origin_surface": "principal_review",
+                "response_class": "presence_silence_ok",
+                "source_scenario": "",
+            }
+        ]
+    )
+    with caplog.at_level(logging.INFO, logger="nate.principal_review_crisis_policy"):
+        out_hit = asyncio.run(
+            m.fetch_principal_review_class_guides(
+                _FakePool(conn_hit),
+                response_class="presence_silence_ok",
+                user_text="Just sit with me.",
+            )
+        )
+    assert len(out_hit) == 1
+    hit_logs = [r for r in caplog.records if "class_inject" in r.message]
+    assert hit_logs, "expected an observability log line on the non-empty path"
+    assert "selected=1" in hit_logs[-1].message
+    assert "sql_rows=1" in hit_logs[-1].message
+
+    caplog.clear()
+
+    # Case 2: SQL returns zero rows -> selected empty -- must STILL log.
+    conn_empty = _FakeConn([])
+    with caplog.at_level(logging.INFO, logger="nate.principal_review_crisis_policy"):
+        out_empty = asyncio.run(
+            m.fetch_principal_review_class_guides(
+                _FakePool(conn_empty),
+                response_class="presence_silence_ok",
+                user_text="Just sit with me.",
+            )
+        )
+    assert out_empty == []
+    empty_logs = [r for r in caplog.records if "class_inject" in r.message]
+    assert empty_logs, "expected an observability log line on the EMPTY path too"
+    assert "selected=0" in empty_logs[-1].message
+    assert "sql_rows=0" in empty_logs[-1].message
+    # And the reinforcement write must not have been attempted on empty ids.
+    assert conn_empty.executed == []
+
+
 def test_voice_pr_crisis_inject_module_present():
     path = _ROOT / "app" / "services" / "voice_pr_crisis_inject.py"
     src = path.read_text(encoding="utf-8")

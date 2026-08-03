@@ -31,6 +31,23 @@ conservative CEO-activate state should never be blocked by a fence
 mismatch; the fence exists to gate granting NEW promote authority, not to
 gate returning to a safer one.
 
+Entry 24/27 preconditions (added 2026-08-03): the forward flip (not
+--revert) also refuses unless ALL three prerequisites Entry 24 named for
+re-attempting G2 are mechanically verified true — not just recorded in a
+doc a future session has to remember to re-check:
+  1. `dual_coo_checklist.dual_coo_checklist_review()` calls a genuinely
+     independent second reviewer (`evaluate_evidence_independent()`), not
+     `evaluate_evidence()` called twice on the same payload.
+  2. A live-exercised `run_fallback_drill()` result exists in
+     `outcome_envelope` within the last 90 days — code existing is not
+     evidence it ran.
+  3. A domain-scoped clinical/defense exclusion is wired into
+     `evaluate_evidence_independent()` — as of this writing, NOT built;
+     this precondition is expected to correctly fail until that lands.
+`--skip-preconditions` exists only for exercising this script's own tests
+against a fixture DB that can't populate real evidence rows — it is not a
+production bypass switch, and prints a loud warning every time it's used.
+
 Usage (inside nate_backend, PYTHONPATH=/app):
   python /app/scripts/flip_g2_governance.py --dry-run
   python /app/scripts/flip_g2_governance.py --reason "CEO-authorized 2026-08-03"
@@ -42,11 +59,80 @@ import argparse
 import asyncio
 import os
 import sys
+from typing import Any, Dict
 
 if "/app" not in sys.path and os.path.isdir("/app/app"):
     sys.path.insert(0, "/app")
 
 _WELD_KEYS = ("ENABLE_LN7_AUTO_PROMOTE", "DUAL_COO_MECHANICAL_PROMOTE")
+
+_FALLBACK_DRILL_WINDOW_DAYS = int(
+    os.getenv("STRUCTURAL_FLOOR_DRILL_WINDOW_DAYS", "90")
+)
+
+
+async def check_g2_preconditions(db_pool) -> Dict[str, Any]:
+    """Entry 24/27 prerequisites, machine-checked. Returns a dict with one
+    key per precondition (bool) plus 'all_ok'. Never raises — any check
+    that can't run reports False with an `<key>_error` explanation rather
+    than crashing the whole precondition gate."""
+    checks: Dict[str, Any] = {}
+
+    try:
+        import inspect
+
+        from app.services import dual_coo_checklist as dcc
+
+        src = inspect.getsource(dcc.dual_coo_checklist_review)
+        has_independent_fn = hasattr(dcc, "evaluate_evidence_independent")
+        wired_correctly = (
+            "cloud = await evaluate_evidence_independent(" in src
+            and "cloud = await evaluate_evidence(" not in src
+        )
+        checks["independent_reviewer_wired"] = bool(
+            has_independent_fn and wired_correctly
+        )
+    except Exception as e:
+        checks["independent_reviewer_wired"] = False
+        checks["independent_reviewer_wired_error"] = str(e)[:200]
+
+    checks["fallback_drill_exercised"] = False
+    if db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT COUNT(*)::int AS n FROM outcome_envelope
+                    WHERE loop_name = 'ops' AND event_kind = 'fallback_drill'
+                      AND created_at > NOW() - ($1::text || ' days')::interval
+                    """,
+                    str(_FALLBACK_DRILL_WINDOW_DAYS),
+                )
+                checks["fallback_drill_exercised"] = bool(row and row["n"] > 0)
+        except Exception as e:
+            checks["fallback_drill_exercised_error"] = str(e)[:200]
+    else:
+        checks["fallback_drill_exercised_error"] = "no db_pool"
+
+    try:
+        import inspect
+
+        from app.services import dual_coo_checklist as dcc
+
+        src = inspect.getsource(dcc.evaluate_evidence_independent)
+        checks["domain_exclusion_wired"] = "domain_tag" in src and (
+            "clinical" in src.lower() or "defense" in src.lower()
+        )
+    except Exception as e:
+        checks["domain_exclusion_wired"] = False
+        checks["domain_exclusion_wired_error"] = str(e)[:200]
+
+    checks["all_ok"] = bool(
+        checks.get("independent_reviewer_wired")
+        and checks.get("fallback_drill_exercised")
+        and checks.get("domain_exclusion_wired")
+    )
+    return checks
 
 
 async def _main() -> int:
@@ -60,6 +146,15 @@ async def _main() -> int:
         "--revert",
         action="store_true",
         help="Set both weld keys back to false instead of flipping to true.",
+    )
+    parser.add_argument(
+        "--skip-preconditions",
+        action="store_true",
+        help=(
+            "Test-only escape hatch for exercising this script's flip path "
+            "against a fixture DB that cannot populate real evidence rows. "
+            "NOT a production bypass -- prints a loud warning every use."
+        ),
     )
     args = parser.parse_args()
 
@@ -86,6 +181,26 @@ async def _main() -> int:
                 print(f"FAIL: Step 0 fence is RED, refusing to flip G2. mismatches={fence.get('mismatches')}")
                 return 2
             print("OK: Step 0 fence is GREEN (manifest_ok, 0 mismatches).")
+
+            if args.skip_preconditions:
+                print(
+                    "WARNING: --skip-preconditions used — Entry 24/27 "
+                    "prerequisite checks were NOT run. This flag exists "
+                    "for test fixtures only; using it in production defeats "
+                    "the entire point of this ticket."
+                )
+            else:
+                print("Checking Entry 24/27 preconditions...")
+                preconditions = await check_g2_preconditions(conn_pool)
+                print(f"Preconditions: {preconditions}")
+                if not preconditions.get("all_ok"):
+                    print(
+                        "FAIL: refusing to flip G2 — not all Entry 24/27 "
+                        "preconditions are met. See 'Preconditions' above "
+                        "for which specific one(s) failed."
+                    )
+                    return 2
+                print("OK: all Entry 24/27 preconditions met.")
         else:
             print("Revert mode: skipping fence check (reverting to a safer state is never fence-gated).")
 

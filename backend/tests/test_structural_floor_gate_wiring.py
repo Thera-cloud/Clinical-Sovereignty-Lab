@@ -20,9 +20,21 @@ Covers the specific failure modes named when this wiring was scoped:
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from app.services.therapeutic_controller import audit_therapeutic_response
+
+
+def _run_async(coro):
+    # NOTE: intentionally NOT asyncio.run() -- on Py3.9 that calls
+    # events.set_event_loop(None) on exit, which breaks every later
+    # test file in the same session that relies on the legacy
+    # asyncio.get_event_loop().run_until_complete() pattern (e.g.
+    # test_family_system_field.py, test_growth_ops_closure.py — see
+    # test_dual_coo_heldout_weld_check.py's identical helper/comment).
+    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 def _meta(turn_class: str = "crisis_si", **overrides) -> dict:
@@ -60,9 +72,7 @@ def test_mode_off_default_never_calls_floor_check(monkeypatch):
     )
     monkeypatch.delenv("STRUCTURAL_FLOOR_MODE", raising=False)
 
-    import asyncio
-
-    out = asyncio.run(
+    out = _run_async(
         audit_therapeutic_response(
             "I hear you.", _meta(), "client1", None,
         )
@@ -84,15 +94,13 @@ def test_mode_shadow_logs_but_never_mutates_response(monkeypatch):
     )
     monkeypatch.setenv("STRUCTURAL_FLOOR_MODE", "shadow")
 
-    import asyncio
-
-    out = asyncio.run(
+    out = _run_async(
         audit_therapeutic_response(
             "I hear you, that sounds heavy.", _meta(), "client1", None,
         )
     )
     # Fire-and-forget task — give the loop one tick to run it.
-    asyncio.run(asyncio.sleep(0))
+    _run_async(asyncio.sleep(0))
     assert out["response_text"] == "I hear you, that sounds heavy."
 
 

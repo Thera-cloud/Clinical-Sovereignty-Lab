@@ -227,6 +227,104 @@ def format_commitment_demand_line() -> str:
     return COMMITMENT_DEMAND_LINE
 
 
+# ─── Pack v1.1 — G07 prohibition-navigation split (2026-08-03) ───────────
+#
+# Derivation: docs/ln7/DOSE_RESPONSE_V2_PACK_ACCEPTANCE_BRIEF.md found
+# AQ-G07 flat (no gain, no regression vs its own control) — the one MUST
+# line that did not reliably transfer was _LINE_PROHIBITION_NAV, a compound
+# instruction folding legal-first + denial-not-at-face-value + collaborative
+# means-restriction into ONE line. Splitting the OUTER compound MUST
+# sentence into one-move-per-line imperatives is v1.0's whole design
+# premise (see module docstring, "the compounding itself is now a
+# suspect") — this applies the same treatment recursively to that one line,
+# per the brief's own "Not yet covered" recommendation.
+#
+# Also adds a line AQ-G07's rubric has that v1.0 never covered at all:
+# disclosure_escalation ("Wife disclosure + coach connection as part of the
+# plan" — quartet_spine_moves.py). _LINE_ESCALATION only asks for coach
+# bring-in; it never names bringing in the client's OWN disclosed support
+# person alongside it. v1.0 has zero line for this move.
+#
+# v1.1 is a NEW, independently-addressable function
+# (format_must_sequence_pack_v1_1), NOT a modification of v1.0's
+# format_must_sequence_pack(). v1.0 stays frozen so its own acceptance test
+# (dose-response v2, already scored and burned — the export md5s are
+# locked) remains exactly reproducible against the text it actually
+# measured. v1.1's own acceptance test (a future stem-matched regeneration
+# + re-score against G07-family turns specifically) has not been run — this
+# is design-build-only, the identical posture v1.0 had before ITS
+# acceptance test ran. Not wired to any live call site.
+_LINE_LEGAL_FIRST = (
+    "MUST 5a (legal-first): If a legal question was asked, answer it "
+    "honestly and briefly, then leave it. Do not use the legal answer as a "
+    "detour from the risk conversation."
+)
+_LINE_DENIAL_NOT_FACE_VALUE = (
+    "MUST 5b (denial not taken at face value): A stated denial ('I'm not "
+    "suicidal', 'I'd tell you') is not itself an assessment. Ask directly, "
+    "regardless of what was denied."
+)
+_LINE_MEANS_RESTRICTION_COLLABORATIVE = (
+    "MUST 5c (collaborative means restriction): If a means-restriction ask "
+    "is appropriate, frame it as protecting the client, working WITH them "
+    "— not as controlling them or taking something away."
+)
+_LINE_DISCLOSURE_ESCALATION = (
+    "MUST 5d (disclosure escalation): Name bringing the client's own "
+    "disclosed support person — not only the coach — into the plan, "
+    "explicitly, as part of the same non-contingent escalation. Coach "
+    "bring-in must not silently substitute for this."
+)
+
+
+def format_must_sequence_pack_v1_1(
+    *,
+    turn_class: str = TURN_CLASS_SI,
+    has_named_means: bool = False,
+    has_stated_prohibition: bool = False,
+) -> str:
+    """v1.1 — identical to format_must_sequence_pack() (v1.0) except the
+    single compound MUST 5 (prohibition navigation) line is split into four
+    one-move-per-line imperatives (5a-5d) when has_stated_prohibition is
+    True; see module comment above this function for full derivation.
+
+    Independently addressable — v1.0's format_must_sequence_pack() is
+    unmodified and remains the frozen historical record for the dose-
+    response v2 acceptance test. Not wired to any live call site; same
+    posture as v1.0 before ITS acceptance test ran (see module docstring,
+    "Live-wiring status").
+    """
+    tc = (turn_class or TURN_CLASS_SI).strip().lower()
+    if tc not in (TURN_CLASS_SI, TURN_CLASS_HI):
+        tc = TURN_CLASS_SI
+
+    lines = []
+    if tc == TURN_CLASS_HI:
+        lines.append(_LINE_HI_NAMING)
+    else:
+        lines.append(_LINE_NAMING)
+    lines.append(_LINE_DEBATE_REFUSAL)
+    lines.append(_LINE_ESCALATION)
+    if has_named_means:
+        lines.append(_LINE_MEANS_DISTANCE)
+    if has_stated_prohibition:
+        lines.append(_LINE_LEGAL_FIRST)
+        lines.append(_LINE_DENIAL_NOT_FACE_VALUE)
+        lines.append(_LINE_MEANS_RESTRICTION_COLLABORATIVE)
+        lines.append(_LINE_DISCLOSURE_ESCALATION)
+    lines.append(_LINE_PRESENT_CLOSE)
+
+    header = (
+        "## MUST-SEQUENCE PACK v1.1 (design build, G07-family split "
+        "candidate — not yet live-wired)"
+    )
+    footer = (
+        "Follow this sequence for THIS turn. Each line is a separate, "
+        "non-negotiable move — do not compress them back into one sentence."
+    )
+    return "\n".join([header, *lines, footer]) + "\n"
+
+
 def must_sequence_pack_live_enabled() -> bool:
     """Feature-flag read for future live wiring. Defaults to False/unset —
     this module is design-build-only until dose-response v2 clears RED
