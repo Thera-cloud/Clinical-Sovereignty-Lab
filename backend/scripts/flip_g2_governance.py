@@ -18,15 +18,23 @@ called with `--force-authorized` — a fence mismatch means the frozen
 config the checklist relies on may not match what's actually running, and
 G2 hands promote authority to that checklist.
 
-Uses `ln7_feature_flags.flip_g2_governance()` (the WELD_FLIP_KEYS path,
-requires `allow_weld_flip=True` — enforced both in Python and by the
-`ln7_feature_flags_weld_guard` PG trigger via `SET LOCAL
-ln7.allow_weld_flip = 'on'`). This is intentionally the ONLY code path in
-the repo that sets `allow_weld_flip=True` — do not add a second one.
+Uses `ln7_feature_flags.flip_g2_governance()` / `revert_g2_governance()`
+(the WELD_FLIP_KEYS path, requires `allow_weld_flip=True` — enforced both
+in Python and by the `ln7_feature_flags_weld_guard` PG trigger via `SET
+LOCAL ln7.allow_weld_flip = 'on'`). `ln7_feature_flags.py` and this script
+are intentionally the ONLY places `allow_weld_flip=True` is ever passed —
+do not add a third call site.
+
+--revert (added 2026-08-03, TRUST_LEDGER Entry 24): sets both weld keys
+back to false. Skips the Step 0 fence check — reverting to the more
+conservative CEO-activate state should never be blocked by a fence
+mismatch; the fence exists to gate granting NEW promote authority, not to
+gate returning to a safer one.
 
 Usage (inside nate_backend, PYTHONPATH=/app):
   python /app/scripts/flip_g2_governance.py --dry-run
   python /app/scripts/flip_g2_governance.py --reason "CEO-authorized 2026-08-03"
+  python /app/scripts/flip_g2_governance.py --revert --reason "..."
 """
 from __future__ import annotations
 
@@ -48,11 +56,20 @@ async def _main() -> int:
         default="CEO-authorized 2026-08-03 — Step 0 fence green, gate 1/gate 2 closed",
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--revert",
+        action="store_true",
+        help="Set both weld keys back to false instead of flipping to true.",
+    )
     args = parser.parse_args()
 
     import asyncpg
 
-    from app.services.ln7_feature_flags import flag_enabled, flip_g2_governance
+    from app.services.ln7_feature_flags import (
+        flag_enabled,
+        flip_g2_governance,
+        revert_g2_governance,
+    )
     from app.services.ln7_frozen_config import boot_fence_check
 
     dsn = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_DSN")
@@ -62,31 +79,40 @@ async def _main() -> int:
 
     conn_pool = await asyncpg.create_pool(dsn, min_size=1, max_size=2)
     try:
-        print("Checking Step 0 fence (boot_fence_check)...")
-        fence = await boot_fence_check(db_pool=conn_pool)
-        if not fence.get("ok"):
-            print(f"FAIL: Step 0 fence is RED, refusing to flip G2. mismatches={fence.get('mismatches')}")
-            return 2
-        print("OK: Step 0 fence is GREEN (manifest_ok, 0 mismatches).")
+        if not args.revert:
+            print("Checking Step 0 fence (boot_fence_check)...")
+            fence = await boot_fence_check(db_pool=conn_pool)
+            if not fence.get("ok"):
+                print(f"FAIL: Step 0 fence is RED, refusing to flip G2. mismatches={fence.get('mismatches')}")
+                return 2
+            print("OK: Step 0 fence is GREEN (manifest_ok, 0 mismatches).")
+        else:
+            print("Revert mode: skipping fence check (reverting to a safer state is never fence-gated).")
 
         before = {}
         for k in _WELD_KEYS:
             before[k] = await flag_enabled(conn_pool, k, default=False)
         print(f"Before: {before}")
 
-        if any(before.values()):
+        target = False if args.revert else True
+        if all(v == target for v in before.values()):
             print(
-                "WARNING: one or both weld keys are already true — this run "
-                "would be a no-op re-confirmation, not a fresh flip."
+                f"WARNING: both weld keys already {target} — this run would "
+                "be a no-op re-confirmation, not a fresh state change."
             )
 
         if args.dry_run:
-            print(f"DRY-RUN: would flip {list(_WELD_KEYS)} to true, reason={args.reason!r}")
+            action = "revert" if args.revert else "flip"
+            print(f"DRY-RUN: would {action} {list(_WELD_KEYS)} to {target}, reason={args.reason!r}")
             return 0
 
-        ok = await flip_g2_governance(conn_pool, reason=args.reason)
+        if args.revert:
+            ok = await revert_g2_governance(conn_pool, reason=args.reason)
+        else:
+            ok = await flip_g2_governance(conn_pool, reason=args.reason)
         if not ok:
-            print("FAIL: flip_g2_governance() returned False — check logs for weld-guard/trigger rejection")
+            fn = "revert_g2_governance" if args.revert else "flip_g2_governance"
+            print(f"FAIL: {fn}() returned False — check logs for weld-guard/trigger rejection")
             return 2
 
         after = {}
@@ -94,15 +120,22 @@ async def _main() -> int:
             after[k] = await flag_enabled(conn_pool, k, default=False)
         print(f"After:  {after}")
 
-        if all(after.values()):
-            print(
-                "OK: G2 flip complete. ENABLE_LN7_AUTO_PROMOTE and "
-                "DUAL_COO_MECHANICAL_PROMOTE are both true. CEO promote "
-                "path is now reverse-only for LN7/Queens promote decisions "
-                "per the plan's Governance model (rev 3)."
-            )
+        if all(v == target for v in after.values()):
+            if args.revert:
+                print(
+                    "OK: G2 revert complete. ENABLE_LN7_AUTO_PROMOTE and "
+                    "DUAL_COO_MECHANICAL_PROMOTE are both false. CEO "
+                    "activate is the promote path again for LN7/Queens."
+                )
+            else:
+                print(
+                    "OK: G2 flip complete. ENABLE_LN7_AUTO_PROMOTE and "
+                    "DUAL_COO_MECHANICAL_PROMOTE are both true. CEO promote "
+                    "path is now reverse-only for LN7/Queens promote decisions "
+                    "per the plan's Governance model (rev 3)."
+                )
             return 0
-        print("FAIL: post-flip read-back does not show both keys true — investigate before relying on G2 state.")
+        print(f"FAIL: post-run read-back does not show both keys {target} — investigate before relying on this state.")
         return 2
     finally:
         await conn_pool.close()

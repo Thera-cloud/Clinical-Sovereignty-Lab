@@ -125,6 +125,40 @@ def test_flip_g2_governance_sets_both_weld_keys_with_allow():
     asyncio.run(_run())
 
 
+def test_revert_g2_governance_sets_both_weld_keys_false_with_allow():
+    """revert_g2_governance() must set BOTH weld keys false — a partial
+    revert (one true, one false) is the same broken governance state as a
+    partial flip (TRUST_LEDGER.md Entry 23's env-kill-switch incident)."""
+    from app.services.ln7_feature_flags import revert_g2_governance
+
+    async def _run():
+        pool = MagicMock()
+        conn = AsyncMock()
+        conn.execute = AsyncMock()
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=conn)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        tx = MagicMock()
+        tx.__aenter__ = AsyncMock(return_value=None)
+        tx.__aexit__ = AsyncMock(return_value=False)
+        conn.transaction = MagicMock(return_value=tx)
+        pool.acquire = MagicMock(return_value=cm)
+
+        assert await revert_g2_governance(pool, reason="test-g2-revert") is True
+
+        # Both weld keys must be written with enabled=False.
+        insert_calls = [
+            c for c in conn.execute.call_args_list if "INSERT INTO ln7_feature_flags" in str(c)
+        ]
+        assert len(insert_calls) == 2
+        for c in insert_calls:
+            args = c.args
+            # (sql, key, enabled, notes) positional args to conn.execute
+            assert args[2] is False
+
+    asyncio.run(_run())
+
+
 def test_flip_g2_governance_is_the_sole_allow_weld_flip_true_call_site():
     """Guard against a second, less-careful weld-flip call site being added
     elsewhere in the codebase — flip_g2_governance() must remain the only
@@ -151,6 +185,17 @@ def test_flip_g2_governance_script_checks_fence_before_flipping():
     fence_check_idx = src.index("boot_fence_check(")
     flip_call_idx = src.index("await flip_g2_governance(")
     assert fence_check_idx < flip_call_idx
+
+
+def test_flip_g2_governance_script_supports_revert_without_fence_gate():
+    """--revert (TRUST_LEDGER Entry 24) must call revert_g2_governance() and
+    must NOT be blocked by the fence check — reverting to a safer state is
+    never gated on fence status."""
+    script = REPO / "backend" / "scripts" / "flip_g2_governance.py"
+    src = script.read_text(encoding="utf-8")
+    assert "--revert" in src
+    assert "revert_g2_governance" in src
+    assert "if not args.revert:" in src
 
 
 def test_w13_artifacts_and_scripts_exist():

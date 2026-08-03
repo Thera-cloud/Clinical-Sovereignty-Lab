@@ -159,3 +159,35 @@ async def flip_g2_governance(db_pool, *, reason: str = "step0_green") -> bool:
         allow_weld_flip=True,
     )
     return ok1 and ok2
+
+
+async def revert_g2_governance(db_pool, *, reason: str = "reverted") -> bool:
+    """G2→G0 reversal (explicit weld flip only, same trigger path as the
+    forward flip). Reverting to the more conservative CEO-activate state is
+    never gated on the Step 0 fence — a fence check exists to protect
+    against granting NEW promote authority on stale/mismatched config, not
+    to block returning to a state that requires MORE human review, not less.
+
+    CEO-authorized 2026-08-03 (see docs/ln7/TRUST_LEDGER.md Entry 24):
+    dual_coo_checklist_review() calls evaluate_evidence() twice on the
+    identical payload (mac/cloud), which cannot ever disagree given
+    deterministic input — the "Dual-COO agreement" the forward flip assumed
+    is not yet a real second review. Revert until that, a live-tested
+    fallback drill, and domain-scoped exclusion for clinical/defense
+    revisions exist.
+    """
+    ok1 = await set_flag(
+        db_pool,
+        "ENABLE_LN7_AUTO_PROMOTE",
+        False,
+        notes=reason,
+        allow_weld_flip=True,
+    )
+    ok2 = await set_flag(
+        db_pool,
+        "DUAL_COO_MECHANICAL_PROMOTE",
+        False,
+        notes=reason,
+        allow_weld_flip=True,
+    )
+    return ok1 and ok2

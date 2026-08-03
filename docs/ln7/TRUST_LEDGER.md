@@ -1661,3 +1661,79 @@ promote authority for LN7/Queens promote paths. CEO surface is transparency
 + one-click reverse only, per the plan's Governance model (rev 3). `enqueue_
 ceo` on promote paths should stop firing going forward — worth confirming on
 the next real promote decision, not asserted here from code alone.
+
+---
+
+## Entry 24 — 2026-08-03 — G2 reverted same day: "Dual-COO agreement" is not yet a real second review
+
+CEO asked, minutes after Entry 23's flip, whether six specific gaps were
+tracked anywhere in the plan: (1) a shadow-mode agreement record (≥95% over
+≥40 proposals, zero above-GREEN disagreements), (2) a classifier fail-closed
+fix, (3) a live-exercised rollback + halt drill, (4) measured nonzero
+cross-Queen disagreement, (5) a clinical/defense-excluded allowlist on the
+promote path, (6) a 5–10% sampling channel to the CEO inbox. **None of the
+six were tracked anywhere in this plan or TRUST_LEDGER** — checked by grep
+across both, zero hits on the specific thresholds/mechanisms.
+
+Verified each against code and live GREEN state (not just absence of docs):
+
+1. **Shadow-mode agreement record** — confirmed absent. No counter,
+   threshold, or scoreboard exists anywhere in `ln7_*` code.
+2. **Classifier fail-closed** — real gap. `ln7_domain_router._static_domain()`
+   is a keyword-match chain ending `return None` for unmatched content
+   (fails open to "unknown domain"), and that classification is never
+   consulted by the promote path at all (see #5).
+3. **Rollback + halt drill never run** — confirmed against production data.
+   `outcome_envelope` has **zero rows** for `loop_name IN ('ops','dual_coo')`
+   on GREEN. `FallbackDrillAgent` skips its first real drill on boot unless
+   `LN7_FALLBACK_DRILL_ON_BOOT=1` (unset), interval is 90 days.
+4. **Cross-Queen disagreement unmeasured — worse than that.**
+   `dual_coo_checklist_review()` (`dual_coo_checklist.py`) calls
+   `evaluate_evidence(payload, ...)` **twice on the identical payload**,
+   labeled `mac` and `cloud`. The module's own comment: *"Simulate two
+   independent reviews (same mechanical checklist; diversity is in model
+   selection at inference sites...)"* — there is no model call, no
+   diversity, no randomness. Given deterministic identical input, `mac` and
+   `cloud` **cannot ever disagree** as currently wired. The `RED hold`/
+   `queens_disagree_lineage` anomaly path is presently dead code in
+   practice.
+5. **No clinical/defense exclusion on promote** — confirmed absent.
+   `DEFAULT_TOOL_ALLOWLIST` gates loop/task-type dispatch
+   (`hive_burst`/`ln7_shadow_fork`/`growth_policy_cross_review`), not
+   domain. `evaluate_evidence()`'s checklist items never inspect
+   `domain_tag`. A clinical- or defense-domain revision promotes through
+   the identical mechanical path as anything else.
+6. **5–10% CEO sampling channel** — confirmed absent.
+   `maybe_promote_via_checklist_or_ceo()` branches cleanly: G2 on →
+   mechanical only, `_enqueue_ceo_promote` is never called. Post-flip, 0%
+   of promote decisions reach the CEO inbox, not a sample.
+
+**CEO decision: revert G2 immediately.** The premise Entry 23's flip
+operated on — "Dual-COO checklist agreement = a real second, independent
+review" — is not true today; it is one deterministic function evaluated
+twice. Reverting until items 2–6 above have real fixes (a genuinely
+diverse/independent second reviewer, a live-exercised fallback drill, and
+domain-scoped exclusion for clinical/defense at minimum) is the correct
+call, not a judgment on the underlying mechanical-checklist concept.
+
+**Build:** `revert_g2_governance()` added to `ln7_feature_flags.py`,
+symmetric to `flip_g2_governance()` — same `allow_weld_flip=True` trigger
+path (still the only two call sites: `ln7_feature_flags.py` and
+`flip_g2_governance.py`), but **skips the Step 0 fence check** — reverting
+to the more conservative CEO-activate state should never be blocked by a
+fence mismatch; the fence exists to gate granting *new* promote authority,
+not to gate returning to a safer one. `flip_g2_governance.py` gained
+`--revert`. 3 new offline tests. 2482+ CI green.
+
+**Execution (GREEN, 2026-08-03):** dry-run confirmed both keys true →
+`--revert` executed → effective read-back (via `flag_enabled()`, not raw
+SQL) confirms both `ENABLE_LN7_AUTO_PROMOTE=False` and
+`DUAL_COO_MECHANICAL_PROMOTE=False`. CEO activate is the promote path again
+for LN7/Queens as of this entry.
+
+**Standing follow-up (not built, not scheduled):** a real second reviewer
+for `dual_coo_checklist_review()` (a genuinely different model or an
+independent evaluation path, not the same function called twice), a
+live-exercised `run_fallback_drill()` result, and a domain-scoped exclusion
+list for clinical/defense revisions in `evaluate_evidence()` are the
+concrete prerequisites named in this entry for re-attempting the G2 flip.
