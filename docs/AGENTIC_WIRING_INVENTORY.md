@@ -122,7 +122,7 @@ Scope invariant (documented): scope may only **narrow** (`global` → `archived`
 | Path | File | Trigger → output |
 |------|------|------------------|
 | Universal SI → coach (flagged) | `backend/app/services/suicide_ideation_coach_alert.py` → `maybe_dispatch_si_coach_alert()` | `match_user_text()` → `dispatch_sensitive_alert()` → `sensitive_bridge_log` + `coach_notifications` ref |
-| Flag | env `ENABLE_UNIVERSAL_SI_COACH_ALERT` | Default **false** |
+| Flag | env `ENABLE_UNIVERSAL_SI_COACH_ALERT` | **CORRECTED 2026-08-03** (was documented here as "Default false" — wrong on both counts). `_flag_enabled()` reads `os.getenv(..., "true")` — the code's own default is **enabled, opt-out only** ("Always-on by default. Set `ENABLE_UNIVERSAL_SI_COACH_ALERT=false` to disable." — the function's own docstring). Live on GREEN: unset in `.env`, so following that default → **enabled**. Set explicitly to `false` to disable this path, not the reverse. |
 | Bridge hook | `bridge_server.py` ~8898 | Calls `maybe_dispatch_si_coach_alert` after client turn |
 | Sensitive Bridge coach alert | `sensitive_clinical_bridge.py` | `BridgeDecision.coach_alert: CoachAlertRef` (`severity`, `payload_ref`) |
 | Dispatcher | `backend/app/services/sensitive_alert_dispatcher.py` | Single entry for addiction/trafficking/codeword/SI |
