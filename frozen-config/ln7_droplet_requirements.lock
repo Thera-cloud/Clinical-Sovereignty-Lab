@@ -1,0 +1,41 @@
+# R5 — frozen droplet bootstrap lockfile (provisioning-tool tier).
+#
+# Hash-pinned per PEP 665 / pip --require-hashes convention. Every requirement line
+# below MUST carry at least one --hash=sha256:... or ln7_droplet_lockfile.verify_droplet_lockfile()
+# fails closed and the fence test (frozen-config/fence_tests/test_droplet_lockfile_weld.py)
+# blocks the merge.
+#
+# Scope: this pins the *provisioning-tool* tier only — the small set of packages the
+# droplet bootstrap script itself needs (talking to the internal mirror / R2, parsing
+# config, making API calls) before it ever touches the GPU/ML stack. The heavy stack
+# (torch/vllm/transformers/peft/bitsandbytes/mergekit) is generated the same way by
+# backend/scripts/ln7_generate_droplet_lockfile.py against a target-specific
+# requirements-hive-gpu.txt run ON (or cross-compiled for) the droplet's actual CUDA/
+# manylinux target — that lock is intentionally not committed here until a GPU droplet
+# provisioning run has produced it, so this file never claims coverage it doesn't have.
+#
+# internal-mirror-index-url: https://pip.sovereignsanctuary.net/simple/
+# generated-by: backend/scripts/ln7_generate_droplet_lockfile.py
+# generated-at: 2026-08-02T00:00:00Z
+# target: manylinux2014_x86_64 / cp311 / cp311
+
+certifi==2024.8.30 \
+    --hash=sha256:922820b53db7a7257ffbda3f597266d435245903d80737e34f8a45ff3e3230d8
+
+charset-normalizer==3.3.2 \
+    --hash=sha256:753f10e867343b4511128c6ed8c82f7bec3bd026875576dfd88483c5c73b2fd8
+
+idna==3.8 \
+    --hash=sha256:050b4e5baadcd44d760cedbd2b8e639f2ff89bbc7a5730fcc662954303377aac
+
+packaging==24.1 \
+    --hash=sha256:5b8f2217dbdbd2f7f384c41c628544e6d52f2d0f53c6d0c3ea61aa5d1d7ff124
+
+PyYAML==6.0.2 \
+    --hash=sha256:3ad2a3decf9aaba3d29c8f537ac4b243e36bef957511b4766cb0057d32b0be85
+
+requests==2.32.3 \
+    --hash=sha256:70761cfe03c773ceb22aa2f671b4757976145175cdfca038c02654d061d6dcc6
+
+urllib3==2.2.3 \
+    --hash=sha256:ca899ca043dcb1bafa3e262d73aa25c465bfb49e0bd9dd5d59f1d0acba2f8fac

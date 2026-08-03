@@ -79,6 +79,40 @@ async def run_fallback_drill(db_pool=None) -> Dict[str, Any]:
         results.append({"id": "fence_manifest", "ok": False, "error": str(e)[:200]})
         ok = False
 
+    # 5) R5 supply-chain pins: droplet lockfile hash-pinned + mirror declared (always
+    # checkable, this artifact ships on every node), and base-model checksums intact
+    # where a local checkout exists (skips gracefully elsewhere).
+    try:
+        from app.services.ln7_droplet_lockfile import verify_droplet_lockfile
+
+        lock = verify_droplet_lockfile()
+        lock_ok = bool(lock.get("ok"))
+        if not lock_ok:
+            ok = False
+    except Exception as e:
+        lock = {"ok": False, "error": str(e)[:200]}
+        lock_ok = False
+        ok = False
+
+    try:
+        from app.services.ln7_r2_weight_mirror import verify_base_model_checksums
+
+        base = await verify_base_model_checksums()
+        base_ok = bool(base.get("ok"))
+        if not base_ok:
+            ok = False
+    except Exception as e:
+        base = {"ok": False, "error": str(e)[:200]}
+        base_ok = False
+        ok = False
+
+    results.append({
+        "id": "supply_chain_pin",
+        "ok": lock_ok and base_ok,
+        "droplet_lockfile": lock,
+        "base_model_checksums": base,
+    })
+
     out = {
         "ok": ok,
         "ran_at": datetime.now(timezone.utc).isoformat(),

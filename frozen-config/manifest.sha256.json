@@ -4,6 +4,7 @@
     "claim_templates.json": "d027abbfa26f1bb2b9e08856cee68663359c7e5d9793eefea286a204a377b824",
     "compliance_grants.json": "2a94a85cee70e5cdba1d0bfd0aef71c6f6a1e8975edcc8e6cc5e7017c76e2999",
     "dual_coo_checklist.json": "8335ce73a0c4bd6b28b68ddc9aa64d98d8e58d98e6ef9f961c009d0da1df39f1",
+    "fence_tests/test_droplet_lockfile_weld.py": "da7cad23a0694bd163185723b54f82991a742b2be438f723246b66e2c0dced8d",
     "fence_tests/test_governance_weld.py": "4976836621f5bbfe482db23865d4a0246a8d3d4da90167ecb09d2a917475f422",
     "fence_tests/test_heldout_weld.py": "b1aaa498360277aa560e15acfa94e617e7fe9f2f70d2995417dcdccaa0b8e1a4",
     "fence_tests/test_host_role_contract.py": "d78aca49c40e58b6bba61e52b5edaf5b559ea15876f8ca262a423c30def2e734",
@@ -13,6 +14,7 @@
     "goodhart_reference.json": "8538c25f2fea795a1dc527075a95e11eb72a3e57d2dbf5703e20ef8949b26597",
     "governance.json": "31719405b92ffe7608e0ba0b88a9432e53521b171760ed0dd1f5b937fd398c66",
     "injection_canary_corpus.json": "2dfe3397ac05b60080c185deaa2791299e598527afbc6c1e057b0ace936c195c",
+    "ln7_droplet_requirements.lock": "f3913518d327559c80a6010cffebc5307ecd03be783a085e5a3c1469c96f557f",
     "ln7_heldout_packs.json": "4985ee0496d132acf23cbc504db5fed71ad4d7034bc2d7312d8b36163c07b44f",
     "retract_surface_map.json": "4c1c1cf61909b18f82ab66660c7074870bb95066395cd345c477f05059f0d112",
     "shadow_eval_params.json": "7ef6ef6d153ca88b9dafd6ed11ff4867fa8f81820c49c7dd3d3efc2ba586770e"
