@@ -90,6 +90,69 @@ def test_w13_weld_flip_blocked_without_allow():
     asyncio.run(_run())
 
 
+def test_flip_g2_governance_sets_both_weld_keys_with_allow():
+    """flip_g2_governance() is the one code path allowed to set allow_weld_flip
+    True — it must set BOTH weld keys, not just one, per the plan's "flip
+    together" instruction (a lone ENABLE_LN7_AUTO_PROMOTE=true with
+    DUAL_COO_MECHANICAL_PROMOTE still false is not a valid G2 state)."""
+    from app.services.ln7_feature_flags import flip_g2_governance
+
+    async def _run():
+        pool = MagicMock()
+        conn = AsyncMock()
+        conn.execute = AsyncMock()
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=conn)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        tx = MagicMock()
+        tx.__aenter__ = AsyncMock(return_value=None)
+        tx.__aexit__ = AsyncMock(return_value=False)
+        conn.transaction = MagicMock(return_value=tx)
+        pool.acquire = MagicMock(return_value=cm)
+
+        assert await flip_g2_governance(pool, reason="test-g2-flip") is True
+
+        # Both weld keys must have had allow_weld_flip's set_config call issued.
+        set_config_calls = [
+            c for c in conn.execute.call_args_list if "set_config" in str(c)
+        ]
+        assert len(set_config_calls) == 2, (
+            "expected one allow_weld_flip set_config call per weld key "
+            f"(ENABLE_LN7_AUTO_PROMOTE, DUAL_COO_MECHANICAL_PROMOTE), got "
+            f"{len(set_config_calls)}"
+        )
+
+    asyncio.run(_run())
+
+
+def test_flip_g2_governance_is_the_sole_allow_weld_flip_true_call_site():
+    """Guard against a second, less-careful weld-flip call site being added
+    elsewhere in the codebase — flip_g2_governance() must remain the only
+    place `allow_weld_flip=True` is ever passed."""
+    src_dir = REPO / "backend" / "app" / "services"
+    scripts_dir = REPO / "backend" / "scripts"
+    hits = []
+    for path in list(src_dir.glob("*.py")) + list(scripts_dir.glob("*.py")):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if "allow_weld_flip=True" in text:
+            hits.append(path.name)
+    assert set(hits) == {"ln7_feature_flags.py", "flip_g2_governance.py"}, hits
+
+
+def test_flip_g2_governance_script_checks_fence_before_flipping():
+    script = REPO / "backend" / "scripts" / "flip_g2_governance.py"
+    assert script.is_file()
+    src = script.read_text(encoding="utf-8")
+    assert "boot_fence_check" in src
+    assert "flip_g2_governance" in src
+    assert "fence.get(\"ok\")" in src or "fence.get('ok')" in src
+    # Refuses to flip on a red fence — the FAIL path must return before
+    # calling flip_g2_governance.
+    fence_check_idx = src.index("boot_fence_check(")
+    flip_call_idx = src.index("await flip_g2_governance(")
+    assert fence_check_idx < flip_call_idx
+
+
 def test_w13_artifacts_and_scripts_exist():
     assert (REPO / "backend" / "migrations" / "311_ln7_queens_fence_acl.sql").is_file()
     assert (REPO / "scripts" / "ln7_weld_backup_r2.sh").is_file()
