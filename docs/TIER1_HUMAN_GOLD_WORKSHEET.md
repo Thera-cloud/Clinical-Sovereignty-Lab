@@ -35,16 +35,21 @@ Stored in `trust_baseline` keys: `tier1_gold_kappa_threshold`, `tier1_gold_relia
 
 ## Stem provenance (anti-circularity)
 
-Source: `backend/app/data/six_quotient_human_gold_stems_v1.json` (v1.1).
+Sources:
+- v1: `backend/app/data/six_quotient_human_gold_stems_v1.json`
+- v2 (complete 70/70, clinician-reviewed 2026-08-03): `backend/app/data/six_quotient_human_gold_stems_v2.json`
 
 | Label | Count | Counts toward floor? |
 |---|---|---|
-| `april_battery_clinician_authored` | 24 | Yes |
-| `model_generated_pending_clinician_revision` | 26 | **No** until clinician revises |
-| `model_generated_then_clinician_revised` | 0 | Yes after revision |
+| `april_battery_clinician_authored` | 24 (v1) | Yes |
+| `v2_battery_clinician_authored` | 24 (v2 Batch 1 V01–V04) | Yes after scoring |
+| `model_generated_pending_clinician_revision` | 26 (v1 G-stems only) | **No** until clinician revises |
+| `model_generated_then_clinician_revised` | 46 (v2 Batches 2–3) | Yes after scoring |
 | `literature_adapted` | optional | Yes |
 
-**Floor:** Among `human_scored=true`, ≥50% must be april / clinician-revised / literature. Current mix is **48%** april — revise G-stems (or expand april) **before** the scoring session.
+**v2 `scoring_guide`:** per-stem expected-moves rubric lives in a dedicated DB/JSON field, never concatenated into `client_says`. Generation paths must not SELECT it (see `test_v2_battery_scoring_guide_isolation.py`).
+
+**Floor:** Among `human_scored=true`, ≥50% must be april / clinician-revised / literature / `v2_battery_clinician_authored`. All **70/70 v2** stems are now floor-eligible once scored. v1’s ~26 pending G-stems remain open.
 
 ---
 

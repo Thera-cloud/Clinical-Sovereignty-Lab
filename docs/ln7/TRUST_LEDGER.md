@@ -2015,6 +2015,74 @@ correctly report `all_ok=True` once the drill evidence is fresh, but that
 alone is not authorization to re-flip; the shadow-agreement volume is a
 separate, still-unmet bar.
 
+## Entry 29 — 2026-08-03 — v2 battery batches 1–2 landed (48/70); scoring_guide isolation fence
+
+Clinician delivered Batch 1 (IQ/EQ/MQ/SQ/CQ/AQ V01–V04, 24 stems) and Batch 2
+(V05–V08, 24 stems) for the ~70-stem v2 battery that unblocks judge v7
+re-certification after the v2 holdout burn (Entry 21 κ=0.480).
+
+**Artifacts:**
+- `backend/app/data/six_quotient_human_gold_stems_v2.json` — 48 stems (at this entry)
+- Migration `323_v2_battery_scoring_guide.sql` — additive `scoring_guide TEXT`
+  column on `six_quotient_human_gold` (rater rubric only)
+- `seed_human_gold_worksheet.py` — merges v1+v2 curated files; always upserts
+  curated stems (no longer capped by the old 50 soft target); syncs
+  `scoring_guide` when the column exists
+- `test_v2_battery_scoring_guide_isolation.py` — batch sizes, provenance,
+  guide≠stem contamination, generation sources never SELECT/reference
+  `scoring_guide`, migration present
+
+**Provenance split at this entry (superseded by Entry 31):**
+| Batch | IDs | Provenance | Counts toward gold floor? |
+|---|---|---|---|
+| 1 | *-V01…V04 | `v2_battery_clinician_authored` | Yes (after scoring) |
+| 2 | *-V05…V08 | `model_generated_pending_clinician_revision` | **No** until clinician revises |
+
+**Isolation rule:** `scoring_guide` holds the clinician "tests:" annotation.
+`fill_human_gold_nate_responses._infer_one` and `live_stack_blinds` SELECT
+`client_says` only — the guide never reaches the answering model. Fence is
+test-enforced.
+
+## Entry 30 — 2026-08-03 — v2 battery complete: 70/70 stems landed
+
+Batch 3 (IQ/EQ/MQ/SQ V09–V12, CQ/AQ V09–V11 — 22 stems) closes out the
+70-stem v2 battery started in Entry 29. All batches land in the same
+`six_quotient_human_gold_stems_v2.json`; provenance discipline unchanged
+until Entry 31.
+
+**Final composition (70 stems):**
+| Batch | IDs | Count | Provenance (pre-Entry 31) |
+|---|---|---|---|
+| 1 | *-V01…V04 | 24 | `v2_battery_clinician_authored` |
+| 2 | *-V05…V08 | 24 | `model_generated_pending_clinician_revision` |
+| 3 | *-V09…V12 (IQ/EQ/MQ/SQ) + *-V09…V11 (CQ/AQ) | 22 | `model_generated_pending_clinician_revision` |
+
+Section counts: IQ 12, EQ 12, MQ 12, SQ 12, CQ 11, AQ 11 (70 total; CQ/AQ
+one stem lighter per quotient in this delivery — optional future micro-batch
+to even strata, not required for gate purposes).
+
+**Isolation fence:** asserts 70/70 and 6-quotient section split. No change to
+the generation-path fence — `scoring_guide` remains absent from every
+`fill_human_gold_nate_responses` and `live_stack_blinds` SELECT.
+
+## Entry 31 — 2026-08-03 — Batches 2–3 clinician-reviewed; provenance flipped
+
+DrNevedal1 reviewed Batches 2–3 and approved them as gold-floor eligible.
+Label flip only (no per-stem text edits after review):
+
+| Batch | IDs | Count | New provenance |
+|---|---|---|---|
+| 1 | *-V01…V04 | 24 | `v2_battery_clinician_authored` (unchanged) |
+| 2–3 | *-V05…V12 | 46 | `model_generated_then_clinician_revised` |
+
+JSON version stamp: `v2-complete-70-clinician-reviewed-2026-08-03`.
+All **70/70 v2** stems now count toward the ≥50% clinician-authored /
+clinician-revised gold floor once scored. v1’s ~26
+`model_generated_pending_clinician_revision` G-stems remain open.
+
+**Still not done at this entry:** migration 323 + seed on GREEN; blinds
+generation; clinician scoring session.
+
 ## Entry 32 — 2026-08-03 — Local CI gate: pre-existing macOS numpy SIGFPE (not this diff); 2 real fixes shipped anyway
 
 While pushing the v2 battery work (Entries 29-31), the local
