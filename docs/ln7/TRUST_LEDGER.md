@@ -2352,3 +2352,12 @@ empty-queue message.
 **Verified:** 68 tests green (12 isolation + 8 kappa-script fence + 9
 router + 39 flywheel-wiring, `.venv` Python 3.13, includes 2 new tests).
 No schema/migration — pure additive query param.
+
+## Entry 39 — 2026-08-04 — Battery scope filter deployed to GREEN
+
+Deployed 80f787a1 via `safe_deploy.sh backend` (no migration). 154/154
+healthy, vault metrics 371→371. Dashboard synced + nginx reloaded.
+
+**Live-verified:** `battery=v2` → 70 items, `battery=v1` → 4 items (matches
+exactly), `battery=v99` → 422. DrNevedal1 can now select "v2 (new)" in the
+Battery dropdown to skip straight to the new material.
