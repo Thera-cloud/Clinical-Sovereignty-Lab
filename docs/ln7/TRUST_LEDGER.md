@@ -2171,3 +2171,18 @@ before — v1 scores untouched).
 **Not done:** clinician scoring session against the 70 new items;
 live-stack (`nate_response_live`) capability-track blinds for v2 (separate
 generator, not run this entry).
+
+## Entry 34 — 2026-08-04 — v2 battery capability-track (live-stack) blinds generated on GREEN
+
+Ran `POST /api/admin/principal-review/gold/live-stack/generate` (production
+therapeutic stack, not the thin harness) against the 70 v2 scenario_ids in
+two batches (48 + 22, API caps `limit` at 50/request via explicit
+`scenario_ids`). 70/70 `ok`, 0 failures.
+
+**Verified on GREEN:** all 70 v2 rows now have `nate_response_live`
+populated (`live_response_provenance='live_stack_attempt'`). Combined with
+Entry 33 (judge-track `nate_response` + `pairs_locked`), both dual-track
+blinds now exist for all 70 v2 stems.
+
+**Still open:** clinician scoring session (both tracks) — DrNevedal1 via
+the Gold Score page / Recheck tab. Nothing further to automate before that.
