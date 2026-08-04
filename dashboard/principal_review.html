@@ -96,6 +96,13 @@ h2{font-family:'Cormorant Garamond',Georgia,serif;color:var(--gold);font-size:1.
           <option value="live" selected>Capability — live-stack blinds</option>
         </select>
       </label>
+      <label>Battery
+        <select id="scoreBattery">
+          <option value="all" selected>All</option>
+          <option value="v2">v2 (new, 70 stems)</option>
+          <option value="v1">v1 (original 50)</option>
+        </select>
+      </label>
       <button class="primary" id="btnStart" onclick="startSession()">Start scoring session</button>
       <button onclick="loadGoldItems()">Load unscored (50)</button>
       <span class="pill pend" id="runPill">no session</span>
@@ -206,6 +213,7 @@ const API = (window.SS_API_BASE || "https://api.sovereignsanctuary.net") + "/api
 let _runId = null, _items = [], _idx = 0, _shownAt = 0, _timerIv = null;
 let _recheckRun = null, _recheckItems = [], _recheckIdx = 0, _recheckShownAt = 0, _recheckIv = null;
 let _scoreTrack = "live";
+let _scoreBattery = "all";
 
 function onTrackChange(){
   const el = document.getElementById("scoreTrack");
@@ -280,6 +288,8 @@ async function refreshProgress(){
 function _syncTrack(){
   const el = document.getElementById("scoreTrack");
   _scoreTrack = (el && el.value) || "live";
+  const bel = document.getElementById("scoreBattery");
+  _scoreBattery = (bel && bel.value) || "all";
 }
 
 async function startSession(){
@@ -299,13 +309,15 @@ async function startSession(){
 async function loadGoldItems(){
   if(!_runId){ alert("Start a scoring session first."); return; }
   _syncTrack();
-  const d = await api("/gold/items?unscored_only=true&limit=50&track="+encodeURIComponent(_scoreTrack));
+  const d = await api("/gold/items?unscored_only=true&limit=50&track="+encodeURIComponent(_scoreTrack)
+    +"&battery="+encodeURIComponent(_scoreBattery));
   if(!d) return;
   _items = d.items||[];
   _idx = 0;
   if(!_items.length){
     document.getElementById("scoreCard").innerHTML =
-      "<div class='empty'>No unscored items on track "+esc(_scoreTrack)+".</div>";
+      "<div class='empty'>No unscored items on track "+esc(_scoreTrack)
+      +" (battery="+esc(_scoreBattery)+").</div>";
     return;
   }
   renderScoreItem();

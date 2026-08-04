@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "backend" / "scripts" / "compute_tier1_v2_battery_holdout_kappa.py"
 V1_STEMS = ROOT / "backend" / "app" / "data" / "six_quotient_human_gold_stems_v1.json"
 V2_STEMS = ROOT / "backend" / "app" / "data" / "six_quotient_human_gold_stems_v2.json"
+PRINCIPAL_REVIEW_API = ROOT / "backend" / "app" / "routers" / "principal_review_api.py"
 
 
 def _v2_id_pattern() -> re.Pattern:
@@ -71,3 +72,29 @@ def test_judge_track_only_no_live_track_fields():
 def test_notes_field_records_gold_locked_choice():
     src = SCRIPT.read_text()
     assert "gold_locked={bool(args.gold_locked)}" in src
+
+
+def test_gold_items_battery_scope_matches_kappa_script_constant():
+    """/gold/items's battery=v2 filter and this script's V2_BATTERY_ID_RE
+    must define the same set of scenario_ids. Two independent copies of
+    "what counts as v2" that silently drift is the exact bug class this
+    project has hit before (e.g. TRUST_LEDGER Entry 6's burned-scenario
+    duplication risk) -- this test is the tripwire."""
+    kappa_pat = _v2_id_pattern().pattern
+    api_src = PRINCIPAL_REVIEW_API.read_text()
+    m = re.search(
+        r'"v2"\s*:\s*"AND scenario_id ~ \'([^\']+)\'"', api_src
+    )
+    assert m, "battery='v2' SQL clause not found in principal_review_api.py"
+    api_pat = m.group(1)
+    assert api_pat == kappa_pat, (
+        f"drift detected: principal_review_api.py battery=v2 pattern "
+        f"{api_pat!r} != compute_tier1_v2_battery_holdout_kappa.py "
+        f"V2_BATTERY_ID_RE {kappa_pat!r}"
+    )
+
+
+def test_gold_items_battery_param_documented():
+    api_src = PRINCIPAL_REVIEW_API.read_text()
+    assert 'battery: str = "all"' in api_src
+    assert "_BATTERY_SQL_CLAUSE" in api_src

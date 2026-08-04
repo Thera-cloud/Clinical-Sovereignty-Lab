@@ -210,22 +210,44 @@ async def gold_progress(request: Request):
     return {"status": "ok", **dict(row or {})}
 
 
+# Battery scoping for /gold/items. Each entry's regex must stay in sync
+# with compute_tier1_v2_battery_holdout_kappa.V2_BATTERY_ID_RE (enforced by
+# test_battery_scope_matches_kappa_script_constant) -- confined here rather
+# than imported cross-module so a router never pulls in a standalone script,
+# same "one auditable constant" pattern as _BURNED_SCENARIO_IDS in
+# compute_tier1_v5_fresh_holdout_kappa.py. Add a new entry per future
+# battery rather than redefining what "v2" means.
+_BATTERY_SQL_CLAUSE = {
+    "all": "",
+    "v2": "AND scenario_id ~ '-V(0[1-9]|1[0-2])$'",
+    "v1": "AND scenario_id !~ '-V(0[1-9]|1[0-2])$'",
+}
+
+
 @router.get("/gold/items")
 async def gold_items(
     request: Request,
     unscored_only: bool = True,
     limit: int = 50,
     track: str = "judge",
+    battery: str = "all",
 ):
     """Blind worksheet rows — no distractor flag, no masterful_criteria, no arm.
 
     track=judge → nate_response (κ). track=live → nate_response_live (capability).
+    battery=all|v1|v2 — scope to a specific stem battery (v2 = the 70-stem
+    2026-08-03 battery, TRUST_LEDGER Entries 29-31). Default all preserves
+    prior behavior.
     """
     pool = _pool(request)
     limit = max(1, min(int(limit or 50), 100))
     track_norm = (track or "judge").strip().lower()
     if track_norm not in ("judge", "live"):
         raise HTTPException(422, "track must be judge|live")
+    battery_norm = (battery or "all").strip().lower()
+    if battery_norm not in _BATTERY_SQL_CLAUSE:
+        raise HTTPException(422, f"battery must be one of {sorted(_BATTERY_SQL_CLAUSE)}")
+    battery_clause = _BATTERY_SQL_CLAUSE[battery_norm]
     async with pool.acquire() as conn:
         # Migration 323 tolerance: scoring_guide may not exist on every
         # environment yet. Never let a missing rater-only column break the
@@ -251,6 +273,7 @@ async def gold_items(
                     FROM six_quotient_human_gold
                     WHERE COALESCE(nate_response_live, '') <> ''
                       {"AND COALESCE(live_human_scored, false) = false" if unscored_only else ""}
+                      {battery_clause}
                     ORDER BY md5(scenario_id || COALESCE(client_says,''))
                     LIMIT $1""",
                 limit,
@@ -268,6 +291,7 @@ async def gold_items(
                       AND nate_response NOT ILIKE '%Placeholder Nate reply%'
                       AND nate_response NOT ILIKE '%External scoring required%'
                       {"AND human_scored = false" if unscored_only else ""}
+                      {battery_clause}
                     ORDER BY md5(scenario_id || COALESCE(client_says,''))
                     LIMIT $1""",
                 limit,
@@ -293,7 +317,13 @@ async def gold_items(
                 "scoring_guide": r.get("scoring_guide") or None,
             }
         )
-    return {"status": "ok", "track": track_norm, "count": len(items), "items": items}
+    return {
+        "status": "ok",
+        "track": track_norm,
+        "battery": battery_norm,
+        "count": len(items),
+        "items": items,
+    }
 
 
 _LIVE_MODE_FAILURES = frozenset(

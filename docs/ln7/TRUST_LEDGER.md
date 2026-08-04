@@ -2324,3 +2324,31 @@ schema errors. `dashboard/principal_review.html` synced to
 now returns a populated `scoring_guide` field for v2 items (spot-checked
 IQ-V04) — the rater-guide surfacing fix from Entry 35 is confirmed working
 end-to-end on production, not just in local tests.
+
+## Entry 38 — 2026-08-04 — /gold/items battery scope filter (all|v1|v2)
+
+Added a `battery` query param to `GET /gold/items` (default `all`,
+preserves prior behavior) so the scoring UI can be scoped to a specific
+stem battery instead of drawing from the full randomized queue. Motivated
+by DrNevedal1 hitting an old v1 item (`AQ-1`) first in the capability-track
+queue — expected behavior (4 leftover v1 items mixed into 74 unscored),
+not a bug, but confirmed there was no way to skip straight to the new
+material.
+
+**Design for future batteries:** `_BATTERY_SQL_CLAUSE` dict in
+`principal_review_api.py` is a confined, auditable-at-a-glance constant
+(same pattern as `_BURNED_SCENARIO_IDS` in
+`compute_tier1_v5_fresh_holdout_kappa.py`) — add one entry per future
+battery rather than redefining what "v2" means. New test
+`test_gold_items_battery_scope_matches_kappa_script_constant` is a
+drift tripwire: it parses both `principal_review_api.py`'s `battery="v2"`
+SQL fragment and `compute_tier1_v2_battery_holdout_kappa.V2_BATTERY_ID_RE`
+and fails if they ever diverge.
+
+**Dashboard:** new "Battery" dropdown (All / v2 (new) / v1 (original))
+next to Track, wired into `loadGoldItems()`'s fetch call and the
+empty-queue message.
+
+**Verified:** 68 tests green (12 isolation + 8 kappa-script fence + 9
+router + 39 flywheel-wiring, `.venv` Python 3.13, includes 2 new tests).
+No schema/migration — pure additive query param.
