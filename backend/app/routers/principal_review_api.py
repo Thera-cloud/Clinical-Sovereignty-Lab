@@ -227,12 +227,27 @@ async def gold_items(
     if track_norm not in ("judge", "live"):
         raise HTTPException(422, "track must be judge|live")
     async with pool.acquire() as conn:
+        # Migration 323 tolerance: scoring_guide may not exist on every
+        # environment yet. Never let a missing rater-only column break the
+        # scoring surface itself.
+        has_scoring_guide = False
+        try:
+            has_scoring_guide = bool(
+                await conn.fetchval(
+                    """SELECT 1 FROM information_schema.columns
+                       WHERE table_name = 'six_quotient_human_gold'
+                         AND column_name = 'scoring_guide'"""
+                )
+            )
+        except Exception:
+            has_scoring_guide = False
+        guide_col = ", scoring_guide" if has_scoring_guide else ", NULL::text AS scoring_guide"
         if track_norm == "live":
             rows = await conn.fetch(
                 f"""SELECT scenario_id, section, client_says, nate_response_live AS response,
                            response_class, difficulty,
                            COALESCE(live_human_scored, false) AS human_scored,
-                           blinded, live_stack_run_id
+                           blinded, live_stack_run_id{guide_col}
                     FROM six_quotient_human_gold
                     WHERE COALESCE(nate_response_live, '') <> ''
                       {"AND COALESCE(live_human_scored, false) = false" if unscored_only else ""}
@@ -245,7 +260,7 @@ async def gold_items(
             rows = await conn.fetch(
                 f"""SELECT scenario_id, section, client_says, nate_response AS response,
                            response_class, difficulty, human_scored, blinded,
-                           NULL::text AS live_stack_run_id
+                           NULL::text AS live_stack_run_id{guide_col}
                     FROM six_quotient_human_gold
                     WHERE pairs_locked = true
                       AND COALESCE(nate_response, '') <> ''
@@ -271,6 +286,11 @@ async def gold_items(
                 "blinded": bool(r["blinded"]),
                 "track": track_norm,
                 "live_stack_run_id": r.get("live_stack_run_id"),
+                # Rater-only reference (never generation input — see
+                # test_v2_battery_scoring_guide_isolation.py). Display only;
+                # submitScore() sends an explicit whitelisted body, so this
+                # cannot round-trip into any write path.
+                "scoring_guide": r.get("scoring_guide") or None,
             }
         )
     return {"status": "ok", "track": track_norm, "count": len(items), "items": items}

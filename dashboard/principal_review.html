@@ -28,6 +28,9 @@ main{max-width:920px;margin:0 auto;padding:1.25rem 1.25rem 3rem}
 .meta{color:var(--dim);font-size:.85rem;margin-bottom:1rem}
 .card{background:var(--elev);border:1px solid var(--line);border-radius:8px;padding:1rem 1.1rem;margin:1rem 0}
 .client,.resp{white-space:pre-wrap;background:var(--void);padding:.75rem;border-radius:4px;margin:.4rem 0 .8rem}
+.guide{margin:.4rem 0 .8rem;border:1px dashed var(--cyan);border-radius:4px;padding:.4rem .6rem}
+.guide summary{cursor:pointer;color:var(--cyan);font-size:.85rem}
+.guide .resp{margin-top:.5rem}
 label{display:inline-block;margin:0 .85rem .5rem 0;color:var(--cyan);font-size:.85rem}
 input[type=number],select,textarea,input[type=text]{background:var(--void);color:var(--goldb);
 border:1px solid var(--line);border-radius:4px;padding:.35rem .5rem;font:inherit}
@@ -346,6 +349,7 @@ function renderScoreItem(){
       <div class="client">${esc(it.client_says)}</div>
       <p><strong>Response (blind)</strong></p>
       <div class="resp">${esc(it.response)}</div>
+      ${it.scoring_guide ? `<details class="guide"><summary>Rater guide (yours — not shown to Nate)</summary><div class="resp">${esc(it.scoring_guide)}</div></details>` : ""}
       <div class="row">
         <label>primary <input type="number" id="sPrimary" min="0" max="3"></label>
         <label>accuracy <input type="number" id="sAccuracy" min="0" max="3"></label>

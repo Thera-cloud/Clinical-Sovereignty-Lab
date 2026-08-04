@@ -2186,3 +2186,79 @@ blinds now exist for all 70 v2 stems.
 
 **Still open:** clinician scoring session (both tracks) — DrNevedal1 via
 the Gold Score page / Recheck tab. Nothing further to automate before that.
+
+## Entry 35 — 2026-08-04 — Gap-audit fixes: rater guide surfaced, v2-scoped fresh κ script, readiness script rescoped
+
+Fixed 3 of the gaps found in the post-deploy gap audit (item 10 / v2
+battery). Deliberately additive-only, no existing gate/certification
+behavior changed — Entry 24's G2 revert is the standing reason to be
+conservative here.
+
+1. **`scoring_guide` now visible to the rater.** Migration 323's column
+   existed but was never selected by `principal_review_api.gold_items()`
+   or rendered anywhere — DrNevedal1's own clinician-authored rubric was
+   inert. Now selected (schema-guarded via `information_schema.columns`
+   check, tolerates environments without migration 323) and rendered as a
+   collapsed `<details>` box in `principal_review.html`'s score card,
+   labeled "Rater guide (yours — not shown to Nate)". Confirmed safe by
+   inspection: `submitScore()` builds an explicit whitelisted POST body
+   (`scenario_id, run_id, primary, accuracy, naturalness, safety_veto,
+   mode_failure, notes` only) — never a spread of the item object — so
+   this display-only field cannot round-trip into any write/promote path.
+   New fence tests (`test_scoring_guide_confined_to_gold_items_read_endpoint`,
+   `test_gold_items_scoring_guide_is_schema_guarded`) assert `scoring_guide`
+   never appears in any function of `principal_review_api.py` except the
+   read-only `gold_items` GET handler.
+
+2. **New `compute_tier1_v2_battery_holdout_kappa.py`** — the real risk
+   found in this audit: `compute_tier1_gold_kappa.py`'s `load_scored_gold()`
+   has no version filter, and defaults `gold_locked=True`, meaning a
+   routine run against the whole table (once v2 gets scored) becomes the
+   number `clinical_tier1_competence_gate_check.py` reads for the live
+   D.14b gate — silently mixing v1 (already used to tune prior judge
+   versions, i.e. burned) with v2 (purpose-built as fresh, untuned-against
+   material) into one κ. This is the exact contamination class
+   `compute_tier1_v5_fresh_holdout_kappa.py` exists to prevent for v5
+   (TRUST_LEDGER Entry 6). Mirrored that precedent for v2 instead of
+   touching the existing certifying script or `load_scored_gold()` at all:
+   new script scopes to `scenario_id ~ '-V(0[1-9]|1[0-2])$'` (schema-level,
+   confirmed collision-free against v1's bare `-N` ids), judge-track only,
+   `--judge-id` has NO default (TRUST_LEDGER Entry 4's stale-default
+   mislabeling incident), and `gold_locked=False` by default — a run only
+   counts toward the D.14b gate if `--gold-locked` is explicitly passed.
+   6 structural tests (no DB) lock in these defaults.
+
+3. **`tier1_gold_d14b_readiness.py`'s hardcoded `/50`** rescoped to the
+   original v1 cohort only (excludes v2 scenario_ids from the D.14b
+   progress query) — this script is informational-only (prints next-steps,
+   the real gate is `clinical_tier1_competence_gate_check.py`, which
+   already uses `>=` comparisons and was already correct against the
+   120-row table), but the printed guidance would have gone nonsensical
+   ("scored=70/50") the moment v2 scoring started. Added a separate
+   `--- v2 battery (informational) ---` block reporting v2 total/locked/
+   scored/judge-blind/live-blind counts.
+
+**Verified:** `test_principal_review_api.py` (9/9, existing router tests,
+unaffected), `test_v2_battery_scoring_guide_isolation.py` (12/12, extended
+from 10), new `test_v2_battery_fresh_holdout_kappa_script.py` (6/6) — 27
+tests total across the touched surface, all green. `clinical_tier1_
+competence_gate_check.py` itself was NOT modified (read-only audit of its
+logic confirmed it was already safe against table growth via its `>=`
+comparisons).
+
+**Explicitly NOT fixed (require clinician content, not code):**
+- CQ/AQ strata (11 stems vs 12 for the other four quotients) — needs
+  DrNevedal1 to author 1 more stem per quotient.
+- Zero degraded distractors specific to v2 — `seed_gold_degraded_distractors.py`
+  reads hand-authored clinically-deliberate-wrong responses from
+  `six_quotient_gold_degraded_distractors_v1.json`; fabricating v2 analogs
+  would be inventing clinical content, not a mechanical fix. Global floor
+  (10 >= 8) already passes via v1, so this is non-blocking.
+- Judge-track thin-harness vs. production-stack asymmetry — documented,
+  intentional dual-track design (TIER1_HUMAN_GOLD_WORKSHEET.md), not a bug;
+  changing it would touch the crisis-inject/prompt-assembly seam, which per
+  this plan's own text merges through RED-adjacent review, not routine
+  hygiene.
+
+**Not deployed to GREEN yet** — local commit only pending this session's
+push.

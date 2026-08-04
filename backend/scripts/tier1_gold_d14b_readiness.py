@@ -26,8 +26,18 @@ async def _main() -> int:
 
     conn = await asyncpg.connect(dsn)
     try:
+        # D.14b certification is anchored to the original 50-item worksheet
+        # (six_quotient_human_gold_stems_v1.json). Scope this script's /50
+        # progress number to that cohort explicitly — otherwise, once the
+        # v2 battery (70 additional stems, scenario_ids *-V01..*-V12,
+        # TRUST_LEDGER Entries 29-34) starts getting scored, the whole-table
+        # "scored" count exceeds 50 and the "/50" print becomes nonsense
+        # (this script is informational-only; the real gate is
+        # clinical_tier1_competence_gate_check.py, which already uses
+        # >= comparisons and is unaffected by table growth).
+        v1_scope = "AND scenario_id !~ '-V(0[1-9]|1[0-2])$'"
         prog = await conn.fetchrow(
-            """SELECT
+            f"""SELECT
                  COUNT(*)::int AS total,
                  COUNT(*) FILTER (WHERE pairs_locked)::int AS locked,
                  COUNT(*) FILTER (WHERE human_scored)::int AS scored,
@@ -45,8 +55,23 @@ async def _main() -> int:
                  PERCENTILE_CONT(0.5) WITHIN GROUP (
                    ORDER BY COALESCE(score_entry_latency_ms,0)
                  ) FILTER (WHERE human_scored) AS med_lat
-               FROM six_quotient_human_gold"""
+               FROM six_quotient_human_gold
+               WHERE TRUE {v1_scope}"""
         )
+        v2_prog = None
+        try:
+            v2_prog = await conn.fetchrow(
+                """SELECT
+                     COUNT(*)::int AS total,
+                     COUNT(*) FILTER (WHERE pairs_locked)::int AS locked,
+                     COUNT(*) FILTER (WHERE human_scored)::int AS scored,
+                     COUNT(*) FILTER (WHERE COALESCE(nate_response,'')<>'')::int AS judge_filled,
+                     COUNT(*) FILTER (WHERE COALESCE(nate_response_live,'')<>'')::int AS live_filled
+                   FROM six_quotient_human_gold
+                   WHERE scenario_id ~ '-V(0[1-9]|1[0-2])$'"""
+            )
+        except Exception:
+            v2_prog = None
         kappa_n = int(
             await conn.fetchval(
                 "SELECT COUNT(*) FROM six_quotient_judge_kappa_evidence WHERE gold_locked"
@@ -95,9 +120,19 @@ async def _main() -> int:
         locked = int(prog["locked"] or 0)
         degraded = int(prog["degraded"] or 0)
 
-        print("=== D.14b readiness (Principal-Review) ===")
+        print("=== D.14b readiness (Principal-Review, v1 50-item worksheet) ===")
         print(f"locked={locked} scored={scored}/50 auth_ok_45s={auth_ok} median_lat_ms={med:.0f}")
         print(f"degraded={degraded} dry_run_placeholders={dry} recheck_table={bool(recheck_tbl)}")
+        if v2_prog:
+            print(
+                f"--- v2 battery (informational, not part of D.14b's 50-item floor) ---"
+            )
+            print(
+                f"v2_total={v2_prog['total']} v2_locked={v2_prog['locked']} "
+                f"v2_scored={v2_prog['scored']}/{v2_prog['total']} "
+                f"v2_judge_blinds={v2_prog['judge_filled']}/{v2_prog['total']} "
+                f"v2_live_blinds={v2_prog['live_filled']}/{v2_prog['total']}"
+            )
         print(f"kappa_evidence_rows={kappa_n} reliability_rows={rel_n} reliability_pass={rel_pass}")
         if latest_k:
             print(

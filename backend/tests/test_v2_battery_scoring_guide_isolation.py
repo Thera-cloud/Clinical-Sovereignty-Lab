@@ -121,3 +121,44 @@ def test_migration_323_adds_scoring_guide_column():
     text = mig.read_text()
     assert "ADD COLUMN IF NOT EXISTS scoring_guide" in text
     assert "Never" in text or "never" in text
+
+
+# `scoring_guide` is display-only rater reference. It is allowed in the
+# read-only GET /gold/items handler (gold_items) that feeds the scoring UI,
+# and nowhere else in the Principal-Review API — never in a promote/write
+# function, never threaded into notes/principal_response/crystal_text.
+_ALLOWED_SCORING_GUIDE_FUNCS = frozenset({"gold_items"})
+
+
+def test_scoring_guide_confined_to_gold_items_read_endpoint():
+    api = ROOT / "backend" / "app" / "routers" / "principal_review_api.py"
+    src = api.read_text()
+    tree = ast.parse(src)
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.AsyncFunctionDef):
+            continue
+        if node.name in _ALLOWED_SCORING_GUIDE_FUNCS:
+            continue
+        body_src = ast.get_source_segment(src, node) or ""
+        if "scoring_guide" in body_src:
+            offenders.append(node.name)
+    assert not offenders, (
+        f"scoring_guide referenced outside {sorted(_ALLOWED_SCORING_GUIDE_FUNCS)}: "
+        f"{offenders} — it must stay display-only, never written into any "
+        f"promote/library/crystal path"
+    )
+
+
+def test_gold_items_scoring_guide_is_schema_guarded():
+    """gold_items() must tolerate migration 323 not being applied yet."""
+    api = ROOT / "backend" / "app" / "routers" / "principal_review_api.py"
+    src = api.read_text()
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "gold_items":
+            body_src = ast.get_source_segment(src, node) or ""
+            assert "information_schema.columns" in body_src
+            assert "has_scoring_guide" in body_src
+            return
+    raise AssertionError("gold_items endpoint not found")
