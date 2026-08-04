@@ -2310,3 +2310,17 @@ script with no pytest involved at all. The `.venv` (Python 3.13, numpy
 2.4.1, no Accelerate self-check crash) is the reliable local verification
 path going forward on this machine; GitHub Actions Linux CI is unaffected
 either way.
+
+## Entry 37 — 2026-08-04 — Gap-audit fixes + fence-manifest fix deployed to GREEN
+
+Deployed commits 7f1676d1 (gap-audit fixes) + 8646116a (fence-manifest
+false-positive fix) to GREEN via `safe_deploy.sh backend` (no migration —
+no schema change). Vault metrics unchanged 371→371. Post-deploy:
+`STARTUP COMPLETE: 154/154 services healthy`, `ALL SYSTEMS NOMINAL`, zero
+schema errors. `dashboard/principal_review.html` synced to
+`/var/www/sovereign-command/` + host nginx reloaded.
+
+**Verified live:** `GET /api/admin/principal-review/gold/items?track=judge`
+now returns a populated `scoring_guide` field for v2 items (spot-checked
+IQ-V04) — the rater-guide surfacing fix from Entry 35 is confirmed working
+end-to-end on production, not just in local tests.
