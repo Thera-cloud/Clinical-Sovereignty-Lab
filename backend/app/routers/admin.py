@@ -5591,6 +5591,29 @@ async def sse_client_intake_turn(request: Request, _user: dict = Depends(_sse_au
     uid = body.get("user_id") or _user.get("hardware_id", "")
     return await process_intake_turn(uid, body.get("user_name", ""), body.get("turn", 1), body.get("user_message", ""), body.get("conversation_history", []), request.app.state.db_pool)
 
+@sse_client_router.get("/intake/needs-symbol-review")
+async def sse_client_needs_symbol_review(request: Request, _user: dict = Depends(_sse_auth)):
+    """Thera-World Global Symbol Safety System — Layer C1, acceptance criterion 6.
+    Existing users whose intake predates the 'Your Story's Language' turn must
+    answer it before their next panel. Client checks this on Thera-World open."""
+    from app.sse.layer1_identity_forge import needs_symbol_review, get_intake_prompt
+    pool = request.app.state.db_pool
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    needs = await needs_symbol_review(uid, pool)
+    return {"needs_review": needs, "prompt": get_intake_prompt(11, _user.get("name", "friend")) if needs else ""}
+
+@sse_client_router.post("/intake/symbol-review")
+async def sse_client_symbol_review(request: Request, _user: dict = Depends(_sse_auth)):
+    """Thera-World Global Symbol Safety System — Layer C1, acceptance criterion 6.
+    Records a migrated user's answer to the review question through the same
+    detection path as live intake (source='onboarding_migration')."""
+    from app.sse.layer1_identity_forge import record_symbol_review_answer
+    body = await request.json()
+    pool = request.app.state.db_pool
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    result = await record_symbol_review_answer(uid, body.get("answer", ""), pool)
+    return result
+
 @sse_client_router.get("/intake/status/{user_id}")
 async def sse_client_intake_status(user_id: str, request: Request, _user: dict = Depends(_sse_auth)):
     from app.services.intake_session import get_intake_status
@@ -5617,6 +5640,57 @@ async def sse_client_storyboard(request: Request, _user: dict = Depends(_sse_aut
                     "panel_tone": p.get("panel_tone")}
                    for p in sp.get("panels", []) if p.get("r2_url")]
     return {"enrolled": True, "storyboard_id": sid, "panels": panels}
+
+@sse_client_router.get("/codex/panel/{panel_id}")
+async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = Depends(_sse_auth)):
+    """Thera-World Global Symbol Safety System — Layer C3: tap-to-reveal legend
+    for one delivered panel. Every character/symbol in the scene, named and
+    explained in this user's own consented posture. No unexplained figures."""
+    pool = request.app.state.db_pool
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT user_id, character_manifest FROM sse_panel_log WHERE panel_id = $1", panel_id)
+        if not row or row["user_id"] != uid:
+            raise HTTPException(404, "panel not found")
+        idrow = await conn.fetchrow(
+            "SELECT cultural_context, spiritual_framework FROM sse_identity_forge WHERE user_id = $1", uid)
+        jrow = await conn.fetchrow(
+            "SELECT last_panel_npcs FROM sse_user_journeys WHERE user_id = $1", uid)
+    npcs = []
+    if jrow and jrow["last_panel_npcs"]:
+        raw = jrow["last_panel_npcs"]
+        raw = json.loads(raw) if isinstance(raw, str) else raw
+        npcs = [n.get("name") for n in (raw or []) if isinstance(n, dict) and n.get("name")]
+    from app.sse.symbol_safety import build_panel_codex
+    legend = await build_panel_codex(
+        row["character_manifest"] or "", npcs, uid, pool,
+        cultural_context=(idrow["cultural_context"] if idrow else "") or "",
+        spiritual_framework=(idrow["spiritual_framework"] if idrow else "") or "",
+    )
+    return {"panel_id": panel_id, "legend": legend}
+
+@sse_client_router.get("/codex/symbols")
+async def sse_client_codex_symbols(request: Request, _user: dict = Depends(_sse_auth)):
+    """Thera-World Global Symbol Safety System — Layer C3: full 'Your Story's
+    Language' review screen. Every registry symbol, this user's current
+    effective state, and what it means for them specifically. Powers the
+    existing-user migration review flow (spec acceptance criterion 6)."""
+    pool = request.app.state.db_pool
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    cultural_context, spiritual_framework = "", ""
+    try:
+        async with pool.acquire() as conn:
+            idrow = await conn.fetchrow(
+                "SELECT cultural_context, spiritual_framework FROM sse_identity_forge WHERE user_id = $1", uid)
+        if idrow:
+            cultural_context = idrow["cultural_context"] or ""
+            spiritual_framework = idrow["spiritual_framework"] or ""
+    except Exception as _codex_err:
+        logger.warning("sse_client_codex_symbols identity lookup failed for %s: %s", uid, _codex_err)
+    from app.sse.symbol_safety import build_symbol_codex
+    legend = await build_symbol_codex(uid, pool, cultural_context, spiritual_framework)
+    return {"symbols": legend}
 
 @sse_client_router.get("/vault/{user_id}")
 async def sse_client_vault(user_id: str, request: Request, _user: dict = Depends(_sse_auth)):

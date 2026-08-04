@@ -168,6 +168,7 @@ async def generate_image(
     prompt: str,
     size: str = "1024x1024",
     source_image_url: Optional[str] = None,
+    negative_prompt: Optional[str] = None,
 ) -> bytes:
     """Generate a static image via Grok Imagine API.
 
@@ -178,8 +179,19 @@ async def generate_image(
     On content moderation rejection, retries once with a softened prompt.
     When source_image_url is provided, sends image_url in the payload
     for image-to-image generation (character consistency anchor).
+
+    Thera-World symbol safety (Layer D4): Grok Imagine has no dedicated
+    negative-prompt field, so negative_prompt is folded into the prompt text
+    as an explicit exclusion clause — the only lever available for this
+    backend. Callers should already have removed literal excluded-symbol
+    text from `prompt` (see app.sse.symbol_safety.sanitize_image_prompt);
+    this is a second, belt-and-suspenders layer against the model
+    improvising forbidden imagery on its own.
+
     Raises RuntimeError on API failure.
     """
+    if negative_prompt:
+        prompt = f"{prompt}. Strictly avoid depicting any of: {negative_prompt}."
     key = _get_api_key()
     if not key:
         if os.getenv("GEMINI_API_KEY", "").strip():

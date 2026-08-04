@@ -3,6 +3,16 @@
 Mines crystal history to generate archetypal NPC characters for quests/missions.
 NPCs are metaphorical and never literal representations of real people.
 
+WIRING STATUS (verified 2026-08): compose_quest_panel() and compose_mission_panel()
+below are currently unreferenced by any router or scheduler — quest/mission NPCs
+are instead blended directly into the main journey panel by
+thera_world_engine.generate_journey_panel() (it reads sse_quests/sse_missions
+active records and folds their NPCs into the shared image prompt). These two
+functions are kept, safety-hardened (symbol sanitization via _safe_sanitize),
+and unit-testable for the day a dedicated quest/mission panel entry point is
+added — do not assume dead code is unsafe code, but also do not assume it is
+exercised by production traffic today.
+
 # TODO Phase 3: Crystal confidence levels affecting narrative intensity
 # TODO Phase 3: Cross-domain crystal co-occurrence for complex NPCs
 # TODO Phase 3: Quest/mission history endpoints
@@ -14,6 +24,23 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+async def _safe_sanitize(image_prompt: str, user_id: str, db_pool, profile: dict) -> tuple:
+    """Symbol safety (Layer D4) wrapper — never let a filter failure crash panel
+    generation, but never silently skip it without a warning either."""
+    try:
+        from app.sse.symbol_safety import sanitize_image_prompt
+        fctx = (profile or {}).get("_family_context") or {}
+        return await sanitize_image_prompt(
+            image_prompt, user_id, db_pool,
+            cultural_context=(profile or {}).get("cultural_context", "") or fctx.get("cultural_context", ""),
+            spiritual_framework=(profile or {}).get("spiritual_framework", "") or fctx.get("spiritual_framework", ""),
+        )
+    except Exception as e:
+        logger.warning("quest_mission_engine symbol sanitization failed for %s: %s", user_id, e)
+        return image_prompt, ""
+
 
 GOAL_TO_DOMAINS: Dict[str, List[str]] = {
     "confidence": ["self-worth", "identity", "shame", "performance"],
@@ -241,7 +268,7 @@ async def compose_quest_panel(user_id: str, quest: dict, profile: dict,
 
     biome_name = journey.get("current_biome", "dark_forest")
     biome = next((b for b in BIOME_THRESHOLDS if b["biome"] == biome_name), BIOME_THRESHOLDS[0])
-    character = await determine_character(profile)
+    character = await determine_character(profile, user_id=user_id, db_pool=db_pool)
     progress = quest.get("progress_notes", [])
     if isinstance(progress, str):
         progress = json.loads(progress)
@@ -303,11 +330,15 @@ async def compose_quest_panel(user_id: str, quest: dict, profile: dict,
                 parsed = json.loads(m.group())
                 if parsed.get("narrative_text") and parsed.get("image_prompt"):
                     parsed.setdefault("panel_tone", "action_sequence")
+                    parsed["image_prompt"], parsed["negative_prompt"] = await _safe_sanitize(
+                        parsed["image_prompt"], user_id, db_pool, profile)
                     print(f">>> [QUEST-PANEL] user={user_id} quest={qid} narrative_len={len(parsed['narrative_text'])}")
                     return parsed
     except Exception as e:
         logger.warning("compose_quest_panel LLM failed for %s: %s", user_id, e)
     print(f">>> [QUEST-PANEL] user={user_id} quest={qid} fallback")
+    fallback["image_prompt"], fallback["negative_prompt"] = await _safe_sanitize(
+        fallback["image_prompt"], user_id, db_pool, profile)
     return fallback
 
 
@@ -319,7 +350,7 @@ async def compose_mission_panel(user_id: str, mission: dict, profile: dict,
 
     biome_name = journey.get("current_biome", "dark_forest")
     biome = next((b for b in BIOME_THRESHOLDS if b["biome"] == biome_name), BIOME_THRESHOLDS[0])
-    character = await determine_character(profile)
+    character = await determine_character(profile, user_id=user_id, db_pool=db_pool)
     target = mission.get("relationship_target", "a loved one")
     rel_type = mission.get("relationship_type", "family")
     mid = mission.get("mission_id", "?")
@@ -372,11 +403,15 @@ async def compose_mission_panel(user_id: str, mission: dict, profile: dict,
                 parsed = json.loads(m.group())
                 if parsed.get("narrative_text") and parsed.get("image_prompt"):
                     parsed.setdefault("panel_tone", "meditative")
+                    parsed["image_prompt"], parsed["negative_prompt"] = await _safe_sanitize(
+                        parsed["image_prompt"], user_id, db_pool, profile)
                     print(f">>> [MISSION-PANEL] user={user_id} mission={mid} narrative_len={len(parsed['narrative_text'])}")
                     return parsed
     except Exception as e:
         logger.warning("compose_mission_panel LLM failed for %s: %s", user_id, e)
     print(f">>> [MISSION-PANEL] user={user_id} mission={mid} fallback")
+    fallback["image_prompt"], fallback["negative_prompt"] = await _safe_sanitize(
+        fallback["image_prompt"], user_id, db_pool, profile)
     return fallback
 
 

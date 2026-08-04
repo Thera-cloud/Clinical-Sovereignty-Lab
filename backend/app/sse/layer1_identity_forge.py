@@ -1,7 +1,8 @@
 """SSE Layer 1 — Identity Forge.
 
-10-turn intake conversation orchestrator. Extracts structured identity
-data and crystallizes key fields for Little Nate's memory.
+11-turn intake conversation orchestrator (10 identity turns + 1 Thera-World
+symbol safety turn — spec Layer C1.1 "Your Story's Language"). Extracts
+structured identity data and crystallizes key fields for Little Nate's memory.
 """
 from __future__ import annotations
 
@@ -47,6 +48,11 @@ INTAKE_PROMPTS = [
     (10, "hope",
      "What are you hoping for? If something could actually "
      "change — what would it be?"),
+    (11, "story_language",
+     "One last thing, and it matters. Is there anything from your faith, "
+     "culture, or personal history that should never appear in your "
+     "story — images, animals, symbols, or themes that would feel wrong "
+     "or unwelcome to you? If nothing comes to mind, that's okay too."),
 ]
 
 
@@ -109,7 +115,109 @@ def _keyword_fallback_extraction(conversation: list) -> dict:
             data.setdefault("spiritual_framework", "christian")
     if len(user_turns) >= 10:
         data["language_notes"] = user_turns[9][:200]
+    if len(user_turns) >= 11:
+        data["story_language_exclusions_raw"] = user_turns[10][:400]
     return data
+
+
+async def needs_symbol_review(user_id: str, db_pool) -> bool:
+    """Thera-World Global Symbol Safety System — Layer C1, acceptance criterion 6.
+
+    True when this user completed Identity Forge intake BEFORE the 'Your
+    Story's Language' turn (11) existed — i.e. their stored conversation_history
+    has fewer than 11 user turns. Callers (the panel-generation scheduler, and
+    the client 'needs review' check) must treat True as 'do not generate a new
+    panel until this user has answered the review question'. False for anyone
+    still mid-intake — the normal 11-turn flow already covers them."""
+    if not db_pool or not user_id:
+        return False
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT status, conversation_history FROM sse_identity_forge WHERE user_id = $1", user_id)
+        if not row or row["status"] != "complete":
+            return False
+        conv = row["conversation_history"]
+        conv = json.loads(conv) if isinstance(conv, str) else (conv or [])
+        if not isinstance(conv, list):
+            return False
+        user_turns = [m for m in conv if isinstance(m, dict) and m.get("role") == "user"]
+        return len(user_turns) < 11
+    except Exception as exc:
+        logger.warning("needs_symbol_review check failed for %s: %s", user_id, exc)
+        return False
+
+
+async def record_symbol_review_answer(user_id: str, answer_text: str, db_pool) -> dict:
+    """Handles a migrated (pre-turn-11) user's answer to the 'Your Story's
+    Language' question. Detects/persists exclusions through the same path as
+    live intake (source='onboarding_migration'), then appends the Q&A to
+    conversation_history so needs_symbol_review() returns False afterward —
+    even a 'nothing comes to mind' answer counts as having been asked once."""
+    written: list = []
+    if not db_pool or not user_id:
+        return {"written": [], "recorded": False}
+    try:
+        from app.sse.symbol_safety import detect_and_record_exclusion
+        written = await detect_and_record_exclusion(
+            answer_text or "", user_id, db_pool, source="onboarding_migration")
+    except Exception as exc:
+        logger.warning("record_symbol_review_answer detection failed for %s: %s", user_id, exc)
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT conversation_history FROM sse_identity_forge WHERE user_id = $1", user_id)
+            conv = row["conversation_history"] if row else None
+            conv = json.loads(conv) if isinstance(conv, str) else (conv or [])
+            conv = list(conv) if isinstance(conv, list) else []
+            conv.append({"role": "assistant", "content": get_intake_prompt(11, "")})
+            conv.append({"role": "user", "content": answer_text or ""})
+            await conn.execute(
+                "UPDATE sse_identity_forge SET conversation_history = $1::jsonb WHERE user_id = $2",
+                json.dumps(conv), user_id)
+        return {"written": written, "recorded": True}
+    except Exception as exc:
+        logger.warning("record_symbol_review_answer persist failed for %s: %s", user_id, exc)
+        return {"written": written, "recorded": False}
+
+
+async def _apply_symbol_safety_intake(conversation: list, user_id: str, db_pool, data: dict) -> list:
+    """Thera-World Global Symbol Safety System — Layer C1.1/C1.2.
+
+    Runs the same conversational exclusion/opt-in detector used for live chat
+    (symbol_safety.detect_and_record_exclusion) across every user turn of the
+    intake — the dedicated 'story_language' turn (11) is the explicit ask, but
+    scanning all turns catches earlier disclosures too (e.g. a phobia named in
+    the 'wound' turn). Also seeds cultural-context auto-exclusions as durable
+    rows (source='onboarding') so they're visible in the Codex/exclusion list
+    even though they're also enforced live via symbol_safety.build_posture().
+    Never raises — a failure here must not block intake completion, but must
+    also never be silently swallowed without a warning log."""
+    if not db_pool or not user_id:
+        return []
+    written: list = []
+    try:
+        from app.sse.symbol_safety import detect_and_record_exclusion, cultural_default_exclusions, record_symbol_state
+
+        for turn in conversation:
+            if turn.get("role") != "user":
+                continue
+            text = turn.get("content", "")
+            if not text:
+                continue
+            hits = await detect_and_record_exclusion(text, user_id, db_pool, source="onboarding")
+            written.extend(hits)
+
+        auto_excluded = cultural_default_exclusions(
+            data.get("cultural_context", ""), data.get("spiritual_framework", ""))
+        for symbol_id in auto_excluded:
+            ok = await record_symbol_state(
+                user_id, symbol_id, "excluded", db_pool,
+                source="onboarding", note="cultural_context auto-rule at intake")
+            written.append({"symbol_id": symbol_id, "state": "excluded", "written": ok, "auto": True})
+    except Exception as exc:
+        logger.warning("symbol_safety intake pass failed for %s: %s", user_id, exc)
+    return written
 
 
 async def _generate_archetype_image(user_id: str, data: dict, db_pool) -> str | None:
@@ -219,6 +327,10 @@ async def extract_intake_data(conversation: list, db_pool, user_id: str) -> dict
     archetype_url = await _generate_archetype_image(user_id, data, db_pool)
     if archetype_url:
         data["archetype_image_url"] = archetype_url
+
+    symbol_exclusions = await _apply_symbol_safety_intake(conversation, user_id, db_pool, data)
+    if symbol_exclusions:
+        data["symbol_exclusions"] = symbol_exclusions
 
     try:
         from app.websocket.crystal_recall_bridge import crystallize_from_conversation

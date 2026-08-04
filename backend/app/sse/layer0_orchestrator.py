@@ -259,11 +259,20 @@ class SSEOrchestrator:
                         "SELECT hardware_id FROM users "
                         "WHERE role='CLIENT' AND subscription_status IN ('ACTIVE','TRIAL_ACTIVE') "
                         "AND hardware_id IS NOT NULL AND hardware_id != ''")
+                from app.sse.layer1_identity_forge import needs_symbol_review
                 for r in rows:
                     try:
                         hw = r["hardware_id"]
                         if await self._ucd_already_generated(hw, hours=24):
                             logger.info("Skipping %s — UCD already generated today", hw)
+                            continue
+                        # Symbol safety (Layer C1, acceptance criterion 6): a user whose
+                        # intake predates the 'Your Story's Language' turn must answer it
+                        # before any new panel is generated for them — this is the
+                        # server-side safety net independent of whether the client app
+                        # has surfaced the review prompt yet.
+                        if await needs_symbol_review(hw, self.db_pool):
+                            logger.info("Skipping %s — pending Thera-World symbol-safety review", hw)
                             continue
                         async with self.db_pool.acquire() as c2:
                             exists = await c2.fetchval(

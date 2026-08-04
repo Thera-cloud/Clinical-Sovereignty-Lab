@@ -243,13 +243,30 @@ async def get_therapeutic_profile(user_id: str, db_pool) -> dict:
     profile: Dict[str, Any] = {"crystal_count": 0, "top_domains": [], "recent_crystals": [],
                                 "domain_counts": {}, "theme_counts": {}, "top_themes": [],
                                 "session_count": 0,
-                                "active_quests": [], "active_missions": []}
+                                "active_quests": [], "active_missions": [],
+                                "cultural_context": "", "spiritual_framework": ""}
     try:
         async with db_pool.acquire() as conn:
             urow = await conn.fetchrow(
                 "SELECT id, username, hardware_id FROM users "
                 "WHERE hardware_id = $1 OR username = $1 LIMIT 1", user_id)
             uid = urow["id"] if urow else None
+
+            # Symbol safety (Layer D4) cultural auto-rules need cultural_context /
+            # spiritual_framework from the Identity Forge intake — without this the
+            # cultural exclusion/label rules in symbol_safety.py are silent no-ops.
+            try:
+                idrow = await conn.fetchrow(
+                    "SELECT cultural_context, spiritual_framework FROM sse_identity_forge "
+                    "WHERE user_id = $1 "
+                    "OR user_id = (SELECT hardware_id FROM users WHERE username = $1 LIMIT 1) "
+                    "OR user_id = (SELECT username FROM users WHERE hardware_id = $1 LIMIT 1) "
+                    "ORDER BY completed_at DESC NULLS LAST LIMIT 1", user_id)
+                if idrow:
+                    profile["cultural_context"] = idrow["cultural_context"] or ""
+                    profile["spiritual_framework"] = idrow["spiritual_framework"] or ""
+            except Exception as e:
+                logger.warning("get_therapeutic_profile identity_forge lookup failed for %s: %s", user_id, e)
 
             if uid:
                 profile["crystal_count"] = await conn.fetchval(
@@ -352,11 +369,20 @@ async def check_biome_transition(user_id: str, profile: dict, journey: dict, db_
     return True
 
 
-async def determine_character(profile: dict, panel_sequence: int = 0) -> Tuple[str, str]:
+async def determine_character(
+    profile: dict, panel_sequence: int = 0, user_id: Optional[str] = None, db_pool=None
+) -> Tuple[str, str]:
     """Map dominant crystal domains to core character manifestation.
 
     Rotates through ALL matched domains by panel_sequence so a user whose
     top domain never changes still sees different manifestations day to day.
+
+    Symbol safety (Layer D4): when user_id + db_pool are supplied, candidates
+    governed by a registry symbol (e.g. Serpent -> "serpent") are filtered by
+    the user's effective posture before rotation, so an excluded symbol never
+    surfaces as a character even by rotation luck. Backward compatible —
+    omitting user_id/db_pool skips filtering (existing call sites unaffected
+    until updated).
     """
     matches: List[Tuple[str, str]] = []
     # Themes mined from crystal text are the primary key; canonical domains fallback
@@ -365,9 +391,30 @@ async def determine_character(profile: dict, panel_sequence: int = 0) -> Tuple[s
             key = domain.lower().strip()
             if key in CRYSTAL_TO_CHARACTER and CRYSTAL_TO_CHARACTER[key] not in matches:
                 matches.append(CRYSTAL_TO_CHARACTER[key])
+    spiritual_framework = ""
+    if user_id and db_pool:
+        try:
+            from app.sse.symbol_safety import filter_character_candidates
+            fctx = profile.get("_family_context") or {}
+            cultural_context = profile.get("cultural_context", "") or fctx.get("cultural_context", "")
+            spiritual_framework = profile.get("spiritual_framework", "") or fctx.get("spiritual_framework", "")
+            matches = await filter_character_candidates(
+                matches, user_id, db_pool,
+                cultural_context=cultural_context,
+                spiritual_framework=spiritual_framework,
+            )
+        except Exception as _sym_err:
+            logger.warning("symbol_safety character filter failed for %s: %s", user_id, _sym_err)
     if not matches:
         return _DEFAULT_CHARACTER
-    return matches[panel_sequence % len(matches)]
+    name, visual = matches[panel_sequence % len(matches)]
+    if spiritual_framework:
+        try:
+            from app.sse.symbol_safety import apply_cultural_label
+            name = apply_cultural_label(name, spiritual_framework)
+        except Exception as _label_err:
+            logger.warning("symbol_safety cultural label failed for %s: %s", user_id, _label_err)
+    return name, visual
 
 
 def _protagonist_gender_lock(character_visual: str, archetype_hint: str = "") -> str:
@@ -996,7 +1043,7 @@ async def build_rich_panel_prompt(user_id: str, db_pool) -> dict:
     if isinstance(last_npcs, str):
         last_npcs = json.loads(last_npcs)
     panel_seq = journey.get("panel_sequence", 0) or 0
-    character = await determine_character(profile, panel_sequence=panel_seq)
+    character = await determine_character(profile, panel_sequence=panel_seq, user_id=user_id, db_pool=db_pool)
 
     # Phase 6: family context enrichment
     try:
@@ -1081,8 +1128,21 @@ async def build_rich_panel_prompt(user_id: str, db_pool) -> dict:
     image_prompt += ", no text, no words, no lettering, no calligraphy, no writing on image"
     image_prompt += f", {character[1]}"
 
+    negative_prompt = ""
+    try:
+        from app.sse.symbol_safety import sanitize_image_prompt
+        fctx = profile.get("_family_context") or {}
+        image_prompt, negative_prompt = await sanitize_image_prompt(
+            image_prompt, user_id, db_pool,
+            cultural_context=profile.get("cultural_context", "") or fctx.get("cultural_context", ""),
+            spiritual_framework=profile.get("spiritual_framework", "") or fctx.get("spiritual_framework", ""),
+        )
+    except Exception as _sanitize_err:
+        logger.warning("build_rich_panel_prompt symbol sanitization failed for %s: %s", user_id, _sanitize_err)
+
     return {
         "image_prompt": image_prompt,
+        "negative_prompt": negative_prompt,
         "narrative_text": narrative.get("narrative_text", ""),
         "panel_tone": narrative.get("panel_tone", "meditative"),
         "biome": current_biome_name,
@@ -1134,7 +1194,7 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     panel_seq = journey.get("panel_sequence", 0) or 0
     if transitioned:
         panel_seq = 0
-    character = await determine_character(profile, panel_sequence=panel_seq)
+    character = await determine_character(profile, panel_sequence=panel_seq, user_id=user_id, db_pool=db_pool)
 
     # Phase 6: enrich profile with family context
     try:
@@ -1241,6 +1301,24 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
         arch_hint,
     )
 
+    # Symbol safety (Layer D4): final sanitization pass before the prompt ever
+    # reaches an image model. Rewrites/strips excluded, never-tier, and
+    # cultural-restricted symbols and produces a negative_prompt for backends
+    # that support it. Never let this exception propagate — a filter failure
+    # must not crash panel generation, but it must also never be silently
+    # skipped without a warning log.
+    negative_prompt = ""
+    try:
+        from app.sse.symbol_safety import sanitize_image_prompt
+        fctx = profile.get("_family_context") or {}
+        image_prompt, negative_prompt = await sanitize_image_prompt(
+            image_prompt, user_id, db_pool,
+            cultural_context=profile.get("cultural_context", "") or fctx.get("cultural_context", ""),
+            spiritual_framework=profile.get("spiritual_framework", "") or fctx.get("spiritual_framework", ""),
+        )
+    except Exception as _sanitize_err:
+        logger.warning("generate_journey_panel symbol sanitization failed for %s: %s", user_id, _sanitize_err)
+
     archetype_ref_url = arch_ident.get("archetype_image_url") or None
     if not archetype_ref_url:
         try:
@@ -1251,20 +1329,50 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
         except Exception as _arc_err:
             logger.warning("Archetype ref lookup failed for %s: %s", user_id, _arc_err)
 
+    panel_id = str(uuid.uuid4())
     r2_url = None
     try:
-        image_bytes = await generate_image(image_prompt, source_image_url=archetype_ref_url)
+        image_bytes = await generate_image(
+            image_prompt, source_image_url=archetype_ref_url, negative_prompt=negative_prompt
+        )
+        # Symbol safety (Layer D3): post-generation vision gate. Checks the
+        # rendered image against the user's excluded symbols + never-tier list;
+        # regenerates (max 3 attempts) or falls back to a safe template scene
+        # and pages the clinician dashboard on exhaustion. Fails open (delivers
+        # the original image) if the vision model itself is unreachable — an
+        # infra outage must never block therapeutic content, but is logged
+        # distinctly from a clean pass. Feature-flagged for rollout control.
+        if os.getenv("ENABLE_SYMBOL_VISION_GATE", "true").lower() == "true":
+            try:
+                from app.sse.symbol_vision_gate import validate_panel_image
+
+                async def _regen(p: str, neg: str) -> bytes:
+                    return await generate_image(p, negative_prompt=neg)
+
+                image_bytes, image_prompt, _gate_passed = await validate_panel_image(
+                    image_bytes, image_prompt, negative_prompt, user_id, db_pool,
+                    panel_id=panel_id, regenerate_fn=_regen,
+                )
+            except Exception as _gate_err:
+                logger.warning("generate_journey_panel vision gate failed for %s: %s", user_id, _gate_err)
         content_hash = hashlib.sha256(image_bytes).hexdigest()[:12]
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         r2_key = f"sse/journey/{user_id}/{today}/{content_hash}.png"
         r2_url = await store_image(image_bytes, r2_key)
     except Exception as e:
         logger.warning("Journey image generation failed for %s: %s", user_id, e)
-        # Reserve panel fallback
+        # Reserve panel fallback — sanitize the reserve prompt too, it was
+        # cached before this user's symbol posture may have changed.
         reserves = jmeta.get("reserve_prompts") or []
         if reserves:
             try:
-                ib = await generate_image(reserves[0])
+                reserve_prompt, reserve_neg = reserves[0], negative_prompt
+                try:
+                    from app.sse.symbol_safety import sanitize_image_prompt as _sanitize_reserve
+                    reserve_prompt, reserve_neg = await _sanitize_reserve(reserves[0], user_id, db_pool)
+                except Exception:
+                    pass
+                ib = await generate_image(reserve_prompt, negative_prompt=reserve_neg)
                 ih = hashlib.md5(reserves[0].encode()).hexdigest()[:12]
                 r2_url = await store_image(ib, f"sse/journey/{user_id}/{datetime.now(timezone.utc).strftime('%Y-%m-%d')}/{ih}.png")
             except Exception as _retry_err:
@@ -1273,7 +1381,8 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     nar_text = narrative.get("narrative_text", "")
     new_summary = (nar_text.split(".")[0] + ".") if nar_text and "." in nar_text else nar_text[:100]
 
-    panel_id = str(uuid.uuid4())
+    # panel_id was hoisted above the image-generation block so the vision gate
+    # (Layer D3) can log against the same id that will be written to sse_panel_log.
     _panel_saved = False
     if not r2_url:
         logger.warning(

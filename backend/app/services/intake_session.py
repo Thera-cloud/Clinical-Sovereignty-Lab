@@ -1,4 +1,5 @@
-"""SSE Intake Session — backend handler for the 10-turn Identity Forge conversation.
+"""SSE Intake Session — backend handler for the 11-turn Identity Forge conversation
+(10 identity turns + 1 Thera-World symbol safety turn, "Your Story's Language").
 
 Called by the Flutter IntakeConversationScreen via POST /api/sse/intake/turn.
 """
@@ -23,7 +24,7 @@ async def process_intake_turn(
     """Process a single intake turn. Returns the next prompt or extraction result."""
     conversation_history.append({"role": "user", "content": user_message})
 
-    if turn < 10:
+    if turn < 11:
         next_prompt = get_intake_prompt(turn + 1, user_name)
         conversation_history.append({"role": "assistant", "content": next_prompt})
         return {
@@ -65,7 +66,7 @@ async def process_intake_turn(
     except Exception as e:
         logger.warning("SSE enrollment insert failed for %s: %s", user_id, e)
     return {
-        "turn": 10,
+        "turn": 11,
         "nate_message": closing,
         "complete": True,
         "intake_data": intake_data,

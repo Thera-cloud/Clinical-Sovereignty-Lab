@@ -1,0 +1,333 @@
+{
+  "version": 2,
+  "symbols": {
+    "serpent": {
+      "tier": "high_risk",
+      "default": "excluded",
+      "aliases": ["snake", "snakes", "cobra", "viper", "serpentine", "reptile", "wyrm", "scaled creature", "coiled creature"],
+      "positive_readings": ["renewal (many Indigenous traditions)", "wisdom/dragon-adjacent (East Asian)", "kundalini/energy (Hindu, yogic)", "healing (Rod of Asclepius)"],
+      "negative_readings": ["temptation/evil/Satan (Christianity, Islam, Judaism)", "phobia trigger (global, ~3% clinical ophidiophobia)"],
+      "requires_opt_in": true,
+      "abstract_variant": "an iridescent flowing pattern of light in water or glass, never a literal snake",
+      "substitutions": ["river current", "wind-traced pattern in sand", "aurora ribbon", "flowing light"]
+    },
+    "dragon": {
+      "tier": "medium_risk",
+      "default": "abstract_only",
+      "aliases": ["wyrm", "drake"],
+      "positive_readings": ["power, luck, wisdom (East Asian)"],
+      "negative_readings": ["monstrous, satanic (Western)"],
+      "requires_opt_in": false,
+      "abstract_variant": "a coiling ribbon of cloud and light along the horizon, no creature present",
+      "substitutions": ["cloud current", "horizon ribbon"]
+    },
+    "spider": {
+      "tier": "medium_risk",
+      "default": "abstract_only",
+      "aliases": ["arachnid", "web", "spiderweb", "cobweb"],
+      "positive_readings": ["patience, careful weaving, resourcefulness"],
+      "negative_readings": ["entrapment, phobia trigger (global, ~3-6% clinical arachnophobia), being watched"],
+      "requires_opt_in": false,
+      "abstract_variant": "a fine lattice of light strung between branches, no creature present",
+      "substitutions": ["dew-strung lattice", "lantern-lit thread"]
+    },
+    "owl": {
+      "tier": "low_risk",
+      "default": "allowed",
+      "aliases": ["night owl", "barn owl"],
+      "positive_readings": ["wisdom, quiet observation (Western)"],
+      "negative_readings": ["omen of death (parts of Africa, India, Indigenous Americas)"],
+      "requires_opt_in": false,
+      "abstract_variant": "a pale watchful shape perched in silhouette, form unspecified",
+      "substitutions": ["watchful silhouette", "quiet perched shape"]
+    },
+    "crow_raven": {
+      "tier": "medium_risk",
+      "default": "abstract_only",
+      "aliases": ["crow", "raven", "blackbird"],
+      "positive_readings": ["intelligence, message-bearer, trickster (Norse, Indigenous)"],
+      "negative_readings": ["death omen (Western folklore)"],
+      "requires_opt_in": false,
+      "abstract_variant": "a dark wing-shape crossing distant light, form indistinct",
+      "substitutions": ["distant wingbeat", "shadow crossing the sky"]
+    },
+    "wolf": {
+      "tier": "low_risk",
+      "default": "allowed",
+      "aliases": ["wolves"],
+      "positive_readings": ["loyalty, family, guidance (many Indigenous traditions)"],
+      "negative_readings": ["predator threat (Western fairy-tale)"],
+      "requires_opt_in": false,
+      "abstract_variant": "a distant howl carried on wind, no creature depicted",
+      "substitutions": ["distant call", "guardian shape at the treeline"]
+    },
+    "pig_boar": {
+      "tier": "never",
+      "default": "excluded",
+      "aliases": ["pig", "boar", "swine", "hog"],
+      "negative_readings": ["ritually offensive (Islam, Judaism)"],
+      "requires_opt_in": false,
+      "abstract_variant": null,
+      "substitutions": ["deer", "stag", "forest creature (non-specific)"]
+    },
+    "dog_symbolic": {
+      "tier": "medium_risk",
+      "default": "abstract_only",
+      "aliases": ["dog", "hound"],
+      "positive_readings": ["loyalty, companionship (most Western/global contexts)"],
+      "negative_readings": ["ritually impure (some Islamic jurisprudential readings)"],
+      "requires_opt_in": false,
+      "cultural_restriction": ["muslim"],
+      "abstract_variant": "a loyal companion shape walking alongside, unspecified breed and form",
+      "substitutions": ["companion presence", "footsteps alongside"]
+    },
+    "cow": {
+      "tier": "low_risk",
+      "default": "allowed",
+      "aliases": ["cattle", "bull"],
+      "positive_readings": ["sacred, nurturing, abundance (Hindu)"],
+      "negative_readings": ["none significant"],
+      "requires_opt_in": false,
+      "abstract_variant": "a grazing shape in a distant field, form gentle",
+      "substitutions": ["distant grazing shape"]
+    },
+    "bat": {
+      "tier": "medium_risk",
+      "default": "abstract_only",
+      "aliases": ["bats"],
+      "positive_readings": ["good fortune (Chinese — homophone of \"fu\")"],
+      "negative_readings": ["evil, vampiric omen (Western)"],
+      "requires_opt_in": false,
+      "abstract_variant": "a fluttering shadow at dusk, form indistinct",
+      "substitutions": ["dusk-flutter", "wingbeat in twilight"]
+    },
+    "black_cat": {
+      "tier": "medium_risk",
+      "default": "abstract_only",
+      "aliases": ["black cat"],
+      "positive_readings": ["good luck (UK/Japan)"],
+      "negative_readings": ["bad luck omen (US/parts of Europe)"],
+      "requires_opt_in": false,
+      "abstract_variant": "a quiet shape moving along a low wall, color unspecified",
+      "substitutions": ["quiet wall-walker"]
+    },
+    "fox": {
+      "tier": "medium_risk",
+      "default": "abstract_only",
+      "aliases": ["foxes", "kitsune"],
+      "positive_readings": ["cleverness, guardian spirit"],
+      "negative_readings": ["trickster/seductress reading (East Asian folklore)"],
+      "requires_opt_in": false,
+      "abstract_variant": "a russet flicker at the treeline, form unspecified",
+      "substitutions": ["quick flicker of color at the tree line"]
+    },
+    "butterfly": {
+      "tier": "low_risk",
+      "default": "allowed",
+      "aliases": ["butterflies", "moth"],
+      "positive_readings": ["transformation (global), souls of the dead (Mexico, Philippines, parts of Europe)"],
+      "negative_readings": ["may read as grief/mourning-specific for some users"],
+      "requires_opt_in": false,
+      "abstract_variant": "drifting motes of light like slow wingbeats",
+      "substitutions": ["drifting light-motes"]
+    },
+    "fish": {
+      "tier": "low_risk",
+      "default": "allowed",
+      "aliases": ["fishes", "koi"],
+      "positive_readings": ["Christian ichthys symbol; luck and abundance (East Asian)"],
+      "negative_readings": ["minimal"],
+      "requires_opt_in": false,
+      "abstract_variant": "a silver ripple beneath still water, no creature depicted",
+      "substitutions": ["silver ripple beneath the surface"]
+    },
+    "chains_shackles": {
+      "tier": "high_risk",
+      "default": "excluded",
+      "aliases": ["chain", "chains", "shackle", "shackles", "manacles"],
+      "negative_readings": ["slavery resonance (African American, Caribbean, and other post-slavery contexts)"],
+      "requires_opt_in": true,
+      "abstract_variant": "a broken length of rope lying loose on the ground, already undone",
+      "substitutions": ["undone binding", "released knot"]
+    },
+    "rope_noose": {
+      "tier": "never",
+      "default": "excluded",
+      "aliases": ["noose", "hanging rope", "gallows"],
+      "negative_readings": ["self-harm / execution imagery — never depict"],
+      "requires_opt_in": false,
+      "abstract_variant": null,
+      "substitutions": ["coiled rope resting on a shelf, purely functional"]
+    },
+    "knife_blade": {
+      "tier": "high_risk",
+      "default": "excluded",
+      "aliases": ["knife", "blade", "dagger", "sword drawn in threat"],
+      "negative_readings": ["self-harm trigger, threat imagery"],
+      "requires_opt_in": true,
+      "abstract_variant": "a carving tool resting still on a workbench, not held, not raised",
+      "substitutions": ["resting craft tool"]
+    },
+    "skull_bones": {
+      "tier": "high_risk",
+      "default": "excluded",
+      "aliases": ["skull", "bones", "skeleton"],
+      "positive_readings": ["Dia de los Muertos remembrance (Mexico)"],
+      "negative_readings": ["death omen, morbid, self-harm adjacency elsewhere"],
+      "requires_opt_in": true,
+      "abstract_variant": "a smooth pale stone set among marigolds, remembrance without depiction",
+      "substitutions": ["memorial stone", "marigold offering"]
+    },
+    "mirror_shatter": {
+      "tier": "never",
+      "default": "excluded",
+      "aliases": ["broken mirror", "shattered glass", "cracked mirror", "shattered mirror"],
+      "positive_readings": ["shattering illusion, seeing truth"],
+      "negative_readings": ["self-harm association, dissociation trigger, bad-luck superstition, spirit-trapping associations (East Asian and Jewish mourning traditions)"],
+      "requires_opt_in": false,
+      "abstract_variant": null,
+      "substitutions": ["a still pool rippling outward, the reflection dissolving gently"]
+    },
+    "clock_time": {
+      "tier": "medium_risk",
+      "default": "abstract_only",
+      "aliases": ["clock", "wall clock", "gifted clock"],
+      "negative_readings": ["\"sending a clock\" as a gift is a death homophone (Chinese)"],
+      "requires_opt_in": false,
+      "cultural_restriction": ["chinese"],
+      "abstract_variant": "sundial shadow moving slowly across stone",
+      "substitutions": ["sundial", "hourglass sand settling"]
+    },
+    "mask": {
+      "tier": "medium_risk",
+      "default": "abstract_only",
+      "aliases": ["masks", "effigy", "doll", "dolls"],
+      "positive_readings": ["ceremonial, protective (many traditions)"],
+      "negative_readings": ["uncanny/dissociation trigger, effigy/voodoo-doll association"],
+      "requires_opt_in": false,
+      "abstract_variant": "a woven cloth draped over a stand, featureless",
+      "substitutions": ["draped cloth"]
+    },
+    "thorns_crown": {
+      "tier": "high_risk",
+      "default": "excluded",
+      "aliases": ["crown of thorns", "thorned crown"],
+      "positive_readings": ["sacrifice, endurance through suffering (Christian)"],
+      "negative_readings": ["explicit crucifixion imagery, may alienate non-Christian or trauma-affected users"],
+      "requires_opt_in": true,
+      "cultural_restriction": ["christian"],
+      "abstract_variant": "a circlet of bare thorned branches resting unworn on stone",
+      "substitutions": ["resting branch circlet"]
+    },
+    "cross_crescent_star": {
+      "tier": "never",
+      "default": "excluded",
+      "aliases": ["cross", "crucifix", "crescent moon and star", "star of david", "pentagram", "inverted star"],
+      "negative_readings": ["religious iconography — never render sacred symbols as set-dressing"],
+      "requires_opt_in": false,
+      "abstract_variant": null,
+      "substitutions": ["open horizon", "plain standing stone"]
+    },
+    "halo_deity_figure": {
+      "tier": "never",
+      "default": "excluded",
+      "aliases": ["halo", "god figure", "prophet figure", "buddha figure", "saint figure", "deity"],
+      "negative_readings": ["never render any figure readable as a deity, prophet (esp. any human figure a Muslim user could read as the Prophet), Buddha, or saint"],
+      "requires_opt_in": false,
+      "abstract_variant": null,
+      "substitutions": ["gentle unseen-source light with no figure attributed"]
+    },
+    "temple_altar": {
+      "tier": "high_risk",
+      "default": "excluded",
+      "aliases": ["temple", "church", "mosque", "altar", "shrine", "prayer posture"],
+      "negative_readings": ["religious architecture/ritual — high alienation risk outside user's own consented framework"],
+      "requires_opt_in": true,
+      "abstract_variant": "a quiet clearing with a single worn stone bench",
+      "substitutions": ["quiet clearing", "stone bench"]
+    },
+    "locked_cage": {
+      "tier": "medium_risk",
+      "default": "abstract_only",
+      "aliases": ["cage", "iron cage", "birdcage"],
+      "positive_readings": ["protection, a boundary that can be opened from within"],
+      "negative_readings": ["imprisonment, captivity trauma, abuse imagery"],
+      "requires_opt_in": false,
+      "abstract_variant": "a ring of standing stones with one open gap, unlocked",
+      "substitutions": ["open stone ring"]
+    },
+    "labyrinth": {
+      "tier": "low_risk",
+      "default": "allowed",
+      "aliases": ["maze", "hedge maze"],
+      "positive_readings": ["the winding nature of growth, patience with the path"],
+      "negative_readings": ["feeling lost, disorientation"],
+      "requires_opt_in": false,
+      "abstract_variant": "a spiraling garden path opening gradually toward light",
+      "substitutions": ["spiral garden path"]
+    },
+    "scales_of_justice": {
+      "tier": "low_risk",
+      "default": "allowed",
+      "aliases": ["scales", "balance scale"],
+      "positive_readings": ["fairness, weighing truth"],
+      "negative_readings": ["judgment anxiety, legal trauma"],
+      "requires_opt_in": false,
+      "abstract_variant": "a balanced stone cairn, weight settling evenly",
+      "substitutions": ["balanced cairn"]
+    },
+    "apple_fruit_offered": {
+      "tier": "medium_risk",
+      "default": "abstract_only",
+      "aliases": ["apple offered", "fruit held out", "forbidden fruit"],
+      "negative_readings": ["Eden/temptation resonance (Christian, Jewish, Islamic)"],
+      "requires_opt_in": false,
+      "cultural_restriction": ["christian", "muslim", "jewish"],
+      "abstract_variant": "a basket of unspecified ripe fruit resting on a table, not being offered",
+      "substitutions": ["resting fruit basket"]
+    },
+    "willow_chrysanthemum_lily": {
+      "tier": "medium_risk",
+      "default": "abstract_only",
+      "aliases": ["willow tree", "chrysanthemum", "chrysanthemums", "lily", "lilies", "white lily"],
+      "negative_readings": ["funeral/mourning association (China, Japan, parts of Europe)"],
+      "requires_opt_in": false,
+      "abstract_variant": "an unspecified flowering shrub in warm light",
+      "substitutions": ["flowering shrub, species unspecified"]
+    },
+    "red_rose": {
+      "tier": "medium_risk",
+      "default": "abstract_only",
+      "aliases": ["red rose", "red roses", "bouquet of roses"],
+      "negative_readings": ["romantic connotation inappropriate in a clinical/therapeutic context"],
+      "requires_opt_in": false,
+      "abstract_variant": "wildflowers in a neutral palette, non-romantic framing",
+      "substitutions": ["wildflower cluster"]
+    },
+    "eclipse_full_moon": {
+      "tier": "medium_risk",
+      "default": "abstract_only",
+      "aliases": ["solar eclipse", "lunar eclipse", "eclipse"],
+      "positive_readings": ["festival marker (some East Asian traditions) for full moon specifically"],
+      "negative_readings": ["omen of ill fortune (many cultures) especially for eclipse"],
+      "requires_opt_in": false,
+      "abstract_variant": "a soft-lit crescent low on the horizon",
+      "substitutions": ["crescent horizon light"]
+    }
+  },
+  "cultural_label_overrides": {
+    "holy_spirit": {
+      "default_label": "Holy Spirit",
+      "non_christian_label": "Guiding Light",
+      "note": "Labeling preference only — not an exclusion. Swap the display/narrative label when spiritual_framework is not christian/catholic."
+    }
+  },
+  "cultural_default_exclusions": {
+    "muslim": ["pig_boar", "dog_symbolic", "apple_fruit_offered", "halo_deity_figure"],
+    "islamic": ["pig_boar", "dog_symbolic", "apple_fruit_offered", "halo_deity_figure"],
+    "jewish": ["pig_boar", "apple_fruit_offered", "mirror_shatter"],
+    "chinese": ["clock_time", "willow_chrysanthemum_lily"],
+    "christian": ["serpent", "apple_fruit_offered"],
+    "catholic": ["serpent", "apple_fruit_offered"]
+  }
+}

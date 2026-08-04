@@ -947,6 +947,12 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
                 }
               },
             )),
+            if (panelId.isNotEmpty && panelId != 'archetype') Padding(padding: const EdgeInsets.only(right: 8), child: OutlinedButton.icon(
+              icon: const Icon(Icons.menu_book_outlined, size: 18),
+              label: const Text('Legend'),
+              style: OutlinedButton.styleFrom(foregroundColor: _VaultDesign.purple, side: BorderSide(color: _VaultDesign.purple.withOpacity(0.5))),
+              onPressed: () => _showCodexLegend(panelId),
+            )),
             Expanded(child: ElevatedButton.icon(
               icon: const Icon(Icons.chat_bubble_outline, size: 18),
               label: const Text('Ask Nate About This'),
@@ -958,6 +964,65 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
             )),
           ]),
         ]),
+      ),
+    );
+  }
+
+  // Thera-World Global Symbol Safety System — Layer C3 (Codex/Legend).
+  // Tap-to-reveal legend: every character/symbol in this panel, named and
+  // explained in the user's own consented posture. No unexplained figures.
+  Future<Map<String, dynamic>?> _fetchCodex(String panelId) async {
+    try {
+      final resp = await http.get(
+        Uri.parse('$_baseUrl/api/sse-client/codex/panel/$panelId'),
+        headers: _authHeaders,
+      ).timeout(const Duration(seconds: 8));
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        return jsonDecode(resp.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  void _showCodexLegend(String panelId) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _VaultDesign.bgChamber,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => FutureBuilder<Map<String, dynamic>?>(
+        future: _fetchCodex(panelId),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const SizedBox(
+              height: 160,
+              child: Center(child: CircularProgressIndicator(color: _VaultDesign.purple)),
+            );
+          }
+          final legend = (snapshot.data?['legend'] as List?) ?? [];
+          return DraggableScrollableSheet(
+            initialChildSize: 0.5, minChildSize: 0.3, maxChildSize: 0.9, expand: false,
+            builder: (_, scrollCtrl) => ListView(controller: scrollCtrl, padding: const EdgeInsets.all(20), children: [
+              const Text('Legend', style: TextStyle(color: _VaultDesign.textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              const Text('Every recurring figure in your story, explained for you.',
+                  style: TextStyle(color: _VaultDesign.textSecondary, fontSize: 13)),
+              const SizedBox(height: 16),
+              if (legend.isEmpty)
+                const Text('No recurring figures in this panel.', style: TextStyle(color: _VaultDesign.textSecondary)),
+              ...legend.map((e) => Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(e['display_name']?.toString() ?? '',
+                      style: const TextStyle(color: _VaultDesign.purple, fontWeight: FontWeight.bold, fontSize: 15)),
+                  const SizedBox(height: 4),
+                  Text(e['meaning']?.toString() ?? '',
+                      style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4)),
+                ]),
+              )),
+            ]),
+          );
+        },
       ),
     );
   }

@@ -545,7 +545,7 @@ class _OnboardingPaidScreenState extends State<OnboardingPaidScreen>
   }
 }
 
-// --- Intake Conversation Screen (10-turn Identity Forge) ---
+// --- Intake Conversation Screen (11-turn Identity Forge) ---
 
 class IntakeConversationScreen extends StatefulWidget {
   final Map<String, dynamic> profileWithToken;
@@ -591,10 +591,10 @@ class _IntakeCSState extends State<IntakeConversationScreen> {
   @override void dispose() { _ctrl.dispose(); _scr.dispose(); super.dispose(); }
   @override Widget build(BuildContext context) => Scaffold(backgroundColor: _bg,
     appBar: AppBar(backgroundColor: _bg, elevation: 0,
-      title: Text('Getting to know you — $_turn/10', style: const TextStyle(color: _ts, fontSize: 14, fontFamily: 'DM Sans')),
+      title: Text('Getting to know you — $_turn/11', style: const TextStyle(color: _ts, fontSize: 14, fontFamily: 'DM Sans')),
       leading: IconButton(icon: const Icon(Icons.close, color: _ts), onPressed: () => Navigator.pop(context))),
     body: Column(children: [
-      LinearProgressIndicator(value: _turn / 10, backgroundColor: Colors.white10, valueColor: const AlwaysStoppedAnimation(_cy), minHeight: 2),
+      LinearProgressIndicator(value: _turn / 11, backgroundColor: Colors.white10, valueColor: const AlwaysStoppedAnimation(_cy), minHeight: 2),
       Expanded(child: ListView.builder(controller: _scr, padding: const EdgeInsets.all(16), itemCount: _msgs.length, itemBuilder: (_, i) {
         final m = _msgs[i]; final n = m['role'] == 'assistant';
         return Padding(padding: const EdgeInsets.only(bottom: 12), child: Row(crossAxisAlignment: CrossAxisAlignment.start,

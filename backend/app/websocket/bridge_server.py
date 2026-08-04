@@ -11121,6 +11121,16 @@ class AzureCortex:
                     ))
                 except Exception:
                     pass
+                # QUANTUM-CRYSTAL-ARCH — Thera-World Layer C2: chat symbol exclusion/opt-in
+                # detection ("no more snakes" -> permanent exclusion row before next image gen)
+                if os.getenv("ENABLE_SYMBOL_SAFETY_CHAT_DETECTION", "true").lower() == "true":
+                    try:
+                        from app.sse.symbol_safety import detect_and_record_exclusion
+                        asyncio.create_task(detect_and_record_exclusion(
+                            _qg_verbatim_user_text, uid, db_pool, source="conversation",
+                        ))
+                    except Exception:
+                        pass
                 # QUANTUM-CRYSTAL-ARCH: skill-plan crystallize + tick + WS status
                 try:
                     from app.services.cycle_skill_plan_service import (
