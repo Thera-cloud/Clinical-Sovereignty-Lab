@@ -2152,3 +2152,22 @@ the numpy install here) to get a genuine local green baseline back —
 right now, `run_ci_tests.sh` cannot complete end-to-end on this Mac
 regardless of diff content.
 
+
+## Entry 33 — 2026-08-04 — v2 battery blinds generated + frozen on GREEN (70/70 loadable)
+
+Ran the judge-track pipeline on GREEN for the 70 v2 stems seeded in Entry
+32's deploy: `fill_human_gold_nate_responses.py --infer-missing --limit 80`
+(harness_thin_inference, clinical-domain sovereign router — all 70 filled,
+0 skips) then `freeze_gold_response_pairs.py` (120/120 pairs_locked,
+degraded=10 >= 8 gate passed).
+
+**Verified on GREEN:** v2 rows now show `pairs_locked=70/70`,
+`nate_response` populated=70/70, `human_scored=0/70` — the exact state
+required for `principal_review_api.py`'s Judge-track "Load unscored" query
+(`WHERE pairs_locked = true AND nate_response <> '' AND human_scored =
+false`). Table totals: 120 total, 120 locked, 50 scored (unchanged from
+before — v1 scores untouched).
+
+**Not done:** clinician scoring session against the 70 new items;
+live-stack (`nate_response_live`) capability-track blinds for v2 (separate
+generator, not run this entry).
