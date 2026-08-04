@@ -2014,3 +2014,73 @@ real proposals, which needs Phase A/C paid GPU generation to resume
 correctly report `all_ok=True` once the drill evidence is fresh, but that
 alone is not authorization to re-flip; the shadow-agreement volume is a
 separate, still-unmet bar.
+
+## Entry 32 — 2026-08-03 — Local CI gate: pre-existing macOS numpy SIGFPE (not this diff); 2 real fixes shipped anyway
+
+While pushing the v2 battery work (Entries 29-31), the local
+`backend/scripts/run_ci_tests.sh` gate crashed with `Floating point
+exception: 8` (SIGFPE). Root-caused via `PYTHONFAULTHANDLER=1 -X
+faulthandler`: numpy's own `_mac_os_check()` self-test (a documented Apple
+Accelerate/LAPACK `polyfit`/`linalg.inv` sanity check, gated on
+`sys.platform == "darwin"`) crashes the process outright on this Mac's
+numpy 1.24.4 + Accelerate combination — `except ValueError` in numpy's own
+source can't catch a SIGFPE, so nothing downstream can recover from it.
+
+**Confirmed pre-existing and unrelated to this diff:** reproduced the
+identical crash with all v2-battery changes fully `git stash`-ed back to
+unmodified `main` HEAD. Also confirmed systemic, not a single call site:
+after two fixes (below), the crash recurred a third time on an unrelated
+fence test (`test_injection_canary_corpus.py`) — it fires on whichever
+test happens to be first in the pytest session to trigger `app.services`
+package `__init__` (which imports `nevedal_engine` -> `numpy`) for the
+first time in a fresh process. `run_ci_tests.sh`'s own comment (lines
+12-14) already documents this exact class of failure and works around it
+for the Sovereign Standard gate step specifically — it was never extended
+to every other call site.
+
+**Two real regressions fixed anyway** (both match the established
+file-path-load workaround, both additive, both tested):
+
+1. `principal_review_crisis_policy.scrub_teaching_text()` — lazy
+   `from app.services.six_quotient_battery_quarantine import
+   _gold_stem_fingerprints` replaced with
+   `_load_gold_stem_fingerprints_fn()`: prefers `sys.modules` cache (fast
+   path in the running app, where `app.services` is already loaded),
+   falls back to a standalone file-based load (bypassing package
+   `__init__`) only when the package hasn't been loaded yet — e.g.
+   `verify_gold_learning_gate.py --offline`'s isolated harness, which
+   deliberately avoids the full package specifically to dodge this bug.
+2. `ln7_droplet_lockfile.lockfile_path()` — same pattern, same reason
+   (`from app.services.ln7_frozen_config import frozen_config_dir` was
+   the trigger); `_load_frozen_config_dir_fn()` added.
+
+Both fixes verified: `verify_gold_learning_gate.py --offline` now runs to
+completion (17/17 PASS, exit 0) standalone. Neither fix touches behavior
+inside the running app (the `sys.modules` fast path is byte-identical to
+the prior direct import once `app.services` is loaded).
+
+**Not fixed (out of scope for this diff):** the remaining call sites
+across `frozen-config/fence_tests/*.py` and `backend/tests/*.py` that can
+still be "the first" to trigger `app.services` init in a fresh pytest
+process. Patching every such site is whack-a-mole against a real,
+pre-existing, macOS-only numpy/Accelerate environment defect — the actual
+fix belongs at the numpy/Accelerate install level (reinstall/upgrade,
+force OpenBLAS, or run tests on a non-Accelerate-linked Python), not in
+application code. Per user decision, this diff proceeds without a fully
+green local `run_ci_tests.sh` run, on these grounds:
+- Confirmed pre-existing (reproduced on unmodified `main`)
+- Confirmed environment-specific (macOS + Accelerate; GitHub Actions'
+  Linux runner in `.github/workflows/deploy.yml` does not link Accelerate
+  and is expected to be unaffected)
+- This diff's own new/changed test suite
+  (`test_v2_battery_scoring_guide_isolation.py`, 10/10) verified green in
+  isolation, and the two fixes above verified green in isolation
+- GitHub Actions Linux CI remains the authoritative gate for `main`
+  protection per `ci-gate-before-push.mdc`
+
+**Action item (not this session):** someone should run the full local
+suite on a machine/numpy combination without this Accelerate bug (or fix
+the numpy install here) to get a genuine local green baseline back —
+right now, `run_ci_tests.sh` cannot complete end-to-end on this Mac
+regardless of diff content.
+

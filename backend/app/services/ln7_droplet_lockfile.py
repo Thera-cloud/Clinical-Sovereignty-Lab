@@ -25,9 +25,33 @@ _HASH_LINE_RE = re.compile(r"^\s*--hash=sha256:[0-9a-f]{64}\s*$")
 _MIRROR_RE = re.compile(r"^#\s*internal-mirror-index-url:\s*(\S+)")
 
 
-def lockfile_path() -> Path:
-    from app.services.ln7_frozen_config import frozen_config_dir
+def _load_frozen_config_dir_fn():
+    """Resolve ln7_frozen_config.frozen_config_dir without forcing a fresh
+    `app.services` package __init__ (which imports nevedal_engine -> numpy;
+    crashes with SIGFPE via Accelerate's buggy polyfit self-check on some
+    macOS hosts). Same pattern as
+    principal_review_crisis_policy._load_gold_stem_fingerprints_fn().
+    """
+    import sys
 
+    mod = sys.modules.get("app.services.ln7_frozen_config")
+    if mod is not None:
+        return mod.frozen_config_dir
+    if "app.services" in sys.modules:
+        from app.services.ln7_frozen_config import frozen_config_dir
+
+        return frozen_config_dir
+    import importlib.util as _ilu
+
+    _path = Path(__file__).resolve().parent / "ln7_frozen_config.py"
+    _spec = _ilu.spec_from_file_location("_standalone_ln7_frozen_config", _path)
+    _standalone = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_standalone)
+    return _standalone.frozen_config_dir
+
+
+def lockfile_path() -> Path:
+    frozen_config_dir = _load_frozen_config_dir_fn()
     return frozen_config_dir() / LOCKFILE_NAME
 
 

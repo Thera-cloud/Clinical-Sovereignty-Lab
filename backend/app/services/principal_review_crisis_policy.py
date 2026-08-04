@@ -224,6 +224,39 @@ _LITERAL_CONTAM_SUBS = (
 )
 
 
+def _load_gold_stem_fingerprints_fn():
+    """Resolve six_quotient_battery_quarantine._gold_stem_fingerprints
+    without forcing a fresh `app.services` package __init__ (which imports
+    nevedal_engine -> numpy). In the running app, `app.services` is already
+    in sys.modules by the time crisis turns are scrubbed, so the fast path
+    below is what normally fires; the standalone file-load fallback exists
+    only for isolated/offline harnesses (e.g. verify_gold_learning_gate.py
+    --offline) that deliberately avoid importing the full services package.
+    See TRUST_LEDGER.md: numpy _mac_os_check SIGFPE via dotted package import.
+    """
+    import sys
+
+    mod = sys.modules.get("app.services.six_quotient_battery_quarantine")
+    if mod is not None:
+        return mod._gold_stem_fingerprints
+    if "app.services" in sys.modules:
+        from app.services.six_quotient_battery_quarantine import (
+            _gold_stem_fingerprints,
+        )
+
+        return _gold_stem_fingerprints
+    import importlib.util as _ilu
+    from pathlib import Path as _Path
+
+    _path = _Path(__file__).resolve().parent / "six_quotient_battery_quarantine.py"
+    _spec = _ilu.spec_from_file_location(
+        "_standalone_six_quotient_battery_quarantine", _path
+    )
+    _standalone = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_standalone)
+    return _standalone._gold_stem_fingerprints
+
+
 def scrub_teaching_text(text: str) -> str:
     """Remove battery/quarantine tripwires from teaching crystal bodies.
 
@@ -246,7 +279,7 @@ def scrub_teaching_text(text: str) -> str:
     out = re.sub(r"\s·\s·", " · ", out)
     out = re.sub(r"\[\s*Principal-Review\s·\s*([A-Z]{2})\s·\s*\]", r"[Principal-Review · \1]", out)
     try:
-        from app.services.six_quotient_battery_quarantine import _gold_stem_fingerprints
+        _gold_stem_fingerprints = _load_gold_stem_fingerprints_fn()
 
         low = out.lower()
         for fp in _gold_stem_fingerprints():
