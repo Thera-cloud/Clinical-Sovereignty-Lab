@@ -2262,3 +2262,51 @@ comparisons).
 
 **Not deployed to GREEN yet** — local commit only pending this session's
 push.
+
+## Entry 36 — 2026-08-04 — Fence-manifest false-positive: __pycache__ excluded from frozen-config hash walk
+
+User's own push (unrelated to any commit content — confirmed `git diff
+origin/main -- frozen-config/` was empty) was blocked by the pre-push CI
+gate: `test_fence_manifest_green` FAILED with
+`AssertionError: ['+fence_tests/__pycache__/test_droplet_lockfile_weld....pyc', ...]`.
+
+**Root cause:** `ln7_frozen_config.compute_manifest()` walked
+`frozen-config/**/*` with `Path.rglob("*")` and hashed every file found,
+with no exclusion for build/cache artifacts. A local pytest run under
+Python 3.13 (`.venv`, separate from the repo's pinned 3.9 environment) had
+imported `frozen-config/fence_tests/*.py` at some point, which wrote
+`__pycache__/*.pyc` bytecode-cache files into that directory — untracked,
+gitignored (`__pycache__/` is in `.gitignore`, confirmed 0 tracked files),
+completely invisible to `git status`, but very visible to the manifest
+walk since it doesn't respect `.gitignore` at all. Any new file under
+`frozen-config/` not in the pinned `manifest.sha256.json` registers as
+`+relpath` — by design, for real tamper detection — but `.pyc` files are
+never source and their mere transient existence is not a real integrity
+violation.
+
+**Fix (additive, does not touch the security property):** `compute_manifest()`
+now skips `__pycache__` directories and `.pyc`/`.pyo` files entirely. Every
+actual `.py`/`.json`/etc. source file under `frozen-config/` is still
+hashed and verified in full — nothing about promote-path gating, RED-hold
+behavior, or `promotions_allowed()`/`boot_fence_check()` changed. New
+regression test `test_fence_manifest_ignores_stray_pycache` (isolated
+`tmp_path`, never touches the real `frozen-config/`) proves: (1) a clean
+manifest still verifies ok, (2) injecting a stray `__pycache__/*.pyc`
+after pinning does NOT break verification, (3) a genuine tamper of a real
+frozen file is still caught. Also deleted the 6 stray local `.pyc` files
+under `frozen-config/fence_tests/__pycache__/` as an immediate unblock
+(local-only, nothing to commit — confirmed 0 tracked files there).
+
+**Verified:** full local CI gate (`run_ci_tests.sh`, `.venv` Python 3.13)
+2573 passed, 0 failed — the exact failure from the user's blocked push
+(`test_fence_manifest_green`) is now green alongside everything else.
+
+**Side note on this session's Mac environment:** the system Python 3.9 +
+Apple Accelerate numpy 1.24.4 combination documented in Entry 32 has
+become MORE unreliable since that entry — it now crashes with SIGFPE on
+essentially every fresh-process import of `app.services` (not just
+"whichever test happens to be first"), including in a bare `python3 -c`
+script with no pytest involved at all. The `.venv` (Python 3.13, numpy
+2.4.1, no Accelerate self-check crash) is the reliable local verification
+path going forward on this machine; GitHub Actions Linux CI is unaffected
+either way.

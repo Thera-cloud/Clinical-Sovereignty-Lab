@@ -33,6 +33,47 @@ def test_fence_manifest_green():
     assert ok, mismatches
 
 
+def test_fence_manifest_ignores_stray_pycache(tmp_path):
+    """Local pytest runs (any Python version) can leave __pycache__/*.pyc
+    inside frozen-config/fence_tests/. Those are gitignored build artifacts,
+    not frozen source -- they must never register as manifest tamper. See
+    TRUST_LEDGER.md Entry 36 (2026-08-04 false-positive incident)."""
+    from app.services.ln7_frozen_config import compute_manifest, verify_manifest
+
+    root = tmp_path / "frozen-config"
+    root.mkdir()
+    real_file = root / "some_weld.json"
+    real_file.write_text('{"a": 1}')
+
+    manifest_before = compute_manifest(root)
+    assert "some_weld.json" in manifest_before
+    (root / "manifest.sha256.json").write_text(
+        json.dumps({"files": manifest_before})
+    )
+
+    ok, mismatches = verify_manifest(root)
+    assert ok, mismatches
+
+    # Simulate a stray bytecode-cache artifact from a local pytest run.
+    cache_dir = root / "fence_tests" / "__pycache__"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "test_something.cpython-313-pytest-9.0.2.pyc").write_bytes(b"\x00\x01")
+
+    manifest_after = compute_manifest(root)
+    assert manifest_after == manifest_before, (
+        "compute_manifest must exclude __pycache__/*.pyc from the frozen "
+        "source hash set entirely"
+    )
+    ok2, mismatches2 = verify_manifest(root)
+    assert ok2, mismatches2
+
+    # A genuine tamper of the real file must still be caught.
+    real_file.write_text('{"a": 2}')
+    ok3, mismatches3 = verify_manifest(root)
+    assert not ok3
+    assert "some_weld.json" in mismatches3
+
+
 def test_feature_flags_default_off_without_db():
     from app.services.ln7_feature_flags import (
         auto_promote_enabled,
