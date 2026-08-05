@@ -1246,55 +1246,139 @@ class HardwareIdentity {
   // 1.5: Biometric-Gated Auto-Login (Face ID / Fingerprint)
   // =========================================================================
 
-  /// Save login credentials for biometric re-authentication.
-  /// Only called for CLIENT and COACH roles — never for ADMIN.
+  // ---------------------------------------------------------------------
+  // Role-scoped biometric storage.
+  //
+  // BUG FIXED (Aug 2026): credentials were stored under global keys
+  // ('bio_username', 'bio_password', 'bio_role'). A user with BOTH a
+  // CLIENT and a COACH account (e.g. Ava Meyers) would have their CLIENT
+  // biometric credentials silently overwritten the moment they logged
+  // into their COACH account (or vice versa), because both roles wrote to
+  // the same storage slot. The next "Quick Login" tap — regardless of
+  // which portal/button the user intended — would then authenticate as
+  // whichever role logged in most recently. Storage is now namespaced
+  // per-role ('bio_username_CLIENT', 'bio_username_COACH', ...) so both
+  // roles can have independent, simultaneously-valid saved credentials.
+  // Legacy unscoped keys are migrated on first read and then removed.
+  // ---------------------------------------------------------------------
+  static const List<String> _bioRoles = ['CLIENT', 'COACH'];
+
+  String _scopedKey(String base, String role) => '${base}_$role';
+
+  bool _migratedLegacy = false;
+
+  /// One-time migration: if legacy unscoped bio_* keys exist, move them
+  /// into the role-scoped slot for the role they were saved under, then
+  /// delete the legacy keys so this only ever runs once.
+  Future<void> _migrateLegacyCredentialsIfNeeded() async {
+    if (_migratedLegacy) return;
+    _migratedLegacy = true;
+    try {
+      final legacyRole = await _storage.read(key: 'bio_role');
+      if (legacyRole == null || !_bioRoles.contains(legacyRole)) return;
+      final legacyUser = await _storage.read(key: 'bio_username');
+      final legacyPass = await _storage.read(key: 'bio_password');
+      final legacyEnabled = await _storage.read(key: 'bio_enabled');
+      if (legacyUser != null && legacyPass != null) {
+        await _storage.write(key: _scopedKey('bio_username', legacyRole), value: legacyUser);
+        await _storage.write(key: _scopedKey('bio_password', legacyRole), value: legacyPass);
+        await _storage.write(key: _scopedKey('bio_enabled', legacyRole), value: legacyEnabled ?? 'true');
+        debugLog(">>> [IDENTITY] Migrated legacy biometric credentials to role-scoped storage ($legacyRole).");
+      }
+    } catch (e) {
+      debugLog("!!! [IDENTITY] legacy migration error: $e");
+    } finally {
+      // Always clear legacy keys, even on partial failure, to stop the
+      // overwrite bug from recurring.
+      try {
+        await _storage.delete(key: 'bio_username');
+        await _storage.delete(key: 'bio_password');
+        await _storage.delete(key: 'bio_role');
+        await _storage.delete(key: 'bio_enabled');
+      } catch (_) {}
+    }
+  }
+
+  /// Save login credentials for biometric re-authentication, scoped to
+  /// [role]. Only called for CLIENT and COACH roles — never for ADMIN.
   Future<void> saveCredentials(String username, String password, String role) async {
     try {
-      await _storage.write(key: 'bio_username', value: username);
-      await _storage.write(key: 'bio_password', value: password);
-      await _storage.write(key: 'bio_role', value: role);
-      await _storage.write(key: 'bio_enabled', value: 'true');
+      await _migrateLegacyCredentialsIfNeeded();
+      await _storage.write(key: _scopedKey('bio_username', role), value: username);
+      await _storage.write(key: _scopedKey('bio_password', role), value: password);
+      await _storage.write(key: _scopedKey('bio_enabled', role), value: 'true');
       debugLog(">>> [IDENTITY] Biometric credentials saved for $role.");
     } catch (e) {
       debugLog("!!! [IDENTITY] saveCredentials error: $e");
     }
   }
 
-  /// Check whether saved biometric credentials exist (no biometric prompt).
-  Future<bool> hasSavedCredentials() async {
+  /// Check whether saved biometric credentials exist for [role] (no biometric prompt).
+  Future<bool> hasSavedCredentialsForRole(String role) async {
     try {
-      final enabled = await _storage.read(key: 'bio_enabled');
+      await _migrateLegacyCredentialsIfNeeded();
+      final enabled = await _storage.read(key: _scopedKey('bio_enabled', role));
       if (enabled != 'true') return false;
-      final user = await _storage.read(key: 'bio_username');
-      final pass = await _storage.read(key: 'bio_password');
+      final user = await _storage.read(key: _scopedKey('bio_username', role));
+      final pass = await _storage.read(key: _scopedKey('bio_password', role));
       return user != null && user.isNotEmpty && pass != null && pass.isNotEmpty;
     } catch (e) {
-      debugLog("!!! [IDENTITY] hasSavedCredentials error: $e");
+      debugLog("!!! [IDENTITY] hasSavedCredentialsForRole error: $e");
       return false;
     }
   }
 
-  /// Retrieve the stored username for display (no biometric prompt).
-  Future<String?> getSavedUsername() async {
+  /// Check whether ANY role has saved biometric credentials.
+  Future<bool> hasSavedCredentials() async {
+    for (final r in _bioRoles) {
+      if (await hasSavedCredentialsForRole(r)) return true;
+    }
+    return false;
+  }
+
+  /// Returns every role (CLIENT/COACH) that currently has valid saved
+  /// biometric credentials. A dual-role user (e.g. a Coach who is also a
+  /// client) can have BOTH — each independently, never overwriting the other.
+  Future<List<String>> getSavedRoles() async {
+    final roles = <String>[];
+    for (final r in _bioRoles) {
+      if (await hasSavedCredentialsForRole(r)) roles.add(r);
+    }
+    return roles;
+  }
+
+  /// Retrieve the stored username for [role] for display (no biometric prompt).
+  Future<String?> getSavedUsernameForRole(String role) async {
     try {
-      return await _storage.read(key: 'bio_username');
+      await _migrateLegacyCredentialsIfNeeded();
+      return await _storage.read(key: _scopedKey('bio_username', role));
     } catch (_) {
       return null;
     }
   }
 
-  /// Recover credentials behind a biometric gate (Face ID / Fingerprint).
+  /// Retrieve the stored username for display (no biometric prompt).
+  /// Back-compat helper: returns the first saved username across roles.
+  Future<String?> getSavedUsername() async {
+    for (final r in _bioRoles) {
+      final u = await getSavedUsernameForRole(r);
+      if (u != null) return u;
+    }
+    return null;
+  }
+
+  /// Recover credentials for [role] behind a biometric gate (Face ID / Fingerprint).
   /// Returns {username, password, role} on success, null on failure/cancel.
-  Future<Map<String, String>?> recoverCredentials() async {
+  Future<Map<String, String>?> recoverCredentialsForRole(String role) async {
     try {
-      final enabled = await _storage.read(key: 'bio_enabled');
+      await _migrateLegacyCredentialsIfNeeded();
+      final enabled = await _storage.read(key: _scopedKey('bio_enabled', role));
       if (enabled != 'true') return null;
 
-      final user = await _storage.read(key: 'bio_username');
-      final pass = await _storage.read(key: 'bio_password');
-      final role = await _storage.read(key: 'bio_role');
+      final user = await _storage.read(key: _scopedKey('bio_username', role));
+      final pass = await _storage.read(key: _scopedKey('bio_password', role));
 
-      if (user == null || pass == null || role == null) return null;
+      if (user == null || pass == null) return null;
 
       bool authenticated = await _authenticateBiometrics();
       if (!authenticated) {
@@ -1305,9 +1389,21 @@ class HardwareIdentity {
       debugLog(">>> [IDENTITY] Biometric credentials recovered for $role.");
       return {'username': user, 'password': pass, 'role': role};
     } catch (e) {
-      debugLog("!!! [IDENTITY] recoverCredentials error: $e");
+      debugLog("!!! [IDENTITY] recoverCredentialsForRole error: $e");
       return null;
     }
+  }
+
+  /// Back-compat helper: recovers credentials for the first role that has
+  /// saved credentials. Prefer [recoverCredentialsForRole] when the caller
+  /// knows which role's quick-login button was tapped.
+  Future<Map<String, String>?> recoverCredentials() async {
+    for (final r in _bioRoles) {
+      if (await hasSavedCredentialsForRole(r)) {
+        return recoverCredentialsForRole(r);
+      }
+    }
+    return null;
   }
 
   /// Check if biometrics are available on this device.
@@ -1323,59 +1419,72 @@ class HardwareIdentity {
   }
 
   /// Clear stored biometric credentials (logout / switch account).
-  Future<void> clearCredentials() async {
+  /// If [role] is provided, only that role's credentials are cleared —
+  /// e.g. a Coach who is also a Client can log out of the Coach quick-login
+  /// without losing their saved Client quick-login. If [role] is omitted,
+  /// ALL roles are cleared (used for full "switch account"/logout flows).
+  Future<void> clearCredentials({String? role}) async {
     try {
+      final roles = role != null ? [role] : _bioRoles;
+      for (final r in roles) {
+        await _storage.delete(key: _scopedKey('bio_username', r));
+        await _storage.delete(key: _scopedKey('bio_password', r));
+        await _storage.delete(key: _scopedKey('bio_enabled', r));
+        await _storage.delete(key: _scopedKey('bio_declined', r));
+      }
+      // Also sweep any lingering legacy unscoped keys.
       await _storage.delete(key: 'bio_username');
       await _storage.delete(key: 'bio_password');
       await _storage.delete(key: 'bio_role');
       await _storage.delete(key: 'bio_enabled');
       await _storage.delete(key: 'bio_declined');
-      debugLog(">>> [IDENTITY] Biometric credentials cleared.");
+      debugLog(">>> [IDENTITY] Biometric credentials cleared${role != null ? ' for $role' : ' (all roles)'}.");
     } catch (e) {
       debugLog("!!! [IDENTITY] clearCredentials error: $e");
     }
   }
 
-  /// Set biometric login enabled/disabled (settings toggle).
-  Future<void> setBiometricEnabled(bool enabled) async {
+  /// Set biometric login enabled/disabled for [role] (settings toggle).
+  Future<void> setBiometricEnabled(bool enabled, String role) async {
     try {
       if (enabled) {
-        await _storage.write(key: 'bio_enabled', value: 'true');
+        await _storage.write(key: _scopedKey('bio_enabled', role), value: 'true');
       } else {
-        await clearCredentials();
+        await clearCredentials(role: role);
       }
     } catch (e) {
       debugLog("!!! [IDENTITY] setBiometricEnabled error: $e");
     }
   }
 
-  /// Check if biometric login is currently enabled.
-  Future<bool> isBiometricEnabled() async {
+  /// Check if biometric login is currently enabled for [role].
+  Future<bool> isBiometricEnabled(String role) async {
     try {
-      final val = await _storage.read(key: 'bio_enabled');
+      await _migrateLegacyCredentialsIfNeeded();
+      final val = await _storage.read(key: _scopedKey('bio_enabled', role));
       return val == 'true';
     } catch (_) {
       return false;
     }
   }
 
-  /// Check if user previously declined the biometric opt-in prompt.
-  Future<bool> hasBiometricDeclined() async {
+  /// Check if user previously declined the biometric opt-in prompt for [role].
+  Future<bool> hasBiometricDeclined(String role) async {
     try {
-      final val = await _storage.read(key: 'bio_declined');
+      final val = await _storage.read(key: _scopedKey('bio_declined', role));
       return val == 'true';
     } catch (_) {
       return false;
     }
   }
 
-  /// Mark that the user declined the biometric opt-in prompt.
-  Future<void> setBiometricDeclined(bool declined) async {
+  /// Mark that the user declined the biometric opt-in prompt for [role].
+  Future<void> setBiometricDeclined(bool declined, String role) async {
     try {
       if (declined) {
-        await _storage.write(key: 'bio_declined', value: 'true');
+        await _storage.write(key: _scopedKey('bio_declined', role), value: 'true');
       } else {
-        await _storage.delete(key: 'bio_declined');
+        await _storage.delete(key: _scopedKey('bio_declined', role));
       }
     } catch (e) {
       debugLog("!!! [IDENTITY] setBiometricDeclined error: $e");
@@ -6637,8 +6746,10 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
   // Admin gate-check: true when we are verifying admin credentials before redirect
   bool _adminGateCheck = false;
 
-  // Biometric auto-login state
-  bool _hasBiometricCreds = false;
+  // Biometric auto-login state — one entry per role with saved credentials,
+  // e.g. [{'role': 'CLIENT', 'username': 'wilsnaw'}, {'role': 'COACH', 'username': 'Wilsnaw'}]
+  List<Map<String, String>> _savedBioAccounts = [];
+  bool get _hasBiometricCreds => _savedBioAccounts.isNotEmpty;
 
   // Login dialog state (shared with StatefulBuilder)
   void Function(void Function())? _dialogSetState;
@@ -6649,7 +6760,6 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
   int _loginAttemptCounter = 0;
   AnimationController? _shakeController;
   bool _biometricAvailable = false;
-  String? _savedUsername;
 
   // Biometric opt-in prompt state (shown after successful manual login)
   bool _showBiometricOptIn = false;
@@ -6689,15 +6799,21 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
   }
 
   /// Check if saved biometric credentials exist for quick login.
+  /// A dual-role user (Coach + Client, e.g. Ava Meyers) may have BOTH a
+  /// saved CLIENT account and a saved COACH account — each is tracked
+  /// independently so neither overwrites the other's quick-login.
   Future<void> _checkBiometricLogin() async {
-    final hasCreds = await _identity.hasSavedCredentials();
+    final savedRoles = await _identity.getSavedRoles();
     final bioAvail = await _identity.isBiometricAvailable();
-    final savedUser = await _identity.getSavedUsername();
+    final accounts = <Map<String, String>>[];
+    for (final r in savedRoles) {
+      final u = await _identity.getSavedUsernameForRole(r);
+      if (u != null) accounts.add({'role': r, 'username': u});
+    }
     if (mounted) {
       setState(() {
-        _hasBiometricCreds = hasCreds;
+        _savedBioAccounts = accounts;
         _biometricAvailable = bioAvail;
-        _savedUsername = savedUser;
       });
     }
   }
@@ -6785,8 +6901,10 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
   }
 
   /// Biometric auto-login: prompt Face ID / Fingerprint, then send stored
-  /// credentials over WebSocket automatically.
-  Future<void> _attemptBiometricLogin() async {
+  /// credentials over WebSocket automatically. [role] identifies WHICH
+  /// saved account to use — a dual-role user has a separate quick-login
+  /// card per role, so this must never guess/fall back to "any" role.
+  Future<void> _attemptBiometricLogin(String role) async {
     if (!_isConnected) {
       _connectToBridge();
       if (mounted) {
@@ -6799,7 +6917,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
 
     setState(() => _isLoading = true);
 
-    final creds = await _identity.recoverCredentials();
+    final creds = await _identity.recoverCredentialsForRole(role);
     if (creds == null) {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -6815,7 +6933,6 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
 
     _tempUser = creds['username']!;
     _tempPass = creds['password']!;
-    final role = creds['role']!;
     _lastExpectedRole = role;
 
     _channel?.sink.add(jsonEncode({
@@ -6833,12 +6950,12 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
     }
   }
 
-  /// Clear biometric login and show manual login.
-  void _switchAccount() {
-    _identity.clearCredentials();
+  /// Clear biometric login for a single role ("use a different account")
+  /// without touching any other saved role's credentials.
+  void _switchAccount(String role) {
+    _identity.clearCredentials(role: role);
     setState(() {
-      _hasBiometricCreds = false;
-      _savedUsername = null;
+      _savedBioAccounts.removeWhere((a) => a['role'] == role);
     });
   }
 
@@ -6972,9 +7089,9 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
 
     if (result == true) {
       await _identity.saveCredentials(_pendingBioUser, _pendingBioPass, _pendingBioRole);
-      await _identity.setBiometricDeclined(false);
+      await _identity.setBiometricDeclined(false, _pendingBioRole);
     } else {
-      await _identity.setBiometricDeclined(true);
+      await _identity.setBiometricDeclined(true, _pendingBioRole);
     }
     _pendingBioUser = "";
     _pendingBioPass = "";
@@ -6983,8 +7100,8 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
 
   Future<void> _checkBiometricOptIn(String role) async {
     try {
-      final alreadyEnabled = await _identity.isBiometricEnabled();
-      final hasDeclined = await _identity.hasBiometricDeclined();
+      final alreadyEnabled = await _identity.isBiometricEnabled(role);
+      final hasDeclined = await _identity.hasBiometricDeclined(role);
       if (alreadyEnabled) {
         _identity.saveCredentials(_tempUser, _tempPass, role);
       } else if (!hasDeclined) {
@@ -7885,64 +8002,76 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
 
               // =============================================================
               // BIOMETRIC QUICK LOGIN (Face ID / Fingerprint)
-              // Shown when saved credentials exist for CLIENT or COACH
+              // One card per role with saved credentials. A dual-role user
+              // (e.g. a Coach who is also an Inner Chamber client) sees BOTH
+              // their Client and Coach quick-login cards, each explicitly
+              // labeled and independently backed — tapping "Coach" can never
+              // sign them into their Client account, or vice versa.
+              // On role-locked web portals (mode == 'CLIENT'/'COACH') only
+              // that role's card is shown, matching the portal's identity.
               // =============================================================
-              if (_hasBiometricCreds && !_isLoading && mode != 'ADMIN') ...[
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.only(bottom: 24),
-                  padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF111111),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.4)),
+              if (!_isLoading && mode != 'ADMIN') ...[
+                for (final account in _savedBioAccounts.where(
+                  (a) => mode == null || a['role'] == mode,
+                ))
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF111111),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.4)),
+                    ),
+                    child: Column(children: [
+                      Text(
+                        account['role'] == 'COACH'
+                            ? 'Continue as Coach — ${account['username']}'
+                            : 'Continue as Client — ${account['username']}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xFFE8D5A3),
+                          fontSize: 14,
+                          fontFamily: 'Cormorant Garamond',
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFC9A962),
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          onPressed: () => _attemptBiometricLogin(account['role']!),
+                          icon: Icon(
+                            _biometricAvailable ? Icons.fingerprint : Icons.lock_open,
+                            size: 24,
+                          ),
+                          label: Text(
+                            _biometricAvailable ? 'Login with Face ID / Fingerprint' : 'Quick Login',
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextButton(
+                        onPressed: () => _switchAccount(account['role']!),
+                        child: const Text(
+                          'Use a different account',
+                          style: TextStyle(color: Colors.white38, fontSize: 12),
+                        ),
+                      ),
+                    ]),
                   ),
-                  child: Column(children: [
-                    Text(
-                      'Welcome back${_savedUsername != null ? ", $_savedUsername" : ""}',
-                      style: const TextStyle(
-                        color: Color(0xFFE8D5A3),
-                        fontSize: 14,
-                        fontFamily: 'Cormorant Garamond',
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFC9A962),
-                          foregroundColor: Colors.black,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        onPressed: _attemptBiometricLogin,
-                        icon: Icon(
-                          _biometricAvailable ? Icons.fingerprint : Icons.lock_open,
-                          size: 24,
-                        ),
-                        label: Text(
-                          _biometricAvailable ? 'Login with Face ID / Fingerprint' : 'Quick Login',
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextButton(
-                      onPressed: _switchAccount,
-                      child: const Text(
-                        'Use a different account',
-                        style: TextStyle(color: Colors.white38, fontSize: 12),
-                      ),
-                    ),
-                  ]),
-                ),
               ],
 
               if (_isLoading) ...[

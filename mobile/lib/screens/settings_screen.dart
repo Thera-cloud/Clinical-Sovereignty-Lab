@@ -520,7 +520,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   }
 
   Future<void> _loadBiometricState() async {
-    final enabled = await _bioIdentity.isBiometricEnabled();
+    final enabled = await _bioIdentity.isBiometricEnabled('CLIENT');
     final available = await _bioIdentity.isBiometricAvailable();
     if (mounted) {
       setState(() {
@@ -3303,8 +3303,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                   : 'Quick Login',
               _biometricEnabled,
               (v) async {
-                await _bioIdentity.setBiometricEnabled(v);
-                if (v) await _bioIdentity.setBiometricDeclined(false);
+                await _bioIdentity.setBiometricEnabled(v, 'CLIENT');
+                if (v) await _bioIdentity.setBiometricDeclined(false, 'CLIENT');
                 setState(() => _biometricEnabled = v);
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -3385,7 +3385,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           _settingsCard([
             _actionRow(Icons.delete_forever, 'Delete My Account', '30-day recovery window', _requestAccountDeletion, danger: true),
             _actionRow(Icons.logout, 'Logout', null, () {
-              _bioIdentity.clearCredentials();
+              _bioIdentity.clearCredentials(role: 'CLIENT');
               widget.onLogout?.call();
               Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(builder: (_) => const LobbyScreen()),
@@ -4319,7 +4319,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
   }
 
   Future<void> _loadBiometricState() async {
-    final enabled = await _bioIdentity.isBiometricEnabled();
+    final enabled = await _bioIdentity.isBiometricEnabled('COACH');
     final available = await _bioIdentity.isBiometricAvailable();
     if (mounted) {
       setState(() {
@@ -5613,8 +5613,8 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
                   : 'Quick Login',
               _biometricEnabled,
               (v) async {
-                await _bioIdentity.setBiometricEnabled(v);
-                if (v) await _bioIdentity.setBiometricDeclined(false);
+                await _bioIdentity.setBiometricEnabled(v, 'COACH');
+                if (v) await _bioIdentity.setBiometricDeclined(false, 'COACH');
                 setState(() => _biometricEnabled = v);
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -5675,7 +5675,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
           _settingsCard([
             _actionRow(Icons.delete_forever, 'Delete My Account', '30-day recovery window', _requestAccountDeletion, danger: true),
             _actionRow(Icons.logout, 'Logout', null, () {
-              _bioIdentity.clearCredentials();
+              _bioIdentity.clearCredentials(role: 'COACH');
               widget.onLogout?.call();
               Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(builder: (_) => const LobbyScreen()),
