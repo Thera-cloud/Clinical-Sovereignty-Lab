@@ -14495,6 +14495,15 @@ async def handle_client(websocket, path=None):
             # === CHAT MESSAGE ===
             elif t == "chat_message":
                 if current_profile:
+                    # QUANTUM-CRYSTAL-ARCH — re-consent gate (existing accounts on version bump)
+                    if (current_profile.get("consent_version") or "") != REQUIRED_CONSENT_VERSION:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "LEGAL_UPDATE_REQUIRED",
+                            "detail": "Please accept the updated Sovereign Covenant to continue.",
+                            "required_consent_version": REQUIRED_CONSENT_VERSION,
+                        }))
+                        continue
                     # QUANTUM-CRYSTAL-ARCH: DOJO per-type tier override (forward dojo_type to cortex)
                     # QUANTUM-CRYSTAL-ARCH: scope response to originating socket context
                     await cortex.process_interaction(current_profile, d.get("text", ""), dojo_type=d.get("dojo_type"), client_context=getattr(websocket, "_eviction_context", "main"))
@@ -14504,6 +14513,15 @@ async def handle_client(websocket, path=None):
             # === NATE QUERY (Mobile App) ===
             elif t == "nate_query":
                 if current_profile:
+                    # QUANTUM-CRYSTAL-ARCH — re-consent gate (existing accounts on version bump)
+                    if (current_profile.get("consent_version") or "") != REQUIRED_CONSENT_VERSION:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "LEGAL_UPDATE_REQUIRED",
+                            "detail": "Please accept the updated Sovereign Covenant to continue.",
+                            "required_consent_version": REQUIRED_CONSENT_VERSION,
+                        }))
+                        continue
                     # COACH_ONLY clients cannot access Nate AI
                     if (current_profile.get("subscription_plan") or "").upper() == "COACH_ONLY" or current_profile.get("can_access_nate") == False:
                         await websocket.send(json.dumps({
@@ -26006,7 +26024,8 @@ Coach Reflection on Session {session_id}:
                             v["profile"]["consent_version"] = REQUIRED_CONSENT_VERSION
                             v["profile"]["consent_date"] = str(datetime.datetime.now())
                             v["profile"]["updated_at"] = str(datetime.datetime.now())
-                            save_registry(registry)
+                            # QUANTUM-CRYSTAL-ARCH — await PG write for consent (critical)
+                            await save_registry_async(registry, changed_keys=[k])
                             current_profile["consent_version"] = REQUIRED_CONSENT_VERSION
                             await websocket.send(json.dumps({
                                 "type": "consent_updated",

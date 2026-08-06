@@ -268,7 +268,7 @@
             <div class="legal-section-title">12. DATA WE COLLECT</div>
             <div class="legal-text">Account info, voice biometrics (pitch, energy, speech rate, pause ratio), facial geometry (Sovereign Circle only), conversations, emotional/analytical data (C_emo, CEE, PMB, crisis assessments), and technical data.</div>
             <div class="legal-section-title">13. HOW WE PROCESS YOUR DATA</div>
-            <div class="legal-text">Via Azure OpenAI (encrypted, NOT used for general model training), Stripe (payments), PostgreSQL (encrypted storage). All data encrypted in transit and at rest.</div>
+            <div class="legal-text">Via configured AI providers including Azure OpenAI / xAI Grok (NOT used for general model training), Stripe (payments), PostgreSQL. Encrypted in transit (TLS 1.2+). Selected credentials use application-layer encryption. Conversation transcripts rely on hosting-provider disk encryption — not application-layer AES-256 per message. Message content is not scrubbed of personal identifiers before AI processing on the primary chat path.</div>
             <div class="legal-section-title">14. DATA RETENTION</div>
             <div class="legal-text">Active: retained during membership. Deleted: 30-day hold then permanent purge. Anonymized aggregate retained for research.</div>
             <div class="legal-section-title">15. DATA SHARING</div>

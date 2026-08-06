@@ -36,7 +36,8 @@ import 'main.dart'
         FamilySanctuaryScreen,
         ClientScheduleScreen,
         isNativeIOS,
-        ClientWsHub;
+        ClientWsHub,
+        ReConsentScreen;
 import 'debug_logger.dart';
 import 'avatar.dart' hide AnimatedBuilder;
 import 'screens/settings_screen.dart';
@@ -1964,6 +1965,23 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
       if (kDebugMode) print(">>> CORTEX SAYS: $data");
 
       if (data['type'] == 'login_success') {
+        // Re-consent on reconnect (Lobby already gates primary login)
+        if (data['consent_update_needed'] == true && mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ReConsentScreen(
+                username: widget.username,
+                password: widget.password,
+                profile: Map<String, dynamic>.from(data['profile'] ?? widget.currentUserProfile),
+                token: data['token']?.toString() ??
+                    widget.currentUserProfile['token']?.toString(),
+              ),
+            ),
+            (r) => false,
+          );
+          return;
+        }
         _scheduleBackoffDecay();
         setState(() => _connectionStatus = "ONLINE (SECURE)");
         _addSystemMsg("Neural Link Established.");
@@ -2457,6 +2475,21 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         final code = (data['message'] ?? data['error'] ?? 'An error occurred')
             .toString();
         final detail = (data['detail'] ?? '').toString();
+        if (code == 'LEGAL_UPDATE_REQUIRED' && mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ReConsentScreen(
+                username: widget.username,
+                password: widget.password,
+                profile: widget.currentUserProfile,
+                token: widget.currentUserProfile['token']?.toString(),
+              ),
+            ),
+            (r) => false,
+          );
+          return;
+        }
         const schedCodes = {'COVENANT_REQUIRED', 'SESSION_LIMIT_REACHED'};
         if (schedCodes.contains(code) || code == 'Time slot conflict') {
           final friendly = detail.isNotEmpty ? detail : code;
@@ -8411,6 +8444,23 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       }
 
       if (data['type'] == 'login_success') {
+        if (data['consent_update_needed'] == true && mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ReConsentScreen(
+                username: widget.username,
+                password: widget.password,
+                profile: Map<String, dynamic>.from(
+                    data['profile'] ?? widget.currentUserProfile),
+                token: data['token']?.toString() ??
+                    widget.currentUserProfile['token']?.toString(),
+              ),
+            ),
+            (r) => false,
+          );
+          return;
+        }
         _debugLog(">>> COACH AUTHENTICATED. Fetching Data...");
         _wsReconnectAttempts = 0;
         _authToken = data['token']?.toString();
@@ -24445,6 +24495,23 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       final data = jsonDecode(message);
 
       if (data['type'] == 'login_success') {
+        if (data['consent_update_needed'] == true && mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ReConsentScreen(
+                username: widget.username,
+                password: widget.password,
+                profile: Map<String, dynamic>.from(
+                    data['profile'] ?? widget.currentUserProfile),
+                token: data['token']?.toString() ??
+                    widget.currentUserProfile['token']?.toString(),
+              ),
+            ),
+            (r) => false,
+          );
+          return;
+        }
         _wsReconnectAttempts = 0;
         _fetchDashboard();
       } else if (data['type'] == 'admin_stats') {

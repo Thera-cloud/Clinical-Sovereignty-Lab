@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 import 'settings_screen.dart';
 import '../config/app_config.dart' as central_config;
+import '../main.dart' show ReConsentScreen;
 
 // -----------------------------------------------------------------------------
 // CONFIGURATION
@@ -127,6 +128,23 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
       
       switch (data['type']) {
         case 'login_success':
+          if (data['consent_update_needed'] == true && mounted) {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ReConsentScreen(
+                  username: widget.username,
+                  password: widget.password,
+                  profile: Map<String, dynamic>.from(
+                      data['profile'] ?? widget.currentUserProfile),
+                  token: data['token']?.toString() ??
+                      widget.currentUserProfile['token']?.toString(),
+                ),
+              ),
+              (r) => false,
+            );
+            return;
+          }
           _fetchAllData();
           break;
         case 'coach_dashboard_data':

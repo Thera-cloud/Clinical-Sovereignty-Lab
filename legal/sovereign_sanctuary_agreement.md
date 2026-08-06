@@ -146,12 +146,12 @@ Sovereign Sanctuary collects and processes the following categories of data:
 
 Your data is processed using the following third-party services:
 
-- **Azure OpenAI (Microsoft):** Text analysis, voice processing, and AI conversation generation. Data is encrypted in transit (TLS 1.2+) and processed under Microsoft's enterprise data protection agreements. Your data is NOT used to train OpenAI's general models.
+- **AI providers (including xAI/Grok and Microsoft Azure OpenAI):** Text analysis, voice processing, and AI conversation generation under enterprise terms. Data is encrypted in transit (TLS 1.2+). Your data is NOT used to train their general models. Message content is not scrubbed of personal identifiers before AI processing on the primary chat path.
 - **Stripe:** Payment processing for subscriptions and coaching fees. Sovereign Sanctuary does not store credit card numbers directly.
-- **PostgreSQL Database:** Account data, session metadata, and analytical scores are stored in encrypted databases hosted on secured infrastructure.
+- **PostgreSQL Database:** Account data, session metadata, and analytical scores are stored on secured infrastructure with hosting-provider disk encryption. Conversation transcripts are not wrapped with application-layer AES-256 per message.
 - **Redis:** Temporary session caching for real-time features.
 
-All data is encrypted in transit and at rest. Voice biometric data is processed in real-time and stored only as extracted feature vectors, not as raw audio recordings (unless you explicitly opt in to session recording for coaching review purposes).
+Data is encrypted in transit (TLS 1.2+). Selected credentials use application-layer encryption; other stored application data (including conversation transcripts) relies on hosting-provider disk encryption. Voice biometric data is processed in real-time and stored only as extracted feature vectors, not as raw audio recordings (unless you explicitly opt in to session recording for coaching review purposes).
 
 ### 14. DATA RETENTION
 
