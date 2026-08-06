@@ -1967,20 +1967,25 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
       if (data['type'] == 'login_success') {
         // Re-consent on reconnect (Lobby already gates primary login)
         if (data['consent_update_needed'] == true && mounted) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ReConsentScreen(
-                username: widget.username,
-                password: widget.password,
-                profile: Map<String, dynamic>.from(data['profile'] ?? widget.currentUserProfile),
-                token: data['token']?.toString() ??
-                    widget.currentUserProfile['token']?.toString(),
+          final user = widget.username ?? '';
+          final pass = widget.password ?? '';
+          if (user.isNotEmpty && pass.isNotEmpty) {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ReConsentScreen(
+                  username: user,
+                  password: pass,
+                  profile: Map<String, dynamic>.from(
+                      data['profile'] ?? widget.currentUserProfile ?? {}),
+                  token: data['token']?.toString() ??
+                      widget.currentUserProfile?['token']?.toString(),
+                ),
               ),
-            ),
-            (r) => false,
-          );
-          return;
+              (r) => false,
+            );
+            return;
+          }
         }
         _scheduleBackoffDecay();
         setState(() => _connectionStatus = "ONLINE (SECURE)");
@@ -2476,18 +2481,26 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
             .toString();
         final detail = (data['detail'] ?? '').toString();
         if (code == 'LEGAL_UPDATE_REQUIRED' && mounted) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ReConsentScreen(
-                username: widget.username,
-                password: widget.password,
-                profile: widget.currentUserProfile,
-                token: widget.currentUserProfile['token']?.toString(),
+          final user = widget.username ?? '';
+          final pass = widget.password ?? '';
+          if (user.isNotEmpty && pass.isNotEmpty) {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ReConsentScreen(
+                  username: user,
+                  password: pass,
+                  profile: widget.currentUserProfile,
+                  token: widget.currentUserProfile?['token']?.toString(),
+                ),
               ),
-            ),
-            (r) => false,
-          );
+              (r) => false,
+            );
+            return;
+          }
+          _addSystemMsg(detail.isNotEmpty
+              ? detail
+              : 'Please accept the updated Sovereign Covenant to continue.');
           return;
         }
         const schedCodes = {'COVENANT_REQUIRED', 'SESSION_LIMIT_REACHED'};
