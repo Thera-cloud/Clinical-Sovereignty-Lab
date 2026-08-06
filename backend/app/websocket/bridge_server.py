@@ -511,7 +511,7 @@ except ImportError:
 # ------------------------------------------------------------------------------
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("WEBSOCKET_PORT", "8765"))
-REQUIRED_CONSENT_VERSION = "v13.0_2026"
+REQUIRED_CONSENT_VERSION = "v13.1_2026"  # QUANTUM-CRYSTAL-ARCH — privacy copy correction (no false PII-strip / AES-256-chat claims)
 REQUIRED_COACH_ETHICS_VERSION = "v1.0_2026"
 
 # Database pool — created in main(), used by NateNudge + AI Mode handlers
@@ -5352,12 +5352,16 @@ class MetricsEngine:
         neg_count = sum(1 for w in negative_words if w in combined_text)
         crisis_detected = any(w in combined_text for w in crisis_words)
         
-        # === UPDATE EMOTIONAL COHERENCE (C_emo) ===
+        # === UPDATE TEXT-SENTIMENT SCORE (lexicon v1 — NOT the Nevedal Formula) ===
+        # Stored under legacy key C_emo for vault compatibility; C_emo_method
+        # marks the source so coaches/UI must not treat this as formula C_emo.
         sentiment_score = (pos_count - neg_count) / max(1, pos_count + neg_count + 1)
         c_emo = ns.get("C_emo", 0.5)
         c_emo = round(c_emo * 0.7 + (0.5 + sentiment_score * 0.3) * 0.3, 2)
         c_emo = max(0.1, min(1.0, c_emo))
         self.update_metric(p, "C_emo", c_emo)
+        self.update_metric(p, "C_emo_method", "lexicon_v1")  # QUANTUM-CRYSTAL-ARCH
+        self.update_metric(p, "text_sentiment_v1", c_emo)  # QUANTUM-CRYSTAL-ARCH
         
         # === UPDATE WARMTH (E_warmth) ===
         warmth_words = ["thank", "appreciate", "help", "support", "kind", "care"]
@@ -27113,7 +27117,7 @@ Coach Reflection on Session {session_id}:
                                         _p["updated_at"] = str(datetime.datetime.now())
                                         _p["family_consent_agreed"] = True
                                         _p["family_consent_date"] = str(datetime.datetime.now())
-                                        _p["family_consent_version"] = "v13.0_2026"
+                                        _p["family_consent_version"] = "v13.1_2026"  # QUANTUM-CRYSTAL-ARCH
                                         _dob = _p.get("dob") or ""
                                         _is_under = bool(_dob) and _age_from_dob_module(_dob) < 18
                                         if _ir == "DEPENDENT" and _is_under:

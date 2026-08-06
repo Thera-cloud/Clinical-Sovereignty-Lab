@@ -187,8 +187,10 @@ class NevedalMetricsGrid extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
               NevedalGauge(
-                label: "Coherence",
-                value: _parseDouble(metrics['C_emo'] ?? metrics['coherence'] ?? metrics['coherence_score'] ?? 0.5),
+                // Chat-path vault score is lexicon word-list sentiment (v1),
+                // NOT Nevedal Formula C_emo — do not label as C_emo.
+                label: "Text Sent.",
+                value: _parseDouble(metrics['text_sentiment_v1'] ?? metrics['C_emo'] ?? metrics['coherence'] ?? metrics['coherence_score'] ?? 0.5),
                 color: SovereignColors.cyan,
                 size: gaugeSize,
               ),
@@ -205,6 +207,12 @@ class NevedalMetricsGrid extends StatelessWidget {
                 size: gaugeSize,
               ),
             ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Text Sent. (v1) = lexicon word-list score from chat — not Nevedal Formula C_emo',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white38, fontSize: 10, fontStyle: FontStyle.italic),
           ),
           
           if (!compact) ...[
@@ -825,7 +833,7 @@ class ClientBriefCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildQuickMetric("Coherence", metrics['C_emo'] ?? metrics['coherence'] ?? 0.5, SovereignColors.cyan),
+                _buildQuickMetric("Text Sent.", metrics['text_sentiment_v1'] ?? metrics['C_emo'] ?? metrics['coherence'] ?? 0.5, SovereignColors.cyan),
                 _buildQuickMetric("GAP", metrics['GAP'] ?? metrics['growth'] ?? metrics['growth_potential'] ?? 0.3, SovereignColors.purple),
                 _buildQuickMetric("Engage", metrics['engagement'] ?? metrics['engage'] ?? 0.5, SovereignColors.green),
               ],

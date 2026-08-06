@@ -6040,8 +6040,8 @@ class _HelpFAQScreenState extends State<_HelpFAQScreen> {
           'a': '"send message" / "send it" — sends your draft\n"clear message" — clears the draft\n"delete last sentence" / "delete last word" — edits your draft\n"read it back" — reads your current draft aloud\n"replace [text] with [text]" — inline replacement',
         },
         {
-          'q': 'What do the metrics (C_emo, GAP, Quantum) mean?',
-          'a': 'C_emo is your Coherent Emotional Engagement score — how aligned your emotional state is. GAP measures growth potential. Quantum reflects the depth of emotional processing. Tap the metrics bar at the top for a full breakdown including mood history and session stats.',
+          'q': 'What do the metrics (Text Sent., GAP, Quantum) mean?',
+          'a': 'Text Sent. (v1) is a lexicon-based text-sentiment score from positive/negative word lists in chat — it is NOT the Nevedal Formula C_emo. GAP measures growth potential. Quantum reflects processing-depth heuristics. Tap the metrics bar for a full breakdown including mood history and session stats.',
         },
         {
           'q': 'How do I enable Avatar Mode?',
@@ -6093,7 +6093,7 @@ class _HelpFAQScreenState extends State<_HelpFAQScreen> {
         },
         {
           'q': 'How do I read my stats and coherence reports?',
-          'a': 'Your metrics bar at the top of the chat screen shows live C_emo (emotional coherence), GAP (growth potential), and Quantum (processing depth). For detailed trends, go to Settings > Your Tools > Coherence Reports. For a quick weekly summary, tap Settings > Your Tools > Weekly Brief.',
+          'a': 'Your metrics bar shows Text Sent. (v1) — a lexicon-based chat sentiment score (not formula C_emo) — plus GAP and Quantum heuristics. For detailed trends, go to Settings > Your Tools > Coherence Reports. For a quick weekly summary, tap Settings > Your Tools > Weekly Brief.',
         },
         {
           'q': 'What is the Sovereign Vault?',
@@ -6489,7 +6489,7 @@ class _LegalAgreementScreen extends StatelessWidget {
             const SizedBox(height: 4),
             const Center(
               child: Text(
-                'Consent Version: v13.0_2026',
+                'Consent Version: v13.1_2026',
                 style: TextStyle(color: _Design.gold, fontSize: 10, fontWeight: FontWeight.bold),
               ),
             ),
@@ -6525,13 +6525,13 @@ class _LegalAgreementScreen extends StatelessWidget {
             _section('12. DATA WE COLLECT',
               'Account information (name, email, phone, DOB), voice biometric data (pitch, energy, speech rate, pause ratio), facial geometry data (Sovereign Circle only, processed real-time, not stored as raw video), text and conversation data, emotional and analytical data (C_emo scores, CEE events, crisis assessments, PMB profiles), and technical/usage data.'),
             _section('13. HOW WE PROCESS YOUR DATA',
-              'Your conversation text and voice audio are processed by third-party AI services: xAI (Grok) and Microsoft Azure OpenAI. Both operate under enterprise data protection agreements — your data is NOT used to train their general models. Payments processed via Stripe. All data encrypted in transit and at rest.'),
+              'Your conversation text and voice transcriptions are processed by third-party AI services (including xAI/Grok and Microsoft Azure OpenAI, and other configured inference providers). Message content is sent as you type or speak it — including any names, emails, phone numbers, or other identifiers you include. Message content is NOT scrubbed of personal identifiers before AI processing on the primary chat path. Providers operate under enterprise terms that prohibit use of your data to train their general models. Payments processed via Stripe. Data is encrypted in transit (TLS 1.2+). Selected credentials use application-layer encryption. Conversation transcripts are stored in our database under hosting-provider disk encryption; they are not wrapped with application-layer AES-256 per message.'),
             _section('14. DATA RETENTION',
               'Active accounts: retained for duration of membership. Deleted accounts: held 30 days then permanently purged. Anonymized aggregate data may be retained indefinitely for research.'),
             _section('15. DATA SHARING',
               'Your data is NEVER sold. Shared with: (a) xAI (Grok) and Microsoft Azure OpenAI — your conversation text and voice audio for AI-powered therapeutic responses, under enterprise agreements that prohibit use for model training; (b) your assigned Coach (session summaries); (c) Head of Household (aggregate family metrics, not individual content); (d) law enforcement (only when legally compelled).'),
             _section('16. YOUR PRIVACY RIGHTS',
-              'California (CCPA/CPRA): right to know, delete, opt out of sale. Illinois (BIPA): biometric consent provided herein. Texas (CUBI): biometric notification provided. Virginia, Colorado, Connecticut, Indiana, Kentucky, Rhode Island: access, correct, delete, port data. Right to Delete via Settings. Right to Data Export (transcripts; analytical overlays excluded as platform IP).'),
+              'California (CCPA/CPRA): right to know, delete, opt out of sale. Illinois (BIPA): biometric consent provided herein. Texas (CUBI): biometric notification provided. Virginia, Colorado, Connecticut, Indiana, Kentucky, Rhode Island: access, correct, delete, port data. Right to Delete via Settings. Right to Data Export returns available profile, session summaries, and metrics JSON (not a guaranteed full conversation-transcript dump); contact support for additional records as needed.'),
             _section('17. CHILDREN\'S PRIVACY (COPPA)',
               'We do not knowingly collect information from children under 13. Children 13-17 may only access via parent/guardian family account.'),
 
@@ -6540,7 +6540,7 @@ class _LegalAgreementScreen extends StatelessWidget {
             _section('18. NATURE OF THE SERVICE',
               'The platform is NOT a licensed mental health provider. Little Nate is NOT a therapist. Coaches are independent practitioners. No doctor-patient or therapist-client privilege applies to AI interactions.'),
             _section('19. INFORMED CONSENT FOR EXPERIMENTAL METHODOLOGY',
-              'The Nevedal Quantum Emotional Coherence framework is a research model and proprietary analytical methodology. It is NOT a clinically validated diagnostic tool. Terms like "quantum" and "coherence" are metaphorical frameworks for organizing biometric data. C_emo scores are algorithmic estimates, not clinical measurements.'),
+              'The Nevedal Quantum Emotional Coherence framework is a research model and proprietary analytical methodology. It is NOT a clinically validated diagnostic tool. Terms like "quantum" and "coherence" are metaphorical frameworks for organizing biometric data. Chat-path "Text Sent. (v1)" scores are lexicon-based word-list estimates, not Nevedal Formula C_emo and not clinical measurements. Formula C_emo is only computed when biometric inputs are supplied on instrumented live paths.'),
             _section('20. ASSUMPTION OF EMOTIONAL RISK',
               'Emotional exploration carries inherent risk. Deep self-reflection, trauma processing, and confrontation of emotional patterns may cause temporary distress. You voluntarily assume this risk.'),
             _section('21. COACH RELATIONSHIP BOUNDARIES',

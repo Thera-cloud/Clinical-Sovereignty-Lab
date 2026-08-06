@@ -1678,7 +1678,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
               _consentBullet(Icons.mic_outlined, "Voice Biometrics",
                   "Voice features (pitch, energy, speech rate, pause ratio) are analyzed locally and sent to our secure server for emotional coherence scoring."),
               _consentBullet(Icons.lock_outline, "Data Protection",
-                  "All data is encrypted in transit (TLS 1.2+) and at rest (AES-256). Microsoft Azure operates under enterprise data protection agreements — your data is NOT used to train their AI models."),
+                  "Data is encrypted in transit (TLS 1.2+). Selected credentials are encrypted at the application layer. Conversation transcripts are stored in our database under hosting-provider disk encryption — not as an application-layer AES-256 wrap of each message. AI providers process messages under their enterprise terms; your data is NOT used to train their general models."),
               _consentBullet(Icons.delete_outline, "Your Rights",
                   "You can delete your data at any time via Settings > Data Deletion. See our Privacy Policy for full details."),
               const SizedBox(height: 8),
@@ -5394,7 +5394,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
                   _buildQuickStat(
-                      "C", _metrics['C_emo'] ?? 0.5, const Color(0xFF00FFFF)),
+                      "TS", _metrics['text_sentiment_v1'] ?? _metrics['C_emo'] ?? 0.5, const Color(0xFF00FFFF)),
                   _buildQuickStat(
                       "G", _metrics['GAP'] ?? 0.3, const Color(0xFF9D4EDD)),
                   _buildQuickStat(
@@ -16099,7 +16099,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     final risk =
         (metrics['risk_level'] ?? ns['risk_level'] ?? 'LOW').toString();
 
-    final cEmo = ns['C_emo'] ?? metrics['C_emo'] ?? metrics['coherence'];
+    // Lexicon chat-path score (v1) — not Nevedal Formula C_emo
+    final cEmo = ns['text_sentiment_v1'] ?? ns['C_emo'] ?? metrics['text_sentiment_v1'] ?? metrics['C_emo'] ?? metrics['coherence'];
     final gap = ns['GAP'] ??
         metrics['GAP'] ??
         metrics['growth'] ??
@@ -16153,7 +16154,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  "C_emo: ${_fmt01(cEmo)}   GAP: ${_fmt01(gap)}   Quantum: ${_fmt01(quantum)}",
+                  "Text Sent.(v1): ${_fmt01(cEmo)}   GAP: ${_fmt01(gap)}   Quantum: ${_fmt01(quantum)}",
                   style: TextStyle(
                       color: Colors.grey[400],
                       fontSize: 11,

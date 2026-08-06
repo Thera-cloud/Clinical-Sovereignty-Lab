@@ -20,7 +20,7 @@ import '../config/app_config.dart' as central_config;
 class AppConfig {
   static String get serverUrl => central_config.AppConfig.wsUrl;
   static const String appName = 'Sovereign Sanctuary';
-  static const String consentVersion = 'v13.0_2026';
+  static const String consentVersion = 'v13.1_2026';
 }
 
 // =============================================================================

@@ -229,23 +229,24 @@
 
                 <h3>How We Use Your Information</h3>
                 <h3><span class="section-number">13.</span> How We Process Your Data</h3>
-                <p>Data is processed via Azure OpenAI (Microsoft) under enterprise data protection agreements — your data is NOT used to train OpenAI's general models. Payments are processed via Stripe. All data is encrypted in transit and at rest.</p>
+                <p>Conversation text and voice transcriptions are processed by third-party AI providers (including xAI/Grok and Microsoft Azure OpenAI, and other configured inference providers) under enterprise terms that prohibit use of your data to train their general models. Payments are processed via Stripe. Data is encrypted in transit (TLS 1.2+). Selected credentials use application-layer encryption. Conversation transcripts are stored in our database under hosting-provider disk encryption; they are not wrapped with application-layer AES-256 per message.</p>
 
                 <h3><span class="section-number">13a.</span> Third-Party AI Service Disclosure</h3>
-                <p>Sovereign Sanctuary uses <strong>Microsoft Azure OpenAI Service</strong> as a third-party AI provider. The following data is transmitted to this service during your use of the AI companion (Little Nate):</p>
+                <p>Sovereign Sanctuary uses third-party AI providers (including <strong>xAI (Grok)</strong> and <strong>Microsoft Azure OpenAI Service</strong>, and other configured inference providers) for the AI companion (Little Nate). The following data may be transmitted during AI use:</p>
                 <ul style="margin: 12px 0 12px 20px;">
-                    <li><strong>Text messages:</strong> Your typed or voice-transcribed messages are sent to Azure OpenAI to generate Little Nate's conversational responses.</li>
+                    <li><strong>Text messages:</strong> Your typed or voice-transcribed messages are sent to the active AI provider(s) to generate Little Nate's conversational responses.</li>
                     <li><strong>Conversation context:</strong> Recent conversation history (within the current session) is included for contextual relevance.</li>
-                    <li><strong>Voice biometric features:</strong> Extracted voice characteristics (pitch mean, pitch variance, energy level, speech rate, and pause ratio) are processed server-side for emotional coherence analysis. Raw audio is NOT transmitted to Azure OpenAI.</li>
-                    <li><strong>Session metadata:</strong> Anonymized emotional state indicators (mood scores, coherence metrics) may be included in AI prompts to personalize responses.</li>
+                    <li><strong>Identifiers in message content:</strong> Message content is sent as you type or speak it. If you include names, email addresses, phone numbers, or other identifiers in a message, those identifiers are included in what is transmitted. Message content is <strong>not</strong> scrubbed of personal identifiers before AI processing on the primary chat path.</li>
+                    <li><strong>Voice biometric features:</strong> Extracted voice characteristics (pitch mean, pitch variance, energy level, speech rate, and pause ratio) may be processed server-side for emotional analysis on instrumented voice/live paths. Raw audio is not sent to Azure OpenAI as a separate media upload for that analysis path.</li>
+                    <li><strong>Session metadata:</strong> Derived emotional state indicators (mood scores, heuristic metrics) may be included in AI prompts to personalize responses.</li>
                 </ul>
-                <p><strong>Data NOT sent to the third-party AI service:</strong></p>
+                <p><strong>Data not sent as separate profile/credential fields to AI providers:</strong></p>
                 <ul style="margin: 12px 0 12px 20px;">
-                    <li>Your name, email address, phone number, or other personally identifiable information (PII) is stripped before transmission</li>
-                    <li>Raw audio or video recordings</li>
-                    <li>Payment information (handled exclusively by Stripe)</li>
-                    <li>Passwords or authentication credentials</li>
+                    <li>Passwords and authentication credentials</li>
+                    <li>Payment card information (handled exclusively by Stripe)</li>
+                    <li>Raw audio or video recordings as media files (voice features may be transcribed to text first)</li>
                 </ul>
+                <p><strong>Important:</strong> Profile fields such as name, email, and phone are not guaranteed to be stripped from AI prompts. Any personal information you include in conversation text is transmitted to the AI provider on the primary chat path.</p>
                 <p><strong>Protections provided by Microsoft Azure OpenAI:</strong></p>
                 <ul style="margin: 12px 0 12px 20px;">
                     <li>Your data is NOT used to train, retrain, or improve Azure OpenAI foundation models</li>
@@ -262,16 +263,16 @@
                 <p><strong>Sovereign Sanctuary is not the custodian of your life story.</strong> The platform — including Little Nate, coaching sessions, and all associated features — is a tool for emotional growth and self-awareness. It is NOT a permanent archive, journal, or record-keeping service for your personal experiences.</p>
                 <p>Conversation history and session data that Little Nate uses to remember context and maintain continuity has a <strong>limited time frame of existence</strong>. This data may be summarized, aged out, or removed as part of normal platform operation, account changes, or data retention policies.</p>
                 <p><strong>You are responsible for maintaining your own records.</strong> If any insight, reflection, memory, or information that emerges during your interactions with Little Nate or your coach is important to you, it is your responsibility to save, store, and preserve it outside the platform by your own means (personal journal, notes, screenshots, data export, etc.).</p>
-                <p>Sovereign Sanctuary makes no guarantee that any specific conversation, session summary, emotional metric, or AI-generated insight will remain available indefinitely. The <strong>Data Export</strong> feature (available in Settings) allows you to download your conversation transcripts at any time — we encourage regular use of this feature.</p>
+                <p>Sovereign Sanctuary makes no guarantee that any specific conversation, session summary, emotional metric, or AI-generated insight will remain available indefinitely. The <strong>Data Export</strong> feature (available in Settings) returns available profile, session summaries, and metrics JSON; it is not a guaranteed full conversation-transcript dump. Contact support for additional records as needed. We encourage keeping your own copies of material that matters to you.</p>
 
                 <h3>Data Storage and Security (HIPAA Compliance)</h3>
                 <p>Sovereign Sanctuary employs industry-standard security measures to protect your sensitive health and emotional data. Our infrastructure is designed with privacy and security as foundational principles:</p>
                 <ul style="margin: 12px 0 12px 20px;">
                     <li><strong>Encryption in transit:</strong> All data transmitted between your device and our servers uses TLS 1.2 or higher.</li>
-                    <li><strong>Encryption at rest:</strong> Stored data is encrypted using AES-256 or equivalent industry standards.</li>
-                    <li><strong>Enterprise agreements:</strong> We use Microsoft Azure OpenAI under enterprise data protection terms that prohibit use of your data for model training.</li>
+                    <li><strong>Encryption at rest:</strong> Selected credentials use application-layer encryption. Conversation transcripts and other stored application data rely on hosting-provider disk encryption; they are not wrapped with application-layer AES-256 per message.</li>
+                    <li><strong>Enterprise agreements:</strong> We use AI providers (including Azure OpenAI and xAI/Grok where configured) under enterprise terms that prohibit use of your data for general model training.</li>
                     <li><strong>Access controls:</strong> Role-based access ensures only authorized personnel and your assigned coach (where applicable) can access your session data.</li>
-                    <li><strong>Audit trails:</strong> System access and data operations are logged for security and compliance review.</li>
+                    <li><strong>Audit trails:</strong> Selected system access and data operations are logged for security and compliance review.</li>
                 </ul>
                 <p>While Sovereign Sanctuary is a technology platform and not a Covered Entity under HIPAA, we apply security practices aligned with healthcare data protection standards. Coaches who are licensed providers remain responsible for their own HIPAA obligations in connection with their practice.</p>
 

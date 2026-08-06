@@ -523,7 +523,7 @@ class _FamilyInviteAcceptScreenState extends State<FamilyInviteAcceptScreen> {
       'type': 'accept_family_invite',
       'token': widget.inviteCode.toUpperCase(),
       'consent_agreed': true,
-      'consent_version': 'v13.0_2026',
+      'consent_version': 'v13.1_2026',
     }));
   }
 
@@ -1597,7 +1597,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
               _consentBullet(Icons.mic_outlined, "Voice Biometrics",
                 "Voice features (pitch, energy, speech rate, pause ratio) are analyzed locally and sent to our secure server for emotional coherence scoring."),
               _consentBullet(Icons.lock_outline, "Data Protection",
-                "All data is encrypted in transit (TLS 1.2+) and at rest (AES-256). Microsoft Azure operates under enterprise data protection agreements — your data is NOT used to train their AI models."),
+                "Data is encrypted in transit (TLS 1.2+). Selected credentials are encrypted at the application layer. Conversation transcripts are stored in our database under hosting-provider disk encryption — not as an application-layer AES-256 wrap of each message. AI providers process messages under their enterprise terms; your data is NOT used to train their general models."),
               _consentBullet(Icons.delete_outline, "Your Rights",
                 "You can delete your data at any time via Settings > Data Deletion. See our Privacy Policy for full details."),
               const SizedBox(height: 8),
@@ -8735,7 +8735,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
     final regPayload = {
       "type": "register_request",
       "consent_agreed": true,
-      "consent_version": "v13.0_2026",
+      "consent_version": "v13.1_2026",
       "role": role,
       "username": _userCtrl.text.trim(),
       "password": _passCtrl.text.trim(),
@@ -10993,7 +10993,7 @@ class SovereignCovenantDoc extends StatelessWidget {
               SizedBox(height: 15),
               
               _Header("9. BIOMETRIC DATA & AI DATA SHARING"),
-              Text("1. VIDEO & VOICE: You explicitly consent to the AI analysis of your Voice (Voiceprint) AND Facial Geometry (Video Biometrics).\n2. AI DATA SHARING: Your text messages and voice transcriptions are sent to Microsoft Azure OpenAI Service (a third-party AI provider) to generate AI companion responses. Your data is NOT used to train their AI models. See our Privacy Policy Section 13a for full details.\n3. DATA SENT: Conversation text, session context, and anonymized emotional metrics. PII (name, email, phone) is stripped before transmission.\n4. DATA NOT SENT: Raw audio/video, passwords, payment information.\n5. SOVEREIGNTY: You retain the 'Right to Delete.' You may revoke AI data consent at any time via Settings.", style: TextStyle(color: Colors.white70)),
+              Text("1. VIDEO & VOICE: You explicitly consent to the AI analysis of your Voice (Voiceprint) AND Facial Geometry (Video Biometrics).\n2. AI DATA SHARING: Your text messages and voice transcriptions are sent to third-party AI providers (including xAI/Grok and Microsoft Azure OpenAI, and other configured inference providers) to generate AI companion responses. Your data is NOT used to train their general models. See our Privacy Policy Section 13a for full details.\n3. DATA SENT: Conversation text and session context as you type or speak them — including any names, emails, phone numbers, or other identifiers you include in messages. Message content is NOT scrubbed of personal identifiers before AI processing on the primary chat path. Derived emotional metrics may also be included.\n4. DATA NOT SENT AS SEPARATE PROFILE FIELDS: Passwords and payment card numbers are not sent to AI providers. Raw audio/video streams are not sent except as transcribed text for voice features.\n5. ENCRYPTION: Data is encrypted in transit (TLS 1.2+). Selected credentials use application-layer encryption. Conversation transcripts are stored in our database; they are not wrapped with application-layer AES-256 per message.\n6. SOVEREIGNTY: You retain the 'Right to Delete.' You may revoke AI data consent at any time via Settings.", style: TextStyle(color: Colors.white70)),
               SizedBox(height: 15),
               
               _Header("10. YOUR RECORDS ARE YOUR RESPONSIBILITY"),
@@ -11008,7 +11008,7 @@ class SovereignCovenantDoc extends StatelessWidget {
               Text("BINDING ARBITRATION: You agree that any disputes shall be resolved by binding individual arbitration. You explicitly WAIVE your right to a jury trial or to participate in any CLASS ACTION.", style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
               SizedBox(height: 20),
               _Header("FULL LEGAL AGREEMENT"),
-              Text("This consent summary covers the key points. The complete Terms of Use, Privacy Policy, Therapeutic Setting Waiver, Patent & Proprietary Technology Notice, and Dispute Resolution agreement (v13.0_2026) is available in Settings > Legal & Privacy after you log in.", style: TextStyle(color: Colors.amber, fontSize: 12)),
+              Text("This consent summary covers the key points. The complete Terms of Use, Privacy Policy, Therapeutic Setting Waiver, Patent & Proprietary Technology Notice, and Dispute Resolution agreement (v13.1_2026) is available in Settings > Legal & Privacy after you log in.", style: TextStyle(color: Colors.amber, fontSize: 12)),
             ]),
           ),
         ),
