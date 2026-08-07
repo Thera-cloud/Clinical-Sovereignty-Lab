@@ -2081,7 +2081,12 @@ async def create_connect_account(request: Request, user: dict = Depends(require_
             type="express",
             email=email or None,
             metadata={"coach_id": hw_id, "platform": "sovereign_sanctuary"},
-            capabilities={"transfers": {"requested": True}},
+            # Stripe requires card_payments when requesting transfers unless
+            # the platform has special transfers-only approval.
+            capabilities={
+                "card_payments": {"requested": True},
+                "transfers": {"requested": True},
+            },
         )
 
         async with pool.acquire() as conn:
