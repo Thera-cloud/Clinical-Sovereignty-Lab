@@ -2037,6 +2037,90 @@ async def setup_card_payment_method(req: ACHSetupRequest, request: Request):
 # STRIPE CONNECT EXPRESS (Coach Payout Onboarding)
 # =============================================================================
 
+_CONNECT_REFRESH_URL = "https://coach.sovereignsanctuary.net/settings?connect=refresh"
+_CONNECT_RETURN_URL = "https://coach.sovereignsanctuary.net/settings?connect=complete"
+
+
+def _connect_account_rank(acct) -> tuple:
+    """Higher rank = prefer this Express account when healing duplicates."""
+    caps = acct.get("capabilities") or {}
+    transfers = caps.get("transfers")
+    card_payments = caps.get("card_payments")
+    return (
+        1 if acct.get("payouts_enabled") else 0,
+        1 if acct.get("charges_enabled") else 0,
+        1 if acct.get("details_submitted") else 0,
+        1 if transfers == "active" else 0,
+        1 if card_payments == "active" else 0,
+    )
+
+
+def _pick_best_connect_account(candidates: list, prefer_id: str = ""):
+    """Pick highest-ranked account; break ties by preferring the DB-linked id."""
+    if not candidates:
+        return None
+    best_rank = max(_connect_account_rank(c) for c in candidates)
+    top = [c for c in candidates if _connect_account_rank(c) == best_rank]
+    if prefer_id:
+        for c in top:
+            if c.id == prefer_id:
+                return c
+    return top[0]
+
+
+def _find_connect_accounts_for_coach(hw_id: str, email: str = "") -> list:
+    """Find Express accounts tagged for this coach (metadata) or matching email."""
+    if not hw_id:
+        return []
+    by_id = {}
+    try:
+        # Stripe Search (bounded) — falls back to list scan below.
+        q = f"metadata['coach_id']:'{hw_id}'"
+        result = stripe.Account.search(query=q, limit=20)
+        for a in result.data:
+            by_id[a.id] = a
+    except Exception:
+        pass
+    try:
+        starting = None
+        scanned = 0
+        while scanned < 200:
+            page = (
+                stripe.Account.list(limit=100, starting_after=starting)
+                if starting
+                else stripe.Account.list(limit=100)
+            )
+            if not page.data:
+                break
+            for a in page.data:
+                scanned += 1
+                meta = dict(a.get("metadata") or {})
+                acct_email = (getattr(a, "email", None) or "").lower()
+                if meta.get("coach_id") == hw_id or (
+                    email and acct_email == email.lower()
+                    and meta.get("platform") == "sovereign_sanctuary"
+                ):
+                    by_id[a.id] = a
+            if not page.has_more:
+                break
+            starting = page.data[-1].id
+    except Exception:
+        pass
+    return list(by_id.values())
+
+
+async def _persist_stripe_connect_id(pool, hw_id: str, account_id: str) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE users SET profile_data = jsonb_set(
+                   COALESCE(profile_data, '{}'::jsonb),
+                   '{stripe_connect_id}',
+                   $1::jsonb
+               ) WHERE hardware_id = $2""",
+            json.dumps(account_id), hw_id,
+        )
+
+
 @router.post("/connect/onboard")
 async def create_connect_account(request: Request, user: dict = Depends(require_coach)):
     """Create a Stripe Connect Express account for a coach and return the onboarding URL."""
@@ -2061,20 +2145,44 @@ async def create_connect_account(request: Request, user: dict = Depends(require_
         email = user.get("email", "")
     existing_connect = (profile.get("stripe_connect_id") or "").strip()
 
+    # Prefer a completed Express account over creating another (dedupe / heal).
+    candidates = []
     if existing_connect:
         try:
-            acct = stripe.Account.retrieve(existing_connect)
-            if not acct.details_submitted:
-                link = stripe.AccountLink.create(
-                    account=existing_connect,
-                    refresh_url="https://coach.sovereignsanctuary.net/settings?connect=refresh",
-                    return_url="https://coach.sovereignsanctuary.net/settings?connect=complete",
-                    type="account_onboarding",
-                )
-                return {"url": link.url, "account_id": existing_connect, "status": "continue_onboarding"}
-            return {"status": "already_connected", "account_id": existing_connect, "payouts_enabled": acct.payouts_enabled}
+            candidates.append(stripe.Account.retrieve(existing_connect))
         except Exception:
             pass
+    for acct in _find_connect_accounts_for_coach(hw_id, email=email):
+        if all(c.id != acct.id for c in candidates):
+            candidates.append(acct)
+
+    if candidates:
+        best = _pick_best_connect_account(candidates, prefer_id=existing_connect)
+        if best.id != existing_connect:
+            try:
+                await _persist_stripe_connect_id(pool, hw_id, best.id)
+            except Exception:
+                pass
+        if best.get("details_submitted") or best.get("payouts_enabled"):
+            return {
+                "status": "already_connected",
+                "account_id": best.id,
+                "payouts_enabled": bool(best.get("payouts_enabled")),
+            }
+        try:
+            link = stripe.AccountLink.create(
+                account=best.id,
+                refresh_url=_CONNECT_REFRESH_URL,
+                return_url=_CONNECT_RETURN_URL,
+                type="account_onboarding",
+            )
+            return {
+                "url": link.url,
+                "account_id": best.id,
+                "status": "continue_onboarding",
+            }
+        except stripe.error.StripeError as e:
+            raise HTTPException(400, f"Stripe Connect error: {e}")
 
     try:
         account = stripe.Account.create(
@@ -2089,20 +2197,12 @@ async def create_connect_account(request: Request, user: dict = Depends(require_
             },
         )
 
-        async with pool.acquire() as conn:
-            await conn.execute(
-                """UPDATE users SET profile_data = jsonb_set(
-                       COALESCE(profile_data, '{}'::jsonb),
-                       '{stripe_connect_id}',
-                       $1::jsonb
-                   ) WHERE hardware_id = $2""",
-                json.dumps(account.id), hw_id,
-            )
+        await _persist_stripe_connect_id(pool, hw_id, account.id)
 
         link = stripe.AccountLink.create(
             account=account.id,
-            refresh_url="https://coach.sovereignsanctuary.net/settings?connect=refresh",
-            return_url="https://coach.sovereignsanctuary.net/settings?connect=complete",
+            refresh_url=_CONNECT_REFRESH_URL,
+            return_url=_CONNECT_RETURN_URL,
             type="account_onboarding",
         )
         return {"url": link.url, "account_id": account.id, "status": "created"}
