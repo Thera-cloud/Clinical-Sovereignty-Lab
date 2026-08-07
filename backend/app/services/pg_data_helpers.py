@@ -269,6 +269,10 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
             if session.get(_consult_key):
                 extra[_consult_key] = session[_consult_key]
         payment_status = str(session.get("payment_status") or "pending")[:32]
+        try:
+            price_cents = int(session.get("price_cents") or 0)
+        except (TypeError, ValueError):
+            price_cents = 0
         start_ts = _parse_ts(session.get("scheduled_start"))
         payment_due_at = start_ts - timedelta(hours=72) if start_ts else None
         cancellation_deadline = start_ts - timedelta(hours=24) if start_ts else None
@@ -283,8 +287,8 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                      zoom_meeting_id, zoom_host_url, notes, coach_notes,
                      topics_covered, homework_assigned, mood_at_start,
                      mood_at_end, nate_summary, recording_url, payment_status,
-                     intake_note, session_data, created_at)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
+                     price_cents, intake_note, session_data, created_at)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
                    ON CONFLICT (session_id) DO UPDATE SET
                      client_id = EXCLUDED.client_id,
                      coach_id = EXCLUDED.coach_id,
@@ -312,6 +316,7 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                      nate_summary = EXCLUDED.nate_summary,
                      recording_url = EXCLUDED.recording_url,
                      payment_status = EXCLUDED.payment_status,
+                     price_cents = COALESCE(EXCLUDED.price_cents, coaching_sessions.price_cents),
                      intake_note = EXCLUDED.intake_note,
                      session_data = COALESCE(coaching_sessions.session_data, '{}'::jsonb)
                                     || COALESCE(EXCLUDED.session_data, '{}'::jsonb)""",
@@ -342,6 +347,7 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                 session.get("nate_summary", ""),
                 session.get("recording_url", ""),
                 payment_status,
+                price_cents,
                 session.get("intake_note", ""),
                 json.dumps(extra),
                 _parse_ts(session.get("created_at")) or datetime.now(timezone.utc),

@@ -95,6 +95,7 @@ class SessionPaymentAgent:
 
         async with self.db_pool.acquire() as conn:
             # Find sessions in the payment window that need charging
+            # QUANTUM-CRYSTAL-ARCH: charge only after coach accepts (scheduled/confirmed/active)
             sessions_to_charge = await conn.fetch(
                 f"""SELECT cs.id, cs.coach_id, cs.client_id,
                           {_APPT_TIME} AS scheduled_at, cs.price_cents,
@@ -103,13 +104,15 @@ class SessionPaymentAgent:
                           u.profile_data->>'email' as client_email,
                           u.profile_data->>'phone' as client_phone,
                           u.profile_data->>'timezone' as client_timezone,
-                          u.profile_data->>'stripe_customer_id' as stripe_customer_id
+                          COALESCE(NULLIF(u.stripe_customer_id, ''),
+                                   u.profile_data->>'stripe_customer_id') as stripe_customer_id
                    FROM coaching_sessions cs
                    LEFT JOIN users u ON u.id::text = cs.client_id::text
                       OR u.hardware_id = cs.client_id::text
                    WHERE {_APPT_TIME} BETWEEN $1 AND $2
                    AND cs.payment_status = 'pending'
                    AND COALESCE(cs.price_cents, 0) > 0
+                   AND UPPER(cs.status) IN ('SCHEDULED', 'CONFIRMED', 'ACTIVE')
                    AND {_NOT_CANCELLED}""",
                 window_start, window_end,
             )
@@ -336,7 +339,7 @@ class SessionPaymentAgent:
                 body = f"""<p>Hello {client_name},</p>
 <p>This is a reminder that your coaching session is scheduled for <strong>{session_date}</strong>.</p>
 {payment_note}
-<p><strong>Cancellation policy:</strong> You may cancel up to 24 hours before the session for a full refund.</p>
+<p><strong>Cancellation policy:</strong> Cancel at least 24 hours before the session for a full refund. Cancellations inside 24 hours are not refundable.</p>
 <p>See you soon!<br>Sovereign Sanctuary</p>"""
 
                 await notify._send_email(client_email, subject, body)

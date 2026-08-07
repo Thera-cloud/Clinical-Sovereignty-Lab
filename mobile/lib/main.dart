@@ -11157,6 +11157,18 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   /// IANA zone from bridge `coach_availability.availability.timezone` (coach’s published calendar).
   String? _coachAvailabilityIana;
 
+  // Session booking billing (coach fee + card + payment consent)
+  double? _coachFee;
+  String _paymentPolicy =
+      'By booking, you agree to pay your coach\'s full session rate. '
+      'After your coach accepts, your card on file will be charged in the '
+      '72-hour window before the session. Payment is due before the session. '
+      'Cancel at least 24 hours before the start time for a full refund. '
+      'Cancellations inside 24 hours are not refundable.';
+  bool _hasCardOnFile = false;
+  bool _cardCheckLoading = false;
+  bool _paymentConsent = false;
+
   bool get _hasCoach => _coachId.isNotEmpty;
 
   String _friendlyCoachTzSubtitle(String? iana) {
@@ -11194,6 +11206,8 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
       if (_hasCoach) {
         _requestUpcomingSessions();
         _requestMonthOverview();
+        _requestCoachInfo();
+        _refreshCardOnFile();
       } else {
         _fetchCoachDirectory();
         _fetchRequestStatus();
@@ -11250,10 +11264,23 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
         if (_hasCoach) {
           _requestUpcomingSessions();
           _requestMonthOverview();
+          _requestCoachInfo();
+          _refreshCardOnFile();
         } else {
           _fetchCoachDirectory();
           _fetchRequestStatus();
         }
+      } else if (type == 'coach_info') {
+        final fee = data['coaching_fee'];
+        final pol = data['payment_policy']?.toString();
+        setState(() {
+          if (fee is num) {
+            _coachFee = fee.toDouble();
+          } else {
+            _coachFee = double.tryParse(fee?.toString() ?? '');
+          }
+          if (pol != null && pol.isNotEmpty) _paymentPolicy = pol;
+        });
       } else if (type == 'login_failed' || type == 'wrong_portal') {
         _loadingTimeout?.cancel();
         if (mounted) setState(() => _isLoading = false);
@@ -11303,6 +11330,17 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
         }
       } else if (type == 'session_cancelled') {
         _requestUpcomingSessions();
+        final refund = (data['refund_status'] ?? '').toString();
+        if (mounted && refund.isNotEmpty && refund != 'skipped' && refund != 'not_paid') {
+          final msg = refund == 'refunded'
+              ? 'Session cancelled. Refund issued.'
+              : refund == 'too_late'
+                  ? 'Session cancelled. Inside 24h — no refund.'
+                  : 'Session cancelled.';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(msg), backgroundColor: refund == 'refunded' ? Colors.green : Colors.orange),
+          );
+        }
       } else if (type == 'coach_request_status') {
         if (data['status'] == 'none') {
           setState(() { _pendingRequest = null; _requestMessages = []; _isLoading = false; });
@@ -11381,6 +11419,84 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
       "coach_id": _coachId,
       "date": date,
     }));
+  }
+
+  void _requestCoachInfo() {
+    if (_coachId.isEmpty) return;
+    _socket?.sink.add(jsonEncode({
+      "type": "client_get_coach_info",
+      "coach_id": _coachId,
+    }));
+  }
+
+  Future<void> _refreshCardOnFile() async {
+    final hw = (widget.currentUserProfile?['hardware_id'] ?? '').toString();
+    final token = (widget.currentUserProfile?['token'] ?? '').toString();
+    if (hw.isEmpty) return;
+    if (mounted) setState(() => _cardCheckLoading = true);
+    try {
+      final resp = await http.get(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/billing/payment-methods/$hw'),
+        headers: {
+          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+      );
+      if (resp.statusCode == 200) {
+        final body = jsonDecode(resp.body);
+        final methods = List<Map<String, dynamic>>.from(body['payment_methods'] ?? []);
+        final hasCard = methods.any((m) => (m['type'] ?? 'card') == 'card');
+        if (mounted) setState(() => _hasCardOnFile = hasCard);
+      }
+    } catch (e) {
+      debugLog('Card check failed: $e');
+    }
+    if (mounted) setState(() => _cardCheckLoading = false);
+  }
+
+  Future<void> _launchAddCardCheckout() async {
+    final hw = (widget.currentUserProfile?['hardware_id'] ?? '').toString();
+    final token = (widget.currentUserProfile?['token'] ?? '').toString();
+    if (hw.isEmpty) return;
+    try {
+      final resp = await http.post(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/billing/payment-method/add-checkout'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({'user_id': hw, 'method_type': 'card'}),
+      );
+      if (resp.statusCode == 200) {
+        final url = jsonDecode(resp.body)['checkout_url']?.toString();
+        if (url != null && url.isNotEmpty) {
+          await launchCheckoutUrl(url);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('After saving your card, return here and tap Refresh.'),
+                backgroundColor: Color(0xFF4ECDC4),
+              ),
+            );
+          }
+        }
+      } else {
+        final err = jsonDecode(resp.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(err['detail']?.toString() ?? 'Could not open card setup'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Card setup error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   void _requestMonthOverview() {
@@ -11725,47 +11841,119 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
 
   void _showBookingIntakeDialog(String start, String end) {
     final noteCtrl = TextEditingController();
+    var localConsent = _paymentConsent;
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF111111),
-        title: const Text('Session Note', style: TextStyle(color: Color(0xFFC9A962))),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Anything your coach should know before this session? (optional)', style: TextStyle(color: Colors.grey, fontSize: 13)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: noteCtrl,
-              maxLines: 3,
-              maxLength: 300,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Topics, goals, or concerns...',
-                hintStyle: const TextStyle(color: Colors.grey),
-                filled: true, fillColor: const Color(0xFF1A1A1A),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          final fee = _coachFee;
+          final feeLabel = (fee != null && fee > 0)
+              ? '\$${fee.toStringAsFixed(fee == fee.roundToDouble() ? 0 : 2)}'
+              : 'your coach\'s rate';
+          final canBook = localConsent && _hasCardOnFile && !_cardCheckLoading;
+          return AlertDialog(
+            backgroundColor: const Color(0xFF111111),
+            title: const Text('Confirm booking', style: TextStyle(color: Color(0xFFC9A962))),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Session rate: $feeLabel',
+                    style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 15, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(_paymentPolicy, style: const TextStyle(color: Colors.grey, fontSize: 12, height: 1.35)),
+                  const SizedBox(height: 12),
+                  if (!_hasCardOnFile) ...[
+                    const Text(
+                      'A card on file is required before booking.',
+                      style: TextStyle(color: Color(0xFFEF4444), fontSize: 12),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton(
+                      onPressed: () async {
+                        await _launchAddCardCheckout();
+                      },
+                      style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFF4ECDC4)),
+                      child: const Text('Add payment card'),
+                    ),
+                    TextButton(
+                      onPressed: () async {
+                        await _refreshCardOnFile();
+                        setLocal(() {});
+                      },
+                      child: Text(
+                        _cardCheckLoading ? 'Checking…' : 'I added my card — Refresh',
+                        style: const TextStyle(color: Color(0xFFC9A962), fontSize: 12),
+                      ),
+                    ),
+                  ] else
+                    const Text(
+                      'Card on file: ready',
+                      style: TextStyle(color: Color(0xFF4ADE80), fontSize: 12),
+                    ),
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: localConsent,
+                    activeColor: const Color(0xFFC9A962),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: const Text(
+                      'I agree to the payment and cancellation policy above',
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                    onChanged: (v) => setLocal(() => localConsent = v ?? false),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Anything your coach should know before this session? (optional)',
+                    style: TextStyle(color: Colors.grey, fontSize: 13),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: noteCtrl,
+                    maxLines: 3,
+                    maxLength: 300,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'Topics, goals, or concerns...',
+                      hintStyle: const TextStyle(color: Colors.grey),
+                      filled: true,
+                      fillColor: const Color(0xFF1A1A1A),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _confirmBookSession(start, end, '');
-            },
-            child: const Text('Skip', style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962), foregroundColor: Colors.black),
-            onPressed: () {
-              Navigator.pop(ctx);
-              _confirmBookSession(start, end, noteCtrl.text.trim());
-            },
-            child: const Text('Book Session'),
-          ),
-        ],
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: canBook ? const Color(0xFFC9A962) : Colors.grey,
+                  foregroundColor: Colors.black,
+                ),
+                onPressed: !canBook
+                    ? null
+                    : () {
+                        setState(() => _paymentConsent = true);
+                        Navigator.pop(ctx);
+                        _confirmBookSession(start, end, noteCtrl.text.trim());
+                      },
+                child: const Text('Book Session'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -11777,6 +11965,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
       "coach_id": _coachId,
       "scheduled_start": start,
       "scheduled_end": end,
+      "payment_consent": true,
     };
     if (intakeNote.isNotEmpty) payload["intake_note"] = intakeNote;
     _socket?.sink.add(jsonEncode(payload));
@@ -11927,6 +12116,11 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
                     const Text('YOUR COACH', style: TextStyle(color: Colors.grey, fontSize: 10, letterSpacing: 1.2)),
                     const SizedBox(height: 2),
                     Text(coachName, style: const TextStyle(color: Color(0xFFC9A962), fontSize: 16, fontWeight: FontWeight.bold)),
+                    if (_coachFee != null && _coachFee! > 0)
+                      Text(
+                        'Session rate: \$${_coachFee!.toStringAsFixed(_coachFee == _coachFee!.roundToDouble() ? 0 : 2)}',
+                        style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 12),
+                      ),
                   ],
                 )),
                 TextButton(
@@ -11936,6 +12130,47 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
               ],
             ),
           ),
+          if (!_hasCardOnFile)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A1510),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.5)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Payment card required to book',
+                    style: TextStyle(color: Color(0xFFE8D5A3), fontWeight: FontWeight.w600, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Add a card before requesting a session. You are charged after your coach accepts, in the 72-hour window before the appointment.',
+                    style: TextStyle(color: Colors.grey, fontSize: 11, height: 1.3),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: _launchAddCardCheckout,
+                        child: const Text('Add card', style: TextStyle(color: Color(0xFF4ECDC4))),
+                      ),
+                      TextButton(
+                        onPressed: _refreshCardOnFile,
+                        child: Text(
+                          _cardCheckLoading ? 'Checking…' : 'Refresh',
+                          style: const TextStyle(color: Color(0xFFC9A962)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           const Text('UPCOMING SESSIONS', style: TextStyle(color: Colors.grey, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
           const SizedBox(height: 12),
           if (_upcomingSessions.isEmpty)

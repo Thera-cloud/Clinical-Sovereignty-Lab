@@ -14815,6 +14815,10 @@ async def handle_client(websocket, path=None):
                                 coaching_fee = _p.get("coaching_fee") or 0
                                 zoom_link = _p.get("zoom_link") or ""
                                 break
+                        try:
+                            from app.services.session_booking_billing import SESSION_PAYMENT_POLICY as _pay_pol
+                        except Exception:
+                            _pay_pol = ""
                         await websocket.send(json.dumps({
                             "type": "coach_info",
                             "coach_id": coach_id,
@@ -14823,6 +14827,7 @@ async def handle_client(websocket, path=None):
                             "specializations": specializations,
                             "coaching_fee": coaching_fee,
                             "zoom_link": zoom_link,
+                            "payment_policy": _pay_pol,  # QUANTUM-CRYSTAL-ARCH
                         }))
 
             # === CLIENT: BOOK SESSION ===
@@ -14926,7 +14931,38 @@ async def handle_client(websocket, path=None):
                                         break
                                 coach_fee = float((coach_profile or {}).get("coaching_fee", 0))
                                 fee_info = calculate_platform_fee(coach_fee) if coach_fee > 0 else {"coach_fee": 0, "platform_fee": 0, "coach_payout": 0}
-                                
+                                # QUANTUM-CRYSTAL-ARCH: session booking billing — card + consent before book
+                                _price_cents = int(round(coach_fee * 100)) if coach_fee > 0 else 0
+                                try:
+                                    from app.services.session_booking_billing import (
+                                        booking_billing_enabled,
+                                        client_has_card_on_file,
+                                        SESSION_PAYMENT_POLICY,
+                                    )
+                                    if booking_billing_enabled() and _price_cents > 0:
+                                        if not d.get("payment_consent"):
+                                            await websocket.send(json.dumps({
+                                                "type": "error",
+                                                "message": "PAYMENT_CONSENT_REQUIRED",
+                                                "detail": SESSION_PAYMENT_POLICY,
+                                            }))
+                                            continue
+                                        if not db_pool or not await client_has_card_on_file(db_pool, client_id):
+                                            await websocket.send(json.dumps({
+                                                "type": "error",
+                                                "message": "CARD_REQUIRED",
+                                                "detail": "Add a payment card before booking a session.",
+                                            }))
+                                            continue
+                                except Exception as _bill_e:
+                                    print(f">>> [BOOKING] billing gate failed: {_bill_e}")
+                                    await websocket.send(json.dumps({
+                                        "type": "error",
+                                        "message": "BOOKING_FAILED",
+                                        "detail": "Payment verification failed. Please try again.",
+                                    }))
+                                    continue
+
                                 new_session = {
                                     "session_id": session_id,
                                     "client_id": client_id,
@@ -14957,6 +14993,8 @@ async def handle_client(websocket, path=None):
                                     "coach_fee": fee_info["coach_fee"],
                                     "platform_fee": fee_info["platform_fee"],
                                     "coach_payout": fee_info["coach_payout"],
+                                    "price_cents": _price_cents,
+                                    "payment_status": "pending" if _price_cents > 0 else "waived",
                                 }
 
                                 # QUANTUM-CRYSTAL-ARCH: coach auto-accept setting skips pending approval
@@ -15639,6 +15677,17 @@ async def handle_client(websocket, path=None):
                                     break
                             if found:
                                 save_json_file(SESSIONS_FILE, sessions)
+                                # QUANTUM-CRYSTAL-ARCH: refund if paid and cancel ≥24h before start
+                                _refund_outcome, _refund_detail = "skipped", ""
+                                if db_pool and cancelled_session:
+                                    try:
+                                        from app.services.session_booking_billing import refund_on_client_cancel
+                                        _refund_outcome, _refund_detail = await refund_on_client_cancel(
+                                            db_pool, cancelled_session
+                                        )
+                                        print(f">>> [CANCEL] refund={_refund_outcome} {_refund_detail}")
+                                    except Exception as _rf_e:
+                                        print(f">>> [CANCEL] refund skipped: {_rf_e}")
                                 # QUANTUM-CRYSTAL-ARCH: PG dual-write so the cancellation frees the slot everywhere
                                 if db_pool and cancelled_session:
                                     try:
@@ -15646,7 +15695,12 @@ async def handle_client(websocket, path=None):
                                         await upsert_session_pg(db_pool, cancelled_session)
                                     except Exception as _pg_e:
                                         print(f">>> [CANCEL] PG upsert failed (non-blocking): {_pg_e}")
-                                await websocket.send(json.dumps({"type": "session_cancelled", "session_id": session_id}))
+                                await websocket.send(json.dumps({
+                                    "type": "session_cancelled",
+                                    "session_id": session_id,
+                                    "refund_status": _refund_outcome,
+                                    "refund_detail": _refund_detail,
+                                }))
                                 # Fire-and-forget Google Calendar delete for both participants.
                                 try:
                                     from app.services.google_calendar_session_sync import (

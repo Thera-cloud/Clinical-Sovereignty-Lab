@@ -454,12 +454,15 @@ async def _get_stripe_customer(user_id: str, db_pool=None) -> Optional[str]:
         try:
             async with db_pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    """SELECT profile_data->>'stripe_customer_id' as stripe_cid
+                    """SELECT stripe_customer_id,
+                              profile_data->>'stripe_customer_id' as stripe_cid
                        FROM users WHERE hardware_id = $1 AND deleted_at IS NULL LIMIT 1""",
                     user_id,
                 )
-                if row and row["stripe_cid"]:
-                    return row["stripe_cid"]
+                if row:
+                    cid = row["stripe_customer_id"] or row["stripe_cid"]
+                    if cid:
+                        return cid
         except Exception as e:
             logger.warning("_get_stripe_customer: PG lookup failed for %s: %s", user_id, e)
 
@@ -2202,7 +2205,13 @@ async def payment_method_add_checkout(body: PaymentMethodCheckoutRequest, reques
             if pool:
                 async with pool.acquire() as conn:
                     await conn.execute(
-                        "UPDATE users SET stripe_customer_id = $1 WHERE hardware_id = $2",
+                        """UPDATE users SET
+                             stripe_customer_id = $1,
+                             profile_data = jsonb_set(
+                               COALESCE(profile_data, '{}'::jsonb),
+                               '{stripe_customer_id}', to_jsonb($1::text)
+                             )
+                           WHERE hardware_id = $2""",
                         customer_id, body.user_id,
                     )
         except stripe.error.StripeError as e:
