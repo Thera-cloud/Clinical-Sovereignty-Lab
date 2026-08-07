@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """Paid WS smoke: book → approve → agent charge → cancel refund.
 
-Prereqs (set by this script when RUN_PREP=1):
-  - audit_coach coaching_fee = 30 (agent MIN_FEE_CENTS)
-  - audit_client temporarily uses paula182 stripe customer (has card)
-  - bridge restarted after profile updates
+Uses ONLY audit_client's own Stripe customer + card on file.
+Never borrows another client's payment method / customer id.
+
+Prereqs:
+  - audit_client must already have a dedicated card on its own Stripe customer
+  - RUN_PREP=1 sets audit_coach coaching_fee=$30 (agent MIN_FEE_CENTS) and restarts bridge
+
+If audit_client has no card, the script exits with instructions — it does not
+attach or reuse any real client's card.
 
 Slot is ~48h out (inside 72h charge window, outside 24h no-refund window).
 
@@ -34,9 +39,6 @@ CLIENT_HW = "audit_client_hw"
 COACH_USER = "audit_coach"
 COACH_PASS = os.getenv("AUDIT_COACH_PASSWORD", "AuditCoach2026!")
 COACH_HW = "audit_coach_hw"
-PAULA_CUS = "cus_UPPrds1ofdAu5T"
-AUDIT_CUS_ORIG = "cus_UI9atNfwmvCWXk"
-FEE_DOLLARS = "30"
 RUN_PREP = os.getenv("RUN_PREP", "1") == "1"
 RESTORE = os.getenv("RESTORE", "1") == "1"
 
@@ -92,24 +94,49 @@ def _slot_48h() -> tuple[str, str]:
     return start.isoformat().replace("+00:00", "Z"), end.isoformat().replace("+00:00", "Z")
 
 
+def audit_client_has_own_card() -> tuple[bool, str]:
+    """True only if audit_client's own Stripe customer has a card. Never reassigns customers."""
+    cus = _pg(
+        "SELECT COALESCE(stripe_customer_id, profile_data->>'stripe_customer_id') "
+        "FROM users WHERE username='audit_client' AND role='CLIENT' LIMIT 1"
+    )
+    if not cus or not cus.startswith("cus_"):
+        return False, "audit_client has no stripe_customer_id"
+    out = _sh(
+        "docker exec nate_backend python3 -c "
+        + json.dumps(
+            "import os,stripe; stripe.api_key=os.environ.get('STRIPE_SECRET_KEY',''); "
+            f"pms=stripe.PaymentMethod.list(customer={cus!r}, type='card', limit=1); "
+            "print(len(pms.data))"
+        )
+    )
+    try:
+        n = int((out.splitlines()[-1] if out else "0").strip())
+    except ValueError:
+        return False, f"stripe list failed: {out[:200]}"
+    if n < 1:
+        return False, (
+            f"audit_client customer {cus} has 0 cards. "
+            "Attach a dedicated test card to audit_client only — "
+            "do not reuse any real client's card."
+        )
+    return True, f"{cus} cards={n}"
+
+
 def prep():
-    print("[*] PREP: set audit_coach fee=$30; borrow paula Stripe customer for audit_client")
+    print("[*] PREP: set audit_coach fee=$30 (no Stripe customer reassignment)")
+    ok, detail = audit_client_has_own_card()
+    if not ok:
+        raise SystemExit(f"ABORT paid smoke: {detail}")
+    print(f"[*] card check OK: {detail}")
     _pg(
         "UPDATE users SET profile_data = jsonb_set("
         "COALESCE(profile_data,'{}'::jsonb), '{coaching_fee}', '30'::jsonb) "
         "WHERE username='audit_coach' AND role='COACH'"
     )
-    _pg(
-        "UPDATE users SET stripe_customer_id = "
-        f"'{PAULA_CUS}', "
-        "profile_data = jsonb_set(COALESCE(profile_data,'{}'::jsonb), "
-        f"'{{stripe_customer_id}}', '\"{PAULA_CUS}\"') "
-        "WHERE username='audit_client' AND role='CLIENT'"
-    )
     print(_pg(
-        "SELECT username, profile_data->>'coaching_fee', "
-        "COALESCE(stripe_customer_id, profile_data->>'stripe_customer_id') "
-        "FROM users WHERE username IN ('audit_client','audit_coach')"
+        "SELECT username, profile_data->>'coaching_fee' "
+        "FROM users WHERE username IN ('audit_client','audit_coach') ORDER BY 1"
     ))
     print("[*] Restarting bridge for registry cache")
     _sh("cd /opt/clinical-sovereignty-lab && bash scripts/safe_deploy.sh bridge")
@@ -117,14 +144,7 @@ def prep():
 
 
 def restore():
-    print("[*] RESTORE: audit_client stripe + clear audit_coach fee")
-    _pg(
-        "UPDATE users SET stripe_customer_id = "
-        f"'{AUDIT_CUS_ORIG}', "
-        "profile_data = jsonb_set(COALESCE(profile_data,'{}'::jsonb), "
-        f"'{{stripe_customer_id}}', '\"{AUDIT_CUS_ORIG}\"') "
-        "WHERE username='audit_client' AND role='CLIENT'"
-    )
+    print("[*] RESTORE: clear audit_coach fee only")
     _pg(
         "UPDATE users SET profile_data = profile_data - 'coaching_fee' "
         "WHERE username='audit_coach' AND role='COACH'"
@@ -155,7 +175,6 @@ async def login(session, username, password, role, hw):
 
 
 def trigger_charge_cycle() -> str:
-    """Run one SessionPaymentAgent cycle inside backend container."""
     return _sh(
         "docker exec -e PYTHONPATH=/app nate_backend "
         "python3 /app/scripts/run_session_payment_cycle_once.py"
@@ -168,6 +187,11 @@ async def main() -> int:
     try:
         if RUN_PREP:
             prep()
+        else:
+            ok, detail = audit_client_has_own_card()
+            if not ok:
+                raise SystemExit(f"ABORT paid smoke: {detail}")
+            print(f"[*] card check OK: {detail}")
 
         start, end = _slot_48h()
         print(f"[*] paid smoke slot {start} → {end}")
@@ -233,7 +257,13 @@ async def main() -> int:
             cancelled = await _recv_until(cws, {"session_cancelled", "error"}, 45)
             refund = cancelled.get("refund_status", "")
             ok_ref = cancelled.get("type") == "session_cancelled" and refund == "refunded"
-            results.append(("cancel_refund", ok_ref, f"refund={refund} detail={cancelled.get('refund_detail')}"))
+            results.append(
+                (
+                    "cancel_refund",
+                    ok_ref,
+                    f"refund={refund} detail={cancelled.get('refund_detail')}",
+                )
+            )
 
             pg_final = _pg(
                 "SELECT status || '|' || payment_status "
@@ -247,7 +277,6 @@ async def main() -> int:
 
         if session_id:
             _pg(f"DELETE FROM coaching_sessions WHERE session_id='{session_id}'")
-            # Best-effort JSON cleanup via temp script (avoid -c quoting pitfalls).
             cleaner = (
                 "import json\n"
                 "p='/opt/clinical-sovereignty-lab/data/bridge/sessions.json'\n"
