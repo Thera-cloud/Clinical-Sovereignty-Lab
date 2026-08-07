@@ -1931,18 +1931,31 @@ async def audit_therapeutic_response(
 
             _floor_mode = await effective_structural_floor_mode(db_pool)
             _floor_user_text = audit_metadata.get("user_text_for_audit") or ""
+            # QUANTUM-CRYSTAL-ARCH — per-generation shadow needs scenario_id
+            # (live_stack_blinds stamps it; production chat leaves None).
+            _floor_scenario_id = (
+                (audit_metadata.get("scenario_id") or "").strip() or None
+            )
+            _floor_source = (
+                (audit_metadata.get("structural_floor_source") or "").strip()
+                or (
+                    "audit_therapeutic_response_shadow"
+                    if _floor_mode == "shadow"
+                    else "audit_therapeutic_response_enforce"
+                )
+            )
 
             if _floor_mode == "shadow":
-                import asyncio as _floor_asyncio
-
-                _floor_asyncio.create_task(
-                    log_structural_floor_check(
-                        db_pool,
-                        response_text=final_text,
-                        user_text=_floor_user_text,
-                        turn_class=_floor_turn_class,
-                        source="audit_therapeutic_response_shadow",
-                    )
+                # Await (not create_task): observation window must persist
+                # envelopes before the request returns — fire-and-forget
+                # dropped live-stack rows with sid=None / zero writes.
+                await log_structural_floor_check(
+                    db_pool,
+                    response_text=final_text,
+                    user_text=_floor_user_text,
+                    turn_class=_floor_turn_class,
+                    scenario_id=_floor_scenario_id,
+                    source=_floor_source,
                 )
             elif _floor_mode in ("enforce_with_alert", "enforce_quiet"):
                 _floor_result = await log_structural_floor_check(
@@ -1950,7 +1963,8 @@ async def audit_therapeutic_response(
                     response_text=final_text,
                     user_text=_floor_user_text,
                     turn_class=_floor_turn_class,
-                    source="audit_therapeutic_response_enforce",
+                    scenario_id=_floor_scenario_id,
+                    source=_floor_source,
                 )
                 if _floor_result and not _floor_result.get("floor_met"):
                     _missing = [

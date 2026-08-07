@@ -70,6 +70,9 @@ def test_live_stack_blinds_threads_scenario_id_for_exclusion():
     assert "scenario_id: Optional[str] = None" in src
     assert 'scenario_id=str(r["scenario_id"] or "")' in src
     assert "exclude_source_scenario=scenario_id" in src
+    # Entry 41 — floor shadow envelopes must be per-generation.
+    assert 'audit_meta["scenario_id"]' in src
+    assert 'structural_floor_source"] = "live_stack_blinds"' in src
 
 
 def test_therapeutic_controller_threads_exclude_source_scenario():

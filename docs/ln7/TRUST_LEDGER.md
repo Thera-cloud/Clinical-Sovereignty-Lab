@@ -2428,3 +2428,33 @@ Fixed before this run: `--judge-id grok-judge-v6` → `judge_version=v6`.
 - DB stamp: `score_entry_source = v2_battery_gold_frozen_f5a13aff` on **70** scored v2 rows
 - Principal-Review re-score → 409 when that prefix is set
 
+
+## Entry 41 — 2026-08-07 — Floor observation wire + 115-row replay (pre-RED)
+
+### Board (post–Entry 40)
+
+- Measurement arc closed: κ=0.232 ran, κ<0.55 branch fired, v2 gold frozen.
+- **v7 authorized** — inversion gate first, then scalars on structurally-valid
+  rows; accuracy spec rebuilt from today's Principal Guide act list; fresh
+  held-out from +1 stems (difficulty spread). Set stays burned — no reopen.
+- Veto 0-miss remains the certification-grade truth; screener-only.
+- `WEEKLY_LIVE=false`. CEO memos unchanged.
+- Floor path: **wire envelopes → 115-row replay → RED review → enforce-with-alert**.
+
+### Action 1 — Wire envelope writes (observation layer)
+
+`live_stack_blinds.run_live_stack_turn` now stamps `audit_metadata.scenario_id`
++ `structural_floor_source=live_stack_blinds`. `audit_therapeutic_response`
+passes `scenario_id` into `log_structural_floor_check` and **awaits** the
+shadow write (create_task dropped live-stack observation). Without this,
+shadow that doesn't record per-generation isn't shadow.
+
+### Action 2 — Full-width replay
+
+Script: `backend/scripts/replay_structural_floor_live_scored.py`
+(results filled after GREEN run).
+
+### RESULTS (115-row replay)
+
+_pending_
+

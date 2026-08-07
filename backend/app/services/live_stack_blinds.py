@@ -163,6 +163,11 @@ async def run_live_stack_turn(
     audit_meta = dict(pack.get("audit_metadata") or {})
     audit_meta.setdefault("max_tokens", max_tok)
     audit_meta.setdefault("user_text_for_audit", (user_text or "")[:800])
+    # QUANTUM-CRYSTAL-ARCH — Gate 2 observation: stamp scenario_id so
+    # structural_verifier_floor envelopes are per-generation (not sid=None).
+    if scenario_id:
+        audit_meta["scenario_id"] = str(scenario_id)[:64]
+        audit_meta["structural_floor_source"] = "live_stack_blinds"
     audit = await audit_therapeutic_response(
         response_text=(text or "").strip(),
         audit_metadata=audit_meta,

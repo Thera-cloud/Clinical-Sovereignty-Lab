@@ -82,10 +82,11 @@ def test_mode_off_default_never_calls_floor_check(monkeypatch):
 
 
 def test_mode_shadow_logs_but_never_mutates_response(monkeypatch):
-    calls = {"n": 0}
+    calls = {"n": 0, "kwargs": None}
 
     async def _fake_log_check(*args, **kwargs):
         calls["n"] += 1
+        calls["kwargs"] = kwargs
         return {"floor_met": False, "floor_checks": {"naming_or_assessment": False}}
 
     monkeypatch.setattr(
@@ -96,11 +97,16 @@ def test_mode_shadow_logs_but_never_mutates_response(monkeypatch):
 
     out = _run_async(
         audit_therapeutic_response(
-            "I hear you, that sounds heavy.", _meta(), "client1", None,
+            "I hear you, that sounds heavy.",
+            _meta(scenario_id="AQ-2", structural_floor_source="live_stack_blinds"),
+            "client1",
+            None,
         )
     )
-    # Fire-and-forget task — give the loop one tick to run it.
-    _run_async(asyncio.sleep(0))
+    # Shadow path now awaits the envelope write (observation window).
+    assert calls["n"] == 1
+    assert calls["kwargs"]["scenario_id"] == "AQ-2"
+    assert calls["kwargs"]["source"] == "live_stack_blinds"
     assert out["response_text"] == "I hear you, that sounds heavy."
 
 
