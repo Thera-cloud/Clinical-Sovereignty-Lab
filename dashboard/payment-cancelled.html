@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Payment Not Completed — Sovereign Sanctuary</title>
+<title>Card Setup Cancelled — Sovereign Sanctuary</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #050505; color: #E8D5A3; font-family: 'DM Sans', system-ui, sans-serif;
@@ -11,17 +11,31 @@
   .card { max-width: 420px; padding: 48px 32px; }
   .icon { font-size: 64px; margin-bottom: 24px; }
   h1 { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 28px; color: #C9A962; margin-bottom: 12px; }
-  p { font-size: 16px; color: #888; line-height: 1.5; margin-bottom: 24px; }
-  .subtle { font-size: 13px; color: #555; }
+  p { font-size: 16px; color: #888; line-height: 1.5; margin-bottom: 16px; }
+  .subtle { font-size: 13px; color: #555; margin-bottom: 24px; }
+  a.btn { display: inline-block; padding: 12px 22px; background: #C9A962; color: #050505;
+    text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; }
 </style>
 </head>
 <body>
 <div class="card">
   <div class="icon">&#8635;</div>
-  <h1>Payment Not Completed</h1>
-  <p>No charges were made. Return to the app to try again.</p>
-  <p class="subtle">You can close this tab and return to the app.</p>
+  <h1>Card Setup Cancelled</h1>
+  <p>No card was saved and no charges were made.</p>
+  <p class="subtle">Return to Schedule and tap <strong>Add card</strong> when you are ready.</p>
+  <a class="btn" id="continue" href="https://app.sovereignsanctuary.net/?card_setup=cancelled">Return to app</a>
 </div>
-<script>setTimeout(function(){ window.location = 'sovereignsanctuary://payment-cancelled'; }, 2000);</script>
+<script>
+(function () {
+  var dest = 'https://app.sovereignsanctuary.net/?card_setup=cancelled';
+  var host = (location.hostname || '').toLowerCase();
+  if (host.indexOf('coach.') === 0) {
+    dest = 'https://coach.sovereignsanctuary.net/?card_setup=cancelled';
+  }
+  var link = document.getElementById('continue');
+  if (link) link.href = dest;
+  setTimeout(function () { location.replace(dest); }, 2000);
+})();
+</script>
 </body>
 </html>

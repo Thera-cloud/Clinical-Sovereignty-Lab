@@ -2181,6 +2181,7 @@ async def payment_method_add_checkout(body: PaymentMethodCheckoutRequest, reques
     pool = getattr(request.app.state, "db_pool", None)
     customer_id = None
     username = ""
+    email = ""
 
     if pool:
         async with pool.acquire() as conn:
@@ -2190,32 +2191,47 @@ async def payment_method_add_checkout(body: PaymentMethodCheckoutRequest, reques
                 body.user_id,
             )
             if row:
-                customer_id = row["stripe_customer_id"]
+                customer_id = (row["stripe_customer_id"] or "").strip() or None
                 username = row["username"] or ""
                 email = row["email"] or ""
 
     if not customer_id:
         try:
-            customer = stripe.Customer.create(
-                email=email if 'email' in dir() else None,
-                name=username or body.user_id,
-                metadata={"user_id": body.user_id},
-            )
-            customer_id = customer.id
+            # Reuse an existing Stripe customer for this email when present
+            # (prior add-checkout attempts may have created one before DB write failed).
+            if email:
+                existing = stripe.Customer.list(email=email, limit=1)
+                if existing.data:
+                    customer_id = existing.data[0].id
+            if not customer_id:
+                customer = stripe.Customer.create(
+                    email=email or None,
+                    name=username or body.user_id,
+                    metadata={"user_id": body.user_id, "username": username},
+                )
+                customer_id = customer.id
             if pool:
                 async with pool.acquire() as conn:
+                    # Separate params avoid asyncpg AmbiguousParameterError
+                    # (varchar column vs to_jsonb text cast on the same $1).
                     await conn.execute(
                         """UPDATE users SET
                              stripe_customer_id = $1,
                              profile_data = jsonb_set(
                                COALESCE(profile_data, '{}'::jsonb),
-                               '{stripe_customer_id}', to_jsonb($1::text)
+                               '{stripe_customer_id}', to_jsonb($2::text)
                              )
-                           WHERE hardware_id = $2""",
-                        customer_id, body.user_id,
+                           WHERE hardware_id = $3""",
+                        customer_id, customer_id, body.user_id,
                     )
         except stripe.error.StripeError as e:
             raise HTTPException(400, f"Failed to create Stripe customer: {e}")
+        except Exception as e:
+            logger.warning("payment_method_add_checkout customer persist failed: %s", e)
+            raise HTTPException(500, f"Failed to save billing account: {e}")
+
+    if not customer_id:
+        raise HTTPException(400, "No Stripe customer available for this user")
 
     method_type = body.method_type.lower()
     if method_type == "bank":
@@ -2228,8 +2244,26 @@ async def payment_method_add_checkout(body: PaymentMethodCheckoutRequest, reques
             customer=customer_id,
             mode="setup",
             payment_method_types=payment_method_types,
-            success_url="https://app.sovereignsanctuary.net/payment-complete",
-            cancel_url="https://app.sovereignsanctuary.net/payment-cancelled",
+            success_url=(
+                "https://app.sovereignsanctuary.net/payment-complete"
+                "?card_setup=complete"
+            ),
+            cancel_url=(
+                "https://app.sovereignsanctuary.net/payment-cancelled"
+                "?card_setup=cancelled"
+            ),
+            setup_intent_data={
+                "metadata": {
+                    "user_id": body.user_id,
+                    "username": username,
+                    "purpose": "session_booking_card",
+                },
+            },
+            metadata={
+                "user_id": body.user_id,
+                "username": username,
+                "purpose": "session_booking_card",
+            },
         )
         return {"checkout_url": session.url, "session_id": session.id}
     except stripe.error.StripeError as e:

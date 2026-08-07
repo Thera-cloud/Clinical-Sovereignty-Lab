@@ -3,25 +3,39 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Payment Confirmed — Sovereign Sanctuary</title>
+<title>Card Saved — Sovereign Sanctuary</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #050505; color: #E8D5A3; font-family: 'DM Sans', system-ui, sans-serif;
     display: flex; align-items: center; justify-content: center; min-height: 100vh; text-align: center; }
   .card { max-width: 420px; padding: 48px 32px; }
-  .icon { font-size: 64px; margin-bottom: 24px; }
+  .icon { font-size: 64px; margin-bottom: 24px; color: #4ADE80; }
   h1 { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 28px; color: #C9A962; margin-bottom: 12px; }
-  p { font-size: 16px; color: #888; line-height: 1.5; margin-bottom: 24px; }
-  .subtle { font-size: 13px; color: #555; }
+  p { font-size: 16px; color: #888; line-height: 1.5; margin-bottom: 16px; }
+  .subtle { font-size: 13px; color: #555; margin-bottom: 24px; }
+  a.btn { display: inline-block; padding: 12px 22px; background: #C9A962; color: #050505;
+    text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; }
 </style>
 </head>
 <body>
 <div class="card">
   <div class="icon">&#10003;</div>
-  <h1>Payment Confirmed</h1>
-  <p>Return to the app to continue your journey.</p>
-  <p class="subtle">You can close this tab and return to the app.</p>
+  <h1>Card Saved</h1>
+  <p>Your payment method was saved. Return to Schedule to book your session.</p>
+  <p class="subtle">If booking still asks for a card, tap <strong>Refresh</strong> on the payment banner.</p>
+  <a class="btn" id="continue" href="https://app.sovereignsanctuary.net/?card_setup=complete">Continue to app</a>
 </div>
-<script>setTimeout(function(){ window.location = 'sovereignsanctuary://payment-complete'; }, 2000);</script>
+<script>
+(function () {
+  var dest = 'https://app.sovereignsanctuary.net/?card_setup=complete';
+  var host = (location.hostname || '').toLowerCase();
+  if (host.indexOf('coach.') === 0) {
+    dest = 'https://coach.sovereignsanctuary.net/?card_setup=complete';
+  }
+  var link = document.getElementById('continue');
+  if (link) link.href = dest;
+  setTimeout(function () { location.replace(dest); }, 1600);
+})();
+</script>
 </body>
 </html>

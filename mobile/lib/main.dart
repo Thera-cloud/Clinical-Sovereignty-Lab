@@ -11088,7 +11088,8 @@ class ClientScheduleScreen extends StatefulWidget {
   State<ClientScheduleScreen> createState() => _ClientScheduleScreenState();
 }
 
-class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
+class _ClientScheduleScreenState extends State<ClientScheduleScreen>
+    with WidgetsBindingObserver {
   WebSocketChannel? _socket;
   StreamSubscription<dynamic>? _hubSub;
   final String _serverUrl = defaultWsUrl;
@@ -11168,6 +11169,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   bool _hasCardOnFile = false;
   bool _cardCheckLoading = false;
   bool _paymentConsent = false;
+  Timer? _cardPollTimer;
 
   bool get _hasCoach => _coachId.isNotEmpty;
 
@@ -11191,6 +11193,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _coachId = (widget.currentUserProfile?['coach_id'] ??
             widget.currentUserProfile?['assigned_coach_id'] ??
             '')
@@ -11217,6 +11220,50 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
     }
     _loadingTimeout = Timer(const Duration(seconds: 8), () {
       if (mounted && _isLoading) setState(() => _isLoading = false);
+    });
+    _maybeHandleCardSetupReturn();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _hasCoach) {
+      _refreshCardOnFile();
+    }
+  }
+
+  void _maybeHandleCardSetupReturn() {
+    final flag = (Uri.base.queryParameters['card_setup'] ?? '').toLowerCase();
+    if (flag != 'complete' && flag != '1') return;
+    _pollCardOnFileAfterSetup();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Checking for your saved card…'),
+          backgroundColor: Color(0xFF4ECDC4),
+        ),
+      );
+    });
+  }
+
+  void _pollCardOnFileAfterSetup() {
+    _cardPollTimer?.cancel();
+    var attempts = 0;
+    _refreshCardOnFile();
+    _cardPollTimer = Timer.periodic(const Duration(seconds: 2), (t) async {
+      attempts++;
+      await _refreshCardOnFile();
+      if (!mounted || _hasCardOnFile || attempts >= 6) {
+        t.cancel();
+        if (mounted && _hasCardOnFile) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Card on file — you can book now.'),
+              backgroundColor: Color(0xFF4ADE80),
+            ),
+          );
+        }
+      }
     });
   }
   
@@ -11469,24 +11516,36 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
       if (resp.statusCode == 200) {
         final url = jsonDecode(resp.body)['checkout_url']?.toString();
         if (url != null && url.isNotEmpty) {
+          // Web uses same-tab redirect; native returns here — poll for attached card.
+          if (!kIsWeb) {
+            _pollCardOnFileAfterSetup();
+          }
           await launchCheckoutUrl(url);
-          if (mounted) {
+          if (mounted && !kIsWeb) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('After saving your card, return here and tap Refresh.'),
+                content: Text('After saving your card, return here — we will refresh automatically.'),
                 backgroundColor: Color(0xFF4ECDC4),
               ),
             );
           }
         }
       } else {
-        final err = jsonDecode(resp.body);
+        String detail = 'Could not open card setup (${resp.statusCode})';
+        try {
+          final err = jsonDecode(resp.body);
+          if (err is Map && err['detail'] != null) {
+            detail = err['detail'].toString();
+          }
+        } catch (_) {
+          final raw = resp.body.trim();
+          if (raw.isNotEmpty) {
+            detail = raw.length > 120 ? '${raw.substring(0, 120)}…' : raw;
+          }
+        }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(err['detail']?.toString() ?? 'Could not open card setup'),
-              backgroundColor: Colors.red,
-            ),
+            SnackBar(content: Text(detail), backgroundColor: Colors.red),
           );
         }
       }
@@ -12035,6 +12094,8 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _cardPollTimer?.cancel();
     _loadingTimeout?.cancel();
     _hubSub?.cancel();
     if (_hubSub == null) _socket?.sink.close();

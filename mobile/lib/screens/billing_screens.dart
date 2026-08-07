@@ -2216,10 +2216,21 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
           await launchCheckoutUrl(url);
         }
       } else {
-        final err = jsonDecode(resp.body);
+        String detail = 'Failed to start setup (${resp.statusCode})';
+        try {
+          final err = jsonDecode(resp.body);
+          if (err is Map && err['detail'] != null) {
+            detail = err['detail'].toString();
+          }
+        } catch (_) {
+          final raw = resp.body.trim();
+          if (raw.isNotEmpty) {
+            detail = raw.length > 120 ? '${raw.substring(0, 120)}…' : raw;
+          }
+        }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(err['detail']?.toString() ?? 'Failed to start setup'),
+            content: Text(detail),
             backgroundColor: _D.red,
           ));
         }

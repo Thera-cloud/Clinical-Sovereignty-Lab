@@ -669,6 +669,10 @@ class UserStore:
             profile["login_count"] = row["login_count"]
         if row.get("last_login"):
             profile["last_login"] = str(row["last_login"])
+        # QUANTUM-CRYSTAL-ARCH: column wins over stale/empty profile_data for billing
+        _stripe_cus = row.get("stripe_customer_id")
+        if _stripe_cus:
+            profile["stripe_customer_id"] = _stripe_cus
 
         # Build the registry key (matches old JSON key format)
         role = profile.get("role", "CLIENT").lower()
