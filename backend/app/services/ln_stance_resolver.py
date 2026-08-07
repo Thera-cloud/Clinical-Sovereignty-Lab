@@ -451,14 +451,29 @@ _COACH_HANDOFF_CLOSING_PATTERNS = [
 ]
 
 _WITNESS_FALLBACK = (
-    "What you're describing sounds overwhelming — and it makes sense that it "
-    "landed that hard on you."
+    "What you're carrying is heavy — and it makes sense that it landed that "
+    "hard on you."
 )
 
 _PRESCRIPTION_REFUSAL_FALLBACK = (
-    "I hear you wanting something concrete — I won't hand you a numbered "
+    "You're wanting something concrete — I won't hand you a numbered "
     "homework list, reading list, or script here; that's for your coach. From what "
-    "you've described, your reactions sound proportionate to what you carried."
+    "you've described, your reactions are proportionate to what you carried."
+)
+
+# Ordinary-turn formula openers (strip stem; do NOT replace OVERRIDE 3/4 scripts).
+_FORMULA_OPENER_STEM = re.compile(
+    r"^(?:"
+    r"i hear you(?:[,.!]|\s)|"
+    r"i(?:'m| am) hearing\b|"
+    r"im hearing\b|"
+    r"(?:it|that) sounds like\b|"
+    r"i (?:can )?sense\b|"
+    r"i(?:'m| am) sensing\b|"
+    r"thank you for (?:sharing|telling)\b|"
+    r"i(?:'m| am) here for you\b"
+    r")",
+    re.I,
 )
 
 _DIAGNOSIS_REFUSAL_FALLBACK = (
@@ -921,12 +936,20 @@ def _ends_on_question(text: str) -> bool:
 
 
 def _build_opener_avoidance_block(state: StanceState) -> str:
+    base = (
+        "\nENTRY WORDING: Do not open ordinary turns with "
+        '"I hear you," "I\'m hearing," "It sounds like," "That sounds like," '
+        '"I sense," "I can sense," or "Thank you for sharing." '
+        "Open with the client's concrete content or a named mechanism. "
+        "Keep OVERRIDE 3/4 witnessing / helplessness lead-ins when those fire.\n"
+    )
     if not state.recent_opener_phrases:
-        return ""
+        return base
     lines = "\n".join(f'- "{p}"' for p in state.recent_opener_phrases[-5:])
     return (
-        "\nDO NOT reuse these recent opening phrasings (use different words):\n"
-        f"{lines}\n"
+        base
+        + "DO NOT reuse these recent opening phrasings (use different words):\n"
+        + f"{lines}\n"
     )
 
 
@@ -1754,6 +1777,7 @@ def apply_post_generation_guards(
 
     run("framing_menu", lambda t: guard_framing_menu(t, st_dec.move))
     run("stale_opener", lambda t: guard_stale_opener(t, state))
+    run("formula_opener", lambda t: guard_formula_opener(t))
     run("generated_closer", lambda t: guard_generated_closer(t, st_dec, state))
     text = guard_boundary_content(text, user_text, state, hits=hits)
     return text, hits
@@ -1817,6 +1841,32 @@ def guard_stale_opener(text: str, state: StanceState) -> str:
         return _WITNESS_FALLBACK
     remainder = " ".join(sentences[1:]).strip()
     return remainder if remainder else _WITNESS_FALLBACK
+
+
+def guard_formula_opener(text: str) -> str:
+    """Strip formula empathy stems from the first sentence; keep clinical body.
+
+    Does not invent replacement therapy language. Does not rewrite OVERRIDE 3/4
+    scripted lead-ins (those do not match _FORMULA_OPENER_STEM).
+    """
+    if not text or not text.strip():
+        return text
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    first = sentences[0].strip()
+    if not _FORMULA_OPENER_STEM.match(first):
+        return text
+    # Drop stem only; keep the rest of the first sentence when substantive.
+    remainder_first = _FORMULA_OPENER_STEM.sub("", first, count=1).strip(" ,—–-")
+    if remainder_first:
+        remainder_first = remainder_first[0].upper() + remainder_first[1:]
+    rest = " ".join(sentences[1:]).strip()
+    if remainder_first and rest:
+        return f"{remainder_first} {rest}"
+    if remainder_first:
+        return remainder_first
+    if rest:
+        return rest
+    return text  # never gut a single-sentence clinical turn to empty
 
 
 def _maybe_reset_position_thread(

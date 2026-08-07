@@ -510,6 +510,11 @@ _BANNED_REPLACEMENTS: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"\baching\b", re.I), "raw"),
     (re.compile(r"\btender place\b", re.I), "sore spot"),
     (re.compile(r"\bI hear you\b", re.I), "That lands"),
+    # Formula openers — strip stem only; keep the clinical clause that follows.
+    (re.compile(r"^(?:It|That) sounds like\s+", re.I | re.M), ""),
+    (re.compile(r"^I(?:'m| am) hearing(?:\s+that)?\s+", re.I | re.M), ""),
+    (re.compile(r"^I (?:can )?sense(?:\s+that)?\s+", re.I | re.M), ""),
+    (re.compile(r"^Thank you for (?:sharing|telling)[^.!?]*[.!?]?\s*", re.I | re.M), ""),
     (
         re.compile(r"\bI(?:'m| am) a large language model[^.!?]*[.!?]?\s*", re.I),
         "",
@@ -559,6 +564,9 @@ def apply_language_guard(text: str, uid: Optional[str] = None) -> Tuple[str, Lis
         if patt.search(cleaned):
             hits.append(patt.pattern)
             cleaned = patt.sub(repl, cleaned)
+    # After opener-stem strip, restore sentence capitalization if needed.
+    if cleaned and cleaned[0].islower():
+        cleaned = cleaned[0].upper() + cleaned[1:]
     if uid:
         seen = _stamp_seen.setdefault(uid, set())
         if len(_stamp_seen) > _MAX_PENDING_USERS:
