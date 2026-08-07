@@ -42,6 +42,7 @@ async def _main() -> int:
 
     import asyncpg
     from app.services.ln7_structural_verifier_floor import verify_structural_floor
+    from app.services.principal_review_crisis_policy import classify_crisis_turn_class
 
     dsn = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_DSN")
     if not dsn:
@@ -53,42 +54,65 @@ async def _main() -> int:
         rows = await conn.fetch(
             """SELECT scenario_id, section, client_says, nate_response_live,
                       live_safety_veto, live_primary_score, live_accuracy_score,
-                      live_naturalness_score, live_scored_at, live_stack_run_id
+                      live_naturalness_score, live_scored_at, live_stack_run_id,
+                      live_inject_meta
                FROM six_quotient_human_gold
                WHERE live_human_scored = true
                  AND COALESCE(nate_response_live, '') <> ''
-                 AND live_safety_veto IN ('ok', 'fail')
                ORDER BY scenario_id"""
         )
     finally:
         await conn.close()
 
     tp = tn = fp = fn = skipped = 0
+    unlabeled_crisis_fire = unlabeled_crisis_quiet = unlabeled_non_crisis = 0
     fp_rows: List[Dict[str, Any]] = []
     fn_rows: List[Dict[str, Any]] = []
     miss_counter: Counter = Counter()
     turn_class_counter: Counter = Counter()
+    unlabeled_fire_miss: Counter = Counter()
 
     for r in rows:
         sid = r["scenario_id"]
-        human = (r["live_safety_veto"] or "").lower()
+        human = (r["live_safety_veto"] or "").strip().lower()
+        labeled = human in ("ok", "fail")
+        # Match live gate: only crisis_si/crisis_hi — never default to SI.
+        # Prefer stamp from live_inject_meta when present (generation-time class).
+        meta = r["live_inject_meta"] or {}
+        if isinstance(meta, str):
+            meta = json.loads(meta) if meta.strip() else {}
+        tc = (meta.get("principal_review_turn_class") or "").strip()
+        if not tc:
+            tc = (classify_crisis_turn_class(r["client_says"] or "") or "").strip()
+        turn_class_counter[tc or "none"] += 1
+        crisis = tc in ("crisis_si", "crisis_hi")
+        if not crisis:
+            skipped += 1
+            if not labeled:
+                unlabeled_non_crisis += 1
+            # Floor does not run on non-crisis in production — exclude from FP/FN.
+            continue
+
         result = verify_structural_floor(
             r["nate_response_live"] or "",
             user_text=r["client_says"] or "",
+            turn_class=tc,
             scenario_id=sid,
         )
-        tc = (result.get("turn_class") or "none") or "none"
-        turn_class_counter[tc] += 1
-        crisis = tc in ("crisis_si", "crisis_hi")
-        if args.crisis_only and not crisis:
-            skipped += 1
+        floor_met = bool(result["floor_met"])
+        fired = not floor_met
+        missing = [k for k, v in (result.get("floor_checks") or {}).items() if not v]
+
+        if not labeled:
+            if fired:
+                unlabeled_crisis_fire += 1
+                for m in missing:
+                    unlabeled_fire_miss[m] += 1
+            else:
+                unlabeled_crisis_quiet += 1
             continue
 
-        # Non-crisis: floor gate does not apply in live audit path — treat as quiet.
-        floor_met = bool(result["floor_met"]) if crisis else True
-        fired = not floor_met
         expect_fire = human == "fail"
-        missing = [k for k, v in (result.get("floor_checks") or {}).items() if not v]
 
         if expect_fire and fired:
             tp += 1
@@ -130,8 +154,9 @@ async def _main() -> int:
             )
 
     n = tp + tn + fp + fn
-    print(f"live_scored_with_veto={len(rows)} evaluated={n} skipped_non_crisis={skipped}")
-    print(f"TP={tp} TN={tn} FP={fp} FN={fn}")
+    n_all = len(rows)
+    print(f"live_scored={n_all} veto_labeled={n} unlabeled={n_all - n} skipped_non_crisis={skipped}")
+    print(f"LABELED CONCORDANCE: TP={tp} TN={tn} FP={fp} FN={fn}")
     if n:
         print(
             f"precision={tp / (tp + fp) if (tp + fp) else 'n/a'} "
@@ -140,8 +165,13 @@ async def _main() -> int:
             f"fp_rate={fp / (fp + tn) if (fp + tn) else 'n/a'} "
             f"fn_rate={fn / (fn + tp) if (fn + tp) else 'n/a'}"
         )
+    print(
+        f"UNLABELED (empty live_safety_veto): crisis_fire={unlabeled_crisis_fire} "
+        f"crisis_quiet={unlabeled_crisis_quiet} non_crisis={unlabeled_non_crisis}"
+    )
+    print(f"unlabeled crisis-fire miss taxonomy: {dict(unlabeled_fire_miss)}")
     print(f"turn_class_counts={dict(turn_class_counter)}")
-    print(f"FP miss taxonomy (count of missing floor_checks across FP rows): {dict(miss_counter)}")
+    print(f"FP miss taxonomy (labeled): {dict(miss_counter)}")
     print("\n=== FALSE POSITIVES (floor fired, human ok) ===")
     for row in fp_rows:
         print(
@@ -159,8 +189,13 @@ async def _main() -> int:
 
     report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "n_live_scored": len(rows),
-        "evaluated": n,
+        "n_live_scored": n_all,
+        "veto_labeled": n,
+        "unlabeled": n_all - n,
+        "unlabeled_crisis_fire": unlabeled_crisis_fire,
+        "unlabeled_crisis_quiet": unlabeled_crisis_quiet,
+        "unlabeled_non_crisis": unlabeled_non_crisis,
+        "unlabeled_fire_miss_taxonomy": dict(unlabeled_fire_miss),
         "skipped_non_crisis": skipped,
         "tp": tp,
         "tn": tn,
