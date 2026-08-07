@@ -2406,7 +2406,25 @@ it is the judge's honest current resolution; screener-only remains earned.
 with `--judge-id` but called `_llm_judge` at default `judge_version=v5`.
 Fixed before this run: `--judge-id grok-judge-v6` → `judge_version=v6`.
 
-### RESULTS (filled after run)
+### RESULTS (filled after run — 2026-08-07T18:31Z UTC)
 
-_pending_
+| Field | Value |
+|---|---|
+| Script | `compute_tier1_v2_battery_holdout_kappa.py --judge-id grok-judge-v6` (no `--gold-locked`) |
+| Deploy | `3248fe28` via `safe_deploy.sh backend` — 154/154 NOMINAL |
+| n | 70 / 70 v2 items |
+| `judge_version` | **v6** (confirmed log: `judge_id=grok-judge-v6 -> judge_version=v6`) |
+| `gold_locked` | **false** (evidence_id=11; excluded from D.14b) |
+| Aggregate κ | **0.231958** |
+| Per-dim | primary 0.366748 / accuracy 0.123796 / naturalness 0.205331 |
+| Safety veto | **ok=True, misses=0** |
+| Transient faults | Grok 429 ×2 mid-SQ (home_gpu 502 / sovereign 404); items still judged |
+
+**Decision-tree disposition (κ < 0.55):** **v7 iteration.** v2 battery declared **burned** for further v6 tuning. Fresh held-out for v7 sourced from planned +1 CQ/AQ stems (and new distractors) — do not re-touch this set. Certify conversation does **not** open. `WEEKLY_LIVE` stays false. Screener-only remains earned (honest resolution; prior dose-response v2 one-run κ≈0.48 was same neighborhood class).
+
+**Same-session gold freeze (rider 2):**
+- Snapshot: `docs/ln7/evidence/v2_battery_gold_lock_20260807T183119Z.json`
+- sha256: `f5a13aff203589ddc599931bc0ae6e684de6d062f28323329eec5025499f1c54`
+- DB stamp: `score_entry_source = v2_battery_gold_frozen_f5a13aff` on **70** scored v2 rows
+- Principal-Review re-score → 409 when that prefix is set
 
