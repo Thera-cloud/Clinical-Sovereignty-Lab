@@ -111,8 +111,8 @@ iframe.preview{width:100%;min-height:70vh;border:1px solid var(--line);backgroun
         <div class="actions">
           <button type="button" class="secondary" id="btnSavePrompt" onclick="saveHeroPrompt()">Save descriptor</button>
           <button type="button" class="secondary" id="btnResetPrompt" onclick="resetHeroPrompt()">Reset from topic</button>
-          <button type="button" id="btnHero" onclick="generateHero()">Generate topic image</button>
-          <button type="button" class="secondary" onclick="refreshHero()">Refresh image</button>
+          <button type="button" id="btnHero" onclick="generateHero(false)">Generate topic image</button>
+          <button type="button" class="secondary" id="btnRefreshHero" onclick="generateHero(true)">Refresh image</button>
         </div>
         <p class="hint">Edit the descriptor anytime. Rewrite refreshes it from the new topic and regenerates the still. Grok first; Gemini if xAI fails. ~10–40s.</p>
       </div>
@@ -181,7 +181,7 @@ function switchTab(name){
   document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active', t.getAttribute('data-tab')===name);});
   document.querySelectorAll('.pane').forEach(function(p){p.classList.toggle('active', p.id==='pane-'+name);});
   if(name==='preview' && current) loadPreview();
-  if(name==='image' && current){ fillHeroPrompt(); refreshHero(); }
+  if(name==='image' && current){ fillHeroPrompt(); renderHeroPreview(); }
   if(name==='insights'){ if(current) loadInsights(); loadGrowth(); }
 }
 
@@ -378,18 +378,21 @@ async function selectIssue(id){
   renderList();
   switchTab('preview');
   loadPreview();
-  refreshHero();
+  renderHeroPreview();
 }
 
-function refreshHero(){
+/** Display-only: paint Image-tab preview from current issue (cache-busted). */
+function renderHeroPreview(){
   if(!current)return;
   var img = document.getElementById('heroImg');
   var miss = document.getElementById('heroMissing');
   var url = current.hero_image_url || (apiBase()+'/api/newsletter/library/'+encodeURIComponent(current.slug)+'/hero');
   if(current.hero_image_url || current.hero_image_r2_key || current.hero_image_generated_at){
     img.style.display='block';
+    img.style.opacity = '1';
     miss.style.display='none';
-    img.src = url + (url.indexOf('?')>=0?'&':'?') + 't=' + Date.now();
+    var bust = encodeURIComponent(String(current.hero_image_generated_at || Date.now()));
+    img.src = url + (url.indexOf('?')>=0?'&':'?') + 't=' + bust;
   }else{
     img.style.display='none';
     img.removeAttribute('src');
@@ -418,24 +421,44 @@ function resetHeroPrompt(){
   setMsg('Descriptor reset from topic — Save or Generate to apply');
 }
 
-async function generateHero(){
+async function generateHero(isRefresh){
   if(!current)return;
-  document.getElementById('btnHero').disabled = true;
-  setMsg('Generating topic image (Grok → Gemini)…');
+  var btnG = document.getElementById('btnHero');
+  var btnR = document.getElementById('btnRefreshHero');
+  if(btnG) btnG.disabled = true;
+  if(btnR) btnR.disabled = true;
+  var img = document.getElementById('heroImg');
+  var miss = document.getElementById('heroMissing');
+  if(img && img.style.display!=='none'){ img.style.opacity = '0.35'; }
+  setMsg((isRefresh?'Refreshing':'Generating')+' topic image (Grok → Gemini)…');
   var prompt = document.getElementById('fHeroPrompt').value.trim();
   var r = await api('/api/newsletter/admin/issues/'+current.id+'/generate-image', {
     method:'POST',
     body: JSON.stringify({prompt: prompt||undefined})
   });
-  document.getElementById('btnHero').disabled = false;
-  if(!r)return;
+  if(btnG) btnG.disabled = false;
+  if(btnR) btnR.disabled = false;
+  if(!r){
+    if(img) img.style.opacity = '1';
+    return;
+  }
   var d = await r.json();
-  if(!r.ok){setMsg(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail||d), true);return;}
+  if(!r.ok){
+    if(img) img.style.opacity = '1';
+    setMsg(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail||d), true);
+    return;
+  }
   current = d.issue || current;
   if(d.hero_image_url) current.hero_image_url = d.hero_image_url;
+  if(d.issue && d.issue.hero_image_generated_at){
+    current.hero_image_generated_at = d.issue.hero_image_generated_at;
+  }else{
+    current.hero_image_generated_at = new Date().toISOString();
+  }
   fillHeroPrompt();
-  setMsg('Topic image ready'+(d.provider?' ('+d.provider+')':''));
-  refreshHero();
+  if(miss) miss.style.display='none';
+  setMsg((isRefresh?'Image replaced':'Topic image ready')+(d.provider?' ('+d.provider+')':''));
+  renderHeroPreview();
   loadPreview();
   loadIssues(current.id);
 }
@@ -504,12 +527,12 @@ async function requestRewrite(){
   document.getElementById('fOpener').value = current.opener||'';
   document.getElementById('fBody').value = current.body_md||'';
   fillHeroPrompt();
-  refreshHero();
+  renderHeroPreview();
   switchTab('preview');
   loadPreview();
   loadIssues(current.id);
   if(d.hero_reset){
-    setTimeout(function(){ loadIssues(current.id); loadPreview(); refreshHero(); }, 25000);
+    setTimeout(function(){ loadIssues(current.id); loadPreview(); renderHeroPreview(); }, 25000);
   }
 }
 

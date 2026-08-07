@@ -231,6 +231,7 @@ def _hero_img_tag(
     *,
     max_width: str = "100%",
     placeholder: bool = False,
+    cache_bust: bool = False,
 ) -> str:
     url = (issue.get("hero_image_url") or "").strip()
     slug = issue.get("slug") or ""
@@ -247,6 +248,13 @@ def _hero_img_tag(
             "Topic image not generated yet — open the Image tab to write a descriptor and generate."
             "</div>"
         )
+    if cache_bust:
+        bust = issue.get("hero_image_generated_at") or ""
+        if hasattr(bust, "isoformat"):
+            bust = bust.isoformat()
+        bust = str(bust).strip() or str(int(datetime.now(timezone.utc).timestamp()))
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}t={bust}"
     alt = (issue.get("topic") or issue.get("subject_line") or "Little Nate Dispatch").replace(
         '"', "'"
     )[:120]
@@ -268,7 +276,7 @@ def render_library_html(issue: Dict[str, Any], *, admin_preview: bool = False) -
     body = md_body_to_html(issue.get("final_body") or issue.get("body_md") or "")
     sources = _sources_html(issue)
     rate_block = "" if admin_preview else _library_rate_block(issue)
-    hero = _hero_img_tag(issue, placeholder=admin_preview)
+    hero = _hero_img_tag(issue, placeholder=admin_preview, cache_bust=admin_preview)
     share_row = "" if admin_preview else _share_row_html(
         slug, str(issue.get("subject_line") or ""), style_inline=False
     )

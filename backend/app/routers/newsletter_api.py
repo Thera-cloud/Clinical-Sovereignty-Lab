@@ -603,10 +603,11 @@ async def library_hero_image(slug: str, request: Request):
     if not data:
         raise HTTPException(404, "No hero image")
     _, media_type = sniff_image_meta(data)
+    # Short TTL + revalidate so Image-tab refresh/regenerate is not stuck on stale bytes.
     return Response(
         content=data,
         media_type=media_type,
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={"Cache-Control": "public, max-age=60, must-revalidate"},
     )
 
 
