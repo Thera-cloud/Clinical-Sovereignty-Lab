@@ -98,3 +98,12 @@ def test_gold_items_battery_param_documented():
     api_src = PRINCIPAL_REVIEW_API.read_text()
     assert 'battery: str = "all"' in api_src
     assert "_BATTERY_SQL_CLAUSE" in api_src
+
+
+def test_judge_id_maps_to_llm_judge_version():
+    """--judge-id must drive _llm_judge(judge_version=...), not only the
+    evidence-row label (Entry 4 mislabeling class)."""
+    src = SCRIPT.read_text()
+    assert "def _judge_version_from_id" in src
+    assert "judge_version=judge_version" in src
+    assert '_judge_all(items, judge_version=judge_version)' in src

@@ -84,7 +84,25 @@ async def _v2_battery_totals(conn) -> dict:
     return dict(row) if row else {"total": 0, "scored": 0}
 
 
-async def _judge_all(items):
+def _judge_version_from_id(judge_id: str) -> str:
+    """Map --judge-id label to _llm_judge(judge_version=...).
+
+    Evidence rows are labeled with the full judge_id string; the prompt
+    path must match (TRUST_LEDGER Entry 4: stale/mismatched labeling).
+    Only v5/v6 prompts exist today — unknown suffixes fail closed.
+    """
+    j = (judge_id or "").strip().lower()
+    if j.endswith("-v6") or j == "v6" or j.endswith("/v6"):
+        return "v6"
+    if j.endswith("-v5") or j == "v5" or j.endswith("/v5"):
+        return "v5"
+    raise ValueError(
+        f"cannot map --judge-id={judge_id!r} to a known judge_version "
+        f"(expected …-v5 or …-v6)"
+    )
+
+
+async def _judge_all(items, *, judge_version: str):
     from app.services.six_quotient_auto_judge import _llm_judge
 
     out = {}
@@ -98,6 +116,7 @@ async def _judge_all(items):
             client_says=str(g.get("client_says") or ""),
             response=str(g.get("nate_response") or ""),
             degraded_distractor=bool(g.get("is_degraded_distractor")),
+            judge_version=judge_version,
         )
         if not judged:
             print(f"FAIL judge: {sid}")
@@ -133,7 +152,13 @@ async def _main() -> int:
     args = parser.parse_args()
 
     if not args.judge_id.strip():
-        print("FAIL: --judge-id is required (e.g. grok-judge-v7) — no default on purpose")
+        print("FAIL: --judge-id is required (e.g. grok-judge-v6) — no default on purpose")
+        return 2
+
+    try:
+        judge_version = _judge_version_from_id(args.judge_id)
+    except ValueError as e:
+        print(f"FAIL: {e}")
         return 2
 
     import asyncpg
@@ -158,11 +183,16 @@ async def _main() -> int:
             f"v2 battery: {totals.get('scored', 0)}/{totals.get('total', 0)} scored total; "
             f"{len(items)} pass the score-complete/locked/non-placeholder filter"
         )
+        print(
+            f"judge_id={args.judge_id.strip()} -> judge_version={judge_version} "
+            f"gold_locked={bool(args.gold_locked)} "
+            f"(default false = excluded from D.14b gate)"
+        )
         if len(items) < args.min_items:
             print(f"FAIL: {len(items)} scored v2 items < --min-items {args.min_items}")
             return 1
 
-        judge_by = await _judge_all(items)
+        judge_by = await _judge_all(items, judge_version=judge_version)
         if judge_by is None:
             return 1
 

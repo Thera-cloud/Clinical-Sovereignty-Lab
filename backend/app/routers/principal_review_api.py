@@ -404,7 +404,7 @@ async def gold_score(
             raise HTTPException(403, "run belongs to a different rater")
         locked = await conn.fetchrow(
             """SELECT scenario_id, pairs_locked, human_scored, nate_response,
-                      nate_response_live
+                      nate_response_live, score_entry_source
                FROM six_quotient_human_gold WHERE scenario_id = $1""",
             body.scenario_id,
         )
@@ -461,6 +461,15 @@ async def gold_score(
 
         if not locked["pairs_locked"]:
             raise HTTPException(409, "pairs not locked — freeze gold before scoring")
+        # TRUST_LEDGER Entry 39 — after v2 κ, scores are snapshot-frozen;
+        # refuse post-hoc re-reads that would drift the held-out gold.
+        _src = locked["score_entry_source"] or ""
+        if locked["human_scored"] and str(_src).startswith("v2_battery_gold_frozen"):
+            raise HTTPException(
+                409,
+                "v2 battery gold frozen after κ — re-score blocked "
+                "(see docs/ln7/evidence/v2_battery_gold_lock_*)",
+            )
         nr = locked["nate_response"] or ""
         if (
             "DRY-RUN" in nr

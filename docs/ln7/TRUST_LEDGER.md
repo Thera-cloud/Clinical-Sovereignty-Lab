@@ -2361,3 +2361,52 @@ healthy, vault metrics 371→371. Dashboard synced + nginx reloaded.
 **Live-verified:** `battery=v2` → 70 items, `battery=v1` → 4 items (matches
 exactly), `battery=v99` → 422. DrNevedal1 can now select "v2 (new)" in the
 Battery dropdown to skip straight to the new material.
+
+## Entry 40 — 2026-08-07 — v2 battery κ run: pre-registered decision tree (BEFORE number)
+
+CEO authorized the pre-registered next move: run
+`compute_tier1_v2_battery_holdout_kappa.py` with **explicit**
+`--judge-id grok-judge-v6`, default **`gold_locked=false`** (no D.14b mix
+with burned v1). Pre-registering the decision tree **before** the number
+lands (this section written before the script starts).
+
+### Semantic: `gold_locked=false`
+
+On `six_quotient_judge_kappa_evidence`, `gold_locked=false` means the
+evidence row is **excluded** from
+`clinical_tier1_competence_gate_check.py` (`WHERE gold_locked = true`).
+It does **not** mean scores are still mutable. Human scores already live
+in `six_quotient_human_gold` (Judge track `120/120`, Capability
+`115/115`, v2 `70/70` both tracks as of this sitting).
+
+**Same-session lock after κ:** export a content-addressed snapshot of the
+v2 Judge-track score vectors + response text; stamp
+`score_entry_source = 'v2_battery_gold_frozen_<sha8>'` on those rows;
+Principal-Review score submit refuses overwrite when that prefix is set.
+κ evidence stays `gold_locked=false` unless a later certify conversation
+explicitly opts in with `--gold-locked`.
+
+### Pre-registered decision tree
+
+| Aggregate κ + veto | Disposition |
+|---|---|
+| κ ≥ 0.70 **and** veto 0-miss | Opens the **certify conversation** only. Re-enable of quality / `WEEKLY_LIVE` still requires the **full** protocol as written: this fresh held-out κ **plus** a gap-respecting reliability recheck. κ alone does **not** flip `WEEKLY_LIVE`. |
+| 0.55 ≤ κ < 0.70 | Measure **inter-clinician ceiling** on a subsample before authorizing v7. Do not chase rater entropy above ~0.56 with prompt iteration alone (accuracy-arc lesson). |
+| κ < 0.55 | **v7 iteration.** Declare v2 battery **burned** for further v6 tuning in the same ledger entry. Fresh held-out for v7 sourced from the planned +1 CQ/AQ stems (and any new distractors), not by re-touching this set. |
+
+### Expectation
+
+v6's one-run on dose-response v2 was κ≈0.48 (Entry 21, different set).
+Landing in the same neighborhood on this battery is **not** a surprise —
+it is the judge's honest current resolution; screener-only remains earned.
+
+### Script hygiene (pre-run fix)
+
+`compute_tier1_v2_battery_holdout_kappa.py` previously labeled evidence
+with `--judge-id` but called `_llm_judge` at default `judge_version=v5`.
+Fixed before this run: `--judge-id grok-judge-v6` → `judge_version=v6`.
+
+### RESULTS (filled after run)
+
+_pending_
+
