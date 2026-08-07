@@ -1843,6 +1843,7 @@ async def booking_action_from_email(token: str, request: Request):
         session["status"] = "scheduled"
         session["approved_at"] = str(datetime.now())
         session["approved_via"] = "email"
+        session["approved_by"] = session.get("approved_by") or "email_link"
 
         # Create Zoom meeting if the pending booking didn't get one
         if settings.ENABLE_ZOOM and not (session.get("zoom_link") or "").strip():
@@ -1887,6 +1888,16 @@ async def booking_action_from_email(token: str, request: Request):
                         )
         except Exception as le:
             _logger.warning("booking-action: ledger update failed for %s: %s", session_id, le)
+
+        # Durable PG obligation for invoicing / accounting
+        try:
+            if db:
+                from app.services.session_financial_records import record_approval_obligation
+                await record_approval_obligation(
+                    db, session, approved_by=session.get("approved_by") or "email_link"
+                )
+        except Exception as oe:
+            _logger.warning("booking-action: obligation record failed for %s: %s", session_id, oe)
 
         if _gcal_sync and db:
             try:

@@ -7,6 +7,7 @@ sessions at the 24-hour mark.
 """
 
 import asyncio
+import json
 import logging
 import os
 from datetime import datetime, timezone, timedelta
@@ -97,18 +98,25 @@ class SessionPaymentAgent:
             # Find sessions in the payment window that need charging
             # QUANTUM-CRYSTAL-ARCH: charge only after coach accepts (scheduled/confirmed/active)
             sessions_to_charge = await conn.fetch(
-                f"""SELECT cs.id, cs.coach_id, cs.client_id,
+                f"""SELECT cs.id, cs.session_id AS session_id_str, cs.coach_id, cs.client_id,
                           {_APPT_TIME} AS scheduled_at, cs.price_cents,
-                          cs.payment_status,
+                          cs.payment_status, cs.session_data,
                           u.profile_data->>'name' as client_name,
                           u.profile_data->>'email' as client_email,
                           u.profile_data->>'phone' as client_phone,
                           u.profile_data->>'timezone' as client_timezone,
                           COALESCE(NULLIF(u.stripe_customer_id, ''),
-                                   u.profile_data->>'stripe_customer_id') as stripe_customer_id
+                                   u.profile_data->>'stripe_customer_id') as stripe_customer_id,
+                          COALESCE(u.profile_data->>'default_payment_method_id', '')
+                              as client_default_pm,
+                          COALESCE(cu.profile_data->>'stripe_connect_id', '') as coach_connect_id,
+                          COALESCE(cu.profile_data->>'payment_mode', 'coach_handles')
+                              as coach_payment_mode
                    FROM coaching_sessions cs
                    LEFT JOIN users u ON u.id::text = cs.client_id::text
                       OR u.hardware_id = cs.client_id::text
+                   LEFT JOIN users cu ON cu.id::text = cs.coach_id::text
+                      OR cu.hardware_id = cs.coach_id::text
                    WHERE {_APPT_TIME} BETWEEN $1 AND $2
                    AND cs.payment_status = 'pending'
                    AND COALESCE(cs.price_cents, 0) > 0
@@ -133,7 +141,7 @@ class SessionPaymentAgent:
 
                 if stripe_customer:
                     success = await self._charge_card(
-                        conn, session_id, stripe_customer, charge_amount
+                        conn, session, stripe_customer, charge_amount
                     )
                     if success:
                         charged += 1
@@ -227,51 +235,153 @@ class SessionPaymentAgent:
                     charged, reminded, cancelled,
                 )
 
-    async def _charge_card(self, conn, session_id, stripe_customer_id: str, amount_cents: int) -> bool:
-        """Attempt to charge the client's card on file via Stripe."""
+    async def _charge_card(self, conn, session, stripe_customer_id: str, amount_cents: int) -> bool:
+        """Charge client default PM; Connect destination + app fee when coach linked; receipt email."""
+        session_id = session["id"]
+        session_id_str = session.get("session_id_str") or str(session_id)
         try:
             import stripe
+            from app.services.session_financial_records import (
+                platform_fee_cents_from_session,
+                mark_coach_ledger_collected,
+            )
+
             stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 
             if not stripe.api_key:
                 logger.warning("SessionPaymentAgent: STRIPE_SECRET_KEY not set")
                 return False
 
-            payment_methods = stripe.PaymentMethod.list(
-                customer=stripe_customer_id, type="card", limit=1
-            )
-            if not payment_methods.data:
-                await self._log_event(conn, session_id, "charge_failed", amount_cents, error="No card on file")
-                return False
+            pm_id = (session.get("client_default_pm") or "").strip()
+            if not pm_id:
+                try:
+                    cu = stripe.Customer.retrieve(stripe_customer_id)
+                    inv = getattr(cu, "invoice_settings", None)
+                    pm_id = (
+                        (inv.get("default_payment_method") if isinstance(inv, dict)
+                         else getattr(inv, "default_payment_method", None))
+                        or ""
+                    )
+                    if pm_id and not isinstance(pm_id, str):
+                        pm_id = getattr(pm_id, "id", "") or ""
+                except Exception:
+                    pm_id = ""
+            if not pm_id:
+                payment_methods = stripe.PaymentMethod.list(
+                    customer=stripe_customer_id, type="card", limit=1
+                )
+                if not payment_methods.data:
+                    await self._log_event(
+                        conn, session_id, "charge_failed", amount_cents, error="No card on file"
+                    )
+                    return False
+                pm_id = payment_methods.data[0].id
 
-            pm = payment_methods.data[0]
+            connect_id = (session.get("coach_connect_id") or "").strip()
+            app_fee = platform_fee_cents_from_session(session, amount_cents)
+            if app_fee >= amount_cents:
+                app_fee = max(0, amount_cents - 1)
 
-            intent = stripe.PaymentIntent.create(
-                amount=amount_cents,
-                currency="usd",
-                customer=stripe_customer_id,
-                payment_method=pm.id,
-                off_session=True,
-                confirm=True,
-                metadata={"session_id": str(session_id), "type": "session_payment"},
-            )
+            pi_kwargs = {
+                "amount": amount_cents,
+                "currency": "usd",
+                "customer": stripe_customer_id,
+                "payment_method": pm_id,
+                "off_session": True,
+                "confirm": True,
+                "metadata": {
+                    "session_id": session_id_str,
+                    "session_uuid": str(session_id),
+                    "type": "session_payment",
+                    "coach_id": str(session.get("coach_id") or ""),
+                    "platform_fee_cents": str(app_fee),
+                },
+            }
+            client_email = (session.get("client_email") or "").strip()
+            if client_email:
+                pi_kwargs["receipt_email"] = client_email
+
+            # Destination charge: coach Connect gets net; platform keeps application_fee
+            if connect_id:
+                pi_kwargs["application_fee_amount"] = app_fee
+                pi_kwargs["transfer_data"] = {"destination": connect_id}
+
+            intent = stripe.PaymentIntent.create(**pi_kwargs)
 
             if intent.status == "succeeded":
+                receipt_url = None
+                try:
+                    if intent.latest_charge:
+                        ch = stripe.Charge.retrieve(intent.latest_charge)
+                        receipt_url = getattr(ch, "receipt_url", None)
+                except Exception:
+                    pass
+
                 await conn.execute(
                     """UPDATE coaching_sessions
                        SET payment_status = 'paid', payment_amount_cents = $1,
-                           stripe_payment_intent_id = $2, updated_at = NOW()
+                           stripe_payment_intent_id = $2,
+                           session_data = COALESCE(session_data, '{}'::jsonb) || $4::jsonb,
+                           updated_at = NOW()
                        WHERE id = $3""",
-                    amount_cents, intent.id, session_id,
+                    amount_cents,
+                    intent.id,
+                    session_id,
+                    json.dumps(
+                        {
+                            "billing_obligation": "collected",
+                            "stripe_payment_intent_id": intent.id,
+                            "receipt_url": receipt_url,
+                            "application_fee_cents": app_fee if connect_id else 0,
+                            "connect_destination": connect_id or None,
+                            "charged_payment_method_id": pm_id,
+                        }
+                    ),
                 )
-                await self._log_event(conn, session_id, "charge_succeeded", amount_cents, stripe_id=intent.id)
+                await self._log_event(
+                    conn,
+                    session_id,
+                    "charge_succeeded",
+                    amount_cents,
+                    stripe_id=intent.id,
+                    note=(
+                        f"receipt={receipt_url or 'pending'};"
+                        f"pm={pm_id};connect={connect_id or 'none'};fee={app_fee}"
+                    ),
+                )
+                if receipt_url:
+                    await self._log_event(
+                        conn,
+                        session_id,
+                        "receipt_issued",
+                        amount_cents,
+                        stripe_id=intent.id,
+                        note=receipt_url,
+                    )
+                try:
+                    await mark_coach_ledger_collected(
+                        self.db_pool,
+                        coach_id=str(session.get("coach_id") or ""),
+                        session_id=session_id_str,
+                        stripe_payment_intent_id=intent.id,
+                        amount_cents=amount_cents,
+                        receipt_url=receipt_url,
+                    )
+                except Exception as le:
+                    logger.warning("SessionPaymentAgent: ledger collected update failed: %s", le)
                 return True
             else:
-                await self._log_event(conn, session_id, "charge_failed", amount_cents, error=f"Status: {intent.status}")
+                await self._log_event(
+                    conn, session_id, "charge_failed", amount_cents,
+                    error=f"Status: {intent.status}",
+                )
                 return False
 
         except Exception as e:
-            logger.warning("SessionPaymentAgent: Stripe charge failed for session %s: %s", session_id, e)
+            logger.warning(
+                "SessionPaymentAgent: Stripe charge failed for session %s: %s",
+                session_id, e,
+            )
             await self._log_event(conn, session_id, "charge_failed", amount_cents, error=str(e))
             return False
 

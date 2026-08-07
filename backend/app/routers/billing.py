@@ -853,12 +853,20 @@ async def attach_payment_method(req: PaymentMethodAttachRequest, request: Reques
             req.payment_method_id,
             customer=stripe_customer,
         )
-        # Set as default
-        stripe.Customer.modify(
-            stripe_customer,
-            invoice_settings={"default_payment_method": req.payment_method_id},
+        # Set as default + mirror to client profile and handling coach billing_clients
+        from app.services.session_financial_records import mirror_default_payment_method
+
+        mirrored = await mirror_default_payment_method(
+            pool,
+            user_key=req.user_id,
+            payment_method_id=req.payment_method_id,
+            stripe_customer_id=stripe_customer,
         )
-        return {"status": "attached", "payment_method_id": req.payment_method_id}
+        return {
+            "status": "attached",
+            "payment_method_id": req.payment_method_id,
+            "default_mirrored": mirrored,
+        }
     except Exception as e:
         raise HTTPException(400, f"Failed to attach payment method: {e}")
 
@@ -1396,11 +1404,19 @@ async def set_default_payment_method(req: SetDefaultPaymentMethodRequest, reques
         raise HTTPException(400, "No Stripe customer found")
 
     try:
-        stripe.Customer.modify(
-            customer_id,
-            invoice_settings={"default_payment_method": req.payment_method_id},
+        from app.services.session_financial_records import mirror_default_payment_method
+
+        mirrored = await mirror_default_payment_method(
+            pool,
+            user_key=req.user_id,
+            payment_method_id=req.payment_method_id,
+            stripe_customer_id=customer_id,
         )
-        return {"default_payment_method": req.payment_method_id, "updated": True}
+        return {
+            "default_payment_method": req.payment_method_id,
+            "updated": True,
+            "default_mirrored": mirrored,
+        }
     except stripe.error.StripeError as e:
         raise HTTPException(400, str(e))
 

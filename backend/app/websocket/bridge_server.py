@@ -15014,6 +15014,10 @@ async def handle_client(websocket, path=None):
                                     new_session["status"] = "scheduled"
                                     new_session["approved_at"] = str(datetime.datetime.now())
                                     new_session["approved_via"] = "auto_accept"
+                                    # QUANTUM-CRYSTAL-ARCH: auto-accept still stamps approver for audit
+                                    new_session["approved_by"] = (
+                                        (coach_profile or {}).get("username") or "auto_accept"
+                                    )
                                     try:
                                         from app.services.session_approval import apply_coach_ledger_txn
                                         if coach_profile:
@@ -15051,11 +15055,20 @@ async def handle_client(websocket, path=None):
                                 sessions.append(new_session)
                                 save_json_file(SESSIONS_FILE, sessions)
 
-                                # PG dual-write
+                                # PG dual-write (+ obligation when auto-accepted)
                                 if db_pool:
                                     try:
                                         from app.services.pg_data_helpers import upsert_session_pg
                                         await upsert_session_pg(db_pool, new_session)
+                                        if new_session.get("status") == "scheduled" and new_session.get("approved_at"):
+                                            from app.services.session_financial_records import (
+                                                record_approval_obligation,
+                                            )
+                                            await record_approval_obligation(
+                                                db_pool,
+                                                new_session,
+                                                approved_by=new_session.get("approved_by") or "auto_accept",
+                                            )
                                     except Exception as _pg_e:
                                         print(f">>> [BOOKING] PG upsert failed (non-blocking): {_pg_e}")
 
@@ -15894,6 +15907,8 @@ async def handle_client(websocket, path=None):
                                 if s.get("session_id") == session_id and s.get("coach_id") == coach_id and s.get("status") == "pending_approval":
                                     s["status"] = "scheduled"
                                     s["approved_at"] = str(datetime.datetime.now())
+                                    # QUANTUM-CRYSTAL-ARCH: audit who accepted for invoicing
+                                    s["approved_by"] = current_profile.get("username") or ""
                                     found_session = s
                                     break
                             if found_session:
@@ -15957,11 +15972,19 @@ async def handle_client(websocket, path=None):
                                 except Exception as ze:
                                     print(f">>> [ZOOM] Auto-create on approve failed: {ze}")
 
-                                # PG dual-write on approval
+                                # PG dual-write on approval + durable invoicing obligation
                                 if db_pool:
                                     try:
                                         from app.services.pg_data_helpers import upsert_session_pg
+                                        from app.services.session_financial_records import (
+                                            record_approval_obligation,
+                                        )
                                         await upsert_session_pg(db_pool, found_session)
+                                        await record_approval_obligation(
+                                            db_pool,
+                                            found_session,
+                                            approved_by=found_session.get("approved_by") or "",
+                                        )
                                     except Exception as _pg_e:
                                         print(f">>> [APPROVE] PG upsert failed (non-blocking): {_pg_e}")
 
