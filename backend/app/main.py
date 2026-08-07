@@ -3527,6 +3527,17 @@ async def lifespan(app: FastAPI):
     except Exception as _sea_err:
         print(f"   ⚠️  ShadowEvaluatorAgent init failed: {_sea_err}")
         app.state.ln7_shadow_evaluator_agent = None
+    # QUANTUM-CRYSTAL-ARCH — LN7 Close Sentinel (read-only; LN7_CLOSE_SENTINEL_ENABLED)
+    try:
+        from app.services.ln7_close_sentinel import maybe_start_close_sentinel
+        if not _is_clone:
+            await maybe_start_close_sentinel(app.state, db_pool)
+        else:
+            app.state.ln7_close_sentinel = "disabled"
+        print("   ✅ Ln7CloseSentinel registered (flag-gated)")
+    except Exception as _lcs_err:
+        print(f"   ⚠️  Ln7CloseSentinel init failed: {_lcs_err}")
+        app.state.ln7_close_sentinel = "init_failed"
 
     # QUANTUM-CRYSTAL-ARCH — Nate clinical coevolution bakeoff (flags default OFF)
     try:
@@ -3754,6 +3765,7 @@ async def lifespan(app: FastAPI):
         ("goodhart_drift_sentinel", getattr(app.state, "goodhart_drift_sentinel", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln7_fallback_drill_agent", getattr(app.state, "ln7_fallback_drill_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln7_shadow_evaluator_agent", getattr(app.state, "ln7_shadow_evaluator_agent", None) is not None),  # QUANTUM-CRYSTAL-ARCH — R3
+        ("ln7_close_sentinel", getattr(app.state, "ln7_close_sentinel", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_clinical_bakeoff_agent", callable(getattr(getattr(app.state, "nate_clinical_bakeoff_agent", None), "run_night", None))),  # QUANTUM-CRYSTAL-ARCH
         ("growth_scheduler", getattr(app.state, "growth_scheduler", None) is not None),  # QUANTUM-CRYSTAL-ARCH
         ("content_factory", getattr(app.state, "content_factory", None) is not None),  # QUANTUM-CRYSTAL-ARCH
@@ -3867,6 +3879,7 @@ async def lifespan(app: FastAPI):
         "goodhart_drift_sentinel",
         "ln7_fallback_drill_agent",
         "ln7_shadow_evaluator_agent",
+        "ln7_close_sentinel",
     ):
         try:
             _fly = getattr(app.state, _fly_attr, None)
