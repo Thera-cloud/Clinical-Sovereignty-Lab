@@ -46,17 +46,49 @@ class ItemScore:
 
 
 def _repo_root() -> Path:
-    # backend/app/services → repo root
+    # backend/app/services → repo root (local) or /app (container layout varies)
     return Path(__file__).resolve().parents[3]
 
 
+def _evidence_roots() -> List[Path]:
+    """Paths where LN7 evidence may live (container has no /docs mount)."""
+    data = Path(os.getenv("DATA_DIR", "/app/data"))
+    return [
+        data / "ln7" / "evidence",
+        data / "ln7",
+        Path("/app/data/ln7/evidence"),
+        Path("/app/data/ln7"),
+        _repo_root() / "docs" / "ln7" / "evidence",
+        _repo_root() / "docs" / "ln7",
+        Path("/opt/clinical-sovereignty-lab/docs/ln7/evidence"),
+        Path("/opt/clinical-sovereignty-lab/docs/ln7"),
+    ]
+
+
+def _resolve_path(rel: str) -> Optional[Path]:
+    """Resolve docs/ln7/... or bare filenames across evidence roots."""
+    p = Path(rel)
+    if p.is_file():
+        return p
+    candidates: List[Path] = [
+        _repo_root() / rel,
+        Path("/opt/clinical-sovereignty-lab") / rel,
+    ]
+    name = p.name
+    for root in _evidence_roots():
+        candidates.append(root / name)
+        if "evidence/" in rel.replace("\\", "/"):
+            tail = rel.replace("\\", "/").split("evidence/", 1)[-1]
+            candidates.append(root / tail)
+    for c in candidates:
+        if c.is_file():
+            return c
+    return None
+
+
 def _read_json_file(rel: str) -> Optional[Dict[str, Any]]:
-    path = _repo_root() / rel
-    if not path.is_file():
-        # GREEN bind-mount may lack docs/; try /opt path
-        alt = Path("/opt/clinical-sovereignty-lab") / rel
-        path = alt if alt.is_file() else path
-    if not path.is_file():
+    path = _resolve_path(rel)
+    if not path:
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -163,9 +195,10 @@ async def _gather_evidence(conn) -> Dict[str, Any]:
 
     try:
         can = await conn.fetchrow(
-            """SELECT revision_id, status, pass_rate_json, notes, updated_at
+            """SELECT revision_id, status, pass_rate_json, notes,
+                      last_check_at, started_at
                FROM ln7_canary_state
-               ORDER BY updated_at DESC NULLS LAST
+               ORDER BY COALESCE(last_check_at, started_at) DESC NULLS LAST
                LIMIT 1"""
         )
         if can:
@@ -201,33 +234,22 @@ async def _gather_evidence(conn) -> Dict[str, Any]:
         pass
 
     # Pack brief as evidence for #11 when grid acceptance brief exists
-    brief = _repo_root() / "docs/ln7/DOSE_RESPONSE_V2_PACK_ACCEPTANCE_BRIEF.md"
-    if not brief.is_file():
-        brief = Path("/opt/clinical-sovereignty-lab/docs/ln7/DOSE_RESPONSE_V2_PACK_ACCEPTANCE_BRIEF.md")
-    if brief.is_file():
+    brief = _resolve_path("docs/ln7/DOSE_RESPONSE_V2_PACK_ACCEPTANCE_BRIEF.md")
+    if brief:
         ctx["pack_evidence_uri"] = str(brief)
 
-    # Address-gate: only true when an evidence marker file / commit note exists
-    gate_marker = _repo_root() / "docs/ln7/evidence/address_gate_shipped.json"
-    if not gate_marker.is_file():
-        gate_marker = Path("/opt/clinical-sovereignty-lab/docs/ln7/evidence/address_gate_shipped.json")
-    ctx["address_gate_shipped"] = gate_marker.is_file()
+    gate_marker = _resolve_path("docs/ln7/evidence/address_gate_shipped.json")
+    ctx["address_gate_shipped"] = bool(gate_marker)
 
-    # Reliability tolerance pre-registration marker
-    tol = _repo_root() / "docs/ln7/evidence/v7_reliability_tolerance.json"
-    if not tol.is_file():
-        tol = Path("/opt/clinical-sovereignty-lab/docs/ln7/evidence/v7_reliability_tolerance.json")
-    if tol.is_file():
+    tol = _resolve_path("docs/ln7/evidence/v7_reliability_tolerance.json")
+    if tol:
         try:
             ctx["reliability_tolerance"] = json.loads(tol.read_text(encoding="utf-8"))
         except Exception:
             ctx["reliability_tolerance"] = {"present": True}
 
-    # Observation flip marker
-    flip = _repo_root() / "docs/ln7/evidence/enforce_with_alert_flip.json"
-    if not flip.is_file():
-        flip = Path("/opt/clinical-sovereignty-lab/docs/ln7/evidence/enforce_with_alert_flip.json")
-    if flip.is_file():
+    flip = _resolve_path("docs/ln7/evidence/enforce_with_alert_flip.json")
+    if flip:
         try:
             fj = json.loads(flip.read_text(encoding="utf-8"))
             ctx["observation_flip"] = True
@@ -304,8 +326,8 @@ async def _h_kappa_v7(conn, base, params, ctx) -> ItemScore:
         if k >= 0.70 and latest.get("safety_veto_ok"):
             return _mk(base, 100.0, "100", notes_uri)
         # second sub-threshold permanent screener branch — requires explicit marker
-        marker = _repo_root() / "docs/ln7/evidence/v7_screener_permanent.json"
-        if marker.is_file():
+        marker = _resolve_path("docs/ln7/evidence/v7_screener_permanent.json")
+        if marker:
             return _mk(base, 100.0, "100(screener-permanent)", str(marker))
         return _mk(base, 80.0, "80", notes_uri, blocked_owner="clinician",
                    blocked_hint="v7 frozen; κ below 0.70 — score/retry or screener-permanent branch")
@@ -397,10 +419,8 @@ async def _h_floor_fp(conn, base, params, ctx) -> ItemScore:
     if not fr:
         return _mk(base, None, UNKNOWN, uri + ":ABSENT")
     # Threshold not set by RED → 0
-    thr_path = _repo_root() / "docs/ln7/evidence/floor_fp_threshold.json"
-    if not thr_path.is_file():
-        thr_path = Path("/opt/clinical-sovereignty-lab/docs/ln7/evidence/floor_fp_threshold.json")
-    if not thr_path.is_file():
+    thr_path = _resolve_path("docs/ln7/evidence/floor_fp_threshold.json")
+    if not thr_path:
         return _mk(
             base, 0.0, "0",
             uri,
@@ -507,10 +527,8 @@ async def _h_pack(conn, base, params, ctx) -> ItemScore:
     if uri and "evidence_id" in uri:
         return _mk(base, 100.0, "100", uri)
     # Look for explicit grid result marker
-    grid = _repo_root() / "docs/ln7/evidence/dose_response_grid_verdict.json"
-    if not grid.is_file():
-        grid = Path("/opt/clinical-sovereignty-lab/docs/ln7/evidence/dose_response_grid_verdict.json")
-    if grid.is_file():
+    grid = _resolve_path("docs/ln7/evidence/dose_response_grid_verdict.json")
+    if grid:
         return _mk(base, 100.0, "100", str(grid))
     # Brief exists but grid not computed → 0 not UNKNOWN (Queens one run from done)
     if ctx.get("pack_evidence_uri"):
@@ -525,10 +543,8 @@ async def _h_pack(conn, base, params, ctx) -> ItemScore:
 
 async def _h_inversion(conn, base, params, ctx) -> ItemScore:
     if not ctx.get("inversion_census_wired"):
-        marker = _repo_root() / "docs/ln7/evidence/inversion_census.json"
-        if not marker.is_file():
-            marker = Path("/opt/clinical-sovereignty-lab/docs/ln7/evidence/inversion_census.json")
-        if not marker.is_file():
+        marker = _resolve_path("docs/ln7/evidence/inversion_census.json")
+        if not marker:
             return _mk(
                 base, 0.0, "0",
                 "inversion_census:ABSENT",
@@ -551,10 +567,8 @@ async def _h_inversion(conn, base, params, ctx) -> ItemScore:
 async def _h_ceo_memos(conn, base, params, ctx) -> ItemScore:
     n = int(ctx.get("ceo_memos") or 0)
     # Allow explicit evidence file
-    path = _repo_root() / "docs/ln7/evidence/ceo_memos.json"
-    if not path.is_file():
-        path = Path("/opt/clinical-sovereignty-lab/docs/ln7/evidence/ceo_memos.json")
-    if path.is_file():
+    path = _resolve_path("docs/ln7/evidence/ceo_memos.json")
+    if path:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             n = int(data.get("signed_count") or 0)
@@ -636,10 +650,8 @@ async def _h_ci(conn, base, params, ctx) -> ItemScore:
 
 
 async def _h_pilot(conn, base, params, ctx) -> ItemScore:
-    path = _repo_root() / "docs/ln7/evidence/pilot_prereg.json"
-    if not path.is_file():
-        path = Path("/opt/clinical-sovereignty-lab/docs/ln7/evidence/pilot_prereg.json")
-    if not path.is_file():
+    path = _resolve_path("docs/ln7/evidence/pilot_prereg.json")
+    if not path:
         return _mk(
             base, 0.0, "0",
             "pilot_prereg:ABSENT",
