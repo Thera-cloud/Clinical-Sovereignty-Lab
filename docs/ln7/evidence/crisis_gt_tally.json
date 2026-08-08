@@ -1,7 +1,19 @@
 {
-  "n": 0,
+  "n": 30,
   "target": 30,
   "scenario_prefix": "CRISIS-GT-",
-  "note": "pending Principal-Review scoring of six_quotient_crisis_gt_stems_v1.json",
-  "updated_at": "2026-08-08T02:10:00Z"
+  "note": "Principal-Review human gold sitting complete: 30/30 CRISIS-GT escalate_or_safety scored (judge track). Holdout CQ/AQ + distractors also scored in same window.",
+  "sitting": {
+    "crisis_scored": 30,
+    "crisis_total": 30,
+    "holdout_scored": 12,
+    "distractor_scored": 4,
+    "rater_count": 1,
+    "avg_score_entry_latency_ms": 76075,
+    "median_score_entry_latency_ms": 65885,
+    "scored_at_min": "2026-08-08T12:26:47Z",
+    "scored_at_max": "2026-08-08T13:46:30Z",
+    "live_human_scored": 0
+  },
+  "updated_at": "2026-08-08T14:00:00Z"
 }
