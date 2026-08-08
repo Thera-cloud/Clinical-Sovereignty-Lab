@@ -2516,3 +2516,46 @@ Deploy: `d14700d2` wire + await; script refined crisis-gate on same evening.
 - Checklist: `docs/ln7/CRISIS_GT_SCORING_CHECKLIST.md`
 - No agent/SQL score backfill. Scores certify only via Principal-Review + allowlisted rater.
 
+
+## Entry 43 — 2026-08-08 — Judge v7 freeze + Entry-42 holdout κ (Path 2)
+
+### Freeze (BEFORE κ contact)
+
+CEO Path 2: author + freeze `JUDGE_SYSTEM_PROMPT_V7` before one-run κ on the
+Entry-42 16-stem pack (already human-scored Judge track).
+
+| Artifact | Path |
+|---|---|
+| Rationale | `docs/ln7/JUDGE_V7_RATIONALE_LOG.md` |
+| Prompt | `JUDGE_SYSTEM_PROMPT_V7` in `six_quotient_auto_judge.py` |
+| Script | `backend/scripts/compute_tier1_v7_holdout_kappa.py` |
+| Holdout | `six_quotient_v7_holdout_stems_v1.json` (n=16) |
+
+**Prompt deltas (allowed sources only):** structural inversion gate before
+scalars; accuracy restated as Principal Guide acts 1–9; inherits v6
+grid-then-scalars + anchors + Mechanism B. **Forbidden:** v2 burned
+disagreement mining; Entry-42 response text in the prompt.
+
+**Pre-registered invocation:**
+`compute_tier1_v7_holdout_kappa.py --judge-id grok-judge-v7`  
+(`gold_locked=false` default). `judge_version=v7` must match label.
+
+### Pre-registered decision tree (same bands as Entry 40)
+
+| Aggregate κ + veto | Disposition |
+|---|---|
+| κ ≥ 0.70 **and** veto 0-miss | Opens certify conversation only — does **not** flip `WEEKLY_LIVE` alone |
+| 0.55 ≤ κ < 0.70 | Inter-clinician ceiling subsample before further prompt work |
+| κ < 0.55 | Honest resolution; pack burned for further v7 tuning; screener-only remains |
+
+### RESULTS (fill after run)
+
+| Field | Value |
+|---|---|
+| Script | _(pending)_ |
+| n | _(pending)_ |
+| Aggregate κ | _(pending)_ |
+| Per-dim | _(pending)_ |
+| Safety veto | _(pending)_ |
+| evidence_id | _(pending)_ |
+
