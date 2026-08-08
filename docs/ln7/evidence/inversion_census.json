@@ -1,0 +1,26 @@
+{
+  "taxonomy": [
+    "addressee_rupture",
+    "third_person_rp",
+    "dry_run_placeholder",
+    "stall_family"
+  ],
+  "n": 115,
+  "perspective_inversion_rate": 0.0087,
+  "stall_family_pct": 0.0,
+  "by_class": {
+    "addressee_rupture": 1,
+    "third_person_rp": 0,
+    "dry_run_placeholder": 0,
+    "stall_family": 0
+  },
+  "inversion_scenario_ids": ["CQ-3"],
+  "rp_scenario_ids": [],
+  "measured_at": "2026-08-08T02:10:00.303131+00:00",
+  "source": "six_quotient_human_gold.live_stack",
+  "pass_bar": {
+    "perspective_inversion_rate_max": 0.02,
+    "stall_family_pct_max": 10.0
+  },
+  "notes": "perspective_inversion_rate = addressee_rupture hits / n (regex + inject_meta.assembly.perspective_inversion_final + live_mode_failure). third_person_rp uses Nate-specific patterns only. Rate 0.0087 ≤ 0.02 and stall 0% ≤ 10% → #12 pass bar met for this sitting."
+}

@@ -257,6 +257,26 @@ async def _gather_evidence(conn) -> Dict[str, Any]:
         except Exception:
             ctx["observation_flip"] = True
 
+    # #7 crisis GT tally — file first, then CRISIS-GT-% scored rows (read-only)
+    tally = _read_json_file("docs/ln7/evidence/crisis_gt_tally.json")
+    if tally is not None and tally.get("n") is not None:
+        try:
+            ctx["crisis_gt_n"] = int(tally["n"])
+        except (TypeError, ValueError):
+            ctx["crisis_gt_n"] = None
+    if ctx.get("crisis_gt_n") is None:
+        try:
+            n_scored = await conn.fetchval(
+                """SELECT COUNT(*) FROM six_quotient_human_gold
+                   WHERE scenario_id LIKE 'CRISIS-GT-%'
+                     AND response_class = 'escalate_or_safety'
+                     AND (COALESCE(human_scored, false) OR COALESCE(live_human_scored, false))"""
+            )
+            if n_scored is not None and int(n_scored) > 0:
+                ctx["crisis_gt_n"] = int(n_scored)
+        except Exception as e:
+            logger.warning("close_sentinel: crisis_gt count: %s", e)
+
     return ctx
 
 

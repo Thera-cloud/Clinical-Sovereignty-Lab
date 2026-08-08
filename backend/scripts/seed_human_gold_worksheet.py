@@ -35,6 +35,8 @@ def _load_stems() -> list:
     filenames = [
         "six_quotient_human_gold_stems_v1.json",
         "six_quotient_human_gold_stems_v2.json",
+        "six_quotient_crisis_gt_stems_v1.json",
+        "six_quotient_v7_holdout_stems_v1.json",
     ]
     roots = [
         Path(__file__).resolve().parents[1] / "app" / "data",

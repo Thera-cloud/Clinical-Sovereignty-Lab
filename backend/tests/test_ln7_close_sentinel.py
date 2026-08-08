@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -132,3 +133,51 @@ def test_pilot_path_double_weight_in_overall(engine):
     ]
     o = engine.overall_weighted(scores)
     assert o == pytest.approx(33.3, abs=0.1)
+
+
+def test_crisis_gt_uses_tally_n(engine):
+    async def _run():
+        base = {
+            "item_id": "#7",
+            "tier": "HUMAN",
+            "title": "Crisis GT",
+            "owner": "clinician",
+            "weight": 2.0,
+            "pct": None,
+            "display": "UNKNOWN",
+            "evidence_uri": "",
+        }
+        sc = await engine._h_crisis_gt(None, base, {"target_n": 30}, {"crisis_gt_n": 12})
+        assert sc.pct == pytest.approx(40.0)
+        assert sc.display == "12/30"
+
+    asyncio.run(_run())
+
+
+def test_inversion_census_pass_bar(engine, tmp_path, monkeypatch):
+    marker = tmp_path / "inversion_census.json"
+    marker.write_text(
+        json.dumps(
+            {
+                "perspective_inversion_rate": 0.0087,
+                "stall_family_pct": 0.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(engine, "_resolve_path", lambda rel: marker if "inversion" in rel else None)
+    async def _run():
+        base = {
+            "item_id": "#12",
+            "tier": "CRANK",
+            "title": "inversion",
+            "owner": "clinician",
+            "weight": 1.0,
+            "pct": None,
+            "display": "UNKNOWN",
+            "evidence_uri": "",
+        }
+        sc = await engine._h_inversion(None, base, {"stall_max_pct": 10}, {})
+        assert sc.pct == 100.0
+
+    asyncio.run(_run())

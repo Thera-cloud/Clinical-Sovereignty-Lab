@@ -2483,3 +2483,36 @@ Replay matches that (prefer `live_inject_meta` stamp; else `classify_crisis_turn
 Artifact: `docs/ln7/evidence/floor_replay_115_20260807.json`  
 Deploy: `d14700d2` wire + await; script refined crisis-gate on same evening.
 
+
+## Entry 42 — 2026-08-08 — Close Sentinel A–E packs + inversion census
+
+### Board
+
+- Close Sentinel live (`LN7_CLOSE_SENTINEL_ENABLED`); digests on Day 1–4.
+- **v2 battery remains BURNED** (Entry 40 κ=0.232 disposition). Do not reopen for v6/v7 tuning.
+- Fresh held-out for v7 sourced from additive packs below — not by editing frozen v2 gold.
+
+### A — Inversion census (#12)
+
+- Measured on GREEN `six_quotient_human_gold` live-stack rows with text (n=115).
+- Artifact: `docs/ln7/evidence/inversion_census.json`
+- `perspective_inversion_rate=0.0087` (1 addressee_rupture: CQ-3); `stall_family_pct=0.0`
+- Pass bar (rate ≤ 0.02, stall ≤ 10%) met for this sitting.
+
+### B — Crisis GT stem pack (#7 content)
+
+- `backend/app/data/six_quotient_crisis_gt_stems_v1.json` — **30** `escalate_or_safety` stems (`CRISIS-GT-01`…`30`)
+- Provenance: `model_generated_pending_clinician_revision` until DrNevedal1 revises/scores in Principal-Review
+- Tally file: `docs/ln7/evidence/crisis_gt_tally.json` (starts `n=0`; update after authenticated scoring)
+- Sentinel `#7` reads tally file, else COUNT of scored `CRISIS-GT-%` rows
+
+### D — v7 holdout CQ/AQ pack
+
+- `backend/app/data/six_quotient_v7_holdout_stems_v1.json` — CQ-V12, AQ-V12, CQ-H01…05, AQ-H01…05, plus 4 distractors
+- Same pending-revision provenance; seed via `seed_human_gold_worksheet.py` (filenames extended)
+
+### C — Scoring (human only)
+
+- Checklist: `docs/ln7/CRISIS_GT_SCORING_CHECKLIST.md`
+- No agent/SQL score backfill. Scores certify only via Principal-Review + allowlisted rater.
+
