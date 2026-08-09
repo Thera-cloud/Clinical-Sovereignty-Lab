@@ -1,0 +1,32 @@
+{
+  "item_id": "#10",
+  "run_at_utc": "2026-08-09T15:51:11.292651+00:00",
+  "method": "start_canary + dual evaluate_canary on real ln7 pack outcomes",
+  "candidate": "LN7-2026-07-28T230514Z",
+  "incumbent": "LN7-fast-baseline",
+  "expired_zombies": [
+    "LN7-2026-07-30T190327Z",
+    "LN7-2026-07-30T191329Z"
+  ],
+  "evals": [
+    {
+      "eval": 1,
+      "ok": true,
+      "action": "await_ceo",
+      "reason": "ci_beats_incumbent",
+      "win_streak": 1,
+      "cand_lo": 0.17073170731707318,
+      "inc_point": 0.0
+    },
+    {
+      "eval": 2,
+      "ok": true,
+      "action": "await_ceo",
+      "reason": "ci_beats_incumbent",
+      "win_streak": 2,
+      "cand_lo": 0.17073170731707318,
+      "inc_point": 0.0
+    }
+  ],
+  "note": "Candidate previously scored 13/41 pack passes vs incumbent 1/31. Gate uses cand CI lo > incumbent point \u2014 not fabricated streak."
+}

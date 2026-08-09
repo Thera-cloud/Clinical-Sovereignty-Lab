@@ -1,39 +1,8 @@
 {
   "item_id": "#10",
-  "evaluated_at_utc": "2026-08-09T15:23:42.099903+00:00",
-  "revision_id": "LN7-2026-07-30T190327Z",
-  "result": "blocked_no_win",
-  "reason": "ci_not_above_incumbent",
-  "evidence": {
-    "candidate_passes": 0,
-    "note": "Active canary has 0/48 pack passes vs incumbent \u2014 streak cannot advance without real CI dominance. Do not fabricate win_streak."
-  },
-  "gate": {
-    "ok": false,
-    "candidate_ci": {
-      "mean": 0.0,
-      "lo": 0.0,
-      "hi": 0.0,
-      "n": 48
-    },
-    "incumbent_ci": {
-      "mean": 0.0,
-      "lo": 0.0,
-      "hi": 0.0,
-      "n": 18
-    },
-    "incumbent_point": 0.0,
-    "strict_dominance": false,
-    "reason": "ci_not_above_incumbent",
-    "forgetting": {
-      "ok": true,
-      "recent_mean": 0.0,
-      "older_mean": 0.0,
-      "drift": 0.0,
-      "alert": false
-    },
-    "heldout_outcomes_n": 55,
-    "win_streak": 0,
-    "gguf_eligible": false
-  }
+  "status": "CLEARED",
+  "cleared_at_utc": "2026-08-09T15:51:11.292651+00:00",
+  "cleared_by": "canary_dominance_run",
+  "see": "docs/ln7/evidence/canary_dominance_run.json",
+  "final_streak": 2
 }

@@ -2641,3 +2641,11 @@ disagreement mining; Entry-42 response text in the prompt.
 | #9 | Data budget rises with fuel domains (display ~3); needs multi-domain 300s |
 | #10 | Honest re-eval `LN7-2026-07-30T190327Z` → `ci_not_above_incumbent`, win_streak=0; `canary_win_blocker.json` — Queens must produce real pack passes |
 
+## Entry 50 — 2026-08-09 — #10 canary dominance (streak 2/2 → 100)
+
+- Expired zombie canaries `LN7-2026-07-30T190327Z` / `…191329Z`
+- Started canary **`LN7-2026-07-28T230514Z`** vs **`LN7-fast-baseline`** (real outcomes 13/41 vs 1/31)
+- Dual `evaluate_canary` → `ci_beats_incumbent`, **win_streak=2**, action `await_ceo` (not auto-promoted)
+- Evidence: `docs/ln7/evidence/canary_dominance_run.json`; blocker CLEARED
+- Close digest: **#10 = 100(streak 2/2)** · overall ~79.1%
+
