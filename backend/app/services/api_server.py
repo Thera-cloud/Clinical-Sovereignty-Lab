@@ -411,6 +411,67 @@ async def require_coach(user: Dict = Depends(get_current_user)) -> Dict:
         raise HTTPException(status_code=403, detail="Coach access required")
     return user
 
+
+def _coach_identity(coach: Dict) -> tuple:
+    """hardware_id, username, uuid-text for caseload matching."""
+    hw = str(coach.get("hardware_id") or "").strip()
+    username = str(coach.get("username") or "").strip()
+    uid = str(coach.get("id") or "").strip()
+    if not hw:
+        hw = uid
+    return hw, username, uid
+
+
+def _is_admin_coach_view(coach: Dict) -> bool:
+    return coach.get("role") == "ADMIN" or bool(coach.get("is_audit"))
+
+
+async def _coach_can_access_client(conn, coach: Dict, client_row) -> bool:
+    """True if coach is assigned to client (profile fields or sessions)."""
+    if _is_admin_coach_view(coach):
+        return True
+    hw, username, uid = _coach_identity(coach)
+    pd = client_row.get("profile_data") or {}
+    if isinstance(pd, str):
+        try:
+            pd = json.loads(pd)
+        except Exception:
+            pd = {}
+    if hw and (
+        pd.get("assigned_coach_id") == hw
+        or pd.get("coach_id") == hw
+        or pd.get("assigned_coach") == hw
+    ):
+        return True
+    if username and (
+        pd.get("assigned_coach_id") == username
+        or pd.get("coach_id") == username
+        or pd.get("assigned_coach") == username
+    ):
+        return True
+    client_id = client_row.get("id")
+    if not client_id:
+        return False
+    return bool(
+        await conn.fetchval(
+            """
+            SELECT 1 FROM sessions s
+            WHERE s.user_id = $1
+              AND (
+                ($2 <> '' AND s.coach_id::text = $2)
+                OR ($3 <> '' AND s.coach_id::text = $3)
+                OR ($4 <> '' AND s.coach_id::text = $4)
+              )
+            LIMIT 1
+            """,
+            client_id,
+            hw,
+            username,
+            uid,
+        )
+    )
+
+
 # =============================================================================
 # AUDIT LOGGING
 # =============================================================================
@@ -799,32 +860,71 @@ async def wipe_memory(
 
 @app.get("/api/coach/dashboard", response_model=CoachDashboard, tags=["Coach"])
 async def get_coach_dashboard(coach: Dict = Depends(require_coach)):
-    """Get coach dashboard data"""
+    """Get coach dashboard data — clients limited to this coach's caseload."""
     if db.pool:
         async with db.pool.acquire() as conn:
-            # Get assigned clients (all clients for now, can be filtered by assignment)
-            clients = await conn.fetch("""
-                SELECT id, name, tier, family_id 
-                FROM users 
-                WHERE role = 'CLIENT' AND deleted_at IS NULL
-                ORDER BY name
-            """)
-            
+            coach_hw, coach_username, coach_uid = _coach_identity(coach)
+
+            if _is_admin_coach_view(coach):
+                clients = await conn.fetch("""
+                    SELECT id, name, tier, family_id
+                    FROM users
+                    WHERE role = 'CLIENT' AND deleted_at IS NULL
+                    ORDER BY name
+                """)
+            else:
+                # Caseload only: profile assignment fields + session fallback.
+                # Matches bridge coach_get_clients / routers/coach.py get_assigned_clients.
+                clients = await conn.fetch(
+                    """
+                    SELECT DISTINCT u.id, u.name, u.tier, u.family_id
+                    FROM users u
+                    WHERE u.role = 'CLIENT'
+                      AND u.deleted_at IS NULL
+                      AND (
+                        ($1 <> '' AND (
+                            u.profile_data->>'assigned_coach_id' = $1
+                            OR u.profile_data->>'coach_id' = $1
+                            OR u.profile_data->>'assigned_coach' = $1
+                        ))
+                        OR ($2 <> '' AND (
+                            u.profile_data->>'assigned_coach_id' = $2
+                            OR u.profile_data->>'coach_id' = $2
+                            OR u.profile_data->>'assigned_coach' = $2
+                        ))
+                        OR EXISTS (
+                            SELECT 1 FROM sessions s
+                            WHERE s.user_id = u.id
+                              AND (
+                                ($1 <> '' AND s.coach_id::text = $1)
+                                OR ($2 <> '' AND s.coach_id::text = $2)
+                                OR ($3 <> '' AND s.coach_id::text = $3)
+                              )
+                        )
+                      )
+                    ORDER BY u.name
+                    """,
+                    coach_hw,
+                    coach_username,
+                    coach_uid,
+                )
+
             # Get schedule
             schedule = await conn.fetch("""
                 SELECT s.*, u.name as client_name
                 FROM sessions s
                 JOIN users u ON u.id = s.user_id
-                WHERE s.coach_id = $1 AND s.scheduled_at > NOW()
+                WHERE s.coach_id::text = ANY($1::text[])
+                  AND s.scheduled_at > NOW()
                 ORDER BY s.scheduled_at
                 LIMIT 10
-            """, coach['id'])
+            """, [x for x in (coach_hw, coach_username, coach_uid) if x])
             
             # Get pending notes count
             pending_notes = await conn.fetchval("""
                 SELECT COUNT(*) FROM coach_notes 
-                WHERE coach_id = $1 AND status = 'PENDING'
-            """, coach['id'])
+                WHERE coach_id::text = ANY($1::text[]) AND status = 'PENDING'
+            """, [x for x in (coach_hw, coach_username, coach_uid) if x])
             
             return CoachDashboard(
                 clients=[dict(c) for c in clients],
@@ -873,17 +973,20 @@ async def submit_coach_note(note: CoachNoteSubmit, coach: Dict = Depends(require
 
 @app.get("/api/coach/clients/{client_id}/brief", tags=["Coach"])
 async def get_presession_brief(client_id: str, coach: Dict = Depends(require_coach)):
-    """Get pre-session brief for client"""
+    """Get pre-session brief for an assigned client only."""
     if db.pool:
         async with db.pool.acquire() as conn:
             # Get client info
             client = await conn.fetchrow(
-                "SELECT * FROM users WHERE id = $1",
+                "SELECT * FROM users WHERE id = $1 AND role = 'CLIENT' AND deleted_at IS NULL",
                 client_id
             )
             
             if not client:
                 raise HTTPException(status_code=404, detail="Client not found")
+
+            if not await _coach_can_access_client(conn, coach, client):
+                raise HTTPException(status_code=403, detail="Client not on your caseload")
             
             # Get recent memory
             memories = await conn.fetch("""
