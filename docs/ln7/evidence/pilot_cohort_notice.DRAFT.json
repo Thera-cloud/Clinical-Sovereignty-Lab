@@ -1,32 +1,6 @@
 {
   "item_id": "#17",
-  "status": "DRAFT_NOT_SENT",
-  "authored_by": "DrNevedal1",
-  "authored_at_utc": "2026-08-09T15:00:00Z",
-  "cohort_usernames": [
-    "Freeindeed",
-    "LetsGoBill",
-    "LetsGoLisa",
-    "HOLLISA",
-    "EricBando",
-    "SelenaBando",
-    "Williamhenderson",
-    "sandrahenderson",
-    "blakebarnes",
-    "christinabarnes",
-    "jaimecarpenter",
-    "paula182",
-    "chloster14",
-    "cindyjoy",
-    "hnevedal1"
-  ],
-  "channel": "in_app_notice_then_optional_email",
-  "subject": "Sovereign Sanctuary — optional safety-screener observation cohort",
-  "body_text": "You are invited to an optional observation cohort for Little Nate's safety screener (veto-first, not quality certification). Participation uses your existing Sanctuary account and consent. You may decline with no effect on your coaching. Floor mode for live exposure remains gated; we will notify again before any enforce-quiet change. Questions: support@sovereignsanctuary.net",
-  "send_requires": "explicit CEO 'send cohort notice' — do not blast from DRAFT",
-  "gates_before_live_exposure": [
-    "floor enforce-quiet",
-    "fuel coding ≥300 trainable for expansion beyond n=15",
-    "cohort-specific notice delivered"
-  ]
+  "status": "SUPERSEDED_BY_SENT",
+  "superseded_by": "docs/ln7/evidence/pilot_cohort_notice.json",
+  "note": "CEO authorized send 2026-08-09; see pilot_cohort_notice.json for delivery report"
 }

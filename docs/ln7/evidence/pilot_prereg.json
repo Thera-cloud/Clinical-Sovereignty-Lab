@@ -2,10 +2,10 @@
   "item_id": "#17",
   "pre_registered_success_numbers": {
     "primary_endpoint": "safety-veto miss rate (primary); floor FP rate + session retention (secondary)",
-    "success_criterion": "0 veto misses across all cohort sessions; floor FP ≤10%; any veto miss = cohort pause + review (mirrors the screener auto-revert)",
+    "success_criterion": "0 veto misses across all cohort sessions; floor FP \u226410%; any veto miss = cohort pause + review (mirrors the screener auto-revert)",
     "n_planned": 15,
     "floor_mode_at_cohort": "enforce_quiet",
-    "n_planned_rationale": "First cohort of 15 existing users — enough for veto/FP signal without implying PRE6 fuel (300) readiness"
+    "n_planned_rationale": "First cohort of 15 existing users \u2014 enough for veto/FP signal without implying PRE6 fuel (300) readiness"
   },
   "first_cohort": {
     "start_date": "2026-08-09",
@@ -31,14 +31,24 @@
     "named_by": "DrNevedal1",
     "named_at_utc": "2026-08-09T14:05:00Z",
     "notice": {
-      "status": "DRAFT_NOT_SENT",
-      "draft_uri": "docs/ln7/evidence/pilot_cohort_notice.DRAFT.json",
-      "drafted_at_utc": "2026-08-09T15:00:00Z"
+      "status": "SENT",
+      "sent_at_utc": "2026-08-09T15:23:28.599180+00:00",
+      "evidence_uri": "docs/ln7/evidence/pilot_cohort_notice.json",
+      "email_ok": 8,
+      "in_app_ok": 15,
+      "missing_email": [
+        "HOLLISA",
+        "Williamhenderson",
+        "sandrahenderson",
+        "blakebarnes",
+        "christinabarnes",
+        "jaimecarpenter",
+        "hnevedal1"
+      ]
     },
-    "gates": "named cohort ready; notice DRAFT only — send requires CEO; live exposure still gated on floor enforce-quiet + fuel ≥300 trainable before expanding beyond n_planned=15"
+    "gates": "named + cohort notice SENT (8 email / 15 in-app); live exposure still gated on floor enforce-quiet + fuel ≥300 trainable before expanding beyond n_planned=15"
   },
-
   "authored_by": "DrNevedal1",
   "authored_at_utc": "2026-08-09T13:31:00Z",
-  "engine_note": "Close Sentinel #17: named roster → partial; UNKNOWN/100 only after live human-gated sessions under cohort gates"
+  "engine_note": "Close Sentinel #17: named roster \u2192 partial; UNKNOWN/100 only after live human-gated sessions under cohort gates"
 }

@@ -2631,3 +2631,13 @@ disagreement mining; Entry-42 response text in the prompt.
 | 5 #11 | Yes | `dose_response_grid_verdict.json` from acceptance brief + CEO memo #13 |
 | 5 #9/#10 | **No** | Canary active but `ok=false` / no win_streak — do not fabricate wins |
 
+## Entry 49 — 2026-08-09 — Cohort notice send + fuel vol2 + canary blocker
+
+| # | Action |
+|---|---|
+| #17 | CEO copy emailed 8/15 (SendGrid); in-app 15/15; `pilot_cohort_notice.json` status=SENT; missing emails listed |
+| #15 | Fuel vol2 — coding **53/300** trainable (+31 packs); ETA ~34d |
+| #8 | Wait — observation still UTC day-of-flip; clean_days=0 → #8=30 |
+| #9 | Data budget rises with fuel domains (display ~3); needs multi-domain 300s |
+| #10 | Honest re-eval `LN7-2026-07-30T190327Z` → `ci_not_above_incumbent`, win_streak=0; `canary_win_blocker.json` — Queens must produce real pack passes |
+

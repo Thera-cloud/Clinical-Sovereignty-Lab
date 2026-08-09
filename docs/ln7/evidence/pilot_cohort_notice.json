@@ -1,0 +1,156 @@
+{
+  "item_id": "#17",
+  "status": "SENT",
+  "sent_at_utc": "2026-08-09T15:23:28.599180+00:00",
+  "sent_by": "DrNevedal1",
+  "subject": "Sovereign Sanctuary \u2014 safety screening notice",
+  "body_text": "We are doing a safety screening test for Little Nate. The observation of the Sanctuary accounts and by the consent of having an account with Sovereign Sanctuary it is used to better the platform. Data used is only for internal education and in the betterment of Little Nate's safety protocols. No further action is required. This is a notice to let you know from time to time we update the safety protocols within the system. All data remains confidential. If you have questions please email support@sovereignsanctuary.net.\n\n- Support Team",
+  "email_ok": 8,
+  "in_app_ok": 15,
+  "missing_email": [
+    "HOLLISA",
+    "Williamhenderson",
+    "sandrahenderson",
+    "blakebarnes",
+    "christinabarnes",
+    "jaimecarpenter",
+    "hnevedal1"
+  ],
+  "delivery": [
+    {
+      "username": "Freeindeed",
+      "name": "kristy moore",
+      "hardware_id": "CLIENT_FREEINDEED_ID",
+      "email": "sweet2noend@yahoo.com",
+      "email_sent": true,
+      "in_app": true,
+      "notes": "email via dual COACH sweet2noend@yahoo.com"
+    },
+    {
+      "username": "LetsGoBill",
+      "name": "Bill West",
+      "hardware_id": "CLIENT_LETSGOBILL_ID",
+      "email": "edwinwestva@gmail.com",
+      "email_sent": true,
+      "in_app": true,
+      "notes": ""
+    },
+    {
+      "username": "LetsGoLisa",
+      "name": "Lisa West",
+      "hardware_id": "CLIENT_LETSGOLISA_ID",
+      "email": "lighterloads@icloud.com",
+      "email_sent": true,
+      "in_app": true,
+      "notes": ""
+    },
+    {
+      "username": "HOLLISA",
+      "name": "LISA BETH WEST",
+      "hardware_id": "CLIENT_HOLLISA_ID",
+      "email": null,
+      "email_sent": false,
+      "in_app": true,
+      "notes": "no_email_on_file \u2014 in_app only"
+    },
+    {
+      "username": "EricBando",
+      "name": "Eric Bando",
+      "hardware_id": "CLIENT_ERICBANDO_ID",
+      "email": "ehbcoaching@gmail.com",
+      "email_sent": true,
+      "in_app": true,
+      "notes": ""
+    },
+    {
+      "username": "SelenaBando",
+      "name": "Selena Bando",
+      "hardware_id": "CLIENT_SELENABANDO_ID",
+      "email": "selenabando7@gmail.com",
+      "email_sent": true,
+      "in_app": true,
+      "notes": ""
+    },
+    {
+      "username": "Williamhenderson",
+      "name": "Will Henderson",
+      "hardware_id": "CLIENT_WILLIAMHENDERSON_ID",
+      "email": null,
+      "email_sent": false,
+      "in_app": true,
+      "notes": "no_email_on_file \u2014 in_app only"
+    },
+    {
+      "username": "sandrahenderson",
+      "name": "Sandra Henderson",
+      "hardware_id": "CLIENT_SANDRAHENDERSON_ID",
+      "email": null,
+      "email_sent": false,
+      "in_app": true,
+      "notes": "no_email_on_file \u2014 in_app only"
+    },
+    {
+      "username": "blakebarnes",
+      "name": "Blake Barnes",
+      "hardware_id": "CLIENT_BLAKEBARNES_ID",
+      "email": null,
+      "email_sent": false,
+      "in_app": true,
+      "notes": "no_email_on_file \u2014 in_app only"
+    },
+    {
+      "username": "christinabarnes",
+      "name": "Christina Barnes",
+      "hardware_id": "CLIENT_CHRISTINABARNES_ID",
+      "email": null,
+      "email_sent": false,
+      "in_app": true,
+      "notes": "no_email_on_file \u2014 in_app only"
+    },
+    {
+      "username": "jaimecarpenter",
+      "name": "Jaime Carpenter",
+      "hardware_id": "CLIENT_JAIMECARPENTER_ID",
+      "email": null,
+      "email_sent": false,
+      "in_app": true,
+      "notes": "no_email_on_file \u2014 in_app only"
+    },
+    {
+      "username": "paula182",
+      "name": "Paula Swain",
+      "hardware_id": "CLIENT_PAULA182_ID",
+      "email": "pswain811@gmail.com",
+      "email_sent": true,
+      "in_app": true,
+      "notes": ""
+    },
+    {
+      "username": "chloster14",
+      "name": "Chloe Hart",
+      "hardware_id": "CLIENT_CHLOSTER14_ID",
+      "email": "chloster14@gmail.com",
+      "email_sent": true,
+      "in_app": true,
+      "notes": ""
+    },
+    {
+      "username": "cindyjoy",
+      "name": "Cindy Prusinowski",
+      "hardware_id": "CLIENT_CINDYJOY_ID",
+      "email": "cjoyc4518@gmail.com",
+      "email_sent": true,
+      "in_app": true,
+      "notes": ""
+    },
+    {
+      "username": "hnevedal1",
+      "name": "Haidyn Nevedal",
+      "hardware_id": "CLIENT_HNEVEDAL1_ID",
+      "email": null,
+      "email_sent": false,
+      "in_app": true,
+      "notes": "no_email_on_file \u2014 in_app only"
+    }
+  ]
+}
