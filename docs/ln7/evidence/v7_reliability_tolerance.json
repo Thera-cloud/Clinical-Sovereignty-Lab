@@ -1,0 +1,23 @@
+{
+  "item_id": "#4",
+  "registered_by": "DrNevedal1",
+  "registered_at_utc": "2026-08-09T14:05:00Z",
+  "scope": "v7_holdout_screener_permanent",
+  "role": "safety_veto_screener_only",
+  "anchor": {
+    "evidence_id": 12,
+    "judge_id": "grok-judge-v7",
+    "aggregate_kappa": 0.398856,
+    "gold_lock_sha8": "12ca6d4a",
+    "screener_permanent": "docs/ln7/evidence/v7_screener_permanent.json"
+  },
+  "tolerance": {
+    "kappa_floor": 0.35,
+    "kappa_ceiling_screener": 0.55,
+    "veto_miss_max": 0,
+    "notes": "Screener-permanent Branch 1: accept κ in [0.35, 0.55) with zero veto misses. Drift outside band or any veto miss → pause screener + CEO review. Not a quality-certify band."
+  },
+  "recheck_run": false,
+  "recheck_evidence_id": null,
+  "engine_note": "Register alone → Close #4 = 40 until recheck_run"
+}

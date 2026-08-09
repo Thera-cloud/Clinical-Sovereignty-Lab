@@ -1,0 +1,15 @@
+{
+  "item_id": "#8",
+  "decision": "flip_to_enforce_with_alert",
+  "from_mode": "shadow",
+  "to_mode": "enforce_with_alert",
+  "clean_days": 0,
+  "observation_week_starts_utc": "2026-08-09T14:00:00Z",
+  "decided_by": "DrNevedal1",
+  "decided_at_utc": "2026-08-09T14:05:00Z",
+  "rationale": "Address-gate shipped (fp=0); #6 ≤10% FP bar accepted with n=2 honesty rider. Start enforce-with-alert observation week; re-verify FP on week's full data before enforce-quiet.",
+  "effects": {
+    "STRUCTURAL_FLOOR_MODE": "enforce_with_alert",
+    "close_sentinel_floor": "observation_week starts at 30 + 10*clean_days"
+  }
+}

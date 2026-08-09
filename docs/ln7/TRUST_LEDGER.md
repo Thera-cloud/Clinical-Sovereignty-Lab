@@ -2611,3 +2611,12 @@ disagreement mining; Entry-42 response text in the prompt.
 - Engine: `_h_floor_fn` uses `effective_fn = raw_fn − disposed` → **#5 = 100** when gate shipped
 - CEO: DrNevedal1 authorized 2026-08-09 (proceed #5→100 AQ-V07)
 
+## Entry 47 — 2026-08-09 — CEO stills + #15 fuel enqueue
+
+| Item | Action |
+|---|---|
+| #8 | `enforce_with_alert_flip.json` + GREEN `STRUCTURAL_FLOOR_MODE=enforce_with_alert` (observation week, clean_days=0 → #8≈30) |
+| #4 | `v7_reliability_tolerance.json` screener band κ∈[0.35,0.55), veto_miss_max=0 → #4=40 until recheck |
+| #17 | Named 15 existing CLIENT usernames in `pilot_prereg.json` (`enrolled_n=15`) → display `15/15 named` (40); live sessions still gated |
+| #15 | Enqueued `hive_burst` + `ln7_shadow_fork` (coding) on CLI task bus — fuel grows only via ci_pack shadow_outcome rows |
+

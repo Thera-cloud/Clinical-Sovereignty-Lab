@@ -700,6 +700,31 @@ async def _h_pilot(conn, base, params, ctx) -> ItemScore:
             blocked_owner="ceo",
             blocked_hint="pilot pre-registered success numbers (#17)",
         )
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        fc = data.get("first_cohort") or {}
+        names = fc.get("enrolled_usernames") or []
+        enrolled_n = int(fc.get("enrolled_n") or len(names) or 0)
+        n_planned = int(
+            (data.get("pre_registered_success_numbers") or {}).get("n_planned")
+            or params.get("n_planned", 15)
+        )
+        # Named roster = human gate step 1 (40). Live sessions under
+        # enforce-quiet gates still required for 100 — not vacuous file→100.
+        if enrolled_n >= n_planned and len(names) >= n_planned:
+            return _mk(
+                base, 40.0, f"{enrolled_n}/{n_planned} named", str(path),
+                blocked_owner="ceo",
+                blocked_hint="pilot named; await live cohort sessions (#17)",
+            )
+        if enrolled_n > 0 or names:
+            return _mk(
+                base, None, f"{enrolled_n}/{n_planned}", str(path),
+                blocked_owner="ceo",
+                blocked_hint="pilot cohort roster incomplete (#17)",
+            )
+    except Exception:
+        pass
     return _mk(base, None, UNKNOWN, str(path), blocked_owner="ceo",
                blocked_hint="pilot cohort still human-gated")
 

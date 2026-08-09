@@ -10,10 +10,29 @@
   "first_cohort": {
     "start_date": "2026-08-09",
     "population": "current existing platform users (active client accounts); recruitment = in-product opt-in among currently enrolled users; consent basis = platform clinical/AI companion consent already on file plus cohort-specific notice before enforce-quiet exposure",
-    "enrolled_n": null,
-    "gates": "start gated on floor enforce-quiet + fuel ≥300 trainable before expanding beyond n_planned=15"
+    "enrolled_n": 15,
+    "enrolled_usernames": [
+      "Freeindeed",
+      "LetsGoBill",
+      "LetsGoLisa",
+      "HOLLISA",
+      "EricBando",
+      "SelenaBando",
+      "Williamhenderson",
+      "sandrahenderson",
+      "blakebarnes",
+      "christinabarnes",
+      "jaimecarpenter",
+      "paula182",
+      "chloster14",
+      "cindyjoy",
+      "hnevedal1"
+    ],
+    "named_by": "DrNevedal1",
+    "named_at_utc": "2026-08-09T14:05:00Z",
+    "gates": "named cohort ready; live exposure still gated on floor enforce-quiet + fuel ≥300 trainable before expanding beyond n_planned=15"
   },
   "authored_by": "DrNevedal1",
   "authored_at_utc": "2026-08-09T13:31:00Z",
-  "engine_note": "Close Sentinel #17 remains UNKNOWN until cohort is human-gated live — file presence alone is not completion"
+  "engine_note": "Close Sentinel #17: named roster → partial; UNKNOWN/100 only after live human-gated sessions under cohort gates"
 }
