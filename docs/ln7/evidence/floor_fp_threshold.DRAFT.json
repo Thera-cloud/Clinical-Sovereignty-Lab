@@ -1,0 +1,23 @@
+{
+  "_status": "DRAFT — CEO RED review required before rename to floor_fp_threshold.json",
+  "item_id": "#6",
+  "max_fp_rate": null,
+  "suggested_default": 0.10,
+  "measured_at_entry41": {
+    "fp": 1,
+    "tn": 1,
+    "fp_rate_among_labeled_ok": 0.5,
+    "note": "pre-address-gate; superseded by measured_post_address_gate"
+  },
+  "measured_post_address_gate": {
+    "fp": 0,
+    "tn": 2,
+    "fp_rate_among_labeled_ok": 0.0,
+    "fn": 1,
+    "note": "AQ-2 FP cleared; remaining FN=AQ-V07 quality-fail. CEO still sets max_fp_rate + fix_shipped"
+  },
+  "fix_shipped": false,
+  "ceo_verdict": "",
+  "decided_at_utc": "",
+  "decided_by": "CEO"
+}

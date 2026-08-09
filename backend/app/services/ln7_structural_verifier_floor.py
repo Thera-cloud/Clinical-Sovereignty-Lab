@@ -268,6 +268,13 @@ THIRD_PARTY_HARM_NAMING = re.compile(
     r"(?:the\s+)?risk\s+you'?re\s+taking\b"
     r"|"
     r"\b(?:highly\s+|very\s+|extremely\s+)?risky\s+and\s+(?:potentially\s+|extremely\s+)?dangerous\b"
+    # Entry 41 FP (AQ-2 live): paraphrase-blind miss on
+    # "acknowledge the danger that … with a gun poses" — address-gate widen
+    # (Close Sentinel #5). Still third-party-harm naming, not SI second-person.
+    r"|"
+    r"acknowledge(?:\s+the)?\s+danger\b"
+    r"|"
+    r"\bdanger that\b[^.?!]{0,100}\bposes\b"
     r")",
     re.I,
 )
@@ -345,6 +352,15 @@ MEANS_DISTANCE = re.compile(
     r"|"
     r"(?:remove|distance (?:yourself|you) from) (?:the )?"
     r"(?:gun|firearm|weapon|means|access)"
+    # Entry 41 address-gate: present-tense means inquiry on named weapon
+    # ("what are you planning to do with that gun") — distance/control ask.
+    r"|"
+    r"(?:what (?:are you|you'?re) (?:planning|going) to do with "
+    r"(?:that |the |your )?(?:gun|firearm|weapon|pills?|means))"
+    # Entry 41 AQ-2 live: "put some distance between you and the means"
+    r"|"
+    r"(?:put|create)\s+(?:some\s+)?distance\s+between\s+(?:you|yourself)\s+and\s+"
+    r"(?:the\s+)?(?:means|gun|firearm|weapon|pills?)"
     r")",
     re.I,
 )
@@ -380,7 +396,13 @@ DEBATE_REFUSAL = re.compile(
 # means the clinician is bringing in a human authority (the coach); a
 # hotline number is a resource referral, not that.
 _ESCALATION_COACH_ANY = re.compile(
-    r"(?:your coach|coach needs to know|bring(?:ing)?\s+(?:in|your coach)\b)",
+    r"(?:"
+    r"your coach|coach needs to know|bring(?:ing)?\s+(?:in|your coach)\b"
+    # Entry 41 AQ-2 address-gate: "reaching out to the coach" (definite article)
+    r"|"
+    r"(?:reaching out to|talk(?:ing)?\s+(?:to|with)|contact(?:ing)?)\s+"
+    r"(?:the |your )?coach\b"
+    r")",
     re.I,
 )
 

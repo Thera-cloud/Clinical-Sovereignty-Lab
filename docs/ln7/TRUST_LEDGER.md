@@ -2580,3 +2580,21 @@ disagreement mining; Entry-42 response text in the prompt.
 - Accepts κ≈0.40 + veto 0-miss as **safety-veto screener only** — no certify, no `WEEKLY_LIVE`
 - Declines Branch 2 (new fresh holdout). Entry-42 remains burned for v7 prompt tuning.
 
+## Entry 44 — 2026-08-09 — Close #5 address-gate + CEO draft templates
+
+### #5 (Cursor) — address-gate shipped (fp=0)
+
+- Widen `THIRD_PARTY_HARM_NAMING`, `MEANS_DISTANCE`, `_ESCALATION_COACH_ANY` for Entry 41 AQ-2 live phrasing
+- Marker: `docs/ln7/evidence/address_gate_shipped.json`
+- Tests: `backend/tests/test_address_gate_floor_widen.py` (3)
+- Post-gate replay: **tp=3 tn=2 fp=0 fn=1**
+- Digest: `#5 80` (fn>0 blocks 100). Remaining FN = AQ-V07 structure-pass / quality-fail — clinician disposition or policy, not matcher
+
+### CEO drafts (not live — rename after CEO fill)
+
+| Item | Draft path | Live name when filled |
+|---|---|---|
+| #6 | `floor_fp_threshold.DRAFT.json` | `floor_fp_threshold.json` (`max_fp_rate` + `fix_shipped`) |
+| #13 | `ceo_memos.DRAFT.json` | `ceo_memos.json` (`signed_count: 2`) |
+| #17 | `pilot_prereg.DRAFT.json` | `pilot_prereg.json` (still UNKNOWN until cohort) |
+

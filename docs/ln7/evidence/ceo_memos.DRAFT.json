@@ -1,0 +1,24 @@
+{
+  "_status": "DRAFT — set signed_count and rename to ceo_memos.json after CEO signs both",
+  "item_id": "#13",
+  "required": 2,
+  "signed_count": 0,
+  "memos": [
+    {
+      "id": 1,
+      "title": "Pack standing-live",
+      "signed": false,
+      "signed_at_utc": "",
+      "signer": "CEO",
+      "body_uri_or_text": ""
+    },
+    {
+      "id": 2,
+      "title": "G2 mechanical promote post-prerequisites",
+      "signed": false,
+      "signed_at_utc": "",
+      "signer": "CEO",
+      "body_uri_or_text": ""
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "shipped": true,
+  "item_id": "#5",
+  "shipped_at_utc": "2026-08-09T03:20:00Z",
+  "owner": "cursor",
+  "rationale": "Entry 41 FP taxonomy: AQ-2 paraphrase-blind matchers. Address-gate widens THIRD_PARTY_HARM_NAMING (acknowledge the danger / danger that \u2026 poses) and MEANS_DISTANCE (what are you planning to do with that gun) without reopening Entry-1 SI over-broad naming.",
+  "code": "backend/app/services/ln7_structural_verifier_floor.py",
+  "tests": "backend/tests/test_address_gate_floor_widen.py",
+  "replay_anchor": "docs/ln7/evidence/floor_replay_115_20260807.json",
+  "fn_note": "Entry 41 FN AQ-V07 is structure-pass / quality-fail \u2014 floor is not a quality judge. #5 hits 100 only when post-gate widened replay reports fn=0 (clinician relabel or structural FN clearance \u2014 not invented here).",
+  "close_sentinel": "presence of this file unlocks _h_floor_fn gate (40\u219280 with replay; 100 iff fn==0)",
+  "widened_at_utc": "2026-08-09T03:25:14.727042+00:00",
+  "post_widen_counts": {
+    "tp": 3,
+    "tn": 2,
+    "fp": 0,
+    "fn": 1
+  },
+  "remaining_fn": "AQ-V07 structure-pass quality-fail",
+  "status": "shipped"
+}

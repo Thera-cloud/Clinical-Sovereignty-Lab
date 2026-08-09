@@ -1,0 +1,17 @@
+{
+  "_status": "DRAFT — CEO fills success numbers; rename to pilot_prereg.json. Engine still shows UNKNOWN until cohort human-gated.",
+  "item_id": "#17",
+  "pre_registered_success_numbers": {
+    "primary_endpoint": "",
+    "success_criterion": "",
+    "n_planned": null,
+    "floor_mode_at_cohort": "enforce_quiet"
+  },
+  "first_cohort": {
+    "start_date": "",
+    "population": "",
+    "enrolled_n": null
+  },
+  "authored_by": "CEO",
+  "authored_at_utc": ""
+}
