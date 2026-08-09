@@ -2620,3 +2620,14 @@ disagreement mining; Entry-42 response text in the prompt.
 | #17 | Named 15 existing CLIENT usernames in `pilot_prereg.json` (`enrolled_n=15`) → display `15/15 named` (40); live sessions still gated |
 | #15 | Enqueued `hive_burst` + `ln7_shadow_fork` (coding) on CLI task bus — fuel grows only via ci_pack shadow_outcome rows |
 
+## Entry 48 — 2026-08-09 — Proceed 1–5 (ready subset)
+
+| # | Ready? | Action |
+|---|---|---|
+| 1 #17 | Partial | `pilot_cohort_notice.DRAFT.json` — **not sent** (needs CEO `send cohort notice`) |
+| 2 #15 | Yes | Multi-pack coding `ci_pack` shadow_fork + fuel gauge |
+| 3 #8 | Partial | Calendar tick wired; same UTC day as flip → still 0 clean_days |
+| 4 #4 | Yes | Band recheck on frozen evidence_id=12 → `recheck_run` → #4=100 |
+| 5 #11 | Yes | `dose_response_grid_verdict.json` from acceptance brief + CEO memo #13 |
+| 5 #9/#10 | **No** | Canary active but `ok=false` / no win_streak — do not fabricate wins |
+

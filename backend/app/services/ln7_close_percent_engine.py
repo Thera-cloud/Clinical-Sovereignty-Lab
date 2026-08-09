@@ -253,7 +253,22 @@ async def _gather_evidence(conn) -> Dict[str, Any]:
         try:
             fj = json.loads(flip.read_text(encoding="utf-8"))
             ctx["observation_flip"] = True
-            ctx["observation_clean_days"] = int(fj.get("clean_days") or 0)
+            # Prefer explicit clean_days; else calendar days since observation
+            # start (UTC date boundary). Same-day start → 0. Does not invent
+            # cleanliness — operator must still re-verify FP before quiet.
+            clean = int(fj.get("clean_days") or 0)
+            start = str(fj.get("observation_week_starts_utc") or "")
+            if start and clean == 0:
+                try:
+                    from datetime import datetime, timezone
+
+                    st = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                    now = datetime.now(timezone.utc)
+                    derived = max(0, (now.date() - st.date()).days)
+                    clean = derived
+                except Exception:
+                    pass
+            ctx["observation_clean_days"] = clean
         except Exception:
             ctx["observation_flip"] = True
 

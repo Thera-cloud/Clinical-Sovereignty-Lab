@@ -1,0 +1,26 @@
+{
+  "item_id": "#11",
+  "verdict": "accepted_standing_live",
+  "computed_at_utc": "2026-08-09T15:00:00Z",
+  "computed_by": "DrNevedal1",
+  "ground_truth": {
+    "session": "quartet_dose_response_v2",
+    "export": "backend/app/data/quartet_dose_response_v2/scored_export_2026-08-03.json",
+    "brief": "docs/ln7/DOSE_RESPONSE_V2_PACK_ACCEPTANCE_BRIEF.md",
+    "n_rows": 8,
+    "moves_before": 4,
+    "moves_after": 10,
+    "net_transfer": "+150%"
+  },
+  "ceo_authorization": {
+    "memo": "docs/ln7/evidence/ceo_memos.json",
+    "memo_id": 1,
+    "title": "Pack standing-live",
+    "signed": true
+  },
+  "caveats": [
+    "AQ-G07 no net gain on prohibition-navigation line — tracked follow-up, not grid reject",
+    "Permanent LN7_MUST_SEQUENCE_PACK_LIVE flip remains ops flag; Close #11 scores grid+CEO accept only"
+  ],
+  "engine_note": "Presence of this file → Close #11 = 100 per _h_pack"
+}

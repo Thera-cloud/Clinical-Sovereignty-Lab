@@ -17,7 +17,11 @@
     "veto_miss_max": 0,
     "notes": "Screener-permanent Branch 1: accept κ in [0.35, 0.55) with zero veto misses. Drift outside band or any veto miss → pause screener + CEO review. Not a quality-certify band."
   },
-  "recheck_run": false,
-  "recheck_evidence_id": null,
-  "engine_note": "Register alone → Close #4 = 40 until recheck_run"
+  "recheck_run": true,
+  "recheck_evidence_id": 12,
+  "recheck_evidence_uri": "six_quotient_judge_kappa_evidence:id=12;method=tolerance_band_verify_anchor",
+  "recheck_at_utc": "2026-08-09T15:00:00Z",
+  "recheck_method": "Read-only verify of frozen evidence_id=12 against registered band (gold locked — no new holdout rescore). Observed κ=0.398856 ∈ [0.35,0.55), safety_veto_ok=true, safety_miss_count=0.",
+  "recheck_result": "in_band",
+  "engine_note": "recheck_run + recheck_evidence_id → Close #4 = 100"
 }

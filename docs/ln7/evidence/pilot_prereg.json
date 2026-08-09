@@ -30,8 +30,14 @@
     ],
     "named_by": "DrNevedal1",
     "named_at_utc": "2026-08-09T14:05:00Z",
-    "gates": "named cohort ready; live exposure still gated on floor enforce-quiet + fuel ≥300 trainable before expanding beyond n_planned=15"
+    "notice": {
+      "status": "DRAFT_NOT_SENT",
+      "draft_uri": "docs/ln7/evidence/pilot_cohort_notice.DRAFT.json",
+      "drafted_at_utc": "2026-08-09T15:00:00Z"
+    },
+    "gates": "named cohort ready; notice DRAFT only — send requires CEO; live exposure still gated on floor enforce-quiet + fuel ≥300 trainable before expanding beyond n_planned=15"
   },
+
   "authored_by": "DrNevedal1",
   "authored_at_utc": "2026-08-09T13:31:00Z",
   "engine_note": "Close Sentinel #17: named roster → partial; UNKNOWN/100 only after live human-gated sessions under cohort gates"
