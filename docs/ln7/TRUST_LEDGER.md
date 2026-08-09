@@ -2604,3 +2604,10 @@ disagreement mining; Entry-42 response text in the prompt.
 - **#6** `floor_fp_threshold.json` — `max_fp_rate: 0.10`, `fix_shipped: true`; verdict carries n=2 honesty rider (re-verify on observation week before enforce-quiet)
 - **#17** `pilot_prereg.json` — endpoint/criterion set; `n_planned: 15` existing users; `start_date: 2026-08-09`; engine still **UNKNOWN** until cohort human-gated
 
+## Entry 46 — 2026-08-09 — Close #5 → 100 via AQ-V07 FN disposition
+
+- Raw replay unchanged: **fn=1** (AQ-V07)
+- Disposition: `docs/ln7/evidence/floor_fn_disposition.json` — `structure_pass_quality_fail` excluded from #5 FN (floor is not a quality judge; Entry 41)
+- Engine: `_h_floor_fn` uses `effective_fn = raw_fn − disposed` → **#5 = 100** when gate shipped
+- CEO: DrNevedal1 authorized 2026-08-09 (proceed #5→100 AQ-V07)
+

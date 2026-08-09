@@ -426,11 +426,33 @@ async def _h_floor_fn(conn, base, params, ctx) -> ItemScore:
             blocked_hint="address-gate commit (#5)",
             delta_note=f"replay artifact present FN={fr.get('fn')} (gate blocked)",
         )
-    pct = 40.0
+    raw_fn = int(fr.get("fn") or 0)
+    # Entry 45/46: structure_pass_quality_fail rows may be CEO-disposed out of #5 FN
+    # (floor is not a quality judge — TRUST_LEDGER Entry 41). Raw replay unchanged.
+    effective_fn = raw_fn
+    disp = _read_json_file("docs/ln7/evidence/floor_fn_disposition.json")
+    disposed_ids: List[str] = []
+    if disp and raw_fn > 0:
+        excluded = {
+            str(e.get("scenario_id") or "")
+            for e in (disp.get("exclusions") or [])
+            if e.get("effective") == "exclude_from_fn"
+        }
+        disposed_ids = [
+            str(r.get("scenario_id") or "")
+            for r in (fr.get("false_negatives") or [])
+            if str(r.get("scenario_id") or "") in excluded
+        ]
+        effective_fn = max(0, raw_fn - len(disposed_ids))
+        if disposed_ids:
+            uri = uri + f";fn_disposed:{','.join(disposed_ids)}"
     pct = 80.0  # gate + replay
-    if int(fr.get("fn") or 0) == 0:
+    if effective_fn == 0:
         pct = 100.0
-    return _mk(base, pct, str(int(pct)), uri)
+    note = f"raw_fn={raw_fn} effective_fn={effective_fn}"
+    if disposed_ids:
+        note += f" disposed={disposed_ids}"
+    return _mk(base, pct, str(int(pct)), uri, delta_note=note)
 
 
 async def _h_floor_fp(conn, base, params, ctx) -> ItemScore:
