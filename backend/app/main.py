@@ -1830,6 +1830,18 @@ async def lifespan(app: FastAPI):
                                                 "DELETE FROM nevedal_metrics WHERE user_id = (SELECT id FROM users WHERE hardware_id = $1)",
                                                 _del_uid,
                                             )
+                                            # QUANTUM-CRYSTAL-ARCH — data-deletion.html claims chat transcripts are purged
+                                            await _pc.execute(
+                                                """DELETE FROM conversation_history
+                                                   WHERE user_id = $1
+                                                      OR user_id IN (
+                                                           SELECT username FROM users WHERE hardware_id = $1
+                                                       )
+                                                      OR user_id IN (
+                                                           SELECT id::text FROM users WHERE hardware_id = $1
+                                                       )""",
+                                                _del_uid,
+                                            )
                                             await _pc.execute(
                                                 "UPDATE users SET deleted_at = NOW(), name = 'Deleted User', "
                                                 "email = NULL, phone = NULL, profile_data = '{}' "
