@@ -2598,3 +2598,9 @@ disagreement mining; Entry-42 response text in the prompt.
 | #13 | `ceo_memos.DRAFT.json` | `ceo_memos.json` (`signed_count: 2`) |
 | #17 | `pilot_prereg.DRAFT.json` | `pilot_prereg.json` (still UNKNOWN until cohort) |
 
+## Entry 45 — 2026-08-09 — CEO Path signed (#13 → #6 → #17)
+
+- **#13** `ceo_memos.json` — DrNevedal1 signed both memos (pack standing-live + G2 mechanical promote prereqs); `signed_count: 2`
+- **#6** `floor_fp_threshold.json` — `max_fp_rate: 0.10`, `fix_shipped: true`; verdict carries n=2 honesty rider (re-verify on observation week before enforce-quiet)
+- **#17** `pilot_prereg.json` — endpoint/criterion set; `n_planned: 15` existing users; `start_date: 2026-08-09`; engine still **UNKNOWN** until cohort human-gated
+

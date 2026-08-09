@@ -1,0 +1,25 @@
+{
+  "item_id": "#13",
+  "required": 2,
+  "signed_count": 2,
+  "signed_at_utc": "2026-08-09T13:31:00Z",
+  "signer": "DrNevedal1",
+  "memos": [
+    {
+      "id": 1,
+      "title": "Pack standing-live",
+      "signed": true,
+      "signed_at_utc": "2026-08-09T13:31:00Z",
+      "signer": "DrNevedal1",
+      "body_uri_or_text": "MUST-sequence living pack authorized standing-live in generation: the pack condition ran clean in v2 regen (floor shadow, nothing blocked), the dose-response grid delivered the pack verdict on unconfounded rows, and reversal remains one flag-flip with the nightly measure as the watchdog."
+    },
+    {
+      "id": 2,
+      "title": "G2 mechanical promote post-prerequisites",
+      "signed": true,
+      "signed_at_utc": "2026-08-09T13:31:00Z",
+      "signer": "DrNevedal1",
+      "body_uri_or_text": "Dual-COO mechanical promote authorized only after all named prerequisites hold: canary ≥2-win streak, data-budget gates green, held-out registry zero-leak, influence-Gini within hold, and floor at enforce-quiet — promote reverts to manual on any prerequisite regression, per the staged-trust pattern."
+    }
+  ]
+}

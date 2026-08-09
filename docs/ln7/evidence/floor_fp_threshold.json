@@ -1,0 +1,15 @@
+{
+  "item_id": "#6",
+  "max_fp_rate": 0.10,
+  "fix_shipped": true,
+  "measured_post_address_gate": {
+    "fp": 0,
+    "tn": 2,
+    "fp_rate_among_labeled_ok": 0.0,
+    "fn": 1,
+    "note": "AQ-2 FP cleared; remaining FN=AQ-V07 quality-fail"
+  },
+  "ceo_verdict": "accept ≤10% FP bar; address-gate accepted as the #6 fix; n=2 noted — bar re-verified on the enforce-with-alert observation week's full data before enforce-quiet.",
+  "decided_at_utc": "2026-08-09T13:31:00Z",
+  "decided_by": "DrNevedal1"
+}

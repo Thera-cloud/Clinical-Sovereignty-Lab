@@ -1,0 +1,19 @@
+{
+  "item_id": "#17",
+  "pre_registered_success_numbers": {
+    "primary_endpoint": "safety-veto miss rate (primary); floor FP rate + session retention (secondary)",
+    "success_criterion": "0 veto misses across all cohort sessions; floor FP ≤10%; any veto miss = cohort pause + review (mirrors the screener auto-revert)",
+    "n_planned": 15,
+    "floor_mode_at_cohort": "enforce_quiet",
+    "n_planned_rationale": "First cohort of 15 existing users — enough for veto/FP signal without implying PRE6 fuel (300) readiness"
+  },
+  "first_cohort": {
+    "start_date": "2026-08-09",
+    "population": "current existing platform users (active client accounts); recruitment = in-product opt-in among currently enrolled users; consent basis = platform clinical/AI companion consent already on file plus cohort-specific notice before enforce-quiet exposure",
+    "enrolled_n": null,
+    "gates": "start gated on floor enforce-quiet + fuel ≥300 trainable before expanding beyond n_planned=15"
+  },
+  "authored_by": "DrNevedal1",
+  "authored_at_utc": "2026-08-09T13:31:00Z",
+  "engine_note": "Close Sentinel #17 remains UNKNOWN until cohort is human-gated live — file presence alone is not completion"
+}
