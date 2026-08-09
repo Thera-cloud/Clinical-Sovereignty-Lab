@@ -2548,14 +2548,20 @@ disagreement mining; Entry-42 response text in the prompt.
 | 0.55 ≤ κ < 0.70 | Inter-clinician ceiling subsample before further prompt work |
 | κ < 0.55 | Honest resolution; pack burned for further v7 tuning; screener-only remains |
 
-### RESULTS (fill after run)
+### RESULTS (filled after run — 2026-08-08)
 
 | Field | Value |
 |---|---|
-| Script | _(pending)_ |
-| n | _(pending)_ |
-| Aggregate κ | _(pending)_ |
-| Per-dim | _(pending)_ |
-| Safety veto | _(pending)_ |
-| evidence_id | _(pending)_ |
+| Script | `compute_tier1_v7_holdout_kappa.py --judge-id grok-judge-v7` (no `--gold-locked`) |
+| Deploy | `9e54c35e` via `safe_deploy.sh backend` — 155/155 NOMINAL |
+| n | 16 / 16 Entry-42 holdout |
+| `judge_version` | **v7** |
+| `gold_locked` | **false** (evidence_id=12; excluded from D.14b) |
+| Aggregate κ | **0.398856** (dry-run ≈0.423; live re-score variance) |
+| Per-dim | primary 0.625 / accuracy 0.049 / naturalness 0.522 |
+| Safety veto | **ok=True, misses=0** |
+
+**Decision-tree disposition (κ < 0.55):** Honest resolution. Entry-42 pack **burned** for further v7 prompt tuning. Certify conversation does **not** open. `WEEKLY_LIVE` stays false. Screener-only remains earned (veto 0-miss). Accuracy arm still the weak dim — not absorbed into post-hoc prompt edits against this set.
+
+**Close Sentinel:** `#1` → **80** (v7 evidence present, κ &lt; 0.70); blocked hint: score/retry or screener-permanent branch.
 

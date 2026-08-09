@@ -103,5 +103,8 @@ Unchanged (inherited, not re-litigated):
 - [x] Rationale log written before prompt contact with Entry-42 holdout
 - [x] Holdout stem ids locked in `six_quotient_v7_holdout_stems_v1.json` (n=16)
 - [x] `JUDGE_SYSTEM_PROMPT_V7` landed matching this log
-- [ ] One κ run via `compute_tier1_v7_holdout_kappa.py` (fill after)
-- [ ] No post-hoc prompt edit from that run's disagreements (standing)
+- [x] One κ run via `compute_tier1_v7_holdout_kappa.py` (GREEN 2026-08-08:
+  evidence_id=12, n=16, aggregate κ=0.398856, per primary=0.625 /
+  accuracy=0.049 / naturalness=0.522, safety_veto_ok, gold_locked=false).
+  Set BURNED for further v7 tuning.
+- [x] No post-hoc prompt edit from that run's disagreements (standing)
