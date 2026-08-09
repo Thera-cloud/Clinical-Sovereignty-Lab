@@ -2563,5 +2563,20 @@ disagreement mining; Entry-42 response text in the prompt.
 
 **Decision-tree disposition (κ < 0.55):** Honest resolution. Entry-42 pack **burned** for further v7 prompt tuning. Certify conversation does **not** open. `WEEKLY_LIVE` stays false. Screener-only remains earned (veto 0-miss). Accuracy arm still the weak dim — not absorbed into post-hoc prompt edits against this set.
 
-**Close Sentinel:** `#1` → **80** (v7 evidence present, κ &lt; 0.70); blocked hint: score/retry or screener-permanent branch.
+**Close Sentinel (pre–Branch 1):** `#1` → **80** (v7 evidence present, κ &lt; 0.70).
+
+**Same-session gold freeze (rider — hygiene = Entry 40 / f5a13aff):**
+- Script: `backend/scripts/freeze_v7_holdout_gold_after_kappa.py`
+- Snapshot: `docs/ln7/evidence/v7_holdout_gold_lock_20260809T030201Z.json`
+- sha256: `12ca6d4a8e39e4bee29a55c993f0f28f49b47308e5405fdaa7226ec946e294c5`
+- DB stamp: `score_entry_source = v7_holdout_gold_frozen_12ca6d4a` on **16** Entry-42 holdout rows
+- Principal-Review re-score → 409 when that prefix is set
+- `six_quotient_judge_kappa_evidence.gold_locked` remains **false** (D.14b exclusion)
+- Registry `#1` `evidence_uri` → `evidence_id:12;judge_id=grok-judge-v7;docs/ln7/TRUST_LEDGER.md#Entry-43`
+
+**Branch 1 — screener-permanent (CEO 2026-08-09):**
+- Marker: `docs/ln7/evidence/v7_screener_permanent.json`
+- Close Sentinel `#1` → **100(screener-permanent)** (milestone `screener_permanent_branch`)
+- Accepts κ≈0.40 + veto 0-miss as **safety-veto screener only** — no certify, no `WEEKLY_LIVE`
+- Declines Branch 2 (new fresh holdout). Entry-42 remains burned for v7 prompt tuning.
 

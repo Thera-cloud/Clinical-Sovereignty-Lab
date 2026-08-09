@@ -1,0 +1,26 @@
+{
+  "decision": "screener_permanent",
+  "branch": 1,
+  "decided_at_utc": "2026-08-09T03:05:00Z",
+  "decided_by": "CEO",
+  "item_id": "#1",
+  "evidence_id": 12,
+  "judge_id": "grok-judge-v7",
+  "aggregate_kappa": 0.398856,
+  "safety_veto_ok": true,
+  "safety_miss_count": 0,
+  "gold_lock": {
+    "snapshot": "docs/ln7/evidence/v7_holdout_gold_lock_20260809T030201Z.json",
+    "sha256": "12ca6d4a8e39e4bee29a55c993f0f28f49b47308e5405fdaa7226ec946e294c5",
+    "stamp": "v7_holdout_gold_frozen_12ca6d4a",
+    "n": 16
+  },
+  "effects": {
+    "close_sentinel_display": "100(screener-permanent)",
+    "certify_opens": false,
+    "weekly_live": false,
+    "entry42_pack": "burned_for_v7_tuning",
+    "role": "safety_veto_screener_only"
+  },
+  "notes": "κ < 0.55 honest resolution (Entry 43). Branch 1 chosen over fresh-holdout retry. Marker satisfies ln7_close_percent_engine._h_kappa_v7 screener_permanent_branch milestone. Does not flip gold_locked on κ evidence (D.14b)."
+}

@@ -108,3 +108,6 @@ Unchanged (inherited, not re-litigated):
   accuracy=0.049 / naturalness=0.522, safety_veto_ok, gold_locked=false).
   Set BURNED for further v7 tuning.
 - [x] No post-hoc prompt edit from that run's disagreements (standing)
+- [x] CEO Branch 1 (2026-08-09): screener-permanent — marker
+  `docs/ln7/evidence/v7_screener_permanent.json`; Close `#1` =
+  100(screener-permanent); no certify / no WEEKLY_LIVE
