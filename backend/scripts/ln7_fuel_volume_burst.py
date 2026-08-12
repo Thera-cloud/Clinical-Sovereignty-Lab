@@ -12,9 +12,15 @@ import argparse
 import asyncio
 import json
 import os
+import sys
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
+# Container: /app/scripts → /app; local: backend/scripts → backend
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 HELDOUT = frozenset(
     {"env_redis_prefix", "mut_off_by_one_range", "mut_mutable_default_arg"}
@@ -58,8 +64,6 @@ async def main() -> None:
             skip += 1
             print("SKIP_MAT", pack, err)
             continue
-        from pathlib import Path
-
         golden = Path(wd, "golden.patch").read_text(encoding="utf-8")
         ph = f"fuel_{args.volume}_{pack}_{uuid.uuid4().hex[:8]}"
         out = await run_shadow_fork(
