@@ -62,3 +62,43 @@ def test_fuel_gauge_excludes_non_fuel_domain_tags():
     # New train domain only after it actually has ci_pack trainable rows
     assert fuel.is_pre6_fuel_domain("clinical_v2", 0) is False
     assert fuel.is_pre6_fuel_domain("clinical_v2", 3) is True
+
+
+def test_clear_stall_on_progress_parses_latched_count():
+    """Stale latch detail 'coding: 1/300' clears when trainable is higher."""
+    import asyncio
+
+    fuel = _load("app.jobs.ln7_fuel_gauge", JOBS / "ln7_fuel_gauge.py")
+
+    class FakeConn:
+        def __init__(self):
+            self.deleted = False
+
+        async def fetchrow(self, *a, **k):
+            return {
+                "detail": "coding: 1/300 trainable, +0.0/day (n=7d), ETA ~n/a. Queens"
+            }
+
+        async def fetchval(self, sql, *a, **k):
+            if "DELETE" in sql:
+                self.deleted = True
+                return 1
+            return None
+
+    conn = FakeConn()
+
+    async def _run():
+        # prior flat at 53 but latch still at 1 → clear via latched_n
+        assert await fuel._clear_stall_on_progress(conn, "coding", 53, 53) is True
+        assert conn.deleted is True
+        conn.deleted = False
+        # no progress vs latch
+        conn_flat = FakeConn()
+
+        async def fetchrow_flat(*a, **k):
+            return {"detail": "coding: 53/300 trainable"}
+
+        conn_flat.fetchrow = fetchrow_flat  # type: ignore[method-assign]
+        assert await fuel._clear_stall_on_progress(conn_flat, "coding", 53, 53) is False
+
+    asyncio.run(_run())

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -176,6 +177,57 @@ async def _stall_days(conn, domain: str, trainable: int) -> int:
     return flat
 
 
+async def _prior_trainable(conn, domain: str, today: date) -> Optional[int]:
+    """Most recent snapshot trainable before today (progress baseline)."""
+    val = await conn.fetchval(
+        """
+        SELECT trainable FROM ln7_fuel_snapshots
+        WHERE domain_tag = $1 AND snap_date < $2
+        ORDER BY snap_date DESC
+        LIMIT 1
+        """,
+        domain,
+        today,
+    )
+    return int(val) if val is not None else None
+
+
+async def _clear_stall_on_progress(
+    conn, domain: str, trainable: int, prior: Optional[int]
+) -> bool:
+    """Drop stall latch when trainable increases so a later flat window can re-alert.
+
+    QUANTUM-CRYSTAL-ARCH — latch is one-shot until progress; stale latches from
+    pre-jump counts (e.g. coding 1→53) must not silence a future real stall.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT detail FROM ln7_fuel_notifications
+        WHERE domain_tag = $1 AND kind = 'stall'
+        """,
+        domain,
+    )
+    if not row:
+        return False
+    detail = str(row.get("detail") or "")
+    m = re.search(r":\s*(\d+)\s*/", detail)
+    latched_n = int(m.group(1)) if m else None
+    progressed = (prior is not None and trainable > prior) or (
+        latched_n is not None and trainable > latched_n
+    )
+    if not progressed:
+        return False
+    deleted = await conn.fetchval(
+        """
+        DELETE FROM ln7_fuel_notifications
+        WHERE domain_tag = $1 AND kind = 'stall'
+        RETURNING 1
+        """,
+        domain,
+    )
+    return bool(deleted)
+
+
 async def run_fuel_gauge_cycle(db_pool) -> Dict[str, Any]:
     if not db_pool:
         return {"ok": False, "error": "no_db"}
@@ -192,6 +244,7 @@ async def run_fuel_gauge_cycle(db_pool) -> Dict[str, Any]:
             total = int(d["total"] or 0)
             if not is_pre6_fuel_domain(domain, trainable):
                 continue
+            prior = await _prior_trainable(conn, domain, today)
             await conn.execute(
                 """
                 INSERT INTO ln7_fuel_snapshots (snap_date, domain_tag, trainable, total)
@@ -204,6 +257,14 @@ async def run_fuel_gauge_cycle(db_pool) -> Dict[str, Any]:
                 trainable,
                 total,
             )
+            if await _clear_stall_on_progress(conn, domain, trainable, prior):
+                actions.append(f"stall_cleared:{domain}")
+                logger.info(
+                    "LN7 fuel | cleared stall latch %s (%s → %s)",
+                    domain,
+                    prior,
+                    trainable,
+                )
             slope, eta, days_tracked = await _slope_eta(conn, domain, trainable)
             eta_s = f"{eta}d" if eta is not None else "n/a"
             line = (
