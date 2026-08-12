@@ -142,6 +142,54 @@ def build_ceo_review_brief(item: Dict[str, Any]) -> Dict[str, Any]:
     ):
         return _build_ln7_revision_brief(item, risk=risk, title=title, detail=detail, payload=payload)
 
+    # QUANTUM-CRYSTAL-ARCH — Phase A: PRE6 fuel stall → volume burst on APPROVE
+    if (
+        kind == "ln7_fuel_volume_burst"
+        or "fuel stalled" in title_l
+        or "pre6 gate" in title_l
+        or title_l.startswith("[fuel")
+    ):
+        domain = str(payload.get("domain") or "coding")
+        ask = str(payload.get("ask_of_ceo") or "").strip()
+        steps = [
+            ask
+            or (
+                f"Reply APPROVE to run a PRE6 fuel volume burst for {domain} "
+                "(ci_pack shadow forks + gauge; 12h cooldown)."
+            ),
+            "Reply ACK/REJECT to clear the inbox without running a burst.",
+            "Paid bakeoff (LN7_BURST_ALLOW_PAID) is NOT started by this APPROVE.",
+        ]
+        decision = normalize_decision_fields(
+            what_it_should_do=[
+                f"Run allowlisted fuel volume burst for {domain} when you APPROVE.",
+                "Return smoke + Dual-COO/LLM reflect in the confirmation email.",
+            ],
+            what_it_should_not_be=[
+                "Not a paid bakeoff or MUST-sequence flip.",
+                "Not open-ended Queens coding on APPROVE.",
+            ],
+            bottom_line=(
+                f"APPROVE → fuel burst ({domain}, 12h cooldown); ACK/REJECT → clear only."
+            ),
+        )
+        return _with_decision(
+            objective=(
+                f"PRE6 fuel alert for {domain}: trainable row volume needs attention. "
+                f"{title}"
+            )[:600],
+            reasoning=(detail or "Fuel gauge escalated to CEO inbox.")[:1200],
+            steps=steps[:8],
+            risk=risk,
+            expected_impact=(
+                "APPROVE runs ci_pack shadow materialize + gauge; confirmation includes "
+                "execution report. Cooldown blocks a second burst within 12h."
+            )[:400],
+            rollback="No reverse — new packs remain; re-run only after cooldown.",
+            decision=decision,
+            payload=payload,
+        )
+
     # QUANTUM-CRYSTAL-ARCH — Adaptive Growth content review
     if kind == "growth_content_review":
         objective = str(
@@ -274,24 +322,24 @@ def build_ceo_review_brief(item: Dict[str, Any]) -> Dict[str, Any]:
         )
         steps = [
             f"Open Sovereign Command → Trust / {who} and identify the failing check(s).",
-            "If the failure is already fixed or expected (deploy in progress), reply APPROVE to acknowledge and clear this item.",
-            "If still broken, have Dual-COO / ops remediate, then reply APPROVE when green.",
-            "Reply REJECT only if this alert is wrong and should be discarded without acknowledging.",
+            "Reply APPROVE to re-run that auditor (reprobe) + smoke/reflect, then clear inbox.",
+            "Reply ACK/REJECT to clear without re-running the auditor.",
+            "If still broken after reprobe, remediate via Dual-COO / ops — APPROVE does not patch code.",
         ]
         ask = str(payload.get("ask_of_ceo") or "").strip()
         if ask:
             steps = [ask] + steps
         decision = normalize_decision_fields(
             what_it_should_do=[
-                "Acknowledge a production trust check failure and clear the inbox when reviewed.",
-                "Drive remediation via Trust / auditor tabs before treating as green.",
+                "Re-run the named auditor on APPROVE and return a smoke/reflect report.",
+                "Clear the CEO inbox item after your reply.",
             ],
             what_it_should_not_be=[
-                "Not an automatic endpoint fix — APPROVE does not repair the failing check.",
+                "Not an automatic code/endpoint patch — reprobe only.",
                 "Not a Dual-COO learning / patent task.",
             ],
             bottom_line=(
-                f"{risk_word}: review Trust / {who}; APPROVE to ack when understood, REJECT if false alert."
+                f"{risk_word}: APPROVE → trust_reprobe ({who}); ACK/REJECT → clear only."
             ),
         )
         return _with_decision(
@@ -300,8 +348,8 @@ def build_ceo_review_brief(item: Dict[str, Any]) -> Dict[str, Any]:
             steps=steps[:8],
             risk=risk_word,
             expected_impact=(
-                "APPROVE records that you reviewed the trust alert and clears the CEO inbox item. "
-                "It does not auto-fix the endpoint."
+                "APPROVE re-runs the auditor and emails an execution report (smoke + reflect). "
+                "It does not auto-patch failing checks."
             ),
             rollback="No automatic reverse — re-open via Sovereign Command CEO Inbox if needed.",
             decision=decision,
@@ -1044,6 +1092,17 @@ async def _apply_ceo_payload(
     # growth_weekly_digest — ACK/APPROVE clears inbox only (no publish)
     if payload.get("kind") == "growth_weekly_digest":
         out["growth_weekly_digest"] = {"ok": True, "acked": True}
+
+    # QUANTUM-CRYSTAL-ARCH — Phase A+B allowlisted remediations
+    if payload.get("kind") in ("ln7_fuel_volume_burst", "trust_reprobe"):
+        try:
+            from app.services.ceo_remediation_apply import apply_ceo_remediation
+
+            out["remediation"] = await apply_ceo_remediation(
+                db_pool, payload, approved_by=approved_by
+            )
+        except Exception as e:
+            out["remediation_error"] = str(e)[:200]
     return out
 
 

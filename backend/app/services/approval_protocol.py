@@ -677,6 +677,7 @@ class ApprovalProtocolService:
         decision: str,
         channel: str,
         recorded_at: Optional[datetime] = None,
+        apply_summary: Optional[str] = None,
     ) -> "tuple[str, str]":
         """Render the (subject, body) of the post-decision confirmation email.
 
@@ -694,6 +695,11 @@ class ApprovalProtocolService:
         next_step = self._DECISION_NEXT_STEP.get(
             decision, "Your response has been recorded."
         )
+        # QUANTUM-CRYSTAL-ARCH — Phase A+B: remediation kinds ran on APPROVE
+        if apply_summary and decision == "APPROVE":
+            next_step = (
+                "Allowlisted remediation ran on APPROVE. See execution report below."
+            )
 
         subject = f"Confirmed: {decision} — {title}"
         body = (
@@ -705,6 +711,8 @@ class ApprovalProtocolService:
             f"Channel: {channel}\n\n"
             f"{next_step}\n"
         )
+        if apply_summary:
+            body += f"\n--- Execution report ---\n{apply_summary.strip()}\n"
         return subject, body
 
     async def send_decision_confirmation(
@@ -713,6 +721,7 @@ class ApprovalProtocolService:
         decision: str,
         channel: str,
         recipient: Optional[str] = None,
+        apply_summary: Optional[str] = None,
     ) -> Optional[str]:
         """Send a confirmation email after a decision is recorded (FIX 3).
 
@@ -734,7 +743,7 @@ class ApprovalProtocolService:
             from sendgrid.helpers.mail import Mail, Email, To, Content
 
             subject, body = self._build_decision_confirmation(
-                proposal, decision, channel
+                proposal, decision, channel, apply_summary=apply_summary
             )
             message = Mail(
                 from_email=Email(settings.FROM_EMAIL, settings.FROM_NAME),
@@ -1242,11 +1251,18 @@ class ApprovalProtocolService:
             "REWRITE", "DELAY", "RETRACT",
         ) and channel == "email":
             try:
+                # QUANTUM-CRYSTAL-ARCH — append Phase A+B remediation report
+                apply_summary = None
+                if isinstance(ceo_side, dict):
+                    rem = (ceo_side.get("apply") or {}).get("remediation") or {}
+                    if isinstance(rem, dict):
+                        apply_summary = rem.get("summary_text") or None
                 await self.send_decision_confirmation(
                     proposal=proposal,
                     decision=decision,
                     channel=channel,
                     recipient=approver_identity,
+                    apply_summary=apply_summary,
                 )
             except Exception as e:
                 print(f">>> [APPROVAL] Confirmation email dispatch failed: {e}")

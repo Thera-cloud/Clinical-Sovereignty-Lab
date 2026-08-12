@@ -69,7 +69,8 @@ async def _mark_sent(conn, domain: str, kind: str, detail: str) -> None:
     )
 
 
-def _notify(title: str, detail: str) -> None:
+def _notify(title: str, detail: str, *, domain: str = "coding") -> None:
+    """CEO inbox: APPROVE runs allowlisted fuel volume burst (Phase A)."""
     try:
         from app.websocket.cli_dual_coo import RISK_YELLOW, enqueue_ceo
 
@@ -79,6 +80,16 @@ def _notify(title: str, detail: str) -> None:
             detail=detail[:800],
             origin="ln7_fuel_gauge",
             dedup_ttl_s=12 * 3600,
+            payload={
+                "kind": "ln7_fuel_volume_burst",
+                "domain": domain,
+                "ask_of_ceo": (
+                    f"APPROVE to run a PRE6 fuel volume burst for {domain} "
+                    "(ci_pack shadow forks + gauge; 12h cooldown). "
+                    "ACK/REJECT to clear without running."
+                ),
+                "apply": {"digest": True, "limit": 0},
+            },
         )
     except Exception as e:
         logger.warning("fuel notify failed: %s", e)
@@ -281,7 +292,7 @@ async def run_fuel_gauge_cycle(db_pool) -> Dict[str, Any]:
                         f"{line}. Preflight checklist: host-contract on main, "
                         "binary audit, LN7_BURST_ALLOW_PAID=1 only after unlock."
                     )
-                    _notify(title, detail)
+                    _notify(title, detail, domain=domain)
                     await _mark_sent(conn, domain, "approach", detail)
                     actions.append(f"approach:{domain}")
 
@@ -292,7 +303,7 @@ async def run_fuel_gauge_cycle(db_pool) -> Dict[str, Any]:
                         f"{line}. LN7_BURST_ALLOW_PAID=1 may now be requested. "
                         "Does NOT auto-dispatch bakeoff — enqueue ln7_bakeoff manually."
                     )
-                    _notify(title, detail)
+                    _notify(title, detail, domain=domain)
                     await _mark_sent(conn, domain, "crossed", detail)
                     try:
                         await conn.execute(
@@ -311,7 +322,7 @@ async def run_fuel_gauge_cycle(db_pool) -> Dict[str, Any]:
                 if not await _already_sent(conn, domain, "stall"):
                     title = f"[FUEL STALLED] {domain} flat at {trainable} for {stall}d"
                     detail = f"{line}. Queens patch volume low — check shadow_fork / hive_burst."
-                    _notify(title, detail)
+                    _notify(title, detail, domain=domain)
                     await _mark_sent(conn, domain, "stall", detail)
                     actions.append(f"stall:{domain}")
 

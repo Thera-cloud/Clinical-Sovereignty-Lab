@@ -93,11 +93,14 @@ def dispatch_enforcement_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any
             ask = (
                 f"Review {auditor} in Sovereign Command Trust: category {cat}. "
                 f"Auditor said: {detail or 'no detail'}. "
-                "Reply APPROVE to acknowledge/clear, or fix then APPROVE."
+                "Reply APPROVE to re-run that auditor (reprobe) + smoke/reflect; "
+                "ACK/REJECT to clear without re-run. APPROVE does not auto-patch code."
             )
             enriched = dict(action) if isinstance(action, dict) else {"raw": action}
             enriched.setdefault("category", cat)
             enriched.setdefault("auditor", auditor)
+            # QUANTUM-CRYSTAL-ARCH — Phase A: APPROVE → trust_reprobe
+            enriched["kind"] = "trust_reprobe"
             enriched["ask_of_ceo"] = ask
             if cat in _GREEN_CATEGORIES:
                 # Bus task only — digest via ops_fix GREEN path; no CEO inbox
