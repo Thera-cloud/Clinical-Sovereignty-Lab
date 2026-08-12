@@ -20167,7 +20167,7 @@ async def handle_client(websocket, path=None):
                     await websocket.send(json.dumps({"type": "coach_clients", "clients": clients}))
             
             # === COACH: GET PRE-SESSION BRIEF ===
-            elif t == "get_presession_brief":
+            elif t in ("get_presession_brief", "fetch_presession_brief"):
                 if current_profile and current_profile.get("role") in ["COACH", "ADMIN"]:
                     client_id = d.get("client_id")
                     registry = load_registry()
@@ -21982,6 +21982,8 @@ If 'challenge', respectfully push the coach's thinking."""
                                             session_data = COALESCE(session_data, '{}'::jsonb) || $4::jsonb,
                                             service_mode = $6
                                         WHERE session_id = $5
+                                           OR (client_id = $7 AND status = 'scheduled'
+                                               AND scheduled_start::date = CURRENT_DATE)
                                     """,
                                         _nate_summary,
                                         _session_notes_text[:4000],
@@ -21993,36 +21995,40 @@ If 'challenge', respectfully push the coach's thinking."""
                                         }),
                                         _sched_sid or live_id,
                                         _svc_mode,
+                                        _client_hw,
                                     )
                                     if _updated and "UPDATE 0" in str(_updated):
-                                        _c_uuid = await _sconn.fetchval(
-                                            "SELECT id FROM users WHERE hardware_id = $1 LIMIT 1", _client_hw
+                                        # QUANTUM-CRYSTAL-ARCH — persist hardware_id (not users.id UUID)
+                                        await _sconn.execute("""
+                                            INSERT INTO coaching_sessions
+                                                (client_id, coach_id, scheduled_at, status, session_id,
+                                                 nate_summary, coach_notes, duration_minutes, session_data,
+                                                 client_name, started_at, ended_at, service_mode)
+                                            VALUES ($1, $2, NOW(), 'completed', $3,
+                                                    $4, $5, $6, $7::jsonb,
+                                                    $8, $9, NOW(), $10)
+                                        """,
+                                            _client_hw, _coach_hw, _sched_sid or live_id,
+                                            _nate_summary, _session_notes_text[:4000],
+                                            billable_seconds // 60,
+                                            json.dumps({
+                                                "observations_count": len(_obs_list),
+                                                "avg_c_emo": round(_avg_cemo, 3),
+                                                "total_obs": _obs_summary,
+                                            }),
+                                            sess.get("client_name") or _client_hw,
+                                            datetime.datetime.fromisoformat(sess.get("started_at", datetime.datetime.now().isoformat())),
+                                            _svc_mode,
                                         )
-                                        _co_uuid = await _sconn.fetchval(
-                                            "SELECT id FROM users WHERE hardware_id = $1 LIMIT 1", _coach_hw
-                                        )
-                                        if _c_uuid and _co_uuid:
-                                            await _sconn.execute("""
-                                                INSERT INTO coaching_sessions
-                                                    (client_id, coach_id, scheduled_at, status, session_id,
-                                                     nate_summary, coach_notes, duration_minutes, session_data,
-                                                     client_name, started_at, ended_at, service_mode)
-                                                VALUES ($1, $2, NOW(), 'completed', $3,
-                                                        $4, $5, $6, $7::jsonb,
-                                                        $8, $9, NOW(), $10)
-                                            """,
-                                                _c_uuid, _co_uuid, _sched_sid or live_id,
-                                                _nate_summary, _session_notes_text[:4000],
-                                                billable_seconds // 60,
-                                                json.dumps({
-                                                    "observations_count": len(_obs_list),
-                                                    "avg_c_emo": round(_avg_cemo, 3),
-                                                    "total_obs": _obs_summary,
-                                                }),
-                                                sess.get("client_id", ""),
-                                                datetime.datetime.fromisoformat(sess.get("started_at", datetime.datetime.now().isoformat())),
-                                                _svc_mode,
-                                            )
+                                # QUANTUM-CRYSTAL-ARCH — folder PDF (all tiers incl. COACH_ONLY)
+                                try:
+                                    from app.services.zoom_session_folder import place_end_session_summary
+                                    await place_end_session_summary(
+                                        db_pool, sess, _sched_sid or live_id,
+                                        _nate_summary, _session_notes_text,
+                                    )
+                                except Exception as _zf_end:
+                                    print(f">>> [LIVE SESSION] Folder summary place failed: {_zf_end}")
                         except Exception as _sum_err:
                             print(f">>> [LIVE SESSION] Summary generation failed: {_sum_err}")
 
@@ -23190,8 +23196,10 @@ If 'challenge', respectfully push the coach's thinking."""
                                     registry = load_registry()
                                     for _, v in registry.items():
                                         p = (v.get("profile") or {})
+                                        _chw = current_profile.get("hardware_id")
                                         if p.get("family_id") == family_id and (
-                                            (p.get("assigned_coach_id") and p.get("assigned_coach_id") == current_profile.get("hardware_id"))
+                                            (p.get("coach_id") and p.get("coach_id") == _chw)
+                                            or (p.get("assigned_coach_id") and p.get("assigned_coach_id") == _chw)
                                             or (p.get("assigned_coach") and p.get("assigned_coach") == current_username)
                                         ):
                                             assigned_ok = True
@@ -23271,10 +23279,12 @@ If 'challenge', respectfully push the coach's thinking."""
                         await websocket.send(json.dumps({"type": "error", "message": "Client not found"}))
                         continue
 
-                    # Authorization for COACH: must be assigned to this client (best-effort)
+                    # Authorization for COACH: must be assigned (coach_id / assigned_*)
                     if current_profile.get("role") == "COACH":
+                        _coach_hw = current_profile.get("hardware_id")
                         assigned = (
-                            (client_profile.get("assigned_coach_id") and client_profile.get("assigned_coach_id") == current_profile.get("hardware_id"))
+                            (client_profile.get("coach_id") and client_profile.get("coach_id") == _coach_hw)
+                            or (client_profile.get("assigned_coach_id") and client_profile.get("assigned_coach_id") == _coach_hw)
                             or (client_profile.get("assigned_coach") and client_profile.get("assigned_coach") == current_username)
                         )
                         if not assigned:

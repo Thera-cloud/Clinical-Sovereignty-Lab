@@ -193,10 +193,25 @@ async def _resolve_client_username(db_pool, client_hardware_id: str) -> Tuple[st
     if not db_pool or not client_hardware_id:
         return "", ""
     try:
-        from app.services.pg_data_helpers import find_user_pg
+        from app.services.pg_data_helpers import find_user_pg, find_user_by_username_pg
 
         profile = await find_user_pg(db_pool, client_hardware_id)
         if not profile:
+            profile = await find_user_by_username_pg(db_pool, client_hardware_id)
+        if not profile:
+            # UUID fallback (legacy End Session INSERT used users.id)
+            try:
+                async with db_pool.acquire() as conn:
+                    row = await conn.fetchrow(
+                        """SELECT username, COALESCE(name, '') AS name, hardware_id
+                           FROM users WHERE id::text = $1 AND deleted_at IS NULL LIMIT 1""",
+                        client_hardware_id,
+                    )
+                if row:
+                    un = (row["username"] or "").strip() or client_hardware_id
+                    return un, (row["name"] or "").strip() or un
+            except Exception:
+                pass
             return client_hardware_id, client_hardware_id
         username = (profile.get("username") or "").strip() or client_hardware_id
         name = (profile.get("name") or "").strip() or username
@@ -300,6 +315,14 @@ async def _fetch_summary_content(
 
     if not body:
         body = (sd.get("zoom_ai_summary_text") or "").strip()
+
+    # QUANTUM-CRYSTAL-ARCH — End Session / coach-notes fallback (all tiers, incl. COACH_ONLY)
+    if not body:
+        body = (pg_row.get("nate_summary") or "").strip()
+    if not body:
+        notes = (pg_row.get("coach_notes") or pg_row.get("session_notes") or "").strip()
+        if notes:
+            body = f"Coach session notes:\n{notes}"
 
     if not body:
         session_id = (pg_row.get("session_id") or "").strip()
@@ -505,6 +528,43 @@ async def _crystallize_summary(
         logger.warning("[ZoomFolder] crystallize failed for %s: %s", session_id, e)
 
 
+async def place_end_session_summary(
+    db_pool,
+    sess: Dict[str, Any],
+    session_id: str,
+    nate_summary: str,
+    coach_notes: str,
+) -> Optional[str]:
+    """QUANTUM-CRYSTAL-ARCH — Place End Session summary PDF (all tiers incl. COACH_ONLY)."""
+    if not db_pool or not session_id:
+        return None
+    coach_id = (sess.get("coach_id") or "").strip()
+    client_id = (sess.get("client_id") or "").strip()
+    if not coach_id or not client_id:
+        return None
+    body = (nate_summary or "").strip()
+    notes = (coach_notes or "").strip()
+    if notes:
+        body = f"{body}\n\nCoach notes:\n{notes[:4000]}" if body else f"Coach notes:\n{notes[:4000]}"
+    if not body:
+        return None
+    mid = str(sess.get("zoom_meeting_id") or session_id).strip()
+    pg_row = {
+        "session_id": session_id,
+        "coach_id": coach_id,
+        "client_id": client_id,
+        "client_name": sess.get("client_name") or "",
+        "nate_summary": nate_summary or "",
+        "coach_notes": notes[:4000],
+        "scheduled_start": None,
+        "session_data": {},
+        "zoom_meeting_id": mid,
+    }
+    return await try_place_session_summary_in_coach_folder(
+        db_pool, pg_row, mid, summary_text=body
+    )
+
+
 async def poll_pending_zoom_session_summaries(db_pool) -> int:
     """
     Place folder summaries for recent Zoom sessions missing zoom_folder_doc_placed.
@@ -518,11 +578,12 @@ async def poll_pending_zoom_session_summaries(db_pool) -> int:
             rows = await conn.fetch(
                 """
                 SELECT session_id, coach_id, client_id, client_name,
-                       zoom_meeting_id, session_data, scheduled_start
+                       zoom_meeting_id, session_data, scheduled_start,
+                       nate_summary, coach_notes, session_notes
                 FROM coaching_sessions
                 WHERE COALESCE(zoom_meeting_id, '') <> ''
                   AND scheduled_start >= NOW() - INTERVAL '96 hours'
-                  AND COALESCE(session_data->>'zoom_summary_source', '') <> 'zoom_api'
+                  AND COALESCE(session_data->>'zoom_folder_doc_placed', '') NOT IN ('true', 'True', '1')
                 ORDER BY scheduled_start DESC NULLS LAST
                 LIMIT 20
                 """

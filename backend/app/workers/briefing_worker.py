@@ -60,7 +60,11 @@ class BriefingWorker:
             await asyncio.sleep(self.interval)
 
     async def _check_upcoming_sessions(self) -> None:
-        """Check for sessions starting within the lead time window."""
+        """Check for sessions starting within the lead time window.
+
+        Uses coaching_sessions (live Zoom scheduling). No tier filter —
+        COACH_ONLY / STANDARD / TOP_TIER all get automatic briefs.
+        """
         if not self.db_pool:
             return
 
@@ -72,13 +76,18 @@ class BriefingWorker:
             async with self.db_pool.acquire() as conn:
                 sessions = await conn.fetch(
                     """
-                    SELECT id, coach_id, user_id, scheduled_at
-                    FROM sessions
-                    WHERE scheduled_at BETWEEN $1 AND $2
-                      AND status = 'SCHEDULED'
-                    ORDER BY scheduled_at ASC
+                    SELECT session_id AS id,
+                           coach_id,
+                           client_id AS user_id,
+                           COALESCE(scheduled_start, scheduled_at) AS scheduled_at,
+                           client_name
+                    FROM coaching_sessions
+                    WHERE COALESCE(scheduled_start, scheduled_at) BETWEEN $1 AND $2
+                      AND LOWER(COALESCE(status, '')) IN ('scheduled', 'confirmed', 'pending')
+                    ORDER BY COALESCE(scheduled_start, scheduled_at) ASC
                     """,
-                    window_start, window_end,
+                    window_start,
+                    window_end,
                 )
         except Exception as e:
             logger.warning("Session query failed: %s", e)
@@ -86,7 +95,7 @@ class BriefingWorker:
 
         for session in sessions:
             session_id = session["id"]
-            if session_id in self._generated:
+            if not session_id or session_id in self._generated:
                 continue
 
             try:
@@ -99,11 +108,19 @@ class BriefingWorker:
 
                 # Notify coach
                 if self.notifications:
+                    member_label = (
+                        getattr(briefing, "member_name", None)
+                        or session.get("client_name")
+                        or "client"
+                    )
                     await self.notifications.send_notification(
                         user_id=session["coach_id"],
                         notification_type="pre_session_briefing",
                         title="Pre-Session Briefing Ready",
-                        body=f"Briefing for {briefing.member_name} is ready. Session at {session['scheduled_at'].strftime('%I:%M %p')}.",
+                        body=(
+                            f"Briefing for {member_label} is ready. "
+                            f"Session at {session['scheduled_at'].strftime('%I:%M %p')}."
+                        ),
                         channel="push",
                     )
 
@@ -119,7 +136,3 @@ class BriefingWorker:
                     session_id=session_id,
                     error=str(e),
                 )
-
-        # Cleanup old entries from _generated (older than 24h)
-        if len(self._generated) > 1000:
-            self._generated.clear()

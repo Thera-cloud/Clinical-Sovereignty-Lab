@@ -566,6 +566,13 @@ async def _archive_transcript_and_classroom_for_pg_session(
     sd0 = _session_data_dict(pg_row)
     if (sd0.get("transcript_location") or "").strip():
         logger.info("[Zoom] PG session %s already has transcript; skipping re-archive", session_id)
+        # QUANTUM-CRYSTAL-ARCH — still place folder summary if missing (all client tiers)
+        try:
+            from app.services.zoom_session_folder import try_place_session_summary_in_coach_folder
+
+            await try_place_session_summary_in_coach_folder(db_pool, pg_row, str(meeting_id))
+        except Exception as _zf_skip:
+            logger.warning("[Zoom] Folder place on transcript-skip %s: %s", session_id, _zf_skip)
         return
 
     from app.services.blob_storage import upload_bytes
@@ -646,6 +653,22 @@ async def _archive_transcript_and_classroom_for_pg_session(
         logger.info("[Zoom] Classroom analyzer unavailable; transcript archived only for %s", session_id)
         async with db_pool.acquire() as conn:
             await _patch_coaching_session_data(conn, session_id, {"classroom_analysis_available": False})
+        # QUANTUM-CRYSTAL-ARCH — folder placement must not depend on classroom analyzer
+        try:
+            from app.services.zoom_session_folder import try_place_session_summary_in_coach_folder
+
+            _pg_for_folder = dict(pg_row)
+            if zoom_ai_summary_text:
+                _sd_f = _session_data_dict(_pg_for_folder)
+                _sd_f["zoom_ai_summary_text"] = zoom_ai_summary_text
+                _sd_f["zoom_summary_source"] = "zoom_api"
+                _pg_for_folder["session_data"] = _sd_f
+            await try_place_session_summary_in_coach_folder(
+                db_pool, _pg_for_folder, str(meeting_id),
+                summary_text=zoom_ai_summary_text or None,
+            )
+        except Exception as _zf_cls:
+            logger.warning("[Zoom] Folder place without classroom %s: %s", session_id, _zf_cls)
         return
 
     coach_name = "Coach"
