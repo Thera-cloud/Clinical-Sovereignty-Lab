@@ -16,6 +16,31 @@ PRE6_TARGET = 300
 APPROACH_AT = 240
 STALL_DAYS = 10
 
+# QUANTUM-CRYSTAL-ARCH — PRE6 fuel = organic G1 ci_pack domains only.
+# Telemetry / governance / Goodhart shadow samples must never stall-alert as fuel.
+PRIMARY_FUEL_DOMAINS = frozenset({"coding", "general"})
+NON_FUEL_DOMAIN_TAGS = frozenset(
+    {
+        "goodhart_shadow",
+        "verify_e2_e4",
+        "e4_prod",
+        "governance",
+        "marketing",
+        "crisis_si",
+    }
+)
+
+
+def is_pre6_fuel_domain(domain: str, trainable: int = 0) -> bool:
+    """True only for domains that count toward PRE6 organic fuel."""
+    d = (domain or "").strip() or "general"
+    if d in NON_FUEL_DOMAIN_TAGS:
+        return False
+    if d in PRIMARY_FUEL_DOMAINS:
+        return True
+    # Future train domains that actually produce ci_pack rows
+    return int(trainable or 0) > 0
+
 
 async def _already_sent(conn, domain: str, kind: str) -> bool:
     row = await conn.fetchval(
@@ -59,7 +84,11 @@ def _notify(title: str, detail: str) -> None:
 
 
 async def _domain_counts(conn) -> List[Dict[str, Any]]:
-    """Trainable = organic G1 ci_pack shadow rows (PRE6 definition)."""
+    """Trainable = organic G1 ci_pack shadow rows (PRE6 definition).
+
+    Excludes non-fuel domain_tags (Goodhart shadow samples, E2/E4 probes, etc.)
+    even when they write outcome_envelope rows with a different oracle shape.
+    """
     rows = await conn.fetch(
         """
         SELECT COALESCE(NULLIF(TRIM(domain_tag), ''), 'general') AS domain_tag,
@@ -68,13 +97,31 @@ async def _domain_counts(conn) -> List[Dict[str, Any]]:
                    AND COALESCE(shadow_outcome->>'oracle', '') IN ('ci_pack', 'ci_pack_cycle')
                    AND (shadow_outcome->>'passed') IS NOT NULL
                )::int AS trainable,
-               COUNT(*)::int AS total
+               COUNT(*) FILTER (
+                 WHERE shadow_outcome IS NOT NULL
+                   AND COALESCE(shadow_outcome->>'oracle', '') IN ('ci_pack', 'ci_pack_cycle')
+                   AND (shadow_outcome->>'passed') IS NOT NULL
+               )::int AS total
         FROM outcome_envelope
         GROUP BY 1
         ORDER BY 1
         """
     )
-    return [dict(r) for r in rows]
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        d = dict(r)
+        tag = str(d.get("domain_tag") or "general")
+        trainable = int(d.get("trainable") or 0)
+        if not is_pre6_fuel_domain(tag, trainable):
+            continue
+        out.append(d)
+    # Always surface primary fuel domains even at zero so ETA/stall stay honest
+    seen = {str(d["domain_tag"]) for d in out}
+    for primary in sorted(PRIMARY_FUEL_DOMAINS):
+        if primary not in seen:
+            out.append({"domain_tag": primary, "trainable": 0, "total": 0})
+    out.sort(key=lambda x: str(x["domain_tag"]))
+    return out
 
 
 async def _slope_eta(
@@ -143,6 +190,8 @@ async def run_fuel_gauge_cycle(db_pool) -> Dict[str, Any]:
             domain = str(d["domain_tag"])
             trainable = int(d["trainable"] or 0)
             total = int(d["total"] or 0)
+            if not is_pre6_fuel_domain(domain, trainable):
+                continue
             await conn.execute(
                 """
                 INSERT INTO ln7_fuel_snapshots (snap_date, domain_tag, trainable, total)

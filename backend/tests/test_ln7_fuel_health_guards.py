@@ -48,3 +48,17 @@ def test_fuel_gauge_constants():
     assert fuel.PRE6_TARGET == 300
     assert fuel.APPROACH_AT == 240
     assert fuel.STALL_DAYS == 10
+
+
+def test_fuel_gauge_excludes_non_fuel_domain_tags():
+    fuel = _load("app.jobs.ln7_fuel_gauge", JOBS / "ln7_fuel_gauge.py")
+    assert fuel.is_pre6_fuel_domain("coding", 0) is True
+    assert fuel.is_pre6_fuel_domain("general", 0) is True
+    assert fuel.is_pre6_fuel_domain("goodhart_shadow", 0) is False
+    assert fuel.is_pre6_fuel_domain("goodhart_shadow", 99) is False
+    assert fuel.is_pre6_fuel_domain("verify_e2_e4", 0) is False
+    assert fuel.is_pre6_fuel_domain("e4_prod", 0) is False
+    assert fuel.is_pre6_fuel_domain("governance", 0) is False
+    # New train domain only after it actually has ci_pack trainable rows
+    assert fuel.is_pre6_fuel_domain("clinical_v2", 0) is False
+    assert fuel.is_pre6_fuel_domain("clinical_v2", 3) is True
