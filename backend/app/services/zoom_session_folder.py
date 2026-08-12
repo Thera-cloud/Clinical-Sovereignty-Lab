@@ -140,11 +140,12 @@ def _build_markdown_document(
     meeting_id: str,
     summary_body: str,
     zoom_doc_url: str = "",
-    scheduled_start: Optional[dt.datetime] = None,
+    live_date: Optional[dt.datetime] = None,
+    booking_label: str = "",
 ) -> str:
     date_label = (
-        scheduled_start.strftime("%Y-%m-%d")
-        if scheduled_start and hasattr(scheduled_start, "strftime")
+        live_date.strftime("%Y-%m-%d")
+        if live_date and hasattr(live_date, "strftime")
         else dt.datetime.utcnow().strftime("%Y-%m-%d")
     )
     lines = [
@@ -152,12 +153,18 @@ def _build_markdown_document(
         "",
         f"- **Session ID:** {session_id}",
         f"- **Zoom meeting:** {meeting_id}",
-        f"- **Date:** {date_label}",
-        "",
-        "## AI Companion Summary",
-        "",
-        (summary_body or "").strip(),
+        f"- **Live session date:** {date_label}",
     ]
+    if booking_label:
+        lines.append(f"- **Originally booked / session-id date:** {booking_label}")
+    lines.extend(
+        [
+            "",
+            "## AI Companion Summary",
+            "",
+            (summary_body or "").strip(),
+        ]
+    )
     if zoom_doc_url:
         lines.extend(["", f"[Open in Zoom Hub]({zoom_doc_url})"])
     return "\n".join(lines).strip()
@@ -385,20 +392,36 @@ async def try_place_session_summary_in_coach_folder(
     if not client_name:
         client_name = resolved_name
 
-    scheduled = pg_row.get("scheduled_start")
+    from app.services.zoom_transcript_context import resolve_live_session_display
+
+    date_info = resolve_live_session_display(
+        actual_start=pg_row.get("actual_start"),
+        actual_end=pg_row.get("actual_end"),
+        scheduled_start=pg_row.get("scheduled_start"),
+        session_data=sd,
+        session_id=session_id,
+    )
+    live_dt = None
+    for key in ("actual_start", "actual_end", "scheduled_start"):
+        val = pg_row.get(key)
+        if val is not None and hasattr(val, "strftime"):
+            live_dt = val
+            break
+    if live_dt is None and date_info.get("date_slug"):
+        try:
+            live_dt = dt.datetime.strptime(date_info["date_slug"], "%Y-%m-%d")
+        except Exception:
+            live_dt = None
     md_doc = _build_markdown_document(
         client_name=client_name,
         session_id=session_id,
         meeting_id=str(meeting_id),
         summary_body=body,
         zoom_doc_url=doc_url,
-        scheduled_start=scheduled,
+        live_date=live_dt,
+        booking_label=date_info.get("booking_label") or "",
     )
-    date_slug = (
-        scheduled.strftime("%Y-%m-%d")
-        if scheduled and hasattr(scheduled, "strftime")
-        else dt.datetime.utcnow().strftime("%Y-%m-%d")
-    )
+    date_slug = date_info.get("date_slug") or dt.datetime.utcnow().strftime("%Y-%m-%d")
     safe_name = re.sub(r"[^\w\s-]", "", client_name or client_username).strip().replace(" ", "_")
     filename = f"Session_Summary_{safe_name}_{date_slug}.pdf"
     pdf_bytes = _markdown_to_pdf_bytes(md_doc, f"Session Summary — {client_name or client_username}")
@@ -422,6 +445,9 @@ async def try_place_session_summary_in_coach_folder(
         "zoom_doc_file_id": doc_file_id or None,
         "summary_preview": body[:4000],
         "markdown": md_doc[:50000],
+        "live_session_date": date_slug,
+        "live_session_label": date_info.get("live_label"),
+        "booking_date_label": date_info.get("booking_label"),
     }
     now_iso = dt.datetime.utcnow().isoformat()
 
@@ -556,8 +582,10 @@ async def place_end_session_summary(
         "client_name": sess.get("client_name") or "",
         "nate_summary": nate_summary or "",
         "coach_notes": notes[:4000],
-        "scheduled_start": None,
-        "session_data": {},
+        "scheduled_start": sess.get("scheduled_start"),
+        "actual_start": sess.get("actual_start"),
+        "actual_end": sess.get("actual_end"),
+        "session_data": sess.get("session_data") or {},
         "zoom_meeting_id": mid,
     }
     return await try_place_session_summary_in_coach_folder(
@@ -579,12 +607,13 @@ async def poll_pending_zoom_session_summaries(db_pool) -> int:
                 """
                 SELECT session_id, coach_id, client_id, client_name,
                        zoom_meeting_id, session_data, scheduled_start,
+                       actual_start, actual_end,
                        nate_summary, coach_notes, session_notes
                 FROM coaching_sessions
                 WHERE COALESCE(zoom_meeting_id, '') <> ''
                   AND scheduled_start >= NOW() - INTERVAL '96 hours'
                   AND COALESCE(session_data->>'zoom_folder_doc_placed', '') NOT IN ('true', 'True', '1')
-                ORDER BY scheduled_start DESC NULLS LAST
+                ORDER BY COALESCE(actual_start, scheduled_start) DESC NULLS LAST
                 LIMIT 20
                 """
             )
@@ -613,7 +642,7 @@ async def get_folder_session_summaries_context_pg(
     client_id: str,
     limit: int = 2,
 ) -> str:
-    """Recent Zoom session summaries from coach folders for LN context."""
+    """Recent Zoom session summaries from coach folders for LN context (read-only)."""
     if not db_pool or not client_id:
         return ""
     try:
@@ -625,13 +654,17 @@ async def get_folder_session_summaries_context_pg(
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT f.filename, f.metadata, f.created_at, cf.entity_name
+                SELECT f.filename, f.metadata, f.created_at, cf.entity_name,
+                       cs.actual_start, cs.actual_end, cs.scheduled_start,
+                       cs.session_data AS coaching_session_data
                 FROM coach_folder_files f
                 JOIN coach_folders cf ON cf.id = f.folder_id
+                LEFT JOIN coaching_sessions cs
+                  ON cs.session_id = COALESCE(f.metadata->>'session_id', '')
                 WHERE cf.folder_type = 'client'
                   AND cf.entity_id = ANY($1::text[])
                   AND f.file_type = $2
-                ORDER BY f.created_at DESC
+                ORDER BY COALESCE(cs.actual_start, cs.actual_end, f.created_at) DESC NULLS LAST
                 LIMIT $3
                 """,
                 entity_ids,
@@ -641,7 +674,12 @@ async def get_folder_session_summaries_context_pg(
         if not rows:
             return ""
 
-        parts = ["[ZOOM SESSION SUMMARIES — Coach folder archives]"]
+        from app.services.zoom_transcript_context import resolve_live_session_display
+
+        parts = [
+            "[ZOOM SESSION SUMMARIES — Coach folder archives — read-only]",
+            "Dates labeled live are when the session ran. SES_* booking stamps are secondary.",
+        ]
         for r in rows:
             meta = r["metadata"]
             if isinstance(meta, str):
@@ -649,30 +687,24 @@ async def get_folder_session_summaries_context_pg(
                     meta = json.loads(meta)
                 except Exception:
                     meta = {}
-            preview = ""
-            if isinstance(meta, dict):
-                preview = (meta.get("summary_preview") or meta.get("markdown") or "")[:1200]
-            dt_label = (
-                r["created_at"].strftime("%b %d, %Y")
-                if r.get("created_at") and hasattr(r["created_at"], "strftime")
-                else "recent"
-            )
+            if not isinstance(meta, dict):
+                meta = {}
+            preview = (meta.get("summary_preview") or meta.get("markdown") or "")[:1200]
             sid = (meta.get("session_id") or "") if isinstance(meta, dict) else ""
-            booked = None
-            if sid:
-                try:
-                    from app.services.zoom_transcript_context import session_id_calendar_label
-
-                    booked = session_id_calendar_label(sid)
-                except Exception:
-                    booked = None
-            if booked:
-                label = booked if booked == dt_label else f"{booked} (archived {dt_label})"
-            else:
-                label = dt_label
+            dates = resolve_live_session_display(
+                actual_start=r.get("actual_start"),
+                actual_end=r.get("actual_end"),
+                scheduled_start=r.get("scheduled_start"),
+                session_data=r.get("coaching_session_data"),
+                archive_created_at=r.get("created_at"),
+                session_id=sid,
+                metadata=meta,
+            )
+            label = dates.get("display_label") or "recent"
             parts.append(f"{label} — {r.get('filename') or 'summary'}:\n{preview}")
         parts.append(
             "These are verified session summaries from live coaching. "
+            "Use them for treatment guidance and next-session planning with the coach. "
             "Reference gently; do not quote the coach's private folder notes verbatim."
         )
         return "\n\n".join(parts)

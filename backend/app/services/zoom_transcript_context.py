@@ -19,7 +19,7 @@ _CONTEXT_HEADER = "[ZOOM SESSION TRANSCRIPTS — Path B full dialogue excerpts]"
 
 
 def session_id_calendar_label(session_id: str) -> Optional[str]:
-    """SES_YYYYMMDD_* embeds the coach-facing booking date."""
+    """SES_YYYYMMDD_* embeds when the meeting was first created/booked — not always live day."""
     if not session_id:
         return None
     m = re.match(r"^SES_(\d{4})(\d{2})(\d{2})(?:_|$)", session_id.strip())
@@ -32,6 +32,102 @@ def session_id_calendar_label(session_id: str) -> Optional[str]:
         return d.strftime("%b %d, %Y")
     except ValueError:
         return None
+
+
+def _as_datetime(val: Any) -> Optional[Any]:
+    """Coerce datetime / ISO string; returns datetime-like or None."""
+    if val is None:
+        return None
+    if hasattr(val, "strftime"):
+        return val
+    if isinstance(val, str) and val.strip():
+        try:
+            from datetime import datetime
+
+            return datetime.fromisoformat(val.strip().replace("Z", "+00:00"))
+        except Exception:
+            return None
+    return None
+
+
+def format_session_day_label(val: Any) -> Optional[str]:
+    dt_val = _as_datetime(val)
+    if dt_val is None:
+        return None
+    try:
+        return dt_val.strftime("%b %d, %Y")
+    except Exception:
+        return None
+
+
+def resolve_live_session_display(
+    *,
+    actual_start: Any = None,
+    actual_end: Any = None,
+    scheduled_start: Any = None,
+    session_data: Any = None,
+    archive_created_at: Any = None,
+    session_id: str = "",
+    metadata: Any = None,
+) -> Dict[str, Optional[str]]:
+    """
+    Prefer when the live call ran over SES_* booking stamp / create day.
+
+    Returns keys: live_label, booking_label, display_label, date_slug (YYYY-MM-DD).
+    """
+    sd = _session_data_dict(session_data)
+    meta = metadata if isinstance(metadata, dict) else {}
+    if isinstance(metadata, str) and metadata.strip():
+        try:
+            meta = json.loads(metadata)
+        except Exception:
+            meta = {}
+
+    candidates = (
+        actual_start,
+        actual_end,
+        meta.get("live_session_at") or meta.get("live_session_date"),
+        sd.get("actual_start") or sd.get("live_started_at") or sd.get("zoom_folder_doc_placed_at"),
+        scheduled_start,
+        archive_created_at,
+    )
+    live_dt = None
+    for c in candidates:
+        live_dt = _as_datetime(c)
+        if live_dt is not None:
+            break
+
+    live_label = format_session_day_label(live_dt) if live_dt else None
+    booking_label = session_id_calendar_label(session_id or "")
+    if booking_label and live_label and booking_label == live_label:
+        booking_label = None
+
+    if live_label and booking_label:
+        display = f"{live_label} (live; booked {booking_label})"
+    elif live_label:
+        display = live_label
+    elif booking_label:
+        display = f"{booking_label} (booking date — live time unknown)"
+    else:
+        display = "recent"
+
+    date_slug = None
+    if live_dt is not None:
+        try:
+            date_slug = live_dt.strftime("%Y-%m-%d")
+        except Exception:
+            date_slug = None
+    if not date_slug and session_id:
+        m = re.match(r"^SES_(\d{4})(\d{2})(\d{2})(?:_|$)", session_id.strip())
+        if m:
+            date_slug = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+
+    return {
+        "live_label": live_label,
+        "booking_label": booking_label,
+        "display_label": display,
+        "date_slug": date_slug,
+    }
 
 
 def _session_data_dict(raw: Any) -> Dict[str, Any]:
@@ -150,11 +246,11 @@ async def get_sessions_with_transcripts_pg(
             rows = await conn.fetch(
                 """
                 SELECT session_id, client_id, client_name, zoom_meeting_id,
-                       scheduled_start, session_data
+                       scheduled_start, actual_start, actual_end, session_data
                 FROM coaching_sessions
                 WHERE client_id = ANY($1::text[])
                   AND COALESCE(session_data->>'transcript_location', '') <> ''
-                ORDER BY scheduled_start DESC NULLS LAST
+                ORDER BY COALESCE(actual_start, actual_end, scheduled_start) DESC NULLS LAST
                 LIMIT $2
                 """,
                 entity_ids,
@@ -206,18 +302,15 @@ async def get_zoom_transcript_context_pg(
         )
         if not excerpt.strip():
             continue
-        scheduled = row.get("scheduled_start")
-        occurred = (
-            scheduled.strftime("%b %d, %Y")
-            if scheduled and hasattr(scheduled, "strftime")
-            else ""
-        )
         sid = row.get("session_id") or ""
-        booked = session_id_calendar_label(sid)
-        if booked:
-            dt_label = booked if not occurred or booked == occurred else f"{booked} (occurred {occurred})"
-        else:
-            dt_label = occurred or "recent"
+        dates = resolve_live_session_display(
+            actual_start=row.get("actual_start"),
+            actual_end=row.get("actual_end"),
+            scheduled_start=row.get("scheduled_start"),
+            session_data=row.get("session_data"),
+            session_id=sid,
+        )
+        dt_label = dates.get("display_label") or "recent"
         parts.append(
             f"Session {dt_label} ({sid}, transcript_chars={raw_len}):\n{excerpt}"
         )

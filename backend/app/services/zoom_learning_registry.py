@@ -171,7 +171,7 @@ async def build_coach_nate_zoom_context(
     try:
         from app.services.zoom_session_folder import get_folder_session_summaries_context_pg
 
-        folder_ctx = await get_folder_session_summaries_context_pg(db_pool, client_id, limit=2)
+        folder_ctx = await get_folder_session_summaries_context_pg(db_pool, client_id, limit=5)
         if folder_ctx:
             blocks.append(folder_ctx)
     except Exception as e:
@@ -179,7 +179,7 @@ async def build_coach_nate_zoom_context(
     try:
         from app.services.zoom_transcript_context import get_zoom_transcript_context_pg
 
-        tx_ctx = await get_zoom_transcript_context_pg(db_pool, client_id, limit=2)
+        tx_ctx = await get_zoom_transcript_context_pg(db_pool, client_id, limit=3)
         if tx_ctx:
             blocks.append(tx_ctx)
     except Exception as e:
