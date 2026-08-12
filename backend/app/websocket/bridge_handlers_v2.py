@@ -295,6 +295,8 @@ class CoachNexusV2:
                       AND scheduled_start >= $2
                       AND scheduled_start <  $3
                       AND LOWER(status) IN ('scheduled', 'active', 'pending_approval')
+                      AND COALESCE(session_data->>'schedule_link_hidden', 'false')
+                          NOT IN ('true', '1', 'yes')
                     ORDER BY scheduled_start ASC
                     LIMIT 500
                     """,
@@ -376,7 +378,8 @@ class CoachNexusV2:
         if added:
             print(f">>> [INFO] get_calendar_data_pg: merged {added} PG sessions for coach={hid} {year}-{month:02d}")
 
-        # QUANTUM-CRYSTAL-ARCH: include hidden schedule-link rows for calendar dots only
+        # QUANTUM-CRYSTAL-ARCH: include hidden schedule-link rows for calendar dots only.
+        # Accept completed OR still-scheduled+hidden (legacy stale dual-write rows).
         try:
             async with db_pool.acquire() as conn:
                 hidden_rows = await conn.fetch(
@@ -390,8 +393,8 @@ class CoachNexusV2:
                     WHERE coach_id = $1
                       AND scheduled_start >= $2
                       AND scheduled_start <  $3
-                      AND LOWER(status) = 'completed'
-                      AND COALESCE(session_data->>'schedule_link_hidden', 'false') = 'true'
+                      AND COALESCE(session_data->>'schedule_link_hidden', 'false')
+                          IN ('true', '1', 'yes')
                     ORDER BY scheduled_start ASC
                     LIMIT 200
                     """,

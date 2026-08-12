@@ -1053,38 +1053,50 @@ async def delete_zoom_meeting(session_id: str, request: Request):
     if not isinstance(sessions, list):
         sessions = []
 
+    target = await _fetch_session_pg(request, session_id)
+    if not target:
+        for s in sessions:
+            if s.get("session_id") == session_id:
+                target = s
+                break
+    if not target:
+        raise HTTPException(404, "Session not found")
+
+    meeting_id = (target.get("zoom_meeting_id") or "").strip()
+    if not meeting_id:
+        return {"ok": True, "message": "No zoom_meeting_id on session", "session": target}
+
+    if not settings.ENABLE_ZOOM:
+        raise HTTPException(status_code=400, detail="Zoom disabled (ENABLE_ZOOM=false)")
+
+    client = _make_zoom_client()
+
+    try:
+        await client.delete_meeting(meeting_id=meeting_id)
+    except httpx.HTTPStatusError as e:
+        body = ""
+        try:
+            body = (e.response.text or "")[:2000]
+        except Exception:
+            body = ""
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "zoom_delete_failed", "zoom_status": getattr(e.response, "status_code", None), "zoom_body": body},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": "zoom_delete_failed", "message": str(e)})
+
+    target["zoom_meeting_deleted_at"] = str(datetime.now())
+    target["zoom_meeting_id"] = ""
+    target["zoom_link"] = ""
     for s in sessions:
-            meeting_id = (s.get("zoom_meeting_id") or "").strip()
-            if not meeting_id:
-                return {"ok": True, "message": "No zoom_meeting_id on session", "session": s}
-
-            if not settings.ENABLE_ZOOM:
-                raise HTTPException(status_code=400, detail="Zoom disabled (ENABLE_ZOOM=false)")
-
-            client = _make_zoom_client()
-
-            try:
-                await client.delete_meeting(meeting_id=meeting_id)
-            except httpx.HTTPStatusError as e:
-                body = ""
-                try:
-                    body = (e.response.text or "")[:2000]
-                except Exception:
-                    body = ""
-                raise HTTPException(
-                    status_code=502,
-                    detail={"error": "zoom_delete_failed", "zoom_status": getattr(e.response, "status_code", None), "zoom_body": body},
-                )
-            except Exception as e:
-                raise HTTPException(status_code=500, detail={"error": "zoom_delete_failed", "message": str(e)})
-
-            s["zoom_meeting_deleted_at"] = str(datetime.now())
+        if s.get("session_id") == session_id:
+            s["zoom_meeting_deleted_at"] = target["zoom_meeting_deleted_at"]
             s["zoom_meeting_id"] = ""
             s["zoom_link"] = ""
-            await _save_session_dual(request, s, sessions)
-            return {"ok": True, "message": "Zoom meeting deleted", "session": s}
-
-    raise HTTPException(404, "Session not found")
+            break
+    await _save_session_dual(request, target, sessions)
+    return {"ok": True, "message": "Zoom meeting deleted", "session": target}
 
 
 @router.get("/{session_id}/zoom/recording_status")
@@ -1626,7 +1638,24 @@ async def hide_schedule_link(
     user_role = getattr(request.state, "user_role", "")
     if current_user != target.get("coach_id") and user_role != "ADMIN":
         raise HTTPException(403, "Only the assigned coach can remove this schedule link")
+    db = _get_db(request)
+    # Stale dual-write used to leave schedule_link_hidden=true while status stayed
+    # scheduled — re-apply hide so the action list and calendar merge stay consistent.
     if is_schedule_link_hidden(target):
+        status_l = str(target.get("status") or "").lower()
+        if status_l in ("scheduled", "active", "pending_approval"):
+            try:
+                repaired = await hide_session_schedule_link(
+                    db, target, sessions_list=sessions
+                )
+                save_json(DATA_DIR / "sessions.json", sessions)
+                await _save_session_dual(request, repaired, all_sessions=sessions)
+                return {
+                    "message": "Schedule link already removed",
+                    "session": repaired,
+                }
+            except Exception as e:
+                _logger.warning("hide_schedule_link repair failed %s: %s", session_id, e)
         return {
             "message": "Schedule link already removed",
             "session": annotate_calendar_item(target),
@@ -1639,17 +1668,18 @@ async def hide_schedule_link(
                 "message": "No archived transcript for this session. Use Schedule → Archive Transcript first.",
             },
         )
-    db = _get_db(request)
     try:
         updated = await hide_session_schedule_link(db, target, sessions_list=sessions)
     except Exception as e:
         _logger.warning("hide_schedule_link failed %s: %s", session_id, e)
         raise HTTPException(500, "Failed to hide schedule link") from e
     save_json(DATA_DIR / "sessions.json", sessions)
-    await _save_session_dual(request, target, all_sessions=sessions)
+    # Must dual-write the post-hide dict — hiding copies the session, so the
+    # pre-hide target still has status=scheduled and would undo the PG update.
+    await _save_session_dual(request, updated, all_sessions=sessions)
     if _gcal_sync and db:
         try:
-            asyncio.create_task(_gcal_sync(db, target, action="delete"))
+            asyncio.create_task(_gcal_sync(db, updated, action="delete"))
         except Exception:
             pass
     return {"message": "Schedule link removed; calendar reference kept", "session": updated}
