@@ -56,7 +56,7 @@ class TestRemediationDispatch(unittest.TestCase):
     def test_unknown_kind_skipped(self):
         from app.services.ceo_remediation_apply import apply_ceo_remediation
 
-        out = asyncio.get_event_loop().run_until_complete(
+        out = asyncio.run(
             apply_ceo_remediation(None, {"kind": "growth_content_review"})
         )
         self.assertTrue(out.get("skipped"))
@@ -70,15 +70,19 @@ class TestRemediationDispatch(unittest.TestCase):
 
         async def _run():
             with patch.object(mod, "_redis", return_value=fake_redis):
-                with patch.object(mod, "_collect_smoke", new=AsyncMock(return_value={"checks": [], "all_ok": True})):
-                    with patch.object(mod, "_fallback_llm_reflect", new=AsyncMock(return_value={"ok": False})):
+                with patch.object(
+                    mod, "_collect_smoke", new=AsyncMock(return_value={"checks": [], "all_ok": True})
+                ):
+                    with patch.object(
+                        mod, "_fallback_llm_reflect", new=AsyncMock(return_value={"ok": False})
+                    ):
                         with patch.object(mod, "_log_remediation", new=AsyncMock()):
                             return await mod.apply_ceo_remediation(
                                 MagicMock(),
                                 {"kind": "ln7_fuel_volume_burst", "domain": "coding"},
                             )
 
-        out = asyncio.get_event_loop().run_until_complete(_run())
+        out = asyncio.run(_run())
         self.assertFalse(out.get("ok"))
         self.assertEqual(out["execution"].get("reason"), "cooldown_12h")
         self.assertIn("cooldown", (out.get("summary_text") or "").lower())
@@ -89,7 +93,9 @@ class TestRemediationDispatch(unittest.TestCase):
         async def _run():
             with patch(
                 "app.services.ceo_remediation_apply.apply_ceo_remediation",
-                new=AsyncMock(return_value={"ok": True, "kind": "trust_reprobe", "summary_text": "ok"}),
+                new=AsyncMock(
+                    return_value={"ok": True, "kind": "trust_reprobe", "summary_text": "ok"}
+                ),
             ) as mocked:
                 out = await cin._apply_ceo_payload(
                     MagicMock(),
@@ -99,7 +105,7 @@ class TestRemediationDispatch(unittest.TestCase):
                 mocked.assert_awaited_once()
                 return out
 
-        out = asyncio.get_event_loop().run_until_complete(_run())
+        out = asyncio.run(_run())
         self.assertEqual(out["remediation"]["kind"], "trust_reprobe")
 
     def test_confirmation_appends_summary(self):
