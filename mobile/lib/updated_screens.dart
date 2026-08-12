@@ -9460,6 +9460,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                   duration: const Duration(seconds: 3),
                 ),
               );
+            } else if (msg == 'NOT_ASSIGNED_COACH' ||
+                msg == 'COACH_NOT_ASSIGNED') {
+              // Quiet: assignment is often profile-based; bridge may lag
+              // coach_assignments. Do not spam raw codes on every refresh.
+              _debugLog('Coach assignment check: $msg');
             } else {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text(msg)),
@@ -11315,6 +11320,41 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       children: [
         // ===== AVAILABILITY SUMMARY + CALENDAR (always visible) =====
         _buildAvailabilitySummaryCard(),
+        // COACH-SCHEDULE-UX: keep Create/Hours in-flow (not bottom FABs)
+        // so they never cover session-card ⋮ menus.
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.schedule,
+                      size: 16, color: Color(0xFFC9A962)),
+                  label: const Text("Set My Hours",
+                      style: TextStyle(color: Color(0xFFC9A962))),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFFC9A962)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  onPressed: _openAvailabilityDialog,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text("Create Session"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFFD700),
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  onPressed: _openCreateSessionDialog,
+                ),
+              ),
+            ],
+          ),
+        ),
         CalendarToolbar(
           view: _calView,
           focusedDate: _calFocusedDate,
@@ -12155,33 +12195,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       ],
     );
 
-    return Stack(
-      children: [
-        content,
-        Positioned(
-          right: 16,
-          bottom: 16,
-          child: FloatingActionButton.extended(
-            backgroundColor: const Color(0xFFFFD700),
-            foregroundColor: Colors.black,
-            icon: const Icon(Icons.add),
-            label: const Text("Create Session"),
-            onPressed: _openCreateSessionDialog,
-          ),
-        ),
-        Positioned(
-          right: 16,
-          bottom: 80,
-          child: FloatingActionButton.extended(
-            backgroundColor: const Color(0xFFC9A962),
-            foregroundColor: Colors.black,
-            icon: const Icon(Icons.schedule),
-            label: const Text("Set My Hours"),
-            onPressed: _openAvailabilityDialog,
-          ),
-        ),
-      ],
-    );
+    // COACH-SCHEDULE-UX: actions live in the list toolbar (not FABs) so they
+    // never cover session-card ⋮ menus / Start Live Session.
+    return content;
   }
 
   // --- Helpers for availability/calendar ---

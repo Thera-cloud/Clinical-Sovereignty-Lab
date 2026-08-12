@@ -20591,15 +20591,29 @@ async def handle_client(websocket, path=None):
                     await websocket.send(json.dumps({"type": "error", "message": "Missing client_id"}))
                     continue
                 _cpi_coach = (current_profile.get("hardware_id") or "").strip()
+                _cpi_uname = (current_profile.get("username") or "").strip()
                 _cpi_admin = current_profile.get("role") == "ADMIN"
                 try:
                     async with db_pool.acquire() as _cpi_conn:
                         if not _cpi_admin:
+                            # QUANTUM-CRYSTAL-ARCH — profile coach_* OR coach_assignments
                             _cpi_ok = await _cpi_conn.fetchval(
-                                """SELECT 1 FROM coach_assignments
-                                   WHERE coach_id = $1 AND entity_type = 'client' AND entity_id = $2 LIMIT 1""",
+                                """SELECT 1 WHERE EXISTS (
+                                     SELECT 1 FROM coach_assignments
+                                     WHERE coach_id = $1 AND entity_type = 'client'
+                                       AND entity_id = $2
+                                   ) OR EXISTS (
+                                     SELECT 1 FROM users u
+                                     WHERE (u.hardware_id = $2 OR u.username = $2)
+                                       AND (
+                                         COALESCE(u.profile_data->>'coach_id','') = $1
+                                         OR COALESCE(u.profile_data->>'assigned_coach_id','') = $1
+                                         OR ($3 <> '' AND COALESCE(u.profile_data->>'assigned_coach','') = $3)
+                                       )
+                                   ) LIMIT 1""",
                                 _cpi_coach,
                                 _cpi_client,
+                                _cpi_uname,
                             )
                             if not _cpi_ok:
                                 await websocket.send(json.dumps({"type": "error", "message": "NOT_ASSIGNED_COACH"}))
@@ -20843,10 +20857,23 @@ async def handle_client(websocket, path=None):
                     async with db_pool.acquire() as conn:
                         is_admin = current_profile.get("role") == "ADMIN"
                         if not is_admin:
+                            # QUANTUM-CRYSTAL-ARCH — profile coach_* OR coach_assignments
+                            _ov_uname = (current_profile.get("username") or "").strip()
                             assigned = await conn.fetchval(
-                                """SELECT 1 FROM coach_assignments
-                                   WHERE coach_id = $1 AND entity_type = 'client' AND entity_id = $2 LIMIT 1""",
-                                coach_hw, client_hw,
+                                """SELECT 1 WHERE EXISTS (
+                                     SELECT 1 FROM coach_assignments
+                                     WHERE coach_id = $1 AND entity_type = 'client'
+                                       AND entity_id = $2
+                                   ) OR EXISTS (
+                                     SELECT 1 FROM users u
+                                     WHERE (u.hardware_id = $2 OR u.username = $2)
+                                       AND (
+                                         COALESCE(u.profile_data->>'coach_id','') = $1
+                                         OR COALESCE(u.profile_data->>'assigned_coach_id','') = $1
+                                         OR ($3 <> '' AND COALESCE(u.profile_data->>'assigned_coach','') = $3)
+                                       )
+                                   ) LIMIT 1""",
+                                coach_hw, client_hw, _ov_uname,
                             )
                             if not assigned:
                                 await websocket.send(json.dumps({"type": "error", "message": "NOT_ASSIGNED_COACH"}))
