@@ -122,6 +122,7 @@ class GoogleWorkspaceService:
                 "scopes": "",
                 "revoked": False,
                 "oauth_enabled": _flag_on("ENABLE_WS_OAUTH"),
+                "connect_visible": _flag_on("ENABLE_WS_OAUTH"),
             }
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -139,12 +140,14 @@ class GoogleWorkspaceService:
                 "scopes": "",
                 "revoked": False,
                 "oauth_enabled": _flag_on("ENABLE_WS_OAUTH"),
+                "connect_visible": _flag_on("ENABLE_WS_OAUTH"),
             }
         return {
             "connected": row["revoked_at"] is None,
             "scopes": row["scopes"] or "",
             "revoked": row["revoked_at"] is not None,
             "oauth_enabled": _flag_on("ENABLE_WS_OAUTH"),
+            "connect_visible": _flag_on("ENABLE_WS_OAUTH"),
         }
 
     async def _load_session(self, session_id: str) -> Optional[Dict[str, Any]]:

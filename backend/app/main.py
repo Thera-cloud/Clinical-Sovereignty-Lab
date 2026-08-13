@@ -4809,6 +4809,13 @@ try:
 except Exception as _gws_err:
     print(f"   ⚠️  Google Workspace router failed: {_gws_err}")
 
+# Studio HMAC hooks (ENABLE_STUDIO_WEBHOOKS default off)  # QUANTUM-CRYSTAL-ARCH
+try:
+    from app.routers.studio_hooks_api import router as studio_hooks_router
+    app.include_router(studio_hooks_router)
+except Exception as _sth_err:
+    print(f"   ⚠️  Studio hooks router failed: {_sth_err}")
+
 # Corporate Command API (CORP_ADMIN dashboard)
 try:
     from app.routers.corporate_command_api import router as corporate_command_router

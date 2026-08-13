@@ -5391,6 +5391,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
           GoogleCalendarSection(
             token: (_profile['token'] ?? widget.profile['token'] ?? '').toString(),
           ),
+          // Connect Google Workspace stays hidden until ENABLE_WS_OAUTH (O9).
           const SizedBox(height: 20),
 
           // --- Practice & Fees ---

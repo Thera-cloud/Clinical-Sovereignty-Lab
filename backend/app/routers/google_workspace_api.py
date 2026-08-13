@@ -94,6 +94,7 @@ async def workspace_health():
         "status": "ok",
         "service": "google_workspace",
         "oauth_enabled": _flag_on("ENABLE_WS_OAUTH"),
+        "connect_visible": _flag_on("ENABLE_WS_OAUTH"),
         "configured": bool(GOOGLE_WS_CLIENT_ID and GOOGLE_WS_CLIENT_SECRET),
         "token_app": "workspace_ws",
     }
