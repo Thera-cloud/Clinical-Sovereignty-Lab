@@ -26,6 +26,9 @@ CANONICAL_DOMAINS = [
     "culture",
     "defense",
     "general",
+    "product",
+    "coding",
+    "operational",
 ]
 
 OVERLAP_THRESHOLD = 0.3

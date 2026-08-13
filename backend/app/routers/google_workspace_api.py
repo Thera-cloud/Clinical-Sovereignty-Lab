@@ -199,3 +199,47 @@ async def workspace_callback(request: Request, code: str = "", state: str = "", 
                 scope,
             )
     return RedirectResponse(GOOGLE_WS_POST_AUTH_REDIRECT)
+
+
+@router.get("/scope")
+async def workspace_scope(request: Request, user: Dict = Depends(require_coach)):
+    from app.services.effective_scope import effective_scope
+
+    pool = getattr(request.app.state, "db_pool", None)
+    hw = (user.get("hardware_id") or "").strip()
+    return await effective_scope(pool, hw)
+
+
+@router.get("/supervision")
+async def workspace_supervision(request: Request, user: Dict = Depends(require_coach)):
+    from app.services.effective_scope import effective_scope, require_supervision
+    from app.services.google_workspace_service import FlagOff
+
+    if not _flag_on("ENABLE_SUPERVISION_VIEW"):
+        raise HTTPException(403, "temporarily unavailable")
+    try:
+        require_supervision()
+    except FlagOff:
+        raise HTTPException(403, "temporarily unavailable")
+    pool = getattr(request.app.state, "db_pool", None)
+    hw = (user.get("hardware_id") or "").strip()
+    scope = await effective_scope(pool, hw)
+    return {
+        "is_master": scope["is_master"],
+        "assistants": scope["assistants"],
+        "client_hardware_ids": scope["client_hardware_ids"],
+        "supervision_visible": scope["supervision_visible"],
+    }
+
+
+@router.get("/tasks")
+async def workspace_tasks(request: Request, user: Dict = Depends(require_coach)):
+    from app.services.coach_task_service import list_open_tasks
+    from app.services.google_workspace_service import FlagOff
+
+    pool = getattr(request.app.state, "db_pool", None)
+    hw = (user.get("hardware_id") or "").strip()
+    try:
+        return {"tasks": await list_open_tasks(pool, hw)}
+    except FlagOff:
+        raise HTTPException(403, "temporarily unavailable")

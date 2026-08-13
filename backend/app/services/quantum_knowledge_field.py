@@ -214,6 +214,7 @@ def encode_knowledge_fragment(
     domain_map = {
         "clinical": 1, "coaching": 2, "marketing": 3,
         "research": 4, "culture": 5, "defense": 6, "general": 7,
+        "product": 8, "coding": 9, "operational": 10,
     }
     domain_byte = domain_map.get(domain, 7)
     confidence_byte = int(min(confidence, 1.0) * 255)
@@ -238,6 +239,7 @@ def decode_knowledge_fragment(data: bytes) -> Optional[Dict[str, Any]]:
     domain_map = {
         1: "clinical", 2: "coaching", 3: "marketing",
         4: "research", 5: "culture", 6: "defense", 7: "general",
+        8: "product", 9: "coding", 10: "operational",
     }
 
     return {

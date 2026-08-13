@@ -387,7 +387,9 @@ class R2AnalyticsService:
 
     async def intelligence_by_domain(self) -> dict:
         """Domain breakdown of all active crystals."""
-        return await self.query(f"""
+        from app.services.crystal_domains import BUDGET_ALLOWLIST, pad_domain_rows
+
+        result = await self.query(f"""
             SELECT domain,
                    COUNT(*) AS crystal_count,
                    AVG(confidence) AS avg_confidence,
@@ -398,6 +400,10 @@ class R2AnalyticsService:
             GROUP BY domain
             ORDER BY crystal_count DESC
         """)
+        result["rows"] = pad_domain_rows(result.get("rows") or [])
+        result["allowlist"] = sorted(BUDGET_ALLOWLIST)
+        result["row_count"] = len(result["rows"])
+        return result
 
     async def intelligence_decay(self, days: int = 90) -> dict:
         """Crystals at risk of decay (unretrieved, low confidence)."""

@@ -262,13 +262,12 @@ DOMAIN_TEMPERATURES = {
     "business": 0.5,
     "accounting": 0.3,
     "crisis": 0.3,
+    "product": 0.5,
+    "operational": 0.3,
 }
 
-_VALID_DOMAINS = {
-    "clinical", "coaching", "marketing", "research", "culture", "defense",
-    "general", "coding", "legal", "pmp", "machining", "teaching",
-    "business", "accounting", "crisis", "liminal_resolve", "ln_self_curiosity",
-}
+from app.services.crystal_domains import VALID_DOMAINS as _VALID_DOMAINS
+from app.services.crystal_domains import normalize_domain as _normalize_domain
 
 DECAY_THRESHOLD_DAYS = 90
 DECAY_MIN_RECALLS = 3
@@ -280,6 +279,8 @@ CLUSTER_MIN_ITEMS_BY_DOMAIN = {
     "coding": 2,
     "architecture": 2,
     "operations": 2,
+    "operational": 2,
+    "product": 2,
     "defense": 2,
     "clinical": 3,
     "coaching": 3,
@@ -304,6 +305,8 @@ CONFIDENCE_FLOOR_BY_DOMAIN = {
     "business": 0.18,
     "accounting": 0.20,
     "crisis": 0.30,
+    "product": 0.20,
+    "operational": 0.20,
 }
 CONFIDENCE_PRUNE_THRESHOLD = 0.15   # absolute floor — below this in any domain = archived
 
@@ -2723,8 +2726,11 @@ def _classify_domain(insight_type: str) -> str:
         "defense": "defense",
         "cultural": "culture",
         "research": "research",
+        "product": "product",
+        "coding": "coding",
+        "operational": "operational",
     }
     for key, domain in mapping.items():
         if key in (insight_type or "").lower():
-            return domain
+            return _normalize_domain(domain)
     return "general"

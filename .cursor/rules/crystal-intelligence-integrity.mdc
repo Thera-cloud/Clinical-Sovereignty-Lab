@@ -15,7 +15,7 @@ Intelligence crystals are Nate's memory. Corruption here means Nate forgets, lie
 
 3. **content_hash is SHA-256 of crystal_text.** Computed at creation, never recomputed unless crystal_text changes (which creates a new crystal, not an update). The hash enables Merkle integrity verification by the Crystal Integrity Helix (defense Layer 3).
 
-4. **Domain must be one of 7 canonical values.** `clinical`, `coaching`, `marketing`, `research`, `culture`, `defense`, `general`. Any new domain requires updating the crystallizer, all 6 domain agents, the analytics API, and this rule.
+4. **Domain allowlist:** seven canonical values plus additive `product`, `coding`, `operational`. Canonical seven: `clinical`, `coaching`, `marketing`, `research`, `culture`, `defense`, `general`. Do not rename the seven. Spec `therapeutic` maps to `clinical`. Additive expansion must update crystallizer, all 6 domain agents, analytics API, and this rule in the same commit. Per-domain budgets key on this expanded allowlist — `marketing` 24h volume cannot crowd `clinical`.
 
 ## Crystal Recall
 

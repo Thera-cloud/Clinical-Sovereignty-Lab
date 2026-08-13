@@ -88,4 +88,11 @@ async def studio_hook(hook: str, request: Request):
                 payload.get("campaign_id"),
                 event_id[:200],
             )
+    if hook == "client-digest" and pool:
+        cid = str(payload.get("client_id") or "").strip()
+        if cid:
+            from app.services.effective_scope import client_in_scope
+
+            if not await client_in_scope(pool, coach_id, cid):
+                raise HTTPException(403, "out of scope")
     return {"ok": True, "duplicate": False, "hook": hook}

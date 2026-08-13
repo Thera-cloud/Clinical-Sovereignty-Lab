@@ -23,6 +23,8 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+from app.services.crystal_domains import VALID_DOMAINS, allow_harvest, normalize_domain
+
 # Domain creativity temperatures
 DOMAIN_TEMPERATURES = {
     "clinical": 0.3,
@@ -32,6 +34,8 @@ DOMAIN_TEMPERATURES = {
     "coaching": 0.5,
     "marketing": 0.8,
     "culture": 0.9,
+    "product": 0.5,
+    "operational": 0.3,
 }
 
 
@@ -57,7 +61,7 @@ class NateAutonomousAgent(ABC):
         app_state=None,
     ):
         self.agent_name = agent_name
-        self.domain = domain
+        self.domain = normalize_domain(domain)
         self.cycle_hours = cycle_hours
         self._db_pool = db_pool
         self._app_state = app_state
@@ -299,6 +303,11 @@ class NateAutonomousAgent(ABC):
         """Feed insights to the memory crystallizer for storage."""
         crystallizer = getattr(self._app_state, "nate_memory_crystallizer", None) if self._app_state else None
         if not crystallizer:
+            return
+        if self.domain not in VALID_DOMAINS:
+            return
+        if not await allow_harvest(self._db_pool, self.domain):
+            logger.warning("%s harvest skipped: domain budget", self.agent_name)
             return
 
         for insight in insights:

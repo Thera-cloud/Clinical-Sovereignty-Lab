@@ -3535,6 +3535,8 @@ async def crystal_network_status(request: Request):
     except Exception:
         pass
 
+    from app.services.crystal_domains import BUDGET_ALLOWLIST
+
     return {
         "status": "ok",
         "nodes": nodes,
@@ -3551,6 +3553,7 @@ async def crystal_network_status(request: Request):
         },
         "exa_flops": await _get_exa_status_or_fallback(request, total_crystals),
         "wisdom_metrics": wisdom_metrics,
+        "domain_allowlist": sorted(BUDGET_ALLOWLIST),
     }
 
 

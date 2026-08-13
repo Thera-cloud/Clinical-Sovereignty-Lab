@@ -108,6 +108,18 @@ async def generate_campaign(
             """,
             campaign_id,
         )
+    newsletter_titles = [
+        (p.get("title") or title)
+        for p in pieces
+        if (p.get("content_type") or "") == "newsletter_issue"
+    ]
+    if newsletter_titles and _flag_on("ENABLE_COACH_NEWSLETTER"):
+        from app.services.newsletter_service import record_topics, stamp_source_crystal
+
+        await record_topics(db_pool, newsletter_titles, domain="marketing")
+        await stamp_source_crystal(
+            db_pool, text=f"Newsletter: {title}", domain="marketing"
+        )
     return {
         "ok": True,
         "campaign_id": str(campaign_id),

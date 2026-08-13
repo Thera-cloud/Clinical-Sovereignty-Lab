@@ -82,6 +82,7 @@ CONFIDENCE_BAND_LOW = 0.2
 CANONICAL_DOMAINS = [
     "clinical", "coaching", "marketing", "research",
     "culture", "defense", "general",
+    "product", "coding", "operational",
 ]
 
 # Platform lenses for World Coherence (H6 strands)

@@ -1924,6 +1924,7 @@ async def _check_crystal_domain_canonical(conn, cid: str) -> Dict[str, Any]:
         # Organic engine/research domains (pre-existing in production)
         "coding", "biochem", "coherence", "predictive_intelligence",
         "voice", "patent", "neuroscience_foundations", "neural_acoustic",
+        "product", "operational",
     }
     try:
         rows = await conn.fetch(
