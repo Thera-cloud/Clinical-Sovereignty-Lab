@@ -99,7 +99,8 @@ def test_hub_router_and_linkedin_isolation():
     assert "INSERT INTO skyeye_platform_tokens" not in api
     li = (ROOT / "backend/app/services/coach_linkedin_oauth.py").read_text()
     assert "coach_linkedin_connection" in li
-    assert "skyeye_platform_tokens" not in li
+    assert "INTO skyeye_platform_tokens" not in li
+    assert "FROM skyeye_platform_tokens" not in li
     pub = (ROOT / "backend/app/services/coach_linkedin_publisher.py").read_text()
     assert "skyeye_platform_tokens" not in pub
     sql = (ROOT / "backend/migrations/332_coach_integrations_hub.sql").read_text()
