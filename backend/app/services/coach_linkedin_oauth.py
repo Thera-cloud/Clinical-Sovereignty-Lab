@@ -5,30 +5,70 @@ Never reads or writes SkyEye platform tokens (NG19).
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 import urllib.parse
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 LINKEDIN_AUTH_URL = "https://www.linkedin.com/oauth/v2/authorization"
 LINKEDIN_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
 LINKEDIN_USERINFO = "https://api.linkedin.com/v2/userinfo"
+LINKEDIN_ME = "https://api.linkedin.com/v2/me"
 COACH_SCOPES = "openid profile email w_member_social"
+SKYEYE_LINKEDIN_CALLBACK = "/api/skyeye/platforms/linkedin/callback"
+COACH_LINKEDIN_CALLBACK = "/api/coach/integrations/linkedin/callback"
+
+logger = logging.getLogger("coach_linkedin_oauth")
 
 
 def _flag_on(name: str) -> bool:
     return os.getenv(name, "false").strip().lower() in ("1", "true", "yes")
 
 
+def _public_api() -> str:
+    return (os.getenv("PUBLIC_BASE_URL") or "https://api.sovereignsanctuary.net").rstrip("/")
+
+
+def canonicalize_linkedin_redirect(uri: str) -> str:
+    u = (uri or "").strip()
+    if not u:
+        return f"{_public_api()}{SKYEYE_LINKEDIN_CALLBACK}"
+    for _ in range(4):
+        nxt = u.replace(
+            "https://api.sovereignsanctuary.net/api.sovereignsanctuary.net",
+            "https://api.sovereignsanctuary.net",
+        ).replace(
+            "http://api.sovereignsanctuary.net/api.sovereignsanctuary.net",
+            "https://api.sovereignsanctuary.net",
+        )
+        if nxt == u:
+            break
+        u = nxt
+    if u.startswith("api.sovereignsanctuary.net"):
+        u = "https://" + u
+    if u.startswith("/"):
+        u = _public_api() + u
+    return u
+
+
 def coach_linkedin_credentials() -> tuple:
-    cid = (os.getenv("LINKEDIN_COACH_CLIENT_ID") or os.getenv("LINKEDIN_CLIENT_ID") or "").strip()
-    secret = (
-        os.getenv("LINKEDIN_COACH_CLIENT_SECRET") or os.getenv("LINKEDIN_CLIENT_SECRET") or ""
-    ).strip()
-    redirect = os.getenv(
-        "LINKEDIN_COACH_REDIRECT_URI",
-        "https://api.sovereignsanctuary.net/api/coach/integrations/linkedin/callback",
-    )
-    return cid, secret, redirect
+    dedicated = (os.getenv("LINKEDIN_COACH_CLIENT_ID") or "").strip()
+    if dedicated:
+        cid = dedicated
+        secret = (os.getenv("LINKEDIN_COACH_CLIENT_SECRET") or "").strip()
+        redirect = os.getenv(
+            "LINKEDIN_COACH_REDIRECT_URI",
+            f"{_public_api()}{COACH_LINKEDIN_CALLBACK}",
+        )
+    else:
+        cid = (os.getenv("LINKEDIN_CLIENT_ID") or "").strip()
+        secret = (os.getenv("LINKEDIN_CLIENT_SECRET") or "").strip()
+        # SkyEye posting app (77wz5scwctl85s) only has the SkyEye callback registered.
+        redirect = os.getenv("LINKEDIN_COACH_REGISTERED_REDIRECT_URI") or (
+            f"{_public_api()}{SKYEYE_LINKEDIN_CALLBACK}"
+        )
+    return cid, secret, canonicalize_linkedin_redirect(redirect)
 
 
 def build_coach_linkedin_oauth_url(client_id: str, redirect_uri: str, state: str) -> str:
@@ -72,11 +112,59 @@ async def exchange_coach_linkedin_code(code: str) -> Dict[str, Any]:
                 person_urn = sub
             elif sub:
                 person_urn = f"urn:li:person:{sub}"
+            if not person_urn:
+                async with session.get(
+                    LINKEDIN_ME,
+                    headers={"Authorization": f"Bearer {token}"},
+                ) as me2:
+                    me_data = await me2.json(content_type=None)
+                pid = str(me_data.get("id") or "")
+                if pid:
+                    person_urn = f"urn:li:person:{pid}"
     return {
         "access_token": token,
         "refresh_token": refresh,
         "person_urn": person_urn,
     }
+
+
+async def try_complete_coach_linkedin_callback(request, code: str, state: str) -> Optional[Any]:
+    """If Redis has coach_li_oauth_state, persist that coach's token and redirect.
+
+    Returns None when this is SkyEye admin OAuth (no coach state).
+    Never writes skyeye_platform_tokens (NG19).
+    """
+    from fastapi.responses import RedirectResponse
+
+    r = getattr(request.app.state, "auth_redis", None) or getattr(
+        request.app.state, "redis_pool", None
+    )
+    if not r or not state:
+        return None
+    raw = await r.get(f"coach_li_oauth_state:{state}")
+    if not raw:
+        return None
+    await r.delete(f"coach_li_oauth_state:{state}")
+    meta = json.loads(raw if isinstance(raw, str) else raw.decode())
+    hw = (meta.get("hardware_id") or "").strip()
+    post = os.getenv(
+        "LINKEDIN_COACH_POST_AUTH_REDIRECT",
+        "https://coach.sovereignsanctuary.net/?linkedin=connected",
+    )
+    err = post.replace("=connected", "=error")
+    if not hw:
+        return RedirectResponse(url=err)
+    pool = getattr(request.app.state, "db_pool", None)
+    try:
+        tokens = await exchange_coach_linkedin_code(code)
+        if not tokens.get("access_token"):
+            logger.warning("Coach LinkedIn token exchange returned no access_token")
+            return RedirectResponse(url=err)
+        await persist_coach_linkedin(pool, hw, tokens)
+        return RedirectResponse(url=post)
+    except Exception as exc:
+        logger.warning("Coach LinkedIn callback failed: %s", exc)
+        return RedirectResponse(url=err)
 
 
 async def persist_coach_linkedin(db_pool, coach_id: str, tokens: Dict[str, Any]) -> None:

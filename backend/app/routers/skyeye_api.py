@@ -1542,6 +1542,12 @@ async def platform_oauth_callback(
     if not code:
         raise HTTPException(status_code=400, detail="No authorization code received")
 
+    if platform == "linkedin" and state:
+        from app.services.coach_linkedin_oauth import try_complete_coach_linkedin_callback
+        coach_resp = await try_complete_coach_linkedin_callback(request, code, state)
+        if coach_resp is not None:
+            return coach_resp
+
     # CSRF state validation
     if state:
         try:

@@ -310,7 +310,7 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
             Text(
               connected
                   ? 'Connected${urn.isNotEmpty ? ': $urn' : ''}. Campaigns publish with this token only — never Nate’s SkyEye page.'
-                  : 'Connect your LinkedIn. Campaigns publish with your token. Nate’s SkyEye page is never used.',
+                  : 'Sign in with YOUR LinkedIn. Each coach connects their own account. Campaigns publish with that token — never Nate’s SkyEye page.',
               style: const TextStyle(color: _muted, fontSize: 12),
             ),
             const SizedBox(height: 12),
@@ -361,7 +361,7 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
       } catch (_) {}
       if (r.statusCode == 503) {
         detail =
-            'LinkedIn app credentials missing. Add this redirect URI in LinkedIn Developer: https://api.sovereignsanctuary.net/api/coach/integrations/linkedin/callback';
+            'LinkedIn app credentials missing on the server.';
       }
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(detail)));
       return;

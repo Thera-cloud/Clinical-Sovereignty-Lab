@@ -1,5 +1,6 @@
 """Seam 5: per-coach LinkedIn, History poll, Drive encrypt, SendGrid markers."""
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -110,3 +111,108 @@ def test_migration_330_additive():
     assert "coach_linkedin_connection" in sql
     assert "gmail_history_id" in sql
     assert "skyeye_platform_tokens" not in sql
+
+
+def test_canonicalize_duplicate_linkedin_host(monkeypatch):
+    from app.services.coach_linkedin_oauth import canonicalize_linkedin_redirect
+
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://api.sovereignsanctuary.net")
+    dup = (
+        "https://api.sovereignsanctuary.net/api.sovereignsanctuary.net"
+        "/api/skyeye/platforms/linkedin/callback"
+    )
+    out = canonicalize_linkedin_redirect(dup)
+    assert out.count("api.sovereignsanctuary.net") == 1
+    assert out.endswith("/api/skyeye/platforms/linkedin/callback")
+
+
+def test_skyeye_app_uses_registered_redirect(monkeypatch):
+    from app.services.coach_linkedin_oauth import coach_linkedin_credentials
+
+    monkeypatch.delenv("LINKEDIN_COACH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("LINKEDIN_COACH_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("LINKEDIN_COACH_REGISTERED_REDIRECT_URI", raising=False)
+    monkeypatch.setenv("LINKEDIN_CLIENT_ID", "77wz5scwctl85s")
+    monkeypatch.setenv("LINKEDIN_CLIENT_SECRET", "secret")
+    monkeypatch.setenv(
+        "LINKEDIN_COACH_REDIRECT_URI",
+        "https://api.sovereignsanctuary.net/api/coach/integrations/linkedin/callback",
+    )
+    cid, secret, redirect = coach_linkedin_credentials()
+    assert cid == "77wz5scwctl85s"
+    assert secret == "secret"
+    assert redirect.endswith("/api/skyeye/platforms/linkedin/callback")
+    assert "/api/coach/integrations/linkedin/callback" not in redirect
+
+
+def test_dedicated_coach_app_uses_coach_callback(monkeypatch):
+    from app.services.coach_linkedin_oauth import coach_linkedin_credentials
+
+    monkeypatch.setenv("LINKEDIN_COACH_CLIENT_ID", "coach-app")
+    monkeypatch.setenv("LINKEDIN_COACH_CLIENT_SECRET", "coach-secret")
+    monkeypatch.setenv(
+        "LINKEDIN_COACH_REDIRECT_URI",
+        "https://api.sovereignsanctuary.net/api/coach/integrations/linkedin/callback",
+    )
+    cid, secret, redirect = coach_linkedin_credentials()
+    assert cid == "coach-app"
+    assert secret == "coach-secret"
+    assert redirect.endswith("/api/coach/integrations/linkedin/callback")
+
+
+def test_skyeye_callback_intercepts_coach_state():
+    src = (ROOT / "backend/app/routers/skyeye_api.py").read_text()
+    assert "try_complete_coach_linkedin_callback" in src
+    oauth = (ROOT / "backend/app/services/coach_linkedin_oauth.py").read_text()
+    assert "INTO skyeye_platform_tokens" not in oauth
+    assert "FROM skyeye_platform_tokens" not in oauth
+    assert "coach_linkedin_connection" in oauth
+    assert "coach_li_oauth_state" in oauth
+
+
+@pytest.mark.asyncio
+async def test_coach_callback_persists_per_hardware_id(monkeypatch):
+    from app.services.coach_linkedin_oauth import try_complete_coach_linkedin_callback
+
+    persisted = {}
+
+    class _Redis:
+        def __init__(self):
+            self.store = {
+                "coach_li_oauth_state:st1": json.dumps(
+                    {"hardware_id": "COACH_A_ID", "user_id": "CoachA", "role": "COACH"}
+                )
+            }
+
+        async def get(self, key):
+            return self.store.get(key)
+
+        async def delete(self, key):
+            self.store.pop(key, None)
+
+    class _State:
+        auth_redis = _Redis()
+        db_pool = object()
+
+    class _Req:
+        app = type("A", (), {"state": _State()})()
+
+    async def _ex(_code):
+        return {"access_token": "tok-a", "refresh_token": "", "person_urn": "urn:li:person:a"}
+
+    async def _persist(_pool, coach_id, tokens):
+        persisted["coach_id"] = coach_id
+        persisted["token"] = tokens["access_token"]
+
+    monkeypatch.setattr(
+        "app.services.coach_linkedin_oauth.exchange_coach_linkedin_code", _ex
+    )
+    monkeypatch.setattr(
+        "app.services.coach_linkedin_oauth.persist_coach_linkedin", _persist
+    )
+    resp = await try_complete_coach_linkedin_callback(_Req(), "code", "st1")
+    assert persisted["coach_id"] == "COACH_A_ID"
+    assert persisted["token"] == "tok-a"
+    assert "linkedin=connected" in resp.headers.get("location", resp.headers.get("Location", ""))
+    none_resp = await try_complete_coach_linkedin_callback(_Req(), "code", "missing")
+    assert none_resp is None
