@@ -230,11 +230,9 @@ class GoogleWorkspaceService:
         return await create_coach_draft(self.db_pool, coach_id, payload)
 
     async def write_client_file(self, coach_id: str, client_id: str, **kwargs: Any) -> Dict[str, Any]:
-        if not _flag_on("ENABLE_WS_DRIVE_DELIVERY"):
-            raise FlagOff("ENABLE_WS_DRIVE_DELIVERY")
-        if not await client_vault_sync(self.db_pool, client_id):
-            raise VaultBlocked("drive.writeClientFile blocked: vault_sync=false")
-        return {"ok": False, "reason": "seam5_pending"}
+        from app.services.drive_workspace_writer import write_client_file as _write
+
+        return await _write(self.db_pool, coach_id, client_id, **kwargs)
 
 
 def get_google_svc(db_pool=None) -> GoogleWorkspaceService:
