@@ -88,6 +88,21 @@ def _require_ws_oauth() -> None:
         raise HTTPException(403, "temporarily unavailable")
 
 
+def _user_email(user: Dict) -> str:
+    email = str(user.get("email") or "").strip()
+    if email:
+        return email
+    pd = user.get("profile_data") or {}
+    if isinstance(pd, str):
+        try:
+            pd = json.loads(pd)
+        except Exception:
+            pd = {}
+    if isinstance(pd, dict):
+        return str(pd.get("email") or "").strip()
+    return ""
+
+
 def _ws_test_users() -> set:
     raw = os.getenv("GOOGLE_WS_TEST_USERS", "").strip()
     return {e.strip().lower() for e in raw.split(",") if e.strip()}
@@ -102,15 +117,19 @@ def _require_ws_test_user(email: str) -> None:
 
 
 @router.get("/health")
-async def workspace_health():
+async def workspace_health(user: Dict = Depends(get_current_user)):
+    email = _user_email(user)
+    allowed = _ws_test_users()
+    test_ok = (not allowed) or (email.lower() in allowed)
+    flag_on = _flag_on("ENABLE_WS_OAUTH")
     return {
         "status": "ok",
         "service": "google_workspace",
-        "oauth_enabled": _flag_on("ENABLE_WS_OAUTH"),
-        "connect_visible": _flag_on("ENABLE_WS_OAUTH"),
+        "oauth_enabled": flag_on,
+        "connect_visible": flag_on and test_ok,
         "configured": bool(GOOGLE_WS_CLIENT_ID and GOOGLE_WS_CLIENT_SECRET),
         "token_app": "workspace_ws",
-        "test_users_restricted": bool(_ws_test_users()),
+        "test_users_restricted": bool(allowed),
     }
 
 
@@ -123,7 +142,7 @@ async def workspace_connect(request: Request, user: Dict = Depends(require_coach
 
     uid = (user.get("username") or "").strip()
     hw = (user.get("hardware_id") or "").strip()
-    email = (user.get("email") or "").strip()
+    email = _user_email(user)
     if not uid:
         raise HTTPException(400, "Could not determine user identity")
     _require_ws_test_user(email)
@@ -142,7 +161,7 @@ async def workspace_connect(request: Request, user: Dict = Depends(require_coach
         GOOGLE_WS_CLIENT_ID,
         GOOGLE_WS_REDIRECT_URI,
         state_token,
-        login_hint=email or next(iter(_ws_test_users()), None),
+        login_hint=email or None,
     )
     return {"oauth_url": url, "incremental": False}
 

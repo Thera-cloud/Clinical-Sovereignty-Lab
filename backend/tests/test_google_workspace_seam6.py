@@ -43,7 +43,10 @@ def test_studio_hooks_wired_and_additive():
     assert "DROP TABLE" not in sql.upper()
     assert "studio_hook_events" in sql
     dart = (ROOT / "mobile/lib/screens/settings_screen.dart").read_text()
-    assert "Connect Google Workspace stays hidden" in dart
+    assert "GoogleWorkspaceSection" in dart
+    widget = (ROOT / "mobile/lib/widgets/google_workspace_section.dart").read_text()
+    assert "connect_visible" in widget
+    assert "/api/workspace/google/connect" in widget
     hooks = (ROOT / "backend/app/routers/studio_hooks_api.py").read_text()
     assert "HTTPException(401" in hooks
     assert "ENABLE_STUDIO_WEBHOOKS" in hooks

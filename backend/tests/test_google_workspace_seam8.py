@@ -205,7 +205,8 @@ def test_erasure_ui_absent_and_first_test_user():
     assert "destroy_client_keys" not in dart
     assert "ENABLE_CLINICAL_ERASURE" not in dart
     env = (ROOT / ".env.template").read_text()
-    assert "GOOGLE_WS_TEST_USERS=admin_nevedalnj@sovereignsanctuary.net" in env
+    assert "support@sovereignsanctuary.net" in env
+    assert "admin_nevedalnj@sovereignsanctuary.net" in env
     assert "ENABLE_WS_OAUTH=false" in env
     api = (ROOT / "backend/app/routers/google_workspace_api.py").read_text()
     assert "_require_ws_test_user" in api

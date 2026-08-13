@@ -29,6 +29,7 @@ import 'nate_organizer_screen.dart';
 import 'quiz_screen.dart';
 import 'nevedal_reports_screen.dart';
 import '../widgets/google_calendar_section.dart';
+import '../widgets/google_workspace_section.dart';
 import 'distress_beacon_screen.dart';
 import 'secure_search_screen.dart';
 import 'intake_form_screen.dart';
@@ -5391,7 +5392,9 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
           GoogleCalendarSection(
             token: (_profile['token'] ?? widget.profile['token'] ?? '').toString(),
           ),
-          // Connect Google Workspace stays hidden until ENABLE_WS_OAUTH (O9).
+          GoogleWorkspaceSection(
+            token: (_profile['token'] ?? widget.profile['token'] ?? '').toString(),
+          ),
           const SizedBox(height: 20),
 
           // --- Practice & Fees ---

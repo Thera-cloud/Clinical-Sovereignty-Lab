@@ -119,6 +119,7 @@ class GoogleWorkspaceService:
         if not pool:
             return {
                 "connected": False,
+                "google_email": None,
                 "scopes": "",
                 "revoked": False,
                 "oauth_enabled": _flag_on("ENABLE_WS_OAUTH"),
@@ -127,7 +128,7 @@ class GoogleWorkspaceService:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT scopes, revoked_at
+                SELECT google_email, scopes, revoked_at
                 FROM google_workspace_connection
                 WHERE hardware_id = $1
                 LIMIT 1
@@ -137,6 +138,7 @@ class GoogleWorkspaceService:
         if not row:
             return {
                 "connected": False,
+                "google_email": None,
                 "scopes": "",
                 "revoked": False,
                 "oauth_enabled": _flag_on("ENABLE_WS_OAUTH"),
@@ -144,6 +146,7 @@ class GoogleWorkspaceService:
             }
         return {
             "connected": row["revoked_at"] is None,
+            "google_email": row["google_email"],
             "scopes": row["scopes"] or "",
             "revoked": row["revoked_at"] is not None,
             "oauth_enabled": _flag_on("ENABLE_WS_OAUTH"),
