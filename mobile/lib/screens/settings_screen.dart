@@ -30,6 +30,7 @@ import 'quiz_screen.dart';
 import 'nevedal_reports_screen.dart';
 import '../widgets/google_calendar_section.dart';
 import '../widgets/google_workspace_section.dart';
+import '../widgets/coach_integrations_hub.dart';
 import 'distress_beacon_screen.dart';
 import 'secure_search_screen.dart';
 import 'intake_form_screen.dart';
@@ -5394,6 +5395,14 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
           ),
           GoogleWorkspaceSection(
             token: (_profile['token'] ?? widget.profile['token'] ?? '').toString(),
+          ),
+          const SizedBox(height: 20),
+          _sectionHeader('INTEGRATIONS', Icons.hub_outlined),
+          SizedBox(
+            height: 720,
+            child: CoachIntegrationsHub(
+              token: (_profile['token'] ?? widget.profile['token'] ?? '').toString(),
+            ),
           ),
           const SizedBox(height: 20),
 

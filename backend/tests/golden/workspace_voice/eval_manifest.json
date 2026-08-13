@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "relationship_classes": ["coaching", "clinical"],
+  "items": [],
+  "status": "pending_authorship"
+}

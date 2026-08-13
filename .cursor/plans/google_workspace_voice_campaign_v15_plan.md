@@ -446,3 +446,35 @@ There is **no** production L1 calendar-only OAuth. Internal calendar work is not
 7. Counsel: O6/O7 ticket parallel — does not block encryption.
 
 **Do not start** the client-facing erasure request UI or key-destruction workflow until counsel returns. **Do** encrypt from the first write.
+
+---
+
+## 11. Coach Command setup surface (WS-UI)
+
+Coach-facing setup lives in **Coach Command** (`coach.sovereignsanctuary.net`), not Sovereign Command / SkyEye.
+
+| Surface | What coaches configure |
+|---------|------------------------|
+| Tab **INTEGRATIONS** (`CoachDashboardScreenV2`, 12th tab) | Inner tabs: Overview, Workspace, LinkedIn, Voice, Campaign, Studio, Vault |
+| Settings → INTEGRATIONS | Same `CoachIntegrationsHub` (bounded height) |
+| Settings → CALENDAR SYNC | 183 **Connect Calendar** (client+coach, calendar-only) + Workspace section (hidden until O9) |
+| ASSISTANTS tab | Supervision roster (`coach_hierarchy`); not a new `master_coach` role |
+
+API prefix: `/api/coach/integrations/*`. LinkedIn callback is public oauth_router. Workspace OAuth stays `/api/workspace/google` and still `_require_ws_oauth()`.
+
+Flags default **OFF**. UI shows “temporarily unavailable” / O9 waiting copy; queue rows are never dropped.
+
+---
+
+## 12. Remaining Queens / human gates (not code)
+
+| Gate | Owner | Code status |
+|------|--------|-------------|
+| O9 CASA + `ENABLE_WS_OAUTH` | Operator | Flag stays false in prod |
+| O6/O7 counsel + erasure UI | Counsel | `ENABLE_CLINICAL_ERASURE=false` |
+| WS-H golden set | Master coaches + operator | `eval_manifest.json` `pending_authorship` |
+| AC33 eval vs golden set | Queens | Blocked on WS-H |
+| AC27 PITR / Ring2 | Ops | Scheduled, not a code gate |
+| Prod Google / LinkedIn / SendGrid live | Staging | Offline CI only |
+
+Seams 0–9 **code** is in-tree. Do not claim Queens GREEN, deploy, or flip flags from this plan file.

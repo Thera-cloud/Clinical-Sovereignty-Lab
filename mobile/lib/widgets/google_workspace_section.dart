@@ -12,6 +12,8 @@ class GoogleWorkspaceSection extends StatefulWidget {
   final Color textPrimary;
   final Color textSecondary;
   final Color cardBg;
+  /// Hub tab: show waiting-O9 copy instead of shrinking when flag is off.
+  final bool forceShow;
 
   const GoogleWorkspaceSection({
     super.key,
@@ -21,6 +23,7 @@ class GoogleWorkspaceSection extends StatefulWidget {
     this.textPrimary = const Color(0xFFE8D5A3),
     this.textSecondary = const Color(0xFF8B7355),
     this.cardBg = const Color(0xFF111111),
+    this.forceShow = false,
   });
 
   @override
@@ -64,7 +67,7 @@ class _GoogleWorkspaceSectionState extends State<GoogleWorkspaceSection> {
       }
       final hj = json.decode(health.body) as Map<String, dynamic>;
       final visible = hj['connect_visible'] == true;
-      if (!visible) {
+      if (!visible && !widget.forceShow) {
         setState(() {
           _visible = false;
           _loading = false;
@@ -127,7 +130,7 @@ class _GoogleWorkspaceSectionState extends State<GoogleWorkspaceSection> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_loading && !_visible) return const SizedBox.shrink();
+    if (!_loading && !_visible && !widget.forceShow) return const SizedBox.shrink();
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
       padding: const EdgeInsets.all(14),
@@ -171,6 +174,12 @@ class _GoogleWorkspaceSectionState extends State<GoogleWorkspaceSection> {
             const SizedBox(height: 4),
             Text(_googleEmail ?? '—',
                 style: TextStyle(color: widget.textPrimary, fontSize: 13)),
+          ] else if (!_visible) ...[
+            Text(
+              'Connect Google Workspace is hidden until Google verification (O9). '
+              'Calendar Sync above stays available. Test users only before then.',
+              style: TextStyle(color: widget.textSecondary, fontSize: 12),
+            ),
           ] else ...[
             Text(
               'Grant Calendar, Gmail drafts, and Drive for this coach mailbox. '

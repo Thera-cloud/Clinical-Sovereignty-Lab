@@ -4816,6 +4816,17 @@ try:
 except Exception as _sth_err:
     print(f"   ⚠️  Studio hooks router failed: {_sth_err}")
 
+# Coach Command integrations hub (Workspace/LinkedIn/Voice/Studio)  # QUANTUM-CRYSTAL-ARCH
+try:
+    from app.routers.coach_integrations_api import (
+        router as coach_integrations_router,
+        oauth_router as coach_integrations_oauth_router,
+    )
+    app.include_router(coach_integrations_router)
+    app.include_router(coach_integrations_oauth_router)
+except Exception as _cint_err:
+    print(f"   ⚠️  Coach integrations router failed: {_cint_err}")
+
 # Corporate Command API (CORP_ADMIN dashboard)
 try:
     from app.routers.corporate_command_api import router as corporate_command_router

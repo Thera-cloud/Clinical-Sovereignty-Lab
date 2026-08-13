@@ -134,7 +134,8 @@ async def list_review_queue(db_pool, coach_id: str, *, limit: int = 50) -> List[
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, title, content_type, status, campaign_id, coach_id, post_urn
+            SELECT id, title, content_type, status, campaign_id, coach_id, post_urn,
+                   LEFT(draft_body, 2000) AS draft_body
             FROM marketing_content
             WHERE coach_id = $1 AND status = $2
             ORDER BY id DESC
@@ -142,6 +143,24 @@ async def list_review_queue(db_pool, coach_id: str, *, limit: int = 50) -> List[
             """,
             coach_id,
             REVIEW,
+            int(limit),
+        )
+    return [dict(r) for r in rows]
+
+
+async def list_approved_unpublished(db_pool, coach_id: str, *, limit: int = 50) -> List[Dict[str, Any]]:
+    coach_id = (coach_id or "").strip()
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, title, content_type, status, campaign_id, coach_id, post_urn,
+                   LEFT(draft_body, 2000) AS draft_body
+            FROM marketing_content
+            WHERE coach_id = $1 AND status = 'approved' AND COALESCE(post_urn, '') = ''
+            ORDER BY id DESC
+            LIMIT $2
+            """,
+            coach_id,
             int(limit),
         )
     return [dict(r) for r in rows]

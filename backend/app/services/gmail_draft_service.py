@@ -118,3 +118,28 @@ async def create_coach_draft(
         "encrypted": bool(body_ciphertext),
         "status": status,
     }
+
+
+async def list_waiting_drafts(db_pool, coach_id: str, *, limit: int = 50) -> list:
+    """Status + metadata only. Never return body_ciphertext."""
+    if not db_pool:
+        return []
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, client_id, draft_type, gmail_draft_id, to_email, subject, status
+            FROM email_drafts
+            WHERE coach_id = $1 AND status IN ('pending', 'pushed')
+            ORDER BY id DESC
+            LIMIT $2
+            """,
+            coach_id,
+            int(limit),
+        )
+    out = []
+    for r in rows:
+        item = dict(r)
+        if item.get("id") is not None:
+            item["id"] = str(item["id"])
+        out.append(item)
+    return out

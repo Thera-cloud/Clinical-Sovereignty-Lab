@@ -58,6 +58,7 @@ import 'config/app_config.dart';
 import 'services/vault_entitlement.dart';
 import 'widgets/vault_attachment_button.dart';
 import 'widgets/upload_progress_indicator.dart';
+import 'widgets/coach_integrations_hub.dart';
 
 /// Debug-only print: suppressed in production builds.
 // ignore: avoid_print
@@ -6268,7 +6269,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 11, vsync: this);
+    _tabController = TabController(length: 12, vsync: this);
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
       if (_tabController.index == 1) {
@@ -10838,7 +10839,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     "TRAINING",
     "FINANCIALS",
     "FOLDER",
-    "ASSISTANTS"
+    "ASSISTANTS",
+    "INTEGRATIONS"
   ];
   static const _tabIcons = [
     Icons.people,
@@ -10851,7 +10853,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     Icons.fitness_center,
     Icons.account_balance_wallet,
     Icons.folder_copy,
-    Icons.supervisor_account
+    Icons.supervisor_account,
+    Icons.hub_outlined
   ];
 
   @override
@@ -10896,6 +10899,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                       text: "FINANCIALS"),
                   Tab(icon: Icon(Icons.folder_copy), text: "FOLDER"),
                   Tab(icon: Icon(Icons.supervisor_account), text: "ASSISTANTS"),
+                  Tab(icon: Icon(Icons.hub_outlined), text: "INTEGRATIONS"),
                 ],
               ),
         actions: [
@@ -10965,6 +10969,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               _buildFinancialsTab(),
               _buildFolderTab(),
               _buildAssistantsTab(),
+              _buildIntegrationsTab(),
             ],
           ),
           if (_isLoading)
@@ -14462,6 +14467,20 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       default:
         return const Color(0xFFC9A962);
     }
+  }
+
+  Widget _buildIntegrationsTab() {
+    final token = (_authToken ??
+            widget.currentUserProfile['token'] ??
+            '')
+        .toString();
+    if (token.isEmpty) {
+      return const Center(
+        child: Text('Sign in required for integrations',
+            style: TextStyle(color: Colors.grey)),
+      );
+    }
+    return CoachIntegrationsHub(token: token);
   }
 
   Widget _buildAssistantsTab() {
