@@ -203,6 +203,7 @@ class Settings(BaseSettings):
     CLIENT_ENVELOPE_KEK: str = ""
     GOOGLE_WS_CLIENT_ID: str = ""
     GOOGLE_WS_CLIENT_SECRET: str = ""
+    GOOGLE_WS_TEST_USERS: str = ""
     ENABLE_DRIP_CAMPAIGN: bool = True
     ENABLE_SKYEYE: bool = True
     ENABLE_SKYEYE_SESSIONS: bool = True  # Auto session engine — autonomous posting enabled

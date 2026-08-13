@@ -139,6 +139,16 @@ async def destroy_client_keys(db_pool, client_id: str) -> int:
     if not _flag_on("ENABLE_CLINICAL_ERASURE"):
         raise ErasureDisabled("ENABLE_CLINICAL_ERASURE is off — key destruction blocked")
     async with db_pool.acquire() as conn:
+        hold = await conn.fetchrow(
+            """
+            SELECT 1 AS ok FROM legal_holds
+            WHERE client_id = $1 AND released_at IS NULL
+            LIMIT 1
+            """,
+            client_id,
+        )
+        if hold:
+            raise PermissionError("legal hold active")
         result = await conn.execute(
             """
             UPDATE client_data_keys

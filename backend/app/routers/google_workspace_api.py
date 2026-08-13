@@ -88,6 +88,19 @@ def _require_ws_oauth() -> None:
         raise HTTPException(403, "temporarily unavailable")
 
 
+def _ws_test_users() -> set:
+    raw = os.getenv("GOOGLE_WS_TEST_USERS", "").strip()
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
+def _require_ws_test_user(email: str) -> None:
+    allowed = _ws_test_users()
+    if not allowed:
+        return
+    if (email or "").strip().lower() not in allowed:
+        raise HTTPException(403, "temporarily unavailable")
+
+
 @router.get("/health")
 async def workspace_health():
     return {
@@ -97,6 +110,7 @@ async def workspace_health():
         "connect_visible": _flag_on("ENABLE_WS_OAUTH"),
         "configured": bool(GOOGLE_WS_CLIENT_ID and GOOGLE_WS_CLIENT_SECRET),
         "token_app": "workspace_ws",
+        "test_users_restricted": bool(_ws_test_users()),
     }
 
 
@@ -109,8 +123,10 @@ async def workspace_connect(request: Request, user: Dict = Depends(require_coach
 
     uid = (user.get("username") or "").strip()
     hw = (user.get("hardware_id") or "").strip()
+    email = (user.get("email") or "").strip()
     if not uid:
         raise HTTPException(400, "Could not determine user identity")
+    _require_ws_test_user(email)
     _check_rate(uid, "ws_auth")
 
     state_token = secrets.token_urlsafe(32)
@@ -126,7 +142,7 @@ async def workspace_connect(request: Request, user: Dict = Depends(require_coach
         GOOGLE_WS_CLIENT_ID,
         GOOGLE_WS_REDIRECT_URI,
         state_token,
-        login_hint=user.get("email"),
+        login_hint=email or next(iter(_ws_test_users()), None),
     )
     return {"oauth_url": url, "incremental": False}
 
@@ -198,6 +214,9 @@ async def workspace_callback(request: Request, code: str = "", state: str = "", 
                 str(int(expiry or 3600)),
                 scope,
             )
+        from app.services.workspace_consent import record_workspace_consent
+
+        await record_workspace_consent(pool, coach_id=hw, document_ref="GOOGLE_WS_OAUTH")
     return RedirectResponse(GOOGLE_WS_POST_AUTH_REDIRECT)
 
 
@@ -243,3 +262,46 @@ async def workspace_tasks(request: Request, user: Dict = Depends(require_coach))
         return {"tasks": await list_open_tasks(pool, hw)}
     except FlagOff:
         raise HTTPException(403, "temporarily unavailable")
+
+
+@router.get("/libraries")
+async def workspace_libraries(request: Request, user: Dict = Depends(require_coach)):
+    from app.services.google_workspace_service import FlagOff
+    from app.services.practice_library_service import list_templates
+
+    pool = getattr(request.app.state, "db_pool", None)
+    hw = (user.get("hardware_id") or "").strip()
+    try:
+        return {"templates": await list_templates(pool, hw)}
+    except FlagOff:
+        raise HTTPException(403, "temporarily unavailable")
+
+
+@router.get("/credentials")
+async def workspace_credentials(request: Request, user: Dict = Depends(require_coach)):
+    from app.services.coach_credential_service import list_credentials
+
+    pool = getattr(request.app.state, "db_pool", None)
+    hw = (user.get("hardware_id") or "").strip()
+    return {"credentials": await list_credentials(pool, hw)}
+
+
+@router.post("/crisis")
+async def workspace_crisis(request: Request, user: Dict = Depends(require_coach)):
+    from app.services.crisis_escalation import escalate
+    from app.services.google_workspace_service import FlagOff
+
+    body = await request.json()
+    pool = getattr(request.app.state, "db_pool", None)
+    hw = (user.get("hardware_id") or "").strip()
+    try:
+        return await escalate(
+            pool,
+            coach_id=hw,
+            client_id=str(body.get("client_id") or ""),
+            note=str(body.get("note") or ""),
+        )
+    except FlagOff:
+        raise HTTPException(403, "temporarily unavailable")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
