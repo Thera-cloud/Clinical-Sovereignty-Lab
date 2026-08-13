@@ -5395,6 +5395,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
           ),
           GoogleWorkspaceSection(
             token: (_profile['token'] ?? widget.profile['token'] ?? '').toString(),
+            forceShow: true,
           ),
           const SizedBox(height: 20),
           _sectionHeader('INTEGRATIONS', Icons.hub_outlined),

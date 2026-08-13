@@ -120,11 +120,14 @@ async def coach_linkedin_status(db_pool, coach_id: str) -> Dict[str, Any]:
         if row and row["revoked_at"] is None:
             connected = True
             person_urn = row["person_urn"] or ""
+    cid, secret, _ = coach_linkedin_credentials()
+    configured = bool(cid and secret)
     return {
         "connected": connected,
         "person_urn": person_urn,
         "oauth_enabled": _flag_on("ENABLE_COACH_LINKEDIN"),
-        "connect_visible": _flag_on("ENABLE_COACH_LINKEDIN"),
+        "connect_visible": True,
+        "oauth_configured": configured,
         "skyeye_fallback": False,
     }
 

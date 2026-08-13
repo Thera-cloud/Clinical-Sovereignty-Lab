@@ -174,7 +174,20 @@ class _GoogleWorkspaceSectionState extends State<GoogleWorkspaceSection> {
             const SizedBox(height: 4),
             Text(_googleEmail ?? '—',
                 style: TextStyle(color: widget.textPrimary, fontSize: 13)),
-          ] else if (!_visible) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: widget.gold,
+                  side: BorderSide(color: widget.goldDim),
+                ),
+                icon: const Icon(Icons.link, size: 18),
+                label: const Text('Reconnect Google Workspace'),
+                onPressed: _connect,
+              ),
+            ),
+          ] else if (!_visible && !widget.forceShow) ...[
             Text(
               'Connect Google Workspace is hidden until Google verification (O9). '
               'Calendar Sync above stays available. Test users only before then.',

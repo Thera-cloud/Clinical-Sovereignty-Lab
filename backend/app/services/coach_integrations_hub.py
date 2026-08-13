@@ -39,6 +39,7 @@ async def hub_snapshot(db_pool, coach_id: str) -> Dict[str, Any]:
     campaign_day_n = None
     campaign_title = None
     voice_recordings = 0
+    assistants: List[Dict[str, Any]] = []
     if db_pool:
         async with db_pool.acquire() as conn:
             sec = await conn.fetchrow(
@@ -86,7 +87,35 @@ async def hub_snapshot(db_pool, coach_id: str) -> Dict[str, Any]:
                 coach_id,
             )
             voice_recordings = int(vr or 0)
+            asst_rows = await conn.fetch(
+                """
+                SELECT ch.assistant_id,
+                       u.username,
+                       COALESCE(u.profile_data->>'name', u.username) AS name
+                FROM coach_hierarchy ch
+                LEFT JOIN users u ON u.hardware_id = ch.assistant_id
+                WHERE ch.master_coach_id = $1 AND ch.status = 'active'
+                ORDER BY name, u.username
+                """,
+                coach_id,
+            )
+            assistants = [
+                {
+                    "hardware_id": r["assistant_id"],
+                    "username": r["username"] or "",
+                    "name": r["name"] or r["username"] or r["assistant_id"],
+                }
+                for r in asst_rows
+            ]
     flags = {name: _flag_on(name) for name in HUB_FLAGS}
+    is_master = bool(assistants)
+    supervision = {
+        "is_master": is_master,
+        "assistants": assistants,
+        "assistant_count": len(assistants),
+        "supervision_flag": flags.get("ENABLE_SUPERVISION_VIEW", False),
+        "source": "coach_hierarchy",
+    }
     return {
         "status": "ok",
         "coach_id": coach_id,
@@ -99,22 +128,26 @@ async def hub_snapshot(db_pool, coach_id: str) -> Dict[str, Any]:
         "drafts_waiting": drafts_waiting,
         "campaign": {"title": campaign_title, "day_n": campaign_day_n},
         "voice_recordings": voice_recordings,
+        "supervision": supervision,
         "studio_hooks": {
             "base": "/api/v1/hooks",
             "paths": ["intake-analysis", "engagement", "client-digest"],
             "headers": ["X-Coach-Id", "X-Studio-Signature"],
         },
-        "cards": _cards(ws, li, drafts_waiting, campaign_day_n, flags),
+        "cards": _cards(ws, li, drafts_waiting, campaign_day_n, flags, supervision),
     }
 
 
-def _cards(ws, li, drafts_waiting, day_n, flags) -> List[Dict[str, Any]]:
+def _cards(ws, li, drafts_waiting, day_n, flags, supervision=None) -> List[Dict[str, Any]]:
+    supervision = supervision or {}
     ws_label = "Connected" if ws.get("connected") else (
-        "Hidden until Google verification" if not flags.get("ENABLE_WS_OAUTH") else "Not connected"
+        "Connect Workspace" if flags.get("ENABLE_WS_OAUTH") else "Not connected"
     )
-    li_label = "Connected" if li.get("connected") else (
-        "Connect LinkedIn" if flags.get("ENABLE_COACH_LINKEDIN") else "Temporarily unavailable"
-    )
+    li_label = "Connected" if li.get("connected") else "Connect LinkedIn"
+    if supervision.get("is_master"):
+        master_detail = f"Master · {supervision.get('assistant_count', 0)} assistants"
+    else:
+        master_detail = "Not a master on coach_hierarchy"
     return [
         {"id": "workspace", "title": "Google Workspace", "detail": ws_label},
         {"id": "linkedin", "title": "LinkedIn", "detail": li_label},
@@ -124,4 +157,5 @@ def _cards(ws, li, drafts_waiting, day_n, flags) -> List[Dict[str, Any]]:
             "title": "Campaign day-N",
             "detail": f"Day {day_n}" if day_n is not None else "None",
         },
+        {"id": "supervision", "title": "Supervision", "detail": master_detail},
     ]

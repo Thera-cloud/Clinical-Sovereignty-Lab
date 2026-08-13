@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../config/app_config.dart';
+import 'google_calendar_section.dart';
 import 'google_workspace_section.dart';
 
 class CoachIntegrationsHub extends StatefulWidget {
@@ -140,12 +141,14 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
               .toList(),
         ),
         const SizedBox(height: 16),
-        Text(
-          'Set up Google Workspace, LinkedIn, voice campaigns, Studio HMAC, '
-          'Chat webhook, and per-client vault sync here. Workspace Connect stays '
-          'hidden until Google verification.',
-          style: const TextStyle(color: _muted, fontSize: 12),
+        const Text(
+          'Connect, update, and disconnect each coach slice from these tabs. '
+          'Google Calendar (session sync) is separate from Google Workspace '
+          '(Gmail drafts + Drive). LinkedIn is your coach page, never Nate’s SkyEye.',
+          style: TextStyle(color: _muted, fontSize: 12),
         ),
+        const SizedBox(height: 12),
+        _supervisionCard(),
         const SizedBox(height: 12),
         _draftsCard(),
         const SizedBox(height: 12),
@@ -157,30 +160,28 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
   }
 
   Widget _flagPanels() {
-    final flags = Map<String, dynamic>.from(_hub?['flags'] ?? {});
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (flags['ENABLE_COACH_TASKS'] == true)
-          _RemoteListCard(
-            token: widget.token,
-            title: 'OPEN TASKS',
-            icon: Icons.checklist,
-            path: '/api/workspace/google/tasks',
-            keyName: 'tasks',
-            labelOf: (m) => (m['title'] ?? '').toString(),
-          ),
-        if (flags['ENABLE_PRACTICE_LIBRARIES'] == true) ...[
-          const SizedBox(height: 12),
-          _RemoteListCard(
-            token: widget.token,
-            title: 'PRACTICE LIBRARY',
-            icon: Icons.menu_book_outlined,
-            path: '/api/workspace/google/libraries',
-            keyName: 'templates',
-            labelOf: (m) => (m['title'] ?? m['name'] ?? '').toString(),
-          ),
-        ],
+        _CreateTaskCard(token: widget.token),
+        const SizedBox(height: 12),
+        _RemoteListCard(
+          token: widget.token,
+          title: 'OPEN TASKS',
+          icon: Icons.checklist,
+          path: '/api/workspace/google/tasks',
+          keyName: 'tasks',
+          labelOf: (m) => (m['title'] ?? '').toString(),
+        ),
+        const SizedBox(height: 12),
+        _RemoteListCard(
+          token: widget.token,
+          title: 'PRACTICE LIBRARY',
+          icon: Icons.menu_book_outlined,
+          path: '/api/workspace/google/libraries',
+          keyName: 'templates',
+          labelOf: (m) => (m['title'] ?? m['name'] ?? '').toString(),
+        ),
         const SizedBox(height: 12),
         _RemoteListCard(
           token: widget.token,
@@ -190,14 +191,34 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
           keyName: 'credentials',
           labelOf: (m) => (m['label'] ?? m['name'] ?? m['credential_type'] ?? '').toString(),
         ),
-        if (flags['ENABLE_SUPERVISION_VIEW'] == true)
-          const Padding(
-            padding: EdgeInsets.only(top: 12),
-            child: Text(
-              'Supervision roster stays on the ASSISTANTS tab (coach_hierarchy).',
-              style: TextStyle(color: _muted, fontSize: 12),
-            ),
-          ),
+      ],
+    );
+  }
+
+  Widget _supervisionCard() {
+    final sup = Map<String, dynamic>.from(_hub?['supervision'] ?? {});
+    final isMaster = sup['is_master'] == true;
+    final assistants = List<Map<String, dynamic>>.from(sup['assistants'] ?? []);
+    return _panel(
+      'MASTER COACH / SUPERVISION',
+      Icons.supervisor_account,
+      [
+        Text(
+          isMaster
+              ? 'You are a master coach (${assistants.length} active assistants on coach_hierarchy). Same roster as ASSISTANTS.'
+              : 'No active assistants under this hardware_id. ASSISTANTS still lists coaches you can invite.',
+          style: const TextStyle(color: _muted, fontSize: 12),
+        ),
+        if (assistants.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          ...assistants.take(12).map((a) => Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '${a['name'] ?? ''}  ·  ${a['username'] ?? ''}',
+                  style: const TextStyle(color: _text, fontSize: 13),
+                ),
+              )),
+        ],
       ],
     );
   }
@@ -228,6 +249,7 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        GoogleCalendarSection(token: widget.token),
         GoogleWorkspaceSection(token: widget.token, forceShow: true),
         const SizedBox(height: 12),
         _chatWebhookCard(),
@@ -276,8 +298,8 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
 
   Widget _linkedin() {
     final li = Map<String, dynamic>.from(_hub?['linkedin'] ?? {});
-    final visible = li['connect_visible'] == true;
     final connected = li['connected'] == true;
+    final urn = (li['person_urn'] ?? '').toString();
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -287,21 +309,18 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
           [
             Text(
               connected
-                  ? 'Connected${li['person_urn'] != null && li['person_urn'].toString().isNotEmpty ? ': ${li['person_urn']}' : ''}'
-                  : visible
-                      ? 'Campaigns publish with your LinkedIn token. Nate’s SkyEye page is never used.'
-                      : 'Temporarily unavailable until ENABLE_COACH_LINKEDIN is on.',
+                  ? 'Connected${urn.isNotEmpty ? ': $urn' : ''}. Campaigns publish with this token only — never Nate’s SkyEye page.'
+                  : 'Connect your LinkedIn. Campaigns publish with your token. Nate’s SkyEye page is never used.',
               style: const TextStyle(color: _muted, fontSize: 12),
             ),
             const SizedBox(height: 12),
-            if (visible && !connected)
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(backgroundColor: _gold),
-                icon: const Icon(Icons.link, color: Colors.black, size: 18),
-                label: const Text('Connect LinkedIn',
-                    style: TextStyle(color: Colors.black)),
-                onPressed: _connectLinkedIn,
-              ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: _gold),
+              icon: const Icon(Icons.link, color: Colors.black, size: 18),
+              label: Text(connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn',
+                  style: const TextStyle(color: Colors.black)),
+              onPressed: _connectLinkedIn,
+            ),
             if (connected)
               TextButton(
                 onPressed: _disconnectLinkedIn,
@@ -335,8 +354,16 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
     );
     if (r.statusCode != 200) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Connect failed (${r.statusCode})')));
+      var detail = 'Connect failed (${r.statusCode})';
+      try {
+        final j = json.decode(r.body);
+        if (j is Map && j['detail'] != null) detail = j['detail'].toString();
+      } catch (_) {}
+      if (r.statusCode == 503) {
+        detail =
+            'LinkedIn app credentials missing. Add this redirect URI in LinkedIn Developer: https://api.sovereignsanctuary.net/api/coach/integrations/linkedin/callback';
+      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(detail)));
       return;
     }
     final url = (json.decode(r.body) as Map)['oauth_url']?.toString() ?? '';
@@ -347,8 +374,6 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
   }
 
   Widget _voice() {
-    final flags = Map<String, dynamic>.from(_hub?['flags'] ?? {});
-    final on = flags['ENABLE_VOICE_CAMPAIGN'] == true;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -356,58 +381,48 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
           'VOICE CAMPAIGN',
           Icons.mic_none,
           [
-            Text(
-              on
-                  ? 'Record (vault_sync clients only) then generate review-queue copy. Never auto-publishes.'
-                  : 'Temporarily unavailable until ENABLE_VOICE_CAMPAIGN is on.',
-              style: const TextStyle(color: _muted, fontSize: 12),
+            const Text(
+              'Upload a recording (vault_sync clients only) then generate review-queue copy. Never auto-publishes. Therapy Twilio calls are not used here.',
+              style: TextStyle(color: _muted, fontSize: 12),
             ),
             Text('Recordings: ${_hub?['voice_recordings'] ?? 0}',
                 style: const TextStyle(color: _text, fontSize: 13)),
-            if (on) ...[
-              const SizedBox(height: 12),
-              TextField(
-                controller: _campaignTitleCtrl,
-                style: const TextStyle(color: _text, fontSize: 13),
-                decoration: const InputDecoration(
-                  labelText: 'Campaign title',
-                  labelStyle: TextStyle(color: _muted),
-                ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _campaignTitleCtrl,
+              style: const TextStyle(color: _text, fontSize: 13),
+              decoration: const InputDecoration(
+                labelText: 'Campaign title',
+                labelStyle: TextStyle(color: _muted),
               ),
-              const SizedBox(height: 8),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: _gold),
-                onPressed: () async {
-                  final r = await http.post(
-                    Uri.parse(
-                        '${AppConfig.apiBaseUrl}/api/coach/integrations/campaigns/generate'),
-                    headers: _h,
-                    body: json.encode(
-                        {'title': _campaignTitleCtrl.text.trim(), 'day_n': 0}),
-                  );
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(r.statusCode == 200
-                          ? 'Queued for review'
-                          : 'Generate failed (${r.statusCode})')));
-                  _load();
-                },
-                child: const Text('Generate review queue',
-                    style: TextStyle(color: Colors.black)),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Voice ingest requires vault_sync on the selected client. '
-                'Therapy Twilio calls are not used here.',
-                style: TextStyle(color: _muted, fontSize: 12),
-              ),
-              const SizedBox(height: 8),
-              _VoiceIngest(token: widget.token),
-            ],
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _gold),
+              onPressed: _generateCampaign,
+              child: const Text('Generate review queue',
+                  style: TextStyle(color: Colors.black)),
+            ),
+            const SizedBox(height: 16),
+            _VoiceIngest(token: widget.token),
           ],
         ),
       ],
     );
+  }
+
+  Future<void> _generateCampaign() async {
+    final r = await http.post(
+      Uri.parse('${AppConfig.apiBaseUrl}/api/coach/integrations/campaigns/generate'),
+      headers: _h,
+      body: json.encode({'title': _campaignTitleCtrl.text.trim(), 'day_n': 0}),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(r.statusCode == 200
+            ? 'Queued for review — open CAMPAIGN to approve'
+            : 'Generate failed (${r.statusCode})')));
+    _load();
   }
 
   Widget _studio() {
@@ -439,14 +454,33 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
             ...List<String>.from(
                     (_hub?['studio_hooks']?['paths'] as List?) ??
                         ['intake-analysis', 'engagement', 'client-digest'])
-                .map((p) => SelectableText(
-                      '${AppConfig.apiBaseUrl}/api/v1/hooks/$p',
-                      style: const TextStyle(color: _text, fontSize: 12),
-                    )),
+                .map((p) {
+              final url = '${AppConfig.apiBaseUrl}/api/v1/hooks/$p';
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: SelectableText(url,
+                          style: const TextStyle(color: _text, fontSize: 12)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.copy, color: _gold, size: 16),
+                      tooltip: 'Copy URL',
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: url));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Copied')));
+                      },
+                    ),
+                  ],
+                ),
+              );
+            }),
             const SizedBox(height: 8),
             const Text(
               'Headers: X-Coach-Id = your hardware_id, X-Studio-Signature = HMAC-SHA256 of the body. '
-              'Flag ENABLE_STUDIO_WEBHOOKS must be on. Engagement is idempotent.',
+              'Engagement is idempotent.',
               style: TextStyle(color: _muted, fontSize: 12),
             ),
           ],
@@ -591,6 +625,7 @@ class _VaultSyncList extends StatefulWidget {
 class _VaultSyncListState extends State<_VaultSyncList> {
   List<Map<String, dynamic>> _clients = [];
   bool _loading = true;
+  String _query = '';
 
   Map<String, String> get _h => {
         'Content-Type': 'application/json',
@@ -641,26 +676,54 @@ class _VaultSyncListState extends State<_VaultSyncList> {
           child: Text('No assigned clients',
               style: TextStyle(color: Color(0xFF8B7355))));
     }
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _clients.length,
-      itemBuilder: (context, i) {
-        final c = _clients[i];
-        final on = c['vault_sync'] == true;
-        return SwitchListTile(
-          activeColor: const Color(0xFFC9A962),
-          title: Text((c['name'] ?? c['username'] ?? '').toString(),
-              style: const TextStyle(color: Color(0xFFE8D5A3))),
-          subtitle: Text(
-            on
-                ? 'Vault sync on — Google may carry client-identifiable content'
-                : 'Vault sync off — titles redacted, no Gmail/Drive PII',
-            style: const TextStyle(color: Color(0xFF8B7355), fontSize: 12),
+    final q = _query.trim().toLowerCase();
+    final shown = q.isEmpty
+        ? _clients
+        : _clients.where((c) {
+            final blob =
+                '${c['name'] ?? ''} ${c['username'] ?? ''} ${c['hardware_id'] ?? ''}'
+                    .toLowerCase();
+            return blob.contains(q);
+          }).toList();
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: TextField(
+            style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 13),
+            decoration: const InputDecoration(
+              hintText: 'Search clients',
+              hintStyle: TextStyle(color: Color(0xFF8B7355)),
+              prefixIcon: Icon(Icons.search, color: Color(0xFFC9A962), size: 18),
+            ),
+            onChanged: (v) => setState(() => _query = v),
           ),
-          value: on,
-          onChanged: (v) => _set((c['hardware_id'] ?? '').toString(), v),
-        );
-      },
+        ),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: shown.length,
+            itemBuilder: (context, i) {
+              final c = shown[i];
+              final on = c['vault_sync'] == true;
+              final rel = (c['relationship_class'] ?? 'coaching').toString();
+              return SwitchListTile(
+                activeColor: const Color(0xFFC9A962),
+                title: Text((c['name'] ?? c['username'] ?? '').toString(),
+                    style: const TextStyle(color: Color(0xFFE8D5A3))),
+                subtitle: Text(
+                  on
+                      ? 'Vault sync on · $rel — Google may carry client-identifiable content'
+                      : 'Vault sync off · $rel — titles redacted, no Gmail/Drive PII',
+                  style: const TextStyle(color: Color(0xFF8B7355), fontSize: 12),
+                ),
+                value: on,
+                onChanged: (v) => _set((c['hardware_id'] ?? '').toString(), v),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -796,6 +859,7 @@ class _CampaignQueue extends StatefulWidget {
 class _CampaignQueueState extends State<_CampaignQueue> {
   Map<String, dynamic>? _data;
   bool _loading = true;
+  final _titleCtrl = TextEditingController(text: 'Campaign');
 
   Map<String, String> get _h => {
         'Content-Type': 'application/json',
@@ -806,6 +870,12 @@ class _CampaignQueueState extends State<_CampaignQueue> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -871,6 +941,35 @@ class _CampaignQueueState extends State<_CampaignQueue> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        TextField(
+          controller: _titleCtrl,
+          style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 13),
+          decoration: const InputDecoration(
+            labelText: 'Campaign title',
+            labelStyle: TextStyle(color: Color(0xFF8B7355)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962)),
+          onPressed: () async {
+            final r = await http.post(
+              Uri.parse(
+                  '${AppConfig.apiBaseUrl}/api/coach/integrations/campaigns/generate'),
+              headers: _h,
+              body: json.encode({'title': _titleCtrl.text.trim(), 'day_n': 0}),
+            );
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(r.statusCode == 200
+                    ? 'Queued for review'
+                    : 'Generate failed (${r.statusCode})')));
+            _load();
+          },
+          child: const Text('Generate campaign drafts',
+              style: TextStyle(color: Colors.black)),
+        ),
+        const SizedBox(height: 16),
         const Text('REVIEW QUEUE',
             style: TextStyle(
                 color: Color(0xFFC9A962), letterSpacing: 1.1, fontSize: 12)),
@@ -1015,6 +1114,129 @@ class _RemoteListCard extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _CreateTaskCard extends StatefulWidget {
+  final String token;
+  const _CreateTaskCard({required this.token});
+
+  @override
+  State<_CreateTaskCard> createState() => _CreateTaskCardState();
+}
+
+class _CreateTaskCardState extends State<_CreateTaskCard> {
+  List<Map<String, dynamic>> _clients = [];
+  String? _clientHw;
+  final _title = TextEditingController();
+  bool _busy = false;
+
+  Map<String, String> get _h => {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ${widget.token}',
+      };
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _title.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final r = await http.get(
+      Uri.parse('${AppConfig.apiBaseUrl}/api/coach/integrations/clients'),
+      headers: _h,
+    );
+    if (!mounted || r.statusCode != 200) return;
+    final j = json.decode(r.body) as Map<String, dynamic>;
+    setState(() {
+      _clients = List<Map<String, dynamic>>.from(j['clients'] ?? []);
+    });
+  }
+
+  Future<void> _create() async {
+    if (_clientHw == null || _title.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Pick a client and enter a title')));
+      return;
+    }
+    setState(() => _busy = true);
+    final r = await http.post(
+      Uri.parse('${AppConfig.apiBaseUrl}/api/coach/integrations/tasks'),
+      headers: _h,
+      body: json.encode({'client_id': _clientHw, 'title': _title.text.trim()}),
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(r.statusCode == 200
+            ? 'Task created'
+            : 'Create failed (${r.statusCode})')));
+    if (r.statusCode == 200) _title.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF8B7355).withOpacity(0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(children: [
+            Icon(Icons.add_task, color: Color(0xFFC9A962), size: 18),
+            SizedBox(width: 8),
+            Text('CREATE TASK',
+                style: TextStyle(
+                    color: Color(0xFFC9A962), fontSize: 12, letterSpacing: 1.1)),
+          ]),
+          const SizedBox(height: 8),
+          DropdownButton<String>(
+            value: _clientHw,
+            hint: const Text('Client',
+                style: TextStyle(color: Color(0xFF8B7355))),
+            dropdownColor: const Color(0xFF111111),
+            isExpanded: true,
+            items: _clients
+                .map((c) => DropdownMenuItem(
+                      value: (c['hardware_id'] ?? '').toString(),
+                      child: Text(
+                        (c['name'] ?? c['username'] ?? '').toString(),
+                        style: const TextStyle(color: Color(0xFFE8D5A3)),
+                      ),
+                    ))
+                .toList(),
+            onChanged: (v) => setState(() => _clientHw = v),
+          ),
+          TextField(
+            controller: _title,
+            style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 13),
+            decoration: const InputDecoration(
+              hintText: 'Task title',
+              hintStyle: TextStyle(color: Color(0xFF8B7355)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFC9A962)),
+            onPressed: _busy ? null : _create,
+            child: Text(_busy ? 'Saving…' : 'Create task',
+                style: const TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
     );
   }
 }

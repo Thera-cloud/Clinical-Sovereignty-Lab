@@ -146,6 +146,9 @@ async def test_flag_kill_hub_and_erasure_off(monkeypatch):
     assert snap["erasure_ui"] is False
     assert snap["workspace"]["connect_visible"] is False
     assert snap["linkedin"]["skyeye_fallback"] is False
+    assert snap["linkedin"]["connect_visible"] is True
+    assert snap["supervision"]["is_master"] is False
+    assert snap["supervision"]["source"] == "coach_hierarchy"
     with pytest.raises(ErasureDisabled):
         await destroy_client_keys(None, "CLIENT_X")
 
