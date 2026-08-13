@@ -271,12 +271,25 @@ async def _log(pool, user_id: str, direction: str, action: str,
 
 # ── Public API ──────────────────────────────────────────────────────────
 
+_PENDING_HOLD_STATUSES = frozenset({
+    "pending_approval", "pending", "requested",
+})
+
+
+def is_pending_google_hold(session: Optional[Dict[str, Any]]) -> bool:
+    """B2: pending bookings must not create Google events (no tentative holds)."""
+    if not session:
+        return False
+    return (session.get("status") or "").strip().lower() in _PENDING_HOLD_STATUSES
+
+
 async def sync_session_to_google(pool, user_id: str, session: Dict[str, Any],
                                    action: str = "create") -> Optional[Dict[str, Any]]:
     """Push a session to Google Calendar for one user (coach OR client).
 
     Dedup guard: if action == 'create' and the session is already synced with a
     google_event_id, this returns immediately without calling Google.
+    B2: pending_approval never creates or updates a Google event.
     """
     if not pool or not user_id or not session:
         return None
@@ -285,6 +298,9 @@ async def sync_session_to_google(pool, user_id: str, session: Dict[str, Any],
     # Dedup guard — applies to creates only.
     if action == "create" and session.get("sync_state") == "synced" and session.get("google_event_id"):
         return {"status": "skipped", "reason": "already_synced"}
+
+    if action != "delete" and is_pending_google_hold(session):
+        return {"status": "skipped", "reason": "pending_no_google_hold"}
 
     conn_row = await _get_connection(pool, user_id)
     if not conn_row:
@@ -437,4 +453,5 @@ __all__ = [
     "sync_session_to_google",
     "sync_session_for_participants",
     "compose_session_event_payload",
+    "is_pending_google_hold",
 ]

@@ -149,30 +149,44 @@ async def compute_available_slots(
                     "end": be.isoformat() if be else "",
                 })
 
-        # Google Calendar external busy (coach-local), keyed by username.
-        if registry_loader is not None:
+        # B1: Google free/busy into LN booking. Resolve username from PG so
+        # REST, chat, and negotiation all mask google_external_busy without
+        # depending on the JSON registry. registry_loader is fallback only.
+        coach_username = None
+        try:
+            coach_username = await conn.fetchval(
+                "SELECT username FROM users WHERE hardware_id = $1 LIMIT 1",
+                coach_hw_id,
+            )
+        except Exception:
+            coach_username = None
+        if not coach_username and registry_loader is not None:
             try:
-                coach_username = None
                 registry = registry_loader()
                 for _k, _v in (registry or {}).items():
                     p = (_v or {}).get("profile", {})
                     if p.get("hardware_id") == coach_hw_id and p.get("role") == "COACH":
                         coach_username = p.get("username") or _k
                         break
-                if coach_username:
-                    ext = await conn.fetch(
-                        "SELECT start_at, end_at FROM google_external_busy "
-                        "WHERE user_id = $1 AND start_at::date = $2",
-                        coach_username, target_date_obj,
-                    )
-                    for xr in ext:
-                        xs, xe = xr["start_at"], xr["end_at"]
-                        if xs and xe:
-                            booked_slots.append({
-                                "start": xs.isoformat(),
-                                "end": xe.isoformat(),
-                                "source": "google",
-                            })
+            except Exception:
+                coach_username = None
+        if coach_username:
+            try:
+                day_start = target_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                day_end = day_start + _dt.timedelta(days=1)
+                ext = await conn.fetch(
+                    "SELECT start_at, end_at FROM google_external_busy "
+                    "WHERE user_id = $1 AND start_at < $3 AND end_at > $2",
+                    coach_username, day_start, day_end,
+                )
+                for xr in ext:
+                    xs, xe = xr["start_at"], xr["end_at"]
+                    if xs and xe:
+                        booked_slots.append({
+                            "start": xs.isoformat(),
+                            "end": xe.isoformat(),
+                            "source": "google",
+                        })
             except Exception:
                 pass
 
