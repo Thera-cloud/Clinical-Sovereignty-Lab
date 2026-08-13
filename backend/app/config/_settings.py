@@ -184,6 +184,25 @@ class Settings(BaseSettings):
     ENABLE_COACHING: bool = False
     ENABLE_STRIPE: bool = False
     ENABLE_ZOOM: bool = False
+    # Workspace pairing + voice campaign (plan v1.5.2) — default OFF until Queens
+    ENABLE_WS_OAUTH: bool = False
+    ENABLE_WS_CALENDAR_SYNC: bool = False
+    ENABLE_WS_GMAIL_DRAFTS: bool = False
+    ENABLE_WS_DRIVE_DELIVERY: bool = False
+    ENABLE_VOICE_CAMPAIGN: bool = False
+    ENABLE_CAMPAIGN_NUDGES: bool = False
+    ENABLE_AUDIO_BRIEFS: bool = False
+    ENABLE_COACH_LINKEDIN: bool = False
+    ENABLE_STUDIO_WEBHOOKS: bool = False
+    ENABLE_COACH_NEWSLETTER: bool = False
+    ENABLE_COACH_TASKS: bool = False
+    ENABLE_SUPERVISION_VIEW: bool = False
+    ENABLE_PRACTICE_LIBRARIES: bool = False
+    ENABLE_CLINICAL_ERASURE: bool = False
+    ENABLE_CRISIS_ESCALATION: bool = False
+    CLIENT_ENVELOPE_KEK: str = ""
+    GOOGLE_WS_CLIENT_ID: str = ""
+    GOOGLE_WS_CLIENT_SECRET: str = ""
     ENABLE_DRIP_CAMPAIGN: bool = True
     ENABLE_SKYEYE: bool = True
     ENABLE_SKYEYE_SESSIONS: bool = True  # Auto session engine — autonomous posting enabled

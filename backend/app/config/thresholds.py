@@ -30,6 +30,8 @@ class ThresholdConfig:
     ENABLE_COACHING = os.getenv("ENABLE_COACHING", "False").lower() == "true"
     ENABLE_STRIPE = os.getenv("ENABLE_STRIPE", "False").lower() == "true"
     ENABLE_ZOOM = os.getenv("ENABLE_ZOOM", "False").lower() == "true"
+    ENABLE_WS_OAUTH = os.getenv("ENABLE_WS_OAUTH", "False").lower() == "true"
+    ENABLE_CLINICAL_ERASURE = os.getenv("ENABLE_CLINICAL_ERASURE", "False").lower() == "true"
     ENABLE_DRIP_CAMPAIGN = os.getenv("ENABLE_DRIP_CAMPAIGN", "True").lower() == "true"
     ENABLE_SKYEYE = os.getenv("ENABLE_SKYEYE", "True").lower() == "true"
     ENABLE_SKYEYE_SESSIONS = os.getenv("ENABLE_SKYEYE_SESSIONS", "True").lower() == "true"

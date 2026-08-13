@@ -4801,6 +4801,14 @@ try:
 except Exception as _gcal_err:
     print(f"   ⚠️  Google Calendar router failed: {_gcal_err}")
 
+# Google Workspace OAuth (GOOGLE_WS_* coach app; ENABLE_WS_OAUTH default off)  # QUANTUM-CRYSTAL-ARCH
+try:
+    from app.routers.google_workspace_api import router as google_ws_router, oauth_router as google_ws_oauth_router
+    app.include_router(google_ws_router)
+    app.include_router(google_ws_oauth_router)
+except Exception as _gws_err:
+    print(f"   ⚠️  Google Workspace router failed: {_gws_err}")
+
 # Corporate Command API (CORP_ADMIN dashboard)
 try:
     from app.routers.corporate_command_api import router as corporate_command_router
