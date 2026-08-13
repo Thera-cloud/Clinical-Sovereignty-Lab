@@ -50,9 +50,11 @@ except ImportError:
 
 from app.auth import get_current_user_id
 from app.constants.tiers import (
+    TIER_COACH_ONLY,
     TIER_STANDARD,
     TIER_TOP_TIER,
     TIER_TRIAL,
+    can_access_nate,
     initial_grant_tokens,
     monthly_cap_tokens,
     normalize_tier,
@@ -666,8 +668,17 @@ class StripeService:
             print(f">>> [STRIPE] Founding member check failed: {e}")
 
         # Create new subscription checkout
-        trial_days = 7 if tier == SubscriptionTier.STANDARD else None
-        sub_data = {"metadata": {"user_id": user_id, "tier": tier.value}}
+        current_plan = await self.db.fetchval(
+            "SELECT COALESCE(profile_data->>'subscription_plan', tier) FROM users WHERE id = $1",
+            db_uid,
+        )
+        from_coach_only = (
+            normalize_tier(current_plan) == TIER_COACH_ONLY
+            or str(current_plan or "").upper() == TIER_COACH_ONLY
+        )
+        trial_days = 7 if tier == SubscriptionTier.STANDARD and not from_coach_only else None
+        uid_meta = str(db_uid)
+        sub_data = {"metadata": {"user_id": uid_meta, "tier": tier.value}}
         if trial_days is not None:
             sub_data["trial_period_days"] = trial_days
 
@@ -678,7 +689,7 @@ class StripeService:
             "line_items": [{"price": price_id, "quantity": 1}],
             "success_url": success_url + "?session_id={CHECKOUT_SESSION_ID}",
             "cancel_url": cancel_url,
-            "metadata": {"user_id": user_id, "tier": tier.value},
+            "metadata": {"user_id": uid_meta, "tier": tier.value},
             "subscription_data": sub_data,
         }
         promo_meta: Dict[str, str] = {}
@@ -1611,18 +1622,24 @@ class StripeWebhookHandler:
                     grant = max(0, floor - sub_before)
                 else:
                     grant = 0
+                nate_ok = can_access_nate(tier_norm)
                 if grant <= 0:
                     if sync_tier:
                         await conn.execute(
                             """
                             UPDATE users SET tier = $1, subscription_status = 'ACTIVE',
                                 profile_data = COALESCE(profile_data, '{}'::jsonb)
-                                  || jsonb_build_object('tier', $2::text)
+                                  || jsonb_build_object(
+                                       'tier', $2::text,
+                                       'subscription_plan', $2::text,
+                                       'can_access_nate', $4::boolean
+                                     )
                             WHERE username = $3
                             """,
                             tier_norm,
                             tier_norm,
                             username,
+                            nate_ok,
                         )
                     return 0
 
@@ -1642,7 +1659,9 @@ class StripeWebhookHandler:
                               || jsonb_build_object(
                                    'token_balance', $3::int,
                                    'subscription_token_balance', $2::int,
-                                   'tier', $4::text
+                                   'tier', $4::text,
+                                   'subscription_plan', $4::text,
+                                   'can_access_nate', $6::boolean
                                  )
                         WHERE username = $5
                         """,
@@ -1651,6 +1670,7 @@ class StripeWebhookHandler:
                         total_after,
                         tier_norm,
                         username,
+                        nate_ok,
                     )
                 else:
                     await conn.execute(
@@ -1828,6 +1848,14 @@ class StripeWebhookHandler:
             return
         
         if session['mode'] == 'subscription':
+            db_uid = await self.db.fetchval(
+                """SELECT id FROM users
+                   WHERE id::text = $1 OR username = $1 OR hardware_id = $1
+                   LIMIT 1""",
+                str(user_id),
+            )
+            if not db_uid:
+                return
             tier_norm = normalize_tier(metadata.get('tier', 'STANDARD'))
             subscription_id = session.get('subscription')
 
@@ -1844,7 +1872,7 @@ class StripeWebhookHandler:
                     current_period_start = EXCLUDED.current_period_start,
                     current_period_end = EXCLUDED.current_period_end
                 """,
-                user_id,
+                db_uid,
                 subscription_id,
                 session['customer'],
                 tier_norm,
@@ -1854,7 +1882,7 @@ class StripeWebhookHandler:
 
             uname = await self.db.fetchval(
                 "SELECT username FROM users WHERE id = $1",
-                user_id,
+                db_uid,
             )
             if uname:
                 await self._apply_subscription_grant(
@@ -3166,12 +3194,17 @@ class StripeWebhookHandler:
                 """
                 UPDATE users SET tier = $1, subscription_status = $2,
                     profile_data = COALESCE(profile_data, '{}'::jsonb)
-                      || jsonb_build_object('tier', $1::text)
+                      || jsonb_build_object(
+                           'tier', $1::text,
+                           'subscription_plan', $1::text,
+                           'can_access_nate', $4::boolean
+                         )
                 WHERE username = $3
                 """,
                 tier_norm,
                 new_status,
                 uname,
+                can_access_nate(tier_norm),
             )
             if is_client and tier_rank(tier_norm) > tier_rank(old_tier):
                 await self._apply_subscription_grant(
@@ -3183,7 +3216,7 @@ class StripeWebhookHandler:
                     None,
                     "customer.subscription.updated tier upgrade",
                     "tier_upgrade",
-                    sync_tier=False,
+                    sync_tier=True,
                 )
             await self._notify_bridge_reload(uname)
 

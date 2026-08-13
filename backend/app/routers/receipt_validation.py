@@ -315,21 +315,32 @@ async def _activate_plan(request: Request, user_id: str, plan: str,
                          source: str, product_id: str):
     """Update the user's subscription plan in the database."""
     pool = request.app.state.db_pool
-    tokens = PLAN_TOKEN_ALLOC.get(plan, 0)
+    from app.constants.tiers import can_access_nate, initial_grant_tokens, normalize_tier
+    tier_norm = normalize_tier(plan)
+    floor = initial_grant_tokens(tier_norm)
+    nate_ok = can_access_nate(tier_norm)
 
     async with pool.acquire() as conn:
         await conn.execute("""
-            UPDATE users SET profile_data = profile_data
-                || jsonb_build_object(
-                    'subscription_plan', $2::text,
-                    'payment_source', $3::text,
-                    'last_payment_product', $4::text,
-                    'last_payment_time', $5::text,
-                    'token_balance', COALESCE((profile_data->>'token_balance')::int, 0) + $6
-                )
+            UPDATE users SET
+                tier = $2,
+                subscription_status = 'ACTIVE',
+                subscription_token_balance = GREATEST(COALESCE(subscription_token_balance, 0), $6),
+                token_balance = GREATEST(COALESCE(token_balance, 0), $6),
+                profile_data = COALESCE(profile_data, '{}'::jsonb)
+                    || jsonb_build_object(
+                        'subscription_plan', $2::text,
+                        'tier', $2::text,
+                        'can_access_nate', $7::boolean,
+                        'payment_source', $3::text,
+                        'last_payment_product', $4::text,
+                        'last_payment_time', $5::text,
+                        'token_balance', GREATEST(
+                            COALESCE((profile_data->>'token_balance')::int, 0), $6)
+                    )
             WHERE username = $1
-        """, user_id, plan, source, product_id,
-            datetime.now(timezone.utc).isoformat(), tokens)
+        """, user_id, tier_norm, source, product_id,
+            datetime.now(timezone.utc).isoformat(), floor, nate_ok)
 
         await conn.execute("""
             INSERT INTO skyeye_activity (type, platform, content, created_at)

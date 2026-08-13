@@ -14827,10 +14827,25 @@ async def handle_client(websocket, path=None):
                                 coaching_fee = _p.get("coaching_fee") or 0
                                 zoom_link = _p.get("zoom_link") or ""
                                 break
+                        _sess_price = coaching_fee
                         try:
-                            from app.services.session_booking_billing import SESSION_PAYMENT_POLICY as _pay_pol
+                            from app.services.session_booking_billing import (
+                                SESSION_PAYMENT_POLICY as _pay_pol,
+                                quote_session_price_cents as _quote_sess,
+                            )
+                            _cents = await _quote_sess(
+                                db_pool,
+                                client_hardware_id=(current_profile.get("hardware_id") or ""),
+                                family_id=(current_profile.get("family_id") or "").strip(),
+                                coach_fee_dollars=float(coaching_fee or 0),
+                                client_plan=current_profile.get("subscription_plan") or current_profile.get("tier"),
+                            )
+                            _sess_price = round(_cents / 100.0, 2)
                         except Exception:
-                            _pay_pol = ""
+                            try:
+                                from app.services.session_booking_billing import SESSION_PAYMENT_POLICY as _pay_pol
+                            except Exception:
+                                _pay_pol = ""
                         await websocket.send(json.dumps({
                             "type": "coach_info",
                             "coach_id": coach_id,
@@ -14838,6 +14853,7 @@ async def handle_client(websocket, path=None):
                             "coach_email": coach_email,
                             "specializations": specializations,
                             "coaching_fee": coaching_fee,
+                            "session_price": _sess_price,
                             "zoom_link": zoom_link,
                             "payment_policy": _pay_pol,  # QUANTUM-CRYSTAL-ARCH
                         }))
@@ -14942,9 +14958,23 @@ async def handle_client(websocket, path=None):
                                         coach_profile = rv.get("profile", {})
                                         break
                                 coach_fee = float((coach_profile or {}).get("coaching_fee", 0))
-                                fee_info = calculate_platform_fee(coach_fee) if coach_fee > 0 else {"coach_fee": 0, "platform_fee": 0, "coach_payout": 0}
+                                # QUANTUM-CRYSTAL-ARCH: membership session discount (IC $50 / SC $50 then $85)
+                                _price_cents = 0
+                                try:
+                                    from app.services.session_booking_billing import quote_session_price_cents
+                                    _price_cents = await quote_session_price_cents(
+                                        db_pool,
+                                        client_hardware_id=client_id,
+                                        family_id=family_id,
+                                        coach_fee_dollars=coach_fee,
+                                        scheduled_start=scheduled_start,
+                                        client_plan=current_profile.get("subscription_plan") or current_profile.get("tier"),
+                                    )
+                                except Exception:
+                                    _price_cents = int(round(coach_fee * 100)) if coach_fee > 0 else 0
+                                _billed = (_price_cents / 100.0) if _price_cents > 0 else 0
+                                fee_info = calculate_platform_fee(_billed) if _billed > 0 else {"coach_fee": 0, "platform_fee": 0, "coach_payout": 0}
                                 # QUANTUM-CRYSTAL-ARCH: session booking billing — card + consent before book
-                                _price_cents = int(round(coach_fee * 100)) if coach_fee > 0 else 0
                                 try:
                                     from app.services.session_booking_billing import (
                                         booking_billing_enabled,

@@ -115,3 +115,26 @@ def initial_grant_tokens(tier: str | None) -> int:
 def is_paid_subscription_tier(tier: str | None) -> bool:
     t = normalize_tier(tier)
     return t in (TIER_STANDARD, TIER_TOP_TIER)
+
+
+def can_access_nate(tier: str | None) -> bool:
+    """COACH_ONLY cannot reach Nate; every other client plan can."""
+    raw = str(tier or "").upper().strip()
+    if raw == TIER_COACH_ONLY or normalize_tier(tier) == TIER_COACH_ONLY:
+        return False
+    return True
+
+
+def session_plan_bucket(plan: str | None) -> str:
+    """IC / SC / NONE for session-charge discounts (family dependents included)."""
+    raw = str(plan or "").upper()
+    if "SOVEREIGN" in raw or "TOP_TIER" in raw or raw == "TOP":
+        return "SC"
+    if "INNER" in raw or "CHAMBER" in raw or "STANDARD" in raw:
+        return "IC"
+    t = normalize_tier(plan)
+    if t == TIER_TOP_TIER:
+        return "SC"
+    if t == TIER_STANDARD:
+        return "IC"
+    return "NONE"

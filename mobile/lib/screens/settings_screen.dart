@@ -832,6 +832,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     final prev = (_profile['previous_plan'] ?? '').toString().toUpperCase();
     final current = _currentPlanKey;
     if (current == 'STANDARD' || current == 'TOP_TIER') return false;
+    if (current == 'COACH_ONLY') return false;
     if (prev == 'STANDARD' || prev == 'TOP_TIER') return false;
     final trialEnd = (_profile['trial_end_date'] ?? '').toString();
     if (trialEnd.isNotEmpty) {
@@ -1176,6 +1177,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
 
   void _confirmPlanChange(String planKey, bool isUpgrade) {
     final names = {
+      'COACH_ONLY': 'Coach Only',
       'TRIAL': 'Threshold',
       'STANDARD': 'Inner Chamber',
       'TOP_TIER': 'Sovereign Circle',
@@ -2737,8 +2739,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             const SizedBox(height: 20),
           ],
 
-          // --- Subscription (hidden for COACH_ONLY) ---
-          if (!_isCoachOnly) ...[
+          // --- Subscription (Coach Only can upgrade to Inner Chamber) ---
           _sectionHeader('SUBSCRIPTION', Icons.workspace_premium),
           _settingsCard([
             _infoRow('Current Plan', _tierDisplayName(plan.toString())),
@@ -2783,6 +2784,22 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               ),
             ),
             const SizedBox(height: 8),
+            if (_isCoachOnly) ...[
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: _Design.cyan.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _Design.cyan.withOpacity(0.3)),
+                ),
+                child: const Text(
+                  'Upgrade to Inner Chamber to unlock Little Nate, 50,000 tokens, and \$50 off every coaching session.',
+                  style: TextStyle(color: _Design.cyan, fontSize: 11, height: 1.4),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (!_isCoachOnly)
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -2828,6 +2845,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           ]),
           const SizedBox(height: 20),
 
+          if (!_isCoachOnly) ...[
           // --- Voice Therapy (prepaid call minutes) ---
           _sectionHeader('VOICE THERAPY', Icons.phone_in_talk),
           _settingsCard([
@@ -3813,7 +3831,7 @@ class _ChangePlanSheet extends StatelessWidget {
                 'Text conversations',
               ],
               color: _Design.textSecondary,
-              locked: !canDowngradeToTrial,
+              locked: !canDowngradeToTrial || currentPlanKey == 'COACH_ONLY',
             ),
             const SizedBox(height: 16),
 
@@ -3829,6 +3847,7 @@ class _ChangePlanSheet extends StatelessWidget {
               features: [
                 'Full AI companion — voice & text',
                 '50,000 tokens/month',
+                '\$50 off every coaching session',
                 'Voice biometrics & emotional tracking',
                 'Session history & metrics',
                 'Push notifications & reminders',
@@ -3849,6 +3868,7 @@ class _ChangePlanSheet extends StatelessWidget {
               features: [
                 'Everything in Inner Chamber',
                 '200,000 tokens/month',
+                '\$50 off first family session each month, then \$85 off',
                 'Avatar Mode (3D companion)',
                 'Family Sanctuary (up to 5 members)',
                 '50 GB Legacy Vault storage',

@@ -1,7 +1,9 @@
-"""Session booking billing — card gate, coach fee → price_cents, cancel refunds.
+"""Session booking billing — card gate, membership session discounts, cancel refunds.
 
-Policy (client-facing): charge full coach coaching_fee after coach accepts,
-via SessionPaymentAgent in the 72h pre-session window. Cancel ≥24h before
+Policy (client-facing): charge membership session rate after coach accepts,
+via SessionPaymentAgent in the 72h pre-session window. Inner Chamber: $50 off
+every session. Sovereign Circle: $50 off the household's first session each
+month, then $85 off each additional (family-scoped). Cancel ≥24h before
 start → full Stripe refund if already paid. Cancel inside 24h → no refund.
 """
 
@@ -16,11 +18,27 @@ logger = logging.getLogger("nate.session_booking_billing")
 
 # Shown in client schedule UI and emails — keep in sync with Flutter copy.
 SESSION_PAYMENT_POLICY = (
-    "By booking, you agree to pay your coach's full session rate. "
+    "By booking, you agree to pay your membership session rate "
+    "(Inner Chamber: $50 off every session; Sovereign Circle: $50 off the "
+    "household's first session each month, then $85 off each additional). "
     "After your coach accepts, your card on file will be charged in the "
     "72-hour window before the session. Payment is due before the session. "
     "Cancel at least 24 hours before the start time for a full refund. "
     "Cancellations inside 24 hours are not refundable."
+)
+
+# Membership discounts off the coach's listed rate (cents). CoachN $175 →
+# Inner Chamber $125 every session; Sovereign Circle $125 first / $90 after.
+INNER_CHAMBER_SESSION_DISCOUNT_CENTS = 5000
+SOVEREIGN_CIRCLE_FIRST_SESSION_DISCOUNT_CENTS = 5000
+SOVEREIGN_CIRCLE_ADDITIONAL_SESSION_DISCOUNT_CENTS = 8500
+
+_COUNT_STATUSES_EXCLUDED = (
+    "cancelled",
+    "canceled",
+    "declined",
+    "rejected",
+    "no_show",
 )
 
 
@@ -43,9 +61,142 @@ def fee_cents_from_coach_fee(coach_fee: Any) -> int:
     return int(round(dollars * 100))
 
 
+def session_discount_cents(plan: str | None, prior_family_sessions_this_month: int) -> int:
+    """Membership discount off listed coach rate. Family-scoped for Sovereign Circle."""
+    from app.constants.tiers import session_plan_bucket
+
+    bucket = session_plan_bucket(plan)
+    prior = max(0, int(prior_family_sessions_this_month or 0))
+    if bucket == "IC":
+        return INNER_CHAMBER_SESSION_DISCOUNT_CENTS
+    if bucket == "SC":
+        if prior <= 0:
+            return SOVEREIGN_CIRCLE_FIRST_SESSION_DISCOUNT_CENTS
+        return SOVEREIGN_CIRCLE_ADDITIONAL_SESSION_DISCOUNT_CENTS
+    return 0
+
+
+def billed_session_cents(coach_fee_dollars: Any, discount_cents: int) -> int:
+    listed = fee_cents_from_coach_fee(coach_fee_dollars)
+    if listed <= 0:
+        return 0
+    return max(0, listed - max(0, int(discount_cents or 0)))
+
+
+def _month_bounds(dt: datetime) -> Tuple[datetime, datetime]:
+    start = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if start.month == 12:
+        end = start.replace(year=start.year + 1, month=1)
+    else:
+        end = start.replace(month=start.month + 1)
+    return start, end
+
+
+def _as_aware(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+async def _prior_family_sessions_this_month(
+    db_pool,
+    client_hardware_id: str,
+    family_id: str,
+    month_start: datetime,
+    month_end: datetime,
+) -> int:
+    if not db_pool:
+        return 0
+    fid = (family_id or "").strip()
+    hid = (client_hardware_id or "").strip()
+    if not hid and not fid:
+        return 0
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM coaching_sessions
+                WHERE scheduled_start >= $1 AND scheduled_start < $2
+                  AND COALESCE(status, '') <> ALL($3::text[])
+                  AND COALESCE(payment_status, '') NOT IN ('refunded', 'waived')
+                  AND (
+                    ($4 <> '' AND (
+                      family_id = $4
+                      OR client_id IN (
+                        SELECT hardware_id FROM users
+                        WHERE deleted_at IS NULL
+                          AND (
+                            family_id::text = $4
+                            OR COALESCE(profile_data->>'family_id', '') = $4
+                          )
+                      )
+                    ))
+                    OR client_id = $5
+                  )
+                """,
+                month_start,
+                month_end,
+                list(_COUNT_STATUSES_EXCLUDED),
+                fid,
+                hid,
+            )
+            return int((row["cnt"] if row else 0) or 0)
+    except Exception as e:
+        logger.warning("prior family session count failed: %s", e)
+        return 0
+
+
+async def quote_session_price_cents(
+    db_pool,
+    *,
+    client_hardware_id: str,
+    family_id: str,
+    coach_fee_dollars: Any,
+    scheduled_start: Any = None,
+    client_plan: Optional[str] = None,
+) -> int:
+    """Client charge in cents after membership discount (family-scoped for SC)."""
+    plan = client_plan
+    if db_pool and client_hardware_id:
+        try:
+            async with db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT COALESCE(profile_data->>'subscription_plan', tier) AS plan
+                    FROM users
+                    WHERE hardware_id = $1 OR username = $1
+                    LIMIT 1
+                    """,
+                    client_hardware_id,
+                )
+                if row and row["plan"]:
+                    plan = row["plan"]
+        except Exception as e:
+            logger.warning("quote_session_price_cents plan lookup: %s", e)
+
+    when = datetime.now(timezone.utc)
+    if scheduled_start:
+        if isinstance(scheduled_start, datetime):
+            when = _as_aware(scheduled_start)
+        else:
+            try:
+                when = _as_aware(
+                    datetime.fromisoformat(str(scheduled_start).replace("Z", "+00:00"))
+                )
+            except Exception:
+                pass
+    month_start, month_end = _month_bounds(when)
+    prior = await _prior_family_sessions_this_month(
+        db_pool, client_hardware_id, family_id, month_start, month_end
+    )
+    discount = session_discount_cents(plan, prior)
+    return billed_session_cents(coach_fee_dollars, discount)
+
+
 def apply_fee_to_session(session: Dict[str, Any], coach_fee_dollars: float, fee_info: Dict[str, Any]) -> None:
     """Stamp session with billable fields for PG + payment agent."""
-    cents = fee_cents_from_coach_fee(coach_fee_dollars)
+    cents = int(session.get("price_cents") or 0) or fee_cents_from_coach_fee(coach_fee_dollars)
     session["coach_fee"] = fee_info.get("coach_fee", coach_fee_dollars)
     session["platform_fee"] = fee_info.get("platform_fee", 0)
     session["coach_payout"] = fee_info.get("coach_payout", 0)

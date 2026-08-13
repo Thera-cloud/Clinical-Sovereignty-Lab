@@ -11161,7 +11161,9 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
   // Session booking billing (coach fee + card + payment consent)
   double? _coachFee;
   String _paymentPolicy =
-      'By booking, you agree to pay your coach\'s full session rate. '
+      'By booking, you agree to pay your membership session rate '
+      '(Inner Chamber: \$50 off every session; Sovereign Circle: \$50 off the '
+      'household\'s first session each month, then \$85 off each additional). '
       'After your coach accepts, your card on file will be charged in the '
       '72-hour window before the session. Payment is due before the session. '
       'Cancel at least 24 hours before the start time for a full refund. '
@@ -11318,13 +11320,13 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
           _fetchRequestStatus();
         }
       } else if (type == 'coach_info') {
-        final fee = data['coaching_fee'];
+        final billed = data['session_price'] ?? data['coaching_fee'];
         final pol = data['payment_policy']?.toString();
         setState(() {
-          if (fee is num) {
-            _coachFee = fee.toDouble();
+          if (billed is num) {
+            _coachFee = billed.toDouble();
           } else {
-            _coachFee = double.tryParse(fee?.toString() ?? '');
+            _coachFee = double.tryParse(billed?.toString() ?? '');
           }
           if (pol != null && pol.isNotEmpty) _paymentPolicy = pol;
         });
