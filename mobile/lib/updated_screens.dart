@@ -6736,9 +6736,30 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       return false;
     }
     final status = (session['status'] ?? 'scheduled').toString().toLowerCase();
-    return status == 'scheduled' ||
-        status == 'active' ||
-        status == 'pending_approval';
+    return status == 'scheduled' || status == 'active';
+  }
+
+  bool _isPendingApproval(Map session) =>
+      (session['status'] ?? '').toString().toLowerCase() == 'pending_approval';
+
+  void _hydratePendingFromSchedule() {
+    final byId = <String, Map<String, dynamic>>{};
+    for (final p in _pendingBookings) {
+      final id = (p['session_id'] ?? '').toString();
+      if (id.isNotEmpty) byId[id] = p;
+    }
+    for (final raw in _schedule) {
+      if (raw is! Map) continue;
+      final m = Map<String, dynamic>.from(raw);
+      final id = (m['session_id'] ?? '').toString();
+      if (id.isEmpty) continue;
+      if (_isPendingApproval(m)) {
+        byId[id] = m;
+      } else {
+        byId.remove(id);
+      }
+    }
+    _pendingBookings = byId.values.toList();
   }
 
   bool _isCalendarReferenceOnly(Map<String, dynamic> session) {
@@ -8606,6 +8627,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         if (m != _calMonth.month || y != _calMonth.year) return;
         setState(() {
           _schedule = List<dynamic>.from(cal['schedule'] ?? []);
+          _hydratePendingFromSchedule();
         });
       } else if (data['type'] == 'consultation_created') {
         final rid = data['request_id']?.toString();
@@ -9255,7 +9277,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               ? Map<String, dynamic>.from(data['session'])
               : <String, dynamic>{};
           setState(() {
-            _pendingBookings.add(session);
+            final sid = (session['session_id'] ?? '').toString();
+            if (sid.isEmpty ||
+                !_pendingBookings.any((s) => s['session_id'] == sid)) {
+              _pendingBookings.add(session);
+            }
           });
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -12263,7 +12289,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   // Build CalendarEvent list from _schedule + _pendingBookings for switched views.
   List<CalendarEvent> _buildCoachCalendarEvents() {
     final out = <CalendarEvent>[];
+    final seenIds = <String>{};
     void addFromMap(Map<String, dynamic> m, {required bool pending}) {
+      final id = (m['session_id'] ?? m['booking_id'] ?? '').toString();
+      if (id.isNotEmpty && seenIds.contains(id)) return;
       DateTime? start;
       DateTime? end;
       try {
@@ -12284,6 +12313,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         } catch (_) {}
       }
       if (start == null) return;
+      if (id.isNotEmpty) seenIds.add(id);
       final dur = (m['duration_minutes'] is int)
           ? m['duration_minutes'] as int
           : int.tryParse('${m['duration_minutes'] ?? ''}') ?? 60;
@@ -12324,8 +12354,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     }
 
     for (final raw in _schedule) {
-      if (raw is Map)
-        addFromMap(Map<String, dynamic>.from(raw), pending: false);
+      if (raw is Map) {
+        final m = Map<String, dynamic>.from(raw);
+        addFromMap(m, pending: _isPendingApproval(m));
+      }
     }
     for (final raw in _pendingBookings) {
       addFromMap(Map<String, dynamic>.from(raw), pending: true);
@@ -12404,10 +12436,22 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   // List of confirmed sessions on a given date (best-effort match against _schedule items)
   List<Map<String, dynamic>> _sessionsOnDate(DateTime d) {
     final out = <Map<String, dynamic>>[];
+    final seen = <String>{};
+    void add(Map<String, dynamic> m) {
+      if (!_sessionMatchesCalendarDay(m, d)) return;
+      final id = (m['session_id'] ?? m['id'] ?? '').toString();
+      if (id.isNotEmpty) {
+        if (seen.contains(id)) return;
+        seen.add(id);
+      }
+      out.add(m);
+    }
+
     for (final raw in _schedule) {
-      if (raw is! Map) continue;
-      final m = Map<String, dynamic>.from(raw);
-      if (_sessionMatchesCalendarDay(m, d)) out.add(m);
+      if (raw is Map) add(Map<String, dynamic>.from(raw));
+    }
+    for (final raw in _pendingBookings) {
+      add(Map<String, dynamic>.from(raw));
     }
     return out;
   }
@@ -13240,9 +13284,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     final blocked = _isDateBlocked(d);
     final recur =
         _myRecurring.where((r) => (r['day_of_week'] ?? -1) == dow).toList();
-    final sessions = _sessionsOnDate(d)
-        .where((s) => _showSessionInActionList(Map<String, dynamic>.from(s)))
-        .toList();
+    final sessions = _sessionsOnDate(d).where((s) {
+      final m = Map<String, dynamic>.from(s);
+      if (_isCalendarReferenceOnly(m)) return false;
+      return _showSessionInActionList(m) || _isPendingApproval(m);
+    }).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

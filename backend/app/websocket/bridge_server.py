@@ -15903,14 +15903,17 @@ async def handle_client(websocket, path=None):
                         try:
                             sessions = load_json_file(SESSIONS_FILE, [])
                             found_session = None
-                            for s in sessions:
-                                if s.get("session_id") == session_id and s.get("coach_id") == coach_id and s.get("status") == "pending_approval":
-                                    s["status"] = "scheduled"
-                                    s["approved_at"] = str(datetime.datetime.now())
-                                    # QUANTUM-CRYSTAL-ARCH: audit who accepted for invoicing
-                                    s["approved_by"] = current_profile.get("username") or ""
-                                    found_session = s
-                                    break
+                            try:
+                                from app.services.session_approval import locate_pending_booking
+                                found_session = await locate_pending_booking(
+                                    db_pool, sessions, session_id, coach_id)
+                            except Exception:
+                                pass
+                            if found_session:
+                                found_session["status"] = "scheduled"
+                                found_session["approved_at"] = str(datetime.datetime.now())
+                                # QUANTUM-CRYSTAL-ARCH: audit who accepted for invoicing
+                                found_session["approved_by"] = current_profile.get("username") or ""
                             if found_session:
                                 save_json_file(SESSIONS_FILE, sessions)
                                 
@@ -16440,13 +16443,16 @@ async def handle_client(websocket, path=None):
                         try:
                             sessions = load_json_file(SESSIONS_FILE, [])
                             found_session = None
-                            for s in sessions:
-                                if s.get("session_id") == session_id and s.get("coach_id") == coach_id and s.get("status") == "pending_approval":
-                                    s["status"] = "declined"
-                                    s["declined_at"] = str(datetime.datetime.now())
-                                    s["decline_reason"] = reason
-                                    found_session = s
-                                    break
+                            try:
+                                from app.services.session_approval import locate_pending_booking
+                                found_session = await locate_pending_booking(
+                                    db_pool, sessions, session_id, coach_id)
+                            except Exception:
+                                pass
+                            if found_session:
+                                found_session["status"] = "declined"
+                                found_session["declined_at"] = str(datetime.datetime.now())
+                                found_session["decline_reason"] = reason
                             if found_session:
                                 save_json_file(SESSIONS_FILE, sessions)
                                 await websocket.send(json.dumps({
@@ -16473,8 +16479,12 @@ async def handle_client(websocket, path=None):
                                     except Exception as _pg_e:
                                         print(f">>> [DECLINE] PG upsert failed (non-blocking): {_pg_e}")
                                     try:
-                                        from app.services.session_approval import send_booking_decision_email
+                                        from app.services.session_approval import (
+                                            send_booking_decision_email,
+                                            close_pending_negotiation,
+                                        )
                                         asyncio.create_task(send_booking_decision_email(db_pool, found_session, "declined", reason))
+                                        asyncio.create_task(close_pending_negotiation(db_pool, session_id, "declined"))
                                     except Exception:
                                         pass
                             else:
@@ -16491,8 +16501,11 @@ async def handle_client(websocket, path=None):
                         sessions = load_json_file(SESSIONS_FILE, [])
                         # QUANTUM-CRYSTAL-ARCH: drop pendings already decided via email (PG is truth)
                         try:
-                            from app.services.session_approval import sync_sessions_with_pg
+                            from app.services.session_approval import (
+                                sync_sessions_with_pg, merge_pg_pendings)
                             if db_pool and await sync_sessions_with_pg(db_pool, sessions):
+                                save_json_file(SESSIONS_FILE, sessions)
+                            if db_pool and await merge_pg_pendings(db_pool, sessions, coach_id):
                                 save_json_file(SESSIONS_FILE, sessions)
                         except Exception:
                             pass

@@ -28,11 +28,15 @@ _NO_RE = re.compile(
     re.I,
 )
 
-# Intent detectors (propose path) — require explicit tool language
-_BOOK_RE = re.compile(
-    r"\b(?:book|schedule|set up)\b.{0,40}\b(?:session|appointment|coaching)\b"
-    r"|\b(?:session|appointment)\b.{0,40}\b(?:book|schedule)\b",
+# Coach-referent only — never match clinical "schedule an appointment with …"
+_COACH_BOOK_RE = re.compile(
+    r"\b(?:book|schedule|set up)\b.{0,40}\b(?:with|my)\s+coach\b"
+    r"|\b(?:book|schedule|set up)\b.{0,40}\b(?:session|coaching)\b.{0,24}\bcoach\b",
     re.I,
+)
+_BOOK_REDIRECT_TEXT = (
+    "I can't book or approve sessions — your coach does that. "
+    "Open Schedule and pick a time from your coach's published availability."
 )
 _REMIND_RE = re.compile(
     r"\bremind me\b(?:\s+to\b|\s+about\b)?\s+(.+)",
@@ -88,16 +92,13 @@ async def _resolve_user_uuid(db_pool: Any, hw_id: str) -> Optional[Any]:
 async def _book_session_executor(
     db_pool: Any, hw_id: str, params: Dict[str, Any]
 ) -> Dict[str, Any]:
-    from app.services.session_booking_service import book_session
-
-    return await book_session(
-        db_pool,
-        client_hw_id=hw_id,
-        coach_id=params.get("coach_id"),
-        slot_start=params.get("slot_start"),
-        session_type=params.get("session_type", "individual"),
-        notes=params.get("notes", ""),
-    )
+    """Never persist. Coach decides; clients request via availability UI."""
+    del db_pool, hw_id, params
+    return {
+        "success": False,
+        "error": "coach_decision_required",
+        "message": _BOOK_REDIRECT_TEXT,
+    }
 
 
 async def _set_reminder_executor(
@@ -187,7 +188,7 @@ async def _queue_resource_executor(
 
 NATE_TOOLS: Dict[str, Dict[str, Any]] = {
     "book_session": {
-        "description": "Book a coaching session after explicit user confirmation",
+        "description": "Disabled — clients request via Schedule; coach approves",
         "param_schema": {
             "slot_start": "ISO8601 datetime",
             "coach_id": "optional coach hardware id",
@@ -292,21 +293,6 @@ def detect_tool_intent(user_text: str) -> Optional[Dict[str, Any]]:
     if not text or len(text) < 8:
         return None
 
-    if _BOOK_RE.search(text):
-        slot = _default_slot_start(text)
-        return {
-            "tool_name": "book_session",
-            "params": {
-                "slot_start": slot,
-                "session_type": "individual",
-                "notes": text[:500],
-            },
-            "prompt": (
-                f"I can request a coaching session around {slot}. "
-                "Say yes to send that to your coach, or no to cancel."
-            ),
-        }
-
     m = _REMIND_RE.search(text) or _SET_REMINDER_RE.search(text)
     if m:
         body = (m.group(1) or text).strip()[:500]
@@ -347,6 +333,8 @@ async def propose_tool_action(
 ) -> Dict[str, Any]:
     if not tool_executor_enabled():
         return {"proposed": False, "reason": "disabled"}
+    if tool_name == "book_session":
+        return {"proposed": False, "reason": "coach_decision_required"}
     if tool_name not in NATE_TOOLS:
         return {"proposed": False, "reason": "unknown_tool"}
 
@@ -378,6 +366,13 @@ async def maybe_propose_from_utterance(
     existing = await _load_pending(hw_id, redis_client)
     if existing:
         return None
+    if _COACH_BOOK_RE.search(user_text or ""):
+        return {
+            "handled": True,
+            "proposed": False,
+            "tool_name": "book_session",
+            "text": _BOOK_REDIRECT_TEXT,
+        }
     intent = detect_tool_intent(user_text)
     if not intent:
         return None
@@ -483,14 +478,14 @@ async def check_and_execute_confirmation(
 
     ok = bool(result.get("success"))
     if ok:
-        if tool_name == "book_session":
-            text = result.get("message") or "Session request is ready for your coach."
-        elif tool_name == "set_reminder":
+        if tool_name == "set_reminder":
             text = "Reminder saved."
         elif tool_name == "queue_resource":
             text = "Resource queued for you."
         else:
             text = "Done."
+    elif result.get("error") == "coach_decision_required":
+        text = result.get("message") or _BOOK_REDIRECT_TEXT
     else:
         err = result.get("error") or "failed"
         text = f"I couldn't complete that ({err})."

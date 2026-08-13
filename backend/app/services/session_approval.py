@@ -129,15 +129,11 @@ async def lookup_user_contact(db_pool, hw_or_username: str) -> Dict[str, str]:
 # =============================================================================
 
 async def send_pending_booking_email(db_pool, session: Dict) -> bool:
-    """Email the coach an approve/decline request for a pending booking."""
+    """Email the coach an approve/decline request for a pending booking.
+
+    Always sent. Coach decides; negotiation notify is additive, not a substitute.
+    """
     try:
-        # QUANTUM-CRYSTAL-ARCH: negotiation email replaces legacy approve/decline when flag on
-        try:
-            from app.services.session_negotiation_service import negotiation_enabled
-            if negotiation_enabled():
-                return False
-        except Exception:
-            pass
         coach = await lookup_user_contact(db_pool, session.get("coach_id", ""))
         if not coach.get("email"):
             logger.warning("session_approval: no coach email for %s — pending email skipped",
@@ -231,6 +227,90 @@ async def sync_sessions_with_pg(db_pool, sessions: List[Dict]) -> bool:
             s["zoom_meeting_id"] = row["zoom_meeting_id"]
             changed = True
     return changed
+
+
+async def locate_pending_booking(
+    db_pool, sessions: List[Dict], session_id: str, coach_id: str,
+    *, _pg_loader=None,
+) -> Optional[Dict]:
+    """JSON first, then PG-only Nate-tool rows missing from sessions.json."""
+    sid = (session_id or "").strip()
+    cid = (coach_id or "").strip()
+    if not sid or not cid:
+        return None
+    for s in sessions:
+        if (
+            s.get("session_id") == sid
+            and s.get("coach_id") == cid
+            and str(s.get("status") or "").lower() == "pending_approval"
+        ):
+            return s
+    if not db_pool:
+        return None
+    try:
+        loader = _pg_loader
+        if loader is None:
+            from app.services.pg_data_helpers import load_sessions_pg
+            loader = load_sessions_pg
+        rows = await loader(db_pool, coach_id=cid, status="pending_approval")
+        for r in rows:
+            if r.get("session_id") == sid:
+                sessions.append(r)
+                return r
+    except Exception as e:
+        logger.warning("session_approval: PG pending lookup failed: %s", e)
+    return None
+
+
+async def merge_pg_pendings(
+    db_pool, sessions: List[Dict], coach_id: str, *, _pg_loader=None,
+) -> bool:
+    """Append PG pending_approval rows that are not in the JSON list."""
+    cid = (coach_id or "").strip()
+    if not db_pool or not cid:
+        return False
+    existing = {(s.get("session_id") or "") for s in sessions}
+    try:
+        loader = _pg_loader
+        if loader is None:
+            from app.services.pg_data_helpers import load_sessions_pg
+            loader = load_sessions_pg
+        rows = await loader(db_pool, coach_id=cid, status="pending_approval")
+    except Exception as e:
+        logger.warning("session_approval: merge_pg_pendings failed: %s", e)
+        return False
+    changed = False
+    for r in rows:
+        sid = r.get("session_id") or ""
+        if not sid or sid in existing:
+            continue
+        sessions.append(r)
+        existing.add(sid)
+        changed = True
+    return changed
+
+
+async def close_pending_negotiation(db_pool, session_id: str, terminal_status: str = "declined") -> None:
+    if not db_pool or not session_id:
+        return
+    status = terminal_status if terminal_status in (
+        "declined", "busy", "cancelled", "expired"
+    ) else "declined"
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE session_negotiations
+                SET status = $2, updated_at = NOW()
+                WHERE session_id = $1
+                  AND status = ANY($3::text[])
+                """,
+                session_id,
+                status,
+                ["awaiting_coach", "alt_proposed", "awaiting_client"],
+            )
+    except Exception as e:
+        logger.warning("session_approval: close negotiation failed: %s", e)
 
 
 # =============================================================================

@@ -31,10 +31,22 @@ def mock_pool():
 
 
 def test_detect_book_session():
-    intent = detect_tool_intent("Can you book a session with my coach tomorrow?")
-    assert intent is not None
-    assert intent["tool_name"] == "book_session"
-    assert "slot_start" in intent["params"]
+    assert detect_tool_intent("Can you book a session with my coach tomorrow?") is None
+    assert detect_tool_intent(
+        "I need to schedule an appointment with my psychiatrist"
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_coach_book_intent_redirects_without_pending():
+    with patch.dict("os.environ", {"ENABLE_NATE_TOOL_EXECUTOR": "true"}):
+        out = await maybe_propose_from_utterance(
+            "HW_BOOK", "Can you book a session with my coach tomorrow?"
+        )
+        assert out and out["handled"] is True
+        assert out.get("proposed") is False
+        assert "HW_BOOK" not in _memory_pending
+        assert "coach" in (out.get("text") or "").lower()
 
 
 def test_detect_reminder():

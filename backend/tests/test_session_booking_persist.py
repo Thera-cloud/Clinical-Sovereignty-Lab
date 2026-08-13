@@ -1,11 +1,11 @@
-"""book_session persists pending_approval via upsert_session_pg."""
+"""book_session must not persist — coach decides via client_book_session."""
 
 import importlib.util
 import sys
 from pathlib import Path
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 _ROOT = Path(__file__).resolve().parents[1]
 _MOD_PATH = _ROOT / "app" / "services" / "session_booking_service.py"
@@ -39,55 +39,11 @@ def mock_pool():
 
 @pytest.mark.asyncio
 async def test_book_session_writes_pending(mock_pool):
-    pool, conn = mock_pool
-    conn.fetchrow = AsyncMock(
-        side_effect=[
-            {
-                "username": "audit_client",
-                "role": "CLIENT",
-                "hardware_id": "HW_CLIENT",
-                "profile_data": {
-                    "name": "Audit",
-                    "coach_id": "COACH_COACHN_ID",
-                },
-            },
-            {
-                "hardware_id": "COACH_COACHN_ID",
-                "username": "CoachN",
-                "name": "Coach N",
-            },
-        ]
+    pool, _conn = mock_pool
+    result = await booking.book_session(
+        pool,
+        client_hw_id="HW_CLIENT",
+        slot_start="2026-07-22T15:00:00+00:00",
     )
-
-    with patch.object(
-        booking, "upsert_session_pg", create=True
-    ):
-        # Inject stubs into module namespace used by book_session imports
-        async def _upsert(db, session):
-            _upsert.called_with = session
-            return True
-
-        _upsert.called_with = None
-
-        with patch.dict(
-            "sys.modules",
-            {
-                "app.services.pg_data_helpers": MagicMock(
-                    upsert_session_pg=AsyncMock(side_effect=_upsert)
-                ),
-                "app.services.session_negotiation_service": MagicMock(
-                    negotiation_enabled=lambda: False,
-                    open_from_pending_session=AsyncMock(),
-                ),
-            },
-        ):
-            # Re-bind after sys.modules patch by calling through fresh import path
-            result = await booking.book_session(
-                pool,
-                client_hw_id="HW_CLIENT",
-                slot_start="2026-07-22T15:00:00+00:00",
-            )
-
-    assert result["success"] is True
-    assert result["status"] == "pending_approval"
-    assert "session_id" in result
+    assert result["success"] is False
+    assert result["error"] == "coach_decision_required"
