@@ -1,13 +1,18 @@
 """Per-coach LinkedIn OAuth. Tokens live on coach_linkedin_connection only.
 
 Never reads or writes SkyEye platform tokens (NG19).
+Coach Command OAuth must never redirect to command.sovereignsanctuary.net.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
+import time
 import urllib.parse
 from typing import Any, Dict, Optional
 
@@ -18,6 +23,7 @@ LINKEDIN_ME = "https://api.linkedin.com/v2/me"
 COACH_SCOPES = "openid profile email w_member_social"
 SKYEYE_LINKEDIN_CALLBACK = "/api/skyeye/platforms/linkedin/callback"
 COACH_LINKEDIN_CALLBACK = "/api/coach/integrations/linkedin/callback"
+COACH_STATE_PREFIX = "coach1."
 
 logger = logging.getLogger("coach_linkedin_oauth")
 
@@ -69,6 +75,67 @@ def coach_linkedin_credentials() -> tuple:
             f"{_public_api()}{SKYEYE_LINKEDIN_CALLBACK}"
         )
     return cid, secret, canonicalize_linkedin_redirect(redirect)
+
+
+def _oauth_state_secret() -> bytes:
+    return (
+        os.getenv("JWT_SECRET")
+        or os.getenv("LINKEDIN_CLIENT_SECRET")
+        or os.getenv("LINKEDIN_COACH_CLIENT_SECRET")
+        or ""
+    ).encode()
+
+
+def coach_post_auth_url(ok: bool = True) -> str:
+    post = os.getenv(
+        "LINKEDIN_COACH_POST_AUTH_REDIRECT",
+        "https://coach.sovereignsanctuary.net/?linkedin=connected",
+    )
+    if ok:
+        return post
+    return post.replace("=connected", "=error")
+
+
+def mint_coach_linkedin_state(hardware_id: str, username: str) -> str:
+    payload = {
+        "hw": hardware_id,
+        "u": username,
+        "exp": int(time.time()) + 600,
+    }
+    raw = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+    sig = hmac.new(_oauth_state_secret(), raw.encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{COACH_STATE_PREFIX}{raw}.{sig}"
+
+
+def parse_coach_linkedin_state(state: str) -> Optional[Dict[str, str]]:
+    if not state or not state.startswith(COACH_STATE_PREFIX):
+        return None
+    body = state[len(COACH_STATE_PREFIX):]
+    if "." not in body:
+        return None
+    raw, sig = body.rsplit(".", 1)
+    if len(sig) != 32:
+        return None
+    expect = hmac.new(_oauth_state_secret(), raw.encode(), hashlib.sha256).hexdigest()[:32]
+    if not hmac.compare_digest(sig, expect):
+        return None
+    pad = "=" * (-len(raw) % 4)
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(raw + pad))
+    except Exception:
+        return None
+    if int(payload.get("exp") or 0) < int(time.time()):
+        return None
+    hw = str(payload.get("hw") or "").strip()
+    if not hw:
+        return None
+    return {"hardware_id": hw, "username": str(payload.get("u") or "")}
+
+
+def is_coach_linkedin_state(state: str) -> bool:
+    return bool(state) and str(state).startswith(COACH_STATE_PREFIX)
 
 
 def build_coach_linkedin_oauth_url(client_id: str, redirect_uri: str, state: str) -> str:
@@ -128,30 +195,47 @@ async def exchange_coach_linkedin_code(code: str) -> Dict[str, Any]:
     }
 
 
-async def try_complete_coach_linkedin_callback(request, code: str, state: str) -> Optional[Any]:
-    """If Redis has coach_li_oauth_state, persist that coach's token and redirect.
+async def _coach_meta_from_redis(state: str) -> Optional[Dict[str, str]]:
+    try:
+        from app.services.api_server import _get_auth_redis
 
-    Returns None when this is SkyEye admin OAuth (no coach state).
-    Never writes skyeye_platform_tokens (NG19).
+        r = await _get_auth_redis()
+        if not r:
+            return None
+        raw = await r.get(f"coach_li_oauth_state:{state}")
+        if not raw:
+            return None
+        await r.delete(f"coach_li_oauth_state:{state}")
+        meta = json.loads(raw if isinstance(raw, str) else raw.decode())
+        hw = (meta.get("hardware_id") or "").strip()
+        if not hw:
+            return None
+        return {"hardware_id": hw, "username": str(meta.get("user_id") or "")}
+    except Exception as exc:
+        logger.warning("Coach LinkedIn Redis state lookup failed: %s", exc)
+        return None
+
+
+async def try_complete_coach_linkedin_callback(request, code: str, state: str) -> Optional[Any]:
+    """Complete per-coach LinkedIn OAuth. Never writes skyeye_platform_tokens (NG19).
+
+    Returns RedirectResponse to coach.sovereignsanctuary.net for coach states.
+    Returns None only for SkyEye admin OAuth (no coach1. prefix / no Redis coach key).
     """
     from fastapi.responses import RedirectResponse
 
-    r = getattr(request.app.state, "auth_redis", None) or getattr(
-        request.app.state, "redis_pool", None
-    )
-    if not r or not state:
+    if not state:
         return None
-    raw = await r.get(f"coach_li_oauth_state:{state}")
-    if not raw:
+    meta = parse_coach_linkedin_state(state)
+    if meta is None:
+        meta = await _coach_meta_from_redis(state)
+    if meta is None:
+        if is_coach_linkedin_state(state):
+            return RedirectResponse(url=coach_post_auth_url(ok=False))
         return None
-    await r.delete(f"coach_li_oauth_state:{state}")
-    meta = json.loads(raw if isinstance(raw, str) else raw.decode())
     hw = (meta.get("hardware_id") or "").strip()
-    post = os.getenv(
-        "LINKEDIN_COACH_POST_AUTH_REDIRECT",
-        "https://coach.sovereignsanctuary.net/?linkedin=connected",
-    )
-    err = post.replace("=connected", "=error")
+    err = coach_post_auth_url(ok=False)
+    post = coach_post_auth_url(ok=True)
     if not hw:
         return RedirectResponse(url=err)
     pool = getattr(request.app.state, "db_pool", None)

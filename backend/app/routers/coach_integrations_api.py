@@ -75,6 +75,7 @@ async def linkedin_connect(request: Request, user: Dict = Depends(require_coach)
     from app.services.coach_linkedin_oauth import (
         build_coach_linkedin_oauth_url,
         coach_linkedin_credentials,
+        mint_coach_linkedin_state,
     )
 
     cid, secret, redirect = coach_linkedin_credentials()
@@ -82,15 +83,17 @@ async def linkedin_connect(request: Request, user: Dict = Depends(require_coach)
         raise HTTPException(503, "LinkedIn coach OAuth not configured")
     uid = (user.get("username") or "").strip()
     hw = _hw(user)
-    state = secrets.token_urlsafe(32)
+    state = mint_coach_linkedin_state(hw, uid)
     r = await _get_auth_redis()
-    if not r:
-        raise HTTPException(503, "Redis unavailable — cannot issue OAuth state")
-    await r.setex(
-        f"coach_li_oauth_state:{state}",
-        300,
-        json.dumps({"user_id": uid, "hardware_id": hw, "role": "COACH"}),
-    )
+    if r:
+        try:
+            await r.setex(
+                f"coach_li_oauth_state:{state}",
+                600,
+                json.dumps({"user_id": uid, "hardware_id": hw, "role": "COACH"}),
+            )
+        except Exception:
+            logger.warning("Coach LinkedIn Redis state write failed — signed state still valid")
     return {
         "oauth_url": build_coach_linkedin_oauth_url(cid, redirect, state),
         "skyeye_fallback": False,
@@ -99,37 +102,19 @@ async def linkedin_connect(request: Request, user: Dict = Depends(require_coach)
 
 @oauth_router.get("/linkedin/callback")
 async def linkedin_callback(request: Request, code: str = "", state: str = "", error: str = ""):
-    if error:
-        raise HTTPException(400, f"LinkedIn OAuth error: {error}")
-    _require_flag("ENABLE_COACH_LINKEDIN")
-    if not code or not state:
-        raise HTTPException(400, "Missing code or state")
-    r = await _get_auth_redis()
-    if not r:
-        raise HTTPException(503, "Redis unavailable")
-    raw = await r.get(f"coach_li_oauth_state:{state}")
-    await r.delete(f"coach_li_oauth_state:{state}")
-    if not raw:
-        raise HTTPException(400, "Invalid or expired OAuth state")
-    meta = json.loads(raw if isinstance(raw, str) else raw.decode())
-    hw = meta.get("hardware_id") or ""
-    err = LINKEDIN_POST_AUTH.replace("=connected", "=error")
-    try:
-        from app.services.coach_linkedin_oauth import (
-            exchange_coach_linkedin_code,
-            persist_coach_linkedin,
-        )
+    from app.services.coach_linkedin_oauth import (
+        coach_post_auth_url,
+        try_complete_coach_linkedin_callback,
+    )
 
-        tokens = await exchange_coach_linkedin_code(code)
-        if not tokens.get("access_token"):
-            return RedirectResponse(err)
-        pool = getattr(request.app.state, "db_pool", None)
-        if pool:
-            await persist_coach_linkedin(pool, hw, tokens)
-    except Exception:
-        logger.exception("Coach LinkedIn persist failed")
-        return RedirectResponse(err)
-    return RedirectResponse(LINKEDIN_POST_AUTH)
+    if error:
+        return RedirectResponse(coach_post_auth_url(ok=False))
+    if not code or not state:
+        return RedirectResponse(coach_post_auth_url(ok=False))
+    resp = await try_complete_coach_linkedin_callback(request, code, state)
+    if resp is not None:
+        return resp
+    return RedirectResponse(coach_post_auth_url(ok=False))
 
 
 @router.get("/clients")

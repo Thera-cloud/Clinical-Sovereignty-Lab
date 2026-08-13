@@ -1,6 +1,5 @@
 """Seam 5: per-coach LinkedIn, History poll, Drive encrypt, SendGrid markers."""
 
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -168,30 +167,38 @@ def test_skyeye_callback_intercepts_coach_state():
     assert "FROM skyeye_platform_tokens" not in oauth
     assert "coach_linkedin_connection" in oauth
     assert "coach_li_oauth_state" in oauth
+    assert "coach.sovereignsanctuary.net" in oauth
+
+
+def test_coach_state_roundtrip_and_never_command(monkeypatch):
+    from app.services.coach_linkedin_oauth import (
+        coach_post_auth_url,
+        mint_coach_linkedin_state,
+        parse_coach_linkedin_state,
+    )
+
+    monkeypatch.setenv("JWT_SECRET", "test-jwt-secret")
+    state = mint_coach_linkedin_state("COACH_A_ID", "CoachA")
+    assert state.startswith("coach1.")
+    meta = parse_coach_linkedin_state(state)
+    assert meta["hardware_id"] == "COACH_A_ID"
+    assert meta["username"] == "CoachA"
+    assert "command.sovereignsanctuary.net" not in coach_post_auth_url(ok=True)
+    assert "coach.sovereignsanctuary.net" in coach_post_auth_url(ok=True)
+    assert "command.sovereignsanctuary.net" not in coach_post_auth_url(ok=False)
 
 
 @pytest.mark.asyncio
 async def test_coach_callback_persists_per_hardware_id(monkeypatch):
-    from app.services.coach_linkedin_oauth import try_complete_coach_linkedin_callback
+    from app.services.coach_linkedin_oauth import (
+        mint_coach_linkedin_state,
+        try_complete_coach_linkedin_callback,
+    )
 
     persisted = {}
-
-    class _Redis:
-        def __init__(self):
-            self.store = {
-                "coach_li_oauth_state:st1": json.dumps(
-                    {"hardware_id": "COACH_A_ID", "user_id": "CoachA", "role": "COACH"}
-                )
-            }
-
-        async def get(self, key):
-            return self.store.get(key)
-
-        async def delete(self, key):
-            self.store.pop(key, None)
+    monkeypatch.setenv("JWT_SECRET", "test-jwt-secret")
 
     class _State:
-        auth_redis = _Redis()
         db_pool = object()
 
     class _Req:
@@ -204,15 +211,29 @@ async def test_coach_callback_persists_per_hardware_id(monkeypatch):
         persisted["coach_id"] = coach_id
         persisted["token"] = tokens["access_token"]
 
+    async def _no_redis(_state):
+        return None
+
     monkeypatch.setattr(
         "app.services.coach_linkedin_oauth.exchange_coach_linkedin_code", _ex
     )
     monkeypatch.setattr(
         "app.services.coach_linkedin_oauth.persist_coach_linkedin", _persist
     )
-    resp = await try_complete_coach_linkedin_callback(_Req(), "code", "st1")
+    monkeypatch.setattr(
+        "app.services.coach_linkedin_oauth._coach_meta_from_redis", _no_redis
+    )
+    state = mint_coach_linkedin_state("COACH_A_ID", "CoachA")
+    resp = await try_complete_coach_linkedin_callback(_Req(), "code", state)
     assert persisted["coach_id"] == "COACH_A_ID"
     assert persisted["token"] == "tok-a"
-    assert "linkedin=connected" in resp.headers.get("location", resp.headers.get("Location", ""))
-    none_resp = await try_complete_coach_linkedin_callback(_Req(), "code", "missing")
+    loc = resp.headers.get("location") or resp.headers.get("Location", "")
+    assert "linkedin=connected" in loc
+    assert "command.sovereignsanctuary.net" not in loc
+    none_resp = await try_complete_coach_linkedin_callback(_Req(), "code", "skyeye-admin")
     assert none_resp is None
+    bad = await try_complete_coach_linkedin_callback(_Req(), "code", "coach1.forged.deadbeef")
+    assert bad is not None
+    bad_loc = bad.headers.get("location") or bad.headers.get("Location", "")
+    assert "coach.sovereignsanctuary.net" in bad_loc
+    assert "command.sovereignsanctuary.net" not in bad_loc
