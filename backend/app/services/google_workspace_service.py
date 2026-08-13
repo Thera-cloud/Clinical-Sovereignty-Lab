@@ -225,18 +225,9 @@ class GoogleWorkspaceService:
         return {"ok": True, "result": result}
 
     async def create_draft(self, coach_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        if not _flag_on("ENABLE_WS_GMAIL_DRAFTS"):
-            raise FlagOff("ENABLE_WS_GMAIL_DRAFTS")
-        client_id = (payload.get("client_id") or "").strip()
-        if client_id and not await client_vault_sync(self.db_pool, client_id):
-            raise VaultBlocked("createDraft blocked: vault_sync=false")
-        # Seam 3 wires Gmail API; encrypt body now so first writes are wrapped.
-        body = payload.get("body") or ""
-        if client_id and body and self.db_pool:
-            from app.services.client_envelope_cipher import encrypt_for_client
-            cipher = await encrypt_for_client(self.db_pool, client_id, body.encode())
-            return {"gmail_draft_id": None, "encrypted": True, "body_ciphertext": cipher}
-        return {"gmail_draft_id": None, "encrypted": False, "reason": "seam3_pending"}
+        from app.services.gmail_draft_service import create_coach_draft
+
+        return await create_coach_draft(self.db_pool, coach_id, payload)
 
     async def write_client_file(self, coach_id: str, client_id: str, **kwargs: Any) -> Dict[str, Any]:
         if not _flag_on("ENABLE_WS_DRIVE_DELIVERY"):
