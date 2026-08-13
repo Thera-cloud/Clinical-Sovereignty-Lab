@@ -17,6 +17,7 @@ Pushes happen for BOTH the coach and the client (each independently connected).
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import time as _time
@@ -58,6 +59,26 @@ async def _resolve_client_email(pool, client_id: str) -> Optional[str]:
         return em if em and "@" in em else None
     except Exception:
         return None
+
+
+async def _client_vault_sync(pool, client_id: str) -> bool:
+    """Fail closed: missing column or row → treat as vault_sync=false."""
+    if not pool or not client_id:
+        return False
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT COALESCE(vault_sync, false) AS vault_sync
+                FROM users
+                WHERE hardware_id = $1 OR username = $1
+                LIMIT 1
+                """,
+                client_id,
+            )
+        return bool(row["vault_sync"]) if row else False
+    except Exception:
+        return False
 
 
 async def _get_connection(pool, user_id: str) -> Optional[Dict[str, Any]]:
@@ -104,48 +125,70 @@ async def _ensure_token(pool, conn_row: Dict[str, Any]) -> Optional[str]:
     return new_access
 
 
-def _build_payload(session: Dict[str, Any],
-                   extra_attendee_email: Optional[str] = None,
-                   tz_override: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def _client_initials(name: str) -> str:
+    parts = [p for p in (name or "").split() if p and p[0].isalpha()]
+    if not parts:
+        return "S"
+    if len(parts) == 1:
+        return parts[0][0].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+
+def compose_session_event_payload(
+    session: Dict[str, Any],
+    *,
+    vault_sync: bool,
+    tz_override: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Build Google event body. B4: never add Sanctuary clients as attendees.
+
+    vault_sync=false → ``Session — {initials}``, empty description, no attendees.
+    Meet conferenceData has no client PII. Zoom join URL stays on the session card.
+    """
     start = session.get("scheduled_start") or session.get("start_time")
     end = session.get("scheduled_end") or session.get("end_time")
     if not start or not end:
         return None
-    coach_name = session.get("coach_name") or session.get("coach_id") or "Coach"
-    client_name = session.get("client_name") or session.get("client_id") or "Client"
-    session_type = (session.get("session_type") or "session").replace("_", " ").title()
-    summary = f"Sanctuary: {session_type} — {coach_name} & {client_name}"
-    description_parts = [
-        f"Session type: {session_type}",
-        f"Coach: {coach_name}",
-        f"Client: {client_name}",
-    ]
-    csubj = (session.get("consultation_subject") or "").strip()
-    if csubj:
-        description_parts.append(f"Topic: {csubj}")
-    notes = session.get("notes") or session.get("description")
-    if notes:
-        description_parts.append(f"\nNotes: {notes}")
+    client_name = (session.get("client_name") or "").strip()
+    initials = _client_initials(client_name) if client_name else "S"
+    session_id = session.get("session_id") or "session"
     join_url = (
         session.get("zoom_join_url")
         or session.get("join_url")
         or session.get("zoom_link")
     )
-    if join_url:
-        description_parts.append(f"\nJoin: {join_url}")
-    description = "\n".join(description_parts)
 
-    # Compose attendee list: external consultee (if any) + registered client (if any).
-    attendee_set = []
-    consultation_email = (session.get("consultation_email") or "").strip()
-    if consultation_email and "@" in consultation_email:
-        attendee_set.append(consultation_email)
-    if extra_attendee_email and "@" in extra_attendee_email:
-        if extra_attendee_email.lower() not in {a.lower() for a in attendee_set}:
-            attendee_set.append(extra_attendee_email)
-    attendees = attendee_set or None
+    if not vault_sync:
+        summary = f"Session — {initials}"
+        description = ""
+        location = None
+        attendees = None
+    else:
+        coach_name = session.get("coach_name") or session.get("coach_id") or "Coach"
+        display_client = client_name or "Client"
+        session_type = (session.get("session_type") or "session").replace("_", " ").title()
+        summary = f"Sanctuary: {session_type} — {coach_name} & {display_client}"
+        description_parts = [
+            f"Session type: {session_type}",
+            f"Coach: {coach_name}",
+            f"Client: {display_client}",
+        ]
+        csubj = (session.get("consultation_subject") or "").strip()
+        if csubj:
+            description_parts.append(f"Topic: {csubj}")
+        notes = session.get("notes") or session.get("description")
+        if notes:
+            description_parts.append(f"\nNotes: {notes}")
+        if join_url:
+            description_parts.append(f"\nJoin: {join_url}")
+        description = "\n".join(description_parts)
+        location = join_url or None
+        attendee_set = []
+        consultation_email = (session.get("consultation_email") or "").strip()
+        if consultation_email and "@" in consultation_email:
+            attendee_set.append(consultation_email)
+        attendees = attendee_set or None
 
-    # PER-USER-TZ-FIX: participant profile → session.timezone → America/New_York
     tz_for_event = (tz_override or "").strip() or session.get("timezone") or "America/New_York"
     payload = gcc._build_event_payload(
         summary=summary,
@@ -153,12 +196,30 @@ def _build_payload(session: Dict[str, Any],
         start_iso=start,
         end_iso=end,
         timezone_str=tz_for_event,
-        location=join_url or None,
+        location=location,
         attendees=attendees,
         conference_link=None,
         source_session_id=session.get("session_id"),
     )
+    req_id = hashlib.sha256(str(session_id).encode()).hexdigest()[:36]
+    payload["conferenceData"] = {
+        "createRequest": {
+            "requestId": req_id,
+            "conferenceSolutionKey": {"type": "hangoutsMeet"},
+        }
+    }
     return payload
+
+
+def _build_payload(session: Dict[str, Any],
+                   extra_attendee_email: Optional[str] = None,
+                   tz_override: Optional[str] = None,
+                   vault_sync: bool = False) -> Optional[Dict[str, Any]]:
+    # extra_attendee_email ignored — B4 clients are never Google attendees.
+    _ = extra_attendee_email
+    return compose_session_event_payload(
+        session, vault_sync=vault_sync, tz_override=tz_override
+    )
 
 
 def _send_updates_for_payload(payload: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -250,10 +311,8 @@ async def sync_session_to_google(pool, user_id: str, session: Dict[str, Any],
                        status="ok" if ok else "error")
             return {"status": "ok" if ok else "error"}
 
-        # Resolve client email so coach's GCal event also invites the registered client.
-        client_email = await _resolve_client_email(
-            pool, (session.get("client_id") or "").strip()
-        )
+        # B4: never invite Sanctuary clients as Google attendees.
+        vault_sync = await _client_vault_sync(pool, (session.get("client_id") or "").strip())
         user_tz = None  # PER-USER-TZ-FIX
         try:
             async with pool.acquire() as conn:
@@ -265,7 +324,7 @@ async def sync_session_to_google(pool, user_id: str, session: Dict[str, Any],
             user_tz = row["tz"] if row else None
         except Exception:
             pass
-        payload = _build_payload(session, extra_attendee_email=client_email, tz_override=user_tz)
+        payload = _build_payload(session, vault_sync=vault_sync, tz_override=user_tz)
         if not payload:
             return {"status": "skipped", "reason": "missing time"}
 
@@ -374,4 +433,8 @@ async def sync_session_for_participants(pool, session: Dict[str, Any],
             pass
 
 
-__all__ = ["sync_session_to_google", "sync_session_for_participants"]
+__all__ = [
+    "sync_session_to_google",
+    "sync_session_for_participants",
+    "compose_session_event_payload",
+]

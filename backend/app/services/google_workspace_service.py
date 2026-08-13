@@ -8,6 +8,7 @@ does not decrypt Google tokens in Seam 0 stubs.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any, Awaitable, Callable, Dict, Optional
@@ -39,9 +40,19 @@ class FlagOff(Exception):
 async def resolve_username(db_pool, hardware_id: str) -> Optional[str]:
     if not db_pool or not hardware_id:
         return None
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT username FROM workspace_identity WHERE hardware_id = $1 LIMIT 1",
+                hardware_id,
+            )
+        if row:
+            return row["username"]
+    except Exception:
+        pass
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT username FROM workspace_identity WHERE hardware_id = $1 LIMIT 1",
+            "SELECT username FROM users WHERE hardware_id = $1 LIMIT 1",
             hardware_id,
         )
     return row["username"] if row else None
@@ -136,15 +147,82 @@ class GoogleWorkspaceService:
             "oauth_enabled": _flag_on("ENABLE_WS_OAUTH"),
         }
 
+    async def _load_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        if not self.db_pool or not session_id:
+            return None
+        async with self.db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT session_id, client_id, coach_id, client_name, session_type,
+                       status, scheduled_start, scheduled_end, zoom_link, zoom_meeting_id,
+                       notes, google_event_id, google_etag, google_calendar_id, sync_state,
+                       consultation_email, session_data
+                FROM coaching_sessions
+                WHERE session_id = $1
+                LIMIT 1
+                """,
+                session_id,
+            )
+        if not row:
+            return None
+        s = dict(row)
+        sd = s.get("session_data") or {}
+        if isinstance(sd, str):
+            try:
+                sd = json.loads(sd) if sd.strip() else {}
+            except Exception:
+                sd = {}
+        if isinstance(sd, dict):
+            for k, v in sd.items():
+                if k not in s or s.get(k) in (None, "", [], {}):
+                    s[k] = v
+        for ts_key in ("scheduled_start", "scheduled_end"):
+            if s.get(ts_key) is not None:
+                s[ts_key] = str(s[ts_key])
+        s["zoom_join_url"] = s.get("zoom_link") or s.get("zoom_join_url") or ""
+        return s
+
     async def upsert_session(self, coach_id: str, session_id: str) -> Dict[str, Any]:
-        if not _flag_on("ENABLE_WS_CALENDAR_SYNC") and not _flag_on("ENABLE_WS_OAUTH"):
+        # 183 live sync is not gated here; this facade is WS-A only.
+        if not _flag_on("ENABLE_WS_CALENDAR_SYNC"):
             return {"ok": False, "reason": "flag_off"}
-        return {"ok": False, "reason": "seam1_pending", "coach_id": coach_id, "session_id": session_id}
+        if not self.db_pool:
+            return {"ok": False, "reason": "no_db"}
+        session = await self._load_session(session_id)
+        if not session:
+            return {"ok": False, "reason": "not_found"}
+        if (session.get("coach_id") or "") != coach_id:
+            return {"ok": False, "reason": "coach_mismatch"}
+        from app.services.google_calendar_session_sync import sync_session_to_google
+
+        username = await resolve_username(self.db_pool, coach_id)
+        if not username:
+            return {"ok": False, "reason": "no_username"}
+        action = "update" if session.get("google_event_id") else "create"
+        result = await sync_session_to_google(
+            self.db_pool, username, session, action=action,
+        )
+        return {"ok": True, "result": result, "action": action}
 
     async def remove_session(self, coach_id: str, session_id: str) -> Dict[str, Any]:
-        if not _flag_on("ENABLE_WS_CALENDAR_SYNC") and not _flag_on("ENABLE_WS_OAUTH"):
+        if not _flag_on("ENABLE_WS_CALENDAR_SYNC"):
             return {"ok": False, "reason": "flag_off"}
-        return {"ok": False, "reason": "seam1_pending", "coach_id": coach_id, "session_id": session_id}
+        if not self.db_pool:
+            return {"ok": False, "reason": "no_db"}
+        session = await self._load_session(session_id)
+        if not session:
+            return {"ok": False, "reason": "not_found"}
+        if (session.get("coach_id") or "") != coach_id:
+            return {"ok": False, "reason": "coach_mismatch"}
+        from app.services.google_calendar_session_sync import sync_session_to_google
+
+        username = await resolve_username(self.db_pool, coach_id)
+        if not username:
+            return {"ok": False, "reason": "no_username"}
+        result = await sync_session_to_google(
+            self.db_pool, username, session, action="delete",
+        )
+        return {"ok": True, "result": result}
 
     async def create_draft(self, coach_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not _flag_on("ENABLE_WS_GMAIL_DRAFTS"):

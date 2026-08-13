@@ -165,15 +165,28 @@ def _build_event_payload(*, summary: str, description: str,
     return payload
 
 
+def _event_url(calendar_id: str, event_id: Optional[str] = None,
+               *, send_updates: Optional[str] = None,
+               conference_data: bool = False) -> str:
+    base = f"{GOOGLE_API_BASE}/calendars/{urllib.parse.quote(calendar_id)}/events"
+    if event_id:
+        base = f"{base}/{urllib.parse.quote(event_id)}"
+    params = []
+    if send_updates:
+        params.append(f"sendUpdates={urllib.parse.quote(send_updates)}")
+    if conference_data:
+        params.append("conferenceDataVersion=1")
+    return f"{base}?{'&'.join(params)}" if params else base
+
+
 async def create_event(access_token: str, calendar_id: str,
                        payload: Dict[str, Any],
                        send_updates: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Create a calendar event. ``send_updates`` e.g. ``all`` emails attendees."""
-    base = f"{GOOGLE_API_BASE}/calendars/{urllib.parse.quote(calendar_id)}/events"
-    url = (
-        f"{base}?sendUpdates={urllib.parse.quote(send_updates)}"
-        if send_updates
-        else base
+    url = _event_url(
+        calendar_id,
+        send_updates=send_updates,
+        conference_data=bool(payload.get("conferenceData")),
     )
     async with aiohttp.ClientSession() as session:
         async with session.post(
@@ -194,8 +207,11 @@ async def create_event(access_token: str, calendar_id: str,
 async def update_event(access_token: str, calendar_id: str, event_id: str,
                         payload: Dict[str, Any], etag: Optional[str] = None
                         ) -> Optional[Dict[str, Any]]:
-    url = (f"{GOOGLE_API_BASE}/calendars/{urllib.parse.quote(calendar_id)}"
-           f"/events/{urllib.parse.quote(event_id)}")
+    url = _event_url(
+        calendar_id,
+        event_id,
+        conference_data=bool(payload.get("conferenceData")),
+    )
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
