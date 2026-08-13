@@ -210,6 +210,8 @@ def test_erasure_ui_absent_and_first_test_user():
     assert "ENABLE_WS_OAUTH=false" in env
     api = (ROOT / "backend/app/routers/google_workspace_api.py").read_text()
     assert "_require_ws_test_user" in api
+    assert "str(int(expiry" not in api
+    assert "expiry_s" in api
     assert "/libraries" in api
     assert "/credentials" in api
     assert "/crisis" in api

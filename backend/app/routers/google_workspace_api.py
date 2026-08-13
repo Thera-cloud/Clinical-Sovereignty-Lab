@@ -191,51 +191,63 @@ async def workspace_callback(request: Request, code: str = "", state: str = "", 
     meta = json.loads(raw if isinstance(raw, str) else raw.decode())
     uid = meta.get("user_id") or ""
     hw = meta.get("hardware_id") or ""
-    tokens = await gcc.exchange_code(
-        GOOGLE_WS_CLIENT_ID, GOOGLE_WS_CLIENT_SECRET, GOOGLE_WS_REDIRECT_URI, code
-    )
+    err_redirect = GOOGLE_WS_POST_AUTH_REDIRECT.replace("=connected", "=error")
+    try:
+        tokens = await gcc.exchange_code(
+            GOOGLE_WS_CLIENT_ID, GOOGLE_WS_CLIENT_SECRET, GOOGLE_WS_REDIRECT_URI, code
+        )
+    except Exception:
+        logger.exception("Workspace token exchange failed")
+        return RedirectResponse(err_redirect)
     access = tokens.get("access_token") or ""
     refresh = tokens.get("refresh_token") or ""
     if not access or not refresh:
-        raise HTTPException(400, "Google did not return refresh_token")
+        return RedirectResponse(err_redirect)
     scope = tokens.get("scope") or GOOGLE_WS_SCOPES
-    expiry = tokens.get("expires_in")
+    try:
+        expiry_s = int(tokens.get("expires_in") or 3600)
+    except (TypeError, ValueError):
+        expiry_s = 3600
     info = await gcc.fetch_user_info(access)
     pool = getattr(request.app.state, "db_pool", None)
     if pool:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO google_workspace_connection
-                  (user_id, hardware_id, user_role, google_email, google_user_id,
-                   access_token, refresh_token, token_expiry, scopes,
-                   token_app, consent_recorded_at)
-                VALUES ($1,$2,'COACH',$3,$4,$5,$6,
-                        NOW() + ($7::int * INTERVAL '1 second'), $8,
-                        'workspace_ws', NOW())
-                ON CONFLICT (user_id) DO UPDATE SET
-                  hardware_id = EXCLUDED.hardware_id,
-                  google_email = EXCLUDED.google_email,
-                  access_token = EXCLUDED.access_token,
-                  refresh_token = EXCLUDED.refresh_token,
-                  token_expiry = EXCLUDED.token_expiry,
-                  scopes = EXCLUDED.scopes,
-                  revoked_at = NULL,
-                  consent_recorded_at = NOW(),
-                  updated_at = NOW()
-                """,
-                uid,
-                hw,
-                (info or {}).get("email"),
-                (info or {}).get("id") or (info or {}).get("sub"),
-                _cipher.encrypt(access),
-                _cipher.encrypt(refresh),
-                str(int(expiry or 3600)),
-                scope,
-            )
-        from app.services.workspace_consent import record_workspace_consent
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO google_workspace_connection
+                      (user_id, hardware_id, user_role, google_email, google_user_id,
+                       access_token, refresh_token, token_expiry, scopes,
+                       token_app, consent_recorded_at)
+                    VALUES ($1,$2,'COACH',$3,$4,$5,$6,
+                            NOW() + ($7::int * INTERVAL '1 second'), $8,
+                            'workspace_ws', NOW())
+                    ON CONFLICT (user_id) DO UPDATE SET
+                      hardware_id = EXCLUDED.hardware_id,
+                      google_email = EXCLUDED.google_email,
+                      access_token = EXCLUDED.access_token,
+                      refresh_token = EXCLUDED.refresh_token,
+                      token_expiry = EXCLUDED.token_expiry,
+                      scopes = EXCLUDED.scopes,
+                      revoked_at = NULL,
+                      consent_recorded_at = NOW(),
+                      updated_at = NOW()
+                    """,
+                    uid,
+                    hw,
+                    (info or {}).get("email"),
+                    (info or {}).get("id") or (info or {}).get("sub"),
+                    _cipher.encrypt(access),
+                    _cipher.encrypt(refresh),
+                    expiry_s,
+                    scope,
+                )
+            from app.services.workspace_consent import record_workspace_consent
 
-        await record_workspace_consent(pool, coach_id=hw, document_ref="GOOGLE_WS_OAUTH")
+            await record_workspace_consent(pool, coach_id=hw, document_ref="GOOGLE_WS_OAUTH")
+        except Exception:
+            logger.exception("Workspace connection persist failed")
+            return RedirectResponse(err_redirect)
     return RedirectResponse(GOOGLE_WS_POST_AUTH_REDIRECT)
 
 
