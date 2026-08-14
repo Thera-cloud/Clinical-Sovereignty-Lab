@@ -162,3 +162,45 @@ def test_migration_329_additive():
     assert "coach_voice_campaigns/" in (
         ROOT / "backend/app/services/voice_campaign_ingest.py"
     ).read_text()
+
+
+@pytest.mark.asyncio
+async def test_coach_self_ingest_skips_vault(monkeypatch):
+    from app.services.voice_campaign_ingest import store_voice_recording
+
+    monkeypatch.setenv("ENABLE_VOICE_CAMPAIGN", "true")
+    vault = AsyncMock(return_value=False)
+    monkeypatch.setattr("app.services.voice_campaign_ingest.client_vault_sync", vault)
+    monkeypatch.setattr(
+        "app.services.voice_campaign_ingest._transcribe",
+        AsyncMock(return_value=""),
+    )
+    monkeypatch.setattr(
+        "app.services.voice_campaign_ingest.encrypt_coach_bytes",
+        lambda data: "coach-cipher",
+    )
+    out = await store_voice_recording(_FakePool(), "COACH", "", b"wav-bytes")
+    assert out["subject"] == "coach"
+    assert out["published"] is False
+    vault.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_video_ingest_flag_off(monkeypatch):
+    from app.services.google_workspace_service import FlagOff
+    from app.services.voice_campaign_ingest import store_voice_recording
+
+    monkeypatch.setenv("ENABLE_VOICE_CAMPAIGN", "true")
+    monkeypatch.setenv("ENABLE_COACH_VIDEO_INGEST", "false")
+    with pytest.raises(FlagOff):
+        await store_voice_recording(
+            _FakePool(), "COACH", "", b"mp4", media_kind="video", content_type="video/mp4"
+        )
+
+
+def test_migration_334_additive():
+    sql = (ROOT / "backend/migrations/334_coach_campaign_windows.sql").read_text()
+    assert "DROP TABLE" not in sql.upper()
+    assert "ALTER COLUMN client_id DROP NOT NULL" in sql
+    assert "length_days" in sql
+    assert "style_json" in sql

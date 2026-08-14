@@ -28,6 +28,10 @@ class _FakeConn:
     async def execute(self, sql, *args):
         self.calls.append(("execute", sql, args))
 
+    async def fetchval(self, sql, *args):
+        self.calls.append(("fetchval", sql, args))
+        return getattr(self, "master_count", 0)
+
 
 class _Acquire:
     def __init__(self, conn):
@@ -100,6 +104,37 @@ async def test_approve_does_not_publish(monkeypatch):
     set_clause = sql.lower().split("set", 1)[1].split("where", 1)[0]
     assert "post_urn" not in set_clause
     assert "published" not in set_clause
+
+
+@pytest.mark.asyncio
+async def test_assistant_audience_requires_master(monkeypatch):
+    from app.services.voice_campaign_generator import generate_campaign
+
+    monkeypatch.setenv("ENABLE_VOICE_CAMPAIGN", "true")
+    pool = _FakePool()
+    pool.conn.master_count = 0
+    with pytest.raises(PermissionError):
+        await generate_campaign(
+            pool, "COACH_HW", title="Train", audience="assistant_coaches"
+        )
+
+
+@pytest.mark.asyncio
+async def test_length_days_unique_bodies(monkeypatch):
+    from app.services.voice_campaign_generator import generate_campaign
+
+    monkeypatch.setenv("ENABLE_VOICE_CAMPAIGN", "true")
+    monkeypatch.setenv("ENABLE_COACH_NEWSLETTER", "false")
+    pool = _FakePool()
+    out = await generate_campaign(pool, "COACH_HW", title="Presence", length_days=3)
+    assert out["length_days"] == 3
+    assert len(out["content_ids"]) == 6
+    bodies = [
+        c[2][4]
+        for c in pool.conn.calls
+        if c[0] == "fetchrow" and "marketing_content" in c[1]
+    ]
+    assert len(bodies) == len(set(bodies))
 
 
 def test_generator_source_has_no_publishers():

@@ -11,6 +11,7 @@ HUB_FLAGS = (
     "ENABLE_WS_GMAIL_DRAFTS",
     "ENABLE_WS_DRIVE_DELIVERY",
     "ENABLE_VOICE_CAMPAIGN",
+    "ENABLE_COACH_VIDEO_INGEST",
     "ENABLE_CAMPAIGN_NUDGES",
     "ENABLE_AUDIO_BRIEFS",
     "ENABLE_COACH_LINKEDIN",
@@ -38,6 +39,8 @@ async def hub_snapshot(db_pool, coach_id: str) -> Dict[str, Any]:
     drafts_waiting = 0
     campaign_day_n = None
     campaign_title = None
+    campaign_length_days = None
+    campaign_audience = None
     voice_recordings = 0
     assistants: List[Dict[str, Any]] = []
     if db_pool:
@@ -70,7 +73,7 @@ async def hub_snapshot(db_pool, coach_id: str) -> Dict[str, Any]:
             drafts_waiting = int(dw or 0)
             camp = await conn.fetchrow(
                 """
-                SELECT title, day_n FROM coach_marketing_campaigns
+                SELECT title, day_n, length_days, audience FROM coach_marketing_campaigns
                 WHERE coach_id = $1
                 ORDER BY updated_at DESC NULLS LAST, id DESC
                 LIMIT 1
@@ -80,6 +83,8 @@ async def hub_snapshot(db_pool, coach_id: str) -> Dict[str, Any]:
             if camp:
                 campaign_title = camp["title"]
                 campaign_day_n = camp["day_n"]
+                campaign_length_days = camp.get("length_days") if hasattr(camp, "get") else camp["length_days"]
+                campaign_audience = camp.get("audience") if hasattr(camp, "get") else camp["audience"]
             vr = await conn.fetchval(
                 """
                 SELECT COUNT(*) FROM coach_voice_recordings WHERE coach_id = $1
@@ -126,7 +131,12 @@ async def hub_snapshot(db_pool, coach_id: str) -> Dict[str, Any]:
         "studio": studio,
         "chat_webhook_url": chat_url,
         "drafts_waiting": drafts_waiting,
-        "campaign": {"title": campaign_title, "day_n": campaign_day_n},
+        "campaign": {
+            "title": campaign_title,
+            "day_n": campaign_day_n,
+            "length_days": campaign_length_days,
+            "audience": campaign_audience,
+        },
         "voice_recordings": voice_recordings,
         "supervision": supervision,
         "studio_hooks": {
@@ -134,11 +144,14 @@ async def hub_snapshot(db_pool, coach_id: str) -> Dict[str, Any]:
             "paths": ["intake-analysis", "engagement", "client-digest"],
             "headers": ["X-Coach-Id", "X-Studio-Signature"],
         },
-        "cards": _cards(ws, li, drafts_waiting, campaign_day_n, flags, supervision),
+        "cards": _cards(
+            ws, li, drafts_waiting, campaign_day_n, flags, supervision,
+            length_days=campaign_length_days,
+        ),
     }
 
 
-def _cards(ws, li, drafts_waiting, day_n, flags, supervision=None) -> List[Dict[str, Any]]:
+def _cards(ws, li, drafts_waiting, day_n, flags, supervision=None, length_days=None) -> List[Dict[str, Any]]:
     supervision = supervision or {}
     ws_label = "Connected" if ws.get("connected") else (
         "Connect Workspace" if flags.get("ENABLE_WS_OAUTH") else "Not connected"
@@ -155,7 +168,11 @@ def _cards(ws, li, drafts_waiting, day_n, flags, supervision=None) -> List[Dict[
         {
             "id": "campaign",
             "title": "Campaign day-N",
-            "detail": f"Day {day_n}" if day_n is not None else "None",
+            "detail": (
+                f"Day {day_n} of {length_days}"
+                if day_n is not None and length_days
+                else (f"Day {day_n}" if day_n is not None else "None")
+            ),
         },
         {"id": "supervision", "title": "Supervision", "detail": master_detail},
     ]

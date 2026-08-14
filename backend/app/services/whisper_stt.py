@@ -78,6 +78,9 @@ async def transcribe(
         "audio/flac": "audio.flac",
         "audio/mp4": "audio.mp4",
         "audio/mpeg": "audio.mp3",
+        "video/mp4": "video.mp4",
+        "video/quicktime": "video.mov",
+        "video/webm": "video.webm",
     }
     filename = ext_map.get(content_type, "audio.webm")
 

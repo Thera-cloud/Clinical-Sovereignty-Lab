@@ -279,9 +279,15 @@ async def generate_voice_campaign(request: Request, user: Dict = Depends(require
             _hw(user),
             title=str(body.get("title") or "Campaign"),
             day_n=int(body.get("day_n") or 0),
+            length_days=int(body.get("length_days") or 1),
+            audience=str(body.get("audience") or "clients"),
         )
     except FlagOff:
         raise HTTPException(403, "temporarily unavailable")
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/campaigns/{content_id}/preview")
@@ -432,16 +438,24 @@ async def ingest_voice(request: Request, user: Dict = Depends(require_coach)):
     _require_flag("ENABLE_VOICE_CAMPAIGN")
     body = await request.json()
     client_id = str(body.get("client_id") or "").strip()
-    b64 = str(body.get("audio_b64") or "")
+    b64 = str(body.get("media_b64") or body.get("audio_b64") or "")
     transcript = str(body.get("transcript") or "")
+    media_kind = str(body.get("media_kind") or "audio").strip().lower()
+    content_type = str(body.get("content_type") or "")
     try:
         audio = base64.b64decode(b64) if b64 else b""
     except Exception:
-        raise HTTPException(400, "invalid audio_b64")
+        raise HTTPException(400, "invalid media_b64")
     pool = getattr(request.app.state, "db_pool", None)
     try:
         return await store_voice_recording(
-            pool, _hw(user), client_id, audio, transcript=transcript
+            pool,
+            _hw(user),
+            client_id,
+            audio,
+            transcript=transcript,
+            media_kind=media_kind,
+            content_type=content_type,
         )
     except FlagOff:
         raise HTTPException(403, "temporarily unavailable")

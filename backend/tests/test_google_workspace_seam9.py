@@ -79,6 +79,10 @@ def test_coach_command_integrations_tab():
     assert "/api/coach/integrations/hub" in hub
     assert "Connect LinkedIn" in hub
     assert "VOICE CAMPAIGN" in hub
+    assert "VIDEO INTERVIEW" in hub
+    assert "length_days" in hub
+    assert "Generate for clients" in hub
+    assert "assistant_coaches" in hub
     assert "STUDIO WEBHOOK SECRET" in hub
     assert "vault_sync" in hub
     assert "CAMPAIGN" in hub

@@ -190,6 +190,7 @@ class Settings(BaseSettings):
     ENABLE_WS_GMAIL_DRAFTS: bool = False
     ENABLE_WS_DRIVE_DELIVERY: bool = False
     ENABLE_VOICE_CAMPAIGN: bool = False
+    ENABLE_COACH_VIDEO_INGEST: bool = False
     ENABLE_CAMPAIGN_NUDGES: bool = False
     ENABLE_AUDIO_BRIEFS: bool = False
     ENABLE_COACH_LINKEDIN: bool = False

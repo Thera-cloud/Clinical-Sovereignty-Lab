@@ -25,6 +25,7 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
   bool _loading = true;
   final _chatCtrl = TextEditingController();
   final _campaignTitleCtrl = TextEditingController(text: 'Campaign');
+  int _lengthDays = 7;
 
   static const _gold = Color(0xFFC9A962);
   static const _goldDim = Color(0xFF8B7355);
@@ -40,7 +41,7 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 7, vsync: this);
+    _tabs = TabController(length: 8, vsync: this);
     _load();
   }
 
@@ -97,6 +98,7 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
             Tab(text: 'WORKSPACE'),
             Tab(text: 'LINKEDIN'),
             Tab(text: 'VOICE'),
+            Tab(text: 'VIDEO'),
             Tab(text: 'CAMPAIGN'),
             Tab(text: 'STUDIO'),
             Tab(text: 'VAULT'),
@@ -113,7 +115,11 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
                     _workspace(),
                     _linkedin(),
                     _voice(),
-                    _CampaignQueue(token: widget.token),
+                    _video(),
+                    _CampaignQueue(
+                      token: widget.token,
+                      isMaster: _hub?['supervision']?['is_master'] == true,
+                    ),
                     _studio(),
                     _vault(),
                   ],
@@ -373,6 +379,34 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
     }
   }
 
+  bool get _isMaster => _hub?['supervision']?['is_master'] == true;
+
+  Widget _lengthPicker() {
+    final types = (_hub?['flags']?['ENABLE_COACH_NEWSLETTER'] == true) ? 3 : 2;
+    final windows = _isMaster ? 2 : 1;
+    final drafts = _lengthDays * types * windows;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Campaign length: $_lengthDays days',
+            style: const TextStyle(color: _text, fontSize: 13)),
+        Slider(
+          value: _lengthDays.toDouble(),
+          min: 1,
+          max: 36,
+          divisions: 35,
+          activeColor: _gold,
+          label: '$_lengthDays',
+          onChanged: (v) => setState(() => _lengthDays = v.round()),
+        ),
+        Text(
+          'About $drafts drafts (days × $types types × $windows window${windows == 1 ? '' : 's'}). Unique copy per day. Never auto-publishes.',
+          style: const TextStyle(color: _muted, fontSize: 11),
+        ),
+      ],
+    );
+  }
+
   Widget _voice() {
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -382,7 +416,7 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
           Icons.mic_none,
           [
             const Text(
-              'Upload a recording (vault_sync clients only) then generate review-queue copy. Never auto-publishes. Therapy Twilio calls are not used here.',
+              'Client vault_sync audio only. Therapy Twilio calls are not used here.',
               style: TextStyle(color: _muted, fontSize: 12),
             ),
             Text('Recordings: ${_hub?['voice_recordings'] ?? 0}',
@@ -396,13 +430,24 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
                 labelStyle: TextStyle(color: _muted),
               ),
             ),
+            _lengthPicker(),
             const SizedBox(height: 8),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: _gold),
-              onPressed: _generateCampaign,
-              child: const Text('Generate review queue',
+              onPressed: () => _generateCampaign(audience: 'clients'),
+              child: const Text('Generate for clients',
                   style: TextStyle(color: Colors.black)),
             ),
+            if (_isMaster) ...[
+              const SizedBox(height: 8),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: _goldDim),
+                onPressed: () =>
+                    _generateCampaign(audience: 'assistant_coaches'),
+                child: const Text('Generate for assistant coaches',
+                    style: TextStyle(color: Colors.black)),
+              ),
+            ],
             const SizedBox(height: 16),
             _VoiceIngest(token: widget.token),
           ],
@@ -411,11 +456,42 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
     );
   }
 
-  Future<void> _generateCampaign() async {
+  Widget _video() {
+    final videoOn = _hub?['flags']?['ENABLE_COACH_VIDEO_INGEST'] == true;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _panel(
+          'VIDEO INTERVIEW',
+          Icons.videocam_outlined,
+          [
+            const Text(
+              'Coach-owned interview (mp4/mov/webm or audio). Little Nate transcribes and builds a style profile. Not a therapy call. Meet/Drive ingest is off.',
+              style: TextStyle(color: _muted, fontSize: 12),
+            ),
+            if (!videoOn)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text('ENABLE_COACH_VIDEO_INGEST is off — video blocked; audio still works on VOICE.',
+                    style: TextStyle(color: Colors.orangeAccent, fontSize: 12)),
+              ),
+            const SizedBox(height: 12),
+            _VideoIngest(token: widget.token, videoEnabled: videoOn),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Future<void> _generateCampaign({required String audience}) async {
     final r = await http.post(
       Uri.parse('${AppConfig.apiBaseUrl}/api/coach/integrations/campaigns/generate'),
       headers: _h,
-      body: json.encode({'title': _campaignTitleCtrl.text.trim(), 'day_n': 0}),
+      body: json.encode({
+        'title': _campaignTitleCtrl.text.trim(),
+        'length_days': _lengthDays,
+        'audience': audience,
+      }),
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -848,9 +924,95 @@ class _VoiceIngestState extends State<_VoiceIngest> {
   }
 }
 
+class _VideoIngest extends StatefulWidget {
+  final String token;
+  final bool videoEnabled;
+  const _VideoIngest({required this.token, required this.videoEnabled});
+
+  @override
+  State<_VideoIngest> createState() => _VideoIngestState();
+}
+
+class _VideoIngestState extends State<_VideoIngest> {
+  bool _busy = false;
+
+  Map<String, String> get _h => {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ${widget.token}',
+      };
+
+  Future<void> _pickAndUpload() async {
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['mp4', 'mov', 'webm', 'wav', 'mp3', 'm4a'],
+      withData: true,
+    );
+    if (picked == null || picked.files.isEmpty) return;
+    final file = picked.files.first;
+    final bytes = file.bytes;
+    if (bytes == null || bytes.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not read media bytes')));
+      return;
+    }
+    final ext = (file.extension ?? '').toLowerCase();
+    final isVideo = const {'mp4', 'mov', 'webm'}.contains(ext);
+    if (isVideo && !widget.videoEnabled) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Video ingest is off')));
+      return;
+    }
+    final limit = isVideo ? 20 * 1024 * 1024 : 15 * 1024 * 1024;
+    if (bytes.length > limit) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(isVideo ? 'Video over 20 MB' : 'Audio over 15 MB')));
+      return;
+    }
+    final ctype = {
+      'mp4': 'video/mp4',
+      'mov': 'video/quicktime',
+      'webm': 'video/webm',
+      'wav': 'audio/wav',
+      'mp3': 'audio/mpeg',
+      'm4a': 'audio/m4a',
+    }[ext] ?? (isVideo ? 'video/mp4' : 'audio/webm');
+    setState(() => _busy = true);
+    final r = await http.post(
+      Uri.parse('${AppConfig.apiBaseUrl}/api/coach/integrations/voice/recordings'),
+      headers: _h,
+      body: json.encode({
+        'media_b64': base64Encode(bytes),
+        'media_kind': isVideo ? 'video' : 'audio',
+        'content_type': ctype,
+      }),
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(r.statusCode == 200
+            ? 'Interview stored (not published)'
+            : 'Ingest failed (${r.statusCode})')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton.icon(
+      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962)),
+      onPressed: _busy ? null : _pickAndUpload,
+      icon: const Icon(Icons.upload_file, color: Colors.black, size: 18),
+      label: Text(_busy ? 'Uploading…' : 'Upload interview',
+          style: const TextStyle(color: Colors.black)),
+    );
+  }
+}
+
 class _CampaignQueue extends StatefulWidget {
   final String token;
-  const _CampaignQueue({required this.token});
+  final bool isMaster;
+  const _CampaignQueue({required this.token, this.isMaster = false});
 
   @override
   State<_CampaignQueue> createState() => _CampaignQueueState();
@@ -861,6 +1023,7 @@ class _CampaignQueueState extends State<_CampaignQueue> {
   bool _loading = true;
   int? _busyId;
   final _titleCtrl = TextEditingController(text: 'Campaign');
+  int _lengthDays = 7;
   static const _gold = Color(0xFFC9A962);
   static const _goldDim = Color(0xFF8B7355);
   static const _text = Color(0xFFE8D5A3);
@@ -895,6 +1058,25 @@ class _CampaignQueueState extends State<_CampaignQueue> {
           : {'error': r.statusCode};
       _loading = false;
     });
+  }
+
+  Future<void> _generateWindow(String audience) async {
+    final r = await http.post(
+      Uri.parse(
+          '${AppConfig.apiBaseUrl}/api/coach/integrations/campaigns/generate'),
+      headers: _h,
+      body: json.encode({
+        'title': _titleCtrl.text.trim(),
+        'length_days': _lengthDays,
+        'audience': audience,
+      }),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(r.statusCode == 200
+            ? 'Queued for review'
+            : 'Generate failed (${r.statusCode})')));
+    _load();
   }
 
   Future<void> _review(int id, String status) async {
@@ -1213,26 +1395,33 @@ class _CampaignQueueState extends State<_CampaignQueue> {
             labelStyle: TextStyle(color: Color(0xFF8B7355)),
           ),
         ),
+        Text('Campaign length: $_lengthDays days',
+            style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 13)),
+        Slider(
+          value: _lengthDays.toDouble(),
+          min: 1,
+          max: 36,
+          divisions: 35,
+          activeColor: const Color(0xFFC9A962),
+          label: '$_lengthDays',
+          onChanged: (v) => setState(() => _lengthDays = v.round()),
+        ),
         const SizedBox(height: 8),
         ElevatedButton(
           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962)),
-          onPressed: () async {
-            final r = await http.post(
-              Uri.parse(
-                  '${AppConfig.apiBaseUrl}/api/coach/integrations/campaigns/generate'),
-              headers: _h,
-              body: json.encode({'title': _titleCtrl.text.trim(), 'day_n': 0}),
-            );
-            if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text(r.statusCode == 200
-                    ? 'Queued for review'
-                    : 'Generate failed (${r.statusCode})')));
-            _load();
-          },
-          child: const Text('Generate campaign drafts',
+          onPressed: () => _generateWindow('clients'),
+          child: const Text('Generate for clients',
               style: TextStyle(color: Colors.black)),
         ),
+        if (widget.isMaster) ...[
+          const SizedBox(height: 8),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B7355)),
+            onPressed: () => _generateWindow('assistant_coaches'),
+            child: const Text('Generate for assistant coaches',
+                style: TextStyle(color: Colors.black)),
+          ),
+        ],
         const SizedBox(height: 16),
         const Text('REVIEW QUEUE',
             style: TextStyle(
@@ -1274,7 +1463,9 @@ class _CampaignQueueState extends State<_CampaignQueue> {
         children: [
           Text((item['title'] ?? '').toString(),
               style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 14)),
-          Text((item['content_type'] ?? '').toString(),
+          Text(
+              '${item['content_type'] ?? ''}'
+              '${item['audience'] != null ? ' · ${item['audience']}' : ''}',
               style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11)),
           _heroThumb(id, item),
           if ((item['draft_body'] ?? '').toString().isNotEmpty)
