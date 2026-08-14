@@ -116,6 +116,11 @@ def test_campaign_review_includes_body_and_approved():
     assert "approved_unpublished" in api
     assert "linkedin/disconnect" in api
     assert "revoke_coach_linkedin" in api
+    assert "/campaigns/{content_id}/preview" in api
+    assert "generate-image" in api
+    hub = (ROOT / "mobile/lib/widgets/coach_integrations_hub.dart").read_text()
+    assert "Preview" in hub
+    assert "Generate photo" in hub
 
 
 def test_ng13_scopes_still_split():

@@ -859,7 +859,11 @@ class _CampaignQueue extends StatefulWidget {
 class _CampaignQueueState extends State<_CampaignQueue> {
   Map<String, dynamic>? _data;
   bool _loading = true;
+  int? _busyId;
   final _titleCtrl = TextEditingController(text: 'Campaign');
+  static const _gold = Color(0xFFC9A962);
+  static const _goldDim = Color(0xFF8B7355);
+  static const _text = Color(0xFFE8D5A3);
 
   Map<String, String> get _h => {
         'Content-Type': 'application/json',
@@ -925,6 +929,266 @@ class _CampaignQueueState extends State<_CampaignQueue> {
       }
     }
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    _load();
+  }
+
+  String _heroUrl(int id) =>
+      '${AppConfig.apiBaseUrl}/api/coach/integrations/campaigns/$id/hero';
+
+  Widget _heroThumb(int id, Map<String, dynamic> item, {double size = 72}) {
+    if ((item['hero_image_url'] ?? '').toString().isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 4),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: _AuthHeroImage(
+          url: _heroUrl(id),
+          token: widget.token,
+          height: size,
+          width: size,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showPreview(Map<String, dynamic> item) async {
+    final id = int.tryParse('${item['id']}') ?? 0;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: Text((item['title'] ?? 'Preview').toString(),
+            style: const TextStyle(color: _gold, fontSize: 16)),
+        content: SizedBox(
+          width: 420,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text((item['content_type'] ?? '').toString().toUpperCase(),
+                    style: const TextStyle(
+                        color: _goldDim, fontSize: 11, letterSpacing: 1.1)),
+                _heroThumb(id, item, size: 220),
+                const SizedBox(height: 8),
+                Text((item['draft_body'] ?? '').toString(),
+                    style: const TextStyle(color: _text, fontSize: 13, height: 1.45)),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close', style: TextStyle(color: _gold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showEdit(Map<String, dynamic> item) async {
+    final id = int.tryParse('${item['id']}') ?? 0;
+    final titleCtrl =
+        TextEditingController(text: (item['title'] ?? '').toString());
+    final bodyCtrl =
+        TextEditingController(text: (item['draft_body'] ?? '').toString());
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: const Text('Edit draft',
+            style: TextStyle(color: _gold, fontSize: 16)),
+        content: SizedBox(
+          width: 420,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleCtrl,
+                  style: const TextStyle(color: _text, fontSize: 13),
+                  decoration: const InputDecoration(
+                    labelText: 'Title',
+                    labelStyle: TextStyle(color: _goldDim),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: bodyCtrl,
+                  maxLines: 8,
+                  style: const TextStyle(color: _text, fontSize: 13),
+                  decoration: const InputDecoration(
+                    labelText: 'Body',
+                    labelStyle: TextStyle(color: _goldDim),
+                    alignLabelWithHint: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: _goldDim)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Save', style: TextStyle(color: _gold)),
+          ),
+        ],
+      ),
+    );
+    if (saved != true) {
+      titleCtrl.dispose();
+      bodyCtrl.dispose();
+      return;
+    }
+    final r = await http.put(
+      Uri.parse(
+          '${AppConfig.apiBaseUrl}/api/coach/integrations/campaigns/$id'),
+      headers: _h,
+      body: json.encode({
+        'title': titleCtrl.text.trim(),
+        'draft_body': bodyCtrl.text,
+      }),
+    );
+    titleCtrl.dispose();
+    bodyCtrl.dispose();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(r.statusCode == 200 ? 'Saved' : 'Save failed (${r.statusCode})')));
+    _load();
+  }
+
+  Future<void> _showPhoto(Map<String, dynamic> item) async {
+    final id = int.tryParse('${item['id']}') ?? 0;
+    final promptCtrl = TextEditingController(
+        text: (item['hero_image_prompt'] ?? '').toString());
+    var generating = false;
+    var hasImage = (item['hero_image_url'] ?? '').toString().isNotEmpty;
+    var bust = DateTime.now().millisecondsSinceEpoch;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: const Color(0xFF111111),
+          title: const Text('Campaign photo',
+              style: TextStyle(color: _gold, fontSize: 16)),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (hasImage)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: _AuthHeroImage(
+                        url: '${_heroUrl(id)}?t=$bust',
+                        token: widget.token,
+                        height: 180,
+                        width: 380,
+                      ),
+                    )
+                  else
+                    const Text('No image yet — describe the still, then Generate.',
+                        style: TextStyle(color: _goldDim, fontSize: 12)),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: promptCtrl,
+                    maxLines: 5,
+                    style: const TextStyle(color: _text, fontSize: 13),
+                    decoration: const InputDecoration(
+                      labelText: 'Image descriptor',
+                      labelStyle: TextStyle(color: _goldDim),
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                  if (generating)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 12),
+                      child: LinearProgressIndicator(color: _gold),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: generating ? null : () => Navigator.pop(ctx),
+              child: const Text('Close', style: TextStyle(color: _goldDim)),
+            ),
+            TextButton(
+              onPressed: generating
+                  ? null
+                  : () async {
+                      final r = await http.put(
+                        Uri.parse(
+                            '${AppConfig.apiBaseUrl}/api/coach/integrations/campaigns/$id'),
+                        headers: _h,
+                        body: json.encode(
+                            {'hero_image_prompt': promptCtrl.text.trim()}),
+                      );
+                      if (!ctx.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(r.statusCode == 200
+                              ? 'Descriptor saved'
+                              : 'Save failed')));
+                    },
+              child: const Text('Save descriptor',
+                  style: TextStyle(color: _gold)),
+            ),
+            TextButton(
+              onPressed: generating
+                  ? null
+                  : () async {
+                      setLocal(() => generating = true);
+                      setState(() => _busyId = id);
+                      try {
+                        final r = await http
+                            .post(
+                              Uri.parse(
+                                  '${AppConfig.apiBaseUrl}/api/coach/integrations/campaigns/$id/generate-image'),
+                              headers: _h,
+                              body: json.encode(
+                                  {'prompt': promptCtrl.text.trim()}),
+                            )
+                            .timeout(const Duration(seconds: 90));
+                        if (!ctx.mounted) return;
+                        if (r.statusCode == 200) {
+                          setLocal(() {
+                            hasImage = true;
+                            bust = DateTime.now().millisecondsSinceEpoch;
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Photo ready')));
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text(
+                                  'Generate failed (${r.statusCode})')));
+                        }
+                      } catch (e) {
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Generate failed: $e')));
+                        }
+                      } finally {
+                        if (ctx.mounted) setLocal(() => generating = false);
+                        if (mounted) setState(() => _busyId = null);
+                      }
+                    },
+              child: const Text('Generate photo',
+                  style: TextStyle(color: _gold)),
+            ),
+          ],
+        ),
+      ),
+    );
+    promptCtrl.dispose();
     _load();
   }
 
@@ -1012,15 +1276,33 @@ class _CampaignQueueState extends State<_CampaignQueue> {
               style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 14)),
           Text((item['content_type'] ?? '').toString(),
               style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11)),
+          _heroThumb(id, item),
           if ((item['draft_body'] ?? '').toString().isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text((item['draft_body'] ?? '').toString(),
                   style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 12),
-                  maxLines: 6,
+                  maxLines: 4,
                   overflow: TextOverflow.ellipsis),
             ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 0,
+            children: [
+              TextButton(
+                  onPressed: () => _showPreview(item),
+                  child: const Text('Preview',
+                      style: TextStyle(color: Color(0xFFC9A962)))),
+              TextButton(
+                  onPressed: () => _showEdit(item),
+                  child: const Text('Edit',
+                      style: TextStyle(color: Color(0xFFC9A962)))),
+              TextButton(
+                  onPressed: _busyId == id ? null : () => _showPhoto(item),
+                  child: Text(_busyId == id ? 'Generating…' : 'Photo',
+                      style: const TextStyle(color: Color(0xFFC9A962)))),
+            ],
+          ),
           if (review)
             Row(children: [
               TextButton(
@@ -1039,6 +1321,41 @@ class _CampaignQueueState extends State<_CampaignQueue> {
                     style: TextStyle(color: Color(0xFFC9A962)))),
         ],
       ),
+    );
+  }
+}
+
+class _AuthHeroImage extends StatelessWidget {
+  final String url;
+  final String token;
+  final double height;
+  final double width;
+
+  const _AuthHeroImage({
+    required this.url,
+    required this.token,
+    required this.height,
+    required this.width,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<http.Response>(
+      future: http.get(
+        Uri.parse(url),
+        headers: {'Authorization': 'Bearer $token'},
+      ),
+      builder: (context, snap) {
+        if (!snap.hasData || snap.data!.statusCode != 200) {
+          return SizedBox(height: height, width: width);
+        }
+        return Image.memory(
+          snap.data!.bodyBytes,
+          height: height,
+          width: width,
+          fit: BoxFit.cover,
+        );
+      },
     );
   }
 }

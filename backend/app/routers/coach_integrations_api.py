@@ -15,7 +15,7 @@ import secrets
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 try:
     from app.services.api_server import get_current_user, require_coach, _get_auth_redis
@@ -282,6 +282,94 @@ async def generate_voice_campaign(request: Request, user: Dict = Depends(require
         )
     except FlagOff:
         raise HTTPException(403, "temporarily unavailable")
+
+
+@router.get("/campaigns/{content_id}/preview")
+async def preview_campaign_item(
+    content_id: int, request: Request, user: Dict = Depends(require_coach)
+):
+    from app.services.coach_campaign_editor import preview_html
+
+    pool = getattr(request.app.state, "db_pool", None)
+    html = await preview_html(pool, content_id, _hw(user)) if pool else None
+    if not html:
+        raise HTTPException(404, "not found")
+    return HTMLResponse(html)
+
+
+@router.get("/campaigns/{content_id}/hero")
+async def campaign_item_hero(
+    content_id: int, request: Request, user: Dict = Depends(require_coach)
+):
+    from app.services.coach_campaign_editor import load_hero_bytes
+    from app.services.newsletter_imagery import sniff_image_meta
+
+    pool = getattr(request.app.state, "db_pool", None)
+    blob = await load_hero_bytes(pool, content_id, _hw(user)) if pool else None
+    if not blob:
+        raise HTTPException(404, "no image")
+    _, media = sniff_image_meta(blob)
+    return Response(
+        content=blob,
+        media_type=media,
+        headers={"Cache-Control": "private, max-age=60"},
+    )
+
+
+@router.get("/campaigns/{content_id}")
+async def get_campaign_item(
+    content_id: int, request: Request, user: Dict = Depends(require_coach)
+):
+    from app.services.coach_campaign_editor import get_item
+
+    pool = getattr(request.app.state, "db_pool", None)
+    item = await get_item(pool, content_id, _hw(user)) if pool else None
+    if not item:
+        raise HTTPException(404, "not found")
+    return {"ok": True, "item": item}
+
+
+@router.put("/campaigns/{content_id}")
+async def update_campaign_item(
+    content_id: int, request: Request, user: Dict = Depends(require_coach)
+):
+    from app.services.coach_campaign_editor import update_item
+
+    body = await request.json()
+    pool = getattr(request.app.state, "db_pool", None)
+    out = await update_item(
+        pool,
+        content_id,
+        coach_id=_hw(user),
+        title=body.get("title"),
+        draft_body=body.get("draft_body"),
+        hero_image_prompt=body.get("hero_image_prompt"),
+    )
+    if not out.get("ok"):
+        raise HTTPException(400, out.get("reason") or "not_editable")
+    return out
+
+
+@router.post("/campaigns/{content_id}/generate-image")
+async def generate_campaign_image(
+    content_id: int, request: Request, user: Dict = Depends(require_coach)
+):
+    from app.services.coach_campaign_editor import generate_hero
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    pool = getattr(request.app.state, "db_pool", None)
+    out = await generate_hero(
+        pool,
+        content_id,
+        coach_id=_hw(user),
+        prompt_override=str(body.get("prompt") or ""),
+    )
+    if not out.get("ok"):
+        raise HTTPException(400, out.get("error") or "generate_failed")
+    return out
 
 
 @router.post("/campaigns/{content_id}/review")

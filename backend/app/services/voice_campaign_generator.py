@@ -135,7 +135,8 @@ async def list_review_queue(db_pool, coach_id: str, *, limit: int = 50) -> List[
         rows = await conn.fetch(
             """
             SELECT id, title, content_type, status, campaign_id, coach_id, post_urn,
-                   LEFT(draft_body, 2000) AS draft_body
+                   LEFT(draft_body, 2000) AS draft_body,
+                   hero_image_prompt, hero_image_url, hero_image_generated_at
             FROM marketing_content
             WHERE coach_id = $1 AND status = $2
             ORDER BY id DESC
@@ -145,7 +146,9 @@ async def list_review_queue(db_pool, coach_id: str, *, limit: int = 50) -> List[
             REVIEW,
             int(limit),
         )
-    return [dict(r) for r in rows]
+    from app.services.coach_campaign_editor import serialize_item
+
+    return [serialize_item(r) for r in rows]
 
 
 async def list_approved_unpublished(db_pool, coach_id: str, *, limit: int = 50) -> List[Dict[str, Any]]:
@@ -154,7 +157,8 @@ async def list_approved_unpublished(db_pool, coach_id: str, *, limit: int = 50) 
         rows = await conn.fetch(
             """
             SELECT id, title, content_type, status, campaign_id, coach_id, post_urn,
-                   LEFT(draft_body, 2000) AS draft_body
+                   LEFT(draft_body, 2000) AS draft_body,
+                   hero_image_prompt, hero_image_url, hero_image_generated_at
             FROM marketing_content
             WHERE coach_id = $1 AND status = 'approved' AND COALESCE(post_urn, '') = ''
             ORDER BY id DESC
@@ -163,7 +167,9 @@ async def list_approved_unpublished(db_pool, coach_id: str, *, limit: int = 50) 
             coach_id,
             int(limit),
         )
-    return [dict(r) for r in rows]
+    from app.services.coach_campaign_editor import serialize_item
+
+    return [serialize_item(r) for r in rows]
 
 
 async def set_review_status(
