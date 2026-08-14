@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -34,6 +35,10 @@ DEFAULT_CADENCE = {
 MAX_DAILY_POSTS_PER_PLATFORM = 48
 QUEUE_LOOKAHEAD_HOURS = 4
 BATCH_SIZE = 6
+# Off by default: these drafts never publish (8619 generated, 0 posted).
+ENABLE_ENGAGEMENT_DRAFTS = os.getenv(
+    "ENABLE_ENGAGEMENT_DRAFTS", "false"
+).strip().lower() in ("1", "true", "yes")
 ENGAGEMENT_POSTS_PER_DAY = 8
 
 # LinkedIn publish is owned exclusively by LinkedInCampaignScheduler
@@ -119,7 +124,10 @@ class MarketingAutomationWorker:
                     logger.info("content_generated",
                                 platform=platform, posts=generated)
 
-        # Strategic engagement posts
+        if not ENABLE_ENGAGEMENT_DRAFTS:
+            return
+
+        # Strategic engagement posts (unused unless ENABLE_ENGAGEMENT_DRAFTS=true)
         for platform in active_platforms:
             if platform in EXCLUDED_PLATFORMS:
                 continue
