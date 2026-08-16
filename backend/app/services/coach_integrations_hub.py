@@ -113,6 +113,8 @@ async def hub_snapshot(db_pool, coach_id: str) -> Dict[str, Any]:
                 for r in asst_rows
             ]
     flags = {name: _flag_on(name) for name in HUB_FLAGS}
+    if not os.getenv("ENABLE_COACH_VIDEO_INGEST", "").strip():
+        flags["ENABLE_COACH_VIDEO_INGEST"] = flags.get("ENABLE_VOICE_CAMPAIGN", False)
     is_master = bool(assistants)
     supervision = {
         "is_master": is_master,

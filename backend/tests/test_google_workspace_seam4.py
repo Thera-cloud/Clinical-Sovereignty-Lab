@@ -137,6 +137,16 @@ async def test_length_days_unique_bodies(monkeypatch):
     assert len(bodies) == len(set(bodies))
 
 
+def test_generator_links_style_crystals_and_schedule():
+    src = (ROOT / "backend/app/services/voice_campaign_generator.py").read_text()
+    assert "recall_crystals_for_context" in src
+    assert 'source="coach_voice_interview"' in src
+    assert "ORDER BY scheduled_at" in src
+    assert "crystallize_approved_draft" in src
+    assert "assistant_stance" in src
+    assert "NateResponseValidator" in src
+
+
 def test_generator_source_has_no_publishers():
     src = (ROOT / "backend/app/services/voice_campaign_generator.py").read_text()
     assert "skyeye_platform_tokens" not in src

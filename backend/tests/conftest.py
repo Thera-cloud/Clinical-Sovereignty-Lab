@@ -14,7 +14,10 @@ import sys
 from unittest import mock
 
 import pytest
-from _pytest.monkeypatch import notset as _MP_NOTSET
+try:
+    from _pytest.monkeypatch import notset as _MP_NOTSET
+except ImportError:
+    from _pytest.monkeypatch import NOTSET as _MP_NOTSET
 
 
 def _bind_module_ancestors(mod_path: str) -> None:

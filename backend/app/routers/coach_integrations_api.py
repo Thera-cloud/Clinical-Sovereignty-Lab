@@ -430,6 +430,30 @@ async def publish_linkedin_item(
         raise HTTPException(403, "temporarily unavailable")
 
 
+@router.get("/voice/interview-prompts")
+async def interview_prompts(user: Dict = Depends(require_coach)):
+    from app.services.coach_voice_profile_service import INTERVIEW_PROMPTS
+
+    return {"prompts": list(INTERVIEW_PROMPTS), "source": "ln"}
+
+
+@router.patch("/voice/recordings/{recording_id}/transcript")
+async def patch_recording_transcript(
+    recording_id: str, request: Request, user: Dict = Depends(require_coach)
+):
+    from app.services.voice_campaign_ingest import attach_transcript
+
+    _require_flag("ENABLE_VOICE_CAMPAIGN")
+    body = await request.json()
+    pool = getattr(request.app.state, "db_pool", None)
+    try:
+        return await attach_transcript(
+            pool, _hw(user), recording_id, str(body.get("transcript") or "")
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.post("/voice/recordings")
 async def ingest_voice(request: Request, user: Dict = Depends(require_coach)):
     from app.services.google_workspace_service import FlagOff, VaultBlocked

@@ -20,6 +20,9 @@ class _FakeConn:
     async def execute(self, sql, *args):
         self.rows.append(("execute", sql, args))
 
+    async def fetchval(self, sql, *args):
+        return None
+
 
 class _Acquire:
     def __init__(self, conn):
@@ -204,3 +207,83 @@ def test_migration_334_additive():
     assert "ALTER COLUMN client_id DROP NOT NULL" in sql
     assert "length_days" in sql
     assert "style_json" in sql
+
+
+@pytest.mark.asyncio
+async def test_video_inherits_voice_when_unset(monkeypatch):
+    from app.services.voice_campaign_ingest import store_voice_recording
+
+    monkeypatch.setenv("ENABLE_VOICE_CAMPAIGN", "true")
+    monkeypatch.delenv("ENABLE_COACH_VIDEO_INGEST", raising=False)
+    monkeypatch.setattr(
+        "app.services.voice_campaign_ingest.encrypt_coach_bytes",
+        lambda data: "coach-cipher",
+    )
+    monkeypatch.setattr(
+        "app.services.voice_campaign_ingest._transcribe",
+        AsyncMock(return_value=""),
+    )
+    monkeypatch.setattr(
+        "app.services.voice_campaign_ingest._put_r2",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        "app.services.coach_voice_profile_service.upsert_voice_profile",
+        AsyncMock(return_value={}),
+    )
+    out = await store_voice_recording(
+        _FakePool(),
+        "COACH",
+        "",
+        b"mp4-bytes-here",
+        media_kind="video",
+        content_type="video/mp4",
+    )
+    assert out["media_kind"] == "video"
+    assert out["subject"] == "coach"
+
+
+@pytest.mark.asyncio
+async def test_transcript_only_coach_ingest(monkeypatch):
+    from app.services.voice_campaign_ingest import store_voice_recording
+
+    monkeypatch.setenv("ENABLE_VOICE_CAMPAIGN", "true")
+    monkeypatch.setattr(
+        "app.services.voice_campaign_ingest.encrypt_coach_bytes",
+        lambda data: "coach-cipher",
+    )
+    monkeypatch.setattr(
+        "app.services.voice_campaign_ingest._put_r2",
+        AsyncMock(return_value=False),
+    )
+    upsert = AsyncMock(return_value={"tone": "warm"})
+    monkeypatch.setattr(
+        "app.services.coach_voice_profile_service.upsert_voice_profile",
+        upsert,
+    )
+    text = "I greet guarded clients slowly and I never diagnose in public copy."
+    out = await store_voice_recording(
+        _FakePool(), "COACH", "", b"", transcript=text
+    )
+    assert out["transcribed"] is True
+    assert out["subject"] == "coach"
+    upsert.assert_awaited()
+
+
+def test_style_merge_and_crystal_surface():
+    from app.services.coach_voice_profile_service import merge_style
+
+    merged = merge_style(
+        {"topics": ["A"], "phrases": ["hi"], "version": 1},
+        {"topics": ["B"], "tone": "warm", "assistant_stance": "steady"},
+    )
+    assert "A" in merged["topics"] and "B" in merged["topics"]
+    assert merged["version"] == 2
+    assert merged["source"] == "merged"
+    src = (ROOT / "backend/app/services/coach_voice_profile_service.py").read_text()
+    assert "subject = 'coach'" in src
+    assert 'origin_surface="coach_voice_interview"' in src
+    ingest = (ROOT / "backend/app/services/voice_campaign_ingest.py").read_text()
+    enc = ingest.split("def encrypt_coach_bytes", 1)[1].split("def decrypt_coach_bytes", 1)[0]
+    assert "TokenCipher.get" not in enc
+    assert "_kek().encrypt" in enc

@@ -56,16 +56,35 @@ def _body_hash(text: str) -> str:
     return hashlib.sha256(norm.encode()).hexdigest()
 
 
-def _audience_brief(audience: str) -> str:
+def _audience_brief(audience: str, profile: Optional[Dict[str, Any]] = None) -> str:
+    profile = profile or {}
     if audience == "assistant_coaches":
+        stance = (
+            profile.get("assistant_stance")
+            or profile.get("stance")
+            or "encourage without diagnosing"
+        )
         return (
             "Audience: assistant coaches. Training and encouragement. "
+            f"Coach assistant stance: {stance}. "
             "No client clinical material. No diagnosis."
         )
     return (
         "Audience: clients. Clinical warmth, invitation, steadiness. "
         "No diagnosis. No assistant-coach training language."
     )
+
+
+async def _safe_body(body: str, fallback: str) -> str:
+    try:
+        from app.services.nate_response_validator import NateResponseValidator
+
+        _cleaned, warnings = await NateResponseValidator().validate(body or "", {})
+        if any("hallucination_pattern" in w or "unverified" in w for w in (warnings or [])):
+            return fallback
+    except Exception as exc:
+        logger.warning("campaign copy validator skipped: %s", exc)
+    return body or fallback
 
 
 async def coach_is_master(db_pool, coach_id: str) -> bool:
@@ -90,6 +109,7 @@ async def _ln_day_pieces(
     profile: Dict[str, Any],
     transcript: str,
     prior: List[str],
+    crystal_ctx: str = "",
 ) -> Optional[List[Dict[str, str]]]:
     try:
         from app.services.nate_inference_router import NateInferenceRouter
@@ -103,9 +123,10 @@ async def _ln_day_pieces(
         result = await router.generate(
             prompt=(
                 f"Campaign title: {title}\nDay {day_n} of {length_days}.\n"
-                f"{_audience_brief(audience)}\n"
+                f"{_audience_brief(audience, profile)}\n"
                 f"Coach style JSON: {style}\n"
                 f"Interview excerpt (tone only, do not quote at length):\n{(transcript or '')[:2500]}\n"
+                f"Coach interview crystals:\n{(crystal_ctx or '')[:1500]}\n"
                 f"Already written (do not repeat):\n{prior_block}\n"
                 f"Return JSON array of {len(types)} objects with content_type, title, draft_body, platform. "
                 f"content_type must be one of {list(types)}. Each draft_body unique for this day."
@@ -181,6 +202,7 @@ async def generate_campaign(
 
     profile: Dict[str, Any] = {}
     transcript = ""
+    crystal_ctx = ""
     if pieces is None:
         try:
             from app.services.coach_voice_profile_service import load_profile_and_transcript
@@ -188,6 +210,14 @@ async def generate_campaign(
             profile, transcript = await load_profile_and_transcript(db_pool, coach_id)
         except Exception as exc:
             logger.warning("campaign profile load skipped: %s", exc)
+        try:
+            from app.websocket.crystal_recall_bridge import recall_crystals_for_context
+
+            crystal_ctx = await recall_crystals_for_context(
+                db_pool, coach_id, max_results=4, source="coach_voice_interview"
+            ) or ""
+        except Exception as exc:
+            logger.warning("campaign crystal recall skipped: %s", exc)
 
     content_ids: List[int] = []
     campaign_id = None
@@ -216,7 +246,7 @@ async def generate_campaign(
                 break
             elif profile or transcript:
                 day_pieces = await _ln_day_pieces(
-                    title, d, days, audience, profile, transcript, prior
+                    title, d, days, audience, profile, transcript, prior, crystal_ctx
                 ) or _vary_stub(title, d, transcript, audience)
             else:
                 day_pieces = compose_day_n_pieces(title, d if days > 1 else day_n)
@@ -227,7 +257,12 @@ async def generate_campaign(
                     continue
                 if ctype == "newsletter_issue" and not _flag_on("ENABLE_COACH_NEWSLETTER"):
                     continue
-                body = (p.get("draft_body") or "").strip()
+                stub = _vary_stub(title, d, transcript, audience)
+                stub_body = next(
+                    (s.get("draft_body") or "" for s in stub if s.get("content_type") == ctype),
+                    f"{title} day {d}",
+                )
+                body = await _safe_body((p.get("draft_body") or "").strip(), stub_body)
                 h = _body_hash(body)
                 if h in seen:
                     body = f"{body} (day {d} · {audience})"
@@ -305,12 +340,12 @@ async def list_review_queue(db_pool, coach_id: str, *, limit: int = 50) -> List[
         rows = await conn.fetch(
             """
             SELECT id, title, content_type, status, campaign_id, coach_id, post_urn,
-                   audience, scheduled_at,
+                   audience, scheduled_at, generation_meta,
                    LEFT(draft_body, 2000) AS draft_body,
                    hero_image_prompt, hero_image_url, hero_image_generated_at
             FROM marketing_content
             WHERE coach_id = $1 AND status = $2
-            ORDER BY id DESC
+            ORDER BY scheduled_at ASC NULLS LAST, id DESC
             LIMIT $3
             """,
             coach_id,
@@ -328,12 +363,12 @@ async def list_approved_unpublished(db_pool, coach_id: str, *, limit: int = 50) 
         rows = await conn.fetch(
             """
             SELECT id, title, content_type, status, campaign_id, coach_id, post_urn,
-                   audience, scheduled_at,
+                   audience, scheduled_at, generation_meta,
                    LEFT(draft_body, 2000) AS draft_body,
                    hero_image_prompt, hero_image_url, hero_image_generated_at
             FROM marketing_content
             WHERE coach_id = $1 AND status = 'approved' AND COALESCE(post_urn, '') = ''
-            ORDER BY id DESC
+            ORDER BY scheduled_at ASC NULLS LAST, id DESC
             LIMIT $2
             """,
             coach_id,
@@ -361,7 +396,7 @@ async def set_review_status(
             SET status = $1, updated_at = NOW()
             WHERE id = $2 AND coach_id = $3 AND status = $4
               AND COALESCE(post_urn, '') = ''
-            RETURNING id, status, post_urn
+            RETURNING id, status, post_urn, title, draft_body, audience
             """,
             status,
             int(content_id),
@@ -370,4 +405,17 @@ async def set_review_status(
         )
     if not row:
         return {"ok": False, "reason": "not_in_queue"}
+    if status == "approved":
+        try:
+            from app.services.coach_voice_profile_service import crystallize_approved_draft
+
+            await crystallize_approved_draft(
+                db_pool,
+                coach_id,
+                row.get("title") or "",
+                row.get("draft_body") or "",
+                row.get("audience") or "clients",
+            )
+        except Exception as exc:
+            logger.warning("approved-draft crystallize skipped: %s", exc)
     return {"ok": True, "id": int(row["id"]), "status": row["status"], "published": False}

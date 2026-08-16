@@ -466,7 +466,7 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
           Icons.videocam_outlined,
           [
             const Text(
-              'Coach-owned interview (mp4/mov/webm or audio). Little Nate transcribes and builds a style profile. Not a therapy call. Meet/Drive ingest is off.',
+              'Answer Nate\'s interview questions, paste a transcript, or upload mp4/mov/webm/audio. Little Nate transcribes and builds a style profile. Not a therapy call. Meet/Drive ingest is off.',
               style: TextStyle(color: _muted, fontSize: 12),
             ),
             if (!videoOn)
@@ -877,9 +877,18 @@ class _VoiceIngestState extends State<_VoiceIngest> {
     );
     if (!mounted) return;
     setState(() => _busy = false);
+    String extra = '';
+    if (r.statusCode == 200) {
+      try {
+        final j = json.decode(r.body) as Map<String, dynamic>;
+        if (j['transcribed'] == true) {
+          extra = ' · transcribed';
+        }
+      } catch (_) {}
+    }
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(r.statusCode == 200
-            ? 'Recording stored (not published)'
+            ? 'Recording stored (not published)$extra'
             : 'Ingest failed (${r.statusCode})')));
   }
 
@@ -935,11 +944,87 @@ class _VideoIngest extends StatefulWidget {
 
 class _VideoIngestState extends State<_VideoIngest> {
   bool _busy = false;
+  List<String> _prompts = const [];
+  String _preview = '';
+  final _answers = TextEditingController();
 
   Map<String, String> get _h => {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ${widget.token}',
       };
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPrompts();
+  }
+
+  @override
+  void dispose() {
+    _answers.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadPrompts() async {
+    final r = await http.get(
+      Uri.parse(
+          '${AppConfig.apiBaseUrl}/api/coach/integrations/voice/interview-prompts'),
+      headers: _h,
+    );
+    if (!mounted || r.statusCode != 200) return;
+    final j = json.decode(r.body) as Map<String, dynamic>;
+    setState(() {
+      _prompts = List<String>.from(j['prompts'] ?? const []);
+    });
+  }
+
+  Future<void> _post({
+    List<int>? bytes,
+    String mediaKind = 'audio',
+    String contentType = '',
+    required String transcript,
+  }) async {
+    setState(() => _busy = true);
+    final body = <String, dynamic>{
+      'media_kind': mediaKind,
+      'transcript': transcript,
+    };
+    if (bytes != null && bytes.isNotEmpty) {
+      body['media_b64'] = base64Encode(bytes);
+      body['content_type'] = contentType;
+    }
+    final r = await http.post(
+      Uri.parse('${AppConfig.apiBaseUrl}/api/coach/integrations/voice/recordings'),
+      headers: _h,
+      body: json.encode(body),
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    String preview = '';
+    if (r.statusCode == 200) {
+      try {
+        final j = json.decode(r.body) as Map<String, dynamic>;
+        preview = (j['transcript_preview'] ?? '').toString();
+      } catch (_) {}
+    }
+    setState(() => _preview = preview);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(r.statusCode == 200
+            ? (preview.isEmpty
+                ? 'Interview stored (not published)'
+                : 'Interview stored · transcribed')
+            : 'Ingest failed (${r.statusCode})')));
+  }
+
+  Future<void> _saveAnswers() async {
+    final text = _answers.text.trim();
+    if (text.length < 40) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Write at least 40 characters of answers')));
+      return;
+    }
+    await _post(transcript: text, mediaKind: 'audio');
+  }
 
   Future<void> _pickAndUpload() async {
     final picked = await FilePicker.platform.pickFiles(
@@ -964,11 +1049,13 @@ class _VideoIngestState extends State<_VideoIngest> {
           const SnackBar(content: Text('Video ingest is off')));
       return;
     }
-    final limit = isVideo ? 20 * 1024 * 1024 : 15 * 1024 * 1024;
+    final limit = isVideo ? 40 * 1024 * 1024 : 15 * 1024 * 1024;
     if (bytes.length > limit) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(isVideo ? 'Video over 20 MB' : 'Audio over 15 MB')));
+          content: Text(isVideo
+              ? 'Video over 40 MB — paste transcript instead'
+              : 'Audio over 15 MB')));
       return;
     }
     final ctype = {
@@ -979,32 +1066,64 @@ class _VideoIngestState extends State<_VideoIngest> {
       'mp3': 'audio/mpeg',
       'm4a': 'audio/m4a',
     }[ext] ?? (isVideo ? 'video/mp4' : 'audio/webm');
-    setState(() => _busy = true);
-    final r = await http.post(
-      Uri.parse('${AppConfig.apiBaseUrl}/api/coach/integrations/voice/recordings'),
-      headers: _h,
-      body: json.encode({
-        'media_b64': base64Encode(bytes),
-        'media_kind': isVideo ? 'video' : 'audio',
-        'content_type': ctype,
-      }),
+    await _post(
+      bytes: bytes,
+      mediaKind: isVideo ? 'video' : 'audio',
+      contentType: ctype,
+      transcript: _answers.text.trim(),
     );
-    if (!mounted) return;
-    setState(() => _busy = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(r.statusCode == 200
-            ? 'Interview stored (not published)'
-            : 'Ingest failed (${r.statusCode})')));
   }
 
   @override
   Widget build(BuildContext context) {
-    return ElevatedButton.icon(
-      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962)),
-      onPressed: _busy ? null : _pickAndUpload,
-      icon: const Icon(Icons.upload_file, color: Colors.black, size: 18),
-      label: Text(_busy ? 'Uploading…' : 'Upload interview',
-          style: const TextStyle(color: Colors.black)),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_prompts.isNotEmpty) ...[
+          const Text('NATE INTERVIEW',
+              style: TextStyle(
+                  color: Color(0xFFC9A962), fontSize: 11, letterSpacing: 1)),
+          const SizedBox(height: 6),
+          ..._prompts.asMap().entries.map((e) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text('${e.key + 1}. ${e.value}',
+                    style: const TextStyle(
+                        color: Color(0xFFE8D5A3), fontSize: 12)),
+              )),
+          const SizedBox(height: 8),
+        ],
+        TextField(
+          controller: _answers,
+          maxLines: 6,
+          style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 13),
+          decoration: const InputDecoration(
+            labelText: 'Answers or pasted transcript',
+            labelStyle: TextStyle(color: Color(0xFF8B7355)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962)),
+          onPressed: _busy ? null : _saveAnswers,
+          icon: const Icon(Icons.save_outlined, color: Colors.black, size: 18),
+          label: Text(_busy ? 'Saving…' : 'Save interview answers',
+              style: const TextStyle(color: Colors.black)),
+        ),
+        const SizedBox(height: 8),
+        ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B7355)),
+          onPressed: _busy ? null : _pickAndUpload,
+          icon: const Icon(Icons.upload_file, color: Colors.black, size: 18),
+          label: Text(_busy ? 'Uploading…' : 'Upload interview file',
+              style: const TextStyle(color: Colors.black)),
+        ),
+        if (_preview.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(_preview,
+                style: const TextStyle(color: Color(0xFF8B7355), fontSize: 12)),
+          ),
+      ],
     );
   }
 }
@@ -1448,6 +1567,17 @@ class _CampaignQueueState extends State<_CampaignQueue> {
     );
   }
 
+  String _scheduleLabel(Map<String, dynamic> item) {
+    final meta = item['generation_meta'];
+    String day = '';
+    if (meta is Map && meta['day_n'] != null) {
+      day = ' · day ${meta['day_n']}';
+    }
+    final sched = (item['scheduled_at'] ?? '').toString();
+    if (sched.isEmpty) return day;
+    return '$day · $sched';
+  }
+
   Widget _itemCard(Map<String, dynamic> item, {required bool review}) {
     final id = int.tryParse('${item['id']}') ?? 0;
     return Container(
@@ -1465,7 +1595,8 @@ class _CampaignQueueState extends State<_CampaignQueue> {
               style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 14)),
           Text(
               '${item['content_type'] ?? ''}'
-              '${item['audience'] != null ? ' · ${item['audience']}' : ''}',
+              '${item['audience'] != null ? ' · ${item['audience']}' : ''}'
+              '${_scheduleLabel(item)}',
               style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11)),
           _heroThumb(id, item),
           if ((item['draft_body'] ?? '').toString().isNotEmpty)
