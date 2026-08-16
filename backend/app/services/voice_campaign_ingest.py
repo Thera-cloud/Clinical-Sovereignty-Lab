@@ -74,9 +74,19 @@ async def decrypt_recording_transcript(
     return decrypt_coach_bytes(ciphertext).decode("utf-8", errors="replace")
 
 
+def _stt_url() -> str:
+    url = (os.getenv("COACH_CAMPAIGN_STT_URL") or "").strip()
+    if url:
+        return url
+    base = (os.getenv("CLASSROOM_VOICE_REMOTE_URL") or "").strip().rstrip("/")
+    if base:
+        return f"{base}/transcribe"
+    return ""
+
+
 async def _transcribe_remote(media: bytes, content_type: str) -> str:
     """Optional ORANGE/local Whisper HTTP. Never loads weights on GREEN."""
-    url = (os.getenv("COACH_CAMPAIGN_STT_URL") or "").strip()
+    url = _stt_url()
     if not url or not media:
         return ""
     try:
@@ -234,6 +244,15 @@ async def store_voice_recording(
         except Exception as exc:
             logger.warning("campaign biometrics skipped: %s", exc)
             bios = {}
+        if kind == "video":
+            try:
+                from app.services.coach_voice_biometrics import extract_visual_presence
+
+                visual = extract_visual_presence(blob) or {}
+                if visual:
+                    bios = {**bios, **visual}
+            except Exception as exc:
+                logger.warning("campaign visual presence skipped: %s", exc)
     if text and subject == "coach":
         try:
             from app.services.coach_voice_profile_service import upsert_voice_profile

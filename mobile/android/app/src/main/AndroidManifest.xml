@@ -21,6 +21,7 @@
 
     <!-- Internet for backend communication -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- BLE feature declaration (not required, but informational) -->
     <uses-feature

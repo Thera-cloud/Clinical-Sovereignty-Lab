@@ -6,10 +6,10 @@ class CoachWebRecorder {
   String get contentType => 'audio/webm';
 
   Future<void> start() async {
-    throw UnsupportedError('In-app record is web-only');
+    throw UnsupportedError('In-app record unavailable on this platform');
   }
 
   Future<Uint8List> stop() async {
-    throw UnsupportedError('In-app record is web-only');
+    throw UnsupportedError('In-app record unavailable on this platform');
   }
 }

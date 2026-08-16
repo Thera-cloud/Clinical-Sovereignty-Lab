@@ -15,6 +15,7 @@ Endpoints:
     GET  /health           — quick liveness + capability gate report
     POST /voice-emotion    — main inference endpoint (matches the contract
                              documented in classroom_remote_dispatch.py)
+    POST /transcribe       — multipart file → {text} (faster-whisper; no GREEN load)
 
 Request body for POST /voice-emotion:
     {
@@ -57,7 +58,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 
 
@@ -120,6 +121,37 @@ VoiceEmotionAnalyzer = _mod.VoiceEmotionAnalyzer  # type: ignore[attr-defined]
 
 
 _ANALYZER: Optional[VoiceEmotionAnalyzer] = None
+_WHISPER = None
+
+
+def _have_faster_whisper() -> bool:
+    try:
+        import faster_whisper  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def _get_whisper():
+    """Lazy faster-whisper on ORANGE only. Never import this module on GREEN."""
+    global _WHISPER
+    if _WHISPER is None:
+        from faster_whisper import WhisperModel
+
+        name = os.getenv("ORANGE_WHISPER_MODEL", "base")
+        _WHISPER = WhisperModel(name, device="cpu", compute_type="int8")
+    return _WHISPER
+
+
+def _stt_wav(wav: Path) -> str:
+    try:
+        model = _get_whisper()
+        segs, _info = model.transcribe(str(wav), language="en")
+        return " ".join((s.text or "").strip() for s in segs if s.text).strip()
+    except Exception as exc:
+        print(f"[ORANGE] transcribe failed: {exc}")
+        return ""
 
 
 def _get_analyzer() -> VoiceEmotionAnalyzer:
@@ -321,6 +353,7 @@ async def health() -> Dict[str, Any]:
         "has_transformers": _HAS_TRANSFORMERS,
         "has_torchaudio": _HAS_TORCHAUDIO,
         "has_librosa": _HAS_LIBROSA,
+        "has_stt": _have_faster_whisper(),
         "analyzer_mode": analyzer.mode if analyzer else "uninit",
         "auth_required": bool(_AUTH_TOKEN),
     }
@@ -428,6 +461,34 @@ async def voice_emotion(
                 }
 
         return result
+
+
+@app.post("/transcribe")
+async def transcribe(
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    """Multipart STT for coach campaign ingest. Weights stay on ORANGE."""
+    _check_auth(authorization)
+    if not _have_ffmpeg():
+        raise HTTPException(status_code=503, detail="ffmpeg missing on ORANGE")
+    if not _have_faster_whisper():
+        raise HTTPException(status_code=503, detail="faster-whisper missing on ORANGE")
+    raw = await file.read()
+    if not raw or len(raw) < 100:
+        raise HTTPException(status_code=400, detail="empty audio")
+    with tempfile.TemporaryDirectory(prefix="orange_stt_") as td_str:
+        td = Path(td_str)
+        src = td / "source.bin"
+        wav = td / "audio.wav"
+        src.write_bytes(raw)
+        ok = await asyncio.to_thread(_extract_wav, src, wav)
+        if not ok:
+            raise HTTPException(status_code=500, detail="ffmpeg extract failed")
+        text = await asyncio.to_thread(_stt_wav, wav)
+    if not text:
+        raise HTTPException(status_code=503, detail="stt produced no text")
+    return {"text": text, "transcript": text}
 
 
 if __name__ == "__main__":

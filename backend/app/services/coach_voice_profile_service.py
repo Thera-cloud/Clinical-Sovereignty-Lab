@@ -44,6 +44,9 @@ def heuristic_style(transcript: str) -> Dict[str, Any]:
     }
 
 
+_PRESENCE_RANK = {"voice_biometrics": 3, "visual": 2, "transcript": 1}
+
+
 def merge_style(old: Dict[str, Any], new: Dict[str, Any]) -> Dict[str, Any]:
     def _list(key: str) -> List[str]:
         seen = []
@@ -69,11 +72,28 @@ def merge_style(old: Dict[str, Any], new: Dict[str, Any]) -> Dict[str, Any]:
                 }
         return {}
 
+    new_src = str(new.get("presence_source") or "")
+    old_src = str(old.get("presence_source") or "")
+    keep_old_presence = (
+        _PRESENCE_RANK.get(old_src, 0) > _PRESENCE_RANK.get(new_src, 0)
+        and bool(old.get("presence_style"))
+    )
+    presence_style = (
+        str(old.get("presence_style") or "").strip()
+        if keep_old_presence
+        else _str("presence_style")
+    )
+    presence_source = old_src if keep_old_presence else _str("presence_source")
+    cadence = (
+        str(old.get("cadence") or "measured").strip()
+        if keep_old_presence
+        else _str("cadence", "measured")
+    )
     version = int(old.get("version") or 1) + 1
     bios = _bios()
     return {
         "tone": _str("tone", "direct"),
-        "cadence": _str("cadence", "measured"),
+        "cadence": cadence,
         "topics": _list("topics"),
         "phrases": _list("phrases"),
         "word_patterns": _list("word_patterns"),
@@ -82,8 +102,9 @@ def merge_style(old: Dict[str, Any], new: Dict[str, Any]) -> Dict[str, Any]:
         "body_style": _str("body_style"),
         "climax_style": _str("climax_style"),
         "conclusion_style": _str("conclusion_style"),
-        "presence_style": _str("presence_style"),
-        "presence_source": _str("presence_source"),
+        "presence_style": presence_style,
+        "presence_source": presence_source,
+        "visual_presence": _str("visual_presence"),
         "voice_biometrics": bios,
         "stance": _str("stance"),
         "assistant_stance": _str("assistant_stance", "encourage without diagnosing"),
@@ -163,6 +184,10 @@ async def upsert_voice_profile(
     biometrics: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     incoming = await extract_style_via_ln(transcript) or heuristic_style(transcript)
+    if not incoming.get("presence_style"):
+        from app.services.coach_voice_biometrics import presence_from_transcript
+
+        incoming = merge_style(incoming, presence_from_transcript(transcript))
     if biometrics:
         incoming = merge_style(incoming, biometrics)
         incoming["source"] = incoming.get("source") or "ln"
@@ -253,6 +278,51 @@ async def load_profile_and_transcript(
             subject="coach",
         )
     return profile, transcript
+
+
+async def backfill_presence(db_pool, coach_id: str) -> Dict[str, Any]:
+    """Merge acoustic/transcript presence from the latest coach-self recording."""
+    coach_id = (coach_id or "").strip()
+    profile, transcript = await load_profile_and_transcript(db_pool, coach_id)
+    if (
+        profile.get("presence_source") == "voice_biometrics"
+        and profile.get("presence_style")
+    ):
+        return {
+            "ok": True,
+            "skipped": "already_acoustic",
+            "presence_style": profile.get("presence_style"),
+        }
+    bios: Dict[str, Any] = {}
+    if db_pool:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT audio_ciphertext FROM coach_voice_recordings
+                WHERE coach_id = $1 AND subject = 'coach'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                coach_id,
+            )
+        if row and row.get("audio_ciphertext"):
+            from app.services.voice_campaign_ingest import decrypt_coach_bytes
+            from app.services.coach_voice_biometrics import extract_campaign_biometrics
+
+            blob = decrypt_coach_bytes(row["audio_ciphertext"])
+            if blob and len(blob) >= 512:
+                bios = extract_campaign_biometrics(blob) or {}
+    if not transcript and not bios:
+        return {"ok": False, "reason": "no_source"}
+    filler = "Coach spoken presence captured from a stored interview recording."
+    style = await upsert_voice_profile(
+        db_pool, coach_id, transcript or filler, biometrics=bios or None
+    )
+    return {
+        "ok": True,
+        "presence_style": style.get("presence_style") or "",
+        "presence_source": style.get("presence_source") or "",
+    }
 
 
 async def _maybe_crystallize(db_pool, coach_id: str, transcript: str, style: Dict[str, Any]) -> None:

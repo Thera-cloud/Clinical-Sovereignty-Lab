@@ -161,6 +161,20 @@ def test_style_schema_has_writing_structure():
     assert merged["body_style"]
     assert merged["presence_style"].startswith("slow")
     assert merged["voice_biometrics"]["voice_warmth_index"] == 0.7
+    kept = merge_style(
+        {
+            "presence_style": "slow, warm, leaves space before the next sentence",
+            "presence_source": "voice_biometrics",
+            "cadence": "unhurried",
+        },
+        {
+            "presence_style": "plain spoken, one thought then the next",
+            "presence_source": "transcript",
+            "cadence": "measured",
+        },
+    )
+    assert kept["presence_source"] == "voice_biometrics"
+    assert "space" in kept["presence_style"]
 
 
 def test_wav_pcm_and_presence_mapping():
@@ -172,6 +186,7 @@ def test_wav_pcm_and_presence_mapping():
     from app.services.coach_voice_biometrics import (
         pcm16_from_wav,
         presence_from_metrics,
+        presence_from_transcript,
         style_presence_block,
     )
 
@@ -202,6 +217,15 @@ def test_wav_pcm_and_presence_mapping():
     block = style_presence_block(warm)
     assert "Spoken presence" in block
     assert "biometrics" in block.lower() or "pace" in block.lower()
+    typed = presence_from_transcript(
+        "I greet slowly. I wait. I name the feeling. We stay. The door stays open."
+    )
+    assert typed["presence_source"] == "transcript"
+    assert typed["presence_style"]
+    visual_block = style_presence_block(
+        {**warm, "visual_presence": "steady camera, even light, seated presence"}
+    )
+    assert "On camera" in visual_block
 
 
 def test_api_and_flutter_wire_preview_edit_photo():
@@ -225,6 +249,15 @@ def test_api_and_flutter_wire_preview_edit_photo():
     ingest = (ROOT / "backend/app/services/voice_campaign_ingest.py").read_text()
     assert "extract_campaign_biometrics" in ingest
     assert "COACH_CAMPAIGN_STT_URL" in ingest
+    assert "CLASSROOM_VOICE_REMOTE_URL" in ingest
+    assert "extract_visual_presence" in ingest
+    orange = (ROOT / "backend/scripts/orange/voice_emotion_server.py").read_text()
+    assert '@app.post("/transcribe")' in orange
+    assert "faster_whisper" in orange
+    yaml = (ROOT / "mobile/pubspec.yaml").read_text()
+    assert "record:" in yaml
+    dart = (ROOT / "mobile/lib/services/coach_web_recorder.dart").read_text()
+    assert "coach_web_recorder_io.dart" in dart
     sql = (ROOT / "backend/migrations/333_coach_campaign_item_editor.sql").read_text()
     assert "ADD COLUMN IF NOT EXISTS hero_image_prompt" in sql
     assert "DROP" not in sql.upper()

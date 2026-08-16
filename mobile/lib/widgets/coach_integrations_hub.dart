@@ -426,7 +426,7 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
             Text(
               _hub?['has_voice_presence'] == true
                   ? 'Spoken presence stored — used in Generate and Rewrite'
-                  : 'Spoken presence: record in VIDEO to capture pace and warmth',
+                  : 'Spoken presence: record on VIDEO or VOICE to capture pace and warmth',
               style: const TextStyle(color: _goldDim, fontSize: 12),
             ),
             const SizedBox(height: 12),
@@ -1023,7 +1023,7 @@ class _VoiceIngestState extends State<_VoiceIngest> {
             label: Text(
                 _recording
                     ? 'Stop recording ${_secs}s'
-                    : 'Record in browser',
+                    : 'Record in app',
                 style: const TextStyle(color: Colors.black)),
           ),
           const SizedBox(height: 8),

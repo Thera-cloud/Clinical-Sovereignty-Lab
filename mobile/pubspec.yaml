@@ -43,6 +43,7 @@ dependencies:
   flutter_tts: ^4.0.2
   audioplayers: ^5.2.1
   permission_handler: ^11.3.0
+  record: ^5.2.1
   local_auth: ^2.2.0
   
   # File System

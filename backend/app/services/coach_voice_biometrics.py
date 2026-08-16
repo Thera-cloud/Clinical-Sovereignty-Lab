@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -153,15 +154,140 @@ def extract_campaign_biometrics(media: bytes, content_type: str = "") -> Dict[st
         return {}
 
 
+def presence_from_transcript(text: str) -> Dict[str, Any]:
+    """Typed/STT fallback when audio is too short for acoustics. Not a clone."""
+    body = (text or "").strip()
+    if len(body) < 40:
+        return {}
+    sentences = [s.strip() for s in re.split(r"[.!?]+", body) if s.strip()]
+    words = re.findall(r"[A-Za-z']+", body)
+    avg = len(words) / max(len(sentences), 1)
+    pauses = (
+        body.count("...")
+        + body.count("—")
+        + body.count(" -- ")
+        + len(re.findall(r"\bum+\b", body, re.I))
+    )
+    if avg <= 10 or pauses >= 3:
+        presence = "short sentences, leaves air, speaks in pieces"
+        cadence = "unhurried"
+    elif avg >= 22:
+        presence = "long, unfolding sentences, few hard stops"
+        cadence = "measured"
+    else:
+        presence = "plain spoken, one thought then the next"
+        cadence = "measured"
+    return {
+        "presence_style": presence,
+        "cadence": cadence,
+        "presence_source": "transcript",
+    }
+
+
+def extract_visual_presence(media: bytes) -> Dict[str, Any]:
+    """ffmpeg frame luma/motion — no ML, no BLUE visual server."""
+    if not media or len(media) < 2000 or not shutil.which("ffmpeg"):
+        return {}
+    src = None
+    td = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as tmp:
+            tmp.write(media)
+            src = tmp.name
+        td = tempfile.mkdtemp(prefix="vis_")
+        dest = os.path.join(td, "frames.rgb")
+        proc = subprocess.run(
+            [
+                "ffmpeg",
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                src,
+                "-vf",
+                "fps=1,scale=64:64",
+                "-frames:v",
+                "8",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgb24",
+                dest,
+            ],
+            capture_output=True,
+            timeout=20,
+            check=False,
+        )
+        if proc.returncode != 0 or not os.path.isfile(dest):
+            return {}
+        with open(dest, "rb") as fh:
+            raw = fh.read()
+        frame = 64 * 64 * 3
+        if len(raw) < frame:
+            return {}
+        n = len(raw) // frame
+        lumas = []
+        for i in range(n):
+            chunk = raw[i * frame : (i + 1) * frame]
+            total = 0.0
+            pixels = 0
+            for j in range(0, len(chunk) - 2, 3):
+                total += 0.2126 * chunk[j] + 0.7152 * chunk[j + 1] + 0.0722 * chunk[j + 2]
+                pixels += 1
+            lumas.append((total / max(pixels, 1)) / 255.0)
+        motion = 0.0
+        if n >= 2:
+            diffs = []
+            for i in range(1, n):
+                a = raw[(i - 1) * frame : i * frame]
+                b = raw[i * frame : (i + 1) * frame]
+                acc = 0
+                samples = 0
+                for k in range(0, frame, 12):
+                    acc += abs(a[k] - b[k])
+                    samples += 1
+                diffs.append((acc / max(samples, 1)) / 255.0)
+            motion = sum(diffs) / len(diffs)
+        mean_luma = sum(lumas) / len(lumas)
+        if motion < 0.04 and mean_luma < 0.25:
+            visual = "still, low light, close and contained"
+        elif motion >= 0.12:
+            visual = "moves while speaking, more energy in the frame"
+        else:
+            visual = "steady camera, even light, seated presence"
+        return {
+            "visual_presence": visual,
+            "visual_metrics": {
+                "luma": round(mean_luma, 3),
+                "motion": round(motion, 3),
+            },
+        }
+    except Exception as exc:
+        logger.warning("visual presence skipped: %s", exc)
+        return {}
+    finally:
+        if src:
+            try:
+                os.unlink(src)
+            except OSError:
+                pass
+        if td:
+            shutil.rmtree(td, ignore_errors=True)
+
+
 def style_presence_block(profile: Optional[Dict[str, Any]]) -> str:
     profile = profile or {}
     presence = str(profile.get("presence_style") or "").strip()
+    visual = str(profile.get("visual_presence") or "").strip()
     bios = profile.get("voice_biometrics") or {}
-    if not presence and not bios:
+    if not presence and not bios and not visual:
         return ""
     bits = []
     if presence:
         bits.append(f"Spoken presence: {presence}.")
+    if visual:
+        bits.append(f"On camera: {visual}.")
     if isinstance(bios, dict) and bios:
         bits.append(
             "Acoustic (do not invent numbers in copy; match the feel): "
