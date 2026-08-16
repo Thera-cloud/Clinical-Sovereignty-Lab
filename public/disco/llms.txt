@@ -1,0 +1,25 @@
+# Sovereign Sanctuary
+
+> Sovereign Sanctuary pairs Little Nate — an AI companion that remembers your
+> history and supports you 24/7 — with certified and licensed human
+> professionals, verified before they ever work with a client. Coverage for you
+> and your partner costs about $5 a day.
+
+## Identity
+- Organization: Sovereign Sanctuary
+- Domain: https://www.sovereignsanctuary.net
+- Founder: Nathaniel Nevedal
+- Public surfaces: coach directory, knowledge articles, product and safety pages
+
+## Directory
+- Coach directory: https://www.sovereignsanctuary.net/coaches
+- Product overview: https://www.sovereignsanctuary.net/product
+- Pricing and family plan: https://www.sovereignsanctuary.net/pricing
+- Clinical safety model: https://www.sovereignsanctuary.net/safety
+
+## Principles
+1. Verification — every listed professional holds credentials verified before activation and maintained in real time.
+2. Privacy — no client data, session content, or personal health information appears on any public surface.
+3. Scope of practice — clinical treatment language applies only to licensed professionals within their lawful jurisdictions; coaching language applies to certified coaches.
+
+<!-- ACTIVATE WHEN T5.1/T5.2 PASS (do not advertise before live) -->

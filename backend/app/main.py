@@ -3094,6 +3094,17 @@ async def lifespan(app: FastAPI):
     except Exception as gcsa_err:
         print(f"   ⚠️  GoogleCalendarSyncAgent init failed: {gcsa_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — GEO DiscoEngine (all DISCO_* flags default OFF)
+    _disco_engine = None
+    try:
+        from app.services.disco import DiscoEngine
+        _disco_engine = DiscoEngine(db_pool=db_pool, app_state=app.state)
+        await _disco_engine.start()
+        app.state.disco_engine = _disco_engine
+        print("   ✅ DiscoEngine started (GEO flags default OFF)")
+    except Exception as _disco_err:
+        print(f"   ⚠️  DiscoEngine init failed: {_disco_err}")
+
     # ── QuickBooks Auditor — 3x daily 10-check trust scorecard ──
     _qb_auditor = None
     try:
@@ -3753,6 +3764,7 @@ async def lifespan(app: FastAPI):
         ("signup_sharing_agent", _signup_sharing_agent is not None),
         ("quickbooks_sync_agent", _qb_sync_agent is not None),
         ("google_calendar_sync_agent", _google_calendar_sync_agent is not None),
+        ("disco_engine", _disco_engine is not None),  # QUANTUM-CRYSTAL-ARCH
         ("quickbooks_auditor", _qb_auditor is not None),
         ("corporate_command_auditor", _corp_auditor is not None),
         ("hot_memory", getattr(app.state, "hot_memory", None) is not None),
@@ -4381,6 +4393,7 @@ async def lifespan(app: FastAPI):
     for _agent_name, _agent_var in [
         ("QuickBooksSyncAgent", _qb_sync_agent),
         ("GoogleCalendarSyncAgent", _google_calendar_sync_agent),
+        ("DiscoEngine", _disco_engine),  # QUANTUM-CRYSTAL-ARCH
         ("QuickBooksAuditor", _qb_auditor),
         ("CorporateCommandAuditor", _corp_auditor),
     ]:
@@ -4808,6 +4821,14 @@ try:
     app.include_router(google_ws_oauth_router)
 except Exception as _gws_err:
     print(f"   ⚠️  Google Workspace router failed: {_gws_err}")
+
+# QUANTUM-CRYSTAL-ARCH — GEO public + coach disco (flags default OFF)
+try:
+    from app.routers.disco_api import router as disco_router, public_router as disco_public_router
+    app.include_router(disco_public_router)
+    app.include_router(disco_router)
+except Exception as _disco_r_err:
+    print(f"   ⚠️  Disco router failed: {_disco_r_err}")
 
 # Studio HMAC hooks (ENABLE_STUDIO_WEBHOOKS default off)  # QUANTUM-CRYSTAL-ARCH
 try:

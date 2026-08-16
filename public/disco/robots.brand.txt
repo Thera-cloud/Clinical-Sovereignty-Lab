@@ -1,0 +1,30 @@
+# Sovereign Sanctuary — public crawler policy
+# AI discovery crawlers allowed on public surfaces; authenticated + client surfaces blocked.
+
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: GPTBot
+User-agent: PerplexityBot
+User-agent: ClaudeBot
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+Allow: /coaches/
+Allow: /articles/
+Allow: /hubs/
+Allow: /product/
+Allow: /about
+Allow: /pricing
+Allow: /safety
+Allow: /api/v1/public/
+Disallow: /api/
+Disallow: /admin/
+Disallow: /coach-command/
+
+User-agent: *
+Allow: /
+Allow: /api/v1/public/
+Disallow: /api/
+Disallow: /admin/
+Disallow: /coach-command/
+
+Sitemap: https://www.sovereignsanctuary.net/sitemap.xml
