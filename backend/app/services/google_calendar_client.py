@@ -26,6 +26,7 @@ import logging
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -137,6 +138,29 @@ async def list_calendars(access_token: str) -> List[Dict[str, Any]]:
             return data.get("items", [])
 
 
+def rfc3339_wall_clock(iso: str, timezone_str: str = "America/New_York") -> Dict[str, str]:
+    """Google rejects dateTime offsets that disagree with timeZone (UTC + NY = 400)."""
+    raw = str(iso or "").strip()
+    if not raw:
+        raise ValueError("empty datetime")
+    if "T" not in raw and " " in raw:
+        raw = raw.replace(" ", "T", 1)
+    if raw.endswith("+00"):
+        raw += ":00"
+    raw = raw.replace("Z", "+00:00")
+    dt = datetime.fromisoformat(raw)
+    tz_name = (timezone_str or "").strip() or "America/New_York"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz_name = "America/New_York"
+        tz = ZoneInfo(tz_name)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=tz)
+    local = dt.astimezone(tz).replace(tzinfo=None)
+    return {"dateTime": local.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": tz_name}
+
+
 def _build_event_payload(*, summary: str, description: str,
                          start_iso: str, end_iso: str,
                          timezone_str: str = "America/New_York",
@@ -148,8 +172,8 @@ def _build_event_payload(*, summary: str, description: str,
     payload: Dict[str, Any] = {
         "summary": summary,
         "description": description or "",
-        "start": {"dateTime": start_iso, "timeZone": timezone_str},
-        "end": {"dateTime": end_iso, "timeZone": timezone_str},
+        "start": rfc3339_wall_clock(start_iso, timezone_str),
+        "end": rfc3339_wall_clock(end_iso, timezone_str),
     }
     if location:
         payload["location"] = location
@@ -199,7 +223,12 @@ async def create_event(access_token: str, calendar_id: str,
         ) as resp:
             body = await resp.text()
             if resp.status not in (200, 201):
-                logger.warning("Google create_event failed: %d %s", resp.status, body[:200])
+                logger.warning("Google create_event failed: %d %s", resp.status, body[:800])
+                if payload.get("conferenceData"):
+                    stripped = {k: v for k, v in payload.items() if k != "conferenceData"}
+                    return await create_event(
+                        access_token, calendar_id, stripped, send_updates=send_updates,
+                    )
                 return None
             return json.loads(body)
 
@@ -337,4 +366,5 @@ __all__ = [
     "list_events_incremental",
     "freebusy",
     "_build_event_payload",
+    "rfc3339_wall_clock",
 ]

@@ -25,6 +25,34 @@ _SESSION = {
 }
 
 
+def test_utc_offset_converts_to_ny_wall_clock():
+    from app.services.google_calendar_client import _build_event_payload
+
+    payload = _build_event_payload(
+        summary="S",
+        description="",
+        start_iso="2026-08-25T11:00:00+00:00",
+        end_iso="2026-08-25T12:00:00+00:00",
+        timezone_str="America/New_York",
+    )
+    assert payload["start"] == {"dateTime": "2026-08-25T07:00:00", "timeZone": "America/New_York"}
+    assert payload["end"] == {"dateTime": "2026-08-25T08:00:00", "timeZone": "America/New_York"}
+
+
+def test_pg_space_timestamp_converts_to_ny_wall_clock():
+    from app.services.google_calendar_client import _build_event_payload
+
+    payload = _build_event_payload(
+        summary="S",
+        description="",
+        start_iso="2026-08-25 11:00:00+00:00",
+        end_iso="2026-08-25 12:00:00+00:00",
+        timezone_str="America/New_York",
+    )
+    assert payload["start"]["dateTime"] == "2026-08-25T07:00:00"
+    assert payload["end"]["dateTime"] == "2026-08-25T08:00:00"
+
+
 def test_event_url_sets_conference_data_version():
     url = _event_url("primary", "evt1", conference_data=True)
     assert "conferenceDataVersion=1" in url
