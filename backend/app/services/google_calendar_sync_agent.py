@@ -2,8 +2,10 @@
 connected users (coaches and clients). Pushes happen inline at booking time.
 
 Cycle (every POLL_INTERVAL_SECONDS):
-  1. Query google_calendar_connection WHERE sync_enabled = true.
-  2. For each user, refresh access token if needed.
+  1. Query google_calendar_connection WHERE sync_enabled = true,
+     then google_workspace_connection (revoked_at IS NULL) for users
+     not already covered by an enabled 183 row.
+  2. For each user, refresh access token if needed (183 vs GOOGLE_WS_*).
   3. Incremental list events using stored sync_token (or bounded full sync).
   4. Reconcile with coaching_sessions:
        - Mirror Sanctuary events (extendedProperties.private.sanctuary_session_id)
@@ -46,8 +48,59 @@ import os
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_WS_CLIENT_ID = os.getenv("GOOGLE_WS_CLIENT_ID", "")
+GOOGLE_WS_CLIENT_SECRET = os.getenv("GOOGLE_WS_CLIENT_SECRET", "")
+
+_ALLOWED_TOKEN_TABLES = frozenset({
+    "google_calendar_connection",
+    "google_workspace_connection",
+})
 
 _cipher = TokenCipher.get()
+
+
+def merge_pull_sources(
+    calendar_rows: List[Dict[str, Any]],
+    workspace_rows: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """183 first; Workspace-only coaches fill gaps. Never mix refresh tokens."""
+    seen = set()
+    out: List[Dict[str, Any]] = []
+    for r in calendar_rows:
+        d = dict(r)
+        uid = d.get("user_id")
+        if not uid:
+            continue
+        d["_token_table"] = "google_calendar_connection"
+        d["token_app"] = d.get("token_app") or "calendar_183"
+        seen.add(uid)
+        out.append(d)
+    for r in workspace_rows:
+        d = dict(r)
+        uid = d.get("user_id")
+        if not uid or uid in seen:
+            continue
+        d["_token_table"] = "google_workspace_connection"
+        d["token_app"] = d.get("token_app") or "workspace_ws"
+        if not d.get("target_calendar_id"):
+            d["target_calendar_id"] = "primary"
+        out.append(d)
+    return out
+
+
+def _oauth_creds_for(row: Dict[str, Any]) -> tuple:
+    if (row.get("token_app") or "") == "workspace_ws":
+        return GOOGLE_WS_CLIENT_ID, GOOGLE_WS_CLIENT_SECRET
+    return GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+
+
+def _token_table(row: Dict[str, Any]) -> str:
+    table = row.get("_token_table") or (
+        "google_workspace_connection"
+        if (row.get("token_app") or "") == "workspace_ws"
+        else "google_calendar_connection"
+    )
+    return table if table in _ALLOWED_TOKEN_TABLES else "google_calendar_connection"
 
 
 class GoogleCalendarSyncAgent:
@@ -66,8 +119,12 @@ class GoogleCalendarSyncAgent:
         if not self._pool:
             logger.warning("GoogleCalendarSyncAgent: no db_pool, skipping start")
             return
-        if not (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET):
-            logger.warning("GoogleCalendarSyncAgent: GOOGLE_CLIENT_ID/SECRET not set — agent inactive")
+        has_183 = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+        has_ws = bool(GOOGLE_WS_CLIENT_ID and GOOGLE_WS_CLIENT_SECRET)
+        if not (has_183 or has_ws):
+            logger.warning(
+                "GoogleCalendarSyncAgent: no GOOGLE_* or GOOGLE_WS_* credentials — agent inactive"
+            )
             return
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
@@ -121,25 +178,63 @@ class GoogleCalendarSyncAgent:
             return {"status": "error", "error": "no db_pool"}
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM google_calendar_connection "
+                "SELECT user_id, user_role, access_token, refresh_token, token_expiry, "
+                "       target_calendar_id, sync_token, error_count, "
+                "       COALESCE(token_app, 'calendar_183') AS token_app "
+                "FROM google_calendar_connection "
                 "WHERE user_id = $1 AND sync_enabled = true",
                 user_id,
             )
-        if not row:
+            if row:
+                d = dict(row)
+                d["_token_table"] = "google_calendar_connection"
+                return await self._pull_user_row(d)
+            ws = await conn.fetchrow(
+                """
+                SELECT user_id, user_role, access_token, refresh_token, token_expiry,
+                       COALESCE(target_calendar_id, 'primary') AS target_calendar_id,
+                       sync_token, error_count,
+                       COALESCE(token_app, 'workspace_ws') AS token_app
+                FROM google_workspace_connection
+                WHERE (user_id = $1 OR hardware_id = $1)
+                  AND revoked_at IS NULL
+                LIMIT 1
+                """,
+                user_id,
+            )
+        if not ws:
             return {"status": "skipped", "reason": "not connected or sync disabled"}
-        return await self._pull_user_row(dict(row))
+        d = dict(ws)
+        d["_token_table"] = "google_workspace_connection"
+        return await self._pull_user_row(d)
 
     # ── Internals ───────────────────────────────────────────────────────
     async def _list_active_users(self) -> List[Dict[str, Any]]:
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
+            cal = await conn.fetch(
                 "SELECT user_id, user_role, access_token, refresh_token, token_expiry, "
-                "       target_calendar_id, sync_token, error_count "
+                "       target_calendar_id, sync_token, error_count, "
+                "       COALESCE(token_app, 'calendar_183') AS token_app "
                 "FROM google_calendar_connection "
                 "WHERE sync_enabled = true AND error_count < $1",
                 MAX_ERROR_COUNT,
             )
-        return [dict(r) for r in rows]
+            try:
+                ws = await conn.fetch(
+                    """
+                    SELECT user_id, user_role, access_token, refresh_token, token_expiry,
+                           COALESCE(target_calendar_id, 'primary') AS target_calendar_id,
+                           sync_token, error_count,
+                           COALESCE(token_app, 'workspace_ws') AS token_app
+                    FROM google_workspace_connection
+                    WHERE revoked_at IS NULL AND error_count < $1
+                    """,
+                    MAX_ERROR_COUNT,
+                )
+            except Exception as e:
+                logger.warning("GoogleCalendarSyncAgent: workspace list skipped: %s", e)
+                ws = []
+        return merge_pull_sources([dict(r) for r in cal], [dict(r) for r in ws])
 
     async def _ensure_valid_token(self, row: Dict[str, Any]) -> Optional[str]:
         expiry = row.get("token_expiry")
@@ -149,18 +244,23 @@ class GoogleCalendarSyncAgent:
                 return _cipher.decrypt(row["access_token"])
             except Exception:
                 return None
+        cid, csec = _oauth_creds_for(row)
+        if not (cid and csec):
+            await self._record_error(row["user_id"], "oauth client missing for token_app", row)
+            return None
         try:
             refresh = _cipher.decrypt(row["refresh_token"])
-            tokens = await gcc.refresh_access_token(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, refresh)
+            tokens = await gcc.refresh_access_token(cid, csec, refresh)
         except Exception as e:
-            await self._record_error(row["user_id"], f"refresh failed: {e}")
+            await self._record_error(row["user_id"], f"refresh failed: {e}", row)
             return None
         new_access = tokens.get("access_token")
         new_expiry = now + timedelta(seconds=int(tokens.get("expires_in") or 3600))
         enc = _cipher.encrypt(new_access)
+        table = _token_table(row)
         async with self._pool.acquire() as conn:
             await conn.execute(
-                "UPDATE google_calendar_connection SET access_token = $1, "
+                f"UPDATE {table} SET access_token = $1, "
                 "token_expiry = $2, error_message = NULL, error_count = 0, updated_at = NOW() "
                 "WHERE user_id = $3",
                 enc, new_expiry, row["user_id"],
@@ -178,11 +278,12 @@ class GoogleCalendarSyncAgent:
         events, next_token = await gcc.list_events_incremental(
             access_token, calendar_id, sync_token=sync_token,
         )
+        table = _token_table(row)
         if next_token is None and sync_token is not None:
             # 410 — sync token invalidated; try a bounded full resync next cycle
             async with self._pool.acquire() as conn:
                 await conn.execute(
-                    "UPDATE google_calendar_connection SET sync_token = NULL, "
+                    f"UPDATE {table} SET sync_token = NULL, "
                     "updated_at = NOW() WHERE user_id = $1",
                     user_id,
                 )
@@ -215,7 +316,7 @@ class GoogleCalendarSyncAgent:
 
         async with self._pool.acquire() as conn:
             await conn.execute(
-                "UPDATE google_calendar_connection SET sync_token = $1, "
+                f"UPDATE {table} SET sync_token = $1, "
                 "last_sync_at = NOW(), error_message = NULL, error_count = 0, "
                 "updated_at = NOW() WHERE user_id = $2",
                 next_token, user_id,
@@ -317,11 +418,12 @@ class GoogleCalendarSyncAgent:
         except Exception as e:
             logger.warning("persist_external_busy failed for %s: %s", user_id, e)
 
-    async def _record_error(self, user_id: str, message: str):
+    async def _record_error(self, user_id: str, message: str, row: Optional[Dict[str, Any]] = None):
+        table = _token_table(row or {})
         try:
             async with self._pool.acquire() as conn:
                 await conn.execute(
-                    "UPDATE google_calendar_connection SET error_message = $1, "
+                    f"UPDATE {table} SET error_message = $1, "
                     "error_count = error_count + 1, updated_at = NOW() "
                     "WHERE user_id = $2",
                     message[:500], user_id,
@@ -347,4 +449,4 @@ class GoogleCalendarSyncAgent:
             pass
 
 
-__all__ = ["GoogleCalendarSyncAgent"]
+__all__ = ["GoogleCalendarSyncAgent", "merge_pull_sources"]

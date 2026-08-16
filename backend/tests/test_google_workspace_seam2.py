@@ -15,6 +15,7 @@ from app.services.google_calendar_session_sync import (
     is_pending_google_hold,
     sync_session_to_google,
 )
+from app.services.google_calendar_sync_agent import merge_pull_sources
 
 _TZ = ZoneInfo("America/New_York")
 _BUSY_START = datetime(2027, 6, 14, 10, 0, tzinfo=_TZ)
@@ -212,3 +213,24 @@ async def test_freebusy_masks_ln_slots_without_registry_loader():
     assert not any("T10:00" in s for s in starts)
     assert any("T09:00" in s for s in starts)
     assert any("T11:00" in s for s in starts)
+
+
+def test_merge_pull_prefers_183_skips_duplicate_workspace():
+    merged = merge_pull_sources(
+        [{"user_id": "CoachN", "token_app": "calendar_183"}],
+        [{"user_id": "CoachN", "token_app": "workspace_ws"}],
+    )
+    assert len(merged) == 1
+    assert merged[0]["_token_table"] == "google_calendar_connection"
+    assert merged[0]["token_app"] == "calendar_183"
+
+
+def test_merge_pull_includes_workspace_only_coach():
+    merged = merge_pull_sources(
+        [{"user_id": "CoachN", "token_app": "calendar_183"}],
+        [{"user_id": "CoachX", "token_app": "workspace_ws"}],
+    )
+    by = {r["user_id"]: r for r in merged}
+    assert by["CoachN"]["_token_table"] == "google_calendar_connection"
+    assert by["CoachX"]["_token_table"] == "google_workspace_connection"
+    assert by["CoachX"]["target_calendar_id"] == "primary"
