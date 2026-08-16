@@ -38,6 +38,8 @@ logger = logging.getLogger("google_calendar_session_sync")
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_WS_CLIENT_ID = os.getenv("GOOGLE_WS_CLIENT_ID", "")
+GOOGLE_WS_CLIENT_SECRET = os.getenv("GOOGLE_WS_CLIENT_SECRET", "")
 
 _cipher = TokenCipher.get()
 
@@ -82,18 +84,45 @@ async def _client_vault_sync(pool, client_id: str) -> bool:
 
 
 async def _get_connection(pool, user_id: str) -> Optional[Dict[str, Any]]:
+    """183 calendar row first; Workspace tokens if that row is missing or off."""
     if not pool or not user_id:
         return None
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT user_id, access_token, refresh_token, token_expiry, "
-            "       target_calendar_id, sync_enabled "
+            "       target_calendar_id, sync_enabled, "
+            "       COALESCE(token_app, 'calendar_183') AS token_app "
             "FROM google_calendar_connection WHERE user_id = $1",
             user_id,
         )
-    if not row or not row["sync_enabled"]:
+        if row and row["sync_enabled"]:
+            d = dict(row)
+            d["_token_table"] = "google_calendar_connection"
+            return d
+        ws = await conn.fetchrow(
+            """
+            SELECT user_id, access_token, refresh_token, token_expiry,
+                   'primary'::varchar AS target_calendar_id,
+                   true AS sync_enabled,
+                   COALESCE(token_app, 'workspace_ws') AS token_app
+            FROM google_workspace_connection
+            WHERE (user_id = $1 OR hardware_id = $1)
+              AND revoked_at IS NULL
+            LIMIT 1
+            """,
+            user_id,
+        )
+    if not ws:
         return None
-    return dict(row)
+    d = dict(ws)
+    d["_token_table"] = "google_workspace_connection"
+    return d
+
+
+def _oauth_client_for(conn_row: Dict[str, Any]) -> tuple:
+    if (conn_row.get("token_app") or "") == "workspace_ws":
+        return GOOGLE_WS_CLIENT_ID, GOOGLE_WS_CLIENT_SECRET
+    return GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
 
 
 async def _ensure_token(pool, conn_row: Dict[str, Any]) -> Optional[str]:
@@ -104,11 +133,19 @@ async def _ensure_token(pool, conn_row: Dict[str, Any]) -> Optional[str]:
             return _cipher.decrypt(conn_row["access_token"])
         except Exception:
             return None
-    if not (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET):
+    cid, csec = _oauth_client_for(conn_row)
+    if not (cid and csec):
+        return None
+    table = conn_row.get("_token_table") or (
+        "google_workspace_connection"
+        if (conn_row.get("token_app") or "") == "workspace_ws"
+        else "google_calendar_connection"
+    )
+    if table not in ("google_calendar_connection", "google_workspace_connection"):
         return None
     try:
         refresh = _cipher.decrypt(conn_row["refresh_token"])
-        tokens = await gcc.refresh_access_token(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, refresh)
+        tokens = await gcc.refresh_access_token(cid, csec, refresh)
     except Exception as e:
         logger.warning("token refresh failed for %s: %s", conn_row["user_id"], e)
         return None
@@ -117,7 +154,7 @@ async def _ensure_token(pool, conn_row: Dict[str, Any]) -> Optional[str]:
     enc = _cipher.encrypt(new_access)
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE google_calendar_connection SET access_token = $1, "
+            f"UPDATE {table} SET access_token = $1, "
             "token_expiry = $2, error_message = NULL, error_count = 0, updated_at = NOW() "
             "WHERE user_id = $3",
             enc, new_expiry, conn_row["user_id"],
@@ -417,7 +454,7 @@ async def _hardware_id_to_username(pool, hardware_id: str) -> Optional[str]:
     try:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT username FROM users WHERE hardware_id = $1 LIMIT 1",
+                "SELECT username FROM users WHERE hardware_id = $1 OR username = $1 LIMIT 1",
                 hardware_id,
             )
         username = row["username"] if row else None

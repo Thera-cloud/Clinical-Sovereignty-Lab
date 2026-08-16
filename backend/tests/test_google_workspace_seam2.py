@@ -8,6 +8,10 @@ import pytest
 
 from app.services.coach_slot_engine import compute_available_slots
 from app.services.google_calendar_session_sync import (
+    _HW_TO_USERNAME_CACHE,
+    _get_connection,
+    _hardware_id_to_username,
+    _oauth_client_for,
     is_pending_google_hold,
     sync_session_to_google,
 )
@@ -95,6 +99,87 @@ async def test_pending_update_skips_google_connection():
         )
     assert out["reason"] == "pending_no_google_hold"
     get_conn.assert_not_awaited()
+
+
+class _FetchPool:
+    def __init__(self, handler):
+        self._handler = handler
+
+    def acquire(self):
+        return _Acquire(_FetchConn(self._handler))
+
+
+class _FetchConn:
+    def __init__(self, handler):
+        self._handler = handler
+
+    async def fetchrow(self, sql, *args):
+        return self._handler(sql, *args)
+
+
+@pytest.mark.asyncio
+async def test_get_connection_falls_back_to_workspace():
+    def handler(sql, *args):
+        if "google_calendar_connection" in sql:
+            return None
+        if "google_workspace_connection" in sql:
+            return {
+                "user_id": "CoachX",
+                "access_token": "enc",
+                "refresh_token": "encr",
+                "token_expiry": None,
+                "target_calendar_id": "primary",
+                "sync_enabled": True,
+                "token_app": "workspace_ws",
+            }
+        return None
+
+    row = await _get_connection(_FetchPool(handler), "CoachX")
+    assert row["token_app"] == "workspace_ws"
+    assert row["_token_table"] == "google_workspace_connection"
+
+
+@pytest.mark.asyncio
+async def test_get_connection_prefers_enabled_183():
+    def handler(sql, *args):
+        if "google_calendar_connection" in sql:
+            return {
+                "user_id": "CoachN",
+                "access_token": "a",
+                "refresh_token": "b",
+                "token_expiry": None,
+                "target_calendar_id": "primary",
+                "sync_enabled": True,
+                "token_app": "calendar_183",
+            }
+        raise AssertionError("workspace lookup should not run when 183 is enabled")
+
+    row = await _get_connection(_FetchPool(handler), "CoachN")
+    assert row["token_app"] == "calendar_183"
+    assert row["_token_table"] == "google_calendar_connection"
+
+
+def test_oauth_client_splits_183_and_workspace(monkeypatch):
+    import app.services.google_calendar_session_sync as gcss
+
+    monkeypatch.setattr(gcss, "GOOGLE_CLIENT_ID", "cal-id")
+    monkeypatch.setattr(gcss, "GOOGLE_CLIENT_SECRET", "cal-sec")
+    monkeypatch.setattr(gcss, "GOOGLE_WS_CLIENT_ID", "ws-id")
+    monkeypatch.setattr(gcss, "GOOGLE_WS_CLIENT_SECRET", "ws-sec")
+    assert _oauth_client_for({"token_app": "calendar_183"}) == ("cal-id", "cal-sec")
+    assert _oauth_client_for({"token_app": "workspace_ws"}) == ("ws-id", "ws-sec")
+
+
+@pytest.mark.asyncio
+async def test_username_or_hardware_id_resolves():
+    _HW_TO_USERNAME_CACHE.clear()
+
+    def handler(sql, *args):
+        assert "username = $1" in sql
+        assert args[0] == "CoachN"
+        return {"username": "CoachN"}
+
+    assert await _hardware_id_to_username(_FetchPool(handler), "CoachN") == "CoachN"
 
 
 @pytest.mark.asyncio
