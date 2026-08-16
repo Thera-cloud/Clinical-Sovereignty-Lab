@@ -128,11 +128,53 @@ async def lookup_user_contact(db_pool, hw_or_username: str) -> Dict[str, str]:
 # EMAILS
 # =============================================================================
 
-async def send_pending_booking_email(db_pool, session: Dict) -> bool:
-    """Email the coach an approve/decline request for a pending booking.
+def session_duration_minutes(session: Dict) -> int:
+    raw = session.get("duration_minutes")
+    try:
+        n = int(raw)
+        if n > 0:
+            return n
+    except (TypeError, ValueError):
+        pass
+    try:
+        st = datetime.fromisoformat(str(session.get("scheduled_start") or "").replace("Z", "+00:00"))
+        en = datetime.fromisoformat(str(session.get("scheduled_end") or "").replace("Z", "+00:00"))
+        if en > st:
+            return max(5, int((en - st).total_seconds() / 60))
+    except Exception:
+        pass
+    return 50
 
-    Always sent. Coach decides; negotiation notify is additive, not a substitute.
-    """
+
+async def notify_coach_of_pending(
+    db_pool,
+    session: Dict,
+    *,
+    connected_clients=None,
+    connected_coaches=None,
+) -> bool:
+    """One coach email per request: Nate negotiation if flagged, else legacy approve/decline."""
+    if not db_pool or str(session.get("status", "")).lower() != "pending_approval":
+        return False
+    try:
+        from app.services.session_negotiation_service import negotiation_enabled
+        if negotiation_enabled():
+            from app.services.session_negotiation_bridge import after_pending_booking
+            await after_pending_booking(
+                db_pool,
+                session,
+                connected_clients=connected_clients or {},
+                connected_coaches=connected_coaches or {},
+            )
+            return True
+        return await send_pending_booking_email(db_pool, session)
+    except Exception as e:
+        logger.warning("session_approval: notify_coach_of_pending failed: %s", e)
+        return False
+
+
+async def send_pending_booking_email(db_pool, session: Dict) -> bool:
+    """Email the coach an approve/decline request for a pending booking."""
     try:
         coach = await lookup_user_contact(db_pool, session.get("coach_id", ""))
         if not coach.get("email"):
@@ -147,7 +189,7 @@ async def send_pending_booking_email(db_pool, session: Dict) -> bool:
             context={
                 "client_name": session.get("client_name") or session.get("client_id", "Client"),
                 "session_time": format_session_time(session, {"timezone": coach.get("timezone")}),
-                "duration": session.get("duration_minutes", 60),
+                "duration": session_duration_minutes(session),
                 "session_title": session.get("title", "Coaching Session"),
                 "approve_url": action_url(sid, "approve"),
                 "decline_url": action_url(sid, "decline"),
@@ -159,8 +201,10 @@ async def send_pending_booking_email(db_pool, session: Dict) -> bool:
 
 
 async def send_booking_decision_email(db_pool, session: Dict, decision: str, reason: str = "") -> bool:
-    """Email the client that their request was approved or declined."""
+    """Email the client that their request was approved or declined. Idempotent per decision."""
     try:
+        if session.get("client_decision_emailed") == decision:
+            return True
         client = await lookup_user_contact(db_pool, session.get("client_id", ""))
         if not client.get("email"):
             logger.warning("session_approval: no client email for %s — decision email skipped",
@@ -168,7 +212,7 @@ async def send_booking_decision_email(db_pool, session: Dict, decision: str, rea
             return False
         coach = await lookup_user_contact(db_pool, session.get("coach_id", ""))
         from app.services.notifications_service import EmailService
-        return await EmailService().send_email(
+        ok = await EmailService().send_email(
             to_email=client["email"],
             template_name="booking_decision_client",
             context={
@@ -179,9 +223,42 @@ async def send_booking_decision_email(db_pool, session: Dict, decision: str, rea
                 "reason": reason,
             },
         )
+        if ok:
+            session["client_decision_emailed"] = decision
+            if db_pool:
+                try:
+                    from app.services.pg_data_helpers import upsert_session_pg
+                    await upsert_session_pg(db_pool, session)
+                except Exception:
+                    pass
+        return ok
     except Exception as e:
         logger.warning("session_approval: decision email failed: %s", e)
         return False
+
+
+def write_sessions_json_both(sessions: List[Dict]) -> None:
+    """Write sessions.json to backend DATA_DIR and optional BRIDGE_DATA_DIR."""
+    from pathlib import Path
+
+    blob = json.dumps(sessions, indent=2, default=str)
+    paths = []
+    try:
+        from app.config import settings as _settings
+        paths.append(Path(_settings.DATA_DIR) / "sessions.json")
+    except Exception:
+        paths.append(Path(os.environ.get("DATA_DIR", "/app/data")) / "sessions.json")
+    bridge = (os.getenv("BRIDGE_DATA_DIR") or "").strip()
+    if bridge:
+        p = Path(bridge) / "sessions.json"
+        if p not in paths:
+            paths.append(p)
+    for path in paths:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(blob)
+        except Exception as e:
+            logger.warning("session_approval: write %s failed: %s", path, e)
 
 
 # =============================================================================
@@ -294,7 +371,7 @@ async def close_pending_negotiation(db_pool, session_id: str, terminal_status: s
     if not db_pool or not session_id:
         return
     status = terminal_status if terminal_status in (
-        "declined", "busy", "cancelled", "expired"
+        "approved", "declined", "busy", "cancelled", "expired"
     ) else "declined"
     try:
         async with db_pool.acquire() as conn:

@@ -489,7 +489,11 @@ async def _save_session_dual(request: Request, session: dict, all_sessions: list
         except Exception as e:
             _logger.warning("_save_session_dual: PG upsert failed: %s", e)
     if all_sessions is not None:
-        save_json(DATA_DIR / "sessions.json", all_sessions)
+        try:
+            from app.services.session_approval import write_sessions_json_both
+            write_sessions_json_both(all_sessions)
+        except Exception:
+            save_json(DATA_DIR / "sessions.json", all_sessions)
 
 
 async def _lookup_client_contact(db_pool, client_id: str) -> dict:
@@ -1807,6 +1811,19 @@ async def negotiation_action_from_email(token: str, request: Request):
         db, decision=action, negotiation_id=neg_id
     )
     if not result.get("ok"):
+        if result.get("error") == "not_active":
+            st = str((result.get("negotiation") or {}).get("status") or "")
+            return _action_page(
+                "Already processed",
+                f"This request has already been handled — current status: <strong>{st or 'closed'}</strong>.",
+                ok=st == "approved",
+            )
+        if result.get("error") == "schedule_not_updated":
+            return _action_page(
+                "Approval did not land on the schedule",
+                "Your decision was recorded, but the session is not scheduled yet. Approve it in Coach Command → SCHEDULE.",
+                ok=False,
+            )
         return _action_page(
             "Could not apply",
             f"Decision <strong>{action}</strong> failed: {result.get('error', 'unknown')}.",
@@ -1815,6 +1832,12 @@ async def negotiation_action_from_email(token: str, request: Request):
     neg = result.get("negotiation") or {}
     alts = neg.get("alt_slots") or []
     if action == "approve":
+        if result.get("session_status") != "scheduled":
+            return _action_page(
+                "Approval did not land on the schedule",
+                "Your decision was recorded, but the session is not scheduled yet. Approve it in Coach Command → SCHEDULE.",
+                ok=False,
+            )
         return _action_page(
             "Session approved",
             "Your client has been notified. The session is confirmed on the schedule.",
@@ -1936,6 +1959,13 @@ async def booking_action_from_email(token: str, request: Request):
             except Exception:
                 pass
 
+        try:
+            from app.services.session_approval import close_pending_negotiation
+            if db:
+                await close_pending_negotiation(db, session_id, "approved")
+        except Exception:
+            pass
+
         # Email + SMS the client: decision email always; join-link email if Zoom exists
         try:
             asyncio.create_task(send_booking_decision_email(db, session, "approved"))
@@ -1959,6 +1989,12 @@ async def booking_action_from_email(token: str, request: Request):
     session["declined_at"] = str(datetime.now())
     session["declined_via"] = "email"
     await _save_session_dual(request, session, sessions)
+    try:
+        from app.services.session_approval import close_pending_negotiation
+        if db:
+            await close_pending_negotiation(db, session_id, "declined")
+    except Exception:
+        pass
 
     if _gcal_sync and db:
         try:

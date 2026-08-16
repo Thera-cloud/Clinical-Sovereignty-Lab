@@ -236,7 +236,7 @@ async def store_voice_recording(
                 subject,
             )
     bios: Dict[str, Any] = {}
-    if blob and subject == "coach":
+    if blob:
         try:
             from app.services.coach_voice_biometrics import extract_campaign_biometrics
 
@@ -253,12 +253,24 @@ async def store_voice_recording(
                     bios = {**bios, **visual}
             except Exception as exc:
                 logger.warning("campaign visual presence skipped: %s", exc)
-    if text and subject == "coach":
+    if subject == "coach" and blob:
+        try:
+            from app.services.coach_campaign_clone import register_clone, voice_id_for
+
+            if await register_clone(blob, coach_id, content_type=ctype):
+                bios = {**bios, "clone_voice_id": voice_id_for(coach_id)}
+        except Exception as exc:
+            logger.warning("campaign clone register skipped: %s", exc)
+    if text or bios:
         try:
             from app.services.coach_voice_profile_service import upsert_voice_profile
 
             await upsert_voice_profile(
-                db_pool, coach_id, text, recording_id=rec_id, biometrics=bios
+                db_pool,
+                coach_id,
+                text or "Client vault voice sample for coach presence.",
+                recording_id=rec_id,
+                biometrics=bios,
             )
         except Exception as exc:
             logger.warning("voice profile upsert skipped: %s", exc)
@@ -319,8 +331,7 @@ async def attach_transcript(
             recording_id,
             coach_id,
         )
-    if subject == "coach":
-        from app.services.coach_voice_profile_service import upsert_voice_profile
+    from app.services.coach_voice_profile_service import upsert_voice_profile
 
-        await upsert_voice_profile(db_pool, coach_id, text, recording_id=recording_id)
+    await upsert_voice_profile(db_pool, coach_id, text, recording_id=recording_id)
     return {"ok": True, "id": recording_id, "transcribed": True, "transcript_preview": text[:400]}

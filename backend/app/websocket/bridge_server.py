@@ -15005,6 +15005,15 @@ async def handle_client(websocket, path=None):
                                     }))
                                     continue
 
+                                # QUANTUM-CRYSTAL-ARCH: duration from booked window (never leave 0)
+                                _book_dur = 50
+                                try:
+                                    _bst = datetime.datetime.fromisoformat(scheduled_start)
+                                    _ben = datetime.datetime.fromisoformat(scheduled_end)
+                                    if _ben > _bst:
+                                        _book_dur = max(5, int((_ben - _bst).total_seconds() / 60))
+                                except Exception:
+                                    pass
                                 new_session = {
                                     "session_id": session_id,
                                     "client_id": client_id,
@@ -15017,7 +15026,7 @@ async def handle_client(websocket, path=None):
                                     "scheduled_end": scheduled_end,
                                     "actual_start": None,
                                     "actual_end": None,
-                                    "duration_minutes": 0,
+                                    "duration_minutes": _book_dur,
                                     "zoom_link": "",
                                     "zoom_meeting_id": "",
                                     "zoom_host_url": "",
@@ -15133,27 +15142,20 @@ async def handle_client(websocket, path=None):
                                         }))
                                     except Exception:
                                         pass
-                                # QUANTUM-CRYSTAL-ARCH: email coach approve/decline links, or client confirmation on auto-accept
+                                # QUANTUM-CRYSTAL-ARCH: one coach email (Nate or legacy), never both
                                 try:
                                     from app.services.session_approval import (
-                                        send_pending_booking_email, send_booking_decision_email)
+                                        notify_coach_of_pending, send_booking_decision_email)
                                     if db_pool and new_session.get("status") == "pending_approval":
-                                        asyncio.create_task(send_pending_booking_email(db_pool, new_session))
+                                        asyncio.create_task(notify_coach_of_pending(
+                                            db_pool, new_session,
+                                            connected_clients=connected_clients,
+                                            connected_coaches=connected_coaches,
+                                        ))
                                     elif db_pool:
                                         asyncio.create_task(send_booking_decision_email(db_pool, new_session, "approved"))
                                 except Exception as _em_e:
                                     print(f">>> [BOOKING] email dispatch failed: {_em_e}")
-                                # QUANTUM-CRYSTAL-ARCH: Nate-mediated negotiation loop (flagged)
-                                try:
-                                    if db_pool and new_session.get("status") == "pending_approval":
-                                        from app.services.session_negotiation_bridge import after_pending_booking
-                                        await after_pending_booking(
-                                            db_pool, new_session,
-                                            connected_clients=connected_clients,
-                                            connected_coaches=connected_coaches,
-                                        )
-                                except Exception as _neg_e:
-                                    print(f">>> [NEGOTIATION] open failed: {_neg_e}")
                         except Exception as e:
                             print(f">>> [ERROR] Booking failed: {e}")
                             await websocket.send(json.dumps({"type": "error", "message": "BOOKING_FAILED"}))
@@ -16052,9 +16054,11 @@ async def handle_client(websocket, path=None):
                                         pass
                                 # QUANTUM-CRYSTAL-ARCH: email client the approval (works even if offline)
                                 try:
-                                    from app.services.session_approval import send_booking_decision_email
+                                    from app.services.session_approval import (
+                                        send_booking_decision_email, close_pending_negotiation)
                                     if db_pool:
                                         asyncio.create_task(send_booking_decision_email(db_pool, found_session, "approved"))
+                                        asyncio.create_task(close_pending_negotiation(db_pool, session_id, "approved"))
                                 except Exception:
                                     pass
                             else:

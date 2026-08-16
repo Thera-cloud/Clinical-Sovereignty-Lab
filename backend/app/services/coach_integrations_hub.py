@@ -15,6 +15,8 @@ HUB_FLAGS = (
     "ENABLE_CAMPAIGN_NUDGES",
     "ENABLE_AUDIO_BRIEFS",
     "ENABLE_COACH_LINKEDIN",
+    "ENABLE_COACH_LINKEDIN_AUDIO",
+    "ENABLE_COACH_VOICE_CLONE",
     "ENABLE_STUDIO_WEBHOOKS",
     "ENABLE_COACH_NEWSLETTER",
     "ENABLE_COACH_TASKS",
@@ -133,6 +135,8 @@ async def hub_snapshot(db_pool, coach_id: str) -> Dict[str, Any]:
     flags = {name: _flag_on(name) for name in HUB_FLAGS}
     if not os.getenv("ENABLE_COACH_VIDEO_INGEST", "").strip():
         flags["ENABLE_COACH_VIDEO_INGEST"] = flags.get("ENABLE_VOICE_CAMPAIGN", False)
+    if not os.getenv("ENABLE_COACH_LINKEDIN_AUDIO", "").strip():
+        flags["ENABLE_COACH_LINKEDIN_AUDIO"] = flags.get("ENABLE_COACH_LINKEDIN", False)
     is_master = bool(assistants)
     supervision = {
         "is_master": is_master,

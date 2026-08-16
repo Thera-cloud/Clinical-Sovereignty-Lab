@@ -759,24 +759,31 @@ async def _apply_coach_on_pool(
     if not result.get("ok"):
         return result
 
+    found = None
     try:
-        await _finalize_session_from_result(
+        found = await _finalize_session_from_result(
             db_pool,
             result,
             neg,
             skip_local_json=staging_fallback,
             fanout_environment="staging" if staging_fallback else None,
         )
-        client_msg = result.get("client_nate_text") or ""
-        await send_client_negotiation_update_email(
-            db_pool,
-            result.get("negotiation") or neg,
-            nate_message=client_msg,
-        )
+        if decision != "approve":
+            client_msg = result.get("client_nate_text") or ""
+            await send_client_negotiation_update_email(
+                db_pool,
+                result.get("negotiation") or neg,
+                nate_message=client_msg,
+            )
     except Exception as e:
         logger.warning("session_negotiation_notify: finalize side effects failed: %s", e)
 
     result["via"] = "channel_staging_fallback" if staging_fallback else "channel"
+    if decision == "approve":
+        result["session_status"] = (found or {}).get("status") or ""
+        if result["session_status"] != "scheduled":
+            result["ok"] = False
+            result["error"] = "schedule_not_updated"
     return result
 
 

@@ -445,8 +445,21 @@ async def publish_linkedin_item(
 
     _require_flag("ENABLE_COACH_LINKEDIN")
     pool = getattr(request.app.state, "db_pool", None)
+    include_audio = False
     try:
-        return await publish_approved_post(pool, coach_id=_hw(user), content_id=content_id)
+        body = await request.json()
+        if isinstance(body, dict):
+            include_audio = bool(body.get("audio") or body.get("include_audio"))
+    except Exception:
+        include_audio = (request.query_params.get("audio") or "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+    try:
+        return await publish_approved_post(
+            pool, coach_id=_hw(user), content_id=content_id, include_audio=include_audio
+        )
     except FlagOff:
         raise HTTPException(403, "temporarily unavailable")
 

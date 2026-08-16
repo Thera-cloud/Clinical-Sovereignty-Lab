@@ -102,6 +102,32 @@ async def synthesize(
         return None
 
 
+async def upload_voice_bytes(
+    data: bytes,
+    voice_id: str,
+    *,
+    filename: str = "reference.wav",
+) -> bool:
+    """Upload in-memory reference audio. Campaign clone only — not live-call XTTS."""
+    if not data or not voice_id:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{SOVEREIGN_TTS_URL}/upload-voice",
+                data={"voice_id": voice_id},
+                files={"file": (filename, data)},
+            )
+        if resp.status_code == 200:
+            _logger.info("Voice reference uploaded: %s", voice_id)
+            return True
+        _logger.warning("Voice upload failed: %d — %s", resp.status_code, resp.text[:200])
+        return False
+    except Exception as e:
+        _logger.warning("Voice upload error: %s", e)
+        return False
+
+
 async def upload_voice_reference(
     file_path: str,
     voice_id: str = "father",

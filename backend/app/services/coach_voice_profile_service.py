@@ -106,6 +106,7 @@ def merge_style(old: Dict[str, Any], new: Dict[str, Any]) -> Dict[str, Any]:
         "presence_source": presence_source,
         "visual_presence": _str("visual_presence"),
         "voice_biometrics": bios,
+        "clone_voice_id": _str("clone_voice_id"),
         "stance": _str("stance"),
         "assistant_stance": _str("assistant_stance", "encourage without diagnosing"),
         "source": "merged",

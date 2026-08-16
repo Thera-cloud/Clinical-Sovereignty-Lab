@@ -1400,11 +1400,12 @@ class _CampaignQueueState extends State<_CampaignQueue> {
     _load();
   }
 
-  Future<void> _publish(int id) async {
+  Future<void> _publish(int id, {bool audio = false}) async {
     final r = await http.post(
       Uri.parse(
           '${AppConfig.apiBaseUrl}/api/coach/integrations/campaigns/$id/publish'),
       headers: _h,
+      body: json.encode({'audio': audio}),
     );
     if (!mounted) return;
     var msg = 'Publish failed (${r.statusCode})';
@@ -1905,10 +1906,16 @@ class _CampaignQueueState extends State<_CampaignQueue> {
                       style: TextStyle(color: Colors.redAccent))),
             ])
           else if ((item['content_type'] ?? '') == 'linkedin_post')
-            TextButton(
-                onPressed: () => _publish(id),
-                child: const Text('Publish to LinkedIn',
-                    style: TextStyle(color: Color(0xFFC9A962)))),
+            Wrap(spacing: 8, children: [
+              TextButton(
+                  onPressed: () => _publish(id),
+                  child: const Text('Publish to LinkedIn',
+                      style: TextStyle(color: Color(0xFFC9A962)))),
+              TextButton(
+                  onPressed: () => _publish(id, audio: true),
+                  child: const Text('Publish with audio',
+                      style: TextStyle(color: Color(0xFFC9A962)))),
+            ])
         ],
       ),
     );
