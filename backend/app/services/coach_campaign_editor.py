@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -322,4 +323,107 @@ async def generate_hero(
         "hero_image_url": public_url,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "item": serialize_item(row),
+    }
+
+
+async def rewrite_item(
+    db_pool,
+    content_id: int,
+    *,
+    coach_id: str,
+    instruction: str,
+    title: Optional[str] = None,
+    draft_body: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Expand coach notes into draft copy in their stored voice. Does not save."""
+    note = (instruction or "").strip()
+    if len(note) < 8:
+        return {"ok": False, "reason": "instruction_too_short"}
+    item = await get_item(db_pool, content_id, coach_id)
+    if not item:
+        return {"ok": False, "reason": "not_found"}
+    if (item.get("status") or "") not in EDITABLE_STATUSES:
+        return {"ok": False, "reason": "not_editable"}
+    from app.services.coach_voice_profile_service import load_profile_and_transcript
+
+    profile, transcript = await load_profile_and_transcript(db_pool, coach_id)
+    crystal_ctx = ""
+    try:
+        from app.websocket.crystal_recall_bridge import recall_crystals_for_context
+
+        crystal_ctx = await recall_crystals_for_context(
+            db_pool, coach_id, max_results=6, source="coach_voice_interview"
+        ) or ""
+    except Exception as exc:
+        logger.warning("rewrite crystal recall skipped: %s", exc)
+    cur_title = (title if title is not None else item.get("title") or "").strip()
+    cur_body = (draft_body if draft_body is not None else item.get("draft_body") or "").strip()
+    ctype = (item.get("content_type") or "linkedin_post").strip()
+    try:
+        from app.services.coach_voice_biometrics import style_presence_block
+        from app.services.nate_inference_router import NateInferenceRouter
+
+        result = await NateInferenceRouter().generate(
+            prompt=(
+                f"Content type: {ctype}\n"
+                f"Current title: {cur_title}\n"
+                f"Current draft:\n{cur_body[:4000]}\n\n"
+                f"Coach rewrite request (obey this; expand it in their voice):\n{note[:2000]}\n\n"
+                f"Coach style JSON:\n{json.dumps(profile or {})[:2200]}\n"
+                f"{style_presence_block(profile)}\n"
+                f"Interview excerpt (tone only):\n{(transcript or '')[:2000]}\n"
+                f"Style crystals:\n{(crystal_ctx or '')[:1200]}\n"
+                "Write as this coach: match preface, introduction, body, climax, conclusion, "
+                "presence_style, word_patterns, and phrases. Do not invent facts or client names. "
+                "Return JSON only: {\"title\": \"...\", \"draft_body\": \"...\"}."
+            ),
+            system="Return valid JSON only. No markdown.",
+            domain="coaching",
+            max_tokens=700,
+            temperature=0.4,
+        )
+    except Exception as exc:
+        logger.warning("campaign rewrite LN failed: %s", exc)
+        return {"ok": False, "reason": "ln_unavailable"}
+    raw = ""
+    if isinstance(result, dict):
+        raw = (result.get("text") or result.get("content") or "").strip()
+    elif isinstance(result, str):
+        raw = result.strip()
+    start, end = raw.find("{"), raw.rfind("}")
+    if start < 0 or end <= start:
+        return {"ok": False, "reason": "ln_parse"}
+    try:
+        data = json.loads(raw[start : end + 1])
+    except Exception:
+        return {"ok": False, "reason": "ln_parse"}
+    if not isinstance(data, dict):
+        return {"ok": False, "reason": "ln_parse"}
+    new_title = str(data.get("title") or cur_title).strip()[:300]
+    new_body = str(data.get("draft_body") or "").strip()[:20000]
+    if len(new_body) < 20:
+        return {"ok": False, "reason": "ln_empty"}
+    try:
+        from app.services.nate_response_validator import NateResponseValidator
+
+        _cleaned, warnings = await NateResponseValidator().validate(new_body, {})
+        if any("hallucination_pattern" in w or "unverified" in w for w in (warnings or [])):
+            return {"ok": False, "reason": "validator"}
+    except Exception as exc:
+        logger.warning("rewrite validator skipped: %s", exc)
+    return {
+        "ok": True,
+        "saved": False,
+        "title": new_title,
+        "draft_body": new_body,
+        "style_used": {
+            "tone": (profile or {}).get("tone"),
+            "cadence": (profile or {}).get("cadence"),
+            "version": (profile or {}).get("version"),
+            "has_structure": bool(
+                (profile or {}).get("preface_style")
+                or (profile or {}).get("body_style")
+            ),
+            "has_presence": bool((profile or {}).get("presence_style")),
+        },
     }

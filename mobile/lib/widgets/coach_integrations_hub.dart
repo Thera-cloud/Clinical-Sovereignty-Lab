@@ -1,4 +1,5 @@
 // Coach Command Integrations hub — Workspace, LinkedIn, Voice, Studio, Vault.
+import 'dart:async';
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../config/app_config.dart';
+import '../services/coach_web_recorder.dart';
 import 'google_calendar_section.dart';
 import 'google_workspace_section.dart';
 
@@ -421,6 +423,12 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
             ),
             Text('Recordings: ${_hub?['voice_recordings'] ?? 0}',
                 style: const TextStyle(color: _text, fontSize: 13)),
+            Text(
+              _hub?['has_voice_presence'] == true
+                  ? 'Spoken presence stored — used in Generate and Rewrite'
+                  : 'Spoken presence: record in VIDEO to capture pace and warmth',
+              style: const TextStyle(color: _goldDim, fontSize: 12),
+            ),
             const SizedBox(height: 12),
             TextField(
               controller: _campaignTitleCtrl,
@@ -466,7 +474,7 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
           Icons.videocam_outlined,
           [
             const Text(
-              'Answer Nate\'s interview questions, paste a transcript, or upload mp4/mov/webm/audio. Little Nate transcribes and builds a style profile. Not a therapy call. Meet/Drive ingest is off.',
+              'Record in the browser, paste answers, or upload mp4/mov/webm/audio. Little Nate transcribes, captures spoken presence (pace/warmth/pauses), and builds a style profile. Not a therapy call. Meet/Drive ingest is off.',
               style: TextStyle(color: _muted, fontSize: 12),
             ),
             if (!videoOn)
@@ -816,6 +824,10 @@ class _VoiceIngestState extends State<_VoiceIngest> {
   String? _clientHw;
   List<Map<String, dynamic>> _clients = [];
   bool _busy = false;
+  bool _recording = false;
+  final _recorder = CoachWebRecorder();
+  Timer? _tick;
+  int _secs = 0;
 
   Map<String, String> get _h => {
         'Content-Type': 'application/json',
@@ -826,6 +838,84 @@ class _VoiceIngestState extends State<_VoiceIngest> {
   void initState() {
     super.initState();
     _loadClients();
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    if (_recording) {
+      _recorder.stop();
+    }
+    super.dispose();
+  }
+
+  Future<void> _toggleRecord() async {
+    if (!CoachWebRecorder.isSupported) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('In-app record is available on web')));
+      return;
+    }
+    if (_clientHw == null || _clientHw!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Select a vault_sync client')));
+      return;
+    }
+    if (_recording) {
+      _tick?.cancel();
+      setState(() {
+        _recording = false;
+        _busy = true;
+      });
+      try {
+        final bytes = await _recorder.stop();
+        if (bytes.isEmpty) {
+          if (!mounted) return;
+          setState(() => _busy = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('No audio captured')));
+          return;
+        }
+        final r = await http.post(
+          Uri.parse(
+              '${AppConfig.apiBaseUrl}/api/coach/integrations/voice/recordings'),
+          headers: _h,
+          body: json.encode({
+            'client_id': _clientHw,
+            'audio_b64': base64Encode(bytes),
+            'content_type': _recorder.contentType,
+            'media_kind': 'audio',
+          }),
+        );
+        if (!mounted) return;
+        setState(() => _busy = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(r.statusCode == 200
+                ? 'Recording stored (not published)'
+                : 'Ingest failed (${r.statusCode})')));
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _busy = false);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Record failed: $e')));
+      }
+      return;
+    }
+    try {
+      await _recorder.start();
+      _secs = 0;
+      _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        setState(() => _secs += 1);
+        if (_secs >= 180) {
+          _toggleRecord();
+        }
+      });
+      setState(() => _recording = true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Mic failed: $e')));
+    }
   }
 
   Future<void> _loadClients() async {
@@ -921,6 +1011,23 @@ class _VoiceIngestState extends State<_VoiceIngest> {
           onChanged: (v) => setState(() => _clientHw = v),
         ),
         const SizedBox(height: 8),
+        if (CoachWebRecorder.isSupported) ...[
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: _recording
+                    ? const Color(0xFFEF4444)
+                    : const Color(0xFFC9A962)),
+            onPressed: _busy ? null : _toggleRecord,
+            icon: Icon(_recording ? Icons.stop : Icons.mic,
+                color: Colors.black, size: 18),
+            label: Text(
+                _recording
+                    ? 'Stop recording ${_secs}s'
+                    : 'Record in browser',
+                style: const TextStyle(color: Colors.black)),
+          ),
+          const SizedBox(height: 8),
+        ],
         ElevatedButton.icon(
           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962)),
           onPressed: _busy ? null : _pickAndUpload,
@@ -944,9 +1051,13 @@ class _VideoIngest extends StatefulWidget {
 
 class _VideoIngestState extends State<_VideoIngest> {
   bool _busy = false;
+  bool _recording = false;
   List<String> _prompts = const [];
   String _preview = '';
   final _answers = TextEditingController();
+  final _recorder = CoachWebRecorder();
+  Timer? _tick;
+  int _secs = 0;
 
   Map<String, String> get _h => {
         'Content-Type': 'application/json',
@@ -961,8 +1072,65 @@ class _VideoIngestState extends State<_VideoIngest> {
 
   @override
   void dispose() {
+    _tick?.cancel();
+    if (_recording) {
+      _recorder.stop();
+    }
     _answers.dispose();
     super.dispose();
+  }
+
+  Future<void> _toggleRecord() async {
+    if (!CoachWebRecorder.isSupported) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('In-app record is available on web')));
+      return;
+    }
+    if (_recording) {
+      _tick?.cancel();
+      setState(() {
+        _recording = false;
+        _busy = true;
+      });
+      try {
+        final bytes = await _recorder.stop();
+        if (bytes.isEmpty) {
+          if (!mounted) return;
+          setState(() => _busy = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('No audio captured')));
+          return;
+        }
+        await _post(
+          bytes: bytes,
+          mediaKind: 'audio',
+          contentType: _recorder.contentType,
+          transcript: _answers.text.trim(),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _busy = false);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Record failed: $e')));
+      }
+      return;
+    }
+    try {
+      await _recorder.start();
+      _secs = 0;
+      _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        setState(() => _secs += 1);
+        if (_secs >= 180) {
+          _toggleRecord();
+        }
+      });
+      setState(() => _recording = true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Mic failed: $e')));
+    }
   }
 
   Future<void> _loadPrompts() async {
@@ -1001,10 +1169,12 @@ class _VideoIngestState extends State<_VideoIngest> {
     if (!mounted) return;
     setState(() => _busy = false);
     String preview = '';
+    var presence = false;
     if (r.statusCode == 200) {
       try {
         final j = json.decode(r.body) as Map<String, dynamic>;
         preview = (j['transcript_preview'] ?? '').toString();
+        presence = j['biometrics'] == true;
       } catch (_) {}
     }
     setState(() => _preview = preview);
@@ -1012,7 +1182,9 @@ class _VideoIngestState extends State<_VideoIngest> {
         content: Text(r.statusCode == 200
             ? (preview.isEmpty
                 ? 'Interview stored (not published)'
-                : 'Interview stored · transcribed')
+                : (presence
+                    ? 'Interview stored · transcribed · presence captured'
+                    : 'Interview stored · transcribed'))
             : 'Ingest failed (${r.statusCode})')));
   }
 
@@ -1102,6 +1274,23 @@ class _VideoIngestState extends State<_VideoIngest> {
           ),
         ),
         const SizedBox(height: 8),
+        if (CoachWebRecorder.isSupported) ...[
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: _recording
+                    ? const Color(0xFFEF4444)
+                    : const Color(0xFFC9A962)),
+            onPressed: _busy ? null : _toggleRecord,
+            icon: Icon(_recording ? Icons.stop : Icons.mic,
+                color: Colors.black, size: 18),
+            label: Text(
+                _recording
+                    ? 'Stop interview ${_secs}s'
+                    : 'Record interview',
+                style: const TextStyle(color: Colors.black)),
+          ),
+          const SizedBox(height: 8),
+        ],
         ElevatedButton.icon(
           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962)),
           onPressed: _busy ? null : _saveAnswers,
@@ -1295,56 +1484,134 @@ class _CampaignQueueState extends State<_CampaignQueue> {
         TextEditingController(text: (item['title'] ?? '').toString());
     final bodyCtrl =
         TextEditingController(text: (item['draft_body'] ?? '').toString());
+    final noteCtrl = TextEditingController();
+    var rewriting = false;
     final saved = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF111111),
-        title: const Text('Edit draft',
-            style: TextStyle(color: _gold, fontSize: 16)),
-        content: SizedBox(
-          width: 420,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: titleCtrl,
-                  style: const TextStyle(color: _text, fontSize: 13),
-                  decoration: const InputDecoration(
-                    labelText: 'Title',
-                    labelStyle: TextStyle(color: _goldDim),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: const Color(0xFF111111),
+          title: const Text('Edit draft',
+              style: TextStyle(color: _gold, fontSize: 16)),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: titleCtrl,
+                    style: const TextStyle(color: _text, fontSize: 13),
+                    decoration: const InputDecoration(
+                      labelText: 'Title',
+                      labelStyle: TextStyle(color: _goldDim),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: bodyCtrl,
-                  maxLines: 8,
-                  style: const TextStyle(color: _text, fontSize: 13),
-                  decoration: const InputDecoration(
-                    labelText: 'Body',
-                    labelStyle: TextStyle(color: _goldDim),
-                    alignLabelWithHint: true,
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: bodyCtrl,
+                    maxLines: 8,
+                    style: const TextStyle(color: _text, fontSize: 13),
+                    decoration: const InputDecoration(
+                      labelText: 'Body — edit by hand anytime',
+                      labelStyle: TextStyle(color: _goldDim),
+                      alignLabelWithHint: true,
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: noteCtrl,
+                    maxLines: 4,
+                    style: const TextStyle(color: _text, fontSize: 13),
+                    decoration: const InputDecoration(
+                      labelText: 'Tell Nate what to change',
+                      hintText:
+                          'e.g. Shorter. Open with presence. End with one question.',
+                      labelStyle: TextStyle(color: _goldDim),
+                      hintStyle: TextStyle(color: _goldDim, fontSize: 12),
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                  if (rewriting)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 10),
+                      child: LinearProgressIndicator(color: _gold),
+                    ),
+                ],
+              ),
             ),
           ),
+          actions: [
+            TextButton(
+              onPressed: rewriting ? null : () => Navigator.pop(ctx, false),
+              child: const Text('Cancel', style: TextStyle(color: _goldDim)),
+            ),
+            TextButton(
+              onPressed: rewriting
+                  ? null
+                  : () async {
+                      final note = noteCtrl.text.trim();
+                      if (note.length < 8) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            content: Text(
+                                'Write at least 8 characters for Nate to rewrite')));
+                        return;
+                      }
+                      setLocal(() => rewriting = true);
+                      try {
+                        final r = await http
+                            .post(
+                              Uri.parse(
+                                  '${AppConfig.apiBaseUrl}/api/coach/integrations/campaigns/$id/rewrite'),
+                              headers: _h,
+                              body: json.encode({
+                                'instruction': note,
+                                'title': titleCtrl.text.trim(),
+                                'draft_body': bodyCtrl.text,
+                              }),
+                            )
+                            .timeout(const Duration(seconds: 60));
+                        if (!ctx.mounted) return;
+                        if (r.statusCode == 200) {
+                          final j =
+                              json.decode(r.body) as Map<String, dynamic>;
+                          titleCtrl.text =
+                              (j['title'] ?? titleCtrl.text).toString();
+                          bodyCtrl.text =
+                              (j['draft_body'] ?? bodyCtrl.text).toString();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text(
+                                      'Rewritten in your voice — edit or Save')));
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content:
+                                  Text('Rewrite failed (${r.statusCode})')));
+                        }
+                      } catch (e) {
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Rewrite failed: $e')));
+                        }
+                      } finally {
+                        if (ctx.mounted) setLocal(() => rewriting = false);
+                      }
+                    },
+              child: Text(rewriting ? 'Rewriting…' : 'Rewrite in my voice',
+                  style: const TextStyle(color: _gold)),
+            ),
+            TextButton(
+              onPressed: rewriting ? null : () => Navigator.pop(ctx, true),
+              child: const Text('Save', style: TextStyle(color: _gold)),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: _goldDim)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Save', style: TextStyle(color: _gold)),
-          ),
-        ],
       ),
     );
     if (saved != true) {
       titleCtrl.dispose();
       bodyCtrl.dispose();
+      noteCtrl.dispose();
       return;
     }
     final r = await http.put(
@@ -1358,6 +1625,7 @@ class _CampaignQueueState extends State<_CampaignQueue> {
     );
     titleCtrl.dispose();
     bodyCtrl.dispose();
+    noteCtrl.dispose();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(r.statusCode == 200 ? 'Saved' : 'Save failed (${r.statusCode})')));

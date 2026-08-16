@@ -122,16 +122,109 @@ async def test_generate_hero_mocked(monkeypatch, tmp_path):
     assert (tmp_path / "coach_campaigns" / "7-hero.png").is_file()
 
 
+@pytest.mark.asyncio
+async def test_rewrite_item_requires_instruction_and_does_not_save():
+    from app.services.coach_campaign_editor import rewrite_item
+
+    pool = _FakePool()
+    short = await rewrite_item(pool, 7, coach_id="COACH_HW", instruction="fix")
+    assert short["ok"] is False
+    assert short["reason"] == "instruction_too_short"
+
+
+def test_style_schema_has_writing_structure():
+    from app.services.coach_voice_profile_service import heuristic_style, merge_style
+
+    h = heuristic_style(
+        "I greet slowly. I name the feeling. We stay with one question. "
+        "I never rush grief. The door stays open."
+    )
+    for key in (
+        "preface_style",
+        "introduction_style",
+        "body_style",
+        "climax_style",
+        "conclusion_style",
+        "word_patterns",
+    ):
+        assert key in h
+    merged = merge_style(
+        h,
+        {
+            "preface_style": "quiet hello",
+            "tone": "warm",
+            "presence_style": "slow, warm, leaves space",
+            "voice_biometrics": {"voice_warmth_index": 0.7, "pause_ratio": 0.3},
+        },
+    )
+    assert merged["preface_style"] == "quiet hello"
+    assert merged["body_style"]
+    assert merged["presence_style"].startswith("slow")
+    assert merged["voice_biometrics"]["voice_warmth_index"] == 0.7
+
+
+def test_wav_pcm_and_presence_mapping():
+    import io
+    import math
+    import struct
+    import wave
+
+    from app.services.coach_voice_biometrics import (
+        pcm16_from_wav,
+        presence_from_metrics,
+        style_presence_block,
+    )
+
+    buf = io.BytesIO()
+    rate = 16000
+    with wave.open(buf, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        frames = b"".join(
+            struct.pack("<h", int(4000 * math.sin(2 * math.pi * 220 * i / rate)))
+            for i in range(rate)
+        )
+        wav.writeframes(frames)
+    pcm, got_rate = pcm16_from_wav(buf.getvalue())
+    assert got_rate == 16000
+    assert len(pcm) >= 512
+    warm = presence_from_metrics(
+        {
+            "voice_warmth_index": 0.7,
+            "pause_ratio": 0.3,
+            "speech_rate": 90,
+            "voice_stress_index": 0.2,
+        }
+    )
+    assert "space" in warm["presence_style"]
+    assert warm["cadence"] == "unhurried"
+    block = style_presence_block(warm)
+    assert "Spoken presence" in block
+    assert "biometrics" in block.lower() or "pace" in block.lower()
+
+
 def test_api_and_flutter_wire_preview_edit_photo():
     api = (ROOT / "backend/app/routers/coach_integrations_api.py").read_text()
     assert "/campaigns/{content_id}/preview" in api
     assert "/campaigns/{content_id}/generate-image" in api
+    assert "/campaigns/{content_id}/rewrite" in api
     assert "update_campaign_item" in api
     dart = (ROOT / "mobile/lib/widgets/coach_integrations_hub.dart").read_text()
     assert "Preview" in dart
     assert "Edit draft" in dart
+    assert "Rewrite in my voice" in dart
+    assert "Tell Nate what to change" in dart
     assert "Generate photo" in dart
     assert "Image descriptor" in dart
+    assert "Record interview" in dart
+    assert "coach_web_recorder.dart" in dart
+    bio = (ROOT / "backend/app/services/coach_voice_biometrics.py").read_text()
+    assert "VoiceBiometricExtractor" in bio
+    assert "faster-whisper" not in bio
+    ingest = (ROOT / "backend/app/services/voice_campaign_ingest.py").read_text()
+    assert "extract_campaign_biometrics" in ingest
+    assert "COACH_CAMPAIGN_STT_URL" in ingest
     sql = (ROOT / "backend/migrations/333_coach_campaign_item_editor.sql").read_text()
     assert "ADD COLUMN IF NOT EXISTS hero_image_prompt" in sql
     assert "DROP" not in sql.upper()

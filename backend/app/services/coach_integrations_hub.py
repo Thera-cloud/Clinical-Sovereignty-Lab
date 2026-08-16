@@ -42,6 +42,7 @@ async def hub_snapshot(db_pool, coach_id: str) -> Dict[str, Any]:
     campaign_length_days = None
     campaign_audience = None
     voice_recordings = 0
+    has_voice_presence = False
     assistants: List[Dict[str, Any]] = []
     if db_pool:
         async with db_pool.acquire() as conn:
@@ -92,6 +93,23 @@ async def hub_snapshot(db_pool, coach_id: str) -> Dict[str, Any]:
                 coach_id,
             )
             voice_recordings = int(vr or 0)
+            style_row = await conn.fetchval(
+                """
+                SELECT style_json FROM coach_voice_profile WHERE coach_id = $1
+                """,
+                coach_id,
+            )
+            if isinstance(style_row, str):
+                import json
+
+                try:
+                    style_row = json.loads(style_row)
+                except Exception:
+                    style_row = {}
+            if isinstance(style_row, dict):
+                has_voice_presence = bool(
+                    style_row.get("presence_style") or style_row.get("voice_biometrics")
+                )
             asst_rows = await conn.fetch(
                 """
                 SELECT ch.assistant_id,
@@ -140,6 +158,7 @@ async def hub_snapshot(db_pool, coach_id: str) -> Dict[str, Any]:
             "audience": campaign_audience,
         },
         "voice_recordings": voice_recordings,
+        "has_voice_presence": has_voice_presence,
         "supervision": supervision,
         "studio_hooks": {
             "base": "/api/v1/hooks",

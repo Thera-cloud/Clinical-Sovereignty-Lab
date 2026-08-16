@@ -356,6 +356,27 @@ async def update_campaign_item(
     return out
 
 
+@router.post("/campaigns/{content_id}/rewrite")
+async def rewrite_campaign_item(
+    content_id: int, request: Request, user: Dict = Depends(require_coach)
+):
+    from app.services.coach_campaign_editor import rewrite_item
+
+    body = await request.json()
+    pool = getattr(request.app.state, "db_pool", None)
+    out = await rewrite_item(
+        pool,
+        content_id,
+        coach_id=_hw(user),
+        instruction=str(body.get("instruction") or ""),
+        title=body.get("title"),
+        draft_body=body.get("draft_body"),
+    )
+    if not out.get("ok"):
+        raise HTTPException(400, out.get("reason") or "rewrite_failed")
+    return out
+
+
 @router.post("/campaigns/{content_id}/generate-image")
 async def generate_campaign_image(
     content_id: int, request: Request, user: Dict = Depends(require_coach)

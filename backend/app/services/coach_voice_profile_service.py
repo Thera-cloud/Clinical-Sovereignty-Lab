@@ -23,13 +23,21 @@ def heuristic_style(transcript: str) -> Dict[str, Any]:
     words = re.findall(r"[A-Za-z']+", text)
     lower = [w.lower() for w in words]
     first = sum(1 for w in lower if w in ("i", "i'm", "im", "we", "my", "our"))
-    sentences = [s.strip() for s in re.split(r"[.!?]+", text) if s.strip()][:4]
+    sentences = [s.strip() for s in re.split(r"[.!?]+", text) if s.strip()]
     caps = sorted({w for w in words if len(w) > 3 and w[0].isupper()})[:8]
+    opener = sentences[0] if sentences else ""
+    closer = sentences[-1] if len(sentences) > 1 else opener
     return {
         "tone": "warm" if first >= 8 else "direct",
         "cadence": "measured",
         "topics": caps,
-        "phrases": sentences,
+        "phrases": sentences[:6],
+        "word_patterns": [w for w in caps if len(w) > 4][:8],
+        "preface_style": "short presence-first greeting" if first else "direct greeting",
+        "introduction_style": opener[:180] or "name the feeling, then one question",
+        "body_style": "concrete, one idea per paragraph",
+        "climax_style": "one pointed invitation, not a lecture",
+        "conclusion_style": closer[:180] or "leave the door open",
         "assistant_stance": "encourage without diagnosing",
         "source": "heuristic",
         "version": 1,
@@ -48,16 +56,37 @@ def merge_style(old: Dict[str, Any], new: Dict[str, Any]) -> Dict[str, Any]:
                     seen.append(s)
         return seen[:16]
 
+    def _str(key: str, fallback: str = "") -> str:
+        return str(new.get(key) or old.get(key) or fallback).strip()
+
+    def _bios() -> Dict[str, Any]:
+        for src in (new.get("voice_biometrics"), old.get("voice_biometrics")):
+            if isinstance(src, dict) and src:
+                return {
+                    str(k): v
+                    for k, v in src.items()
+                    if isinstance(v, (int, float, str))
+                }
+        return {}
+
     version = int(old.get("version") or 1) + 1
+    bios = _bios()
     return {
-        "tone": new.get("tone") or old.get("tone") or "direct",
-        "cadence": new.get("cadence") or old.get("cadence") or "measured",
+        "tone": _str("tone", "direct"),
+        "cadence": _str("cadence", "measured"),
         "topics": _list("topics"),
         "phrases": _list("phrases"),
-        "stance": new.get("stance") or old.get("stance") or "",
-        "assistant_stance": new.get("assistant_stance")
-        or old.get("assistant_stance")
-        or "encourage without diagnosing",
+        "word_patterns": _list("word_patterns"),
+        "preface_style": _str("preface_style"),
+        "introduction_style": _str("introduction_style"),
+        "body_style": _str("body_style"),
+        "climax_style": _str("climax_style"),
+        "conclusion_style": _str("conclusion_style"),
+        "presence_style": _str("presence_style"),
+        "presence_source": _str("presence_source"),
+        "voice_biometrics": bios,
+        "stance": _str("stance"),
+        "assistant_stance": _str("assistant_stance", "encourage without diagnosing"),
         "source": "merged",
         "version": version,
     }
@@ -84,8 +113,14 @@ async def extract_style_via_ln(transcript: str) -> Optional[Dict[str, Any]]:
         router = NateInferenceRouter()
         result = await router.generate(
             prompt=(
-                "Extract this coach's speaking style as JSON only with keys "
+                "Extract this coach's speaking and writing style as JSON only with keys "
                 "tone, cadence, topics (array), phrases (array of short quotes), "
+                "word_patterns (array of recurring words or stems), "
+                "preface_style (how they open / greet), "
+                "introduction_style (how they introduce a topic), "
+                "body_style (how they develop the middle), "
+                "climax_style (how they land the turn or invitation), "
+                "conclusion_style (how they close), "
                 "stance, assistant_stance.\n\n"
                 f"{text[:6000]}"
             ),
@@ -111,7 +146,9 @@ async def extract_style_via_ln(transcript: str) -> Optional[Dict[str, Any]]:
             return None
         data["source"] = "ln"
         data["version"] = 1
-        return data
+        merged = merge_style(heuristic_style(text), data)
+        merged["source"] = "ln"
+        return merged
     except Exception as exc:
         logger.warning("coach voice profile LN extract failed: %s", exc)
         return None
@@ -123,8 +160,12 @@ async def upsert_voice_profile(
     transcript: str,
     *,
     recording_id: Optional[str] = None,
+    biometrics: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     incoming = await extract_style_via_ln(transcript) or heuristic_style(transcript)
+    if biometrics:
+        incoming = merge_style(incoming, biometrics)
+        incoming["source"] = incoming.get("source") or "ln"
     style = incoming
     if db_pool:
         async with db_pool.acquire() as conn:
@@ -246,6 +287,13 @@ async def _write_style_crystal(
         return
     crystal_text = (
         f"{coach_id} coach-interview style: tone={style.get('tone')}; "
+        f"cadence={style.get('cadence')}; "
+        f"preface={style.get('preface_style')}; "
+        f"intro={style.get('introduction_style')}; "
+        f"body={style.get('body_style')}; "
+        f"climax={style.get('climax_style')}; "
+        f"close={style.get('conclusion_style')}; "
+        f"presence={style.get('presence_style')}; "
         f"topics={', '.join((style.get('topics') or [])[:6])}; "
         f"said: \"{snippet[:300].strip()}\""
     )

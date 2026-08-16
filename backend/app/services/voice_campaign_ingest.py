@@ -74,9 +74,41 @@ async def decrypt_recording_transcript(
     return decrypt_coach_bytes(ciphertext).decode("utf-8", errors="replace")
 
 
+async def _transcribe_remote(media: bytes, content_type: str) -> str:
+    """Optional ORANGE/local Whisper HTTP. Never loads weights on GREEN."""
+    url = (os.getenv("COACH_CAMPAIGN_STT_URL") or "").strip()
+    if not url or not media:
+        return ""
+    try:
+        import httpx
+
+        headers = {}
+        token = (os.getenv("CLASSROOM_REMOTE_AUTH_TOKEN") or "").strip()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        filename = "audio.wav" if "wav" in (content_type or "") else "audio.webm"
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            resp = await client.post(
+                url,
+                headers=headers,
+                files={"file": (filename, media, content_type or "application/octet-stream")},
+            )
+        if resp.status_code >= 400:
+            return ""
+        data = resp.json()
+        if isinstance(data, dict):
+            return str(data.get("text") or data.get("transcript") or "").strip()
+    except Exception as exc:
+        logger.warning("campaign remote STT skipped: %s", exc)
+    return ""
+
+
 async def _transcribe(media: bytes, content_type: str) -> str:
     if not media or len(media) < 100:
         return ""
+    remote = await _transcribe_remote(media, content_type)
+    if remote:
+        return remote
     try:
         from app.services.whisper_stt import transcribe, transcribe_chunked
 
@@ -193,11 +225,22 @@ async def store_voice_recording(
                 kind,
                 subject,
             )
+    bios: Dict[str, Any] = {}
+    if blob and subject == "coach":
+        try:
+            from app.services.coach_voice_biometrics import extract_campaign_biometrics
+
+            bios = extract_campaign_biometrics(blob, ctype) or {}
+        except Exception as exc:
+            logger.warning("campaign biometrics skipped: %s", exc)
+            bios = {}
     if text and subject == "coach":
         try:
             from app.services.coach_voice_profile_service import upsert_voice_profile
 
-            await upsert_voice_profile(db_pool, coach_id, text, recording_id=rec_id)
+            await upsert_voice_profile(
+                db_pool, coach_id, text, recording_id=rec_id, biometrics=bios
+            )
         except Exception as exc:
             logger.warning("voice profile upsert skipped: %s", exc)
     preview = text[:400] if text else ""
@@ -211,6 +254,8 @@ async def store_voice_recording(
         "subject": subject,
         "transcribed": bool(text),
         "transcript_preview": preview,
+        "biometrics": bool(bios.get("voice_biometrics")),
+        "presence_style": bios.get("presence_style") or "",
     }
 
 

@@ -115,7 +115,10 @@ async def _ln_day_pieces(
         from app.services.nate_inference_router import NateInferenceRouter
 
         router = NateInferenceRouter()
-        style = json.dumps(profile or {})[:800]
+        from app.services.coach_voice_biometrics import style_presence_block
+
+        style = json.dumps(profile or {})[:2200]
+        presence = style_presence_block(profile)
         prior_block = "\n---\n".join(prior[-8:]) if prior else "(none)"
         types = ["linkedin_post", "drip_touch"]
         if _flag_on("ENABLE_COACH_NEWSLETTER"):
@@ -124,6 +127,7 @@ async def _ln_day_pieces(
             prompt=(
                 f"Campaign title: {title}\nDay {day_n} of {length_days}.\n"
                 f"{_audience_brief(audience, profile)}\n"
+                f"{presence}\n"
                 f"Coach style JSON: {style}\n"
                 f"Interview excerpt (tone only, do not quote at length):\n{(transcript or '')[:2500]}\n"
                 f"Coach interview crystals:\n{(crystal_ctx or '')[:1500]}\n"
