@@ -7,6 +7,8 @@ import json
 from app.services.disco.surfaces import CANONICAL_POSITIONING
 
 BRAND_ORIGIN = "https://www.sovereignsanctuary.net"
+SIGNUP_URL = "https://app.sovereignsanctuary.net/signup.html"
+SQUARESPACE_HOME = "https://www.sovereignsanctuary.net/"
 
 # Live Squarespace sitemap 2026-08-16 + nav extras (cart, root, clinical-safety alias).
 SQUARESPACE_PATHS = (
@@ -94,6 +96,8 @@ def render_brand_page(path: str) -> str:
         f"<h1>{spec['h1']}</h1>"
         f"<p class='positioning'>{CANONICAL_POSITIONING}</p>"
         f"<p>{spec['body']}</p>"
+        "<p><a href='https://app.sovereignsanctuary.net/signup.html'>Sign up</a></p>"
+        "<p><a href='/coaches/coachn'>Nathaniel Nevedal — coach profile</a></p>"
         "<aside class='ss-crisis' role='note'><strong>If you need support right now:</strong> "
         "<a href='tel:988'>988 Suicide &amp; Crisis Lifeline</a></aside>"
         "</body></html>"
@@ -129,7 +133,12 @@ TEST_COACH = {
     ),
     "slug": "coachn",
     "canonical_phrases": ["family systems coaching", "presence-based coaching"],
-    "same_as": [],
+    "same_as": [
+        "https://mycounselor.online/christian-counselors/nathaniel-nevedal/",
+        "https://mycounselor.online/author/nathaniel-nevedal/",
+        "https://opennpi.com/provider/1790494144",
+        "https://www.google.com/maps/place/Sovereign+Sanctuary/data=!4m2!3m1!1s0x8824bdf3fb8a0155:0xb66b2d67afaa7216",
+    ],
     "area_served": [TEST_METRO],
     "relationship_class": "coaching",
 }

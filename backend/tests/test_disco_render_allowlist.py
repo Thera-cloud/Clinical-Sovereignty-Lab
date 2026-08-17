@@ -55,3 +55,28 @@ def test_coachn_hub_is_coaching_class(monkeypatch):
     assert lint["blocked"] is False, lint
     out = render_profile_html(TEST_COACH, relationship_class="coaching")
     assert out.get("blocked") is False, out.get("lint")
+
+
+def test_listing_packet_coaching_class_no_clinical_terms():
+    pkt = DiscoEngine().listing_packet(
+        {
+            "display_name": "Nathaniel Nevedal",
+            "slug": "coachn",
+            "bio": TEST_COACH["bio"],
+            "canonical_phrases": ["family systems coaching", "presence-based coaching"],
+            "area_served": ["Detroit, MI, USA"],
+        }
+    )
+    blob = " ".join(
+        [
+            pkt["psychology_today"]["about"],
+            pkt["psychology_today"]["category"],
+            pkt["bing_places"]["category"],
+            " ".join(pkt["psychology_today"]["specialties"]),
+        ]
+    )
+    lint = register_lint(blob, "coaching")
+    assert lint["blocked"] is False, lint
+    assert pkt["psychology_today"]["category"] == "Life Coaching"
+    assert pkt["human_step"] == "paste_and_submit"
+    assert "mycounselor.online/christian-counselors/nathaniel-nevedal" in pkt["existing_public"]["mycounselor_profile"]

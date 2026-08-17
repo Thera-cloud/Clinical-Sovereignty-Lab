@@ -24,7 +24,12 @@ def person_jsonld(record: dict[str, Any]) -> dict:
     phrases = record.get("canonical_phrases") or []
     same_as = record.get("same_as") or []
     if isinstance(same_as, str):
-        same_as = [same_as]
+        try:
+            parsed = json.loads(same_as)
+            same_as = parsed if isinstance(parsed, list) else [same_as]
+        except Exception:
+            same_as = [same_as] if same_as else []
+    same_as = [u for u in same_as if isinstance(u, str) and u.startswith("http")]
     return {
         "@context": "https://schema.org",
         "@type": "Person",
@@ -59,11 +64,13 @@ def render_profile_html(
         if isinstance(q, dict)
     )
     article = (
+        f"<p class='crumb'><a href='/'>Sovereign Sanctuary</a> · "
+        f"<a href='/coaches/{_esc(slug)}'>/coaches/{_esc(slug)}</a></p>"
         f"<h1>{name}</h1><p class='cred'>{cred}</p>"
         f"<p>{_esc(body)}</p>"
         f"<p class='phrases'>{_esc(', '.join(phrases))}</p>"
         f"{faq_html}"
-        f"<p><a href='/intake'>Request a session through Little Nate</a></p>"
+        f"<p><a href='https://app.sovereignsanctuary.net/signup.html'>Sign up</a></p>"
     )
     value = InlineValueRenderer().render_page(article, value_unit, region)
     hreflang = LocaleRouter.hreflang_block(slug, record.get("languages") or ["en"])

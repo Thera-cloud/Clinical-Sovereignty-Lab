@@ -33,6 +33,14 @@ from app.services.disco.pipeline import (
     register_lint,
 )
 from app.services.disco.renderer import render_llms, render_profile_html
+from app.services.disco.t1_workers import (
+    authority_packet as _authority_packet,
+    authority_roster,
+    authority_targets,
+    derive_area_served,
+    lifecycle_plan,
+    propagate_credential_lapse,
+)
 from app.services.disco.workers_61_64 import (
     CACLedger,
     ClaimTruthRegister,
@@ -210,16 +218,75 @@ class DiscoEngine:
         return {"rows": rows, "action": divergence_action(rows)}
 
     def listing_packet(self, record: dict) -> dict:
-        """#34 — platform-fitted copy. HUMAN: paste + submit."""
+        """#34 — platform-fitted copy. HUMAN: paste + submit. Coaching-class only."""
         name = record.get("display_name") or ""
-        phrases = record.get("canonical_phrases") or []
+        phrases = list(record.get("canonical_phrases") or [])
+        bio = (record.get("bio") or "").strip()
+        slug = record.get("slug") or _slug(name)
+        website = "https://www.sovereignsanctuary.net/"
+        signup = "https://app.sovereignsanctuary.net/signup.html"
+        area = record.get("area_served") or []
+        if isinstance(area, str):
+            area = [area]
+        metro = (area[0] if area else "Detroit, MI, USA")
+        about_pt = bio[:325]
+        about_short = bio[:200]
+        category = "Life coach"
         return {
+            "relationship_class": "coaching",
+            "do_not_use": ["therapist", "counselor", "psychotherapy", "treatment", "patient"],
             "psychology_today": {
+                "url": "https://www.psychologytoday.com/us/coaches",
+                "category": "Life Coaching",
                 "headline": name[:70],
                 "specialties": phrases[:5],
-                "about": (record.get("bio") or "")[:325],
+                "about": about_pt,
+                "website": website,
+                "signup": signup,
+                "location": metro,
             },
-            "bing_places": {"name": name, "description": (record.get("bio") or "")[:200]},
+            "bing_places": {
+                "url": "https://www.bingplaces.com/",
+                "name": name,
+                "category": category,
+                "description": about_short,
+                "website": website,
+                "signup": signup,
+                "service_area": metro,
+            },
+            "apple_business_connect": {
+                "url": "https://businessconnect.apple.com/",
+                "name": name,
+                "category": category,
+                "description": about_short,
+                "website": website,
+                "signup": signup,
+                "service_area": metro,
+            },
+            "foursquare": {
+                "url": "https://foursquare.com/business/",
+                "name": name,
+                "category": category,
+                "description": about_short,
+                "website": website,
+                "signup": signup,
+            },
+            "linkedin_services": {
+                "url": "https://www.linkedin.com/",
+                "featured_link": signup,
+                "services": phrases[:5] or ["family systems coaching"],
+                "about": about_pt,
+            },
+            "existing_public": {
+                "mycounselor_profile": "https://mycounselor.online/christian-counselors/nathaniel-nevedal/",
+                "mycounselor_author": "https://mycounselor.online/author/nathaniel-nevedal/",
+                "npi_1790494144": "https://opennpi.com/provider/1790494144",
+            },
+            "signup": signup,
+            "bounce_instruction": (
+                "Customer website is Squarespace home; conversion is signup.html. "
+                "Do not send listings to /coaches/coachn."
+            ),
             "human_step": "paste_and_submit",
         }
 
@@ -228,23 +295,28 @@ class DiscoEngine:
         return {
             "business_name": record.get("display_name"),
             "category": "Life coach" if (record.get("relationship_class") or "coaching") == "coaching" else "Therapist",
-            "website": f"https://www.sovereignsanctuary.net/coaches/{record.get('slug')}",
-            "human_step": "claim_gbp",
+            "website": "https://www.sovereignsanctuary.net/",
+            "signup": "https://app.sovereignsanctuary.net/signup.html",
+            "manager_role": "Manager",
+            "not_owner": True,
+            "human_step": "add_sanctuary_as_manager_then_send_public_maps_url",
         }
 
     def area_served(self, relationship_class: str, jurisdictions: list[str]) -> list[str]:
-        """#16 — clinical areaServed from licensure; coaching may be global."""
-        if relationship_class == "clinical":
-            return list(jurisdictions or [])
-        return jurisdictions or ["global_virtual"]
+        """#16 T1.7 — clinical from licensure only; coaching may be global."""
+        return derive_area_served(relationship_class, jurisdictions)["area_served"]
 
-    def lifecycle_actions(self, status: str, slug: str) -> dict:
-        """#5 — pause/depart → 301 + unstitch."""
-        if status == "departed":
-            return {"redirects": [f"/coaches/{slug} → /hubs"], "unstitch_sameAs": True, "deindex": True}
-        if status == "paused":
-            return {"noindex": True, "badge_off": True, "unstitch_sameAs": False}
-        return {"active": True}
+    def derive_area(self, relationship_class: str, jurisdictions: list[str] | None = None, **kwargs) -> dict:
+        """#16 T1.7 full result (flag gates persist)."""
+        return derive_area_served(relationship_class, jurisdictions, **kwargs)
+
+    def propagate_lapse(self, record: dict, *, lapsed: bool = True) -> dict:
+        """#4 T1.8 — same-day lapse plan. No write unless DISCO_CREDSTATE."""
+        return propagate_credential_lapse(record, lapsed=lapsed)
+
+    def lifecycle_actions(self, status: str, slug: str, *, coach_id: str | None = None) -> dict:
+        """#5 T1.9 — pause/depart → 301 + unstitch. No write unless DISCO_LIFECYCLE."""
+        return lifecycle_plan(status, slug, coach_id=coach_id)
 
     def originality_gate(self, text: str) -> dict:
         """#49 — thin/duplicate block."""
@@ -519,9 +591,51 @@ class DiscoEngine:
         """#33."""
         return {"ok": indexed and sitemap_ok, "indexed": indexed, "sitemap_ok": sitemap_ok}
 
-    def authority_packet(self, outlet: str, angle: str) -> dict:
-        """T1.16 outreach packet."""
-        return {"outlet": outlet, "angle": angle, "human_step": "send_pitch"}
+    def authority_packet(self, outlet: str, angle: str, record: dict | None = None) -> dict:
+        """T1.16 outreach packet. No send unless DISCO_AUTHORITY."""
+        rec = dict(record or {})
+        rec.setdefault("display_name", rec.get("display_name") or "Coach")
+        target = {"id": "custom", "kind": angle or "press", "name": outlet, "outlet": outlet}
+        pkt = _authority_packet(rec, target)
+        pkt["outlet"] = outlet
+        pkt["angle"] = angle
+        return pkt
+
+    def authority_builder(self, record: dict) -> dict:
+        """T1.16 / §19.1a roster + packets. Placement persist only if flag on."""
+        return {
+            "targets": authority_targets(),
+            "packets": authority_roster(record),
+            "persist": disco_flag("DISCO_AUTHORITY"),
+            "auto_sent": False,
+        }
+
+    async def persist_authority_placements(self, record: dict) -> dict:
+        """T1.16 write path. No-op unless DISCO_AUTHORITY and db_pool."""
+        built = self.authority_builder(record)
+        if not built["persist"] or not self.db_pool:
+            return {"written": False, "reason": "flag_off_or_no_pool", "count": 0, "auto_sent": False}
+        coach_id = record.get("coach_id") or record.get("username") or "unknown"
+        written = 0
+        async with self.db_pool.acquire() as conn:
+            for pkt in built["packets"]:
+                await conn.execute(
+                    """
+                    INSERT INTO disco_authority_placements
+                        (coach_id, target_id, target_kind, packet, status, updated_at)
+                    VALUES ($1, $2, $3, $4::jsonb, 'drafted', NOW())
+                    ON CONFLICT (coach_id, target_id) DO UPDATE SET
+                        packet = EXCLUDED.packet,
+                        target_kind = EXCLUDED.target_kind,
+                        updated_at = NOW()
+                    """,
+                    coach_id,
+                    pkt["target_id"],
+                    pkt["kind"],
+                    json.dumps(pkt),
+                )
+                written += 1
+        return {"written": True, "count": written, "auto_sent": False}
 
     def campaign_bridge(self, phrase: str, relationship_class: str = "coaching") -> dict:
         """T5.4 — campaign phrase → taxonomy candidate (lint gated)."""
@@ -571,16 +685,16 @@ class DiscoEngine:
             "T1.4": True,
             "T1.5": True,
             "T1.6": True,
-            "T1.7": True,
-            "T1.8": True,
-            "T1.9": True,
+            "T1.7": "code_ready_flag_off",
+            "T1.8": "code_ready_flag_off",
+            "T1.9": "code_ready_flag_off",
             "T1.10": True,
             "T1.11": True,
             "T1.12": "ops_gsc_bing",
             "T1.13": True,
             "T1.14": True,
-            "T1.15": True,
-            "T1.16": True,
+            "T1.15": "human_listings_open",
+            "T1.16": "code_ready_flag_off",
             "T2.1": True,
             "T2.5": True,
             "T2.6": True,

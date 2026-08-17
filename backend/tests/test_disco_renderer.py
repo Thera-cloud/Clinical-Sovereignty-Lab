@@ -1,5 +1,7 @@
 """Canonical renderer + authored copy gates."""
 
+import json
+
 from app.services.disco.assets import BRAND_DEFENSE_COPY, PRICING_COPY, PRODUCT_COPY
 from app.services.disco.renderer import person_jsonld, render_profile_html
 
@@ -35,6 +37,18 @@ def test_person_jsonld_shape():
     assert ld["@context"] == "https://schema.org"
     assert ld["name"] == "Ada"
     assert "grief" in ld["knowsAbout"]
+
+
+def test_person_jsonld_parses_json_string_same_as():
+    url = "https://mycounselor.online/christian-counselors/nathaniel-nevedal/"
+    ld = person_jsonld(
+        {
+            "display_name": "Nathaniel Nevedal",
+            "slug": "coachn",
+            "same_as": json.dumps([url]),
+        }
+    )
+    assert ld["sameAs"] == [url]
 
 
 def test_authored_copy_c4_c5():
