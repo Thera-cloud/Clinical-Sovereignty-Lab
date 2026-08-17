@@ -1,5 +1,7 @@
 """Tests for Family System Field (FSF) isolation and ACL."""
 
+import asyncio
+
 from app.services.family_system_field import (
     LANE_MEMBER,
     LANE_SANCTUARY,
@@ -13,6 +15,17 @@ from app.services.family_system_field import (
     insert_entry,
     project_fsf,
 )
+
+
+def _run(coro):
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError("closed")
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
 
 
 def test_detect_cross_member_probe():
@@ -65,9 +78,7 @@ def test_insert_entry_blocks_sensitive_lexicon():
         async def __aexit__(self, *a):
             pass
 
-    import asyncio
-
-    ok = asyncio.get_event_loop().run_until_complete(
+    ok = _run(
         insert_entry(
             FakePool(),
             family_id="f1",
@@ -115,7 +126,6 @@ def test_project_fsf_restricts_lanes_on_probe():
     async def noop_audit(*a, **k):
         return None
 
-    import asyncio
     import app.services.family_system_field as fsf
 
     orig = fsf._family_member_names
@@ -123,7 +133,7 @@ def test_project_fsf_restricts_lanes_on_probe():
     fsf._family_member_names = fake_names
     fsf._audit = noop_audit
     try:
-        proj = asyncio.get_event_loop().run_until_complete(
+        proj = _run(
             project_fsf(
                 FakePool(),
                 family_id="fam-1",

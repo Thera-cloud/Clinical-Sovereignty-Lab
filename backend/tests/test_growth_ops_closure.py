@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from app.services.growth.authority_map import (
     POLICY_FACTORY_SYSTEM,
     social_strategy_owner,
@@ -40,9 +42,14 @@ def test_factory_digest_min_default():
 
 
 def test_dispatch_unknown_kind():
-    import asyncio
-
-    out = asyncio.get_event_loop().run_until_complete(
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError("closed")
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    out = loop.run_until_complete(
         _dispatch_kind(None, "growth_not_real")
     )
     assert out.get("ok") is False

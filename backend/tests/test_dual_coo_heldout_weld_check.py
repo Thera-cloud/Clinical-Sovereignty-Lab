@@ -22,13 +22,17 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 
 def _run(coro):
-    # NOTE: intentionally NOT asyncio.run() — on Py3.9 that calls
-    # events.set_event_loop(None) on exit, which breaks every later test
-    # file in the same session that relies on the legacy
-    # asyncio.get_event_loop().run_until_complete(...) pattern (e.g.
-    # test_family_system_field.py, test_growth_ops_closure.py). Reuse the
-    # thread's existing event loop instead, matching the rest of this suite.
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Do not use asyncio.run() — on Py3.9 it clears the thread loop and
+    # breaks later get_event_loop() callers. On 3.11+ get_event_loop()
+    # raises if none is set, so create-and-keep one for the session.
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError("closed")
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
 
 
 def _checklist_ids(result):
