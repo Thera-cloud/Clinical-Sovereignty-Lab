@@ -177,6 +177,7 @@ wireguard/*/privatekey
 mobile/lib/*.backup*
 mobile/lib/**/*.backup*
 backend/resources/therapeutic_library/imagery_guides/.wrangler/
+cloudflare/workers/**/.wrangler/
 deploy-web.sh
 
 # Local agent heartbeat (machine-specific)
