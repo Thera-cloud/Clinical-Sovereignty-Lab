@@ -269,6 +269,34 @@ class DiscoEngine:
         hits = [w for w in ("suicide", "kill myself", "end my life", "want to die") if w in low]
         return {"distress": bool(hits), "hits": hits}
 
+    def crisis_session_gate(self, html: str, *, distress: bool, apply_conversion: bool = False) -> dict:
+        """DAC35 — resources present, zero conversion, Queens RED on inversion."""
+        has_resources = "ss-crisis" in (html or "")
+        has_ask = InlineValueRenderer.contains_conversion_ask(html or "")
+        inverted = bool(distress and (has_ask or apply_conversion))
+        if inverted:
+            return {
+                "ok": False,
+                "queens": "RED",
+                "resources": has_resources,
+                "conversion_prompts": 0 if not (has_ask or apply_conversion) else 1,
+                "reason": "conversion_on_distress",
+            }
+        if distress and not has_resources:
+            return {
+                "ok": False,
+                "queens": "RED",
+                "resources": False,
+                "conversion_prompts": 0,
+                "reason": "missing_crisis_resources",
+            }
+        return {
+            "ok": True,
+            "queens": "GREEN",
+            "resources": has_resources,
+            "conversion_prompts": 0,
+        }
+
     async def upsert_canonical(self, record: dict) -> dict:
         username = record.get("coach_id") or record.get("username")
         if not username:

@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from app.services.disco.pipeline import BuildBoundary
+from app.services.disco.schema_keys import FORBIDDEN_TABLES, SCHEMA_KEYS
 
 logger = logging.getLogger("disco.boundary")
+
+
+def _tbl(contract: str, key: str) -> str:
+    return SCHEMA_KEYS[contract][key][0]
+
+
+def _col(contract: str, key: str) -> str:
+    return SCHEMA_KEYS[contract][key][1]
 
 
 class LiveBuildBoundary(BuildBoundary):
@@ -22,28 +31,40 @@ class LiveBuildBoundary(BuildBoundary):
         if not self.db_pool:
             self.available = found
             return self.readiness()
+        users = _tbl("credentials", "class")
+        rel_col = _col("credentials", "class")
+        cred_tbl = _tbl("credentials", "credential_rows")
+        eng_tbl = _tbl("engagements", "table")
+        topics_tbl = _tbl("content_topics", "v15")
+        auth_tbl = _tbl("authoring", "table")
         checks = {
-            "credentials": """
+            "credentials": f"""
                 SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'users' AND column_name = 'relationship_class'
+                WHERE table_name = '{users}' AND column_name = '{rel_col}'
+                AND EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_name = '{cred_tbl}'
+                )
                 LIMIT 1
             """,
-            "engagements": """
+            "engagements": f"""
                 SELECT 1 FROM information_schema.tables
-                WHERE table_name = 'campaign_engagements' LIMIT 1
+                WHERE table_name = '{eng_tbl}' LIMIT 1
             """,
-            "content_topics": """
+            "content_topics": f"""
                 SELECT 1 FROM information_schema.tables
-                WHERE table_name IN ('content_topics', 'disco_content_topics') LIMIT 1
+                WHERE table_name = '{topics_tbl}' LIMIT 1
             """,
-            "authoring": """
+            "authoring": f"""
                 SELECT 1 FROM information_schema.tables
-                WHERE table_name = 'marketing_content' LIMIT 1
+                WHERE table_name = '{auth_tbl}' LIMIT 1
             """,
         }
         try:
             async with self.db_pool.acquire() as conn:
                 for name, sql in checks.items():
+                    if any(bad in sql for bad in FORBIDDEN_TABLES):
+                        raise KeyError(f"forbidden table in {name} probe")
                     row = await conn.fetchval(sql)
                     if row:
                         found.add(name)
@@ -53,20 +74,35 @@ class LiveBuildBoundary(BuildBoundary):
         return self.readiness()
 
     async def credentials_for(self, username: str) -> dict:
-        default = {"class": "coaching", "username": username}
+        default = {"class": "coaching", "username": username, "credentials": []}
         if "credentials" not in self.available or not self.db_pool:
             return self.get("credentials", default)
+        users = _tbl("credentials", "identity")
+        ident = _col("credentials", "identity")
+        rel = _col("credentials", "class")
+        jur = _col("credentials", "jurisdiction")
+        vault = _col("credentials", "vault_sync")
+        cred_tbl = _tbl("credentials", "credential_rows")
+        cred_fk = _col("credentials", "credential_rows")
         try:
             async with self.db_pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    """
-                    SELECT username, role,
-                           COALESCE(relationship_class, 'coaching') AS relationship_class,
-                           COALESCE(client_jurisdiction, '') AS jurisdiction,
-                           COALESCE(vault_sync, false) AS vault_sync
-                    FROM users
-                    WHERE username = $1
+                    f"""
+                    SELECT u.{ident} AS username, u.role,
+                           COALESCE(u.{rel}, 'coaching') AS relationship_class,
+                           COALESCE(u.{jur}, '') AS jurisdiction,
+                           COALESCE(u.{vault}, false) AS vault_sync
+                    FROM {users} u
+                    WHERE u.{ident} = $1
                     LIMIT 1
+                    """,
+                    username,
+                )
+                creds = await conn.fetch(
+                    f"""
+                    SELECT credential_type, expires_at, document_ref
+                    FROM {cred_tbl}
+                    WHERE {cred_fk} = $1
                     """,
                     username,
                 )
@@ -80,6 +116,7 @@ class LiveBuildBoundary(BuildBoundary):
                     "jurisdiction": row["jurisdiction"],
                     "vault_sync": bool(row["vault_sync"]),
                     "role": row["role"],
+                    "credentials": [dict(c) for c in creds],
                 },
             }
         except Exception as exc:
@@ -94,25 +131,41 @@ class LiveBuildBoundary(BuildBoundary):
         try:
             async with self.db_pool.acquire() as conn:
                 if contract == "engagements":
+                    tbl = _tbl("engagements", "table")
                     rows = await conn.fetch(
-                        "SELECT * FROM campaign_engagements ORDER BY created_at DESC LIMIT 50"
+                        f"SELECT * FROM {tbl} ORDER BY created_at DESC LIMIT 50"
                     )
                     return {"degraded": False, "value": [dict(r) for r in rows]}
                 if contract == "authoring":
+                    tbl = _tbl("authoring", "table")
                     rows = await conn.fetch(
-                        """
+                        f"""
                         SELECT id, content_type, status, slug, coach_id
-                        FROM marketing_content
+                        FROM {tbl}
                         WHERE status IN ('approved', 'published', 'live')
                         ORDER BY id DESC LIMIT 50
                         """
                     )
                     return {"degraded": False, "value": [dict(r) for r in rows]}
                 if contract == "content_topics":
-                    rows = await conn.fetch(
-                        "SELECT * FROM disco_content_topics ORDER BY flagged_at DESC LIMIT 50"
+                    v15 = _tbl("content_topics", "v15")
+                    flagged = _tbl("content_topics", "coach_flagged")
+                    v15_rows = await conn.fetch(
+                        f"SELECT * FROM {v15} ORDER BY created_at DESC LIMIT 50"
                     )
-                    return {"degraded": False, "value": [dict(r) for r in rows]}
+                    try:
+                        flag_rows = await conn.fetch(
+                            f"SELECT * FROM {flagged} ORDER BY flagged_at DESC LIMIT 50"
+                        )
+                    except Exception:
+                        flag_rows = []
+                    return {
+                        "degraded": False,
+                        "value": {
+                            "topics": [dict(r) for r in v15_rows],
+                            "coach_flagged": [dict(r) for r in flag_rows],
+                        },
+                    }
         except Exception as exc:
             logger.warning("%s contract degraded: %s", contract, exc)
             return {"degraded": True, "reason": str(exc), "value": default}

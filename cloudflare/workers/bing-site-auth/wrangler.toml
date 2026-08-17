@@ -1,0 +1,7 @@
+name = "bing-site-auth"
+main = "worker.js"
+compatibility_date = "2026-03-01"
+
+routes = [
+  { pattern = "www.sovereignsanctuary.net/BingSiteAuth.xml", zone_name = "sovereignsanctuary.net" },
+]
