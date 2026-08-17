@@ -10,11 +10,14 @@ from app.services.disco.assets import BRAND_ROBOTS
 from app.services.disco.brand import (
     PAGES,
     TEST_COACH,
+    TEST_HUB_PATH,
+    TEST_METRO,
     render_brand_page,
     render_hub_page,
     render_metro_page,
     sitemap_xml,
 )
+from app.services.disco.pipeline import register_lint
 from app.services.disco.renderer import render_profile_html
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,8 +38,14 @@ def main() -> None:
         html = render_brand_page(path)
         dest = OUT / "index.html" if path == "/" else OUT / path.strip("/") / "index.html"
         _write(dest, html)
-    _write(OUT / "metros" / "detroit" / "index.html", render_metro_page("Detroit", "coachn"))
-    _write(OUT / "hubs" / "family-systems" / "index.html", render_hub_page("family-systems", "coachn"))
+    _write(OUT / "metros" / "detroit-mi" / "index.html", render_metro_page(TEST_METRO, "coachn"))
+    _write(OUT / TEST_HUB_PATH / "index.html", render_hub_page(TEST_HUB_PATH, "coachn", TEST_METRO))
+    lint = register_lint(
+        f"{TEST_COACH['bio']} {TEST_COACH['credential_string']} trauma coaches",
+        "coaching",
+    )
+    if lint["blocked"]:
+        raise SystemExit(f"register_lint blocked coaching profile: {lint}")
     coach = render_profile_html(TEST_COACH, relationship_class="coaching")
     if coach.get("blocked"):
         raise SystemExit(coach.get("lint"))

@@ -4,4 +4,5 @@ compatibility_date = "2026-03-01"
 
 routes = [
   { pattern = "www.sovereignsanctuary.net/BingSiteAuth.xml", zone_name = "sovereignsanctuary.net" },
+  { pattern = "www.sovereignsanctuary.net/30f24e0be266373675ca6d01227d0ff1.txt", zone_name = "sovereignsanctuary.net" },
 ]

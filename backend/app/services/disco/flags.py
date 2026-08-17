@@ -46,3 +46,13 @@ def disco_flag(name: str) -> bool:
 def disco_render_coach() -> str:
     """Single-coach allowlist. Empty = all active profiles (do not use at T1)."""
     return os.getenv("DISCO_RENDER_COACH", "").strip()
+
+
+def disco_render_metro() -> str:
+    """Service-area label, e.g. 'Detroit, MI, USA'."""
+    return os.getenv("DISCO_RENDER_METRO", "").strip()
+
+
+def disco_render_hub() -> str:
+    """Programmatic hub path, e.g. coaches/trauma-coaches/detroit-mi."""
+    return os.getenv("DISCO_RENDER_HUB", "").strip()

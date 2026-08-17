@@ -5,7 +5,10 @@ import os
 import pytest
 
 from app.services.disco.engine import DiscoEngine
-from app.services.disco.flags import disco_render_coach
+from app.services.disco.brand import TEST_COACH, TEST_HUB_PATH, TEST_METRO
+from app.services.disco.flags import disco_render_coach, disco_render_hub, disco_render_metro
+from app.services.disco.pipeline import register_lint
+from app.services.disco.renderer import render_profile_html
 
 
 def test_allowlist_env_defaults_empty(monkeypatch):
@@ -38,3 +41,17 @@ async def test_allowlist_rejects_other_slug(monkeypatch):
     out = await _Eng().public_profile_html("other")
     assert out["ok"] is False
     assert out["reason"] == "not_in_render_allowlist"
+
+
+def test_coachn_hub_is_coaching_class(monkeypatch):
+    monkeypatch.setenv("DISCO_RENDER_METRO", TEST_METRO)
+    monkeypatch.setenv("DISCO_RENDER_HUB", TEST_HUB_PATH)
+    assert disco_render_metro() == "Detroit, MI, USA"
+    assert disco_render_hub() == "coaches/trauma-coaches/detroit-mi"
+    lint = register_lint(
+        f"{TEST_COACH['bio']} {TEST_COACH['credential_string']} trauma coaches",
+        "coaching",
+    )
+    assert lint["blocked"] is False, lint
+    out = render_profile_html(TEST_COACH, relationship_class="coaching")
+    assert out.get("blocked") is False, out.get("lint")
