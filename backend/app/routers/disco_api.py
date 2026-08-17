@@ -68,6 +68,11 @@ async def public_org_schema(request: Request):
     return {"status": "ok", "jsonld": _engine(request).org_schema()}
 
 
+@public_router.get("/homepage-seo")
+async def public_homepage_seo(request: Request):
+    return {"status": "ok", "packet": _engine(request).homepage_seo()}
+
+
 @public_router.get("/mcp.json")
 async def public_mcp(request: Request):
     if not disco_flag("DISCO_AGENT_API"):

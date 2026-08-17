@@ -135,5 +135,8 @@ def test_checklist_does_not_claim_t1_gate():
     assert tickets["T1.7"] == "code_ready_flag_off"
     assert tickets["T1.8"] == "code_ready_flag_off"
     assert tickets["T1.9"] == "code_ready_flag_off"
+    assert tickets["T1.11"] == "squarespace_interim"
+    assert tickets["T1.14"] == "human_gbp_open"
     assert tickets["T1.15"] == "human_listings_open"
     assert tickets["T1.16"] == "code_ready_flag_off"
+    assert tickets["T1.MIG"] == "www_still_squarespace"

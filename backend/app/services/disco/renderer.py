@@ -30,7 +30,11 @@ def person_jsonld(record: dict[str, Any]) -> dict:
         except Exception:
             same_as = [same_as] if same_as else []
     same_as = [u for u in same_as if isinstance(u, str) and u.startswith("http")]
-    return {
+    area = record.get("area_served") or []
+    if isinstance(area, str):
+        area = [area]
+    area = [a for a in area if isinstance(a, str) and a.strip()]
+    person = {
         "@context": "https://schema.org",
         "@type": "Person",
         "name": record.get("display_name"),
@@ -39,6 +43,9 @@ def person_jsonld(record: dict[str, Any]) -> dict:
         "knowsAbout": phrases,
         "sameAs": same_as,
     }
+    if area:
+        person["areaServed"] = area
+    return person
 
 
 def render_profile_html(

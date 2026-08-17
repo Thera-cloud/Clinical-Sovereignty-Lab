@@ -32,6 +32,7 @@ from app.services.disco.pipeline import (
     divergence_action,
     register_lint,
 )
+from app.services.disco.brand import homepage_jsonld, homepage_seo_packet
 from app.services.disco.renderer import render_llms, render_profile_html
 from app.services.disco.t1_workers import (
     authority_packet as _authority_packet,
@@ -161,6 +162,16 @@ class DiscoEngine:
         return register_lint(text, relationship_class)
 
     def validate_jsonld(self, payload: dict) -> dict:
+        if "@graph" in payload:
+            missing = [k for k in ("@context", "@graph") if k not in payload]
+            nodes = payload.get("@graph") or []
+            if not isinstance(nodes, list) or not nodes:
+                missing.append("@graph[0]")
+            else:
+                for i, n in enumerate(nodes):
+                    if not isinstance(n, dict) or "@type" not in n or "name" not in n:
+                        missing.append(f"@graph[{i}]")
+            return {"ok": not missing, "missing": missing}
         missing = [k for k in ("@context", "@type", "name") if k not in payload]
         return {"ok": not missing, "missing": missing}
 
@@ -283,6 +294,7 @@ class DiscoEngine:
                 "npi_1790494144": "https://opennpi.com/provider/1790494144",
             },
             "signup": signup,
+            "homepage_seo": homepage_seo_packet(),
             "bounce_instruction": (
                 "Customer website is Squarespace home; conversion is signup.html. "
                 "Do not send listings to /coaches/coachn."
@@ -292,14 +304,20 @@ class DiscoEngine:
 
     def gbp_claim_packet(self, record: dict) -> dict:
         """#35 — claim packet. HUMAN: one-time claim click."""
+        coaching = (record.get("relationship_class") or "coaching") == "coaching"
         return {
             "business_name": record.get("display_name"),
-            "category": "Life coach" if (record.get("relationship_class") or "coaching") == "coaching" else "Therapist",
+            "category": "Life coach" if coaching else "Therapist",
+            "additional_categories": [],
+            "do_not_add": ["Counselor", "Therapist", "Psychotherapist"] if coaching else [],
             "website": "https://www.sovereignsanctuary.net/",
             "signup": "https://app.sovereignsanctuary.net/signup.html",
+            "hide_address": True,
+            "onsite_services": False,
+            "service_area": "Detroit, MI",
             "manager_role": "Manager",
             "not_owner": True,
-            "human_step": "add_sanctuary_as_manager_then_send_public_maps_url",
+            "human_step": "gbp_hide_address_keep_life_coach_only",
         }
 
     def area_served(self, relationship_class: str, jurisdictions: list[str]) -> list[str]:
@@ -518,14 +536,10 @@ class DiscoEngine:
         ]
 
     def org_schema(self) -> dict:
-        return {
-            "@context": "https://schema.org",
-            "@type": "Organization",
-            "name": "Sovereign Sanctuary",
-            "url": "https://www.sovereignsanctuary.net",
-            "founder": {"@type": "Person", "name": "Nathaniel Nevedal"},
-            "sameAs": [],
-        }
+        return homepage_jsonld()
+
+    def homepage_seo(self) -> dict:
+        return homepage_seo_packet()
 
     def org_offer_schema(self) -> dict:
         return {
@@ -689,12 +703,13 @@ class DiscoEngine:
             "T1.8": "code_ready_flag_off",
             "T1.9": "code_ready_flag_off",
             "T1.10": True,
-            "T1.11": True,
+            "T1.11": "squarespace_interim",
             "T1.12": "ops_gsc_bing",
             "T1.13": True,
-            "T1.14": True,
+            "T1.14": "human_gbp_open",
             "T1.15": "human_listings_open",
             "T1.16": "code_ready_flag_off",
+            "T1.MIG": "www_still_squarespace",
             "T2.1": True,
             "T2.5": True,
             "T2.6": True,

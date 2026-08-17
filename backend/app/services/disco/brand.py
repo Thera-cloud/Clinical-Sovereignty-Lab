@@ -51,23 +51,113 @@ HERO = (
     "they meet you."
 )
 
-ORG_JSONLD = {
-    "@context": "https://schema.org",
-    "@type": "Organization",
-    "name": "Sovereign Sanctuary",
-    "url": BRAND_ORIGIN,
-    "description": (
-        "AI companion support paired with verified certified and licensed human "
-        "professionals, for individuals and families."
-    ),
-    "founder": {"@type": "Person", "name": "Nathaniel Nevedal"},
-    "makesOffer": [
-        {"@type": "Offer", "name": "Trial-Threshold", "price": "0", "priceCurrency": "USD"},
-        {"@type": "Offer", "name": "Inner Chamber", "price": "49", "priceCurrency": "USD"},
-        {"@type": "Offer", "name": "Sovereign Circle", "price": "149", "priceCurrency": "USD"},
-        {"@type": "Offer", "name": "Coach-Only", "price": "0", "priceCurrency": "USD"},
-    ],
-}
+PUBLIC_EMAIL = "support@sovereignsanctuary.net"
+PUBLIC_PHONE = "+1-810-354-7770"
+TEST_METRO = "Detroit, MI, USA"
+TEST_HUB_PATH = "coaches/trauma-coaches/detroit-mi"
+COACHING_PHRASES = ("family systems coaching", "presence-based coaching")
+ORG_SAME_AS = (
+    "https://mycounselor.online/christian-counselors/nathaniel-nevedal/",
+    "https://mycounselor.online/author/nathaniel-nevedal/",
+    "https://opennpi.com/provider/1790494144",
+    "https://www.google.com/maps/place/Sovereign+Sanctuary/data=!4m2!3m1!1s0x8824bdf3fb8a0155:0xb66b2d67afaa7216",
+)
+ORG_DESCRIPTION = (
+    "AI companion support paired with verified certified and licensed human "
+    "professionals, for individuals and families."
+)
+SERVICE_DESCRIPTION = (
+    "Family systems coaching and presence-based coaching in Detroit, MI, USA. "
+    "Coaching-class Life coach. Virtual appointments."
+)
+
+
+def homepage_jsonld() -> dict:
+    """Homepage graph. No empty strings. No LocalBusiness street. No clinical types."""
+    return {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "WebSite",
+                "@id": f"{BRAND_ORIGIN}/#website",
+                "url": f"{BRAND_ORIGIN}/",
+                "name": "Sovereign Sanctuary",
+                "description": META,
+                "publisher": {"@id": f"{BRAND_ORIGIN}/#org"},
+            },
+            {
+                "@type": "Organization",
+                "@id": f"{BRAND_ORIGIN}/#org",
+                "name": "Sovereign Sanctuary",
+                "url": BRAND_ORIGIN,
+                "description": ORG_DESCRIPTION,
+                "email": PUBLIC_EMAIL,
+                "telephone": PUBLIC_PHONE,
+                "founder": {"@type": "Person", "name": "Nathaniel Nevedal"},
+                "sameAs": list(ORG_SAME_AS),
+                "areaServed": TEST_METRO,
+                "makesOffer": [
+                    {"@type": "Offer", "name": "Trial-Threshold", "price": "0", "priceCurrency": "USD"},
+                    {"@type": "Offer", "name": "Inner Chamber", "price": "49", "priceCurrency": "USD"},
+                    {"@type": "Offer", "name": "Sovereign Circle", "price": "149", "priceCurrency": "USD"},
+                    {"@type": "Offer", "name": "Coach-Only", "price": "0", "priceCurrency": "USD"},
+                ],
+            },
+            {
+                "@type": "ProfessionalService",
+                "@id": f"{BRAND_ORIGIN}/#lifecoach",
+                "name": "Sovereign Sanctuary",
+                "url": BRAND_ORIGIN,
+                "serviceType": "Life coach",
+                "description": SERVICE_DESCRIPTION,
+                "areaServed": TEST_METRO,
+                "email": PUBLIC_EMAIL,
+                "telephone": PUBLIC_PHONE,
+                "sameAs": list(ORG_SAME_AS),
+                "availableChannel": {
+                    "@type": "ServiceChannel",
+                    "serviceUrl": SIGNUP_URL,
+                    "availableLanguage": "English",
+                },
+            },
+        ],
+    }
+
+
+def homepage_seo_packet() -> dict:
+    """Human paste for live Squarespace + GBP. Does not recut DNS."""
+    ld = homepage_jsonld()
+    script = (
+        '<script type="application/ld+json">'
+        + json.dumps(ld, separators=(",", ":"))
+        + "</script>"
+    )
+    return {
+        "live_host": "squarespace",
+        "do_not_emit": ["LocalBusiness", "Counselor", "Therapist", "Psychotherapist"],
+        "squarespace": {
+            "h1_keep": "Revolutionizing the Path to Mental Wellness",
+            "h1_demote_to_h2": "24 hours / 7 days a week!",
+            "image_alt": "Sovereign Sanctuary — family systems coaching",
+            "code_injection_header": script,
+            "seo_description": META,
+        },
+        "gbp": {
+            "primary_category": "Life coach",
+            "additional_categories": [],
+            "hide_address": True,
+            "onsite_services": False,
+            "service_area": "Detroit, MI",
+            "website": SQUARESPACE_HOME,
+            "signup": SIGNUP_URL,
+            "human_step": "gbp_hide_address_keep_life_coach_only",
+        },
+        "bing": {"human_step": "request_indexing_after_squarespace_publish"},
+        "jsonld": ld,
+    }
+
+
+ORG_JSONLD = homepage_jsonld()
 
 PAGES = {
     "/": {"h1": HERO, "body": CANONICAL_POSITIONING},
@@ -91,6 +181,11 @@ def render_brand_page(path: str) -> str:
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
         f"<title>{TITLE}</title>"
         f"<meta name='description' content='{META}'>"
+        f"<meta property='og:title' content='{TITLE}'>"
+        f"<meta property='og:description' content='{META}'>"
+        f"<meta property='og:url' content='{SQUARESPACE_HOME}'>"
+        f"<meta property='og:type' content='website'>"
+        f"<meta property='og:site_name' content='Sovereign Sanctuary'>"
         f"<script type='application/ld+json'>{ld}</script>"
         "</head><body>"
         f"<h1>{spec['h1']}</h1>"
@@ -121,9 +216,6 @@ def sitemap_xml() -> str:
     )
 
 
-TEST_METRO = "Detroit, MI, USA"
-TEST_HUB_PATH = "coaches/trauma-coaches/detroit-mi"
-
 TEST_COACH = {
     "display_name": "Nathaniel Nevedal",
     "credential_string": "Coach",
@@ -132,13 +224,8 @@ TEST_COACH = {
         "and family systems coaching — coaching-class, not a clinical practice."
     ),
     "slug": "coachn",
-    "canonical_phrases": ["family systems coaching", "presence-based coaching"],
-    "same_as": [
-        "https://mycounselor.online/christian-counselors/nathaniel-nevedal/",
-        "https://mycounselor.online/author/nathaniel-nevedal/",
-        "https://opennpi.com/provider/1790494144",
-        "https://www.google.com/maps/place/Sovereign+Sanctuary/data=!4m2!3m1!1s0x8824bdf3fb8a0155:0xb66b2d67afaa7216",
-    ],
+    "canonical_phrases": list(COACHING_PHRASES),
+    "same_as": list(ORG_SAME_AS),
     "area_served": [TEST_METRO],
     "relationship_class": "coaching",
 }

@@ -80,3 +80,16 @@ def test_listing_packet_coaching_class_no_clinical_terms():
     assert pkt["psychology_today"]["category"] == "Life Coaching"
     assert pkt["human_step"] == "paste_and_submit"
     assert "mycounselor.online/christian-counselors/nathaniel-nevedal" in pkt["existing_public"]["mycounselor_profile"]
+    assert pkt["homepage_seo"]["gbp"]["hide_address"] is True
+
+
+def test_gbp_packet_hides_address_life_coach_only():
+    pkt = DiscoEngine().gbp_claim_packet(
+        {"display_name": "Sovereign Sanctuary", "relationship_class": "coaching"}
+    )
+    assert pkt["hide_address"] is True
+    assert pkt["onsite_services"] is False
+    assert pkt["category"] == "Life coach"
+    assert pkt["additional_categories"] == []
+    assert "Counselor" in pkt["do_not_add"]
+    assert "Therapist" in pkt["do_not_add"]

@@ -51,6 +51,19 @@ def test_person_jsonld_parses_json_string_same_as():
     assert ld["sameAs"] == [url]
 
 
+def test_person_jsonld_includes_area_served():
+    ld = person_jsonld(
+        {
+            "display_name": "Nathaniel Nevedal",
+            "slug": "coachn",
+            "canonical_phrases": ["family systems coaching"],
+            "area_served": ["Detroit, MI, USA"],
+        }
+    )
+    assert ld["areaServed"] == ["Detroit, MI, USA"]
+    assert ld["knowsAbout"] == ["family systems coaching"]
+
+
 def test_authored_copy_c4_c5():
     assert "about $5 a day for you and your partner" in PRODUCT_COPY
     assert "about $5 a day" in PRICING_COPY
