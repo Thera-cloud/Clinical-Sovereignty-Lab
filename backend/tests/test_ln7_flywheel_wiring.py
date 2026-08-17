@@ -602,6 +602,53 @@ def test_living_pack_materialize_writes_files(tmp_path, monkeypatch):
     assert (tmp_path / ".deploy_queue" / "living_testhash12.ready").is_file()
 
 
+def test_packs_root_prefers_data_dir(tmp_path, monkeypatch):
+    from app.services import ln7_living_packs as lp
+
+    monkeypatch.delenv("LN7_SANDBOX_PACKS_DIR", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    root = lp.packs_root()
+    assert root == tmp_path / "ln_sandbox_ci_packs"
+    assert root.is_dir()
+
+
+def test_list_pack_names_includes_living(tmp_path, monkeypatch):
+    from app.services import ln7_living_packs as lp
+    from app.services.ln_sandbox_engineering_ci import list_pack_names, load_pack
+
+    monkeypatch.setenv("LN7_SANDBOX_PACKS_DIR", str(tmp_path))
+    lp.materialize_living_pack(
+        "living_abc123def456",
+        patch_hash="abc123def456ffff",
+        domain="coding",
+        split="train",
+    )
+    lp.register_living_pack("living_abc123def456", "train")
+    names = list_pack_names()
+    assert "living_abc123def456" in names
+    assert "asyncpg_cast" in names
+    task = load_pack("living_abc123def456")
+    assert task is not None
+    assert task.get("split") == "train"
+
+
+def test_living_heldout_stays_out_of_fuel(tmp_path, monkeypatch):
+    from app.services import ln7_fuel_volume as fv
+    from app.services import ln7_living_packs as lp
+
+    monkeypatch.setenv("LN7_SANDBOX_PACKS_DIR", str(tmp_path))
+    lp.register_living_pack("living_held_aaaa", "heldout")
+    held = fv.fuel_heldout()
+    assert "living_held_aaaa" in held
+    assert "env_redis_prefix" in held
+    filtered = fv.filter_burst_packs(
+        ["asyncpg_cast", "living_held_aaaa", "living_new_bbbb"],
+        {"asyncpg_cast"},
+        only_new=True,
+    )
+    assert filtered == ["living_new_bbbb"]
+
+
 def test_hive_vllm_serve_script_exists():
     script = REPO / "scripts" / "ln7_hive_vllm_serve.sh"
     assert script.is_file()

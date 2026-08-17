@@ -38,6 +38,11 @@ async def main() -> None:
         action="store_true",
         help="Force close digest after gauge (optional)",
     )
+    parser.add_argument(
+        "--replay",
+        action="store_true",
+        help="Re-fork packs that already have ci_pack rows (default: new packs only)",
+    )
     args = parser.parse_args()
 
     import asyncpg
@@ -49,6 +54,7 @@ async def main() -> None:
         volume=args.volume,
         limit=args.limit,
         digest=bool(args.digest),
+        only_new=not bool(args.replay),
     )
     print("FUEL_SUMMARY", json.dumps({k: out.get(k) for k in (
         "volume", "pass", "fail", "skip", "packs", "at_utc", "ok"

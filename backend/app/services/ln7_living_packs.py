@@ -1,7 +1,7 @@
 """Living CI packs from Queens merges (R2 / W8).
 
-Materializes pack dirs under backend/app/data/ln_sandbox_ci_packs/living_*
-and records a sandbox deploy hook marker for Orange sync.
+Writes living_* dirs under $DATA_DIR/ln_sandbox_ci_packs (writable volume).
+The app tree (`backend/app/data/...`) is read-only in GREEN Docker.
 
 # QUANTUM-CRYSTAL-ARCH
 """
@@ -13,7 +13,7 @@ import os
 import random
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, FrozenSet, List
 
 logger = logging.getLogger("ln7_living_packs")
 
@@ -21,8 +21,83 @@ _PACKS_ROOT = Path(__file__).resolve().parents[1] / "data" / "ln_sandbox_ci_pack
 
 
 def packs_root() -> Path:
+    """Writable living-pack root. Never require the RO app bind-mount."""
     override = os.getenv("LN7_SANDBOX_PACKS_DIR", "").strip()
-    return Path(override) if override else _PACKS_ROOT
+    if override:
+        root = Path(override)
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+    data = (os.getenv("DATA_DIR") or "").strip()
+    if data:
+        root = Path(data) / "ln_sandbox_ci_packs"
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            return root
+        except OSError as e:
+            logger.warning("living packs DATA_DIR not writable (%s): %s", root, e)
+    return _PACKS_ROOT
+
+
+def living_index_path() -> Path:
+    return packs_root() / "living_index.json"
+
+
+def register_living_pack(pack_name: str, split: str) -> None:
+    """Sidecar index — heldout vs train. Do not edit packs_index.json."""
+    path = living_index_path()
+    data: Dict[str, Any] = {"version": 1, "packs": [], "heldout": []}
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data.update(loaded)
+        except Exception as e:
+            logger.warning("living_index read: %s", e)
+    packs = [str(p) for p in (data.get("packs") or []) if str(p).strip()]
+    if pack_name not in packs:
+        packs.append(pack_name)
+    held = [str(h) for h in (data.get("heldout") or []) if str(h).strip()]
+    if split == "heldout":
+        if pack_name not in held:
+            held.append(pack_name)
+    else:
+        held = [h for h in held if h != pack_name]
+    data["packs"] = packs
+    data["heldout"] = held
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def living_heldout_names() -> FrozenSet[str]:
+    path = living_index_path()
+    if not path.is_file():
+        return frozenset()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        names = data.get("heldout") or []
+        return frozenset(str(n).strip() for n in names if str(n).strip())
+    except Exception:
+        return frozenset()
+
+
+def living_pack_names() -> List[str]:
+    root = packs_root()
+    if not root.is_dir():
+        return []
+    names: List[str] = []
+    for child in sorted(root.iterdir()):
+        if child.name.startswith("living_") and (child / "task.json").is_file():
+            names.append(child.name)
+    return names
+
+
+def _living_split() -> str:
+    """Train is the PRE6 default. Set LN7_LIVING_HELDOUT_FRAC to reserve eval."""
+    try:
+        frac = float(os.getenv("LN7_LIVING_HELDOUT_FRAC", "0") or "0")
+    except ValueError:
+        frac = 0.0
+    frac = max(0.0, min(1.0, frac))
+    return "heldout" if frac > 0 and random.random() < frac else "train"
 
 
 def materialize_living_pack(
@@ -190,7 +265,9 @@ async def distill_due_packs(
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=min_age_days)
     distilled = 0
+    due = 0
     materialized: List[str] = []
+    pending_shadow: List[Dict[str, str]] = []
     try:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(
@@ -205,8 +282,9 @@ async def distill_due_packs(
                 """,
                 cutoff,
             )
+            due = len(rows)
             for row in rows:
-                split = random.choice(["train", "heldout"])
+                split = _living_split()
                 pack_name = f"living_{row['patch_hash'][:12]}"
                 try:
                     mat = materialize_living_pack(
@@ -215,9 +293,11 @@ async def distill_due_packs(
                         domain=str(row["domain"] or ""),
                         split=split,
                     )
-                    if mat.get("ok"):
-                        sandbox_deploy_hook(pack_name)
-                        materialized.append(pack_name)
+                    if not mat.get("ok"):
+                        continue
+                    register_living_pack(pack_name, split)
+                    sandbox_deploy_hook(pack_name)
+                    materialized.append(pack_name)
                 except Exception as me:
                     logger.warning("materialize %s failed: %s", pack_name, me)
                     continue
@@ -232,6 +312,14 @@ async def distill_due_packs(
                     split,
                 )
                 distilled += 1
+                if split == "train":
+                    pending_shadow.append(
+                        {
+                            "pack_name": pack_name,
+                            "patch_hash": str(row["patch_hash"]),
+                            "domain": str(row["domain"] or "coding"),
+                        }
+                    )
                 logger.info(
                     "living pack distilled: %s domain=%s split=%s",
                     pack_name,
@@ -244,9 +332,59 @@ async def distill_due_packs(
             "ok": False,
             "distilled": distilled,
             "materialized": materialized,
+            "due": due,
             "error": str(e),
         }
-    return {"ok": True, "distilled": distilled, "materialized": materialized}
+    shadowed = 0
+    for item in pending_shadow:
+        if await _organic_shadow_living(
+            db_pool,
+            pack_name=item["pack_name"],
+            source_hash=item["patch_hash"],
+            domain=item["domain"],
+        ):
+            shadowed += 1
+    return {
+        "ok": True,
+        "distilled": distilled,
+        "materialized": materialized,
+        "due": due,
+        "shadowed": shadowed,
+    }
+
+
+async def _organic_shadow_living(
+    db_pool,
+    *,
+    pack_name: str,
+    source_hash: str,
+    domain: str,
+) -> bool:
+    """One ci_pack fork for a newly distilled train pack — not a static replay."""
+    try:
+        from app.services.ln7_shadow_fork import run_shadow_fork
+        from app.services.ln_sandbox_engineering_ci import materialize_pack
+
+        wd, _meta, err = materialize_pack(pack_name)
+        if not wd:
+            logger.warning("living shadow skip %s: %s", pack_name, err)
+            return False
+        golden = (wd / "golden.patch").read_text(encoding="utf-8")
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+        ph = f"living_distill_{source_hash[:12]}_{stamp}"
+        out = await run_shadow_fork(
+            db_pool,
+            patch_hash=ph,
+            domain=domain or "coding",
+            evidence_uri=f"living_distill:{pack_name}",
+            counterfactual_diff=golden,
+            pack_ids=[pack_name],
+            force=True,
+        )
+        return bool(out.get("passed"))
+    except Exception as e:
+        logger.warning("living shadow %s: %s", pack_name, e)
+        return False
 
 
 class LivingPackAgent:
@@ -283,7 +421,15 @@ class LivingPackAgent:
         await asyncio.sleep(190)
         while self._running:
             try:
-                await distill_due_packs(self.db_pool)
+                out = await distill_due_packs(self.db_pool)
+                logger.info(
+                    "LivingPackAgent cycle ok=%s due=%s distilled=%s shadowed=%s error=%s",
+                    out.get("ok"),
+                    out.get("due"),
+                    out.get("distilled"),
+                    out.get("shadowed"),
+                    out.get("error"),
+                )
             except asyncio.CancelledError:
                 raise
             except Exception as e:

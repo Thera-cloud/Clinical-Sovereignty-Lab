@@ -321,7 +321,10 @@ async def run_fuel_gauge_cycle(db_pool) -> Dict[str, Any]:
             if slope <= 0.0 and stall >= STALL_DAYS and trainable < PRE6_TARGET:
                 if not await _already_sent(conn, domain, "stall"):
                     title = f"[FUEL STALLED] {domain} flat at {trainable} for {stall}d"
-                    detail = f"{line}. Queens patch volume low — check shadow_fork / hive_burst."
+                    detail = (
+                        f"{line}. Queens merge volume low — living distill "
+                        "writes to DATA_DIR; hive_burst stays gated until PRE6."
+                    )
                     _notify(title, detail, domain=domain)
                     await _mark_sent(conn, domain, "stall", detail)
                     actions.append(f"stall:{domain}")

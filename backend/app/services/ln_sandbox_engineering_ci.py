@@ -56,35 +56,64 @@ def packs_dir() -> Optional[Path]:
     return None
 
 
-def list_pack_names() -> List[str]:
-    root = packs_dir()
-    if not root:
-        return []
+def _living_packs_root() -> Optional[Path]:
     try:
-        data = json.loads((root / "packs_index.json").read_text(encoding="utf-8"))
-        names = list(data.get("packs") or [])
-        return [n for n in names if (root / n / "task.json").is_file()]
-    except Exception as e:
-        logger.warning("ln_sandbox_ci: index load failed: %s", e)
-        return []
+        from app.services.ln7_living_packs import packs_root
+
+        root = packs_root()
+        return root if root.is_dir() else None
+    except Exception:
+        return None
+
+
+def list_pack_names() -> List[str]:
+    names: List[str] = []
+    seen: set = set()
+    root = packs_dir()
+    if root:
+        try:
+            data = json.loads((root / "packs_index.json").read_text(encoding="utf-8"))
+            for n in data.get("packs") or []:
+                if n not in seen and (root / n / "task.json").is_file():
+                    names.append(n)
+                    seen.add(n)
+        except Exception as e:
+            logger.warning("ln_sandbox_ci: index load failed: %s", e)
+    living = _living_packs_root()
+    if living:
+        for child in sorted(living.iterdir()):
+            if (
+                child.name.startswith("living_")
+                and child.name not in seen
+                and (child / "task.json").is_file()
+            ):
+                names.append(child.name)
+                seen.add(child.name)
+    return names
 
 
 def load_pack(name: str) -> Optional[Dict[str, Any]]:
-    root = packs_dir()
-    if not root:
-        return None
-    pack = root / name
-    task_path = pack / "task.json"
-    if not task_path.is_file():
-        return None
-    try:
-        task = json.loads(task_path.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.warning("ln_sandbox_ci: task.json %s: %s", name, e)
-        return None
-    task["_pack_dir"] = str(pack)
-    task["_pack_name"] = name
-    return task
+    roots: List[Path] = []
+    static = packs_dir()
+    if static:
+        roots.append(static)
+    living = _living_packs_root()
+    if living and living not in roots:
+        roots.append(living)
+    for root in roots:
+        pack = root / name
+        task_path = pack / "task.json"
+        if not task_path.is_file():
+            continue
+        try:
+            task = json.loads(task_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning("ln_sandbox_ci: task.json %s: %s", name, e)
+            return None
+        task["_pack_dir"] = str(pack)
+        task["_pack_name"] = name
+        return task
+    return None
 
 
 def _strip_fences(text: str) -> str:

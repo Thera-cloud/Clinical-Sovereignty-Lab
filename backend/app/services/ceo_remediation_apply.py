@@ -119,11 +119,14 @@ async def _run_fuel_burst(
     volume = str(apply.get("volume") or f"ceo_{stamp}")[:40]
     limit = int(apply.get("limit") if apply.get("limit") is not None else FUEL_BURST_DEFAULT_LIMIT)
     digest = bool(apply.get("digest", True))
+    only_new = not bool(apply.get("replay"))
+    if "only_new" in apply:
+        only_new = bool(apply.get("only_new"))
 
     from app.services.ln7_fuel_volume import run_fuel_volume_burst
 
     out = await run_fuel_volume_burst(
-        db_pool, volume=volume, limit=limit, digest=digest
+        db_pool, volume=volume, limit=limit, digest=digest, only_new=only_new
     )
     out["approved_by"] = approved_by
     out["domain_hint"] = payload.get("domain") or "coding"
