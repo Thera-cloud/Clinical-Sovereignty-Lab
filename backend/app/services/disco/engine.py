@@ -19,7 +19,7 @@ from app.services.disco.assets import (
     autonomy_json,
 )
 from app.services.disco.boundary import LiveBuildBoundary
-from app.services.disco.flags import DISCO_FLAGS, disco_flag
+from app.services.disco.flags import DISCO_FLAGS, disco_flag, disco_render_coach
 from app.services.disco.pipeline import (
     CanaryPromoter,
     CostLedger,
@@ -377,6 +377,9 @@ class DiscoEngine:
         rec = await self.get_profile(slug)
         if not rec or rec.get("profile_status") != "active":
             return {"ok": False, "status": 404, "reason": "not_active"}
+        allow = disco_render_coach()
+        if allow and rec.get("coach_id") != allow and rec.get("slug") != allow.lower():
+            return {"ok": False, "status": 404, "reason": "not_in_render_allowlist"}
         creds = await self.boundary.credentials_for(rec["coach_id"])
         rel = (creds.get("value") or {}).get("class") or "coaching"
         out = render_profile_html(

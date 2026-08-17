@@ -106,8 +106,54 @@ def sitemap_urls() -> list[str]:
 
 def sitemap_xml() -> str:
     locs = "".join(f"<url><loc>{u}</loc></url>" for u in sitemap_urls())
+    extra = (
+        f"<url><loc>{BRAND_ORIGIN}/coaches/coachn</loc></url>"
+        f"<url><loc>{BRAND_ORIGIN}/metros/detroit</loc></url>"
+        f"<url><loc>{BRAND_ORIGIN}/hubs/family-systems</loc></url>"
+    )
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
-        f"{locs}</urlset>\n"
+        f"{locs}{extra}</urlset>\n"
+    )
+
+
+TEST_COACH = {
+    "display_name": "Nathaniel Nevedal",
+    "credential_string": "Coach",
+    "bio": "Family systems coaching for households in Detroit. Presence-based coaching, not a clinical practice.",
+    "slug": "coachn",
+    "canonical_phrases": ["family systems coaching", "presence-based coaching"],
+    "same_as": [],
+}
+
+
+def render_metro_page(metro: str, slug: str) -> str:
+    return (
+        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+        f"<title>Coaches in {metro} | Sovereign Sanctuary</title>"
+        f"<meta name='description' content='{META}'>"
+        "</head><body>"
+        f"<h1>Coaches in {metro}</h1>"
+        f"<p class='positioning'>{CANONICAL_POSITIONING}</p>"
+        f"<p><a href='/coaches/{slug}'>Nathaniel Nevedal</a> — family systems coaching</p>"
+        "<aside class='ss-crisis' role='note'><strong>If you need support right now:</strong> "
+        "<a href='tel:988'>988 Suicide &amp; Crisis Lifeline</a></aside>"
+        "</body></html>"
+    )
+
+
+def render_hub_page(hub: str, slug: str) -> str:
+    title = hub.replace("-", " ")
+    return (
+        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+        f"<title>{title} | Sovereign Sanctuary</title>"
+        f"<meta name='description' content='{META}'>"
+        "</head><body>"
+        f"<h1>{title}</h1>"
+        f"<p class='positioning'>{CANONICAL_POSITIONING}</p>"
+        f"<p><a href='/coaches/{slug}'>Nathaniel Nevedal</a></p>"
+        "<aside class='ss-crisis' role='note'><strong>If you need support right now:</strong> "
+        "<a href='tel:988'>988 Suicide &amp; Crisis Lifeline</a></aside>"
+        "</body></html>"
     )

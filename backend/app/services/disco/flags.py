@@ -41,3 +41,8 @@ DISCO_FLAGS = (
 
 def disco_flag(name: str) -> bool:
     return os.getenv(name, "false").strip().lower() in ("1", "true", "yes", "on")
+
+
+def disco_render_coach() -> str:
+    """Single-coach allowlist. Empty = all active profiles (do not use at T1)."""
+    return os.getenv("DISCO_RENDER_COACH", "").strip()
