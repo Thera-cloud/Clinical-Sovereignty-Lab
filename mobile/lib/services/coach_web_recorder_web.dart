@@ -55,13 +55,23 @@ class CoachWebRecorder {
     _stream = await devices.getUserMedia({'audio': true, 'video': false});
     _rec = _makeRecorder(_stream!);
     _stopped = Completer<void>();
-    _rec!.onDataAvailable.listen((event) {
-      final data = event.data;
+    _rec!.addEventListener('dataavailable', (event) {
+      html.Blob? data;
+      if (event is html.BlobEvent) {
+        data = event.data;
+      } else {
+        try {
+          final raw = (event as dynamic).data;
+          if (raw is html.Blob) {
+            data = raw;
+          }
+        } catch (_) {}
+      }
       if (data != null && data.size > 0) {
         _chunks.add(data);
       }
     });
-    _rec!.onStop.listen((_) {
+    _rec!.addEventListener('stop', (_) {
       final c = _stopped;
       if (c != null && !c.isCompleted) {
         c.complete();

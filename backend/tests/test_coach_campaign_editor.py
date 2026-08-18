@@ -259,7 +259,8 @@ def test_api_and_flutter_wire_preview_edit_photo():
     dart = (ROOT / "mobile/lib/services/coach_web_recorder.dart").read_text()
     assert "coach_web_recorder_io.dart" in dart
     web = (ROOT / "mobile/lib/services/coach_web_recorder_web.dart").read_text()
-    assert "onDataAvailable" in web
+    assert "dataavailable" in web
+    assert "(event as dynamic).data" in web
     assert "_rec!.start(250)" in web
     assert "bytesFromReaderResult" in web
     assert "audio/mp4" in web
