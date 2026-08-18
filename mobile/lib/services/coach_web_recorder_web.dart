@@ -2,18 +2,48 @@ import 'dart:async';
 import 'dart:html' as html;
 import 'dart:typed_data';
 
-/// Browser mic → webm via MediaRecorder (no third-party license).
+/// Browser mic → webm/mp4 via MediaRecorder (no third-party license).
 class CoachWebRecorder {
   static bool get isSupported => true;
+
+  static const _mimeCandidates = <String>[
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/aac',
+  ];
 
   html.MediaRecorder? _rec;
   html.MediaStream? _stream;
   final List<html.Blob> _chunks = [];
   Completer<void>? _stopped;
   bool _recording = false;
+  String _mime = 'audio/webm';
 
   bool get isRecording => _recording;
-  String get contentType => 'audio/webm';
+
+  String get contentType {
+    if (_mime.startsWith('audio/mp4') || _mime.startsWith('audio/aac')) {
+      return 'audio/mp4';
+    }
+    return 'audio/webm';
+  }
+
+  html.MediaRecorder _makeRecorder(html.MediaStream stream) {
+    for (final mime in _mimeCandidates) {
+      if (!html.MediaRecorder.isTypeSupported(mime)) {
+        continue;
+      }
+      try {
+        final rec = html.MediaRecorder(stream, {'mimeType': mime});
+        _mime = mime;
+        return rec;
+      } catch (_) {}
+    }
+    _mime = 'audio/webm';
+    return html.MediaRecorder(stream);
+  }
 
   Future<void> start() async {
     final devices = html.window.navigator.mediaDevices;
@@ -23,25 +53,40 @@ class CoachWebRecorder {
     await stop();
     _chunks.clear();
     _stream = await devices.getUserMedia({'audio': true, 'video': false});
-    var mime = 'audio/webm';
-    if (html.MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-      mime = 'audio/webm;codecs=opus';
-    }
-    _rec = html.MediaRecorder(_stream!, {'mimeType': mime});
+    _rec = _makeRecorder(_stream!);
     _stopped = Completer<void>();
-    _rec!.addEventListener('dataavailable', (event) {
-      if (event is html.BlobEvent && event.data != null && event.data!.size > 0) {
-        _chunks.add(event.data!);
+    _rec!.onDataAvailable.listen((event) {
+      final data = event.data;
+      if (data != null && data.size > 0) {
+        _chunks.add(data);
       }
     });
-    _rec!.addEventListener('stop', (_) {
+    _rec!.onStop.listen((_) {
       final c = _stopped;
       if (c != null && !c.isCompleted) {
         c.complete();
       }
     });
-    _rec!.start();
+    // Timeslice so Safari/Chrome emit chunks before stop.
+    _rec!.start(250);
     _recording = true;
+  }
+
+  static Uint8List bytesFromReaderResult(Object? raw) {
+    if (raw is Uint8List) {
+      return raw;
+    }
+    if (raw is ByteBuffer) {
+      return Uint8List.view(raw);
+    }
+    if (raw is TypedData) {
+      return Uint8List.view(
+        raw.buffer,
+        raw.offsetInBytes,
+        raw.lengthInBytes,
+      );
+    }
+    return Uint8List(0);
   }
 
   Future<Uint8List> stop() async {
@@ -51,11 +96,15 @@ class CoachWebRecorder {
     }
     _recording = false;
     try {
+      _rec?.requestData();
+    } catch (_) {}
+    try {
       _rec?.stop();
     } catch (_) {}
     try {
       await _stopped?.future.timeout(const Duration(seconds: 4));
     } catch (_) {}
+    await Future<void>.delayed(const Duration(milliseconds: 80));
     _stream?.getTracks().forEach((t) => t.stop());
     _stream = null;
     _rec = null;
@@ -63,16 +112,13 @@ class CoachWebRecorder {
     if (_chunks.isEmpty) {
       return Uint8List(0);
     }
-    final blob = html.Blob(_chunks, 'audio/webm');
+    final blob = html.Blob(_chunks, contentType);
     _chunks.clear();
     final reader = html.FileReader();
     final done = Completer<Uint8List>();
     reader.onLoad.listen((_) {
-      final raw = reader.result;
-      if (raw is ByteBuffer) {
-        done.complete(Uint8List.view(raw));
-      } else {
-        done.complete(Uint8List(0));
+      if (!done.isCompleted) {
+        done.complete(bytesFromReaderResult(reader.result));
       }
     });
     reader.onError.listen((_) {

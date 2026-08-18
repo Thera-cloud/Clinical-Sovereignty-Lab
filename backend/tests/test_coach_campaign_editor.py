@@ -258,6 +258,14 @@ def test_api_and_flutter_wire_preview_edit_photo():
     assert "record:" in yaml
     dart = (ROOT / "mobile/lib/services/coach_web_recorder.dart").read_text()
     assert "coach_web_recorder_io.dart" in dart
+    web = (ROOT / "mobile/lib/services/coach_web_recorder_web.dart").read_text()
+    assert "onDataAvailable" in web
+    assert "_rec!.start(250)" in web
+    assert "bytesFromReaderResult" in web
+    assert "audio/mp4" in web
+    hub = (ROOT / "mobile/lib/widgets/coach_integrations_hub.dart").read_text()
+    assert "_pickedFileBytes" in hub
+    assert "withReadStream: true" in hub
     sql = (ROOT / "backend/migrations/333_coach_campaign_item_editor.sql").read_text()
     assert "ADD COLUMN IF NOT EXISTS hero_image_prompt" in sql
     assert "DROP" not in sql.upper()

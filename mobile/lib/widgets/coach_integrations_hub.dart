@@ -1,6 +1,7 @@
 // Coach Command Integrations hub — Workspace, LinkedIn, Voice, Studio, Vault.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,23 @@ import '../config/app_config.dart';
 import '../services/coach_web_recorder.dart';
 import 'google_calendar_section.dart';
 import 'google_workspace_section.dart';
+
+Future<Uint8List?> _pickedFileBytes(PlatformFile file) async {
+  if (file.bytes != null && file.bytes!.isNotEmpty) {
+    return file.bytes;
+  }
+  final stream = file.readStream;
+  if (stream != null) {
+    final chunks = <int>[];
+    await for (final part in stream) {
+      chunks.addAll(part);
+    }
+    if (chunks.isNotEmpty) {
+      return Uint8List.fromList(chunks);
+    }
+  }
+  return null;
+}
 
 class CoachIntegrationsHub extends StatefulWidget {
   final String token;
@@ -941,9 +959,10 @@ class _VoiceIngestState extends State<_VoiceIngest> {
       type: FileType.custom,
       allowedExtensions: const ['wav', 'mp3', 'm4a', 'ogg', 'webm'],
       withData: true,
+      withReadStream: true,
     );
     if (picked == null || picked.files.isEmpty) return;
-    final bytes = picked.files.first.bytes;
+    final bytes = await _pickedFileBytes(picked.files.first);
     if (bytes == null || bytes.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1203,10 +1222,11 @@ class _VideoIngestState extends State<_VideoIngest> {
       type: FileType.custom,
       allowedExtensions: const ['mp4', 'mov', 'webm', 'wav', 'mp3', 'm4a'],
       withData: true,
+      withReadStream: true,
     );
     if (picked == null || picked.files.isEmpty) return;
     final file = picked.files.first;
-    final bytes = file.bytes;
+    final bytes = await _pickedFileBytes(file);
     if (bytes == null || bytes.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
