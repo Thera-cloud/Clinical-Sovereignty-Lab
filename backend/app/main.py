@@ -2948,6 +2948,22 @@ async def lifespan(app: FastAPI):
     except Exception as _ln_oa_err:
         print(f"   ⚠️  LNObserverAuditor init failed: {_ln_oa_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — Sovereign Studio auditor (15 checks, stagger 296s)
+    _studio_auditor = None
+    try:
+        from app.services.studio_auditor import StudioAuditor
+        _studio_auditor = StudioAuditor(
+            db_pool,
+            auth_token=os.environ.get("SKYEYE_AUDIT_TOKEN", ""),
+            app_state=app.state,
+        )
+        if not _is_clone:
+            await _studio_auditor.start()
+        app.state.studio_auditor = _studio_auditor
+        print("   ✅ StudioAuditor started (3x daily, stagger 296s)")
+    except Exception as _studio_aud_err:
+        print(f"   ⚠️  StudioAuditor init failed: {_studio_aud_err}")
+
     # ── Nate Check-In Agent — 72h inactivity outreach for clients + coaches ──
     _nate_checkin_agent = None
     try:
@@ -3748,6 +3764,7 @@ async def lifespan(app: FastAPI):
         ("ln_sandbox_engine", _ln_sandbox_engine is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln_sandbox_auditor", _ln_sandbox_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln_observer_auditor", _ln_observer_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("studio_auditor", _studio_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", _nate_checkin_agent is not None),
         ("pgsd_heartbeat_agent", _pgsd_heartbeat_agent is not None),  # QUANTUM-CRYSTAL-ARCH
         ("pgsd_discernment_scorer", (os.environ.get("PGSD_ENABLED", "").strip().lower() not in ("1", "true", "yes", "on")) or (_pgsd_discernment_scorer is not None)),  # QUANTUM-CRYSTAL-ARCH
@@ -3853,6 +3870,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ LNObserverAuditor stopped")
         except Exception as _ln_oa_stop:
             print(f"   ⚠️  LNObserverAuditor shutdown: {_ln_oa_stop}")
+    _studio_auditor_h = getattr(app.state, "studio_auditor", None)
+    if _studio_auditor_h:
+        try:
+            await _studio_auditor_h.stop()
+            print("   ✅ StudioAuditor stopped")
+        except Exception as _studio_aud_stop:
+            print(f"   ⚠️  StudioAuditor shutdown: {_studio_aud_stop}")
 
     # QUANTUM-CRYSTAL-ARCH — stop crystallizer loop + domain agents
     _cz_h = getattr(app.state, "nate_memory_crystallizer", None)
@@ -4707,6 +4731,16 @@ try:
     app.include_router(studio_router)
 except Exception as _studio_err:
     print(f"   ⚠️  Studio router failed: {_studio_err}")
+
+try:
+    from app.routers.sovereign_studio_api import (
+        public_router as sovereign_studio_public,
+        router as sovereign_studio_router,
+    )
+    app.include_router(sovereign_studio_public)
+    app.include_router(sovereign_studio_router)
+except Exception as _sov_studio_err:
+    print(f"   ⚠️  Sovereign Studio router failed: {_sov_studio_err}")  # QUANTUM-CRYSTAL-ARCH
 
 # QUANTUM-CRYSTAL-ARCH: 30s journey recap (transcript + panels + Ask Nate → stitched video)
 try:

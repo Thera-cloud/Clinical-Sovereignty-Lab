@@ -523,6 +523,88 @@ async def ingest_voice(request: Request, user: Dict = Depends(require_coach)):
         raise HTTPException(400, str(exc)) from exc
 
 
+@router.get("/mirror-capture/prompts")
+async def mirror_capture_prompts(user: Dict = Depends(require_coach)):
+    from app.services.studio_mirror_capture import MIRROR_CAPTURE_PARTS
+
+    return {
+        "ok": True,
+        "parts": list(MIRROR_CAPTURE_PARTS),
+        "label": "AI co-host and knowledge companion",
+    }
+
+
+@router.get("/mirror-capture/status")
+async def mirror_capture_status(request: Request, user: Dict = Depends(require_coach)):
+    from app.services.studio_mirror_capture import status as _status
+
+    return await _status(getattr(request.app.state, "db_pool", None), _hw(user))
+
+
+@router.post("/mirror-capture/parts/{n}/upload")
+async def mirror_capture_upload(
+    n: int, request: Request, user: Dict = Depends(require_coach)
+):
+    from app.services.google_workspace_service import FlagOff, VaultBlocked
+    from app.services.studio_mirror_capture import part_by_index
+    from app.services.voice_campaign_ingest import store_voice_recording
+
+    part = part_by_index(n)
+    if not part:
+        raise HTTPException(404, "unknown capture part")
+    body = await request.json()
+    b64 = str(body.get("media_b64") or body.get("audio_b64") or "")
+    transcript = str(body.get("transcript") or "")
+    media_kind = str(body.get("media_kind") or "audio").strip().lower()
+    content_type = str(body.get("content_type") or "")
+    try:
+        audio = base64.b64decode(b64) if b64 else b""
+    except Exception:
+        raise HTTPException(400, "invalid media_b64")
+    pool = getattr(request.app.state, "db_pool", None)
+    try:
+        return await store_voice_recording(
+            pool,
+            _hw(user),
+            "",
+            audio,
+            transcript=transcript,
+            media_kind=media_kind,
+            content_type=content_type,
+            capture_part_index=int(part["index"]),
+            capture_kind=str(part["kind"]),
+            clone_consent=bool(body.get("clone_consent")),
+        )
+    except FlagOff:
+        raise HTTPException(403, "temporarily unavailable")
+    except VaultBlocked as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/mirror-capture/finalize")
+async def mirror_capture_finalize(request: Request, user: Dict = Depends(require_coach)):
+    from app.services.studio_mirror_capture import finalize as _finalize
+
+    return await _finalize(getattr(request.app.state, "db_pool", None), _hw(user))
+
+
+@router.post("/mirror-capture/consent-clone")
+async def mirror_capture_consent(request: Request, user: Dict = Depends(require_coach)):
+    from app.services.studio_mirror_capture import record_clone_consent
+
+    body = await request.json()
+    out = await record_clone_consent(
+        getattr(request.app.state, "db_pool", None),
+        _hw(user),
+        bool(body.get("signed")),
+    )
+    if not out.get("ok"):
+        raise HTTPException(int(out.get("code") or 400), out.get("reason") or "error")
+    return out
+
+
 @router.get("/morning-brief")
 async def morning_brief(request: Request, user: Dict = Depends(require_coach)):
     from app.services.coach_task_service import list_open_tasks

@@ -86,6 +86,7 @@ AUDITOR_ACTIVITY_TYPES = [
     "newsletter_audit_sent",
     "ln_sandbox_audit_sent",
     "ln_observer_audit_sent",
+    "studio_audit_sent",
 ]
 
 AUDITOR_LABELS = {
@@ -125,6 +126,7 @@ AUDITOR_LABELS = {
     "newsletter_audit_sent": "Little Nate Dispatch",
     "ln_sandbox_audit_sent": "LN Sandbox DOJO",
     "ln_observer_audit_sent": "LN-Observer",
+    "studio_audit_sent": "Sovereign Studio",
 }
 
 REMEDIATION_CATEGORIES = {
@@ -589,6 +591,7 @@ class TrustEnforcer:
             "newsletter_audit_sent": "newsletter_check_count",
             "ln_sandbox_audit_sent": "ln_sandbox_check_count",
             "ln_observer_audit_sent": "ln_observer_check_count",
+            "studio_audit_sent": "studio_check_count",
         }
         return mapping.get(activity_type, "")
 

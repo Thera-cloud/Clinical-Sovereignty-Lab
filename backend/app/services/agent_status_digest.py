@@ -421,6 +421,7 @@ class AgentStatusDigest:
             ("Voice Infrastructure Auditor", "voice_infra_auditor"),
             ("High-Risk Crisis Auditor", "high_risk_crisis_auditor"),  # QUANTUM-CRYSTAL-ARCH
             ("Newsletter Auditor", "newsletter_auditor"),  # QUANTUM-CRYSTAL-ARCH
+            ("Sovereign Studio Auditor", "studio_auditor"),  # QUANTUM-CRYSTAL-ARCH
         ]
         rows = []
         for name, attr in auditors:

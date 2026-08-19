@@ -165,9 +165,18 @@ async def store_voice_recording(
     transcript: str = "",
     media_kind: str = "audio",
     content_type: str = "",
+    capture_part_index: Optional[int] = None,
+    capture_kind: Optional[str] = None,
+    clone_consent: bool = False,
 ) -> Dict[str, Any]:
     """R2 prefix coach_voice_campaigns/. Envelope-encrypt bytes. No LinkedIn/Gmail send."""
-    if not _flag_on("ENABLE_VOICE_CAMPAIGN"):
+    studio_capture = bool(capture_kind)
+    if studio_capture:
+        from app.services.studio_invariants import studio_flag_on
+
+        if not studio_flag_on() and not _flag_on("ENABLE_VOICE_CAMPAIGN"):
+            raise FlagOff("ENABLE_SOVEREIGN_STUDIO")
+    elif not _flag_on("ENABLE_VOICE_CAMPAIGN"):
         raise FlagOff("ENABLE_VOICE_CAMPAIGN")
     coach_id = (coach_id or "").strip()
     client_id = (client_id or "").strip()
@@ -219,22 +228,56 @@ async def store_voice_recording(
     r2_ok = await _put_r2(r2_key, (cipher or "").encode())
     if db_pool:
         async with db_pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO coach_voice_recordings
-                  (id, coach_id, client_id, r2_key, audio_ciphertext, transcript_ciphertext,
-                   media_kind, subject)
-                VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8)
-                """,
-                rec_id,
-                coach_id,
-                client_id or None,
-                r2_key,
-                cipher,
-                tx_cipher,
-                kind,
-                subject,
-            )
+            existing = None
+            if capture_kind:
+                existing = await conn.fetchval(
+                    """
+                    SELECT id FROM coach_voice_recordings
+                    WHERE coach_id = $1 AND capture_kind = $2
+                    LIMIT 1
+                    """,
+                    coach_id,
+                    capture_kind,
+                )
+            if existing:
+                rec_id = str(existing)
+                await conn.execute(
+                    """
+                    UPDATE coach_voice_recordings
+                    SET r2_key = $2, audio_ciphertext = $3, transcript_ciphertext = $4,
+                        media_kind = $5, subject = $6, capture_part_index = $7,
+                        clone_consent = $8
+                    WHERE id = $1::uuid
+                    """,
+                    rec_id,
+                    r2_key,
+                    cipher,
+                    tx_cipher,
+                    kind,
+                    subject,
+                    capture_part_index,
+                    bool(clone_consent),
+                )
+            else:
+                await conn.execute(
+                    """
+                    INSERT INTO coach_voice_recordings
+                      (id, coach_id, client_id, r2_key, audio_ciphertext, transcript_ciphertext,
+                       media_kind, subject, capture_part_index, capture_kind, clone_consent)
+                    VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    """,
+                    rec_id,
+                    coach_id,
+                    client_id or None,
+                    r2_key,
+                    cipher,
+                    tx_cipher,
+                    kind,
+                    subject,
+                    capture_part_index,
+                    capture_kind,
+                    bool(clone_consent),
+                )
     bios: Dict[str, Any] = {}
     if blob:
         try:
@@ -254,13 +297,17 @@ async def store_voice_recording(
             except Exception as exc:
                 logger.warning("campaign visual presence skipped: %s", exc)
     if subject == "coach" and blob:
-        try:
-            from app.services.coach_campaign_clone import register_clone, voice_id_for
+        allow_clone = True
+        if capture_kind:
+            allow_clone = bool(clone_consent)
+        if allow_clone:
+            try:
+                from app.services.coach_campaign_clone import register_clone, voice_id_for
 
-            if await register_clone(blob, coach_id, content_type=ctype):
-                bios = {**bios, "clone_voice_id": voice_id_for(coach_id)}
-        except Exception as exc:
-            logger.warning("campaign clone register skipped: %s", exc)
+                if await register_clone(blob, coach_id, content_type=ctype):
+                    bios = {**bios, "clone_voice_id": voice_id_for(coach_id)}
+            except Exception as exc:
+                logger.warning("campaign clone register skipped: %s", exc)
     if text or bios:
         try:
             from app.services.coach_voice_profile_service import upsert_voice_profile

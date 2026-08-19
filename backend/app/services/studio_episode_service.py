@@ -1,0 +1,253 @@
+"""Episode review gates — INV-3 human publish. QUANTUM-CRYSTAL-ARCH"""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any, Dict, List
+from xml.sax.saxutils import escape
+
+from app.services.studio_invariants import (
+    episode_can_approve,
+    episode_can_publish,
+    override_requires_admin,
+)
+
+logger = logging.getLogger("studio_episode")
+
+
+async def get_episode(db_pool, episode_id: str, coach_id: str) -> Dict[str, Any]:
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", "code": 503}
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT e.*, s.coach_id, s.name AS show_name
+            FROM studio_episodes e
+            JOIN studio_shows s ON s.id = e.show_id
+            WHERE e.id = $1::uuid AND s.coach_id = $2
+            """,
+            episode_id,
+            coach_id,
+        )
+        flags = []
+        if row:
+            flags = await conn.fetch(
+                """
+                SELECT id, severity, category, detail, status
+                FROM studio_compliance_flags WHERE episode_id = $1::uuid
+                """,
+                episode_id,
+            )
+    if not row:
+        return {"ok": False, "reason": "not_found", "code": 404}
+    return {"ok": True, "episode": _ep(row), "flags": [_flag(f) for f in flags]}
+
+
+async def approve_episode(db_pool, episode_id: str, coach_id: str) -> Dict[str, Any]:
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", "code": 503}
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT e.id, e.state, s.coach_id,
+              (SELECT COUNT(*) FROM studio_compliance_flags f
+                WHERE f.episode_id = e.id AND f.status = 'open') AS open_flags
+            FROM studio_episodes e
+            JOIN studio_shows s ON s.id = e.show_id
+            WHERE e.id = $1::uuid AND s.coach_id = $2
+            """,
+            episode_id,
+            coach_id,
+        )
+        if not row:
+            return {"ok": False, "reason": "not_found", "code": 404}
+        open_n = int(row["open_flags"] or 0)
+        if open_n > 0:
+            return {"ok": False, "reason": "open_compliance_flags", "code": 409}
+        if not episode_can_approve(row["state"], open_n):
+            return {"ok": False, "reason": "not_in_review", "code": 409}
+        await conn.execute(
+            """
+            UPDATE studio_episodes
+            SET state = 'approved', approved_by = $2, approved_at = NOW(), updated_at = NOW()
+            WHERE id = $1::uuid
+            """,
+            episode_id,
+            coach_id,
+        )
+    return {"ok": True, "state": "approved"}
+
+
+async def publish_episode(db_pool, episode_id: str, coach_id: str) -> Dict[str, Any]:
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", "code": 503}
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT e.id, e.state FROM studio_episodes e
+            JOIN studio_shows s ON s.id = e.show_id
+            WHERE e.id = $1::uuid AND s.coach_id = $2
+            """,
+            episode_id,
+            coach_id,
+        )
+        if not row:
+            return {"ok": False, "reason": "not_found", "code": 404}
+        if not episode_can_publish(row["state"]):
+            return {"ok": False, "reason": "not_approved", "code": 409}
+        await conn.execute(
+            """
+            UPDATE studio_episodes
+            SET state = 'published', published_at = NOW(),
+                rss_guid = COALESCE(rss_guid, $1::text), updated_at = NOW()
+            WHERE id = $2::uuid
+            """,
+            f"studio-{episode_id}",
+            episode_id,
+        )
+    return {"ok": True, "state": "published"}
+
+
+async def reject_episode(db_pool, episode_id: str, coach_id: str) -> Dict[str, Any]:
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", "code": 503}
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE studio_episodes e
+            SET state = 'rejected', updated_at = NOW()
+            FROM studio_shows s
+            WHERE e.id = $1::uuid AND e.show_id = s.id AND s.coach_id = $2
+              AND e.state = 'in_review'
+            RETURNING e.id
+            """,
+            episode_id,
+            coach_id,
+        )
+    if not row:
+        return {"ok": False, "reason": "not_found", "code": 404}
+    return {"ok": True, "state": "rejected"}
+
+
+async def add_cuts(
+    db_pool, episode_id: str, coach_id: str, cuts: List[Any]
+) -> Dict[str, Any]:
+    if not cuts:
+        return {"ok": False, "reason": "cuts required", "code": 422}
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", "code": 503}
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE studio_episodes e
+            SET cuts_json = $3::jsonb, updated_at = NOW()
+            FROM studio_shows s
+            WHERE e.id = $1::uuid AND e.show_id = s.id AND s.coach_id = $2
+            RETURNING e.id
+            """,
+            episode_id,
+            coach_id,
+            json.dumps(cuts),
+        )
+    if not row:
+        return {"ok": False, "reason": "not_found", "code": 404}
+    return {"ok": True, "cuts": cuts}
+
+
+async def resolve_flag(
+    db_pool,
+    episode_id: str,
+    flag_id: str,
+    coach_id: str,
+    *,
+    username: str,
+    is_admin: bool,
+    reason: str,
+) -> Dict[str, Any]:
+    reason = (reason or "").strip()
+    if len(reason) < 8:
+        return {"ok": False, "reason": "typed reason required", "code": 422}
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", "code": 503}
+    async with db_pool.acquire() as conn:
+        flag = await conn.fetchrow(
+            """
+            SELECT f.id, f.severity, f.status, f.episode_id
+            FROM studio_compliance_flags f
+            JOIN studio_episodes e ON e.id = f.episode_id
+            JOIN studio_shows s ON s.id = e.show_id
+            WHERE f.id = $1::uuid AND e.id = $2::uuid AND s.coach_id = $3
+            """,
+            flag_id,
+            episode_id,
+            coach_id,
+        )
+        if not flag:
+            return {"ok": False, "reason": "not_found", "code": 404}
+        if override_requires_admin(flag["severity"]) and not is_admin:
+            return {"ok": False, "reason": "high_severity_needs_admin", "code": 403}
+        await conn.execute(
+            """
+            UPDATE studio_compliance_flags SET status = 'overridden' WHERE id = $1::uuid
+            """,
+            flag_id,
+        )
+        await conn.execute(
+            """
+            INSERT INTO studio_compliance_flag_overrides
+              (flag_id, episode_id, severity, reason, overridden_by)
+            VALUES ($1::uuid, $2::uuid, $3, $4, $5)
+            """,
+            flag_id,
+            episode_id,
+            flag["severity"],
+            reason,
+            username,
+        )
+    return {"ok": True, "status": "overridden"}
+
+
+def rss_xml(show: Dict[str, Any], items: List[Dict[str, Any]]) -> str:
+    title = escape(str(show.get("name") or "Sovereign Studio"))
+    desc = escape(str(show.get("description") or LN_safe_desc()))
+    parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<rss version="2.0"><channel>',
+        f"<title>{title}</title>",
+        f"<description>{desc}</description>",
+        "<language>en-us</language>",
+    ]
+    for it in items:
+        parts.append("<item>")
+        parts.append(f"<title>{escape(str(it.get('title') or 'Episode'))}</title>")
+        parts.append(f"<guid>{escape(str(it.get('rss_guid') or it.get('id') or ''))}</guid>")
+        parts.append("</item>")
+    parts.append("</channel></rss>")
+    return "\n".join(parts)
+
+
+def LN_safe_desc() -> str:
+    from app.services.studio_invariants import LN_COHOST_LABEL
+
+    return f"Show with {LN_COHOST_LABEL}"
+
+
+def _ep(row) -> Dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "show_id": str(row["show_id"]),
+        "state": row["state"],
+        "title": row.get("title"),
+        "approved_by": row.get("approved_by"),
+    }
+
+
+def _flag(row) -> Dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "severity": row["severity"],
+        "category": row["category"],
+        "detail": row.get("detail"),
+        "status": row["status"],
+    }

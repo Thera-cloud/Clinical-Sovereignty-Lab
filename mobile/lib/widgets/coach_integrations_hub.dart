@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../config/app_config.dart';
 import '../services/coach_web_recorder.dart';
+import 'coach_sovereign_studio_tab.dart';
 import 'google_calendar_section.dart';
 import 'google_workspace_section.dart';
 
@@ -532,6 +533,8 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        CoachSovereignStudioTab(token: widget.token),
+        const SizedBox(height: 16),
         _panel(
           'STUDIO WEBHOOK SECRET',
           Icons.key,
