@@ -127,6 +127,7 @@ def test_migration_407_and_api_routes():
     assert "livekit/events" in src
     assert "ln-scan" in src
     assert "cohost/turn" in src
+    assert "cohost/caption" in src
     dart = (ROOT / "mobile/lib/widgets/coach_sovereign_studio_tab.dart").read_text()
     assert "EPISODE REVIEW" in dart
     assert "Little Nate (co-host)" in dart
@@ -267,6 +268,8 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert (ROOT / "mobile/web/avatar-modes/lil_nate_morphs.glb").is_file()
     assert (ROOT / "mobile/web/avatar-modes/vendor/three.module.js").is_file()
     assert "/cohost/turn" in html
+    assert "/cohost/caption" in html
+    assert "MediaRecorder" in html
     assert "ActiveSpeakersChanged" in html
     assert "caller_join" in html
     assert "grid-template-columns:1fr 1fr 1fr" in html
@@ -295,6 +298,22 @@ def test_s4_apply_probe_egress_billing_autoscale():
     )
     assert opened["ok"] is True
     assert opened.get("event") == "open"
+    captioned = asyncio.run(
+        _sess.cohost_turn(
+            None,
+            "sid-1",
+            "HOST: welcome in\nCALLER: what is sovereignty?",
+            event="caption",
+            callers=1,
+        )
+    )
+    assert captioned["ok"] is True
+    assert captioned.get("event") == "caption"
+    assert _sess.caption_should_ask("CALLER: what is sovereignty?") is True
+    assert _sess.caption_should_ask("ok") is False
+    quiet = asyncio.run(_sess.ingest_live_caption(b"", speaker="caller"))
+    assert quiet["ok"] is False
+    assert quiet["reason"] == "no_speech"
     blocked = asyncio.run(_sess.cohost_turn(None, "sid-1", "please diagnose this therapy case"))
     assert blocked["ok"] is True
     assert blocked.get("redirect") is True

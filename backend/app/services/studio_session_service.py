@@ -206,6 +206,13 @@ async def cohost_turn(
         prefix = f"{room} A caller just joined. Welcome them once, then yield to the host.\n"
     elif kind == "toss":
         prefix = f"{room} TOSS — host handed you the floor. Answer, then pause.\n"
+    elif kind == "caption":
+        prefix = (
+            f"{room} Live captions labeled HOST vs CALLER. A pause just happened. "
+            "If this is a question or aimed at you, answer in 1–3 sentences. "
+            "If they are mid-thought, one short line or wait. Do not talk over them. "
+            "Do not invent speech that is not in the captions.\n"
+        )
     else:
         prefix = f"{room} Live turn from {speaker}. Reply, then pause.\n"
     reply = (
@@ -215,6 +222,8 @@ async def cohost_turn(
         if kind == "caller_join"
         else "I'm on the floor. What should we open with?"
         if kind == "toss"
+        else "I heard the room. What should we take next?"
+        if kind == "caption"
         else "I'm with you. Say that again and I'll pick it up."
     )
     provider = "fallback"
@@ -240,6 +249,43 @@ async def cohost_turn(
         )
         provider = "inv6_filter"
     return {"ok": True, "text": reply, "provider": provider, "toss": bool(toss), "event": kind}
+
+
+def caption_should_ask(blob: str) -> bool:
+    text = (blob or "").strip()
+    if len(text) < 12:
+        return False
+    low = text.lower()
+    if "caller:" in low:
+        return True
+    if "?" in text:
+        return True
+    if "nate" in low or "co-host" in low or "cohost" in low:
+        return True
+    return len(text) >= 80
+
+
+async def ingest_live_caption(
+    audio: bytes,
+    speaker: str = "host",
+    identity: str = "",
+    content_type: str = "audio/webm",
+) -> Dict[str, Any]:
+    role = "caller" if (speaker or "").strip().lower() == "caller" else "host"
+    ctype = (content_type or "audio/webm").split(";")[0].strip() or "audio/webm"
+    if not audio or len(audio) < 400:
+        return {"ok": False, "reason": "no_speech", "speaker": role}
+    text = ""
+    try:
+        from app.services.whisper_stt import transcribe
+
+        text = (await transcribe(audio, content_type=ctype)) or ""
+    except Exception as exc:
+        logger.warning("studio caption stt skipped: %s", exc)
+    text = text.strip()
+    if not text:
+        return {"ok": False, "reason": "no_speech", "speaker": role}
+    return {"ok": True, "text": text, "speaker": role, "identity": (identity or "").strip()}
 
 
 def reject_guest_video(role: str, video_track_key: str) -> Dict[str, Any]:

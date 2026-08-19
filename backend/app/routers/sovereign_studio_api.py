@@ -7,7 +7,7 @@ import os
 from typing import Any, Dict, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
@@ -658,6 +658,37 @@ async def cohost_turn_public(session_id: UUID, body: CohostTurnBody, request: Re
             waiting=int(body.waiting or 0),
             event=body.event or "line",
         )
+    )
+
+
+@public_router.post("/sessions/{session_id}/cohost/caption")
+async def cohost_caption_public(
+    session_id: UUID,
+    request: Request,
+    file: UploadFile = File(...),
+    speaker: str = Form("host"),
+    identity: str = Form(""),
+):
+    _flag()
+    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    from app.services.studio_livekit import verify_livekit_jwt
+
+    checked = verify_livekit_jwt(token)
+    if not checked.get("ok"):
+        raise HTTPException(401, checked.get("reason") or "livekit_jwt")
+    if checked.get("session_id") != str(session_id):
+        raise HTTPException(403, "room_mismatch")
+    raw = await file.read()
+    if len(raw) > 800_000:
+        raise HTTPException(413, "caption_too_large")
+    from app.services.studio_session_service import ingest_live_caption
+
+    return await ingest_live_caption(
+        raw,
+        speaker=speaker,
+        identity=identity,
+        content_type=file.content_type or "audio/webm",
     )
 
 

@@ -79,6 +79,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 (function(){
   var room = null, micOn = true, camOn = false, lnPaused = false, waiting = [];
   var lastHeard = '', greeted = false, rec = null, nateSpeaking = false, bargeTimer = null;
+  var audioTracks = {}, capRecs = {}, pendingCaps = [], capPauseTimer = null;
   function params(){
     var h = new URLSearchParams(location.hash.replace(/^#/, ''));
     var q = new URLSearchParams(location.search);
@@ -195,6 +196,92 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     } catch (e) { live = 0; }
     return {callers: live, waiting: waiting.length};
   }
+  function speakerRole(identity){
+    if (room && room.localParticipant && identity === room.localParticipant.identity) {
+      return guest ? 'caller' : 'host';
+    }
+    return 'caller';
+  }
+  function rememberAudio(participant, track){
+    if (!track || track.kind !== 'audio') return;
+    var id = (participant && participant.identity) || 'unknown';
+    audioTracks[id] = track.mediaStreamTrack || track;
+  }
+  function rememberLocalMic(){
+    try {
+      var pub = room && room.localParticipant && LK.Track && room.localParticipant.getTrackPublication
+        ? room.localParticipant.getTrackPublication(LK.Track.Source.Microphone)
+        : null;
+      if (pub && pub.track) rememberAudio(room.localParticipant, pub.track);
+    } catch (e) {}
+  }
+  function stopCap(id){
+    var recd = capRecs[id];
+    if (!recd) return;
+    try { if (recd.state !== 'inactive') recd.stop(); } catch (e) {}
+    delete capRecs[id];
+  }
+  function shouldAskCaps(blob){
+    if (!blob || blob.length < 12) return false;
+    var low = blob.toLowerCase();
+    if (low.indexOf('caller:') !== -1) return true;
+    if (blob.indexOf('?') !== -1) return true;
+    if (low.indexOf('nate') !== -1 || low.indexOf('co-host') !== -1 || low.indexOf('cohost') !== -1) return true;
+    return blob.length >= 80;
+  }
+  function armCaptionTurn(){
+    if (capPauseTimer) clearTimeout(capPauseTimer);
+    capPauseTimer = setTimeout(function(){
+      capPauseTimer = null;
+      if (lnPaused || guest) { pendingCaps = []; return; }
+      if (nateSpeaking || Object.keys(capRecs).length) { armCaptionTurn(); return; }
+      var blob = pendingCaps.join('\n');
+      pendingCaps = [];
+      if (!shouldAskCaps(blob)) return;
+      nateTurn(blob, false, 'caption');
+    }, 1100);
+  }
+  function postCaption(id, blob){
+    if (guest || lnPaused || !cfg.session || !cfg.token) return;
+    var fd = new FormData();
+    fd.append('file', blob, 'cap.webm');
+    fd.append('speaker', speakerRole(id));
+    fd.append('identity', id || '');
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/caption', {
+      method: 'POST',
+      headers: {'Authorization':'Bearer ' + cfg.token},
+      body: fd
+    }).then(function(r){ return r.json(); }).then(function(j){
+      if (!j || !j.ok || !j.text) return;
+      var who = j.speaker === 'caller' ? 'CALLER' : 'HOST';
+      lastHeard = j.text;
+      addLine(who, j.text);
+      sendData({op:'caption', speaker: who, text: j.text});
+      pendingCaps.push(who + ': ' + j.text);
+      if (pendingCaps.length > 12) pendingCaps = pendingCaps.slice(-12);
+      armCaptionTurn();
+    }).catch(function(){});
+  }
+  function startCap(id){
+    if (guest || lnPaused || !cfg.session || !cfg.token || capRecs[id]) return;
+    var mst = audioTracks[id];
+    if (!mst || !window.MediaRecorder) return;
+    var stream = new MediaStream([mst]);
+    var mime = '';
+    try {
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) mime = 'audio/webm;codecs=opus';
+      else if (MediaRecorder.isTypeSupported('audio/webm')) mime = 'audio/webm';
+    } catch (e) {}
+    var recd;
+    try { recd = mime ? new MediaRecorder(stream, {mimeType: mime}) : new MediaRecorder(stream); }
+    catch (e) { return; }
+    capRecs[id] = recd;
+    recd.ondataavailable = function(ev){
+      if (!ev.data || ev.data.size < 400) return;
+      postCaption(id, ev.data);
+    };
+    try { recd.start(2400); } catch (e) { delete capRecs[id]; }
+  }
   function stopNateVoice(){
     nateSpeaking = false;
     if (window.speechSynthesis) speechSynthesis.cancel();
@@ -253,6 +340,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       fitMedia(el);
     }
     document.getElementById('callers').appendChild(el);
+    if (track.kind === 'audio') rememberAudio(participant, track);
     waiting = waiting.filter(function(n){ return n !== participant.identity; });
     renderWait();
   });
@@ -264,10 +352,22 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     }
   });
   room.on(LK.RoomEvent.ParticipantDisconnected, function(participant){
+    var id = participant && participant.identity;
+    if (id) { stopCap(id); delete audioTracks[id]; }
     waiting = waiting.filter(function(n){ return n !== participant.identity; });
     renderWait();
   });
   room.on(LK.RoomEvent.ActiveSpeakersChanged, function(speakers){
+    var ids = {};
+    (speakers || []).forEach(function(p){
+      if (p && p.identity) ids[p.identity] = true;
+    });
+    if (!guest) {
+      Object.keys(audioTracks).forEach(function(id){
+        if (ids[id]) startCap(id);
+        else stopCap(id);
+      });
+    }
     if (!nateSpeaking || !speakers || !speakers.length) {
       if (bargeTimer) { clearTimeout(bargeTimer); bargeTimer = null; }
       return;
@@ -287,10 +387,14 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
         addLine('Nate', msg.text);
         if (guest) speakNate(msg.text);
       }
+      if (msg.op === 'caption' && msg.text){ addLine(msg.speaker || 'HOST', msg.text); lastHeard = msg.text; }
       if (msg.op === 'chat' && msg.text){ addLine(msg.who || 'Host', msg.text); lastHeard = msg.text; }
     } catch (e) {}
   });
-  room.on(LK.RoomEvent.LocalTrackPublished, attachLocalCam);
+  room.on(LK.RoomEvent.LocalTrackPublished, function(pub){
+    attachLocalCam();
+    if (pub && pub.track) rememberAudio(room.localParticipant, pub.track);
+  });
   room.connect(cfg.url, cfg.token).then(function(){
     return room.localParticipant.setMicrophoneEnabled(true);
   }).then(function(){
@@ -312,6 +416,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       return room.localParticipant.publishTrack(vt, opts).catch(function(){ return null; });
     });
   }).then(function(){
+    rememberLocalMic();
     setStatus(guest ? 'Guest audio-only · Little Nate live.' : 'Little Nate live — chat or Talk anytime.');
     if (!greeted && !guest){
       greeted = true;
