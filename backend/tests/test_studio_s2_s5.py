@@ -9,6 +9,7 @@ _inv = load_svc("studio_invariants")
 _lk = load_svc("studio_livekit")
 _meter = load_svc("studio_meter")
 _sip = load_svc("studio_sip")
+_did = load_svc("studio_did_service")
 _sc = load_svc("studio_screener_service")
 _t2 = load_svc("studio_tier2")
 _sms = load_svc("studio_sms")
@@ -28,6 +29,8 @@ join_token = _lk.join_token
 session_minutes = _meter.session_minutes
 sip_join_allowed = _sip.sip_join_allowed
 sip_ingress_twiml = _sip.sip_ingress_twiml
+normalize_e164 = _did.normalize_e164
+COACHN_DID = _did.COACHN_DID
 handle_screener = _sc.handle_screener
 inbound_twiml = _sc.inbound_twiml
 is_risk = _sc.is_risk
@@ -192,3 +195,12 @@ def test_s4_room_meter_sip():
     assert sip_join_allowed("")["code"] == 403
     assert sip_join_allowed("abc")["ok"] is True
     assert "<Reject" in sip_ingress_twiml("")
+    assert normalize_e164("(561) 783-3006") == COACHN_DID
+    assert normalize_e164("5617833006") == "+15617833006"
+    sql411 = (ROOT / "backend/migrations/411_studio_coachn_did.sql").read_text()
+    assert "+15617833006" in sql411
+    assert "COACH_COACHN_ID" in sql411
+    src = (ROOT / "backend/app/services/studio_did_service.py").read_text()
+    assert "incoming_phone_numbers.create" in src
+    assert "attach_existing_did" in src
+    assert "purchased" in src

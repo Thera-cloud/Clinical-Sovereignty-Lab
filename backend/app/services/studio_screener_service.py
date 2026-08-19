@@ -208,10 +208,19 @@ async def persist_screener(
 async def lookup_show_by_did(db_pool, did: str) -> Optional[str]:
     if not db_pool or not did:
         return None
+    from app.services.studio_did_service import digits_only
+
+    digits = digits_only(did)
+    if not digits:
+        return None
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id FROM studio_shows WHERE did_e164 = $1 LIMIT 1",
-            did.strip(),
+            """
+            SELECT id FROM studio_shows
+            WHERE regexp_replace(COALESCE(did_e164, ''), '[^0-9]', '', 'g') = $1
+            LIMIT 1
+            """,
+            digits,
         )
     return str(row["id"]) if row else None
 

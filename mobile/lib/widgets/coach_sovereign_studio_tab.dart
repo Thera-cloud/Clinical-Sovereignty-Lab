@@ -513,7 +513,8 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
                 dense: true,
                 title: Text((s['name'] ?? '').toString(),
                     style: const TextStyle(color: _text, fontSize: 13)),
-                subtitle: Text((s['vertical'] ?? '').toString(),
+                subtitle: Text(
+                    '${s['vertical'] ?? ''} · ${s['did_e164'] ?? 'no DID'}',
                     style: const TextStyle(color: _muted, fontSize: 11)),
                 onTap: () {
                   setState(() => _selected = s);

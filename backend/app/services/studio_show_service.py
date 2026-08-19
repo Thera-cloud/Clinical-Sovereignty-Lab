@@ -116,7 +116,7 @@ async def list_shows(db_pool, coach_id: str) -> Dict[str, Any]:
         rows = await conn.fetch(
             """
             SELECT s.id, s.coach_id, s.name, s.vertical, s.host_number, s.host_verified,
-                   s.persona_style_layer, s.tier, s.live_unlocked, s.created_at,
+                   s.did_e164, s.persona_style_layer, s.tier, s.live_unlocked, s.created_at,
                    (SELECT COUNT(*) FROM studio_episodes e
                      WHERE e.show_id = s.id AND e.state = 'published'
                        AND NOT EXISTS (
@@ -219,6 +219,7 @@ def _show_row(row) -> Dict[str, Any]:
         "description": row.get("description"),
         "vertical": row.get("vertical"),
         "host_number": row.get("host_number"),
+        "did_e164": row.get("did_e164"),
         "host_verified": bool(row.get("host_verified")),
         "persona_style_layer": style if isinstance(style, dict) else {},
         "tier": row.get("tier") or "tier1",

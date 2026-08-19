@@ -50,6 +50,10 @@ class HostNumberBody(BaseModel):
     host_number: str
 
 
+class AttachDidBody(BaseModel):
+    did_e164: str
+
+
 class SessionCreate(BaseModel):
     show_id: str
 
@@ -187,6 +191,20 @@ async def provision_did(show_id: UUID, request: Request, user: Dict = Depends(re
     from app.services.studio_did_service import provision_did as _prov
 
     return _raise(await _prov(_pool(request), str(show_id), user.get("username") or ""))
+
+
+@router.post("/shows/{show_id}/attach-did")
+async def attach_did(
+    show_id: UUID, body: AttachDidBody, request: Request, user: Dict = Depends(require_admin)
+):
+    _flag()
+    from app.services.studio_did_service import attach_existing_did
+
+    return _raise(
+        await attach_existing_did(
+            _pool(request), str(show_id), body.did_e164, user.get("username") or ""
+        )
+    )
 
 
 @router.get("/shows/{show_id}/caller-memory")
