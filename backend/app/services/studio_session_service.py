@@ -87,15 +87,21 @@ async def end_session(db_pool, session_id: str, coach_id: str) -> Dict[str, Any]
         )
     if not row:
         return {"ok": False, "reason": "not_found", "code": 404}
-    from app.services.studio_meter import add_session_minutes, session_minutes
+    from app.services.studio_meter import add_session_minutes, post_session_billing, session_minutes
 
     mins = session_minutes(row["started_at"], row["ended_at"])
     await add_session_minutes(db_pool, str(row["show_id"]), mins)
+    try:
+        billed = await post_session_billing(db_pool, str(row["show_id"]), coach_id, mins)
+    except Exception as exc:
+        logger.warning("studio post_session_billing: %s", exc)
+        billed = {"ok": False, "reason": str(exc)[:80]}
     return {
         "ok": True,
         "session_id": str(row["id"]),
         "state": "ended",
         "session_minutes": mins,
+        "billing": billed,
     }
 
 

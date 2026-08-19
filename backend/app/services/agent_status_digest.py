@@ -252,6 +252,7 @@ class AgentStatusDigest:
             ("LN Sandbox DOJO", "ln_sandbox_engine"),  # QUANTUM-CRYSTAL-ARCH
             ("LN Sandbox Auditor", "ln_sandbox_auditor"),  # QUANTUM-CRYSTAL-ARCH
             ("PGSD Heartbeat", "pgsd_heartbeat_agent"),  # QUANTUM-CRYSTAL-ARCH
+            ("Studio Screener Autoscale", "studio_screener_autoscale"),  # QUANTUM-CRYSTAL-ARCH
         ]:
             agent = getattr(self.app, attr, None)
             status, detail = self._check_agent(agent, name)

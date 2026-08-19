@@ -63,9 +63,16 @@ video{width:320px;height:180px;background:#111;border-radius:8px}
     return room.localParticipant.setMicrophoneEnabled(true);
   }).then(function(){
     if (guest) return room.localParticipant.setCameraEnabled(false);
+    var stream = document.getElementById('env').captureStream(12);
+    var vt = stream && stream.getVideoTracks()[0];
+    if (vt){
+      var t = 0;
+      setInterval(function(){ t += 1; drawEnv(0.28 + 0.45*Math.abs(Math.sin(t/8))); }, 80);
+      return room.localParticipant.publishTrack(vt, {name:'ln-envelope'});
+    }
     return room.localParticipant.setCameraEnabled(true);
   }).then(function(){
-    status.textContent = guest ? 'Guest audio-only (INV-2).' : 'Host connected.';
+    status.textContent = guest ? 'Guest audio-only (INV-2).' : 'Host + envelope avatar.';
   }).catch(function(e){
     status.textContent = 'Connect failed: ' + e;
   });

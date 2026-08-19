@@ -46,7 +46,7 @@ LIVEKIT_PORT=${API_PORT}
 EOF
   chmod 600 "${KEY_FILE}"
   echo "Wrote ${KEY_FILE} — copy KEY/SECRET to GREEN .env as LIVEKIT_API_KEY/SECRET"
-  echo "Set GREEN LIVEKIT_URL=wss://studio-live.sovereignsanctuary.net (or WG host after TLS)"
+  echo "Set GREEN LIVEKIT_URL=wss://api.sovereignsanctuary.net/livekit"
   echo "Set GREEN LIVEKIT_INTERNAL_URL=http://${WG_IP}:${API_PORT}"
 fi
 
@@ -103,6 +103,7 @@ EOF
 
 if command -v ufw >/dev/null 2>&1; then
   ufw allow from 10.13.13.0/24 to any port "${API_PORT}" proto tcp
+  ufw allow "${RTC_PORT}/tcp"
   ufw allow "${UDP_START}:${UDP_END}/udp"
   ufw deny 11434/tcp || true
 fi

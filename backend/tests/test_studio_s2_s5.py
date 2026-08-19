@@ -204,3 +204,36 @@ def test_s4_room_meter_sip():
     assert "incoming_phone_numbers.create" in src
     assert "attach_existing_did" in src
     assert "purchased" in src
+
+
+def test_s4_apply_probe_egress_billing_autoscale():
+    import asyncio
+
+    start_room_egress = _lk.start_room_egress
+    post_session_billing = _meter.post_session_billing
+    StudioScreenerAutoscaleAgent = _as.StudioScreenerAutoscaleAgent
+
+    h = _lk.health()
+    assert h["node"] == "orange"
+    assert h["allow_video_guest"] is False
+    assert "internal_reachable" in h
+    plan = asyncio.run(start_room_egress("sid-apply"))
+    assert plan["delay_s"] == 45
+    assert plan["started"] is False
+    assert plan["reason"] == "livekit_not_configured"
+    billed = asyncio.run(post_session_billing(None, "show", "COACH_COACHN_ID", 12))
+    assert billed["dry"] is True
+    agent = StudioScreenerAutoscaleAgent(None)
+    assert agent.last_hint["workers"] == 1
+    html = _lk.ROOM_HTML
+    assert "captureStream" in html
+    assert "ln-envelope" in html
+    ngx = (ROOT / "nginx/snippets/health-livekit.conf").read_text()
+    assert "location /livekit/" in ngx
+    assert "10.13.13.5:7880" in ngx
+    main = (ROOT / "backend/app/main.py").read_text()
+    assert "studio_screener_autoscale" in main
+    dart = (ROOT / "mobile/lib/widgets/coach_sovereign_studio_tab.dart").read_text()
+    assert "/egress" in dart
+    pin = (ROOT / "scripts/cf_pin_ln_observer_lb.sh").read_text()
+    assert "/livekit" in pin

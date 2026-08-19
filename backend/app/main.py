@@ -2964,6 +2964,18 @@ async def lifespan(app: FastAPI):
     except Exception as _studio_aud_err:
         print(f"   ⚠️  StudioAuditor init failed: {_studio_aud_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — Studio screener autoscale hint loop
+    _studio_screener_autoscale = None
+    try:
+        from app.services.studio_screener_autoscale import StudioScreenerAutoscaleAgent
+        _studio_screener_autoscale = StudioScreenerAutoscaleAgent(db_pool)
+        if not _is_clone:
+            await _studio_screener_autoscale.start()
+        app.state.studio_screener_autoscale = _studio_screener_autoscale
+        print("   ✅ StudioScreenerAutoscaleAgent started (300s)")
+    except Exception as _studio_as_err:
+        print(f"   ⚠️  StudioScreenerAutoscaleAgent init failed: {_studio_as_err}")
+
     # ── Nate Check-In Agent — 72h inactivity outreach for clients + coaches ──
     _nate_checkin_agent = None
     try:
@@ -3765,6 +3777,7 @@ async def lifespan(app: FastAPI):
         ("ln_sandbox_auditor", _ln_sandbox_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("ln_observer_auditor", _ln_observer_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("studio_auditor", _studio_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("studio_screener_autoscale", _studio_screener_autoscale is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", _nate_checkin_agent is not None),
         ("pgsd_heartbeat_agent", _pgsd_heartbeat_agent is not None),  # QUANTUM-CRYSTAL-ARCH
         ("pgsd_discernment_scorer", (os.environ.get("PGSD_ENABLED", "").strip().lower() not in ("1", "true", "yes", "on")) or (_pgsd_discernment_scorer is not None)),  # QUANTUM-CRYSTAL-ARCH
@@ -3877,6 +3890,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ StudioAuditor stopped")
         except Exception as _studio_aud_stop:
             print(f"   ⚠️  StudioAuditor shutdown: {_studio_aud_stop}")
+    _studio_as_h = getattr(app.state, "studio_screener_autoscale", None)
+    if _studio_as_h:
+        try:
+            await _studio_as_h.stop()
+            print("   ✅ StudioScreenerAutoscaleAgent stopped")
+        except Exception as _studio_as_stop:
+            print(f"   ⚠️  StudioScreenerAutoscaleAgent shutdown: {_studio_as_stop}")
 
     # QUANTUM-CRYSTAL-ARCH — stop crystallizer loop + domain agents
     _cz_h = getattr(app.state, "nate_memory_crystallizer", None)

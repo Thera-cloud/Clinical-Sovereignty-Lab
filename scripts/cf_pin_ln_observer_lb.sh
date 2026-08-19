@@ -20,7 +20,7 @@ if [[ -z "${TOKEN}" || -z "${ACCT}" ]]; then
   exit 1
 fi
 
-NEW_COND='(starts_with(http.request.uri.path, "/ws") or starts_with(http.request.uri.path, "/api/ln-observer"))'
+NEW_COND='(starts_with(http.request.uri.path, "/ws") or starts_with(http.request.uri.path, "/api/ln-observer") or starts_with(http.request.uri.path, "/livekit"))'
 export TOKEN ACCT ZONE NEW_COND
 
 python3 <<'PY'

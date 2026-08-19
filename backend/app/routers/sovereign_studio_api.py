@@ -294,7 +294,7 @@ async def join_token(session_id: UUID, request: Request, user: Dict = Depends(re
 @router.post("/sessions/{session_id}/egress")
 async def start_egress(session_id: UUID, request: Request, user: Dict = Depends(require_coach)):
     _flag()
-    from app.services.studio_livekit import egress_plan
+    from app.services.studio_livekit import start_room_egress
 
     rtmp = ""
     unlocked = False
@@ -324,7 +324,7 @@ async def start_egress(session_id: UUID, request: Request, user: Dict = Depends(
         from app.services.studio_invariants import live_tier_unlocked
 
         unlocked = live_tier_unlocked(int(row["clean_published"] or 0))
-    return egress_plan(str(session_id), rtmp_url=rtmp, live_unlocked=unlocked)
+    return await start_room_egress(str(session_id), rtmp_url=rtmp, live_unlocked=unlocked)
 
 
 @router.get("/shows/{show_id}/meter")

@@ -231,11 +231,26 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
     if (r.statusCode == 200) {
       final j = json.decode(r.body) as Map<String, dynamic>;
       final roomUrl = (j['room_url'] ?? '').toString();
+      String note = j['jwt'] == true
+          ? 'LiveKit JWT ready (guest audio-only).'
+          : 'LiveKit pending URL — envelope avatar local.';
+      try {
+        final eg = await http.post(
+          Uri.parse('${AppConfig.apiBaseUrl}/api/studio/sessions/$_sessionId/egress'),
+          headers: _h,
+          body: json.encode({}),
+        );
+        if (eg.statusCode == 200) {
+          final ej = json.decode(eg.body) as Map<String, dynamic>;
+          note += ej['started'] == true
+              ? ' Egress started.'
+              : ' Egress: ${ej['reason'] ?? 'pending'}.';
+        }
+      } catch (_) {}
+      if (!mounted) return;
       setState(() {
         _roomUrl = roomUrl;
-        _lkNote = j['jwt'] == true
-            ? 'LiveKit JWT ready (guest audio-only).'
-            : 'LiveKit pending URL — envelope avatar local.';
+        _lkNote = note;
       });
     }
   }

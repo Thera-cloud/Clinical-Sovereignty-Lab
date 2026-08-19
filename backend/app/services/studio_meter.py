@@ -35,6 +35,47 @@ async def add_session_minutes(db_pool, show_id: str, minutes: float) -> Dict[str
     return {"ok": True, "minutes": mins}
 
 
+async def post_session_billing(
+    db_pool, show_id: str, coach_id: str, minutes: float
+) -> Dict[str, Any]:
+    """Roll studio_meter into token_transactions (usage, no deduct). QUANTUM-CRYSTAL-ARCH"""
+    mins = max(0.0, float(minutes))
+    if not db_pool or mins <= 0:
+        return {"ok": True, "dry": True, "minutes": mins}
+    units = max(1, int(round(mins * 10)))
+    async with db_pool.acquire() as conn:
+        user = await conn.fetchrow(
+            """
+            SELECT username, company_id
+            FROM users
+            WHERE hardware_id = $1 AND (deleted_at IS NULL)
+            """,
+            coach_id,
+        )
+        if not user:
+            return {"ok": True, "skipped": "no_user", "minutes": mins}
+        bal = await conn.fetchval(
+            "SELECT COALESCE(token_balance, 0) FROM users WHERE username = $1",
+            user["username"],
+        )
+        scope = "corporate" if user.get("company_id") else "coach"
+        await conn.execute(
+            """
+            INSERT INTO token_transactions
+              (username, action, amount, balance_before, balance_after,
+               reason, source, initiated_by, target_scope, target_ref)
+            VALUES ($1, 'usage', $2, $3, $3, $4, 'studio_session', 'studio', $5, $6)
+            """,
+            user["username"],
+            units,
+            int(bal or 0),
+            f"Studio session {mins} min",
+            scope,
+            str(show_id),
+        )
+    return {"ok": True, "minutes": mins, "units": units, "source": "studio_session"}
+
+
 async def add_youtube_push(db_pool, show_id: str) -> None:
     if not db_pool:
         return
