@@ -74,6 +74,10 @@ def test_migration_407_and_api_routes():
     sql = (ROOT / "backend/migrations/407_studio_s2_s5.sql").read_text()
     assert "studio_youtube_connection" in sql
     assert "rtmp_url" in sql
+    c402 = (ROOT / "backend/migrations/402_studio_callers.sql").read_text()
+    assert "CREATE TABLE IF NOT EXISTS consent_records" not in c402
+    c408 = (ROOT / "backend/migrations/408_studio_consent_records.sql").read_text()
+    assert "studio_consent_records" in c408
     src = (ROOT / "backend/app/routers/sovereign_studio_api.py").read_text()
     assert "studio_screener_service" in src
     assert "studio_tier2" in src

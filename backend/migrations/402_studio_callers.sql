@@ -22,18 +22,5 @@ CREATE TABLE IF NOT EXISTS caller_topics (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS consent_records (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    show_id UUID NOT NULL REFERENCES studio_shows (id),
-    caller_id UUID REFERENCES show_callers (id),
-    consent_kind TEXT NOT NULL,
-    granted BOOLEAN NOT NULL DEFAULT FALSE,
-    source TEXT NOT NULL DEFAULT 'screener',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT consent_kind_chk CHECK (
-        consent_kind IN ('air', 'recording', 'recall', 'sms_opt_in')
-    )
-);
-
-CREATE INDEX IF NOT EXISTS idx_consent_records_show
-    ON consent_records (show_id, created_at DESC);
+-- Do not create public.consent_records — that table is identity/workspace (163b/328).
+-- Studio consents live in studio_consent_records (migration 408).

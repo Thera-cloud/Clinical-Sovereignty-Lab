@@ -157,7 +157,7 @@ async def persist_screener(
         )
         await conn.execute(
             """
-            INSERT INTO consent_records (show_id, caller_id, consent_kind, granted, source)
+            INSERT INTO studio_consent_records (show_id, caller_id, consent_kind, granted, source)
             VALUES ($1::uuid, $2::uuid, 'air', $3, 'screener')
             """,
             show_id,
@@ -167,7 +167,7 @@ async def persist_screener(
         if consented and not risk:
             await conn.execute(
                 """
-                INSERT INTO consent_records (show_id, caller_id, consent_kind, granted, source)
+                INSERT INTO studio_consent_records (show_id, caller_id, consent_kind, granted, source)
                 VALUES ($1::uuid, $2::uuid, 'recording', TRUE, 'screener')
                 """,
                 show_id,

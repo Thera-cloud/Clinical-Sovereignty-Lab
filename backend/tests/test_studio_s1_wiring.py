@@ -11,8 +11,8 @@ MIRROR_CAPTURE_PARTS = load_svc("studio_mirror_capture").MIRROR_CAPTURE_PARTS
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_migrations_400_407_exist():
-    names = [p.name for p in (ROOT / "backend/migrations").glob("40[0-7]_*.sql")]
+def test_migrations_400_408_exist():
+    names = [p.name for p in (ROOT / "backend/migrations").glob("40[0-8]_*.sql")]
     for n in (
         "400_studio_shows.sql",
         "401_studio_sessions.sql",
@@ -22,6 +22,7 @@ def test_migrations_400_407_exist():
         "405_mirror_capture.sql",
         "406_studio_trust_baseline.sql",
         "407_studio_s2_s5.sql",
+        "408_studio_consent_records.sql",
     ):
         assert n in names
 

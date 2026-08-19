@@ -49,7 +49,7 @@ def test_studio_modules_do_not_import_therapeutic():
 
 
 def test_no_drop_in_studio_migrations():
-    for i in range(400, 408):
+    for i in range(400, 409):
         matches = list((ROOT / "backend/migrations").glob(f"{i}_*.sql"))
         assert matches, f"missing migration {i}"
         body = matches[0].read_text().upper()

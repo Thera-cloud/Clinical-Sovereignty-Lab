@@ -529,7 +529,7 @@ async def sms_consent(
             raise HTTPException(404, "not_found")
         await conn.execute(
             """
-            INSERT INTO consent_records (show_id, consent_kind, granted, source)
+            INSERT INTO studio_consent_records (show_id, consent_kind, granted, source)
             VALUES ($1::uuid, $2, $3, 'coach')
             """,
             str(show_id),
