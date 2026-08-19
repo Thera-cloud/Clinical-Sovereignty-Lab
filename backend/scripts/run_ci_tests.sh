@@ -8,11 +8,12 @@ export ENVIRONMENT="${ENVIRONMENT:-test}"
 export DATABASE_URL="${DATABASE_URL:-}"
 export REDIS_URL="${REDIS_URL:-}"
 export PYTHONPATH="${PYTHONPATH:-${ROOT}/backend}"
+PYTHON="${PYTHON:-python3}"
 
 # QUANTUM-CRYSTAL-ARCH — Sovereign Standard CI decorator / docstring gate
 # Load gate via file path (not app.services package) to avoid nevedal/numpy
 # Accelerate SIGFPE on some macOS hosts during package __init__ import.
-python3 -c "
+"${PYTHON}" -c "
 from pathlib import Path
 import importlib.util
 import sys
@@ -28,17 +29,17 @@ print('Sovereign Standard gate: PASS')
 "
 
 # QUANTUM-CRYSTAL-ARCH — Principal-Review gold learning gate (offline harness)
-python3 "${ROOT}/backend/scripts/verify_gold_learning_gate.py" --offline
+"${PYTHON}" "${ROOT}/backend/scripts/verify_gold_learning_gate.py" --offline
 
 # QUANTUM-CRYSTAL-ARCH — Fuel-cycle funnel verification (offline harness; audits
 # production data when DATABASE_URL is set, no-ops cleanly in CI otherwise)
-python3 "${ROOT}/backend/scripts/verify_fuel_cycle.py" --offline
+"${PYTHON}" "${ROOT}/backend/scripts/verify_fuel_cycle.py" --offline
 
 # QUANTUM-CRYSTAL-ARCH — LN7 flywheel fence suite (Step 0 welds; Queens SA must not write)
 export FROZEN_CONFIG_DIR="${FROZEN_CONFIG_DIR:-${ROOT}/frozen-config}"
-python3 -m pytest "${ROOT}/frozen-config/fence_tests" -q --tb=short
+"${PYTHON}" -m pytest "${ROOT}/frozen-config/fence_tests" -q --tb=short
 
-exec python3 -m pytest "${ROOT}/backend/tests/" -v --tb=short \
+exec "${PYTHON}" -m pytest "${ROOT}/backend/tests/" -v --tb=short \
   --ignore="${ROOT}/backend/tests/test_integration.py" \
   --ignore="${ROOT}/backend/tests/test_stripe_billing_flows.py" \
   --ignore="${ROOT}/backend/tests/test_hive_defense.py" \

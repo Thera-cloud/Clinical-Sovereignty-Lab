@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 import '../config/app_config.dart';
 import '../services/coach_web_recorder.dart';
 
@@ -49,7 +50,12 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
 
   final _nameCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
+  final _hostCtrl = TextEditingController();
   String _vertical = 'life_coaching';
+  bool _ytConnected = false;
+  bool _smsOptIn = false;
+  String _lkNote = '';
+  List<Offset> _envelope = const [];
   List<Map<String, dynamic>> _shows = [];
   Map<String, dynamic>? _selected;
   List<Map<String, dynamic>> _parts = [];
@@ -85,6 +91,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
     }
     _nameCtrl.dispose();
     _descCtrl.dispose();
+    _hostCtrl.dispose();
     _noteCtrl.dispose();
     super.dispose();
   }
@@ -100,6 +107,13 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
             '${AppConfig.apiBaseUrl}/api/coach/integrations/mirror-capture/status'),
         headers: _h,
       );
+      final ytR = await http.get(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/studio/youtube/status'),
+        headers: _h,
+      );
+      final envR = await http.get(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/studio/avatar/envelope?level=0.4'),
+      );
       if (!mounted) return;
       if (showsR.statusCode == 200) {
         final j = json.decode(showsR.body);
@@ -114,6 +128,21 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
         _parts = List<Map<String, dynamic>>.from(j['parts'] ?? []);
         _complete = (j['complete_count'] as num?)?.toInt() ?? 0;
         _cloneConsent = j['clone_consent'] == true;
+      }
+      if (ytR.statusCode == 200) {
+        final j = json.decode(ytR.body) as Map<String, dynamic>;
+        _ytConnected = j['connected'] == true;
+      }
+      if (envR.statusCode == 200) {
+        final j = json.decode(envR.body) as Map<String, dynamic>;
+        final pts = (j['points'] as List?) ?? [];
+        _envelope = pts
+            .whereType<Map>()
+            .map((p) => Offset(
+                  (p['x'] as num?)?.toDouble() ?? 0,
+                  (p['y'] as num?)?.toDouble() ?? 0,
+                ))
+            .toList();
       }
       final sid = (_selected?['id'] ?? '').toString();
       if (sid.isNotEmpty) {
@@ -155,8 +184,105 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
     if (path == '/api/studio/sessions' && r.statusCode == 200) {
       final j = json.decode(r.body) as Map<String, dynamic>;
       _sessionId = (j['session']?['id'] ?? j['id'] ?? '').toString();
+      if ((_sessionId ?? '').isNotEmpty) {
+        await _joinRoom();
+      }
     }
     await _refresh();
+  }
+
+  Future<void> _connectYoutube() async {
+    final r = await http.get(
+      Uri.parse('${AppConfig.apiBaseUrl}/api/studio/youtube/connect'),
+      headers: _h,
+    );
+    if (!mounted) return;
+    if (r.statusCode != 200) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('YouTube connect failed (${r.statusCode})')));
+      return;
+    }
+    final url = (json.decode(r.body)['url'] ?? '').toString();
+    if (url.isEmpty) return;
+    await launchUrl(Uri.parse(url),
+        mode: LaunchMode.externalApplication, webOnlyWindowName: '_blank');
+  }
+
+  Future<void> _toggleSms(bool on) async {
+    final sid = (_selected?['id'] ?? '').toString();
+    if (sid.isEmpty) return;
+    setState(() => _smsOptIn = on);
+    await _post('/api/studio/shows/$sid/sms-consent', {
+      'granted': on,
+      'consent_kind': 'sms_opt_in',
+    });
+  }
+
+  Future<void> _joinRoom() async {
+    if ((_sessionId ?? '').isEmpty) return;
+    final r = await http.post(
+      Uri.parse('${AppConfig.apiBaseUrl}/api/studio/sessions/$_sessionId/join-token'),
+      headers: _h,
+      body: json.encode({'role': 'host'}),
+    );
+    if (!mounted) return;
+    if (r.statusCode == 200) {
+      final j = json.decode(r.body) as Map<String, dynamic>;
+      setState(() {
+        _lkNote = j['jwt'] == true
+            ? 'LiveKit JWT ready (guest audio-only).'
+            : 'LiveKit pending URL — envelope avatar local.';
+      });
+      final url = (j['url'] ?? '').toString();
+      if (url.isNotEmpty) {
+        await launchUrl(Uri.parse(url),
+            mode: LaunchMode.externalApplication, webOnlyWindowName: '_blank');
+      }
+    }
+  }
+
+  Future<void> _openTranscript(String eid) async {
+    final r = await http.get(
+      Uri.parse('${AppConfig.apiBaseUrl}/api/studio/episodes/$eid'),
+      headers: _h,
+    );
+    if (!mounted) return;
+    if (r.statusCode != 200) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Transcript failed (${r.statusCode})')));
+      return;
+    }
+    final j = json.decode(r.body) as Map<String, dynamic>;
+    final segs = List<Map<String, dynamic>>.from(
+        ((j['episode']?['transcript'] ?? []) as List));
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: const Text('Speaker transcript',
+            style: TextStyle(color: _text, fontSize: 14)),
+        content: SizedBox(
+          width: 420,
+          child: segs.isEmpty
+              ? const Text('No speaker lines yet',
+                  style: TextStyle(color: _muted, fontSize: 12))
+              : ListView(
+                  shrinkWrap: true,
+                  children: segs
+                      .map((s) => Text(
+                            '${s['speaker'] ?? '?'}: ${s['text'] ?? ''}',
+                            style: const TextStyle(color: _text, fontSize: 12),
+                          ))
+                      .toList(),
+                ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close')),
+        ],
+      ),
+    );
   }
 
   Future<void> _createShow() async {
@@ -168,6 +294,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
         'name': _nameCtrl.text.trim(),
         'vertical': _vertical,
         'description': _descCtrl.text.trim(),
+        'host_number': _hostCtrl.text.trim(),
       }),
     );
     if (!mounted) return;
@@ -352,6 +479,15 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
           ),
         ),
         const SizedBox(height: 8),
+        TextField(
+          controller: _hostCtrl,
+          style: const TextStyle(color: _text),
+          decoration: const InputDecoration(
+            hintText: 'Host number (Google Voice OK)',
+            hintStyle: TextStyle(color: _muted),
+          ),
+        ),
+        const SizedBox(height: 8),
         Wrap(
           spacing: 6,
           runSpacing: 6,
@@ -398,6 +534,32 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
             Chip(label: Text('L3 style = capture', style: TextStyle(fontSize: 11))),
           ],
         ),
+        const SizedBox(height: 16),
+        const Text('YOUTUBE (coach-owned channel)',
+            style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
+        Text(_ytConnected ? 'Connected' : 'Not connected',
+            style: const TextStyle(color: _muted, fontSize: 12)),
+        TextButton(
+          onPressed: _busy ? null : _connectYoutube,
+          child: const Text('Connect YouTube'),
+        ),
+        CheckboxListTile(
+          value: _smsOptIn,
+          activeColor: _gold,
+          title: const Text('Caller SMS opt-in (counts only, not therapy)',
+              style: TextStyle(color: _text, fontSize: 12)),
+          onChanged: _busy || _selected == null
+              ? null
+              : (v) => _toggleSms(v ?? false),
+        ),
+        if (_envelope.isNotEmpty)
+          SizedBox(
+            height: 80,
+            width: 80,
+            child: CustomPaint(painter: _EnvelopePainter(_envelope)),
+          ),
+        if (_lkNote.isNotEmpty)
+          Text(_lkNote, style: const TextStyle(color: _muted, fontSize: 11)),
         const SizedBox(height: 16),
         const Text('CALLER MEMORY (counts only)',
             style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
@@ -464,6 +626,16 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
             trailing: Wrap(
               spacing: 4,
               children: [
+                TextButton(
+                  onPressed: _busy ? null : () => _openTranscript(eid),
+                  child: const Text('Transcript', style: TextStyle(fontSize: 11)),
+                ),
+                TextButton(
+                  onPressed: _busy
+                      ? null
+                      : () => _post('/api/studio/episodes/$eid/youtube-upload'),
+                  child: const Text('YouTube', style: TextStyle(fontSize: 11)),
+                ),
                 TextButton(
                   onPressed: _busy
                       ? null
@@ -559,4 +731,30 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
       ],
     );
   }
+}
+
+class _EnvelopePainter extends CustomPainter {
+  final List<Offset> points;
+  _EnvelopePainter(this.points);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.length < 3) return;
+    final paint = Paint()
+      ..color = const Color(0xFFC9A962)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4;
+    final sx = size.width / 160;
+    final sy = size.height / 160;
+    final path = Path()
+      ..moveTo(points.first.dx * sx, points.first.dy * sy);
+    for (final p in points.skip(1)) {
+      path.lineTo(p.dx * sx, p.dy * sy);
+    }
+    path.close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _EnvelopePainter old) => old.points != points;
 }

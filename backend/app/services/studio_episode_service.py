@@ -289,15 +289,17 @@ async def create_from_session(db_pool, session_id: str, coach_id: str) -> Dict[s
         )
         if existing:
             return {"ok": True, "episode_id": str(existing["id"]), "existing": True}
+        transcript = await _speaker_transcript(conn, session_id)
         ep = await conn.fetchrow(
             """
             INSERT INTO studio_episodes (show_id, session_id, state, title, transcript_json)
-            VALUES ($1::uuid, $2::uuid, 'in_review', $3, '[]'::jsonb)
+            VALUES ($1::uuid, $2::uuid, 'in_review', $3, $4::jsonb)
             RETURNING id
             """,
             sess["show_id"],
             session_id,
             f"{sess['name']} session",
+            json.dumps(transcript),
         )
     from app.services.studio_compliance import run_pass
 
@@ -316,8 +318,33 @@ async def regenerate_segment(
     if inv6_blocks(note):
         return {"ok": False, "reason": "INV-6 blocked in coach note", "code": 422}
     text = f"{LN_COHOST_LABEL} rewrite ({segment_id}): {note}"
+    provider = "template"
+    if db_pool:
+        try:
+            from app.services.nate_inference_router import NateInferenceRouter
+
+            out = await NateInferenceRouter().generate(
+                prompt=(
+                    f"Rewrite this educational show segment. Coach note: {note}. "
+                    f"Speak as {LN_COHOST_LABEL}."
+                ),
+                system=(
+                    f"You are {LN_COHOST_LABEL}. Never use clinical, therapy, diagnose, "
+                    "treatment, prescribe, or assess your case."
+                ),
+                domain="general",
+                max_tokens=400,
+            )
+            gen = (out.get("text") or "").strip()
+            if gen:
+                text = gen
+                provider = out.get("provider") or "router"
+        except Exception as exc:
+            logger.warning("studio regen inference skipped: %s", exc)
+    if inv6_blocks(text):
+        return {"ok": False, "reason": "INV-6 blocked generated text", "code": 422}
     if not db_pool:
-        return {"ok": True, "text": text, "dry": True}
+        return {"ok": True, "text": text, "dry": True, "provider": provider}
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -330,7 +357,23 @@ async def regenerate_segment(
         )
         if not row:
             return {"ok": False, "reason": "not_found", "code": 404}
-    return {"ok": True, "text": text, "segment_id": segment_id}
+        seg = {
+            "speaker": "cohost_ai",
+            "segment_id": segment_id,
+            "text": text,
+            "source": "regenerate",
+        }
+        await conn.execute(
+            """
+            UPDATE studio_episodes
+            SET transcript_json = COALESCE(transcript_json, '[]'::jsonb) || $2::jsonb,
+                updated_at = NOW()
+            WHERE id = $1::uuid
+            """,
+            episode_id,
+            json.dumps([seg]),
+        )
+    return {"ok": True, "text": text, "segment_id": segment_id, "provider": provider}
 
 
 async def extract_learning(db_pool, show_id: str) -> None:
@@ -371,13 +414,86 @@ def LN_safe_desc() -> str:
     return f"Show with {LN_COHOST_LABEL}"
 
 
+async def _speaker_transcript(conn, session_id: str) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    try:
+        legs = await conn.fetch(
+            """
+            SELECT id, role, label, utterances_json
+            FROM session_legs WHERE session_id = $1::uuid ORDER BY created_at
+            """,
+            session_id,
+        )
+    except Exception:
+        legs = await conn.fetch(
+            """
+            SELECT id, role, label FROM session_legs
+            WHERE session_id = $1::uuid ORDER BY created_at
+            """,
+            session_id,
+        )
+    for leg in legs:
+        uttered = leg.get("utterances_json") if hasattr(leg, "get") else None
+        if isinstance(uttered, str):
+            try:
+                uttered = json.loads(uttered)
+            except Exception:
+                uttered = []
+        if isinstance(uttered, list) and uttered:
+            for u in uttered:
+                if isinstance(u, dict):
+                    out.append(
+                        {
+                            "speaker": leg["role"],
+                            "label": leg.get("label"),
+                            "leg_id": str(leg["id"]),
+                            "text": u.get("text") or "",
+                        }
+                    )
+        else:
+            out.append(
+                {
+                    "speaker": leg["role"],
+                    "label": leg.get("label"),
+                    "leg_id": str(leg["id"]),
+                    "text": "",
+                }
+            )
+    topics = await conn.fetch(
+        """
+        SELECT t.topic_deidentified
+        FROM caller_topics t
+        JOIN show_callers c ON c.id = t.caller_id
+        WHERE c.session_id = $1::uuid
+        ORDER BY t.created_at
+        """,
+        session_id,
+    )
+    for t in topics:
+        out.append(
+            {
+                "speaker": "guest",
+                "text": t["topic_deidentified"],
+                "source": "topic",
+            }
+        )
+    return out
+
+
 def _ep(row) -> Dict[str, Any]:
+    transcript = row.get("transcript_json")
+    if isinstance(transcript, str):
+        try:
+            transcript = json.loads(transcript)
+        except Exception:
+            transcript = []
     return {
         "id": str(row["id"]),
         "show_id": str(row["show_id"]),
         "state": row["state"],
         "title": row.get("title"),
         "approved_by": row.get("approved_by"),
+        "transcript": transcript if isinstance(transcript, list) else [],
     }
 
 

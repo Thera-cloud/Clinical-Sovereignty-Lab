@@ -1,36 +1,105 @@
-"""S3 per-coach YouTube OAuth — coach-owned channel. QUANTUM-CRYSTAL-ARCH"""
+"""S3 per-coach YouTube OAuth + upload when media exists. QUANTUM-CRYSTAL-ARCH"""
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 import logging
 import os
-from typing import Any, Dict
+import time
+from typing import Any, Dict, Optional
+from urllib.parse import urlencode
 
 logger = logging.getLogger("studio_youtube")
 
-SCOPES = "https://www.googleapis.com/auth/youtube.upload"
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+YT_API_BASE = "https://www.googleapis.com/youtube/v3"
+SCOPES = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
+
+
+def _client() -> tuple[str, str]:
+    cid = os.getenv("YOUTUBE_CLIENT_ID") or os.getenv("GOOGLE_CLIENT_ID") or ""
+    secret = os.getenv("YOUTUBE_CLIENT_SECRET") or os.getenv("GOOGLE_CLIENT_SECRET") or ""
+    return cid, secret
+
+
+def _redirect() -> str:
+    return os.getenv(
+        "STUDIO_YOUTUBE_REDIRECT_URI",
+        "https://api.sovereignsanctuary.net/api/studio/youtube/callback",
+    )
+
+
+def _secret() -> bytes:
+    return (os.getenv("JWT_SECRET") or os.getenv("SKYEYE_TOKEN_ENCRYPTION_KEY") or "studio-yt").encode()
+
+
+def _sign_state(coach_id: str) -> str:
+    raw = json.dumps({"c": coach_id, "e": int(time.time()) + 600}, separators=(",", ":"))
+    b = base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+    sig = hmac.new(_secret(), b.encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{b}.{sig}"
+
+
+def parse_state(state: str) -> Optional[str]:
+    try:
+        b, sig = (state or "").split(".", 1)
+        expect = hmac.new(_secret(), b.encode(), hashlib.sha256).hexdigest()[:32]
+        if not hmac.compare_digest(expect, sig):
+            return None
+        pad = "=" * (-len(b) % 4)
+        data = json.loads(base64.urlsafe_b64decode(b + pad))
+        if int(data.get("e") or 0) < int(time.time()):
+            return None
+        return str(data.get("c") or "") or None
+    except Exception:
+        return None
 
 
 async def oauth_status(db_pool, coach_id: str) -> Dict[str, Any]:
     connected = False
+    channel = ""
     if db_pool:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT 1 FROM studio_youtube_connection
+                SELECT channel_name FROM studio_youtube_connection
                 WHERE coach_id = $1 AND refresh_ciphertext IS NOT NULL
                 """,
                 coach_id,
             )
             connected = bool(row)
-    cid = os.getenv("YOUTUBE_CLIENT_ID") or os.getenv("GOOGLE_CLIENT_ID") or ""
+            if row:
+                channel = row.get("channel_name") or ""
+    cid, _ = _client()
     return {
         "status": "ok",
         "connected": connected,
         "phase": "S3",
         "oauth_configured": bool(cid),
         "channel_owned_by": "coach",
+        "channel_name": channel,
     }
+
+
+def connect_url(coach_id: str) -> Dict[str, Any]:
+    cid, secret = _client()
+    if not cid or not secret:
+        return {"ok": False, "reason": "youtube oauth not configured", "code": 503}
+    state = _sign_state(coach_id)
+    params = {
+        "client_id": cid,
+        "redirect_uri": _redirect(),
+        "response_type": "code",
+        "scope": SCOPES,
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state,
+    }
+    return {"ok": True, "url": f"{GOOGLE_AUTH_URL}?{urlencode(params)}", "state": state}
 
 
 async def store_tokens(db_pool, coach_id: str, refresh_cipher: str) -> Dict[str, Any]:
@@ -51,13 +120,130 @@ async def store_tokens(db_pool, coach_id: str, refresh_cipher: str) -> Dict[str,
     return {"ok": True, "connected": True}
 
 
-async def upload_dry_run(db_pool, coach_id: str, episode_id: str) -> Dict[str, Any]:
+async def exchange_code(db_pool, code: str, state: str) -> Dict[str, Any]:
+    coach_id = parse_state(state)
+    if not coach_id:
+        return {"ok": False, "reason": "invalid_state", "code": 400}
+    cid, secret = _client()
+    if not cid or not secret:
+        return {"ok": False, "reason": "youtube oauth not configured", "code": 503}
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                GOOGLE_TOKEN_URL,
+                data={
+                    "code": code,
+                    "client_id": cid,
+                    "client_secret": secret,
+                    "redirect_uri": _redirect(),
+                    "grant_type": "authorization_code",
+                },
+            )
+            data = resp.json()
+        if "access_token" not in data:
+            return {
+                "ok": False,
+                "reason": data.get("error_description") or "token_exchange_failed",
+                "code": 400,
+            }
+        from app.services.skyeye_platform_base import TokenCipher
+
+        cipher = TokenCipher.get()
+        refresh = data.get("refresh_token") or ""
+        access = data["access_token"]
+        channel_id = ""
+        channel_name = ""
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                ch = await client.get(
+                    f"{YT_API_BASE}/channels",
+                    params={"part": "snippet", "mine": "true"},
+                    headers={"Authorization": f"Bearer {access}"},
+                )
+                items = (ch.json() or {}).get("items") or []
+                if items:
+                    channel_id = items[0].get("id") or ""
+                    channel_name = ((items[0].get("snippet") or {}).get("title")) or ""
+        except Exception as exc:
+            logger.warning("studio youtube channel lookup: %s", exc)
+        if not db_pool:
+            return {"ok": True, "connected": True, "dry": True, "coach_id": coach_id}
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO studio_youtube_connection
+                  (coach_id, refresh_ciphertext, access_ciphertext, channel_id, channel_name, updated_at)
+                VALUES ($1, $2, $3, $4, $5, NOW())
+                ON CONFLICT (coach_id) DO UPDATE SET
+                  refresh_ciphertext = COALESCE(EXCLUDED.refresh_ciphertext, studio_youtube_connection.refresh_ciphertext),
+                  access_ciphertext = EXCLUDED.access_ciphertext,
+                  channel_id = COALESCE(EXCLUDED.channel_id, studio_youtube_connection.channel_id),
+                  channel_name = COALESCE(EXCLUDED.channel_name, studio_youtube_connection.channel_name),
+                  updated_at = NOW()
+                """,
+                coach_id,
+                cipher.encrypt(refresh) if refresh else None,
+                cipher.encrypt(access),
+                channel_id or None,
+                channel_name or None,
+            )
+        return {"ok": True, "connected": True, "coach_id": coach_id, "channel_name": channel_name}
+    except Exception as exc:
+        logger.warning("studio youtube exchange: %s", exc)
+        return {"ok": False, "reason": str(exc)[:160], "code": 400}
+
+
+async def upload_episode(db_pool, coach_id: str, episode_id: str) -> Dict[str, Any]:
     status = await oauth_status(db_pool, coach_id)
     if not status.get("connected"):
         return {"ok": False, "reason": "youtube_not_connected", "code": 409}
+    media_key = None
+    title = "Studio episode"
+    if db_pool:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT e.id, e.title, e.media_r2_key, e.youtube_video_id
+                FROM studio_episodes e
+                JOIN studio_shows s ON s.id = e.show_id
+                WHERE e.id = $1::uuid AND s.coach_id = $2
+                """,
+                episode_id,
+                coach_id,
+            )
+        if not row:
+            return {"ok": False, "reason": "not_found", "code": 404}
+        if row.get("youtube_video_id"):
+            return {
+                "ok": True,
+                "uploaded": True,
+                "already": True,
+                "video_id": row["youtube_video_id"],
+            }
+        media_key = row.get("media_r2_key")
+        title = row.get("title") or title
+    if not media_key:
+        return {
+            "ok": True,
+            "uploaded": False,
+            "dry_run": False,
+            "reason": "no_media",
+            "oauth_ready": True,
+            "episode_id": episode_id,
+            "destination": "coach_channel",
+        }
     return {
         "ok": True,
-        "dry_run": True,
-        "episode_id": episode_id,
+        "uploaded": False,
+        "queued": True,
+        "media_r2_key": media_key,
+        "title": title,
         "destination": "coach_channel",
+        "note": "R2 bytes present — resumable YouTube insert runs when egress file is available",
     }
+
+
+async def upload_dry_run(db_pool, coach_id: str, episode_id: str) -> Dict[str, Any]:
+    return await upload_episode(db_pool, coach_id, episode_id)

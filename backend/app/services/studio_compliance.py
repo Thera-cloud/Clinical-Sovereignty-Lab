@@ -24,6 +24,14 @@ CRISIS_RE = re.compile(
 )
 
 
+def prescan_outgoing(text: str) -> Dict[str, Any]:
+    flags = scan_text(text or "")
+    blocked = bool(INV6_BLOCKED.search(text or "")) or any(
+        f.get("severity") == "high" for f in flags
+    )
+    return {"ok": not blocked, "blocked": blocked, "flags": flags, "pre_synthesis": True}
+
+
 def scan_text(text: str, *, vertical: str = "") -> List[Dict[str, str]]:
     flags: List[Dict[str, str]] = []
     blob = text or ""

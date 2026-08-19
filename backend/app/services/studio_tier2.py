@@ -69,10 +69,27 @@ async def dump_session(db_pool, session_id: str, coach_id: str) -> Dict[str, Any
         return {"ok": False, "reason": "not_found", "code": 404}
     if not dump_allowed(int(row["clean_published"] or 0)):
         return {"ok": False, "reason": "tier2_locked", "code": 409}
+    span_id = None
+    try:
+        async with db_pool.acquire() as conn:
+            rec = await conn.fetchrow(
+                """
+                INSERT INTO studio_dump_spans (session_id, show_id, delay_s, irreversible)
+                VALUES ($1::uuid, $2::uuid, $3, TRUE)
+                RETURNING id
+                """,
+                session_id,
+                str(row["show_id"]),
+                DELAY_S,
+            )
+            span_id = str(rec["id"]) if rec else None
+    except Exception:
+        span_id = None
     return {
         "ok": True,
         "dumped": True,
         "delay_s": DELAY_S,
         "irreversible": True,
         "gate": LIVE_TIER_CLEAN_EPISODES,
+        "span_id": span_id,
     }

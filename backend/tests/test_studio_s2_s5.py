@@ -9,16 +9,27 @@ _inv = load_svc("studio_invariants")
 _lk = load_svc("studio_livekit")
 _sc = load_svc("studio_screener_service")
 _t2 = load_svc("studio_tier2")
+_sms = load_svc("studio_sms")
+_av = load_svc("studio_avatar")
+_as = load_svc("studio_screener_autoscale")
+_yt = load_svc("studio_youtube")
 scan_text = _comp.scan_text
+prescan_outgoing = _comp.prescan_outgoing
 LIVE_TIER_CLEAN_EPISODES = _inv.LIVE_TIER_CLEAN_EPISODES
 LN_COHOST_LABEL = _inv.LN_COHOST_LABEL
 join_token_stub = _lk.join_token_stub
 reject_guest_video = _lk.reject_guest_video
+mint_livekit_jwt = _lk.mint_livekit_jwt
 handle_screener = _sc.handle_screener
 inbound_twiml = _sc.inbound_twiml
 is_risk = _sc.is_risk
 DELAY_S = _t2.DELAY_S
 dump_allowed = _t2.dump_allowed
+parse_sms_reply = _sms.parse_sms_reply
+envelope_frame = _av.envelope_frame
+scale_hint = _as.scale_hint
+parse_state = _yt.parse_state
+_sign_state = _yt._sign_state
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -78,11 +89,54 @@ def test_migration_407_and_api_routes():
     assert "CREATE TABLE IF NOT EXISTS consent_records" not in c402
     c408 = (ROOT / "backend/migrations/408_studio_consent_records.sql").read_text()
     assert "studio_consent_records" in c408
+    c409 = (ROOT / "backend/migrations/409_studio_s2_s5_complete.sql").read_text()
+    assert "studio_dump_spans" in c409
+    assert "COACH_COACHN_ID" in c409
+    assert "CREATE TABLE IF NOT EXISTS consent_records" not in c409
     src = (ROOT / "backend/app/routers/sovereign_studio_api.py").read_text()
     assert "studio_screener_service" in src
     assert "studio_tier2" in src
     assert "regenerate" in src
+    assert "youtube/callback" in src
+    assert "ln-scan" in src
     dart = (ROOT / "mobile/lib/widgets/coach_sovereign_studio_tab.dart").read_text()
     assert "EPISODE REVIEW" in dart
     assert LN_COHOST_LABEL in dart
     assert "Dump locked" in dart
+    assert "Connect YouTube" in dart
+    assert "Speaker transcript" in dart
+
+
+def test_sms_reply_and_autoscale():
+    assert parse_sms_reply("YES") == "opt_in"
+    assert parse_sms_reply("STOP") == "opt_out"
+    assert parse_sms_reply("hello") == "ignore"
+    assert scale_hint(0)["workers"] == 1
+    assert scale_hint(12)["workers"] == 3
+
+
+def test_inv6_prescan_and_envelope():
+    blocked = prescan_outgoing("I will diagnose you")
+    assert blocked["blocked"] is True
+    assert blocked["pre_synthesis"] is True
+    ok = prescan_outgoing("Let's talk about sleep habits")
+    assert ok["ok"] is True
+    frame = envelope_frame(0.5)
+    assert frame["photoreal"] is False
+    assert len(frame["points"]) == 24
+
+
+def test_youtube_state_and_livekit_jwt():
+    st = _sign_state("COACH_COACHN_ID")
+    assert parse_state(st) == "COACH_COACHN_ID"
+    assert parse_state("bad") is None
+    tok = mint_livekit_jwt(
+        api_key="key",
+        api_secret="secret",
+        room="studio-1",
+        identity="host",
+        role="guest",
+    )
+    assert tok.count(".") == 2
+    guest = join_token_stub("sid", "guest")
+    assert guest["allow_video"] is False

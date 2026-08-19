@@ -182,6 +182,21 @@ async def persist_screener(
                 caller["id"],
                 topic,
             )
+    if consented and not risk and phone:
+        try:
+            from app.services.studio_sms import send_opt_in_sms
+
+            send_opt_in_sms(phone)
+        except Exception as exc:
+            logger.warning("studio SMS dispatch skipped: %s", exc)
+    if show_id:
+        try:
+            from app.services.studio_screener_autoscale import scale_hint, waiting_count
+
+            n = await waiting_count(db_pool, show_id)
+            logger.info("studio autoscale %s", scale_hint(n))
+        except Exception as exc:
+            logger.warning("studio autoscale skipped: %s", exc)
 
 
 async def lookup_show_by_did(db_pool, did: str) -> Optional[str]:
@@ -222,13 +237,94 @@ async def caller_memory_counts(db_pool, show_id: str, coach_id: str) -> Dict[str
             """,
             show_id,
         )
+        recent = await conn.fetch(
+            """
+            SELECT t.topic_deidentified
+            FROM caller_topics t
+            JOIN show_callers c ON c.id = t.caller_id
+            WHERE c.show_id = $1::uuid AND c.opted_in = TRUE
+            ORDER BY t.created_at DESC
+            LIMIT 5
+            """,
+            show_id,
+        )
+    labels = [r["topic_deidentified"] for r in recent] if recent else []
     return {
         "ok": True,
         "logged": int(logged or 0),
         "opted_in": int(opted or 0),
         "deidentified_topics": int(topics or 0),
+        "recent_topics": labels,
+        "ack_only": True,
         "browse": False,
     }
+
+
+async def acknowledge_caller(db_pool, show_id: str, phone: str) -> Dict[str, Any]:
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", "code": 503}
+    ph = phone_hash(phone)
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT COUNT(*) AS n, BOOL_OR(opted_in) AS opted
+            FROM show_callers WHERE show_id = $1::uuid AND phone_hash = $2
+            """,
+            show_id,
+            ph,
+        )
+        topic = None
+        if row and row["opted"]:
+            topic = await conn.fetchval(
+                """
+                SELECT t.topic_deidentified
+                FROM caller_topics t
+                JOIN show_callers c ON c.id = t.caller_id
+                WHERE c.show_id = $1::uuid AND c.phone_hash = $2 AND c.opted_in = TRUE
+                ORDER BY t.created_at DESC LIMIT 1
+                """,
+                show_id,
+                ph,
+            )
+    n = int((row["n"] if row else 0) or 0)
+    return {
+        "ok": True,
+        "prior_calls": n,
+        "ack": "I remember you have been on the show before." if n else "First time on the show.",
+        "last_topic": topic if (row and row["opted"]) else None,
+        "browse": False,
+    }
+
+
+async def apply_sms_reply(db_pool, did: str, phone: str, body: str) -> Dict[str, Any]:
+    from app.services.studio_sms import parse_sms_reply
+
+    action = parse_sms_reply(body)
+    if action == "ignore":
+        return {"ok": True, "action": "ignore"}
+    show_id = await lookup_show_by_did(db_pool, did)
+    if not db_pool or not show_id:
+        return {"ok": True, "action": action, "persisted": False}
+    opted = action == "opt_in"
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE show_callers SET opted_in = $3
+            WHERE show_id = $1::uuid AND phone_hash = $2
+            """,
+            show_id,
+            phone_hash(phone),
+            opted,
+        )
+        await conn.execute(
+            """
+            INSERT INTO studio_consent_records (show_id, consent_kind, granted, source)
+            VALUES ($1::uuid, 'sms_opt_in', $2, 'sms')
+            """,
+            show_id,
+            opted,
+        )
+    return {"ok": True, "action": action, "persisted": True}
 
 
 def escape_say(text: str) -> str:

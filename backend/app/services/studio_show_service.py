@@ -84,9 +84,34 @@ async def get_show(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
     return {"ok": True, "show": show}
 
 
+async def ensure_coachn_show(db_pool) -> None:
+    if not db_pool:
+        return
+    async with db_pool.acquire() as conn:
+        exists = await conn.fetchval(
+            "SELECT 1 FROM studio_shows WHERE coach_id = $1 LIMIT 1",
+            "COACH_COACHN_ID",
+        )
+        if exists:
+            return
+        await conn.execute(
+            """
+            INSERT INTO studio_shows (coach_id, name, description, vertical)
+            VALUES (
+              'COACH_COACHN_ID',
+              'CoachN Studio',
+              'Educational show with an AI co-host and knowledge companion.',
+              'life_coaching'
+            )
+            """
+        )
+
+
 async def list_shows(db_pool, coach_id: str) -> Dict[str, Any]:
     if not db_pool:
         return {"ok": False, "shows": [], "code": 503}
+    if coach_id == "COACH_COACHN_ID":
+        await ensure_coachn_show(db_pool)
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
             """

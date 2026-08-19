@@ -90,6 +90,41 @@ async def end_session(db_pool, session_id: str, coach_id: str) -> Dict[str, Any]
     return {"ok": True, "session_id": str(row["id"]), "state": "ended"}
 
 
+async def append_utterance(
+    db_pool, session_id: str, coach_id: str, leg_id: str, text: str
+) -> Dict[str, Any]:
+    blob = (text or "").strip()
+    if not blob:
+        return {"ok": False, "reason": "text required", "code": 422}
+    from app.services.studio_invariants import inv6_blocks
+
+    if inv6_blocks(blob):
+        return {"ok": False, "reason": "INV-6 blocked", "code": 422}
+    if not db_pool:
+        return {"ok": True, "dry": True, "text": blob}
+    import json
+
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE session_legs l
+            SET utterances_json = COALESCE(l.utterances_json, '[]'::jsonb) || $3::jsonb
+            FROM studio_sessions s
+            JOIN studio_shows sh ON sh.id = s.show_id
+            WHERE l.id = $2::uuid AND l.session_id = s.id
+              AND s.id = $1::uuid AND sh.coach_id = $4
+            RETURNING l.id
+            """,
+            session_id,
+            leg_id,
+            json.dumps([{"text": blob}]),
+            coach_id,
+        )
+    if not row:
+        return {"ok": False, "reason": "not_found", "code": 404}
+    return {"ok": True, "leg_id": str(row["id"])}
+
+
 def reject_guest_video(role: str, video_track_key: str) -> Dict[str, Any]:
     if guest_video_allowed(role, video_track_key or None):
         return {"ok": True}

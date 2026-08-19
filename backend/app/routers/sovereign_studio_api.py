@@ -77,6 +77,14 @@ class ConsentRecordBody(BaseModel):
     consent_kind: str = "sms_opt_in"
 
 
+class ScanBody(BaseModel):
+    text: str = ""
+
+
+class UtteranceBody(BaseModel):
+    text: str = ""
+
+
 def _hw(user: Dict) -> str:
     return (user.get("hardware_id") or "").strip()
 
@@ -253,8 +261,6 @@ async def dump_session(session_id: UUID, request: Request, user: Dict = Depends(
 @router.post("/sessions/{session_id}/join-token")
 async def join_token(session_id: UUID, request: Request, user: Dict = Depends(require_coach)):
     _flag()
-    from app.services.studio_livekit import join_token_stub
-
     role = "host"
     try:
         body = await request.json()
@@ -262,7 +268,9 @@ async def join_token(session_id: UUID, request: Request, user: Dict = Depends(re
             role = str(body.get("role") or "host")
     except Exception:
         pass
-    return join_token_stub(str(session_id), role)
+    from app.services.studio_livekit import join_token as _join
+
+    return _join(str(session_id), role, identity=_hw(user))
 
 
 @router.post("/sessions/{session_id}/legs")
@@ -275,6 +283,34 @@ async def add_leg(session_id: UUID, request: Request, user: Dict = Depends(requi
     if not check.get("ok"):
         return _raise(check)
     return {"ok": True, "session_id": str(session_id), "role": body.get("role")}
+
+
+@router.post("/sessions/{session_id}/ln-scan")
+async def ln_scan(session_id: UUID, body: ScanBody, user: Dict = Depends(require_coach)):
+    _flag()
+    from app.services.studio_compliance import prescan_outgoing
+
+    out = prescan_outgoing(body.text)
+    out["session_id"] = str(session_id)
+    return out
+
+
+@router.post("/sessions/{session_id}/legs/{leg_id}/utterance")
+async def add_utterance(
+    session_id: UUID,
+    leg_id: UUID,
+    body: UtteranceBody,
+    request: Request,
+    user: Dict = Depends(require_coach),
+):
+    _flag()
+    from app.services.studio_session_service import append_utterance
+
+    return _raise(
+        await append_utterance(
+            _pool(request), str(session_id), _hw(user), str(leg_id), body.text
+        )
+    )
 
 
 @router.get("/episodes/{episode_id}")
@@ -330,9 +366,9 @@ async def episode_youtube(
     episode_id: UUID, request: Request, user: Dict = Depends(require_coach)
 ):
     _flag()
-    from app.services.studio_youtube import upload_dry_run
+    from app.services.studio_youtube import upload_episode
 
-    return _raise(await upload_dry_run(_pool(request), _hw(user), str(episode_id)))
+    return _raise(await upload_episode(_pool(request), _hw(user), str(episode_id)))
 
 
 @router.post("/episodes/{episode_id}/reject")
@@ -476,7 +512,48 @@ async def sip_join(request: Request):
 
 @public_router.get("/youtube/oauth-status")
 async def youtube_oauth_status():
-    return {"status": "ok", "connected": False, "phase": "S3"}
+    return {"status": "ok", "connected": False, "phase": "S3", "channel_owned_by": "coach"}
+
+
+@public_router.get("/youtube/callback")
+async def youtube_callback(request: Request):
+    from fastapi.responses import HTMLResponse, RedirectResponse
+
+    from app.services.studio_youtube import exchange_code
+
+    code = (request.query_params.get("code") or "").strip()
+    state = (request.query_params.get("state") or "").strip()
+    out = await exchange_code(_pool(request), code, state)
+    dest = os.getenv("STUDIO_YOUTUBE_POST_AUTH", "https://coach.sovereignsanctuary.net/")
+    if out.get("ok"):
+        return RedirectResponse(f"{dest}#studio_youtube=connected")
+    html = f"<html><body>YouTube connect failed: {out.get('reason')}</body></html>"
+    return HTMLResponse(html, status_code=int(out.get("code") or 400))
+
+
+@public_router.post("/voice/sms-reply")
+async def voice_sms_reply(request: Request):
+    from app.services.studio_screener_service import apply_sms_reply
+
+    form: Dict[str, Any] = {}
+    try:
+        form = dict(await request.form())
+    except Exception:
+        form = {}
+    await apply_sms_reply(
+        _pool(request),
+        did=str(form.get("To") or ""),
+        phone=str(form.get("From") or ""),
+        body=str(form.get("Body") or ""),
+    )
+    return Response(content="<Response/>", media_type="application/xml")
+
+
+@public_router.get("/avatar/envelope")
+async def avatar_envelope(level: float = 0.35):
+    from app.services.studio_avatar import envelope_frame
+
+    return envelope_frame(level)
 
 
 @public_router.get("/livekit/health")
@@ -492,6 +569,14 @@ async def youtube_status(request: Request, user: Dict = Depends(require_coach)):
     from app.services.studio_youtube import oauth_status
 
     return await oauth_status(_pool(request), _hw(user))
+
+
+@router.get("/youtube/connect")
+async def youtube_connect(user: Dict = Depends(require_coach)):
+    _flag()
+    from app.services.studio_youtube import connect_url
+
+    return _raise(connect_url(_hw(user)))
 
 
 @router.post("/youtube/store")
