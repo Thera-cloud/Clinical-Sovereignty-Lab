@@ -276,6 +276,9 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "/cohost/turn" in html
     assert "/cohost/caption" in html
     assert "/cohost/speak" in html
+    assert "nateSpeaker" in html
+    assert "echoCancellation" in html
+    assert "holdHostMic" not in html
     assert "Room link expired" in html
     assert "MediaRecorder" in html
     assert "ActiveSpeakersChanged" in html

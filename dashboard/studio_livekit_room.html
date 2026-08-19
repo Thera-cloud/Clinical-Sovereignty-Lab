@@ -48,7 +48,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 <div id="stage">
   <div id="board">
     <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
-    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="/avatar-modes/expression_viewer.html" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas></div></div>
+    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="/avatar-modes/expression_viewer.html" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
     <div class="tile" id="callerTile"><h3>CALLERS (audio)</h3><div class="box" id="callers"><span id="callerEmpty" class="empty">No live callers</span></div></div>
   </div>
   <aside id="chat">
@@ -139,36 +139,52 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (expr) f.contentWindow.postMessage({type:'setExpression', expression:expr}, '*');
     if (voice) f.contentWindow.postMessage({type:'setVoiceState', state:voice}, '*');
   }
-  var nateAudio = null, nateHeldMic = false;
-  function holdHostMic(off){
-    if (guest || !room || !room.localParticipant) return;
-    if (off){
-      if (room.localParticipant.isMicrophoneEnabled){
-        nateHeldMic = true;
-        room.localParticipant.setMicrophoneEnabled(false);
-      }
-      return;
-    }
-    if (nateHeldMic){
-      nateHeldMic = false;
-      room.localParticipant.setMicrophoneEnabled(true);
-    }
+  var nateAudioUrl = '', pendingNate = '', audioUnlocked = false;
+  function speakerEl(){ return document.getElementById('nateSpeaker'); }
+  function unlockAudio(){
+    audioUnlocked = true;
+    var a = speakerEl();
+    if (a){ a.muted = false; a.volume = 1; }
+    if (pendingNate){ var t = pendingNate; pendingNate = ''; speakNate(t); }
   }
+  document.addEventListener('pointerdown', unlockAudio, true);
+  document.addEventListener('keydown', unlockAudio, true);
   function speakBrowser(text){
     if (!window.speechSynthesis){ nateSpeaking = false; lnAvatar(null, 'idle'); return; }
     var u = new SpeechSynthesisUtterance(text);
     u.rate = 1.02;
-    u.onend = function(){ nateSpeaking = false; holdHostMic(false); lnAvatar('attentive', 'idle'); };
-    u.onerror = function(){ nateSpeaking = false; holdHostMic(false); lnAvatar('neutral', 'idle'); };
+    u.volume = 1;
+    u.onend = function(){ nateSpeaking = false; lnAvatar('attentive', 'idle'); };
+    u.onerror = function(){ nateSpeaking = false; lnAvatar('neutral', 'idle'); };
     speechSynthesis.cancel();
     speechSynthesis.speak(u);
   }
+  function playNateBlob(blob){
+    var a = speakerEl();
+    if (!a) return Promise.reject();
+    if (nateAudioUrl) try { URL.revokeObjectURL(nateAudioUrl); } catch (e) {}
+    nateAudioUrl = URL.createObjectURL(blob);
+    a.pause();
+    a.muted = false;
+    a.volume = 1;
+    a.src = nateAudioUrl;
+    a.onended = function(){
+      nateSpeaking = false;
+      lnAvatar('attentive', 'idle');
+    };
+    a.onerror = function(){ nateSpeaking = false; lnAvatar('neutral', 'idle'); };
+    var play = a.play();
+    if (play && play.catch) return play.catch(function(){
+      pendingNate = '';
+      setStatus('Tap the Little Nate audio bar under his face to hear him.');
+    });
+    return play;
+  }
   function speakNate(text){
     if (lnPaused || !text) return;
+    if (!audioUnlocked){ pendingNate = text; setStatus('Click once so speakers can play Little Nate.'); return; }
     nateSpeaking = true;
-    holdHostMic(true);
     lnAvatar('warm', 'speaking');
-    if (nateAudio){ try { nateAudio.pause(); nateAudio.src = ''; } catch (e) {} nateAudio = null; }
     if (window.speechSynthesis) speechSynthesis.cancel();
     if (!cfg.session || !cfg.token){ speakBrowser(text); return; }
     fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/speak', {
@@ -179,17 +195,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       if (!r.ok) throw new Error('tts');
       return r.blob();
     }).then(function(blob){
-      if (lnPaused){ nateSpeaking = false; holdHostMic(false); return; }
-      var url = URL.createObjectURL(blob);
-      nateAudio = new Audio(url);
-      nateAudio.onended = function(){
-        nateSpeaking = false;
-        holdHostMic(false);
-        lnAvatar('attentive', 'idle');
-        URL.revokeObjectURL(url);
-      };
-      nateAudio.onerror = function(){ nateSpeaking = false; holdHostMic(false); lnAvatar('neutral', 'idle'); };
-      return nateAudio.play();
+      if (lnPaused){ nateSpeaking = false; return; }
+      return playNateBlob(blob);
     }).catch(function(){ speakBrowser(text); });
   }
   function fitMedia(el){
@@ -325,8 +332,9 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   function stopNateVoice(){
     nateSpeaking = false;
-    holdHostMic(false);
-    if (nateAudio){ try { nateAudio.pause(); nateAudio.src = ''; } catch (e) {} nateAudio = null; }
+    pendingNate = '';
+    var a = speakerEl();
+    if (a){ try { a.pause(); a.removeAttribute('src'); a.load(); } catch (e) {} }
     if (window.speechSynthesis) speechSynthesis.cancel();
     lnAvatar('attentive', 'idle');
   }
@@ -390,14 +398,25 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     return;
   }
   previewCam();
-  room = new LK.Room({adaptiveStream:true, dynacast:true});
+  room = new LK.Room({
+    adaptiveStream:true,
+    dynacast:true,
+    audioCaptureDefaults:{
+      echoCancellation:true,
+      noiseSuppression:true,
+      autoGainControl:true
+    }
+  });
   room.on(LK.RoomEvent.TrackSubscribed, function(track, pub, participant){
     var empty = document.getElementById('callerEmpty');
     if (empty) empty.remove();
     var el = track.attach();
     el.autoplay = true;
     if (track.kind === 'audio'){
+      el.muted = false;
+      el.volume = 1;
       el.controls = true;
+      el.play().catch(function(){});
     } else {
       fitMedia(el);
     }
@@ -462,7 +481,17 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (pub && pub.track) rememberAudio(room.localParticipant, pub.track);
   });
   room.connect(cfg.url, cfg.token).then(function(){
-    return room.localParticipant.setMicrophoneEnabled(true);
+    return room.localParticipant.setMicrophoneEnabled(true, {
+      echoCancellation:true,
+      noiseSuppression:true,
+      autoGainControl:true
+    });
+  }).then(function(){
+    micOn = !!(room.localParticipant && room.localParticipant.isMicrophoneEnabled);
+    if (!micOn) setStatus('Microphone did not start — allow mic for this tab, then tap Unmute.');
+    var muteBtn = document.getElementById('btnMute');
+    muteBtn.textContent = micOn ? 'Mute' : 'Unmute';
+    muteBtn.classList.toggle('on', !micOn);
   }).then(function(){
     if (guest) return room.localParticipant.setCameraEnabled(false);
     return room.localParticipant.setCameraEnabled(true).then(function(){
