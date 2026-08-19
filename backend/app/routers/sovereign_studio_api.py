@@ -98,6 +98,10 @@ class CohostTurnBody(BaseModel):
     event: str = "line"
 
 
+class CohostSpeakBody(BaseModel):
+    text: str = ""
+
+
 def _hw(user: Dict) -> str:
     return (user.get("hardware_id") or "").strip()
 
@@ -659,6 +663,31 @@ async def cohost_turn_public(session_id: UUID, body: CohostTurnBody, request: Re
             event=body.event or "line",
         )
     )
+
+
+@public_router.post("/sessions/{session_id}/cohost/speak")
+async def cohost_speak_public(session_id: UUID, body: CohostSpeakBody, request: Request):
+    _flag()
+    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    from app.services.studio_livekit import verify_livekit_jwt
+
+    checked = verify_livekit_jwt(token)
+    if not checked.get("ok"):
+        raise HTTPException(401, checked.get("reason") or "livekit_jwt")
+    if checked.get("session_id") != str(session_id):
+        raise HTTPException(403, "room_mismatch")
+    line = (body.text or "").strip()
+    if not line or len(line) > 2000:
+        raise HTTPException(422, "text required")
+    from app.services.studio_session_service import synthesize_cohost_line
+
+    audio = await synthesize_cohost_line(
+        line, voice_router=getattr(request.app.state, "voice_router", None)
+    )
+    if not audio:
+        raise HTTPException(502, "tts")
+    return Response(content=audio, media_type="audio/mpeg")
 
 
 @public_router.post("/sessions/{session_id}/cohost/caption")

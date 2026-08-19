@@ -139,17 +139,58 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (expr) f.contentWindow.postMessage({type:'setExpression', expression:expr}, '*');
     if (voice) f.contentWindow.postMessage({type:'setVoiceState', state:voice}, '*');
   }
-  function speakNate(text){
-    if (lnPaused || !text) return;
-    nateSpeaking = true;
-    lnAvatar('warm', 'speaking');
+  var nateAudio = null, nateHeldMic = false;
+  function holdHostMic(off){
+    if (guest || !room || !room.localParticipant) return;
+    if (off){
+      if (room.localParticipant.isMicrophoneEnabled){
+        nateHeldMic = true;
+        room.localParticipant.setMicrophoneEnabled(false);
+      }
+      return;
+    }
+    if (nateHeldMic){
+      nateHeldMic = false;
+      room.localParticipant.setMicrophoneEnabled(true);
+    }
+  }
+  function speakBrowser(text){
     if (!window.speechSynthesis){ nateSpeaking = false; lnAvatar(null, 'idle'); return; }
     var u = new SpeechSynthesisUtterance(text);
     u.rate = 1.02;
-    u.onend = function(){ nateSpeaking = false; lnAvatar('attentive', 'idle'); };
-    u.onerror = function(){ nateSpeaking = false; lnAvatar('neutral', 'idle'); };
+    u.onend = function(){ nateSpeaking = false; holdHostMic(false); lnAvatar('attentive', 'idle'); };
+    u.onerror = function(){ nateSpeaking = false; holdHostMic(false); lnAvatar('neutral', 'idle'); };
     speechSynthesis.cancel();
     speechSynthesis.speak(u);
+  }
+  function speakNate(text){
+    if (lnPaused || !text) return;
+    nateSpeaking = true;
+    holdHostMic(true);
+    lnAvatar('warm', 'speaking');
+    if (nateAudio){ try { nateAudio.pause(); nateAudio.src = ''; } catch (e) {} nateAudio = null; }
+    if (window.speechSynthesis) speechSynthesis.cancel();
+    if (!cfg.session || !cfg.token){ speakBrowser(text); return; }
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/speak', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
+      body: JSON.stringify({text: text})
+    }).then(function(r){
+      if (!r.ok) throw new Error('tts');
+      return r.blob();
+    }).then(function(blob){
+      if (lnPaused){ nateSpeaking = false; holdHostMic(false); return; }
+      var url = URL.createObjectURL(blob);
+      nateAudio = new Audio(url);
+      nateAudio.onended = function(){
+        nateSpeaking = false;
+        holdHostMic(false);
+        lnAvatar('attentive', 'idle');
+        URL.revokeObjectURL(url);
+      };
+      nateAudio.onerror = function(){ nateSpeaking = false; holdHostMic(false); lnAvatar('neutral', 'idle'); };
+      return nateAudio.play();
+    }).catch(function(){ speakBrowser(text); });
   }
   function fitMedia(el){
     if (!el) return;
@@ -284,6 +325,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   function stopNateVoice(){
     nateSpeaking = false;
+    holdHostMic(false);
+    if (nateAudio){ try { nateAudio.pause(); nateAudio.src = ''; } catch (e) {} nateAudio = null; }
     if (window.speechSynthesis) speechSynthesis.cancel();
     lnAvatar('attentive', 'idle');
   }
@@ -381,13 +424,17 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     (speakers || []).forEach(function(p){
       if (p && p.identity) ids[p.identity] = true;
     });
+    var localId = room.localParticipant && room.localParticipant.identity;
     if (!guest) {
       Object.keys(audioTracks).forEach(function(id){
-        if (ids[id]) startCap(id);
+        if (ids[id] && !(nateSpeaking && id === localId)) startCap(id);
         else stopCap(id);
       });
     }
-    if (!nateSpeaking || !speakers || !speakers.length) {
+    var remoteTalk = (speakers || []).some(function(p){
+      return p && p.identity && p.identity !== localId;
+    });
+    if (!nateSpeaking || !remoteTalk) {
       if (bargeTimer) { clearTimeout(bargeTimer); bargeTimer = null; }
       return;
     }
@@ -499,7 +546,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     lnPaused = !lnPaused;
     this.textContent = lnPaused ? 'Resume LN' : 'Pause LN';
     this.classList.toggle('on', lnPaused);
-    if (lnPaused && window.speechSynthesis) speechSynthesis.cancel();
+    if (lnPaused) stopNateVoice();
     lnAvatar(lnPaused ? 'neutral' : 'attentive', lnPaused ? 'idle' : 'idle');
     sendData({op: lnPaused ? 'pause_ln' : 'resume_ln'});
   };

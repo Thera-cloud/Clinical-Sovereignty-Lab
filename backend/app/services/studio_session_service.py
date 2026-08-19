@@ -251,6 +251,22 @@ async def cohost_turn(
     return {"ok": True, "text": reply, "provider": provider, "toss": bool(toss), "event": kind}
 
 
+async def synthesize_cohost_line(text: str, voice_router=None) -> bytes:
+    line = (text or "").strip()
+    if not line:
+        return b""
+    if voice_router is not None:
+        try:
+            audio = await voice_router.process_text_to_speech(
+                line, tts_provider="azure_premium", voice="onyx"
+            )
+            if audio:
+                return audio
+        except Exception as exc:
+            logger.warning("studio speak azure skipped: %s", exc)
+    return b""
+
+
 def caption_should_ask(blob: str) -> bool:
     text = (blob or "").strip()
     if len(text) < 12:

@@ -128,6 +128,7 @@ def test_migration_407_and_api_routes():
     assert "ln-scan" in src
     assert "cohost/turn" in src
     assert "cohost/caption" in src
+    assert "cohost/speak" in src
     dart = (ROOT / "mobile/lib/widgets/coach_sovereign_studio_tab.dart").read_text()
     assert "EPISODE REVIEW" in dart
     assert "Little Nate (co-host)" in dart
@@ -271,6 +272,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert (ROOT / "mobile/web/avatar-modes/vendor/three.module.js").is_file()
     assert "/cohost/turn" in html
     assert "/cohost/caption" in html
+    assert "/cohost/speak" in html
     assert "Room link expired" in html
     assert "MediaRecorder" in html
     assert "ActiveSpeakersChanged" in html
@@ -317,6 +319,11 @@ def test_s4_apply_probe_egress_billing_autoscale():
     quiet = asyncio.run(_sess.ingest_live_caption(b"", speaker="caller"))
     assert quiet["ok"] is False
     assert quiet["reason"] == "no_speech"
+    spoken = asyncio.run(_sess.synthesize_cohost_line(""))
+    assert spoken == b""
+    src_sess = (ROOT / "backend/app/services/studio_session_service.py").read_text()
+    assert 'tts_provider="azure_premium"' in src_sess
+    assert 'voice="onyx"' in src_sess
     blocked = asyncio.run(_sess.cohost_turn(None, "sid-1", "please diagnose this therapy case"))
     assert blocked["ok"] is True
     assert blocked.get("redirect") is True
