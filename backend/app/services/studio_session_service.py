@@ -140,6 +140,108 @@ async def append_utterance(
     return {"ok": True, "leg_id": str(row["id"])}
 
 
+async def cohost_turn(
+    db_pool,
+    session_id: str,
+    text: str,
+    speaker: str = "host",
+    toss: bool = False,
+    callers: int = 0,
+    waiting: int = 0,
+    event: str = "line",
+) -> Dict[str, Any]:
+    blob = (text or "").strip()
+    if not blob:
+        return {"ok": False, "reason": "text required", "code": 422}
+    from app.services.studio_invariants import LN_COHOST_ONAIR, inv6_blocks
+
+    if inv6_blocks(blob):
+        return {
+            "ok": True,
+            "text": (
+                "I stay on the knowledge-companion side of this show. "
+                "Ask it as a topic for the room, not as a case."
+            ),
+            "redirect": True,
+        }
+    persona = ""
+    if db_pool:
+        try:
+            from app.services.broadcast_persona_resolver import resolve
+
+            async with db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT show_id FROM studio_sessions WHERE id = $1::uuid",
+                    session_id,
+                )
+            if row:
+                resolved = await resolve(db_pool, str(row["show_id"]))
+                if resolved.get("ok"):
+                    style = resolved.get("style") or {}
+                    persona = str(style.get("tone") or style.get("stance") or "")
+        except Exception as exc:
+            logger.warning("studio cohost persona skipped: %s", exc)
+    kind = (event or "line").strip().lower()
+    if toss:
+        kind = "toss"
+    live = max(0, int(callers or 0))
+    hold = max(0, int(waiting or 0))
+    system = (
+        f"You are Little Nate, {LN_COHOST_ONAIR}, live on a public educational podcast. "
+        "This is a show, not a private chat and not a therapy session. "
+        "Turn-taking like a human guest: one speaker at a time, pause after you talk, "
+        "do not talk over the host or a caller, do not fill every silence. "
+        "1–3 short spoken sentences, then leave space. "
+        "When tossed, take the floor, answer, then hand back to the host. "
+        "When a caller is live, include them by name if you have it; when only the host is here, stay ready. "
+        "Never do clinical work: no therapy, diagnose, treatment, prescribe, or assess your case. "
+        "If someone brings pain, stay educational and human, then toss back to the host."
+    )
+    if persona:
+        system += f" Coach style note: {persona[:240]}"
+    room = f"Room: {live} live caller(s), {hold} waiting."
+    if kind == "open":
+        prefix = f"{room} Podcast room just went live. Brief hello as co-host, then wait.\n"
+    elif kind == "caller_join":
+        prefix = f"{room} A caller just joined. Welcome them once, then yield to the host.\n"
+    elif kind == "toss":
+        prefix = f"{room} TOSS — host handed you the floor. Answer, then pause.\n"
+    else:
+        prefix = f"{room} Live turn from {speaker}. Reply, then pause.\n"
+    reply = (
+        "I'm here. Whenever you're ready."
+        if kind == "open"
+        else "Welcome in. Host, over to you."
+        if kind == "caller_join"
+        else "I'm on the floor. What should we open with?"
+        if kind == "toss"
+        else "I'm with you. Say that again and I'll pick it up."
+    )
+    provider = "fallback"
+    try:
+        from app.services.nate_inference_router import NateInferenceRouter
+
+        out = await NateInferenceRouter().generate(
+            prompt=prefix + blob,
+            system=system,
+            domain="general",
+            max_tokens=160,
+        )
+        gen = (out.get("text") or "").strip()
+        if gen:
+            reply = gen
+            provider = out.get("provider") or "router"
+    except Exception as exc:
+        logger.warning("studio cohost inference skipped: %s", exc)
+    if inv6_blocks(reply):
+        reply = (
+            "I'll keep this on the educational side. "
+            "Host, take us to the next question for the room."
+        )
+        provider = "inv6_filter"
+    return {"ok": True, "text": reply, "provider": provider, "toss": bool(toss), "event": kind}
+
+
 def reject_guest_video(role: str, video_track_key: str) -> Dict[str, Any]:
     if guest_video_allowed(role, video_track_key or None):
         return {"ok": True}

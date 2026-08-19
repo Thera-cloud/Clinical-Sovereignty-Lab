@@ -89,6 +89,15 @@ class UtteranceBody(BaseModel):
     text: str = ""
 
 
+class CohostTurnBody(BaseModel):
+    text: str = ""
+    speaker: str = "host"
+    toss: bool = False
+    callers: int = 0
+    waiting: int = 0
+    event: str = "line"
+
+
 def _hw(user: Dict) -> str:
     return (user.get("hardware_id") or "").strip()
 
@@ -622,6 +631,34 @@ async def avatar_envelope(level: float = 0.35):
     from app.services.studio_avatar import envelope_frame
 
     return envelope_frame(level)
+
+
+@public_router.post("/sessions/{session_id}/cohost/turn")
+async def cohost_turn_public(session_id: UUID, body: CohostTurnBody, request: Request):
+    _flag()
+    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    from app.services.studio_livekit import verify_livekit_jwt
+
+    checked = verify_livekit_jwt(token)
+    if not checked.get("ok"):
+        raise HTTPException(401, checked.get("reason") or "livekit_jwt")
+    if checked.get("session_id") != str(session_id):
+        raise HTTPException(403, "room_mismatch")
+    from app.services.studio_session_service import cohost_turn as _turn
+
+    return _raise(
+        await _turn(
+            _pool(request),
+            str(session_id),
+            body.text,
+            speaker=body.speaker or "host",
+            toss=bool(body.toss),
+            callers=int(body.callers or 0),
+            waiting=int(body.waiting or 0),
+            event=body.event or "line",
+        )
+    )
 
 
 @public_router.get("/livekit/health")

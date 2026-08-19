@@ -6,6 +6,7 @@ from _studio_load import load_svc
 
 TAB_ENDPOINTS = load_svc("studio_auditor").TAB_ENDPOINTS
 LN_COHOST_LABEL = load_svc("studio_invariants").LN_COHOST_LABEL
+LN_COHOST_ONAIR = load_svc("studio_invariants").LN_COHOST_ONAIR
 MIRROR_CAPTURE_PARTS = load_svc("studio_mirror_capture").MIRROR_CAPTURE_PARTS
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -50,7 +51,8 @@ def test_mirror_has_seven_parts():
 
 def test_flutter_label_and_live_gate():
     dart = (ROOT / "mobile/lib/widgets/coach_sovereign_studio_tab.dart").read_text()
-    assert LN_COHOST_LABEL in dart
+    assert LN_COHOST_ONAIR in dart
+    assert LN_COHOST_LABEL == "AI co-host and knowledge companion"
     assert "1 clean published episode" in dart
     hub = (ROOT / "mobile/lib/widgets/coach_integrations_hub.dart").read_text()
     assert "CoachSovereignStudioTab" in hub

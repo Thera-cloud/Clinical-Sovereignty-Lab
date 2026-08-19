@@ -5,29 +5,61 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Sovereign Studio Room</title>
 <style>
-body{margin:0;background:#050505;color:#E8D5A3;font-family:DM Sans,sans-serif}
-#bar{padding:12px 16px;border-bottom:1px solid #222;color:#C9A962;letter-spacing:1px;font-size:12px}
-#status{padding:8px 16px;color:#8B7355;font-size:12px}
-#board{display:flex;gap:12px;padding:12px;flex-wrap:wrap}
-.tile{background:#111;border:1px solid #222;border-radius:8px;min-width:220px;flex:1}
-.tile h3{margin:0;padding:8px 10px;font-size:11px;color:#C9A962;letter-spacing:1px}
-.tile .box{width:100%;height:180px;background:#0A0A0A;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.tile video,.tile canvas{width:100%;height:180px;object-fit:cover;background:#0A0A0A}
-#wait{padding:0 12px 8px;color:#8B7355;font-size:12px}
-#dock{position:sticky;bottom:0;padding:10px 12px;border-top:1px solid #222;background:#0A0A0A;display:flex;flex-wrap:wrap;gap:8px}
+html,body{height:100%;margin:0}
+body{display:flex;flex-direction:column;min-height:100vh;background:#050505;color:#E8D5A3;font-family:DM Sans,sans-serif}
+#bar{padding:10px 16px;border-bottom:1px solid #222;color:#C9A962;letter-spacing:1px;font-size:12px;flex:0 0 auto}
+#status{padding:6px 16px;color:#8B7355;font-size:12px;flex:0 0 auto}
+#stage{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:12px;padding:12px;min-height:0}
+#board{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;min-height:0;align-items:stretch}
+.tile{display:flex;flex-direction:column;min-width:0;min-height:0;background:#111;border:1px solid #222;border-radius:8px}
+.tile h3{margin:0;padding:8px 10px;font-size:11px;color:#C9A962;letter-spacing:1px;flex:0 0 auto}
+.tile .box{flex:1;position:relative;min-height:220px;background:#0A0A0A;overflow:hidden}
+.tile .box video{position:absolute;inset:0;width:100%!important;height:100%!important;object-fit:cover;object-position:center;background:#0A0A0A}
+.tile .box canvas#env{position:absolute;width:1px!important;height:1px!important;opacity:0;pointer-events:none}
+.tile .box iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#050505}
+.tile .box audio{position:absolute;left:8px;right:8px;bottom:8px;top:auto;height:32px;width:auto}
+.tile .box .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#8B7355;font-size:12px}
+#chat{display:flex;flex-direction:column;min-height:0;background:#111;border:1px solid #222;border-radius:8px}
+#chat h3{margin:0;padding:8px 10px;font-size:11px;color:#C9A962;letter-spacing:1px}
+#chatLog{flex:1;overflow:auto;padding:8px 10px;font-size:12px;line-height:1.45}
+#chatLog .ln{color:#4ECDC4}
+#chatLog .host{color:#E8D5A3}
+#chatLog .caller{color:#9D4EDD}
+#chatForm{display:flex;gap:6px;padding:8px;border-top:1px solid #222}
+#chatIn{flex:1;background:#0A0A0A;color:#E8D5A3;border:1px solid #8B7355;border-radius:6px;padding:8px}
+#chatForm button{background:#111;color:#C9A962;border:1px solid #C9A962;border-radius:6px;padding:8px 10px;font-size:12px;cursor:pointer}
+#wait{padding:0 12px 8px;color:#8B7355;font-size:12px;flex:0 0 auto}
+#dock{flex:0 0 auto;padding:10px 12px;border-top:1px solid #222;background:#0A0A0A;display:flex;flex-wrap:wrap;gap:8px}
 #dock button{background:#111;color:#E8D5A3;border:1px solid #8B7355;border-radius:6px;padding:8px 12px;font-size:12px;cursor:pointer}
 #dock button.on{border-color:#C9A962;color:#C9A962}
 #dock button.warn{border-color:#EF4444;color:#EF4444}
 #dock .meta{color:#8B7355;font-size:11px;align-self:center}
+@media (max-width:960px){
+  #stage{grid-template-columns:1fr}
+  #board{grid-template-columns:1fr;min-height:420px}
+  .tile .box{min-height:160px}
+  #chat{min-height:220px}
+}
 </style>
 </head>
 <body>
-<div id="bar">SOVEREIGN STUDIO · AI co-host and knowledge companion</div>
+<div id="bar">SOVEREIGN STUDIO · Little Nate (co-host)</div>
 <div id="status">Connecting…</div>
-<div id="board">
-  <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
-  <div class="tile" id="lnTile"><h3>AI CO-HOST</h3><div class="box"><canvas id="env" width="160" height="160"></canvas></div></div>
-  <div class="tile" id="callerTile"><h3>CALLERS (audio)</h3><div class="box" id="callers"><span id="callerEmpty" style="color:#8B7355;font-size:12px">No live callers</span></div></div>
+<div id="stage">
+  <div id="board">
+    <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
+    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="/avatar-modes/expression_viewer.html" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas></div></div>
+    <div class="tile" id="callerTile"><h3>CALLERS (audio)</h3><div class="box" id="callers"><span id="callerEmpty" class="empty">No live callers</span></div></div>
+  </div>
+  <aside id="chat">
+    <h3>LIVE WITH LITTLE NATE</h3>
+    <div id="chatLog"></div>
+    <form id="chatForm">
+      <input id="chatIn" autocomplete="off" placeholder="Talk with Nate — host or caller"/>
+      <button id="btnSend" type="submit">Send</button>
+      <button id="btnTalk" type="button">Talk</button>
+    </form>
+  </aside>
 </div>
 <div id="wait">Waiting room: none</div>
 <div id="dock">
@@ -46,26 +78,41 @@ body{margin:0;background:#050505;color:#E8D5A3;font-family:DM Sans,sans-serif}
 <script>
 (function(){
   var room = null, micOn = true, camOn = false, lnPaused = false, waiting = [];
+  var lastHeard = '', greeted = false, rec = null, nateSpeaking = false, bargeTimer = null;
   function params(){
     var h = new URLSearchParams(location.hash.replace(/^#/, ''));
     var q = new URLSearchParams(location.search);
+    function g(k, d){ return h.get(k) || q.get(k) || d; }
     return {
-      url: h.get('url') || q.get('url') || '',
-      token: h.get('token') || q.get('token') || '',
-      role: (h.get('role') || q.get('role') || 'host').toLowerCase()
+      url: g('url', ''),
+      token: g('token', ''),
+      role: (g('role', 'host') || 'host').toLowerCase(),
+      session: g('session', ''),
+      api: (g('api', 'https://api.sovereignsanctuary.net') || '').replace(/\/$/, '')
     };
   }
-  function drawEnv(level){
+  var cfg = params();
+  var guest = cfg.role === 'guest';
+  function sizeEnv(){
     var c = document.getElementById('env');
+    var box = c.parentElement;
+    var w = Math.max(160, box.clientWidth || 160);
+    var h = Math.max(160, box.clientHeight || 160);
+    if (c.width !== w || c.height !== h){ c.width = w; c.height = h; }
+    return c;
+  }
+  function drawEnv(level){
+    var c = sizeEnv();
     var ctx = c.getContext('2d');
-    ctx.clearRect(0,0,160,160);
+    var w = c.width, h = c.height, cx = w/2, cy = h/2, base = Math.min(w,h)*0.22;
+    ctx.clearRect(0,0,w,h);
     ctx.strokeStyle = '#C9A962';
     ctx.beginPath();
     for (var i=0;i<24;i++){
       var ang = (i/24)*Math.PI*2;
-      var r = 40 + 28*level*(0.65+0.35*Math.sin(i*1.7));
-      var x = 80 + r*Math.cos(ang);
-      var y = 80 + r*Math.sin(ang);
+      var r = base + (base*0.7)*level*(0.65+0.35*Math.sin(i*1.7));
+      var x = cx + r*Math.cos(ang);
+      var y = cy + r*Math.sin(ang);
       if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
     }
     ctx.closePath(); ctx.stroke();
@@ -75,11 +122,49 @@ body{margin:0;background:#050505;color:#E8D5A3;font-family:DM Sans,sans-serif}
     document.getElementById('wait').textContent = waiting.length
       ? ('Waiting room: ' + waiting.join(', ')) : 'Waiting room: none';
   }
+  function addLine(who, text){
+    if (!text) return;
+    var log = document.getElementById('chatLog');
+    var d = document.createElement('div');
+    var cls = who === 'Nate' ? 'ln' : (who === 'Caller' ? 'caller' : 'host');
+    d.className = cls;
+    d.textContent = (who === 'Nate' ? 'Little Nate' : who) + ': ' + text;
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+  }
+  function lnAvatar(expr, voice){
+    var f = document.getElementById('lnAvatar');
+    if (!f || !f.contentWindow) return;
+    if (expr) f.contentWindow.postMessage({type:'setExpression', expression:expr}, '*');
+    if (voice) f.contentWindow.postMessage({type:'setVoiceState', state:voice}, '*');
+  }
+  function speakNate(text){
+    if (lnPaused || !text) return;
+    nateSpeaking = true;
+    lnAvatar('warm', 'speaking');
+    if (!window.speechSynthesis){ nateSpeaking = false; lnAvatar(null, 'idle'); return; }
+    var u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.02;
+    u.onend = function(){ nateSpeaking = false; lnAvatar('attentive', 'idle'); };
+    u.onerror = function(){ nateSpeaking = false; lnAvatar('neutral', 'idle'); };
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+  }
+  function fitMedia(el){
+    if (!el) return;
+    el.removeAttribute('width'); el.removeAttribute('height');
+    el.style.width = '100%';
+    el.style.height = '100%';
+    el.style.objectFit = 'cover';
+    el.style.objectPosition = 'center';
+    el.muted = true; el.autoplay = true; el.playsInline = true;
+  }
   function previewCam(){
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
     navigator.mediaDevices.getUserMedia({video:true, audio:false}).then(function(ms){
       var v = document.getElementById('hostVid');
       v.srcObject = ms;
+      fitMedia(v);
       v.play().catch(function(){});
     }).catch(function(){});
   }
@@ -91,27 +176,62 @@ body{margin:0;background:#050505;color:#E8D5A3;font-family:DM Sans,sans-serif}
       var isCam = (LK.Track && LK.Track.Source && src === LK.Track.Source.Camera) || src === 'camera';
       if (!isCam) return;
       var el = pub.track.attach();
-      el.muted = true; el.autoplay = true; el.playsInline = true;
+      fitMedia(el);
       var box = document.getElementById('hostBox');
       box.innerHTML = '';
       box.appendChild(el);
     });
   }
-  function sendOp(op){
-    if (!room) return;
+  function sendData(obj){
+    if (!room || !room.localParticipant || !room.localParticipant.publishData) return;
     try {
-      var raw = JSON.stringify({op: op});
-      if (room.localParticipant.publishData) {
-        room.localParticipant.publishData(new TextEncoder().encode(raw), {reliable:true});
-      }
+      room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(obj)), {reliable:true});
     } catch (e) {}
-    setStatus('Host · ' + op);
   }
+  function roomCtx(){
+    var live = 0;
+    try {
+      if (room && room.remoteParticipants) live = room.remoteParticipants.size || 0;
+    } catch (e) { live = 0; }
+    return {callers: live, waiting: waiting.length};
+  }
+  function stopNateVoice(){
+    nateSpeaking = false;
+    if (window.speechSynthesis) speechSynthesis.cancel();
+    lnAvatar('attentive', 'idle');
+  }
+  function nateTurn(text, toss, event){
+    if (!cfg.session || !cfg.token){ setStatus('Nate chat needs a live session token.'); return; }
+    if (lnPaused && !toss && event !== 'caller_join') return;
+    if (toss) { lnPaused = false; document.getElementById('btnPause').textContent = 'Pause LN'; document.getElementById('btnPause').classList.remove('on'); }
+    var ctx = roomCtx();
+    var kind = event || (toss ? 'toss' : 'line');
+    lnAvatar(toss || kind === 'caller_join' ? 'encouraging' : 'attentive', 'listening');
+    setStatus(kind === 'toss' ? 'Little Nate taking the floor…' : 'Little Nate listening…');
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/turn', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
+      body: JSON.stringify({
+        text: text,
+        speaker: guest ? 'caller' : 'host',
+        toss: !!toss,
+        callers: ctx.callers,
+        waiting: ctx.waiting,
+        event: kind
+      })
+    }).then(function(r){ return r.json(); }).then(function(j){
+      var t = (j && (j.text || j.reason)) || '';
+      if (!j || !j.ok){ lnAvatar('thoughtful', 'idle'); setStatus('Little Nate: ' + (t || 'turn failed')); return; }
+      addLine('Nate', t);
+      speakNate(t);
+      sendData({op:'nate_line', text:t});
+      setStatus(guest ? 'Guest audio-only · Little Nate live.' : 'Little Nate live — chat or Talk anytime.');
+    }).catch(function(e){ setStatus('Nate chat failed: ' + e); });
+  }
+  window.addEventListener('resize', function(){ drawEnv(0.35); });
   drawEnv(0.35);
-  var p = params();
-  var guest = p.role === 'guest';
   if (guest) document.getElementById('btnCam').style.display = 'none';
-  if (!p.url || !p.token){
+  if (!cfg.url || !cfg.token){
     setStatus('LiveKit pending — set LIVEKIT_URL + JWT, then Start session.');
     return;
   }
@@ -127,6 +247,11 @@ body{margin:0;background:#050505;color:#E8D5A3;font-family:DM Sans,sans-serif}
     if (empty) empty.remove();
     var el = track.attach();
     el.autoplay = true;
+    if (track.kind === 'audio'){
+      el.controls = true;
+    } else {
+      fitMedia(el);
+    }
     document.getElementById('callers').appendChild(el);
     waiting = waiting.filter(function(n){ return n !== participant.identity; });
     renderWait();
@@ -134,13 +259,39 @@ body{margin:0;background:#050505;color:#E8D5A3;font-family:DM Sans,sans-serif}
   room.on(LK.RoomEvent.ParticipantConnected, function(participant){
     waiting.push(participant.identity || 'caller');
     renderWait();
+    if (!guest) {
+      nateTurn('Caller ' + (participant.identity || '') + ' just joined the podcast room.', false, 'caller_join');
+    }
   });
   room.on(LK.RoomEvent.ParticipantDisconnected, function(participant){
     waiting = waiting.filter(function(n){ return n !== participant.identity; });
     renderWait();
   });
+  room.on(LK.RoomEvent.ActiveSpeakersChanged, function(speakers){
+    if (!nateSpeaking || !speakers || !speakers.length) {
+      if (bargeTimer) { clearTimeout(bargeTimer); bargeTimer = null; }
+      return;
+    }
+    if (bargeTimer) return;
+    bargeTimer = setTimeout(function(){
+      bargeTimer = null;
+      if (!nateSpeaking) return;
+      stopNateVoice();
+      setStatus('Little Nate yielded — host or caller has the floor.');
+    }, 450);
+  });
+  room.on(LK.RoomEvent.DataReceived, function(payload){
+    try {
+      var msg = JSON.parse(new TextDecoder().decode(payload));
+      if (msg.op === 'nate_line' && msg.text){
+        addLine('Nate', msg.text);
+        if (guest) speakNate(msg.text);
+      }
+      if (msg.op === 'chat' && msg.text){ addLine(msg.who || 'Host', msg.text); lastHeard = msg.text; }
+    } catch (e) {}
+  });
   room.on(LK.RoomEvent.LocalTrackPublished, attachLocalCam);
-  room.connect(p.url, p.token).then(function(){
+  room.connect(cfg.url, cfg.token).then(function(){
     return room.localParticipant.setMicrophoneEnabled(true);
   }).then(function(){
     if (guest) return room.localParticipant.setCameraEnabled(false);
@@ -161,10 +312,49 @@ body{margin:0;background:#050505;color:#E8D5A3;font-family:DM Sans,sans-serif}
       return room.localParticipant.publishTrack(vt, opts).catch(function(){ return null; });
     });
   }).then(function(){
-    setStatus(guest ? 'Guest audio-only (INV-2).' : 'Host + envelope avatar.');
+    setStatus(guest ? 'Guest audio-only · Little Nate live.' : 'Little Nate live — chat or Talk anytime.');
+    if (!greeted && !guest){
+      greeted = true;
+      nateTurn('The podcast room is live. Host is here. No lecture — short hello, then wait for the host or a caller.', false, 'open');
+    }
   }).catch(function(e){
     setStatus('Connect failed: ' + e);
   });
+  document.getElementById('chatForm').onsubmit = function(ev){
+    ev.preventDefault();
+    var box = document.getElementById('chatIn');
+    var text = (box.value || '').trim();
+    if (!text) return;
+    box.value = '';
+    lastHeard = text;
+    stopNateVoice();
+    addLine(guest ? 'Caller' : 'Host', text);
+    sendData({op:'chat', who: guest ? 'Caller' : 'Host', text:text});
+    nateTurn(text, false, 'line');
+  };
+  document.getElementById('btnTalk').onclick = function(){
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR){ setStatus('Talk needs Chrome speech recognition — type instead.'); return; }
+    if (rec){ rec.stop(); rec = null; this.classList.remove('on'); this.textContent = 'Talk'; return; }
+    rec = new SR();
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.lang = 'en-US';
+    var btn = this;
+    rec.onresult = function(ev){
+      var text = (ev.results[0] && ev.results[0][0] && ev.results[0][0].transcript) || '';
+      if (!text) return;
+      lastHeard = text;
+      stopNateVoice();
+      addLine(guest ? 'Caller' : 'Host', text);
+      sendData({op:'chat', who: guest ? 'Caller' : 'Host', text:text});
+      nateTurn(text, false, 'line');
+    };
+    rec.onend = function(){ rec = null; btn.classList.remove('on'); btn.textContent = 'Talk'; };
+    rec.start();
+    btn.classList.add('on');
+    btn.textContent = 'Listening';
+  };
   document.getElementById('btnMute').onclick = function(){
     if (!room) return;
     micOn = !micOn;
@@ -178,19 +368,23 @@ body{margin:0;background:#050505;color:#E8D5A3;font-family:DM Sans,sans-serif}
     room.localParticipant.setCameraEnabled(camOn).then(attachLocalCam);
     this.classList.toggle('on', camOn);
   };
-  document.getElementById('btnToss').onclick = function(){ sendOp('toss'); };
+  document.getElementById('btnToss').onclick = function(){
+    nateTurn(lastHeard || 'Host tossed the floor to you. Address the room and take the next question.', true);
+  };
   document.getElementById('btnPause').onclick = function(){
     lnPaused = !lnPaused;
     this.textContent = lnPaused ? 'Resume LN' : 'Pause LN';
     this.classList.toggle('on', lnPaused);
-    sendOp(lnPaused ? 'pause_ln' : 'resume_ln');
+    if (lnPaused && window.speechSynthesis) speechSynthesis.cancel();
+    lnAvatar(lnPaused ? 'neutral' : 'attentive', lnPaused ? 'idle' : 'idle');
+    sendData({op: lnPaused ? 'pause_ln' : 'resume_ln'});
   };
   document.getElementById('btnBring').onclick = function(){
     if (!waiting.length){ setStatus('Waiting room empty.'); return; }
-    sendOp('bring_on:' + waiting[0]);
+    sendData({op:'bring_on', who: waiting[0]});
   };
-  document.getElementById('btnHold').onclick = function(){ sendOp('hold'); };
-  document.getElementById('btnDrop').onclick = function(){ sendOp('drop'); };
+  document.getElementById('btnHold').onclick = function(){ sendData({op:'hold'}); };
+  document.getElementById('btnDrop').onclick = function(){ sendData({op:'drop'}); };
   document.getElementById('btnEnd').onclick = function(){
     if (room) room.disconnect();
     setStatus('Session ended. Close this tab or End → review in Studio.');

@@ -7,6 +7,7 @@ from _studio_load import load_svc
 _comp = load_svc("studio_compliance")
 _inv = load_svc("studio_invariants")
 _lk = load_svc("studio_livekit")
+_sess = load_svc("studio_session_service")
 _meter = load_svc("studio_meter")
 _sip = load_svc("studio_sip")
 _did = load_svc("studio_did_service")
@@ -125,9 +126,10 @@ def test_migration_407_and_api_routes():
     assert "youtube/callback" in src
     assert "livekit/events" in src
     assert "ln-scan" in src
+    assert "cohost/turn" in src
     dart = (ROOT / "mobile/lib/widgets/coach_sovereign_studio_tab.dart").read_text()
     assert "EPISODE REVIEW" in dart
-    assert LN_COHOST_LABEL in dart
+    assert "Little Nate (co-host)" in dart
     assert "Dump locked" in dart
     assert "Connect YouTube" in dart
     assert "Speaker transcript" in dart
@@ -257,6 +259,45 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "Toss to Nate" in html
     assert "hostVid" in html
     assert "setCameraEnabled(true)" in html
+    assert "LIVE WITH LITTLE NATE" in html
+    assert "LITTLE NATE (CO-HOST)" in html
+    assert "AI CO-HOST" not in html
+    assert "/avatar-modes/expression_viewer.html" in html
+    assert "lil_nate_morphs.glb" in (ROOT / "mobile/web/avatar-modes/expression_viewer.html").read_text()
+    assert (ROOT / "mobile/web/avatar-modes/lil_nate_morphs.glb").is_file()
+    assert (ROOT / "mobile/web/avatar-modes/vendor/three.module.js").is_file()
+    assert "/cohost/turn" in html
+    assert "ActiveSpeakersChanged" in html
+    assert "caller_join" in html
+    assert "grid-template-columns:1fr 1fr 1fr" in html
+    assert "object-fit:cover" in html
+    tok = _lk.mint_livekit_jwt(
+        api_key="k",
+        api_secret="s",
+        room="studio-sid-1",
+        identity="host",
+        role="host",
+    )
+    import os
+
+    os.environ["LIVEKIT_API_KEY"] = "k"
+    os.environ["LIVEKIT_API_SECRET"] = "s"
+    v = _lk.verify_livekit_jwt(tok)
+    assert v["ok"] is True
+    assert v["session_id"] == "sid-1"
+    url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
+    assert "session=sid-1" in url
+    turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
+    assert turn["ok"] is True
+    assert turn["text"]
+    opened = asyncio.run(
+        _sess.cohost_turn(None, "sid-1", "podcast room live", event="open", callers=1)
+    )
+    assert opened["ok"] is True
+    assert opened.get("event") == "open"
+    blocked = asyncio.run(_sess.cohost_turn(None, "sid-1", "please diagnose this therapy case"))
+    assert blocked["ok"] is True
+    assert blocked.get("redirect") is True
     assert (ROOT / "mobile/web/livekit-client.umd.min.js").is_file()
     ngx = (ROOT / "nginx/snippets/health-livekit.conf").read_text()
     assert "location /livekit/" in ngx

@@ -10,7 +10,7 @@ import '../config/app_config.dart';
 import '../services/coach_web_recorder.dart';
 import '../services/studio_livekit_room.dart';
 
-const _lnLabel = 'AI co-host and knowledge companion';
+const _lnLabel = 'Little Nate (co-host)';
 const _verticals = <String>[
   'life_coaching',
   'grief',
@@ -447,7 +447,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Little Nate is your $_lnLabel.',
+        Text('$_lnLabel is live in the room with you and callers.',
             style: const TextStyle(color: _text, fontSize: 13)),
         const SizedBox(height: 6),
         Text(

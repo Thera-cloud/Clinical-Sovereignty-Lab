@@ -7,6 +7,7 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 LN_COHOST_LABEL = "AI co-host and knowledge companion"
+LN_COHOST_ONAIR = "Little Nate (co-host)"
 LIVE_TIER_CLEAN_EPISODES = 1
 SCREENER_TOKEN_TTL_S = 60
 VERTICALS = (
