@@ -267,8 +267,11 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "LITTLE NATE (CO-HOST)" in html
     assert "AI CO-HOST" not in html
     assert "/avatar-modes/expression_viewer.html" in html
-    assert "lil_nate.glb" in (ROOT / "mobile/web/avatar-modes/expression_viewer.html").read_text()
-    assert (ROOT / "mobile/web/avatar-modes/lil_nate.glb").is_file()
+    assert "mininate_neutral.glb" in (ROOT / "mobile/web/avatar-modes/expression_viewer.html").read_text()
+    assert "lil_nate.glb" not in (ROOT / "mobile/web/avatar-modes/expression_viewer.html").read_text()
+    assert (ROOT / "mobile/web/avatar-modes/mininate_neutral.glb").is_file()
+    assert (ROOT / "mobile/web/avatar-modes/mininate_empathetic.glb").is_file()
+    assert (ROOT / "mobile/web/avatar-modes/mininate_sad.glb").is_file()
     assert (ROOT / "mobile/web/avatar-modes/vendor/three.module.js").is_file()
     assert "/cohost/turn" in html
     assert "/cohost/caption" in html
