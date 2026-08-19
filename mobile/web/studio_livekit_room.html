@@ -322,6 +322,25 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     setStatus('LiveKit pending — set LIVEKIT_URL + JWT, then Start session.');
     return;
   }
+  function jwtExp(tok){
+    try {
+      var p = (tok || '').split('.')[1] || '';
+      p += '==='.slice((p.length + 3) % 4);
+      var j = JSON.parse(atob(p.replace(/-/g,'+').replace(/_/g,'/')));
+      return Number(j.exp) || 0;
+    } catch (e) { return 0; }
+  }
+  function tidyErr(e){
+    var s = String(e || '');
+    if (/expired|token is expired/i.test(s) || /invalid token/i.test(s))
+      return 'Room link expired. Go back to Studio, tap Start session, then Open studio room.';
+    return s.replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[token]');
+  }
+  var exp = jwtExp(cfg.token);
+  if (exp && exp < (Date.now() / 1000)) {
+    setStatus('Room link expired. Go back to Studio, tap Start session, then Open studio room.');
+    return;
+  }
   var LK = window.LivekitClient;
   if (!LK || !LK.Room){
     setStatus('LiveKit client failed to load.');
@@ -423,7 +442,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       nateTurn('The podcast room is live. Host is here. No lecture — short hello, then wait for the host or a caller.', false, 'open');
     }
   }).catch(function(e){
-    setStatus('Connect failed: ' + e);
+    setStatus('Connect failed: ' + tidyErr(e));
   });
   document.getElementById('chatForm').onsubmit = function(ev){
     ev.preventDefault();

@@ -199,6 +199,8 @@ def test_youtube_state_and_livekit_jwt():
     host_video = _jwt_body(host)["video"]
     assert host_video["canPublish"] is True
     assert "canPublishSources" not in host_video
+    host_body = _jwt_body(host)
+    assert host_body["exp"] - host_body["nbf"] >= 28000
     guest = join_token_stub("sid", "guest")
     assert guest["allow_video"] is False
 
@@ -264,11 +266,12 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "LITTLE NATE (CO-HOST)" in html
     assert "AI CO-HOST" not in html
     assert "/avatar-modes/expression_viewer.html" in html
-    assert "lil_nate_morphs.glb" in (ROOT / "mobile/web/avatar-modes/expression_viewer.html").read_text()
-    assert (ROOT / "mobile/web/avatar-modes/lil_nate_morphs.glb").is_file()
+    assert "lil_nate.glb" in (ROOT / "mobile/web/avatar-modes/expression_viewer.html").read_text()
+    assert (ROOT / "mobile/web/avatar-modes/lil_nate.glb").is_file()
     assert (ROOT / "mobile/web/avatar-modes/vendor/three.module.js").is_file()
     assert "/cohost/turn" in html
     assert "/cohost/caption" in html
+    assert "Room link expired" in html
     assert "MediaRecorder" in html
     assert "ActiveSpeakersChanged" in html
     assert "caller_join" in html

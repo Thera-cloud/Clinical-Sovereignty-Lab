@@ -157,7 +157,7 @@ def mint_livekit_jwt(
     room: str,
     identity: str,
     role: str,
-    ttl_s: int = 3600,
+    ttl_s: int = 28800,
 ) -> str:
     now = int(time.time())
     can_video = role != "guest"
