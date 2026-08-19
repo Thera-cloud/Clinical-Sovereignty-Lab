@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../config/app_config.dart';
 import '../services/coach_web_recorder.dart';
+import '../services/studio_livekit_room.dart';
 
 const _lnLabel = 'AI co-host and knowledge companion';
 const _verticals = <String>[
@@ -55,6 +56,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
   bool _ytConnected = false;
   bool _smsOptIn = false;
   String _lkNote = '';
+  String _roomUrl = '';
   List<Offset> _envelope = const [];
   List<Map<String, dynamic>> _shows = [];
   Map<String, dynamic>? _selected;
@@ -228,16 +230,13 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
     if (!mounted) return;
     if (r.statusCode == 200) {
       final j = json.decode(r.body) as Map<String, dynamic>;
+      final roomUrl = (j['room_url'] ?? '').toString();
       setState(() {
+        _roomUrl = roomUrl;
         _lkNote = j['jwt'] == true
             ? 'LiveKit JWT ready (guest audio-only).'
             : 'LiveKit pending URL — envelope avatar local.';
       });
-      final url = (j['url'] ?? '').toString();
-      if (url.isNotEmpty) {
-        await launchUrl(Uri.parse(url),
-            mode: LaunchMode.externalApplication, webOnlyWindowName: '_blank');
-      }
     }
   }
 
@@ -560,6 +559,15 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
           ),
         if (_lkNote.isNotEmpty)
           Text(_lkNote, style: const TextStyle(color: _muted, fontSize: 11)),
+        if (_roomUrl.isNotEmpty) ...[
+          TextButton(
+            onPressed: () => launchUrl(Uri.parse(_roomUrl),
+                mode: LaunchMode.externalApplication,
+                webOnlyWindowName: '_blank'),
+            child: const Text('Open studio room'),
+          ),
+          StudioLiveKitRoomEmbed(src: _roomUrl),
+        ],
         const SizedBox(height: 16),
         const Text('CALLER MEMORY (counts only)',
             style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),

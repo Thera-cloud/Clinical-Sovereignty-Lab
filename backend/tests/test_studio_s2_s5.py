@@ -7,6 +7,8 @@ from _studio_load import load_svc
 _comp = load_svc("studio_compliance")
 _inv = load_svc("studio_invariants")
 _lk = load_svc("studio_livekit")
+_meter = load_svc("studio_meter")
+_sip = load_svc("studio_sip")
 _sc = load_svc("studio_screener_service")
 _t2 = load_svc("studio_tier2")
 _sms = load_svc("studio_sms")
@@ -20,6 +22,12 @@ LN_COHOST_LABEL = _inv.LN_COHOST_LABEL
 join_token_stub = _lk.join_token_stub
 reject_guest_video = _lk.reject_guest_video
 mint_livekit_jwt = _lk.mint_livekit_jwt
+room_embed_url = _lk.room_embed_url
+egress_plan = _lk.egress_plan
+join_token = _lk.join_token
+session_minutes = _meter.session_minutes
+sip_join_allowed = _sip.sip_join_allowed
+sip_ingress_twiml = _sip.sip_ingress_twiml
 handle_screener = _sc.handle_screener
 inbound_twiml = _sc.inbound_twiml
 is_risk = _sc.is_risk
@@ -120,6 +128,14 @@ def test_migration_407_and_api_routes():
     assert "Dump locked" in dart
     assert "Connect YouTube" in dart
     assert "Speaker transcript" in dart
+    assert "Open studio room" in dart
+    html = (ROOT / "mobile/web/studio_livekit_room.html").read_text()
+    assert "livekit-client" in html
+    assert "setCameraEnabled(false)" in html
+    boot = (ROOT / "scripts/orange/livekit_bootstrap.sh").read_text()
+    assert "APPLY" in boot
+    assert "11434" in boot
+    assert "10.13.13.5" in boot
 
 
 def test_sms_reply_and_autoscale():
@@ -155,3 +171,24 @@ def test_youtube_state_and_livekit_jwt():
     assert tok.count(".") == 2
     guest = join_token_stub("sid", "guest")
     assert guest["allow_video"] is False
+
+
+def test_s4_room_meter_sip():
+    from datetime import datetime, timezone
+
+    url = room_embed_url("wss://lk.example", "tok", "guest")
+    assert "studio_livekit_room.html" in url
+    assert "role=guest" in url
+    plan = egress_plan("sid-1", rtmp_url="rtmp://x", live_unlocked=False)
+    assert plan["delay_s"] == 45
+    assert plan["rtmp"] is False
+    assert plan["photoreal"] is False
+    minted = join_token("abc", "guest", identity="g1")
+    assert minted["room_url"]
+    assert minted["allow_video"] is False
+    start = datetime(2026, 8, 18, 12, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 8, 18, 12, 30, tzinfo=timezone.utc)
+    assert session_minutes(start, end) == 30.0
+    assert sip_join_allowed("")["code"] == 403
+    assert sip_join_allowed("abc")["ok"] is True
+    assert "<Reject" in sip_ingress_twiml("")

@@ -80,14 +80,23 @@ async def end_session(db_pool, session_id: str, coach_id: str) -> Dict[str, Any]
             FROM studio_shows sh
             WHERE s.id = $1::uuid AND s.show_id = sh.id AND sh.coach_id = $2
               AND s.state <> 'ended'
-            RETURNING s.id, s.state
+            RETURNING s.id, s.state, s.show_id, s.started_at, s.ended_at
             """,
             session_id,
             coach_id,
         )
     if not row:
         return {"ok": False, "reason": "not_found", "code": 404}
-    return {"ok": True, "session_id": str(row["id"]), "state": "ended"}
+    from app.services.studio_meter import add_session_minutes, session_minutes
+
+    mins = session_minutes(row["started_at"], row["ended_at"])
+    await add_session_minutes(db_pool, str(row["show_id"]), mins)
+    return {
+        "ok": True,
+        "session_id": str(row["id"]),
+        "state": "ended",
+        "session_minutes": mins,
+    }
 
 
 async def append_utterance(

@@ -201,11 +201,12 @@ async def upload_episode(db_pool, coach_id: str, episode_id: str) -> Dict[str, A
         return {"ok": False, "reason": "youtube_not_connected", "code": 409}
     media_key = None
     title = "Studio episode"
+    show_id = ""
     if db_pool:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT e.id, e.title, e.media_r2_key, e.youtube_video_id
+                SELECT e.id, e.title, e.media_r2_key, e.youtube_video_id, e.show_id
                 FROM studio_episodes e
                 JOIN studio_shows s ON s.id = e.show_id
                 WHERE e.id = $1::uuid AND s.coach_id = $2
@@ -224,6 +225,7 @@ async def upload_episode(db_pool, coach_id: str, episode_id: str) -> Dict[str, A
             }
         media_key = row.get("media_r2_key")
         title = row.get("title") or title
+        show_id = str(row.get("show_id") or "")
     if not media_key:
         return {
             "ok": True,
@@ -236,6 +238,10 @@ async def upload_episode(db_pool, coach_id: str, episode_id: str) -> Dict[str, A
         }
     pushed = await _upload_r2_media(db_pool, coach_id, episode_id, media_key, title)
     if pushed.get("uploaded"):
+        if show_id:
+            from app.services.studio_meter import add_youtube_push
+
+            await add_youtube_push(db_pool, show_id)
         return pushed
     return {
         "ok": True,

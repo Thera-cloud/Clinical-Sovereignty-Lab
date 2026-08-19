@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
 try:
@@ -273,6 +273,50 @@ async def join_token(session_id: UUID, request: Request, user: Dict = Depends(re
     return _join(str(session_id), role, identity=_hw(user))
 
 
+@router.post("/sessions/{session_id}/egress")
+async def start_egress(session_id: UUID, request: Request, user: Dict = Depends(require_coach)):
+    _flag()
+    from app.services.studio_livekit import egress_plan
+
+    rtmp = ""
+    unlocked = False
+    pool = _pool(request)
+    if pool:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT sh.rtmp_url,
+                  (SELECT COUNT(*) FROM studio_episodes e
+                    WHERE e.show_id = sh.id AND e.state = 'published'
+                      AND NOT EXISTS (
+                        SELECT 1 FROM studio_compliance_flags f
+                        WHERE f.episode_id = e.id AND f.status = 'open'
+                      )
+                  ) AS clean_published
+                FROM studio_sessions s
+                JOIN studio_shows sh ON sh.id = s.show_id
+                WHERE s.id = $1::uuid AND sh.coach_id = $2
+                """,
+                str(session_id),
+                _hw(user),
+            )
+        if not row:
+            raise HTTPException(404, "not_found")
+        rtmp = row["rtmp_url"] or ""
+        from app.services.studio_invariants import live_tier_unlocked
+
+        unlocked = live_tier_unlocked(int(row["clean_published"] or 0))
+    return egress_plan(str(session_id), rtmp_url=rtmp, live_unlocked=unlocked)
+
+
+@router.get("/shows/{show_id}/meter")
+async def show_meter(show_id: UUID, request: Request, user: Dict = Depends(require_coach)):
+    _flag()
+    from app.services.studio_meter import show_meter as _meter
+
+    return _raise(await _meter(_pool(request), str(show_id), _hw(user)))
+
+
 @router.post("/sessions/{session_id}/legs")
 async def add_leg(session_id: UUID, request: Request, user: Dict = Depends(require_coach)):
     _flag()
@@ -490,7 +534,9 @@ async def screener_ttl():
 
 @public_router.get("/voice/sip-health")
 async def sip_health():
-    return {"status": "ok", "sip": "s2", "allow_video": False}
+    from app.services.studio_sip import sip_health as _sip
+
+    return _sip()
 
 
 @public_router.post("/voice/sip-join")
@@ -565,6 +611,13 @@ async def livekit_health():
     from app.services.studio_livekit import health
 
     return health()
+
+
+@public_router.get("/livekit/room")
+async def livekit_room_page():
+    from app.services.studio_livekit import ROOM_HTML
+
+    return HTMLResponse(ROOM_HTML)
 
 
 @public_router.post("/livekit/events")
