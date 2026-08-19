@@ -17,7 +17,7 @@ video{width:320px;height:180px;background:#111;border-radius:8px}
 <div id="bar">SOVEREIGN STUDIO · AI co-host and knowledge companion</div>
 <div id="status">Connecting…</div>
 <div id="stage"><canvas id="env" width="160" height="160"></canvas></div>
-<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.15.4/dist/livekit-client.umd.min.js"></script>
+<script src="/livekit-client.umd.min.js"></script>
 <script>
 (function(){
   function params(){
@@ -53,6 +53,10 @@ video{width:320px;height:180px;background:#111;border-radius:8px}
     return;
   }
   var LK = window.LivekitClient;
+  if (!LK || !LK.Room){
+    status.textContent = 'LiveKit client failed to load.';
+    return;
+  }
   var room = new LK.Room({adaptiveStream:true, dynacast:true});
   room.on(LK.RoomEvent.TrackSubscribed, function(track){
     var el = track.attach();

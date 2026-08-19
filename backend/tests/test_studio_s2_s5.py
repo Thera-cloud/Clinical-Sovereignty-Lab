@@ -133,7 +133,8 @@ def test_migration_407_and_api_routes():
     assert "Speaker transcript" in dart
     assert "Open studio room" in dart
     html = (ROOT / "mobile/web/studio_livekit_room.html").read_text()
-    assert "livekit-client" in html
+    assert "livekit-client.umd.min.js" in html
+    assert "cdn.jsdelivr.net" not in html
     assert "setCameraEnabled(false)" in html
     boot = (ROOT / "scripts/orange/livekit_bootstrap.sh").read_text()
     assert "APPLY" in boot
@@ -228,6 +229,8 @@ def test_s4_apply_probe_egress_billing_autoscale():
     html = _lk.ROOM_HTML
     assert "captureStream" in html
     assert "ln-envelope" in html
+    assert "cdn.jsdelivr.net" not in html
+    assert (ROOT / "mobile/web/livekit-client.umd.min.js").is_file()
     ngx = (ROOT / "nginx/snippets/health-livekit.conf").read_text()
     assert "location /livekit/" in ngx
     assert "10.13.13.5:7880" in ngx

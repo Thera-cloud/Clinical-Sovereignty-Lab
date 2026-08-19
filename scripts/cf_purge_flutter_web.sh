@@ -38,6 +38,8 @@ paths = (
     "version.json",
     "signup.html",
     "try.html",
+    "studio_livekit_room.html",
+    "livekit-client.umd.min.js",
 )
 files = [f"https://{h}/{p}" for h in hosts for p in paths]
 print(json.dumps({"files": files}))
