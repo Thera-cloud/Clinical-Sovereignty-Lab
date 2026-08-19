@@ -5099,6 +5099,7 @@ for _rmod, _ralias in [
     ("app.routers.monetization_control_api", "monetization_router"),
     ("app.routers.cycle_api", "cycle_router"),
     ("app.routers.predictive_api", "predictive_router"),
+    ("app.routers.seo_public", "seo_public_router"),  # QUANTUM-CRYSTAL-ARCH
 ]:
     try:
         _mod = __import__(_rmod, fromlist=["router"])
@@ -5114,11 +5115,16 @@ for _rmod, _ralias in [
 @app.get("/")
 async def root():
     """Root endpoint."""
-    return {
-        "message": "Welcome to the Sanctuary",
-        "api_docs": "/docs",
-        "health": "/health"
-    }
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(
+        {
+            "message": "Welcome to the Sanctuary",
+            "api_docs": "/docs",
+            "health": "/health",
+        },
+        headers={"X-Robots-Tag": "noindex, nofollow"},  # QUANTUM-CRYSTAL-ARCH
+    )
 
 
 # =============================================================================
