@@ -106,6 +106,28 @@ async def publish_episode(db_pool, episode_id: str, coach_id: str) -> Dict[str, 
             f"studio-{episode_id}",
             episode_id,
         )
+        show_id = await conn.fetchval(
+            "SELECT show_id FROM studio_episodes WHERE id = $1::uuid",
+            episode_id,
+        )
+        if show_id:
+            await conn.execute(
+                """
+                UPDATE studio_shows SET live_unlocked = TRUE, updated_at = NOW()
+                WHERE id = $1::uuid
+                  AND (
+                    SELECT COUNT(*) FROM studio_episodes e
+                    WHERE e.show_id = studio_shows.id AND e.state = 'published'
+                      AND NOT EXISTS (
+                        SELECT 1 FROM studio_compliance_flags f
+                        WHERE f.episode_id = e.id AND f.status = 'open'
+                      )
+                  ) >= 1
+                """,
+                show_id,
+            )
+    if show_id:
+        await extract_learning(db_pool, str(show_id))
     return {"ok": True, "state": "published"}
 
 
@@ -206,6 +228,122 @@ async def resolve_flag(
             username,
         )
     return {"ok": True, "status": "overridden"}
+
+
+async def list_episodes(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
+    if not db_pool:
+        return {"ok": False, "episodes": [], "code": 503}
+    async with db_pool.acquire() as conn:
+        show = await conn.fetchrow(
+            "SELECT id FROM studio_shows WHERE id = $1::uuid AND coach_id = $2",
+            show_id,
+            coach_id,
+        )
+        if not show:
+            return {"ok": False, "reason": "not_found", "code": 404}
+        rows = await conn.fetch(
+            """
+            SELECT e.id, e.state, e.title, e.created_at,
+              (SELECT COUNT(*) FROM studio_compliance_flags f
+                WHERE f.episode_id = e.id AND f.status = 'open') AS open_flags
+            FROM studio_episodes e
+            WHERE e.show_id = $1::uuid
+            ORDER BY e.created_at DESC
+            LIMIT 40
+            """,
+            show_id,
+        )
+    return {
+        "ok": True,
+        "episodes": [
+            {
+                "id": str(r["id"]),
+                "state": r["state"],
+                "title": r["title"],
+                "open_flags": int(r["open_flags"] or 0),
+            }
+            for r in rows
+        ],
+    }
+
+
+async def create_from_session(db_pool, session_id: str, coach_id: str) -> Dict[str, Any]:
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", "code": 503}
+    async with db_pool.acquire() as conn:
+        sess = await conn.fetchrow(
+            """
+            SELECT s.id, s.show_id, sh.name
+            FROM studio_sessions s
+            JOIN studio_shows sh ON sh.id = s.show_id
+            WHERE s.id = $1::uuid AND sh.coach_id = $2
+            """,
+            session_id,
+            coach_id,
+        )
+        if not sess:
+            return {"ok": False, "reason": "not_found", "code": 404}
+        existing = await conn.fetchrow(
+            "SELECT id FROM studio_episodes WHERE session_id = $1::uuid LIMIT 1",
+            session_id,
+        )
+        if existing:
+            return {"ok": True, "episode_id": str(existing["id"]), "existing": True}
+        ep = await conn.fetchrow(
+            """
+            INSERT INTO studio_episodes (show_id, session_id, state, title, transcript_json)
+            VALUES ($1::uuid, $2::uuid, 'in_review', $3, '[]'::jsonb)
+            RETURNING id
+            """,
+            sess["show_id"],
+            session_id,
+            f"{sess['name']} session",
+        )
+    from app.services.studio_compliance import run_pass
+
+    flags = await run_pass(db_pool, str(ep["id"]))
+    return {"ok": True, "episode_id": str(ep["id"]), "compliance": flags}
+
+
+async def regenerate_segment(
+    db_pool, episode_id: str, coach_id: str, segment_id: str, coach_note: str
+) -> Dict[str, Any]:
+    note = (coach_note or "").strip()
+    if not note:
+        return {"ok": False, "reason": "coach_note required", "code": 422}
+    from app.services.studio_invariants import LN_COHOST_LABEL, inv6_blocks
+
+    if inv6_blocks(note):
+        return {"ok": False, "reason": "INV-6 blocked in coach note", "code": 422}
+    text = f"{LN_COHOST_LABEL} rewrite ({segment_id}): {note}"
+    if not db_pool:
+        return {"ok": True, "text": text, "dry": True}
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT e.id FROM studio_episodes e
+            JOIN studio_shows s ON s.id = e.show_id
+            WHERE e.id = $1::uuid AND s.coach_id = $2
+            """,
+            episode_id,
+            coach_id,
+        )
+        if not row:
+            return {"ok": False, "reason": "not_found", "code": 404}
+    return {"ok": True, "text": text, "segment_id": segment_id}
+
+
+async def extract_learning(db_pool, show_id: str) -> None:
+    if not db_pool:
+        return
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO studio_show_learning (show_id, kind, payload_deidentified)
+            VALUES ($1::uuid, 'publish', '{"source":"episode"}'::jsonb)
+            """,
+            show_id,
+        )
 
 
 def rss_xml(show: Dict[str, Any], items: List[Dict[str, Any]]) -> str:

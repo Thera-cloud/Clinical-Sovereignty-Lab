@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
-from app.services.studio_invariants import guest_video_allowed
+from _studio_load import load_svc
+
+guest_video_allowed = load_svc("studio_invariants").guest_video_allowed
 
 SQL = (Path(__file__).resolve().parents[2] / "backend/migrations/401_studio_sessions.sql").read_text()
 

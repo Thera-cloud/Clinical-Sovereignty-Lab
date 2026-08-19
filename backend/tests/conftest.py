@@ -11,7 +11,23 @@ from __future__ import annotations
 
 import importlib
 import sys
+import types
+from pathlib import Path
 from unittest import mock
+
+# macOS: app.services.__init__ imports nevedal_engine → numpy SIGFPE.
+# Namespace stub so submodule imports load files without package __init__.
+if sys.platform == "darwin" and "app.services" not in sys.modules:
+    _app_dir = Path(__file__).resolve().parents[1] / "app"
+    _app = sys.modules.get("app")
+    if _app is None:
+        _app = types.ModuleType("app")
+        _app.__path__ = [str(_app_dir)]  # type: ignore[attr-defined]
+        sys.modules["app"] = _app
+    _svc = types.ModuleType("app.services")
+    _svc.__path__ = [str(_app_dir / "services")]  # type: ignore[attr-defined]
+    sys.modules["app.services"] = _svc
+    setattr(_app, "services", _svc)
 
 import pytest
 try:

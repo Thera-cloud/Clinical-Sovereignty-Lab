@@ -2,7 +2,11 @@
 
 from pathlib import Path
 
-from app.services.studio_invariants import THERAPEUTIC_IMPORT_BAN, WALL_TABLES
+from _studio_load import load_svc
+
+_inv = load_svc("studio_invariants")
+THERAPEUTIC_IMPORT_BAN = _inv.THERAPEUTIC_IMPORT_BAN
+WALL_TABLES = _inv.WALL_TABLES
 
 ROOT = Path(__file__).resolve().parents[2]
 MIG = ROOT / "backend/migrations/404_studio_roles.sql"
@@ -45,7 +49,7 @@ def test_studio_modules_do_not_import_therapeutic():
 
 
 def test_no_drop_in_studio_migrations():
-    for i in range(400, 407):
+    for i in range(400, 408):
         matches = list((ROOT / "backend/migrations").glob(f"{i}_*.sql"))
         assert matches, f"missing migration {i}"
         body = matches[0].read_text().upper()

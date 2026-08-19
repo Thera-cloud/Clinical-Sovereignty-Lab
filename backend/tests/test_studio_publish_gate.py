@@ -1,12 +1,14 @@
 """INV-3 approve then publish; 409 if open flags."""
 
-from app.services.studio_episode_service import add_cuts
-from app.services.studio_invariants import (
-    episode_can_approve,
-    episode_can_publish,
-    live_tier_unlocked,
-    override_requires_admin,
-)
+from _studio_load import load_svc
+
+_ep = load_svc("studio_episode_service")
+_inv = load_svc("studio_invariants")
+add_cuts = _ep.add_cuts
+episode_can_approve = _inv.episode_can_approve
+episode_can_publish = _inv.episode_can_publish
+live_tier_unlocked = _inv.live_tier_unlocked
+override_requires_admin = _inv.override_requires_admin
 
 
 def test_approve_requires_in_review_and_zero_flags():

@@ -1,13 +1,16 @@
 """INV-5 style whitelist + INV-6 copy + clone context."""
 
-from app.services.broadcast_persona_resolver import validate_show_copy, validate_vertical
-from app.services.studio_invariants import (
-    STYLE_KEYS,
-    VERTICALS,
-    clone_context_allowed,
-    filter_style_layer,
-    inv6_blocks,
-)
+from _studio_load import load_svc
+
+_inv = load_svc("studio_invariants")
+_bp = load_svc("broadcast_persona_resolver")
+validate_show_copy = _bp.validate_show_copy
+validate_vertical = _bp.validate_vertical
+STYLE_KEYS = _inv.STYLE_KEYS
+VERTICALS = _inv.VERTICALS
+clone_context_allowed = _inv.clone_context_allowed
+filter_style_layer = _inv.filter_style_layer
+inv6_blocks = _inv.inv6_blocks
 
 
 def test_style_whitelist_rejects_guardrail_keys():

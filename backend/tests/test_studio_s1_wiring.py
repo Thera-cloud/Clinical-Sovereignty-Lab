@@ -2,15 +2,17 @@
 
 from pathlib import Path
 
-from app.services.studio_auditor import TAB_ENDPOINTS
-from app.services.studio_invariants import LN_COHOST_LABEL
-from app.services.studio_mirror_capture import MIRROR_CAPTURE_PARTS
+from _studio_load import load_svc
+
+TAB_ENDPOINTS = load_svc("studio_auditor").TAB_ENDPOINTS
+LN_COHOST_LABEL = load_svc("studio_invariants").LN_COHOST_LABEL
+MIRROR_CAPTURE_PARTS = load_svc("studio_mirror_capture").MIRROR_CAPTURE_PARTS
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_migrations_400_406_exist():
-    names = [p.name for p in (ROOT / "backend/migrations").glob("40[0-6]_*.sql")]
+def test_migrations_400_407_exist():
+    names = [p.name for p in (ROOT / "backend/migrations").glob("40[0-7]_*.sql")]
     for n in (
         "400_studio_shows.sql",
         "401_studio_sessions.sql",
@@ -19,6 +21,7 @@ def test_migrations_400_406_exist():
         "404_studio_roles.sql",
         "405_mirror_capture.sql",
         "406_studio_trust_baseline.sql",
+        "407_studio_s2_s5.sql",
     ):
         assert n in names
 

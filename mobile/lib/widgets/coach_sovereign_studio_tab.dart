@@ -53,11 +53,16 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
   List<Map<String, dynamic>> _shows = [];
   Map<String, dynamic>? _selected;
   List<Map<String, dynamic>> _parts = [];
+  List<Map<String, dynamic>> _episodes = [];
+  int _callersLogged = 0;
+  int _callersOpted = 0;
+  String? _sessionId;
   int _complete = 0;
   bool _cloneConsent = false;
   bool _busy = false;
   int? _recordingPart;
   final _recorder = CoachWebRecorder();
+  final _noteCtrl = TextEditingController();
   Timer? _tick;
   int _secs = 0;
 
@@ -80,6 +85,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
     }
     _nameCtrl.dispose();
     _descCtrl.dispose();
+    _noteCtrl.dispose();
     super.dispose();
   }
 
@@ -109,8 +115,48 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
         _complete = (j['complete_count'] as num?)?.toInt() ?? 0;
         _cloneConsent = j['clone_consent'] == true;
       }
+      final sid = (_selected?['id'] ?? '').toString();
+      if (sid.isNotEmpty) {
+        final epR = await http.get(
+          Uri.parse('${AppConfig.apiBaseUrl}/api/studio/shows/$sid/episodes'),
+          headers: _h,
+        );
+        final memR = await http.get(
+          Uri.parse('${AppConfig.apiBaseUrl}/api/studio/shows/$sid/caller-memory'),
+          headers: _h,
+        );
+        if (epR.statusCode == 200) {
+          final j = json.decode(epR.body);
+          _episodes = List<Map<String, dynamic>>.from((j['episodes'] ?? []) as List);
+        }
+        if (memR.statusCode == 200) {
+          final j = json.decode(memR.body) as Map<String, dynamic>;
+          _callersLogged = (j['logged'] as num?)?.toInt() ?? 0;
+          _callersOpted = (j['opted_in'] as num?)?.toInt() ?? 0;
+        }
+      }
       setState(() {});
     } catch (_) {}
+  }
+
+  Future<void> _post(String path, [Map<String, dynamic>? body]) async {
+    setState(() => _busy = true);
+    final r = await http.post(
+      Uri.parse('${AppConfig.apiBaseUrl}$path'),
+      headers: _h,
+      body: json.encode(body ?? {}),
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(r.statusCode == 200
+            ? 'OK'
+            : '${r.statusCode}: ${r.body.length > 80 ? r.body.substring(0, 80) : r.body}')));
+    if (path == '/api/studio/sessions' && r.statusCode == 200) {
+      final j = json.decode(r.body) as Map<String, dynamic>;
+      _sessionId = (j['session']?['id'] ?? j['id'] ?? '').toString();
+    }
+    await _refresh();
   }
 
   Future<void> _createShow() async {
@@ -334,9 +380,115 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
                     style: const TextStyle(color: _text, fontSize: 13)),
                 subtitle: Text((s['vertical'] ?? '').toString(),
                     style: const TextStyle(color: _muted, fontSize: 11)),
-                onTap: () => setState(() => _selected = s),
+                onTap: () {
+                  setState(() => _selected = s);
+                  _refresh();
+                },
               )),
         ],
+        const SizedBox(height: 16),
+        const Text('LN PERSONA (L1/L2 platform-locked)',
+            style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          children: const [
+            Chip(label: Text('L1 guardrail', style: TextStyle(fontSize: 11))),
+            Chip(label: Text('L2 vertical', style: TextStyle(fontSize: 11))),
+            Chip(label: Text('L3 style = capture', style: TextStyle(fontSize: 11))),
+          ],
+        ),
+        const SizedBox(height: 16),
+        const Text('CALLER MEMORY (counts only)',
+            style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
+        Text('logged $_callersLogged · opted-in $_callersOpted · no transcript browse',
+            style: const TextStyle(color: _muted, fontSize: 12)),
+        const SizedBox(height: 16),
+        const Text('EPISODE REVIEW',
+            style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _gold),
+              onPressed: _busy || _selected == null
+                  ? null
+                  : () => _post('/api/studio/sessions',
+                      {'show_id': (_selected?['id'] ?? '').toString()}),
+              child: const Text('Start session',
+                  style: TextStyle(color: Colors.black)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _gold),
+              onPressed: _busy || (_sessionId ?? '').isEmpty
+                  ? null
+                  : () => _post('/api/studio/sessions/$_sessionId/end'),
+              child: const Text('End → review',
+                  style: TextStyle(color: Colors.black)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: liveReady ? _gold : _muted),
+              onPressed: _busy || !liveReady || (_sessionId ?? '').isEmpty
+                  ? null
+                  : () => _post('/api/studio/sessions/$_sessionId/dump'),
+              child: Text(liveReady ? 'Dump (45s)' : 'Dump locked',
+                  style: const TextStyle(color: Colors.black)),
+            ),
+          ],
+        ),
+        TextField(
+          controller: _noteCtrl,
+          style: const TextStyle(color: _text, fontSize: 12),
+          decoration: const InputDecoration(
+            hintText: 'Coach note for regenerate LN answer',
+            hintStyle: TextStyle(color: _muted),
+          ),
+        ),
+        if (_episodes.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text('No episodes yet',
+                style: TextStyle(color: _muted, fontSize: 12)),
+          ),
+        ..._episodes.map((e) {
+          final eid = (e['id'] ?? '').toString();
+          return ListTile(
+            dense: true,
+            title: Text('${e['title'] ?? 'Episode'} · ${e['state']}',
+                style: const TextStyle(color: _text, fontSize: 12)),
+            subtitle: Text('open flags ${e['open_flags'] ?? 0}',
+                style: const TextStyle(color: _muted, fontSize: 11)),
+            trailing: Wrap(
+              spacing: 4,
+              children: [
+                TextButton(
+                  onPressed: _busy
+                      ? null
+                      : () => _post('/api/studio/episodes/$eid/approve'),
+                  child: const Text('Approve', style: TextStyle(fontSize: 11)),
+                ),
+                TextButton(
+                  onPressed: _busy
+                      ? null
+                      : () => _post('/api/studio/episodes/$eid/publish'),
+                  child: const Text('Publish', style: TextStyle(fontSize: 11)),
+                ),
+                TextButton(
+                  onPressed: _busy
+                      ? null
+                      : () => _post('/api/studio/episodes/$eid/regenerate', {
+                            'segment_id': 'ln',
+                            'coach_note': _noteCtrl.text.trim(),
+                          }),
+                  child: const Text('Regen LN', style: TextStyle(fontSize: 11)),
+                ),
+              ],
+            ),
+          );
+        }),
         const SizedBox(height: 20),
         Text('MIRROR CAPTURE  $_complete/7',
             style: const TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),

@@ -62,6 +62,21 @@ class FlagResolveBody(BaseModel):
     reason: str = ""
 
 
+class RegenBody(BaseModel):
+    segment_id: str = "ln"
+    coach_note: str = ""
+
+
+class RtmpBody(BaseModel):
+    rtmp_url: str = ""
+
+
+class ConsentRecordBody(BaseModel):
+    show_id: str = ""
+    granted: bool = False
+    consent_kind: str = "sms_opt_in"
+
+
 def _hw(user: Dict) -> str:
     return (user.get("hardware_id") or "").strip()
 
@@ -161,12 +176,47 @@ async def verify_host(
 @router.post("/shows/{show_id}/provision-did")
 async def provision_did(show_id: UUID, request: Request, user: Dict = Depends(require_admin)):
     _flag()
-    return {
-        "ok": False,
-        "reason": "S2 DID provision not enabled",
-        "show_id": str(show_id),
-        "admin": (user.get("username") or ""),
-    }
+    from app.services.studio_did_service import provision_did as _prov
+
+    return _raise(await _prov(_pool(request), str(show_id), user.get("username") or ""))
+
+
+@router.get("/shows/{show_id}/caller-memory")
+async def caller_memory(show_id: UUID, request: Request, user: Dict = Depends(require_coach)):
+    _flag()
+    from app.services.studio_screener_service import caller_memory_counts
+
+    return _raise(await caller_memory_counts(_pool(request), str(show_id), _hw(user)))
+
+
+@router.get("/shows/{show_id}/episodes")
+async def list_show_episodes(
+    show_id: UUID, request: Request, user: Dict = Depends(require_coach)
+):
+    _flag()
+    from app.services.studio_episode_service import list_episodes
+
+    return _raise(await list_episodes(_pool(request), str(show_id), _hw(user)))
+
+
+@router.post("/shows/{show_id}/rtmp-key")
+async def set_rtmp(show_id: UUID, body: RtmpBody, request: Request, user: Dict = Depends(require_coach)):
+    _flag()
+    from app.services.studio_tier2 import store_rtmp
+
+    return _raise(await store_rtmp(_pool(request), str(show_id), _hw(user), body.rtmp_url))
+
+
+@router.get("/shows/{show_id}/delay")
+async def show_delay(show_id: UUID, request: Request, user: Dict = Depends(require_coach)):
+    _flag()
+    from app.services.studio_show_service import get_show as _get
+    from app.services.studio_tier2 import delay_status
+
+    out = await _get(_pool(request), str(show_id), _hw(user))
+    if not out.get("ok"):
+        return _raise(out)
+    return delay_status(bool((out.get("show") or {}).get("live_unlocked")))
 
 
 @router.post("/sessions")
@@ -180,15 +230,51 @@ async def create_session(body: SessionCreate, request: Request, user: Dict = Dep
 @router.post("/sessions/{session_id}/end")
 async def end_session(session_id: UUID, request: Request, user: Dict = Depends(require_coach)):
     _flag()
+    from app.services.studio_episode_service import create_from_session
     from app.services.studio_session_service import end_session as _end
 
-    return _raise(await _end(_pool(request), str(session_id), _hw(user)))
+    ended = await _end(_pool(request), str(session_id), _hw(user))
+    if not ended.get("ok"):
+        return _raise(ended)
+    ep = await create_from_session(_pool(request), str(session_id), _hw(user))
+    ended["episode"] = ep
+    return ended
 
 
 @router.post("/sessions/{session_id}/dump")
-async def dump_session(session_id: UUID, user: Dict = Depends(require_coach)):
+async def dump_session(session_id: UUID, request: Request, user: Dict = Depends(require_coach)):
     _flag()
-    raise HTTPException(409, "tier2_locked")
+    from app.services.studio_tier2 import dump_session as _dump
+
+    # 409 tier2_locked when clean published episodes < LIVE_TIER_CLEAN_EPISODES
+    return _raise(await _dump(_pool(request), str(session_id), _hw(user)))
+
+
+@router.post("/sessions/{session_id}/join-token")
+async def join_token(session_id: UUID, request: Request, user: Dict = Depends(require_coach)):
+    _flag()
+    from app.services.studio_livekit import join_token_stub
+
+    role = "host"
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            role = str(body.get("role") or "host")
+    except Exception:
+        pass
+    return join_token_stub(str(session_id), role)
+
+
+@router.post("/sessions/{session_id}/legs")
+async def add_leg(session_id: UUID, request: Request, user: Dict = Depends(require_coach)):
+    _flag()
+    from app.services.studio_livekit import reject_guest_video
+
+    body = await request.json()
+    check = reject_guest_video(str(body.get("role") or ""), body.get("video_track_key"))
+    if not check.get("ok"):
+        return _raise(check)
+    return {"ok": True, "session_id": str(session_id), "role": body.get("role")}
 
 
 @router.get("/episodes/{episode_id}")
@@ -223,6 +309,30 @@ async def episode_publish(episode_id: UUID, request: Request, user: Dict = Depen
     from app.services.studio_episode_service import publish_episode
 
     return _raise(await publish_episode(_pool(request), str(episode_id), _hw(user)))
+
+
+@router.post("/episodes/{episode_id}/regenerate")
+async def episode_regen(
+    episode_id: UUID, body: RegenBody, request: Request, user: Dict = Depends(require_coach)
+):
+    _flag()
+    from app.services.studio_episode_service import regenerate_segment
+
+    return _raise(
+        await regenerate_segment(
+            _pool(request), str(episode_id), _hw(user), body.segment_id, body.coach_note
+        )
+    )
+
+
+@router.post("/episodes/{episode_id}/youtube-upload")
+async def episode_youtube(
+    episode_id: UUID, request: Request, user: Dict = Depends(require_coach)
+):
+    _flag()
+    from app.services.studio_youtube import upload_dry_run
+
+    return _raise(await upload_dry_run(_pool(request), _hw(user), str(episode_id)))
 
 
 @router.post("/episodes/{episode_id}/reject")
@@ -291,15 +401,38 @@ async def show_rss(show_id: UUID, request: Request):
 
 @public_router.post("/voice/inbound")
 async def voice_inbound():
-    twiml = (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        "<Response><Say>This line starts the screening. Please stay on the line.</Say>"
-        "<Redirect>/api/studio/voice/screener</Redirect></Response>"
-    )
-    return Response(content=twiml, media_type="application/xml")
+    from app.services.studio_screener_service import inbound_twiml
+
+    return Response(content=inbound_twiml(), media_type="application/xml")
 
 
 @public_router.post("/voice/screener")
+async def voice_screener(request: Request):
+    from app.services.studio_screener_service import handle_screener, lookup_show_by_did, persist_screener
+
+    step = (request.query_params.get("step") or "disclosure").strip()
+    form: Dict[str, Any] = {}
+    try:
+        form = dict(await request.form())
+    except Exception:
+        form = {}
+    digits = str(form.get("Digits") or "")
+    speech = str(form.get("SpeechResult") or "")
+    out = handle_screener(step=step, digits=digits, speech=speech)
+    if out.get("persist"):
+        show_id = await lookup_show_by_did(_pool(request), str(form.get("To") or ""))
+        await persist_screener(
+            _pool(request),
+            show_id=show_id,
+            session_id=None,
+            phone=str(form.get("From") or ""),
+            speech=str(out.get("speech") or speech),
+            consented=bool(out.get("consented")),
+            risk=bool(out.get("risk")),
+        )
+    return Response(content=out["twiml"], media_type="application/xml")
+
+
 @public_router.get("/voice/screener-health")
 async def screener_health():
     return {
@@ -344,3 +477,63 @@ async def sip_join(request: Request):
 @public_router.get("/youtube/oauth-status")
 async def youtube_oauth_status():
     return {"status": "ok", "connected": False, "phase": "S3"}
+
+
+@public_router.get("/livekit/health")
+async def livekit_health():
+    from app.services.studio_livekit import health
+
+    return health()
+
+
+@router.get("/youtube/status")
+async def youtube_status(request: Request, user: Dict = Depends(require_coach)):
+    _flag()
+    from app.services.studio_youtube import oauth_status
+
+    return await oauth_status(_pool(request), _hw(user))
+
+
+@router.post("/youtube/store")
+async def youtube_store(request: Request, user: Dict = Depends(require_coach)):
+    _flag()
+    from app.services.studio_youtube import store_tokens
+
+    body: Dict[str, Any] = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    cipher = str(body.get("refresh_ciphertext") or "").strip()
+    if not cipher:
+        raise HTTPException(422, "refresh_ciphertext required")
+    return _raise(await store_tokens(_pool(request), _hw(user), cipher))
+
+
+@router.post("/shows/{show_id}/sms-consent")
+async def sms_consent(
+    show_id: UUID, body: ConsentRecordBody, request: Request, user: Dict = Depends(require_coach)
+):
+    _flag()
+    pool = _pool(request)
+    if not pool:
+        raise HTTPException(503, "no_db")
+    kind = body.consent_kind if body.consent_kind in ("sms_opt_in", "recall") else "sms_opt_in"
+    async with pool.acquire() as conn:
+        show = await conn.fetchrow(
+            "SELECT id FROM studio_shows WHERE id = $1::uuid AND coach_id = $2",
+            str(show_id),
+            _hw(user),
+        )
+        if not show:
+            raise HTTPException(404, "not_found")
+        await conn.execute(
+            """
+            INSERT INTO consent_records (show_id, consent_kind, granted, source)
+            VALUES ($1::uuid, $2, $3, 'coach')
+            """,
+            str(show_id),
+            kind,
+            body.granted,
+        )
+    return {"ok": True, "consent_kind": kind, "granted": body.granted}
