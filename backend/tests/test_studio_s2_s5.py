@@ -23,6 +23,8 @@ mint_livekit_jwt = _lk.mint_livekit_jwt
 handle_screener = _sc.handle_screener
 inbound_twiml = _sc.inbound_twiml
 is_risk = _sc.is_risk
+wait_twiml = _sc.wait_twiml
+handle_event = _lk.handle_event
 DELAY_S = _t2.DELAY_S
 dump_allowed = _t2.dump_allowed
 parse_sms_reply = _sms.parse_sms_reply
@@ -44,6 +46,7 @@ def test_screener_risk_private_support_not_show():
     out = handle_screener(step="risk", speech="I want to die tonight")
     assert out["risk"] is True
     assert "988" in out["twiml"]
+    assert "<Dial>988</Dial>" in out["twiml"]
     assert "private support" in out["twiml"].lower()
     assert "waiting room" not in out["twiml"].lower()
 
@@ -53,6 +56,17 @@ def test_screener_safe_wait():
     assert out["risk"] is False
     assert "waiting room" in out["twiml"].lower()
     assert "audio only" in out["twiml"].lower()
+
+
+def test_wait_room_loops_then_closes():
+    looped = wait_twiml(0)
+    assert "step=wait" in looped
+    assert "n=1" in looped
+    closed = wait_twiml(8)
+    assert "Hangup" in closed
+    evt = handle_event({"event": "egress_ended"})
+    assert evt["ok"] is True
+    assert evt["allow_video_guest"] is False
 
 
 def test_is_risk_false_on_ordinary():
@@ -98,6 +112,7 @@ def test_migration_407_and_api_routes():
     assert "studio_tier2" in src
     assert "regenerate" in src
     assert "youtube/callback" in src
+    assert "livekit/events" in src
     assert "ln-scan" in src
     dart = (ROOT / "mobile/lib/widgets/coach_sovereign_studio_tab.dart").read_text()
     assert "EPISODE REVIEW" in dart

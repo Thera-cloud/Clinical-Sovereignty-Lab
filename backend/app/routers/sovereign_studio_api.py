@@ -447,6 +447,10 @@ async def voice_screener(request: Request):
     from app.services.studio_screener_service import handle_screener, lookup_show_by_did, persist_screener
 
     step = (request.query_params.get("step") or "disclosure").strip()
+    try:
+        n = int(request.query_params.get("n") or 0)
+    except (TypeError, ValueError):
+        n = 0
     form: Dict[str, Any] = {}
     try:
         form = dict(await request.form())
@@ -454,7 +458,7 @@ async def voice_screener(request: Request):
         form = {}
     digits = str(form.get("Digits") or "")
     speech = str(form.get("SpeechResult") or "")
-    out = handle_screener(step=step, digits=digits, speech=speech)
+    out = handle_screener(step=step, digits=digits, speech=speech, n=n)
     if out.get("persist"):
         show_id = await lookup_show_by_did(_pool(request), str(form.get("To") or ""))
         await persist_screener(
@@ -561,6 +565,18 @@ async def livekit_health():
     from app.services.studio_livekit import health
 
     return health()
+
+
+@public_router.post("/livekit/events")
+async def livekit_events(request: Request):
+    from app.services.studio_livekit import handle_event
+
+    body: Dict[str, Any] = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return handle_event(body)
 
 
 @router.get("/youtube/status")

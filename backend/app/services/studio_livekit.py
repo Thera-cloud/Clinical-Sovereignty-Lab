@@ -85,6 +85,16 @@ def mint_livekit_jwt(
     return f"{h}.{p}.{_b64(sig)}"
 
 
+def handle_event(body: Dict[str, Any]) -> Dict[str, Any]:
+    event = str((body or {}).get("event") or (body or {}).get("event_type") or "").strip()
+    return {
+        "ok": True,
+        "event": event or "unknown",
+        "allow_video_guest": False,
+        "installed": False,
+    }
+
+
 def join_token(session_id: str, role: str, identity: str = "") -> Dict[str, Any]:
     out = join_token_stub(session_id, role)
     key = os.getenv("LIVEKIT_API_KEY", "")

@@ -234,6 +234,9 @@ async def upload_episode(db_pool, coach_id: str, episode_id: str) -> Dict[str, A
             "episode_id": episode_id,
             "destination": "coach_channel",
         }
+    pushed = await _upload_r2_media(db_pool, coach_id, episode_id, media_key, title)
+    if pushed.get("uploaded"):
+        return pushed
     return {
         "ok": True,
         "uploaded": False,
@@ -241,8 +244,104 @@ async def upload_episode(db_pool, coach_id: str, episode_id: str) -> Dict[str, A
         "media_r2_key": media_key,
         "title": title,
         "destination": "coach_channel",
-        "note": "R2 bytes present — resumable YouTube insert runs when egress file is available",
+        "reason": pushed.get("reason") or "r2_or_youtube_unavailable",
     }
+
+
+async def _upload_r2_media(
+    db_pool, coach_id: str, episode_id: str, media_key: str, title: str
+) -> Dict[str, Any]:
+    try:
+        from app.services.r2_storage import download_bytes_async
+
+        blob = await download_bytes_async(key=media_key)
+    except Exception as exc:
+        logger.warning("studio youtube r2: %s", exc)
+        return {"uploaded": False, "reason": "r2_read_failed"}
+    if not blob:
+        return {"uploaded": False, "reason": "r2_empty"}
+    token = await _access_token(db_pool, coach_id)
+    if not token:
+        return {"uploaded": False, "reason": "youtube_token"}
+    try:
+        import httpx
+
+        meta = {"snippet": {"title": title[:90], "description": "Sovereign Studio episode"}, "status": {"privacyStatus": "unlisted"}}
+        async with httpx.AsyncClient(timeout=60) as client:
+            init = await client.post(
+                "https://www.googleapis.com/upload/youtube/v3/videos",
+                params={"uploadType": "resumable", "part": "snippet,status"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json; charset=UTF-8",
+                    "X-Upload-Content-Type": "video/mp4",
+                    "X-Upload-Content-Length": str(len(blob)),
+                },
+                json=meta,
+            )
+            loc = init.headers.get("Location") or ""
+            if init.status_code >= 400 or not loc:
+                return {"uploaded": False, "reason": f"yt_init_{init.status_code}"}
+            put = await client.put(loc, content=blob, headers={"Content-Type": "video/mp4"})
+            body = put.json() if put.headers.get("content-type", "").startswith("application/json") else {}
+            vid = (body or {}).get("id")
+        if not vid:
+            return {"uploaded": False, "reason": f"yt_put_{put.status_code}"}
+        if db_pool:
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE studio_episodes SET youtube_video_id = $2 WHERE id = $1::uuid",
+                    episode_id,
+                    vid,
+                )
+        return {"ok": True, "uploaded": True, "video_id": vid, "destination": "coach_channel"}
+    except Exception as exc:
+        logger.warning("studio youtube upload: %s", exc)
+        return {"uploaded": False, "reason": "yt_upload_failed"}
+
+
+async def _access_token(db_pool, coach_id: str) -> str:
+    if not db_pool:
+        return ""
+    try:
+        from app.services.skyeye_platform_base import TokenCipher
+
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT access_ciphertext, refresh_ciphertext
+                FROM studio_youtube_connection WHERE coach_id = $1
+                """,
+                coach_id,
+            )
+        if not row:
+            return ""
+        cipher = TokenCipher.get()
+        access = ""
+        if row.get("access_ciphertext"):
+            access = cipher.decrypt(row["access_ciphertext"]) or ""
+        if access:
+            return access
+        refresh = cipher.decrypt(row["refresh_ciphertext"]) if row.get("refresh_ciphertext") else ""
+        if not refresh:
+            return ""
+        cid, secret = _client()
+        import httpx
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                GOOGLE_TOKEN_URL,
+                data={
+                    "refresh_token": refresh,
+                    "client_id": cid,
+                    "client_secret": secret,
+                    "grant_type": "refresh_token",
+                },
+            )
+            return (resp.json() or {}).get("access_token") or ""
+    except Exception as exc:
+        logger.warning("studio youtube access: %s", exc)
+        return ""
 
 
 async def upload_dry_run(db_pool, coach_id: str, episode_id: str) -> Dict[str, Any]:

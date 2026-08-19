@@ -72,8 +72,8 @@ def risk_or_wait_twiml(speech: str) -> Dict[str, Any]:
             "risk": True,
             "twiml": _xml(
                 "<Say>I am connecting you with private support, not the show. "
-                "If you are in immediate danger, call emergency services or 988.</Say>"
-                "<Hangup/>"
+                "If you are in immediate danger, stay on the line for 988.</Say>"
+                "<Dial>988</Dial>"
             ),
         }
     return {
@@ -86,7 +86,7 @@ def risk_or_wait_twiml(speech: str) -> Dict[str, Any]:
     }
 
 
-def handle_screener(*, step: str, digits: str = "", speech: str = "") -> Dict[str, Any]:
+def handle_screener(*, step: str, digits: str = "", speech: str = "", n: int = 0) -> Dict[str, Any]:
     st = (step or "disclosure").strip().lower()
     if st in ("", "disclosure"):
         return {"twiml": disclosure_twiml(), "persist": False}
@@ -103,14 +103,20 @@ def handle_screener(*, step: str, digits: str = "", speech: str = "") -> Dict[st
             "consented": not out["risk"],
             "speech": speech,
         }
-    return {"twiml": wait_twiml(), "persist": False}
+    return {"twiml": wait_twiml(n), "persist": False}
 
 
-def wait_twiml() -> str:
+def wait_twiml(n: int = 0) -> str:
+    try:
+        loops = max(0, int(n))
+    except (TypeError, ValueError):
+        loops = 0
+    if loops >= 8:
+        return _xml("<Say>Waiting room closed. Please call back.</Say><Hangup/>")
     return _xml(
         "<Say>Still waiting. Guests are audio only. Video is not available on this line.</Say>"
         "<Pause length=\"8\"/>"
-        "<Hangup/>"
+        f'<Redirect>{BASE}?step=wait&amp;n={loops + 1}</Redirect>'
     )
 
 
