@@ -25,18 +25,44 @@ ROOM_HTML = """<!DOCTYPE html>
 body{margin:0;background:#050505;color:#E8D5A3;font-family:DM Sans,sans-serif}
 #bar{padding:12px 16px;border-bottom:1px solid #222;color:#C9A962;letter-spacing:1px;font-size:12px}
 #status{padding:8px 16px;color:#8B7355;font-size:12px}
-#stage{display:flex;gap:8px;padding:12px;flex-wrap:wrap}
-video{width:320px;height:180px;background:#111;border-radius:8px}
-#env{width:160px;height:160px;background:#111;border-radius:8px}
+#board{display:flex;gap:12px;padding:12px;flex-wrap:wrap}
+.tile{background:#111;border:1px solid #222;border-radius:8px;min-width:220px;flex:1}
+.tile h3{margin:0;padding:8px 10px;font-size:11px;color:#C9A962;letter-spacing:1px}
+.tile .box{width:100%;height:180px;background:#0A0A0A;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.tile video,.tile canvas{width:100%;height:180px;object-fit:cover;background:#0A0A0A}
+#wait{padding:0 12px 8px;color:#8B7355;font-size:12px}
+#dock{position:sticky;bottom:0;padding:10px 12px;border-top:1px solid #222;background:#0A0A0A;display:flex;flex-wrap:wrap;gap:8px}
+#dock button{background:#111;color:#E8D5A3;border:1px solid #8B7355;border-radius:6px;padding:8px 12px;font-size:12px;cursor:pointer}
+#dock button.on{border-color:#C9A962;color:#C9A962}
+#dock button.warn{border-color:#EF4444;color:#EF4444}
+#dock .meta{color:#8B7355;font-size:11px;align-self:center}
 </style>
 </head>
 <body>
 <div id="bar">SOVEREIGN STUDIO · AI co-host and knowledge companion</div>
 <div id="status">Connecting…</div>
-<div id="stage"><canvas id="env" width="160" height="160"></canvas></div>
+<div id="board">
+  <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
+  <div class="tile" id="lnTile"><h3>AI CO-HOST</h3><div class="box"><canvas id="env" width="160" height="160"></canvas></div></div>
+  <div class="tile" id="callerTile"><h3>CALLERS (audio)</h3><div class="box" id="callers"><span id="callerEmpty" style="color:#8B7355;font-size:12px">No live callers</span></div></div>
+</div>
+<div id="wait">Waiting room: none</div>
+<div id="dock">
+  <button id="btnMute" type="button">Mute</button>
+  <button id="btnCam" type="button">Camera</button>
+  <button id="btnToss" type="button">Toss to Nate</button>
+  <button id="btnPause" type="button">Pause LN</button>
+  <button id="btnBring" type="button">Bring on</button>
+  <button id="btnHold" type="button">Hold</button>
+  <button id="btnDrop" type="button">Drop</button>
+  <button id="btnEnd" class="warn" type="button">End session</button>
+  <button id="btnDump" type="button" disabled>Dump locked</button>
+  <span class="meta">Delay 45s · RTMP pending</span>
+</div>
 <script src="/livekit-client.umd.min.js"></script>
 <script>
 (function(){
+  var room = null, micOn = true, camOn = false, lnPaused = false, waiting = [];
   function params(){
     var h = new URLSearchParams(location.hash.replace(/^#/, ''));
     var q = new URLSearchParams(location.search);
@@ -61,42 +87,131 @@ video{width:320px;height:180px;background:#111;border-radius:8px}
     }
     ctx.closePath(); ctx.stroke();
   }
+  function setStatus(t){ document.getElementById('status').textContent = t; }
+  function renderWait(){
+    document.getElementById('wait').textContent = waiting.length
+      ? ('Waiting room: ' + waiting.join(', ')) : 'Waiting room: none';
+  }
+  function previewCam(){
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+    navigator.mediaDevices.getUserMedia({video:true, audio:false}).then(function(ms){
+      var v = document.getElementById('hostVid');
+      v.srcObject = ms;
+      v.play().catch(function(){});
+    }).catch(function(){});
+  }
+  function attachLocalCam(){
+    if (!room || !room.localParticipant) return;
+    room.localParticipant.videoTrackPublications.forEach(function(pub){
+      if (!pub.track) return;
+      var src = pub.source;
+      var isCam = (LK.Track && LK.Track.Source && src === LK.Track.Source.Camera) || src === 'camera';
+      if (!isCam) return;
+      var el = pub.track.attach();
+      el.muted = true; el.autoplay = true; el.playsInline = true;
+      var box = document.getElementById('hostBox');
+      box.innerHTML = '';
+      box.appendChild(el);
+    });
+  }
+  function sendOp(op){
+    if (!room) return;
+    try {
+      var raw = JSON.stringify({op: op});
+      if (room.localParticipant.publishData) {
+        room.localParticipant.publishData(new TextEncoder().encode(raw), {reliable:true});
+      }
+    } catch (e) {}
+    setStatus('Host · ' + op);
+  }
   drawEnv(0.35);
   var p = params();
-  var status = document.getElementById('status');
   var guest = p.role === 'guest';
+  if (guest) document.getElementById('btnCam').style.display = 'none';
   if (!p.url || !p.token){
-    status.textContent = 'LiveKit pending — set LIVEKIT_URL + JWT, then Start session.';
+    setStatus('LiveKit pending — set LIVEKIT_URL + JWT, then Start session.');
     return;
   }
   var LK = window.LivekitClient;
   if (!LK || !LK.Room){
-    status.textContent = 'LiveKit client failed to load.';
+    setStatus('LiveKit client failed to load.');
     return;
   }
-  var room = new LK.Room({adaptiveStream:true, dynacast:true});
-  room.on(LK.RoomEvent.TrackSubscribed, function(track){
+  previewCam();
+  room = new LK.Room({adaptiveStream:true, dynacast:true});
+  room.on(LK.RoomEvent.TrackSubscribed, function(track, pub, participant){
+    var empty = document.getElementById('callerEmpty');
+    if (empty) empty.remove();
     var el = track.attach();
     el.autoplay = true;
-    document.getElementById('stage').appendChild(el);
+    document.getElementById('callers').appendChild(el);
+    waiting = waiting.filter(function(n){ return n !== participant.identity; });
+    renderWait();
   });
+  room.on(LK.RoomEvent.ParticipantConnected, function(participant){
+    waiting.push(participant.identity || 'caller');
+    renderWait();
+  });
+  room.on(LK.RoomEvent.ParticipantDisconnected, function(participant){
+    waiting = waiting.filter(function(n){ return n !== participant.identity; });
+    renderWait();
+  });
+  room.on(LK.RoomEvent.LocalTrackPublished, attachLocalCam);
   room.connect(p.url, p.token).then(function(){
     return room.localParticipant.setMicrophoneEnabled(true);
   }).then(function(){
     if (guest) return room.localParticipant.setCameraEnabled(false);
-    var stream = document.getElementById('env').captureStream(12);
-    var vt = stream && stream.getVideoTracks()[0];
-    if (vt){
+    return room.localParticipant.setCameraEnabled(true).then(function(){
+      camOn = true;
+      attachLocalCam();
+      var stream = document.getElementById('env').captureStream(12);
+      var vt = stream && stream.getVideoTracks()[0];
+      if (!vt) return;
       var t = 0;
-      setInterval(function(){ t += 1; drawEnv(0.28 + 0.45*Math.abs(Math.sin(t/8))); }, 80);
-      return room.localParticipant.publishTrack(vt, {name:'ln-envelope'});
-    }
-    return room.localParticipant.setCameraEnabled(true);
+      setInterval(function(){
+        if (lnPaused) return;
+        t += 1;
+        drawEnv(0.28 + 0.45*Math.abs(Math.sin(t/8)));
+      }, 80);
+      var opts = {name:'ln-envelope'};
+      if (LK.Track && LK.Track.Source) opts.source = LK.Track.Source.ScreenShare;
+      return room.localParticipant.publishTrack(vt, opts).catch(function(){ return null; });
+    });
   }).then(function(){
-    status.textContent = guest ? 'Guest audio-only (INV-2).' : 'Host + envelope avatar.';
+    setStatus(guest ? 'Guest audio-only (INV-2).' : 'Host + envelope avatar.');
   }).catch(function(e){
-    status.textContent = 'Connect failed: ' + e;
+    setStatus('Connect failed: ' + e);
   });
+  document.getElementById('btnMute').onclick = function(){
+    if (!room) return;
+    micOn = !micOn;
+    room.localParticipant.setMicrophoneEnabled(micOn);
+    this.textContent = micOn ? 'Mute' : 'Unmute';
+    this.classList.toggle('on', !micOn);
+  };
+  document.getElementById('btnCam').onclick = function(){
+    if (!room || guest) return;
+    camOn = !camOn;
+    room.localParticipant.setCameraEnabled(camOn).then(attachLocalCam);
+    this.classList.toggle('on', camOn);
+  };
+  document.getElementById('btnToss').onclick = function(){ sendOp('toss'); };
+  document.getElementById('btnPause').onclick = function(){
+    lnPaused = !lnPaused;
+    this.textContent = lnPaused ? 'Resume LN' : 'Pause LN';
+    this.classList.toggle('on', lnPaused);
+    sendOp(lnPaused ? 'pause_ln' : 'resume_ln');
+  };
+  document.getElementById('btnBring').onclick = function(){
+    if (!waiting.length){ setStatus('Waiting room empty.'); return; }
+    sendOp('bring_on:' + waiting[0]);
+  };
+  document.getElementById('btnHold').onclick = function(){ sendOp('hold'); };
+  document.getElementById('btnDrop').onclick = function(){ sendOp('drop'); };
+  document.getElementById('btnEnd').onclick = function(){
+    if (room) room.disconnect();
+    setStatus('Session ended. Close this tab or End → review in Studio.');
+  };
 })();
 </script>
 </body>
@@ -204,16 +319,19 @@ def mint_livekit_jwt(
 ) -> str:
     now = int(time.time())
     can_video = role != "guest"
+    # Omit canPublishSources for host — string names decode as UNKNOWN and
+    # canvas captureStream is screen_share, not camera. Guest: proto MICROPHONE=2.
     video = {
         "roomJoin": True,
         "room": room,
         "canPublish": True,
         "canSubscribe": True,
         "canPublishData": True,
-        "canPublishSources": ["microphone"] if not can_video else ["microphone", "camera"],
         "roomRecord": True,
         "roomAdmin": can_video,
     }
+    if not can_video:
+        video["canPublishSources"] = [2]
     header = {"alg": "HS256", "typ": "JWT"}
     payload = {
         "iss": api_key,

@@ -32,7 +32,7 @@ class _StudioLiveKitRoomEmbedState extends State<StudioLiveKitRoomEmbed> {
   Widget build(BuildContext context) {
     if (widget.src.isEmpty) return const SizedBox.shrink();
     return SizedBox(
-      height: 360,
+      height: 620,
       width: double.infinity,
       child: HtmlElementView(viewType: _viewType),
     );

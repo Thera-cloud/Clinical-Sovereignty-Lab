@@ -575,6 +575,14 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
           ),
         if (_lkNote.isNotEmpty)
           Text(_lkNote, style: const TextStyle(color: _muted, fontSize: 11)),
+        if ((_sessionId ?? '').isNotEmpty) ...[
+          const Text('SESSION VIEW',
+              style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
+          const Text(
+              'Host tile · LN avatar · callers (audio) · waiting room. Dock: Mute, Camera, Toss, Pause LN, Bring on, Hold, Drop, End.',
+              style: TextStyle(color: _muted, fontSize: 11)),
+          const SizedBox(height: 6),
+        ],
         if (_roomUrl.isNotEmpty) ...[
           TextButton(
             onPressed: () => launchUrl(Uri.parse(_roomUrl),

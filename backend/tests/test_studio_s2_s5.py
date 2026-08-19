@@ -132,6 +132,7 @@ def test_migration_407_and_api_routes():
     assert "Connect YouTube" in dart
     assert "Speaker transcript" in dart
     assert "Open studio room" in dart
+    assert "SESSION VIEW" in dart
     html = (ROOT / "mobile/web/studio_livekit_room.html").read_text()
     assert "livekit-client.umd.min.js" in html
     assert "cdn.jsdelivr.net" not in html
@@ -173,6 +174,28 @@ def test_youtube_state_and_livekit_jwt():
         role="guest",
     )
     assert tok.count(".") == 2
+
+    def _jwt_body(raw: str) -> dict:
+        import base64
+        import json
+
+        part = raw.split(".")[1]
+        part += "=" * (-len(part) % 4)
+        return json.loads(base64.urlsafe_b64decode(part))
+
+    guest_video = _jwt_body(tok)["video"]
+    assert guest_video["canPublish"] is True
+    assert guest_video["canPublishSources"] == [2]
+    host = mint_livekit_jwt(
+        api_key="key",
+        api_secret="secret",
+        room="studio-1",
+        identity="host",
+        role="host",
+    )
+    host_video = _jwt_body(host)["video"]
+    assert host_video["canPublish"] is True
+    assert "canPublishSources" not in host_video
     guest = join_token_stub("sid", "guest")
     assert guest["allow_video"] is False
 
@@ -230,6 +253,10 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "captureStream" in html
     assert "ln-envelope" in html
     assert "cdn.jsdelivr.net" not in html
+    assert "btnMute" in html
+    assert "Toss to Nate" in html
+    assert "hostVid" in html
+    assert "setCameraEnabled(true)" in html
     assert (ROOT / "mobile/web/livekit-client.umd.min.js").is_file()
     ngx = (ROOT / "nginx/snippets/health-livekit.conf").read_text()
     assert "location /livekit/" in ngx
