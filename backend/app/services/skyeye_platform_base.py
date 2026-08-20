@@ -196,22 +196,33 @@ class ModerateResult:
 # TOKEN ENCRYPTION (Fernet symmetric — AES-128-CBC + HMAC-SHA256)
 # =============================================================================
 
+class TokenEncryptionError(RuntimeError):
+    """Raised in strict mode when an OAuth token cannot be encrypted safely."""
+
+
 class TokenCipher:
     """
     Encrypt / decrypt OAuth tokens at rest using Fernet.
 
     Behaviour:
     - If SKYEYE_TOKEN_ENCRYPTION_KEY is set → full encryption.
-    - If the key is empty → logs a warning and passes tokens through in
-      plaintext (allows dev/test without a key).
     - decrypt() auto-detects legacy plaintext tokens (they won't start
       with 'gAAAAA') and returns them unchanged, so existing DB rows
       don't break after enabling encryption.
+
+    Fail-closed policy (Slice 0.5):
+    - In production (ENVIRONMENT=production) or when ENCRYPTION_STRICT=true,
+      encrypt() raises TokenEncryptionError if the key is missing or the
+      encryption operation fails. This prevents an OAuth token from being
+      silently written to disk in plaintext when the operator expected AES.
+    - Dev / test / staging keeps the historic plaintext passthrough so local
+      runs don't need a key configured.
     """
 
     _instance: Optional["TokenCipher"] = None
     _fernet: Optional[Any] = None
     _warned: bool = False
+    _strict: bool = False
 
     @classmethod
     def get(cls) -> "TokenCipher":
@@ -222,46 +233,85 @@ class TokenCipher:
         return cls._instance
 
     def _init_cipher(self):
+        import os as _os
+
         try:
             from app.config import settings  # Docker / production
         except ImportError:
-            from backend.app.config import settings  # local dev fallback
-        key = getattr(settings, "SKYEYE_TOKEN_ENCRYPTION_KEY", "")
+            try:
+                from backend.app.config import settings  # local dev fallback
+            except ImportError:
+                settings = None  # tests / bare-metal — env-only
+
+        # Prefer live env vars over cached pydantic settings so tests and
+        # runtime overrides both work. Settings is only a fallback.
+        _env = (
+            _os.getenv("ENVIRONMENT")
+            or (getattr(settings, "ENVIRONMENT", "") if settings else "")
+            or ""
+        ).strip().lower()
+        _override = (_os.getenv("ENCRYPTION_STRICT") or "").strip().lower()
+        if _override in ("true", "1", "yes", "on"):
+            self._strict = True
+        elif _override in ("false", "0", "no", "off"):
+            self._strict = False
+        else:
+            self._strict = _env == "production"
+
+        key = (
+            _os.getenv("SKYEYE_TOKEN_ENCRYPTION_KEY")
+            or (getattr(settings, "SKYEYE_TOKEN_ENCRYPTION_KEY", "") if settings else "")
+            or ""
+        )
         if key and Fernet is not None:
             try:
                 self._fernet = Fernet(key.encode() if isinstance(key, str) else key)
-                logger.info("TokenCipher: Fernet encryption enabled for platform tokens")
+                logger.info(
+                    "TokenCipher: Fernet encryption enabled (strict=%s)", self._strict
+                )
             except Exception as exc:
                 logger.error(f"TokenCipher: Invalid encryption key — {exc}")
                 self._fernet = None
         else:
             if not self._warned:
                 if Fernet is None:
-                    logger.warning(
-                        "TokenCipher: cryptography package not installed — "
-                        "tokens will be stored in PLAINTEXT"
+                    msg = (
+                        "TokenCipher: cryptography package not installed"
                     )
                 else:
-                    logger.warning(
-                        "TokenCipher: SKYEYE_TOKEN_ENCRYPTION_KEY is empty — "
-                        "tokens will be stored in PLAINTEXT"
-                    )
+                    msg = "TokenCipher: SKYEYE_TOKEN_ENCRYPTION_KEY is empty"
+                if self._strict:
+                    logger.error("%s — writes will fail in strict mode", msg)
+                else:
+                    logger.warning("%s — tokens will be stored in PLAINTEXT", msg)
                 self._warned = True
             self._fernet = None
 
     # ── public API ──────────────────────────────────────────────────
 
     def encrypt(self, plaintext: str) -> str:
-        """Encrypt a token string. Returns ciphertext (base64) or plaintext fallback."""
+        """Encrypt a token string.
+
+        Strict mode: raises TokenEncryptionError if the key is missing or
+        encryption fails. Non-strict mode: falls back to plaintext with a
+        warning (legacy dev/test behavior).
+        """
         if not plaintext:
             return plaintext
         if self._fernet is None:
+            if self._strict:
+                raise TokenEncryptionError(
+                    "TokenCipher.encrypt called in strict mode without a valid key"
+                )
             return plaintext
         try:
             return self._fernet.encrypt(plaintext.encode()).decode()
         except Exception as exc:
+            if self._strict:
+                logger.error("TokenCipher.encrypt failed in strict mode: %s", exc)
+                raise TokenEncryptionError(f"TokenCipher.encrypt failed: {exc}") from exc
             logger.error(f"TokenCipher.encrypt failed: {exc}")
-            return plaintext  # fallback to plaintext rather than crash
+            return plaintext
 
     def decrypt(self, ciphertext: str) -> str:
         """
@@ -286,6 +336,10 @@ class TokenCipher:
         except Exception as exc:
             logger.error(f"TokenCipher.decrypt failed: {exc}")
             return ciphertext
+
+    def is_strict(self) -> bool:
+        """Whether this cipher instance is running in fail-closed strict mode."""
+        return bool(self._strict)
 
 
 # =============================================================================
