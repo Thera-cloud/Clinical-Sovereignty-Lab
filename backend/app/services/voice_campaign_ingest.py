@@ -280,10 +280,19 @@ async def store_voice_recording(
                 )
     bios: Dict[str, Any] = {}
     if blob:
+        # Slice 0: honor per-user biometrics opt-out (IL BIPA §15(b) / BAA §6.3).
+        subject_id = client_id if subject == "client" else coach_id
+        try:
+            from app.services.biometrics_consent import is_biometrics_disabled
+
+            _bio_disabled = await is_biometrics_disabled(subject_id, db_pool)
+        except Exception as exc:
+            logger.warning("biometrics_consent check skipped: %s", exc)
+            _bio_disabled = False
         try:
             from app.services.coach_voice_biometrics import extract_campaign_biometrics
 
-            bios = extract_campaign_biometrics(blob, ctype) or {}
+            bios = extract_campaign_biometrics(blob, ctype, is_disabled=_bio_disabled) or {}
         except Exception as exc:
             logger.warning("campaign biometrics skipped: %s", exc)
             bios = {}

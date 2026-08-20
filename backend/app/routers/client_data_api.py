@@ -541,6 +541,57 @@ async def put_proactive_presence_consent(request: Request, user=Depends(_require
     return result
 
 
+# ── Slice 0: Client self-serve voice biometrics opt-out (IL BIPA §15(b)) ──
+@router.get("/biometrics-opt-out")
+async def get_client_biometrics_opt_out(request: Request, user=Depends(_require_auth)):
+    """Return the caller's current voice biometrics opt-out state."""
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        raise HTTPException(503, "Database unavailable")
+    username = (user.get("username") or "").strip() if isinstance(user, dict) else ""
+    if not username:
+        raise HTTPException(400, "identity missing")
+    from app.services.biometrics_consent import get_biometrics_status
+
+    current = await get_biometrics_status(username, db_pool)
+    if current is None:
+        raise HTTPException(404, "user not found")
+    return {"username": username, "biometrics_disabled": bool(current)}
+
+
+@router.put("/biometrics-opt-out")
+async def put_client_biometrics_opt_out(request: Request, user=Depends(_require_auth)):
+    """Client self-toggle for voice biometrics extraction (BAA §6.3 disable control)."""
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        raise HTTPException(503, "Database unavailable")
+    username = (user.get("username") or "").strip() if isinstance(user, dict) else ""
+    if not username:
+        raise HTTPException(400, "identity missing")
+    body: dict = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if "disabled" not in body:
+        raise HTTPException(400, "disabled field required")
+    disabled = bool(body.get("disabled"))
+    reason = (body.get("reason") or None)
+    from app.services.biometrics_consent import set_biometrics_opt_out, get_biometrics_status
+
+    ok = await set_biometrics_opt_out(
+        username=username,
+        disabled=disabled,
+        actor=username,
+        reason=reason,
+        db_pool=db_pool,
+    )
+    if not ok:
+        raise HTTPException(500, "update failed")
+    current = await get_biometrics_status(username, db_pool)
+    return {"status": "ok", "username": username, "biometrics_disabled": bool(current)}
+
+
 @router.get("/health-check")
 async def client_health_check(request: Request, user=Depends(_require_auth)):
     """Enhanced health check that includes ai_consent_granted_at for consent gate."""

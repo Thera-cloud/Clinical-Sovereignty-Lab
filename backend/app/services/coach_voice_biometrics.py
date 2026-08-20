@@ -132,8 +132,18 @@ def presence_from_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def extract_campaign_biometrics(media: bytes, content_type: str = "") -> Dict[str, Any]:
-    """Lazy-import extractor. Empty dict on any failure — never blocks ingest."""
+def extract_campaign_biometrics(
+    media: bytes,
+    content_type: str = "",
+    is_disabled: bool = False,
+) -> Dict[str, Any]:
+    """Lazy-import extractor. Empty dict on any failure — never blocks ingest.
+
+    When ``is_disabled`` is True (per-user biometrics opt-out, IL BIPA §15(b)),
+    no acoustic features are extracted or returned.
+    """
+    if is_disabled:
+        return {}
     pcm, rate = to_pcm16_mono(media, content_type)
     if not pcm or rate < 8000 or len(pcm) < 512:
         return {}

@@ -309,10 +309,12 @@ async def backfill_presence(db_pool, coach_id: str) -> Dict[str, Any]:
         if row and row.get("audio_ciphertext"):
             from app.services.voice_campaign_ingest import decrypt_coach_bytes
             from app.services.coach_voice_biometrics import extract_campaign_biometrics
+            from app.services.biometrics_consent import is_biometrics_disabled
 
             blob = decrypt_coach_bytes(row["audio_ciphertext"])
             if blob and len(blob) >= 512:
-                bios = extract_campaign_biometrics(blob) or {}
+                _bio_disabled = await is_biometrics_disabled(coach_id, db_pool)
+                bios = extract_campaign_biometrics(blob, is_disabled=_bio_disabled) or {}
     if not transcript and not bios:
         return {"ok": False, "reason": "no_source"}
     filler = "Coach spoken presence captured from a stored interview recording."

@@ -106,6 +106,9 @@ class RealtimeSession:
         self._cancel_event = asyncio.Event()
         self._active_task: Optional[asyncio.Task] = None
         self._client_biometrics: Dict[str, float] = {}
+        # Slice 0: user identity captured from webrtc.setup / session.update
+        # for per-user biometrics opt-out enforcement (IL BIPA §15(b)).
+        self._user_id: Optional[str] = None
 
         # Cloudflare Realtime integration
         self._sfu_session_id: Optional[str] = None
@@ -187,6 +190,7 @@ class RealtimeSession:
 
         elif msg_type == "webrtc.setup":
             user_id = msg.get("user_id", self.session_id)
+            self._user_id = user_id
             webrtc_info = await self.setup_webrtc(user_id)
             await self._send({"type": "webrtc.ready", "webrtc": webrtc_info})
 
@@ -232,11 +236,21 @@ class RealtimeSession:
         try:
             await self._send({"type": "response.created", "response": {"id": response_id}})
 
-            # ── 1. Extract client voice biometrics ──────────────────────
+            # ── 1. Extract client voice biometrics (Slice 0: honor opt-out) ─
             try:
                 extractor = getattr(self._app_state, "voice_biometric_extractor", None)
                 if extractor and len(audio_data) > 1000:
-                    self._client_biometrics = extractor.process_audio_chunk(audio_data)
+                    _bio_disabled = False
+                    if self._user_id:
+                        try:
+                            from app.services.biometrics_consent import is_biometrics_disabled
+
+                            _pool = getattr(self._app_state, "db_pool", None)
+                            _bio_disabled = await is_biometrics_disabled(self._user_id, _pool)
+                        except Exception:
+                            _bio_disabled = False
+                    if not _bio_disabled:
+                        self._client_biometrics = extractor.process_audio_chunk(audio_data)
             except Exception:
                 pass
 
@@ -1135,11 +1149,22 @@ class TwilioMediaSession:
             wav_data = mulaw_chunks_to_whisper_wav(mulaw_chunks)
             print(f"[TWILIO-CALL] {self.session_id}: processing {len(mulaw_chunks)} chunks ({len(wav_data)} bytes WAV)")
 
-            # 2. Voice biometrics from raw audio
+            # 2. Voice biometrics from raw audio (Slice 0: honor opt-out)
             try:
                 extractor = getattr(self._app_state, "voice_biometric_extractor", None)
                 if extractor and len(wav_data) > 1000:
-                    self._client_biometrics = extractor.process_audio_chunk(wav_data)
+                    _bio_disabled = False
+                    _uname = (self._call_context.get("username") or "").strip()
+                    if _uname:
+                        try:
+                            from app.services.biometrics_consent import is_biometrics_disabled
+
+                            _pool = getattr(self._app_state, "db_pool", None)
+                            _bio_disabled = await is_biometrics_disabled(_uname, _pool)
+                        except Exception:
+                            _bio_disabled = False
+                    if not _bio_disabled:
+                        self._client_biometrics = extractor.process_audio_chunk(wav_data)
             except Exception:
                 pass
 

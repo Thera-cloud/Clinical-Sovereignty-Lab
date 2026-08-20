@@ -765,6 +765,60 @@ async def admin_reset_biometrics(req: ResetBiometricsRequest, request: Request):
     return {"status": "biometrics_reset", "user_id": req.user_id, "message": "Biometrics cleared. User must re-enroll."}
 
 
+# ── Slice 0: Voice biometrics opt-out toggle (IL BIPA §15(b) / BAA §6.3) ──
+class BiometricsOptOutRequest(BaseModel):
+    username: str
+    disabled: bool
+    reason: Optional[str] = None
+
+
+@router.post("/biometrics-opt-out")
+async def admin_biometrics_opt_out(req: BiometricsOptOutRequest, request: Request):
+    """Admin toggle for a user's voice biometrics opt-out flag.
+
+    Writes to `users.biometrics_disabled` and appends an audit row to
+    `biometrics_opt_out_log`. Required by BAA §6.3 disable-control clause.
+    """
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "database unavailable")
+    admin_ctx = getattr(request.state, "user", None) or {}
+    actor = (admin_ctx.get("username") if isinstance(admin_ctx, dict) else None) or "admin"
+    from app.services.biometrics_consent import set_biometrics_opt_out, get_biometrics_status
+
+    ok = await set_biometrics_opt_out(
+        username=req.username,
+        disabled=bool(req.disabled),
+        actor=actor,
+        reason=req.reason,
+        db_pool=pool,
+    )
+    if not ok:
+        raise HTTPException(404, "user not found or update failed")
+    current = await get_biometrics_status(req.username, pool)
+    _audit_log_append(
+        "ADMIN_BIOMETRICS_OPT_OUT",
+        user_id=req.username,
+        user_name=req.username,
+        extra={"disabled": bool(req.disabled), "reason": req.reason or ""},
+    )
+    return {"status": "ok", "username": req.username, "biometrics_disabled": bool(current)}
+
+
+@router.get("/biometrics-opt-out/{username}")
+async def admin_biometrics_opt_out_status(username: str, request: Request):
+    """Return the current biometrics opt-out state for a user."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "database unavailable")
+    from app.services.biometrics_consent import get_biometrics_status
+
+    current = await get_biometrics_status(username, pool)
+    if current is None:
+        raise HTTPException(404, "user not found")
+    return {"username": username, "biometrics_disabled": bool(current)}
+
+
 @router.post("/ban-user")
 async def admin_ban_user(req: BanUserRequest, request: Request):
     """Ban a user account (sets status to BANNED). Audit-logged."""
