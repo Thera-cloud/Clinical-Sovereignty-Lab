@@ -435,6 +435,11 @@ class DatabaseMaintenanceAgent:
         `ENABLE_RETENTION_ENFORCEMENT` so we can ship the code path in
         a disabled state and flip it on later.
 
+        Slice B adds a cohort-aware DRY-RUN branch gated on
+        ``ENABLE_RETENTION_DRYRUN`` which reports per-(table, cohort)
+        deletion counts without touching data. When both flags are set,
+        dry-run wins (safety-first).
+
         Currently prunes rows from `conversation_history` and
         `nevedal_metrics` older than the configured window. Rows are
         deleted in a single transaction with matching tombstone inserts
@@ -444,13 +449,21 @@ class DatabaseMaintenanceAgent:
         try:
             from app.services.retention_policy import (
                 get_retention_days,
+                is_retention_dryrun_enabled,
                 is_retention_enforcement_enabled,
             )
         except Exception as exc:
             logger.warning("retention: helper import failed: %s", exc)
             return {"summary": "disabled (import error)", "deleted": 0}
 
-        if not is_retention_enforcement_enabled():
+        dryrun = is_retention_dryrun_enabled()
+        enforcement = is_retention_enforcement_enabled()
+
+        # Slice B: dry-run wins when both are set. Safety-first.
+        if dryrun:
+            return await self._retention_dry_run_report()
+
+        if not enforcement:
             return {"summary": "disabled (flag off)", "deleted": 0}
 
         days = get_retention_days()
@@ -518,6 +531,169 @@ class DatabaseMaintenanceAgent:
             "summary": f"enforced @ {days}d — {detail}",
             "deleted": deleted_total,
             "per_table": per_table,
+        }
+
+    # ------------------------------------------------------------------ #
+    # Slice B: cohort-aware DRY-RUN report.                              #
+    # ------------------------------------------------------------------ #
+    async def _retention_dry_run_report(self) -> dict:
+        """Cohort-aware retention dry-run.
+
+        Reports what WOULD be deleted per (table × cohort) without
+        touching data or emitting tombstones. Bee HIV+ cohort uses the
+        strict 30-day window (retention_policy._STRICT_DEFAULT_DAYS).
+        Non-cohort users use the admin-configured global policy; when
+        global is "forever" they contribute 0 to the count.
+
+        Never DELETEs. Never inserts into ``data_tombstones``. Safe to
+        run on live production data before enforcement is flipped on.
+        """
+        try:
+            from app.services.retention_policy import get_retention_days
+        except Exception as exc:
+            logger.warning("retention dry-run: helper import failed: %s", exc)
+            return {"summary": f"dry-run error: {exc}", "would_delete": 0}
+
+        global_days = get_retention_days()
+        STRICT_DAYS = 30
+
+        total_would_delete = 0
+        per_table: dict[str, dict] = {}
+        # (table, user_col, ts_col) — column types are TEXT/VARCHAR for
+        # both target tables so ANY($::text[]) works with mixed
+        # username/hardware_id/uuid identifiers.
+        targets = [
+            ("conversation_history", "user_id", "created_at"),
+            ("nevedal_metrics", "user_id", "created_at"),
+        ]
+
+        try:
+            async with self.db_pool.acquire() as conn:
+                cohort_ids = await self._retention_cohort_identifiers(
+                    conn, "bee_hiv_plus"
+                )
+                for table, user_col, ts_col in targets:
+                    try:
+                        row = await self._retention_count_would_delete(
+                            conn, table, user_col, ts_col,
+                            cohort_ids, global_days, STRICT_DAYS,
+                        )
+                        per_table[table] = row
+                        total_would_delete += row["would_delete"]
+                    except Exception as exc:
+                        logger.warning(
+                            "retention dry-run: table=%s failed: %s", table, exc
+                        )
+                        per_table[table] = {"error": str(exc), "would_delete": 0}
+        except Exception as exc:
+            logger.warning("retention dry-run: pass failed: %s", exc)
+            return {
+                "summary": f"dry-run error: {exc}",
+                "would_delete": total_would_delete,
+                "per_table": per_table,
+            }
+
+        detail = ", ".join(
+            f"{t}(c={p.get('cohort_would', 0)},n={p.get('noncohort_would', 0)})"
+            for t, p in per_table.items()
+        )
+        global_label = "forever" if global_days is None else f"{global_days}d"
+        summary = (
+            f"DRY-RUN (global={global_label}, cohort=30d) — "
+            f"would_delete={total_would_delete} — {detail}"
+        )
+        return {
+            "summary": summary,
+            "dryrun": True,
+            "would_delete": total_would_delete,
+            "deleted": 0,
+            "per_table": per_table,
+            "policy_global_days": global_days,
+            "policy_strict_days": STRICT_DAYS,
+            "cohort_id_count": len(cohort_ids),
+        }
+
+    async def _retention_cohort_identifiers(
+        self, conn, program_id: str
+    ) -> list:
+        """Return usernames, hardware_ids, and stringified UUIDs of
+        users in the given cohort. Empty list if the ``program_id``
+        column is missing (pre-414 schema) or no users match.
+
+        ``conversation_history.user_id`` and ``nevedal_metrics.user_id``
+        both store TEXT and can be any of these three shapes depending
+        on the calling surface (voice → username, chat → hardware_id,
+        etc.), so we resolve all three and let ANY($::text[]) match.
+        """
+        try:
+            rows = await conn.fetch(
+                """
+                SELECT username, hardware_id, id::text AS uid
+                FROM users
+                WHERE program_id = $1
+                """,
+                program_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "retention dry-run: cohort lookup failed (pre-414?): %s", exc
+            )
+            return []
+        ids: set = set()
+        for r in rows:
+            for key in ("username", "hardware_id", "uid"):
+                v = r[key]
+                if v:
+                    ids.add(str(v))
+        return list(ids)
+
+    async def _retention_count_would_delete(
+        self, conn, table: str, user_col: str, ts_col: str,
+        cohort_ids: list, global_days, strict_days: int,
+    ) -> dict:
+        """COUNT-only helper — never mutates."""
+        cohort_would = 0
+        if cohort_ids:
+            row = await conn.fetchrow(
+                f"""
+                SELECT COUNT(*) AS c
+                FROM {table}
+                WHERE {ts_col} < NOW() - ($1 || ' days')::interval
+                  AND {user_col} = ANY($2::text[])
+                """,
+                str(strict_days),
+                cohort_ids,
+            )
+            cohort_would = int(row["c"] or 0) if row else 0
+
+        noncohort_would = 0
+        if global_days is not None:
+            if cohort_ids:
+                row = await conn.fetchrow(
+                    f"""
+                    SELECT COUNT(*) AS c
+                    FROM {table}
+                    WHERE {ts_col} < NOW() - ($1 || ' days')::interval
+                      AND NOT ({user_col} = ANY($2::text[]))
+                    """,
+                    str(global_days),
+                    cohort_ids,
+                )
+            else:
+                row = await conn.fetchrow(
+                    f"""
+                    SELECT COUNT(*) AS c
+                    FROM {table}
+                    WHERE {ts_col} < NOW() - ($1 || ' days')::interval
+                    """,
+                    str(global_days),
+                )
+            noncohort_would = int(row["c"] or 0) if row else 0
+
+        return {
+            "would_delete": cohort_would + noncohort_would,
+            "cohort_would": cohort_would,
+            "noncohort_would": noncohort_would,
         }
 
     async def _collect_stats(self) -> dict:

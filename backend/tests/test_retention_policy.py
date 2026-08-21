@@ -147,3 +147,78 @@ def test_describe_policy_exposes_strict_cohorts(tmp_path: Path):
     desc = mod.describe_policy()
     assert "bee_hiv_plus" in desc["strict_cohorts"]
     assert desc["strict_default_days"] == 30
+
+
+# ------------------------------------------------------------------ #
+# Slice B: retention dry-run flag.                                   #
+# ------------------------------------------------------------------ #
+
+def test_dryrun_flag_defaults_off(tmp_path: Path):
+    mod = _reload_module(
+        {
+            "DATA_DIR": str(tmp_path),
+            "ENABLE_RETENTION_DRYRUN": None,
+        }
+    )
+    assert mod.is_retention_dryrun_enabled() is False
+
+
+def test_dryrun_flag_true_variants(tmp_path: Path):
+    for val in ("1", "true", "TRUE", "yes", "on"):
+        mod = _reload_module(
+            {
+                "DATA_DIR": str(tmp_path),
+                "ENABLE_RETENTION_DRYRUN": val,
+            }
+        )
+        assert mod.is_retention_dryrun_enabled() is True, f"failed for {val!r}"
+
+
+def test_dryrun_flag_falsy_variants(tmp_path: Path):
+    for val in ("0", "false", "no", "off", "", "   "):
+        mod = _reload_module(
+            {
+                "DATA_DIR": str(tmp_path),
+                "ENABLE_RETENTION_DRYRUN": val,
+            }
+        )
+        assert mod.is_retention_dryrun_enabled() is False, f"failed for {val!r}"
+
+
+def test_dryrun_and_enforcement_are_independent(tmp_path: Path):
+    """Both flags can be on simultaneously — the maintenance agent
+    resolves the priority (dry-run wins), not the flag helpers."""
+    mod = _reload_module(
+        {
+            "DATA_DIR": str(tmp_path),
+            "ENABLE_RETENTION_ENFORCEMENT": "true",
+            "ENABLE_RETENTION_DRYRUN": "true",
+        }
+    )
+    assert mod.is_retention_enforcement_enabled() is True
+    assert mod.is_retention_dryrun_enabled() is True
+
+
+def test_describe_policy_exposes_dryrun(tmp_path: Path):
+    mod = _reload_module(
+        {
+            "DATA_DIR": str(tmp_path),
+            "ENABLE_RETENTION_ENFORCEMENT": None,
+            "ENABLE_RETENTION_DRYRUN": "1",
+        }
+    )
+    desc = mod.describe_policy()
+    assert desc["dryrun_enabled"] is True
+    assert desc["enforcement_enabled"] is False
+
+
+def test_describe_policy_dryrun_off_by_default(tmp_path: Path):
+    mod = _reload_module(
+        {
+            "DATA_DIR": str(tmp_path),
+            "ENABLE_RETENTION_ENFORCEMENT": None,
+            "ENABLE_RETENTION_DRYRUN": None,
+        }
+    )
+    desc = mod.describe_policy()
+    assert desc["dryrun_enabled"] is False

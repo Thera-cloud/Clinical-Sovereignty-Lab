@@ -131,6 +131,20 @@ def is_retention_enforcement_enabled() -> bool:
     return raw in ("1", "true", "yes", "on")
 
 
+def is_retention_dryrun_enabled() -> bool:
+    """Slice B: dry-run gate for retention enforcement.
+
+    When True, the retention pass reports what would be deleted
+    per (table, cohort) but performs no DELETEs and writes no
+    tombstones. Safe to enable in production before the actual
+    deleter is flipped on. Independent of
+    ``ENABLE_RETENTION_ENFORCEMENT``; when both are set, dry-run
+    takes precedence (safety-first).
+    """
+    raw = (os.getenv("ENABLE_RETENTION_DRYRUN") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def describe_policy() -> dict:
     """Compact summary for auditors and health probes."""
     days = get_retention_days()
@@ -138,6 +152,7 @@ def describe_policy() -> dict:
         "policy_days": days,
         "policy_label": "forever" if days is None else f"{days}d",
         "enforcement_enabled": is_retention_enforcement_enabled(),
+        "dryrun_enabled": is_retention_dryrun_enabled(),
         "strict_cohorts": sorted(_STRICT_RETENTION_PROGRAMS),
         "strict_default_days": _STRICT_DEFAULT_DAYS,
     }
