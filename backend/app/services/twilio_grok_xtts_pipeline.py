@@ -416,6 +416,14 @@ async def _open_grok_session(system_prompt: str, silence_duration_ms: int = 700)
         raise RuntimeError("AZURE_API_KEY or AZURE_OPENAI_ENDPOINT not set for voice")
 
     _sil = max(500, min(1500, int(silence_duration_ms or 700)))  # SOVEREIGN-VOICE pacing
+    # gap-fix-d: regex-only PII scrub of system prompt before Azure Grok. # SOVEREIGN-VOICE
+    # Names intentionally NOT swapped (Grok speaks audio; token names sound wrong out loud);
+    # only category PII (email/phone/SSN/UUID/HWID/DOB/ADDR) is redacted. Zero-cost when flag off.
+    try:
+        from app.services.pii_pseudonymizer import maybe_pseudonymize_prompt
+        _si_prompt, _, _ = maybe_pseudonymize_prompt(system_prompt or "", "", known_names=[])
+    except Exception:
+        _si_prompt = system_prompt
     print(f"[VOICE] Connecting to Azure Foundry Realtime: {_AZ_REALTIME_URL[:60]}...")
     ws = await websockets.connect(
         _AZ_REALTIME_URL,
@@ -426,7 +434,7 @@ async def _open_grok_session(system_prompt: str, silence_duration_ms: int = 700)
     session_update = {
         "type": "session.update",
         "session": {
-            "instructions": system_prompt,
+            "instructions": _si_prompt,
             "turn_detection": {
                 "type": "server_vad",
                 "silence_duration_ms": _sil,

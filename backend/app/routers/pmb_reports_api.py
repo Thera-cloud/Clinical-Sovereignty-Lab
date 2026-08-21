@@ -28,6 +28,7 @@ import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.services.api_server import get_current_user, require_admin, require_coach
+from app.services.mfa_gate import enforce_mfa_recent
 
 logger = logging.getLogger("pmb.reports")
 
@@ -902,10 +903,12 @@ async def wisdom_feed(request: Request):
 # CLIENT PMB ENDPOINT
 # ===========================================================================
 
-@router.get("/client/{hardware_id}", dependencies=[Depends(require_admin)])
-async def get_client_pmb(hardware_id: str, request: Request):
+@router.get("/client/{hardware_id}")
+async def get_client_pmb(hardware_id: str, request: Request, admin: Dict = Depends(require_admin)):
     """Get full PMB data for a specific client, pulling from all live DB sources."""
     db = request.app.state.db_pool
+    # gap-fix-e: PHI read requires fresh MFA (no-op when ENABLE_PHI_MFA_GATE is off)
+    await enforce_mfa_recent(db, admin)
 
     async with db.acquire() as conn:
         row = await conn.fetchrow(
@@ -1273,11 +1276,13 @@ def _parse_report_uuid(report_id: str) -> UUID:
         raise HTTPException(422, f"Invalid report ID format: {report_id}")
 
 
-@router.post("/deep-dive/{report_id}", dependencies=[Depends(require_admin)])
-async def deep_dive(report_id: str, request: Request):
+@router.post("/deep-dive/{report_id}")
+async def deep_dive(report_id: str, request: Request, admin: Dict = Depends(require_admin)):
     """Admin: get full PMB data for clinical consultation with Big Nate."""
     rid = _parse_report_uuid(report_id)
     db = request.app.state.db_pool
+    # gap-fix-e: PHI read requires fresh MFA (no-op when ENABLE_PHI_MFA_GATE is off)
+    await enforce_mfa_recent(db, admin)
     async with db.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM pmb_report_requests WHERE id = $1",
@@ -1308,10 +1313,12 @@ async def deep_dive(report_id: str, request: Request):
     }
 
 
-@router.post("/approve/{report_id}", dependencies=[Depends(require_admin)])
-async def approve_report(report_id: str, request: Request):
+@router.post("/approve/{report_id}")
+async def approve_report(report_id: str, request: Request, admin: Dict = Depends(require_admin)):
     """Admin approves a PMB report with clinical analysis and guidance."""
     rid = _parse_report_uuid(report_id)
+    # gap-fix-e: clinical write requires fresh MFA (no-op when flag off)
+    await enforce_mfa_recent(request.app.state.db_pool, admin)
     body = await request.json()
     clinical_analysis = body.get("clinical_analysis", {})
     admin_notes = body.get("admin_notes", "")
@@ -1356,10 +1363,12 @@ async def approve_report(report_id: str, request: Request):
     return {"id": report_id, "status": "APPROVED", "released_at": now.isoformat()}
 
 
-@router.post("/deny/{report_id}", dependencies=[Depends(require_admin)])
-async def deny_report(report_id: str, request: Request):
+@router.post("/deny/{report_id}")
+async def deny_report(report_id: str, request: Request, admin: Dict = Depends(require_admin)):
     """Admin denies a PMB report request with reason."""
     rid = _parse_report_uuid(report_id)
+    # gap-fix-e: clinical write requires fresh MFA (no-op when flag off)
+    await enforce_mfa_recent(request.app.state.db_pool, admin)
     body = await request.json()
     reason = body.get("reason", "")
 
@@ -1396,6 +1405,8 @@ async def get_report(report_id: str, request: Request, user: Dict = Depends(get_
     """Get a specific PMB report. Coaches only see APPROVED reports for their clients."""
     rid = _parse_report_uuid(report_id)
     db = request.app.state.db_pool
+    # gap-fix-e: PHI read requires fresh MFA for both admin + coach callers (no-op when flag off)
+    await enforce_mfa_recent(db, user)
     async with db.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM pmb_report_requests WHERE id = $1",

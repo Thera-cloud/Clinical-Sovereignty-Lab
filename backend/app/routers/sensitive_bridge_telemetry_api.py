@@ -43,6 +43,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, validator
 
 from app.services.api_server import require_admin
+from app.services.mfa_gate import enforce_mfa_recent
 from app.services.sensitive_bridge_telemetry_agent import (
     ReenableTelemetryUnresolved,
     _AUTO_DISABLEABLE_FLAGS,
@@ -163,6 +164,9 @@ async def cancel_auto_disable(
     if db_pool is None:
         raise HTTPException(503, detail={"reason": "database_unavailable"})
 
+    # gap-fix-e: clinical RED-gate mutation requires fresh MFA (no-op when flag off)
+    await enforce_mfa_recent(db_pool, principal)
+
     actor = (principal or {}).get("username") or "unknown_admin"
 
     async with db_pool.acquire() as conn:
@@ -260,6 +264,9 @@ async def set_feature_flag(
     db_pool = request.app.state.db_pool
     if db_pool is None:
         raise HTTPException(503, detail={"reason": "database_unavailable"})
+
+    # gap-fix-e: clinical RED-gate mutation requires fresh MFA (no-op when flag off)
+    await enforce_mfa_recent(db_pool, principal)
 
     actor = (principal or {}).get("username") or "unknown_admin"
     snapshot: Optional[Dict[str, Any]] = None

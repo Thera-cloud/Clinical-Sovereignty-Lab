@@ -8,6 +8,7 @@ from app.services.pii_pseudonymizer import (
     PseudonymBook,
     StreamRestorer,
     is_enabled,
+    maybe_pseudonymize_prompt,
     pseudonymize_messages,
     pseudonymize_text,
     restore_text,
@@ -212,3 +213,60 @@ def test_hwid_not_matched_on_lowercase_or_partial():
     src = "client_kristy_id lower and CLIENTKRISTYID no underscore"
     out = pseudonymize_text(src, book)
     assert "PSEUDO_HWID_" not in out
+
+
+# ------------------------------------------------------------------- #
+# gap-fix-c: maybe_pseudonymize_prompt convenience wrapper.           #
+# ------------------------------------------------------------------- #
+
+def test_maybe_pseudonymize_prompt_flag_off_returns_originals():
+    """When ENABLE_PROVIDER_PSEUDONYMIZATION is unset, the helper is a
+    zero-cost passthrough so protected-file call sites are safe to wrap
+    unconditionally."""
+    sys_p = "You are Little Nate. Coach: hnevedal. Contact " + E_ALICE
+    user_p = "Reply to Alice about her SSN 123-45-6789."
+    ps, pu, book = maybe_pseudonymize_prompt(sys_p, user_p, known_names=["Alice"])
+    assert ps == sys_p
+    assert pu == user_p
+    assert book is None
+
+
+def test_maybe_pseudonymize_prompt_flag_on_scrubs_and_shares_book(monkeypatch):
+    """With the flag on, PII in either prompt is replaced by tokens from
+    a SHARED book so a token in the system prompt matches the same
+    substitution in the user prompt (deterministic per-book)."""
+    monkeypatch.setenv("ENABLE_PROVIDER_PSEUDONYMIZATION", "true")
+    sys_p = "Coach context includes " + E_ALICE + " and client Alice."
+    user_p = "Draft a reply to " + E_ALICE + " for Alice."
+    ps, pu, book = maybe_pseudonymize_prompt(sys_p, user_p, known_names=["Alice"])
+    assert E_ALICE not in ps and E_ALICE not in pu
+    assert "Alice" not in ps and "Alice" not in pu
+    assert "PSEUDO_EMAIL_" in ps and "PSEUDO_EMAIL_" in pu
+    assert "PSEUDO_NAME_" in ps and "PSEUDO_NAME_" in pu
+    assert book is not None
+    # Same email in both prompts → identical token via shared book.
+    email_tokens_sys = [w for w in ps.split() if w.startswith("PSEUDO_EMAIL_")]
+    email_tokens_user = [w for w in pu.split() if w.startswith("PSEUDO_EMAIL_")]
+    assert email_tokens_sys[0] == email_tokens_user[0]
+
+
+def test_maybe_pseudonymize_prompt_restore_round_trip(monkeypatch):
+    """The book returned by the helper must round-trip through
+    restore_text so provider responses can be un-pseudonymized in-place."""
+    monkeypatch.setenv("ENABLE_PROVIDER_PSEUDONYMIZATION", "true")
+    sys_p = "System note about " + E_BOB
+    user_p = "User asks about Bob and " + E_BOB
+    ps, pu, book = maybe_pseudonymize_prompt(sys_p, user_p, known_names=["Bob"])
+    # Simulate a provider response that echoes back tokens from both prompts.
+    fake_response = f"Told {pu.split()[-1]} the info from {ps.split()[-1]}."
+    restored = restore_text(fake_response, book)
+    assert E_BOB in restored
+
+
+def test_maybe_pseudonymize_prompt_empty_strings(monkeypatch):
+    """Empty prompts must not crash and must produce no book allocation
+    cost when the flag is off (fast path)."""
+    monkeypatch.setenv("ENABLE_PROVIDER_PSEUDONYMIZATION", "true")
+    ps, pu, book = maybe_pseudonymize_prompt("", "", known_names=[])
+    assert ps == "" and pu == ""
+    assert book is not None  # still allocated for consistency on the on-path

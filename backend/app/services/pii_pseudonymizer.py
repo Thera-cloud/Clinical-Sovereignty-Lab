@@ -125,6 +125,35 @@ def pseudonymize_text(
     return text
 
 
+def maybe_pseudonymize_prompt(
+    system_prompt: str,
+    user_prompt: str,
+    known_names: Optional[List[str]] = None,
+) -> "tuple[str, str, Optional[PseudonymBook]]":
+    """Convenience wrapper for direct provider WebSocket call sites.
+
+    Slice C follow-up (gap-fix-c): the family sanctuary, group coaching,
+    and private coaching handlers open ``aiohttp`` WebSockets to Azure
+    Realtime directly (they don't route through ``sovereign_chat_client``)
+    so they need a lightweight, in-place pseudonymization primitive.
+
+    Returns ``(pseudo_system, pseudo_user, book_or_None)``. When the flag
+    is off, the originals pass through untouched and ``book`` is ``None``
+    so callers can cheaply skip the restore step:
+
+        ps, pu, book = maybe_pseudonymize_prompt(sys_p, user_p, names)
+        # ... send ps + pu to provider, collect response_text ...
+        if book:
+            response_text = restore_text(response_text, book)
+    """
+    if not is_enabled():
+        return system_prompt, user_prompt, None
+    book = PseudonymBook()
+    ps = pseudonymize_text(system_prompt, book, known_names) if system_prompt else system_prompt
+    pu = pseudonymize_text(user_prompt, book, known_names) if user_prompt else user_prompt
+    return ps, pu, book
+
+
 def pseudonymize_messages(
     messages: List[Dict],
     book: PseudonymBook,

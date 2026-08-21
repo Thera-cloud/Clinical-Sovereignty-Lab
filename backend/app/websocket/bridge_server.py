@@ -9019,6 +9019,20 @@ class AzureCortex:
         _full_name = (profile.get("name") or "").strip()
         _first_name = _full_name.split()[0] if _full_name else ""
         _known_names = [n for n in {_full_name, _first_name} if n and len(n) >= 2]
+        # gap-fix-b: for coaches, also pseudonymize their assigned clients' names. # QUANTUM-CRYSTAL-ARCH
+        if profile.get("role") == "COACH":
+            _assigned = set(profile.get("assigned_clients") or [])
+            if _assigned:
+                for _rv in _registry_cache.values():
+                    _cp = (_rv or {}).get("profile", {}) or {}
+                    if _cp.get("hardware_id") in _assigned:
+                        _cn = (_cp.get("name") or "").strip()
+                        if _cn and len(_cn) >= 2:
+                            _known_names.append(_cn)
+                            _cf = _cn.split()[0]
+                            if _cf and len(_cf) >= 2:
+                                _known_names.append(_cf)
+                _known_names = list(dict.fromkeys(_known_names))
         # QUANTUM-CRYSTAL-ARCH: resolve DOJO per-type model-tier override (skips ODPE)
         _dojo_tier = _DOJO_TYPE_MODEL_TIER.get((dojo_type or "").lower()) if dojo_type else None
         _dojo_signal = _DOJO_TIER_TO_SIGNAL.get(_dojo_tier) if _dojo_tier else None
@@ -11685,6 +11699,11 @@ class AzureCortex:
         Keep responses brief (2-4 sentences). Be warm, not preachy.
         If P0/P1 crisis, provide 988 Lifeline naturally."""
 
+            # gap-fix-c: pseudonymize family PII before Azure Realtime call. # QUANTUM-CRYSTAL-ARCH
+            from app.services.pii_pseudonymizer import maybe_pseudonymize_prompt, restore_text
+            _sn = [(p.get("name") or "").strip() for p in (family_profiles or [])]
+            _sn = [n for n in _sn if n and len(n) >= 2]
+            _sps, _, _sbook = maybe_pseudonymize_prompt(system_prompt, "", known_names=_sn)
             try:
                 import aiohttp
                 response_text = ""
@@ -11696,7 +11715,7 @@ class AzureCortex:
                     ) as azure_ws:
                         await azure_ws.send_str(json.dumps({
                             "type": "session.update",
-                            "session": {"modalities": ["text"], "instructions": system_prompt}
+                            "session": {"modalities": ["text"], "instructions": _sps}
                         }))
                         await azure_ws.send_str(json.dumps({
                             "type": "conversation.item.create",
@@ -11713,6 +11732,8 @@ class AzureCortex:
                                 elif data.get("type") in ["response.done", "error"]:
                                     break
                     
+                if _sbook:
+                    response_text = restore_text(response_text, _sbook)
                 clean_response, recon_markers = self._extract_recon_markers(response_text)
                 clean_response, eft_markers = self._extract_eft_markers(clean_response)
                 if sanctuary_id and eft_markers:
@@ -11998,6 +12019,12 @@ class AzureCortex:
         TARGET_AUDIENCE: [who it's addressed to - e.g., "Jane" or "everyone"]
         EMOTIONAL_TONE: [e.g., "vulnerable", "repair", "reaching out"]"""
 
+            # gap-fix-c: pseudonymize target + other member names before Azure Realtime call. # QUANTUM-CRYSTAL-ARCH
+            from app.services.pii_pseudonymizer import maybe_pseudonymize_prompt, restore_text
+            _gn = [target_name] + [(o.get("name") or "").strip() for o in (other_members or [])]
+            _gn = [n for n in _gn if n and len(n) >= 2]
+            _user_prompt_g = f"Generate a suggested response for {target_name}."
+            _gps, _gpu, _gbook = maybe_pseudonymize_prompt(system_prompt, _user_prompt_g, known_names=_gn)
             try:
                 import aiohttp
                 response_text = ""
@@ -12009,12 +12036,12 @@ class AzureCortex:
                     ) as azure_ws:
                         await azure_ws.send_str(json.dumps({
                             "type": "session.update",
-                            "session": {"modalities": ["text"], "instructions": system_prompt}
+                            "session": {"modalities": ["text"], "instructions": _gps}
                         }))
                         await azure_ws.send_str(json.dumps({
                             "type": "conversation.item.create",
                             "item": {"type": "message", "role": "user",
-                                    "content": [{"type": "input_text", "text": f"Generate a suggested response for {target_name}."}]}
+                                    "content": [{"type": "input_text", "text": _gpu}]}
                         }))
                         await azure_ws.send_str(json.dumps({"type": "response.create"}))
 
@@ -12026,6 +12053,8 @@ class AzureCortex:
                                 elif data.get("type") == "response.done":
                                     break
 
+                if _gbook:
+                    response_text = restore_text(response_text, _gbook)
                 result = {
                     "suggested_response": "",
                     "rationale": "",
@@ -12349,6 +12378,13 @@ class AzureCortex:
 
         Keep responses warm, brief, and conversational. You're a supportive friend, not a lecturer."""
 
+                # gap-fix-c: pseudonymize member name before Azure Realtime call. # QUANTUM-CRYSTAL-ARCH
+                from app.services.pii_pseudonymizer import maybe_pseudonymize_prompt, restore_text
+                _pn = [member_name] if member_name and len(member_name) >= 2 else []
+                _pf = member_name.split()[0] if member_name else ""
+                if _pf and len(_pf) >= 2 and _pf not in _pn:
+                    _pn.append(_pf)
+                _pps, _ppu, _pbook = maybe_pseudonymize_prompt(system_prompt, user_prompt, known_names=_pn)
                 try:
                     import aiohttp
                     response_text = ""
@@ -12360,12 +12396,12 @@ class AzureCortex:
                         ) as azure_ws:
                             await azure_ws.send_str(json.dumps({
                                 "type": "session.update",
-                                "session": {"modalities": ["text"], "instructions": system_prompt}
+                                "session": {"modalities": ["text"], "instructions": _pps}
                             }))
                             await azure_ws.send_str(json.dumps({
                                 "type": "conversation.item.create",
                                 "item": {"type": "message", "role": "user",
-                                        "content": [{"type": "input_text", "text": user_prompt}]}
+                                        "content": [{"type": "input_text", "text": _ppu}]}
                             }))
                             await azure_ws.send_str(json.dumps({"type": "response.create"}))
 
@@ -12377,6 +12413,8 @@ class AzureCortex:
                                     elif data.get("type") in ["response.done", "error"]:
                                         break
 
+                    if _pbook:
+                        response_text = restore_text(response_text, _pbook)
                     # Determine if user seems de-escalated (simple heuristic)
                     is_deescalated = False
                     if coaching_messages:
