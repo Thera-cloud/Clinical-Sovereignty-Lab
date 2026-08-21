@@ -112,6 +112,7 @@ class DatabaseMaintenanceAgent:
         sent_followups = await self._send_trial_followups()
         shadow_proposals = await self._shadow_weighting_pass()
         touch_adaptations = await self._touch_adaptation_pass()
+        retention_stats = await self._enforce_retention_policy()
         stats = await self._collect_stats()
 
         summary = (
@@ -125,6 +126,7 @@ class DatabaseMaintenanceAgent:
             f"{shadow_proposals} crystal confidence shadow proposals recorded "
             f"({SHADOW_WEIGHTING_INTERVAL_DAYS}d cadence, never applied). "
             f"{touch_adaptations} proactive touch adaptation proposals/shadow rows. "
+            f"Retention: {retention_stats.get('summary', 'disabled')}. "
             f"DB size: {stats.get('db_size', 'unknown')}. "
             f"Tables: activity={stats.get('activity_rows', '?')}, "
             f"content_queue={stats.get('content_rows', '?')}, "
@@ -423,6 +425,100 @@ class DatabaseMaintenanceAgent:
         except Exception as e:
             logger.warning("DatabaseMaintenanceAgent: touch adaptation pass failed: %s", e)
             return 0
+
+    async def _enforce_retention_policy(self) -> dict:
+        """Enforce the admin-configured `memory_retention_policy` on
+        user-owned conversation data and write tombstones so Flutter
+        clients can prune their local caches.
+
+        Slice 1 of the Bee HIV+ privacy plan. Gated behind
+        `ENABLE_RETENTION_ENFORCEMENT` so we can ship the code path in
+        a disabled state and flip it on later.
+
+        Currently prunes rows from `conversation_history` and
+        `nevedal_metrics` older than the configured window. Rows are
+        deleted in a single transaction with matching tombstone inserts
+        so the operation is all-or-nothing. Uses a hard LIMIT per pass
+        so a very old dataset can't monopolise the daily cycle.
+        """
+        try:
+            from app.services.retention_policy import (
+                get_retention_days,
+                is_retention_enforcement_enabled,
+            )
+        except Exception as exc:
+            logger.warning("retention: helper import failed: %s", exc)
+            return {"summary": "disabled (import error)", "deleted": 0}
+
+        if not is_retention_enforcement_enabled():
+            return {"summary": "disabled (flag off)", "deleted": 0}
+
+        days = get_retention_days()
+        if days is None:
+            return {"summary": "disabled (policy=forever)", "deleted": 0}
+
+        BATCH_LIMIT = 5000
+        deleted_total = 0
+        per_table: dict[str, int] = {}
+        targets = [
+            ("conversation_history", "id::text", "user_id", "created_at"),
+            ("nevedal_metrics", "id::text", "user_id", "created_at"),
+        ]
+
+        try:
+            async with self.db_pool.acquire() as conn:
+                for table, id_expr, user_col, ts_col in targets:
+                    try:
+                        async with conn.transaction():
+                            rows = await conn.fetch(
+                                f"""
+                                SELECT {id_expr} AS row_id, {user_col} AS user_id
+                                FROM {table}
+                                WHERE {ts_col} < NOW() - ($1 || ' days')::interval
+                                LIMIT {BATCH_LIMIT}
+                                """,
+                                str(days),
+                            )
+                            if not rows:
+                                per_table[table] = 0
+                                continue
+
+                            row_ids = [r["row_id"] for r in rows]
+                            await conn.execute(
+                                f"""
+                                DELETE FROM {table}
+                                WHERE {id_expr} = ANY($1::text[])
+                                """,
+                                row_ids,
+                            )
+                            await conn.executemany(
+                                """
+                                INSERT INTO data_tombstones
+                                    (user_id, table_name, row_id, reason)
+                                VALUES ($1, $2, $3, 'retention_policy')
+                                """,
+                                [
+                                    (str(r["user_id"] or ""), table, str(r["row_id"]))
+                                    for r in rows
+                                ],
+                            )
+                            per_table[table] = len(rows)
+                            deleted_total += len(rows)
+                    except Exception as exc:
+                        logger.warning(
+                            "retention: table=%s failed: %s", table, exc
+                        )
+                        per_table[table] = -1
+        except Exception as exc:
+            logger.warning("retention: enforcement pass failed: %s", exc)
+            return {"summary": f"error: {exc}", "deleted": deleted_total}
+
+        detail = ", ".join(f"{t}={n}" for t, n in per_table.items())
+        return {
+            "summary": f"enforced @ {days}d — {detail}",
+            "deleted": deleted_total,
+            "per_table": per_table,
+        }
 
     async def _collect_stats(self) -> dict:
         stats = {}

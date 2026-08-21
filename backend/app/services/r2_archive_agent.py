@@ -118,6 +118,43 @@ class R2ArchiveAgent:
             logger.warning("R2 archive upload failed for %s: %s", rel_path, e)
             return False
 
+    async def _write_tombstones(
+        self,
+        conn,
+        table: str,
+        rows: List[Dict[str, Any]],
+    ) -> None:
+        """Record `r2_archive` tombstones so Flutter clients can drop the
+        matching rows from their local caches on next reconnect.
+
+        Silently no-ops if the `data_tombstones` table hasn't been
+        applied yet (migration 413) — the archive path must still work
+        on databases that lag behind. Slice 1 of the Bee HIV+ privacy
+        plan.
+        """
+        try:
+            await conn.executemany(
+                """
+                INSERT INTO data_tombstones
+                    (user_id, table_name, row_id, reason)
+                VALUES ($1, $2, $3, 'r2_archive')
+                """,
+                [
+                    (
+                        str(r.get("user_id") or ""),
+                        table,
+                        str(r.get("id")),
+                    )
+                    for r in rows
+                ],
+            )
+        except Exception as exc:
+            logger.debug(
+                "R2ArchiveAgent: tombstone write skipped for %s: %s",
+                table,
+                exc,
+            )
+
     async def _archive_conversation_history(self):
         try:
             async with self._db_pool.acquire() as conn:
@@ -152,10 +189,14 @@ class R2ArchiveAgent:
 
             if await self._upload_to_r2(archive_path, jsonl.encode()):
                 async with self._db_pool.acquire() as conn:
-                    await conn.execute(
-                        "DELETE FROM conversation_history WHERE id = ANY($1::int[])",
-                        ids_to_prune,
-                    )
+                    async with conn.transaction():
+                        await conn.execute(
+                            "DELETE FROM conversation_history WHERE id = ANY($1::int[])",
+                            ids_to_prune,
+                        )
+                        await self._write_tombstones(
+                            conn, "conversation_history", archive_data
+                        )
                 self._total_archived["conversation_history"] += len(ids_to_prune)
                 logger.info("Archived %d conversation_history rows to R2", len(ids_to_prune))
 
@@ -204,10 +245,14 @@ class R2ArchiveAgent:
 
             if await self._upload_to_r2(archive_path, jsonl.encode()):
                 async with self._db_pool.acquire() as conn:
-                    await conn.execute(
-                        "DELETE FROM nevedal_metrics WHERE id = ANY($1::int[])",
-                        ids_to_prune,
-                    )
+                    async with conn.transaction():
+                        await conn.execute(
+                            "DELETE FROM nevedal_metrics WHERE id = ANY($1::int[])",
+                            ids_to_prune,
+                        )
+                        await self._write_tombstones(
+                            conn, "nevedal_metrics", archive_data
+                        )
                 self._total_archived["nevedal_metrics"] += len(ids_to_prune)
                 logger.info("Archived %d nevedal_metrics rows to R2", len(ids_to_prune))
 

@@ -592,6 +592,78 @@ async def put_client_biometrics_opt_out(request: Request, user=Depends(_require_
     return {"status": "ok", "username": username, "biometrics_disabled": bool(current)}
 
 
+# ── Slice 1: Retention tombstones — Flutter local-cache sync ──────────
+@router.get("/data-tombstones")
+async def get_data_tombstones(
+    request: Request,
+    since: Optional[str] = None,
+    limit: int = 500,
+    user=Depends(_require_auth),
+):
+    """Return tombstones for the caller since a timestamp.
+
+    Consumed by the Flutter client on reconnect (see
+    `device-history-sync-on-login.mdc`) so the local SQLite/hive cache
+    can drop rows that the server has deleted under the retention
+    policy or R2 archive path.
+
+    `since` is an ISO 8601 timestamp. Omit for the last 30 days.
+    `limit` is capped at 5000 to keep response size bounded.
+    """
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        raise HTTPException(503, "Database unavailable")
+    username = (user.get("username") or "").strip() if isinstance(user, dict) else ""
+    if not username:
+        raise HTTPException(400, "identity missing")
+
+    limit = max(1, min(int(limit or 500), 5000))
+    from datetime import datetime, timedelta, timezone as _tz
+
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        except Exception:
+            raise HTTPException(400, "invalid since timestamp")
+    else:
+        since_dt = datetime.now(_tz.utc) - timedelta(days=30)
+
+    try:
+        rows = await db_pool.fetch(
+            """
+            SELECT id, table_name, row_id, reason, tombstoned_at
+            FROM data_tombstones
+            WHERE user_id = $1 AND tombstoned_at > $2
+            ORDER BY tombstoned_at ASC
+            LIMIT $3
+            """,
+            username,
+            since_dt,
+            limit,
+        )
+    except Exception as exc:
+        logger.warning("data-tombstones query failed for %s: %s", username, exc)
+        return {"username": username, "since": since_dt.isoformat(), "tombstones": []}
+
+    return {
+        "username": username,
+        "since": since_dt.isoformat(),
+        "count": len(rows),
+        "tombstones": [
+            {
+                "id": r["id"],
+                "table": r["table_name"],
+                "row_id": r["row_id"],
+                "reason": r["reason"],
+                "tombstoned_at": r["tombstoned_at"].isoformat()
+                if r.get("tombstoned_at")
+                else None,
+            }
+            for r in rows
+        ],
+    }
+
+
 @router.get("/health-check")
 async def client_health_check(request: Request, user=Depends(_require_auth)):
     """Enhanced health check that includes ai_consent_granted_at for consent gate."""
