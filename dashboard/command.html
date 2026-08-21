@@ -1110,6 +1110,9 @@
         <div class="nav-tab" data-tab="ln_sandbox" onclick="navTo('ln_sandbox.html')" title="LN Sandbox DOJO">
             LN Sandbox
         </div>
+        <div class="nav-tab" data-tab="alphaln" id="nav-tab-alphaln" style="display:none;" onclick="navTo('alphaln.html')" title="AlphaLN — Shadow Twin (DrNevedal1 only)">
+            <span>🜁</span> AlphaLN
+        </div>
         <div class="nav-tab" data-tab="marketing_engine" onclick="navTo('marketing_engine.html')" title="Adaptive Growth Engine">
           <span class="nav-icon">📈</span> Growth
         </div>
@@ -1737,6 +1740,14 @@
                 window.location.href = 'index.html';
                 return;
             }
+
+            // Reveal AlphaLN tab only for DrNevedal1 (server enforces the real gate).
+            try {
+                if (storedUsername === 'DrNevedal1') {
+                    var _alTab = document.getElementById('nav-tab-alphaln');
+                    if (_alTab) _alTab.style.display = '';
+                }
+            } catch(e) {}
 
             // Persist everything back to sessionStorage so sub-pages can find it
             try { sessionStorage.setItem('token', storedToken); } catch(e) {}

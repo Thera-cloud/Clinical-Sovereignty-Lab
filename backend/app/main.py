@@ -4849,6 +4849,13 @@ try:
 except Exception as _en_err:
     print(f"   ⚠️  Enrollment API router failed: {_en_err}")
 
+# AlphaLN admin twin chat (shadow twin; admin+DrNevedal1 only; feature-flagged)
+try:
+    from app.routers.alphaln_admin_api import router as alphaln_router
+    app.include_router(alphaln_router)
+except Exception as _aln_err:
+    print(f"   ⚠️  AlphaLN admin router failed: {_aln_err}")
+
 # QuickBooks Integration API (admin-only auth-gated + public OAuth callback)
 try:
     from app.routers.quickbooks_api import router as quickbooks_router, oauth_router as quickbooks_oauth_router

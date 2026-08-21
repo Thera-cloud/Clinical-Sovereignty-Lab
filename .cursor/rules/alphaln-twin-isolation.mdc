@@ -1,0 +1,79 @@
+# AlphaLN Shadow-Twin Isolation
+
+AlphaLN is a shadow research twin of Little Nate. It exists so we can experiment
+with clinical coevolution loops (self-play patient sims, DPO exports, promotion
+gates, etc.) without touching the live ANI ("Little Nate") that clients talk to.
+
+These invariants are **security- and privacy-critical**. Do not weaken any of
+them without an explicit, dated approval from the user.
+
+## Invariant 1 — AlphaLN never speaks to a client
+
+- The only ingress path is the admin console at `/api/admin/alphaln/*`.
+- The router uses `require_admin` **and** a body-level `_require_dr_nevedal1`
+  check. No coach, no other admin, and no client can reach it.
+- There is no WebSocket, Twilio, or bridge path that instantiates AlphaLN. If a
+  new path is added, it MUST route through `nate_inference_router` under the
+  normal "Little Nate" identity — never as `AlphaLN`.
+
+## Invariant 2 — AlphaLN never writes to production memory
+
+AlphaLN turns live in dedicated tables (migration 421):
+
+| Table | Purpose |
+|---|---|
+| `alphaln_conversations` | admin twin sessions |
+| `alphaln_messages` | turn-by-turn transcript |
+
+AlphaLN code MUST NOT write to any of these production surfaces:
+
+- `conversation_history`
+- `nate_intelligence_crystals`
+- `nevedal_metrics`
+- `nevedal_metrics_v2`
+- `pmb_reports_*`
+- `sensitive_bridge_*`
+
+If a future slice wants to reuse memory, it goes through a **read-only** view
+of the production tables, not a write path.
+
+## Invariant 3 — Feature-flagged and dark by default
+
+- Backend gate: `ENABLE_ALPHALN_TWIN` (default false). When false, every
+  `/api/admin/alphaln/*` endpoint returns `503 AlphaLN twin disabled`.
+- UI gate: the AlphaLN nav tab in `dashboard/command.html` is
+  `display:none` unless `sessionStorage.getItem('username') === 'DrNevedal1'`.
+  This is a UX hint only — the server gate is authoritative.
+
+## Invariant 4 — Same PII controls as the rest of Nate
+
+- Every admin prompt is passed through `maybe_pseudonymize_prompt` before it
+  reaches `NateInferenceRouter`.
+- The provider's reply is passed through `restore_text(book)` before it is
+  written to `alphaln_messages` or returned to the admin.
+- MFA freshness is enforced (`enforce_mfa_recent`) on all mutating endpoints
+  (session create, message send, session end).
+
+## Invariant 5 — Additive schema only
+
+Migration 421 is additive. Never `ALTER TABLE` on `alphaln_conversations` or
+`alphaln_messages` in a hotfix — cut a new migration. Never drop these tables;
+they are the audit trail for a shadow research surface.
+
+## Invariant 6 — Never merge AlphaLN weights into ANI without a human gate
+
+If a later slice wires an auto-promotion pipeline from AlphaLN to Little Nate,
+`nate_clinical_flags.auto_promote_enabled()` MUST stay `False` in code and
+require a human review step before any weight/PEFT change is served to a
+client. AlphaLN's job is to *propose*; only the admin promotes.
+
+## Invariant 7 — Isolation is testable
+
+Any change to the AlphaLN surface must keep the offline tests in
+`backend/tests/test_alphaln_admin_api.py` green, including:
+
+- flag-off → 503 on every endpoint
+- non-admin → 403
+- admin but not `DrNevedal1` → 403
+- happy path: create session → send message → read transcript → end session
+- rate limit trips after `_MSG_RATE_MAX` sends inside `_MSG_RATE_WINDOW_S`
