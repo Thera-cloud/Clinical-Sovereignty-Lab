@@ -31,6 +31,29 @@ except ImportError:
     async def _track(**kw):  # noqa: E303
         pass
 
+# Slice 3 (Bee HIV+): pseudonymize direct identifiers before shipping to any
+# external model provider. Feature-flagged via ENABLE_PROVIDER_PSEUDONYMIZATION.
+try:
+    from app.services.pii_pseudonymizer import (
+        is_enabled as _pseudo_enabled,
+        PseudonymBook as _PseudoBook,
+        StreamRestorer as _PseudoStreamRestorer,
+        pseudonymize_messages as _pseudo_messages,
+        restore_text as _pseudo_restore,
+    )
+except ImportError:  # pragma: no cover
+    def _pseudo_enabled() -> bool:
+        return False
+
+    _PseudoBook = None  # type: ignore
+    _PseudoStreamRestorer = None  # type: ignore
+
+    def _pseudo_messages(messages, book, known_names=None):
+        return messages
+
+    def _pseudo_restore(text, book):
+        return text
+
 # --- Provider config (captured at import, re-read lazily if empty) ---
 _SOVEREIGN_URL = os.getenv("SOVEREIGN_INFERENCE_URL", "")
 _SOVEREIGN_MODEL_FAST = os.getenv("SOVEREIGN_MODEL_FAST", "llama3.1:8b-instruct-q4_K_M")
@@ -493,6 +516,12 @@ async def generate_streaming(
     _t0 = time.monotonic()
     _chars_out = 0
 
+    # Slice 3: pseudonymize outbound / restore inbound. Both None when the
+    # flag is off, in which case the wire format is identical to legacy.
+    _pseudo_active = bool(_pseudo_enabled() and _PseudoBook is not None)
+    _book = _PseudoBook() if _pseudo_active else None
+    _restorer = _PseudoStreamRestorer(_book) if _pseudo_active else None
+
     from app.websocket.cli_prompt_budget import trim_prompt_to_ceiling
 
     # SOVEREIGN-VOICE: if image present, prefer vision-capable providers
@@ -525,6 +554,10 @@ async def generate_streaming(
                 ]
             _chars_in = len(_sp) + len(_um)
 
+            # Slice 3: replace direct identifiers with tokens right before send.
+            if _book is not None:
+                messages = _pseudo_messages(messages, _book)
+
             if provider == "sovereign":
                 slot_acquired = await _acquire_sovereign_slot()
                 if not slot_acquired:
@@ -543,10 +576,16 @@ async def generate_streaming(
                     ):
                         _provider_chars += len(delta)
                         _chars_out += len(delta)
-                        yield (delta, "sovereign")
+                        _emit = _restorer.feed(delta) if _restorer else delta
+                        if _emit:
+                            yield (_emit, "sovereign")
                     if _provider_chars == 0:
                         logger.warning("Sovereign returned 0 chunks — falling back to next provider")
                         continue
+                    if _restorer:
+                        _tail = _restorer.flush()
+                        if _tail:
+                            yield (_tail, "sovereign")
                     _sovereign_stats["total_sovereign"] += 1
                     asyncio.ensure_future(_track(provider="sovereign", chars_in=_chars_in, chars_out=_chars_out, duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
                     return
@@ -561,10 +600,16 @@ async def generate_streaming(
                 ):
                     _provider_chars += len(delta)
                     _chars_out += len(delta)
-                    yield (delta, "workers_ai")
+                    _emit = _restorer.feed(delta) if _restorer else delta
+                    if _emit:
+                        yield (_emit, "workers_ai")
                 if _provider_chars == 0:
                     logger.warning("Workers AI returned 0 chunks — falling back to next provider")
                     continue
+                if _restorer:
+                    _tail = _restorer.flush()
+                    if _tail:
+                        yield (_tail, "workers_ai")
                 _sovereign_stats["total_workers_ai"] += 1
                 asyncio.ensure_future(_track(provider="workers_ai", chars_in=_chars_in, chars_out=_chars_out, duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
                 return
@@ -577,10 +622,16 @@ async def generate_streaming(
                 ):
                     _provider_chars += len(delta)
                     _chars_out += len(delta)
-                    yield (delta, "azure")
+                    _emit = _restorer.feed(delta) if _restorer else delta
+                    if _emit:
+                        yield (_emit, "azure")
                 if _provider_chars == 0:
                     logger.warning("Azure OpenAI returned 0 chunks — falling back to next provider")
                     continue
+                if _restorer:
+                    _tail = _restorer.flush()
+                    if _tail:
+                        yield (_tail, "azure")
                 _sovereign_stats["total_azure_fallback"] += 1
                 asyncio.ensure_future(_track(provider="azure", chars_in=_chars_in, chars_out=_chars_out, duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
                 return
@@ -596,10 +647,16 @@ async def generate_streaming(
                         ):
                             _provider_chars += len(delta)
                             _chars_out += len(delta)
-                            yield (delta, "grok")
+                            _emit = _restorer.feed(delta) if _restorer else delta
+                            if _emit:
+                                yield (_emit, "grok")
                         if _provider_chars == 0:
                             logger.warning("Grok returned 0 chunks — falling back to next provider")
                             continue
+                        if _restorer:
+                            _tail = _restorer.flush()
+                            if _tail:
+                                yield (_tail, "grok")
                         _sovereign_stats["total_grok"] += 1
                         asyncio.ensure_future(_track(provider="grok", chars_in=_chars_in, chars_out=_chars_out, duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
                         return
@@ -644,6 +701,13 @@ async def generate_complete(
     seen = set()
     _t0 = time.monotonic()
 
+    # Slice 3: pseudonymize outbound / restore inbound (see generate_streaming).
+    _pseudo_active = bool(_pseudo_enabled() and _PseudoBook is not None)
+    _book = _PseudoBook() if _pseudo_active else None
+
+    def _restore(t: str) -> str:
+        return _pseudo_restore(t, _book) if _book is not None else t
+
     from app.websocket.cli_prompt_budget import trim_prompt_to_ceiling
 
     for provider in providers_to_try:
@@ -661,6 +725,9 @@ async def generate_complete(
             ]
             _chars_in = len(_sp) + len(_um)
 
+            if _book is not None:
+                messages = _pseudo_messages(messages, _book)
+
             if provider == "sovereign" and _SOVEREIGN_URL:
                 slot_acquired = await _acquire_sovereign_slot()
                 if not slot_acquired:
@@ -672,7 +739,7 @@ async def generate_complete(
                                                  _timeout_for_model(model))
                     _sovereign_stats["total_sovereign"] += 1
                     asyncio.ensure_future(_track(provider="sovereign", chars_in=_chars_in, chars_out=len(text), duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
-                    return (text, "sovereign")
+                    return (_restore(text), "sovereign")
                 finally:
                     await _release_sovereign_slot()
 
@@ -680,13 +747,13 @@ async def generate_complete(
                 text = await _complete_workers_ai(messages, temperature, max_tokens)
                 _sovereign_stats["total_workers_ai"] += 1
                 asyncio.ensure_future(_track(provider="workers_ai", chars_in=_chars_in, chars_out=len(text), duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
-                return (text, "workers_ai")
+                return (_restore(text), "workers_ai")
 
             elif provider == "azure" and _AZURE_ENDPOINT and _AZURE_KEY:
                 text = await _complete_azure(messages, temperature, max_tokens)
                 _sovereign_stats["total_azure_fallback"] += 1
                 asyncio.ensure_future(_track(provider="azure", chars_in=_chars_in, chars_out=len(text), duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
-                return (text, "azure")
+                return (_restore(text), "azure")
 
             elif provider == "grok" and _GROK_URL and _GROK_KEY:
                 for attempt in range(2):
@@ -694,7 +761,7 @@ async def generate_complete(
                         text = await _complete_grok(messages, temperature, max_tokens)
                         _sovereign_stats["total_grok"] += 1
                         asyncio.ensure_future(_track(provider="grok", chars_in=_chars_in, chars_out=len(text), duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
-                        return (text, "grok")
+                        return (_restore(text), "grok")
                     except RateLimitError as rl:
                         if attempt == 0:
                             wait = min(rl.wait_seconds, 65.0)
