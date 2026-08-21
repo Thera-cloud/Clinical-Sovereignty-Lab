@@ -535,6 +535,30 @@ async def recall_crystals_for_context(
         if not crystals:
             return ""
 
+        # QUANTUM-CRYSTAL-ARCH — Slice 4 (Bee HIV+): program isolation filter.
+        # When ENABLE_PROGRAM_ISOLATION is on, drop crystals whose program_id
+        # is incompatible with the caller (general users can't see program-
+        # specific disclosures, and program members can't see other programs).
+        # Flag-off = zero behavior change (helper returns input unchanged).
+        try:
+            from app.services.program_isolation import (
+                is_enabled as _prog_enabled,
+                get_user_program_id as _prog_user,
+                filter_crystals_by_program_async as _prog_filter,
+            )
+            if _prog_enabled():
+                _pid = None if global_only else await _prog_user(db_pool, hardware_id)
+                _kept = await _prog_filter(db_pool, list(crystals), _pid)
+                _kept_ids = {int(c["id"]) for c in _kept}
+                user_crystals = [c for c in user_crystals if int(c["id"]) in _kept_ids]
+                clinical_dna = [c for c in clinical_dna if int(c["id"]) in _kept_ids]
+                global_crystals = [c for c in global_crystals if int(c["id"]) in _kept_ids]
+                crystals = user_crystals + clinical_dna + list(global_crystals)
+                if not crystals:
+                    return ""
+        except Exception as _pe:
+            logger.debug("crystal_recall_bridge: program isolation skipped: %s", _pe)
+
         # QUANTUM-CRYSTAL-ARCH: Tier 1 — Layer 8 factual-grounding filter at
         # recall time (flag-gated). Filtered crystals stay in PG, just not here.
         if _VALIDATOR_FILTER_RECALL:
