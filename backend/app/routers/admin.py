@@ -5403,6 +5403,7 @@ async def webauthn_auth_verify(
                WHERE hardware_id = $2""",
             json.dumps({
                 "webauthn_last_verified": verified_at,
+                "mfa_last_verified_at": verified_at,  # Slice 6c: canonical MFA key
                 "webauthn_active_key": matched_label,
                 "sentinel_auth_method": "yubikey",
                 "sentinel_frozen": False,

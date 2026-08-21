@@ -537,6 +537,15 @@ async def require_clinician_for_user(
             "_token_session_hash": _token_session_hash(credentials),
         }
 
+    # Slice 6c: PHI MFA freshness gate. Dormant unless ENABLE_PHI_MFA_GATE
+    # is on. Runs BEFORE the admin bypass on purpose — admins must
+    # re-verify too. Auditors already returned above. Raises 401 with
+    # code=MFA_REVERIFY_REQUIRED when stale.
+    from app.services.mfa_gate import enforce_mfa_recent
+    await enforce_mfa_recent(
+        getattr(request.app.state, "db_pool", None), principal
+    )
+
     # Admin role ALWAYS satisfies the assignment check — admins are the
     # supervising layer for every clinician relationship.
     if principal.get("role") == "ADMIN":
