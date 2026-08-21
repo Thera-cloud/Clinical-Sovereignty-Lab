@@ -3607,6 +3607,26 @@ async def lifespan(app: FastAPI):
         print(f"   ⚠️  NateClinicalBakeoffAgent init failed: {_nca_err}")
         app.state.nate_clinical_bakeoff_agent = None  # QUANTUM-CRYSTAL-ARCH — not truthy fake
 
+    # QUANTUM-CRYSTAL-ARCH — AlphaLN shadow observer + invariant auditor (dark by default)
+    try:
+        from app.services.alphaln_shadow_observer import AlphaLNShadowObserver
+        _aln_obs = AlphaLNShadowObserver(db_pool, app_state=app.state)
+        await _aln_obs.start()
+        app.state.alphaln_shadow_observer = _aln_obs
+        print("   ✅ AlphaLNShadowObserver started (ENABLE_ALPHALN_SHADOW_OBSERVER gated)")
+    except Exception as _aln_obs_err:
+        print(f"   ⚠️  AlphaLNShadowObserver init failed: {_aln_obs_err}")
+        app.state.alphaln_shadow_observer = None
+    try:
+        from app.services.alphaln_auditor import AlphaLNAuditor
+        _aln_aud = AlphaLNAuditor(db_pool, app_state=app.state)
+        await _aln_aud.start()
+        app.state.alphaln_auditor = _aln_aud
+        print("   ✅ AlphaLNAuditor started (invariant checks, log-only)")
+    except Exception as _aln_aud_err:
+        print(f"   ⚠️  AlphaLNAuditor init failed: {_aln_aud_err}")
+        app.state.alphaln_auditor = None
+
     # QUANTUM-CRYSTAL-ARCH — Adaptive Growth Engine (scheduler + content factory)
     try:
         from app.services.growth import (
@@ -3969,6 +3989,14 @@ async def lifespan(app: FastAPI):
             print("   ✅ NateClinicalBakeoffAgent stopped")
     except Exception as _nca_stop:
         print(f"   ⚠️  NateClinicalBakeoffAgent shutdown: {_nca_stop}")
+    for _aln_attr in ("alphaln_shadow_observer", "alphaln_auditor"):
+        try:
+            _aln = getattr(app.state, _aln_attr, None)
+            if _aln is not None and hasattr(_aln, "stop"):
+                await _aln.stop()
+                print(f"   ✅ {_aln_attr} stopped")
+        except Exception as _aln_stop:
+            print(f"   ⚠️  {_aln_attr} shutdown: {_aln_stop}")
     # QUANTUM-CRYSTAL-ARCH — Adaptive Growth scheduler + factory
     try:
         _gs = getattr(app.state, "growth_scheduler", None)

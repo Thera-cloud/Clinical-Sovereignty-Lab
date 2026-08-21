@@ -52,6 +52,10 @@ class _FakeConn:
 
     async def fetchrow(self, query: str, *args, **kwargs):
         q = " ".join(query.split())
+        if q.startswith("SELECT to_regclass"):
+            # AlphaLN auditor schema check — pretend every alphaln_* table exists.
+            arg = args[0] if args else ""
+            return {"reg": arg}
         if q.startswith("INSERT INTO alphaln_conversations"):
             conv_id, admin_user, title = args
             row = {
@@ -135,6 +139,12 @@ class _FakeConn:
                 )
             return out
         raise AssertionError(f"unexpected fetch: {q[:200]}")
+
+    async def fetchval(self, query: str, *args, **kwargs):
+        q = " ".join(query.split())
+        if "FROM alphaln_shadow_observations" in q and "mirrored_to_conversation_history" in q:
+            return 0
+        raise AssertionError(f"unexpected fetchval: {q[:200]}")
 
     async def execute(self, query: str, *args, **kwargs):
         q = " ".join(query.split())
@@ -263,6 +273,33 @@ def test_flag_off_returns_503_on_every_endpoint(monkeypatch):
         "/api/admin/alphaln/session/" + str(uuid.uuid4()) + "/end"
     ).status_code == 503
     assert client.get("/api/admin/alphaln/sessions").status_code == 503
+
+    # Slice 3–8 surfaces must also be dark when the twin is off.
+    assert client.get("/api/admin/alphaln/observations").status_code == 503
+    assert client.post("/api/admin/alphaln/gym/run", json={"max_matches": 1}).status_code == 503
+    assert client.get("/api/admin/alphaln/gym/runs").status_code == 503
+    assert client.post(
+        "/api/admin/alphaln/trajectory/schedule",
+        json={"scenario": "safety-check", "max_depth": 1, "max_rollouts": 1},
+    ).status_code == 503
+    assert client.post("/api/admin/alphaln/trajectory/1/execute").status_code == 503
+    assert client.get("/api/admin/alphaln/trajectory/runs").status_code == 503
+    assert client.post(
+        "/api/admin/alphaln/promotion/propose",
+        json={"variant_id": "v-test", "reason": "unit-test"},
+    ).status_code == 503
+    assert client.get("/api/admin/alphaln/promotion/candidates").status_code == 503
+    assert client.post(
+        "/api/admin/alphaln/promotion/1/review",
+        json={"decision": "rejected"},
+    ).status_code == 503
+
+    # /health is deliberately available even when twin is off (invariant surface).
+    r = client.get("/api/admin/alphaln/health")
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("twin_enabled") is False
+    assert "checks" in body
 
 
 # --------------------------------------------------------------------------- #

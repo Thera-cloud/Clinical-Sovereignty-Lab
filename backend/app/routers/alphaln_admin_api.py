@@ -384,3 +384,230 @@ async def list_sessions(
             for r in rows
         ]
     }
+
+
+# --------------------------------------------------------------------------- #
+# Slice 3/4 — Shadow observer console                                         #
+# --------------------------------------------------------------------------- #
+
+
+@router.get("/observations")
+async def list_observations(
+    request: Request,
+    principal: Dict[str, Any] = Depends(require_admin),
+    limit: int = 50,
+):
+    """Read-only view of the shadow observer ledger. Empty when Slice 3 dark."""
+    _require_enabled()
+    _require_dr_nevedal1(principal)
+    db = _require_db(request)
+    limit = max(1, min(int(limit or 50), 500))
+    async with db.acquire() as conn:
+        try:
+            rows = await conn.fetch(
+                """SELECT id, observed_at, source_table, user_pseudonym,
+                          reply_len, score, score_method, dims
+                     FROM alphaln_shadow_observations
+                    ORDER BY observed_at DESC
+                    LIMIT $1""",
+                limit,
+            )
+        except Exception as exc:
+            logger.warning("alphaln observations query failed: %s", exc)
+            raise HTTPException(503, "shadow observations unavailable")
+    return {
+        "observations": [
+            {
+                "id": int(r["id"]),
+                "observed_at": r["observed_at"].isoformat(),
+                "source_table": r["source_table"],
+                "user_pseudonym": r["user_pseudonym"],
+                "reply_len": r["reply_len"],
+                "score": float(r["score"]) if r["score"] is not None else None,
+                "score_method": r["score_method"],
+                "dims": r["dims"] or {},
+            }
+            for r in rows
+        ]
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Slice 5 — Gym control                                                       #
+# --------------------------------------------------------------------------- #
+
+
+class GymRunRequest(BaseModel):
+    max_matches: Optional[int] = Field(default=4, ge=1, le=8)
+
+
+@router.post("/gym/run")
+async def gym_trigger_run(
+    req: GymRunRequest,
+    request: Request,
+    principal: Dict[str, Any] = Depends(require_admin),
+):
+    _require_enabled()
+    username = _require_dr_nevedal1(principal)
+    db = _require_db(request)
+    await enforce_mfa_recent(db, principal)
+    from app.services import alphaln_gym_service
+    return await alphaln_gym_service.trigger_run(
+        db, request.app.state, username, req.max_matches,
+    )
+
+
+@router.get("/gym/runs")
+async def gym_list_runs(
+    request: Request,
+    principal: Dict[str, Any] = Depends(require_admin),
+    limit: int = 20,
+):
+    _require_enabled()
+    username = _require_dr_nevedal1(principal)
+    db = _require_db(request)
+    from app.services import alphaln_gym_service
+    return await alphaln_gym_service.list_recent_runs(db, username, limit)
+
+
+# --------------------------------------------------------------------------- #
+# Slice 6 — Trajectory search skeleton                                        #
+# --------------------------------------------------------------------------- #
+
+
+class TrajectoryScheduleRequest(BaseModel):
+    scenario: str = Field(..., min_length=1, max_length=200)
+    max_depth: int = Field(default=3, ge=1, le=6)
+    max_rollouts: int = Field(default=8, ge=1, le=32)
+
+
+@router.post("/trajectory/schedule")
+async def trajectory_schedule(
+    req: TrajectoryScheduleRequest,
+    request: Request,
+    principal: Dict[str, Any] = Depends(require_admin),
+):
+    _require_enabled()
+    username = _require_dr_nevedal1(principal)
+    db = _require_db(request)
+    await enforce_mfa_recent(db, principal)
+    from app.services import alphaln_trajectory_search
+    return await alphaln_trajectory_search.schedule_run(
+        db, username, req.scenario, req.max_depth, req.max_rollouts,
+    )
+
+
+@router.post("/trajectory/{run_id}/execute")
+async def trajectory_execute(
+    run_id: int,
+    request: Request,
+    principal: Dict[str, Any] = Depends(require_admin),
+):
+    _require_enabled()
+    _require_dr_nevedal1(principal)
+    db = _require_db(request)
+    await enforce_mfa_recent(db, principal)
+    from app.services import alphaln_trajectory_search
+    return await alphaln_trajectory_search.execute_run(
+        db, request.app.state, int(run_id),
+    )
+
+
+@router.get("/trajectory/runs")
+async def trajectory_list_runs(
+    request: Request,
+    principal: Dict[str, Any] = Depends(require_admin),
+    limit: int = 20,
+):
+    _require_enabled()
+    username = _require_dr_nevedal1(principal)
+    db = _require_db(request)
+    from app.services import alphaln_trajectory_search
+    return await alphaln_trajectory_search.list_recent_runs(db, username, limit)
+
+
+# --------------------------------------------------------------------------- #
+# Slice 8 — Promotion pipeline (paved-and-locked)                             #
+# --------------------------------------------------------------------------- #
+
+
+class PromotionProposeRequest(BaseModel):
+    variant_id: str = Field(..., min_length=1, max_length=200)
+    reason: str = Field(..., min_length=1, max_length=1000)
+    evidence: Optional[Dict[str, Any]] = None
+
+
+class PromotionReviewRequest(BaseModel):
+    decision: str = Field(..., pattern="^(approved|rejected|withdrawn)$")
+    approval_note: Optional[str] = Field(default=None, max_length=2000)
+
+
+@router.post("/promotion/propose")
+async def promotion_propose(
+    req: PromotionProposeRequest,
+    request: Request,
+    principal: Dict[str, Any] = Depends(require_admin),
+):
+    _require_enabled()
+    username = _require_dr_nevedal1(principal)
+    db = _require_db(request)
+    await enforce_mfa_recent(db, principal)
+    from app.services import alphaln_promotion
+    return await alphaln_promotion.propose_candidate(
+        db, req.variant_id, req.reason, req.evidence, proposed_by=username,
+    )
+
+
+@router.get("/promotion/candidates")
+async def promotion_list(
+    request: Request,
+    principal: Dict[str, Any] = Depends(require_admin),
+    status: Optional[str] = None,
+    limit: int = 25,
+):
+    _require_enabled()
+    _require_dr_nevedal1(principal)
+    db = _require_db(request)
+    from app.services import alphaln_promotion
+    return await alphaln_promotion.list_candidates(db, status, limit)
+
+
+@router.post("/promotion/{candidate_id}/review")
+async def promotion_review(
+    candidate_id: int,
+    req: PromotionReviewRequest,
+    request: Request,
+    principal: Dict[str, Any] = Depends(require_admin),
+):
+    _require_enabled()
+    username = _require_dr_nevedal1(principal)
+    db = _require_db(request)
+    await enforce_mfa_recent(db, principal)
+    from app.services import alphaln_promotion
+    alphaln_promotion.assert_auto_promote_locked()
+    return await alphaln_promotion.review_candidate(
+        db, int(candidate_id), username, req.decision, req.approval_note,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Slice 10 — Health / invariants                                              #
+# --------------------------------------------------------------------------- #
+
+
+@router.get("/health")
+async def alphaln_health(
+    request: Request,
+    principal: Dict[str, Any] = Depends(require_admin),
+):
+    """Report AlphaLN invariant status. Runs even if twin flag is off.
+
+    Deliberately not gated by ``_require_enabled`` — health should surface
+    whether the twin is dark or live.
+    """
+    _require_dr_nevedal1(principal)
+    db = _require_db(request)
+    from app.services.alphaln_auditor import run_invariants
+    report = await run_invariants(db)
+    report["twin_enabled"] = _is_enabled()
+    return report

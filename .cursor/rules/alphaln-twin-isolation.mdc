@@ -18,12 +18,17 @@ them without an explicit, dated approval from the user.
 
 ## Invariant 2 — AlphaLN never writes to production memory
 
-AlphaLN turns live in dedicated tables (migration 421):
+AlphaLN turns live in dedicated tables (migrations 421–426):
 
-| Table | Purpose |
-|---|---|
-| `alphaln_conversations` | admin twin sessions |
-| `alphaln_messages` | turn-by-turn transcript |
+| Table | Migration | Purpose |
+|---|---|---|
+| `alphaln_conversations` | 421 | admin twin sessions |
+| `alphaln_messages` | 421 | turn-by-turn transcript |
+| `alphaln_shadow_observations` | 422 | de-identified scores of live LN replies (Slice 3) |
+| `alphaln_gym_runs` | 423 | admin-triggered bakeoff audit (Slice 5) |
+| `alphaln_trajectory_runs` / `alphaln_trajectory_nodes` | 424 | MCTS skeleton (Slice 6) |
+| `alphaln_sensor_joins` | 425 | biometric ingest schema only, no writes yet (Slice 7) |
+| `alphaln_promotion_candidates` | 426 | paved-and-locked promotion ledger (Slice 8) |
 
 AlphaLN code MUST NOT write to any of these production surfaces:
 
@@ -77,3 +82,44 @@ Any change to the AlphaLN surface must keep the offline tests in
 - admin but not `DrNevedal1` → 403
 - happy path: create session → send message → read transcript → end session
 - rate limit trips after `_MSG_RATE_MAX` sends inside `_MSG_RATE_WINDOW_S`
+- Slices 3–8 endpoints (`observations`, `gym/*`, `trajectory/*`,
+  `promotion/*`) return 503 when `ENABLE_ALPHALN_TWIN` is off
+
+## Invariant 8 — Shadow observer never writes back
+
+The `AlphaLNShadowObserver` (Slice 3) reads `conversation_history` READ-ONLY.
+It MUST NOT UPDATE, DELETE, or INSERT into any production table. Its only
+write target is `alphaln_shadow_observations`. `user_id` values are stored
+as HMAC pseudonyms via `ALPHALN_OBSERVER_SALT`; raw usernames or hardware IDs
+must never land in that table.
+
+## Invariant 9 — Trajectory search is a stub until wired
+
+`alphaln_trajectory_search.execute_run` returns `not_implemented` unless
+BOTH `ENABLE_ALPHALN_TRAJECTORY_SEARCH` is on AND
+`app.state.alphaln_trajectory_engine` is a callable. Any future engine MUST
+NOT call live PMB/clinical bridges, MUST NOT read raw usernames, and MUST
+operate against reactive-patient sims only.
+
+## Invariant 10 — Sensor joins are consent-gated
+
+`alphaln_sensor_joins` (migration 425) is schema-only in Slice 7. Any future
+ingester MUST check `users.biometrics_disabled = false` AND populate
+`consent_receipt_id` from `biometric_consent_receipts` before insert. No
+back-fill from historical audio, no simulated data.
+
+## Invariant 11 — Promotion is human-gated
+
+`alphaln_promotion.assert_auto_promote_locked()` runs on every
+`/api/admin/alphaln/promotion/*/review` call. If it ever throws, treat that
+as a P0 incident: the auto-promote code path leaked into `True`. Approving a
+candidate marks the row `approved`; it does NOT touch the inference router or
+crystal tables. A human operator must promote out-of-band.
+
+## Invariant 12 — AlphaLN does not affect the sovereign trust score
+
+`alphaln_auditor.AlphaLNAuditor` is log-only. There is no row for AlphaLN in
+`trust_baseline` and none of the 29 trust auditors should be extended to
+score AlphaLN endpoints until this rule is amended. AlphaLN health lives at
+`/api/admin/alphaln/health` and in container logs — never in the sovereign
+trust report.
