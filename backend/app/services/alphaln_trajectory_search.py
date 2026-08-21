@@ -19,6 +19,7 @@ This lets us:
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 from typing import Any, Dict, Optional
@@ -50,6 +51,8 @@ async def schedule_run(
 ) -> Dict[str, Any]:
     if db_pool is None:
         return {"ok": False, "reason": "no_db"}
+    if not is_enabled():
+        return {"ok": False, "reason": "flag_off"}
     seed = _root_seed_from(scenario, admin_user)
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -112,7 +115,7 @@ async def execute_run(db_pool, app_state, run_id: int) -> Dict[str, Any]:
                     WHERE id=$1""",
                 run_id,
                 float(result.get("best_score") or 0.0),
-                result,
+                json.dumps(result or {}),
             )
         return {"ok": True, "status": "complete", "result": result}
     except Exception as exc:
@@ -126,6 +129,30 @@ async def execute_run(db_pool, app_state, run_id: int) -> Dict[str, Any]:
                 run_id, str(exc)[:500],
             )
         return {"ok": False, "reason": str(exc)[:200]}
+
+
+async def cleanup_orphaned_runs(db_pool, max_age_hours: int = 2) -> Dict[str, Any]:
+    """Mark trajectory runs stuck in 'running' > max_age_hours as errored.
+
+    Called by AlphaLNAuditor and exposed via /api/admin/alphaln/health so
+    orphans surface in the invariant report. Safe to run when the flag is off.
+    """
+    if db_pool is None:
+        return {"cleaned": 0}
+    async with db_pool.acquire() as conn:
+        cleaned = await conn.fetchval(
+            """WITH updated AS (
+                   UPDATE alphaln_trajectory_runs
+                      SET status='error', finished_at=NOW(),
+                          error_text='orphaned_by_auditor'
+                    WHERE status='running'
+                      AND started_at < NOW() - ($1 || ' hours')::interval
+                  RETURNING id
+               )
+               SELECT COUNT(*) FROM updated""",
+            str(int(max_age_hours)),
+        )
+    return {"cleaned": int(cleaned or 0)}
 
 
 async def list_recent_runs(db_pool, admin_user: str, limit: int = 20) -> Dict[str, Any]:

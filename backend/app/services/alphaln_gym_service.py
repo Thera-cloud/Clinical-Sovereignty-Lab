@@ -15,6 +15,7 @@ Invariants:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -102,7 +103,7 @@ async def trigger_run(
                 int(result.get("matches_attempted") or 0),
                 int(result.get("matches_complete") or 0),
                 int(result.get("preferences_written") or 0),
-                result,
+                json.dumps(result or {}),
                 None if result.get("ok") else str(result.get("reason") or "unknown"),
             )
         return {"ok": True, "run_id": run_id, "status": status, "result": result}

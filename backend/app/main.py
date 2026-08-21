@@ -3254,6 +3254,10 @@ async def lifespan(app: FastAPI):
         try:
             from app.services.nate_inference_router import NateInferenceRouter
             app.state.inference_router = NateInferenceRouter(app_state=app.state)
+            # Alias for services that read the canonical attribute name
+            # (nate_clinical_bakeoff_agent, alphaln_gym_service). See rule
+            # alphaln-twin-isolation.mdc invariant 12.
+            app.state.nate_inference_router = app.state.inference_router
             print("   ✅ NateInferenceRouter on app.state")
         except Exception as _ir_err:
             print(f"   ⚠️  NateInferenceRouter init failed: {_ir_err}")

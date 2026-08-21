@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import json
 import logging
 import os
 import secrets
@@ -184,7 +185,7 @@ class AlphaLNShadowObserver:
                     len(ai_text),
                     s["score"],
                     s["score_method"],
-                    s["dims"],
+                    json.dumps(s["dims"] or {}),
                 )
                 written += 1
         return {"ok": True, "status": "wrote", "written": written}

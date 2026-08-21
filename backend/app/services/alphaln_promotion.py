@@ -16,6 +16,7 @@ Locked invariants (see cursor rule alphaln-twin-isolation.mdc invariant 6):
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any, Dict, Optional
@@ -39,13 +40,15 @@ async def propose_candidate(
 ) -> Dict[str, Any]:
     if db_pool is None:
         return {"ok": False, "reason": "no_db"}
+    if not is_enabled():
+        return {"ok": False, "reason": "flag_off"}
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             """INSERT INTO alphaln_promotion_candidates
                    (proposed_by, variant_id, reason, evidence)
                  VALUES ($1, $2, $3, $4)
               RETURNING id, proposed_at""",
-            proposed_by, variant_id, reason, (evidence or {}),
+            proposed_by, variant_id, reason, json.dumps(evidence or {}),
         )
     return {
         "ok": True,
@@ -57,6 +60,8 @@ async def propose_candidate(
 async def list_candidates(db_pool, status: Optional[str] = None, limit: int = 25) -> Dict[str, Any]:
     if db_pool is None:
         return {"candidates": []}
+    if not is_enabled():
+        return {"candidates": [], "note": "flag_off"}
     limit = max(1, min(int(limit or 25), 200))
     async with db_pool.acquire() as conn:
         if status:
@@ -108,6 +113,8 @@ async def review_candidate(
         return {"ok": False, "reason": "invalid_decision"}
     if db_pool is None:
         return {"ok": False, "reason": "no_db"}
+    if not is_enabled():
+        return {"ok": False, "reason": "flag_off"}
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             """UPDATE alphaln_promotion_candidates

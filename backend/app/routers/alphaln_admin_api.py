@@ -608,6 +608,6 @@ async def alphaln_health(
     _require_dr_nevedal1(principal)
     db = _require_db(request)
     from app.services.alphaln_auditor import run_invariants
-    report = await run_invariants(db)
+    report = await run_invariants(db, getattr(request.app, "state", None))
     report["twin_enabled"] = _is_enabled()
     return report

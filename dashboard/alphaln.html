@@ -60,6 +60,28 @@ body { font-family: var(--font-body); background: var(--bg-void); color: var(--t
 .notice-title { font-family: var(--font-display); font-size: 28px; color: var(--gold-bright); margin-bottom: 12px; }
 .notice-body { font-size: 14px; max-width: 480px; margin: 0 auto; line-height: 1.6; }
 .notice-body code { font-family: var(--font-mono); color: var(--cyan); background: var(--bg-elevated); padding: 2px 6px; border-radius: 3px; }
+
+/* Ops tabs + panels ---------------------------------------------------- */
+.tabs { display: flex; gap: 4px; padding: 6px 20px; border-bottom: 1px solid var(--border); background: var(--bg-dark); overflow-x: auto; }
+.tab { padding: 6px 14px; border-radius: 6px; font-size: 11px; font-weight: 600; color: var(--text-secondary); cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid transparent; white-space: nowrap; }
+.tab:hover { color: var(--gold-bright); }
+.tab.active { color: var(--gold); border-color: var(--border-active); background: var(--bg-elevated); }
+.tab-view { display: none; flex: 1; overflow-y: auto; padding: 20px; }
+.tab-view.active { display: block; }
+.ops-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+.ops-card h4 { font-family: var(--font-display); font-size: 18px; color: var(--gold-bright); margin-bottom: 12px; }
+.ops-row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.ops-row input, .ops-row select { flex: 1; min-width: 140px; background: var(--bg-elevated); border: 1px solid var(--border-active); border-radius: 6px; padding: 8px 10px; color: var(--text-primary); font-size: 13px; font-family: var(--font-body); }
+.ops-row input:focus, .ops-row select:focus { outline: none; border-color: var(--gold); }
+.ops-table { width: 100%; font-size: 12px; border-collapse: collapse; }
+.ops-table th { text-align: left; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.ops-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--text-primary); font-family: var(--font-mono); }
+.ops-table tr:hover td { background: var(--bg-elevated); }
+.chip { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; text-transform: uppercase; }
+.chip.ok { background: var(--green-dim); color: var(--green); }
+.chip.warn { background: rgba(201,169,98,0.15); color: var(--gold); }
+.chip.err { background: var(--red-dim); color: var(--red); }
+.hint { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -97,17 +119,105 @@ body { font-family: var(--font-body); background: var(--bg-void); color: var(--t
     <div id="sessionList"></div>
   </div>
   <div class="chat-panel">
-    <div class="chat-header">
-      <div class="chat-header-title" id="chatTitle">— no session —</div>
-      <div class="chat-header-actions">
-        <button id="endBtn" class="btn btn-red" onclick="endSession()" disabled>End Session</button>
+    <div class="tabs">
+      <div class="tab active" data-tab="chat" onclick="switchTab('chat')">Chat</div>
+      <div class="tab" data-tab="observations" onclick="switchTab('observations')">Shadow Obs</div>
+      <div class="tab" data-tab="gym" onclick="switchTab('gym')">Gym</div>
+      <div class="tab" data-tab="trajectory" onclick="switchTab('trajectory')">Trajectory</div>
+      <div class="tab" data-tab="promotion" onclick="switchTab('promotion')">Promotion</div>
+      <div class="tab" data-tab="health" onclick="switchTab('health')">Health</div>
+    </div>
+
+    <!-- Chat tab: full-height flex column -->
+    <div id="view-chat" class="tab-view active" style="display:flex; flex-direction:column; padding:0;">
+      <div class="chat-header">
+        <div class="chat-header-title" id="chatTitle">— no session —</div>
+        <div class="chat-header-actions">
+          <button id="endBtn" class="btn btn-red" onclick="endSession()" disabled>End Session</button>
+        </div>
+      </div>
+      <div id="messages" class="messages"></div>
+      <div class="composer">
+        <div class="composer-row">
+          <textarea id="composer" placeholder="Talk to AlphaLN..." rows="2" disabled></textarea>
+          <button id="sendBtn" class="btn btn-primary" onclick="sendMessage()" disabled>Send</button>
+        </div>
       </div>
     </div>
-    <div id="messages" class="messages"></div>
-    <div class="composer">
-      <div class="composer-row">
-        <textarea id="composer" placeholder="Talk to AlphaLN..." rows="2" disabled></textarea>
-        <button id="sendBtn" class="btn btn-primary" onclick="sendMessage()" disabled>Send</button>
+
+    <!-- Shadow Observations tab (Slice 3) -->
+    <div id="view-observations" class="tab-view">
+      <div class="ops-card">
+        <h4>Shadow Observations</h4>
+        <div class="hint">De-identified scores of Little Nate replies. Populated by <code>alphaln_shadow_observer</code> when <code>ENABLE_ALPHALN_SHADOW_OBSERVER=true</code>.</div>
+        <div class="ops-row" style="margin-top:12px;">
+          <input id="obsLimit" type="number" min="1" max="200" value="25" placeholder="limit">
+          <button class="btn btn-primary" onclick="loadObservations()">Load</button>
+        </div>
+        <div id="obsTable" style="margin-top:14px;"></div>
+      </div>
+    </div>
+
+    <!-- Gym tab (Slice 5) -->
+    <div id="view-gym" class="tab-view">
+      <div class="ops-card">
+        <h4>Sim Gym — Trigger Bakeoff</h4>
+        <div class="hint">Wraps <code>nate_clinical_bakeoff_agent.run_night</code>. Requires <code>ENABLE_ALPHALN_GYM=true</code>. Rate-ceiled server-side.</div>
+        <div class="ops-row" style="margin-top:12px;">
+          <input id="gymMatches" type="number" min="1" max="8" value="2" placeholder="max matches">
+          <button class="btn btn-primary" onclick="triggerGymRun()">Run Bakeoff</button>
+          <button class="btn" onclick="loadGymRuns()">Refresh Runs</button>
+        </div>
+        <div id="gymTable" style="margin-top:14px;"></div>
+      </div>
+    </div>
+
+    <!-- Trajectory tab (Slice 6) -->
+    <div id="view-trajectory" class="tab-view">
+      <div class="ops-card">
+        <h4>Trajectory Search — Loop C skeleton</h4>
+        <div class="hint">Stub unless <code>ENABLE_ALPHALN_TRAJECTORY_SEARCH=true</code> AND a search engine is wired into <code>app.state.alphaln_trajectory_engine</code>.</div>
+        <div class="ops-row" style="margin-top:12px;">
+          <input id="trajScenario" type="text" placeholder="scenario label (e.g. 'reactive_withdrawer_v1')">
+        </div>
+        <div class="ops-row">
+          <input id="trajDepth" type="number" min="1" max="6" value="3" placeholder="max depth">
+          <input id="trajRollouts" type="number" min="1" max="32" value="8" placeholder="max rollouts">
+          <button class="btn btn-primary" onclick="scheduleTrajectory()">Schedule</button>
+          <button class="btn" onclick="loadTrajectoryRuns()">Refresh Runs</button>
+        </div>
+        <div id="trajTable" style="margin-top:14px;"></div>
+      </div>
+    </div>
+
+    <!-- Promotion tab (Slice 8) -->
+    <div id="view-promotion" class="tab-view">
+      <div class="ops-card">
+        <h4>Promotion Candidates</h4>
+        <div class="hint">Manual review only. <b>Auto-promotion is always disabled.</b> Requires <code>ENABLE_ALPHALN_PROMOTION=true</code>.</div>
+        <div class="ops-row" style="margin-top:12px;">
+          <select id="promStatus">
+            <option value="">any status</option>
+            <option value="proposed">proposed</option>
+            <option value="approved">approved</option>
+            <option value="rejected">rejected</option>
+            <option value="withdrawn">withdrawn</option>
+          </select>
+          <button class="btn btn-primary" onclick="loadPromotionCandidates()">Load</button>
+        </div>
+        <div id="promTable" style="margin-top:14px;"></div>
+      </div>
+    </div>
+
+    <!-- Health tab (Slice 10) -->
+    <div id="view-health" class="tab-view">
+      <div class="ops-card">
+        <h4>Invariant Report</h4>
+        <div class="hint">Runs <code>alphaln_auditor.run_invariants()</code> — includes router alias check (G1), schema, orphan runs, sensor-join consent, twin-flag state, auto-promote lock.</div>
+        <div class="ops-row" style="margin-top:12px;">
+          <button class="btn btn-primary" onclick="loadHealth()">Refresh</button>
+        </div>
+        <div id="healthBox" style="margin-top:14px;"></div>
       </div>
     </div>
   </div>
@@ -277,6 +387,177 @@ async function endSession(){
     document.getElementById('endBtn').disabled = true;
     await loadSessions();
   } catch (e) { alert(e.message); }
+}
+
+// ---- Ops tabs (G3) -----------------------------------------------------------
+function switchTab(name){
+  var tabs = document.querySelectorAll('.tab');
+  for (var i=0;i<tabs.length;i++){ tabs[i].classList.toggle('active', tabs[i].dataset.tab===name); }
+  var views = document.querySelectorAll('.tab-view');
+  for (var j=0;j<views.length;j++){ views[j].classList.toggle('active', views[j].id==='view-'+name); }
+  // Lazy-load
+  if (name==='observations' && !document.getElementById('obsTable').innerHTML) loadObservations();
+  else if (name==='gym' && !document.getElementById('gymTable').innerHTML) loadGymRuns();
+  else if (name==='trajectory' && !document.getElementById('trajTable').innerHTML) loadTrajectoryRuns();
+  else if (name==='promotion' && !document.getElementById('promTable').innerHTML) loadPromotionCandidates();
+  else if (name==='health' && !document.getElementById('healthBox').innerHTML) loadHealth();
+}
+
+function _chip(text, kind){ return '<span class="chip '+(kind||'')+'">'+escapeHtml(String(text))+'</span>'; }
+function _short(s, n){ s = s==null?'':String(s); return s.length>n ? s.slice(0,n)+'…' : s; }
+function _flagOffBox(host, msg){ host.innerHTML = '<div class="hint" style="color:var(--gold);">'+escapeHtml(msg||'Feature flag is off.')+'</div>'; }
+
+// ---- Shadow Observations ----------------------------------------------------
+async function loadObservations(){
+  var host = document.getElementById('obsTable');
+  var limit = Math.max(1, Math.min(200, parseInt(document.getElementById('obsLimit').value)||25));
+  host.innerHTML = '<div class="hint">Loading…</div>';
+  try {
+    var data = await apiFetch('/api/admin/alphaln/observations?limit='+limit);
+    var rows = data.observations || [];
+    if (!rows.length){ host.innerHTML = '<div class="hint">No observations yet.</div>'; return; }
+    var html = '<table class="ops-table"><thead><tr><th>Time</th><th>Source</th><th>User (pseud)</th><th>Score</th><th>Method</th><th>Reply len</th></tr></thead><tbody>';
+    for (var i=0;i<rows.length;i++){
+      var r = rows[i];
+      var when = r.observed_at ? new Date(r.observed_at).toLocaleString() : '';
+      var sc = (r.score==null) ? '—' : (typeof r.score==='number' ? r.score.toFixed(3) : String(r.score));
+      html += '<tr><td>'+escapeHtml(when)+'</td><td>'+escapeHtml(_short(r.source_table||'',16))+'</td><td>'+escapeHtml(_short(r.user_pseudonym||'',12))+'</td><td>'+escapeHtml(sc)+'</td><td>'+escapeHtml(r.score_method||'')+'</td><td>'+escapeHtml(String(r.reply_len==null?'—':r.reply_len))+'</td></tr>';
+    }
+    html += '</tbody></table>';
+    host.innerHTML = html;
+  } catch(e){
+    if (String(e.message||'').indexOf('disabled')>=0) _flagOffBox(host, 'ENABLE_ALPHALN_SHADOW_OBSERVER is off.');
+    else host.innerHTML = '<div class="hint" style="color:var(--red);">'+escapeHtml(e.message)+'</div>';
+  }
+}
+
+// ---- Gym --------------------------------------------------------------------
+async function loadGymRuns(){
+  var host = document.getElementById('gymTable');
+  host.innerHTML = '<div class="hint">Loading…</div>';
+  try {
+    var data = await apiFetch('/api/admin/alphaln/gym/runs?limit=25');
+    var rows = data.runs || [];
+    if (!rows.length){ host.innerHTML = '<div class="hint">No gym runs yet.</div>'; return; }
+    var html = '<table class="ops-table"><thead><tr><th>ID</th><th>Status</th><th>Triggered</th><th>Attempted</th><th>Complete</th><th>Prefs</th></tr></thead><tbody>';
+    for (var i=0;i<rows.length;i++){
+      var r = rows[i]; var st = r.status||'?';
+      var kind = (st==='completed'||st==='complete')?'ok':(st==='running'||st==='queued'?'warn':(st==='error'?'err':''));
+      var when = r.triggered_at ? new Date(r.triggered_at).toLocaleString() : '';
+      html += '<tr><td>'+escapeHtml(String(r.id||''))+'</td><td>'+_chip(st,kind)+'</td><td>'+escapeHtml(when)+'</td><td>'+escapeHtml(String(r.matches_attempted==null?'—':r.matches_attempted))+'</td><td>'+escapeHtml(String(r.matches_complete==null?'—':r.matches_complete))+'</td><td>'+escapeHtml(String(r.preferences_written==null?'—':r.preferences_written))+'</td></tr>';
+    }
+    html += '</tbody></table>';
+    host.innerHTML = html;
+  } catch(e){
+    if (String(e.message||'').indexOf('disabled')>=0) _flagOffBox(host, 'ENABLE_ALPHALN_GYM is off.');
+    else host.innerHTML = '<div class="hint" style="color:var(--red);">'+escapeHtml(e.message)+'</div>';
+  }
+}
+async function triggerGymRun(){
+  var matches = Math.max(1, Math.min(8, parseInt(document.getElementById('gymMatches').value)||2));
+  try {
+    await apiFetch('/api/admin/alphaln/gym/run', { method:'POST', body: JSON.stringify({ max_matches: matches }) });
+    await loadGymRuns();
+  } catch(e){ alert(e.message); }
+}
+
+// ---- Trajectory -------------------------------------------------------------
+async function loadTrajectoryRuns(){
+  var host = document.getElementById('trajTable');
+  host.innerHTML = '<div class="hint">Loading…</div>';
+  try {
+    var data = await apiFetch('/api/admin/alphaln/trajectory/runs?limit=25');
+    var rows = data.runs || [];
+    if (!rows.length){ host.innerHTML = '<div class="hint">No trajectory runs yet.</div>'; return; }
+    var html = '<table class="ops-table"><thead><tr><th>ID</th><th>Seed</th><th>Status</th><th>Depth</th><th>Rollouts</th><th>Started</th><th>Best</th></tr></thead><tbody>';
+    for (var i=0;i<rows.length;i++){
+      var r = rows[i]; var st = r.status||'?';
+      var kind = (st==='complete'||st==='completed')?'ok':(st==='running'||st==='queued'?'warn':(st==='error'?'err':''));
+      var when = r.started_at ? new Date(r.started_at).toLocaleString() : '';
+      var best = (r.best_score==null) ? '—' : (typeof r.best_score==='number' ? r.best_score.toFixed(3) : String(r.best_score));
+      html += '<tr><td>'+escapeHtml(String(r.id||''))+'</td><td>'+escapeHtml(_short(r.root_seed||'',20))+'</td><td>'+_chip(st,kind)+'</td><td>'+escapeHtml(String(r.max_depth||'—'))+'</td><td>'+escapeHtml(String(r.max_rollouts||'—'))+'</td><td>'+escapeHtml(when)+'</td><td>'+escapeHtml(best)+'</td></tr>';
+    }
+    html += '</tbody></table>';
+    host.innerHTML = html;
+  } catch(e){
+    if (String(e.message||'').indexOf('disabled')>=0) _flagOffBox(host, 'ENABLE_ALPHALN_TRAJECTORY_SEARCH is off.');
+    else host.innerHTML = '<div class="hint" style="color:var(--red);">'+escapeHtml(e.message)+'</div>';
+  }
+}
+async function scheduleTrajectory(){
+  var scenario = (document.getElementById('trajScenario').value||'').trim();
+  if (!scenario){ alert('Scenario label required.'); return; }
+  var depth = Math.max(1, Math.min(6, parseInt(document.getElementById('trajDepth').value)||3));
+  var rollouts = Math.max(1, Math.min(32, parseInt(document.getElementById('trajRollouts').value)||8));
+  try {
+    var body = { scenario: scenario, max_depth: depth, max_rollouts: rollouts };
+    var data = await apiFetch('/api/admin/alphaln/trajectory/schedule', { method:'POST', body: JSON.stringify(body) });
+    if (data && data.ok === false) alert('Not scheduled: ' + (data.reason||'unknown'));
+    await loadTrajectoryRuns();
+  } catch(e){ alert(e.message); }
+}
+
+// ---- Promotion --------------------------------------------------------------
+async function loadPromotionCandidates(){
+  var host = document.getElementById('promTable');
+  var status = document.getElementById('promStatus').value;
+  var qs = status ? ('?status='+encodeURIComponent(status)) : '';
+  host.innerHTML = '<div class="hint">Loading…</div>';
+  try {
+    var data = await apiFetch('/api/admin/alphaln/promotion/candidates'+qs);
+    var rows = data.candidates || [];
+    if (!rows.length){ host.innerHTML = '<div class="hint">No candidates.</div>'; return; }
+    var html = '<table class="ops-table"><thead><tr><th>ID</th><th>Variant</th><th>Reason</th><th>Status</th><th>Proposed</th><th>Actions</th></tr></thead><tbody>';
+    for (var i=0;i<rows.length;i++){
+      var r = rows[i]; var st = r.status||'proposed';
+      var kind = st==='approved'?'ok':(st==='rejected'?'err':(st==='withdrawn'?'err':'warn'));
+      var when = r.proposed_at ? new Date(r.proposed_at).toLocaleString() : '';
+      var actions = '';
+      if (st==='proposed') {
+        actions = '<button class="btn btn-primary" style="padding:2px 8px;font-size:10px;" onclick="reviewCandidate('+r.id+',\'approved\')">Approve</button> '
+               + '<button class="btn btn-red" style="padding:2px 8px;font-size:10px;" onclick="reviewCandidate('+r.id+',\'rejected\')">Reject</button>';
+      }
+      html += '<tr><td>'+escapeHtml(String(r.id||''))+'</td><td>'+escapeHtml(_short(r.variant_id||'',20))+'</td><td>'+escapeHtml(_short(r.reason||'',40))+'</td><td>'+_chip(st,kind)+'</td><td>'+escapeHtml(when)+'</td><td>'+actions+'</td></tr>';
+    }
+    html += '</tbody></table><div class="hint" style="margin-top:8px;color:var(--red);">Approval marks the candidate reviewed only. Rollout requires an operator-run migration; there is no auto-promote path.</div>';
+    host.innerHTML = html;
+  } catch(e){
+    if (String(e.message||'').indexOf('disabled')>=0) _flagOffBox(host, 'ENABLE_ALPHALN_PROMOTION is off.');
+    else host.innerHTML = '<div class="hint" style="color:var(--red);">'+escapeHtml(e.message)+'</div>';
+  }
+}
+async function reviewCandidate(id, decision){
+  var note = prompt(decision==='approved' ? 'Optional approval note:' : 'Reason for rejection:') || '';
+  try {
+    await apiFetch('/api/admin/alphaln/promotion/'+encodeURIComponent(id)+'/review',
+      { method:'POST', body: JSON.stringify({ decision: decision, approval_note: note }) });
+    await loadPromotionCandidates();
+  } catch(e){ alert(e.message); }
+}
+
+// ---- Health -----------------------------------------------------------------
+async function loadHealth(){
+  var host = document.getElementById('healthBox');
+  host.innerHTML = '<div class="hint">Running invariant checks…</div>';
+  try {
+    var data = await apiFetch('/api/admin/alphaln/health');
+    var checks = data.checks || {};
+    var overall = data.ok === true ? _chip('OK','ok') : _chip('FAIL','err');
+    var flag = data.twin_enabled ? _chip('twin: on','ok') : _chip('twin: off','warn');
+    var html = '<div style="margin-bottom:10px;">'+overall+' '+flag+'</div>';
+    html += '<table class="ops-table"><thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>';
+    var keys = Object.keys(checks).sort();
+    for (var i=0;i<keys.length;i++){
+      var k = keys[i]; var c = checks[k] || {};
+      var ok = c.ok === true;
+      html += '<tr><td>'+escapeHtml(k)+'</td><td>'+_chip(ok?'ok':'fail', ok?'ok':'err')+'</td><td>'+escapeHtml(_short(c.detail||c.reason||'',80))+'</td></tr>';
+    }
+    html += '</tbody></table>';
+    host.innerHTML = html;
+  } catch(e){
+    if (String(e.message||'').indexOf('disabled')>=0) _flagOffBox(host, 'ENABLE_ALPHALN_TWIN is off.');
+    else host.innerHTML = '<div class="hint" style="color:var(--red);">'+escapeHtml(e.message)+'</div>';
+  }
 }
 
 // Enter to send (Shift+Enter = newline)

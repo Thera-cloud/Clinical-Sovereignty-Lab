@@ -88,13 +88,93 @@ async def _check_no_production_writes(db_pool) -> Dict[str, Any]:
     return {"ok": int(leaked or 0) == 0, "leaked_rows": int(leaked or 0)}
 
 
-async def run_invariants(db_pool) -> Dict[str, Any]:
+def _check_router_alias(app_state) -> Dict[str, Any]:
+    """Verify G1 fix: nate_clinical_bakeoff_agent / alphaln_gym_service both
+    read app.state.nate_inference_router. main.py must set that alias when
+    the inference router is created."""
+    if app_state is None:
+        return {"ok": False, "detail": "no_app_state"}
+    canonical = getattr(app_state, "nate_inference_router", None)
+    primary = getattr(app_state, "inference_router", None)
+    if canonical is None and primary is None:
+        return {"ok": True, "detail": "no_router_present"}
+    return {
+        "ok": canonical is not None,
+        "canonical_present": canonical is not None,
+        "primary_present": primary is not None,
+    }
+
+
+async def _check_trajectory_orphans(db_pool) -> Dict[str, Any]:
+    """Look for trajectory runs stuck in 'running' > 2h. The trajectory
+    service's cleanup_orphaned_runs() helper will roll these to 'error'
+    on the next tick; here we just report the count."""
+    if db_pool is None:
+        return {"ok": True, "detail": "no_db"}
+    async with db_pool.acquire() as conn:
+        try:
+            stuck = await conn.fetchval(
+                """SELECT COUNT(*) FROM alphaln_trajectory_runs
+                    WHERE status='running'
+                      AND started_at < NOW() - INTERVAL '2 hours'"""
+            )
+        except Exception:
+            stuck = 0
+    return {"ok": int(stuck or 0) == 0, "orphaned_running": int(stuck or 0)}
+
+
+async def _check_sensor_joins_have_consent(db_pool) -> Dict[str, Any]:
+    """Any sensor-join row must reference a consent_receipt_id. Rows without
+    one are a privacy-invariant break."""
+    if db_pool is None:
+        return {"ok": True, "detail": "no_db"}
+    async with db_pool.acquire() as conn:
+        try:
+            missing = await conn.fetchval(
+                """SELECT COUNT(*) FROM alphaln_sensor_joins
+                    WHERE consent_receipt_id IS NULL"""
+            )
+        except Exception:
+            missing = 0
+    return {"ok": int(missing or 0) == 0, "missing_consent": int(missing or 0)}
+
+
+async def _check_gym_orphans(db_pool) -> Dict[str, Any]:
+    """Gym runs stuck in 'running' > 1h suggest a crashed bakeoff invocation."""
+    if db_pool is None:
+        return {"ok": True, "detail": "no_db"}
+    async with db_pool.acquire() as conn:
+        try:
+            stuck = await conn.fetchval(
+                """SELECT COUNT(*) FROM alphaln_gym_runs
+                    WHERE status='running'
+                      AND started_at < NOW() - INTERVAL '1 hour'"""
+            )
+        except Exception:
+            stuck = 0
+    return {"ok": int(stuck or 0) == 0, "orphaned_running": int(stuck or 0)}
+
+
+async def run_invariants(db_pool, app_state=None) -> Dict[str, Any]:
     """Run every invariant once; return the aggregated report."""
+    # Best-effort orphan cleanup before we report. If the trajectory helper
+    # isn't importable we skip silently — this check is diagnostic, not
+    # gating.
+    try:
+        from app.services.alphaln_trajectory_search import cleanup_orphaned_runs
+        await cleanup_orphaned_runs(db_pool, max_age_hours=2)
+    except Exception:
+        pass
+
     checks = {
         "auto_promote_locked": await _check_auto_promote_locked(),
         "twin_flag": _check_twin_flag(),
         "schema_present": await _check_schema(db_pool),
         "no_production_writes": await _check_no_production_writes(db_pool),
+        "router_alias": _check_router_alias(app_state),
+        "trajectory_orphans": await _check_trajectory_orphans(db_pool),
+        "gym_orphans": await _check_gym_orphans(db_pool),
+        "sensor_joins_consent": await _check_sensor_joins_have_consent(db_pool),
     }
     all_ok = all(c.get("ok", False) for k, c in checks.items() if k != "twin_flag")
     return {"ok": all_ok, "checks": checks}
@@ -131,7 +211,7 @@ class AlphaLNAuditor:
         await asyncio.sleep(60)
         while self._running:
             try:
-                self.last_report = await run_invariants(self.db_pool)
+                self.last_report = await run_invariants(self.db_pool, self.app_state)
                 if not self.last_report.get("ok"):
                     logger.warning("alphaln invariants BROKEN: %s", self.last_report)
                 else:
