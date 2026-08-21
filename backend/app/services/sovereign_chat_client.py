@@ -493,6 +493,7 @@ async def generate_streaming(
     max_tokens: int = 1500,
     domain: str = "general",
     image_data_url: Optional[str] = None,
+    known_names: Optional[List[str]] = None,
 ) -> AsyncIterator[Tuple[str, str]]:
     """
     Stream tokens from the ODPE-selected provider with automatic fallback.
@@ -554,9 +555,11 @@ async def generate_streaming(
                 ]
             _chars_in = len(_sp) + len(_um)
 
-            # Slice 3: replace direct identifiers with tokens right before send.
+            # Slice 3 + C (Bee HIV+): replace direct identifiers with tokens
+            # before send. known_names is the participant's own name pulled
+            # from their profile — matched whole-word, case-insensitive.
             if _book is not None:
-                messages = _pseudo_messages(messages, _book)
+                messages = _pseudo_messages(messages, _book, known_names=known_names)
 
             if provider == "sovereign":
                 slot_acquired = await _acquire_sovereign_slot()
@@ -687,6 +690,7 @@ async def generate_complete(
     temperature: float = 0.7,
     max_tokens: int = 1500,
     domain: str = "general",
+    known_names: Optional[List[str]] = None,
 ) -> Tuple[str, str]:
     """
     Non-streaming generation with ODPE routing. Returns (full_text, provider).
@@ -726,7 +730,7 @@ async def generate_complete(
             _chars_in = len(_sp) + len(_um)
 
             if _book is not None:
-                messages = _pseudo_messages(messages, _book)
+                messages = _pseudo_messages(messages, _book, known_names=known_names)
 
             if provider == "sovereign" and _SOVEREIGN_URL:
                 slot_acquired = await _acquire_sovereign_slot()

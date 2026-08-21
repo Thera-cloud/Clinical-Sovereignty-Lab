@@ -9014,6 +9014,11 @@ class AzureCortex:
             _allow_metrics_inject = lambda m: True  # noqa: E731
             _allow_xfer_sum = lambda m: True  # noqa: E731
         print(f">>> [AI] Cortex Active for {profile.get('name')} ctx={_ctx} depth={_depth}")
+        # QUANTUM-CRYSTAL-ARCH — Slice C (Bee HIV+): assemble known-name list for
+        # provider pseudonymization. Only used when ENABLE_PROVIDER_PSEUDONYMIZATION=true.
+        _full_name = (profile.get("name") or "").strip()
+        _first_name = _full_name.split()[0] if _full_name else ""
+        _known_names = [n for n in {_full_name, _first_name} if n and len(n) >= 2]
         # QUANTUM-CRYSTAL-ARCH: resolve DOJO per-type model-tier override (skips ODPE)
         _dojo_tier = _DOJO_TYPE_MODEL_TIER.get((dojo_type or "").lower()) if dojo_type else None
         _dojo_signal = _DOJO_TIER_TO_SIGNAL.get(_dojo_tier) if _dojo_tier else None
@@ -10523,6 +10528,7 @@ class AzureCortex:
                         temperature=_user_temp, max_tokens=_len_cap,  # FIX-LEN
                         domain="clinical",
                         image_data_url=_vault_image_data_url,
+                        known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C pseudonymization
                     ):
                         if _prev_prov and provider != _prev_prov:
                             full_response, _chunk_buf, _raw_accum = "", "", ""
@@ -10608,6 +10614,7 @@ class AzureCortex:
                                 odpe_signal="TENSION",
                                 temperature=_user_temp, max_tokens=_len_cap,  # FIX-LEN
                                 domain="clinical",
+                                known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C
                             )
                             if _fb_resp:
                                 full_response = _fb_resp
@@ -10645,6 +10652,7 @@ class AzureCortex:
                         odpe_signal=_dojo_signal,  # QUANTUM-CRYSTAL-ARCH: DOJO tier override
                         temperature=_user_temp, max_tokens=_len_cap,  # FIX-LEN
                         domain="clinical",
+                        known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C
                     )
                 except Exception as _sov_err:
                     print(f">>> [SOVEREIGN] Primary inference failed: {_sov_err}")
@@ -10716,6 +10724,7 @@ class AzureCortex:
                         full_response, _provider_used = await _sovereign_generate(
                             _retry_prompt, user_text, temperature=_user_temp,
                             max_tokens=300, domain="clinical",
+                            known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C
                         )
                     elif _race_inference:
                         full_response, _provider_used = await _race_inference(
@@ -10794,6 +10803,7 @@ class AzureCortex:
                         odpe_signal="TENSION",
                         temperature=_user_temp, max_tokens=_len_cap,
                         domain="clinical",
+                        known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C
                     )
                     if _tr_resp and len(_tr_resp.strip()) >= _orig_chars * 1.3:
                         full_response = _tr_resp

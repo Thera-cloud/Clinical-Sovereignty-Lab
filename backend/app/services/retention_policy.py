@@ -40,7 +40,39 @@ _POLICY_TO_DAYS: dict[str, Optional[int]] = {
     "forever": None,
     "1_year": 365,
     "6_months": 180,
+    "30_days": 30,  # Slice D-prep: Bee HIV+ cohort override
 }
+
+
+# --------------------------------------------------------------------------- #
+# Slice D-prep: cohort-scoped retention (Bee HIV+ program participants).      #
+# --------------------------------------------------------------------------- #
+
+# Program IDs that opt into the strict retention window. Kept as a set so we
+# can extend to additional cohorts later without touching call sites.
+_STRICT_RETENTION_PROGRAMS = {"bee_hiv_plus"}
+
+# Default retention for strict cohorts when no explicit override is configured.
+_STRICT_DEFAULT_DAYS = 30
+
+
+def get_retention_days_for_user(program_id: Optional[str]) -> Optional[int]:
+    """Return retention days for a user, honoring cohort program overrides.
+
+    Non-cohort users get the global admin policy from ``get_retention_days``.
+    Users whose ``program_id`` is in ``_STRICT_RETENTION_PROGRAMS`` get the
+    stricter of (global policy, cohort default = 30 days). ``None`` means
+    unlimited retention.
+    """
+    global_days = get_retention_days()
+
+    pid = (program_id or "").strip().lower()
+    if pid not in _STRICT_RETENTION_PROGRAMS:
+        return global_days
+
+    if global_days is None:
+        return _STRICT_DEFAULT_DAYS
+    return min(global_days, _STRICT_DEFAULT_DAYS)
 
 
 def _settings_path() -> Path:
@@ -106,4 +138,6 @@ def describe_policy() -> dict:
         "policy_days": days,
         "policy_label": "forever" if days is None else f"{days}d",
         "enforcement_enabled": is_retention_enforcement_enabled(),
+        "strict_cohorts": sorted(_STRICT_RETENTION_PROGRAMS),
+        "strict_default_days": _STRICT_DEFAULT_DAYS,
     }

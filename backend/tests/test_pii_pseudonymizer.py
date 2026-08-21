@@ -172,3 +172,43 @@ def test_stream_restorer_incomplete_prefix_flushed_on_close():
     a = r.feed("prefix PSEUDO_EMAIL_")
     b = r.flush()
     assert (a + b) == "prefix PSEUDO_EMAIL_"
+
+
+# ------------------------------------------------------------------- #
+# Slice C additions: UUID + HWID direct-identifier patterns.           #
+# ------------------------------------------------------------------- #
+
+def test_uuid_pseudonymized():
+    book = PseudonymBook()
+    uid = "550e8400-e29b-41d4-a716-446655440000"
+    src = f"session_id={uid} rolled at 12:00"
+    out = pseudonymize_text(src, book)
+    assert uid not in out
+    assert "PSEUDO_UUID_" in out
+    assert restore_text(out, book) == src
+
+
+def test_uuid_case_insensitive():
+    book = PseudonymBook()
+    uid = "550E8400-E29B-41D4-A716-446655440000"
+    src = f"crystal {uid} recalled"
+    out = pseudonymize_text(src, book)
+    assert uid not in out
+    assert "PSEUDO_UUID_" in out
+
+
+def test_hwid_pseudonymized():
+    book = PseudonymBook()
+    src = "assign CLIENT_KRISTY9_ID to COACH_COACHN_ID under ADMIN_DRNEVEDAL1_ID"
+    out = pseudonymize_text(src, book)
+    for hw in ("CLIENT_KRISTY9_ID", "COACH_COACHN_ID", "ADMIN_DRNEVEDAL1_ID"):
+        assert hw not in out
+    assert out.count("PSEUDO_HWID_") == 3
+    assert restore_text(out, book) == src
+
+
+def test_hwid_not_matched_on_lowercase_or_partial():
+    book = PseudonymBook()
+    src = "client_kristy_id lower and CLIENTKRISTYID no underscore"
+    out = pseudonymize_text(src, book)
+    assert "PSEUDO_HWID_" not in out

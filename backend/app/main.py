@@ -4842,6 +4842,13 @@ try:
 except Exception as _sc_err:
     print(f"   ⚠️  School Code API router failed: {_sc_err}")
 
+# Cohort Enrollment API (Bee HIV+ and future cohorts)
+try:
+    from app.routers.enrollment_api import router as enrollment_router
+    app.include_router(enrollment_router)
+except Exception as _en_err:
+    print(f"   ⚠️  Enrollment API router failed: {_en_err}")
+
 # QuickBooks Integration API (admin-only auth-gated + public OAuth callback)
 try:
     from app.routers.quickbooks_api import router as quickbooks_router, oauth_router as quickbooks_oauth_router

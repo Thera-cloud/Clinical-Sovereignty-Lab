@@ -95,3 +95,55 @@ def test_describe_policy_labels(tmp_path: Path):
     assert desc["policy_days"] == 365
     assert desc["policy_label"] == "365d"
     assert desc["enforcement_enabled"] is True
+
+
+# ------------------------------------------------------------------ #
+# Slice D-prep: 30_days policy + cohort-scoped per-user override.     #
+# ------------------------------------------------------------------ #
+
+def test_policy_30_days(tmp_path: Path):
+    (tmp_path / "admin_settings.json").write_text(
+        json.dumps({"memory_retention_policy": "30_days"})
+    )
+    mod = _reload_module({"DATA_DIR": str(tmp_path)})
+    assert mod.get_retention_days() == 30
+
+
+def test_cohort_user_gets_30_day_override_when_global_forever(tmp_path: Path):
+    # Global policy is default "forever" (no settings file).
+    mod = _reload_module({"DATA_DIR": str(tmp_path)})
+    assert mod.get_retention_days() is None
+    assert mod.get_retention_days_for_user("bee_hiv_plus") == 30
+
+
+def test_cohort_user_takes_stricter_when_global_shorter(tmp_path: Path):
+    (tmp_path / "admin_settings.json").write_text(
+        json.dumps({"memory_retention_policy": "6_months"})  # 180d
+    )
+    mod = _reload_module({"DATA_DIR": str(tmp_path)})
+    assert mod.get_retention_days() == 180
+    # Cohort still gets 30 because min(180, 30) == 30.
+    assert mod.get_retention_days_for_user("bee_hiv_plus") == 30
+
+
+def test_non_cohort_user_uses_global(tmp_path: Path):
+    (tmp_path / "admin_settings.json").write_text(
+        json.dumps({"memory_retention_policy": "1_year"})
+    )
+    mod = _reload_module({"DATA_DIR": str(tmp_path)})
+    assert mod.get_retention_days_for_user(None) == 365
+    assert mod.get_retention_days_for_user("") == 365
+    assert mod.get_retention_days_for_user("some_other_program") == 365
+
+
+def test_cohort_case_insensitive(tmp_path: Path):
+    mod = _reload_module({"DATA_DIR": str(tmp_path)})
+    assert mod.get_retention_days_for_user("BEE_HIV_PLUS") == 30
+    assert mod.get_retention_days_for_user(" bee_hiv_plus ") == 30
+
+
+def test_describe_policy_exposes_strict_cohorts(tmp_path: Path):
+    mod = _reload_module({"DATA_DIR": str(tmp_path)})
+    desc = mod.describe_policy()
+    assert "bee_hiv_plus" in desc["strict_cohorts"]
+    assert desc["strict_default_days"] == 30

@@ -870,6 +870,29 @@ async def crystallize_coach_observation(
     crystal_text = f"Coach observation: {text}"
     coach_hw = (coach_hardware_id or "").strip()
 
+    # QUANTUM-CRYSTAL-ARCH — Slice E (Bee HIV+): write-side tenancy check.
+    # When ENABLE_PROGRAM_ISOLATION is on, refuse coach observations that cross
+    # cohort boundaries (coach in program X writing about client in program Y,
+    # or unprogrammed coach writing about a cohort client). BAA §8.7A. Flag-off
+    # or program_isolation unavailable = zero behavior change.
+    try:
+        from app.services.program_isolation import (
+            is_enabled as _prog_enabled,
+            get_user_program_id as _prog_user,
+        )
+        if _prog_enabled():
+            _coach_pid = await _prog_user(db_pool, coach_hw) if coach_hw else None
+            _client_pid = await _prog_user(db_pool, client_hardware_id)
+            if _client_pid and _coach_pid != _client_pid:
+                logger.warning(
+                    "crystallize_coach_observation: REFUSED cross-program write "
+                    "(coach_pid=%s client_pid=%s)",
+                    _coach_pid or "none", _client_pid,
+                )
+                return None
+    except Exception as _pe:
+        logger.debug("crystallize_coach_observation: tenancy check skipped: %s", _pe)
+
     try:
         async with db_pool.acquire() as conn:
             user_uuid = await conn.fetchval(

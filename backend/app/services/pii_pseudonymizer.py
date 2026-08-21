@@ -28,8 +28,15 @@ logger = logging.getLogger(__name__)
 _TOKEN_PREFIX = "PSEUDO_"
 
 # HIPAA-aligned direct-identifier regexes. Order matters: SSN before generic
-# digit-heavy patterns, DOB before addresses, etc.
+# digit-heavy patterns, DOB before addresses, UUID/HWID before free text.
+# Slice C (Bee HIV+ revised): UUID + HWID added to catch internal record
+# IDs leaking via crystal_ids, session_ids, hardware_ids in system prompts.
 _PATTERNS: List[tuple[str, "re.Pattern[str]"]] = [
+    ("UUID", re.compile(
+        r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+        re.IGNORECASE,
+    )),
+    ("HWID", re.compile(r"\b(?:CLIENT|COACH|ADMIN)_[A-Z0-9]+_ID\b")),
     ("EMAIL", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")),
     ("SSN", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
     ("PHONE", re.compile(

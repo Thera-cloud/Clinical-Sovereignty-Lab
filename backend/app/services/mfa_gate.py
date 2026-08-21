@@ -54,6 +54,11 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
+from app.services.cohort import (
+    get_strict_mfa_window_seconds,
+    is_strict_cohort,
+)
+
 logger = logging.getLogger(__name__)
 
 _ENV_FLAG = "ENABLE_PHI_MFA_GATE"
@@ -172,44 +177,91 @@ def check_mfa_recent(
     return True, "ok"
 
 
-async def _fetch_principal_profile_data(
+async def _fetch_principal_state(
     db_pool: Any, principal: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
-    """Load the caller's ``profile_data`` JSONB. Returns None on any failure.
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Load ``(profile_data, program_id)`` for the caller.
+
+    Returns ``(None, None)`` on any failure. ``program_id`` is a first-class
+    column added by migration 414; on pre-414 schemas we transparently fall
+    back to a legacy single-column fetch so this module keeps working while
+    the migration rolls out. ``profile_data`` is normalized to a ``dict``
+    (parsing JSON strings when necessary).
 
     Prefers ``hardware_id`` (indexed unique key on ``users``) and falls
     back to ``username`` if hardware_id is missing.
     """
     if db_pool is None:
-        return None
+        return None, None
     hw = (principal.get("hardware_id") or "").strip()
     uname = (principal.get("username") or "").strip()
     if not hw and not uname:
-        return None
+        return None, None
+
+    pd_raw: Any = None
+    program_id: Optional[str] = None
+
     try:
         async with db_pool.acquire() as conn:
             if hw:
                 row = await conn.fetchrow(
-                    "SELECT profile_data FROM users WHERE hardware_id = $1",
+                    "SELECT profile_data, program_id FROM users WHERE hardware_id = $1",
                     hw,
                 )
             else:
                 row = await conn.fetchrow(
-                    "SELECT profile_data FROM users WHERE username = $1",
+                    "SELECT profile_data, program_id FROM users WHERE username = $1",
                     uname,
                 )
+        if row is None:
+            return None, None
+        pd_raw = row["profile_data"]
+        try:
+            program_id = row["program_id"]
+        except (KeyError, IndexError):
+            program_id = None
     except Exception as exc:
-        logger.warning("mfa_gate: profile_data fetch failed: %s", exc)
-        return None
-    if not row or row["profile_data"] is None:
-        return None
-    pd = row["profile_data"]
-    if isinstance(pd, dict):
-        return pd
+        # Pre-414 schemas: retry without program_id so the gate still works
+        # during rollout.
+        logger.debug(
+            "mfa_gate: two-column fetch failed (%s); retrying without program_id",
+            exc,
+        )
+        try:
+            async with db_pool.acquire() as conn:
+                if hw:
+                    row = await conn.fetchrow(
+                        "SELECT profile_data FROM users WHERE hardware_id = $1",
+                        hw,
+                    )
+                else:
+                    row = await conn.fetchrow(
+                        "SELECT profile_data FROM users WHERE username = $1",
+                        uname,
+                    )
+            if row is None:
+                return None, None
+            pd_raw = row["profile_data"]
+        except Exception as exc2:
+            logger.warning("mfa_gate: profile_data fetch failed: %s", exc2)
+            return None, None
+
+    if pd_raw is None:
+        return None, program_id
+    if isinstance(pd_raw, dict):
+        return pd_raw, program_id
     try:
-        return json.loads(pd)
+        return json.loads(pd_raw), program_id
     except (TypeError, ValueError):
-        return None
+        return None, program_id
+
+
+async def _fetch_principal_profile_data(
+    db_pool: Any, principal: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """Back-compat shim retained for callers that only need profile_data."""
+    pd, _ = await _fetch_principal_state(db_pool, principal)
+    return pd
 
 
 async def enforce_mfa_recent(
@@ -227,9 +279,21 @@ async def enforce_mfa_recent(
       3. Flag is on and profile_data lookup fails.
       4. Flag is on and no supported MFA timestamp is present or fresh.
 
+    Cohort-aware window (Slice 6c-strict)
+    -------------------------------------
+    Users whose ``users.program_id`` is in
+    ``cohort.STRICT_COHORT_PROGRAM_IDS`` (e.g. ``bee_hiv_plus``) get the
+    stricter of (caller override, global default, strict window). This
+    tightens re-authentication for cohorts handling higher-risk PHI without
+    penalizing the general user pool. When the caller passes an explicit
+    ``max_age_seconds`` we still clamp DOWN to the strict window — the
+    caller's override is treated as an upper bound only, never a way to
+    weaken cohort policy.
+
     The 401 payload includes ``reason`` for observability and a
     ``retry_after_seconds`` hint so the client knows how long its next
-    verification will remain valid.
+    verification will remain valid. We deliberately do NOT surface
+    ``program_id`` in the response — cohort membership stays server-side.
     """
     if not is_enabled():
         return
@@ -239,20 +303,28 @@ async def enforce_mfa_recent(
     # Import locally to keep this module import-safe outside FastAPI.
     from fastapi import HTTPException  # type: ignore
 
-    window = max_age_seconds if max_age_seconds is not None else default_window_seconds()
+    profile_data, program_id = await _fetch_principal_state(db_pool, principal)
 
-    profile_data = await _fetch_principal_profile_data(db_pool, principal)
+    base_window = (
+        max_age_seconds if max_age_seconds is not None else default_window_seconds()
+    )
+    if is_strict_cohort(program_id):
+        window = min(base_window, get_strict_mfa_window_seconds())
+    else:
+        window = base_window
+
     ok, reason = check_mfa_recent(profile_data, max_age_seconds=window)
     if ok:
         return
 
     who = principal.get("username") or principal.get("hardware_id") or "?"
     logger.info(
-        "mfa_gate: blocking %s (role=%s) reason=%s window=%ds",
+        "mfa_gate: blocking %s (role=%s) reason=%s window=%ds cohort=%s",
         who,
         principal.get("role"),
         reason,
         window,
+        program_id or "-",
     )
     raise HTTPException(
         status_code=401,
@@ -269,4 +341,5 @@ __all__ = [
     "default_window_seconds",
     "enforce_mfa_recent",
     "is_enabled",
+    "_fetch_principal_state",
 ]
