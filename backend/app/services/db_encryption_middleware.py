@@ -139,3 +139,25 @@ async def set_pii_key_on_connection(conn) -> bool:
     except Exception as e:
         logger.warning("[pgcrypto] set_pii_key_on_connection failed: %s", e)
         return False
+
+
+def encryption_pool_kwargs() -> dict:
+    """Return kwargs suitable for splatting into asyncpg.create_pool(...)
+    that activate pgcrypto SQL-layer encryption on every new connection.
+
+    Slice 2 of the Bee HIV+ privacy plan. Feature-flagged so we can ship
+    the wiring in a disabled state and flip it on once operators have
+    provisioned `PII_ENCRYPTION_KEY` and run the backfill script.
+
+    Returns:
+        {"init": init_connection}  when ENABLE_PGCRYPTO_ENCRYPTION is truthy
+        {}                          otherwise (no-op wiring, existing behavior)
+
+    The returned callback is itself a no-op when no key is resolvable, so
+    even when the flag is on with a missing key the pool creation cannot
+    fail because of encryption wiring.
+    """
+    raw = (os.environ.get("ENABLE_PGCRYPTO_ENCRYPTION") or "").strip().lower()
+    if raw not in ("1", "true", "yes", "on"):
+        return {}
+    return {"init": init_connection}

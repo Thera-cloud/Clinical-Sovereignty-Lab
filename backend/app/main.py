@@ -83,6 +83,8 @@ async def get_db_pool() -> asyncpg.Pool:
     if db_pool is None:
         _db_url = os.environ.get("DATABASE_URL", "")
         _db_host = "postgres" if "@postgres:" in _db_url else settings.POSTGRES_HOST
+        # QUANTUM-CRYSTAL-ARCH — pgcrypto encryption wiring (Slice 2, feature-flagged)
+        from app.services.db_encryption_middleware import encryption_pool_kwargs as _enc_kw
         db_pool = await asyncpg.create_pool(
             host=_db_host,
             port=settings.POSTGRES_PORT,
@@ -92,6 +94,7 @@ async def get_db_pool() -> asyncpg.Pool:
             min_size=5,
             max_size=30,
             max_inactive_connection_lifetime=300,
+            **_enc_kw(),  # QUANTUM-CRYSTAL-ARCH
         )
     return db_pool
 
@@ -120,6 +123,8 @@ async def lifespan(app: FastAPI):
     # Detect Docker by checking if DATABASE_URL contains @postgres:
     _db_url = os.environ.get("DATABASE_URL", "")
     _db_host = "postgres" if "@postgres:" in _db_url else settings.POSTGRES_HOST
+    # QUANTUM-CRYSTAL-ARCH — pgcrypto encryption wiring (Slice 2, feature-flagged)
+    from app.services.db_encryption_middleware import encryption_pool_kwargs as _enc_kw
     db_pool = await asyncpg.create_pool(
         host=_db_host,
         port=settings.POSTGRES_PORT,
@@ -129,6 +134,7 @@ async def lifespan(app: FastAPI):
         min_size=5,
         max_size=30,
         max_inactive_connection_lifetime=300,
+        **_enc_kw(),  # QUANTUM-CRYSTAL-ARCH
     )
     print(f"   ✅ Database connected (host={_db_host})")
     

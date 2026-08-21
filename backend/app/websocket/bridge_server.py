@@ -32817,6 +32817,8 @@ async def main():
     if _pg_pass:
         try:
             import asyncpg
+            # QUANTUM-CRYSTAL-ARCH — pgcrypto encryption wiring (Slice 2, feature-flagged)
+            from app.services.db_encryption_middleware import encryption_pool_kwargs as _enc_kw
             db_pool = await asyncpg.create_pool(
                 host=_pg_host,
                 port=_pg_port,
@@ -32827,6 +32829,7 @@ async def main():
                 max_size=40,  # SOVEREIGN-VOICE — raised from 20 for 50+ concurrent user capacity
                 max_inactive_connection_lifetime=300,
                 command_timeout=30,
+                **_enc_kw(),  # QUANTUM-CRYSTAL-ARCH
             )
             print(f"[*] Database pool created ({db_pool.get_size()} connections)")
             # SOVEREIGN-VOICE: dedicated small pool for chat context — never queues behind background agents
@@ -32835,6 +32838,7 @@ async def main():
                 host=_pg_host, port=_pg_port, user=_pg_user,
                 password=_pg_pass, database=_pg_db,
                 min_size=2, max_size=8, command_timeout=10,
+                **_enc_kw(),  # QUANTUM-CRYSTAL-ARCH
             )
             print(f"[*] Chat context pool created ({chat_db_pool.get_size()} connections)")
             billing_system.db_pool = db_pool  # Founding member eligibility (platform_config)
