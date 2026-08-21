@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -54,6 +55,53 @@ logger = logging.getLogger("nate.enrollment_api")
 router = APIRouter(prefix="/api/enrollment", tags=["enrollment"])
 
 _ENV_FLAG = "ENABLE_ENROLLMENT_API"
+
+# --------------------------------------------------------------------------- #
+# Rate limiting (in-memory, per-process)                                      #
+# --------------------------------------------------------------------------- #
+# Redemption is a code-guessing-adjacent surface even though the caller is
+# authenticated: a compromised low-privilege account could still try to
+# brute-force cohort codes. Cap redemption attempts per-IP.
+#
+# In-memory only (per bridge/backend process). This is a "reasonable minimum"
+# — a determined attacker with a botnet defeats it, but the codes are also
+# limited by ``max_uses`` and ``expires_at`` on ``enrollment_codes``.
+_redeem_hits: Dict[str, List[float]] = {}
+_REDEEM_RATE_WINDOW_S = 60
+_REDEEM_RATE_MAX = 5  # attempts per window per key
+
+
+def _redeem_rate_limited(key: str) -> bool:
+    """Return True if the caller has exceeded the redeem rate budget.
+
+    Uses a rolling window; entries older than ``_REDEEM_RATE_WINDOW_S`` are
+    dropped on each call.
+    """
+    now = time.time()
+    hits = [t for t in _redeem_hits.get(key, []) if now - t < _REDEEM_RATE_WINDOW_S]
+    hits.append(now)
+    _redeem_hits[key] = hits
+    return len(hits) > _REDEEM_RATE_MAX
+
+
+def _redeem_rate_key(request: Request, username: str) -> str:
+    """Compose the rate-limit key.
+
+    Prefer IP+username so a shared NAT egress doesn't lock out unrelated users,
+    but if IP is unavailable fall back to username-only.
+    """
+    ip = "unknown"
+    try:
+        if request.client and request.client.host:
+            ip = request.client.host
+    except Exception:
+        pass
+    return f"{ip}|{username}"
+
+
+def _redeem_rate_reset_for_tests() -> None:
+    """Test hook: clear the in-memory rate state between test runs."""
+    _redeem_hits.clear()
 
 
 def _is_enabled() -> bool:
@@ -132,6 +180,15 @@ async def redeem_code(
     code_str = req.code.strip()
     if not code_str:
         raise HTTPException(400, "code required")
+
+    # Rate limit BEFORE any DB work so a flood can't drive contention on
+    # ``enrollment_codes`` row locks. Log 429s so security can spot abuse.
+    rl_key = _redeem_rate_key(request, username)
+    if _redeem_rate_limited(rl_key):
+        logger.warning(
+            "enrollment.redeem rate-limited: key=%s username=%s", rl_key, username
+        )
+        raise HTTPException(429, "Too many enrollment attempts; try again shortly.")
 
     # Best-effort audit context (never fatal).
     src_ip: Optional[str] = None
@@ -334,4 +391,4 @@ async def revoke_code(
     return {"status": "revoked", "id": code_id}
 
 
-__all__ = ["router"]
+__all__ = ["router", "_redeem_rate_reset_for_tests"]

@@ -374,3 +374,63 @@ def test_admin_list_codes(monkeypatch):
     assert body["count"] == 1
     assert body["codes"][0]["code"] == "BEE-2026-ABC"
     assert body["codes"][0]["program_id"] == "bee_hiv_plus"
+
+
+# --------------------------------------------------------------------------- #
+# Tests: redeem rate limiting                                                 #
+# --------------------------------------------------------------------------- #
+
+
+def test_redeem_rate_limit_blocks_6th_attempt(monkeypatch):
+    """5 attempts/60s per (IP, username). 6th must be 429."""
+    monkeypatch.setenv("ENABLE_ENROLLMENT_API", "true")
+    state = _seed_state()
+    principal = {"username": "alice", "role": "CLIENT"}
+    app = _build_app(state, principal)
+    client = TestClient(app)
+
+    # First 5 attempts with an unknown code → 404 (rate check runs before DB
+    # lookup so this exercises the limiter, not code-validation logic).
+    for i in range(5):
+        r = client.post("/api/enrollment/redeem", json={"code": f"NOPE-{i}"})
+        assert r.status_code == 404, f"attempt {i+1}: {r.status_code} {r.text}"
+
+    # 6th attempt: over budget → 429 regardless of code validity.
+    r = client.post("/api/enrollment/redeem", json={"code": "BEE-2026-ABC"})
+    assert r.status_code == 429, r.text
+    assert "try again" in r.json()["detail"].lower()
+
+    # State must NOT show a redemption or program_id write.
+    assert state["users"]["alice"]["program_id"] is None
+    assert len(state["redemptions"]) == 0
+
+
+def test_redeem_rate_limit_isolates_users(monkeypatch):
+    """A different username on the same client host has its own budget."""
+    monkeypatch.setenv("ENABLE_ENROLLMENT_API", "true")
+
+    # Alice: burn through her budget.
+    state_a = _seed_state()
+    state_a["users"]["bob"] = {
+        "id": uuid.uuid4(),
+        "username": "bob",
+        "program_id": None,
+    }
+    app_a = _build_app(state_a, {"username": "alice", "role": "CLIENT"})
+    client_a = TestClient(app_a)
+    for i in range(6):
+        client_a.post("/api/enrollment/redeem", json={"code": f"NOPE-{i}"})
+    over = client_a.post("/api/enrollment/redeem", json={"code": "STILL-NOPE"})
+    assert over.status_code == 429, "alice should now be rate-limited"
+
+    # Bob (different username) on the same app must still be allowed. We reload
+    # the router module via _build_app to fake a fresh process for Bob only if
+    # we wanted cross-process isolation, but here we want the SAME limiter
+    # state and verify the key includes username.
+    from app.routers import enrollment_api
+
+    app_a.dependency_overrides[enrollment_api.get_current_user] = (
+        lambda: {"username": "bob", "role": "CLIENT"}
+    )
+    r_bob = client_a.post("/api/enrollment/redeem", json={"code": "NOPE-BOB"})
+    assert r_bob.status_code == 404, r_bob.text
