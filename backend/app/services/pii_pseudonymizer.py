@@ -59,6 +59,30 @@ def is_enabled() -> bool:
     return raw in ("1", "true", "yes", "on")
 
 
+def is_enabled_for(program_id: Optional[str]) -> bool:
+    """Cohort-gated flag check. Returns True only when the pseudonymizer
+    flag is on AND the caller belongs to a strict cohort (e.g. Bee HIV+).
+
+    Non-strict users (``program_id`` is None, unknown, or not in the strict
+    set) get zero pseudonymization even when the global flag is on — this
+    matches HIPAA §164.514(b) which requires pseudonymization for the PHI
+    population only, not the general user pool.
+
+    Fail policy: if ``cohort`` module is unavailable (import error), we
+    fall back to legacy global ``is_enabled()`` behavior so strict cohort
+    members retain their protection. Cosmetic PSEUDO tokens leaking to
+    non-cohort users is a UX bug; a HIPAA leak to a provider is a legal
+    breach — we bias toward the latter never happening.
+    """
+    if not is_enabled():
+        return False
+    try:
+        from app.services.cohort import is_strict_cohort
+    except Exception:
+        return True  # legacy behavior when cohort helper unavailable
+    return is_strict_cohort(program_id)
+
+
 def _hash(value: str, salt: str) -> str:
     h = hashlib.sha256(f"{salt}:{value}".encode("utf-8")).hexdigest()
     return h[:12]
@@ -129,6 +153,7 @@ def maybe_pseudonymize_prompt(
     system_prompt: str,
     user_prompt: str,
     known_names: Optional[List[str]] = None,
+    program_id: Optional[str] = None,
 ) -> "tuple[str, str, Optional[PseudonymBook]]":
     """Convenience wrapper for direct provider WebSocket call sites.
 
@@ -137,17 +162,31 @@ def maybe_pseudonymize_prompt(
     Realtime directly (they don't route through ``sovereign_chat_client``)
     so they need a lightweight, in-place pseudonymization primitive.
 
-    Returns ``(pseudo_system, pseudo_user, book_or_None)``. When the flag
-    is off, the originals pass through untouched and ``book`` is ``None``
-    so callers can cheaply skip the restore step:
+    ``program_id`` gates the pseudonymizer to strict cohorts only (see
+    ``is_enabled_for``). Passing ``None`` (or omitting) preserves legacy
+    behavior for callers that predate the cohort gate — those should be
+    migrated to pass the caller's ``program_id`` so non-cohort users are
+    not pseudonymized.
 
-        ps, pu, book = maybe_pseudonymize_prompt(sys_p, user_p, names)
+    Returns ``(pseudo_system, pseudo_user, book_or_None)``. When the flag
+    is off OR the user is outside the strict cohort, the originals pass
+    through untouched and ``book`` is ``None`` so callers can cheaply skip
+    the restore step:
+
+        ps, pu, book = maybe_pseudonymize_prompt(sys_p, user_p, names, program_id=pid)
         # ... send ps + pu to provider, collect response_text ...
         if book:
             response_text = restore_text(response_text, book)
     """
-    if not is_enabled():
-        return system_prompt, user_prompt, None
+    # program_id is optional for backwards compatibility. If callers pass
+    # ``None`` (opt-out of cohort gating), fall through to legacy global
+    # gate to avoid silently regressing existing strict-cohort call sites.
+    if program_id is None:
+        if not is_enabled():
+            return system_prompt, user_prompt, None
+    else:
+        if not is_enabled_for(program_id):
+            return system_prompt, user_prompt, None
     book = PseudonymBook()
     ps = pseudonymize_text(system_prompt, book, known_names) if system_prompt else system_prompt
     pu = pseudonymize_text(user_prompt, book, known_names) if user_prompt else user_prompt

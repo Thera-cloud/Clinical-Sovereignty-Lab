@@ -36,6 +36,7 @@ except ImportError:
 try:
     from app.services.pii_pseudonymizer import (
         is_enabled as _pseudo_enabled,
+        is_enabled_for as _pseudo_enabled_for,
         PseudonymBook as _PseudoBook,
         StreamRestorer as _PseudoStreamRestorer,
         pseudonymize_messages as _pseudo_messages,
@@ -43,6 +44,9 @@ try:
     )
 except ImportError:  # pragma: no cover
     def _pseudo_enabled() -> bool:
+        return False
+
+    def _pseudo_enabled_for(program_id) -> bool:
         return False
 
     _PseudoBook = None  # type: ignore
@@ -53,6 +57,19 @@ except ImportError:  # pragma: no cover
 
     def _pseudo_restore(text, book):
         return text
+
+
+def _pseudo_gate(program_id):
+    """Cohort-aware gate. Non-strict users get no pseudonymization.
+
+    ``program_id`` == None → legacy global behavior (backwards compat for
+    callers that haven't been migrated yet). Once all callers thread the
+    user's ``program_id`` through, this branch is dead code and the flag
+    check collapses to ``_pseudo_enabled_for(program_id)`` exclusively.
+    """
+    if program_id is None:
+        return _pseudo_enabled()
+    return _pseudo_enabled_for(program_id)
 
 # --- Provider config (captured at import, re-read lazily if empty) ---
 _SOVEREIGN_URL = os.getenv("SOVEREIGN_INFERENCE_URL", "")
@@ -494,6 +511,7 @@ async def generate_streaming(
     domain: str = "general",
     image_data_url: Optional[str] = None,
     known_names: Optional[List[str]] = None,
+    program_id: Optional[str] = None,
 ) -> AsyncIterator[Tuple[str, str]]:
     """
     Stream tokens from the ODPE-selected provider with automatic fallback.
@@ -517,9 +535,11 @@ async def generate_streaming(
     _t0 = time.monotonic()
     _chars_out = 0
 
-    # Slice 3: pseudonymize outbound / restore inbound. Both None when the
-    # flag is off, in which case the wire format is identical to legacy.
-    _pseudo_active = bool(_pseudo_enabled() and _PseudoBook is not None)
+    # Slice 3 + gap-fix (bee-hiv-only): pseudonymize outbound / restore
+    # inbound. Cohort-gated via program_id — non-strict users get zero
+    # pseudonymization even when the global flag is on. Both None when
+    # gate is closed, in which case wire format is identical to legacy.
+    _pseudo_active = bool(_pseudo_gate(program_id) and _PseudoBook is not None)
     _book = _PseudoBook() if _pseudo_active else None
     _restorer = _PseudoStreamRestorer(_book) if _pseudo_active else None
 
@@ -691,6 +711,7 @@ async def generate_complete(
     max_tokens: int = 1500,
     domain: str = "general",
     known_names: Optional[List[str]] = None,
+    program_id: Optional[str] = None,
 ) -> Tuple[str, str]:
     """
     Non-streaming generation with ODPE routing. Returns (full_text, provider).
@@ -705,8 +726,8 @@ async def generate_complete(
     seen = set()
     _t0 = time.monotonic()
 
-    # Slice 3: pseudonymize outbound / restore inbound (see generate_streaming).
-    _pseudo_active = bool(_pseudo_enabled() and _PseudoBook is not None)
+    # Slice 3 + gap-fix (bee-hiv-only): cohort-gated (see generate_streaming).
+    _pseudo_active = bool(_pseudo_gate(program_id) and _PseudoBook is not None)
     _book = _PseudoBook() if _pseudo_active else None
 
     def _restore(t: str) -> str:

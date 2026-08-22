@@ -9016,9 +9016,13 @@ class AzureCortex:
         print(f">>> [AI] Cortex Active for {profile.get('name')} ctx={_ctx} depth={_depth}")
         # QUANTUM-CRYSTAL-ARCH — Slice C (Bee HIV+): assemble known-name list for
         # provider pseudonymization. Only used when ENABLE_PROVIDER_PSEUDONYMIZATION=true.
+        # gap-fix (bee-hiv-only): _program_id gates pseudonymization to strict
+        # cohort members (see sovereign_chat_client._pseudo_gate). Normal users
+        # like non-HIV clients get zero pseudonymization end-to-end.
         _full_name = (profile.get("name") or "").strip()
         _first_name = _full_name.split()[0] if _full_name else ""
         _known_names = [n for n in {_full_name, _first_name} if n and len(n) >= 2]
+        _program_id = (profile.get("program_id") or "").strip() or None
         # gap-fix-b: for coaches, also pseudonymize their assigned clients' names. # QUANTUM-CRYSTAL-ARCH
         if profile.get("role") == "COACH":
             _assigned = set(profile.get("assigned_clients") or [])
@@ -10543,6 +10547,7 @@ class AzureCortex:
                         domain="clinical",
                         image_data_url=_vault_image_data_url,
                         known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C pseudonymization
+                        program_id=_program_id,  # gap-fix (bee-hiv-only): cohort-gate
                     ):
                         if _prev_prov and provider != _prev_prov:
                             full_response, _chunk_buf, _raw_accum = "", "", ""
@@ -10629,6 +10634,7 @@ class AzureCortex:
                                 temperature=_user_temp, max_tokens=_len_cap,  # FIX-LEN
                                 domain="clinical",
                                 known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C
+                                program_id=_program_id,  # gap-fix (bee-hiv-only)
                             )
                             if _fb_resp:
                                 full_response = _fb_resp
@@ -10667,6 +10673,7 @@ class AzureCortex:
                         temperature=_user_temp, max_tokens=_len_cap,  # FIX-LEN
                         domain="clinical",
                         known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C
+                        program_id=_program_id,  # gap-fix (bee-hiv-only)
                     )
                 except Exception as _sov_err:
                     print(f">>> [SOVEREIGN] Primary inference failed: {_sov_err}")
@@ -10739,6 +10746,7 @@ class AzureCortex:
                             _retry_prompt, user_text, temperature=_user_temp,
                             max_tokens=300, domain="clinical",
                             known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C
+                            program_id=_program_id,  # gap-fix (bee-hiv-only)
                         )
                     elif _race_inference:
                         full_response, _provider_used = await _race_inference(
@@ -10818,6 +10826,7 @@ class AzureCortex:
                         temperature=_user_temp, max_tokens=_len_cap,
                         domain="clinical",
                         known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C
+                        program_id=_program_id,  # gap-fix (bee-hiv-only)
                     )
                     if _tr_resp and len(_tr_resp.strip()) >= _orig_chars * 1.3:
                         full_response = _tr_resp
@@ -11700,10 +11709,18 @@ class AzureCortex:
         If P0/P1 crisis, provide 988 Lifeline naturally."""
 
             # gap-fix-c: pseudonymize family PII before Azure Realtime call. # QUANTUM-CRYSTAL-ARCH
+            # gap-fix (bee-hiv-only): cohort-gate — if ANY family member is in
+            # a strict cohort, pseudonymize the shared prompt (their PHI must
+            # not leak). Non-cohort families get zero pseudonymization.
             from app.services.pii_pseudonymizer import maybe_pseudonymize_prompt, restore_text
+            from app.services.cohort import is_strict_cohort as _is_strict
             _sn = [(p.get("name") or "").strip() for p in (family_profiles or [])]
             _sn = [n for n in _sn if n and len(n) >= 2]
-            _sps, _, _sbook = maybe_pseudonymize_prompt(system_prompt, "", known_names=_sn)
+            _sp_pids = [(p.get("program_id") or "").strip() for p in (family_profiles or [])]
+            _sanctuary_program_id = next((pid for pid in _sp_pids if pid and _is_strict(pid)), None)
+            _sps, _, _sbook = maybe_pseudonymize_prompt(
+                system_prompt, "", known_names=_sn, program_id=_sanctuary_program_id,
+            )
             try:
                 import aiohttp
                 response_text = ""
@@ -12020,11 +12037,20 @@ class AzureCortex:
         EMOTIONAL_TONE: [e.g., "vulnerable", "repair", "reaching out"]"""
 
             # gap-fix-c: pseudonymize target + other member names before Azure Realtime call. # QUANTUM-CRYSTAL-ARCH
+            # gap-fix (bee-hiv-only): cohort-gate — if target OR any other member
+            # is in a strict cohort, pseudonymize; otherwise pass through.
             from app.services.pii_pseudonymizer import maybe_pseudonymize_prompt, restore_text
+            from app.services.cohort import is_strict_cohort as _is_strict
             _gn = [target_name] + [(o.get("name") or "").strip() for o in (other_members or [])]
             _gn = [n for n in _gn if n and len(n) >= 2]
             _user_prompt_g = f"Generate a suggested response for {target_name}."
-            _gps, _gpu, _gbook = maybe_pseudonymize_prompt(system_prompt, _user_prompt_g, known_names=_gn)
+            _gp_pids = [(target_member.get("program_id") or "").strip()] + [
+                (o.get("program_id") or "").strip() for o in (other_members or [])
+            ]
+            _group_program_id = next((pid for pid in _gp_pids if pid and _is_strict(pid)), None)
+            _gps, _gpu, _gbook = maybe_pseudonymize_prompt(
+                system_prompt, _user_prompt_g, known_names=_gn, program_id=_group_program_id,
+            )
             try:
                 import aiohttp
                 response_text = ""
@@ -12379,12 +12405,16 @@ class AzureCortex:
         Keep responses warm, brief, and conversational. You're a supportive friend, not a lecturer."""
 
                 # gap-fix-c: pseudonymize member name before Azure Realtime call. # QUANTUM-CRYSTAL-ARCH
+                # gap-fix (bee-hiv-only): cohort-gate on member_profile.program_id.
                 from app.services.pii_pseudonymizer import maybe_pseudonymize_prompt, restore_text
                 _pn = [member_name] if member_name and len(member_name) >= 2 else []
                 _pf = member_name.split()[0] if member_name else ""
                 if _pf and len(_pf) >= 2 and _pf not in _pn:
                     _pn.append(_pf)
-                _pps, _ppu, _pbook = maybe_pseudonymize_prompt(system_prompt, user_prompt, known_names=_pn)
+                _pc_program_id = (member_profile.get("program_id") or "").strip() or None
+                _pps, _ppu, _pbook = maybe_pseudonymize_prompt(
+                    system_prompt, user_prompt, known_names=_pn, program_id=_pc_program_id,
+                )
                 try:
                     import aiohttp
                     response_text = ""
