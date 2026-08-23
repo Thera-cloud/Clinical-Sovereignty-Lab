@@ -139,17 +139,26 @@ def pseudonymize_text(
         text = pattern.sub(_sub, text)
 
     if known_names:
-        for name in known_names:
+        # gap-fix (bee-hiv-only): sort longest-first so "John D." fires before "John",
+        # and relax right-boundary for names ending in "." (initials like "John D.")
+        # so trailing-period tokens actually match. Prior version left "PSEUDO_ D."
+        # visible because \b requires word→non-word transition; after "." there is
+        # already a non-word char so \b was unsatisfied.
+        _names_sorted = sorted(
+            (n for n in known_names if n),
+            key=lambda s: -len(s.strip()),
+        )
+        for name in _names_sorted:
             name = (name or "").strip()
             if not name or len(name) < 2:
                 continue
             token = book.token_for("NAME", name)
-            text = re.sub(
-                rf"\b{re.escape(name)}\b",
-                token,
-                text,
-                flags=re.IGNORECASE,
-            )
+            if name.endswith("."):
+                # Right boundary: end-of-string OR whitespace OR punctuation
+                pattern = rf"\b{re.escape(name)}(?=\s|$|[,;:?!\"')\]])"
+            else:
+                pattern = rf"\b{re.escape(name)}\b"
+            text = re.sub(pattern, token, text, flags=re.IGNORECASE)
     return text
 
 

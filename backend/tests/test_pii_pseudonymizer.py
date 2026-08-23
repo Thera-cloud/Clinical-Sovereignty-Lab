@@ -345,3 +345,31 @@ def test_maybe_pseudonymize_prompt_force_regex_only_flag_off_passthrough(monkeyp
     assert ps == sys_p
     assert pu == "user text"
     assert book is None
+
+
+def test_known_names_trailing_initial_replaced_whole():
+    """Regression: name ending in "." (e.g. "John D.") must match end-to-end,
+    not leak the trailing initial. Prior version left "PSEUDO_ D." visible."""
+    book = PseudonymBook()
+    src = "Hello John D., welcome back."
+    out = pseudonymize_text(src, book, known_names=["John D.", "John"])
+    assert "John D." not in out
+    assert " D." not in out  # trailing initial must not leak
+    assert "PSEUDO_NAME_" in out
+    # Bare "John" elsewhere still matches
+    src2 = "Say hi to John please."
+    out2 = pseudonymize_text(src2, book, known_names=["John D.", "John"])
+    assert "John" not in out2
+    assert "PSEUDO_NAME_" in out2
+
+
+def test_known_names_longest_first_wins():
+    """Longer names are tried before shorter overlapping ones so "John D."
+    replaces "John D." wholesale rather than "John" firing first and leaving
+    " D." dangling."""
+    book = PseudonymBook()
+    src = "Meet John D. tomorrow."
+    out = pseudonymize_text(src, book, known_names=["John", "John D."])
+    # "John D." should have been matched as one unit; no trailing " D." leak
+    assert " D." not in out
+    assert "PSEUDO_NAME_" in out
