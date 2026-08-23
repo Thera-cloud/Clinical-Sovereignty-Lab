@@ -5142,7 +5142,13 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.currentUserProfile?['name'] ?? "SUBJECT",
+            Text(
+                (widget.currentUserProfile?['display_name_public'] as String?)
+                        ?.trim()
+                        .isNotEmpty ==
+                    true
+                    ? widget.currentUserProfile!['display_name_public']
+                    : (widget.currentUserProfile?['name'] ?? "SUBJECT"),
                 style: const TextStyle(
                     fontFamily: "Courier",
                     color: Colors.cyanAccent,

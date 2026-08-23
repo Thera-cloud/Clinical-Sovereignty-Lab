@@ -13807,6 +13807,19 @@ async def handle_client(websocket, path=None):
                     
                     _consent_needed = res.pop("_consent_update_needed", False)
                     _ethics_needed = res.pop("_coach_ethics_needed", False)
+                    # gap-fix (bee-hiv-only): mask header/recap name for strict cohorts.
+                    # Non-cohort users unaffected (helper returns None → field omitted).
+                    try:
+                        from app.services.display_name import public_display_name
+                        _dnp = public_display_name(
+                            res.get("name"),
+                            res.get("username"),
+                            (res.get("program_id") or "").strip() or None,
+                        )
+                        if _dnp:
+                            res["display_name_public"] = _dnp
+                    except Exception as _dnp_err:
+                        print(f"[bridge] display_name_public skip: {_dnp_err}")
                     login_payload = {"type": "login_success", "token": tok, "profile": res}
                     # SOVEREIGN-VOICE — attach session recovery token
                     if _gen_recovery:

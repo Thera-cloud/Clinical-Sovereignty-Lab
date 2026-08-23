@@ -5972,7 +5972,21 @@ async def sse_client_recap(request: Request, _user: dict = Depends(_sse_auth)):
     uname = _user.get("username") or uid
     pool = request.app.state.db_pool
     ids = [uid, uname] if uid != uname else [uid]
-    result: dict = {"user_name": _user.get("name") or uname, "journey": None, "active_quests": [], "active_missions": [], "workbooks": [], "crystal_insight": None, "last_panel_url": None, "widget_content": None}
+    # gap-fix (bee-hiv-only): mask recap "Welcome back, <name>" for strict cohorts.
+    _real_name = _user.get("name") or uname
+    _display_name = _real_name
+    try:
+        from app.services.display_name import public_display_name
+        _dnp = public_display_name(
+            _user.get("name"),
+            uname,
+            (_user.get("program_id") or "").strip() or None,
+        )
+        if _dnp:
+            _display_name = _dnp
+    except Exception:
+        pass
+    result: dict = {"user_name": _display_name, "journey": None, "active_quests": [], "active_missions": [], "workbooks": [], "crystal_insight": None, "last_panel_url": None, "widget_content": None}
     try:
         async with pool.acquire() as conn:
             j = await conn.fetchrow("SELECT current_biome, dominant_character FROM sse_user_journeys WHERE user_id = ANY($1) LIMIT 1", ids)
