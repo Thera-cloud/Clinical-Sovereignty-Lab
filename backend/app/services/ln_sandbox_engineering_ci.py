@@ -66,6 +66,32 @@ def _living_packs_root() -> Optional[Path]:
         return None
 
 
+def _scan_task_dirs(
+    root: Path,
+    names: List[str],
+    seen: set,
+    *,
+    prefixes: Optional[Tuple[str, ...]] = None,
+) -> None:
+    """Pick up on-disk packs the index omitted (e.g. micro_ab_ok_on_fail)."""
+    if not root or not root.is_dir():
+        return
+    try:
+        children = sorted(root.iterdir())
+    except OSError as e:
+        logger.warning("ln_sandbox_ci: scan %s failed: %s", root, e)
+        return
+    for child in children:
+        if not child.is_dir() or child.name.startswith("."):
+            continue
+        if prefixes and not child.name.startswith(prefixes):
+            continue
+        if child.name in seen or not (child / "task.json").is_file():
+            continue
+        names.append(child.name)
+        seen.add(child.name)
+
+
 def list_pack_names() -> List[str]:
     names: List[str] = []
     seen: set = set()
@@ -79,16 +105,15 @@ def list_pack_names() -> List[str]:
                     seen.add(n)
         except Exception as e:
             logger.warning("ln_sandbox_ci: index load failed: %s", e)
+        _scan_task_dirs(root, names, seen)
     living = _living_packs_root()
-    if living:
-        for child in sorted(living.iterdir()):
-            if (
-                child.name.startswith("living_")
-                and child.name not in seen
-                and (child / "task.json").is_file()
-            ):
-                names.append(child.name)
-                seen.add(child.name)
+    if living and living != root:
+        _scan_task_dirs(
+            living,
+            names,
+            seen,
+            prefixes=("living_", "catalog_"),
+        )
     return names
 
 

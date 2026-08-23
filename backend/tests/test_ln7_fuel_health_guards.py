@@ -102,3 +102,80 @@ def test_clear_stall_on_progress_parses_latched_count():
         assert await fuel._clear_stall_on_progress(conn_flat, "coding", 53, 53) is False
 
     asyncio.run(_run())
+
+
+def test_list_pack_names_includes_index_orphan_micro_ab():
+    ci = _load(
+        "app.services.ln_sandbox_engineering_ci",
+        APP / "services" / "ln_sandbox_engineering_ci.py",
+    )
+    names = ci.list_pack_names()
+    assert "micro_ab_ok_on_fail" in names
+    assert "asyncpg_cast" in names
+
+
+def test_catalog_slugs_unique_and_prefixed():
+    cat = _load(
+        "app.services.ln7_fuel_pack_catalog",
+        APP / "services" / "ln7_fuel_pack_catalog.py",
+    )
+    ok, dup = cat.catalog_slugs_unique()
+    assert ok, dup
+    names = cat.catalog_pack_names()
+    assert len(names) >= 20
+    assert all(n.startswith("catalog_") for n in names)
+    assert len(set(names)) == len(names)
+
+
+def test_catalog_golden_applies_on_tmp(tmp_path):
+    cat = _load(
+        "app.services.ln7_fuel_pack_catalog",
+        APP / "services" / "ln7_fuel_pack_catalog.py",
+    )
+    ci = _load(
+        "app.services.ln_sandbox_engineering_ci",
+        APP / "services" / "ln_sandbox_engineering_ci.py",
+    )
+    from shutil import copytree
+
+    for spec in cat.catalog_specs():
+        cat.materialize_catalog_pack(tmp_path, spec)
+        name = cat.catalog_pack_name(spec.slug)
+        assert (tmp_path / name / "task.json").is_file(), name
+        work = tmp_path / f"wd_{name}"
+        copytree(tmp_path / name, work)
+        broken = ci.run_pytest(work, "tests/test_fix.py")
+        assert not broken["passed"], name
+        ok, apply_notes = ci.apply_unified_diff(
+            work, (work / "golden.patch").read_text(encoding="utf-8")
+        )
+        assert ok, f"{name}: {apply_notes}"
+        fixed = ci.run_pytest(work, "tests/test_fix.py")
+        assert fixed["passed"], f"{name}: {fixed.get('log')}"
+
+
+def test_drip_disabled(monkeypatch):
+    drip = _load("app.jobs.ln7_fuel_drip", JOBS / "ln7_fuel_drip.py")
+    monkeypatch.setenv("LN7_FUEL_DRIP", "0")
+    assert drip.drip_enabled() is False
+    monkeypatch.setenv("LN7_FUEL_DRIP", "1")
+    assert drip.drip_enabled() is True
+    assert 1 <= drip.drip_limit() <= 24
+
+
+def test_drip_skips_at_target(monkeypatch):
+    import asyncio
+
+    drip = _load("app.jobs.ln7_fuel_drip", JOBS / "ln7_fuel_drip.py")
+    monkeypatch.setenv("LN7_FUEL_DRIP", "1")
+
+    async def _full(_pool):
+        return 300
+
+    drip._coding_trainable = _full  # type: ignore[method-assign]
+
+    async def _run():
+        out = await drip.run_fuel_organic_drip(object())
+        assert out.get("skipped") == "at_target"
+
+    asyncio.run(_run())

@@ -65,6 +65,18 @@ class Ln7OpsScheduler:
             if out.get("ok"):
                 self._last_fuel_date = day
                 logger.info("fuel gauge digest: %s", out.get("digest"))
+                try:
+                    from app.jobs.ln7_fuel_drip import run_fuel_organic_drip
+
+                    drip = await run_fuel_organic_drip(self._db_pool)
+                    logger.info(
+                        "fuel organic drip: skipped=%s pass=%s unused=%s",
+                        drip.get("skipped"),
+                        (drip.get("burst") or {}).get("pass"),
+                        drip.get("unused_before"),
+                    )
+                except Exception as e:
+                    logger.warning("fuel organic drip: %s", e)
 
         week = iso_week(now)
         if (

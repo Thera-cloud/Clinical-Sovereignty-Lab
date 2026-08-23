@@ -23,6 +23,7 @@
     "vectorize_outside_db",
     "no_iframe_embed",
     "coach_three_fields",
+    "micro_ab_ok_on_fail",
     "middleware_not_in_lifespan",
     "flutter_nocache_sw",
     "mut_off_by_one_range",
