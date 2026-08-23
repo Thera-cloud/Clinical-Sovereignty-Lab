@@ -591,6 +591,67 @@ async def promotion_review(
 
 
 # --------------------------------------------------------------------------- #
+# Fuel pack drafts — AlphaLN proposes; CEO accept materializes files only     #
+# --------------------------------------------------------------------------- #
+
+
+class PackDraftGenerateRequest(BaseModel):
+    count: int = Field(default=3, ge=1, le=4)
+
+
+class PackDraftReviewRequest(BaseModel):
+    decision: str = Field(..., pattern="^(accepted|rejected)$")
+    note: Optional[str] = Field(default=None, max_length=400)
+
+
+@router.post("/pack-drafts/generate")
+async def pack_drafts_generate(
+    req: PackDraftGenerateRequest,
+    request: Request,
+    principal: Dict[str, Any] = Depends(require_admin),
+):
+    _require_enabled()
+    username = _require_dr_nevedal1(principal)
+    db = _require_db(request)
+    await enforce_mfa_recent(db, principal)
+    from app.services import alphaln_pack_drafts
+    return await alphaln_pack_drafts.generate_drafts(
+        db, request.app.state, username, req.count,
+    )
+
+
+@router.get("/pack-drafts")
+async def pack_drafts_list(
+    request: Request,
+    principal: Dict[str, Any] = Depends(require_admin),
+    status: Optional[str] = None,
+    limit: int = 40,
+):
+    _require_enabled()
+    _require_dr_nevedal1(principal)
+    db = _require_db(request)
+    from app.services import alphaln_pack_drafts
+    return await alphaln_pack_drafts.list_drafts(db, status, limit)
+
+
+@router.post("/pack-drafts/{draft_id}/review")
+async def pack_drafts_review(
+    draft_id: int,
+    req: PackDraftReviewRequest,
+    request: Request,
+    principal: Dict[str, Any] = Depends(require_admin),
+):
+    _require_enabled()
+    username = _require_dr_nevedal1(principal)
+    db = _require_db(request)
+    await enforce_mfa_recent(db, principal)
+    from app.services import alphaln_pack_drafts
+    return await alphaln_pack_drafts.review_draft(
+        db, int(draft_id), username, req.decision, req.note,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Slice 10 — Health / invariants                                              #
 # --------------------------------------------------------------------------- #
 

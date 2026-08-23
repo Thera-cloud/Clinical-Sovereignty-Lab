@@ -293,6 +293,14 @@ def test_flag_off_returns_503_on_every_endpoint(monkeypatch):
         "/api/admin/alphaln/promotion/1/review",
         json={"decision": "rejected"},
     ).status_code == 503
+    assert client.post(
+        "/api/admin/alphaln/pack-drafts/generate", json={"count": 2}
+    ).status_code == 503
+    assert client.get("/api/admin/alphaln/pack-drafts").status_code == 503
+    assert client.post(
+        "/api/admin/alphaln/pack-drafts/1/review",
+        json={"decision": "rejected"},
+    ).status_code == 503
 
     # /health is deliberately available even when twin is off (invariant surface).
     r = client.get("/api/admin/alphaln/health")

@@ -11,7 +11,7 @@ Checks (see cursor rule ``alphaln-twin-isolation.mdc``):
 2. ``twin_dark_shipped`` — When ``ENABLE_ALPHALN_TWIN`` is off, the router
    surface exists but returns 503 to admin callers (checked by presence, not
    by HTTP; a full HTTP probe belongs in the trust auditor once we un-dark).
-3. ``schema_present`` — All five AlphaLN tables exist (421–426).
+3. ``schema_present`` — AlphaLN tables exist (421–428 including pack drafts).
 4. ``no_production_writes`` — Sanity check that AlphaLN tables have no rows
    whose ``metadata`` claims they were mirrored into ``conversation_history``.
 
@@ -39,6 +39,7 @@ _REQUIRED_TABLES = (
     "alphaln_trajectory_runs",
     "alphaln_sensor_joins",
     "alphaln_promotion_candidates",
+    "alphaln_pack_drafts",
 )
 
 

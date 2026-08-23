@@ -18,7 +18,7 @@ them without an explicit, dated approval from the user.
 
 ## Invariant 2 — AlphaLN never writes to production memory
 
-AlphaLN turns live in dedicated tables (migrations 421–426):
+AlphaLN turns live in dedicated tables (migrations 421–428):
 
 | Table | Migration | Purpose |
 |---|---|---|
@@ -29,6 +29,7 @@ AlphaLN turns live in dedicated tables (migrations 421–426):
 | `alphaln_trajectory_runs` / `alphaln_trajectory_nodes` | 424 | MCTS skeleton (Slice 6) |
 | `alphaln_sensor_joins` | 425 | biometric ingest schema only, no writes yet (Slice 7) |
 | `alphaln_promotion_candidates` | 426 | paved-and-locked promotion ledger (Slice 8) |
+| `alphaln_pack_drafts` | 428 | CI pack specs; human accept required before drip can see them |
 
 AlphaLN code MUST NOT write to any of these production surfaces:
 
@@ -38,6 +39,7 @@ AlphaLN code MUST NOT write to any of these production surfaces:
 - `nevedal_metrics_v2`
 - `pmb_reports_*`
 - `sensitive_bridge_*`
+- `outcome_envelope` (pack drafts never mint fuel rows; drip stays unused-only)
 
 If a future slice wants to reuse memory, it goes through a **read-only** view
 of the production tables, not a write path.
@@ -83,7 +85,8 @@ Any change to the AlphaLN surface must keep the offline tests in
 - happy path: create session → send message → read transcript → end session
 - rate limit trips after `_MSG_RATE_MAX` sends inside `_MSG_RATE_WINDOW_S`
 - Slices 3–8 endpoints (`observations`, `gym/*`, `trajectory/*`,
-  `promotion/*`) return 503 when `ENABLE_ALPHALN_TWIN` is off
+  `promotion/*`) and pack-drafts (`pack-drafts/*`) return 503 when
+  `ENABLE_ALPHALN_TWIN` is off
 
 ## Invariant 8 — Shadow observer never writes back
 
@@ -123,3 +126,10 @@ crystal tables. A human operator must promote out-of-band.
 score AlphaLN endpoints until this rule is amended. AlphaLN health lives at
 `/api/admin/alphaln/health` and in container logs — never in the sovereign
 trust report.
+
+## Invariant 13 — Pack drafts never auto-fuel
+
+`alphaln_pack_drafts` stores specs only. `generate` writes draft rows.
+`review` with `accepted` materializes `catalog_aln_*` under the writable
+packs root. It MUST NOT call `run_fuel_volume_burst`, drip, or INSERT
+`outcome_envelope`. Replay stays CEO-only.

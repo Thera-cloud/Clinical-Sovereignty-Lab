@@ -125,6 +125,7 @@ body { font-family: var(--font-body); background: var(--bg-void); color: var(--t
       <div class="tab" data-tab="gym" onclick="switchTab('gym')">Gym</div>
       <div class="tab" data-tab="trajectory" onclick="switchTab('trajectory')">Trajectory</div>
       <div class="tab" data-tab="promotion" onclick="switchTab('promotion')">Promotion</div>
+      <div class="tab" data-tab="packs" onclick="switchTab('packs')">Pack drafts</div>
       <div class="tab" data-tab="health" onclick="switchTab('health')">Health</div>
     </div>
 
@@ -206,6 +207,20 @@ body { font-family: var(--font-body); background: var(--bg-void); color: var(--t
           <button class="btn btn-primary" onclick="loadPromotionCandidates()">Load</button>
         </div>
         <div id="promTable" style="margin-top:14px;"></div>
+      </div>
+    </div>
+
+    <!-- Pack drafts — AlphaLN proposes; you accept before drip can see them -->
+    <div id="view-packs" class="tab-view">
+      <div class="ops-card">
+        <h4>CI pack drafts</h4>
+        <div class="hint">AlphaLN writes specs only. Accept publishes <code>catalog_aln_*</code> for nightly drip. Reject drops the draft. Does not mint fuel rows or replay packs.</div>
+        <div class="ops-row" style="margin-top:12px;">
+          <input id="packCount" type="number" min="1" max="4" value="3" placeholder="count">
+          <button class="btn btn-primary" onclick="generatePackDrafts()">Draft packs</button>
+          <button class="btn" onclick="loadPackDrafts()">Refresh</button>
+        </div>
+        <div id="packDraftsBox" style="margin-top:14px;"></div>
       </div>
     </div>
 
@@ -400,6 +415,7 @@ function switchTab(name){
   else if (name==='gym' && !document.getElementById('gymTable').innerHTML) loadGymRuns();
   else if (name==='trajectory' && !document.getElementById('trajTable').innerHTML) loadTrajectoryRuns();
   else if (name==='promotion' && !document.getElementById('promTable').innerHTML) loadPromotionCandidates();
+  else if (name==='packs' && !document.getElementById('packDraftsBox').innerHTML) loadPackDrafts();
   else if (name==='health' && !document.getElementById('healthBox').innerHTML) loadHealth();
 }
 
@@ -532,6 +548,56 @@ async function reviewCandidate(id, decision){
     await apiFetch('/api/admin/alphaln/promotion/'+encodeURIComponent(id)+'/review',
       { method:'POST', body: JSON.stringify({ decision: decision, approval_note: note }) });
     await loadPromotionCandidates();
+  } catch(e){ alert(e.message); }
+}
+
+// ---- Pack drafts ------------------------------------------------------------
+async function generatePackDrafts(){
+  var n = Math.max(1, Math.min(4, parseInt(document.getElementById('packCount').value)||3));
+  var host = document.getElementById('packDraftsBox');
+  host.innerHTML = '<div class="hint">Drafting… AlphaLN is writing specs, not fuel.</div>';
+  try {
+    var data = await apiFetch('/api/admin/alphaln/pack-drafts/generate', {
+      method: 'POST',
+      body: JSON.stringify({ count: n }),
+    });
+    if (!data.ok) { alert(data.reason || 'draft failed'); }
+    await loadPackDrafts();
+  } catch(e){ alert(e.message); }
+}
+async function loadPackDrafts(){
+  var host = document.getElementById('packDraftsBox');
+  host.innerHTML = '<div class="hint">Loading…</div>';
+  try {
+    var data = await apiFetch('/api/admin/alphaln/pack-drafts?limit=40');
+    var rows = data.drafts || [];
+    if (!rows.length){ host.innerHTML = '<div class="hint">No drafts yet.</div>'; return; }
+    var html = '<table class="ops-table"><thead><tr><th>ID</th><th>Slug</th><th>Title</th><th>Status</th><th></th></tr></thead><tbody>';
+    for (var i=0;i<rows.length;i++){
+      var r = rows[i];
+      var st = r.status || '';
+      var kind = st==='accepted'?'ok':(st==='rejected'?'err':'warn');
+      var actions = '';
+      if (st==='draft') {
+        actions = '<button class="btn btn-primary" style="padding:2px 8px;font-size:10px;" onclick="reviewPackDraft('+r.id+',\'accepted\')">Accept</button> '
+               + '<button class="btn btn-red" style="padding:2px 8px;font-size:10px;" onclick="reviewPackDraft('+r.id+',\'rejected\')">Reject</button>';
+      }
+      html += '<tr><td>'+escapeHtml(String(r.id||''))+'</td><td>'+escapeHtml(r.slug||'')+'</td><td>'+escapeHtml(_short(r.title||'',48))+'</td><td>'+_chip(st,kind)+'</td><td>'+actions+'</td></tr>';
+    }
+    html += '</tbody></table><div class="hint" style="margin-top:8px;">Accept writes a pack file. Nightly drip may use unused accepted packs. No replay.</div>';
+    host.innerHTML = html;
+  } catch(e){
+    if (String(e.message||'').indexOf('disabled')>=0) _flagOffBox(host, 'ENABLE_ALPHALN_TWIN is off.');
+    else host.innerHTML = '<div class="hint" style="color:var(--red);">'+escapeHtml(e.message)+'</div>';
+  }
+}
+async function reviewPackDraft(id, decision){
+  var note = decision==='rejected' ? (prompt('Reject reason (optional):') || '') : '';
+  try {
+    var data = await apiFetch('/api/admin/alphaln/pack-drafts/'+encodeURIComponent(id)+'/review',
+      { method:'POST', body: JSON.stringify({ decision: decision, note: note }) });
+    if (!data.ok) alert(data.reason || 'review failed');
+    await loadPackDrafts();
   } catch(e){ alert(e.message); }
 }
 
