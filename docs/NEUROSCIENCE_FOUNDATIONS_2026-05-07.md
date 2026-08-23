@@ -137,6 +137,8 @@ Synaptic strengthening requires concurrent pre/postsynaptic activation ("cells t
 
 **Honest scope**: That generated panels actually engage the default mode network or right-hemisphere imagistic processing in users is **not measured**. The design rationale is sound; outcome data is needed.
 
+**Index case (2026-08-22)**: A daily panel emitted high-specificity feline / cultural-protector language from sparse identity cues before the client verbally disclosed that mapping. The **method** (retrieval-conditioned metaphorical generation) is predesigned; the **instance** is an emergent collision — expected class of output, unexpected instance. Do not treat such hits as episodic recall by Little Nate or as enablement of undisclosed-trauma recovery. Full record: `docs/THERA_WORLD_INDEX_CASE_EMERGENT_COLLISION_2026-08-22.md`.
+
 ### 3.2 Coherence Lattice and Coherence Engine
 
 **Description**: A Nevedal-engine driven measurement of dyadic coherence between user and Nate (or user and family member), used to modulate response register, story-engine pacing, and family-sanctuary visualizations.

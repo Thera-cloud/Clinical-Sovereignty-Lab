@@ -41,6 +41,8 @@ IMMUTABLE_TYPES = (
     # retained_until default). Protect mirrored skyeye_activity rows so the
     # daily prune cannot evict the audit trail before its retention window.
     "sensitive_bridge_log_event",
+    # Thera-World research index cases (architecture / patent / Nate accuracy).
+    "thera_world_index_case",
 )
 
 # QUANTUM-CRYSTAL-ARCH: WIRE_WHAT_EXISTS Commit 4 STEP 4 — shadow confidence
