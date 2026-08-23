@@ -232,13 +232,22 @@ def test_maybe_pseudonymize_prompt_flag_off_returns_originals():
 
 
 def test_maybe_pseudonymize_prompt_flag_on_scrubs_and_shares_book(monkeypatch):
-    """With the flag on, PII in either prompt is replaced by tokens from
-    a SHARED book so a token in the system prompt matches the same
-    substitution in the user prompt (deterministic per-book)."""
+    """With the flag on AND a strict cohort program_id, PII in either
+    prompt is replaced by tokens from a SHARED book so a token in the
+    system prompt matches the same substitution in the user prompt
+    (deterministic per-book).
+
+    gap-fix (bee-hiv-only): pseudonymization is cohort-gated. Tests must
+    pass a strict ``program_id`` (see ``services.cohort``); flag alone is
+    insufficient. Non-cohort behavior is covered by
+    ``test_maybe_pseudonymize_prompt_flag_on_non_cohort_returns_originals``.
+    """
     monkeypatch.setenv("ENABLE_PROVIDER_PSEUDONYMIZATION", "true")
     sys_p = "Coach context includes " + E_ALICE + " and client Alice."
     user_p = "Draft a reply to " + E_ALICE + " for Alice."
-    ps, pu, book = maybe_pseudonymize_prompt(sys_p, user_p, known_names=["Alice"])
+    ps, pu, book = maybe_pseudonymize_prompt(
+        sys_p, user_p, known_names=["Alice"], program_id="bee_hiv_plus"
+    )
     assert E_ALICE not in ps and E_ALICE not in pu
     assert "Alice" not in ps and "Alice" not in pu
     assert "PSEUDO_EMAIL_" in ps and "PSEUDO_EMAIL_" in pu
@@ -256,7 +265,9 @@ def test_maybe_pseudonymize_prompt_restore_round_trip(monkeypatch):
     monkeypatch.setenv("ENABLE_PROVIDER_PSEUDONYMIZATION", "true")
     sys_p = "System note about " + E_BOB
     user_p = "User asks about Bob and " + E_BOB
-    ps, pu, book = maybe_pseudonymize_prompt(sys_p, user_p, known_names=["Bob"])
+    ps, pu, book = maybe_pseudonymize_prompt(
+        sys_p, user_p, known_names=["Bob"], program_id="bee_hiv_plus"
+    )
     # Simulate a provider response that echoes back tokens from both prompts.
     fake_response = f"Told {pu.split()[-1]} the info from {ps.split()[-1]}."
     restored = restore_text(fake_response, book)
@@ -267,6 +278,70 @@ def test_maybe_pseudonymize_prompt_empty_strings(monkeypatch):
     """Empty prompts must not crash and must produce no book allocation
     cost when the flag is off (fast path)."""
     monkeypatch.setenv("ENABLE_PROVIDER_PSEUDONYMIZATION", "true")
-    ps, pu, book = maybe_pseudonymize_prompt("", "", known_names=[])
+    ps, pu, book = maybe_pseudonymize_prompt(
+        "", "", known_names=[], program_id="bee_hiv_plus"
+    )
     assert ps == "" and pu == ""
     assert book is not None  # still allocated for consistency on the on-path
+
+
+# ------------------------------------------------------------------- #
+# gap-fix (bee-hiv-only): cohort-gating regression tests.             #
+# ------------------------------------------------------------------- #
+
+def test_maybe_pseudonymize_prompt_flag_on_non_cohort_returns_originals(monkeypatch):
+    """With the flag ON but no strict program_id, non-cohort users
+    (e.g. general population like 'John D.') must NOT see pseudonymization.
+
+    Regression test for the 2026-08-22 leak where PSEUDO_NAME_* tokens
+    surfaced in non-cohort UI because the ``program_id is None`` path
+    fell back to the global flag.
+    """
+    monkeypatch.setenv("ENABLE_PROVIDER_PSEUDONYMIZATION", "true")
+    sys_p = "Coach context includes " + E_ALICE + " and client Alice."
+    user_p = "Reply to Alice about " + E_ALICE + "."
+    # program_id=None (default) — general user pool.
+    ps, pu, book = maybe_pseudonymize_prompt(sys_p, user_p, known_names=["Alice"])
+    assert ps == sys_p
+    assert pu == user_p
+    assert book is None
+    # Also test unknown program_id explicitly (not in STRICT_COHORT_PROGRAM_IDS).
+    ps2, pu2, book2 = maybe_pseudonymize_prompt(
+        sys_p, user_p, known_names=["Alice"], program_id="general_pool"
+    )
+    assert ps2 == sys_p
+    assert pu2 == user_p
+    assert book2 is None
+
+
+def test_maybe_pseudonymize_prompt_force_regex_only_bypasses_cohort(monkeypatch):
+    """``force_regex_only=True`` scrubs categorical PII regardless of
+    cohort (used by voice pipeline — audio output, names left intact).
+
+    Names must NOT be substituted even when provided; only regex-matched
+    direct identifiers (email/phone/SSN/UUID/HWID/DOB/ADDR).
+    """
+    monkeypatch.setenv("ENABLE_PROVIDER_PSEUDONYMIZATION", "true")
+    sys_p = "Speak with " + E_ALICE + " about Alice"
+    ps, _, book = maybe_pseudonymize_prompt(
+        sys_p, "", known_names=["Alice"], force_regex_only=True
+    )
+    assert E_ALICE not in ps
+    assert "PSEUDO_EMAIL_" in ps
+    # Names intentionally preserved for audio quality.
+    assert "Alice" in ps
+    assert "PSEUDO_NAME_" not in ps
+    assert book is not None
+
+
+def test_maybe_pseudonymize_prompt_force_regex_only_flag_off_passthrough(monkeypatch):
+    """When the global flag is OFF, ``force_regex_only`` still respects
+    the master kill switch and passes originals through untouched."""
+    monkeypatch.delenv("ENABLE_PROVIDER_PSEUDONYMIZATION", raising=False)
+    sys_p = "Speak with " + E_ALICE
+    ps, pu, book = maybe_pseudonymize_prompt(
+        sys_p, "user text", known_names=["Alice"], force_regex_only=True
+    )
+    assert ps == sys_p
+    assert pu == "user text"
+    assert book is None

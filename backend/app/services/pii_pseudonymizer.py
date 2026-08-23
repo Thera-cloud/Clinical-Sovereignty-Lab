@@ -68,18 +68,22 @@ def is_enabled_for(program_id: Optional[str]) -> bool:
     matches HIPAA §164.514(b) which requires pseudonymization for the PHI
     population only, not the general user pool.
 
-    Fail policy: if ``cohort`` module is unavailable (import error), we
-    fall back to legacy global ``is_enabled()`` behavior so strict cohort
-    members retain their protection. Cosmetic PSEUDO tokens leaking to
-    non-cohort users is a UX bug; a HIPAA leak to a provider is a legal
-    breach — we bias toward the latter never happening.
+    Fail policy: if the ``cohort`` module is unavailable (import error),
+    the gate is CLOSED. Prior versions fell back to global ``is_enabled()``
+    to preserve legacy behavior; that path was the root cause of the
+    2026-08-22 leak (PSEUDO_NAME_* tokens surfacing in non-cohort UI).
+    Missing cohort metadata is an infra bug — fix the deploy, don't
+    silently regress the safety property.
     """
     if not is_enabled():
         return False
     try:
         from app.services.cohort import is_strict_cohort
-    except Exception:
-        return True  # legacy behavior when cohort helper unavailable
+    except Exception:  # pragma: no cover — infra failure, fail closed
+        logger.error(
+            "pii_pseudonymizer: cohort module unavailable; failing gate CLOSED"
+        )
+        return False
     return is_strict_cohort(program_id)
 
 
@@ -154,6 +158,8 @@ def maybe_pseudonymize_prompt(
     user_prompt: str,
     known_names: Optional[List[str]] = None,
     program_id: Optional[str] = None,
+    *,
+    force_regex_only: bool = False,
 ) -> "tuple[str, str, Optional[PseudonymBook]]":
     """Convenience wrapper for direct provider WebSocket call sites.
 
@@ -163,30 +169,39 @@ def maybe_pseudonymize_prompt(
     so they need a lightweight, in-place pseudonymization primitive.
 
     ``program_id`` gates the pseudonymizer to strict cohorts only (see
-    ``is_enabled_for``). Passing ``None`` (or omitting) preserves legacy
-    behavior for callers that predate the cohort gate — those should be
-    migrated to pass the caller's ``program_id`` so non-cohort users are
-    not pseudonymized.
+    ``is_enabled_for``). ``None`` means "no known strict cohort" → gate
+    CLOSED. HIPAA §164.514(b) requires pseudonymization for PHI
+    populations only; non-cohort users must not see PSEUDO_* tokens.
 
-    Returns ``(pseudo_system, pseudo_user, book_or_None)``. When the flag
-    is off OR the user is outside the strict cohort, the originals pass
-    through untouched and ``book`` is ``None`` so callers can cheaply skip
-    the restore step:
+    ``force_regex_only=True`` bypasses the cohort gate and applies ONLY
+    categorical PII regex substitution (emails, phones, SSNs, UUIDs,
+    HWIDs, DOBs, addresses). Reserved for provider-boundary callers that
+    must never leak categorical PII regardless of cohort (voice pipeline
+    ``twilio_grok_xtts_pipeline`` — audio output is spoken, so PSEUDO
+    tokens never surface visually; names are intentionally not swapped).
+    Requires the global ``ENABLE_PROVIDER_PSEUDONYMIZATION`` flag to be
+    on; when off the originals pass through untouched.
+
+    Returns ``(pseudo_system, pseudo_user, book_or_None)``. When the
+    gate is closed the originals pass through and ``book`` is ``None``:
 
         ps, pu, book = maybe_pseudonymize_prompt(sys_p, user_p, names, program_id=pid)
         # ... send ps + pu to provider, collect response_text ...
         if book:
             response_text = restore_text(response_text, book)
     """
-    # program_id is optional for backwards compatibility. If callers pass
-    # ``None`` (opt-out of cohort gating), fall through to legacy global
-    # gate to avoid silently regressing existing strict-cohort call sites.
-    if program_id is None:
+    # gap-fix (bee-hiv-only): closed the None → global trapdoor.
+    # Non-cohort users (program_id None/empty/unknown) never pseudonymize.
+    if force_regex_only:
         if not is_enabled():
             return system_prompt, user_prompt, None
-    else:
-        if not is_enabled_for(program_id):
-            return system_prompt, user_prompt, None
+        # Categorical-PII only: pass known_names=None so no name swap.
+        book = PseudonymBook()
+        ps = pseudonymize_text(system_prompt, book, None) if system_prompt else system_prompt
+        pu = pseudonymize_text(user_prompt, book, None) if user_prompt else user_prompt
+        return ps, pu, book
+    if not is_enabled_for(program_id):
+        return system_prompt, user_prompt, None
     book = PseudonymBook()
     ps = pseudonymize_text(system_prompt, book, known_names) if system_prompt else system_prompt
     pu = pseudonymize_text(user_prompt, book, known_names) if user_prompt else user_prompt

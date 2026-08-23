@@ -62,13 +62,14 @@ except ImportError:  # pragma: no cover
 def _pseudo_gate(program_id):
     """Cohort-aware gate. Non-strict users get no pseudonymization.
 
-    ``program_id`` == None → legacy global behavior (backwards compat for
-    callers that haven't been migrated yet). Once all callers thread the
-    user's ``program_id`` through, this branch is dead code and the flag
-    check collapses to ``_pseudo_enabled_for(program_id)`` exclusively.
+    ``program_id == None`` means "no known strict cohort" → gate CLOSED.
+    Prior versions had a back-compat trapdoor that fell back to the global
+    flag when ``program_id`` was None; that leaked ``PSEUDO_NAME_*`` tokens
+    into non-cohort users' UI (observed 2026-08-22 for John D., program_id
+    empty). HIPAA §164.514(b) only requires pseudonymization for PHI
+    populations — non-cohort users must remain unaffected.
     """
-    if program_id is None:
-        return _pseudo_enabled()
+    # gap-fix (bee-hiv-only): closed the None → global trapdoor.
     return _pseudo_enabled_for(program_id)
 
 # --- Provider config (captured at import, re-read lazily if empty) ---

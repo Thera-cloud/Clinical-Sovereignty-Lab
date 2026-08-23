@@ -421,7 +421,14 @@ async def _open_grok_session(system_prompt: str, silence_duration_ms: int = 700)
     # only category PII (email/phone/SSN/UUID/HWID/DOB/ADDR) is redacted. Zero-cost when flag off.
     try:
         from app.services.pii_pseudonymizer import maybe_pseudonymize_prompt
-        _si_prompt, _, _ = maybe_pseudonymize_prompt(system_prompt or "", "", known_names=[])
+        # gap-fix (bee-hiv-only): voice pipeline scrubs categorical PII
+        # (email/phone/SSN/UUID/HWID/DOB/ADDR) UNIVERSALLY — output is
+        # audio, PSEUDO tokens never surface visually. Names intentionally
+        # NOT swapped (audio quality). Cohort gate is bypassed for this
+        # provider-boundary safety net; controlled by global flag only.
+        _si_prompt, _, _ = maybe_pseudonymize_prompt(
+            system_prompt or "", "", known_names=None, force_regex_only=True,
+        )
     except Exception:
         _si_prompt = system_prompt
     print(f"[VOICE] Connecting to Azure Foundry Realtime: {_AZ_REALTIME_URL[:60]}...")
