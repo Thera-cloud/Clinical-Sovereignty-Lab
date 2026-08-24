@@ -77,6 +77,11 @@ body { font-family: var(--font-body); background: var(--bg-void); color: var(--t
 .ops-table th { text-align: left; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
 .ops-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--text-primary); font-family: var(--font-mono); }
 .ops-table tr:hover td { background: var(--bg-elevated); }
+.pack-preview { margin-top: 14px; padding: 14px; border: 1px solid var(--border-active); border-radius: 8px; background: var(--bg-elevated); }
+.pack-preview h5 { font-family: var(--font-display); font-size: 16px; color: var(--gold-bright); margin-bottom: 10px; }
+.pack-preview ol { margin: 0 0 0 18px; color: var(--text-primary); font-size: 13px; line-height: 1.55; }
+.pack-preview ol li { margin-bottom: 10px; }
+.pack-preview ol li strong { color: var(--gold); display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
 .chip { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; text-transform: uppercase; }
 .chip.ok { background: var(--green-dim); color: var(--green); }
 .chip.warn { background: rgba(201,169,98,0.15); color: var(--gold); }
@@ -221,6 +226,7 @@ body { font-family: var(--font-body); background: var(--bg-void); color: var(--t
           <button class="btn" onclick="loadPackDrafts()">Refresh</button>
         </div>
         <div id="packDraftsBox" style="margin-top:14px;"></div>
+        <div id="packDraftPreview" class="pack-preview" style="display:none;"></div>
       </div>
     </div>
 
@@ -565,26 +571,66 @@ async function generatePackDrafts(){
     await loadPackDrafts();
   } catch(e){ alert(e.message); }
 }
+var _packDraftsById = {};
+function _fallbackPackPreview(r){
+  var slug = r.slug || '';
+  var name = r.pack_name || ('catalog_aln_' + slug);
+  var rel = r.rel || 'broken/task.py';
+  var needle = r.looks_needle || '';
+  var st = r.status || 'draft';
+  var request = (r.title || slug) + '. Incident file ' + rel + '. LN must change only what makes looks_fixed(run()) true' + (needle ? ' (fixed-only marker: ' + needle + ').' : '.');
+  var after;
+  if (st === 'accepted') {
+    after = 'Already published as ' + name + ' on the writable packs root. Nightly unused-only drip (after 06:00 UTC, limit 8) may run it as a coding shadow fork. Accept did not mint fuel rows.';
+  } else if (st === 'rejected') {
+    after = 'Rejected. No pack file was written. Drip cannot see this spec.';
+  } else {
+    after = 'Accept writes unused inventory ' + name + ' under DATA_DIR/ln_sandbox_ci_packs. Reject writes nothing. Neither mints outcome_envelope. Next drip after 06:00 UTC can pick unused accepted packs (limit 8).';
+  }
+  return {
+    request: request,
+    after: after,
+    benefit: 'Grows PRE6 coding fuel (#15) when drip runs this unique pack. No replay. Does not close #9 / #16 / R4 or promote AlphaLN.'
+  };
+}
+function showPackDraftPreview(id){
+  var r = _packDraftsById[String(id)];
+  var box = document.getElementById('packDraftPreview');
+  if (!r || !box) return;
+  var p = r.preview && r.preview.request ? r.preview : _fallbackPackPreview(r);
+  box.style.display = 'block';
+  box.innerHTML = '<h5>Preview · '+escapeHtml(r.slug||'')+' · '+_chip(r.status||'', r.status==='accepted'?'ok':(r.status==='rejected'?'err':'warn'))+'</h5>'
+    + '<ol>'
+    + '<li><strong>1. Request</strong>'+escapeHtml(p.request||'')+'</li>'
+    + '<li><strong>2. What happens after</strong>'+escapeHtml(p.after||'')+'</li>'
+    + '<li><strong>3. Benefit</strong>'+escapeHtml(p.benefit||'')+'</li>'
+    + '</ol>';
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
 async function loadPackDrafts(){
   var host = document.getElementById('packDraftsBox');
+  var preview = document.getElementById('packDraftPreview');
   host.innerHTML = '<div class="hint">Loading…</div>';
+  if (preview) { preview.style.display = 'none'; preview.innerHTML = ''; }
   try {
     var data = await apiFetch('/api/admin/alphaln/pack-drafts?limit=40');
     var rows = data.drafts || [];
+    _packDraftsById = {};
     if (!rows.length){ host.innerHTML = '<div class="hint">No drafts yet.</div>'; return; }
     var html = '<table class="ops-table"><thead><tr><th>ID</th><th>Slug</th><th>Title</th><th>Status</th><th></th></tr></thead><tbody>';
     for (var i=0;i<rows.length;i++){
       var r = rows[i];
+      _packDraftsById[String(r.id)] = r;
       var st = r.status || '';
       var kind = st==='accepted'?'ok':(st==='rejected'?'err':'warn');
-      var actions = '';
+      var actions = '<button class="btn" style="padding:2px 8px;font-size:10px;" onclick="showPackDraftPreview('+r.id+')">Preview</button> ';
       if (st==='draft') {
-        actions = '<button class="btn btn-primary" style="padding:2px 8px;font-size:10px;" onclick="reviewPackDraft('+r.id+',\'accepted\')">Accept</button> '
+        actions += '<button class="btn btn-primary" style="padding:2px 8px;font-size:10px;" onclick="reviewPackDraft('+r.id+',\'accepted\')">Accept</button> '
                + '<button class="btn btn-red" style="padding:2px 8px;font-size:10px;" onclick="reviewPackDraft('+r.id+',\'rejected\')">Reject</button>';
       }
       html += '<tr><td>'+escapeHtml(String(r.id||''))+'</td><td>'+escapeHtml(r.slug||'')+'</td><td>'+escapeHtml(_short(r.title||'',48))+'</td><td>'+_chip(st,kind)+'</td><td>'+actions+'</td></tr>';
     }
-    html += '</tbody></table><div class="hint" style="margin-top:8px;">Accept writes a pack file. Nightly drip may use unused accepted packs. No replay.</div>';
+    html += '</tbody></table><div class="hint" style="margin-top:8px;">Preview explains the request, what Accept does, and the fuel benefit. Accept writes a pack file. Nightly drip may use unused accepted packs. No replay.</div>';
     host.innerHTML = html;
   } catch(e){
     if (String(e.message||'').indexOf('disabled')>=0) _flagOffBox(host, 'ENABLE_ALPHALN_TWIN is off.');

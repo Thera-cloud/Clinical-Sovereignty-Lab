@@ -103,6 +103,28 @@ def test_review_and_generate_never_call_burst():
     assert "nate_intelligence_crystals" not in src
 
 
+def test_build_preview_has_three_parts():
+    m = _load()
+    prev = m.build_preview(
+        {"rel": "broken/dotenv_load.py", "looks_needle": "load_dotenv()"},
+        slug="dotenv_no_override",
+        title="load_dotenv must not override Docker env",
+        status="draft",
+    )
+    assert set(prev) == {"request", "after", "benefit"}
+    assert "broken/dotenv_load.py" in prev["request"]
+    assert "catalog_aln_dotenv_no_override" in prev["after"]
+    assert "PRE6" in prev["benefit"]
+    accepted = m.build_preview(
+        {"rel": "broken/dotenv_load.py", "looks_needle": "load_dotenv()"},
+        slug="dotenv_no_override",
+        title="load_dotenv must not override Docker env",
+        status="accepted",
+        pack_name="catalog_aln_dotenv_no_override",
+    )
+    assert "Already published" in accepted["after"]
+
+
 def test_materialize_writes_catalog_aln_prefix(tmp_path):
     m = _load()
     spec, err = m.validate_spec(

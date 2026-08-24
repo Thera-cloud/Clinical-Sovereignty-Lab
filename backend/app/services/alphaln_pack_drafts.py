@@ -286,9 +286,55 @@ async def list_drafts(db_pool, status: Optional[str] = None, limit: int = 40) ->
                 "looks_needle": spec.get("looks_needle"),
                 "broken": spec.get("broken"),
                 "fixed": spec.get("fixed"),
+                "preview": build_preview(
+                    spec,
+                    slug=str(r["slug"]),
+                    title=str(r["title"]),
+                    status=str(r["status"]),
+                    pack_name=r["pack_name"],
+                ),
             }
         )
     return {"drafts": drafts}
+
+
+def build_preview(
+    spec: Dict[str, Any],
+    *,
+    slug: str,
+    title: str,
+    status: str,
+    pack_name: Optional[str] = None,
+) -> Dict[str, str]:
+    """Three-part brief: request, after accept/reject, benefit."""
+    rel = str((spec or {}).get("rel") or "broken/task.py")
+    needle = str((spec or {}).get("looks_needle") or "").strip()
+    name = pack_name or f"{PACK_PREFIX}{slug}"
+    request = (
+        f"{title}. Incident file {rel}. "
+        "LN must change only what makes looks_fixed(run()) true"
+        + (f" (fixed-only marker: {needle})." if needle else ".")
+    )
+    if status == "accepted":
+        after = (
+            f"Already published as {name} on the writable packs root. "
+            "Nightly unused-only drip (after 06:00 UTC, limit 8) may run it "
+            "as a coding shadow fork. Accept did not mint fuel rows."
+        )
+    elif status == "rejected":
+        after = "Rejected. No pack file was written. Drip cannot see this spec."
+    else:
+        after = (
+            f"Accept writes unused inventory {name} under "
+            "DATA_DIR/ln_sandbox_ci_packs. Reject writes nothing. "
+            "Neither mints outcome_envelope. Next drip after 06:00 UTC "
+            "can pick unused accepted packs (limit 8)."
+        )
+    benefit = (
+        "Grows PRE6 coding fuel (#15) when drip runs this unique pack. "
+        "No replay. Does not close #9 / #16 / R4 or promote AlphaLN."
+    )
+    return {"request": request, "after": after, "benefit": benefit}
 
 
 def materialize_aln_pack(root: Path, spec: Dict[str, str]) -> Dict[str, Any]:
