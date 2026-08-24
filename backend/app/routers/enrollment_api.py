@@ -269,11 +269,23 @@ async def redeem_code(
                 code_row["id"],
             )
             await conn.execute(
-                "UPDATE users SET program_id = $1 WHERE id = $2",
+                """UPDATE users SET
+                     program_id = $1,
+                     profile_data = jsonb_set(
+                         COALESCE(profile_data, '{}'::jsonb),
+                         '{program_id}',
+                         to_jsonb($1::text)
+                     )
+                   WHERE id = $2""",
                 program_id,
                 user_row["id"],
             )
 
+    try:
+        from app.services.program_isolation import invalidate_user_cache
+        invalidate_user_cache(username)
+    except Exception:
+        pass
     logger.info(
         "enrollment: %s redeemed code=%s into program=%s",
         username,

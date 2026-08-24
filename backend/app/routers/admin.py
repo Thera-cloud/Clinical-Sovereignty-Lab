@@ -5989,6 +5989,22 @@ async def sse_client_recap(request: Request, _user: dict = Depends(_sse_auth)):
     result: dict = {"user_name": _display_name, "journey": None, "active_quests": [], "active_missions": [], "workbooks": [], "crystal_insight": None, "last_panel_url": None, "widget_content": None}
     try:
         async with pool.acquire() as conn:
+            try:
+                _pid_row = await conn.fetchrow(
+                    "SELECT program_id, name FROM users "
+                    "WHERE LOWER(username) = LOWER($1) AND deleted_at IS NULL",
+                    uname,
+                )
+                if _pid_row is not None:
+                    from app.services.display_name import public_display_name
+                    _dnp = public_display_name(
+                        _pid_row["name"] or _user.get("name"),
+                        uname,
+                        (_pid_row["program_id"] or "").strip() or None,
+                    )
+                    result["user_name"] = _dnp or (_pid_row["name"] or _real_name)
+            except Exception:
+                pass
             j = await conn.fetchrow("SELECT current_biome, dominant_character FROM sse_user_journeys WHERE user_id = ANY($1) LIMIT 1", ids)
             idf = await conn.fetchrow("SELECT archetype_hint, archetype_image_url FROM sse_identity_forge WHERE user_id = ANY($1) LIMIT 1", ids)
             pcnt = await conn.fetchval("SELECT count(*) FROM sse_panel_log WHERE user_id = ANY($1)", ids)

@@ -55,6 +55,7 @@ import 'screens/intake_form_coach_panel.dart';
 import 'screens/daily_reconnect_screen.dart';
 import 'screens/training_ground_screen.dart';
 import 'config/app_config.dart';
+import 'services/tombstone_sync.dart';
 import 'services/vault_entitlement.dart';
 import 'widgets/vault_attachment_button.dart';
 import 'widgets/upload_progress_indicator.dart';
@@ -1993,6 +1994,12 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         _addSystemMsg("Neural Link Established.");
 
         final profile = data['profile'] ?? {};
+        final tombstoneTok = (data['token'] ??
+                (profile is Map ? profile['token'] : null) ??
+                widget.currentUserProfile?['token'] ??
+                '')
+            .toString();
+        unawaited(syncDataTombstones(tombstoneTok));
         _updateMetricsFromProfile(profile);
         _requestMetrics();
         // Self-heal: if the first get_metrics reply is missed (raced ahead of

@@ -155,6 +155,24 @@ class LocalHistoryService {
   }
 
   /// Returns entries created after [isoTimestamp] for delta sync to server.
+  /// Drop local rows older than [isoTimestamp] (ISO-8601). Used when
+  /// the server reports conversation_history tombstones so the device
+  /// does not keep rows the retention policy already deleted.
+  Future<int> deleteOlderThan(String isoTimestamp) async {
+    if (_disabled) return 0;
+    try {
+      final db = await _getDatabase();
+      return await db.delete(
+        'history',
+        where: 'created_at < ?',
+        whereArgs: [isoTimestamp],
+      );
+    } catch (e) {
+      print('[LocalHistoryService] deleteOlderThan failed: $e');
+      return 0;
+    }
+  }
+
   Future<List<Map<String, dynamic>>> getEntriesAfter(String isoTimestamp, {int limit = 200}) async {
     if (_disabled) return [];
     try {

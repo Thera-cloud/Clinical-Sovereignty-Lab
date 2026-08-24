@@ -33,9 +33,49 @@ class _FakeRow(dict):
     uses mapping style (``row["c"]``) so a plain dict is sufficient."""
 
 
+class _FakeTxn:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
 class _FakeConn:
     def __init__(self, state: dict):
         self.state = state
+
+    def transaction(self):
+        return _FakeTxn()
+
+    def _stale_rows(self, sql_norm: str, args):
+        days = int(args[0])
+        for table in ("conversation_history", "nevedal_metrics"):
+            if f"FROM {table}" not in sql_norm:
+                continue
+            rows = self.state["rows"][table]
+            if "NOT (" in sql_norm:
+                ids = set(args[1])
+                matched = [
+                    r for r in rows
+                    if r["user_id"] not in ids and r["age_days"] > days
+                ]
+            elif "user_id = ANY" in sql_norm:
+                ids = set(args[1])
+                matched = [
+                    r for r in rows
+                    if r["user_id"] in ids and r["age_days"] > days
+                ]
+            else:
+                matched = [r for r in rows if r["age_days"] > days]
+            return [
+                _FakeRow(
+                    row_id=f"{table}:{r['user_id']}:{r['age_days']}",
+                    user_id=r["user_id"],
+                )
+                for r in matched
+            ]
+        return None
 
     async def fetch(self, sql: str, *args):
         self.state["queries"].append(("fetch", sql, args))
@@ -53,6 +93,10 @@ class _FakeConn:
                 for u in self.state["users"]
                 if u["program_id"] == program_id
             ]
+        if "AS row_id" in sql_norm:
+            selected = self._stale_rows(sql_norm, args)
+            if selected is not None:
+                return selected
         raise AssertionError(f"unexpected fetch: {sql_norm[:80]}")
 
     async def fetchrow(self, sql: str, *args):
@@ -89,12 +133,20 @@ class _FakeConn:
         raise AssertionError(f"unexpected fetchrow: {sql_norm[:80]}")
 
     async def execute(self, sql: str, *args):
-        # If the dry-run path ever issues a DELETE/INSERT, the test
-        # blows up here.
         self.state["writes"].append(("execute", sql, args))
-        raise AssertionError(
-            f"dry-run path must not execute writes: {sql[:80]}"
-        )
+        if not self.state.get("allow_writes"):
+            raise AssertionError(
+                f"dry-run path must not execute writes: {sql[:80]}"
+            )
+        return "DELETE 0"
+
+    async def executemany(self, sql: str, seq):
+        self.state["writes"].append(("executemany", sql, seq))
+        if not self.state.get("allow_writes"):
+            raise AssertionError(
+                f"dry-run path must not executemany: {sql[:80]}"
+            )
+        return "INSERT 0"
 
 
 class _FakePoolCtx:
@@ -122,6 +174,9 @@ class _FakePool:
 
 
 def _reload_retention_policy(env: dict):
+    for flag in ("ENABLE_RETENTION_ENFORCEMENT", "ENABLE_RETENTION_DRYRUN"):
+        if flag not in env:
+            os.environ.pop(flag, None)
     for k, v in env.items():
         if v is None:
             os.environ.pop(k, None)
@@ -379,3 +434,49 @@ def test_dryrun_issues_zero_deletes(tmp_path):
     fetchrow_sqls = [q[1] for q in state["queries"] if q[0] == "fetchrow"]
     assert any("conversation_history" in s for s in fetchrow_sqls)
     assert any("nevedal_metrics" in s for s in fetchrow_sqls)
+
+
+def test_enforcement_forever_deletes_only_cohort(tmp_path):
+    """Global forever + enforcement ON: delete Bee 30d rows only, never joe."""
+    _reload_retention_policy(
+        {
+            "DATA_DIR": str(tmp_path),
+            "ENABLE_RETENTION_ENFORCEMENT": "true",
+            "ENABLE_RETENTION_DRYRUN": None,
+        }
+    )
+    state = _seed_state()
+    state["allow_writes"] = True
+    agent = _make_agent(state)
+    result = asyncio.run(agent._enforce_retention_policy())
+    assert result.get("dryrun") is not True
+    assert result["deleted"] == 2
+    assert result["per_table"]["conversation_history"] == 1  # bee1 35d
+    assert result["per_table"]["nevedal_metrics"] == 1  # HW_BEE1 40d
+    deleted_users = []
+    for kind, sql, payload in state["writes"]:
+        if kind == "executemany":
+            deleted_users.extend(row[0] for row in payload)
+    assert "bee1" in deleted_users
+    assert "HW_BEE1" in deleted_users
+    assert "joe" not in deleted_users
+    assert "HW_JOE" not in deleted_users
+
+
+def test_enforcement_no_cohort_forever_is_zero(tmp_path):
+    """No program_id column + forever → 0 deletes (do not wipe everyone)."""
+    _reload_retention_policy(
+        {
+            "DATA_DIR": str(tmp_path),
+            "ENABLE_RETENTION_ENFORCEMENT": "true",
+            "ENABLE_RETENTION_DRYRUN": None,
+        }
+    )
+    state = _seed_state()
+    state["no_program_id_column"] = True
+    state["allow_writes"] = True
+    agent = _make_agent(state)
+    result = asyncio.run(agent._enforce_retention_policy())
+    assert result["deleted"] == 0
+    assert all(n == 0 for n in result["per_table"].values())
+    assert state["writes"] == []

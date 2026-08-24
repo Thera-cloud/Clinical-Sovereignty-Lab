@@ -10,6 +10,9 @@ from pathlib import Path
 
 
 def _reload_module(env: dict):
+    for flag in ("ENABLE_RETENTION_ENFORCEMENT", "ENABLE_RETENTION_DRYRUN"):
+        if flag not in env:
+            os.environ.pop(flag, None)
     for k, v in env.items():
         if v is None:
             os.environ.pop(k, None)

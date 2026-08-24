@@ -468,11 +468,10 @@ class DatabaseMaintenanceAgent:
         if not enforcement:
             return {"summary": "disabled (flag off)", "deleted": 0}
 
-        days = get_retention_days()
-        if days is None:
-            return {"summary": "disabled (policy=forever)", "deleted": 0}
-
-        BATCH_LIMIT = 5000
+        # Cohort-scoped: Bee HIV+ uses 30d; non-cohort uses global policy.
+        # Global "forever" (None) ⇒ non-cohort rows are never deleted.
+        global_days = get_retention_days()
+        STRICT_DAYS = 30
         deleted_total = 0
         per_table: dict[str, int] = {}
         targets = [
@@ -482,58 +481,117 @@ class DatabaseMaintenanceAgent:
 
         try:
             async with self.db_pool.acquire() as conn:
+                cohort_ids = await self._retention_cohort_identifiers(
+                    conn, "bee_hiv_plus"
+                )
                 for table, id_expr, user_col, ts_col in targets:
-                    try:
-                        async with conn.transaction():
-                            rows = await conn.fetch(
-                                f"""
-                                SELECT {id_expr} AS row_id, {user_col} AS user_id
-                                FROM {table}
-                                WHERE {ts_col} < NOW() - ($1 || ' days')::interval
-                                LIMIT {BATCH_LIMIT}
-                                """,
-                                str(days),
-                            )
-                            if not rows:
-                                per_table[table] = 0
-                                continue
-
-                            row_ids = [r["row_id"] for r in rows]
-                            await conn.execute(
-                                f"""
-                                DELETE FROM {table}
-                                WHERE {id_expr} = ANY($1::text[])
-                                """,
-                                row_ids,
-                            )
-                            await conn.executemany(
-                                """
-                                INSERT INTO data_tombstones
-                                    (user_id, table_name, row_id, reason)
-                                VALUES ($1, $2, $3, 'retention_policy')
-                                """,
-                                [
-                                    (str(r["user_id"] or ""), table, str(r["row_id"]))
-                                    for r in rows
-                                ],
-                            )
-                            per_table[table] = len(rows)
-                            deleted_total += len(rows)
-                    except Exception as exc:
-                        logger.warning(
-                            "retention: table=%s failed: %s", table, exc
+                    n_c = 0
+                    n_n = 0
+                    if cohort_ids:
+                        n_c = await self._retention_delete_batch(
+                            conn, table, id_expr, user_col, ts_col,
+                            STRICT_DAYS, cohort_ids, invert=False,
                         )
+                    if global_days is not None:
+                        n_n = await self._retention_delete_batch(
+                            conn, table, id_expr, user_col, ts_col,
+                            global_days, cohort_ids, invert=True,
+                        )
+                    if n_c < 0 or n_n < 0:
                         per_table[table] = -1
+                    else:
+                        per_table[table] = n_c + n_n
+                        deleted_total += n_c + n_n
         except Exception as exc:
             logger.warning("retention: enforcement pass failed: %s", exc)
             return {"summary": f"error: {exc}", "deleted": deleted_total}
 
+        global_label = "forever" if global_days is None else f"{global_days}d"
         detail = ", ".join(f"{t}={n}" for t, n in per_table.items())
         return {
-            "summary": f"enforced @ {days}d — {detail}",
+            "summary": (
+                f"enforced cohort=30d global={global_label} — {detail}"
+            ),
             "deleted": deleted_total,
             "per_table": per_table,
         }
+
+    async def _retention_delete_batch(
+        self, conn, table: str, id_expr: str, user_col: str, ts_col: str,
+        days: int, cohort_ids: list, invert: bool,
+    ) -> int:
+        """Delete one (table × cohort-or-noncohort) batch + tombstones.
+
+        ``invert=False``: only ``user_id`` in ``cohort_ids`` (strict 30d).
+        ``invert=True``: everyone else, using the global window. Empty
+        ``cohort_ids`` + invert means the whole table (all users non-cohort).
+        ``invert=False`` + empty ids is a no-op.
+        """
+        if not days:
+            return 0
+        if not invert and not cohort_ids:
+            return 0
+        BATCH_LIMIT = 5000
+        try:
+            async with conn.transaction():
+                if invert and cohort_ids:
+                    rows = await conn.fetch(
+                        f"""
+                        SELECT {id_expr} AS row_id, {user_col} AS user_id
+                        FROM {table}
+                        WHERE {ts_col} < NOW() - ($1 || ' days')::interval
+                          AND NOT ({user_col} = ANY($2::text[]))
+                        LIMIT {BATCH_LIMIT}
+                        """,
+                        str(days),
+                        cohort_ids,
+                    )
+                elif invert:
+                    rows = await conn.fetch(
+                        f"""
+                        SELECT {id_expr} AS row_id, {user_col} AS user_id
+                        FROM {table}
+                        WHERE {ts_col} < NOW() - ($1 || ' days')::interval
+                        LIMIT {BATCH_LIMIT}
+                        """,
+                        str(days),
+                    )
+                else:
+                    rows = await conn.fetch(
+                        f"""
+                        SELECT {id_expr} AS row_id, {user_col} AS user_id
+                        FROM {table}
+                        WHERE {ts_col} < NOW() - ($1 || ' days')::interval
+                          AND {user_col} = ANY($2::text[])
+                        LIMIT {BATCH_LIMIT}
+                        """,
+                        str(days),
+                        cohort_ids,
+                    )
+                if not rows:
+                    return 0
+                row_ids = [r["row_id"] for r in rows]
+                await conn.execute(
+                    f"DELETE FROM {table} WHERE {id_expr} = ANY($1::text[])",
+                    row_ids,
+                )
+                await conn.executemany(
+                    """
+                    INSERT INTO data_tombstones
+                        (user_id, table_name, row_id, reason)
+                    VALUES ($1, $2, $3, 'retention_policy')
+                    """,
+                    [
+                        (str(r["user_id"] or ""), table, str(r["row_id"]))
+                        for r in rows
+                    ],
+                )
+                return len(rows)
+        except Exception as exc:
+            logger.warning(
+                "retention: table=%s invert=%s failed: %s", table, invert, exc
+            )
+            return -1
 
     # ------------------------------------------------------------------ #
     # Slice B: cohort-aware DRY-RUN report.                              #

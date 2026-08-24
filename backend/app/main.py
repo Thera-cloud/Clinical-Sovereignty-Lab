@@ -2057,9 +2057,14 @@ async def lifespan(app: FastAPI):
     try:
         from app.services.db_maintenance_agent import DatabaseMaintenanceAgent
         _db_maintenance = DatabaseMaintenanceAgent(db_pool, interval_seconds=86400)
-        await _db_maintenance.start()
-        app.state.db_maintenance_agent = _db_maintenance
-        print("   ✅ DatabaseMaintenanceAgent started (24h cycle, stagger 90s)")
+        # QUANTUM-CRYSTAL-ARCH: clone shares primary PG; skip so we do not dual-prune.
+        if _is_clone:
+            app.state.db_maintenance_agent = _db_maintenance
+            print("   ⚡ DatabaseMaintenanceAgent skipped (IS_CLONE)")
+        else:
+            await _db_maintenance.start()
+            app.state.db_maintenance_agent = _db_maintenance
+            print("   ✅ DatabaseMaintenanceAgent started (24h cycle, stagger 90s)")
     except Exception as dbm_err:
         print(f"   ⚠️  DatabaseMaintenanceAgent init failed: {dbm_err}")
 

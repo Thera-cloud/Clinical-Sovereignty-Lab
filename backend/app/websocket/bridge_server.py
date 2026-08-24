@@ -13807,6 +13807,27 @@ async def handle_client(websocket, path=None):
                     
                     _consent_needed = res.pop("_consent_update_needed", False)
                     _ethics_needed = res.pop("_coach_ethics_needed", False)
+                    # gap-fix (bee-hiv-only): column users.program_id wins over
+                    # stale JSONB/cache so header + chat see cohort after redeem.
+                    try:
+                        if db_pool:
+                            _pid_ident = (res.get("username") or d.get("username") or "").strip()
+                            if _pid_ident:
+                                async with db_pool.acquire() as _pid_conn:
+                                    _pid_row = await _pid_conn.fetchrow(
+                                        "SELECT program_id FROM users "
+                                        "WHERE LOWER(username) = LOWER($1) "
+                                        "AND deleted_at IS NULL",
+                                        _pid_ident,
+                                    )
+                                if _pid_row is not None:
+                                    _col_pid = (_pid_row["program_id"] or "").strip()
+                                    if _col_pid:
+                                        res["program_id"] = _col_pid
+                                    else:
+                                        res.pop("program_id", None)
+                    except Exception as _pid_err:
+                        print(f"[bridge] program_id overlay skip: {_pid_err}")
                     # gap-fix (bee-hiv-only): mask header/recap name for strict cohorts.
                     # Non-cohort users unaffected (helper returns None → field omitted).
                     try:

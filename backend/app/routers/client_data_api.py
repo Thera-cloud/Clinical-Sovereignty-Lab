@@ -614,7 +614,9 @@ async def get_data_tombstones(
     if not db_pool:
         raise HTTPException(503, "Database unavailable")
     username = (user.get("username") or "").strip() if isinstance(user, dict) else ""
-    if not username:
+    hw_id = (user.get("hardware_id") or "").strip() if isinstance(user, dict) else ""
+    identities = [i for i in dict.fromkeys([username, hw_id]) if i]
+    if not identities:
         raise HTTPException(400, "identity missing")
 
     limit = max(1, min(int(limit or 500), 5000))
@@ -633,11 +635,11 @@ async def get_data_tombstones(
             """
             SELECT id, table_name, row_id, reason, tombstoned_at
             FROM data_tombstones
-            WHERE user_id = $1 AND tombstoned_at > $2
+            WHERE user_id = ANY($1::text[]) AND tombstoned_at > $2
             ORDER BY tombstoned_at ASC
             LIMIT $3
             """,
-            username,
+            identities,
             since_dt,
             limit,
         )

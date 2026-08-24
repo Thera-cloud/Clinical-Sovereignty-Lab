@@ -365,6 +365,8 @@ class UserStore:
                         consent_version = COALESCE(EXCLUDED.consent_version, users.consent_version),
                         subscription_status = COALESCE(users.subscription_status, EXCLUDED.subscription_status),
                         family_id = COALESCE(EXCLUDED.family_id, users.family_id),
+                        -- Enrollment owns program_id; bridge cache must never clear it.
+                        program_id = users.program_id,
                         -- QUANTUM-CRYSTAL-ARCH: merge sensitive_bridge so existing PG wins on
                         -- overlapping keys (coach REST e.g. framework_preferences / crystal graph
                         -- opt-in); bridge-only keys under sensitive_bridge are preserved.
@@ -414,7 +416,8 @@ class UserStore:
                                                 'parent_id',
                                                 'head_of_household_id',
                                                 'guardian_id',
-                                                'linked_by'
+                                                'linked_by',
+                                                'program_id'
                                             ])
                                         ),
                                         '{}'::jsonb
@@ -673,6 +676,16 @@ class UserStore:
         _stripe_cus = row.get("stripe_customer_id")
         if _stripe_cus:
             profile["stripe_customer_id"] = _stripe_cus
+        # Enrollment writes users.program_id (column). JSONB/cache may lag.
+        # Column is source of truth; empty column clears a stale JSONB value
+        # so non-cohort users never inherit a leftover program_id.
+        _row_keys = set(row.keys()) if hasattr(row, "keys") else set()
+        if "program_id" in _row_keys:
+            _pid = row.get("program_id")
+            if _pid:
+                profile["program_id"] = _pid
+            else:
+                profile.pop("program_id", None)
 
         # Build the registry key (matches old JSON key format)
         role = profile.get("role", "CLIENT").lower()
