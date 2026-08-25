@@ -9867,7 +9867,43 @@ class AzureCortex:
         except Exception as e:
             print(f">>> [WORKBOOK] Query failed: {e}")
             workbook_guidance = ""
-                
+
+        # QUANTUM-CRYSTAL-ARCH: workbook intent classifier + assertive stance addon
+        # Feature-flagged; additive only. See workbook_intent_classifier.py and
+        # ln_response_stance.py. Contract: does NOT modify existing prompt; adds
+        # one system block appended after COACHING WORKBOOK TOOLS.
+        _coaching_stance_block = ""
+        _coaching_intent_dict: dict = {}
+        try:
+            from app.services.workbook_intent_classifier import classify as _wb_classify
+            from app.services.ln_response_stance import stance_block as _wb_stance, is_enabled as _wb_stance_on
+            from app.services.workbook_catalog import catalog_titles as _wb_titles
+            if _wb_stance_on():
+                _recent = []
+                try:
+                    if isinstance(memory_context, str) and memory_context:
+                        _recent = [ln for ln in memory_context.splitlines() if ln.strip()][-6:]
+                except Exception:
+                    _recent = []
+                _plan_locked = bool(profile.get("skill_plan_locked") if isinstance(profile, dict) else False)
+                _intent = _wb_classify(
+                    user_text,
+                    recent_texts=_recent,
+                    skill_plan_locked=_plan_locked,
+                    catalog=_wb_titles(max_files=32),
+                )
+                _coaching_intent_dict = _intent.to_dict()
+                _coaching_stance_block = _wb_stance(_intent)
+                if _coaching_intent_dict.get("method") and _coaching_intent_dict.get("method") != "none":
+                    print(
+                        f">>> [COACHING-INTENT] method={_coaching_intent_dict['method']} "
+                        f"action={_coaching_intent_dict['action']} "
+                        f"conf={_coaching_intent_dict['confidence']}"
+                    )
+        except Exception as _e:
+            print(f">>> [COACHING-INTENT] classifier disabled: {_e}")
+            _coaching_stance_block = ""
+
         # === VAULT CONTENT INJECTION === # QUANTUM-CRYSTAL-ARCH
         vault_context = ""
         _vault_image_data_url = None  # SOVEREIGN-VOICE: vision block for image vault items
@@ -9981,7 +10017,9 @@ class AzureCortex:
 
         COACHING WORKBOOK TOOLS (methods a client may consider — not therapy; cite the file and walk them through only if they want it):
         {workbook_guidance if workbook_guidance else "None available"}
-        
+
+        {_coaching_stance_block}
+
         {"DOJO TRAINING MODE ACTIVE - This is a coach training simulation. The coach is practicing therapeutic techniques. Provide authentic simulated responses based on the persona indicated. After each response, offer constructive feedback on the coachs approach, referencing workbook guidance where relevant. Help the coach develop clinical skills through experiential learning." if is_dojo_simulation else ""}
 
         CONVERSATION MEMORY (grouped by session — most recent last):
