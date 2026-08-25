@@ -88,7 +88,10 @@ def dispatch_enforcement_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any
             )
             if pub.get("status") == "ok":
                 published += 1
-            task_id = str((pub.get("task") or {}).get("task_id") or "")
+            auditor_slug = "".join(
+                ch if ch.isalnum() or ch in "._-" else "_" for ch in auditor
+            )[:64]
+            task_id = f"trust:{cat}:{auditor_slug}"
             # QUANTUM-CRYSTAL-ARCH — English ask for CEO (ceo_inbox_notify expands further)
             ask = (
                 f"Review {auditor} in Sovereign Command Trust: category {cat}. "

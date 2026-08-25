@@ -806,6 +806,23 @@ async def decide_ceo_inbox_items(
                     db_pool, payload, approved_by=approver or "dashboard_ceo"
                 )
             ack = ack_ceo_inbox(item_id=iid)
+            try:
+                from app.websocket.cli_dual_coo import (
+                    ceo_issue_fingerprint,
+                    mark_ceo_issue_decided,
+                )
+
+                fp = str(it.get("issue_fp") or "")
+                if not fp:
+                    fp = ceo_issue_fingerprint(
+                        title=str(it.get("title") or ""),
+                        origin=str(it.get("origin") or ""),
+                        task_id=str(it.get("task_id") or ""),
+                        payload=payload,
+                    )
+                mark_ceo_issue_decided(fp)
+            except Exception as e:
+                logger.debug("ceo issue suppress inbox_only: %s", e)
             results.append({
                 "item_id": iid,
                 "proposal_id": None,
@@ -879,6 +896,23 @@ async def handle_ceo_decision(
         "RETRACT",
     ):
         ack_result = ack_ceo_inbox(item_id=item_id)
+        try:
+            from app.websocket.cli_dual_coo import (
+                ceo_issue_fingerprint,
+                mark_ceo_issue_decided,
+            )
+
+            fp = str(meta.get("ceo_issue_fp") or "")
+            if not fp:
+                fp = ceo_issue_fingerprint(
+                    title=str(proposal.get("title") or ""),
+                    origin=str(meta.get("ceo_origin") or ""),
+                    task_id=str(meta.get("ceo_task_id") or ""),
+                    payload=payload,
+                )
+            mark_ceo_issue_decided(fp)
+        except Exception as e:
+            logger.debug("ceo issue suppress: %s", e)
 
     apply_result: Dict[str, Any] = {}
     if decision == "APPROVE" and db_pool:
@@ -1205,6 +1239,17 @@ async def _insert_ceo_proposal(db_pool, item: Dict[str, Any]) -> Optional[Dict[s
     title_with_token = f"{title} [#ceo{short}]"[:300]
 
     brief = build_ceo_review_brief(item)
+    try:
+        from app.websocket.cli_dual_coo import ceo_issue_fingerprint
+
+        issue_fp = str(item.get("issue_fp") or "") or ceo_issue_fingerprint(
+            title=title,
+            origin=str(item.get("origin") or ""),
+            task_id=str(item.get("task_id") or ""),
+            payload=item.get("payload") if isinstance(item.get("payload"), dict) else {},
+        )
+    except Exception:
+        issue_fp = str(item.get("issue_fp") or "")
     meta = {
         "ceo_inbox": True,
         "ceo_inbox_item_id": item.get("id"),
@@ -1212,6 +1257,7 @@ async def _insert_ceo_proposal(db_pool, item: Dict[str, Any]) -> Optional[Dict[s
         "ceo_payload": item.get("payload") or {},
         "ceo_origin": item.get("origin"),
         "ceo_task_id": item.get("task_id"),
+        "ceo_issue_fp": issue_fp,
         "ceo_risk": risk,
         "details": {
             "objective": brief["objective"],
@@ -1252,6 +1298,31 @@ async def _insert_ceo_proposal(db_pool, item: Dict[str, Any]) -> Optional[Dict[s
                     logger.info(
                         "ceo_inbox_notify: pending proposal exists for item %s",
                         inbox_item_id[:24],
+                    )
+                    return None
+            if issue_fp:
+                recent = await conn.fetchrow(
+                    """
+                    SELECT proposal_id, status FROM strategy_proposals
+                    WHERE metadata->>'ceo_issue_fp' = $1
+                      AND (
+                        status IN ('pending_approval', 'proposed')
+                        OR (
+                          status IN ('approved', 'rejected')
+                          AND COALESCE(updated_at, created_at)
+                              > NOW() - INTERVAL '7 days'
+                        )
+                      )
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    issue_fp,
+                )
+                if recent:
+                    logger.info(
+                        "ceo_inbox_notify: skip issue_fp %s (status=%s)",
+                        issue_fp,
+                        recent["status"],
                     )
                     return None
             row = await conn.fetchrow(

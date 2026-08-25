@@ -41,6 +41,7 @@ class TestAuditorBusDispatch(unittest.TestCase):
         self.assertIn("dispatch_enforcement_actions", src)
         self.assertIn("ops_fix", src)
         self.assertIn("publish_task", src)
+        self.assertIn("trust:{cat}:{auditor_slug}", src)
         self.assertIn("_ALL_BUS_CATEGORIES", src)
         self.assertIn("ENDPOINT_DOWN", src)
         self.assertIn("DATA_PIPELINE", src)
@@ -91,6 +92,8 @@ class TestCeoInboxNotify(unittest.TestCase):
         self.assertIn("+15865243969", src)
         self.assertIn("schedule_ceo_inbox_notify", src)
         self.assertIn("handle_ceo_decision", src)
+        self.assertIn("ceo_issue_fp", src)
+        self.assertIn("mark_ceo_issue_decided", src)
         self.assertIn("YELLOW", src)
         self.assertIn("RED", src)
 
@@ -366,6 +369,31 @@ class TestCoachOverrideRestSource(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('@router.post("/client-override")', src)
         self.assertIn("crystallize_coach_observation", src)
+
+
+class TestCeoIssueRepeatContracts(unittest.TestCase):
+    def test_bakeoff_uses_enqueue_ceo(self):
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "app"
+            / "services"
+            / "nate_clinical_bakeoff_agent.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("enqueue_ceo", src)
+        self.assertIn("clinical_bakeoff_yield", src)
+        self.assertNotIn("schedule_ceo_inbox_notify", src)
+
+    def test_growth_digest_skips_zero_stale(self):
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "app"
+            / "services"
+            / "growth"
+            / "growth_hive.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("noop_no_stale", src)
+        self.assertIn('task_id="growth_weekly_digest"', src)
+        self.assertIn('task_id="growth_segment_propose"', src)
 
 
 class TestCiSovereignGateWired(unittest.TestCase):

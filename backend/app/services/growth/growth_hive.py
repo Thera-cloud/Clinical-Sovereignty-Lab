@@ -230,6 +230,14 @@ async def _weekly_digest(db_pool) -> Dict[str, Any]:
         "",
         "Stale items (open dashboard; reply APPROVE/REJECT per content email or ACK this digest):",
     ]
+    if not stale:
+        return {
+            "ok": True,
+            "stale": 0,
+            "refreshed": 0,
+            "spend_usd": spend_total,
+            "action": "noop_no_stale",
+        }
     for s in stale[:25]:
         lines.append(f"  #{s['id']} [{s['content_type']}] {s['title']}")
     detail = "\n".join(lines)
@@ -238,7 +246,7 @@ async def _weekly_digest(db_pool) -> Dict[str, Any]:
         title=f"Growth weekly digest — {len(stale)} stale reviews",
         detail=detail[:1800],
         origin="growth",
-        task_id=f"gdigest-{datetime.now(timezone.utc).strftime('%Y%m%d')}",
+        task_id="growth_weekly_digest",
         payload={
             "kind": "growth_weekly_digest",
             "stale_ids": [s["id"] for s in stale],
@@ -317,7 +325,7 @@ async def _segment_propose(db_pool) -> Dict[str, Any]:
         title="Growth segment propose",
         detail="Proposed segments (ICP + try themes):\n" + "\n".join(buckets[:12]),
         origin="growth",
-        task_id=f"gseg-{datetime.now(timezone.utc).strftime('%Y%m%d')}",
+        task_id="growth_segment_propose",
         payload={
             "kind": "growth_segment_propose",
             "proposal": proposal,

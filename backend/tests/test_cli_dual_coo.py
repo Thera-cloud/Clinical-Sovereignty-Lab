@@ -65,10 +65,90 @@ class TestCeoInbox(unittest.TestCase):
         from app.websocket.cli_dual_coo import enqueue_ceo
 
         client = MagicMock()
+        client.get.return_value = None
+        client.set.return_value = True
         mock_redis.return_value = client
         r = enqueue_ceo(risk=RISK_YELLOW, title="batch me", detail="d", origin="cloud")
         self.assertEqual(r.get("status"), "ok")
         client.lpush.assert_called()
+
+    def test_uuid_task_ids_collapse_when_kind_present(self):
+        from app.websocket.cli_dual_coo import ceo_issue_fingerprint
+
+        pl = {
+            "kind": "trust_reprobe",
+            "auditor": "Defense Health",
+            "category": "DEFENSE_DEGRADED",
+        }
+        a = ceo_issue_fingerprint(
+            title="Trust RED: Defense Health (DEFENSE_DEGRADED)",
+            origin="cloud",
+            task_id="a1b2c3d4e5f67890",
+            payload=pl,
+        )
+        b = ceo_issue_fingerprint(
+            title="Trust RED: Defense Health (DEFENSE_DEGRADED) [#ceo31e30abc]",
+            origin="cloud",
+            task_id="ffffffffffffffff",
+            payload=pl,
+        )
+        self.assertEqual(a, b)
+
+    def test_distinct_kinds_do_not_collapse(self):
+        from app.websocket.cli_dual_coo import ceo_issue_fingerprint
+
+        a = ceo_issue_fingerprint(
+            title="Growth segment propose",
+            origin="growth",
+            payload={"kind": "growth_segment_propose"},
+        )
+        b = ceo_issue_fingerprint(
+            title="Growth weekly digest — 0 stale reviews",
+            origin="growth",
+            payload={"kind": "growth_weekly_digest"},
+        )
+        self.assertNotEqual(a, b)
+
+    @patch("app.websocket.cli_dual_coo._redis")
+    def test_enqueue_skips_when_suppressed(self, mock_redis):
+        from app.websocket.cli_dual_coo import enqueue_ceo
+
+        client = MagicMock()
+        client.get.return_value = b"1"
+        mock_redis.return_value = client
+        r = enqueue_ceo(
+            risk=RISK_YELLOW,
+            title="Clinical bakeoff yield below floor",
+            payload={"kind": "nate_clinical_revision_candidate"},
+        )
+        self.assertEqual(r.get("status"), "skipped")
+        self.assertEqual(r.get("reason"), "suppressed")
+        client.lpush.assert_not_called()
+
+    @patch("app.websocket.cli_dual_coo._redis")
+    def test_enqueue_skips_dedup(self, mock_redis):
+        from app.websocket.cli_dual_coo import enqueue_ceo
+
+        client = MagicMock()
+        client.get.return_value = None
+        client.set.return_value = None
+        mock_redis.return_value = client
+        r = enqueue_ceo(risk=RISK_YELLOW, title="Growth segment propose")
+        self.assertEqual(r.get("status"), "skipped")
+        self.assertEqual(r.get("reason"), "dedup")
+        client.lpush.assert_not_called()
+
+    @patch("app.websocket.cli_dual_coo._redis")
+    def test_mark_ceo_issue_decided_sets_suppress(self, mock_redis):
+        from app.websocket.cli_dual_coo import mark_ceo_issue_decided
+
+        client = MagicMock()
+        mock_redis.return_value = client
+        self.assertTrue(mark_ceo_issue_decided("abc123", ttl_s=3600))
+        client.set.assert_called()
+        args, kwargs = client.set.call_args
+        self.assertIn("cli:ceo_suppress:abc123", args[0])
+        self.assertEqual(kwargs.get("ex"), 3600)
 
 
 class TestCrystalApplyDomains(unittest.TestCase):

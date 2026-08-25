@@ -249,25 +249,28 @@ class NateClinicalBakeoffAgent:
 
     async def _ceo_yield_alert(self, stats: Dict[str, Any]) -> None:
         try:
-            from app.services.ceo_inbox_notify import schedule_ceo_inbox_notify
+            from app.websocket.cli_dual_coo import RISK_YELLOW, enqueue_ceo
 
-            schedule_ceo_inbox_notify(
-                {
+            enqueue_ceo(
+                risk=RISK_YELLOW,
+                title="Clinical bakeoff yield below floor",
+                detail=(
+                    f"preference_yield_rate={stats.get('preference_yield_rate'):.2f} "
+                    f"(floor {stats.get('yield_floor')}). "
+                    f"attempted={stats.get('matches_attempted')} "
+                    f"complete={stats.get('matches_complete')} "
+                    f"prefs={stats.get('preferences_written')} "
+                    f"both_failed={stats.get('both_failed_gate')} "
+                    f"one_failed={stats.get('one_failed_gate')} "
+                    f"tie_or_discordant={stats.get('tie_or_discordant')}"
+                ),
+                origin="cloud",
+                task_id="clinical_bakeoff_yield",
+                payload={
                     "kind": "nate_clinical_revision_candidate",
-                    "risk": "YELLOW",
-                    "title": "Clinical bakeoff yield below floor",
-                    "summary": (
-                        f"preference_yield_rate={stats.get('preference_yield_rate'):.2f} "
-                        f"(floor {stats.get('yield_floor')}). "
-                        f"attempted={stats.get('matches_attempted')} "
-                        f"complete={stats.get('matches_complete')} "
-                        f"prefs={stats.get('preferences_written')} "
-                        f"both_failed={stats.get('both_failed_gate')} "
-                        f"one_failed={stats.get('one_failed_gate')} "
-                        f"tie_or_discordant={stats.get('tie_or_discordant')}"
-                    ),
-                    "payload": stats,
-                }
+                    "stats": stats,
+                },
+                dedup_ttl_s=6 * 3600,
             )
         except Exception as e:
             logger.debug("ceo notify skipped: %s", e)

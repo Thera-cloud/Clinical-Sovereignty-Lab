@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -206,11 +207,63 @@ def classify_risk(
     return RISK_YELLOW
 
 
-def _ceo_dedup_key(title: str, origin: str, task_id: str = "") -> str:
-    """Fingerprint for inbox dedup (title+origin+task_id)."""
-    raw = f"{(origin or '')}|{(task_id or '')}|{(title or '')[:200]}"
-    digest = hashlib.sha256(raw.encode()).hexdigest()[:24]
+# After APPROVE/ACK/REJECT/HOLD, do not mint a new email for the same issue.
+_CEO_SUPPRESS_TTL_S = int(os.getenv("CEO_ISSUE_SUPPRESS_TTL_S") or 7 * 86400)
+_UUIDISH_TASK = re.compile(r"^[0-9a-fA-F-]{16,40}$")
+
+
+def ceo_issue_fingerprint(
+    *,
+    title: str,
+    origin: str = "",
+    task_id: str = "",
+    payload: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Stable issue key. Drops UUID task_ids so Trust/bus republishes collapse."""
+    pl = payload if isinstance(payload, dict) else {}
+    kind = str(pl.get("kind") or "").strip().lower()
+    auditor = str(pl.get("auditor") or "").strip().lower()
+    cat = str(pl.get("category") or "").strip().upper()
+    tid = (task_id or "").strip()
+    if kind:
+        tid = ""
+    else:
+        compact = tid.replace("-", "")
+        if _UUIDISH_TASK.match(tid) and len(compact) >= 16:
+            tid = ""
+    title_norm = re.sub(r"\s*\[#ceo[0-9a-fA-F]*\]\s*", " ", title or "", flags=re.I)
+    title_norm = re.sub(r"\s+", " ", title_norm).strip().lower()[:160]
+    raw = f"{kind}|{auditor}|{cat}|{(origin or '').strip().lower()}|{tid}|{title_norm}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:24]
+
+
+def _ceo_dedup_key(title: str, origin: str, task_id: str = "", payload: Optional[Dict[str, Any]] = None) -> str:
+    """Fingerprint for inbox dedup (issue fingerprint, not unique bus ids)."""
+    digest = ceo_issue_fingerprint(
+        title=title or "", origin=origin or "", task_id=task_id or "", payload=payload,
+    )
     return f"{_prefix()}:{_env()}:cli:ceo_dedup:{digest}"
+
+
+def _ceo_suppress_key(issue_fp: str) -> str:
+    return f"{_prefix()}:{_env()}:cli:ceo_suppress:{issue_fp}"
+
+
+def mark_ceo_issue_decided(issue_fp: str, ttl_s: Optional[int] = None) -> bool:
+    """Block re-email of the same issue after CEO decided."""
+    fp = (issue_fp or "").strip()
+    if not fp:
+        return False
+    c = _redis()
+    if not c:
+        return False
+    ttl = int(ttl_s if ttl_s is not None else _CEO_SUPPRESS_TTL_S)
+    try:
+        c.set(_ceo_suppress_key(fp), "1", ex=max(3600, ttl))
+        return True
+    except Exception as e:
+        logger.debug("ceo suppress set: %s", e)
+        return False
 
 
 def enqueue_ceo(
@@ -225,18 +278,28 @@ def enqueue_ceo(
 ) -> Dict[str, Any]:
     """Push YELLOW/RED item to CEO-Nathan morning inbox (Redis list).
 
-    Dedup: same title+origin+task_id within dedup_ttl_s is skipped (default 1h).
-    Item ids are UUID-suffixed to avoid same-second ack collisions.
+    Dedup + post-decision suppress use ceo_issue_fingerprint (kind/title),
+    not unique bus task_ids. Item ids stay UUID-suffixed for ack collisions.
     """
     if risk not in (RISK_YELLOW, RISK_RED):
         return {"status": "skipped", "reason": "not_ceo_tier"}
     c = _redis()
     if not c:
         return {"status": "error", "error": "redis_unavailable"}
-    dkey = _ceo_dedup_key(title or "", origin or "", task_id or "")
+    pl = dict(payload or {})
+    issue_fp = ceo_issue_fingerprint(
+        title=title or "", origin=origin or "", task_id=task_id or "", payload=pl,
+    )
+    try:
+        flagged = c.get(_ceo_suppress_key(issue_fp))
+        if flagged in (b"1", "1", 1, True):
+            return {"status": "skipped", "reason": "suppressed", "issue_fp": issue_fp}
+    except Exception as e:
+        logger.debug("ceo suppress check: %s", e)
+    dkey = _ceo_dedup_key(title or "", origin or "", task_id or "", pl)
     try:
         if int(dedup_ttl_s or 0) > 0 and c.set(dkey, "1", nx=True, ex=int(dedup_ttl_s)) is None:
-            return {"status": "skipped", "reason": "dedup"}
+            return {"status": "skipped", "reason": "dedup", "issue_fp": issue_fp}
     except Exception as e:
         logger.debug("ceo dedup check: %s", e)
     item = {
@@ -246,7 +309,8 @@ def enqueue_ceo(
         "detail": (detail or "")[:2000],
         "origin": origin,
         "task_id": task_id or "",
-        "payload": payload or {},
+        "payload": pl,
+        "issue_fp": issue_fp,
         "created_at": time.time(),
         "status": "pending_ceo",
     }
