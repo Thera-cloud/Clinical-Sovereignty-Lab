@@ -270,7 +270,7 @@ async def redeem_code(
             )
             await conn.execute(
                 """UPDATE users SET
-                     program_id = $1,
+                     program_id = $1::text,
                      profile_data = jsonb_set(
                          COALESCE(profile_data, '{}'::jsonb),
                          '{program_id}',

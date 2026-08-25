@@ -434,3 +434,13 @@ def test_redeem_rate_limit_isolates_users(monkeypatch):
     )
     r_bob = client_a.post("/api/enrollment/redeem", json={"code": "NOPE-BOB"})
     assert r_bob.status_code == 404, r_bob.text
+
+
+def test_redeem_sql_casts_program_id_for_asyncpg():
+    """asyncpg rejects $1 used as both text column and to_jsonb($1::text)."""
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "app" / "routers" / "enrollment_api.py"
+    text = src.read_text()
+    assert "program_id = $1::text" in text
+    assert "to_jsonb($1::text)" in text
