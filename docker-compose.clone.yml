@@ -81,6 +81,8 @@ services:
       - "8000:8000"
     volumes:
       - ./backend/app:/app/app:ro
+      - ./Workbooks:/app/workbooks:ro
+      - ./backend/resources:/app/resources:ro
       - ./data/backend:/app/data
       - backend_logs:/app/logs
     healthcheck:

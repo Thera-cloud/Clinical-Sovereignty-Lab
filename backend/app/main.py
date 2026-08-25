@@ -2772,6 +2772,18 @@ async def lifespan(app: FastAPI):
     except Exception as tua_err:
         print(f"   ⚠️  TokenUsageAgent init failed: {tua_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — workbook auto-learn (coaching tools, not therapy)
+    _workbook_sync_agent = None
+    try:
+        from app.services.workbook_sync_agent import WorkbookSyncAgent, workbook_sync_enabled
+        _workbook_sync_agent = WorkbookSyncAgent(db_pool=db_pool, app_state=app.state)
+        if workbook_sync_enabled() and not _is_clone:
+            await _workbook_sync_agent.start()
+        app.state.workbook_sync_agent = _workbook_sync_agent
+        print("   ✅ WorkbookSyncAgent started (folder watch + coaching crystals)")
+    except Exception as _wsa_err:
+        print(f"   ⚠️  WorkbookSyncAgent init failed: {_wsa_err}")
+
     # QUANTUM-CRYSTAL-ARCH — Little Nate Dispatch (feature-flagged)
     _newsletter_agent = None
     _newsletter_auditor = None
@@ -3798,6 +3810,7 @@ async def lifespan(app: FastAPI):
         ("token_lab_auditor", _token_lab_auditor is not None),
         ("gkm_auditor", _gkm_auditor is not None),
         ("token_usage_agent", _token_usage_agent is not None),
+        ("workbook_sync_agent", _workbook_sync_agent is not None),  # QUANTUM-CRYSTAL-ARCH
         ("newsletter_agent", _newsletter_agent is not None),  # QUANTUM-CRYSTAL-ARCH
         ("newsletter_auditor", _newsletter_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("account_event_reconciler", _account_event_reconciler is not None),
@@ -4042,6 +4055,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ GrowthDiagnosticsWorker stopped")
     except Exception as _gd_stop:
         print(f"   ⚠️  GrowthDiagnosticsWorker shutdown: {_gd_stop}")
+    _workbook_sync_agent = getattr(app.state, "workbook_sync_agent", None)
+    if _workbook_sync_agent and hasattr(_workbook_sync_agent, "stop"):
+        try:
+            await _workbook_sync_agent.stop()
+            print("   ✅ WorkbookSyncAgent stopped")
+        except Exception as _wsa_stop:
+            print(f"   ⚠️  WorkbookSyncAgent shutdown: {_wsa_stop}")
     _classroom_learning_auditor = getattr(app.state, "classroom_learning_auditor", None)
     if _classroom_learning_auditor:
         try:

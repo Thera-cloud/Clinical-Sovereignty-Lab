@@ -58,7 +58,7 @@ class WorkbookLibrary:
     - Keep prompt injection short and relevant
     - Avoid huge verbatim dumps (we cap output)
     - Work offline with minimal dependencies
-    - Support PDF files for therapeutic materials
+    -     Support PDF files for coaching-method materials (not therapy)
     """
 
     def __init__(self, workbooks_dir: Path):
@@ -185,6 +185,10 @@ class WorkbookLibrary:
                 score += 0.02
             if "reconsolidation" in fname and ("memory" in q_words or "reconsolidation" in q_words):
                 score += 0.02
+            if "gestalt" in fname and (
+                "gestalt" in q_words or "chair" in q_words or "unfinished" in q_words
+            ):
+                score += 0.03
 
             scored.append((score, ch))
 
@@ -222,5 +226,11 @@ class WorkbookLibrary:
             if len([l for l in out_lines if l.startswith("- ")]) >= max_chunks:
                 break
 
-        return "\n".join(out_lines).strip()
+        body = "\n".join(out_lines).strip()
+        if not body:
+            return ""
+        return (
+            "COACHING TOOLS (not therapy — client may consider these methods):\n"
+            + body
+        )
 

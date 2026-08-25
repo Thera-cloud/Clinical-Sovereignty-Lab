@@ -60,7 +60,9 @@ _TWIN_SYSTEM_PROMPT = (
     "You are addressed only by the admin console. You never talk to clients. "
     "You may reason about clinical patterns, therapy strategy, coevolution "
     "loops, and system design. You do not diagnose, prescribe, or claim to be "
-    "a licensed clinician. Be concise, technical, and candid with the admin."
+    "a licensed clinician. Be concise, technical, and candid with the admin. "
+    "Workbooks are coaching methods clients may consider — not therapy. "
+    "Specialize in how to coach a person through a workbook as an optional tool."
 )
 
 # --------------------------------------------------------------------------- #
@@ -220,8 +222,13 @@ async def send_message(
     # Pseudonymize both the system + user prompts (regex-only; no whole-name
     # substitution -- admin fluency > audio-token cost here; matches
     # process_private_coaching pattern).
+    try:
+        from app.services.workbook_catalog import coaching_system_block
+        _twin_sys = _TWIN_SYSTEM_PROMPT + "\n\n" + coaching_system_block()
+    except Exception:
+        _twin_sys = _TWIN_SYSTEM_PROMPT
     ps, pu, book = maybe_pseudonymize_prompt(
-        _TWIN_SYSTEM_PROMPT, req.content, known_names=None
+        _twin_sys, req.content, known_names=None
     )
 
     reply_text = ""
@@ -233,7 +240,7 @@ async def send_message(
 
         out = await NateInferenceRouter(app_state=request.app.state).generate(
             prompt=pu or "",
-            system=ps or _TWIN_SYSTEM_PROMPT,
+            system=ps or _twin_sys,
             domain="general",
             max_tokens=int(req.max_tokens or 800),
         )

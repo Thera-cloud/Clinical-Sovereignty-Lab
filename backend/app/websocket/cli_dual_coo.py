@@ -432,6 +432,12 @@ def cloud_sole_failover_active() -> bool:
 
 
 def dual_coo_system_addon() -> str:
+    try:
+        from app.services.workbook_catalog import coaching_system_block
+
+        wb = "\n" + coaching_system_block() + "\n"
+    except Exception:
+        wb = ""
     return (
         "\nDUAL-COO (Nathan = CEO): You are one Queen COO (CLI-Mac or CLI-Cloud). "
         "Your peer Queen is the other COO — monitor via shared task bus, path locks, "
@@ -439,7 +445,10 @@ def dual_coo_system_addon() -> str:
         "inbox), RED (CEO-Nathan only: clinical/defense/therapeutic/sensitive). "
         "Never auto-apply clinical crystal confidence or ship RED without CEO. "
         "Reflect against your peer: enqueue_review after promotes; treat peer findings "
-        "as backup verification of one mind.\n"
+        "as backup verification of one mind."
+        + wb
+        + "When a workbook is added, help LN/AlphaLN learn it as a coaching tool "
+        "(not therapy) and draft how to walk a consenting client through it.\n"
     )
 
 

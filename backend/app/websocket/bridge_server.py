@@ -2480,8 +2480,9 @@ for folder in ["Admin", "Coaches", "Clients", "Guests"]:
     (VAULT_ROOT / folder).mkdir(parents=True, exist_ok=True)
 (VAULT_ROOT / "Admin" / "admin_LN_training_folder").mkdir(parents=True, exist_ok=True)
 
-# Workbooks live at repo root: ./Workbooks
-WORKBOOKS_DIR = Path(__file__).resolve().parents[3] / "Workbooks"
+# Workbooks live at repo root: ./Workbooks (GREEN mounts at /Workbooks)
+# QUANTUM-CRYSTAL-ARCH
+WORKBOOKS_DIR = Path(os.getenv("WORKBOOKS_DIR") or str(Path(__file__).resolve().parents[3] / "Workbooks"))
 workbook_library = WorkbookLibrary(WORKBOOKS_DIR) if WorkbookLibrary else None
 
 # Classroom analyzer for coach session review and learning
@@ -9978,7 +9979,7 @@ class AzureCortex:
         {plan_context_block}
         {"PRIORITY — THERAPEUTIC / CYCLE SKILL PLAN: Answer the client's need first. If SKILL FIDELITY LOCK appears, do not invent other techniques; teach THAT modality's AGREED/OPTIONAL practice only when they ask, accept, or engage it. No generic 5-4-3-2-1 unless lock modality is grounding/mindfulness. Never dump a syllabus." if plan_context_block else ""}
 
-        THERAPEUTIC WORKBOOK GUIDANCE (Evidence-based techniques and frameworks from clinical materials - apply these principles in your responses):
+        COACHING WORKBOOK TOOLS (methods a client may consider — not therapy; cite the file and walk them through only if they want it):
         {workbook_guidance if workbook_guidance else "None available"}
         
         {"DOJO TRAINING MODE ACTIVE - This is a coach training simulation. The coach is practicing therapeutic techniques. Provide authentic simulated responses based on the persona indicated. After each response, offer constructive feedback on the coachs approach, referencing workbook guidance where relevant. Help the coach develop clinical skills through experiential learning." if is_dojo_simulation else ""}
@@ -11585,7 +11586,7 @@ class AzureCortex:
 
         {sanctuary_crystal_ctx}
 
-        WORKBOOK GUIDANCE (best-practice excerpts; keep quotes short, do not dump long text):
+        COACHING WORKBOOK TOOLS (optional methods to consider — not therapy; keep quotes short):
         {workbook_guidance if workbook_guidance else "None"}
 
         EFT CONTEXT (attachment longings + what to deepen; do not lecture):
@@ -11995,7 +11996,7 @@ class AzureCortex:
 
         {gc_crystal_ctx}
 
-        WORKBOOK GUIDANCE (best-practice excerpts; keep quotes short, do not dump long text):
+        COACHING WORKBOOK TOOLS (optional methods to consider — not therapy; keep quotes short):
         {workbook_guidance if workbook_guidance else "None"}
 
         EFT CONTEXT (attachment needs to meet / deepen):

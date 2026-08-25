@@ -6521,7 +6521,15 @@ async def sse_assign_workbook(request: Request):
 @sse_router.post("/admin/ingest-workbooks")
 async def sse_ingest_workbooks(request: Request):
     from app.sse.workbook_ingestion import ingest_workbooks
-    return await ingest_workbooks(request.app.state.db_pool)
+    proto = await ingest_workbooks(request.app.state.db_pool)
+    sync = {}
+    try:
+        agent = getattr(request.app.state, "workbook_sync_agent", None)
+        if agent is not None:
+            sync = await agent.cycle_once()
+    except Exception as exc:
+        sync = {"error": str(exc)}
+    return {"protocol": proto, "folder_sync": sync}
 
 @sse_router.post("/admin/backfill-intake/{user_id}")
 async def sse_backfill_intake(user_id: str, request: Request):

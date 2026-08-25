@@ -385,6 +385,9 @@ services:
       - GEMINI_LINKEDIN_IMAGE_SIZE=${GEMINI_LINKEDIN_IMAGE_SIZE:-2K}
       - SKYEYE_LINKEDIN_BRAND_STYLE=${SKYEYE_LINKEDIN_BRAND_STYLE:-true}
       - SKYEYE_LINKEDIN_BRAND_REFS=${SKYEYE_LINKEDIN_BRAND_REFS:-true}
+      # QUANTUM-CRYSTAL-ARCH — coaching workbook auto-learn (not therapy)
+      - WORKBOOKS_DIR=/app/workbooks
+      - ENABLE_WORKBOOK_SYNC=${ENABLE_WORKBOOK_SYNC:-true}
     ports:
       - "127.0.0.1:${SERVER_PORT:-8000}:8000"
     depends_on:
@@ -403,6 +406,8 @@ services:
       - ./mobile/lib:/app/mobile/lib:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (Flutter)
       - ./backend/migrations:/app/migrations:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (schema)
       - ./patent:/app/patent:ro  # QUANTUM-CRYSTAL-ARCH: Dual-COO patent idea corpus (read-only)
+      - ./Workbooks:/app/workbooks:ro  # QUANTUM-CRYSTAL-ARCH: coaching workbook library
+      - ./backend/resources:/app/resources:ro  # QUANTUM-CRYSTAL-ARCH: protocol workbooks
       - ./frozen-config:/opt/ln7/frozen-config:ro  # QUANTUM-CRYSTAL-ARCH — Step 0 fence (W13)
       - ./data/backend:/app/data
       - ./data/bridge:/app/bridge_data:ro  # Bridge metrics (PMB, Nevedal state) for dashboard read
@@ -567,6 +572,8 @@ services:
       - ENABLE_GATE_CONFIDENCE_FEEDBACK=${ENABLE_GATE_CONFIDENCE_FEEDBACK:-true}
       - ENABLE_L5_OBSERVE=${ENABLE_L5_OBSERVE:-true}
       - ENABLE_L5_ADAPT=${ENABLE_L5_ADAPT:-true}
+      # QUANTUM-CRYSTAL-ARCH — coaching workbook RAG (mounted at /Workbooks)
+      - WORKBOOKS_DIR=/Workbooks
     ports:
       - "127.0.0.1:${WEBSOCKET_PORT:-8765}:8765"
     depends_on:
@@ -581,6 +588,7 @@ services:
       - ./mobile/lib:/app/mobile/lib:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (Flutter)
       - ./backend/migrations:/app/migrations:ro  # QUANTUM-CRYSTAL-ARCH: CLI-Cloud discovery (schema)
       - ./frozen-config:/opt/ln7/frozen-config:ro  # QUANTUM-CRYSTAL-ARCH — Step 0 fence (W13)
+      - ./Workbooks:/Workbooks:ro  # QUANTUM-CRYSTAL-ARCH: coaching workbook RAG
       - ./data/bridge:/app/data
       # Read backend scheduling + Zoom join_url without duplicating stores
       - ./data/backend:/app/backend_data:ro

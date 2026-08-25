@@ -1,10 +1,8 @@
-"""Night School Workbook Ingestion — crystallizes protocol workbooks into Nate's knowledge base."""
+"""Night School Workbook Ingestion — crystallizes protocol workbooks as coaching tools."""
 
 import hashlib
 import json
 import logging
-import os
-import uuid
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -14,11 +12,15 @@ _METADATA_PATH = _WORKBOOK_DIR / "metadata.json"
 
 
 async def ingest_workbooks(db_pool) -> dict:
-    """Read all protocol workbooks and store each as a high-confidence global crystal."""
+    """Read protocol workbooks and store each as a coaching-tool crystal (not therapy)."""
     if not _METADATA_PATH.exists():
         return {"error": "metadata.json not found", "workbooks_processed": 0, "crystals_created": 0}
 
-    meta = json.loads(_METADATA_PATH.read_text())
+    try:
+        meta = json.loads(_METADATA_PATH.read_text())
+    except json.JSONDecodeError as exc:
+        logger.warning("workbook_ingestion: metadata.json invalid: %s", exc)
+        return {"error": f"metadata.json invalid: {exc}", "workbooks_processed": 0, "crystals_created": 0}
     workbooks = meta.get("workbooks", [])
     created = 0
     processed = 0
@@ -52,7 +54,9 @@ async def ingest_workbooks(db_pool) -> dict:
                 entries = [text]
 
             for entry in entries:
-                crystal_text = f"[{protocol}] {entry}"
+                crystal_text = (
+                    f"[{protocol}] Coaching tool (not therapy). {entry}"
+                )
                 content_hash = hashlib.sha256(crystal_text.encode()).hexdigest()
 
                 existing = await conn.fetchval(
@@ -61,14 +65,14 @@ async def ingest_workbooks(db_pool) -> dict:
                 if existing:
                     continue
 
-                crystal_id = str(uuid.uuid4())
                 domain = _map_domain(wb_id)
                 await conn.execute(
                     "INSERT INTO nate_intelligence_crystals "
-                    "(crystal_id, crystal_text, domain, confidence, scope, source_count, "
-                    " content_hash, created_at) "
-                    "VALUES ($1, $2, $3, 0.95, 'global', 1, $4, NOW())",
-                    crystal_id, crystal_text, domain, content_hash)
+                    "(crystal_text, domain, confidence, scope, source_count, "
+                    " content_hash, created_at, updated_at) "
+                    "VALUES ($1, $2, 0.78, 'global', 2, $3, NOW(), NOW()) "
+                    "ON CONFLICT (content_hash) DO NOTHING",
+                    crystal_text, domain, content_hash)
                 created += 1
 
     logger.info("workbook_ingestion: processed %d workbooks, created %d crystals", processed, created)
@@ -76,15 +80,9 @@ async def ingest_workbooks(db_pool) -> dict:
 
 
 def _map_domain(wb_id: str) -> str:
-    """Map workbook IDs to crystal domains."""
-    clinical = {"ifs", "eft", "aedp", "attachment_theory", "nicc", "polyvagal",
-                "memory_reconsolidation", "rogers_person_centered"}
-    if wb_id in clinical:
-        return "clinical"
+    """Map workbook IDs to crystal domains. Methods are coaching tools."""
     if wb_id in ("divine_resonance",):
         return "culture"
-    if wb_id in ("jung_analytical",):
+    if wb_id in ("jung_analytical", "faggin_quantum"):
         return "research"
-    if wb_id in ("faggin_quantum",):
-        return "research"
-    return "clinical"
+    return "coaching"

@@ -81,6 +81,8 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app:ro
+      - ./Workbooks:/app/workbooks:ro
+      - ./backend/resources:/app/resources:ro
       - ./data/bridge:/app/data:ro
       - backend_logs:/app/logs
     healthcheck:
@@ -118,6 +120,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app:ro
+      - ./Workbooks:/Workbooks:ro
       - ./data/bridge:/app/data
       - bridge_logs:/app/logs
     healthcheck:
