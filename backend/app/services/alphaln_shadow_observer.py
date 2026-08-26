@@ -37,6 +37,7 @@ logger = logging.getLogger("nate.alphaln_shadow_observer")
 
 _ENV_FLAG = "ENABLE_ALPHALN_SHADOW_OBSERVER"
 _ENV_SALT = "ALPHALN_OBSERVER_SALT"
+_ENV_SCORER = "ALPHALN_SCORER_MODE"
 
 # Cycle: every 5 min when enabled; long sleep otherwise so an empty process
 # doesn't spin.
@@ -111,6 +112,35 @@ def _score_reply(text: str) -> Dict[str, Any]:
     }
 
 
+def _scorer_mode() -> str:
+    return (os.getenv(_ENV_SCORER) or "heuristic_v1").strip().lower()
+
+
+async def _score_reply_maybe_validated(text: str) -> Dict[str, Any]:
+    """Heuristic by default; validated instruments when ALPHALN_SCORER_MODE=validated."""
+    if _scorer_mode() != "validated":
+        return _score_reply(text)
+    try:
+        from app.services.alphaln_validated_scorer import score_validated_bundle
+
+        bundle = await score_validated_bundle(text)
+        dims = bundle.get("dims") or {}
+        return {
+            "score": float(bundle.get("score") or 0.0),
+            "dims": dims,
+            "score_method": str(bundle.get("score_method") or "heuristic_v1"),
+            "notes": str(bundle.get("notes") or ""),
+            "metadata": {
+                "item_scores": bundle.get("item_scores") or [],
+                "srs": (bundle.get("srs") or {}).get("score"),
+                "phq9_delta": (bundle.get("phq9") or {}).get("score"),
+            },
+        }
+    except Exception as exc:
+        logger.warning("alphaln validated scorer failed; heuristic fallback: %s", exc)
+        return _score_reply(text)
+
+
 class AlphaLNShadowObserver:
     """Background agent — start/stop/_tick pattern (matches bakeoff agent)."""
 
@@ -173,19 +203,23 @@ class AlphaLNShadowObserver:
             )
             for r in rows:
                 ai_text = r["ai_text"] or ""
-                s = _score_reply(ai_text)
+                s = await _score_reply_maybe_validated(ai_text)
                 await conn.execute(
                     """INSERT INTO alphaln_shadow_observations
                            (source_table, source_row_id, user_pseudonym,
-                            reply_hash, reply_len, score, score_method, dims)
-                         VALUES ('conversation_history', $1, $2, $3, $4, $5, $6, $7)""",
+                            reply_hash, reply_len, score, score_method, dims,
+                            notes, metadata)
+                         VALUES ('conversation_history', $1, $2, $3, $4, $5, $6, $7,
+                                 $8, $9)""",
                     str(r["id"]),
                     _pseudonym(r["user_id"]),
                     _reply_hash(ai_text),
                     len(ai_text),
                     s["score"],
                     s["score_method"],
-                    json.dumps(s["dims"] or {}),
+                    json.dumps(s.get("dims") or {}),
+                    s.get("notes"),
+                    json.dumps(s.get("metadata") or {}),
                 )
                 written += 1
         return {"ok": True, "status": "wrote", "written": written}

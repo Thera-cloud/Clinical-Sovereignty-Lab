@@ -32,8 +32,10 @@ Guardrails
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -118,6 +120,88 @@ def _msg_rate_limited(username: str) -> bool:
 def _msg_rate_reset_for_tests() -> None:
     """Test hook to clear the in-memory rate window between test runs."""
     _msg_hits.clear()
+
+
+_SEARCH_INTENT = re.compile(
+    r"\b(search|look up|look it up|google|find out|what does .+ say|"
+    r"latest (on|about)|who is|what is the (current|latest))\b",
+    re.IGNORECASE,
+)
+
+
+def _is_alphaln_search_intent(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return False
+    return bool(_SEARCH_INTENT.search(t))
+
+
+async def _recall_alphaln_crystals(db, username: str, query: str) -> str:
+    """Read-only crystal recall tagged source=alphaln_twin (not the chat default)."""
+    try:
+        from app.websocket.crystal_recall_bridge import recall_crystals_for_context
+
+        ctx = await recall_crystals_for_context(
+            db,
+            username,
+            max_results=6,
+            source="alphaln_twin",
+            query_text=query or "",
+            global_only=True,
+        )
+        return str(ctx or "")
+    except Exception as exc:
+        logger.warning("alphaln crystal recall skipped: %s", exc)
+        return ""
+
+
+async def _alphaln_web_search(query: str) -> str:
+    """SecureSearchProxy for explicit admin search intent only."""
+    try:
+        from app.services.search_proxy import SecureSearchProxy
+
+        data_dir = os.getenv("DATA_DIR") or "/tmp/alphaln_search"
+        proxy = SecureSearchProxy(data_dir=data_dir)
+        out = await proxy.execute_search(query, coach_id="alphaln_admin", num_results=3)
+        if not out or not out.get("success"):
+            return ""
+        lines = []
+        for r in (out.get("results") or [])[:3]:
+            title = (r.get("title") or "").strip()
+            snippet = (r.get("snippet") or r.get("body") or "").strip()
+            if title or snippet:
+                lines.append(f"- {title}: {snippet}"[:400])
+        return "\n".join(lines)
+    except Exception as exc:
+        logger.warning("alphaln web search skipped: %s", exc)
+        return ""
+
+
+async def _record_alphaln_research(db, conversation_id, query: str, findings: str) -> None:
+    """Isolate research in alphaln_research_findings — not nate_intelligence_crystals.
+
+    ExaCrystallizationHook.post_inference_crystallize writes the production
+    harvest buffer (Invariant 2). We import the hook for wiring/identity but
+    persist only to the AlphaLN namespace with source=alphaln_research.
+    """
+    if not findings:
+        return
+    try:
+        from app.services.exa_crystallization_hook import ExaCrystallizationHook  # noqa: F401
+    except Exception:
+        pass
+    try:
+        async with db.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO alphaln_research_findings
+                       (conversation_id, query_text, findings, source)
+                     VALUES ($1, $2, $3::jsonb, 'alphaln_research')""",
+                conversation_id,
+                query[:2000],
+                json.dumps([{"text": findings[:4000]}]),
+            )
+    except Exception as exc:
+        logger.warning("alphaln research log skipped: %s", exc)
 
 
 # --------------------------------------------------------------------------- #
@@ -227,8 +311,27 @@ async def send_message(
         _twin_sys = _TWIN_SYSTEM_PROMPT + "\n\n" + coaching_system_block()
     except Exception:
         _twin_sys = _TWIN_SYSTEM_PROMPT
+    crystal_ctx = await _recall_alphaln_crystals(db, username, req.content)
+    search_block = ""
+    if _is_alphaln_search_intent(req.content):
+        search_block = await _alphaln_web_search(req.content)
+        if search_block:
+            await _record_alphaln_research(db, conv_uuid, req.content, search_block)
+    extra_ctx = ""
+    if crystal_ctx:
+        extra_ctx += (
+            "\n\n[ALPHALN_TWIN MEMORY — read-only global crystals]\n"
+            + crystal_ctx[:4000]
+        )
+    if search_block:
+        extra_ctx += (
+            "\n\n[ALPHALN_RESEARCH — sanitized web results, source=alphaln_research]\n"
+            + search_block[:3000]
+        )
+    sys_for_model = _twin_sys + extra_ctx
+
     ps, pu, book = maybe_pseudonymize_prompt(
-        _twin_sys, req.content, known_names=None
+        sys_for_model, req.content, known_names=None
     )
 
     reply_text = ""
@@ -240,7 +343,7 @@ async def send_message(
 
         out = await NateInferenceRouter(app_state=request.app.state).generate(
             prompt=pu or "",
-            system=ps or _twin_sys,
+            system=ps or sys_for_model,
             domain="general",
             max_tokens=int(req.max_tokens or 800),
         )

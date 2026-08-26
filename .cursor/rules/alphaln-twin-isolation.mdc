@@ -18,7 +18,7 @@ them without an explicit, dated approval from the user.
 
 ## Invariant 2 — AlphaLN never writes to production memory
 
-AlphaLN turns live in dedicated tables (migrations 421–428):
+AlphaLN turns live in dedicated tables (migrations 421–432):
 
 | Table | Migration | Purpose |
 |---|---|---|
@@ -30,6 +30,8 @@ AlphaLN turns live in dedicated tables (migrations 421–428):
 | `alphaln_sensor_joins` | 425 | biometric ingest schema only, no writes yet (Slice 7) |
 | `alphaln_promotion_candidates` | 426 | paved-and-locked promotion ledger (Slice 8) |
 | `alphaln_pack_drafts` | 428 | CI pack specs; human accept required before drip can see them |
+| `alphaln_synthetic_profiles` | 430 | gym synthetic client grid (Phase B) |
+| `alphaln_research_findings` | 430 | isolated admin research log (`source=alphaln_research`) |
 
 AlphaLN code MUST NOT write to any of these production surfaces:
 
