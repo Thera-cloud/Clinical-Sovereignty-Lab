@@ -133,7 +133,7 @@ class _AiConsentScreenState extends State<AiConsentScreen> {
                     const SizedBox(height: 20),
                     const Text(
                       'Little Nate is an AI wellness companion. To provide personalized '
-                      'responses, your conversations are processed by secure AI services.'
+                      'responses, your conversations are processed by secure AI services.',
                       style: TextStyle(color: _D.textPrimary, fontSize: 15, height: 1.6),
                     ),
                     const SizedBox(height: 28),
